@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { LoginForm } from '@/components/business/auth/LoginForm';
 import { getSession } from '@/lib/auth/session';
+import { safeInternalPath } from '@/lib/auth/redirect';
 
 export const metadata = {
   title: '登录 · 红包印刷 ERP',
@@ -13,7 +14,8 @@ type PageProps = {
 export default async function LoginPage({ searchParams }: PageProps) {
   const session = await getSession();
   const { from } = await searchParams;
-  const safeFrom = typeof from === 'string' && from.startsWith('/') ? from : '/';
+  // Guard against open-redirect via `?from=//evil` (Codex round 8).
+  const safeFrom = safeInternalPath(from);
 
   if (session) {
     redirect(safeFrom);

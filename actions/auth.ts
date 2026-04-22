@@ -3,6 +3,7 @@
 import { AuthError } from 'next-auth';
 import { signIn } from '@/lib/auth/config';
 import { loginSchema } from '@/lib/auth/schemas';
+import { safeInternalPath } from '@/lib/auth/redirect';
 
 // Shape the LoginForm reads to render error text / decide redirect.
 // `redirectTo` on success is the path we want the client to navigate to; we
@@ -30,8 +31,9 @@ export async function signInWithCredentials(
     return { status: 'invalid', fieldErrors };
   }
 
-  const fromRaw = formData.get('from');
-  const from = typeof fromRaw === 'string' && fromRaw.startsWith('/') ? fromRaw : '/';
+  // Sanitize the post-login target so `/login?from=//evil.example` can't turn
+  // the auth flow into an open redirect (Codex round 8).
+  const from = safeInternalPath(formData.get('from'));
 
   try {
     // On success Auth.js throws NEXT_REDIRECT; this function never "returns"
