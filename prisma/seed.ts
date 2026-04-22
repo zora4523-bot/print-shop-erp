@@ -38,13 +38,16 @@ async function main() {
 // 1. 管理员账号
 // ============================================================
 async function seedAdmin() {
-  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
-  const existing = await db.user.findUnique({ where: { username } });
-  if (existing) {
-    console.log(`  ⏭  管理员 ${username} 已存在`);
+  // Gate: bootstrap admin is only for the first seed into an empty User table.
+  // If any user already exists (even one renamed/created by ops), we stay out —
+  // creating another OWNER silently on reseed would be a privilege leak.
+  const userCount = await db.user.count();
+  if (userCount > 0) {
+    console.log(`  ⏭  User 表已有 ${userCount} 位账号，跳过管理员种子`);
     return;
   }
 
+  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
   const fromEnv = process.env.SEED_ADMIN_PASSWORD;
   const generated = fromEnv ? null : randomBytes(12).toString('base64url');
   const plaintext = fromEnv ?? generated!;
@@ -231,23 +234,27 @@ async function seedSalaryRules() {
     },
   ];
 
-  // 幂等策略：按 (ruleType, ruleKey) 查找当前有效（effectiveTo=null）的规则。
-  // 找到则更新其 value/remark；未找到才以当前时间作为 effectiveFrom 新建。
-  // 这样每次重跑 seed 不会因 effectiveFrom=now 导致 upsert key 总是不匹配而不断累积。
+  // 幂等策略 + 旧污染库修复：
+  // 每条 (ruleType, ruleKey) 应当至多对应 1 行 effectiveTo=null 的"有效规则"。
+  // 先前版本以 effectiveFrom=now 作 upsert 键，同一键会随每次 seed 累积多份 active 行，
+  // 仅 findFirst+update 只能修好"新库"，老库里遗留的多份 active 仍违反不变量。
+  //
+  // 这里改为 findMany 拿出所有 active 行：
+  //   - 0 行：按 effectiveFrom=now 新建；
+  //   - ≥1 行：取最早创建的一行更新 value/remark；其余多余的 active 行收尾为
+  //     effectiveTo=now，把它们降级为"历史规则"，让不变量恢复到 1 条 active。
+  let collapsed = 0;
   for (const rule of rules) {
-    const active = await db.salaryRule.findFirst({
+    const active = await db.salaryRule.findMany({
       where: {
         ruleType: rule.ruleType,
         ruleKey: rule.ruleKey,
         effectiveTo: null,
       },
+      orderBy: { createdAt: 'asc' },
     });
-    if (active) {
-      await db.salaryRule.update({
-        where: { id: active.id },
-        data: { ruleValue: rule.ruleValue, remark: rule.remark },
-      });
-    } else {
+
+    if (active.length === 0) {
       await db.salaryRule.create({
         data: {
           ruleType: rule.ruleType,
@@ -257,7 +264,26 @@ async function seedSalaryRules() {
           remark: rule.remark,
         },
       });
+      continue;
     }
+
+    const [keep, ...extras] = active;
+    await db.salaryRule.update({
+      where: { id: keep.id },
+      data: { ruleValue: rule.ruleValue, remark: rule.remark },
+    });
+
+    if (extras.length > 0) {
+      await db.salaryRule.updateMany({
+        where: { id: { in: extras.map((r) => r.id) } },
+        data: { effectiveTo: now },
+      });
+      collapsed += extras.length;
+    }
+  }
+
+  if (collapsed > 0) {
+    console.log(`  ⚠  发现 ${collapsed} 条重复的 active 薪资规则，已收尾为历史记录（effectiveTo=now）`);
   }
   console.log(`  ✓ 薪资规则 ${rules.length} 条`);
 }
