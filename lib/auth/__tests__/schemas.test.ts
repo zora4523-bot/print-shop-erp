@@ -6,6 +6,8 @@ import {
   createUserSchema,
   updateUserSchema,
   resetUserPasswordSchema,
+  createCraftSchema,
+  updateCraftSchema,
 } from '../schemas';
 
 describe('loginSchema', () => {
@@ -405,6 +407,125 @@ describe('resetUserPasswordSchema', () => {
   });
   it('rejects >72-char passwords', () => {
     const r = resetUserPasswordSchema.safeParse({ newPassword: 'a'.repeat(73) });
+    expect(r.success).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Craft dictionary schemas (P0 #2)
+// ─────────────────────────────────────────────────────────────────────
+
+const validCraft = {
+  name: '专版单色平烫',
+  code: 'FLAT_FOIL_SINGLE',
+  isOutsource: 'false',
+  defaultMachineType: MachineType.WINDMILL,
+  sortOrder: '20',
+};
+
+describe('createCraftSchema', () => {
+  it('accepts a SPEC §6.1 entry as-is', () => {
+    const r = createCraftSchema.safeParse(validCraft);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.sortOrder).toBe(20); // coerced from string
+      expect(r.data.isOutsource).toBe(false);
+    }
+  });
+
+  describe('code', () => {
+    it('rejects lowercase', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, code: 'flat_foil_single' });
+      expect(r.success).toBe(false);
+    });
+    it('rejects leading digit', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, code: '1FLAT' });
+      expect(r.success).toBe(false);
+    });
+    it('rejects hyphen / dot', () => {
+      for (const bad of ['FLAT-FOIL', 'FLAT.FOIL']) {
+        const r = createCraftSchema.safeParse({ ...validCraft, code: bad });
+        expect(r.success, bad).toBe(false);
+      }
+    });
+    it('accepts underscores and trailing digits', () => {
+      for (const ok of ['STOCK_FOIL', 'COLOR_PRINT_FOIL', 'UV', 'FOIL2']) {
+        const r = createCraftSchema.safeParse({ ...validCraft, code: ok });
+        expect(r.success, ok).toBe(true);
+      }
+    });
+    it('requires at least 2 chars', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, code: 'A' });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe('defaultMachineType', () => {
+    it('accepts null / empty string (outsource with no machine)', () => {
+      for (const v of ['', null, undefined]) {
+        const r = createCraftSchema.safeParse({ ...validCraft, defaultMachineType: v });
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.defaultMachineType).toBeNull();
+      }
+    });
+    it('accepts a MachineType value', () => {
+      const r = createCraftSchema.safeParse({
+        ...validCraft,
+        defaultMachineType: MachineType.HAND_PRESS,
+      });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.defaultMachineType).toBe(MachineType.HAND_PRESS);
+    });
+    it('rejects an unknown string', () => {
+      const r = createCraftSchema.safeParse({
+        ...validCraft,
+        defaultMachineType: 'NOT_A_MACHINE',
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe('sortOrder', () => {
+    it('coerces decimal strings via z.coerce.number → int check fails', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '3.5' });
+      expect(r.success).toBe(false);
+    });
+    it('rejects negative numbers', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '-1' });
+      expect(r.success).toBe(false);
+    });
+    it('rejects non-numeric strings', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: 'abc' });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe('isOutsource (formBoolean reuse)', () => {
+    it.each([
+      ['on', true],
+      ['true', true],
+      [undefined, false],
+      ['', false],
+      ['false', false],
+    ])('maps %j → %j', (raw, expected) => {
+      const r = createCraftSchema.safeParse({ ...validCraft, isOutsource: raw });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.isOutsource).toBe(expected);
+    });
+  });
+});
+
+describe('updateCraftSchema', () => {
+  const validUpdate = { ...validCraft, isActive: 'true' };
+
+  it('requires isActive', () => {
+    const r = updateCraftSchema.safeParse({ ...validUpdate, isActive: undefined });
+    expect(r.success).toBe(true); // formBoolean treats missing as false
+    if (r.success) expect(r.data.isActive).toBe(false);
+  });
+
+  it('reuses the code / name regex', () => {
+    const r = updateCraftSchema.safeParse({ ...validUpdate, code: 'bad-code' });
     expect(r.success).toBe(false);
   });
 });

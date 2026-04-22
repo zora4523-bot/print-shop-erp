@@ -216,3 +216,58 @@ export const resetUserPasswordSchema = z.object({
 });
 
 export type ResetUserPasswordInput = z.infer<typeof resetUserPasswordSchema>;
+
+// ============================================================
+// Craft dictionary (SPEC §6.1 / appendix B)
+// ============================================================
+
+// Code is the stable machine-facing identifier — referenced by production
+// tasks, notification templates, future API consumers. Keep it narrow so
+// ad-hoc edits don't break existing joins.
+const craftCodeField = z
+  .string()
+  .trim()
+  .min(2, '代码至少 2 个字符')
+  .max(32, '代码过长（最多 32 个字符）')
+  .regex(/^[A-Z][A-Z0-9_]*$/, '代码只能包含大写字母、数字、下划线，且必须以字母开头');
+
+const craftNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写工艺名')
+  .max(32, '工艺名过长（最多 32 个字符）');
+
+// Optional select that arrives from FormData as '' when the operator didn't
+// pick anything. Normalize to null so Prisma's MachineType? column stores
+// a proper "no default machine".
+const optionalMachineTypeField = z
+  .union([z.nativeEnum(MachineType), z.literal(''), z.null(), z.undefined()])
+  .transform((v) => (v === '' || v === undefined ? null : v));
+
+// FormData always hands us strings; accept the string form too and coerce.
+const sortOrderField = z.coerce
+  .number({ message: '排序必须是数字' })
+  .int('排序必须是整数')
+  .min(0, '排序不能为负数')
+  .max(9999, '排序过大');
+
+export const createCraftSchema = z.object({
+  name: craftNameField,
+  code: craftCodeField,
+  isOutsource: formBoolean,
+  defaultMachineType: optionalMachineTypeField,
+  sortOrder: sortOrderField,
+});
+
+export type CreateCraftInput = z.infer<typeof createCraftSchema>;
+
+export const updateCraftSchema = z.object({
+  name: craftNameField,
+  code: craftCodeField,
+  isOutsource: formBoolean,
+  defaultMachineType: optionalMachineTypeField,
+  sortOrder: sortOrderField,
+  isActive: formBoolean,
+});
+
+export type UpdateCraftInput = z.infer<typeof updateCraftSchema>;
