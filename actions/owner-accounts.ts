@@ -15,11 +15,13 @@ import {
   resetUserPassword,
   AccountInvariantError,
 } from '@/lib/account';
+import type { AccountMutationResult } from './owner-accounts.types';
 
-export type AccountMutationResult =
-  | { status: 'success' }
-  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
-  | { status: 'error'; message: string };
+// NB: Next.js strips every non-async-function export from a 'use server'
+// module, so a `export type { AccountMutationResult }` re-export here would
+// be silently dropped at RSC compile time. All callers — pages, client
+// components, and tests — must import the type from './owner-accounts.types'
+// directly.
 
 function collectFieldErrors(
   issues: readonly { path: readonly PropertyKey[]; message: string }[],

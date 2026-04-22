@@ -1,10 +1,12 @@
 import Link from 'next/link';
+import { Role } from '../generated/prisma/client';
 import { requireSession } from '@/lib/auth/session';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
 
 export default async function Home() {
   const { user } = await requireSession();
+  const isOwner = user.role === Role.OWNER;
 
   return (
     <div className="min-h-screen bg-muted/40">
@@ -25,7 +27,7 @@ export default async function Home() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl px-6 py-12">
+      <main className="mx-auto max-w-4xl px-6 py-12 space-y-6">
         <div className="rounded-xl border bg-card p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">欢迎回来，{user.displayName}</h2>
           <p className="text-sm text-muted-foreground">
@@ -33,6 +35,19 @@ export default async function Home() {
             清单逐步补齐：工单核心、生产流程、薪资、推送、CDR、账单、Dashboard。
           </p>
         </div>
+        {isOwner ? (
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <h3 className="mb-3 text-base font-semibold">老板后台</h3>
+            <ul className="space-y-1 text-sm">
+              <li>
+                <Link href="/owner/accounts" className="text-primary underline hover:no-underline">
+                  账号管理 →
+                </Link>
+                <span className="ml-2 text-muted-foreground">新增 / 编辑 / 停用员工账号</span>
+              </li>
+            </ul>
+          </div>
+        ) : null}
       </main>
     </div>
   );
