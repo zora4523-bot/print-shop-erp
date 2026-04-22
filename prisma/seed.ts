@@ -13,6 +13,7 @@
  * 注意：Prisma 7 的 client 从 ./generated/prisma 导入，不是 @prisma/client
  */
 
+import { randomBytes } from 'node:crypto';
 import { PrismaClient, Role, MachineType } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
@@ -37,23 +38,38 @@ async function main() {
 // 1. 管理员账号
 // ============================================================
 async function seedAdmin() {
-  const existing = await db.user.findUnique({ where: { username: 'admin' } });
+  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
+  const existing = await db.user.findUnique({ where: { username } });
   if (existing) {
-    console.log('  ⏭  管理员已存在');
+    console.log(`  ⏭  管理员 ${username} 已存在`);
     return;
   }
 
-  const password = await bcrypt.hash('admin@2026', 10);
+  const fromEnv = process.env.SEED_ADMIN_PASSWORD;
+  const generated = fromEnv ? null : randomBytes(12).toString('base64url');
+  const plaintext = fromEnv ?? generated!;
+  const hashed = await bcrypt.hash(plaintext, 10);
+
   await db.user.create({
     data: {
-      username: 'admin',
-      password,
+      username,
+      password: hashed,
       role: Role.OWNER,
       displayName: '老板',
       isActive: true,
     },
   });
-  console.log('  ✓ 创建管理员账号 admin / admin@2026（请尽快改密码）');
+
+  if (generated) {
+    console.log('');
+    console.log('  ⚠  SEED_ADMIN_PASSWORD 未设置，已随机生成一次性密码：');
+    console.log(`       用户名: ${username}`);
+    console.log(`       密码:   ${generated}`);
+    console.log('     仅此一次打印，请立刻保存并登录后修改。');
+    console.log('');
+  } else {
+    console.log(`  ✓ 创建管理员 ${username}（密码来自 SEED_ADMIN_PASSWORD，登录后请修改）`);
+  }
 }
 
 // ============================================================
@@ -215,27 +231,33 @@ async function seedSalaryRules() {
     },
   ];
 
+  // 幂等策略：按 (ruleType, ruleKey) 查找当前有效（effectiveTo=null）的规则。
+  // 找到则更新其 value/remark；未找到才以当前时间作为 effectiveFrom 新建。
+  // 这样每次重跑 seed 不会因 effectiveFrom=now 导致 upsert key 总是不匹配而不断累积。
   for (const rule of rules) {
-    await db.salaryRule.upsert({
+    const active = await db.salaryRule.findFirst({
       where: {
-        ruleType_ruleKey_effectiveFrom: {
-          ruleType: rule.ruleType,
-          ruleKey: rule.ruleKey,
-          effectiveFrom: now,
-        },
-      },
-      update: {
-        ruleValue: rule.ruleValue,
-        remark: rule.remark,
-      },
-      create: {
         ruleType: rule.ruleType,
         ruleKey: rule.ruleKey,
-        ruleValue: rule.ruleValue,
-        effectiveFrom: now,
-        remark: rule.remark,
+        effectiveTo: null,
       },
     });
+    if (active) {
+      await db.salaryRule.update({
+        where: { id: active.id },
+        data: { ruleValue: rule.ruleValue, remark: rule.remark },
+      });
+    } else {
+      await db.salaryRule.create({
+        data: {
+          ruleType: rule.ruleType,
+          ruleKey: rule.ruleKey,
+          ruleValue: rule.ruleValue,
+          effectiveFrom: now,
+          remark: rule.remark,
+        },
+      });
+    }
   }
   console.log(`  ✓ 薪资规则 ${rules.length} 条`);
 }
