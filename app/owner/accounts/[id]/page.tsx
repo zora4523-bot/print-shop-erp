@@ -39,7 +39,22 @@ export default async function EditAccountPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>
-        <AccountForm mode="edit" action={boundUpdate} initial={account} />
+        {/*
+          Key on updatedAt so the client component remounts after a successful
+          save (revalidatePath brings a fresh `account` with a newer timestamp).
+          Without this, useState seeded from `initial` keeps the pre-submit
+          value and the form can drift away from the DB on subsequent edits
+          — React's canonical "reset state when the underlying row changes"
+          pattern. Accepted trade-off: the inline "✓ 已保存" banner is very
+          short-lived because the form unmounts as soon as the revalidated
+          render arrives.
+        */}
+        <AccountForm
+          key={`${account.id}-${account.updatedAt.toISOString()}`}
+          mode="edit"
+          action={boundUpdate}
+          initial={account}
+        />
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
