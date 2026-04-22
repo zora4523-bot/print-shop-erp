@@ -332,6 +332,7 @@ const minOrderQtyField = z.preprocess(
   },
   z
     .number({ message: '最小起订量必须是正整数' })
+    .finite('最小起订量必须是有限数')
     .int('最小起订量必须是整数')
     .min(1, '最小起订量必须 ≥ 1')
     .max(9_999_999, '最小起订量过大')

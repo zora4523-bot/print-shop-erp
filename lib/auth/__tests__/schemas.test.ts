@@ -661,6 +661,12 @@ describe('createProductSchema', () => {
         expect(r.success, String(bad)).toBe(false);
       }
     });
+    it('rejects Infinity / NaN on the numeric path (Codex round 23 / P2)', () => {
+      for (const bad of [Infinity, -Infinity, NaN]) {
+        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
+        expect(r.success, String(bad)).toBe(false);
+      }
+    });
   });
 
   describe('name / specification / paperType', () => {
