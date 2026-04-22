@@ -39,35 +39,66 @@ async function main() {
 // ============================================================
 async function seedAdmin() {
   const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
+  const fromEnv = process.env.SEED_ADMIN_PASSWORD;
+  const existing = await db.user.findUnique({ where: { username } });
 
-  // Guard 1: if any active OWNER already exists, account lifecycle belongs to ops.
-  // A reseed with a changed SEED_ADMIN_USERNAME must not silently mint an extra superuser.
+  // ── Branch 1: the target username already exists ────────────────────────
+  if (existing) {
+    // Non-OWNER collision: refuse — silently promoting a WORKER/SALES/etc to
+    // OWNER is the privilege-leak Codex round 2 called out.
+    if (existing.role !== Role.OWNER) {
+      throw new Error(
+        `SEED_ADMIN_USERNAME "${username}" 已被非 OWNER 账号占用（role=${existing.role}）；` +
+          '拒绝将已有账号静默提权为 OWNER。请换用其它 SEED_ADMIN_USERNAME。',
+      );
+    }
+
+    // Row is an OWNER. Two sub-cases:
+    //   a) SEED_ADMIN_PASSWORD is set → explicit bootstrap-credential reset:
+    //      update password and ensure isActive=true. No new row is minted,
+    //      no role is elevated; the env var is the explicit operator intent.
+    //   b) SEED_ADMIN_PASSWORD is unset → preserve the "hands off existing
+    //      OWNER" invariant (Codex round 3): skip if active, refuse if
+    //      inactive with guidance to reactivate or set the env var.
+    if (fromEnv) {
+      const hashed = await bcrypt.hash(fromEnv, 10);
+      await db.user.update({
+        where: { id: existing.id },
+        data: { password: hashed, isActive: true },
+      });
+      const reactivated = !existing.isActive ? '并重新激活' : '';
+      console.log(`  🔑 已重置 OWNER ${username} 的密码${reactivated}（来自 SEED_ADMIN_PASSWORD）`);
+      return;
+    }
+
+    if (existing.isActive) {
+      console.log(`  ⏭  已有活跃 OWNER ${username}，跳过管理员种子`);
+    } else {
+      throw new Error(
+        `用户 "${username}" 已存在且 role=OWNER（isActive=false）。` +
+          '可选恢复路径：(1) DBA 直接 UPDATE isActive=true；' +
+          '(2) 设置 SEED_ADMIN_PASSWORD 后重跑 seed，将自动重置密码并激活。',
+      );
+    }
+    return;
+  }
+
+  // ── Branch 2: the target username does not exist ────────────────────────
+  // Don't create a second superuser behind the back of an existing active OWNER
+  // (e.g. the operator renamed the original admin but left the default
+  // SEED_ADMIN_USERNAME in env — the fresh "admin" would silently become a
+  // second OWNER).
   const activeOwnerCount = await db.user.count({
     where: { role: Role.OWNER, isActive: true },
   });
   if (activeOwnerCount > 0) {
-    console.log(`  ⏭  已有 ${activeOwnerCount} 位活跃 OWNER，跳过管理员种子`);
+    console.log(
+      `  ⏭  已有 ${activeOwnerCount} 位活跃 OWNER（与 SEED_ADMIN_USERNAME=${username} 不同名），跳过`,
+    );
     return;
   }
 
-  // No active OWNER → this is either a first seed or a recovery seed
-  // (e.g. workers/sales imported first, or the sole OWNER was deactivated).
-  // Collision check before creating: never silently elevate an existing row.
-  const collision = await db.user.findUnique({ where: { username } });
-  if (collision) {
-    if (collision.role === Role.OWNER) {
-      throw new Error(
-        `用户 "${username}" 已存在且 role=OWNER（isActive=${collision.isActive}）。` +
-          '恢复可登录 OWNER 的首选方式是重新激活该账号；若确需新建，请换用其它 SEED_ADMIN_USERNAME。',
-      );
-    }
-    throw new Error(
-      `SEED_ADMIN_USERNAME "${username}" 已被非 OWNER 账号占用（role=${collision.role}）；` +
-        '拒绝将已有账号静默提权为 OWNER。请换用其它 SEED_ADMIN_USERNAME。',
-    );
-  }
-
-  const fromEnv = process.env.SEED_ADMIN_PASSWORD;
+  // First seed into an empty DB, or recovery after all OWNERs were removed.
   const generated = fromEnv ? null : randomBytes(12).toString('base64url');
   const plaintext = fromEnv ?? generated!;
   const hashed = await bcrypt.hash(plaintext, 10);
