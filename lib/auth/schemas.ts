@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { Role, WorkerType, MachineType } from '../../generated/prisma/client';
+import {
+  Role,
+  WorkerType,
+  MachineType,
+  ProductCategory,
+} from '../../generated/prisma/client';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -274,3 +279,69 @@ export const updateCraftSchema = z.object({
 });
 
 export type UpdateCraftInput = z.infer<typeof updateCraftSchema>;
+
+// ============================================================
+// Product dictionary (SPEC §4.1 / appendix C)
+// ============================================================
+
+const productNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写产品名')
+  .max(64, '产品名过长（最多 64 个字符）');
+
+const productTextFieldOptional = (label: string, max = 64) =>
+  z
+    .string()
+    .trim()
+    .max(max, `${label}过长（最多 ${max} 个字符）`)
+    .transform((v) => (v === '' ? null : v))
+    .nullable();
+
+// Prices go into a Decimal(10,4) column. We keep them as strings through
+// the schema because JS floats would silently round e.g. 0.0007 → 0.0006999…
+// at bcrypt-style small values. Prisma accepts string-form decimals. The
+// regex caps at 4 decimal places matching the column precision.
+const moneyOptionalField = z
+  .string()
+  .trim()
+  .refine(
+    (v) => v === '' || /^\d+(\.\d{1,4})?$/.test(v),
+    { message: '金额格式错误（最多 4 位小数，非负数）' },
+  )
+  .transform((v) => (v === '' ? null : v));
+
+const minOrderQtyField = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.coerce
+    .number({ message: '最小起订量必须是数字' })
+    .int('最小起订量必须是整数')
+    .min(1, '最小起订量必须 ≥ 1')
+    .max(9_999_999, '最小起订量过大')
+    .optional(),
+);
+
+const productCategoryField = z.nativeEnum(ProductCategory);
+
+export const createProductSchema = z.object({
+  category: productCategoryField,
+  name: productNameField,
+  specification: productTextFieldOptional('规格', 64),
+  paperType: productTextFieldOptional('纸张', 32),
+  baseUnitPrice: moneyOptionalField,
+  minOrderQty: minOrderQtyField,
+});
+
+export type CreateProductInput = z.infer<typeof createProductSchema>;
+
+export const updateProductSchema = z.object({
+  category: productCategoryField,
+  name: productNameField,
+  specification: productTextFieldOptional('规格', 64),
+  paperType: productTextFieldOptional('纸张', 32),
+  baseUnitPrice: moneyOptionalField,
+  minOrderQty: minOrderQtyField,
+  isActive: formBoolean,
+});
+
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
