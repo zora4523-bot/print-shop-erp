@@ -48,7 +48,9 @@ function mapPrismaError(err: unknown): AccountMutationResult | null {
 
 function normalizeFormInput(formData: FormData) {
   // Turn FormData into a plain object. Empty strings stay empty so Zod can
-  // tell "absent" from "the operator cleared this field".
+  // tell "absent" from "the operator cleared this field". `isActive` is
+  // passed through as-is; the schema's `formBoolean` preprocess handles
+  // both the browser-default 'on' (Codex round 13 / P2) and explicit 'true'.
   const get = (k: string) => {
     const v = formData.get(k);
     return typeof v === 'string' ? v : undefined;
@@ -61,7 +63,7 @@ function normalizeFormInput(formData: FormData) {
     workerType: get('workerType') || null,
     machineType: get('machineType') || null,
     password: get('password'),
-    isActive: get('isActive') === 'true',
+    isActive: get('isActive'),
   };
 }
 

@@ -355,9 +355,38 @@ describe('updateUserSchema', () => {
     expect(updateUserSchema.safeParse(validUpdate).success).toBe(true);
   });
 
-  it('requires isActive (boolean)', () => {
-    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'yes' });
-    expect(r.success).toBe(false);
+  it('accepts the default HTML checkbox value "on" as true (Codex round 13 / P2)', () => {
+    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'on' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.isActive).toBe(true);
+  });
+
+  it('accepts explicit string "true"', () => {
+    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'true' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.isActive).toBe(true);
+  });
+
+  it('treats a missing isActive (unchecked checkbox) as false', () => {
+    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: undefined });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.isActive).toBe(false);
+  });
+
+  it('accepts real booleans (for JS callers that bypass FormData)', () => {
+    for (const v of [true, false]) {
+      const r = updateUserSchema.safeParse({ ...validUpdate, isActive: v });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.isActive).toBe(v);
+    }
+  });
+
+  it('treats an unknown string ("yes", "1") as false — explicit values only', () => {
+    for (const v of ['yes', '1', 'checked']) {
+      const r = updateUserSchema.safeParse({ ...validUpdate, isActive: v });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.isActive).toBe(false);
+    }
   });
 
   it('reuses the same enforceWorkerCascade refinement', () => {

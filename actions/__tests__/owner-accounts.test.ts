@@ -178,6 +178,41 @@ describe('updateUserAction', () => {
     );
   });
 
+  it('reads a browser-default checkbox (isActive=on) as true (Codex round 13 / P2)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    accountMock.updateUser.mockResolvedValue({ id: 'user-1' });
+
+    await updateUserAction('user-1', null, fd({ ...baseUpdate, isActive: 'on' }));
+
+    expect(accountMock.updateUser).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ isActive: true }),
+      expect.anything(),
+    );
+  });
+
+  it('reads a missing isActive field (unchecked checkbox) as false', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    accountMock.updateUser.mockResolvedValue({ id: 'user-1' });
+
+    const formNoCheckbox = new FormData();
+    formNoCheckbox.set('displayName', 'Alice');
+    formNoCheckbox.set('phone', '');
+    formNoCheckbox.set('role', Role.SALES);
+    formNoCheckbox.set('workerType', '');
+    formNoCheckbox.set('machineType', '');
+    // isActive deliberately absent — mirrors browser behavior for an
+    // unchecked checkbox.
+
+    await updateUserAction('user-1', null, formNoCheckbox);
+
+    expect(accountMock.updateUser).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ isActive: false }),
+      expect.anything(),
+    );
+  });
+
   it('maps AccountInvariantError to error result, not a throw', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     accountMock.updateUser.mockRejectedValueOnce(new MockAccountInvariantError('最后一位 OWNER'));

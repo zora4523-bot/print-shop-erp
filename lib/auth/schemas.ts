@@ -187,6 +187,17 @@ export const createUserSchema = z
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
+// HTML checkboxes submit value="on" when checked and omit the field when
+// unchecked — unless the form sets an explicit value. Accept both the
+// browser-default 'on' and explicit 'true' / boolean so the schema works
+// whether the form is stock HTML or a JS-driven component (Codex round 13
+// / P2).
+const formBoolean = z.preprocess((v) => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v === 'true' || v === 'on';
+  return false;
+}, z.boolean());
+
 export const updateUserSchema = z
   .object({
     displayName: displayNameField,
@@ -194,7 +205,7 @@ export const updateUserSchema = z
     role: roleField,
     workerType: workerTypeField,
     machineType: machineTypeField,
-    isActive: z.boolean(),
+    isActive: formBoolean,
   })
   .superRefine(enforceWorkerCascade);
 

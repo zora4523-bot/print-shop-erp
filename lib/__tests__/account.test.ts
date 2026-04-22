@@ -2,8 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { Role, WorkerType, MachineType } from '../../generated/prisma/client';
 
-const { dbMock } = vi.hoisted(() => ({
-  dbMock: {
+const { dbMock } = vi.hoisted(() => {
+  const mock: {
+    user: {
+      findMany: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+      create: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      count: ReturnType<typeof vi.fn>;
+    };
+    $queryRaw: ReturnType<typeof vi.fn>;
+    $transaction: ReturnType<typeof vi.fn>;
+  } = {
     user: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -11,8 +21,18 @@ const { dbMock } = vi.hoisted(() => ({
       update: vi.fn(),
       count: vi.fn(),
     },
-  },
-}));
+    // $queryRaw is only used to acquire the advisory lock; no return value.
+    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    // $transaction runs the callback with the same mock as tx so every
+    // lib-layer call inside the transaction observes the same findUnique /
+    // update / count state we set up.
+    $transaction: vi.fn(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
+      return fn;
+    }),
+  };
+  return { dbMock: mock };
+});
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
@@ -52,6 +72,11 @@ const makeUser = (over: Partial<{
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.user)) fn.mockReset();
+  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+    if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
+    return fn;
+  });
 });
 
 describe('listUsers', () => {
@@ -162,6 +187,25 @@ describe('updateUser invariants', () => {
   const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
   const salesPerson = makeUser({ id: 'sales-1', role: Role.SALES });
 
+  it('wraps the check + write in a transaction and holds the owner advisory lock (Codex round 13 / P1)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(salesPerson);
+    dbMock.user.update.mockResolvedValue(makeUser({ id: 'sales-1' }));
+
+    await updateUser(
+      'sales-1',
+      { displayName: 'Bob', role: Role.SALES, isActive: true },
+      baseActor,
+    );
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    // First tx-scoped call is the advisory lock — ensures the critical
+    // section is serialized against concurrent OWNER mutations.
+    expect(dbMock.$queryRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    const templateText = (firstCall[0] as TemplateStringsArray).join('?');
+    expect(templateText).toMatch(/pg_advisory_xact_lock/);
+  });
+
   it('refuses to demote the last active OWNER', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
     dbMock.user.count.mockResolvedValue(0); // no other active OWNER
@@ -262,6 +306,18 @@ describe('updateUser invariants', () => {
 describe('setUserActive invariants', () => {
   const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
   const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+
+  it('also runs inside the transaction + advisory lock (Codex round 13 / P1)', async () => {
+    const inactive = makeUser({ id: 'inactive', isActive: false, role: Role.SALES });
+    dbMock.user.findUnique.mockResolvedValue(inactive);
+    dbMock.user.update.mockResolvedValue({ ...inactive, isActive: true });
+
+    await setUserActive('inactive', true, baseActor);
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    expect((firstCall[0] as TemplateStringsArray).join('?')).toMatch(/pg_advisory_xact_lock/);
+  });
 
   it('refuses self-deactivation even when other OWNERs exist', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerSelf);
