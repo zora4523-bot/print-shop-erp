@@ -7,9 +7,16 @@ import { z } from 'zod';
 // than 72 bytes, they can later log in with any suffix — a real security
 // weakening. Cap any newly-set password at exactly the bcrypt boundary.
 //
-// We count bytes, not characters, because 1 ASCII char == 1 byte but each
-// Chinese character in UTF-8 is 3 bytes; a 25-char Chinese passphrase is
-// already 75 bytes and must be rejected too.
+// Two-gate guard:
+//   1. .max(72) fails fast on .length, which is UTF-16 units — cheap and
+//      ensures we never call TextEncoder.encode on a pathologically large
+//      payload (Codex round 11). Since every UTF-8 byte maps to ≥ 1 UTF-16
+//      code unit at the source side, any input whose .length > 72 is
+//      guaranteed to exceed 72 UTF-8 bytes too, so no legitimate input is
+//      lost by tripping this gate first.
+//   2. The refine() then does the exact byte count for the ≤72-char inputs
+//      where multibyte chars may still push bytes over the limit (e.g. 25
+//      Chinese chars = 75 bytes).
 const BCRYPT_MAX_BYTES = 72;
 const UTF8 = new TextEncoder();
 const bcryptSafeByteLimit = {
@@ -51,6 +58,7 @@ export const changePasswordSchema = z
     newPassword: z
       .string()
       .min(8, '新密码至少 8 位')
+      .max(72, '新密码过长（最多 72 字符）')
       .refine(bcryptSafeByteLimit.check, { message: bcryptSafeByteLimit.message }),
     confirmPassword: z.string(),
   })

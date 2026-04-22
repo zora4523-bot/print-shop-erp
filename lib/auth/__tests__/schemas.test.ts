@@ -117,7 +117,9 @@ describe('changePasswordSchema', () => {
       expect(r.success).toBe(true);
     });
 
-    it('rejects 73 ASCII bytes', () => {
+    it('rejects 73 ASCII bytes (via char-count short-circuit, not byte refine)', () => {
+      // 73 ASCII chars == 73 bytes; .max(72) fires first, which is what we
+      // want (Codex round 11 — avoid an unnecessary TextEncoder.encode).
       const new73 = 'a'.repeat(73);
       const r = changePasswordSchema.safeParse({
         currentPassword: 'old-one-123',
@@ -127,7 +129,7 @@ describe('changePasswordSchema', () => {
       expect(r.success).toBe(false);
       if (!r.success) {
         const issue = r.error.issues.find((i) => i.path[0] === 'newPassword');
-        expect(issue?.message).toMatch(/72 字节/);
+        expect(issue?.message).toMatch(/最多 72 字符/);
       }
     });
 
@@ -162,6 +164,22 @@ describe('changePasswordSchema', () => {
         confirmPassword: scientist,
       });
       expect(r.success).toBe(false);
+    });
+
+    it('rejects pathological oversize by .length before running TextEncoder (Codex round 11)', () => {
+      // 10k ASCII chars — cheap .max(72) must short-circuit rather than let
+      // TextEncoder.encode allocate a 10k-byte Uint8Array just to fail.
+      const huge = 'a'.repeat(10_000);
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: huge,
+        confirmPassword: huge,
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path[0] === 'newPassword');
+        expect(issue?.message).toMatch(/最多 72 字符/);
+      }
     });
   });
 });
