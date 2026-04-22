@@ -53,21 +53,40 @@ async function seedAdmin() {
       );
     }
 
-    // Row is an OWNER. Two sub-cases:
-    //   a) SEED_ADMIN_PASSWORD is set → explicit bootstrap-credential reset:
-    //      update password and ensure isActive=true. No new row is minted,
-    //      no role is elevated; the env var is the explicit operator intent.
-    //   b) SEED_ADMIN_PASSWORD is unset → preserve the "hands off existing
-    //      OWNER" invariant (Codex round 3): skip if active, refuse if
-    //      inactive with guidance to reactivate or set the env var.
+    // Row is an OWNER. Separate "reset password" (never privilege-altering)
+    // from "reactivate a dormant OWNER" (privilege-altering when another
+    // OWNER is already active, per Codex round 5).
     if (fromEnv) {
       const hashed = await bcrypt.hash(fromEnv, 10);
+
+      if (existing.isActive) {
+        // Pure password reset — the row is already the (or an) active OWNER.
+        await db.user.update({
+          where: { id: existing.id },
+          data: { password: hashed },
+        });
+        console.log(`  🔑 已重置活跃 OWNER ${username} 的密码（来自 SEED_ADMIN_PASSWORD）`);
+        return;
+      }
+
+      // Dormant OWNER: reactivation would add a second active OWNER if any
+      // other OWNER is already active under a different username.
+      const otherActiveOwners = await db.user.count({
+        where: { role: Role.OWNER, isActive: true },
+      });
+      if (otherActiveOwners > 0) {
+        throw new Error(
+          `既有 ${otherActiveOwners} 位活跃 OWNER，拒绝同时将非活跃 OWNER "${username}" 重新激活` +
+            '（会产生多个同时活跃的超级用户）。请先 deactivate 当前活跃 OWNER 再重跑 seed，' +
+            '或换用其它 SEED_ADMIN_USERNAME 以定向重置活跃 OWNER。',
+        );
+      }
+
       await db.user.update({
         where: { id: existing.id },
         data: { password: hashed, isActive: true },
       });
-      const reactivated = !existing.isActive ? '并重新激活' : '';
-      console.log(`  🔑 已重置 OWNER ${username} 的密码${reactivated}（来自 SEED_ADMIN_PASSWORD）`);
+      console.log(`  🔑 已重置 OWNER ${username} 的密码并重新激活（来自 SEED_ADMIN_PASSWORD）`);
       return;
     }
 
