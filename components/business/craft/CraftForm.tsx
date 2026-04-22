@@ -120,6 +120,15 @@ export function CraftForm(props: Props) {
         label="排序"
         hint="数字越小越靠前，必须 ≥ 1。建议从 10 起每 10 留一档（10, 20, 30…）"
         type="number"
+        // Mirror the schema's min(1).int() constraint on the input itself
+        // (Codex round 19 / P2). The form has `noValidate`, so the browser
+        // won't block submit on this attribute alone — the server schema is
+        // still the source of truth — but keeping the attribute in sync
+        // makes the field self-describing to AT / dev tools, prevents the
+        // number-input spinner from stepping into 0 / negatives, and stays
+        // correct if `noValidate` is ever removed.
+        min={1}
+        step={1}
         required
         disabled={pending}
         error={errs.sortOrder?.[0]}
@@ -170,6 +179,8 @@ function TextField({
   hint,
   error,
   type = 'text',
+  min,
+  step,
   ...inputProps
 }: {
   id: string;
@@ -177,6 +188,8 @@ function TextField({
   hint?: string;
   error?: string | undefined;
   type?: string;
+  min?: number;
+  step?: number;
   required?: boolean;
   disabled?: boolean;
   defaultValue?: string;
@@ -188,6 +201,8 @@ function TextField({
         id={id}
         name={id}
         type={type}
+        min={min}
+        step={step}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
         {...inputProps}
