@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { loginSchema, changePasswordSchema } from '../schemas';
+import { Role, WorkerType, MachineType } from '../../../generated/prisma/client';
+import {
+  loginSchema,
+  changePasswordSchema,
+  createUserSchema,
+  updateUserSchema,
+  resetUserPasswordSchema,
+} from '../schemas';
 
 describe('loginSchema', () => {
   it('accepts a valid pair', () => {
@@ -211,3 +218,164 @@ describe('changePasswordSchema', () => {
 });
 
 const MAX_PASSWORD_CHARS = 72;
+
+// ─────────────────────────────────────────────────────────────────────
+// Owner-side account schemas
+// ─────────────────────────────────────────────────────────────────────
+
+const validCreate = {
+  username: 'alice',
+  displayName: 'Alice',
+  phone: '',
+  role: Role.SALES,
+  workerType: null,
+  machineType: null,
+  password: 'secret-pass-1',
+};
+
+describe('createUserSchema', () => {
+  describe('username', () => {
+    it('rejects under 3 chars', () => {
+      const r = createUserSchema.safeParse({ ...validCreate, username: 'ab' });
+      expect(r.success).toBe(false);
+    });
+    it('rejects invalid chars (spaces, CJK, slashes)', () => {
+      for (const bad of ['alice x', '管理员', 'a/b', 'a@b', 'a.b']) {
+        const r = createUserSchema.safeParse({ ...validCreate, username: bad });
+        expect(r.success, bad).toBe(false);
+      }
+    });
+    it('accepts letters / digits / underscore / hyphen', () => {
+      for (const ok of ['alice', 'A1_b-c', 'u_123', 'sales-01']) {
+        const r = createUserSchema.safeParse({ ...validCreate, username: ok });
+        expect(r.success, ok).toBe(true);
+      }
+    });
+    it('trims surrounding whitespace', () => {
+      const r = createUserSchema.parse({ ...validCreate, username: '  alice  ' });
+      expect(r.username).toBe('alice');
+    });
+  });
+
+  describe('enforceWorkerCascade', () => {
+    it('requires workerType when role=WORKER', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: null,
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path[0] === 'workerType');
+        expect(issue?.message).toMatch(/岗位类型/);
+      }
+    });
+
+    it('requires machineType when workerType=MACHINE', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.MACHINE,
+        machineType: null,
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path[0] === 'machineType');
+        expect(issue?.message).toMatch(/机器类型/);
+      }
+    });
+
+    it('accepts WORKER + MACHINE + machineType', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.MACHINE,
+        machineType: MachineType.HAND_PRESS,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('accepts WORKER + PACKER without machineType', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.PACKER,
+        machineType: null,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('rejects machineType on non-MACHINE worker', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.PACKER,
+        machineType: MachineType.WINDMILL,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it('rejects workerType on non-WORKER role', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.SALES,
+        workerType: WorkerType.MACHINE,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it('rejects machineType on non-WORKER role', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.SALES,
+        machineType: MachineType.WINDMILL,
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  it('enforces the bcrypt 72-byte ceiling on password (shared helper)', () => {
+    const long = 'a'.repeat(73);
+    const r = createUserSchema.safeParse({ ...validCreate, password: long });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('updateUserSchema', () => {
+  const validUpdate = {
+    displayName: 'Alice',
+    phone: '',
+    role: Role.SALES,
+    workerType: null,
+    machineType: null,
+    isActive: true,
+  };
+
+  it('accepts a valid shape', () => {
+    expect(updateUserSchema.safeParse(validUpdate).success).toBe(true);
+  });
+
+  it('requires isActive (boolean)', () => {
+    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'yes' });
+    expect(r.success).toBe(false);
+  });
+
+  it('reuses the same enforceWorkerCascade refinement', () => {
+    const r = updateUserSchema.safeParse({ ...validUpdate, role: Role.WORKER });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('resetUserPasswordSchema', () => {
+  it('accepts an 8+ char new password', () => {
+    expect(resetUserPasswordSchema.safeParse({ newPassword: '12345678' }).success).toBe(true);
+  });
+  it('rejects short passwords', () => {
+    const r = resetUserPasswordSchema.safeParse({ newPassword: 'short7_' });
+    expect(r.success).toBe(false);
+  });
+  it('rejects >72-char passwords', () => {
+    const r = resetUserPasswordSchema.safeParse({ newPassword: 'a'.repeat(73) });
+    expect(r.success).toBe(false);
+  });
+});

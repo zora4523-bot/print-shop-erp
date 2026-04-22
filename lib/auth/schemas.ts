@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Role, WorkerType, MachineType } from '../../generated/prisma/client';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -81,3 +82,126 @@ export const changePasswordSchema = z
   });
 
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+// ============================================================
+// Owner-side account management (SPEC §2 + §9.1)
+// ============================================================
+
+// Username is used both as a login handle and appears in logs / UI. Keep it
+// narrow: ascii letters, digits, dash, underscore, 3–64 chars. Trim first
+// so a phone keyboard's trailing space doesn't create a weirdly-named row.
+const usernameField = z
+  .string()
+  .trim()
+  .min(3, '用户名至少 3 个字符')
+  .max(64, '用户名过长（最多 64 个字符）')
+  .regex(/^[A-Za-z0-9_-]+$/, '用户名只能包含字母、数字、下划线或连字符');
+
+const displayNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写姓名')
+  .max(64, '姓名过长（最多 64 个字符）');
+
+// Accept blank, then coerce to null/undefined at the action boundary. Keep
+// the upper bound so log lines don't balloon.
+const phoneField = z
+  .string()
+  .trim()
+  .max(32, '电话过长（最多 32 个字符）')
+  .optional();
+
+const roleField = z.nativeEnum(Role);
+const workerTypeField = z.nativeEnum(WorkerType).nullable().optional();
+const machineTypeField = z.nativeEnum(MachineType).nullable().optional();
+
+// Enforces the SPEC §2.1 cascade:
+//   role === WORKER            ⇒ workerType is required
+//   workerType === MACHINE     ⇒ machineType is required
+//   role !== WORKER            ⇒ workerType / machineType must be absent
+//   workerType !== MACHINE     ⇒ machineType must be absent
+//
+// Extracted as a standalone function so createUserSchema and updateUserSchema
+// can both apply it without having to duplicate the cross-field logic.
+function enforceWorkerCascade(
+  data: { role: Role; workerType?: WorkerType | null; machineType?: MachineType | null },
+  ctx: z.RefinementCtx,
+) {
+  if (data.role === Role.WORKER) {
+    if (!data.workerType) {
+      ctx.addIssue({ code: 'custom', path: ['workerType'], message: '请为师傅选择岗位类型' });
+      return;
+    }
+    if (data.workerType === WorkerType.MACHINE && !data.machineType) {
+      ctx.addIssue({ code: 'custom', path: ['machineType'], message: '请为开机师傅选择机器类型' });
+    }
+    if (data.workerType !== WorkerType.MACHINE && data.machineType) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['machineType'],
+        message: '只有开机师傅（MACHINE）才需要机器类型',
+      });
+    }
+  } else {
+    if (data.workerType) {
+      ctx.addIssue({ code: 'custom', path: ['workerType'], message: '非师傅角色不应设置岗位类型' });
+    }
+    if (data.machineType) {
+      ctx.addIssue({ code: 'custom', path: ['machineType'], message: '非开机师傅不应设置机器类型' });
+    }
+  }
+}
+
+// Reused for both createUserSchema.password and resetUserPasswordSchema.
+// Same bcrypt 72-byte ceiling as changePasswordSchema.newPassword
+// (rounds 10 / 11 / 12).
+function passwordField(label = '密码') {
+  return z
+    .string()
+    .min(8, `${label}至少 8 位`)
+    .superRefine((v, ctx) => {
+      if (v.length > MAX_PASSWORD_CHARS) {
+        ctx.addIssue({ code: 'custom', message: `${label}过长（最多 72 字符）` });
+        return;
+      }
+      if (UTF8.encode(v).length > BCRYPT_MAX_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${label}过长（按 UTF-8 字节计，最多 72 字节。纯英文约 72 字符，含中文约 24 字符）`,
+        });
+      }
+    });
+}
+
+export const createUserSchema = z
+  .object({
+    username: usernameField,
+    displayName: displayNameField,
+    phone: phoneField,
+    role: roleField,
+    workerType: workerTypeField,
+    machineType: machineTypeField,
+    password: passwordField('密码'),
+  })
+  .superRefine(enforceWorkerCascade);
+
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+export const updateUserSchema = z
+  .object({
+    displayName: displayNameField,
+    phone: phoneField,
+    role: roleField,
+    workerType: workerTypeField,
+    machineType: machineTypeField,
+    isActive: z.boolean(),
+  })
+  .superRefine(enforceWorkerCascade);
+
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+
+export const resetUserPasswordSchema = z.object({
+  newPassword: passwordField('新密码'),
+});
+
+export type ResetUserPasswordInput = z.infer<typeof resetUserPasswordSchema>;

@@ -1,0 +1,318 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import bcrypt from 'bcryptjs';
+import { Role, WorkerType, MachineType } from '../../generated/prisma/client';
+
+const { dbMock } = vi.hoisted(() => ({
+  dbMock: {
+    user: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      count: vi.fn(),
+    },
+  },
+}));
+
+vi.mock('@/lib/db', () => ({ db: dbMock }));
+
+import {
+  listUsers,
+  createUser,
+  updateUser,
+  setUserActive,
+  resetUserPassword,
+  AccountInvariantError,
+} from '../account';
+
+const baseActor = { id: 'owner-self', role: Role.OWNER };
+
+const makeUser = (over: Partial<{
+  id: string;
+  username: string;
+  displayName: string;
+  phone: string | null;
+  role: Role;
+  workerType: WorkerType | null;
+  machineType: MachineType | null;
+  isActive: boolean;
+}> = {}) => ({
+  id: 'user-1',
+  username: 'u1',
+  displayName: 'User',
+  phone: null,
+  role: Role.SALES,
+  workerType: null,
+  machineType: null,
+  isActive: true,
+  createdAt: new Date('2026-04-22T00:00:00Z'),
+  updatedAt: new Date('2026-04-22T00:00:00Z'),
+  ...over,
+});
+
+beforeEach(() => {
+  for (const fn of Object.values(dbMock.user)) fn.mockReset();
+});
+
+describe('listUsers', () => {
+  it('orders by isActive desc then createdAt asc', async () => {
+    dbMock.user.findMany.mockResolvedValue([]);
+    await listUsers();
+    expect(dbMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      }),
+    );
+  });
+
+  it('does not select the password column', async () => {
+    dbMock.user.findMany.mockResolvedValue([]);
+    await listUsers();
+    const call = dbMock.user.findMany.mock.calls[0][0];
+    expect(call.select).toBeDefined();
+    expect(call.select.password).toBeUndefined();
+  });
+});
+
+describe('createUser', () => {
+  it('hashes the password via bcrypt and stores the hash, not plaintext', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.SALES }));
+    await createUser({
+      username: 'alice',
+      password: 'plaintext-9chars',
+      displayName: 'Alice',
+      role: Role.SALES,
+    });
+    const call = dbMock.user.create.mock.calls[0][0];
+    const stored = call.data.password as string;
+    expect(stored).not.toBe('plaintext-9chars');
+    expect(await bcrypt.compare('plaintext-9chars', stored)).toBe(true);
+  });
+
+  it('coerces workerType / machineType to null for non-WORKER roles', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.SALES }));
+    await createUser({
+      username: 'bob',
+      password: 'plaintext-9chars',
+      displayName: 'Bob',
+      role: Role.SALES,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+    });
+    const data = dbMock.user.create.mock.calls[0][0].data;
+    expect(data.workerType).toBeNull();
+    expect(data.machineType).toBeNull();
+  });
+
+  it('keeps workerType / machineType for WORKER + MACHINE', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.WORKER }));
+    await createUser({
+      username: 'wu',
+      password: 'plaintext-9chars',
+      displayName: 'Wu',
+      role: Role.WORKER,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.WINDMILL,
+    });
+    const data = dbMock.user.create.mock.calls[0][0].data;
+    expect(data.role).toBe(Role.WORKER);
+    expect(data.workerType).toBe(WorkerType.MACHINE);
+    expect(data.machineType).toBe(MachineType.WINDMILL);
+  });
+
+  it('drops machineType when workerType is not MACHINE', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.WORKER }));
+    await createUser({
+      username: 'pk',
+      password: 'plaintext-9chars',
+      displayName: 'Pack',
+      role: Role.WORKER,
+      workerType: WorkerType.PACKER,
+      machineType: MachineType.WINDMILL,
+    });
+    const data = dbMock.user.create.mock.calls[0][0].data;
+    expect(data.workerType).toBe(WorkerType.PACKER);
+    expect(data.machineType).toBeNull();
+  });
+
+  it('stores phone only when non-empty', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser());
+    await createUser({
+      username: 'a',
+      password: 'plaintext-9chars',
+      displayName: 'A',
+      role: Role.SALES,
+      phone: '',
+    });
+    expect(dbMock.user.create.mock.calls[0][0].data.phone).toBeNull();
+
+    await createUser({
+      username: 'b',
+      password: 'plaintext-9chars',
+      displayName: 'B',
+      role: Role.SALES,
+      phone: '13800138000',
+    });
+    expect(dbMock.user.create.mock.calls[1][0].data.phone).toBe('13800138000');
+  });
+});
+
+describe('updateUser invariants', () => {
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+  const salesPerson = makeUser({ id: 'sales-1', role: Role.SALES });
+
+  it('refuses to demote the last active OWNER', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerOther);
+    dbMock.user.count.mockResolvedValue(0); // no other active OWNER
+
+    await expect(
+      updateUser(
+        'owner-other',
+        {
+          displayName: 'X',
+          role: Role.SALES, // demote
+          isActive: true,
+        },
+        baseActor,
+      ),
+    ).rejects.toBeInstanceOf(AccountInvariantError);
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows demoting one OWNER when another active OWNER exists', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerOther);
+    dbMock.user.count.mockResolvedValue(1); // some other OWNER
+    dbMock.user.update.mockResolvedValue(makeUser({ id: 'owner-other', role: Role.SALES }));
+
+    await expect(
+      updateUser(
+        'owner-other',
+        { displayName: 'X', role: Role.SALES, isActive: true },
+        baseActor,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('refuses to deactivate the last active OWNER', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerOther);
+    dbMock.user.count.mockResolvedValue(0);
+
+    await expect(
+      updateUser(
+        'owner-other',
+        { displayName: 'X', role: Role.OWNER, isActive: false },
+        baseActor,
+      ),
+    ).rejects.toBeInstanceOf(AccountInvariantError);
+  });
+
+  it('refuses to change the actor OWN role (self lockout guard)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerSelf);
+    dbMock.user.count.mockResolvedValue(99); // plenty of other OWNERs — irrelevant
+
+    await expect(
+      updateUser(
+        'owner-self',
+        { displayName: 'X', role: Role.SALES, isActive: true },
+        baseActor,
+      ),
+    ).rejects.toThrowError(/不能修改自己的角色/);
+  });
+
+  it('refuses to deactivate the actor self', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerSelf);
+    dbMock.user.count.mockResolvedValue(99);
+
+    await expect(
+      updateUser(
+        'owner-self',
+        { displayName: 'X', role: Role.OWNER, isActive: false },
+        baseActor,
+      ),
+    ).rejects.toThrowError(/不能停用自己的账号/);
+  });
+
+  it('allows editing another active user when invariants are fine', async () => {
+    dbMock.user.findUnique.mockResolvedValue(salesPerson);
+    dbMock.user.update.mockResolvedValue(makeUser({ id: 'sales-1', displayName: 'New' }));
+
+    const result = await updateUser(
+      'sales-1',
+      { displayName: 'New', role: Role.SALES, isActive: true, phone: '13800138000' },
+      baseActor,
+    );
+    expect(result.displayName).toBe('New');
+    expect(dbMock.user.update.mock.calls[0][0].data.phone).toBe('13800138000');
+  });
+
+  it('throws when the target does not exist', async () => {
+    dbMock.user.findUnique.mockResolvedValue(null);
+    await expect(
+      updateUser(
+        'nope',
+        { displayName: 'X', role: Role.SALES, isActive: true },
+        baseActor,
+      ),
+    ).rejects.toThrowError(/不存在/);
+  });
+});
+
+describe('setUserActive invariants', () => {
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+
+  it('refuses self-deactivation even when other OWNERs exist', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerSelf);
+    dbMock.user.count.mockResolvedValue(5);
+
+    await expect(setUserActive('owner-self', false, baseActor)).rejects.toThrowError(
+      /不能停用自己的账号/,
+    );
+  });
+
+  it('refuses to deactivate the last active OWNER', async () => {
+    dbMock.user.findUnique.mockResolvedValue(ownerOther);
+    dbMock.user.count.mockResolvedValue(0);
+
+    await expect(setUserActive('owner-other', false, baseActor)).rejects.toBeInstanceOf(
+      AccountInvariantError,
+    );
+  });
+
+  it('allows reactivating without invariant checks', async () => {
+    const inactive = makeUser({ id: 'inactive', isActive: false, role: Role.SALES });
+    dbMock.user.findUnique.mockResolvedValue(inactive);
+    dbMock.user.update.mockResolvedValue({ ...inactive, isActive: true });
+
+    await expect(setUserActive('inactive', true, baseActor)).resolves.toBeDefined();
+    expect(dbMock.user.update).toHaveBeenCalled();
+  });
+
+  it('is a no-op when the target is already in the desired state', async () => {
+    const active = makeUser({ id: 'active', isActive: true });
+    dbMock.user.findUnique.mockResolvedValue(active);
+
+    const result = await setUserActive('active', true, baseActor);
+    expect(result).toBe(active);
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('resetUserPassword', () => {
+  it('hashes the new password and updates the target', async () => {
+    dbMock.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    dbMock.user.update.mockResolvedValue({ id: 'user-1' });
+    await resetUserPassword('user-1', 'new-one-1234');
+    const data = dbMock.user.update.mock.calls[0][0].data;
+    expect(data.password).not.toBe('new-one-1234');
+    expect(await bcrypt.compare('new-one-1234', data.password)).toBe(true);
+  });
+
+  it('throws when the target does not exist', async () => {
+    dbMock.user.findUnique.mockResolvedValue(null);
+    await expect(resetUserPassword('nope', 'x'.repeat(10))).rejects.toThrowError(/不存在/);
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+});
