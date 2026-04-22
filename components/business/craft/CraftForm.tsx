@@ -118,12 +118,14 @@ export function CraftForm(props: Props) {
       <TextField
         id="sortOrder"
         label="排序"
-        hint="数字越小越靠前；同组内通常每 10 留一档（10, 20, 30…）"
+        hint="数字越小越靠前，必须 ≥ 1。建议从 10 起每 10 留一档（10, 20, 30…）"
         type="number"
         required
         disabled={pending}
         error={errs.sortOrder?.[0]}
-        defaultValue={String(initial?.sortOrder ?? 0)}
+        // Create: no default (force explicit input so no accidental 0 that
+        // would jump the new craft to the top). Edit: show the saved value.
+        defaultValue={initial ? String(initial.sortOrder) : undefined}
       />
 
       {!isCreate ? (

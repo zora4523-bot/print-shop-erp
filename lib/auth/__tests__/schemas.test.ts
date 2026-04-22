@@ -494,6 +494,22 @@ describe('createCraftSchema', () => {
       const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '-1' });
       expect(r.success).toBe(false);
     });
+    it('rejects 0 — new crafts must pick a positive sortOrder (Codex round 18 / P2)', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '0' });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path[0] === 'sortOrder');
+        expect(issue?.message).toMatch(/≥ 1/);
+      }
+    });
+    it("rejects empty string (coerces to 0 then trips the min)", () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '' });
+      expect(r.success).toBe(false);
+    });
+    it('accepts 1 (tight boundary)', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: '1' });
+      expect(r.success).toBe(true);
+    });
     it('rejects non-numeric strings', () => {
       const r = createCraftSchema.safeParse({ ...validCraft, sortOrder: 'abc' });
       expect(r.success).toBe(false);

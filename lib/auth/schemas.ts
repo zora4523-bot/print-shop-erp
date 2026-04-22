@@ -245,10 +245,13 @@ const optionalMachineTypeField = z
   .transform((v) => (v === '' || v === undefined ? null : v));
 
 // FormData always hands us strings; accept the string form too and coerce.
+// Min is 1 (not 0) so an untouched create form — where the default-empty
+// input coerces to 0 — fails validation rather than accidentally sorting
+// the new craft ahead of every existing one (Codex round 18 / P2).
 const sortOrderField = z.coerce
   .number({ message: '排序必须是数字' })
   .int('排序必须是整数')
-  .min(0, '排序不能为负数')
+  .min(1, '排序必须 ≥ 1（建议从 10 起，每 10 留一档）')
   .max(9999, '排序过大');
 
 export const createCraftSchema = z.object({
