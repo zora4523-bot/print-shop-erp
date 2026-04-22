@@ -106,13 +106,62 @@ describe('changePasswordSchema', () => {
     }
   });
 
-  it('rejects overly long new password', () => {
-    const long = 'a'.repeat(257);
-    const r = changePasswordSchema.safeParse({
-      currentPassword: 'old-one-123',
-      newPassword: long,
-      confirmPassword: long,
+  describe('bcrypt 72-byte ceiling on newPassword (Codex round 10 / P1)', () => {
+    it('accepts exactly 72 ASCII bytes', () => {
+      const new72 = 'a'.repeat(72); // 72 bytes in UTF-8
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: new72,
+        confirmPassword: new72,
+      });
+      expect(r.success).toBe(true);
     });
-    expect(r.success).toBe(false);
+
+    it('rejects 73 ASCII bytes', () => {
+      const new73 = 'a'.repeat(73);
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: new73,
+        confirmPassword: new73,
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path[0] === 'newPassword');
+        expect(issue?.message).toMatch(/72 字节/);
+      }
+    });
+
+    it('accepts 24 Chinese characters (72 UTF-8 bytes)', () => {
+      const new24cn = '密码'.repeat(12); // 24 Chinese chars × 3 bytes = 72
+      expect(new TextEncoder().encode(new24cn).length).toBe(72);
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: new24cn,
+        confirmPassword: new24cn,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('rejects 25 Chinese characters (75 UTF-8 bytes) even though the char count is tiny', () => {
+      const new25cn = '密码'.repeat(12) + '长'; // 75 bytes
+      expect(new TextEncoder().encode(new25cn).length).toBe(75);
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: new25cn,
+        confirmPassword: new25cn,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it('rejects long emoji passphrase that is visually short but byte-long', () => {
+      // Each 👩‍🔬 is 11 UTF-8 bytes (emoji + ZWJ + emoji).
+      const scientist = '👩‍🔬'.repeat(8); // 88 bytes, only 8 "characters" visually
+      const r = changePasswordSchema.safeParse({
+        currentPassword: 'old-one-123',
+        newPassword: scientist,
+        confirmPassword: scientist,
+      });
+      expect(r.success).toBe(false);
+    });
   });
 });
