@@ -298,26 +298,36 @@ const productTextFieldOptional = (label: string, max = 64) =>
     .transform((v) => (v === '' ? null : v))
     .nullable();
 
-// Prices go into a Decimal(10,4) column. We keep them as strings through
-// the schema because JS floats would silently round e.g. 0.0007 → 0.0006999…
-// at bcrypt-style small values. Prisma accepts string-form decimals. The
-// regex caps at 4 decimal places matching the column precision.
+// Prices go into a Decimal(10,4) column → 10 total digits with 4 after the
+// decimal point, i.e. integer part capped at 6 digits, max value ≈
+// 999999.9999. We keep the value as a string all the way to Prisma so JS
+// floats don't silently round small decimals (e.g. 0.0007 → 0.0006999…).
+// Both bounds live in the regex so an oversized price is rejected as
+// `invalid` at the schema boundary instead of surfacing as a DB overflow.
 const moneyOptionalField = z
   .string()
   .trim()
   .refine(
-    (v) => v === '' || /^\d+(\.\d{1,4})?$/.test(v),
-    { message: '金额格式错误（最多 4 位小数，非负数）' },
+    (v) => v === '' || /^\d{1,6}(\.\d{1,4})?$/.test(v),
+    { message: '金额格式错误（整数部分最多 6 位、小数最多 4 位、非负数）' },
   )
   .transform((v) => (v === '' ? null : v));
 
+// `z.coerce.number()` would silently accept JS-ish numeric forms like
+// '1e3', '0x10', or ' 5 '. For a quantity field that's surprising. Require
+// a plain base-10 digit string at the raw layer, then parseInt to number.
 const minOrderQtyField = z.preprocess(
-  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
-  z.coerce
-    .number({ message: '最小起订量必须是数字' })
-    .int('最小起订量必须是整数')
-    .min(1, '最小起订量必须 ≥ 1')
-    .max(9_999_999, '最小起订量过大')
+  (v) => {
+    if (typeof v !== 'string') return v;
+    const trimmed = v.trim();
+    return trimmed === '' ? undefined : trimmed;
+  },
+  z
+    .string()
+    .regex(/^\d+$/, '最小起订量必须是十进制整数')
+    .transform((s) => Number.parseInt(s, 10))
+    .refine((n) => n >= 1, '最小起订量必须 ≥ 1')
+    .refine((n) => n <= 9_999_999, '最小起订量过大')
     .optional(),
 );
 

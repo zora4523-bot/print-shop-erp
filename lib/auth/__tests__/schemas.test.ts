@@ -588,7 +588,7 @@ describe('createProductSchema', () => {
   });
 
   describe('baseUnitPrice', () => {
-    it.each(['0', '1', '100', '0.1', '1.5', '0.0001', '12.3456'])(
+    it.each(['0', '1', '100', '0.1', '1.5', '0.0001', '12.3456', '999999', '999999.9999'])(
       'accepts %j',
       (v) => {
         const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
@@ -596,9 +596,16 @@ describe('createProductSchema', () => {
       },
     );
 
-    it.each(['1.23456', '-1', '.5', '1.', 'abc', '1,5'])('rejects %j', (v) => {
+    it.each(['1.23456', '-1', '.5', '1.', 'abc', '1,5'])('rejects format %j', (v) => {
       const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
       expect(r.success, v).toBe(false);
+    });
+
+    it('rejects values exceeding Decimal(10,4) precision (Codex round 21 / P1)', () => {
+      for (const v of ['1000000', '9999999', '1000000.0', '1000000.0000']) {
+        const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
+        expect(r.success, v).toBe(false);
+      }
     });
 
     it('empty string is normalized to null', () => {
@@ -626,6 +633,22 @@ describe('createProductSchema', () => {
         const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
         expect(r.success, bad).toBe(false);
       }
+    });
+    it('rejects JS-ish numeric forms that z.coerce would have accepted (Codex round 21 / P2)', () => {
+      // Trimming is explicitly part of the preprocess, so ' 5 ' is fine —
+      // the invalid shapes are the ones that break the digit-only regex.
+      for (const bad of ['1e3', '0x10', '+5', '005e1']) {
+        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
+        expect(r.success, bad).toBe(false);
+      }
+    });
+    it('accepts the boundary value 9,999,999 but not one more', () => {
+      expect(
+        createProductSchema.safeParse({ ...validProduct, minOrderQty: '9999999' }).success,
+      ).toBe(true);
+      expect(
+        createProductSchema.safeParse({ ...validProduct, minOrderQty: '10000000' }).success,
+      ).toBe(false);
     });
   });
 
