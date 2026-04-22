@@ -9,19 +9,13 @@ import { authConfigEdge } from '@/lib/auth/config.edge';
 const { auth } = NextAuth(authConfigEdge);
 
 export default auth((req) => {
-  const { pathname } = req.nextUrl;
-  const isLoggedIn = !!req.auth;
+  if (req.auth) return NextResponse.next();
 
-  if (isLoggedIn) {
-    // Logged-in users bouncing into /login → send them to the home page.
-    if (pathname === '/login') {
-      return NextResponse.redirect(new URL('/', req.url));
-    }
-    return NextResponse.next();
-  }
-
-  // Not logged in: protected prefixes require auth.
+  // /login is excluded by the matcher, so by the time we're here we're a
+  // guest on a non-public page — bounce to the login screen and remember
+  // where they were headed so we can hop back after a successful login.
   const url = new URL('/login', req.url);
+  const { pathname } = req.nextUrl;
   if (pathname !== '/') {
     url.searchParams.set('from', pathname);
   }

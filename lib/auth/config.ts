@@ -1,14 +1,9 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
-import { z } from 'zod';
 import { db } from '@/lib/db';
 import { authConfigEdge } from './config.edge';
-
-const credentialsSchema = z.object({
-  username: z.string().trim().min(1).max(64),
-  password: z.string().min(8).max(256),
-});
+import { loginSchema } from './schemas';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfigEdge,
@@ -19,7 +14,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         password: { label: '密码', type: 'password' },
       },
       async authorize(raw) {
-        const parsed = credentialsSchema.safeParse(raw);
+        const parsed = loginSchema.safeParse(raw);
         if (!parsed.success) return null;
 
         const { username, password } = parsed.data;
