@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Prisma 7 rust-free client output (regenerated).
+    "generated/**",
+    // Skeleton files preserved for onboarding; moved into place by P0 features.
+    "_reference/**",
   ]),
 ]);
 
