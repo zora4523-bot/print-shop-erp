@@ -31,9 +31,21 @@ function collectFieldErrors(
 
 // P2002 → field-level error. Both `name` and `code` carry a unique
 // constraint on the Craft table; Prisma's `meta.target` distinguishes them.
+//
+// Prisma's `meta.target` shape is connector-dependent: most connectors
+// return `string[]`, but some variants return a single `string` (e.g. the
+// index name). Normalize to an array of column names before matching so a
+// string like `"Craft_name_key"` doesn't get substring-matched against
+// `"name"` via `String.prototype.includes` and cause false positives
+// (Codex round 16 / P2).
 function mapPrismaError(err: unknown): CraftMutationResult | null {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-    const targets = (err.meta?.target as string[] | undefined) ?? [];
+    const raw = err.meta?.target;
+    const targets: string[] = Array.isArray(raw)
+      ? (raw as string[])
+      : typeof raw === 'string'
+        ? [raw]
+        : [];
     if (targets.includes('code')) {
       return { status: 'invalid', fieldErrors: { code: ['该代码已被占用'] } };
     }

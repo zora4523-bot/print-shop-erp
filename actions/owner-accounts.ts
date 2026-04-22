@@ -38,9 +38,20 @@ function collectFieldErrors(
 // Handles the "username already exists" race: the schema can't know what's
 // in the DB, so Prisma's P2002 (unique violation) is the authoritative
 // answer. Surface it as a field-level error on the right input.
+//
+// Normalize `meta.target` because Prisma returns a single string on some
+// connector variants (e.g. the index name) — see Codex round 16 for the
+// craft module. `.includes('username')` on a string like
+// `"User_username_key"` would substring-match against the column name
+// and cause false positives.
 function mapPrismaError(err: unknown): AccountMutationResult | null {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-    const targets = (err.meta?.target as string[] | undefined) ?? [];
+    const raw = err.meta?.target;
+    const targets: string[] = Array.isArray(raw)
+      ? (raw as string[])
+      : typeof raw === 'string'
+        ? [raw]
+        : [];
     if (targets.includes('username')) {
       return { status: 'invalid', fieldErrors: { username: ['该用户名已被占用'] } };
     }

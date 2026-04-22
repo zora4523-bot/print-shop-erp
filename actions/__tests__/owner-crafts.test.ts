@@ -122,6 +122,44 @@ describe('createCraftAction', () => {
     }
   });
 
+  it('handles P2002 where meta.target is a single string (Codex round 16 / P2)', async () => {
+    // Some Prisma connector variants return `meta.target` as a plain
+    // string (often the column name or an index name). Normalization
+    // must treat it the same as the array form.
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'code' },
+      }),
+    );
+    const result = await createCraftAction(null, fd(validCreateFields));
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.code).toContain('该代码已被占用');
+    }
+  });
+
+  it("doesn't false-positive on an unrelated index name that happens to contain 'name'", async () => {
+    // Pre-fix: `.includes('name')` on the string 'User_username_key' would
+    // substring-match and incorrectly map the error. With proper array
+    // normalization, 'User_username_key' is a single element that doesn't
+    // equal 'name' nor 'code', so the generic 500 path is taken.
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'Craft_something_name_idx' },
+      }),
+    );
+    await expect(createCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
+      Prisma.PrismaClientKnownRequestError,
+    );
+    // i.e. NOT returned as `{ status: 'invalid' }`
+  });
+
   it('revalidates /owner/crafts on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });

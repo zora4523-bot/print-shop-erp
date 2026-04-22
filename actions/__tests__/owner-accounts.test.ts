@@ -121,6 +121,31 @@ describe('createUserAction', () => {
     }
   });
 
+  it('handles P2002 where meta.target is a single string (Codex round 16 / P2)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    accountMock.createUser.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'username' },
+      }),
+    );
+    const result = await createUserAction(
+      null,
+      fd({
+        username: 'alice',
+        displayName: 'Alice',
+        role: Role.SALES,
+        password: 'plain-pass-1',
+        phone: '',
+      }),
+    );
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.username).toContain('该用户名已被占用');
+    }
+  });
+
   it('revalidates /owner/accounts on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     accountMock.createUser.mockResolvedValue({ id: 'u1' });
