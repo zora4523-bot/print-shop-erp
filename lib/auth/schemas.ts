@@ -313,21 +313,28 @@ const moneyOptionalField = z
   )
   .transform((v) => (v === '' ? null : v));
 
-// `z.coerce.number()` would silently accept JS-ish numeric forms like
-// '1e3', '0x10', or ' 5 '. For a quantity field that's surprising. Require
-// a plain base-10 digit string at the raw layer, then parseInt to number.
+// Quantity semantics:
+//   • From FormData (strings): accept `^\d+$` (plus trim), reject JS-ish
+//     numeric forms '1e3' / '0x10' / '+5' etc. that z.coerce.number() would
+//     have silently accepted.
+//   • From JS callers (seed scripts, internal helpers): accept plain
+//     `number` values directly so the schema stays usable outside the
+//     form-post path.
+// Both paths funnel into a plain `z.number().int().min(1).max(…)`.
 const minOrderQtyField = z.preprocess(
   (v) => {
+    if (typeof v === 'number') return v;
     if (typeof v !== 'string') return v;
     const trimmed = v.trim();
-    return trimmed === '' ? undefined : trimmed;
+    if (trimmed === '') return undefined;
+    if (!/^\d+$/.test(trimmed)) return null; // invalid — number schema will reject
+    return Number.parseInt(trimmed, 10);
   },
   z
-    .string()
-    .regex(/^\d+$/, '最小起订量必须是十进制整数')
-    .transform((s) => Number.parseInt(s, 10))
-    .refine((n) => n >= 1, '最小起订量必须 ≥ 1')
-    .refine((n) => n <= 9_999_999, '最小起订量过大')
+    .number({ message: '最小起订量必须是正整数' })
+    .int('最小起订量必须是整数')
+    .min(1, '最小起订量必须 ≥ 1')
+    .max(9_999_999, '最小起订量过大')
     .optional(),
 );
 

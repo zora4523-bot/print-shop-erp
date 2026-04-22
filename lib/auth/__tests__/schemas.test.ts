@@ -650,6 +650,17 @@ describe('createProductSchema', () => {
         createProductSchema.safeParse({ ...validProduct, minOrderQty: '10000000' }).success,
       ).toBe(false);
     });
+    it('also accepts a plain number for programmatic callers (Codex round 22 / P2)', () => {
+      const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: 500 });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.minOrderQty).toBe(500);
+    });
+    it('still rejects non-int and out-of-range numbers', () => {
+      for (const bad of [3.5, 0, -1, 10_000_000]) {
+        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
+        expect(r.success, String(bad)).toBe(false);
+      }
+    });
   });
 
   describe('name / specification / paperType', () => {
