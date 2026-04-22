@@ -51,6 +51,12 @@ export default async function Home() {
                 </Link>
                 <span className="ml-2 text-muted-foreground">管理工艺清单、默认机器、外协标记</span>
               </li>
+              <li>
+                <Link href="/owner/products" className="text-primary underline hover:no-underline">
+                  产品字典 →
+                </Link>
+                <span className="ml-2 text-muted-foreground">管理产品清单、规格、建议单价</span>
+              </li>
             </ul>
           </div>
         ) : null}
