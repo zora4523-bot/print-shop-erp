@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { loginSchema, changePasswordSchema } from '../schemas';
 
 describe('loginSchema', () => {
@@ -166,9 +166,7 @@ describe('changePasswordSchema', () => {
       expect(r.success).toBe(false);
     });
 
-    it('rejects pathological oversize by .length before running TextEncoder (Codex round 11)', () => {
-      // 10k ASCII chars — cheap .max(72) must short-circuit rather than let
-      // TextEncoder.encode allocate a 10k-byte Uint8Array just to fail.
+    it('rejects pathological oversize by char count (Codex round 11)', () => {
       const huge = 'a'.repeat(10_000);
       const r = changePasswordSchema.safeParse({
         currentPassword: 'old-one-123',
@@ -181,5 +179,35 @@ describe('changePasswordSchema', () => {
         expect(issue?.message).toMatch(/最多 72 字符/);
       }
     });
+
+    it('short-circuits before TextEncoder.encode for oversize input (Codex round 12)', () => {
+      // The invariant we're locking in: Zod's checks run even after .max()
+      // fails, so a naive `.max(72).refine(encodeCheck)` would still allocate
+      // a 10k-byte Uint8Array for a 10k-char payload. The superRefine's
+      // early return must keep TextEncoder.encode out of the hot path.
+      const spy = vi.spyOn(TextEncoder.prototype, 'encode');
+      const huge = 'a'.repeat(10_000);
+
+      try {
+        const r = changePasswordSchema.safeParse({
+          currentPassword: 'old-one-123',
+          newPassword: huge,
+          confirmPassword: huge,
+        });
+        expect(r.success).toBe(false);
+        for (const call of spy.mock.calls) {
+          // `call[0]` is the string passed to encode. None of our code paths
+          // should have encoded the oversize payload.
+          expect(call[0]).not.toBe(huge);
+          if (typeof call[0] === 'string') {
+            expect(call[0].length).toBeLessThanOrEqual(MAX_PASSWORD_CHARS);
+          }
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });
+
+const MAX_PASSWORD_CHARS = 72;
