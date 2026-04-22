@@ -38,16 +38,35 @@ async function main() {
 // 1. 管理员账号
 // ============================================================
 async function seedAdmin() {
-  // Gate: bootstrap admin is only for the first seed into an empty User table.
-  // If any user already exists (even one renamed/created by ops), we stay out —
-  // creating another OWNER silently on reseed would be a privilege leak.
-  const userCount = await db.user.count();
-  if (userCount > 0) {
-    console.log(`  ⏭  User 表已有 ${userCount} 位账号，跳过管理员种子`);
+  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
+
+  // Guard 1: if any active OWNER already exists, account lifecycle belongs to ops.
+  // A reseed with a changed SEED_ADMIN_USERNAME must not silently mint an extra superuser.
+  const activeOwnerCount = await db.user.count({
+    where: { role: Role.OWNER, isActive: true },
+  });
+  if (activeOwnerCount > 0) {
+    console.log(`  ⏭  已有 ${activeOwnerCount} 位活跃 OWNER，跳过管理员种子`);
     return;
   }
 
-  const username = process.env.SEED_ADMIN_USERNAME ?? 'admin';
+  // No active OWNER → this is either a first seed or a recovery seed
+  // (e.g. workers/sales imported first, or the sole OWNER was deactivated).
+  // Collision check before creating: never silently elevate an existing row.
+  const collision = await db.user.findUnique({ where: { username } });
+  if (collision) {
+    if (collision.role === Role.OWNER) {
+      throw new Error(
+        `用户 "${username}" 已存在且 role=OWNER（isActive=${collision.isActive}）。` +
+          '恢复可登录 OWNER 的首选方式是重新激活该账号；若确需新建，请换用其它 SEED_ADMIN_USERNAME。',
+      );
+    }
+    throw new Error(
+      `SEED_ADMIN_USERNAME "${username}" 已被非 OWNER 账号占用（role=${collision.role}）；` +
+        '拒绝将已有账号静默提权为 OWNER。请换用其它 SEED_ADMIN_USERNAME。',
+    );
+  }
+
   const fromEnv = process.env.SEED_ADMIN_PASSWORD;
   const generated = fromEnv ? null : randomBytes(12).toString('base64url');
   const plaintext = fromEnv ?? generated!;
