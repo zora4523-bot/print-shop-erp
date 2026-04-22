@@ -122,10 +122,7 @@ describe('createCraftAction', () => {
     }
   });
 
-  it('handles P2002 where meta.target is a single string (Codex round 16 / P2)', async () => {
-    // Some Prisma connector variants return `meta.target` as a plain
-    // string (often the column name or an index name). Normalization
-    // must treat it the same as the array form.
+  it('handles P2002 where meta.target is a single column string', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('dup', {
@@ -141,11 +138,26 @@ describe('createCraftAction', () => {
     }
   });
 
-  it("doesn't false-positive on an unrelated index name that happens to contain 'name'", async () => {
-    // Pre-fix: `.includes('name')` on the string 'User_username_key' would
-    // substring-match and incorrectly map the error. With proper array
-    // normalization, 'User_username_key' is a single element that doesn't
-    // equal 'name' nor 'code', so the generic 500 path is taken.
+  it('handles P2002 where meta.target is the Prisma default constraint name (Codex round 17 / P2)', async () => {
+    // Some connectors return the `<Model>_<column>_key` form. The
+    // synonym allowlist must accept it so real duplicate-code errors
+    // still map to a field-level message.
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: 'Craft_code_key' },
+      }),
+    );
+    const result = await createCraftAction(null, fd(validCreateFields));
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.code).toContain('该代码已被占用');
+    }
+  });
+
+  it("doesn't false-positive on an unrelated index name that contains 'name' as substring", async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('dup', {
@@ -154,10 +166,10 @@ describe('createCraftAction', () => {
         meta: { target: 'Craft_something_name_idx' },
       }),
     );
+    // Not in our synonym allowlist → bubbles up, not mapped.
     await expect(createCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
       Prisma.PrismaClientKnownRequestError,
     );
-    // i.e. NOT returned as `{ status: 'invalid' }`
   });
 
   it('revalidates /owner/crafts on success', async () => {

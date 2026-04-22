@@ -35,15 +35,20 @@ function collectFieldErrors(
   return out;
 }
 
-// Handles the "username already exists" race: the schema can't know what's
-// in the DB, so Prisma's P2002 (unique violation) is the authoritative
-// answer. Surface it as a field-level error on the right input.
-//
-// Normalize `meta.target` because Prisma returns a single string on some
-// connector variants (e.g. the index name) — see Codex round 16 for the
-// craft module. `.includes('username')` on a string like
-// `"User_username_key"` would substring-match against the column name
-// and cause false positives.
+// P2002 on the User table's unique username column. `meta.target` comes in
+// several shapes depending on the driver — `string[]` of columns, a single
+// column `string`, or a single constraint/index `string` like
+// `User_username_key` (Prisma's default `<Model>_<column>_key` format,
+// confirmed in prisma/migrations/.../migration.sql). Accept all three via
+// exact-element match against a synonym allowlist.
+// Background: rounds 16 (substring match false-positives) → 17 (exact
+// match too strict, drops constraint-name variants).
+const USERNAME_UNIQUE_SYNONYMS = ['username', 'User_username_key'] as const;
+
+function matchesUnique(targets: string[], synonyms: readonly string[]): boolean {
+  return targets.some((t) => synonyms.includes(t));
+}
+
 function mapPrismaError(err: unknown): AccountMutationResult | null {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
     const raw = err.meta?.target;
@@ -52,7 +57,7 @@ function mapPrismaError(err: unknown): AccountMutationResult | null {
       : typeof raw === 'string'
         ? [raw]
         : [];
-    if (targets.includes('username')) {
+    if (matchesUnique(targets, USERNAME_UNIQUE_SYNONYMS)) {
       return { status: 'invalid', fieldErrors: { username: ['该用户名已被占用'] } };
     }
   }

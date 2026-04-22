@@ -32,12 +32,25 @@ function collectFieldErrors(
 // P2002 → field-level error. Both `name` and `code` carry a unique
 // constraint on the Craft table; Prisma's `meta.target` distinguishes them.
 //
-// Prisma's `meta.target` shape is connector-dependent: most connectors
-// return `string[]`, but some variants return a single `string` (e.g. the
-// index name). Normalize to an array of column names before matching so a
-// string like `"Craft_name_key"` doesn't get substring-matched against
-// `"name"` via `String.prototype.includes` and cause false positives
-// (Codex round 16 / P2).
+// `meta.target` shape is connector-dependent. What we've actually observed:
+//   - `string[]` of column names (most drivers): e.g. ['code']
+//   - single `string` column name: 'code'
+//   - single `string` constraint/index name: 'Craft_code_key'
+//
+// Match with exact element equality against an allowlist of known synonyms
+// per column so neither substring false-positives (Codex round 16) nor
+// exact-match false-negatives (Codex round 17) can slip through. The
+// constraint-name format follows Prisma's default `<Model>_<column>_key`
+// (confirmed in prisma/migrations/.../migration.sql).
+const CRAFT_UNIQUE_SYNONYMS = {
+  code: ['code', 'Craft_code_key'],
+  name: ['name', 'Craft_name_key'],
+} as const;
+
+function matchesUnique(targets: string[], synonyms: readonly string[]): boolean {
+  return targets.some((t) => synonyms.includes(t));
+}
+
 function mapPrismaError(err: unknown): CraftMutationResult | null {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
     const raw = err.meta?.target;
@@ -46,10 +59,10 @@ function mapPrismaError(err: unknown): CraftMutationResult | null {
       : typeof raw === 'string'
         ? [raw]
         : [];
-    if (targets.includes('code')) {
+    if (matchesUnique(targets, CRAFT_UNIQUE_SYNONYMS.code)) {
       return { status: 'invalid', fieldErrors: { code: ['该代码已被占用'] } };
     }
-    if (targets.includes('name')) {
+    if (matchesUnique(targets, CRAFT_UNIQUE_SYNONYMS.name)) {
       return { status: 'invalid', fieldErrors: { name: ['该工艺名已被占用'] } };
     }
   }
