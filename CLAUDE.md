@@ -147,6 +147,9 @@ print-shop-erp/
 2. 本文件（CLAUDE.md）
 3. 如涉及数据库：`prisma/schema.prisma`
 4. 如涉及已有代码：相关`lib/`模块的`__tests__/`
+5. `HANDOFF.md`（如存在）—— 上次会话留下的接力棒，本次任务的起点
+6. `PROGRESS.md` —— 当前阶段与下一步
+7. `DECISIONS.md` 最近 3-5 条 —— 最新已拍板的决策（避免和已有决策冲突）
 
 ### 4.2 垂直切片开发
 
@@ -536,6 +539,48 @@ describe('calcMachinePiecework', () => {
 
 ---
 
-**本文档版本**：1.0
+## 13. 记忆管理与交接
+
+为解决 Claude Code / Codex 跨对话无记忆的问题，项目根目录维护三份**状态文档**，由人 + AI 共同维护：
+
+| 文档 | 节奏 | 写入策略 |
+|---|---|---|
+| `HANDOFF.md` | 每次会话**结束前**整体重写 | 把"下次接着做什么"写清楚 |
+| `PROGRESS.md` | 完成模块/阶段切换时更新 | 勾选已完成、移动进行中、刷新下一步 |
+| `DECISIONS.md` | 出现**新的关键决策**时追加 | 不删旧条目，只追加新条目 |
+
+### 13.1 每次对话开始前（必做）
+
+1. 读 `HANDOFF.md` —— 拿到本次任务起点和约束
+2. 读 `PROGRESS.md` —— 确认整体进度和待澄清问题
+3. 扫 `DECISIONS.md` 最近 3-5 条 —— 避免和已拍板的决策冲突
+
+### 13.2 每次对话结束前（必做）
+
+1. **更新 `HANDOFF.md`**：当前任务、已完成步骤、下一步具体指令、卡住的问题；在 `## 历史` 追加一行 `- YYYY-MM-DD：<本次主要产出>`
+2. 如有阶段性进展，**更新 `PROGRESS.md`** 的"已完成"和"下一步"
+3. 如本次产生了**新的关键决策**，追加到 `DECISIONS.md`（按二级标题 `## YYYY-MM-DD：<标题>` 格式，包含决策/理由/影响/相关文档四行）
+
+### 13.3 提交纪律
+
+- 每完成一个小任务即 commit；commit message 引用 SPEC 章节，例：
+  - `feat(order): add urgent flag (SPEC §4.2)`
+  - `fix(salary): correct windmill double-color multiplier (SPEC §6.3)`
+- 三份记忆文档的更新可单独 commit，type 用 `docs`，scope 用 `memory`，例：
+  - `docs(memory): handoff after P0-1 auth scaffolding`
+  - `docs(memory): record decision on Pigsty extension whitelist`
+
+### 13.4 不确定业务规则时
+
+**禁止猜测**（重申 §9.1）。改为：
+
+1. 在涉及代码处写 `// TODO: 需业主确认 —— <具体问题>`
+2. 把同一问题追加到 `HANDOFF.md` 的"卡住的问题"
+3. 同一问题也追加到 `PROGRESS.md` 的"待澄清的业务问题"
+4. 暂停该子任务，转下一项或结束会话
+
+---
+
+**本文档版本**：1.1
 **最后更新**：2026-04-22
 **维护者**：业主 + Claude Code / Codex

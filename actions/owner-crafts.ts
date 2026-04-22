@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createCraftSchema, updateCraftSchema } from '@/lib/auth/schemas';
@@ -95,8 +96,10 @@ export async function createCraftAction(
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
 
+  let createdId: string;
   try {
-    await createCraft(parsed.data);
+    const created = await createCraft(parsed.data);
+    createdId = created.id;
   } catch (err) {
     const mapped = mapPrismaError(err);
     if (mapped) return mapped;
@@ -107,7 +110,7 @@ export async function createCraftAction(
   }
 
   revalidatePath('/owner/crafts');
-  return { status: 'success' };
+  redirect(`/owner/crafts/${createdId}`);
 }
 
 export async function updateCraftAction(

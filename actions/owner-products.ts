@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createProductSchema, updateProductSchema } from '@/lib/auth/schemas';
 import {
@@ -50,8 +51,10 @@ export async function createProductAction(
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
 
+  let createdId: string;
   try {
-    await createProduct(parsed.data);
+    const created = await createProduct(parsed.data);
+    createdId = created.id;
   } catch (err) {
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };
@@ -60,7 +63,7 @@ export async function createProductAction(
   }
 
   revalidatePath('/owner/products');
-  return { status: 'success' };
+  redirect(`/owner/products/${createdId}`);
 }
 
 export async function updateProductAction(

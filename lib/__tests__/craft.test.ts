@@ -105,30 +105,41 @@ describe('updateCraft', () => {
     await expect(
       updateCraft('nope', {
         name: 'X',
-        code: 'X',
+        code: 'XX',
         isOutsource: false,
         defaultMachineType: null,
-        sortOrder: 0,
-        isActive: true,
+        sortOrder: 10,
       }),
     ).rejects.toBeInstanceOf(CraftInvariantError);
     expect(dbMock.craft.update).not.toHaveBeenCalled();
   });
 
-  it('updates all fields including isActive', async () => {
+  it('updates the editable fields', async () => {
     dbMock.craft.findUnique.mockResolvedValue(makeCraft());
-    dbMock.craft.update.mockResolvedValue(makeCraft({ isActive: false }));
+    dbMock.craft.update.mockResolvedValue(makeCraft({ name: '现货加烫(改名)' }));
     await updateCraft('craft-1', {
       name: '现货加烫(改名)',
       code: 'STOCK_FOIL',
       isOutsource: false,
       defaultMachineType: MachineType.HAND_PRESS,
       sortOrder: 10,
-      isActive: false,
     });
     const data = dbMock.craft.update.mock.calls[0][0].data;
     expect(data.name).toBe('现货加烫(改名)');
-    expect(data.isActive).toBe(false);
+  });
+
+  it('never writes isActive through the update path', async () => {
+    dbMock.craft.findUnique.mockResolvedValue(makeCraft());
+    dbMock.craft.update.mockResolvedValue(makeCraft());
+    await updateCraft('craft-1', {
+      name: 'x',
+      code: 'XX',
+      isOutsource: false,
+      defaultMachineType: null,
+      sortOrder: 10,
+    });
+    const data = dbMock.craft.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect('isActive' in data).toBe(false);
   });
 });
 

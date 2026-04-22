@@ -11,23 +11,33 @@ import { UnauthorizedError } from '../../lib/auth/errors';
 // pull in next-auth and the Prisma singleton, neither of which is wanted in
 // a unit test environment. Everything vi.mock uses must be declared via
 // vi.hoisted so it's initialized before the hoisted mock factories run.
-const { permissionsMock, accountMock, revalidatePathMock, MockAccountInvariantError } =
-  vi.hoisted(() => ({
-    permissionsMock: { requirePermission: vi.fn() },
-    accountMock: {
-      createUser: vi.fn(),
-      updateUser: vi.fn(),
-      setUserActive: vi.fn(),
-      resetUserPassword: vi.fn(),
-    },
-    revalidatePathMock: vi.fn(),
-    MockAccountInvariantError: class extends Error {
-      constructor(message: string) {
-        super(message);
-        this.name = 'AccountInvariantError';
-      }
-    },
-  }));
+const {
+  permissionsMock,
+  accountMock,
+  revalidatePathMock,
+  redirectMock,
+  MockAccountInvariantError,
+} = vi.hoisted(() => ({
+  permissionsMock: { requirePermission: vi.fn() },
+  accountMock: {
+    createUser: vi.fn(),
+    updateUser: vi.fn(),
+    setUserActive: vi.fn(),
+    resetUserPassword: vi.fn(),
+  },
+  revalidatePathMock: vi.fn(),
+  // redirect() in prod throws NEXT_REDIRECT; mock mirrors that so we can
+  // distinguish "create succeeded + redirected" from "create still running".
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
+  MockAccountInvariantError: class extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'AccountInvariantError';
+    }
+  },
+}));
 
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: permissionsMock.requirePermission,
@@ -40,6 +50,7 @@ vi.mock('@/lib/account', () => ({
   AccountInvariantError: MockAccountInvariantError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
+vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createUserAction,
@@ -70,6 +81,9 @@ beforeEach(() => {
   accountMock.setUserActive.mockReset();
   accountMock.resetUserPassword.mockReset();
   revalidatePathMock.mockReset();
+  redirectMock.mockReset().mockImplementation((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  });
 });
 
 describe('createUserAction', () => {
@@ -173,24 +187,27 @@ describe('createUserAction', () => {
     }
   });
 
-  it('revalidates /owner/accounts on success', async () => {
+  it('revalidates + redirects to the new account edit page on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     accountMock.createUser.mockResolvedValue({ id: 'u1' });
 
-    const result = await createUserAction(
-      null,
-      fd({
-        username: 'alice',
-        displayName: 'Alice',
-        role: Role.WORKER,
-        workerType: WorkerType.MACHINE,
-        machineType: MachineType.WINDMILL,
-        password: 'plain-pass-1',
-        phone: '',
-      }),
-    );
-    expect(result.status).toBe('success');
+    await expect(
+      createUserAction(
+        null,
+        fd({
+          username: 'alice',
+          displayName: 'Alice',
+          role: Role.WORKER,
+          workerType: WorkerType.MACHINE,
+          machineType: MachineType.WINDMILL,
+          password: 'plain-pass-1',
+          phone: '',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1');
   });
 });
 
@@ -201,7 +218,6 @@ describe('updateUserAction', () => {
     role: Role.SALES,
     workerType: '',
     machineType: '',
-    isActive: 'true',
   };
 
   it('requires account:manage; unauth bubbles', async () => {
@@ -224,45 +240,12 @@ describe('updateUserAction', () => {
       expect.objectContaining({
         displayName: 'Alice',
         role: Role.SALES,
-        isActive: true,
       }),
       expect.objectContaining({ id: 'actor-owner', role: Role.OWNER }),
     );
-  });
-
-  it('reads a browser-default checkbox (isActive=on) as true (Codex round 13 / P2)', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    accountMock.updateUser.mockResolvedValue({ id: 'user-1' });
-
-    await updateUserAction('user-1', null, fd({ ...baseUpdate, isActive: 'on' }));
-
-    expect(accountMock.updateUser).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({ isActive: true }),
-      expect.anything(),
-    );
-  });
-
-  it('reads a missing isActive field (unchecked checkbox) as false', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    accountMock.updateUser.mockResolvedValue({ id: 'user-1' });
-
-    const formNoCheckbox = new FormData();
-    formNoCheckbox.set('displayName', 'Alice');
-    formNoCheckbox.set('phone', '');
-    formNoCheckbox.set('role', Role.SALES);
-    formNoCheckbox.set('workerType', '');
-    formNoCheckbox.set('machineType', '');
-    // isActive deliberately absent — mirrors browser behavior for an
-    // unchecked checkbox.
-
-    await updateUserAction('user-1', null, formNoCheckbox);
-
-    expect(accountMock.updateUser).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({ isActive: false }),
-      expect.anything(),
-    );
+    // isActive is OWNED BY setUserActive, not this path — must not reach lib.
+    const args = accountMock.updateUser.mock.calls[0][1] as Record<string, unknown>;
+    expect('isActive' in args).toBe(false);
   });
 
   it('maps AccountInvariantError to error result, not a throw', async () => {

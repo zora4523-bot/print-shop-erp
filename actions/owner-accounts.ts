@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -97,8 +98,10 @@ export async function createUserAction(
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
 
+  let createdId: string;
   try {
-    await createUser(parsed.data);
+    const created = await createUser(parsed.data);
+    createdId = created.id;
   } catch (err) {
     const mapped = mapPrismaError(err);
     if (mapped) return mapped;
@@ -109,7 +112,10 @@ export async function createUserAction(
   }
 
   revalidatePath('/owner/accounts');
-  return { status: 'success' };
+  // Send the operator straight to the edit page — clearer feedback than a
+  // silent "✓ 已保存" and prevents accidental double-submit from a lingering
+  // filled-in create form.
+  redirect(`/owner/accounts/${createdId}`);
 }
 
 export async function updateUserAction(

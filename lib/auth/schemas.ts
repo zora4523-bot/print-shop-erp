@@ -203,6 +203,11 @@ const formBoolean = z.preprocess((v) => {
   return false;
 }, z.boolean());
 
+// isActive is intentionally NOT part of the update schema. Activation is
+// controlled by a dedicated setXxxActive action (surfaced in the UI as a
+// separate "停用/启用" button), so the basic-info form can't silently flip
+// activation mid-edit. Same pattern applies to updateCraftSchema and
+// updateProductSchema below.
 export const updateUserSchema = z
   .object({
     displayName: displayNameField,
@@ -210,7 +215,6 @@ export const updateUserSchema = z
     role: roleField,
     workerType: workerTypeField,
     machineType: machineTypeField,
-    isActive: formBoolean,
   })
   .superRefine(enforceWorkerCascade);
 
@@ -275,7 +279,6 @@ export const updateCraftSchema = z.object({
   isOutsource: formBoolean,
   defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
-  isActive: formBoolean,
 });
 
 export type UpdateCraftInput = z.infer<typeof updateCraftSchema>;
@@ -359,7 +362,6 @@ export const updateProductSchema = z.object({
   paperType: productTextFieldOptional('纸张', 32),
   baseUnitPrice: moneyOptionalField,
   minOrderQty: minOrderQtyField,
-  isActive: formBoolean,
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;

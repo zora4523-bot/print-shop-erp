@@ -73,6 +73,8 @@ export async function createProduct(data: CreateProductData): Promise<ProductSum
   });
 }
 
+// Activation is owned by setProductActive, not this update path — see
+// lib/account.ts for the rationale.
 export type UpdateProductData = {
   category: ProductCategory;
   name: string;
@@ -80,7 +82,6 @@ export type UpdateProductData = {
   paperType: string | null;
   baseUnitPrice: string | null;
   minOrderQty?: number;
-  isActive: boolean;
 };
 
 export async function updateProduct(
@@ -99,7 +100,6 @@ export async function updateProduct(
       paperType: data.paperType,
       baseUnitPrice: data.baseUnitPrice,
       minOrderQty: data.minOrderQty ?? null,
-      isActive: data.isActive,
     },
     select: SUMMARY_SELECT,
   });

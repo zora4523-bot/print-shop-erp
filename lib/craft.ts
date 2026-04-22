@@ -72,13 +72,14 @@ export async function createCraft(data: CreateCraftData): Promise<CraftSummary> 
   });
 }
 
+// Activation is owned by setCraftActive, not this update path — see
+// lib/account.ts for the rationale.
 export type UpdateCraftData = {
   name: string;
   code: string;
   isOutsource: boolean;
   defaultMachineType: MachineType | null;
   sortOrder: number;
-  isActive: boolean;
 };
 
 export async function updateCraft(
@@ -96,7 +97,6 @@ export async function updateCraft(
       isOutsource: data.isOutsource,
       defaultMachineType: data.defaultMachineType,
       sortOrder: data.sortOrder,
-      isActive: data.isActive,
     },
     select: SUMMARY_SELECT,
   });

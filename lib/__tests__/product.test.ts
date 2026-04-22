@@ -94,15 +94,14 @@ describe('updateProduct', () => {
         specification: null,
         paperType: null,
         baseUnitPrice: null,
-        isActive: true,
       }),
     ).rejects.toBeInstanceOf(ProductInvariantError);
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
 
-  it('updates all fields', async () => {
+  it('updates the editable fields', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
-    dbMock.product.update.mockResolvedValue(makeProduct({ isActive: false }));
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
     await updateProduct('p1', {
       category: ProductCategory.COLOR_PRINT,
       name: '改名',
@@ -110,12 +109,24 @@ describe('updateProduct', () => {
       paperType: '新纸',
       baseUnitPrice: '1.5000',
       minOrderQty: 2000,
-      isActive: false,
     });
     const data = dbMock.product.update.mock.calls[0][0].data;
     expect(data.name).toBe('改名');
-    expect(data.isActive).toBe(false);
     expect(data.baseUnitPrice).toBe('1.5000');
+  });
+
+  it('never writes isActive through the update path', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.product.update.mockResolvedValue(makeProduct());
+    await updateProduct('p1', {
+      category: ProductCategory.BLANK_STOCK,
+      name: 'x',
+      specification: null,
+      paperType: null,
+      baseUnitPrice: null,
+    });
+    const data = dbMock.product.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect('isActive' in data).toBe(false);
   });
 });
 

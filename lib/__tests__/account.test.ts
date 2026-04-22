@@ -193,7 +193,7 @@ describe('updateUser invariants', () => {
 
     await updateUser(
       'sales-1',
-      { displayName: 'Bob', role: Role.SALES, isActive: true },
+      { displayName: 'Bob', role: Role.SALES },
       baseActor,
     );
 
@@ -216,7 +216,6 @@ describe('updateUser invariants', () => {
         {
           displayName: 'X',
           role: Role.SALES, // demote
-          isActive: true,
         },
         baseActor,
       ),
@@ -231,25 +230,8 @@ describe('updateUser invariants', () => {
     dbMock.user.update.mockResolvedValue(makeUser({ id: 'owner-other', role: Role.SALES }));
 
     await expect(
-      updateUser(
-        'owner-other',
-        { displayName: 'X', role: Role.SALES, isActive: true },
-        baseActor,
-      ),
+      updateUser('owner-other', { displayName: 'X', role: Role.SALES }, baseActor),
     ).resolves.toBeDefined();
-  });
-
-  it('refuses to deactivate the last active OWNER', async () => {
-    dbMock.user.findUnique.mockResolvedValue(ownerOther);
-    dbMock.user.count.mockResolvedValue(0);
-
-    await expect(
-      updateUser(
-        'owner-other',
-        { displayName: 'X', role: Role.OWNER, isActive: false },
-        baseActor,
-      ),
-    ).rejects.toBeInstanceOf(AccountInvariantError);
   });
 
   it('refuses to change the actor OWN role (self lockout guard)', async () => {
@@ -257,25 +239,16 @@ describe('updateUser invariants', () => {
     dbMock.user.count.mockResolvedValue(99); // plenty of other OWNERs — irrelevant
 
     await expect(
-      updateUser(
-        'owner-self',
-        { displayName: 'X', role: Role.SALES, isActive: true },
-        baseActor,
-      ),
+      updateUser('owner-self', { displayName: 'X', role: Role.SALES }, baseActor),
     ).rejects.toThrowError(/不能修改自己的角色/);
   });
 
-  it('refuses to deactivate the actor self', async () => {
-    dbMock.user.findUnique.mockResolvedValue(ownerSelf);
-    dbMock.user.count.mockResolvedValue(99);
-
-    await expect(
-      updateUser(
-        'owner-self',
-        { displayName: 'X', role: Role.OWNER, isActive: false },
-        baseActor,
-      ),
-    ).rejects.toThrowError(/不能停用自己的账号/);
+  it('never writes isActive through the update path', async () => {
+    dbMock.user.findUnique.mockResolvedValue(salesPerson);
+    dbMock.user.update.mockResolvedValue(salesPerson);
+    await updateUser('sales-1', { displayName: 'Y', role: Role.SALES }, baseActor);
+    const data = dbMock.user.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect('isActive' in data).toBe(false);
   });
 
   it('allows editing another active user when invariants are fine', async () => {
@@ -284,7 +257,7 @@ describe('updateUser invariants', () => {
 
     const result = await updateUser(
       'sales-1',
-      { displayName: 'New', role: Role.SALES, isActive: true, phone: '13800138000' },
+      { displayName: 'New', role: Role.SALES, phone: '13800138000' },
       baseActor,
     );
     expect(result.displayName).toBe('New');
@@ -294,11 +267,7 @@ describe('updateUser invariants', () => {
   it('throws when the target does not exist', async () => {
     dbMock.user.findUnique.mockResolvedValue(null);
     await expect(
-      updateUser(
-        'nope',
-        { displayName: 'X', role: Role.SALES, isActive: true },
-        baseActor,
-      ),
+      updateUser('nope', { displayName: 'X', role: Role.SALES }, baseActor),
     ).rejects.toThrowError(/不存在/);
   });
 });

@@ -2,22 +2,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MachineType, Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
-const { permissionsMock, craftMock, revalidatePathMock, MockCraftInvariantError } =
-  vi.hoisted(() => ({
-    permissionsMock: { requirePermission: vi.fn() },
-    craftMock: {
-      createCraft: vi.fn(),
-      updateCraft: vi.fn(),
-      setCraftActive: vi.fn(),
-    },
-    revalidatePathMock: vi.fn(),
-    MockCraftInvariantError: class extends Error {
-      constructor(message: string) {
-        super(message);
-        this.name = 'CraftInvariantError';
-      }
-    },
-  }));
+const {
+  permissionsMock,
+  craftMock,
+  revalidatePathMock,
+  redirectMock,
+  MockCraftInvariantError,
+} = vi.hoisted(() => ({
+  permissionsMock: { requirePermission: vi.fn() },
+  craftMock: {
+    createCraft: vi.fn(),
+    updateCraft: vi.fn(),
+    setCraftActive: vi.fn(),
+  },
+  revalidatePathMock: vi.fn(),
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
+  MockCraftInvariantError: class extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'CraftInvariantError';
+    }
+  },
+}));
 
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: permissionsMock.requirePermission,
@@ -29,6 +37,7 @@ vi.mock('@/lib/craft', () => ({
   CraftInvariantError: MockCraftInvariantError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
+vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createCraftAction,
@@ -65,6 +74,9 @@ beforeEach(() => {
   craftMock.updateCraft.mockReset();
   craftMock.setCraftActive.mockReset();
   revalidatePathMock.mockReset();
+  redirectMock.mockReset().mockImplementation((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  });
 });
 
 describe('createCraftAction', () => {
@@ -172,18 +184,22 @@ describe('createCraftAction', () => {
     );
   });
 
-  it('revalidates /owner/crafts on success', async () => {
+  it('revalidates + redirects to the new craft edit page on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
-    const result = await createCraftAction(null, fd(validCreateFields));
-    expect(result.status).toBe('success');
+    await expect(createCraftAction(null, fd(validCreateFields))).rejects.toThrow(
+      /NEXT_REDIRECT/,
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/crafts/craft-new');
   });
 
   it('coerces sortOrder string into int at the schema layer', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
-    await createCraftAction(null, fd({ ...validCreateFields, sortOrder: '42' }));
+    await expect(
+      createCraftAction(null, fd({ ...validCreateFields, sortOrder: '42' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ sortOrder: 42 }),
     );
@@ -192,7 +208,9 @@ describe('createCraftAction', () => {
   it('browser-default checkbox isOutsource=on parses as true', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
-    await createCraftAction(null, fd({ ...validCreateFields, isOutsource: 'on' }));
+    await expect(
+      createCraftAction(null, fd({ ...validCreateFields, isOutsource: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ isOutsource: true }),
     );
@@ -207,7 +225,7 @@ describe('createCraftAction', () => {
     f.set('defaultMachineType', MachineType.GLUE);
     f.set('sortOrder', '40');
     // isOutsource deliberately absent
-    await createCraftAction(null, f);
+    await expect(createCraftAction(null, f)).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ isOutsource: false }),
     );
@@ -215,7 +233,7 @@ describe('createCraftAction', () => {
 });
 
 describe('updateCraftAction', () => {
-  const baseUpdate = { ...validCreateFields, isActive: 'true' };
+  const baseUpdate = { ...validCreateFields };
 
   it('requires dict:craft:manage', async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {

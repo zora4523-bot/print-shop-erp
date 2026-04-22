@@ -218,19 +218,6 @@ export function AccountForm(props: Props) {
         </div>
       ) : null}
 
-      {!isCreate ? (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            name="isActive"
-            defaultChecked={initial?.isActive}
-            disabled={pending}
-            className="h-4 w-4 rounded border-input"
-          />
-          <span>账号启用</span>
-        </label>
-      ) : null}
-
       {generalError ? (
         <p role="alert" className="text-sm text-destructive">
           {generalError}

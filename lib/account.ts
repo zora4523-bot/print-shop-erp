@@ -160,13 +160,14 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
   });
 }
 
+// Update NEVER touches isActive. Activation is a separate action
+// (setUserActive) so a basic-info edit can't silently deactivate.
 export type UpdateUserData = {
   displayName: string;
   phone?: string;
   role: Role;
   workerType?: User['workerType'];
   machineType?: User['machineType'];
-  isActive: boolean;
 };
 
 export async function updateUser(
@@ -185,15 +186,14 @@ export async function updateUser(
     if (!target) throw new AccountInvariantError('目标账号不存在');
 
     const roleChanging = data.role !== target.role;
-    const deactivating = target.isActive && !data.isActive;
 
     if (roleChanging) assertNotSelfTarget(target, actor, 'role-change');
-    if (deactivating) assertNotSelfTarget(target, actor, 'deactivate');
 
-    await assertNotStrandingSystemInTx(txClient, target, {
-      isActive: data.isActive,
-      role: data.role,
-    });
+    // isActive isn't part of this update, but demoting the last active
+    // OWNER still has to be blocked — assertNotStrandingSystemInTx reads
+    // target.isActive when `next.isActive` is omitted, preserving the
+    // guard.
+    await assertNotStrandingSystemInTx(txClient, target, { role: data.role });
 
     return txClient.user.update({
       where: { id },
@@ -206,7 +206,6 @@ export async function updateUser(
           data.role === Role.WORKER && data.workerType === 'MACHINE'
             ? (data.machineType ?? null)
             : null,
-        isActive: data.isActive,
       },
       select: SUMMARY_SELECT,
     });

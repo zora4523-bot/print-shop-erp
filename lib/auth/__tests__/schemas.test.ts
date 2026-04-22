@@ -352,44 +352,17 @@ describe('updateUserSchema', () => {
     role: Role.SALES,
     workerType: null,
     machineType: null,
-    isActive: true,
   };
 
   it('accepts a valid shape', () => {
     expect(updateUserSchema.safeParse(validUpdate).success).toBe(true);
   });
 
-  it('accepts the default HTML checkbox value "on" as true (Codex round 13 / P2)', () => {
+  it('does not include isActive (activation is owned by setUserActive)', () => {
     const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'on' });
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data.isActive).toBe(true);
-  });
-
-  it('accepts explicit string "true"', () => {
-    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: 'true' });
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.isActive).toBe(true);
-  });
-
-  it('treats a missing isActive (unchecked checkbox) as false', () => {
-    const r = updateUserSchema.safeParse({ ...validUpdate, isActive: undefined });
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.isActive).toBe(false);
-  });
-
-  it('accepts real booleans (for JS callers that bypass FormData)', () => {
-    for (const v of [true, false]) {
-      const r = updateUserSchema.safeParse({ ...validUpdate, isActive: v });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.isActive).toBe(v);
-    }
-  });
-
-  it('treats an unknown string ("yes", "1") as false — explicit values only', () => {
-    for (const v of ['yes', '1', 'checked']) {
-      const r = updateUserSchema.safeParse({ ...validUpdate, isActive: v });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.isActive).toBe(false);
+    if (r.success) {
+      expect('isActive' in r.data).toBe(false);
     }
   });
 
@@ -534,12 +507,12 @@ describe('createCraftSchema', () => {
 });
 
 describe('updateCraftSchema', () => {
-  const validUpdate = { ...validCraft, isActive: 'true' };
+  const validUpdate = { ...validCraft };
 
-  it('requires isActive', () => {
-    const r = updateCraftSchema.safeParse({ ...validUpdate, isActive: undefined });
-    expect(r.success).toBe(true); // formBoolean treats missing as false
-    if (r.success) expect(r.data.isActive).toBe(false);
+  it('accepts a valid shape and strips any submitted isActive', () => {
+    const r = updateCraftSchema.safeParse({ ...validUpdate, isActive: 'on' });
+    expect(r.success).toBe(true);
+    if (r.success) expect('isActive' in r.data).toBe(false);
   });
 
   it('reuses the code / name regex', () => {
@@ -702,17 +675,9 @@ describe('createProductSchema', () => {
 });
 
 describe('updateProductSchema', () => {
-  const validUpdate = { ...validProduct, isActive: 'on' };
-
-  it('accepts a valid update with isActive=on', () => {
-    const r = updateProductSchema.safeParse(validUpdate);
+  it('accepts a valid shape and strips any submitted isActive', () => {
+    const r = updateProductSchema.safeParse({ ...validProduct, isActive: 'on' });
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data.isActive).toBe(true);
-  });
-
-  it('missing isActive (unchecked) parses as false', () => {
-    const r = updateProductSchema.safeParse({ ...validUpdate, isActive: undefined });
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.isActive).toBe(false);
+    if (r.success) expect('isActive' in r.data).toBe(false);
   });
 });
