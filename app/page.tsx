@@ -38,12 +38,18 @@ export default async function Home() {
         {isOwner ? (
           <div className="rounded-xl border bg-card p-6 shadow-sm">
             <h3 className="mb-3 text-base font-semibold">老板后台</h3>
-            <ul className="space-y-1 text-sm">
+            <ul className="space-y-2 text-sm">
               <li>
                 <Link href="/owner/accounts" className="text-primary underline hover:no-underline">
                   账号管理 →
                 </Link>
                 <span className="ml-2 text-muted-foreground">新增 / 编辑 / 停用员工账号</span>
+              </li>
+              <li>
+                <Link href="/owner/crafts" className="text-primary underline hover:no-underline">
+                  工艺字典 →
+                </Link>
+                <span className="ml-2 text-muted-foreground">管理工艺清单、默认机器、外协标记</span>
               </li>
             </ul>
           </div>
