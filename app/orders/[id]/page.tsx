@@ -4,12 +4,17 @@ import { OrderStatus, Role } from '../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import { isTerminalOrderStatus } from '@/lib/order/status-machine';
+import {
+  editableFieldsetForStatus,
+  isOrderEditable,
+} from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
+import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -40,6 +45,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canCancel =
     user.role === Role.OWNER && !isTerminalOrderStatus(order.status);
 
+  // Editing follows SPEC §3.6. Ownership mirrors the action-layer
+  // guard: SALES / CUSTOMER_SERVICE only their own; OWNER / FOREMAN
+  // any. Server still re-verifies on submit — this is UI-only.
+  const canEdit =
+    isOrderEditable(order.status) &&
+    (order.submitterId === user.id ||
+      user.role === Role.OWNER ||
+      user.role === Role.FOREMAN);
+  // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
+  const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -59,6 +75,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </div>
         <div className="flex items-center gap-3">
           <OrderStatusBadge status={order.status} />
+          {canEdit ? (
+            <Link
+              href={`/orders/${order.id}/edit`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              编辑
+            </Link>
+          ) : null}
+          {canToggleUrgent ? (
+            <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
+          ) : null}
           <Link
             href={`/print/orders/${order.id}?autoprint=1`}
             target="_blank"
