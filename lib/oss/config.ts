@@ -80,7 +80,7 @@ function deriveBucketUrl(endpoint: string, bucket: string): string {
   const bucketPrefix = `${bucket}.`;
   if (url.hostname.toLowerCase().startsWith(bucketPrefix.toLowerCase())) {
     throw new Error(
-      `OSS_ENDPOINT 不应已经包含 bucket（${bucket}）前缀：${endpoint}（请使用 region endpoint，如 https://oss-cn-shenzhen.aliyuncs.com）`,
+      `OSS_ENDPOINT 不应已经包含 bucket（${bucket}）前缀：${endpoint}（请使用服务主机，而非虚拟主机格式的 bucket URL，如 https://oss-cn-shenzhen.aliyuncs.com）`,
     );
   }
   // Virtual-hosted: `<bucket>.<host>`. Keeps the protocol + port that
