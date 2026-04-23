@@ -244,6 +244,15 @@ describe('cancelOrderAction', () => {
     );
   });
 
+  it('rejects a non-string reason (e.g., File upload) as invalid (Codex round 27 / P2)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const f = new FormData();
+    f.set('reason', new Blob(['malicious'], { type: 'text/plain' }), 'reason.txt');
+    const result = await cancelOrderAction('o1', null, f);
+    expect(result.status).toBe('invalid');
+    expect(orderMock.cancelOrder).not.toHaveBeenCalled();
+  });
+
   it('maps InvalidOrderTransitionError → error', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockRejectedValueOnce(

@@ -99,9 +99,12 @@ export async function cancelOrderAction(
 ): Promise<OrderMutationResult> {
   const actor = await requirePermission('order:cancel');
 
-  const reasonRaw = formData.get('reason');
+  // Pass the raw FormDataEntryValue through to the schema so a File
+  // upload (or any non-string) gets rejected as invalid instead of
+  // being silently coerced to '' and proceeding with an empty reason
+  // on a destructive action.
   const parsed = cancelOrderSchema.safeParse({
-    reason: typeof reasonRaw === 'string' ? reasonRaw : '',
+    reason: formData.get('reason'),
   });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };

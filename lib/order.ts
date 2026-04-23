@@ -1,8 +1,5 @@
 import Decimal from 'decimal.js';
-import {
-  OrderStatus,
-  type Role,
-} from '../generated/prisma/client';
+import { OrderStatus, Role } from '../generated/prisma/client';
 import { db } from './db';
 import { nextOrderNumber } from './order/order-number';
 import {
@@ -192,12 +189,22 @@ type StatusTxClient = {
   };
 };
 
+type TransitionOptions = {
+  remark: string | null;
+  // Optional authz guard that runs AFTER we've fetched the row (so it
+  // can see submitterId / status) but BEFORE the status-machine check.
+  // Throw OrderInvariantError to reject.
+  authz?: (order: { submitterId: string; status: OrderStatus }) => void;
+  now?: Date;
+};
+
 async function transitionWithLog(
   orderId: string,
   target: OrderStatus,
   actor: { id: string; role: Role },
-  remark: string | null,
+  opts: TransitionOptions,
 ): Promise<{ id: string; status: OrderStatus }> {
+  const now = opts.now ?? new Date();
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as StatusTxClient;
     const target_order = await txClient.order.findUnique({
@@ -205,6 +212,8 @@ async function transitionWithLog(
       select: { id: true, status: true, submitterId: true },
     });
     if (!target_order) throw new OrderInvariantError('工单不存在');
+
+    if (opts.authz) opts.authz(target_order);
 
     // status-machine.ts throws InvalidOrderTransitionError on bad moves —
     // we let it propagate (action layer maps to a generic error result).
@@ -214,7 +223,7 @@ async function transitionWithLog(
       where: { id: orderId },
       data: {
         status: target,
-        submittedAt: target === OrderStatus.SUBMITTED ? new Date() : undefined,
+        submittedAt: target === OrderStatus.SUBMITTED ? now : undefined,
       },
       select: { id: true, status: true },
     });
@@ -227,7 +236,7 @@ async function transitionWithLog(
         changedFields: {
           status: { before: target_order.status, after: target },
         },
-        remark,
+        remark: opts.remark,
       },
     });
 
@@ -238,21 +247,34 @@ async function transitionWithLog(
 export async function submitOrder(
   orderId: string,
   actor: { id: string; role: Role },
+  now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
-  return transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, '提交工单');
+  return transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, {
+    remark: '提交工单',
+    now,
+    authz: (order) => {
+      // 'order:create' permission lets SALES / CS create AND submit — but
+      // only for their own rows. OWNER / FOREMAN keep the global override.
+      const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+      if (!globalOverride && order.submitterId !== actor.id) {
+        throw new OrderInvariantError('只能提交自己创建的工单');
+      }
+    },
+  });
 }
 
 export async function cancelOrder(
   orderId: string,
   actor: { id: string; role: Role },
   reason: string | null,
+  now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
-  return transitionWithLog(
-    orderId,
-    OrderStatus.CANCELLED,
-    actor,
-    reason ? `取消：${reason}` : '取消工单',
-  );
+  // The action-layer `requirePermission('order:cancel')` is OWNER-only, so
+  // there's no additional ownership guard to run here.
+  return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
+    remark: reason ? `取消：${reason}` : '取消工单',
+    now,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────

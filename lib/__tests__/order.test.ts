@@ -270,7 +270,7 @@ describe('createOrder', () => {
 });
 
 describe('submitOrder', () => {
-  it('transitions DRAFT → SUBMITTED and stamps submittedAt', async () => {
+  it('transitions DRAFT → SUBMITTED and stamps submittedAt from the injected clock', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
       status: OrderStatus.DRAFT,
@@ -278,11 +278,12 @@ describe('submitOrder', () => {
     });
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
 
-    const r = await submitOrder('o1', salesActor);
+    const clock = new Date('2026-04-23T10:00:00+08:00');
+    const r = await submitOrder('o1', salesActor, clock);
     expect(r.status).toBe(OrderStatus.SUBMITTED);
     const updateArg = dbMock.order.update.mock.calls[0][0];
     expect(updateArg.data.status).toBe(OrderStatus.SUBMITTED);
-    expect(updateArg.data.submittedAt).toBeInstanceOf(Date);
+    expect(updateArg.data.submittedAt).toBe(clock);
 
     // Exactly one STATUS_CHANGE log with before/after.
     const logArg = dbMock.orderLog.create.mock.calls[0][0];
@@ -291,6 +292,30 @@ describe('submitOrder', () => {
       before: OrderStatus.DRAFT,
       after: OrderStatus.SUBMITTED,
     });
+  });
+
+  it('refuses when a non-owner SALES tries to submit another SALES\'s order (Codex round 27 / P1)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'someone-else',
+    });
+
+    await expect(submitOrder('o1', salesActor)).rejects.toThrowError(
+      /只能提交自己创建的工单/,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('OWNER may submit on behalf of another submitter (global override)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'someone-else',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
+    await expect(submitOrder('o1', ownerActor)).resolves.toBeDefined();
   });
 
   it('refuses the submit when the current status is not DRAFT', async () => {
