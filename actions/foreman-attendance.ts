@@ -1,0 +1,91 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { requirePermission } from '@/lib/auth/permissions';
+import {
+  recordAttendanceSchema,
+  removeAttendanceSchema,
+} from '@/lib/auth/schemas';
+import {
+  recordAttendance,
+  removeAttendance,
+  AttendanceError,
+} from '@/lib/attendance';
+import type { AttendanceMutationResult } from './foreman-attendance.types';
+
+function collectFieldErrors(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[],
+) {
+  const out: Record<string, string[]> = {};
+  for (const issue of issues) {
+    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
+    (out[key] ??= []).push(issue.message);
+  }
+  return out;
+}
+
+// Foreman records one (worker, date) attendance row. Idempotent by
+// design — same (worker, date) re-posts overwrite via upsert.
+//
+// Permission: reuse 'task:assign' (FOREMAN + OWNER) since the foreman
+// already has broad workshop authority; adding a new permission key
+// for attendance alone is yak-shaving at this stage.
+export async function recordAttendanceAction(
+  _prev: AttendanceMutationResult | null,
+  raw: unknown,
+): Promise<AttendanceMutationResult> {
+  const actor = await requirePermission('task:assign');
+
+  const parsed = recordAttendanceSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    await recordAttendance(
+      parsed.data.workerId,
+      parsed.data.date,
+      {
+        normalHours: parsed.data.normalHours,
+        otHours: parsed.data.otHours,
+        spareHours: parsed.data.spareHours,
+        remark: parsed.data.remark ?? null,
+      },
+      actor,
+    );
+  } catch (err) {
+    if (err instanceof AttendanceError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/foreman/attendance');
+  return { status: 'success' };
+}
+
+// Remove one (worker, date) row — "请假 = 没有行" semantic. Idempotent:
+// removing a row that doesn't exist still returns success.
+export async function removeAttendanceAction(
+  _prev: AttendanceMutationResult | null,
+  raw: unknown,
+): Promise<AttendanceMutationResult> {
+  const actor = await requirePermission('task:assign');
+
+  const parsed = removeAttendanceSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    await removeAttendance(parsed.data.workerId, parsed.data.date, actor);
+  } catch (err) {
+    if (err instanceof AttendanceError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/foreman/attendance');
+  return { status: 'success' };
+}

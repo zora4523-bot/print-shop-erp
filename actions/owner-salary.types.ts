@@ -39,3 +39,14 @@ export type SettleReadyCsResult =
       errors: Array<{ periodId: string; message: string }>;
     }
   | { status: 'error'; message: string };
+
+export type RecomputeHourlyResult =
+  | {
+      status: 'success';
+      month: string;
+      workerCount: number;
+      errorCount: number;
+      errors: Array<{ workerId: string; message: string }>;
+    }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };

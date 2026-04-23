@@ -811,3 +811,83 @@ export const markCsCommissionPaidSchema = z.object({
 });
 
 export type MarkCsCommissionPaidInput = z.infer<typeof markCsCommissionPaidSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// 时薪工考勤 + 月结 (P0 #5 Slice C)
+// ─────────────────────────────────────────────────────────────────────
+
+// Hours field: accepts number or numeric string; "" / null → 0
+// (foreman may leave a field blank to mean "didn't work those hours").
+// Rejects negative / non-numeric / > 24.
+const hoursField = (label: string) =>
+  z.preprocess(
+    (v) => {
+      if (v === null || v === undefined || v === '') return 0;
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (t === '') return 0;
+        if (!/^\d{1,2}(\.\d{1,2})?$/.test(t)) return Number.NaN;
+        return Number.parseFloat(t);
+      }
+      return Number.NaN;
+    },
+    z
+      .number()
+      .min(0, `${label}不能为负`)
+      .max(24, `${label}超出 24 小时`),
+  );
+
+export const recordAttendanceSchema = z.object({
+  workerId: safeId('工人 id'),
+  date: ymdField('考勤日期'),
+  normalHours: hoursField('正常工时'),
+  otHours: hoursField('加班工时'),
+  spareHours: hoursField('空闲打包工时'),
+  remark: optionalTrimmedText('备注', 200).optional(),
+});
+
+export type RecordAttendanceInput = z.infer<typeof recordAttendanceSchema>;
+
+export const removeAttendanceSchema = z.object({
+  workerId: safeId('工人 id'),
+  date: ymdField('考勤日期'),
+});
+
+export type RemoveAttendanceInput = z.infer<typeof removeAttendanceSchema>;
+
+// YYYY-MM — same strict-regex-with-calendar-check pattern as ymdField.
+const ymField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .superRefine((val, ctx) => {
+      if (!/^(\d{4})-(\d{2})$/.test(val)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${label}格式非法（应为 YYYY-MM）`,
+        });
+        return;
+      }
+      const [, , mo] = /^(\d{4})-(\d{2})$/.exec(val)!;
+      const month = Number(mo);
+      if (month < 1 || month > 12) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${label}月份超出 1-12`,
+        });
+      }
+    });
+
+export const recomputeHourlyPayrollSchema = z.object({
+  month: ymField('月份'),
+  workerId: safeId('工人 id').optional(),
+});
+
+export type RecomputeHourlyPayrollInput = z.infer<typeof recomputeHourlyPayrollSchema>;
+
+export const markHourlyPayrollPaidSchema = z.object({
+  isPaid: formBoolean,
+});
+
+export type MarkHourlyPayrollPaidInput = z.infer<typeof markHourlyPayrollPaidSchema>;

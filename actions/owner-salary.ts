@@ -8,6 +8,8 @@ import {
   markDailySalaryPaidSchema,
   startCsPeriodSchema,
   markCsCommissionPaidSchema,
+  recomputeHourlyPayrollSchema,
+  markHourlyPayrollPaidSchema,
 } from '@/lib/auth/schemas';
 import {
   computeDailyForAllMachineWorkers,
@@ -23,12 +25,19 @@ import {
   CsPeriodError,
   InvalidCsPeriodTransitionError,
 } from '@/lib/salary/cs';
+import {
+  computeHourlyPayroll,
+  computeHourlyForAllInMonth,
+  markHourlyPayrollPaid,
+  HourlyAggregateError,
+} from '@/lib/salary/hourly-aggregate';
 import type {
   RecomputeDailyResult,
   SalaryMutationResult,
   StartCsPeriodResult,
   SettleCsPeriodResult,
   SettleReadyCsResult,
+  RecomputeHourlyResult,
 } from './owner-salary.types';
 
 function collectFieldErrors(
@@ -215,5 +224,74 @@ export async function markCsCommissionPaidAction(
     throw err;
   }
   revalidatePath('/owner/salary/cs');
+  return { status: 'success' };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 时薪工 (PACKER / CLEANER / COOK) actions — SPEC §5.4 / §3.9
+// ─────────────────────────────────────────────────────────────────────
+
+// Owner kicks the monthly hourly-payroll computation. With a workerId,
+// recomputes that one row; without, runs the batch over every active
+// hourly worker.
+export async function recomputeHourlyPayrollAction(
+  _prev: RecomputeHourlyResult | null,
+  raw: unknown,
+): Promise<RecomputeHourlyResult> {
+  await requirePermission('salary:rule:manage');
+
+  const parsed = recomputeHourlyPayrollSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    if (parsed.data.workerId) {
+      await computeHourlyPayroll(parsed.data.workerId, parsed.data.month);
+      revalidatePath('/owner/salary/hourly');
+      return {
+        status: 'success',
+        month: parsed.data.month,
+        workerCount: 1,
+        errorCount: 0,
+        errors: [],
+      };
+    }
+    const { settled, errors } = await computeHourlyForAllInMonth(
+      parsed.data.month,
+    );
+    revalidatePath('/owner/salary/hourly');
+    return {
+      status: 'success',
+      month: parsed.data.month,
+      workerCount: settled.length,
+      errorCount: errors.length,
+      errors,
+    };
+  } catch (err) {
+    if (err instanceof HourlyAggregateError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+}
+
+// Finance toggle — same shape as the daily-salary mark-paid action.
+export async function setHourlyPayrollPaidAction(
+  id: string,
+  _prev: SalaryMutationResult | null,
+  formData: FormData,
+): Promise<SalaryMutationResult> {
+  await requirePermission('salary:view:all');
+
+  const parsed = markHourlyPayrollPaidSchema.safeParse({
+    isPaid: formData.get('isPaid'),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  await markHourlyPayrollPaid(id, parsed.data.isPaid);
+  revalidatePath('/owner/salary/hourly');
   return { status: 'success' };
 }
