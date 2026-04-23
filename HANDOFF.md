@@ -8,11 +8,13 @@
 
 ## 当前任务
 
-P0 #1 / #2 / #3 / #4 全部完成。**下一步：P0 #5 薪资系统**（预计 2 周，P0 最难的一块）。
+P0 #1 / #2 / #3 / #4 完成。P0 #5 薪资系统走完 4/5 切片（Slices A/B/D 完整 + Slice C 纯函数）。**下一步：P0 #5 Slice C 剩余（Attendance 表 + 月结汇总）** 或者直接开 **P0 #6 应收账单**（并在账单 mark-paid 处 wire 住 `accumulateCsSales`）。
 
 ## 本次 session 主要产出
 
-P0 #4 生产流程完整交付——9 个 commits，+107 单测（累计 507），Codex rounds 37–42 共 6 轮（Slice A 一次修 / Slice B 一次修 / Slice C 一次修，其余首过）。
+P0 #5 薪资系统 4/5 切片 + P0 #4 memory docs 关闭——15 个 commits，+119 单测（累计 626），Codex rounds 43–47 共 5 轮。
+
+上一 session（同日）还完成了 P0 #4 生产流程——9 个 commits，+107 单测（累计 507），Codex rounds 37–42 共 6 轮（Slice A 一次修 / Slice B 一次修 / Slice C 一次修，其余首过）。
 
 - **Slice A 排产**（rounds 37 / 38）
   - `lib/production.ts scheduleOrder`：tx 内批量 createMany + 状态机转换 + OrderLog。按 Craft.isOutsource 拆两条路径，每个 item × non-outsource craft 对要求唯一 assignment。
@@ -39,43 +41,37 @@ P0 #4 生产流程完整交付——9 个 commits，+107 单测（累计 507）�
 
 ## 下一步具体指令（给下次 AI）
 
-P0 #5 薪资系统（预计 2 周，核心难点）。开工前**必读**：
+**P0 #5 已完成 4/5 切片**（Slices A / B / D 完整 + Slice C 纯函数）。剩下的两条路业主拍板一下：
 
-1. SPEC-v1.2.md §5（全部算法）、§7（四个示例表，逐行对应）、§3.7（客服周期结算时序）、§3.8（师傅日薪定时）、§3.9（时薪工月结）
-2. `prisma/schema.prisma` 的 `SalaryRule` / `DailyWorkerSalary` / `SalaryPeriod` / `CustomerServiceCommission` / `HourlyWorkerPayroll`
-3. `lib/salary/machine-piecework.ts`（已写好，Slice B 已在用）
-4. `lib/salary/rules.ts`（已写好的 `getActiveMachineRule`；之后会加 `getActiveCsTiers` / `getActiveHourlyRule`）
-5. 现有每条计件记录已快照了规则（`ProductionTask.salaryRuleSnapshot`）——P0 #5 薪资汇总**读快照，不回查 SalaryRule.id**
+**路线 A：收尾 P0 #5（Slice C 剩余，1–2 天）**
 
-分解建议（按 CLAUDE.md §4.2 垂直切片）：
+做时薪工月结的 DB 层：
+1. **Schema 迁移**：新增 `Attendance` 模型 + User 反向 relation。字段：`workerId / date / normalHours / otHours / spareHours / createdById / remark`，`@@unique([workerId, date])`。创建 `prisma/migrations/<timestamp>_attendance/migration.sql`。
+2. **`lib/attendance.ts`**：`recordAttendance(workerId, date, input, actor)` upsert；`listAttendance(filter)` 读。
+3. **`lib/salary/hourly-aggregate.ts`** `computeHourlyPayroll(workerId, month, now)`：
+   - 解析 YYYY-MM → 当月 Shanghai 范围
+   - 查当月 Attendance，汇总 normal / ot / spare
+   - 查 PACKER_HOURLY / CLEANER_HOURLY / COOK_MONTHLY / COOK_SPARE_HOURLY / OT_MULTIPLIER 的 active 规则（加 `lib/salary/rules.ts` 新 getters）
+   - 调 `calcHourlyPayroll`（已写好，`lib/salary/hourly-payroll.ts`）
+   - upsert `HourlyWorkerPayroll`（`@@unique([workerId, month])`），写 `salaryRuleSnapshot`（参考 CS commission snapshot 模式）
+   - **已发放行拒绝重算**（round 43 约定）
+4. Actions：recompute / mark-paid
+5. Cron：`POST /api/cron/hourly-payroll` shared-secret，月底触发
+6. UI：`/foreman/attendance` 录入 + `/owner/salary/hourly` 月结列表
 
-**Slice A — 师傅日薪汇总**
-- `lib/salary/daily.ts` `computeDailyWorkerSalary(workerId, date)`：
-  - 查当日 `completedAt` 落在 [date 00:00, date+1 00:00) 的 `ProductionTask`（该师傅的）
-  - 汇总 `pieceworkAmount`（Decimal 加法）
-  - 读师傅的 machineType 的 active `SalaryRule` 拿 `dailyBase`
-  - 结果 `actualSalary = max(sum, dailyBase)`
-  - 写 `DailyWorkerSalary`（`@@unique([workerId, date])`，幂等 upsert，每次覆盖写 `salaryRuleSnapshot`）
-- Cron hook：SPEC §3.8 要求"每日 24:00"；用 `pg_cron` 或 Next.js 的 scheduled API route（Pigsty 已启用 pg_cron，DECISIONS 2026-04-22）
-- 老板 UI：`/owner/salary/daily` 列表，筛选日期 + 师傅，显示 actualSalary、汇总 / 保底两列；"标记已发放"切 `isPaid`
+已建范式照抄：`lib/salary/daily.ts` 的 upsert + rule snapshot + `isPaid` guard 模式；`lib/salary/cs.ts` 的 tx + advisory lock 模式。
 
-**Slice B — 客服周期业绩 + 结算**
-- `lib/salary/cs.ts` `startPeriod(csUserId, start, initialSales?)` 在客服开户时触发（当前 `account.ts createUser` 需要钩）
-- `lib/salary/cs.ts accumulateSales(periodId, amount)` 在账单 mark-paid 时累加（P0 #6 才会调用，现在先写好接口）
-- `lib/salary/cs.ts settlePeriod(periodId, now)`：查 `CS_TIERS` 规则、按 `totalSales + initialSales` 匹配档位、生成 `CustomerServiceCommission`、切状态 IN_PROGRESS → SETTLED、自动开启下一周期
-- Cron hook：每日扫 `periodEnd <= today && status=IN_PROGRESS`
-- 历史业绩导入（SPEC §5.5）：`/owner/salary/cs/import` 页面或 seed 里直接喂
+**路线 B：跳到 P0 #6 应收账单（3 天）**
 
-**Slice C — 时薪工月结**
-- 需要先有"考勤"表（schema 里没有，需要加 migration：`Attendance` 表：`workerId, date, normalHours, otHours, spareHours?`）
-- `lib/salary/hourly.ts` `computeHourlyPayroll(workerId, month)`：PACKER/CLEANER 走正常工时 × 时薪 + 加班工时 × 倍率，COOK 走月薪 + spareHours × PACKER 时薪
-- 月底 cron 触发
+SPEC §4 / §3.1 — 账单是客服周期累加业绩的数据源。`lib/salary/cs.ts accumulateCsSales` 已写好并测好，就差账单 mark-paid 处调用。
 
-**Slice D — 老板薪资看板**
-- `/owner/salary` 聚合页：今日日薪 / 本月提成 / 本月时薪 / 待发放合计
-- 每块都有 drill-down 到对应 resource 的详情页
+分解建议：
+- `Bill` / `BillItem` schema（应该已在 prisma/schema.prisma，check 一下）
+- `lib/bill.ts` create / addItem / markPaid（markPaid → `accumulateCsSales(submitterId, amount, paidAt)`）
+- 状态机 DRAFT → SENT → PARTIAL_PAID → PAID
+- 销售 / 老板 UI
 
-建议顺序 A → B → D → C；A 直接测通报工 → 日薪闭环；B 可以等 P0 #6 账单模块之后回来补（或者先用 seed 喂数据）；C 的考勤表和 UI 工作量最大，放最后。
+**优先级建议**：Slice C 剩余把 P0 #5 画句号，比账单优先。1-2 天完成，不会拖 P0 节奏。
 
 ## 卡住的问题
 
@@ -116,3 +112,4 @@ P0 #5 薪资系统（预计 2 周，核心难点）。开工前**必读**：
 - 2026-04-23：完成 P0 #2 工艺字典 + 产品字典。10 个 feature/fix commits，+100 单测（累计 249），Codex 9 轮 review。Round 24 统一修了三份字典的 "编辑页双 isActive 控件" 和 "create 后停留 /new" 两个通病。
 - 2026-04-23：完成 P0 #3 工单核心（E-lean）。21 commits，+151 单测（累计 400），Codex rounds 25–36 共 9 轮。E-full（款式级编辑）延期到 P1。OSS 直传脚手架、打印 + PDF 双通道、工单编辑 + 急单 + OrderLog diff 全部落地。
 - 2026-04-23：完成 P0 #4 生产流程。9 commits，+107 单测（累计 507），Codex rounds 37–42 共 6 轮。排产 + 师傅报工 + 薪资算法纯函数 + 外协单全部落地。级联的并发正确性一来就被 round 39 打中，cascade 锁内 fresh-read 补上；严格 `YYYY-MM-DD` 日期解析避免 JS Date 的滚动坑。
+- 2026-04-24：完成 P0 #5 薪资系统 4/5 切片。15 commits，+119 单测（累计 626），Codex rounds 43–47 共 5 轮。师傅日薪 + 客服周期 / 提成 + 老板总览页 + 时薪工纯函数全部落地。时薪工的 DB / UI / cron 留到下一 session。关键修复：已发放行拒绝重算（round 43 / P0）；CS accumulate-vs-settle race 最后切到 per-CS-user advisory lock（round 46 / P0）；完整 `salaryRuleSnapshot` on CustomerServiceCommission（round 45 / P1 + migration）。

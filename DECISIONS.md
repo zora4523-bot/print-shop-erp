@@ -157,3 +157,39 @@
 - **理由**：SPEC §3.2 文字上暗示"外协回货后 → 工单可排产"的串行依赖，但业主实际场景里是"内部任务和外协并行跑，回货和完工各自记账"。强制串行化会让 UI 变复杂（需要在 foreman 视图里阻塞排产按钮、做二次确认），MVP 不值得。Slice C 做到"可录入、可标记回货、可取消"就足够覆盖老板日常看板需求。
 - **影响**：`lib/outsource.ts` 所有函数都是单表操作，无 tx、无 advisory lock（跨行不变量不存在）；`lib/auth/schemas.ts` 新增的 `optionalDateField` 用严格 `YYYY-MM-DD` 正则 + UTC 回环校验拒绝 `2024-02-31` 之类的日历非法日期（Codex round 41）。如果业主将来希望把外协 RECEIVED 作为某个状态转换的前置条件，加一条 `WHERE status = 'RECEIVED'` 的 gate 即可，不影响现有数据。
 - **相关文档**：`lib/outsource.ts`、`lib/outsource/status-machine.ts`、`lib/auth/schemas.ts` `parseStrictYmd`、SPEC §3.2 / §4.3、Codex round 41。
+
+---
+
+## 2026-04-24：已发放薪资记录拒绝重算（finance-of-record 守卫）
+
+- **决策**：`DailyWorkerSalary` / `HourlyWorkerPayroll`（以及所有未来同构的薪资结果表）一旦 `isPaid=true`，重算流程一律抛错 `DailySalaryError`/同类；owner 必须先点&ldquo;撤销发放&rdquo;才能触发重算，然后重新标记已发。`CustomerServiceCommission` 同理以 `isFullyPaid` 作为 gate。
+- **理由**：薪资记录在师傅 / 客服签收之后就是 finance-of-record。Codex round 43 指出当时 `computeDailyWorkerSalary` 的 upsert `update` 分支虽然没写 isPaid，但仍会用新规则 / 新汇总覆盖 baseSalary / actualSalary / salaryRuleSnapshot，历史可能被悄悄改写。拒绝重算 + 要求显式撤销是唯一能让审计链路保持可见的做法。
+- **影响**：`lib/salary/daily.ts` 在 upsert 前先 `findUnique` 读 isPaid；`CustomerServiceCommission.salaryRuleSnapshot` 写在 settle 时一次定版后就不再覆盖（配合 migration `20260424015000_cs_commission_snapshot`）。Slice C 时薪工实现时沿用同规则。
+- **相关文档**：`lib/salary/daily.ts` `computeDailyWorkerSalary`、Codex round 43 / P0、CLAUDE.md §4.4。
+
+---
+
+## 2026-04-24：客服业绩流的并发序列化 — 锁 CS user 不锁 period
+
+- **决策**：`accumulateCsSales`（每笔账单付款累加业绩）和 `settleCsPeriod`（周期结算）之间的并发正确性通过 `pg_advisory_xact_lock(hashtext('print-shop-erp:cs-user:<csUserId>'))` 序列化——锁**以客服 id 为键**，不是 period id。
+- **理由**：per-period 锁解不了"找 period → 拿锁"之间的竞争：accumulate 必须先查当前 IN_PROGRESS period 才能拿到 period id 去加锁，而两次读之间 settle 可能已经把这个 period 切到 SETTLED，accumulate 拿到锁后仍会向已 SETTLED 的 period 累加 totalSales，导致 `SalaryPeriod.totalSales != CustomerServiceCommission.totalSales`（Codex rounds 45 P0 → 46 P0）。锁 CS user 让两个流程都能在读 period **之前**拿到锁，critical section 内 period 状态是稳定的。
+- **影响**：`lib/salary/cs.ts csUserLockKey` 命名空间；`settleCsPeriod` 先做 `findUnique select csUserId`（ID 不可变，不 race），再拿锁，再全读；`accumulateCsSales` 直接用传入的 csUserId 拿锁。P0 #6 账单 mark-paid 调 `accumulateCsSales` 时会自动走这个保护。未来同类型的&ldquo;用户+当前活跃记录&rdquo;模型（例如新的销售周期 / 会员累计）可以按同款范式。
+- **相关文档**：`lib/salary/cs.ts csUserLockKey`、Codex rounds 45-47、`lib/production.ts orderCascadeLockKey` 的&ldquo;级联锁命名&rdquo;先例。
+
+---
+
+## 2026-04-24：CS 提成规则全快照（CustomerServiceCommission.salaryRuleSnapshot）
+
+- **决策**：`settleCsPeriod` 在结算时把完整的 `{ tiers: CS_TIERS规则全量, monthlyBase, durationMonths, activeAtSettle: { monthlyBase, durationMonths } }` 写入 `CustomerServiceCommission.salaryRuleSnapshot` Json 列（migration `20260424015000_cs_commission_snapshot`）。单独的 `tierRate` 列已经能复算提成金额，但回答不了&ldquo;2026-Q1 时 tier 5 的档位是什么&rdquo;这种审计问题。
+- **理由**：Codex round 45 P1 指出只存 `tierRate` 等于&ldquo;金额可复算但不可审计&rdquo;。tier 表改了之后，月报 / 年审 / 劳资纠纷排查都要回看当时规则，不存全量就只能靠 SalaryRule 历史版本拼回——而 SalaryRule 的版本化是 effectiveFrom/To 区间，改规则不一定会落一条新行。直接在 commission 上冻结快照是最便宜、最直接的审计手段。
+- **影响**：所有 `CustomerServiceCommission` 写入都附带 snapshot；读侧的前端目前不展示（Slice D 只聚合金额），但审计需要时可以按 id 读出完整规则快照。P0 #5 Slice C 的 `HourlyWorkerPayroll` 沿用同样的冻结策略（schema 已有 `salaryRuleSnapshot Json` 列）。
+- **相关文档**：`lib/salary/cs.ts settleCsPeriod`、`prisma/migrations/20260424015000_cs_commission_snapshot/migration.sql`、CLAUDE.md §4.4、Codex round 45。
+
+---
+
+## 2026-04-24：Cron 端点统一 shared-secret Bearer，CRON_SECRET 未设置时 503
+
+- **决策**：所有 `/api/cron/*` 端点采用 `Authorization: Bearer $CRON_SECRET` 鉴权。当 `CRON_SECRET` 环境变量**未设置**时，端点返回 **503 Not Configured**（不是 401/200）；设置后未匹配才是 401。目前已有 `/api/cron/daily-salary`、`/api/cron/cs-settle`，Slice C 的 `/api/cron/hourly-payroll` 会沿用。
+- **理由**：生产环境若把 CRON_SECRET 忘了设置，401 会让 cron 无声失败（pg_cron 不一定告警），200 会让 endpoint 变开放。503 是&ldquo;明确拒绝服务&rdquo;——监控 / 告警会立即发出，不会静默数据。
+- **影响**：部署 checklist 必须加&ldquo;设置 CRON_SECRET 环境变量&rdquo;。CI 测试无需配置此变量——端点未被触发时不会检查。pg_cron 或外部调度器调用时，`curl -H "Authorization: Bearer $CRON_SECRET"` 带上即可。
+- **相关文档**：`app/api/cron/daily-salary/route.ts`、`app/api/cron/cs-settle/route.ts`、HANDOFF.md 约束提醒。

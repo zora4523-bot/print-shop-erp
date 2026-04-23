@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**P0 阶段 4/9：生产流程完成，准备开 P0 #5 薪资系统**
+**P0 阶段 5/9：薪资系统（A/B/D + Slice C 纯函数）完成，剩余 Slice C 的考勤表 + 聚合 UI**
 
 ## 最后更新
 
@@ -67,21 +67,39 @@
     - 独立记录不阻塞 Order 级联（DECISIONS 2026-04-23）
     - `optionalDateField` 改严格 `YYYY-MM-DD` 解析（round 41 / P1，拒绝 `2024-02-31` 滚动）
     - `/foreman/outsource` 列表 / new?orderId / detail；工单详情页 foreman 可见"外协"入口
+- [ ] **P0 #5 薪资系统（4/5 切片完成）**（commits `da80e1f → 2b7ba69`, +119 单测 = 626）
+  - [x] **Slice A — 师傅日薪**（rounds 43/44 clean）
+    - `lib/salary/daily.ts computeDailyWorkerSalary`：每日 24:00 汇总 `ProductionTask.pieceworkAmount`，max(汇总, dailyBase)，upsert 按 `@@unique([workerId, date])`；Shanghai 日界严格 `parseStrictYmd`
+    - **已发放行拒绝重算**（round 43 / P0）：`isPaid=true` 抛错
+    - `/owner/salary/daily` 列表 + FilterBar（date / paid / workerId）+ 3 张统计卡 + per-row 发放 toggle
+    - `POST /api/cron/daily-salary` shared-secret Bearer
+  - [x] **Slice B — 客服周期 + 提成**（rounds 45/46/47 clean，P3 hashtext 残留)
+    - `calcCsCommission` FLAT 模式 + `computePeriodEnd`（Jan 31+1 月 → Feb 28 钳制）
+    - `startCsPeriod` 支持 initialSales / durationMonths / monthlyBase override（SPEC §5.5 历史导入）+ 区间 overlap 守卫
+    - `settleCsPeriod`：tx + **per-CS-user advisory lock**（防 accumulate-vs-settle race，round 46 / P0）+ 完整 `salaryRuleSnapshot`（round 45 / P1）+ 自动开启下一周期
+    - `settleReadyCsPeriods` per-period try/catch（round 45 / P1）
+    - `/owner/salary/cs` 列表 + new + detail + MarkCsPaidForm；`POST /api/cron/cs-settle`
+    - **Migration**：`20260424015000_cs_commission_snapshot` 加 `salaryRuleSnapshot Json?`
+  - [x] **Slice D — 老板薪资总览**
+    - `/owner/salary` 索引：今日日薪 / 累计未发 / 客服活跃 / 待结算 / 未发提成合计
+  - [x] **Slice C 纯函数 — `calcHourlyPayroll`**（一次过）
+    - PACKER / CLEANER / COOK 三态；COOK 月薪 + spareHours × PACKER 时薪
+    - SPEC §7.4 176+12×1.0×11=2068；COOK 3000+20×11=3220
+  - [ ] **Slice C 剩余：`Attendance` schema + 外层 lib + 车间主管录入 UI + 老板月结列表**（本次 session 未做）
 
 ## 进行中
 
-（无，准备开 P0 #5）
+P0 #5 Slice C 剩余（考勤 + 月结汇总 UI）或 P0 #6。
 
 ## 下一步
 
 按 README "开发路径（P0 优先级）" 顺序推进：
 
-5. **P0-5 薪资系统**（预计 2 周，核心难点）— **下一个**
-   - 客服周期结算（4 月周期，业绩档位 × rate + 2000 底薪 / 月，SPEC §5.3）
-   - 师傅日薪汇总（`DailyWorkerSalary`：每日 24:00 汇总当日完成的 `ProductionTask.pieceworkAmount`，取 max(汇总, dailyBase)，SPEC §5.2 / §7.1）
-   - 时薪工月薪（`HourlyWorkerPayroll`：PACKER/CLEANER 按时薪、COOK 按月薪 + spareHours 打包时薪，SPEC §5.4 / §7.4）
-   - 历史业绩导入（SPEC §5.5）
-   - 老板薪资审批 / 发放标记 UI（owner dashboard 雏形）
+5. **P0-5 Slice C 剩余**（当前优先级，预计 1-2 天）
+   - Schema 迁移：新增 `Attendance` 模型（workerId / date / normalHours / otHours / spareHours / createdById）
+   - `lib/attendance.ts` CRUD + 车间主管录入 UI `/foreman/attendance`
+   - `lib/salary/hourly-aggregate.ts` 月汇总 + Prisma 层（读月考勤 + 活跃规则 + 写 `HourlyWorkerPayroll` + `salaryRuleSnapshot`）
+   - 老板 UI `/owner/salary/hourly` 月结列表 + mark-paid
 6. **P0-6 应收账单**（3 天）
 7. **P0-7 CDR 汇总**（2 天）
 8. **P0-8 推送 + Dashboard**（1 周）
