@@ -57,9 +57,19 @@ export async function GET(_req: Request, ctx: Params) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(order.orderNo)}.pdf"`,
+      'Content-Disposition': buildAttachmentHeader(`${order.orderNo}.pdf`),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
     },
   });
+}
+
+// RFC 5987 / 6266: ship an ASCII fallback for legacy clients and the
+// UTF-8 spelling via filename*= for anything modern. orderNo is ASCII
+// today (YYYYMMDD-XXXX) but the factory name prefix might leak into
+// future naming, and the extra header is cheap.
+function buildAttachmentHeader(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replace(/['()]/g, escape);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }

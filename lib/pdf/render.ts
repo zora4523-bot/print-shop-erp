@@ -33,8 +33,8 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
       ...opts.launch,
     }));
 
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     // `networkidle0` is required so OSS-hosted design thumbnails have
     // finished loading before we snapshot. Inline SVG (QR codes)
     // doesn't trigger network activity, but image tags do.
@@ -47,6 +47,11 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     });
     return Buffer.from(pdf);
   } finally {
+    // Always dispose of the page — when the caller shares a browser,
+    // closing only at browser-shutdown would accumulate pages across
+    // renders. Swallow errors so a page-close failure doesn't mask
+    // the original thrown error on the PDF path.
+    await page.close().catch(() => undefined);
     // Only close the browser we launched. A caller-provided browser
     // is someone else's to dispose of (e.g. tests sharing one).
     if (!opts.browser) {
