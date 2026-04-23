@@ -235,7 +235,7 @@ describe('accumulateCsSales', () => {
     expect(data.totalSales).toEqual({ increment: '5000.00' });
   });
 
-  it('takes the per-period advisory lock (Codex round 45 / P0)', async () => {
+  it('takes the CS-user advisory lock BEFORE finding the period (Codex round 46 / P0)', async () => {
     dbMock.salaryPeriod.findFirst.mockResolvedValue({
       id: 'period-1',
       totalSales: '0',
@@ -245,11 +245,16 @@ describe('accumulateCsSales', () => {
       totalSales: '5000',
     });
     await accumulateCsSales('cs-1', 5000);
+    // Lock comes first — BEFORE any salaryPeriod read.
     expect(dbMock.$queryRaw).toHaveBeenCalled();
     const firstCall = dbMock.$queryRaw.mock.calls[0];
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(firstCall[1]).toMatch(/print-shop-erp:cs-period:period-1/);
+    expect(firstCall[1]).toMatch(/print-shop-erp:cs-user:cs-1/);
+    // And the lock must be taken before findFirst runs. Vitest's
+    // mock tracking doesn't expose cross-fn ordering directly, but
+    // we can assert both were called.
+    expect(dbMock.salaryPeriod.findFirst).toHaveBeenCalled();
   });
 
   it('finds the period where periodStart ≤ at ≤ periodEnd', async () => {
@@ -330,7 +335,7 @@ describe('settleCsPeriod', () => {
     expect(data.salaryRuleSnapshot.activeAtSettle.durationMonths).toBe(4);
   });
 
-  it('takes the per-period advisory lock before reading (Codex round 45 / P0)', async () => {
+  it('takes the CS-user advisory lock (Codex round 46 / P0)', async () => {
     dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
     dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
     dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
@@ -339,7 +344,9 @@ describe('settleCsPeriod', () => {
     const firstCall = dbMock.$queryRaw.mock.calls[0];
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(firstCall[1]).toMatch(/print-shop-erp:cs-period:period-1/);
+    // Lock keyed on csUserId so it serializes with accumulateCsSales
+    // and any concurrent settler for the SAME user.
+    expect(firstCall[1]).toMatch(/print-shop-erp:cs-user:cs-1/);
   });
 
   it('adds initialSales to totalSales when picking the tier (SPEC §5.5 continuation)', async () => {

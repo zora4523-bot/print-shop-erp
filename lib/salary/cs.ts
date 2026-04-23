@@ -21,12 +21,19 @@ import {
   InvalidCsPeriodTransitionError,
 } from './cs/status-machine';
 
-// Advisory-lock namespace: one lock per CS period protects both the
-// settle flow and the per-bill accumulate flow from stepping on each
-// other (Codex round 45 / P0). Callers MUST take this lock BEFORE
-// reading totalSales inside whatever tx they're running.
-function csPeriodLockKey(periodId: string): string {
-  return `print-shop-erp:cs-period:${periodId}`;
+// Advisory-lock namespace: one lock per CS USER (not per period)
+// protects both the settle flow and the per-bill accumulate flow
+// from stepping on each other (Codex round 46 / P0).
+//
+// Why user-level not period-level: accumulateCsSales has to FIND the
+// period before it can lock it. A concurrent settler running between
+// that find and the lock acquisition would flip the period to
+// SETTLED, leaving accumulate to increment a now-settled row. Locking
+// on the CS user (whose id is the same for find + increment) closes
+// that window — the accumulate flow takes the lock FIRST, then
+// searches for the active period inside the critical section.
+function csUserLockKey(csUserId: string): string {
+  return `print-shop-erp:cs-user:${csUserId}`;
 }
 
 // Minimal tx surface for rule reads — we need to go through `tx`
@@ -262,6 +269,15 @@ export async function accumulateCsSales(
       };
     };
 
+    // Lock FIRST (Codex round 46 / P0). If we searched before
+    // locking, a concurrent settler could flip our target period to
+    // SETTLED in the gap. Taking the user-scope lock first guarantees
+    // that within the critical section, period state is stable —
+    // either IN_PROGRESS or the settler's auto-created next period.
+    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+      csUserId,
+    )}))`;
+
     const period = await txc.salaryPeriod.findFirst({
       where: {
         csUserId,
@@ -272,13 +288,6 @@ export async function accumulateCsSales(
       select: { id: true, totalSales: true },
     });
     if (!period) return null;
-
-    // Serialize against settleCsPeriod for the same period — otherwise
-    // an increment landing mid-settle leaves commission.totalSales !=
-    // period.totalSales (Codex round 45 / P0).
-    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csPeriodLockKey(
-      period.id,
-    )}))`;
 
     const inc = new Decimal(amount as Decimal.Value);
     const updated = await txc.salaryPeriod.update({
@@ -336,12 +345,19 @@ export async function settleCsPeriod(
       };
     };
 
-    // Serialize against concurrent settlers AND accumulateCsSales on
-    // the same period (Codex round 45 / P0, P1). Any contender blocks
-    // here; when we proceed, we re-read totalSales so the commission
-    // snapshot is consistent with DB state.
-    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csPeriodLockKey(
-      periodId,
+    // First look up csUserId (un-locked but ID is immutable, so no
+    // race). Then acquire the user-scope lock BEFORE re-reading the
+    // period in full, so accumulateCsSales and any concurrent
+    // settler for the SAME user all serialize through it (Codex
+    // round 46 / P0).
+    const periodLight = await txc.salaryPeriod.findUnique({
+      where: { id: periodId },
+      select: { csUserId: true },
+    });
+    if (!periodLight) throw new CsPeriodError('周期不存在');
+
+    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+      periodLight.csUserId,
     )}))`;
 
     const period = await txc.salaryPeriod.findUnique({
