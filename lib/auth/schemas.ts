@@ -546,3 +546,50 @@ export const scheduleOrderSchema = z.object({
 });
 
 export type ScheduleOrderInput = z.infer<typeof scheduleOrderSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Worker task report (SPEC §3.3)
+// ─────────────────────────────────────────────────────────────────────
+
+// Shared coercion for the three count fields. Accepts either a number
+// (programmatic caller) or the string that FormData hands us; null /
+// empty / blank string → 0 so a worker who doesn't have any rework
+// pieces can leave the field blank.
+const taskCountField = (label: string) =>
+  z.preprocess(
+    (v) => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const trimmed = v.trim();
+        if (trimmed === '') return 0;
+        // Reject decimals, signs, scientific notation — counts are
+        // non-negative integers.
+        if (!/^\d+$/.test(trimmed)) return Number.NaN;
+        const n = Number.parseInt(trimmed, 10);
+        return Number.isSafeInteger(n) ? n : Number.NaN;
+      }
+      if (v === null || v === undefined) return 0;
+      return Number.NaN;
+    },
+    z
+      .number()
+      .int(`${label}必须是整数`)
+      .min(0, `${label}不能为负`)
+      .max(10_000_000, `${label}超出合理范围`),
+  );
+
+export const reportTaskSchema = z
+  .object({
+    completedQty: taskCountField('合格数'),
+    defectQty: taskCountField('不良数'),
+    reworkQty: taskCountField('返工数'),
+  })
+  .refine(
+    (v) => v.completedQty + v.defectQty + v.reworkQty > 0,
+    {
+      message: '至少报一件（合格 / 不良 / 返工 三者之和 > 0）',
+      path: ['completedQty'],
+    },
+  );
+
+export type ReportTaskInput = z.infer<typeof reportTaskSchema>;

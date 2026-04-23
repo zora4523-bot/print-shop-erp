@@ -7,16 +7,28 @@ const {
   productionMock,
   revalidatePathMock,
   MockSchedulingError,
+  MockReportError,
   MockOrderInvariantError,
   MockInvalidOrderTransitionError,
+  MockInvalidTaskTransitionError,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
-  productionMock: { scheduleOrder: vi.fn() },
+  productionMock: {
+    scheduleOrder: vi.fn(),
+    beginTask: vi.fn(),
+    reportTask: vi.fn(),
+  },
   revalidatePathMock: vi.fn(),
   MockSchedulingError: class extends Error {
     constructor(msg: string) {
       super(msg);
       this.name = 'SchedulingError';
+    }
+  },
+  MockReportError: class extends Error {
+    constructor(msg: string) {
+      super(msg);
+      this.name = 'ReportError';
     }
   },
   MockOrderInvariantError: class extends Error {
@@ -35,6 +47,12 @@ const {
       this.to = to;
     }
   },
+  MockInvalidTaskTransitionError: class extends Error {
+    constructor(from: string, to: string) {
+      super(`生产任务状态不能从 ${from} 直接切到 ${to}`);
+      this.name = 'InvalidTaskTransitionError';
+    }
+  },
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -42,7 +60,11 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/production', () => ({
   scheduleOrder: productionMock.scheduleOrder,
+  beginTask: productionMock.beginTask,
+  reportTask: productionMock.reportTask,
   SchedulingError: MockSchedulingError,
+  ReportError: MockReportError,
+  InvalidTaskTransitionError: MockInvalidTaskTransitionError,
 }));
 vi.mock('@/lib/order', () => ({
   OrderInvariantError: MockOrderInvariantError,
@@ -50,7 +72,26 @@ vi.mock('@/lib/order', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
-import { scheduleOrderAction } from '../production';
+import {
+  scheduleOrderAction,
+  beginTaskAction,
+  reportTaskAction,
+} from '../production';
+
+const workerActor = {
+  id: 'worker-1',
+  username: 'w1',
+  displayName: '张师傅',
+  role: Role.WORKER,
+  workerType: null,
+  machineType: null,
+};
+
+const fd = (data: Record<string, string>): FormData => {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(data)) f.set(k, v);
+  return f;
+};
 
 const foremanActor = {
   id: 'foreman-1',
@@ -64,6 +105,8 @@ const foremanActor = {
 beforeEach(() => {
   permissionsMock.requirePermission.mockReset();
   productionMock.scheduleOrder.mockReset();
+  productionMock.beginTask.mockReset();
+  productionMock.reportTask.mockReset();
   revalidatePathMock.mockReset();
 });
 
@@ -166,5 +209,191 @@ describe('scheduleOrderAction', () => {
     await scheduleOrderAction(null, validPayload);
     const args = productionMock.scheduleOrder.mock.calls[0];
     expect(args[1]).toMatchObject({ id: 'foreman-1', role: Role.FOREMAN });
+  });
+});
+
+describe('beginTaskAction', () => {
+  it("first-line requirePermission('task:report')", async () => {
+    permissionsMock.requirePermission.mockImplementation(async () => {
+      throw new UnauthorizedError('未登录');
+    });
+    await expect(beginTaskAction('task-1')).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:report');
+    expect(productionMock.beginTask).not.toHaveBeenCalled();
+  });
+
+  it('maps ReportError → error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.beginTask.mockRejectedValueOnce(
+      new MockReportError('只能开始分配给自己的任务'),
+    );
+    const r = await beginTaskAction('task-1');
+    expect(r.status).toBe('error');
+  });
+
+  it('maps InvalidTaskTransitionError → error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.beginTask.mockRejectedValueOnce(
+      new MockInvalidTaskTransitionError('COMPLETED', 'IN_PROGRESS'),
+    );
+    const r = await beginTaskAction('task-1');
+    expect(r.status).toBe('error');
+  });
+
+  it('revalidates + returns success', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.beginTask.mockResolvedValue({
+      taskId: 'task-1',
+      status: 'IN_PROGRESS',
+      orderStatusChanged: true,
+    });
+    const r = await beginTaskAction('task-1');
+    expect(r.status).toBe('success');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks/task-1');
+  });
+});
+
+describe('reportTaskAction', () => {
+  it("first-line requirePermission('task:report')", async () => {
+    permissionsMock.requirePermission.mockImplementation(async () => {
+      throw new UnauthorizedError('未登录');
+    });
+    await expect(
+      reportTaskAction('task-1', null, fd({ completedQty: '1' })),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(productionMock.reportTask).not.toHaveBeenCalled();
+  });
+
+  it('coerces FormData strings to ints and forwards', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockResolvedValue({
+      taskId: 'task-1',
+      status: 'COMPLETED',
+      pieceworkAmount: '40.00',
+      boardCount: 1,
+      pressCount: 5000,
+      orderCompleted: false,
+    });
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '4900', defectQty: '50', reworkQty: '50' }),
+    );
+    expect(r.status).toBe('success');
+    expect(productionMock.reportTask).toHaveBeenCalledWith(
+      'task-1',
+      { completedQty: 4900, defectQty: 50, reworkQty: 50 },
+      expect.objectContaining({ id: 'worker-1', role: Role.WORKER }),
+    );
+  });
+
+  it('treats empty defectQty / reworkQty as 0', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockResolvedValue({
+      taskId: 'task-1',
+      status: 'COMPLETED',
+      pieceworkAmount: '40.00',
+      boardCount: 1,
+      pressCount: 5000,
+      orderCompleted: false,
+    });
+    await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '5000', defectQty: '', reworkQty: '' }),
+    );
+    expect(productionMock.reportTask.mock.calls[0][1]).toEqual({
+      completedQty: 5000,
+      defectQty: 0,
+      reworkQty: 0,
+    });
+  });
+
+  it('rejects non-numeric completedQty as invalid', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: 'abc', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.completedQty).toBeDefined();
+    }
+    expect(productionMock.reportTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects negative counts as invalid', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '-5', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+  });
+
+  it('rejects all-zero submission (must have produced at least 1)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '0', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      // The superRefine message attaches to completedQty path.
+      expect(r.fieldErrors.completedQty).toContain(
+        '至少报一件（合格 / 不良 / 返工 三者之和 > 0）',
+      );
+    }
+  });
+
+  it('rejects decimal completedQty (pieces are integer)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '4.5', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+  });
+
+  it('maps ReportError → error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockRejectedValueOnce(
+      new MockReportError('无当前生效的 HAND_PRESS 薪资规则'),
+    );
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '5000', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('error');
+    if (r.status === 'error') {
+      expect(r.message).toMatch(/薪资规则/);
+    }
+  });
+
+  it('revalidates both routes on success', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockResolvedValue({
+      taskId: 'task-1',
+      status: 'COMPLETED',
+      pieceworkAmount: '40.00',
+      boardCount: 1,
+      pressCount: 5000,
+      orderCompleted: true,
+    });
+    await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '5000', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks/task-1');
   });
 });
