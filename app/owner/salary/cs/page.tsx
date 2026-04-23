@@ -1,0 +1,116 @@
+import Link from 'next/link';
+import { listCsPeriods } from '@/lib/salary/cs';
+import { SalaryPeriodStatus } from '@/generated/prisma/enums';
+import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
+import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
+
+export const metadata = { title: '客服周期与提成' };
+
+type PageProps = {
+  searchParams: Promise<{ status?: string; csUserId?: string }>;
+};
+
+function formatDate(d: Date): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+export default async function CsSalaryListPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const status =
+    sp.status === 'IN_PROGRESS'
+      ? SalaryPeriodStatus.IN_PROGRESS
+      : sp.status === 'SETTLED'
+        ? SalaryPeriodStatus.SETTLED
+        : undefined;
+  const periods = await listCsPeriods({
+    status,
+    csUserId: sp.csUserId,
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">客服周期与提成</h1>
+          <p className="text-sm text-muted-foreground">
+            每位客服一条活跃周期（默认 4 个月）。周期到期后扫档位 → 生成提成记录 → 自动开启下一个。
+          </p>
+        </div>
+        <Link
+          href="/owner/salary/cs/new"
+          className={buttonVariants({ size: 'sm' })}
+        >
+          + 新建周期
+        </Link>
+      </div>
+
+      <section className="rounded-xl border bg-card p-4 shadow-sm">
+        <SettleReadyCsButton />
+      </section>
+
+      {periods.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
+          暂无周期数据。先新建一个周期。
+        </div>
+      ) : (
+        <div className="rounded-xl border bg-card shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 text-left">客服</th>
+                <th className="px-4 py-2 text-left">周期</th>
+                <th className="px-4 py-2 text-center">月数</th>
+                <th className="px-4 py-2 text-right">期初业绩</th>
+                <th className="px-4 py-2 text-right">本期累计</th>
+                <th className="px-4 py-2 text-right">月底薪</th>
+                <th className="px-4 py-2 text-center">状态</th>
+                <th className="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {periods.map((p) => (
+                <tr key={p.id}>
+                  <td className="px-4 py-3">{p.csUser.displayName}</td>
+                  <td className="px-4 py-3 text-xs font-mono">
+                    {formatDate(p.periodStart)} ~ {formatDate(p.periodEnd)}
+                  </td>
+                  <td className="px-4 py-3 text-center">{p.durationMonths}</td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    {String(p.initialSales)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {String(p.totalSales)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">
+                    {String(p.monthlyBase)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {p.status === SalaryPeriodStatus.SETTLED ? (
+                      <Badge>已结算</Badge>
+                    ) : (
+                      <Badge variant="outline">进行中</Badge>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      href={`/owner/salary/cs/${p.id}`}
+                      className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                    >
+                      详情
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

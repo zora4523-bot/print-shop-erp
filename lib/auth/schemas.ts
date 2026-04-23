@@ -740,3 +740,74 @@ export const markDailySalaryPaidSchema = z.object({
 });
 
 export type MarkDailySalaryPaidInput = z.infer<typeof markDailySalaryPaidSchema>;
+
+// Reusable strict-calendar YYYY-MM-DD field (covers rule-key resolution
+// + calendar validity in one helper, like recomputeDailySalarySchema).
+const ymdField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .superRefine((val, ctx) => {
+      if (!YMD_RE.test(val)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${label}格式非法（应为 YYYY-MM-DD）`,
+        });
+        return;
+      }
+      if (!parseStrictYmd(val)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `${label}不是合法日历日期`,
+        });
+      }
+    });
+
+const nonNegativeDecimal = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === '') return undefined;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (t === '') return undefined;
+      if (!/^\d{1,10}(\.\d{1,2})?$/.test(t)) return Number.NaN;
+      return t;
+    }
+    return Number.NaN;
+  },
+  z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((v) =>
+      v === undefined || v === '' ? undefined : String(v),
+    ),
+);
+
+export const startCsPeriodSchema = z.object({
+  csUserId: safeId('客服 id'),
+  periodStart: ymdField('周期起始日期'),
+  durationMonths: z.preprocess(
+    (v) => {
+      if (v === undefined || v === null || v === '') return undefined;
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (t === '') return undefined;
+        if (!/^\d+$/.test(t)) return Number.NaN;
+        return Number.parseInt(t, 10);
+      }
+      return Number.NaN;
+    },
+    z.number().int('周期月数必须是整数').min(1, '周期月数必须 ≥ 1').max(24, '周期月数超出合理范围').optional(),
+  ),
+  initialSales: nonNegativeDecimal,
+  monthlyBase: nonNegativeDecimal,
+});
+
+export type StartCsPeriodInput = z.infer<typeof startCsPeriodSchema>;
+
+export const markCsCommissionPaidSchema = z.object({
+  isPaid: formBoolean,
+});
+
+export type MarkCsCommissionPaidInput = z.infer<typeof markCsCommissionPaidSchema>;
