@@ -356,6 +356,10 @@ type TaskTxClient = {
     }) => Promise<Array<{ id: string; status: TaskStatus }>>;
   };
   order: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{ id: string; status: OrderStatus } | null>;
     update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<{
       id: string;
       status: OrderStatus;
@@ -449,15 +453,34 @@ export async function beginTask(
     // SPEC §3.2 implies this transition when production actually
     // starts. Guard with a second advisory lock so two workers
     // clicking "开始" simultaneously on two different tasks of the
-    // same order don't both try to transition (which the status
-    // machine would catch, but the lock avoids the wasted round trip).
+    // same order don't both try to transition.
     let orderStatusChanged = false;
     const { order } = task.orderItem;
     if (order.status === OrderStatus.SCHEDULING) {
       await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
         order.id,
       )}))`;
-      transitionOrder(order.status, OrderStatus.IN_PRODUCTION);
+      // Re-read INSIDE the lock. The snapshot from the initial task
+      // fetch can be stale by the time we get here — a concurrent
+      // beginTask on a sibling task may have already transitioned the
+      // order, and the status-machine would then throw a spurious
+      // error when we try to re-run the same transition (Codex round
+      // 39 / P2).
+      const fresh = await txClient.order.findUnique({
+        where: { id: order.id },
+        select: { id: true, status: true },
+      });
+      if (!fresh) throw new ReportError('工单不存在');
+      if (fresh.status !== OrderStatus.SCHEDULING) {
+        // Another worker's beginTask already moved the order. Nothing
+        // for us to do on the cascade side.
+        return {
+          taskId: task.id,
+          status: TaskStatus.IN_PROGRESS,
+          orderStatusChanged: false,
+        };
+      }
+      transitionOrder(fresh.status, OrderStatus.IN_PRODUCTION);
       await txClient.order.update({
         where: { id: order.id },
         data: { status: OrderStatus.IN_PRODUCTION },
@@ -612,28 +635,42 @@ export async function reportTask(
       activeSiblings.every((t) => t.status === TaskStatus.COMPLETED);
 
     let orderCompleted = false;
-    if (allCompleted && order.status === OrderStatus.IN_PRODUCTION) {
-      transitionOrder(order.status, OrderStatus.COMPLETED);
-      await txClient.order.update({
+    if (allCompleted) {
+      // Re-read Order.status INSIDE the cascade lock. The snapshot
+      // taken at the top of the tx can be stale: when two workers
+      // simultaneously finish the last two tasks, the first to take
+      // the cascade lock transitions order to COMPLETED; the second
+      // must notice that and skip (Codex round 39 / P1). Acting on
+      // the stale IN_PRODUCTION would write a duplicate
+      // STATUS_CHANGE log for a transition that already happened.
+      const fresh = await txClient.order.findUnique({
         where: { id: order.id },
-        data: { status: OrderStatus.COMPLETED, completedAt: now },
         select: { id: true, status: true },
       });
-      await txClient.orderLog.create({
-        data: {
-          orderId: order.id,
-          operatorId: actor.id,
-          action: 'STATUS_CHANGE',
-          changedFields: {
-            status: {
-              before: OrderStatus.IN_PRODUCTION,
-              after: OrderStatus.COMPLETED,
+      if (!fresh) throw new ReportError('工单不存在');
+      if (fresh.status === OrderStatus.IN_PRODUCTION) {
+        transitionOrder(fresh.status, OrderStatus.COMPLETED);
+        await txClient.order.update({
+          where: { id: order.id },
+          data: { status: OrderStatus.COMPLETED, completedAt: now },
+          select: { id: true, status: true },
+        });
+        await txClient.orderLog.create({
+          data: {
+            orderId: order.id,
+            operatorId: actor.id,
+            action: 'STATUS_CHANGE',
+            changedFields: {
+              status: {
+                before: OrderStatus.IN_PRODUCTION,
+                after: OrderStatus.COMPLETED,
+              },
             },
+            remark: '全部任务完工',
           },
-          remark: '全部任务完工',
-        },
-      });
-      orderCompleted = true;
+        });
+        orderCompleted = true;
+      }
     }
 
     return {

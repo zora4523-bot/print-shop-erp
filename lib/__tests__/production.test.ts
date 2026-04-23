@@ -8,7 +8,11 @@ import {
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
-    order: { findFirst: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+    order: {
+      findFirst: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
     craft: { findMany: ReturnType<typeof vi.fn> };
     user: { findMany: ReturnType<typeof vi.fn> };
     productionTask: {
@@ -22,7 +26,7 @@ const { dbMock } = vi.hoisted(() => {
     $queryRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
-    order: { findFirst: vi.fn(), update: vi.fn() },
+    order: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     craft: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
     productionTask: {
@@ -123,6 +127,7 @@ function fixtureWorker(id: string, overrides: Partial<{ isActive: boolean; role:
 
 beforeEach(() => {
   dbMock.order.findFirst.mockReset();
+  dbMock.order.findUnique.mockReset();
   dbMock.order.update.mockReset();
   dbMock.craft.findMany.mockReset();
   dbMock.user.findMany.mockReset();
@@ -563,6 +568,10 @@ describe('beginTask', () => {
       id: 'task-1',
       status: TaskStatus.IN_PROGRESS,
     });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+    });
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',
       status: OrderStatus.IN_PRODUCTION,
@@ -576,6 +585,10 @@ describe('beginTask', () => {
     dbMock.productionTask.update.mockResolvedValue({
       id: 'task-1',
       status: TaskStatus.IN_PROGRESS,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
     });
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',
@@ -596,16 +609,20 @@ describe('beginTask', () => {
       id: 'task-1',
       status: TaskStatus.IN_PROGRESS,
     });
+    // Fresh-read inside cascade lock confirms the order is still
+    // SCHEDULING, so cascade proceeds.
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+    });
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',
       status: OrderStatus.IN_PRODUCTION,
     });
     const r = await beginTask('task-1', workerActor);
     expect(r.orderStatusChanged).toBe(true);
-    // Order.update called with IN_PRODUCTION.
     const orderUpdate = dbMock.order.update.mock.calls[0][0];
     expect(orderUpdate.data.status).toBe(OrderStatus.IN_PRODUCTION);
-    // OrderLog entry for the status transition.
     const log = dbMock.orderLog.create.mock.calls[0][0].data as {
       action: string;
       changedFields: Record<string, { before: string; after: string }>;
@@ -615,6 +632,26 @@ describe('beginTask', () => {
       before: OrderStatus.SCHEDULING,
       after: OrderStatus.IN_PRODUCTION,
     });
+  });
+
+  it('beginTask fresh-read: skips cascade if a concurrent tx already transitioned the order (Codex round 39 / P2)', async () => {
+    // Initial snapshot sees SCHEDULING. After the cascade lock is
+    // acquired, the fresh read shows IN_PRODUCTION — another worker
+    // got here first. We must not re-emit the transition (which would
+    // write a duplicate STATUS_CHANGE log and break the status machine).
+    dbMock.productionTask.findUnique.mockResolvedValue(fixtureTask());
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.IN_PROGRESS,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
+    const r = await beginTask('task-1', workerActor);
+    expect(r.orderStatusChanged).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('does not cascade when order is already IN_PRODUCTION', async () => {
@@ -728,6 +765,7 @@ describe('reportTask', () => {
     dbMock.productionTask.findUnique.mockResolvedValue(
       fixtureTask({
         status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
         isDoubleSided: true,
         isDoubleColor: true,
       }),
@@ -740,6 +778,14 @@ describe('reportTask', () => {
     dbMock.productionTask.findMany.mockResolvedValue([
       { id: 'task-1', status: TaskStatus.COMPLETED },
     ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.COMPLETED,
+    });
 
     await reportTask(
       'task-1',
@@ -770,6 +816,11 @@ describe('reportTask', () => {
     dbMock.productionTask.findMany.mockResolvedValue([
       { id: 'task-1', status: TaskStatus.COMPLETED },
     ]);
+    // Fresh read confirms order still IN_PRODUCTION → cascade fires.
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',
       status: OrderStatus.COMPLETED,
@@ -779,6 +830,45 @@ describe('reportTask', () => {
     expect(r.orderCompleted).toBe(true);
     const orderUpdate = dbMock.order.update.mock.calls[0][0];
     expect(orderUpdate.data.status).toBe(OrderStatus.COMPLETED);
+  });
+
+  it('reportTask fresh-read: skips cascade when the order has already completed (Codex round 39 / P1)', async () => {
+    // Two workers finish simultaneously. First finisher transitioned
+    // the order to COMPLETED; the second tx lands inside the cascade
+    // lock and sees COMPLETED from the fresh read. No duplicate log.
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+      { id: 'task-2', status: TaskStatus.COMPLETED },
+    ]);
+    // The first finisher already transitioned this to COMPLETED.
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.COMPLETED,
+    });
+
+    const r = await reportTask('task-1', validInput, workerActor);
+    expect(r.orderCompleted).toBe(false);
+    // order.update called ONCE by the task's own update flow? No —
+    // order.update is only invoked for the cascade in this module.
+    // Confirm it wasn't called a second time for a redundant cascade.
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    // No redundant STATUS_CHANGE log.
+    const statusChangeLogs = dbMock.orderLog.create.mock.calls.filter(
+      (c) =>
+        (c[0] as { data: { action: string } }).data.action === 'STATUS_CHANGE',
+    );
+    expect(statusChangeLogs).toHaveLength(0);
   });
 
   it('skips cascade when other tasks are still PENDING/IN_PROGRESS', async () => {
@@ -819,6 +909,10 @@ describe('reportTask', () => {
       { id: 'task-1', status: TaskStatus.COMPLETED },
       { id: 'task-2', status: TaskStatus.CANCELLED },
     ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',
       status: OrderStatus.COMPLETED,
