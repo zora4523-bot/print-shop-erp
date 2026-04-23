@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { OrderStatus, Role } from '../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
@@ -5,6 +6,7 @@ import { getOrderDetail } from '@/lib/order';
 import { isTerminalOrderStatus } from '@/lib/order/status-machine';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
@@ -55,7 +57,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
             · 创建于 {formatDateTime(order.createdAt)}
           </p>
         </div>
-        <OrderStatusBadge status={order.status} />
+        <div className="flex items-center gap-3">
+          <OrderStatusBadge status={order.status} />
+          <Link
+            href={`/print/orders/${order.id}?autoprint=1`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            打印
+          </Link>
+          <Link
+            href={`/api/orders/${order.id}/pdf`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            下载 PDF
+          </Link>
+        </div>
       </div>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
