@@ -33,23 +33,37 @@ export function OutsourceActions({ id, canReceive, canCancel }: Props) {
       {canReceive ? (
         <form
           action={(fd) => startReceive(() => receiveAction(fd))}
-          className="flex items-center gap-3"
+          className="space-y-2"
         >
-          <label className="text-sm text-muted-foreground">
-            回货日期（可留空，默认为今天）
-          </label>
-          <input
-            type="date"
-            name="actualDate"
-            className="rounded-md border bg-background px-3 py-1 text-sm"
-          />
-          <Button type="submit" disabled={receivePending}>
-            {receivePending ? '处理中…' : '已回货'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-muted-foreground">
+              回货日期（可留空，默认为今天）
+            </label>
+            <input
+              type="date"
+              name="actualDate"
+              className="rounded-md border bg-background px-3 py-1 text-sm"
+            />
+            <Button type="submit" disabled={receivePending}>
+              {receivePending ? '处理中…' : '已回货'}
+            </Button>
+          </div>
           {receiveState?.status === 'error' ? (
-            <span className="text-xs text-destructive">
-              {receiveState.message}
-            </span>
+            <p className="text-xs text-destructive">{receiveState.message}</p>
+          ) : null}
+          {receiveState?.status === 'invalid' ? (
+            // Surface per-field Zod errors — otherwise an invalid
+            // actualDate silently fails (Codex round 41 UX note).
+            <ul className="text-xs text-destructive">
+              {Object.entries(receiveState.fieldErrors).flatMap(
+                ([field, msgs]) =>
+                  msgs.map((m) => (
+                    <li key={`${field}-${m}`}>
+                      {field}: {m}
+                    </li>
+                  )),
+              )}
+            </ul>
           ) : null}
         </form>
       ) : null}

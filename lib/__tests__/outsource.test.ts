@@ -143,6 +143,56 @@ describe('markOutsourceReceived', () => {
   });
 });
 
+describe('createOutsourceSchema — strict YYYY-MM-DD parsing (Codex round 41 / P1)', () => {
+  // Not strictly a lib.outsource test, but belongs here because this
+  // flow is the only consumer of optionalDateField today.
+  it('rejects invalid calendar dates that new Date() would roll over', async () => {
+    const { createOutsourceSchema } = await import('../auth/schemas');
+    const bad = createOutsourceSchema.safeParse({
+      ...baseInput,
+      expectedDate: '2024-02-31',
+    });
+    expect(bad.success).toBe(false);
+    if (!bad.success) {
+      expect(bad.error.issues.some((i) => i.path[0] === 'expectedDate')).toBe(
+        true,
+      );
+    }
+  });
+
+  it('rejects non-YYYY-MM-DD strings (e.g. "May 2026")', async () => {
+    const { createOutsourceSchema } = await import('../auth/schemas');
+    const bad = createOutsourceSchema.safeParse({
+      ...baseInput,
+      expectedDate: 'May 2026',
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('accepts valid YYYY-MM-DD', async () => {
+    const { createOutsourceSchema } = await import('../auth/schemas');
+    const good = createOutsourceSchema.safeParse({
+      ...baseInput,
+      expectedDate: '2026-04-30',
+    });
+    expect(good.success).toBe(true);
+  });
+
+  it('accepts null / empty string', async () => {
+    const { createOutsourceSchema } = await import('../auth/schemas');
+    const a = createOutsourceSchema.safeParse({
+      ...baseInput,
+      expectedDate: null,
+    });
+    expect(a.success).toBe(true);
+    const b = createOutsourceSchema.safeParse({
+      ...baseInput,
+      expectedDate: '',
+    });
+    expect(b.success).toBe(true);
+  });
+});
+
 describe('cancelOutsourceOrder', () => {
   it('cancels from SENT', async () => {
     dbMock.outsourceOrder.findUnique.mockResolvedValue({

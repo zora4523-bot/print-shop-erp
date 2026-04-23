@@ -637,14 +637,41 @@ const optionalIntField = (label: string, max: number) =>
       .nullable(),
   );
 
+// Strict YYYY-MM-DD parser — matches the format HTML `<input type="date">`
+// emits. JS's `new Date(string)` would accept `2024-02-31` and silently
+// roll it forward to March, which is exactly the class of calendar bug
+// we don't want leaking into expected/actual delivery dates.
+const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+function parseStrictYmd(s: string): Date | null {
+  const m = YMD_RE.exec(s);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12) return null;
+  if (d < 1 || d > 31) return null;
+  // Use UTC so timezone offset doesn't shift the day. Verify the parsed
+  // date's components match the input to reject invalid calendar dates
+  // like 2024-02-31 (Date() would silently normalize to 2024-03-02).
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    date.getUTCFullYear() !== y ||
+    date.getUTCMonth() !== mo - 1 ||
+    date.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return date;
+}
+
 const optionalDateField = z.preprocess((v) => {
   if (v === null || v === undefined) return null;
   if (v instanceof Date) return v;
   if (typeof v === 'string') {
     const t = v.trim();
     if (t === '') return null;
-    const d = new Date(t);
-    return Number.isNaN(d.valueOf()) ? 'invalid-date' : d;
+    const parsed = parseStrictYmd(t);
+    return parsed ?? 'invalid-date';
   }
   return 'invalid-date';
 }, z.date().nullable());
