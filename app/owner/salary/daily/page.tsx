@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { listDailyWorkerSalaries } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { MachineType } from '@/generated/prisma/enums';
+import { parseStrictYmd } from '@/lib/auth/schemas';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import Link from 'next/link';
@@ -40,9 +41,11 @@ function formatDate(d: Date): string {
 
 export default async function DailySalaryPage({ searchParams }: PageProps) {
   const sp = await searchParams;
-  const selectedDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date)
-    ? sp.date
-    : todayShanghai();
+  // Strict calendar validation on the filter path: `?date=2026-02-31`
+  // must not silently normalize to March 3 (Codex round 44 / P3).
+  // Fall back to today when the query is malformed.
+  const selectedDate =
+    sp.date && parseStrictYmd(sp.date) ? sp.date : todayShanghai();
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
 

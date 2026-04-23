@@ -258,8 +258,16 @@ export async function listDailyWorkerSalaries(filter: {
     isPaid?: boolean;
   } = {};
   if (filter.date) {
-    const [y, mo, d] = filter.date.split('-').map(Number);
-    where.date = new Date(Date.UTC(y!, mo! - 1, d!));
+    // Strict calendar parse on the read path too, so an invalid
+    // ?date=2026-02-31 filter doesn't silently match March 3 rows
+    // (Codex round 44 / P3).
+    const parsed = parseStrictYmd(filter.date);
+    if (!parsed) {
+      throw new DailySalaryError(
+        `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${filter.date}`,
+      );
+    }
+    where.date = parsed;
   }
   if (filter.workerId) where.workerId = filter.workerId;
   if (filter.isPaid !== undefined) where.isPaid = filter.isPaid;

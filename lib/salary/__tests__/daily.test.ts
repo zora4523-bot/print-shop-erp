@@ -259,6 +259,16 @@ describe('listDailyWorkerSalaries', () => {
     expect((where.date as Date).toISOString()).toBe('2026-04-23T00:00:00.000Z');
   });
 
+  it('rejects invalid calendar dates on the filter path (Codex round 44 / P3)', async () => {
+    // `/owner/salary/daily?date=2026-02-31` should not silently match
+    // March 3 rows. listDailyWorkerSalaries throws so the page can
+    // fall back / show an error cleanly.
+    await expect(
+      listDailyWorkerSalaries({ date: '2026-02-31' }),
+    ).rejects.toThrow(/非法日历日期/);
+    expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
+  });
+
   it('filters by workerId and isPaid', async () => {
     await listDailyWorkerSalaries({ workerId: 'worker-1', isPaid: false });
     const where = dbMock.dailyWorkerSalary.findMany.mock.calls[0][0].where;
