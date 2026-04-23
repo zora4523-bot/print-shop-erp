@@ -21,7 +21,16 @@ export type OssConfig = {
   stsRoleArn: string;
   bucket: string;
   region: string;
+  // OSS service endpoint — used by the STS / metadata APIs. Not the
+  // upload target. Defaults to `https://${region}.aliyuncs.com`.
   endpoint: string;
+  // Virtual-hosted bucket URL — this is where browser PUT uploads go.
+  // ALWAYS derived from bucket + region, never from OSS_PUBLIC_BASE_URL
+  // (which can legitimately be a read-only CDN / custom domain that
+  // won't accept writes).
+  bucketUrl: string;
+  // Public read URL base. CDN / custom domain if configured, else same
+  // as bucketUrl. Only used for building `publicUrl` on stored designs.
   publicBaseUrl: string;
 };
 
@@ -48,12 +57,18 @@ export function readOssConfig(env: NodeJS.ProcessEnv = process.env): OssConfigRe
   }
   const region = env.OSS_REGION!.trim();
   const bucket = env.OSS_BUCKET!.trim();
-  // Derive the conventional public endpoint when OSS_ENDPOINT isn't pinned.
+  // Service endpoint for STS / metadata. Derived when not pinned.
   const endpoint = isBlank(env.OSS_ENDPOINT)
     ? `https://${region}.aliyuncs.com`
     : env.OSS_ENDPOINT!.trim();
+  // Upload target — virtual-hosted bucket URL. Always derived from
+  // bucket + region; intentionally ignores OSS_PUBLIC_BASE_URL since a
+  // CDN can't accept PUTs.
+  const bucketUrl = `https://${bucket}.${region}.aliyuncs.com`;
+  // Public-read URL base. CDN / custom domain if provided, else same as
+  // bucketUrl (direct OSS public access).
   const publicBaseUrl = isBlank(env.OSS_PUBLIC_BASE_URL)
-    ? `https://${bucket}.${region}.aliyuncs.com`
+    ? bucketUrl
     : env.OSS_PUBLIC_BASE_URL!.trim();
 
   return {
@@ -65,6 +80,7 @@ export function readOssConfig(env: NodeJS.ProcessEnv = process.env): OssConfigRe
       bucket,
       region,
       endpoint,
+      bucketUrl,
       publicBaseUrl,
     },
   };

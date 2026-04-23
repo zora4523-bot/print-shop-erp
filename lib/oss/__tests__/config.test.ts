@@ -74,7 +74,7 @@ describe('readOssConfig', () => {
     }
   });
 
-  it('derives endpoint + publicBaseUrl when optional vars are blank', () => {
+  it('derives endpoint + bucketUrl + publicBaseUrl when optional vars are blank', () => {
     const r = readOssConfig(
       envWith({
         OSS_ACCESS_KEY_ID: 'ak',
@@ -87,6 +87,7 @@ describe('readOssConfig', () => {
     expect(r.configured).toBe(true);
     if (r.configured) {
       expect(r.cfg.endpoint).toBe('https://oss-cn-shenzhen.aliyuncs.com');
+      expect(r.cfg.bucketUrl).toBe('https://my-bucket.oss-cn-shenzhen.aliyuncs.com');
       expect(r.cfg.publicBaseUrl).toBe('https://my-bucket.oss-cn-shenzhen.aliyuncs.com');
     }
   });
@@ -107,6 +108,29 @@ describe('readOssConfig', () => {
     if (r.configured) {
       expect(r.cfg.endpoint).toBe('https://internal-oss.example.com');
       expect(r.cfg.publicBaseUrl).toBe('https://cdn.example.com');
+    }
+  });
+
+  it('keeps bucketUrl on the OSS virtual-hosted host even when publicBaseUrl is a CDN (Codex round 30 / P2)', () => {
+    // A CDN / custom domain is read-only; browser uploads must still
+    // target the bucket's OSS host. Regression test to ensure future
+    // edits don't accidentally point uploadUrl at the CDN.
+    const r = readOssConfig(
+      envWith({
+        OSS_ACCESS_KEY_ID: 'ak',
+        OSS_ACCESS_KEY_SECRET: 'sk',
+        OSS_STS_ROLE_ARN: 'arn',
+        OSS_BUCKET: 'my-bucket',
+        OSS_REGION: 'oss-cn-shenzhen',
+        OSS_PUBLIC_BASE_URL: 'https://cdn.example.com',
+      }),
+    );
+    expect(r.configured).toBe(true);
+    if (r.configured) {
+      expect(r.cfg.bucketUrl).toBe('https://my-bucket.oss-cn-shenzhen.aliyuncs.com');
+      expect(r.cfg.publicBaseUrl).toBe('https://cdn.example.com');
+      // Not equal — that's the point.
+      expect(r.cfg.bucketUrl).not.toBe(r.cfg.publicBaseUrl);
     }
   });
 

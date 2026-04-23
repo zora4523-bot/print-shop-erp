@@ -137,11 +137,11 @@ export async function signDesignUpload(
     bucket: cfg.bucket,
     region: cfg.region,
     objectKey,
-    // Virtual-hosted style to match what the browser SDK (ali-oss) uses
-    // and what publicBaseUrl derives. Path-style (`${endpoint}/${bucket}
-    // /${objectKey}`) would work for some SDKs but not all, and gives
-    // the browser a different host than the CORS policy expects.
-    uploadUrl: `${cfg.publicBaseUrl}/${objectKey}`,
+    // Upload target is the virtual-hosted bucket URL — the one that
+    // actually accepts PUTs. We deliberately do NOT use publicBaseUrl
+    // here: that value can be a read-only CDN / custom domain (round
+    // 30). Stored designs still read from publicBaseUrl.
+    uploadUrl: `${cfg.bucketUrl}/${objectKey}`,
     publicUrl: `${cfg.publicBaseUrl}/${objectKey}`,
   };
 }
