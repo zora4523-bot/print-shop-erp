@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  computeDailyForAllMachineWorkers,
-  DailySalaryError,
-} from '@/lib/salary/daily';
+import { computeDailyForAllMachineWorkers } from '@/lib/salary/daily';
 
 // Node runtime: Prisma + decimal.js aren't edge-compatible.
 export const runtime = 'nodejs';
@@ -53,25 +50,26 @@ export async function POST(req: Request) {
   }
 
   try {
-    const results = await computeDailyForAllMachineWorkers(date);
+    const { settled, errors } = await computeDailyForAllMachineWorkers(date);
     // COUNTS ONLY — full per-worker salary amounts would leak into
-    // scheduler / pg_cron logs (same Codex round 49 / P2 rationale
-    // as /api/cron/hourly-payroll). Owner sees details at
+    // scheduler / pg_cron logs (Codex round 49 / P2). Per-worker
+    // errors likewise embed salary amounts in the paid-row refusal
+    // path (Codex round 50 / P2). Owner sees details at
     // /owner/salary/daily.
     return NextResponse.json({
       status: 'ok',
       date,
-      workerCount: results.length,
+      workerCount: settled.length,
+      errorCount: errors.length,
     });
   } catch (err) {
-    const message =
-      err instanceof DailySalaryError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : String(err);
+    // Infrastructure failure (DB down, etc.) — per-worker errors are
+    // captured inside computeDailyForAllMachineWorkers now. Scrub
+    // err.message to avoid leaking any salary figures that a future
+    // wrapping error might carry.
+    void err;
     return NextResponse.json(
-      { status: 'error', date, message },
+      { status: 'error', date, message: '批处理失败；查看 owner 页面确认' },
       { status: 500 },
     );
   }

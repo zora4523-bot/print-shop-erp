@@ -220,10 +220,21 @@ export async function computeDailyWorkerSalary(
 // Batch: for every active machine-type worker, compute the given day.
 // Used by the cron endpoint (24:00 每日 per SPEC §3.8) and by the
 // owner's "recompute" button. Returns per-worker results for display.
+export type BatchDailyResult = {
+  settled: DailyWorkerSalaryResult[];
+  errors: Array<{ workerId: string; message: string }>;
+};
+
+// Per-worker try/catch so one bad worker (paid row, missing rule,
+// etc.) doesn't abort the whole batch — matches the hourly + cs
+// batch patterns (rounds 45, 48). Also closes a cron-log leak path:
+// aborting the batch propagated error messages with salary amounts
+// up to the cron JSON response (Codex round 50 / P2). With per-
+// worker error capture, the cron can return counts only.
 export async function computeDailyForAllMachineWorkers(
   date: string,
   now: Date = new Date(),
-): Promise<DailyWorkerSalaryResult[]> {
+): Promise<BatchDailyResult> {
   const workers = await db.user.findMany({
     where: {
       role: Role.WORKER,
@@ -233,14 +244,19 @@ export async function computeDailyForAllMachineWorkers(
     },
     select: { id: true },
   });
-  const results: DailyWorkerSalaryResult[] = [];
+  const settled: DailyWorkerSalaryResult[] = [];
+  const errors: Array<{ workerId: string; message: string }> = [];
   for (const w of workers) {
-    // Serialized on purpose — one compute per worker is a single-
-    // row upsert with no cross-worker interaction; parallelizing would
-    // only help I/O and risks pool exhaustion on large teams.
-    results.push(await computeDailyWorkerSalary(w.id, date, now));
+    try {
+      settled.push(await computeDailyWorkerSalary(w.id, date, now));
+    } catch (err) {
+      errors.push({
+        workerId: w.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
-  return results;
+  return { settled, errors };
 }
 
 // ─────────────────────────────────────────────────────────────────────

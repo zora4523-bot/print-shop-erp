@@ -164,10 +164,10 @@ describe('recomputeDailySalaryAction', () => {
 
   it('batch path: calls computeDailyForAllMachineWorkers when no workerId', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue([
-      { workerId: 'w1' },
-      { workerId: 'w2' },
-    ]);
+    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
+      settled: [{ workerId: 'w1' }, { workerId: 'w2' }],
+      errors: [],
+    });
     const r = await recomputeDailySalaryAction(null, { date: '2026-04-23' });
     expect(r.status).toBe('success');
     if (r.status === 'success') {
@@ -207,7 +207,10 @@ describe('recomputeDailySalaryAction', () => {
 
   it('revalidates /owner/salary/daily on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue([]);
+    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
+      settled: [],
+      errors: [],
+    });
     await recomputeDailySalaryAction(null, { date: '2026-04-23' });
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/daily');
   });

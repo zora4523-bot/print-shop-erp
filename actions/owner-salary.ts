@@ -73,8 +73,10 @@ export async function recomputeDailySalaryAction(
       await computeDailyWorkerSalary(parsed.data.workerId, parsed.data.date);
       count = 1;
     } else {
-      const results = await computeDailyForAllMachineWorkers(parsed.data.date);
-      count = results.length;
+      const { settled } = await computeDailyForAllMachineWorkers(
+        parsed.data.date,
+      );
+      count = settled.length;
     }
     revalidatePath('/owner/salary/daily');
     return {
