@@ -126,3 +126,34 @@
 - **理由**：E-full 的实质复杂度是 OrderLog 按字段 diff 渲染 + RHF useFieldArray 联动 + item 级 OSS 设计图增删同步。业主明确判断：款式级编辑在实际业务里是低频操作（大多数修改是改收货信息 / 备注），把这部分放 P1 单独跟，不拖 P0 #3 的节奏。
 - **影响**：`lib/order/editable-fields.ts` 实现 FULL / SHIPPING_ONLY / NONE 三档，`FULL_EDITABLE_FIELDS` 和 `SHIPPING_EDITABLE_FIELDS` 是 readonly tuple 常量，防御性地做 pickEditableFields 二次过滤——就算 action 层 schema 放行 customerRef，lib 层在 SHIPPING_ONLY 状态下也会 drop。`updateEditableOrderSchema` 所有字段都 `.optional()`（partial update 语义：缺 key = 不改，空串 = 清空为 null）；`optionalFormBoolean` 把 undefined 和 false 严格区分，防止表单缺 checkbox 时 isUrgent 被意外翻成 false。UI 在 detail 页按 `isOrderEditable(status)` + ownership 条件渲染 "编辑" 链接和急单 toggle；edit page 再次 check fieldset，NONE 直接 redirect 回 detail。
 - **相关文档**：`lib/order/editable-fields.ts`、`lib/order.ts updateOrderFields`、`components/business/order/EditOrderForm.tsx`、SPEC §3.6、P1 ticket TODO "工单款式级编辑（E-full）"。
+
+---
+
+## 2026-04-23：生产计件口径定为"合计压片数"（completed + defect + rework）
+
+- **决策**：`reportTask` 把 `totalPressed = completedQty + defectQty + reworkQty` 作为喂给 `calcMachinePiecework` 的数量。每一次下压——无论合格、不良还是返工——都消耗了师傅一次操作，计件金额按总压片付。不良 / 返工 数量只做 QC 追溯，不影响薪资。
+- **理由**：SPEC §5.2 算法伪代码里 `quantity = task.quantity`，例子里的"下数 = 数量 × 倍率"是基于总压片次数的，不区分好坏。把 completedQty 作为唯一计件口径会让师傅在不良率高的任务上被扣双倍工资（操作数还是付了但不算钱）——不公平。业主如果将来想推"按合格数付"的激励机制，在 `calcMachinePiecework` 的入参处改一行即可，snapshotted rule 保护历史数据。
+- **影响**：`lib/production.ts reportTask` 明确注释这一口径；测试里"合格 4900 + 不良 50 + 返工 50 = 总压 5000"对应 SPEC §7.1 的 T2 期望（40 元）。前端 `ReportTaskForm` 描述里写明&ldquo;合计压片 × 单价&rdquo;的语义。
+- **相关文档**：`lib/production.ts:560` 注释、`components/business/production/ReportTaskForm.tsx:46` 文案、SPEC §5.2 / §7.1 / §7.2、`lib/salary/machine-piecework.ts`。
+
+---
+
+## 2026-04-23：工单状态级联由 lib 层统一做，两道 advisory lock 分别管不同不变量
+
+- **决策**：Order 状态级联（SCHEDULING → IN_PRODUCTION → COMPLETED）集中在 `lib/production.ts beginTask / reportTask` 完成，UI 层和 action 层都不重复。两个独立的 advisory xact lock namespace：
+  - `print-shop-erp:schedule:order:<id>` 序列化 `scheduleOrder` 的"提交→排产"入口；
+  - `print-shop-erp:task:<id>` 序列化单个 ProductionTask 的同时读写；
+  - `print-shop-erp:order-cascade:<orderId>` 序列化同一 Order 下多个任务的并发级联。
+  进入 cascade 锁后必须 re-read Order.status（`order.findUnique` 新鲜读），不信任事务开头的 snapshot。
+- **理由**：状态机之外，Order-level 和 Task-level 的跨行不变量是两类竞争（调度双击 vs 报工双击同任务 vs 不同任务同时完工），三把锁刚好切开。Cascade 锁后再读 Order 是 Codex round 39 明确的 race：并发报工最后两个任务时，第二个 tx 会持着 stale `status=IN_PRODUCTION` 去发重复的 `STATUS_CHANGE` OrderLog——fresh-read 才能检测"另一个 tx 已经替我完成级联了"。
+- **影响**：`EditTxClient` / `TaskTxClient` / `ScheduleTxClient` 都带 `$queryRaw` 条目；任何新的跨行不变量（比如发货 / 完工的计数守卫）按同款 `print-shop-erp:<domain>:<invariant>` 命名空间做；cascade 分支必须 `if (freshStatus === expectedStatus)` 再写。
+- **相关文档**：`lib/production.ts` `scheduleLockKey` / `taskLockKey` / `orderCascadeLockKey`、Codex rounds 37 / 39、`lib/account.ts OWNER_INVARIANT_LOCK_KEY` 的命名先例。
+
+---
+
+## 2026-04-23：外协单作为独立记录，不阻塞 Order 级联（MVP）
+
+- **决策**：`OutsourceOrder` 是独立的 CRUD 记录；`scheduleOrder` 见到外协工艺时"skip + 记外协数"，不生成 ProductionTask，也不要求外协 RECEIVED 后才能排产。外协回货只是状态更新，**不触发** Order 任何状态级联。
+- **理由**：SPEC §3.2 文字上暗示"外协回货后 → 工单可排产"的串行依赖，但业主实际场景里是"内部任务和外协并行跑，回货和完工各自记账"。强制串行化会让 UI 变复杂（需要在 foreman 视图里阻塞排产按钮、做二次确认），MVP 不值得。Slice C 做到"可录入、可标记回货、可取消"就足够覆盖老板日常看板需求。
+- **影响**：`lib/outsource.ts` 所有函数都是单表操作，无 tx、无 advisory lock（跨行不变量不存在）；`lib/auth/schemas.ts` 新增的 `optionalDateField` 用严格 `YYYY-MM-DD` 正则 + UTC 回环校验拒绝 `2024-02-31` 之类的日历非法日期（Codex round 41）。如果业主将来希望把外协 RECEIVED 作为某个状态转换的前置条件，加一条 `WHERE status = 'RECEIVED'` 的 gate 即可，不影响现有数据。
+- **相关文档**：`lib/outsource.ts`、`lib/outsource/status-machine.ts`、`lib/auth/schemas.ts` `parseStrictYmd`、SPEC §3.2 / §4.3、Codex round 41。
