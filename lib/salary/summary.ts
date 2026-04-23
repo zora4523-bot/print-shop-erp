@@ -10,6 +10,7 @@ import { shanghaiDayRange } from './daily';
 
 export type SalaryIndexSummary = {
   today: string;
+  currentMonth: string;
   // 师傅日薪（今天）
   dailyToday: {
     count: number;
@@ -30,6 +31,17 @@ export type SalaryIndexSummary = {
   csReadyToSettle: number;
   // 客服活跃周期统计：每位客服一条 IN_PROGRESS
   csActivePeriods: number;
+  // 时薪工本月月结
+  hourlyCurrentMonth: {
+    count: number;
+    totalSalary: string;
+    unpaidTotal: string;
+  };
+  // 所有时薪工月结未发合计
+  hourlyUnpaidAllTime: {
+    count: number;
+    totalSalary: string;
+  };
 };
 
 function todayShanghai(): string {
@@ -39,6 +51,10 @@ function todayShanghai(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
+}
+
+function currentShanghaiMonth(): string {
+  return todayShanghai().slice(0, 7);
 }
 
 export async function getSalaryIndexSummary(
@@ -57,12 +73,15 @@ export async function getSalaryIndexSummary(
   );
   void todayStart; // kept for future if we want completed-at windowing
 
+  const month = currentShanghaiMonth();
   const [
     dailyTodayRows,
     dailyUnpaidRows,
     csUnpaidRows,
     csReadyCount,
     csActiveCount,
+    hourlyMonthRows,
+    hourlyUnpaidRows,
   ] = await Promise.all([
     db.dailyWorkerSalary.findMany({
       where: { date: todayDateCol },
@@ -85,6 +104,14 @@ export async function getSalaryIndexSummary(
     db.salaryPeriod.count({
       where: { status: SalaryPeriodStatus.IN_PROGRESS },
     }),
+    db.hourlyWorkerPayroll.findMany({
+      where: { month },
+      select: { totalSalary: true, isPaid: true },
+    }),
+    db.hourlyWorkerPayroll.findMany({
+      where: { isPaid: false },
+      select: { totalSalary: true },
+    }),
   ]);
 
   const dailyTodayTotal = sumDecimal(dailyTodayRows.map((r) => r.actualSalary));
@@ -96,8 +123,19 @@ export async function getSalaryIndexSummary(
   );
   const csUnpaidTotal = sumDecimal(csUnpaidRows.map((r) => r.totalIncome));
 
+  const hourlyMonthTotal = sumDecimal(
+    hourlyMonthRows.map((r) => r.totalSalary),
+  );
+  const hourlyMonthUnpaid = sumDecimal(
+    hourlyMonthRows.filter((r) => !r.isPaid).map((r) => r.totalSalary),
+  );
+  const hourlyUnpaidTotal = sumDecimal(
+    hourlyUnpaidRows.map((r) => r.totalSalary),
+  );
+
   return {
     today,
+    currentMonth: month,
     dailyToday: {
       count: dailyTodayRows.length,
       actualTotal: dailyTodayTotal.toFixed(2),
@@ -113,6 +151,15 @@ export async function getSalaryIndexSummary(
     },
     csReadyToSettle: csReadyCount,
     csActivePeriods: csActiveCount,
+    hourlyCurrentMonth: {
+      count: hourlyMonthRows.length,
+      totalSalary: hourlyMonthTotal.toFixed(2),
+      unpaidTotal: hourlyMonthUnpaid.toFixed(2),
+    },
+    hourlyUnpaidAllTime: {
+      count: hourlyUnpaidRows.length,
+      totalSalary: hourlyUnpaidTotal.toFixed(2),
+    },
   };
 }
 

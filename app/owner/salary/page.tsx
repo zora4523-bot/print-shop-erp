@@ -74,9 +74,35 @@ export default async function SalaryIndexPage() {
         </div>
       </section>
 
-      <p className="text-xs text-muted-foreground">
-        时薪工月薪（打包 / 清废 / 厨师）模块 P0 #5 Slice C 还未落地。考勤表尚未建表。
-      </p>
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold">
+          时薪工月结（打包 / 清废 / 厨师）
+        </h2>
+        <div className="grid grid-cols-3 gap-4">
+          <StatCard
+            label={`${s.currentMonth} 记录`}
+            value={`${s.hourlyCurrentMonth.count} 条`}
+            hint={`合计 ¥${s.hourlyCurrentMonth.totalSalary}`}
+          />
+          <StatCard
+            label={`${s.currentMonth} 未发`}
+            value={`¥${s.hourlyCurrentMonth.unpaidTotal}`}
+          />
+          <StatCard
+            label="累计未发（所有月份）"
+            value={`¥${s.hourlyUnpaidAllTime.totalSalary}`}
+            hint={`${s.hourlyUnpaidAllTime.count} 条`}
+          />
+        </div>
+        <div>
+          <Link
+            href="/owner/salary/hourly"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看时薪工月结 →
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

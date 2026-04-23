@@ -1,0 +1,64 @@
+'use client';
+
+import { useActionState, useTransition } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { recomputeHourlyPayrollAction } from '@/actions/owner-salary';
+import type { RecomputeHourlyResult } from '@/actions/owner-salary.types';
+
+type Props = {
+  defaultMonth: string;
+};
+
+export function RecomputeHourlyForm({ defaultMonth }: Props) {
+  const [state, action] = useActionState<RecomputeHourlyResult | null, unknown>(
+    recomputeHourlyPayrollAction,
+    null,
+  );
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <form
+      action={(fd) => {
+        const month = String(fd.get('month') ?? '');
+        startTransition(() => action({ month }));
+      }}
+      className="space-y-2"
+    >
+      <div className="flex items-center gap-3">
+        <Input
+          type="month"
+          name="month"
+          defaultValue={defaultMonth}
+          className="max-w-[180px]"
+        />
+        <Button type="submit" disabled={pending}>
+          {pending ? '重算中…' : '重算该月全员时薪工月结'}
+        </Button>
+      </div>
+      {state?.status === 'success' ? (
+        <p className="text-xs text-muted-foreground">
+          {state.month} 已处理 {state.workerCount} 位时薪工
+          {state.errorCount > 0 ? ` · ${state.errorCount} 个失败` : ''}
+        </p>
+      ) : null}
+      {state?.status === 'success' && state.errors.length > 0 ? (
+        <ul className="text-xs text-destructive space-y-1">
+          {state.errors.map((e) => (
+            <li key={e.workerId}>
+              {e.workerId}: {e.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {state?.status === 'error' ? (
+        <p className="text-xs text-destructive">{state.message}</p>
+      ) : null}
+      {state?.status === 'invalid' ? (
+        <p className="text-xs text-destructive">
+          {Object.values(state.fieldErrors).flat().join('；')}
+        </p>
+      ) : null}
+    </form>
+  );
+}

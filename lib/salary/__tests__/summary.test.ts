@@ -5,6 +5,7 @@ const { dbMock } = vi.hoisted(() => {
     dailyWorkerSalary: { findMany: vi.fn() },
     customerServiceCommission: { findMany: vi.fn() },
     salaryPeriod: { count: vi.fn() },
+    hourlyWorkerPayroll: { findMany: vi.fn() },
   };
   return { dbMock: mock };
 });
@@ -16,6 +17,7 @@ beforeEach(() => {
   dbMock.dailyWorkerSalary.findMany.mockReset();
   dbMock.customerServiceCommission.findMany.mockReset();
   dbMock.salaryPeriod.count.mockReset();
+  dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
 });
 
 describe('getSalaryIndexSummary', () => {
@@ -44,6 +46,20 @@ describe('getSalaryIndexSummary', () => {
     dbMock.salaryPeriod.count
       .mockResolvedValueOnce(1) // ready to settle
       .mockResolvedValueOnce(3); // active
+    // Hourly current month: 3 rows totaling 6368 (2 unpaid = 4300)
+    dbMock.hourlyWorkerPayroll.findMany
+      .mockResolvedValueOnce([
+        { totalSalary: '2068.00', isPaid: true },
+        { totalSalary: '2232.00', isPaid: false },
+        { totalSalary: '2068.00', isPaid: false },
+      ])
+      // All-time unpaid: 4 rows totaling 8400
+      .mockResolvedValueOnce([
+        { totalSalary: '2100.00' },
+        { totalSalary: '2100.00' },
+        { totalSalary: '2100.00' },
+        { totalSalary: '2100.00' },
+      ]);
 
     const s = await getSalaryIndexSummary();
 
@@ -59,6 +75,14 @@ describe('getSalaryIndexSummary', () => {
     expect(s.csUnpaid.totalIncome).toBe('82000.00');
     expect(s.csReadyToSettle).toBe(1);
     expect(s.csActivePeriods).toBe(3);
+
+    // Hourly month total = 2068 + 2232 + 2068 = 6368; unpaid = 4300
+    expect(s.hourlyCurrentMonth.count).toBe(3);
+    expect(s.hourlyCurrentMonth.totalSalary).toBe('6368.00');
+    expect(s.hourlyCurrentMonth.unpaidTotal).toBe('4300.00');
+    expect(s.hourlyUnpaidAllTime.count).toBe(4);
+    expect(s.hourlyUnpaidAllTime.totalSalary).toBe('8400.00');
+    expect(s.currentMonth).toMatch(/^\d{4}-\d{2}$/);
   });
 
   it('handles empty dataset (zero totals)', async () => {
