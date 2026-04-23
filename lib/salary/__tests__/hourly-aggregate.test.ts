@@ -16,6 +16,11 @@ const { dbMock } = vi.hoisted(() => {
       findMany: vi.fn(),
       update: vi.fn(),
     },
+    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $transaction: vi.fn(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
+      return fn;
+    }),
   };
   return { dbMock: mock };
 });
@@ -75,6 +80,11 @@ beforeEach(() => {
     }));
   dbMock.hourlyWorkerPayroll.findMany.mockReset();
   dbMock.hourlyWorkerPayroll.update.mockReset();
+  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+    if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
+    return fn;
+  });
 });
 
 describe('computeHourlyPayroll — worker validation', () => {
@@ -391,6 +401,10 @@ describe('listHourlyPayrolls', () => {
 
 describe('markHourlyPayrollPaid', () => {
   beforeEach(() => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      workerId: 'worker-1',
+      month: '2026-05',
+    });
     dbMock.hourlyWorkerPayroll.update.mockResolvedValue({
       id: 'p-1',
       isPaid: true,
@@ -410,5 +424,49 @@ describe('markHourlyPayrollPaid', () => {
     const data = dbMock.hourlyWorkerPayroll.update.mock.calls[0][0].data;
     expect(data.isPaid).toBe(false);
     expect(data.paidAt).toBeNull();
+  });
+
+  it('takes the per-(worker, month) advisory lock (Codex round 48 / P0)', async () => {
+    // mark-paid must take the same lock as computeHourlyPayroll so a
+    // concurrent recompute can't overwrite salary fields on a row
+    // that's being marked paid.
+    await markHourlyPayrollPaid('p-1', true);
+    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(sqlCalls[0][1]).toMatch(
+      /print-shop-erp:hourly:worker-1:2026-05/,
+    );
+  });
+});
+
+describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)', () => {
+  it('takes the per-(worker, month) advisory lock (P0)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+    await computeHourlyPayroll('worker-1', '2026-05');
+    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(sqlCalls[0][1]).toMatch(
+      /print-shop-erp:hourly:worker-1:2026-05/,
+    );
+  });
+
+  it('pins all rule-resolution calls to the injected `now` (P1)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+    const now = new Date('2026-06-15T12:00:00Z');
+    await computeHourlyPayroll('worker-1', '2026-05', now);
+    // Every rule lookup inside computeHourlyPayroll must have used
+    // `now` in its effectiveFrom.lte — if any call passes Date.now()
+    // instead, it'll differ from `now`.
+    for (const call of dbMock.salaryRule.findFirst.mock.calls) {
+      expect(call[0].where.effectiveFrom.lte).toEqual(now);
+    }
   });
 });

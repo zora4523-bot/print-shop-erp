@@ -43,12 +43,16 @@ export async function POST(req: Request) {
 
   try {
     const { settled, errors } = await computeHourlyForAllInMonth(month);
+    // Return summary only — per-worker salary amounts could leak via
+    // scheduler / pg_cron logs (Codex round 48 / P2). Owner can view
+    // details in /owner/salary/hourly.
     return NextResponse.json({
       status: 'ok',
       month,
       workerCount: settled.length,
       errorCount: errors.length,
-      settled,
+      // Error messages are operational (missing rule, inactive worker)
+      // and don't contain salary figures, so they're safe to return.
       errors,
     });
   } catch (err) {
