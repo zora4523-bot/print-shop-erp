@@ -193,3 +193,48 @@
 - **理由**：生产环境若把 CRON_SECRET 忘了设置，401 会让 cron 无声失败（pg_cron 不一定告警），200 会让 endpoint 变开放。503 是&ldquo;明确拒绝服务&rdquo;——监控 / 告警会立即发出，不会静默数据。
 - **影响**：部署 checklist 必须加&ldquo;设置 CRON_SECRET 环境变量&rdquo;。CI 测试无需配置此变量——端点未被触发时不会检查。pg_cron 或外部调度器调用时，`curl -H "Authorization: Bearer $CRON_SECRET"` 带上即可。
 - **相关文档**：`app/api/cron/daily-salary/route.ts`、`app/api/cron/cs-settle/route.ts`、HANDOFF.md 约束提醒。
+
+---
+
+## 2026-04-24：厨师请假 MVP 按"不折扣月薪"处理（TODO 需业主确认）
+
+- **决策**：COOK workerType 的月薪 `monthlyBase`（默认 3000）与 `normalHours` / `otHours` 完全解耦——请假整月照发 3000，请假 + 代班打包则额外 + `spareHours × PACKER 时薪`。`calcHourlyPayroll` 的 COOK 分支对 normal/ot 一律忽略。
+- **理由**：SPEC §5.4 / §7.4 只给了 `base + spare_pay` 公式，未定义请假扣款；业主没明确表达过扣款需求。MVP 简化为"月薪常量"避免引入应出勤天数 / 自然天数 / 法定假日等配置项。如果未来业主说"请假多了要扣"，改 `calcHourlyPayroll` COOK 分支一行 + 加 `absenceDays` migration 即可，历史 snapshot 保护已发放月份。
+- **影响**：`lib/salary/hourly-payroll.ts calcHourlyPayroll` + `lib/salary/__tests__/hourly-payroll.test.ts "请假整月"` 用例 pin 住当前语义。PROGRESS.md 列为待澄清问题；DECISIONS 重审时如业主推翻，测试会先 red。
+- **相关文档**：`lib/salary/hourly-payroll.ts:88`、`lib/salary/__tests__/hourly-payroll.test.ts "场景: 请假整月"`、SPEC §5.4 / §7.4、Codex rounds 48-49。
+
+---
+
+## 2026-04-24：加班边界采用闭区间下限（>= otStart 即计入）
+
+- **决策**：`WORK_HOURS.otStart`（默认 `18:00`）定义加班计时的**下限闭区间**——`otHours = max(0, endTime − 18:00)`。到达 18:00 本身 otHours=0；18:30 → 0.5；19:00 → 1.0。
+- **理由**：SPEC §5.4 语焉不详；闭区间下限是最直观的&ldquo;从这一刻起的分钟都算加班&rdquo;语义，与&ldquo;加班从 18:00 开始&rdquo;的业务共识最贴。
+- **影响**：MVP 考勤录入是主管手填三个数字（normal/ot/spare），后端不再从 startTime/endTime 自动切分——这条语义主要影响 UI hint 文档 + 未来如果加入自动派生会参考。`getActiveWorkHours` 返回的 `otStart` 字符串就是这条边界。
+- **相关文档**：`lib/salary/rules.ts WorkHoursConfig`、SPEC §5.4 "加班起始 18:00"、Codex rounds 48-49。
+
+---
+
+## 2026-04-24：考勤 = 每日一行；请假 = 无行
+
+- **决策**：`Attendance` 模型按 `@@unique([workerId, date])` 一人一天一条；主管每天录入三个小时数字；**请假 = 删除该行**或**从未录**。月结聚合直接 `findMany` 当月所有行并 `sum` —— 无行的日子自动不贡献工时。
+- **理由**：比引入 `isLeave` 枚举状态简单；主管删除即代表"这天没上班"；聚合 SQL 不需要过滤 status。副作用：COOK 月薪 flat（DECISIONS 同条），无行的月份也发 3000——符合"不折扣月薪"约定。
+- **影响**：`recordAttendance` upsert 幂等（主管重录覆盖；createdById 保留原作）+ `removeAttendance` idempotent delete（row 不存在也返回 success）。车间主管 UI `/foreman/attendance` 日历网格里用 Badge "未录" 标识请假态。如果将来业主要求区分"请假 vs 漏录"，加 `isLeave` 字段。
+- **相关文档**：`lib/attendance.ts recordAttendance / removeAttendance`、`app/foreman/attendance/page.tsx`、Codex review constraint walk round 49。
+
+---
+
+## 2026-04-24：Cron 响应只返回计数，细节走 owner UI
+
+- **决策**：所有 `/api/cron/*` 端点（daily-salary / cs-settle / hourly-payroll）**响应 COUNTS ONLY**，不返回 `settled` / `errors` 的完整消息。Owner 需要看每行详情 / per-worker 失败原因时，走 `/owner/salary/*` 页面（认证 session 内）。500 路径也 scrub `err.message`，用通用"批处理失败；查看 owner 页面确认"替代。
+- **理由**：Codex rounds 49-50 连续打到：（a）`settled` 数组直接携带 per-worker totalSalary，流到 pg_cron / 调度器日志；（b）paid-row 拒绝重算的 `err.message` 里 embed 了 `existing.totalSalary`（for UI 可读），批处理 abort 时走 500 路径把消息原样返回。两者都在**认证链路之外**（cron 调用是 server-to-server shared secret）落到**可能被留存的日志**里——薪资数据不应该在 ops 日志里出现。
+- **影响**：`computeDailyForAllMachineWorkers` 改成 per-worker try/catch 返回 `{ settled, errors }`（round 50，统一三个批处理的模式）。Owner 端 action（如 `recomputeDailySalaryAction`）**仍**返回完整 errors[]（通过认证 HTTPS，直给 owner 看）——`RecomputeDailyForm` 渲染 errorCount + 失败列表。未来新增 `/api/cron/*` 端点按同模式处理。
+- **相关文档**：`app/api/cron/daily-salary/route.ts` / `cs-settle/route.ts` / `hourly-payroll/route.ts`、`actions/owner-salary.ts`、Codex rounds 49-51。
+
+---
+
+## 2026-04-24：HourlyWorkerPayroll 的 per-(worker, month) advisory lock + now 贯穿
+
+- **决策**：`computeHourlyPayroll` 全程跑在 `db.$transaction` 内，开头拿 `pg_advisory_xact_lock(hashtext('print-shop-erp:hourly:<workerId>:<month>'))`；`markHourlyPayrollPaid` 取同一把锁。规则解析的 `now` 一路贯穿到每个 `getActive*` 调用。
+- **理由**：Codex round 48 打到两处：（a）isPaid check 与 upsert 之间 finance 若并发 mark-paid，upsert 会覆盖一条&ldquo;已发放&rdquo;行的金额列（P0）；（b）批处理里每个 worker 的规则解析各自调 `new Date()`，如果中途规则被改，同一批次的不同 worker 会 snapshot 不同规则版本（P1）。Lock + 贯穿 now 是同样的双管齐下——锁挡并发、时间戳挡版本漂移。
+- **影响**：后续每条薪资写入路径（如未来的 bonus / deduction 表）按同款双保护；daily-salary 也有同类 race（Codex round 48 注意），但 PROGRESS.md 记为&ldquo;待补&rdquo;；如果业主 push 就先补 daily，再动手 P0 #6。
+- **相关文档**：`lib/salary/hourly-aggregate.ts hourlyLockKey`、Codex rounds 48 / 49，对应已有 CS 的 `csUserLockKey`（rounds 45-46）先例。

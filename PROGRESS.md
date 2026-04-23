@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**P0 阶段 5/9：薪资系统（A/B/D + Slice C 纯函数）完成，剩余 Slice C 的考勤表 + 聚合 UI**
+**P0 阶段 6/9：薪资系统全部完成，准备开 P0 #6 应收账单**
 
 ## 最后更新
 
@@ -67,7 +67,7 @@
     - 独立记录不阻塞 Order 级联（DECISIONS 2026-04-23）
     - `optionalDateField` 改严格 `YYYY-MM-DD` 解析（round 41 / P1，拒绝 `2024-02-31` 滚动）
     - `/foreman/outsource` 列表 / new?orderId / detail；工单详情页 foreman 可见"外协"入口
-- [ ] **P0 #5 薪资系统（4/5 切片完成）**（commits `da80e1f → 2b7ba69`, +119 单测 = 626）
+- [x] **P0 #5 薪资系统（5/5 切片完成）**（commits `da80e1f → 4aabcd0`, +209 单测 = 716）
   - [x] **Slice A — 师傅日薪**（rounds 43/44 clean）
     - `lib/salary/daily.ts computeDailyWorkerSalary`：每日 24:00 汇总 `ProductionTask.pieceworkAmount`，max(汇总, dailyBase)，upsert 按 `@@unique([workerId, date])`；Shanghai 日界严格 `parseStrictYmd`
     - **已发放行拒绝重算**（round 43 / P0）：`isPaid=true` 抛错
@@ -82,24 +82,35 @@
     - **Migration**：`20260424015000_cs_commission_snapshot` 加 `salaryRuleSnapshot Json?`
   - [x] **Slice D — 老板薪资总览**
     - `/owner/salary` 索引：今日日薪 / 累计未发 / 客服活跃 / 待结算 / 未发提成合计
-  - [x] **Slice C 纯函数 — `calcHourlyPayroll`**（一次过）
-    - PACKER / CLEANER / COOK 三态；COOK 月薪 + spareHours × PACKER 时薪
-    - SPEC §7.4 176+12×1.0×11=2068；COOK 3000+20×11=3220
-  - [ ] **Slice C 剩余：`Attendance` schema + 外层 lib + 车间主管录入 UI + 老板月结列表**（本次 session 未做）
+  - [x] **Slice C — 时薪工月结 + 考勤**（rounds 48–51 clean）
+    - **纯函数** `calcHourlyPayroll`：PACKER / CLEANER / COOK 三态；COOK 月薪 + spareHours × PACKER 时薪；SPEC §7.4 示例 + 4 个 COOK 场景（全职/混合/请假/代班）行对行
+    - **Schema**：`Attendance` 新表（@@unique([workerId, date]) 幂等）+ `HourlyWorkerPayroll` 加 totalSpareHours / spareSalary / salaryRuleSnapshot 三列（migration 20260424020000）
+    - **Rule getters** `getActivePackerHourlyRate` / `getActiveCleanerHourlyRate` / `getActiveCookMonthlyBase` / `getActiveCookSpareHourlyRate` / `getActiveOtMultiplier` / `getActiveWorkHours`
+    - **`lib/attendance.ts`**：recordAttendance 幂等 upsert（主管重录覆盖，createdById 保留原作）+ removeAttendance（请假 = 无行，idempotent delete）+ listMonthlyAttendance
+    - **`lib/salary/hourly-aggregate.ts` `computeHourlyPayroll`**：$transaction + **per-(worker, month) advisory lock**（round 48 P0，防 mark-paid 中途改状态）+ **now 贯穿所有 rule getters**（round 48 P1，batch 规则版本一致）+ salaryRuleSnapshot 写全量（含 WORK_HOURS）+ 已发行拒绝重算；`computeDailyForAllMachineWorkers` 也改成 per-worker try/catch（round 50 P2，closes cron 批处理中 abort + 原始 error message 泄漏）
+    - **Cron 响应 COUNTS ONLY** 跨 daily/hourly/cs 三端点（rounds 49-50 P2，防 pg_cron 日志泄漏薪资）；action 端仍返回完整 errors[] 给 owner 认证 UI
+    - **UI**：`/foreman/attendance` 月度日历 + Record dialog（normal/ot/spare，COOK 专用字段；快速填"全勤"从 WORK_HOURS 规则派生，拒绝硬编码）；`/owner/salary/hourly` 列表（COOK 列自动切"代班"语义）+ recompute + mark-paid；`/owner/salary` 索引加时薪工统计卡
+    - **Cron** `POST /api/cron/hourly-payroll` shared-secret Bearer + 默认上月 Shanghai
+  - **5 注意事项全部满足** (Codex round 49 confirmed constraint walk):
+    1. ✅ 厨师三场景测试覆盖 全职做饭 / 混合打包 / 请假（+ 代班） in `hourly-payroll.test.ts` + `hourly-aggregate.test.ts`
+    2. ✅ Attendance `@@unique([workerId, date])` + upsert + 测试覆盖重录
+    3. ✅ HourlyWorkerPayroll.isPaid + 已发行拒绝重算 + 测试
+    4. ✅ salaryRuleSnapshot 含 hourlyRate / otMultiplier / monthlyBase / spareHourlyRate / workHours / totals
+    5. ✅ WORK_HOURS 走 `getActiveWorkHours` rule getter，UI hint 也从规则派生
 
 ## 进行中
 
-P0 #5 Slice C 剩余（考勤 + 月结汇总 UI）或 P0 #6。
+P0 #5 全部闭合，准备开 P0 #6 应收账单。
 
 ## 下一步
 
 按 README "开发路径（P0 优先级）" 顺序推进：
 
-5. **P0-5 Slice C 剩余**（当前优先级，预计 1-2 天）
-   - Schema 迁移：新增 `Attendance` 模型（workerId / date / normalHours / otHours / spareHours / createdById）
-   - `lib/attendance.ts` CRUD + 车间主管录入 UI `/foreman/attendance`
-   - `lib/salary/hourly-aggregate.ts` 月汇总 + Prisma 层（读月考勤 + 活跃规则 + 写 `HourlyWorkerPayroll` + `salaryRuleSnapshot`）
-   - 老板 UI `/owner/salary/hourly` 月结列表 + mark-paid
+6. **P0-6 应收账单**（3 天）— **下一个**
+   - `Bill` / `BillItem` schema（check 是否已在 schema.prisma）
+   - `lib/bill.ts` create / addItem / markPaid（markPaid → `accumulateCsSales(submitterId, amount, paidAt)` — CS 接口已备好）
+   - 状态机 DRAFT → SENT → PARTIAL_PAID → PAID
+   - 销售 / 老板 UI
 6. **P0-6 应收账单**（3 天）
 7. **P0-7 CDR 汇总**（2 天）
 8. **P0-8 推送 + Dashboard**（1 周）
