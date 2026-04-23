@@ -28,8 +28,20 @@ const DATE_PREFIX_FORMATTER = new Intl.DateTimeFormat('en-CA', {
 });
 
 function formatDatePrefix(date: Date): string {
-  // 'en-CA' formats as YYYY-MM-DD; strip dashes for the 8-digit prefix.
-  return DATE_PREFIX_FORMATTER.format(date).replace(/-/g, '');
+  // Using formatToParts (not format + dash-strip) because 'en-CA' is not a
+  // contractual YYYY-MM-DD everywhere — some ICU/Node builds can return
+  // other patterns like MM/DD/YYYY, and a blind strip would produce a
+  // malformed prefix. Assembling from named parts is bulletproof.
+  const parts = DATE_PREFIX_FORMATTER.formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  if (!year || !month || !day) {
+    throw new Error(
+      `Failed to format business-timezone date via Intl.DateTimeFormat: ${date.toISOString()}`,
+    );
+  }
+  return `${year}${month}${day}`;
 }
 
 // Minimal shape of the Prisma tx client we need. Kept local so the module
@@ -77,15 +89,21 @@ export async function nextOrderNumber(
 }
 
 function parseSerial(orderNo: string): number {
-  // Tail after the first "-" is the serial. Fall back to `0` would be
-  // unsafe — if the DB somehow holds a malformed highest row we'd emit
-  // '-0001' and collide with an existing well-formed '-0001'. Since we
-  // control insertion, a malformed row means something upstream is
-  // already wrong; fail loudly so ops catch it.
+  // Tail after the first "-" is the serial. Any malformed input means
+  // something upstream wrote a non-standard row; fail loudly so ops can
+  // investigate, rather than silently emitting a colliding '-0001'.
   const tail = orderNo.split('-', 2)[1];
   if (!tail) throw new Error(`无法解析工单号（缺少序号段）：${orderNo}`);
   if (!/^\d+$/.test(tail)) {
     throw new Error(`无法解析工单号（序号段非纯数字）：${orderNo}`);
+  }
+  // A serial longer than 4 digits is data corruption (we generate them
+  // ourselves), not "capacity exceeded". Surface it distinctly from the
+  // regular 9999 cap so the message isn't misleading.
+  if (tail.length > SEQ_PAD) {
+    throw new Error(
+      `无法解析工单号（序号段位数异常：${tail.length} > ${SEQ_PAD}）：${orderNo}`,
+    );
   }
   const n = Number.parseInt(tail, 10);
   if (!Number.isFinite(n) || n <= 0) {

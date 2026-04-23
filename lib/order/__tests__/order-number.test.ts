@@ -90,6 +90,13 @@ describe('nextOrderNumber', () => {
     await expect(nextOrderNumber(tx, date)).rejects.toThrow(/无法解析工单号/);
   });
 
+  it('distinguishes "5-digit tail" from the regular 9999 cap (Codex round 26 / P2)', async () => {
+    // A 5-digit tail is data corruption (we pad to 4) — operators should
+    // see the distinct "位数异常" message, not the soft "达到 9999" one.
+    const tx = makeTx(['20260423-10000']);
+    await expect(nextOrderNumber(tx, date)).rejects.toThrow(/位数异常/);
+  });
+
   it('handles single-digit months/days with zero padding', async () => {
     const tx = makeTx([]);
     const jan5 = new Date('2026-01-05T10:00:00+08:00');
