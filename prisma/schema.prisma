@@ -67,6 +67,8 @@ model User {
   csCommissions       CustomerServiceCommission[]
   dailyWorkerSalaries DailyWorkerSalary[]
   hourlyPayrolls      HourlyWorkerPayroll[]
+  attendanceRecords   Attendance[]                @relation("AttendanceWorker")
+  attendanceCreated   Attendance[]                @relation("AttendanceCreator")
   bills               Bill[]
   designBundles       DesignBundle[]
   materialTxs         MaterialTransaction[]
@@ -544,26 +546,58 @@ model CustomerServiceCommission {
 
 // 时薪工月度工资
 model HourlyWorkerPayroll {
-  id              String   @id @default(cuid())
-  workerId        String
-  month           String // YYYY-MM
-  totalWorkHours  Decimal  @db.Decimal(6, 2)
-  totalOtHours    Decimal  @default(0) @db.Decimal(6, 2)
-  hourlyRate      Decimal  @db.Decimal(6, 2)
-  otMultiplier    Decimal  @db.Decimal(4, 2)
-  baseSalary      Decimal  @db.Decimal(10, 2)
-  otSalary        Decimal  @default(0) @db.Decimal(10, 2)
-  totalSalary     Decimal  @db.Decimal(10, 2)
-  dailyDetail     Json? // 每日工时明细
-  isPaid          Boolean  @default(false)
-  paidAt          DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  workerId           String
+  month              String // YYYY-MM
+  totalWorkHours     Decimal  @db.Decimal(6, 2)
+  totalOtHours       Decimal  @default(0) @db.Decimal(6, 2)
+  totalSpareHours    Decimal  @default(0) @db.Decimal(6, 2) // COOK 专用
+  hourlyRate         Decimal  @db.Decimal(6, 2)
+  otMultiplier       Decimal  @db.Decimal(4, 2)
+  baseSalary         Decimal  @db.Decimal(10, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
+  otSalary           Decimal  @default(0) @db.Decimal(10, 2) // PACKER/CLEANER only
+  spareSalary        Decimal  @default(0) @db.Decimal(10, 2) // COOK only
+  totalSalary        Decimal  @db.Decimal(10, 2)
+  dailyDetail        Json? // 每日工时明细
+  // Full rule snapshot at settlement time: hourlyRate / cookMonthly /
+  // spareHourlyRate / otMultiplier / workHours config. Enough to
+  // reproduce the pay even after the rules table is later edited
+  // (CLAUDE.md §4.4 rule-snapshot bedrock, same pattern as CS commission).
+  salaryRuleSnapshot Json?
+  isPaid             Boolean  @default(false)
+  paidAt             DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   worker User @relation(fields: [workerId], references: [id])
 
   @@unique([workerId, month])
   @@index([month])
+}
+
+// 时薪工考勤（PACKER / CLEANER / COOK）
+// MVP：车间主管每日录入三个数字（normalHours / otHours / spareHours）；
+// WORK_HOURS 规则仅用于录入 UI 的"全勤"快速填充 hint，不在后端硬编码。
+// 加班边界语义：>= otStart (默认 18:00) 即计入加班（DECISIONS 2026-04-24）。
+// 厨师请假：SPEC 未定义；MVP 按"不折扣月薪"处理（DECISIONS 2026-04-24，TODO 需业主确认）。
+model Attendance {
+  id          String   @id @default(cuid())
+  workerId    String
+  date        DateTime @db.Date
+  normalHours Decimal  @default(0) @db.Decimal(6, 2)
+  otHours     Decimal  @default(0) @db.Decimal(6, 2)
+  spareHours  Decimal  @default(0) @db.Decimal(6, 2) // COOK 专用
+  remark      String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  worker    User @relation("AttendanceWorker", fields: [workerId], references: [id])
+  createdBy User @relation("AttendanceCreator", fields: [createdById], references: [id])
+
+  // Idempotent upsert surface: 主管重录同一天要覆盖而非报错
+  @@unique([workerId, date])
+  @@index([date])
 }
 
 // ============================================================
