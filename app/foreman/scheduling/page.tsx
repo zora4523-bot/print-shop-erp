@@ -1,0 +1,91 @@
+import Link from 'next/link';
+import { listPendingSchedulingOrders } from '@/lib/production';
+import { roleLabel } from '@/lib/auth/role-labels';
+import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
+
+export const metadata = { title: '待排产工单' };
+
+function formatShanghaiDate(d: Date | null): string {
+  if (!d) return '-';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+export default async function SchedulingListPage() {
+  const orders = await listPendingSchedulingOrders();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">待排产</h1>
+        <p className="text-sm text-muted-foreground">
+          已提交（SUBMITTED）的工单按急单优先、提交时间先后排列。点击&ldquo;排产&rdquo;为每个款式的非外协工艺派师傅。
+        </p>
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
+          没有待排产的工单。
+        </div>
+      ) : (
+        <div className="rounded-xl border bg-card shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 text-left">工单号</th>
+                <th className="px-4 py-2 text-left">客户代号</th>
+                <th className="px-4 py-2 text-left">提交人</th>
+                <th className="px-4 py-2 text-left">提交时间</th>
+                <th className="px-4 py-2 text-center">款式 / 工艺数</th>
+                <th className="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {orders.map((o) => {
+                const craftTotal = o.items.reduce((sum, it) => sum + it.crafts.length, 0);
+                return (
+                  <tr key={o.id}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{o.orderNo}</span>
+                        {o.isUrgent ? (
+                          <Badge variant="destructive">急单</Badge>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">{o.customerRef ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      {o.submitter.displayName}
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({roleLabel(o.submitter.role)})
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {formatShanghaiDate(o.submittedAt ?? o.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 text-center font-mono text-xs">
+                      {o.items.length} / {craftTotal}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/foreman/scheduling/${o.id}`}
+                        className={buttonVariants({ size: 'sm' })}
+                      >
+                        排产
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-import { OrderStatus, Role, TaskStatus } from '../generated/prisma/enums';
+import { OrderStatus, Role, TaskStatus, MachineType } from '../generated/prisma/enums';
 import { db } from './db';
 import { transitionOrder } from './order/status-machine';
 import { OrderInvariantError } from './order';
@@ -290,3 +290,140 @@ export async function scheduleOrder(
 }
 
 export { SchedulingError as ProductionSchedulingError };
+
+// ─────────────────────────────────────────────────────────────────────
+// Read helpers for the scheduling UI
+// ─────────────────────────────────────────────────────────────────────
+
+// All SUBMITTED orders awaiting scheduling. Foremen see everything
+// (no scope filter) — matches `order:schedule` permission's "no
+// ownership" posture.
+export async function listPendingSchedulingOrders() {
+  return db.order.findMany({
+    where: { status: OrderStatus.SUBMITTED },
+    select: {
+      id: true,
+      orderNo: true,
+      isUrgent: true,
+      customerRef: true,
+      submittedAt: true,
+      createdAt: true,
+      items: {
+        select: { id: true, crafts: true },
+      },
+      submitter: {
+        select: { displayName: true, role: true },
+      },
+    },
+    orderBy: [{ isUrgent: 'desc' }, { submittedAt: 'asc' }],
+  });
+}
+
+export type SchedulingViewCraft = {
+  id: string;
+  name: string;
+  isOutsource: boolean;
+  defaultMachineType: MachineType | null;
+};
+
+export type SchedulingViewItem = {
+  id: string;
+  sequence: number;
+  name: string;
+  quantity: number;
+  specification: string | null;
+  paperType: string | null;
+  crafts: SchedulingViewCraft[];
+};
+
+export type SchedulingViewCandidate = {
+  id: string;
+  displayName: string;
+  machineType: MachineType | null;
+};
+
+export type SchedulingView = {
+  orderId: string;
+  orderNo: string;
+  isUrgent: boolean;
+  customerRef: string | null;
+  submitterDisplayName: string;
+  items: SchedulingViewItem[];
+  workers: SchedulingViewCandidate[];
+};
+
+// Assembles the view-model the scheduling form needs: the order's items
+// + their crafts resolved to names + isOutsource + machineType, plus
+// the list of active WORKERs as assignment candidates. Returns null
+// when the order is missing OR not in SUBMITTED (so the UI can bounce
+// back to the list). Scope check: `order:schedule` permission is
+// already FOREMAN+OWNER only — no per-order ownership to apply.
+export async function getSchedulingView(
+  orderId: string,
+): Promise<SchedulingView | null> {
+  const order = await db.order.findFirst({
+    where: { id: orderId, status: OrderStatus.SUBMITTED },
+    select: {
+      id: true,
+      orderNo: true,
+      isUrgent: true,
+      customerRef: true,
+      submitter: { select: { displayName: true } },
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          name: true,
+          quantity: true,
+          specification: true,
+          paperType: true,
+          crafts: true,
+        },
+      },
+    },
+  });
+  if (!order) return null;
+
+  const allCraftIds = new Set<string>();
+  for (const item of order.items) for (const cid of item.crafts) allCraftIds.add(cid);
+  const crafts =
+    allCraftIds.size === 0
+      ? []
+      : await db.craft.findMany({
+          where: { id: { in: [...allCraftIds] } },
+          select: {
+            id: true,
+            name: true,
+            isOutsource: true,
+            defaultMachineType: true,
+          },
+        });
+  const craftById = new Map(crafts.map((c) => [c.id, c]));
+
+  const workers = await db.user.findMany({
+    where: { role: Role.WORKER, isActive: true },
+    select: { id: true, displayName: true, machineType: true },
+    orderBy: { displayName: 'asc' },
+  });
+
+  return {
+    orderId: order.id,
+    orderNo: order.orderNo,
+    isUrgent: order.isUrgent,
+    customerRef: order.customerRef,
+    submitterDisplayName: order.submitter.displayName,
+    items: order.items.map((item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      name: item.name,
+      quantity: item.quantity,
+      specification: item.specification,
+      paperType: item.paperType,
+      crafts: item.crafts
+        .map((cid) => craftById.get(cid))
+        .filter((c): c is SchedulingViewCraft => typeof c !== 'undefined'),
+    })),
+    workers,
+  };
+}
