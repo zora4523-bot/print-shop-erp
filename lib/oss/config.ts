@@ -59,6 +59,30 @@ function deriveBucketUrl(endpoint: string, bucket: string): string {
       `OSS_ENDPOINT 不是合法 URL：${endpoint}（形如 https://oss-cn-shenzhen.aliyuncs.com）`,
     );
   }
+  // Reject shapes we can't safely virtual-host into `<bucket>.<host>`:
+  //   - path / query / fragment — OSS endpoints are host-only; carrying a
+  //     path into `bucketUrl` would silently drop it and produce a
+  //     mismatched upload target
+  //   - IPv6 literals — `url.hostname` returns the address without its
+  //     surrounding brackets; you can't prepend a subdomain to an IP
+  //   - already virtual-hosted host (`<bucket>.…`) — otherwise we'd
+  //     double-prefix into `my-bucket.my-bucket.…`
+  if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
+    throw new Error(
+      `OSS_ENDPOINT 不能包含路径 / 查询 / 片段：${endpoint}（形如 https://oss-cn-shenzhen.aliyuncs.com）`,
+    );
+  }
+  if (url.hostname.startsWith('[') || /:/.test(url.hostname)) {
+    throw new Error(
+      `OSS_ENDPOINT 暂不支持 IPv6 字面量：${endpoint}（请使用 DNS 主机名）`,
+    );
+  }
+  const bucketPrefix = `${bucket}.`;
+  if (url.hostname.toLowerCase().startsWith(bucketPrefix.toLowerCase())) {
+    throw new Error(
+      `OSS_ENDPOINT 不应已经包含 bucket（${bucket}）前缀：${endpoint}（请使用 region endpoint，如 https://oss-cn-shenzhen.aliyuncs.com）`,
+    );
+  }
   // Virtual-hosted: `<bucket>.<host>`. Keeps the protocol + port that
   // the endpoint uses, so VPC / HTTP-only / custom-port setups are all
   // covered without extra env surface.

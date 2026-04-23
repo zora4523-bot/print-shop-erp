@@ -163,6 +163,79 @@ describe('readOssConfig', () => {
     ).toThrowError(/OSS_ENDPOINT 不是合法 URL/);
   });
 
+  it('rejects OSS_ENDPOINT with a path component (Codex round 32 / P2)', () => {
+    // A path would be silently dropped when we prepend the bucket to the
+    // host, producing an upload target that doesn't match what the
+    // operator configured for STS/metadata.
+    expect(() =>
+      readOssConfig(
+        envWith({
+          OSS_ACCESS_KEY_ID: 'ak',
+          OSS_ACCESS_KEY_SECRET: 'sk',
+          OSS_STS_ROLE_ARN: 'arn',
+          OSS_BUCKET: 'my-bucket',
+          OSS_REGION: 'oss-cn-shenzhen',
+          OSS_ENDPOINT: 'https://oss.internal/prefix',
+        }),
+      ),
+    ).toThrowError(/不能包含路径/);
+  });
+
+  it('accepts OSS_ENDPOINT with a trailing slash but no path', () => {
+    const r = readOssConfig(
+      envWith({
+        OSS_ACCESS_KEY_ID: 'ak',
+        OSS_ACCESS_KEY_SECRET: 'sk',
+        OSS_STS_ROLE_ARN: 'arn',
+        OSS_BUCKET: 'my-bucket',
+        OSS_REGION: 'oss-cn-shenzhen',
+        OSS_ENDPOINT: 'https://oss-cn-shenzhen-internal.aliyuncs.com/',
+      }),
+    );
+    expect(r.configured).toBe(true);
+    if (r.configured) {
+      expect(r.cfg.bucketUrl).toBe(
+        'https://my-bucket.oss-cn-shenzhen-internal.aliyuncs.com',
+      );
+    }
+  });
+
+  it('rejects IPv6 literal in OSS_ENDPOINT (Codex round 32 / P1)', () => {
+    // `url.hostname` drops the surrounding brackets on an IPv6 literal,
+    // so naïve prepending would yield an invalid host like
+    // `my-bucket.2001:db8::1`. Fail fast instead of emitting garbage.
+    expect(() =>
+      readOssConfig(
+        envWith({
+          OSS_ACCESS_KEY_ID: 'ak',
+          OSS_ACCESS_KEY_SECRET: 'sk',
+          OSS_STS_ROLE_ARN: 'arn',
+          OSS_BUCKET: 'my-bucket',
+          OSS_REGION: 'oss-cn-shenzhen',
+          OSS_ENDPOINT: 'http://[2001:db8::1]:9000',
+        }),
+      ),
+    ).toThrowError(/IPv6/);
+  });
+
+  it('rejects OSS_ENDPOINT that already carries the bucket as a prefix (Codex round 32 / P2)', () => {
+    // A common operator mistake is pinning the virtual-hosted URL as
+    // OSS_ENDPOINT. Without a guard we'd derive
+    // `my-bucket.my-bucket.oss-cn-shenzhen.aliyuncs.com`.
+    expect(() =>
+      readOssConfig(
+        envWith({
+          OSS_ACCESS_KEY_ID: 'ak',
+          OSS_ACCESS_KEY_SECRET: 'sk',
+          OSS_STS_ROLE_ARN: 'arn',
+          OSS_BUCKET: 'my-bucket',
+          OSS_REGION: 'oss-cn-shenzhen',
+          OSS_ENDPOINT: 'https://my-bucket.oss-cn-shenzhen.aliyuncs.com',
+        }),
+      ),
+    ).toThrowError(/已经包含 bucket/);
+  });
+
   it('keeps bucketUrl on the OSS virtual-hosted host even when publicBaseUrl is a CDN (Codex round 30 / P2)', () => {
     // A CDN / custom domain is read-only; browser uploads must still
     // target the bucket's OSS host. Regression test to ensure future
