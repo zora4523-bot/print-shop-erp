@@ -59,6 +59,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
       user.role === Role.FOREMAN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  // Only foreman / owner creates outsource orders, and only when the
+  // order hasn't terminated. SPEC §3.2 ties outsource creation to the
+  // scheduling step, but in practice it's useful at any active stage.
+  const canCreateOutsource =
+    (user.role === Role.OWNER || user.role === Role.FOREMAN) &&
+    !isTerminalOrderStatus(order.status);
 
   return (
     <div className="space-y-6">
@@ -89,6 +95,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
           ) : null}
           {canToggleUrgent ? (
             <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
+          ) : null}
+          {canCreateOutsource ? (
+            <Link
+              href={`/foreman/outsource/new?orderId=${order.id}`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              外协
+            </Link>
           ) : null}
           <Link
             href={`/print/orders/${order.id}?autoprint=1`}

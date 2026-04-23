@@ -34,6 +34,12 @@ export default async function ForemanLayout({
                 排产
               </Link>
               <Link
+                href="/foreman/outsource"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                外协
+              </Link>
+              <Link
                 href="/orders"
                 className="text-muted-foreground hover:text-foreground"
               >

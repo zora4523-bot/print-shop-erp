@@ -593,3 +593,86 @@ export const reportTaskSchema = z
   );
 
 export type ReportTaskInput = z.infer<typeof reportTaskSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Outsource order (SPEC §3.2, 外协)
+// ─────────────────────────────────────────────────────────────────────
+
+const moneyField = z.preprocess(
+  (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (t === '') return null;
+      if (!/^\d{1,10}(\.\d{1,2})?$/.test(t)) return Number.NaN;
+      return t;
+    }
+    return Number.NaN;
+  },
+  z
+    .union([z.string(), z.number()])
+    .nullable()
+    .transform((v) => (v === null || v === '' ? null : String(v))),
+);
+
+const optionalIntField = (label: string, max: number) =>
+  z.preprocess(
+    (v) => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (t === '') return null;
+        if (!/^\d+$/.test(t)) return Number.NaN;
+        return Number.parseInt(t, 10);
+      }
+      return Number.NaN;
+    },
+    z
+      .number()
+      .int(`${label}必须是整数`)
+      .min(0, `${label}不能为负`)
+      .max(max, `${label}超出合理范围`)
+      .nullable(),
+  );
+
+const optionalDateField = z.preprocess((v) => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '') return null;
+    const d = new Date(t);
+    return Number.isNaN(d.valueOf()) ? 'invalid-date' : d;
+  }
+  return 'invalid-date';
+}, z.date().nullable());
+
+export const createOutsourceSchema = z.object({
+  orderId: safeId('工单 id'),
+  orderItemIds: z
+    .array(safeId('款式 id'))
+    .min(1, '至少选择一个款式')
+    .max(50, '单次外协不超过 50 个款式'),
+  supplierName: z
+    .string()
+    .trim()
+    .min(1, '请填写外协厂名')
+    .max(64, '外协厂名过长（最多 64 个字符）'),
+  supplierContact: optionalTrimmedText('联系方式', 64),
+  craftDescription: optionalTrimmedText('工艺说明', 500),
+  specialRequirement: optionalTrimmedText('特殊要求', 500),
+  totalQty: optionalIntField('总数量', 10_000_000),
+  expectedDate: optionalDateField,
+  amount: moneyField,
+  remark: optionalTrimmedText('备注', 500),
+});
+
+export type CreateOutsourceInput = z.infer<typeof createOutsourceSchema>;
+
+export const markOutsourceReceivedSchema = z.object({
+  actualDate: optionalDateField,
+});
+
+export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSchema>;
