@@ -14,10 +14,19 @@ export class SchedulingError extends Error {
   }
 }
 
+// Advisory-lock namespace for the scheduling serialization guard.
+// Same `print-shop-erp:<domain>:<invariant>` convention we use in
+// lib/account.ts (OWNER count) and lib/order/order-number.ts
+// (per-day serial).
+function scheduleLockKey(orderId: string): string {
+  return `print-shop-erp:schedule:order:${orderId}`;
+}
+
 // Minimal tx surface we need — kept narrow so a typed Prisma client
 // upgrade doesn't explode the function signature (same pattern as
 // lib/order.ts's OrderTxClient).
 type ScheduleTxClient = {
+  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
     findFirst: (args: {
       where: unknown;
@@ -99,6 +108,17 @@ export async function scheduleOrder(
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as ScheduleTxClient;
 
+    // Serialize concurrent scheduling attempts on the same order.
+    // Without this, two foremen clicking 排产 at the same moment can
+    // both observe SUBMITTED, both pass the status-machine check, and
+    // both createMany — producing duplicate ProductionTask rows and
+    // two STATUS_CHANGE log entries. Lock is per-tx so the second
+    // transaction blocks here and then sees SCHEDULING on its own
+    // read, tripping transitionOrder's guard (Codex round 37 / P0).
+    await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${scheduleLockKey(
+      input.orderId,
+    )}))`;
+
     const order = await txClient.order.findFirst({
       where: { id: input.orderId },
       select: {
@@ -145,9 +165,14 @@ export async function scheduleOrder(
     // silently drop the task. (Can happen if a craft was hard-deleted
     // between order submit and scheduling.)
     for (const cid of allCraftIds) {
-      if (!craftById.has(cid)) {
-        throw new SchedulingError(`工艺不存在：${cid}`);
-      }
+      const c = craftById.get(cid);
+      if (!c) throw new SchedulingError(`工艺不存在：${cid}`);
+      // createOrder already verifies every craft is active, but the
+      // dictionary can be stopped between submit and schedule. Block
+      // rather than silently schedule on a retired craft — the
+      // foreman has to either change the craft on the order (edit
+      // flow) or the owner has to re-enable the craft.
+      if (!c.isActive) throw new SchedulingError(`工艺已停用：${cid}`);
     }
 
     // Expected set: for each item, for each non-outsource craft on

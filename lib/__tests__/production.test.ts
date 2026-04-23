@@ -13,6 +13,7 @@ const { dbMock } = vi.hoisted(() => {
     user: { findMany: ReturnType<typeof vi.fn> };
     productionTask: { createMany: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
+    $queryRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
     order: { findFirst: vi.fn(), update: vi.fn() },
@@ -20,6 +21,7 @@ const { dbMock } = vi.hoisted(() => {
     user: { findMany: vi.fn() },
     productionTask: { createMany: vi.fn() },
     orderLog: { create: vi.fn() },
+    $queryRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -107,6 +109,7 @@ beforeEach(() => {
   dbMock.user.findMany.mockReset();
   dbMock.productionTask.createMany.mockReset();
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
+  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -380,6 +383,55 @@ describe('scheduleOrder', () => {
     expect(result.status).toBe(OrderStatus.SCHEDULING);
     expect(result.tasksCreated).toBe(0);
     expect(result.skippedOutsourceCrafts).toBe(1);
+  });
+
+  it('acquires a per-order advisory xact lock before reading (Codex round 37 / P0)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.user.findMany.mockResolvedValue([
+      fixtureWorker('worker-1'),
+      fixtureWorker('worker-2'),
+    ]);
+    dbMock.productionTask.createMany.mockResolvedValue({ count: 2 });
+    await scheduleOrder(
+      {
+        orderId: 'order-1',
+        assignments: [
+          { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
+          { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-2' },
+        ],
+      },
+      foremanActor,
+    );
+    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const sql = (firstCall[0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    // Key value is passed as the template parameter.
+    expect(firstCall[1]).toMatch(/print-shop-erp:schedule:order:order-1/);
+  });
+
+  it('refuses when a craft on the order has been deactivated (Codex round 37 / P1)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    // craft-foil still exists but is now inactive — e.g. the owner
+    // stopped it between submit and schedule.
+    dbMock.craft.findMany.mockResolvedValue(
+      fixtureCrafts().map((c) =>
+        c.id === 'craft-foil' ? { ...c, isActive: false } : c,
+      ),
+    );
+    await expect(
+      scheduleOrder(
+        {
+          orderId: 'order-1',
+          assignments: [
+            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
+            { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-2' },
+          ],
+        },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/工艺已停用/);
   });
 
   it('refuses when an order references a craft id that no longer exists in the dictionary', async () => {

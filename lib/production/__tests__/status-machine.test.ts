@@ -60,6 +60,18 @@ describe('transitionProductionTask', () => {
       ).toThrow(InvalidTaskTransitionError);
     }
   });
+
+  it('rejects self-transitions (no idempotent cancel or self-complete)', () => {
+    // CANCELLED → CANCELLED looks harmless but opens a footgun:
+    // callers can re-run a "cancel" action and get silent success
+    // while the task was actually still active under a different
+    // concurrent write. Demand a real transition so duplicates surface.
+    for (const s of Object.values(TaskStatus)) {
+      expect(() => transitionProductionTask(s, s)).toThrow(
+        InvalidTaskTransitionError,
+      );
+    }
+  });
 });
 
 describe('canTransitionProductionTask / isTerminalTaskStatus', () => {
