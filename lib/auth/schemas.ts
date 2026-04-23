@@ -516,3 +516,33 @@ export const setOrderUrgentSchema = z.object({
 });
 
 export type SetOrderUrgentInput = z.infer<typeof setOrderUrgentSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Production scheduling (SPEC §3.2 / §4.3)
+// ─────────────────────────────────────────────────────────────────────
+
+// ID allowlist kept in sync with lib/oss/sign.ts — cuid / cuid2 only,
+// no path-sensitive characters. A caller sending garbage here is a bug
+// or attack, not a user typo.
+const scheduleIdRe = /^[A-Za-z0-9_-]+$/;
+const safeId = (label: string) =>
+  z.string().trim().regex(scheduleIdRe, `${label}格式非法`);
+
+const scheduleAssignmentSchema = z.object({
+  orderItemId: safeId('款式 id'),
+  craftId: safeId('工艺 id'),
+  workerId: safeId('师傅 id'),
+});
+
+export const scheduleOrderSchema = z.object({
+  orderId: safeId('工单 id'),
+  assignments: z
+    .array(scheduleAssignmentSchema)
+    // An "all-outsource" order has zero expected assignments. Allow
+    // the empty array so scheduleOrder can still transition Order to
+    // SCHEDULING (lib enforces the real invariant: every expected
+    // non-outsource pair must be covered).
+    .max(200, '单次排产不超过 200 个任务'),
+});
+
+export type ScheduleOrderInput = z.infer<typeof scheduleOrderSchema>;
