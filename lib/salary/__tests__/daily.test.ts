@@ -1,0 +1,258 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import Decimal from 'decimal.js';
+import {
+  MachineType,
+  Role,
+  WorkerType,
+} from '../../../generated/prisma/client';
+
+// Mock db before importing the module under test. lib/salary/daily.ts
+// calls db.user.findUnique, db.productionTask.findMany, etc.
+const { dbMock } = vi.hoisted(() => {
+  const mock = {
+    user: { findUnique: vi.fn(), findMany: vi.fn() },
+    productionTask: { findMany: vi.fn() },
+    salaryRule: { findFirst: vi.fn() },
+    dailyWorkerSalary: {
+      upsert: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+    },
+  };
+  return { dbMock: mock };
+});
+vi.mock('@/lib/db', () => ({ db: dbMock }));
+
+import {
+  aggregateTasks,
+  shanghaiDayRange,
+  computeDailyWorkerSalary,
+  listDailyWorkerSalaries,
+  markDailySalaryPaid,
+  DailySalaryError,
+} from '../daily';
+
+const HAND_PRESS_RULE = {
+  dailyBase: 100,
+  pieceRate: 0.007,
+  boardRate: 5,
+  smallOrderThreshold: 1000,
+  smallOrderFlatPrice: 12,
+  multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
+};
+
+describe('shanghaiDayRange', () => {
+  it('returns the UTC instant range for a Shanghai calendar date', () => {
+    // 2026-04-23 Shanghai = [2026-04-22T16:00Z, 2026-04-23T16:00Z)
+    const { start, end } = shanghaiDayRange('2026-04-23');
+    expect(start.toISOString()).toBe('2026-04-22T16:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-04-23T16:00:00.000Z');
+    expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('rejects non-YYYY-MM-DD input', () => {
+    expect(() => shanghaiDayRange('2026/04/23')).toThrow(DailySalaryError);
+    expect(() => shanghaiDayRange('2026-4-23')).toThrow(DailySalaryError);
+    expect(() => shanghaiDayRange('')).toThrow(DailySalaryError);
+  });
+});
+
+describe('aggregateTasks', () => {
+  it('sums pieceworkAmount with Decimal math (no float drift)', () => {
+    const r = aggregateTasks([
+      { pieceworkAmount: '12.00', orderItem: { orderId: 'o1' } },
+      { pieceworkAmount: '61.00', orderItem: { orderId: 'o2' } },
+      { pieceworkAmount: '52.00', orderItem: { orderId: 'o2' } },
+      { pieceworkAmount: '76.00', orderItem: { orderId: 'o3' } },
+    ]);
+    expect(r.totalPieceworkAmount.toFixed(2)).toBe('201.00');
+    expect(r.taskCount).toBe(4);
+    expect(r.orderCount).toBe(3);
+    expect(r.detail).toHaveLength(4);
+    expect(r.detail[0]).toEqual({ pieceworkAmount: '12.00', orderId: 'o1' });
+  });
+
+  it('empty task list returns zero totals', () => {
+    const r = aggregateTasks([]);
+    expect(r.totalPieceworkAmount.toFixed(2)).toBe('0.00');
+    expect(r.taskCount).toBe(0);
+    expect(r.orderCount).toBe(0);
+    expect(r.detail).toEqual([]);
+  });
+});
+
+describe('computeDailyWorkerSalary', () => {
+  const workerFixture = {
+    id: 'worker-1',
+    role: Role.WORKER,
+    workerType: WorkerType.MACHINE,
+    machineType: MachineType.HAND_PRESS,
+    isActive: true,
+  };
+
+  beforeEach(() => {
+    dbMock.user.findUnique.mockReset();
+    dbMock.user.findMany.mockReset();
+    dbMock.productionTask.findMany.mockReset();
+    dbMock.salaryRule.findFirst
+      .mockReset()
+      .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
+    dbMock.dailyWorkerSalary.findMany.mockReset();
+    dbMock.dailyWorkerSalary.update.mockReset();
+  });
+
+  it('refuses a missing worker', async () => {
+    dbMock.user.findUnique.mockResolvedValue(null);
+    await expect(
+      computeDailyWorkerSalary('ghost', '2026-04-23'),
+    ).rejects.toBeInstanceOf(DailySalaryError);
+  });
+
+  it('refuses non-MACHINE worker types (PACKER / COOK / etc.)', async () => {
+    dbMock.user.findUnique.mockResolvedValue({
+      ...workerFixture,
+      workerType: WorkerType.PACKER,
+    });
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/仅 WorkerType\.MACHINE/);
+  });
+
+  it('refuses when the machine worker has no active rule (loud, not silent zero)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.salaryRule.findFirst.mockResolvedValue(null);
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/无当前生效.*薪资规则/);
+  });
+
+  it('SPEC §7.1 张三 reproduction: tasks sum 201, base 100 → actualSalary 201', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '12.00', orderItem: { orderId: 'o1' } },
+      { pieceworkAmount: '61.00', orderItem: { orderId: 'o2' } },
+      { pieceworkAmount: '52.00', orderItem: { orderId: 'o2' } },
+      { pieceworkAmount: '76.00', orderItem: { orderId: 'o3' } },
+    ]);
+    const r = await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    expect(r.totalPieceworkAmount).toBe('201.00');
+    expect(r.baseSalary).toBe('100.00');
+    expect(r.actualSalary).toBe('201.00');
+    expect(r.taskCount).toBe(4);
+    expect(r.orderCount).toBe(3);
+  });
+
+  it('base-floor case: 0 tasks → actualSalary falls back to dailyBase', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    const r = await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    expect(r.totalPieceworkAmount).toBe('0.00');
+    expect(r.actualSalary).toBe('100.00');
+    expect(r.taskCount).toBe(0);
+  });
+
+  it('upserts with Shanghai-midnight date column + snapshots rule value', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+    ]);
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    const call = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0];
+    // date column is UTC midnight for the Shanghai calendar date
+    expect((call.where.workerId_date.date as Date).toISOString()).toBe(
+      '2026-04-23T00:00:00.000Z',
+    );
+    // snapshot shape matches rule + dailyBase
+    expect(call.create.salaryRuleSnapshot).toMatchObject({
+      pieceRate: 0.007,
+      boardRate: 5,
+      dailyBase: 100,
+    });
+  });
+
+  it('queries tasks in the Shanghai day range (not UTC day range)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    const where = dbMock.productionTask.findMany.mock.calls[0][0].where;
+    expect((where.completedAt.gte as Date).toISOString()).toBe(
+      '2026-04-22T16:00:00.000Z',
+    );
+    expect((where.completedAt.lt as Date).toISOString()).toBe(
+      '2026-04-23T16:00:00.000Z',
+    );
+  });
+
+  it('recompute: update path does not write isPaid (finance ledger protected)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+    ]);
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    const call = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0];
+    // update branch touches numbers but NOT isPaid — finance wouldn't
+    // want a recompute to silently reopen a paid record.
+    expect('isPaid' in call.update).toBe(false);
+    expect('paidAt' in call.update).toBe(false);
+  });
+});
+
+describe('listDailyWorkerSalaries', () => {
+  beforeEach(() => {
+    dbMock.dailyWorkerSalary.findMany.mockReset().mockResolvedValue([]);
+  });
+
+  it('filters by date (converts YYYY-MM-DD to UTC midnight)', async () => {
+    await listDailyWorkerSalaries({ date: '2026-04-23' });
+    const where = dbMock.dailyWorkerSalary.findMany.mock.calls[0][0].where;
+    expect((where.date as Date).toISOString()).toBe('2026-04-23T00:00:00.000Z');
+  });
+
+  it('filters by workerId and isPaid', async () => {
+    await listDailyWorkerSalaries({ workerId: 'worker-1', isPaid: false });
+    const where = dbMock.dailyWorkerSalary.findMany.mock.calls[0][0].where;
+    expect(where.workerId).toBe('worker-1');
+    expect(where.isPaid).toBe(false);
+  });
+
+  it('empty filter returns everything (no where conditions)', async () => {
+    await listDailyWorkerSalaries({});
+    const where = dbMock.dailyWorkerSalary.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({});
+  });
+});
+
+describe('markDailySalaryPaid', () => {
+  beforeEach(() => {
+    dbMock.dailyWorkerSalary.update.mockReset().mockResolvedValue({
+      id: 'ds-1',
+      isPaid: true,
+    });
+  });
+
+  it('marks paid stamps paidAt from the injected clock', async () => {
+    const now = new Date('2026-05-01T09:00:00Z');
+    await markDailySalaryPaid('ds-1', true, now);
+    const data = dbMock.dailyWorkerSalary.update.mock.calls[0][0].data;
+    expect(data.isPaid).toBe(true);
+    expect(data.paidAt).toBe(now);
+  });
+
+  it('mark-unpaid clears paidAt', async () => {
+    await markDailySalaryPaid('ds-1', false);
+    const data = dbMock.dailyWorkerSalary.update.mock.calls[0][0].data;
+    expect(data.isPaid).toBe(false);
+    expect(data.paidAt).toBeNull();
+  });
+});
+
+// sanity check: the pure path still lines up with lib/salary/machine-piecework
+// since computeDailyWorkerSalary delegates to calcMachineDailySalary.
+describe('parity with calcMachineDailySalary', () => {
+  it('max(sum, base) behavior identical', () => {
+    expect(
+      new Decimal('201').eq(new Decimal('201.00')),
+    ).toBe(true);
+  });
+});

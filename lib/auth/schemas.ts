@@ -703,3 +703,25 @@ export const markOutsourceReceivedSchema = z.object({
 });
 
 export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Salary actions (SPEC §5)
+// ─────────────────────────────────────────────────────────────────────
+
+// The recompute-daily endpoint takes a date and optionally a single
+// workerId (for "recompute just this row" from the UI).
+export const recomputeDailySalarySchema = z.object({
+  date: z
+    .string()
+    .trim()
+    .regex(YMD_RE, '日期格式非法（应为 YYYY-MM-DD）'),
+  workerId: safeId('师傅 id').optional(),
+});
+
+export type RecomputeDailySalaryInput = z.infer<typeof recomputeDailySalarySchema>;
+
+export const markDailySalaryPaidSchema = z.object({
+  isPaid: formBoolean,
+});
+
+export type MarkDailySalaryPaidInput = z.infer<typeof markDailySalaryPaidSchema>;
