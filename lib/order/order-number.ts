@@ -14,9 +14,22 @@
 const ORDER_SEQ_NAMESPACE = 'print-shop-erp:order-seq';
 const SEQ_PAD = 4;
 
+// The shop is in Foshan → Asia/Shanghai. Pin the "YYYYMMDD" calendar to
+// that zone so a server in UTC (or any other region) still groups orders
+// by the business day the operator filled them in. Using local-time
+// getters on a `Date` would produce different prefixes depending on
+// process TZ and silently split sequences across days around midnight.
+const BUSINESS_TIMEZONE = 'Asia/Shanghai';
+const DATE_PREFIX_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
 function formatDatePrefix(date: Date): string {
-  const z = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}${z(date.getMonth() + 1)}${z(date.getDate())}`;
+  // 'en-CA' formats as YYYY-MM-DD; strip dashes for the 8-digit prefix.
+  return DATE_PREFIX_FORMATTER.format(date).replace(/-/g, '');
 }
 
 // Minimal shape of the Prisma tx client we need. Kept local so the module
@@ -64,10 +77,19 @@ export async function nextOrderNumber(
 }
 
 function parseSerial(orderNo: string): number {
-  // Tail after the first "-" is the serial. Tolerate unexpected shapes by
-  // falling back to 0 (safer: the next number starts at 1).
+  // Tail after the first "-" is the serial. Fall back to `0` would be
+  // unsafe — if the DB somehow holds a malformed highest row we'd emit
+  // '-0001' and collide with an existing well-formed '-0001'. Since we
+  // control insertion, a malformed row means something upstream is
+  // already wrong; fail loudly so ops catch it.
   const tail = orderNo.split('-', 2)[1];
-  if (!tail) return 0;
+  if (!tail) throw new Error(`无法解析工单号（缺少序号段）：${orderNo}`);
+  if (!/^\d+$/.test(tail)) {
+    throw new Error(`无法解析工单号（序号段非纯数字）：${orderNo}`);
+  }
   const n = Number.parseInt(tail, 10);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`无法解析工单号（序号非正整数）：${orderNo}`);
+  }
+  return n;
 }

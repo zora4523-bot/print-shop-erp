@@ -21,6 +21,8 @@ function makeTx(existingOrderNos: string[] = []) {
   return tx;
 }
 
+// Anchored in the business timezone (+08:00) so calendar-day math is
+// unambiguous across test envs.
 const date = new Date('2026-04-23T09:00:00+08:00');
 
 describe('nextOrderNumber', () => {
@@ -80,18 +82,38 @@ describe('nextOrderNumber', () => {
     await expect(nextOrderNumber(tx, date)).rejects.toThrow(/9999/);
   });
 
-  it('treats a malformed existing orderNo as 0 rather than crashing', async () => {
-    // Shouldn't happen (we generate them ourselves), but be forgiving.
-    const tx = makeTx(['20260423-abc', '20260423-0001']);
-    const result = await nextOrderNumber(tx, date);
-    // findFirst picks the lexicographically-largest, which is "abc".
-    // parseSerial('20260423-abc') returns 0 → next = 0001.
-    expect(result).toBe('20260423-0001');
+  it('throws on a malformed highest orderNo rather than colliding (Codex round 25 / P1)', async () => {
+    // If the DB somehow holds '20260423-abc' as the highest row, falling
+    // back to 0 would produce '0001' which already exists — a hard
+    // unique-constraint collision. Fail loudly so ops can investigate.
+    const tx = makeTx(['20260423-abc']);
+    await expect(nextOrderNumber(tx, date)).rejects.toThrow(/无法解析工单号/);
   });
 
   it('handles single-digit months/days with zero padding', async () => {
     const tx = makeTx([]);
-    const jan5 = new Date('2026-01-05T10:00:00');
+    const jan5 = new Date('2026-01-05T10:00:00+08:00');
     expect(await nextOrderNumber(tx, jan5)).toBe('20260105-0001');
+  });
+
+  describe('business-timezone anchoring (Codex round 25 / P1)', () => {
+    it('uses Asia/Shanghai calendar even when the Date points to a different UTC day', async () => {
+      const tx = makeTx([]);
+      // 2026-04-23 23:30 UTC = 2026-04-24 07:30 in Asia/Shanghai → day 24.
+      const utcLateNight = new Date('2026-04-23T23:30:00Z');
+      expect(await nextOrderNumber(tx, utcLateNight)).toBe('20260424-0001');
+    });
+
+    it('keeps same-business-day orders in the same prefix', async () => {
+      const tx = makeTx([]);
+      // 2026-04-23 00:30 CST (= 2026-04-22 16:30 UTC) → day 23.
+      const earlyMorningCST = new Date('2026-04-22T16:30:00Z');
+      // 2026-04-23 23:00 CST (= 2026-04-23 15:00 UTC) → day 23.
+      const lateNightCST = new Date('2026-04-23T15:00:00Z');
+      const first = await nextOrderNumber(tx, earlyMorningCST);
+      const second = await nextOrderNumber(tx, lateNightCST);
+      expect(first.startsWith('20260423-')).toBe(true);
+      expect(second.startsWith('20260423-')).toBe(true);
+    });
   });
 });
