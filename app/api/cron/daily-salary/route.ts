@@ -54,11 +54,14 @@ export async function POST(req: Request) {
 
   try {
     const results = await computeDailyForAllMachineWorkers(date);
+    // COUNTS ONLY — full per-worker salary amounts would leak into
+    // scheduler / pg_cron logs (same Codex round 49 / P2 rationale
+    // as /api/cron/hourly-payroll). Owner sees details at
+    // /owner/salary/daily.
     return NextResponse.json({
       status: 'ok',
       date,
       workerCount: results.length,
-      results,
     });
   } catch (err) {
     const message =

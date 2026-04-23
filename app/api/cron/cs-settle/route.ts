@@ -28,12 +28,14 @@ export async function POST(req: Request) {
 
   try {
     const { settled, errors } = await settleReadyCsPeriods();
+    // COUNTS ONLY — per-commission totals / tier rates would leak via
+    // scheduler logs (Codex round 49 / P2 rationale applied across
+    // all three cron endpoints). Owner sees details at
+    // /owner/salary/cs.
     return NextResponse.json({
       status: 'ok',
       settledCount: settled.length,
       errorCount: errors.length,
-      settled,
-      errors,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
