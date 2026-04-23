@@ -194,6 +194,72 @@ describe('calcHourlyPayroll — COOK', () => {
       ),
     ).toThrow(/不能为负/);
   });
+
+  // 注意事项 1: 厨师混合薪资测试必须覆盖"全职做饭 / 混合打包 / 请假"
+  // 三种场景 + 请假代班。以下四个用例把每种场景明确写成名字在 pure
+  // function 层面固化，aggregator 层的集成测试另外覆盖数据库路径。
+
+  it('场景: 全职做饭 — 只有 normal/ot 工时（都被忽略）, spare=0 → 纯月薪 3000', () => {
+    const r = calcHourlyPayroll(
+      {
+        workerType: WorkerType.COOK,
+        totalNormalHours: 176, // 22 天 × 8h
+        totalOtHours: 8, // 加班烧菜，但 COOK 不算 ot
+        totalSpareHours: 0,
+      },
+      COOK_RULES,
+    );
+    eq(r.totalSalary, '3000');
+    eq(r.normalPay, '0');
+    eq(r.otPay, '0');
+    eq(r.sparePay, '0');
+  });
+
+  it('场景: 混合打包 — 月薪 3000 + spare 20h × 11 = 3220', () => {
+    const r = calcHourlyPayroll(
+      {
+        workerType: WorkerType.COOK,
+        totalNormalHours: 150, // 忽略
+        totalOtHours: 0,
+        totalSpareHours: 20,
+      },
+      COOK_RULES,
+    );
+    eq(r.totalSalary, '3220');
+    eq(r.sparePay, '220');
+  });
+
+  it('场景: 请假整月 — 无任何工时 → 月薪 3000 不折扣（DECISIONS 2026-04-24, TODO 需业主确认）', () => {
+    // MVP 不折扣。如果业主后续要求按天扣，改 COOK 分支一行即可；
+    // 此测试是未来策略变更的第一个 red test。
+    const r = calcHourlyPayroll(
+      {
+        workerType: WorkerType.COOK,
+        totalNormalHours: 0,
+        totalOtHours: 0,
+        totalSpareHours: 0,
+      },
+      COOK_RULES,
+    );
+    eq(r.totalSalary, '3000');
+    eq(r.monthlyBasePay, '3000');
+  });
+
+  it('场景: 请假 + 代班打包 — 月薪照发 + 15h spare × 11 = 3165', () => {
+    // 厨师不在但帮打包组做了 15 小时；月薪 full 3000 + spare 165。
+    const r = calcHourlyPayroll(
+      {
+        workerType: WorkerType.COOK,
+        totalNormalHours: 0,
+        totalOtHours: 0,
+        totalSpareHours: 15,
+      },
+      COOK_RULES,
+    );
+    eq(r.totalSalary, '3165');
+    eq(r.monthlyBasePay, '3000');
+    eq(r.sparePay, '165');
+  });
 });
 
 describe('calcHourlyPayroll — input flexibility', () => {
