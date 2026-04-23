@@ -30,10 +30,20 @@ export default async function Home() {
       <main className="mx-auto max-w-4xl px-6 py-12 space-y-6">
         <div className="rounded-xl border bg-card p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">欢迎回来，{user.displayName}</h2>
-          <p className="text-sm text-muted-foreground">
-            这是 P0 阶段的最小登录壳。后续几个切片会按 SPEC §9.1 P0
-            清单逐步补齐：工单核心、生产流程、薪资、推送、CDR、账单、Dashboard。
+          <p className="mb-4 text-sm text-muted-foreground">
+            这是 P0 阶段的最小登录壳。工单、字典可从下方入口进入。
           </p>
+          <div>
+            <Link
+              href="/orders"
+              className="text-base text-primary underline hover:no-underline"
+            >
+              工单 →
+            </Link>
+            <span className="ml-2 text-sm text-muted-foreground">
+              查看 / 新建 / 提交（按角色范围）
+            </span>
+          </div>
         </div>
         {isOwner ? (
           <div className="rounded-xl border bg-card p-6 shadow-sm">

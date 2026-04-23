@@ -1,10 +1,15 @@
 import { z } from 'zod';
+// Import enums from the runtime-free /enums entry so importing this
+// module from client components (e.g. `zodResolver(createOrderSchema)`
+// inside an RHF form) doesn't drag the Prisma runtime into the browser
+// bundle. /enums exports plain `const` objects with the same values as
+// /client but without the `@prisma/client` runtime (node:module etc.).
 import {
   Role,
   WorkerType,
   MachineType,
   ProductCategory,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
