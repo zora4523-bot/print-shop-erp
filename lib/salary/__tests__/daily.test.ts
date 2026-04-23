@@ -16,6 +16,7 @@ const { dbMock } = vi.hoisted(() => {
     dailyWorkerSalary: {
       upsert: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
   };
@@ -54,6 +55,14 @@ describe('shanghaiDayRange', () => {
     expect(() => shanghaiDayRange('2026/04/23')).toThrow(DailySalaryError);
     expect(() => shanghaiDayRange('2026-4-23')).toThrow(DailySalaryError);
     expect(() => shanghaiDayRange('')).toThrow(DailySalaryError);
+  });
+
+  it('rejects invalid calendar dates (2026-02-31 rollover) (Codex round 43 / P1)', () => {
+    // JS `new Date('2026-02-31')` would silently normalize to Mar 3;
+    // shanghaiDayRange must refuse so a cron/UI typo fails loud.
+    expect(() => shanghaiDayRange('2026-02-31')).toThrow(DailySalaryError);
+    expect(() => shanghaiDayRange('2025-04-31')).toThrow(DailySalaryError);
+    expect(() => shanghaiDayRange('2026-13-01')).toThrow(DailySalaryError);
   });
 });
 
@@ -99,6 +108,7 @@ describe('computeDailyWorkerSalary', () => {
       .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
     dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
     dbMock.dailyWorkerSalary.findMany.mockReset();
+    dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
     dbMock.dailyWorkerSalary.update.mockReset();
   });
 
@@ -195,6 +205,46 @@ describe('computeDailyWorkerSalary', () => {
     // want a recompute to silently reopen a paid record.
     expect('isPaid' in call.update).toBe(false);
     expect('paidAt' in call.update).toBe(false);
+  });
+
+  it('refuses to recompute an already-paid row (Codex round 43 / P0)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+    ]);
+    dbMock.dailyWorkerSalary.findUnique.mockResolvedValue({
+      id: 'ds-existing',
+      isPaid: true,
+      actualSalary: '201.00',
+    });
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/已标记发放.*撤销发放再重算/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
+  });
+
+  it('allows recompute when the existing row is unpaid', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+    ]);
+    dbMock.dailyWorkerSalary.findUnique.mockResolvedValue({
+      id: 'ds-existing',
+      isPaid: false,
+      actualSalary: '150.00',
+    });
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    expect(dbMock.dailyWorkerSalary.upsert).toHaveBeenCalled();
+  });
+
+  it('allows first-time compute when no row exists yet (findUnique null)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+    ]);
+    dbMock.dailyWorkerSalary.findUnique.mockResolvedValue(null);
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    expect(dbMock.dailyWorkerSalary.upsert).toHaveBeenCalled();
   });
 });
 

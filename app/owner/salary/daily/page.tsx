@@ -1,7 +1,10 @@
+import Decimal from 'decimal.js';
 import { listDailyWorkerSalaries } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { MachineType } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
+import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
 
@@ -49,13 +52,22 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     workerId: sp.workerId,
   });
 
-  const totalActual = rows.reduce(
-    (acc, r) => acc + Number(r.actualSalary),
-    0,
-  );
+  // Aggregate in Decimal — rows are Prisma Decimal, and JS float
+  // addition can drift by cents when summing 50+ rows (Codex round
+  // 43 / P2).
+  const totalActual = rows
+    .reduce(
+      (acc, r) => acc.plus(new Decimal(r.actualSalary as unknown as string)),
+      new Decimal(0),
+    )
+    .toFixed(2);
   const unpaidActual = rows
     .filter((r) => !r.isPaid)
-    .reduce((acc, r) => acc + Number(r.actualSalary), 0);
+    .reduce(
+      (acc, r) => acc.plus(new Decimal(r.actualSalary as unknown as string)),
+      new Decimal(0),
+    )
+    .toFixed(2);
 
   return (
     <div className="space-y-6">
@@ -73,9 +85,15 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
 
       <div className="grid grid-cols-3 gap-4 text-sm">
         <StatCard label="记录数" value={rows.length.toString()} />
-        <StatCard label="当日实发合计" value={`¥ ${totalActual.toFixed(2)}`} />
-        <StatCard label="未发合计" value={`¥ ${unpaidActual.toFixed(2)}`} />
+        <StatCard label="当日实发合计" value={`¥ ${totalActual}`} />
+        <StatCard label="未发合计" value={`¥ ${unpaidActual}`} />
       </div>
+
+      <FilterBar
+        selectedDate={selectedDate}
+        paid={sp.paid}
+        workerId={sp.workerId}
+      />
 
       {rows.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
@@ -146,5 +164,66 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold font-mono">{value}</div>
     </div>
+  );
+}
+
+function FilterBar({
+  selectedDate,
+  paid,
+  workerId,
+}: {
+  selectedDate: string;
+  paid: string | undefined;
+  workerId: string | undefined;
+}) {
+  // Plain GET form — the searchParams round-trip is server-rendered
+  // so filtering doesn't need any client JS. No form action attribute
+  // means "submit to the same URL", exactly what we want.
+  return (
+    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+      <div className="flex flex-col">
+        <label className="text-xs text-muted-foreground">日期</label>
+        <input
+          type="date"
+          name="date"
+          defaultValue={selectedDate}
+          className="rounded-md border bg-background px-3 py-1 text-sm"
+        />
+      </div>
+      <div className="flex flex-col">
+        <label className="text-xs text-muted-foreground">状态</label>
+        <select
+          name="paid"
+          defaultValue={paid ?? ''}
+          className="rounded-md border bg-background px-3 py-1 text-sm"
+        >
+          <option value="">全部</option>
+          <option value="unpaid">仅未发</option>
+          <option value="paid">仅已发</option>
+        </select>
+      </div>
+      <div className="flex flex-col">
+        <label className="text-xs text-muted-foreground">师傅 id (可选)</label>
+        <input
+          type="text"
+          name="workerId"
+          defaultValue={workerId ?? ''}
+          placeholder="留空=全部"
+          className="rounded-md border bg-background px-3 py-1 text-sm"
+        />
+      </div>
+      <button
+        type="submit"
+        className={buttonVariants({ size: 'sm' })}
+      >
+        筛选
+      </button>
+      <Link
+        href="/owner/salary/daily"
+        className={buttonVariants({ size: 'sm', variant: 'ghost' })}
+      >
+        清除
+      </Link>
+    </form>
   );
 }

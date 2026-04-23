@@ -641,8 +641,8 @@ const optionalIntField = (label: string, max: number) =>
 // emits. JS's `new Date(string)` would accept `2024-02-31` and silently
 // roll it forward to March, which is exactly the class of calendar bug
 // we don't want leaking into expected/actual delivery dates.
-const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-function parseStrictYmd(s: string): Date | null {
+export const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+export function parseStrictYmd(s: string): Date | null {
   const m = YMD_RE.exec(s);
   if (!m) return null;
   const y = Number(m[1]);
@@ -709,12 +709,27 @@ export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSch
 // ─────────────────────────────────────────────────────────────────────
 
 // The recompute-daily endpoint takes a date and optionally a single
-// workerId (for "recompute just this row" from the UI).
+// workerId (for "recompute just this row" from the UI). Strict calendar
+// validation — refuses 2026-02-31 and the like (Codex round 43 / P1).
 export const recomputeDailySalarySchema = z.object({
   date: z
     .string()
     .trim()
-    .regex(YMD_RE, '日期格式非法（应为 YYYY-MM-DD）'),
+    .superRefine((val, ctx) => {
+      if (!YMD_RE.test(val)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '日期格式非法（应为 YYYY-MM-DD）',
+        });
+        return;
+      }
+      if (!parseStrictYmd(val)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: '日期不是合法日历日期',
+        });
+      }
+    }),
   workerId: safeId('师傅 id').optional(),
 });
 

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { MachineType, Role, WorkerType } from '../../generated/prisma/enums';
 import { db } from '../db';
+import { parseStrictYmd } from '../auth/schemas';
 import {
   calcMachineDailySalary,
   type MachineSalaryRule,
@@ -25,14 +26,20 @@ export class DailySalaryError extends Error {
 // `@db.Date` column) and returns the matching [start, end) UTC instant
 // range. Pure helper, exported for testing.
 export function shanghaiDayRange(date: string): { start: Date; end: Date } {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) {
-    throw new DailySalaryError(`日期格式非法（应为 YYYY-MM-DD）：${date}`);
+  // Strict calendar check — rejects 2026-02-31 and other rollover
+  // traps that `new Date(string)` would silently normalize (Codex
+  // round 43 / P1). parseStrictYmd returns a UTC-midnight Date for
+  // the input calendar date.
+  const utcMidnight = parseStrictYmd(date);
+  if (!utcMidnight) {
+    throw new DailySalaryError(
+      `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${date}`,
+    );
   }
-  const [, y, mo, d] = m;
-  // UTC midnight for the given Shanghai date minus the +8 offset.
+  // Shanghai is UTC+8 and has no DST, so a Shanghai calendar day
+  // spans from (UTC-midnight − 8h) to (UTC-midnight + 16h).
   const start = new Date(
-    Date.UTC(Number(y), Number(mo) - 1, Number(d), -SHANGHAI_OFFSET_HOURS, 0, 0),
+    utcMidnight.getTime() - SHANGHAI_OFFSET_HOURS * 60 * 60 * 1000,
   );
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { start, end };
@@ -146,11 +153,27 @@ export async function computeDailyWorkerSalary(
     baseSalary,
   );
 
-  // Store the `@db.Date` column as a UTC midnight for the Shanghai
-  // calendar date; Prisma strips the time when the column is Date.
-  // Constructing via Date.UTC matches shanghaiDayRange's convention.
-  const [y, mo, d] = date.split('-').map(Number);
-  const dateCol = new Date(Date.UTC(y!, mo! - 1, d!));
+  // Store the `@db.Date` column as UTC midnight for the Shanghai
+  // calendar date. parseStrictYmd already returned this value inside
+  // shanghaiDayRange — reusing the same parser here keeps the two
+  // columns-vs-range views perfectly aligned.
+  const dateCol = parseStrictYmd(date)!;
+
+  // Refuse to recompute an already-paid row: the paid amount is a
+  // finance-of-record value, and silently overwriting it would break
+  // audit (Codex round 43 / P0). Owner must explicitly 撤销发放 first,
+  // recompute, then re-mark paid — the trail stays visible.
+  const existing = await db.dailyWorkerSalary.findUnique({
+    where: { workerId_date: { workerId, date: dateCol } },
+    select: { id: true, isPaid: true, actualSalary: true },
+  });
+  if (existing?.isPaid) {
+    throw new DailySalaryError(
+      `该日已标记发放（${date} · 师傅 ${workerId} · 实发 ¥${String(
+        existing.actualSalary,
+      )}），请先撤销发放再重算。`,
+    );
+  }
 
   await db.dailyWorkerSalary.upsert({
     where: { workerId_date: { workerId, date: dateCol } },

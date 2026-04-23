@@ -75,11 +75,19 @@ describe('recomputeDailySalaryAction', () => {
     expect(r.status).toBe('invalid');
   });
 
-  it('rejects invalid calendar dates (2026-02-31 rollover)', async () => {
-    // The schema uses a simple YYYY-MM-DD regex; the library's
-    // shanghaiDayRange does a deeper calendar check via the strict
-    // parser when called. We allow the action to hand through since
-    // the lib would throw DailySalaryError on the invalid day.
+  it('rejects invalid calendar dates (2026-02-31 rollover) via strict schema (Codex round 43 / P1)', async () => {
+    // Schema now does a full calendar-validity check, not just the
+    // YYYY-MM-DD regex — matches shanghaiDayRange's behavior so the
+    // action fails fast without hitting the lib.
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const r = await recomputeDailySalaryAction(null, { date: '2026-02-31' });
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.date?.[0]).toMatch(/合法日历日期/);
+    }
+  });
+
+  it('rejects garbage string', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     const r = await recomputeDailySalaryAction(null, { date: 'not-a-date' });
     expect(r.status).toBe('invalid');
