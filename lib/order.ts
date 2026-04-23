@@ -6,8 +6,17 @@ import {
   transitionOrder,
   InvalidOrderTransitionError,
 } from './order/status-machine';
-import type { CreateOrderInput } from './auth/schemas';
+import type {
+  CreateOrderInput,
+  UpdateEditableOrderInput,
+  UpdateShippingOrderInput,
+} from './auth/schemas';
 import { getOrderScopeFilter } from './auth/order-scope';
+import {
+  FULL_EDITABLE_FIELDS,
+  SHIPPING_EDITABLE_FIELDS,
+  editableFieldsetForStatus,
+} from './order/editable-fields';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -275,6 +284,202 @@ export async function cancelOrder(
     remark: reason ? `取消：${reason}` : '取消工单',
     now,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Order edit (E-lean: top-level fields only, SPEC §3.6)
+// ─────────────────────────────────────────────────────────────────────
+//
+// Tx surface for the edit path. Kept separate from create/transition so
+// the types don't drift when those grow new needs.
+type EditTxClient = {
+  order: {
+    findFirst: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<
+      | {
+          id: string;
+          status: OrderStatus;
+          submitterId: string;
+          customerRef: string | null;
+          receiverName: string | null;
+          receiverPhone: string | null;
+          receiverAddress: string | null;
+          expressCode: string | null;
+          packageRequirement: string | null;
+          remark: string | null;
+          isUrgent: boolean;
+        }
+      | null
+    >;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string; status: OrderStatus }>;
+  };
+  orderLog: {
+    create: (args: { data: unknown }) => Promise<unknown>;
+  };
+};
+
+type EditableOrderFieldValue = string | boolean | null;
+
+type EditableOrderSnapshot = {
+  customerRef: string | null;
+  receiverName: string | null;
+  receiverPhone: string | null;
+  receiverAddress: string | null;
+  expressCode: string | null;
+  packageRequirement: string | null;
+  remark: string | null;
+  isUrgent: boolean;
+};
+
+// Zod `optionalTrimmedText` collapses blank → undefined in the parsed
+// output; normalize that to explicit null so diffing and persistence
+// treat "user cleared the field" the same as the DB's null state.
+function normalizeEditableValue(raw: unknown): EditableOrderFieldValue {
+  if (raw === undefined || raw === '') return null;
+  if (typeof raw === 'boolean' || typeof raw === 'string') return raw;
+  return null;
+}
+
+// Shallow-pick only the fields that are editable at this status. Anything
+// else in `input` is silently dropped; the action layer has already
+// rejected unknown keys via Zod, so this is a second defense, not a
+// silent filter of user-supplied data.
+function pickEditableFields(
+  input: Record<string, unknown>,
+  allowed: readonly string[],
+): Record<string, EditableOrderFieldValue> {
+  const out: Record<string, EditableOrderFieldValue> = {};
+  for (const key of allowed) {
+    if (!(key in input)) continue;
+    out[key] = normalizeEditableValue(input[key]);
+  }
+  return out;
+}
+
+function diffEditableFields(
+  before: EditableOrderSnapshot,
+  next: Record<string, EditableOrderFieldValue>,
+): Record<string, { before: EditableOrderFieldValue; after: EditableOrderFieldValue }> {
+  const changes: Record<
+    string,
+    { before: EditableOrderFieldValue; after: EditableOrderFieldValue }
+  > = {};
+  for (const [key, after] of Object.entries(next)) {
+    const prev = (before as unknown as Record<string, EditableOrderFieldValue>)[key] ?? null;
+    if (prev !== after) {
+      changes[key] = { before: prev, after };
+    }
+  }
+  return changes;
+}
+
+export type UpdateOrderResult = {
+  id: string;
+  status: OrderStatus;
+  changed: boolean;
+  changedFields: string[];
+};
+
+export async function updateOrderFields(
+  orderId: string,
+  input: UpdateEditableOrderInput | UpdateShippingOrderInput,
+  actor: { id: string; role: Role },
+): Promise<UpdateOrderResult> {
+  return db.$transaction(async (tx) => {
+    const txClient = tx as unknown as EditTxClient;
+
+    const order = await txClient.order.findFirst({
+      // Scope filter + id gives us "can this actor see this order?" in
+      // a single query — action-layer ownership on top of role scope.
+      where: { id: orderId, ...getOrderScopeFilter(actor) },
+      select: {
+        id: true,
+        status: true,
+        submitterId: true,
+        customerRef: true,
+        receiverName: true,
+        receiverPhone: true,
+        receiverAddress: true,
+        expressCode: true,
+        packageRequirement: true,
+        remark: true,
+        isUrgent: true,
+      },
+    });
+    if (!order) throw new OrderInvariantError('工单不存在或无权访问');
+
+    // SALES / CUSTOMER_SERVICE can only edit their own orders. OWNER /
+    // FOREMAN have a global override so they can correct field data for
+    // anyone. Same pattern as submitOrder's ownership guard.
+    const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+    if (!globalOverride && order.submitterId !== actor.id) {
+      throw new OrderInvariantError('只能修改自己创建的工单');
+    }
+
+    const fieldset = editableFieldsetForStatus(order.status);
+    if (fieldset === 'NONE') {
+      throw new OrderInvariantError('当前状态不可编辑');
+    }
+    const allowed =
+      fieldset === 'FULL' ? FULL_EDITABLE_FIELDS : SHIPPING_EDITABLE_FIELDS;
+
+    const nextFields = pickEditableFields(
+      input as unknown as Record<string, unknown>,
+      allowed,
+    );
+    const changes = diffEditableFields(order, nextFields);
+
+    // No-op edit — skip the UPDATE and the log entry. Keeps the
+    // OrderLog feed clean for users who open the edit form and save
+    // without changing anything.
+    if (Object.keys(changes).length === 0) {
+      return {
+        id: order.id,
+        status: order.status,
+        changed: false,
+        changedFields: [],
+      };
+    }
+
+    const updated = await txClient.order.update({
+      where: { id: orderId },
+      data: nextFields,
+      select: { id: true, status: true },
+    });
+
+    await txClient.orderLog.create({
+      data: {
+        orderId,
+        operatorId: actor.id,
+        action: 'UPDATE',
+        changedFields: changes,
+      },
+    });
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      changed: true,
+      changedFields: Object.keys(changes),
+    };
+  });
+}
+
+// Quick one-click 急单 flip. Callable only while the order is in
+// DRAFT / SUBMITTED (isUrgent is not in the SHIPPING_ONLY set); delegates
+// to updateOrderFields so the same scope / OrderLog guarantees apply.
+export async function setOrderUrgent(
+  orderId: string,
+  isUrgent: boolean,
+  actor: { id: string; role: Role },
+): Promise<UpdateOrderResult> {
+  return updateOrderFields(orderId, { isUrgent } as UpdateEditableOrderInput, actor);
 }
 
 // ─────────────────────────────────────────────────────────────────────

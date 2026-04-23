@@ -208,6 +208,17 @@ const formBoolean = z.preprocess((v) => {
   return false;
 }, z.boolean());
 
+// Partial-update variant: undefined stays undefined (meaning "don't
+// change") instead of collapsing to false. Used on edit schemas where
+// not every checkbox is present in every submission (e.g. the
+// SHIPPING_ONLY edit form omits isUrgent entirely).
+const optionalFormBoolean = z.preprocess((v) => {
+  if (v === undefined) return undefined;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v === 'true' || v === 'on';
+  return undefined;
+}, z.boolean().optional());
+
 // isActive is intentionally NOT part of the update schema. Activation is
 // controlled by a dedicated setXxxActive action (surfaced in the UI as a
 // separate "停用/启用" button), so the basic-info form can't silently flip
@@ -457,3 +468,51 @@ export const cancelOrderSchema = z.object({
 });
 
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Order edit (SPEC §3.6 — top-level fields only, E-lean scope)
+// ─────────────────────────────────────────────────────────────────────
+//
+// E-full (item add/remove/edit) is deferred to P1. These schemas cover
+// the top-level Order fields; the action layer picks the FULL or
+// SHIPPING_ONLY shape based on the order's current status and rejects
+// anything outside the allowed set before reaching the lib.
+
+// Partial-update shape: every field is independently optional so the
+// action can submit only what the form actually touched. Missing key
+// → don't change; empty string → clear to null; present value → update.
+// optionalFormBoolean already handles the undefined case for isUrgent.
+export const updateEditableOrderSchema = z.object({
+  customerRef: optionalTrimmedText('客户代号', 64).optional(),
+  receiverName: optionalTrimmedText('收货人', 64).optional(),
+  receiverPhone: optionalTrimmedText('收货电话', 32).optional(),
+  receiverAddress: optionalTrimmedText('收货地址', 256).optional(),
+  expressCode: optionalTrimmedText('快递代码', 32).optional(),
+  packageRequirement: optionalTrimmedText('包装要求', 500).optional(),
+  remark: optionalTrimmedText('工单备注', 1000).optional(),
+  isUrgent: optionalFormBoolean,
+});
+
+export type UpdateEditableOrderInput = z.infer<typeof updateEditableOrderSchema>;
+
+export const updateShippingOrderSchema = z.object({
+  receiverName: optionalTrimmedText('收货人', 64),
+  receiverPhone: optionalTrimmedText('收货电话', 32),
+  receiverAddress: optionalTrimmedText('收货地址', 256),
+  expressCode: optionalTrimmedText('快递代码', 32),
+  packageRequirement: optionalTrimmedText('包装要求', 500),
+  remark: optionalTrimmedText('工单备注', 1000),
+});
+
+export type UpdateShippingOrderInput = z.infer<typeof updateShippingOrderSchema>;
+
+// Lightweight schema for the inline 急单 toggle — keeps that quick
+// one-click UX separate from the main edit form so a failed form
+// validation doesn't block a simple urgent-flag flip.
+// Toggle is a one-click action — the value IS the intent, so require
+// it explicitly instead of defaulting.
+export const setOrderUrgentSchema = z.object({
+  isUrgent: formBoolean,
+});
+
+export type SetOrderUrgentInput = z.infer<typeof setOrderUrgentSchema>;

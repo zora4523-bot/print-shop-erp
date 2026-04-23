@@ -15,6 +15,8 @@ const {
     createOrder: vi.fn(),
     submitOrder: vi.fn(),
     cancelOrder: vi.fn(),
+    updateOrderFields: vi.fn(),
+    setOrderUrgent: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   redirectMock: vi.fn((path: string) => {
@@ -45,6 +47,8 @@ vi.mock('@/lib/order', () => ({
   createOrder: orderMock.createOrder,
   submitOrder: orderMock.submitOrder,
   cancelOrder: orderMock.cancelOrder,
+  updateOrderFields: orderMock.updateOrderFields,
+  setOrderUrgent: orderMock.setOrderUrgent,
   OrderInvariantError: MockOrderInvariantError,
   InvalidOrderTransitionError: MockInvalidOrderTransitionError,
 }));
@@ -55,6 +59,8 @@ import {
   createOrderAction,
   submitOrderAction,
   cancelOrderAction,
+  updateOrderAction,
+  setOrderUrgentAction,
 } from '../order';
 
 const salesActor = {
@@ -107,6 +113,8 @@ beforeEach(() => {
   orderMock.createOrder.mockReset();
   orderMock.submitOrder.mockReset();
   orderMock.cancelOrder.mockReset();
+  orderMock.updateOrderFields.mockReset();
+  orderMock.setOrderUrgent.mockReset();
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -285,5 +293,168 @@ describe('cancelOrderAction', () => {
     await cancelOrderAction('o1', null, fd({ reason: '' }));
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
+  });
+});
+
+describe('updateOrderAction', () => {
+  it("first-line requirePermission('order:create')", async () => {
+    permissionsMock.requirePermission.mockImplementation(async () => {
+      throw new UnauthorizedError('未登录');
+    });
+    await expect(
+      updateOrderAction('o1', null, fd({ remark: 'x' })),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:create');
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
+  it('forwards parsed text fields to updateOrderFields', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['remark'],
+    });
+    await expect(
+      updateOrderAction(
+        'o1',
+        null,
+        fd({ remark: '新备注', receiverName: '张三' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    const args = orderMock.updateOrderFields.mock.calls[0];
+    expect(args[0]).toBe('o1');
+    expect(args[1]).toMatchObject({ remark: '新备注', receiverName: '张三' });
+  });
+
+  it('parses isUrgent="on" (HTML checkbox) as true', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['isUrgent'],
+    });
+    await expect(
+      updateOrderAction('o1', null, fd({ isUrgent: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(orderMock.updateOrderFields).toHaveBeenCalledWith(
+      'o1',
+      expect.objectContaining({ isUrgent: true }),
+      expect.anything(),
+    );
+  });
+
+  it('omits isUrgent from the payload when the form did not submit it (partial update)', async () => {
+    // The SHIPPING_ONLY edit form won't include the 急单 checkbox; a
+    // missing field must stay missing so updateOrderFields leaves the
+    // flag alone instead of flipping it to false.
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      changed: true,
+      changedFields: ['receiverName'],
+    });
+    await expect(
+      updateOrderAction('o1', null, fd({ receiverName: '新收货人' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    const parsed = orderMock.updateOrderFields.mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect('isUrgent' in parsed).toBe(false);
+  });
+
+  it('rejects a File upload in a text field as invalid', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const f = new FormData();
+    f.set('remark', new Blob(['x'], { type: 'text/plain' }), 'r.txt');
+    const result = await updateOrderAction('o1', null, f);
+    expect(result.status).toBe('invalid');
+    expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+  });
+
+  it('maps OrderInvariantError → error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockRejectedValueOnce(
+      new MockOrderInvariantError('当前状态不可编辑'),
+    );
+    const result = await updateOrderAction('o1', null, fd({ remark: 'x' }));
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.message).toBe('当前状态不可编辑');
+    }
+  });
+
+  it('revalidates + redirects to detail on success', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['remark'],
+    });
+    await expect(
+      updateOrderAction('o1', null, fd({ remark: 'x' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
+    expect(redirectMock).toHaveBeenCalledWith('/orders/o1');
+  });
+});
+
+describe('setOrderUrgentAction', () => {
+  it("first-line requirePermission('order:create')", async () => {
+    permissionsMock.requirePermission.mockImplementation(async () => {
+      throw new UnauthorizedError('未登录');
+    });
+    await expect(
+      setOrderUrgentAction('o1', null, fd({ isUrgent: 'true' })),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(orderMock.setOrderUrgent).not.toHaveBeenCalled();
+  });
+
+  it('forwards the boolean through to setOrderUrgent (true path)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderUrgent.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['isUrgent'],
+    });
+    const r = await setOrderUrgentAction('o1', null, fd({ isUrgent: 'true' }));
+    expect(r.status).toBe('success');
+    expect(orderMock.setOrderUrgent).toHaveBeenCalledWith(
+      'o1',
+      true,
+      expect.anything(),
+    );
+  });
+
+  it('forwards the boolean through to setOrderUrgent (false path)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderUrgent.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['isUrgent'],
+    });
+    await setOrderUrgentAction('o1', null, fd({ isUrgent: 'false' }));
+    expect(orderMock.setOrderUrgent).toHaveBeenCalledWith(
+      'o1',
+      false,
+      expect.anything(),
+    );
+  });
+
+  it('maps OrderInvariantError → error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.setOrderUrgent.mockRejectedValueOnce(
+      new MockOrderInvariantError('当前状态不可编辑'),
+    );
+    const r = await setOrderUrgentAction('o1', null, fd({ isUrgent: 'true' }));
+    expect(r.status).toBe('error');
   });
 });

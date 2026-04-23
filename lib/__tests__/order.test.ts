@@ -42,6 +42,8 @@ import {
   cancelOrder,
   listOrders,
   getOrderDetail,
+  updateOrderFields,
+  setOrderUrgent,
   OrderInvariantError,
 } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
@@ -410,5 +412,202 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
     expect(result).toBeNull();
     const arg = dbMock.order.findFirst.mock.calls[0][0];
     expect(arg.where).toMatchObject({ id: 'someone-elses-order', submitterId: 'sales-1' });
+  });
+});
+
+describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
+  function snapshot(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: 'order-1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'sales-1',
+      customerRef: '苹果福',
+      receiverName: '张三',
+      receiverPhone: '13800000000',
+      receiverAddress: '佛山市…',
+      expressCode: null,
+      packageRequirement: null,
+      remark: null,
+      isUrgent: false,
+      ...overrides,
+    };
+  }
+
+  it('throws when the order cannot be seen (scope filter returns null)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(null);
+    await expect(
+      updateOrderFields('order-1', { remark: 'x' }, salesActor),
+    ).rejects.toBeInstanceOf(OrderInvariantError);
+  });
+
+  it('throws when a non-owning SALES tries to edit another SALES\'s order', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ submitterId: 'sales-OTHER' }),
+    );
+    await expect(
+      updateOrderFields('order-1', { remark: 'x' }, salesActor),
+    ).rejects.toThrow(/只能修改自己创建的工单/);
+  });
+
+  it('OWNER can edit someone else\'s order (global override)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ submitterId: 'sales-OTHER' }),
+    );
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.DRAFT,
+    });
+    const result = await updateOrderFields(
+      'order-1',
+      { remark: '老板代改' },
+      ownerActor,
+    );
+    expect(result.changed).toBe(true);
+  });
+
+  it('refuses to edit when the status is terminal (FINISHED)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ status: OrderStatus.FINISHED }),
+    );
+    await expect(
+      updateOrderFields('order-1', { remark: 'x' }, ownerActor),
+    ).rejects.toThrow(/当前状态不可编辑/);
+  });
+
+  it('DRAFT / FULL fieldset: customerRef and isUrgent are both applied', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot());
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
+    await updateOrderFields(
+      'order-1',
+      { customerRef: '新客户', isUrgent: true, remark: '新备注' },
+      salesActor,
+    );
+    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.customerRef).toBe('新客户');
+    expect(data.isUrgent).toBe(true);
+    expect(data.remark).toBe('新备注');
+  });
+
+  it('SHIPPING_ONLY fieldset: customerRef and isUrgent are dropped even if submitted', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ status: OrderStatus.IN_PRODUCTION }),
+    );
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
+    await updateOrderFields(
+      'order-1',
+      {
+        // These two live outside the SHIPPING_ONLY allowlist and MUST be
+        // ignored even if the action hands them down — SPEC §3.6 forbids
+        // changing them once production starts.
+        customerRef: '攻击者改',
+        isUrgent: true,
+        receiverName: '新收货人',
+        remark: '新备注',
+      } as never,
+      ownerActor,
+    );
+    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('customerRef');
+    expect(data).not.toHaveProperty('isUrgent');
+    expect(data.receiverName).toBe('新收货人');
+    expect(data.remark).toBe('新备注');
+  });
+
+  it('writes an OrderLog with field-level before / after for every changed field', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ remark: null, receiverName: '旧' }),
+    );
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
+    await updateOrderFields(
+      'order-1',
+      { remark: '新', receiverName: '新', receiverPhone: null },
+      salesActor,
+    );
+    const log = dbMock.orderLog.create.mock.calls[0][0].data as {
+      action: string;
+      changedFields: Record<string, { before: unknown; after: unknown }>;
+    };
+    expect(log.action).toBe('UPDATE');
+    expect(log.changedFields).toMatchObject({
+      remark: { before: null, after: '新' },
+      receiverName: { before: '旧', after: '新' },
+    });
+    // receiverPhone went from the snapshot's '13800000000' to null (cleared);
+    // that IS a change and should appear.
+    expect(log.changedFields.receiverPhone).toEqual({
+      before: '13800000000',
+      after: null,
+    });
+  });
+
+  it('no-op edit (same values re-submitted) skips UPDATE and log entry', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot());
+    const result = await updateOrderFields(
+      'order-1',
+      { remark: null, customerRef: '苹果福' },
+      salesActor,
+    );
+    expect(result.changed).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('empty-string input normalizes to null for text fields (cleared field)', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ remark: '旧备注' }));
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
+    await updateOrderFields('order-1', { remark: '' }, salesActor);
+    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.remark).toBeNull();
+  });
+});
+
+describe('setOrderUrgent — quick toggle', () => {
+  function urgentSnapshot(isUrgent: boolean) {
+    return {
+      id: 'order-1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'sales-1',
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      packageRequirement: null,
+      remark: null,
+      isUrgent,
+    };
+  }
+
+  it('flips isUrgent from false → true and logs the change', async () => {
+    dbMock.order.findFirst.mockResolvedValue(urgentSnapshot(false));
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
+    const result = await setOrderUrgent('order-1', true, salesActor);
+    expect(result.changed).toBe(true);
+    expect(result.changedFields).toEqual(['isUrgent']);
+    const data = dbMock.order.update.mock.calls[0][0].data as { isUrgent: boolean };
+    expect(data.isUrgent).toBe(true);
+  });
+
+  it('no-op when target matches current value', async () => {
+    dbMock.order.findFirst.mockResolvedValue(urgentSnapshot(true));
+    const result = await setOrderUrgent('order-1', true, salesActor);
+    expect(result.changed).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses once the order has moved past FULL-editable (isUrgent outside SHIPPING_ONLY set)', async () => {
+    // isUrgent is only in the FULL set, not SHIPPING_ONLY. A toggle in
+    // SCHEDULING silently drops isUrgent and reports no change — that's
+    // the desired guard (preserves the flag set at intake).
+    dbMock.order.findFirst.mockResolvedValue({
+      ...urgentSnapshot(false),
+      status: OrderStatus.SCHEDULING,
+    });
+    const result = await setOrderUrgent('order-1', true, ownerActor);
+    expect(result.changed).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 });

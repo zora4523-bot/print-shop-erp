@@ -6,12 +6,16 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   createOrderSchema,
   cancelOrderSchema,
+  updateEditableOrderSchema,
+  setOrderUrgentSchema,
   type CreateOrderInput,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
   submitOrder,
   cancelOrder,
+  updateOrderFields,
+  setOrderUrgent,
   OrderInvariantError,
   InvalidOrderTransitionError,
 } from '@/lib/order';
@@ -123,6 +127,89 @@ export async function cancelOrderAction(
       return { status: 'error', message: err.message };
     }
     if (err instanceof InvalidOrderTransitionError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  return { status: 'success' };
+}
+
+// Accepts FormData (the edit form progressively enhances from a plain
+// HTML form). updateOrderFields then enforces which subset of the
+// parsed keys is actually applicable given the order's current status.
+export async function updateOrderAction(
+  orderId: string,
+  _prev: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:create');
+
+  const raw: Record<string, unknown> = {};
+  for (const key of [
+    'customerRef',
+    'receiverName',
+    'receiverPhone',
+    'receiverAddress',
+    'expressCode',
+    'packageRequirement',
+    'remark',
+    'isUrgent',
+  ] as const) {
+    const value = formData.get(key);
+    // Reject non-string uploads at the action boundary so File / Blob
+    // can't slip into fields the schema expects text for.
+    if (value === null) continue;
+    if (typeof value !== 'string' && typeof value !== 'boolean') {
+      return {
+        status: 'invalid',
+        fieldErrors: { [key]: ['字段格式非法'] },
+      };
+    }
+    raw[key] = value;
+  }
+
+  const parsed = updateEditableOrderSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    await updateOrderFields(orderId, parsed.data, actor);
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}`);
+}
+
+// Quick one-click 急单 toggle. Accepts `isUrgent` as a string form
+// field ("true" / "false") so the button can be a zero-JS plain form.
+export async function setOrderUrgentAction(
+  orderId: string,
+  _prev: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:create');
+
+  const parsed = setOrderUrgentSchema.safeParse({
+    isUrgent: formData.get('isUrgent'),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    await setOrderUrgent(orderId, parsed.data.isUrgent, actor);
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }
     throw err;
