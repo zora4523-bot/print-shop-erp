@@ -9,6 +9,10 @@ import {
   isOrderEditable,
 } from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
+import {
+  actionLabel,
+  formatOrderLogChanges,
+} from '@/lib/order/log-format';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
@@ -151,20 +155,46 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
-        <h2 className="text-base font-semibold">最近日志</h2>
+        <h2 className="text-base font-semibold">修改日志</h2>
         {order.logs.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无</p>
         ) : (
-          <ul className="space-y-2 text-xs">
-            {order.logs.slice(0, 10).map((log) => (
-              <li key={log.id} className="flex items-start gap-2">
-                <span className="text-muted-foreground">
-                  {formatDateTime(log.createdAt)}
-                </span>
-                <span className="font-mono">{log.action}</span>
-                {log.remark ? <span>· {log.remark}</span> : null}
-              </li>
-            ))}
+          <ul className="divide-y text-sm">
+            {order.logs.slice(0, 10).map((log) => {
+              const changes = formatOrderLogChanges(log.changedFields);
+              return (
+                <li key={log.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {formatDateTime(log.createdAt)}
+                    </span>
+                    <span className="font-medium">{actionLabel(log.action)}</span>
+                    <span className="text-muted-foreground">
+                      · {log.operator.displayName}（{roleLabel(log.operator.role)}）
+                    </span>
+                    {log.remark ? (
+                      <span className="text-muted-foreground">· {log.remark}</span>
+                    ) : null}
+                  </div>
+                  {changes.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-xs">
+                      {changes.map((c) => (
+                        <li key={c.field} className="flex items-start gap-2">
+                          <span className="min-w-[5rem] text-muted-foreground">
+                            {c.label}
+                          </span>
+                          <span className="line-through text-muted-foreground">
+                            {c.before}
+                          </span>
+                          <span>→</span>
+                          <span className="font-medium">{c.after}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

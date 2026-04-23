@@ -536,6 +536,9 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
       logs: {
         orderBy: { createdAt: 'desc' },
         take: 20,
+        include: {
+          operator: { select: { displayName: true, role: true } },
+        },
       },
       submitter: {
         select: { id: true, displayName: true, username: true, role: true },
