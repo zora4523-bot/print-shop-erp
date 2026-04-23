@@ -111,6 +111,58 @@ describe('readOssConfig', () => {
     }
   });
 
+  it('derives bucketUrl from OSS_ENDPOINT override (VPC / internal host, Codex round 31 / P2)', () => {
+    const r = readOssConfig(
+      envWith({
+        OSS_ACCESS_KEY_ID: 'ak',
+        OSS_ACCESS_KEY_SECRET: 'sk',
+        OSS_STS_ROLE_ARN: 'arn',
+        OSS_BUCKET: 'my-bucket',
+        OSS_REGION: 'oss-cn-shenzhen',
+        OSS_ENDPOINT: 'https://oss-cn-shenzhen-internal.aliyuncs.com',
+      }),
+    );
+    expect(r.configured).toBe(true);
+    if (r.configured) {
+      expect(r.cfg.endpoint).toBe('https://oss-cn-shenzhen-internal.aliyuncs.com');
+      expect(r.cfg.bucketUrl).toBe(
+        'https://my-bucket.oss-cn-shenzhen-internal.aliyuncs.com',
+      );
+    }
+  });
+
+  it('preserves port and protocol from OSS_ENDPOINT (HTTP-only or custom port)', () => {
+    const r = readOssConfig(
+      envWith({
+        OSS_ACCESS_KEY_ID: 'ak',
+        OSS_ACCESS_KEY_SECRET: 'sk',
+        OSS_STS_ROLE_ARN: 'arn',
+        OSS_BUCKET: 'my-bucket',
+        OSS_REGION: 'oss-cn-shenzhen',
+        OSS_ENDPOINT: 'http://oss.internal:9000',
+      }),
+    );
+    expect(r.configured).toBe(true);
+    if (r.configured) {
+      expect(r.cfg.bucketUrl).toBe('http://my-bucket.oss.internal:9000');
+    }
+  });
+
+  it('throws when OSS_ENDPOINT is not a valid URL', () => {
+    expect(() =>
+      readOssConfig(
+        envWith({
+          OSS_ACCESS_KEY_ID: 'ak',
+          OSS_ACCESS_KEY_SECRET: 'sk',
+          OSS_STS_ROLE_ARN: 'arn',
+          OSS_BUCKET: 'my-bucket',
+          OSS_REGION: 'oss-cn-shenzhen',
+          OSS_ENDPOINT: 'not a url',
+        }),
+      ),
+    ).toThrowError(/OSS_ENDPOINT 不是合法 URL/);
+  });
+
   it('keeps bucketUrl on the OSS virtual-hosted host even when publicBaseUrl is a CDN (Codex round 30 / P2)', () => {
     // A CDN / custom domain is read-only; browser uploads must still
     // target the bucket's OSS host. Regression test to ensure future

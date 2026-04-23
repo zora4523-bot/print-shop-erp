@@ -50,6 +50,22 @@ function isBlank(v: string | undefined): boolean {
   return v === undefined || v.trim() === '';
 }
 
+function deriveBucketUrl(endpoint: string, bucket: string): string {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error(
+      `OSS_ENDPOINT 不是合法 URL：${endpoint}（形如 https://oss-cn-shenzhen.aliyuncs.com）`,
+    );
+  }
+  // Virtual-hosted: `<bucket>.<host>`. Keeps the protocol + port that
+  // the endpoint uses, so VPC / HTTP-only / custom-port setups are all
+  // covered without extra env surface.
+  const port = url.port ? `:${url.port}` : '';
+  return `${url.protocol}//${bucket}.${url.hostname}${port}`;
+}
+
 export function readOssConfig(env: NodeJS.ProcessEnv = process.env): OssConfigResult {
   const missing = REQUIRED_KEYS.filter((k) => isBlank(env[k]));
   if (missing.length > 0) {
@@ -61,10 +77,13 @@ export function readOssConfig(env: NodeJS.ProcessEnv = process.env): OssConfigRe
   const endpoint = isBlank(env.OSS_ENDPOINT)
     ? `https://${region}.aliyuncs.com`
     : env.OSS_ENDPOINT!.trim();
-  // Upload target — virtual-hosted bucket URL. Always derived from
-  // bucket + region; intentionally ignores OSS_PUBLIC_BASE_URL since a
-  // CDN can't accept PUTs.
-  const bucketUrl = `https://${bucket}.${region}.aliyuncs.com`;
+  // Upload target — virtual-hosted bucket URL. Prepend `${bucket}.` to
+  // the SAME host as `endpoint` so a pinned OSS_ENDPOINT (VPC /
+  // internal / OSS-compatible alt host) is respected instead of
+  // silently sending uploads to the default public host (round 31).
+  // Intentionally ignores OSS_PUBLIC_BASE_URL since a CDN can't accept
+  // PUTs.
+  const bucketUrl = deriveBucketUrl(endpoint, bucket);
   // Public-read URL base. CDN / custom domain if provided, else same as
   // bucketUrl (direct OSS public access).
   const publicBaseUrl = isBlank(env.OSS_PUBLIC_BASE_URL)
