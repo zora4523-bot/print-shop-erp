@@ -200,6 +200,23 @@ describe('submitOrderAction', () => {
     expect(r.status).toBe('error');
   });
 
+  it('propagates the lib-level ownership guard (non-owner SALES submitting another SALES\'s draft)', async () => {
+    // The guard actually lives in lib/order.submitOrder's authz callback
+    // (round 27). Action layer just surfaces the OrderInvariantError it
+    // throws. Belt-and-suspenders test: a direct POST that bypasses the
+    // UI still returns an error instead of letting the transition through.
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.submitOrder.mockRejectedValueOnce(
+      new MockOrderInvariantError('只能提交自己创建的工单'),
+    );
+    const r = await submitOrderAction('o1');
+    expect(r.status).toBe('error');
+    if (r.status === 'error') {
+      expect(r.message).toBe('只能提交自己创建的工单');
+    }
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:create');
+  });
+
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.submitOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });

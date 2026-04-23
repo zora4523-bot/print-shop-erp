@@ -73,6 +73,12 @@ export async function createOrderFromInput(
 export async function submitOrderAction(
   orderId: string,
 ): Promise<OrderMutationResult> {
+  // 'order:create' is the coarse role gate. Ownership — "you can only
+  // submit your own DRAFT unless you're OWNER / FOREMAN" — is enforced
+  // deeper in lib/order.submitOrder's `authz` callback (round 27), which
+  // throws OrderInvariantError and is mapped to `{ status: 'error' }`
+  // below. Any direct POST to this action bypassing the UI still hits
+  // that guard.
   const actor = await requirePermission('order:create');
 
   try {
