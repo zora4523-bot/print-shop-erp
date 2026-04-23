@@ -112,31 +112,7 @@ export async function requireOwnership<T extends Record<string, unknown>>(
   }
 }
 
-/**
- * 工单可见范围过滤（用于 Prisma where）。
- *
- * - OWNER / FOREMAN：看全部
- * - SALES / CUSTOMER_SERVICE：只看自己提交的
- * - WORKER：只看有分配任务给自己的工单
- * - 未知角色：什么都看不到（硬失败语义）
- */
-export function getOrderScopeFilter(user: { id: string; role: Role }) {
-  if (user.role === Role.OWNER || user.role === Role.FOREMAN) {
-    return {};
-  }
-  if (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) {
-    return { submitterId: user.id };
-  }
-  if (user.role === Role.WORKER) {
-    return {
-      items: {
-        some: {
-          tasks: {
-            some: { workerId: user.id },
-          },
-        },
-      },
-    };
-  }
-  return { id: 'never-match' };
-}
+// Re-export so existing callers (server-only) don't have to chase the move.
+// New code — especially anything imported from test environments — should
+// import directly from './order-scope' to avoid pulling session / next-auth.
+export { getOrderScopeFilter } from './order-scope';

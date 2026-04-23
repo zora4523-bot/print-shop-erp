@@ -307,14 +307,20 @@ const productTextFieldOptional = (label: string, max = 64) =>
 // floats don't silently round small decimals (e.g. 0.0007 → 0.0006999…).
 // Both bounds live in the regex so an oversized price is rejected as
 // `invalid` at the schema boundary instead of surfacing as a DB overflow.
-const moneyOptionalField = z
-  .string()
-  .trim()
-  .refine(
-    (v) => v === '' || /^\d{1,6}(\.\d{1,4})?$/.test(v),
-    { message: '金额格式错误（整数部分最多 6 位、小数最多 4 位、非负数）' },
-  )
-  .transform((v) => (v === '' ? null : v));
+// Preprocess normalizes null / undefined to '' so programmatic callers
+// (lib.createOrder receives pre-parsed objects with null fields) don't
+// trip "Expected string, got null".
+const moneyOptionalField = z.preprocess(
+  (v) => (v === null || v === undefined ? '' : v),
+  z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === '' || /^\d{1,6}(\.\d{1,4})?$/.test(v),
+      { message: '金额格式错误（整数部分最多 6 位、小数最多 4 位、非负数）' },
+    )
+    .transform((v) => (v === '' ? null : v)),
+);
 
 // Quantity semantics:
 //   • From FormData (strings): accept `^\d+$` (plus trim), reject JS-ish
@@ -365,3 +371,84 @@ export const updateProductSchema = z.object({
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+// ============================================================
+// Order creation (SPEC §3.1 / §4.1)
+// ============================================================
+
+const optionalTrimmedText = (label: string, max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, `${label}过长（最多 ${max} 个字符）`)
+    .transform((v) => (v === '' ? null : v))
+    .nullable();
+
+// Per-item quantity: integer ≥ 1, capped at the same 9,999,999 ceiling as
+// minOrderQty. Reject JS-ish numeric forms on the string path (see
+// minOrderQtyField for rationale).
+const orderItemQuantityField = z.preprocess(
+  (v) => {
+    if (typeof v === 'number') return v;
+    if (typeof v !== 'string') return v;
+    const trimmed = v.trim();
+    if (trimmed === '') return undefined;
+    if (!/^\d+$/.test(trimmed)) return null;
+    return Number.parseInt(trimmed, 10);
+  },
+  z
+    .number({ message: '数量必须是正整数' })
+    .finite('数量必须是有限数')
+    .int('数量必须是整数')
+    .min(1, '数量必须 ≥ 1')
+    .max(9_999_999, '数量过大'),
+);
+
+const craftIdSchema = z
+  .string()
+  .trim()
+  .min(1, '工艺 id 不能为空')
+  .max(32, '工艺 id 过长');
+
+const orderItemSchema = z.object({
+  name: z.string().trim().min(1, '请填写款式名').max(64, '款式名过长（最多 64 个字符）'),
+  productId: optionalTrimmedText('产品 id', 32),
+  specification: optionalTrimmedText('规格', 64),
+  paperType: optionalTrimmedText('纸张', 32),
+  quantity: orderItemQuantityField,
+  crafts: z
+    .array(craftIdSchema)
+    .min(1, '至少选择一项工艺')
+    .max(10, '单款式工艺不超过 10 项'),
+  foilColor: optionalTrimmedText('烫金颜色', 32),
+  isDoubleSided: formBoolean,
+  isDoubleColor: formBoolean,
+  unitPrice: moneyOptionalField,
+  suggestedPrice: moneyOptionalField,
+  remark: optionalTrimmedText('款式备注', 1000),
+});
+
+export type OrderItemInput = z.infer<typeof orderItemSchema>;
+
+export const createOrderSchema = z.object({
+  customerRef: optionalTrimmedText('客户代号', 64),
+  receiverName: optionalTrimmedText('收货人', 64),
+  receiverPhone: optionalTrimmedText('收货电话', 32),
+  receiverAddress: optionalTrimmedText('收货地址', 256),
+  expressCode: optionalTrimmedText('快递代码', 32),
+  packageRequirement: optionalTrimmedText('包装要求', 500),
+  remark: optionalTrimmedText('工单备注', 1000),
+  isUrgent: formBoolean,
+  items: z
+    .array(orderItemSchema)
+    .min(1, '至少一个款式')
+    .max(50, '单工单款式不超过 50 项'),
+});
+
+export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+
+export const cancelOrderSchema = z.object({
+  reason: optionalTrimmedText('取消原因', 500),
+});
+
+export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
