@@ -40,6 +40,12 @@ export default async function ForemanLayout({
                 外协
               </Link>
               <Link
+                href="/foreman/attendance"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                考勤
+              </Link>
+              <Link
                 href="/orders"
                 className="text-muted-foreground hover:text-foreground"
               >
