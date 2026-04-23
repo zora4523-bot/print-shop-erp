@@ -4,7 +4,13 @@ export type SalaryMutationResult =
   | { status: 'error'; message: string };
 
 export type RecomputeDailyResult =
-  | { status: 'success'; date: string; workerCount: number }
+  | {
+      status: 'success';
+      date: string;
+      workerCount: number;
+      errorCount: number;
+      errors: Array<{ workerId: string; message: string }>;
+    }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 

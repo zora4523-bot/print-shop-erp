@@ -23,29 +23,41 @@ export function RecomputeDailyForm({ defaultDate }: Props) {
         const date = String(fd.get('date') ?? '');
         startTransition(() => action({ date }));
       }}
-      className="flex items-center gap-3"
+      className="space-y-2"
     >
-      <Input
-        type="date"
-        name="date"
-        defaultValue={defaultDate}
-        className="max-w-[180px]"
-      />
-      <Button type="submit" disabled={pending}>
-        {pending ? '重算中…' : '重算该日全员日薪'}
-      </Button>
-      {state?.status === 'success' ? (
-        <span className="text-xs text-muted-foreground">
-          {state.date} 已处理 {state.workerCount} 位师傅
-        </span>
+      <div className="flex items-center gap-3">
+        <Input
+          type="date"
+          name="date"
+          defaultValue={defaultDate}
+          className="max-w-[180px]"
+        />
+        <Button type="submit" disabled={pending}>
+          {pending ? '重算中…' : '重算该日全员日薪'}
+        </Button>
+        {state?.status === 'success' ? (
+          <span className="text-xs text-muted-foreground">
+            {state.date} 已处理 {state.workerCount} 位师傅
+            {state.errorCount > 0 ? ` · ${state.errorCount} 个失败` : ''}
+          </span>
+        ) : null}
+      </div>
+      {state?.status === 'success' && state.errors.length > 0 ? (
+        <ul className="text-xs text-destructive space-y-1">
+          {state.errors.map((e) => (
+            <li key={e.workerId}>
+              {e.workerId}: {e.message}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <span className="text-xs text-destructive">{state.message}</span>
+        <p className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
-        <span className="text-xs text-destructive">
+        <p className="text-xs text-destructive">
           {Object.values(state.fieldErrors).flat().join('；')}
-        </span>
+        </p>
       ) : null}
     </form>
   );

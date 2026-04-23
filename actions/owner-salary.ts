@@ -68,21 +68,27 @@ export async function recomputeDailySalaryAction(
   }
 
   try {
-    let count: number;
     if (parsed.data.workerId) {
       await computeDailyWorkerSalary(parsed.data.workerId, parsed.data.date);
-      count = 1;
-    } else {
-      const { settled } = await computeDailyForAllMachineWorkers(
-        parsed.data.date,
-      );
-      count = settled.length;
+      revalidatePath('/owner/salary/daily');
+      return {
+        status: 'success',
+        date: parsed.data.date,
+        workerCount: 1,
+        errorCount: 0,
+        errors: [],
+      };
     }
+    const { settled, errors } = await computeDailyForAllMachineWorkers(
+      parsed.data.date,
+    );
     revalidatePath('/owner/salary/daily');
     return {
       status: 'success',
       date: parsed.data.date,
-      workerCount: count,
+      workerCount: settled.length,
+      errorCount: errors.length,
+      errors,
     };
   } catch (err) {
     if (err instanceof DailySalaryError) {
