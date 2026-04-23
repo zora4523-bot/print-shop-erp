@@ -99,3 +99,30 @@
 - **理由**：Codex round 24 指出：返回 success 后表单短暂显示"✓ 已保存"就没了，操作者容易没看见就重复点击 → 创建重复记录。送到编辑页一次性解决三件事：明确的视觉反馈、避免重复提交、如需调整可直接继续改。
 - **影响**：Server Action 调 `redirect()` 后抛 NEXT_REDIRECT，`useActionState` 不会看到 success 状态。现有表单组件的 "✓ 已保存" 分支对 update 路径仍有效（update 不 redirect），对 create 路径因 redirect 抢先而基本看不到 —— 可接受。测试要 mock `next/navigation` 让 `redirect` 抛可识别的错误。
 - **相关文档**：`actions/owner-accounts.ts createUserAction`(同款在 crafts/products)、Codex round 24 commit。
+
+---
+
+## 2026-04-23：OSS 直传脚手架先于 STS SDK（"占位打桩"）
+
+- **决策**：P0 #3 Slice C 把 OSS 上传流程拆成两半。`lib/oss/config.ts` 读齐 env 并返回 `{ configured: true, cfg }` / `{ configured: false, missing }`；`signDesignUpload` 做完 validate + 权限 + 路径注入防御后调用 `signViaSts`，后者是故意抛 `OssNotWiredError` 的桩。UI 层看到 `status: 'not-configured'` 显示禁用态 + 缺失 key 列表；看到 `OssNotWiredError` 知道 env 配齐了但 STS SDK 还没装。
+- **理由**：红包厂 OSS 账号/STS role 得业主申请后才到，但工单创建 / 设计图列表展示不能阻塞到那一天。"占位打桩"让 UI 契约稳定（`SignUploadResult` 四态 discriminated union 不会变），真实 SDK 落地时只替换 `signViaSts` 的 6 行实现。
+- **影响**：`lib/oss/types.ts` `SignUploadResult` 是稳定契约——实现 STS 不改这个文件。`lib/oss/config.ts deriveBucketUrl` 从 `OSS_ENDPOINT` 派生 upload 主机（Codex round 31–33），支持 VPC / 内部 / HTTP-only / custom-port。`publicBaseUrl`（CDN / 自定义域名）只用于读，永远不写。路径前缀 `design/<orderId>/<orderItemId>/<fileType>-<uuid>.<ext>`；orderId / orderItemId 过 `SAFE_ID_RE = /^[A-Za-z0-9_-]+$/` 防 `..` / `/` 注入（round 29）；扩展名按 `fileType` 核对，防 `application/octet-stream` 的 CDR 通道被任意文件复用。
+- **相关文档**：`lib/oss/` 全文件、SPEC v1.2 附录 H、Codex rounds 29 / 30 / 31 / 32 / 33。
+
+---
+
+## 2026-04-23：工单打印 + PDF 双通道共享同一组件
+
+- **决策**：`/print/orders/[id]` 是独立的 top-level 路由段，不走 `/orders` 下的导航 layout。浏览器打印通道链接到 `?autoprint=1`，client 端 `AutoPrint` 组件 `useEffect` → `window.print()` → `afterprint` 关闭窗口。PDF 通道是 `GET /api/orders/[id]/pdf`，服务端 `renderToStaticMarkup(<OrderPrintLayout />)` 得到 HTML，Puppeteer `page.setContent(html, { waitUntil: 'networkidle0' })` → `page.pdf()`，不做本机 HTTP 二次 round trip，不用转发 session cookie。
+- **理由**：SPEC 附录 E.1 明确"两通道共用同一个 React 组件"。走 localhost hop 要解决 cookie 透传 + 自引用 URL 解析，复杂度高且重复鉴权。`setContent` 方案让 PDF 路由完全在进程内渲染，只有 OSS 图片 URL 会触发外部请求（由 `networkidle0` 等）。拆 `/print` 为独立 segment 是因为 Next.js App Router 没有"跳过父 layout"的正交开关。
+- **影响**：`components/business/order/OrderPrintLayout.tsx` 是纯函数组件，接收 `PrintOrder` 视图模型（craft IDs 在 page 层被解析成名字、role enum 解成中文 label）。`lib/pdf/render.ts` 是通用 wrapper，未来薪资单、账单都走同一个 `renderHtmlToPdf`。`lib/order/print-html.tsx` 的 `<title>` 注入用 `escapeHtml` 硬化（早期 review 确认 orderNo 目前是 ASCII，但加防御）。PDF route 回传 RFC 5987 双份 `Content-Disposition`（round 34）。`qrcode.react` SVG 变体用在 server-render 完全 OK。
+- **相关文档**：`app/print/orders/[id]/page.tsx`、`app/api/orders/[id]/pdf/route.ts`、`lib/pdf/render.ts`、SPEC 附录 E、Codex rounds 34–35。
+
+---
+
+## 2026-04-23：P0 #3 工单编辑走 E-lean（top-level 字段 only）
+
+- **决策**：P0 #3 Slice E 的编辑能力只覆盖 Order 表顶层字段（customerRef / 收货信息 / 包装要求 / 备注 / isUrgent）。款式（OrderItem）的增删改（use field array、per-row diff）**不进 P0**，业主临时处理方式是"取消旧工单、新建"。SPEC §3.6 的"DRAFT / SUBMITTED 全部可改"在 E-lean 诠释下指向"全部顶层字段可改"。
+- **理由**：E-full 的实质复杂度是 OrderLog 按字段 diff 渲染 + RHF useFieldArray 联动 + item 级 OSS 设计图增删同步。业主明确判断：款式级编辑在实际业务里是低频操作（大多数修改是改收货信息 / 备注），把这部分放 P1 单独跟，不拖 P0 #3 的节奏。
+- **影响**：`lib/order/editable-fields.ts` 实现 FULL / SHIPPING_ONLY / NONE 三档，`FULL_EDITABLE_FIELDS` 和 `SHIPPING_EDITABLE_FIELDS` 是 readonly tuple 常量，防御性地做 pickEditableFields 二次过滤——就算 action 层 schema 放行 customerRef，lib 层在 SHIPPING_ONLY 状态下也会 drop。`updateEditableOrderSchema` 所有字段都 `.optional()`（partial update 语义：缺 key = 不改，空串 = 清空为 null）；`optionalFormBoolean` 把 undefined 和 false 严格区分，防止表单缺 checkbox 时 isUrgent 被意外翻成 false。UI 在 detail 页按 `isOrderEditable(status)` + ownership 条件渲染 "编辑" 链接和急单 toggle；edit page 再次 check fieldset，NONE 直接 redirect 回 detail。
+- **相关文档**：`lib/order/editable-fields.ts`、`lib/order.ts updateOrderFields`、`components/business/order/EditOrderForm.tsx`、SPEC §3.6、P1 ticket TODO "工单款式级编辑（E-full）"。
