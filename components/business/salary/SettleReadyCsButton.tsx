@@ -22,7 +22,17 @@ export function SettleReadyCsButton() {
       {state?.status === 'success' ? (
         <span className="text-xs text-muted-foreground">
           已结算 {state.settledCount} 个周期
+          {state.errorCount > 0 ? ` · ${state.errorCount} 个失败` : ''}
         </span>
+      ) : null}
+      {state?.status === 'success' && state.errors.length > 0 ? (
+        <ul className="text-xs text-destructive space-y-1">
+          {state.errors.map((e) => (
+            <li key={e.periodId}>
+              {e.periodId}: {e.message}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {state?.status === 'error' ? (
         <span className="text-xs text-destructive">{state.message}</span>

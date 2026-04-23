@@ -32,5 +32,10 @@ export type SettleCsPeriodResult =
   | { status: 'error'; message: string };
 
 export type SettleReadyCsResult =
-  | { status: 'success'; settledCount: number }
+  | {
+      status: 'success';
+      settledCount: number;
+      errorCount: number;
+      errors: Array<{ periodId: string; message: string }>;
+    }
   | { status: 'error'; message: string };

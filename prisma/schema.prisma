@@ -515,20 +515,25 @@ model SalaryPeriod {
 
 // 客服提成记录
 model CustomerServiceCommission {
-  id                String    @id @default(cuid())
-  csUserId          String
-  salaryPeriodId    String    @unique
-  totalSales        Decimal   @db.Decimal(12, 2)
-  tierRate          Decimal   @db.Decimal(6, 4)
-  commissionAmount  Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal  Decimal   @db.Decimal(10, 2)
-  totalIncome       Decimal   @db.Decimal(12, 2)
-  paidBase          Decimal   @default(0) @db.Decimal(12, 2)
-  paidCommission    Decimal   @default(0) @db.Decimal(12, 2)
-  isFullyPaid       Boolean   @default(false)
-  settledAt         DateTime
-  paidAt            DateTime?
-  createdAt         DateTime  @default(now())
+  id                  String    @id @default(cuid())
+  csUserId            String
+  salaryPeriodId      String    @unique
+  totalSales          Decimal   @db.Decimal(12, 2)
+  tierRate            Decimal   @db.Decimal(6, 4)
+  commissionAmount    Decimal   @db.Decimal(12, 2)
+  monthlyBaseTotal    Decimal   @db.Decimal(10, 2)
+  totalIncome         Decimal   @db.Decimal(12, 2)
+  paidBase            Decimal   @default(0) @db.Decimal(12, 2)
+  paidCommission      Decimal   @default(0) @db.Decimal(12, 2)
+  isFullyPaid         Boolean   @default(false)
+  settledAt           DateTime
+  paidAt              DateTime?
+  // Full rule snapshot at settlement time: CS_TIERS (including mode),
+  // CS_BASE_SALARY, CS_PERIOD_LENGTH. Enough to reproduce WHY this
+  // specific tierRate was picked even after the tier table is edited
+  // (CLAUDE.md §4.4 rule-snapshot bedrock).
+  salaryRuleSnapshot  Json?
+  createdAt           DateTime  @default(now())
 
   csUser       User         @relation(fields: [csUserId], references: [id])
   salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id])

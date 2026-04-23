@@ -27,11 +27,13 @@ export async function POST(req: Request) {
   }
 
   try {
-    const results = await settleReadyCsPeriods();
+    const { settled, errors } = await settleReadyCsPeriods();
     return NextResponse.json({
       status: 'ok',
-      settledCount: results.length,
-      results,
+      settledCount: settled.length,
+      errorCount: errors.length,
+      settled,
+      errors,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

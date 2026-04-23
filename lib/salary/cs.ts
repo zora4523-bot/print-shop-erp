@@ -1,5 +1,9 @@
 import Decimal from 'decimal.js';
-import { Role, SalaryPeriodStatus } from '../../generated/prisma/enums';
+import {
+  Role,
+  SalaryPeriodStatus,
+  SalaryRuleType,
+} from '../../generated/prisma/enums';
 import { db } from '../db';
 import { parseStrictYmd } from '../auth/schemas';
 import {
@@ -11,12 +15,51 @@ import {
 import {
   getActiveCsMonthlyBase,
   getActiveCsPeriodLength,
-  getActiveCsTiers,
 } from './rules';
 import {
   transitionCsPeriod,
   InvalidCsPeriodTransitionError,
 } from './cs/status-machine';
+
+// Advisory-lock namespace: one lock per CS period protects both the
+// settle flow and the per-bill accumulate flow from stepping on each
+// other (Codex round 45 / P0). Callers MUST take this lock BEFORE
+// reading totalSales inside whatever tx they're running.
+function csPeriodLockKey(periodId: string): string {
+  return `print-shop-erp:cs-period:${periodId}`;
+}
+
+// Minimal tx surface for rule reads — we need to go through `tx`
+// (not global `db`) so rule lookups participate in the settlement
+// snapshot's isolation (Codex round 45 / P2).
+type RuleTx = {
+  salaryRule: {
+    findFirst: (args: {
+      where: unknown;
+      orderBy?: unknown;
+      select?: unknown;
+    }) => Promise<{ ruleValue: unknown } | null>;
+  };
+};
+
+async function txActiveCsRule<T>(
+  tx: RuleTx,
+  ruleKey: string,
+  now: Date,
+): Promise<T | null> {
+  const rule = await tx.salaryRule.findFirst({
+    where: {
+      ruleType: SalaryRuleType.CS_COMMISSION,
+      ruleKey,
+      effectiveFrom: { lte: now },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { ruleValue: true },
+  });
+  if (!rule) return null;
+  return rule.ruleValue as unknown as T;
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // CS period lifecycle (SPEC §3.7 / §5.3 / §5.5)
@@ -210,31 +253,44 @@ export async function accumulateCsSales(
   amount: string | number | Decimal,
   at: Date = new Date(),
 ): Promise<{ periodId: string; newTotalSales: string } | null> {
-  const period = await db.salaryPeriod.findFirst({
-    where: {
-      csUserId,
-      status: SalaryPeriodStatus.IN_PROGRESS,
-      periodStart: { lte: at },
-      periodEnd: { gte: at },
-    },
-    select: { id: true, totalSales: true },
-  });
-  if (!period) return null;
+  return db.$transaction(async (tx) => {
+    const txc = tx as unknown as {
+      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+      salaryPeriod: {
+        findFirst: (args: { where: unknown; select?: unknown }) => Promise<{ id: string; totalSales: unknown } | null>;
+        update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<{ id: string; totalSales: unknown }>;
+      };
+    };
 
-  // Use Prisma's atomic increment so concurrent bill settlements
-  // don't lose writes. Prisma `increment` takes a number — we convert
-  // via Decimal to avoid float rounding, then Prisma stores the
-  // resulting string correctly in the Decimal(12,2) column.
-  const inc = new Decimal(amount as Decimal.Value);
-  const updated = await db.salaryPeriod.update({
-    where: { id: period.id },
-    data: { totalSales: { increment: inc.toFixed(2) } },
-    select: { id: true, totalSales: true },
+    const period = await txc.salaryPeriod.findFirst({
+      where: {
+        csUserId,
+        status: SalaryPeriodStatus.IN_PROGRESS,
+        periodStart: { lte: at },
+        periodEnd: { gte: at },
+      },
+      select: { id: true, totalSales: true },
+    });
+    if (!period) return null;
+
+    // Serialize against settleCsPeriod for the same period — otherwise
+    // an increment landing mid-settle leaves commission.totalSales !=
+    // period.totalSales (Codex round 45 / P0).
+    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csPeriodLockKey(
+      period.id,
+    )}))`;
+
+    const inc = new Decimal(amount as Decimal.Value);
+    const updated = await txc.salaryPeriod.update({
+      where: { id: period.id },
+      data: { totalSales: { increment: inc.toFixed(2) } },
+      select: { id: true, totalSales: true },
+    });
+    return {
+      periodId: updated.id,
+      newTotalSales: String(updated.totalSales),
+    };
   });
-  return {
-    periodId: updated.id,
-    newTotalSales: String(updated.totalSales),
-  };
 }
 
 export type SettledCommission = {
@@ -258,7 +314,37 @@ export async function settleCsPeriod(
   now: Date = new Date(),
 ): Promise<SettledCommission> {
   return db.$transaction(async (tx) => {
-    const period = await tx.salaryPeriod.findUnique({
+    const txc = tx as unknown as RuleTx & {
+      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+      salaryPeriod: {
+        findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
+          id: string;
+          csUserId: string;
+          periodStart: Date;
+          periodEnd: Date;
+          durationMonths: number;
+          totalSales: unknown;
+          initialSales: unknown;
+          monthlyBase: unknown;
+          status: SalaryPeriodStatus;
+        } | null>;
+        update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<unknown>;
+        create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
+      };
+      customerServiceCommission: {
+        create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
+      };
+    };
+
+    // Serialize against concurrent settlers AND accumulateCsSales on
+    // the same period (Codex round 45 / P0, P1). Any contender blocks
+    // here; when we proceed, we re-read totalSales so the commission
+    // snapshot is consistent with DB state.
+    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csPeriodLockKey(
+      periodId,
+    )}))`;
+
+    const period = await txc.salaryPeriod.findUnique({
       where: { id: periodId },
       select: {
         id: true,
@@ -274,12 +360,29 @@ export async function settleCsPeriod(
     });
     if (!period) throw new CsPeriodError('周期不存在');
 
+    // Status-machine check. If a concurrent settler got here first,
+    // this period is now SETTLED and transitionCsPeriod will throw
+    // InvalidCsPeriodTransitionError — which is the right outcome:
+    // the first winner already did the work.
     transitionCsPeriod(period.status, SalaryPeriodStatus.SETTLED);
 
-    const tiers = await getActiveCsTiers(now);
+    // Rule reads go through the tx (Codex round 45 / P2) so a
+    // concurrent rule edit can't have us observe mixed versions.
+    const tiers = await txActiveCsRule<CsTiersConfig>(txc, 'CS_TIERS', now);
     if (!tiers) {
       throw new CsPeriodError('无当前生效的 CS_TIERS 规则');
     }
+    const activeBase = await txActiveCsRule<{ monthlyBase: number }>(
+      txc,
+      'CS_BASE_SALARY',
+      now,
+    );
+    const activeDurationValue = await txActiveCsRule<{ months: number }>(
+      txc,
+      'CS_PERIOD_LENGTH',
+      now,
+    );
+
     // SPEC §5.3: commission is on (totalSales + initialSales)
     const totalForTier = new Decimal(period.totalSales as unknown as string)
       .plus(new Decimal(period.initialSales as unknown as string));
@@ -293,7 +396,23 @@ export async function settleCsPeriod(
       breakdown.commissionAmount,
     );
 
-    await tx.salaryPeriod.update({
+    // Full rule snapshot (Codex round 45 / P1). Stored on the
+    // commission so "what was tier 5 then?" stays answerable from
+    // persisted data even after the tier table is later edited.
+    const ruleSnapshot = {
+      tiers,
+      monthlyBase: period.monthlyBase as unknown as string,
+      durationMonths: period.durationMonths,
+      // Include the currently-active base + duration too so a post-
+      // period rule update is visible in the audit trail, not just
+      // the per-period snapshots that were taken at create time.
+      activeAtSettle: {
+        monthlyBase: activeBase?.monthlyBase ?? null,
+        durationMonths: activeDurationValue?.months ?? null,
+      },
+    };
+
+    await txc.salaryPeriod.update({
       where: { id: period.id },
       data: {
         status: SalaryPeriodStatus.SETTLED,
@@ -301,7 +420,7 @@ export async function settleCsPeriod(
       },
     });
 
-    const commission = await tx.customerServiceCommission.create({
+    const commission = await txc.customerServiceCommission.create({
       data: {
         csUserId: period.csUserId,
         salaryPeriodId: period.id,
@@ -311,6 +430,7 @@ export async function settleCsPeriod(
         monthlyBaseTotal: monthlyBaseTotal.toFixed(2),
         totalIncome: totalIncome.toFixed(2),
         settledAt: now,
+        salaryRuleSnapshot: JSON.parse(JSON.stringify(ruleSnapshot)),
       },
       select: { id: true },
     });
@@ -323,28 +443,25 @@ export async function settleCsPeriod(
     const nextStart = new Date(
       (period.periodEnd as Date).getTime() + 24 * 60 * 60 * 1000,
     );
-    const activeBase = await getActiveCsMonthlyBase(now);
-    const activeDuration = await getActiveCsPeriodLength(now);
-    if (activeBase !== null && activeDuration !== null) {
-      const nextEnd = computePeriodEnd(nextStart, activeDuration);
-      const next = await tx.salaryPeriod.create({
+    if (activeBase !== null && activeDurationValue !== null) {
+      const nextEnd = computePeriodEnd(nextStart, activeDurationValue.months);
+      const next = await txc.salaryPeriod.create({
         data: {
           csUserId: period.csUserId,
           periodStart: nextStart,
           periodEnd: nextEnd,
-          durationMonths: activeDuration,
+          durationMonths: activeDurationValue.months,
           totalSales: '0.00',
           initialSales: '0.00',
-          monthlyBase: new Decimal(activeBase).toFixed(2),
+          monthlyBase: new Decimal(activeBase.monthlyBase).toFixed(2),
           status: SalaryPeriodStatus.IN_PROGRESS,
         },
         select: { id: true },
       });
       nextPeriodId = next.id;
     }
-    // If rules are missing, we log (via the return value) and leave
-    // the CS without a next period. Owner is expected to restart it
-    // manually after the rules get added.
+    // If rules are missing, we leave the CS without a next period.
+    // Owner is expected to restart it manually after rules are added.
 
     return {
       commissionId: commission.id,
@@ -363,9 +480,18 @@ export async function settleCsPeriod(
 // Batch: finds every IN_PROGRESS period whose periodEnd has passed and
 // settles it. Used by the "每日扫描" cron endpoint (SPEC §3.7 "周期结束
 // 当日（定时任务）"). Serialized so we don't interleave transactions.
+export type BatchSettleResult = {
+  settled: SettledCommission[];
+  errors: Array<{ periodId: string; message: string }>;
+};
+
+// Batch: finds every IN_PROGRESS period whose periodEnd has passed
+// and settles each. Per-period try/catch so one bad period doesn't
+// abort the whole batch (e.g. missing CS_TIERS rule, or a concurrent
+// settler already handled this period — Codex round 45 / P1).
 export async function settleReadyCsPeriods(
   now: Date = new Date(),
-): Promise<SettledCommission[]> {
+): Promise<BatchSettleResult> {
   const due = await db.salaryPeriod.findMany({
     where: {
       status: SalaryPeriodStatus.IN_PROGRESS,
@@ -374,11 +500,21 @@ export async function settleReadyCsPeriods(
     select: { id: true },
     orderBy: { periodEnd: 'asc' },
   });
-  const out: SettledCommission[] = [];
+  const settled: SettledCommission[] = [];
+  const errors: Array<{ periodId: string; message: string }> = [];
   for (const p of due) {
-    out.push(await settleCsPeriod(p.id, now));
+    try {
+      settled.push(await settleCsPeriod(p.id, now));
+    } catch (err) {
+      // Capture and continue — operator decides what to do with the
+      // failing period (often: add missing rule, retry).
+      errors.push({
+        periodId: p.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
-  return out;
+  return { settled, errors };
 }
 
 // Mark a commission as fully paid (base + commission in one go).

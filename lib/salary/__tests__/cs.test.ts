@@ -20,6 +20,7 @@ const { dbMock } = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    $queryRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -64,6 +65,7 @@ beforeEach(() => {
   dbMock.customerServiceCommission.findUnique.mockReset();
   dbMock.customerServiceCommission.create.mockReset();
   dbMock.customerServiceCommission.update.mockReset();
+  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
   // Default: all three CS rules resolve to seed values.
   dbMock.salaryRule.findFirst.mockImplementation(async (args: {
     where: { ruleKey: string };
@@ -233,6 +235,23 @@ describe('accumulateCsSales', () => {
     expect(data.totalSales).toEqual({ increment: '5000.00' });
   });
 
+  it('takes the per-period advisory lock (Codex round 45 / P0)', async () => {
+    dbMock.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'period-1',
+      totalSales: '0',
+    });
+    dbMock.salaryPeriod.update.mockResolvedValue({
+      id: 'period-1',
+      totalSales: '5000',
+    });
+    await accumulateCsSales('cs-1', 5000);
+    expect(dbMock.$queryRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    const sql = (firstCall[0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(firstCall[1]).toMatch(/print-shop-erp:cs-period:period-1/);
+  });
+
   it('finds the period where periodStart ≤ at ≤ periodEnd', async () => {
     dbMock.salaryPeriod.findFirst.mockResolvedValue({
       id: 'period-1',
@@ -294,6 +313,33 @@ describe('settleCsPeriod', () => {
     expect(r.monthlyBaseTotal).toBe('8000.00');
     expect(r.totalIncome).toBe('41000.00');
     expect(r.nextPeriodId).toBe('period-2');
+  });
+
+  it('writes salaryRuleSnapshot with full tier table + monthlyBase (Codex round 45 / P1)', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+    await settleCsPeriod('period-1');
+    const data = dbMock.customerServiceCommission.create.mock.calls[0][0].data;
+    expect(data.salaryRuleSnapshot).toBeDefined();
+    expect(data.salaryRuleSnapshot.tiers.mode).toBe('FLAT');
+    expect(data.salaryRuleSnapshot.tiers.tiers).toHaveLength(5);
+    expect(data.salaryRuleSnapshot.monthlyBase).toBe('2000');
+    expect(data.salaryRuleSnapshot.durationMonths).toBe(4);
+    expect(data.salaryRuleSnapshot.activeAtSettle.monthlyBase).toBe(2000);
+    expect(data.salaryRuleSnapshot.activeAtSettle.durationMonths).toBe(4);
+  });
+
+  it('takes the per-period advisory lock before reading (Codex round 45 / P0)', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+    await settleCsPeriod('period-1');
+    expect(dbMock.$queryRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    const sql = (firstCall[0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(firstCall[1]).toMatch(/print-shop-erp:cs-period:period-1/);
   });
 
   it('adds initialSales to totalSales when picking the tier (SPEC §5.5 continuation)', async () => {
@@ -402,15 +448,51 @@ describe('settleReadyCsPeriods', () => {
     dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm' });
     dbMock.salaryPeriod.create.mockResolvedValue({ id: 'next' });
     const out = await settleReadyCsPeriods();
-    expect(out).toHaveLength(2);
-    expect(out[0].periodId).toBe('period-a');
-    expect(out[1].periodId).toBe('period-b');
+    expect(out.settled).toHaveLength(2);
+    expect(out.errors).toEqual([]);
+    expect(out.settled[0].periodId).toBe('period-a');
+    expect(out.settled[1].periodId).toBe('period-b');
   });
 
   it('returns empty when nothing is due', async () => {
     dbMock.salaryPeriod.findMany.mockResolvedValue([]);
     const out = await settleReadyCsPeriods();
-    expect(out).toEqual([]);
+    expect(out.settled).toEqual([]);
+    expect(out.errors).toEqual([]);
+  });
+
+  it('per-period try: one failure does not abort the batch (Codex round 45 / P1)', async () => {
+    dbMock.salaryPeriod.findMany.mockResolvedValue([
+      { id: 'period-ok' },
+      { id: 'period-broken' },
+      { id: 'period-ok-2' },
+    ]);
+    dbMock.salaryPeriod.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === 'period-broken') return null; // triggers CsPeriodError
+        return {
+          id: where.id,
+          csUserId: 'cs-1',
+          periodStart: new Date(Date.UTC(2026, 0, 1)),
+          periodEnd: new Date(Date.UTC(2026, 3, 30)),
+          durationMonths: 4,
+          totalSales: '100000',
+          initialSales: '0',
+          monthlyBase: '2000',
+          status: SalaryPeriodStatus.IN_PROGRESS,
+        };
+      },
+    );
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'next' });
+    const out = await settleReadyCsPeriods();
+    expect(out.settled.map((s) => s.periodId)).toEqual([
+      'period-ok',
+      'period-ok-2',
+    ]);
+    expect(out.errors).toHaveLength(1);
+    expect(out.errors[0].periodId).toBe('period-broken');
+    expect(out.errors[0].message).toMatch(/周期不存在/);
   });
 });
 

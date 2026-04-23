@@ -375,19 +375,40 @@ describe('settleCsPeriodAction', () => {
 });
 
 describe('settleReadyCsPeriodsAction', () => {
-  it('returns settledCount on success', async () => {
+  it('returns settledCount + errorCount on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    csMock.settleReadyCsPeriods.mockResolvedValue([
-      { periodId: 'p1' },
-      { periodId: 'p2' },
-    ]);
+    csMock.settleReadyCsPeriods.mockResolvedValue({
+      settled: [{ periodId: 'p1' }, { periodId: 'p2' }],
+      errors: [],
+    });
     const r = await settleReadyCsPeriodsAction();
     expect(r.status).toBe('success');
-    if (r.status === 'success') expect(r.settledCount).toBe(2);
+    if (r.status === 'success') {
+      expect(r.settledCount).toBe(2);
+      expect(r.errorCount).toBe(0);
+      expect(r.errors).toEqual([]);
+    }
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs');
   });
 
-  it('maps errors to { status: error }', async () => {
+  it('surfaces per-period errors from the batch (Codex round 45 / P1)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    csMock.settleReadyCsPeriods.mockResolvedValue({
+      settled: [{ periodId: 'p1' }],
+      errors: [
+        { periodId: 'p2', message: '无当前生效的 CS_TIERS 规则' },
+      ],
+    });
+    const r = await settleReadyCsPeriodsAction();
+    expect(r.status).toBe('success');
+    if (r.status === 'success') {
+      expect(r.settledCount).toBe(1);
+      expect(r.errorCount).toBe(1);
+      expect(r.errors[0].periodId).toBe('p2');
+    }
+  });
+
+  it('maps scan-level errors to { status: error }', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     csMock.settleReadyCsPeriods.mockRejectedValueOnce(
       new Error('db down'),

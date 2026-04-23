@@ -177,9 +177,14 @@ export async function settleReadyCsPeriodsAction(): Promise<SettleReadyCsResult>
   await requirePermission('salary:rule:manage');
 
   try {
-    const results = await settleReadyCsPeriods();
+    const { settled, errors } = await settleReadyCsPeriods();
     revalidatePath('/owner/salary/cs');
-    return { status: 'success', settledCount: results.length };
+    return {
+      status: 'success',
+      settledCount: settled.length,
+      errorCount: errors.length,
+      errors,
+    };
   } catch (err) {
     if (err instanceof Error) {
       return { status: 'error', message: err.message };
