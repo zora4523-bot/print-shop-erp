@@ -30,6 +30,15 @@ export const ALLOWED_MIME: Record<DesignFileType, readonly string[]> = {
   ] as const,
 };
 
+// Extensions the server will accept for each fileType. The client-supplied
+// MIME alone isn't enough — `application/octet-stream` is legitimate for
+// CDR but any file can be re-labeled as octet-stream, so we also check
+// the extension matches the declared fileType.
+export const ALLOWED_EXTENSIONS: Record<DesignFileType, readonly string[]> = {
+  [DesignFileType.IMAGE]: ['jpg', 'jpeg', 'png', 'webp'] as const,
+  [DesignFileType.CDR]: ['cdr'] as const,
+};
+
 export type SignUploadParams = {
   userId: string;
   orderId: string;

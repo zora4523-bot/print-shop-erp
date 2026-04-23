@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { readOssConfig, type OssConfig } from './config';
 import {
+  ALLOWED_EXTENSIONS,
   ALLOWED_MIME,
   FILE_SIZE_LIMITS,
   type SignUploadParams,
   type SignUploadResult,
 } from './types';
+
+// Strict allowlist for characters that can appear in path-sensitive ids.
+// Prisma cuids match [A-Za-z0-9]+, cuid2 adds `_-`; this accepts either
+// and rejects `/`, `..`, control chars, URL-significant characters.
+// If a caller sends garbage here, it's a bug or attack, not a user typo.
+const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 // Thrown when OSS is fully configured per env, but the actual STS signing
 // library (ali-oss / @alicloud/sts20150401) hasn't been plumbed in yet.
@@ -21,10 +28,14 @@ export class OssNotWiredError extends Error {
 }
 
 function buildObjectKey(params: SignUploadParams): string {
-  const ext = extractExtension(params.fileName) || (params.fileType === 'IMAGE' ? 'jpg' : 'cdr');
+  // Extension is derived from the DECLARED fileType, not the untrusted
+  // client extension. Even if a user renames a .jpg to .cdr, the stored
+  // object uses the canonical extension for its declared type.
+  const ext = ALLOWED_EXTENSIONS[params.fileType][0];
   const id = randomUUID();
   // Path layout: design/<orderId>/<orderItemId>/<fileType>-<uuid>.<ext>
-  // Keeps per-order files co-located for future bulk download (CDR汇总).
+  // orderId / orderItemId are whitelisted to SAFE_ID_RE (see validate),
+  // so there's no way to escape the design/ prefix via `..` or `/`.
   return `design/${params.orderId}/${params.orderItemId}/${params.fileType.toLowerCase()}-${id}.${ext}`;
 }
 
@@ -36,6 +47,17 @@ function extractExtension(fileName: string): string | null {
 
 function validate(params: SignUploadParams): Record<string, string[]> | null {
   const errors: Record<string, string[]> = {};
+
+  // Path-sensitive identifiers must be plain (cuid-shaped). Anything that
+  // could contain `/`, `..`, or control chars gets rejected before we
+  // touch the object key.
+  if (!SAFE_ID_RE.test(params.orderId)) {
+    (errors.orderId ??= []).push('orderId 格式非法');
+  }
+  if (!SAFE_ID_RE.test(params.orderItemId)) {
+    (errors.orderItemId ??= []).push('orderItemId 格式非法');
+  }
+
   const sizeLimit = FILE_SIZE_LIMITS[params.fileType];
   if (params.fileSize <= 0) {
     (errors.fileSize ??= []).push('文件大小无效');
@@ -44,13 +66,27 @@ function validate(params: SignUploadParams): Record<string, string[]> | null {
       `文件过大（${params.fileType} 上限 ${Math.round(sizeLimit / (1024 * 1024))} MiB）`,
     );
   }
-  const allowed = ALLOWED_MIME[params.fileType];
-  if (!allowed.includes(params.mimeType)) {
+
+  const allowedMime = ALLOWED_MIME[params.fileType];
+  if (!allowedMime.includes(params.mimeType)) {
     (errors.mimeType ??= []).push(`MIME 类型不被允许：${params.mimeType}`);
   }
+
+  // Extension must match the declared fileType. Defends against the
+  // `application/octet-stream` CDR loophole — a caller can't rename a
+  // JPEG to .cdr and pass it off with octet-stream.
   if (!params.fileName || params.fileName.trim() === '') {
     (errors.fileName ??= []).push('文件名不能为空');
+  } else {
+    const ext = extractExtension(params.fileName);
+    const allowedExts = ALLOWED_EXTENSIONS[params.fileType];
+    if (!ext || !allowedExts.includes(ext)) {
+      (errors.fileName ??= []).push(
+        `文件扩展名与类型不匹配（${params.fileType} 期望：${allowedExts.join(', ')}）`,
+      );
+    }
   }
+
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
@@ -101,7 +137,11 @@ export async function signDesignUpload(
     bucket: cfg.bucket,
     region: cfg.region,
     objectKey,
-    uploadUrl: `${cfg.endpoint}/${cfg.bucket}/${objectKey}`,
+    // Virtual-hosted style to match what the browser SDK (ali-oss) uses
+    // and what publicBaseUrl derives. Path-style (`${endpoint}/${bucket}
+    // /${objectKey}`) would work for some SDKs but not all, and gives
+    // the browser a different host than the CORS policy expects.
+    uploadUrl: `${cfg.publicBaseUrl}/${objectKey}`,
     publicUrl: `${cfg.publicBaseUrl}/${objectKey}`,
   };
 }

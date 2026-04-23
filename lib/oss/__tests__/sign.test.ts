@@ -60,7 +60,7 @@ describe('signDesignUpload — validation (runs before STS signing)', () => {
     expect(r.status).toBe('invalid');
   });
 
-  it('accepts 100 MiB CDR (under CDR limit)', async () => {
+  it('accepts valid CDR (under CDR limit, .cdr extension)', async () => {
     // Even when the validation passes, signing itself is still stubbed
     // out — the call should throw OssNotWiredError, not return ok.
     await expect(
@@ -100,6 +100,56 @@ describe('signDesignUpload — validation (runs before STS signing)', () => {
       configuredEnv,
     );
     expect(r.status).toBe('invalid');
+  });
+
+  it('rejects path-injection orderId / orderItemId (Codex round 29 / P1)', async () => {
+    for (const bad of ['../../etc', 'a/b', 'with spaces', 'has.dot', 'c\0d']) {
+      const r1 = await signDesignUpload(
+        { ...validParams, orderId: bad },
+        configuredEnv,
+      );
+      expect(r1.status, `orderId=${bad}`).toBe('invalid');
+      if (r1.status === 'invalid') expect(r1.fieldErrors.orderId).toBeDefined();
+
+      const r2 = await signDesignUpload(
+        { ...validParams, orderItemId: bad },
+        configuredEnv,
+      );
+      expect(r2.status, `orderItemId=${bad}`).toBe('invalid');
+      if (r2.status === 'invalid') expect(r2.fieldErrors.orderItemId).toBeDefined();
+    }
+  });
+
+  it('rejects extension / fileType mismatch — CDR upload named .jpg (Codex round 29 / P2)', async () => {
+    const r = await signDesignUpload(
+      {
+        ...validParams,
+        fileType: DesignFileType.CDR,
+        fileName: 'actually-a-photo.jpg',
+        fileSize: 1024,
+        mimeType: 'application/octet-stream',
+      },
+      configuredEnv,
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.fileName?.[0]).toMatch(/扩展名与类型不匹配/);
+    }
+  });
+
+  it('accepts .jpg / .jpeg / .png / .webp for IMAGE, rejects other extensions', async () => {
+    for (const good of ['a.jpg', 'b.JPEG', 'c.png', 'd.webp']) {
+      await expect(
+        signDesignUpload({ ...validParams, fileName: good }, configuredEnv),
+      ).rejects.toBeInstanceOf(OssNotWiredError);
+    }
+    for (const bad of ['a.gif', 'b.bmp', 'c.heic', 'noext']) {
+      const r = await signDesignUpload(
+        { ...validParams, fileName: bad },
+        configuredEnv,
+      );
+      expect(r.status, bad).toBe('invalid');
+    }
   });
 });
 
