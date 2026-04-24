@@ -146,6 +146,21 @@ describe('generateBillsForPeriod', () => {
     expect(r.generated).toEqual([]);
     expect(r.errors).toEqual([]);
   });
+
+  it('takes per-(salesUser, period) advisory lock before findUnique (Codex round 52 / P1)', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+    ]);
+    dbMock.bill.findUnique.mockResolvedValue(null);
+    dbMock.bill.create.mockResolvedValue({ id: 'bill-1' });
+    await generateBillsForPeriod('2026-05', ownerActor);
+    expect(dbMock.$queryRaw).toHaveBeenCalled();
+    const sql = (dbMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(dbMock.$queryRaw.mock.calls[0][1]).toMatch(
+      /print-shop-erp:bill-gen:sales-a:2026-05/,
+    );
+  });
 });
 
 describe('issueBill', () => {
@@ -359,6 +374,28 @@ describe('recordPayment', () => {
     dbMock.salaryPeriod.findFirst.mockResolvedValue(null);
     const r = await recordPayment('bill-1', 500, ownerActor);
     expect(r.csAccumulated).toBe(false);
+  });
+
+  it('CS accumulation shares the bill tx (Codex round 52 / P1 — no independent commit)', async () => {
+    // If accumulateCsSales were opening its own $transaction, we'd
+    // see a SECOND $transaction call. With the tx threaded through,
+    // there's only ONE (the bill tx).
+    dbMock.bill.findUnique.mockResolvedValue(
+      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
+    );
+    dbMock.bill.update.mockResolvedValue({});
+    dbMock.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'period-1',
+      totalSales: '0',
+    });
+    dbMock.salaryPeriod.update.mockResolvedValue({
+      id: 'period-1',
+      totalSales: '500.00',
+    });
+    await recordPayment('bill-1', 500, ownerActor);
+    // Exactly one $transaction — the outer bill tx. CS accumulation
+    // reused it instead of opening a new one.
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 });
 

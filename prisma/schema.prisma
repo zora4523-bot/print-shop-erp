@@ -641,6 +641,10 @@ model BillItem {
   bill  Bill  @relation(fields: [billId], references: [id], onDelete: Cascade)
   order Order @relation(fields: [orderId], references: [id])
 
+  // Prevent duplicate items for the same (bill, order) under
+  // concurrent generateBillsForPeriod runs. The advisory lock in lib
+  // closes most of the race, but this is the DB-level last-line guard.
+  @@unique([billId, orderId])
   @@index([billId])
 }
 

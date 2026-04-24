@@ -255,50 +255,87 @@ export async function startCsPeriod(
 // Adds to the active period's totalSales for a given CS user. Intended
 // to be called from the bill mark-paid flow in P0 #6 — wired via this
 // thin accessor now so we don't need to touch lib/cs.ts from bill code.
+// Minimal tx-client surface so outer transactions can pass their own
+// tx in and share atomicity with us (Codex round 52 / P1 — bill
+// payment + CS accumulation must commit / roll back together).
+type CsAccumulateTxClient = {
+  $queryRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+  salaryPeriod: {
+    findFirst: (args: { where: unknown; select?: unknown }) => Promise<
+      { id: string; totalSales: unknown } | null
+    >;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string; totalSales: unknown }>;
+  };
+};
+
+// Core implementation — runs against whichever tx client is provided.
+// Caller is responsible for ensuring we're inside a transaction that
+// covers the cross-flow atomicity they care about.
+async function accumulateCsSalesIn(
+  tx: CsAccumulateTxClient,
+  csUserId: string,
+  amount: string | number | Decimal,
+  at: Date,
+): Promise<{ periodId: string; newTotalSales: string } | null> {
+  // Lock FIRST (Codex round 46 / P0). If we searched before locking,
+  // a concurrent settler could flip our target period to SETTLED in
+  // the gap. User-scope lock keeps period state stable in this
+  // critical section — either IN_PROGRESS or the settler's auto-
+  // created next period.
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+    csUserId,
+  )}))`;
+
+  const period = await tx.salaryPeriod.findFirst({
+    where: {
+      csUserId,
+      status: SalaryPeriodStatus.IN_PROGRESS,
+      periodStart: { lte: at },
+      periodEnd: { gte: at },
+    },
+    select: { id: true, totalSales: true },
+  });
+  if (!period) return null;
+
+  const inc = new Decimal(amount as Decimal.Value);
+  const updated = await tx.salaryPeriod.update({
+    where: { id: period.id },
+    data: { totalSales: { increment: inc.toFixed(2) } },
+    select: { id: true, totalSales: true },
+  });
+  return {
+    periodId: updated.id,
+    newTotalSales: String(updated.totalSales),
+  };
+}
+
+// Public API. Optional `tx` parameter lets a caller that's already
+// inside a transaction (like recordPayment on Bill) share its
+// atomicity with us — same visibility, commit / rollback together.
+// Standalone callers omit the arg and we open a new tx ourselves.
 export async function accumulateCsSales(
   csUserId: string,
   amount: string | number | Decimal,
   at: Date = new Date(),
+  tx?: CsAccumulateTxClient,
 ): Promise<{ periodId: string; newTotalSales: string } | null> {
-  return db.$transaction(async (tx) => {
-    const txc = tx as unknown as {
-      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-      salaryPeriod: {
-        findFirst: (args: { where: unknown; select?: unknown }) => Promise<{ id: string; totalSales: unknown } | null>;
-        update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<{ id: string; totalSales: unknown }>;
-      };
-    };
-
-    // Lock FIRST (Codex round 46 / P0). If we searched before
-    // locking, a concurrent settler could flip our target period to
-    // SETTLED in the gap. Taking the user-scope lock first guarantees
-    // that within the critical section, period state is stable —
-    // either IN_PROGRESS or the settler's auto-created next period.
-    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+  if (tx) {
+    return accumulateCsSalesIn(tx, csUserId, amount, at);
+  }
+  return db.$transaction(async (outerTx) => {
+    return accumulateCsSalesIn(
+      outerTx as unknown as CsAccumulateTxClient,
       csUserId,
-    )}))`;
-
-    const period = await txc.salaryPeriod.findFirst({
-      where: {
-        csUserId,
-        status: SalaryPeriodStatus.IN_PROGRESS,
-        periodStart: { lte: at },
-        periodEnd: { gte: at },
-      },
-      select: { id: true, totalSales: true },
-    });
-    if (!period) return null;
-
-    const inc = new Decimal(amount as Decimal.Value);
-    const updated = await txc.salaryPeriod.update({
-      where: { id: period.id },
-      data: { totalSales: { increment: inc.toFixed(2) } },
-      select: { id: true, totalSales: true },
-    });
-    return {
-      periodId: updated.id,
-      newTotalSales: String(updated.totalSales),
-    };
+      amount,
+      at,
+    );
   });
 }
 

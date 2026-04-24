@@ -38,6 +38,13 @@ function billLockKey(billId: string): string {
   return `print-shop-erp:bill:${billId}`;
 }
 
+// Generate 路径在 Bill 还没创建之前就需要锁——用 (salesUser, period)
+// 做 key，防两次并发生成同一张账单时双写 item 或同时 create。
+// Codex round 52 / P1。
+function billGenerateLockKey(salesUserId: string, period: string): string {
+  return `print-shop-erp:bill-gen:${salesUserId}:${period}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 生成：月初扫描上月 FINISHED 订单 → 每位销售 / 客服一条账单
 // ─────────────────────────────────────────────────────────────────────
@@ -113,6 +120,17 @@ async function generateBillForSubmitter(
   orders: Array<{ id: string; totalAmount: unknown }>,
 ): Promise<BillGenerationResult['generated'][number]> {
   return db.$transaction(async (tx) => {
+    // Serialize two concurrent generate runs on the same (sales, period)
+    // 对。Without this, both runs could read existing.items, both decide
+    // an orderId is missing, and both createMany a duplicate. The
+    // @@unique([billId, orderId]) index is the DB-level last-line
+    // guard; this lock turns the error into clean serialization
+    // (Codex round 52 / P1).
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${billGenerateLockKey(
+      submitterId,
+      period,
+    )}))`;
+
     // Finance-of-record: 该月账单一旦进入 ISSUED / PAID / PARTIAL_PAID
     // 就不再自动追加 items（owner 手动补单或新建月份账单）。自动
     // 生成只覆盖 DRAFT 或首次创建。
@@ -312,17 +330,18 @@ export async function recordPayment(
 
     // CS 业绩累计：仅当 salesUser 是 CUSTOMER_SERVICE 才触发。
     // SALES 的账单不累计（SALES 不走客服周期 / 提成系统）。
+    //
+    // Pass our tx into accumulateCsSales so the CS-period write
+    // shares atomicity with the bill update (Codex round 52 / P1).
+    // Prisma 的 $transaction 不是真嵌套；不传 tx 会开独立事务，bill
+    // 外层 rollback 时 CS 已经 commit 了。传 tx 后两者同生共死。
     let csAccumulated = false;
     if (bill.salesUser.role === Role.CUSTOMER_SERVICE) {
-      // accumulateCsSales 自己开 $transaction + 拿 CS-user 锁（DECISIONS
-      // 2026-04-24）。嵌套在当前 bill tx 内是安全的 — Prisma 的
-      // interactive transactions 不是真正嵌套，inner 会复用 outer 的
-      // connection + 事务视图。这里 delta 是本次付款；CS 周期累计
-      // 逻辑知道怎么对应到正确的 in-progress 周期（按 `at` 时间）。
       const r = await accumulateCsSales(
         bill.salesUserId,
         deltaDec.toFixed(2),
         now,
+        tx as unknown as Parameters<typeof accumulateCsSales>[3],
       );
       csAccumulated = r !== null;
     }
