@@ -44,7 +44,16 @@ function formatDateTime(d: Date | null): string {
 }
 
 function isValidYm(s: string | undefined): s is string {
-  return !!s && /^\d{4}-\d{2}$/.test(s);
+  if (!s) return false;
+  const m = /^(\d{4})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  // listBills -> parseShanghaiMonth rejects month > 12 with a thrown
+  // error; catching the throw in the Server Component would only make
+  // the page crash silently. Pre-validate range here so a bookmark /
+  // hand-edited URL like ?period=2026-13 cleanly falls back to
+  // &ldquo;no filter&rdquo; (Codex round 56 / P2).
+  const mo = Number(m[2]);
+  return mo >= 1 && mo <= 12;
 }
 
 function isBillStatus(s: string | undefined): s is BillStatus {
@@ -114,8 +123,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          重跑同一月会把新完工订单追加到已有 DRAFT 账单；已发单 / 已结清的
-          月份账单不会被覆盖（业主手动补单或新建月份账单）。
+          重跑同一月会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
+          （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程会对那位销售 /
+          客服报错，不覆盖已发账单；此时需业主判断：等待下月生成或按业务流程
+          单独处理。
         </p>
       </section>
 

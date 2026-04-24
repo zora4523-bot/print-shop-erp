@@ -101,8 +101,12 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">发单</h2>
           <p className="text-xs text-muted-foreground">
-            发单后进入 ISSUED，可接受付款。发单后仍可通过追加月账单把后续完工
-            订单补进来，但状态不能回退到 DRAFT。
+            发单后进入 ISSUED，可接受付款。状态单向，不可回退到 DRAFT。发单
+            前请先在列表页&ldquo;生成 / 追加月账单&rdquo;把截至目前所有完工
+            订单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
+            {BILL_STATUS_LABELS[BillStatus.PARTIAL_PAID]} /
+            {BILL_STATUS_LABELS[BillStatus.FULLY_PAID]} 的账单不再由生成流程
+            自动追加新工单。
           </p>
           <IssueBillButton billId={bill.id} />
         </section>
