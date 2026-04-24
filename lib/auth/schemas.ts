@@ -891,3 +891,38 @@ export const markHourlyPayrollPaidSchema = z.object({
 });
 
 export type MarkHourlyPayrollPaidInput = z.infer<typeof markHourlyPayrollPaidSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// 销售应收账单 (P0 #6 Slice A)
+// ─────────────────────────────────────────────────────────────────────
+
+export const generateBillsSchema = z.object({
+  period: ymField('月份'),
+});
+
+export type GenerateBillsInput = z.infer<typeof generateBillsSchema>;
+
+// Money input: accepts number or string; required > 0 for payments.
+const billPaymentField = z.preprocess(
+  (v) => {
+    if (v === null || v === undefined || v === '') return Number.NaN;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (t === '') return Number.NaN;
+      if (!/^\d{1,10}(\.\d{1,2})?$/.test(t)) return Number.NaN;
+      return t;
+    }
+    return Number.NaN;
+  },
+  z
+    .union([z.string(), z.number()])
+    .transform((v) => String(v))
+    .refine((v) => Number.parseFloat(v) > 0, '付款金额必须大于 0'),
+);
+
+export const recordBillPaymentSchema = z.object({
+  amount: billPaymentField,
+});
+
+export type RecordBillPaymentInput = z.infer<typeof recordBillPaymentSchema>;
