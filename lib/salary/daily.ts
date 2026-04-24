@@ -91,6 +91,18 @@ export type DailyWorkerSalaryResult = {
   orderCount: number;
 };
 
+// Per-(worker, date) advisory lock. Closes two races (mirrors Codex
+// round 48 hourly fix / P0):
+// 1. recompute vs mark-paid: recompute reads isPaid=false, mark-paid
+//    flips to true, recompute's upsert still rewrites the now-paid row.
+// 2. two concurrent recomputes for the same (worker, date) both
+//    passing the paid guard and double-writing.
+// markDailySalaryPaid takes the same lock so the check-and-update
+// pair is serialized end-to-end.
+function dailyLockKey(workerId: string, date: string): string {
+  return `print-shop-erp:daily:${workerId}:${date}`;
+}
+
 // Compute (or recompute) one worker × one date. Upserts on
 // @@unique([workerId, date]) so re-running the job on an already-
 // processed day is idempotent and corrects any after-the-fact task
@@ -124,34 +136,17 @@ export async function computeDailyWorkerSalary(
   if (!worker.machineType) {
     throw new DailySalaryError('师傅未配置机型');
   }
+  // Hoist the narrowed machineType into a non-null local — TS loses
+  // flow narrowing across the $transaction arrow body's closure (same
+  // pattern as computeHourlyPayroll).
+  const machineType: MachineType = worker.machineType;
 
-  const rule = await getActiveMachineRule(worker.machineType, now);
+  const rule = await getActiveMachineRule(machineType, now);
   if (!rule) {
     throw new DailySalaryError(
-      `无当前生效的 ${worker.machineType} 薪资规则`,
+      `无当前生效的 ${machineType} 薪资规则`,
     );
   }
-
-  const tasks = await db.productionTask.findMany({
-    where: {
-      workerId,
-      status: 'COMPLETED',
-      completedAt: { gte: start, lt: end },
-    },
-    select: {
-      pieceworkAmount: true,
-      orderItem: { select: { orderId: true } },
-    },
-  });
-
-  const { totalPieceworkAmount, taskCount, orderCount, detail } =
-    aggregateTasks(tasks);
-
-  const baseSalary = new Decimal((rule as MachineRuleWithBase).dailyBase);
-  const actualSalary = calcMachineDailySalary(
-    tasks.map((t) => new Decimal(t.pieceworkAmount as Decimal.Value)),
-    baseSalary,
-  );
 
   // Store the `@db.Date` column as UTC midnight for the Shanghai
   // calendar date. parseStrictYmd already returned this value inside
@@ -159,62 +154,93 @@ export async function computeDailyWorkerSalary(
   // columns-vs-range views perfectly aligned.
   const dateCol = parseStrictYmd(date)!;
 
-  // Refuse to recompute an already-paid row: the paid amount is a
-  // finance-of-record value, and silently overwriting it would break
-  // audit (Codex round 43 / P0). Owner must explicitly 撤销发放 first,
-  // recompute, then re-mark paid — the trail stays visible.
-  const existing = await db.dailyWorkerSalary.findUnique({
-    where: { workerId_date: { workerId, date: dateCol } },
-    select: { id: true, isPaid: true, actualSalary: true },
-  });
-  if (existing?.isPaid) {
-    throw new DailySalaryError(
-      `该日已标记发放（${date} · 师傅 ${workerId} · 实发 ¥${String(
-        existing.actualSalary,
-      )}），请先撤销发放再重算。`,
-    );
-  }
-
-  await db.dailyWorkerSalary.upsert({
-    where: { workerId_date: { workerId, date: dateCol } },
-    create: {
+  // Everything past here runs in ONE transaction under the per-
+  // (worker, date) advisory lock so the paid-row guard and the upsert
+  // can't be interleaved with a concurrent markDailySalaryPaid.
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
       workerId,
-      date: dateCol,
-      machineType: worker.machineType,
-      baseSalary: baseSalary.toFixed(2),
-      totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
-      actualSalary: actualSalary.toFixed(2),
-      taskCount,
-      orderCount,
-      calculationDetail: detail,
-      salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
-    },
-    update: {
-      // isPaid / paidAt stay whatever they already are; finance
-      // shouldn't have its mark-paid reverted by a recompute. The
-      // recompute is allowed to change the NUMBERS — that's the
-      // point — but the payment ledger entry is separate.
-      machineType: worker.machineType,
-      baseSalary: baseSalary.toFixed(2),
-      totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
-      actualSalary: actualSalary.toFixed(2),
-      taskCount,
-      orderCount,
-      calculationDetail: detail,
-      salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
-    },
-  });
+      date,
+    )}))`;
 
-  return {
-    workerId,
-    date,
-    machineType: worker.machineType,
-    totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
-    baseSalary: baseSalary.toFixed(2),
-    actualSalary: actualSalary.toFixed(2),
-    taskCount,
-    orderCount,
-  };
+    // Refuse to recompute an already-paid row: the paid amount is a
+    // finance-of-record value, and silently overwriting it would break
+    // audit (Codex round 43 / P0). Owner must explicitly 撤销发放 first,
+    // recompute, then re-mark paid — the trail stays visible.
+    const existing = await tx.dailyWorkerSalary.findUnique({
+      where: { workerId_date: { workerId, date: dateCol } },
+      select: { id: true, isPaid: true, actualSalary: true },
+    });
+    if (existing?.isPaid) {
+      throw new DailySalaryError(
+        `该日已标记发放（${date} · 师傅 ${workerId} · 实发 ¥${String(
+          existing.actualSalary,
+        )}），请先撤销发放再重算。`,
+      );
+    }
+
+    const tasks = await tx.productionTask.findMany({
+      where: {
+        workerId,
+        status: 'COMPLETED',
+        completedAt: { gte: start, lt: end },
+      },
+      select: {
+        pieceworkAmount: true,
+        orderItem: { select: { orderId: true } },
+      },
+    });
+
+    const { totalPieceworkAmount, taskCount, orderCount, detail } =
+      aggregateTasks(tasks);
+
+    const baseSalary = new Decimal((rule as MachineRuleWithBase).dailyBase);
+    const actualSalary = calcMachineDailySalary(
+      tasks.map((t) => new Decimal(t.pieceworkAmount as Decimal.Value)),
+      baseSalary,
+    );
+
+    await tx.dailyWorkerSalary.upsert({
+      where: { workerId_date: { workerId, date: dateCol } },
+      create: {
+        workerId,
+        date: dateCol,
+        machineType,
+        baseSalary: baseSalary.toFixed(2),
+        totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
+        actualSalary: actualSalary.toFixed(2),
+        taskCount,
+        orderCount,
+        calculationDetail: detail,
+        salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
+      },
+      update: {
+        // isPaid / paidAt stay whatever they already are; finance
+        // shouldn't have its mark-paid reverted by a recompute. The
+        // recompute is allowed to change the NUMBERS — that's the
+        // point — but the payment ledger entry is separate.
+        machineType,
+        baseSalary: baseSalary.toFixed(2),
+        totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
+        actualSalary: actualSalary.toFixed(2),
+        taskCount,
+        orderCount,
+        calculationDetail: detail,
+        salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
+      },
+    });
+
+    return {
+      workerId,
+      date,
+      machineType,
+      totalPieceworkAmount: totalPieceworkAmount.toFixed(2),
+      baseSalary: baseSalary.toFixed(2),
+      actualSalary: actualSalary.toFixed(2),
+      taskCount,
+      orderCount,
+    };
+  });
 }
 
 // Batch: for every active machine-type worker, compute the given day.
@@ -313,15 +339,33 @@ export async function markDailySalaryPaid(
   isPaid: boolean,
   now: Date = new Date(),
 ): Promise<{ id: string; isPaid: boolean }> {
-  const updated = await db.dailyWorkerSalary.update({
-    where: { id },
-    data: {
-      isPaid,
-      paidAt: isPaid ? now : null,
-    },
-    select: { id: true, isPaid: true },
+  // Same advisory lock as computeDailyWorkerSalary so a mark-paid
+  // landing mid-recompute blocks until the recompute's tx commits —
+  // no more paid-row amount overwrite. Lock key needs (workerId, date),
+  // which we resolve from the row first.
+  return db.$transaction(async (tx) => {
+    const row = await tx.dailyWorkerSalary.findUnique({
+      where: { id },
+      select: { workerId: true, date: true },
+    });
+    if (!row) {
+      throw new DailySalaryError('日薪记录不存在');
+    }
+    const dateKey = row.date.toISOString().slice(0, 10);
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
+      row.workerId,
+      dateKey,
+    )}))`;
+    const updated = await tx.dailyWorkerSalary.update({
+      where: { id },
+      data: {
+        isPaid,
+        paidAt: isPaid ? now : null,
+      },
+      select: { id: true, isPaid: true },
+    });
+    return updated;
   });
-  return updated;
 }
 
 // Shadow export of the rule type so callers don't have to reach into

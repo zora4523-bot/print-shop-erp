@@ -19,6 +19,11 @@ const { dbMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $transaction: vi.fn(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
+      return fn;
+    }),
   };
   return { dbMock: mock };
 });
@@ -110,6 +115,11 @@ describe('computeDailyWorkerSalary', () => {
     dbMock.dailyWorkerSalary.findMany.mockReset();
     dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
     dbMock.dailyWorkerSalary.update.mockReset();
+    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
+      return fn;
+    });
   });
 
   it('refuses a missing worker', async () => {
@@ -285,9 +295,20 @@ describe('listDailyWorkerSalaries', () => {
 
 describe('markDailySalaryPaid', () => {
   beforeEach(() => {
+    dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue({
+      workerId: 'worker-1',
+      // Shanghai 2026-04-23 is stored as UTC midnight for that calendar
+      // date (see computeDailyWorkerSalary comment).
+      date: new Date('2026-04-23T00:00:00.000Z'),
+    });
     dbMock.dailyWorkerSalary.update.mockReset().mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+    });
+    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
+      return fn;
     });
   });
 
@@ -304,6 +325,74 @@ describe('markDailySalaryPaid', () => {
     const data = dbMock.dailyWorkerSalary.update.mock.calls[0][0].data;
     expect(data.isPaid).toBe(false);
     expect(data.paidAt).toBeNull();
+  });
+
+  it('throws when the row is missing (no silent no-op)', async () => {
+    dbMock.dailyWorkerSalary.findUnique.mockResolvedValue(null);
+    await expect(markDailySalaryPaid('ghost', true)).rejects.toThrow(
+      /日薪记录不存在/,
+    );
+    expect(dbMock.dailyWorkerSalary.update).not.toHaveBeenCalled();
+  });
+
+  it('takes the per-(worker, date) advisory lock (mirrors hourly round 48 / P0)', async () => {
+    // mark-paid must take the same lock as computeDailyWorkerSalary so
+    // a concurrent recompute can't overwrite salary fields on a row
+    // that's being marked paid.
+    await markDailySalaryPaid('ds-1', true);
+    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(sqlCalls[0][1]).toMatch(
+      /print-shop-erp:daily:worker-1:2026-04-23/,
+    );
+  });
+});
+
+describe('computeDailyWorkerSalary — advisory lock + now pinning (mirrors hourly round 48)', () => {
+  const workerFixture = {
+    id: 'worker-1',
+    role: Role.WORKER,
+    workerType: WorkerType.MACHINE,
+    machineType: MachineType.HAND_PRESS,
+    isActive: true,
+  };
+
+  beforeEach(() => {
+    dbMock.user.findUnique.mockReset().mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+    dbMock.salaryRule.findFirst
+      .mockReset()
+      .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
+    dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
+    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
+      return fn;
+    });
+  });
+
+  it('takes the per-(worker, date) advisory lock (P0)', async () => {
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    expect(sqlCalls.length).toBeGreaterThan(0);
+    const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    expect(sqlCalls[0][1]).toMatch(
+      /print-shop-erp:daily:worker-1:2026-04-23/,
+    );
+  });
+
+  it('pins rule-resolution to the injected `now` (batches snapshot one rule version)', async () => {
+    const now = new Date('2026-04-23T10:00:00Z');
+    await computeDailyWorkerSalary('worker-1', '2026-04-23', now);
+    // getActiveMachineRule is the single rule lookup; it must use `now`
+    // in effectiveFrom.lte, not Date.now().
+    for (const call of dbMock.salaryRule.findFirst.mock.calls) {
+      expect(call[0].where.effectiveFrom.lte).toEqual(now);
+    }
   });
 });
 
