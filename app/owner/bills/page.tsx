@@ -124,11 +124,13 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
           重跑选中月份会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
-          （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程会对那位销售 /
-          客服报错，不覆盖已发账单。唯一的漏抓口子：一笔工单在「该笔工单的
-          finishedAt 月份」账单已发单之后才 FINISHED——这种工单不会被任何
-          月份的生成流程抓到，需业主线下单独处理。发单前请确认所选周期的
-          全部工单都已 FINISHED。
+          （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程对该条账单会报错，
+          不再向其追加任何工单。含义是：凡是在发单那一刻没被归集进 BillItems
+          的&ldquo;该月 finishedAt&rdquo;工单——无论是发单前已 FINISHED 但业主没再
+          点一次&ldquo;生成 / 追加&rdquo;来拉取，还是发单后才 FINISHED——之后都不会被任何
+          月份的生成流程抓到，需业主线下单独处理。因此发单前务必确认：
+          (1) 所选周期内所有待入账工单都已 FINISHED，(2) 再点一次&ldquo;生成 /
+          追加&rdquo;把最新 FINISHED 订单拉入 DRAFT。
         </p>
       </section>
 
