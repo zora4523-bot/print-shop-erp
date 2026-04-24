@@ -8,13 +8,13 @@
 
 ## 当前任务
 
-P0 #1 / #2 / #3 / #4 / #5 完成。**下一步：P0 #6 应收账单**（预计 3 天），账单 mark-paid 处 wire 住已备好的 `accumulateCsSales(submitterId, amount, paidAt)` 接口。
+P0 #1–#5 完成。P0 #6 Slice A 后端落地 clean（status machine + lib + actions + tests，rounds 52-54 闭合）。**下一步：P0 #6 Slices B/C/D — owner UI + sales UI + 月初 cron。**
 
 ## 本次 session 主要产出
 
-P0 #5 Slice C 完整落地（时薪工月结 + 考勤），加 4 轮 Codex 修——12 个 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮（每轮都有实质性发现，paid-row race / batch now-pinning / cron log leak 三道防线）。
+P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮，2 个 P1 修复（generate race + CS atomicity + migration pre-dedupe）。
 
-同一 session 前半段（commit `da80e1f → ba89e2c`）还完成了 P0 #5 Slices A/B/D + C 纯函数，15 个 commits + 1 docs，Codex rounds 43–47 共 5 轮。
+同一 session 前半段已完成 P0 #5 Slice C（时薪工 + 考勤），+90 单测，Codex rounds 48–51。
 
 - **Slice A 排产**（rounds 37 / 38）
   - `lib/production.ts scheduleOrder`：tx 内批量 createMany + 状态机转换 + OrderLog。按 Craft.isOutsource 拆两条路径，每个 item × non-outsource craft 对要求唯一 assignment。
@@ -41,38 +41,38 @@ P0 #5 Slice C 完整落地（时薪工月结 + 考勤），加 4 轮 Codex 修�
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 #6 应收账单**（预计 3 天）。必读：
+**P0 #6 Slice A 后端已完成**（status machine + lib + actions，rounds 52-54 clean）。剩下三片 UI / cron：
 
-1. SPEC §3.1 / §4.1（销售应收账单）
-2. `prisma/schema.prisma` 的 `Bill` / `BillItem` 模型（应该已在 schema.prisma；check 字段齐不齐）
-3. `lib/salary/cs.ts accumulateCsSales(csUserId, amount, at?)` — 已备好、测好，就等账单 mark-paid 来调
-4. `lib/auth/permissions.ts` 的 `bill:view:all` / `bill:view:self` / `bill:mark-paid` 已定义
+**Slice B — Owner 账单 UI `/owner/bills`**
+- 列表：salesUser 姓名 / 周期 / totalAmount / paidAmount / 状态；FilterBar（status / period / salesUserId）；3 张统计卡（已发但未收 / 全部未收 / 本月新生成数）
+- 详情 `/owner/bills/[id]`：
+  - BillItems 表格（orderNo / customerRef / finishedAt / orderAmount）
+  - 状态展示 + paidAmount 进度条
+  - DRAFT → 显示&ldquo;发单&rdquo;按钮（`issueBillAction`）
+  - ISSUED / PARTIAL_PAID → 显示&ldquo;录入付款&rdquo;表单（`recordBillPaymentAction`，amount field）
+  - FULLY_PAID → 只读，显示 `csAccumulated` 提示
+- 索引页：`/owner/bills/generate` 或详情页顶部&ldquo;生成 YYYY-MM 月账单&rdquo;按钮 → `generateBillsAction`
+- 权限 layout gate: OWNER only
 
-分解建议：
+**Slice C — Sales / CS UI `/sales/bills`**
+- 仅看自己的账单（`salesUserId === session.user.id`）
+- 列表 + 详情只读；显示付款进度、BillItems
+- 权限：`bill:view:self` （SALES / CUSTOMER_SERVICE）
 
-**Slice A — 账单 CRUD + 状态机**
-- `lib/bill/status-machine.ts`: DRAFT → SENT → PARTIAL_PAID → PAID（PAID 终态）；任何非终态可 CANCELLED
-- `lib/bill.ts createBill` / `updateBill`（DRAFT only）/ `sendBill` / `cancelBill`
-- 销售 UI `/sales/bills`（列表 / new / [id]）
+**Slice D — Cron `POST /api/cron/generate-bills`**
+- shared-secret Bearer
+- 默认 period=上月 Shanghai
+- 调 `generateBillsForPeriod(period, systemActor)`
+- 响应 COUNTS ONLY（复用 daily-salary pattern from round 49）
 
-**Slice B — mark-paid + 客服累加**
-- `lib/bill.ts markPaid(billId, paidAmount, actor)`: tx 内
-  1. 验证状态（SENT → PARTIAL_PAID 或 PAID；PARTIAL_PAID → PAID）
-  2. 更新 bill.paidAmount + status
-  3. 调 `accumulateCsSales(bill.submitterId, delta, now)` — delta 是这次新增的付款数额
-  4. 写 BillLog
-- 注意：accumulateCsSales 已经带 per-CS-user advisory lock（DECISIONS 2026-04-24），mark-paid 会自动序列化
-- 部分付款 UI：老板输入&ldquo;本次收款多少&rdquo;
+已建范式照抄：
+- `/owner/salary/daily` 列表 + FilterBar + stat cards（最相似）
+- `/owner/salary/cs/[id]` 详情页 + action buttons 条件渲染
+- `POST /api/cron/daily-salary` shared-secret + 昨日 fallback pattern
 
-**Slice C — 老板应收账单看板**
-- `/owner/bills` 列表 + 过滤（status / 销售 / 日期）+ 总额 / 已收 / 未收统计
-- 老板&ldquo;mark paid&rdquo;按钮（salary:view:all 权限）
-
-已建范式照抄：`lib/order.ts` 的 tx + 状态机 + OrderLog 写入；`lib/outsource.ts` 的简单 CRUD + status machine；`actions/order.ts` / `actions/outsource.ts` 的 action pattern；`/owner/salary/daily` 的 stat cards + FilterBar UI 布局。
-
-**P0 #5 已知未修残留（写在这里给未来处理）**：
-- **daily-salary 的 paid-row 并发 race 未补**（同 hourly round 48 的 P0 模式，但 `computeDailyWorkerSalary` 还没加 advisory lock）。业务风险：并发 recompute + mark-paid 可能覆盖已发放日薪。优先级 P1，在 P0 #6 或之后补。
-- daily-salary lib 的 rule 读也没全部贯穿 `now`（同 hourly round 48 P1）——小范围。
+**P0 #5 已知未修残留**：
+- daily-salary 的 paid-row 并发 race 未补（同 hourly round 48 P0 模式，但 `computeDailyWorkerSalary` 还没加 advisory lock）。优先级 P1。
+- daily-salary lib 的 rule 读未贯穿 `now`（同 round 48 P1）。
 
 ## 卡住的问题
 
@@ -115,3 +115,4 @@ P0 #5 Slice C 完整落地（时薪工月结 + 考勤），加 4 轮 Codex 修�
 - 2026-04-23：完成 P0 #4 生产流程。9 commits，+107 单测（累计 507），Codex rounds 37–42 共 6 轮。排产 + 师傅报工 + 薪资算法纯函数 + 外协单全部落地。级联的并发正确性一来就被 round 39 打中，cascade 锁内 fresh-read 补上；严格 `YYYY-MM-DD` 日期解析避免 JS Date 的滚动坑。
 - 2026-04-24：完成 P0 #5 薪资系统 4/5 切片。15 commits，+119 单测（累计 626），Codex rounds 43–47 共 5 轮。师傅日薪 + 客服周期 / 提成 + 老板总览页 + 时薪工纯函数全部落地。时薪工的 DB / UI / cron 留到下一 session。关键修复：已发放行拒绝重算（round 43 / P0）；CS accumulate-vs-settle race 最后切到 per-CS-user advisory lock（round 46 / P0）；完整 `salaryRuleSnapshot` on CustomerServiceCommission（round 45 / P1 + migration）。
 - 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。12 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮。核心修复：hourly payroll 的 paid-row race → per-(worker, month) advisory lock + tx（round 48 P0）；batch now 贯穿所有 rule getters 防版本漂移（round 48 P1）；**三条 cron 路径统一 COUNTS ONLY 响应**，不返回 settled / errors 避免 pg_cron 日志泄漏薪资（rounds 49-50 P2）；daily batch 改 per-worker try/catch（round 50 P2）；recompute action 补 errors[] 给 owner UI，不然偷摸跳过失败 worker（round 51 P1）。
+- 2026-04-25：完成 P0 #6 Slice A 应收账单后端。4 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮。状态机 DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；核心修复 2 个 P1：generateBillsForPeriod read-diff-write race → per-(salesUser, period) advisory lock + `@@unique([billId, orderId])` DB last-line guard（migration 加 pre-dedupe DELETE）；mark-paid 调 accumulateCsSales 独立开事务 → 改成 tx 贯穿，bill write + CS 累计 atomic。Bill FULLY_PAID 为终态（退款新开负数账单，不回退状态）。

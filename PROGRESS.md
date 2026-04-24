@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**P0 阶段 6/9：薪资系统全部完成，准备开 P0 #6 应收账单**
+**P0 阶段 6/9：应收账单 Slice A 后端完成 (状态机+lib+actions)，剩 owner UI + cron**
 
 ## 最后更新
 
-2026-04-23
+2026-04-25
 
 ## 已完成
 
@@ -97,21 +97,28 @@
     3. ✅ HourlyWorkerPayroll.isPaid + 已发行拒绝重算 + 测试
     4. ✅ salaryRuleSnapshot 含 hourlyRate / otMultiplier / monthlyBase / spareHourlyRate / workHours / totals
     5. ✅ WORK_HOURS 走 `getActiveWorkHours` rule getter，UI hint 也从规则派生
+- [ ] **P0 #6 应收账单（Slice A 完成）**（commits `ec86612 → 503e438`, +56 单测 = 772）
+  - [x] **Slice A 后端**（rounds 52–54 clean）
+    - 状态机 `lib/bill/status-machine.ts`：DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；self-transition 拒绝；PARTIAL_PAID → PARTIAL_PAID 的&ldquo;续收&rdquo;场景在 lib 层跳过 machine（target === current）
+    - `lib/bill.ts generateBillsForPeriod`：扫 Order.status=FINISHED 且 finishedAt 在 Shanghai 月内，按 submitterId 分组，upsert `@@unique([salesUserId, period])`；DRAFT 可追加 items、非 DRAFT 拒绝；**per-(salesUser, period) advisory lock** 防并发生成 race（round 52 P1）；DB 侧 `@@unique([billId, orderId])` + 前置 dedupe DELETE 是 last-line guard（rounds 52-53）
+    - `issueBill`: DRAFT → ISSUED + per-bill advisory lock + 机器校验
+    - `recordPayment`: 0 / 负数 / 超付拒绝；paidAmount 累加；ISSUED/PARTIAL_PAID → {PARTIAL_PAID, FULLY_PAID}；**tx 内调 `accumulateCsSales(submitterId, DELTA, now, tx)` 共享原子性**（round 52 P1，tx 贯穿 cs accumulator 避免 CS 提前 commit 导致账单 rollback 后 payroll drift）
+    - actions: `generateBillsAction` / `issueBillAction` / `recordBillPaymentAction`，bill:view:all / bill:mark-paid 权限
+    - Migration `20260425000000_bill_item_unique`（含 pre-dedupe DELETE）
+    - 56 新单测（状态机 13 / lib 16 / action 14 + 回归）
+  - [ ] **Slice B：Owner UI `/owner/bills`** 列表 / detail / 付款录入 / 发单 / 批量生成按钮
+  - [ ] **Slice C：Sales UI `/sales/bills`** 仅看自己，状态可见
+  - [ ] **Slice D：Cron** `POST /api/cron/generate-bills` shared-secret，月初扫上月 FINISHED
 
 ## 进行中
 
-P0 #5 全部闭合，准备开 P0 #6 应收账单。
+Slice B 老板账单 UI，或 Slice D cron（任选）。
 
 ## 下一步
 
 按 README "开发路径（P0 优先级）" 顺序推进：
 
-6. **P0-6 应收账单**（3 天）— **下一个**
-   - `Bill` / `BillItem` schema（check 是否已在 schema.prisma）
-   - `lib/bill.ts` create / addItem / markPaid（markPaid → `accumulateCsSales(submitterId, amount, paidAt)` — CS 接口已备好）
-   - 状态机 DRAFT → SENT → PARTIAL_PAID → PAID
-   - 销售 / 老板 UI
-6. **P0-6 应收账单**（3 天）
+6. **P0-6 应收账单 剩余（Slices B / C / D）**— **当前优先级**
 7. **P0-7 CDR 汇总**（2 天）
 8. **P0-8 推送 + Dashboard**（1 周）
 9. **P0-9 测试 + 上线**（3 天）

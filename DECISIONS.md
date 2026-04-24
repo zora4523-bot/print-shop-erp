@@ -238,3 +238,21 @@
 - **理由**：Codex round 48 打到两处：（a）isPaid check 与 upsert 之间 finance 若并发 mark-paid，upsert 会覆盖一条&ldquo;已发放&rdquo;行的金额列（P0）；（b）批处理里每个 worker 的规则解析各自调 `new Date()`，如果中途规则被改，同一批次的不同 worker 会 snapshot 不同规则版本（P1）。Lock + 贯穿 now 是同样的双管齐下——锁挡并发、时间戳挡版本漂移。
 - **影响**：后续每条薪资写入路径（如未来的 bonus / deduction 表）按同款双保护；daily-salary 也有同类 race（Codex round 48 注意），但 PROGRESS.md 记为&ldquo;待补&rdquo;；如果业主 push 就先补 daily，再动手 P0 #6。
 - **相关文档**：`lib/salary/hourly-aggregate.ts hourlyLockKey`、Codex rounds 48 / 49，对应已有 CS 的 `csUserLockKey`（rounds 45-46）先例。
+
+---
+
+## 2026-04-25：应收账单 mark-paid 与 CS 累计共享同一个事务（tx threading）
+
+- **决策**：`lib/salary/cs.ts accumulateCsSales(csUserId, amount, at, tx?)` 接受可选第 4 参数 tx。当账单 `recordPayment` 在自己的 `db.$transaction` 里调用时，传入 tx 让 CS 业绩累计的 `SalaryPeriod.totalSales += delta` 与 bill.paidAmount 的写入 **共享原子性**——一起 commit 一起 rollback。standalone 调用（未来可能的其他入口）不传 tx，自己开事务。
+- **理由**：Codex round 52 / P1 指出 Prisma 的 `$transaction` 不是真的嵌套——`recordPayment` 外层 tx 里再 `await accumulateCsSales(...)`，内部会再开一个独立事务。内部先 commit，如果外层后续 rollback（比如 Decimal.js 精度断言失败 / 写 OrderLog 失败），`SalaryPeriod.totalSales` 已经涨了 delta，但 `bill.paidAmount` 回到旧值——payroll ledger 跑到 billing ledger 前面，提成多算。
+- **影响**：`accumulateCsSales` 拆成 `accumulateCsSalesIn(tx, ...)`（真实逻辑）+ `accumulateCsSales(csUserId, amount, at, tx?)`（公开 API 包壳）。所有跨模块调 CS 累计的路径都应该传 tx。未来同款模式：如果 bill module 再长出 `cancelPayment` / `issueRefund`，也应该走 tx-threading 而非独立事务。同模式未来再出现跨模块累计（比如客服退单扣回业绩），API 已经就位。
+- **相关文档**：`lib/salary/cs.ts accumulateCsSalesIn` / `accumulateCsSales`、`lib/bill.ts recordPayment`、Codex round 52。
+
+---
+
+## 2026-04-25：应收账单 paid-ledger 语义 — FULLY_PAID 终态，退款开新负数账单
+
+- **决策**：`Bill.status` 状态机里 `FULLY_PAID` 是终态，不允许回退到 `PARTIAL_PAID` / `ISSUED`。如果业务发生退款 / 冲账，正确做法是 owner 新建一条负数金额的 Bill 做冲账记录（不改已结清的原单）。自反迁移（自我 → 自我）也一律拒绝；例外是 `PARTIAL_PAID → PARTIAL_PAID`（续收部分款），lib 层主动在状态未变时**跳过**状态机调用。
+- **理由**：finance-of-record bedrock（DECISIONS 2026-04-24 薪资铁律）同样适用于账单。一旦打标 FULLY_PAID，关联的 CS 业绩已累计进 `SalaryPeriod.totalSales`、甚至可能已在月底 settle 成 `CustomerServiceCommission`——回退账单状态会让历史金额不可信。续收的场景下金额在变但状态不变，是合理的 no-transition；状态机保留&ldquo;自反即 bug&rdquo;的严格性用来抓 re-issue / re-pay 误用。
+- **影响**：`lib/bill/status-machine.ts BILL_TRANSITIONS` 不含任何 self-loop；`lib/bill.ts recordPayment` 显式 `if (targetStatus !== bill.status) transitionBill(...)` 跳过续收的 self-transition。UI 在 detail 页要隐藏 `FULLY_PAID` 单的&ldquo;录入付款&rdquo;按钮（Slice B 落地）。未来 P1 加退款功能时，新加 `ADJUSTED` 或 `CREDITED` 状态、或者保持双账单模式。
+- **相关文档**：`lib/bill/status-machine.ts`、`lib/bill.ts recordPayment`、Codex round 52。
