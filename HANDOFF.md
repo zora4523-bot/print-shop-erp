@@ -8,11 +8,12 @@
 
 ## 当前任务
 
-P0 #1–#5 完成。P0 #6 Slice A 后端落地 clean（status machine + lib + actions + tests，rounds 52-54 闭合）。**下一步：P0 #6 Slices B/C/D — owner UI + sales UI + 月初 cron。**
+P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端落地 clean（status machine + lib + actions + tests，rounds 52-54 闭合）。**下一步：P0 #6 Slices B/C/D — owner UI + sales UI + 月初 cron。**
 
 ## 本次 session 主要产出
 
-P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮，2 个 P1 修复（generate race + CS atomicity + migration pre-dedupe）。
+- P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮，2 个 P1 修复（generate race + CS atomicity + migration pre-dedupe）。
+- **P0 #5 daily-salary race 补齐**（commit `50956ee`）—— 和 hourly round 48 同构的 paid-row race：findUnique(isPaid) → upsert 两次 round-trip 间被 markDailySalaryPaid 翻转。修法沿用 per-(worker,date) advisory lock + tx，`markDailySalaryPaid` 取同一锁。+4 单测（累计 776）。
 
 同一 session 前半段已完成 P0 #5 Slice C（时薪工 + 考勤），+90 单测，Codex rounds 48–51。
 
@@ -70,9 +71,7 @@ P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 
 - `/owner/salary/cs/[id]` 详情页 + action buttons 条件渲染
 - `POST /api/cron/daily-salary` shared-secret + 昨日 fallback pattern
 
-**P0 #5 已知未修残留**：
-- daily-salary 的 paid-row 并发 race 未补（同 hourly round 48 P0 模式，但 `computeDailyWorkerSalary` 还没加 advisory lock）。优先级 P1。
-- daily-salary lib 的 rule 读未贯穿 `now`（同 round 48 P1）。
+**P0 #5 已知未修残留**：无（commit `50956ee` 闭合了 daily-salary race + now 贯穿 —— rule 读本就接 `now`，新增一条测试锁定）。
 
 ## 卡住的问题
 
@@ -102,7 +101,7 @@ P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 
 
 ## 上次会话结束时间
 
-2026-04-23
+2026-04-24
 
 ---
 
@@ -116,3 +115,4 @@ P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 
 - 2026-04-24：完成 P0 #5 薪资系统 4/5 切片。15 commits，+119 单测（累计 626），Codex rounds 43–47 共 5 轮。师傅日薪 + 客服周期 / 提成 + 老板总览页 + 时薪工纯函数全部落地。时薪工的 DB / UI / cron 留到下一 session。关键修复：已发放行拒绝重算（round 43 / P0）；CS accumulate-vs-settle race 最后切到 per-CS-user advisory lock（round 46 / P0）；完整 `salaryRuleSnapshot` on CustomerServiceCommission（round 45 / P1 + migration）。
 - 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。12 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮。核心修复：hourly payroll 的 paid-row race → per-(worker, month) advisory lock + tx（round 48 P0）；batch now 贯穿所有 rule getters 防版本漂移（round 48 P1）；**三条 cron 路径统一 COUNTS ONLY 响应**，不返回 settled / errors 避免 pg_cron 日志泄漏薪资（rounds 49-50 P2）；daily batch 改 per-worker try/catch（round 50 P2）；recompute action 补 errors[] 给 owner UI，不然偷摸跳过失败 worker（round 51 P1）。
 - 2026-04-25：完成 P0 #6 Slice A 应收账单后端。4 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮。状态机 DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；核心修复 2 个 P1：generateBillsForPeriod read-diff-write race → per-(salesUser, period) advisory lock + `@@unique([billId, orderId])` DB last-line guard（migration 加 pre-dedupe DELETE）；mark-paid 调 accumulateCsSales 独立开事务 → 改成 tx 贯穿，bill write + CS 累计 atomic。Bill FULLY_PAID 为终态（退款新开负数账单，不回退状态）。
+- 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。和 hourly round 48 同构的 paid-row race —— compute 的 findUnique(isPaid) 和 upsert 之间被 markDailySalaryPaid 翻转，update 分支静默覆盖金额。修法镜像 hourly：per-(worker,date) advisory lock + tx（compute 和 mark-paid 共用同一把锁，rule 读留在 tx 外）。+4 单测（累计 776）。
