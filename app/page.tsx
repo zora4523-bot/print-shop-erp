@@ -67,6 +67,12 @@ export default async function Home() {
                 </Link>
                 <span className="ml-2 text-muted-foreground">管理产品清单、规格、建议单价</span>
               </li>
+              <li>
+                <Link href="/owner/bills" className="text-primary underline hover:no-underline">
+                  销售应收账单 →
+                </Link>
+                <span className="ml-2 text-muted-foreground">月账单生成、发单、录入付款</span>
+              </li>
             </ul>
           </div>
         ) : null}

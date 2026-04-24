@@ -5,6 +5,7 @@ import {
   WorkerType,
   MachineType,
   ProductCategory,
+  BillStatus,
 } from '../../generated/prisma/enums';
 
 // Canonical Chinese label for each Role enum. Keep in sync with SPEC §2.1.
@@ -54,4 +55,15 @@ export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
 
 export function productCategoryLabel(category: ProductCategory): string {
   return PRODUCT_CATEGORY_LABELS[category] ?? category;
+}
+
+export const BILL_STATUS_LABELS: Record<BillStatus, string> = {
+  [BillStatus.DRAFT]: '草稿',
+  [BillStatus.ISSUED]: '已发单',
+  [BillStatus.PARTIAL_PAID]: '部分结清',
+  [BillStatus.FULLY_PAID]: '已结清',
+};
+
+export function billStatusLabel(status: BillStatus): string {
+  return BILL_STATUS_LABELS[status] ?? status;
 }
