@@ -123,11 +123,12 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          重跑同一月会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
+          重跑选中月份会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
           （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程会对那位销售 /
-          客服报错，不覆盖已发账单。注意：该月之后再完工的订单只属于该月，
-          不会被下月生成抓到——发单前务必确认本月所有工单都已 FINISHED；
-          漏抓的工单需要业主线下单独处理。
+          客服报错，不覆盖已发账单。唯一的漏抓口子：一笔工单在「该笔工单的
+          finishedAt 月份」账单已发单之后才 FINISHED——这种工单不会被任何
+          月份的生成流程抓到，需业主线下单独处理。发单前请确认所选周期的
+          全部工单都已 FINISHED。
         </p>
       </section>
 
