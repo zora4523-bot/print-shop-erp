@@ -71,9 +71,16 @@ export async function resetBillsForUser(userId: string): Promise<void> {
           'created by globalSetup.ts).',
       );
     }
-    // Order matters: BillItem fk → Bill / Order, so go items first,
-    // then bills, then E2E orders. Bills + Orders cleared in full
-    // because the user is by-construction test-only.
+    // Wipe order: BillItem → Bill RESTRICT, so do BillItems first.
+    // Then bills (full wipe — user is e2e-* test-only). Then ALL the
+    // user's orders, regardless of orderNo prefix: Codex round 82 / P1
+    // pointed out generateBillsForPeriod selects FINISHED orders by
+    // submitterId only, so a non-E2E-prefix order (e.g. one shipped
+    // via wave 4 SHIP flow that uses real nextOrderNumber) would
+    // leak back into a fresh run's bill. Order children
+    // (OrderItem, OrderLog, OrderItemDesign via OrderItem,
+    // ProductionTask via OrderItem, OutsourceOrder.orderId → SET NULL)
+    // all cascade automatically per the schema's FK rules.
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT id FROM "Bill" WHERE "salesUserId" = $1
@@ -81,10 +88,7 @@ export async function resetBillsForUser(userId: string): Promise<void> {
       [userId],
     );
     await db.query(`DELETE FROM "Bill" WHERE "salesUserId" = $1`, [userId]);
-    await db.query(
-      `DELETE FROM "Order" WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'`,
-      [userId],
-    );
+    await db.query(`DELETE FROM "Order" WHERE "submitterId" = $1`, [userId]);
   });
 }
 
