@@ -18,41 +18,93 @@ export async function register() {
   const Sentry = await import('@sentry/nextjs');
   const release = process.env.APP_VERSION || 'dev';
 
-  // Defense-in-depth header / body scrubber. Sentry's
+  // Defense-in-depth header / body / URL-query scrubber. Sentry's
   // captureRequestError + the default RequestData integration would
   // otherwise forward `event.request.headers` (Authorization, Cookie,
-  // any custom API keys) and `event.request.data` (which can include
-  // 薪资金额 / customer refs in Server Action payloads) to the Sentry
-  // server. `sendDefaultPii: false` does NOT gate this — it only gates
-  // IP collection (Codex round 65 / P1).
+  // any custom API keys) and `event.request.data` (Server Action
+  // FormData with 薪资金额 / customer refs) to the Sentry server.
+  // `sendDefaultPii: false` only gates IP collection (Codex round 65).
   //
-  // We strip aggressively before send: keep ONLY pathname + method —
-  // url query strings can carry reset tokens / signed URL params /
-  // customer ids (Codex round 66 / P2), so we strip them too. Also
-  // applied to transaction events (Codex round 66 / P1) since
-  // tracesSampleRate=0.2 means sampled spans flow through
-  // beforeSendTransaction with the same RequestData attached.
-  function scrubRequest<T extends { request?: { url?: string; method?: string } }>(
-    event: T,
-  ): T {
-    if (event.request) {
-      let pathOnly: string | undefined = event.request.url;
-      if (pathOnly) {
-        try {
-          // Parse with a dummy base so absolute and relative both work;
-          // we only keep `.pathname` so query / hash / host all drop.
-          pathOnly = new URL(pathOnly, 'http://scrubbed.local').pathname;
-        } catch {
-          // Unparseable URL — drop entirely rather than forward something
-          // unexpected.
-          pathOnly = undefined;
-        }
-      }
-      event.request = {
-        url: pathOnly,
-        method: event.request.method,
+  // Three sweep points — each was a separate Codex finding:
+  //   - event.request          → minimize to { url=path, method }       (round 65 P1)
+  //   - event.spans[*].data    → drop full URLs from sampled spans      (round 67 P2)
+  //   - contexts.nextjs.req_path → strip query string                   (round 67 P2)
+  // Applied to BOTH beforeSend (exceptions) and beforeSendTransaction
+  // (sampled traces, since tracesSampleRate=0.2; round 66 P1).
+  function stripQuery(s: string | undefined): string | undefined {
+    if (!s) return s;
+    try {
+      // Parse with dummy base so relative / absolute both work; we keep
+      // only .pathname so query / hash / host all drop.
+      return new URL(s, 'http://scrubbed.local').pathname;
+    } catch {
+      // Unparseable — drop rather than forward something unexpected.
+      return undefined;
+    }
+  }
+
+  // Whitelist of span-data keys that don't carry URL / query / header
+  // info and are useful for debugging. Anything else (http.url,
+  // http.target, http.query, db.statement, etc.) is dropped.
+  const SAFE_SPAN_DATA_KEYS = new Set([
+    'http.method',
+    'http.response.status_code',
+    'http.status_code',
+    'op',
+    'origin',
+  ]);
+
+  function scrubEvent<T>(event: T): T {
+    // Sentry's ErrorEvent / TransactionEvent share these fields; we
+    // mutate via a permissive view so one helper covers both.
+    const e = event as unknown as {
+      request?: { url?: string; method?: string };
+      spans?: Array<{
+        description?: string;
+        data?: Record<string, unknown>;
+      }>;
+      contexts?: {
+        nextjs?: { request_path?: unknown };
+        [k: string]: unknown;
+      };
+    };
+
+    if (e.request) {
+      e.request = {
+        url: stripQuery(e.request.url),
+        method: e.request.method,
       };
     }
+
+    if (Array.isArray(e.spans)) {
+      for (const span of e.spans) {
+        // Span description for HTTP-flavored spans is `<METHOD> <URL>`.
+        // Cut the query at first `?` rather than parse — the format
+        // isn't guaranteed to be a clean URL, but `?...` is reliably
+        // the query separator.
+        if (typeof span.description === 'string') {
+          const q = span.description.indexOf('?');
+          if (q >= 0) span.description = span.description.slice(0, q);
+        }
+        if (span.data && typeof span.data === 'object') {
+          const safe: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(span.data)) {
+            if (SAFE_SPAN_DATA_KEYS.has(k)) safe[k] = v;
+          }
+          span.data = safe;
+        }
+      }
+    }
+
+    if (
+      e.contexts?.nextjs &&
+      typeof e.contexts.nextjs.request_path === 'string'
+    ) {
+      e.contexts.nextjs.request_path = stripQuery(
+        e.contexts.nextjs.request_path,
+      );
+    }
+
     return event;
   }
 
@@ -66,8 +118,8 @@ export async function register() {
     // customer refs may end up in messages — keep send-default-pii
     // off and let specific call sites attach context explicitly.
     sendDefaultPii: false,
-    beforeSend: scrubRequest,
-    beforeSendTransaction: scrubRequest,
+    beforeSend: scrubEvent,
+    beforeSendTransaction: scrubEvent,
   };
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
