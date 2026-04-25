@@ -17,8 +17,11 @@ export default async function SalesLayout({
   const session = await getSession();
   if (!session) redirect('/login');
   const { user } = session;
+  // OWNER 复制粘贴 /sales/bills 链接 → 直接转 /owner/bills（同业务，
+  // 老板视角）。其他非 SALES / CS 角色走根页。Codex round 61 / P3：
+  // 注释当时承诺了这条转发，但 redirect 落到了 / 而不是 /owner/bills。
+  if (user.role === Role.OWNER) redirect('/owner/bills');
   if (user.role !== Role.SALES && user.role !== Role.CUSTOMER_SERVICE) {
-    // OWNER 走自己的 /owner/bills；其他角色没有理由进 /sales。
     redirect('/');
   }
 

@@ -41,7 +41,19 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  const period = extractPeriod(body) ?? lastMonthShanghai();
+  // Distinguish "field absent → use default" from "field present but
+  // malformed → reject 400". On a mutating endpoint, silently treating
+  // {"period": ""} as &ldquo;run for last month&rdquo; would re-process the
+  // previous period when the caller meant something specific (Codex
+  // round 61 / P2).
+  const extracted = extractPeriod(body);
+  if (extracted.explicit && extracted.value === null) {
+    return NextResponse.json(
+      { error: 'invalid period: present but malformed' },
+      { status: 400 },
+    );
+  }
+  const period = extracted.value ?? lastMonthShanghai();
   // Strict YYYY-MM + month-range validation. generateBillsForPeriod →
   // parseShanghaiMonth would throw on month > 12, but doing the check
   // here keeps the response a clean 400 instead of a generic 500.
@@ -80,12 +92,20 @@ export async function POST(req: Request) {
   }
 }
 
-function extractPeriod(body: unknown): string | null {
+// `explicit=true` means the caller sent a `period` field; `value=null`
+// in that case means the value was malformed (empty / non-string). The
+// caller turns that into a 400 instead of silently defaulting.
+function extractPeriod(
+  body: unknown,
+): { value: string | null; explicit: boolean } {
   if (body && typeof body === 'object' && 'period' in body) {
     const v = (body as { period: unknown }).period;
-    if (typeof v === 'string' && v.trim() !== '') return v.trim();
+    if (typeof v === 'string' && v.trim() !== '') {
+      return { value: v.trim(), explicit: true };
+    }
+    return { value: null, explicit: true };
   }
-  return null;
+  return { value: null, explicit: false };
 }
 
 function lastMonthShanghai(): string {
