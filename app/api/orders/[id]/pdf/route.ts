@@ -39,9 +39,14 @@ export async function GET(_req: Request, ctx: Params) {
     // host (pnpm may skip puppeteer's postinstall). Return a 500 with
     // a hint so the owner knows to run `npx puppeteer browsers install`
     // instead of guessing at the browser side.
+    // Puppeteer's "no browser" error wording varies by version: older
+    // releases said "Could not find Chromium", current ones say
+    // "Could not find Chrome". Match all three (and the generic
+    // "browser") so the hint always fires when this is the cause.
     const hint =
-      err instanceof Error && /Could not find (Chromium|browser)/i.test(err.message)
-        ? '请在服务器上运行 `npx puppeteer browsers install chrome` 下载渲染所需的 Chromium。'
+      err instanceof Error &&
+      /Could not find (Chrome|Chromium|browser)/i.test(err.message)
+        ? '请在服务器上运行 `npx puppeteer browsers install chrome` 下载渲染所需的浏览器。'
         : null;
     return NextResponse.json(
       {

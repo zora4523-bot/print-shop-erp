@@ -269,11 +269,24 @@ Pigsty 自带 pgbackrest，**不要**自己写 cron 备份脚本。配置点：
 
 `OSS_ENDPOINT` 一般留空（按 region 派生）；只有 VPC 内访问 / 特殊端口才需要。
 
-### 6. 上线 smoke checklist
+### 6. Puppeteer Chrome 安装
+
+PDF 生成用 Puppeteer 自带的 Chromium（不复用系统 Chrome）。pnpm 默认会跳过 puppeteer 的 postinstall，所以需要**手动**触发：
+
+```bash
+npx puppeteer browsers install chrome
+```
+
+下载到 `~/.cache/puppeteer/`，约 200MB。CI / 生产部署里要把这一步显式写进 build 脚本。第一次点 PDF 下载报 `Could not find Chrome` 即此问题。
+
+如果不想下载 Puppeteer 自己的浏览器，想用系统 Chrome，设置 `PUPPETEER_SKIP_DOWNLOAD=true` + `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`（MVP 没做这个分支，需要时再说）。
+
+### 7. 上线 smoke checklist
 
 按顺序跑一遍：
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
 - [ ] `pnpm prisma db seed`（首次创建 admin / 工艺字典 / 薪资规则）
+- [ ] `npx puppeteer browsers install chrome`（PDF 生成依赖）
 - [ ] 老板登录 `/owner/accounts` 改默认密码
 - [ ] 销售 / 客服 / 师傅各创一个测试账号
 - [ ] 跑通 工单创建 → 排产 → 报工 → 完工 一条链
