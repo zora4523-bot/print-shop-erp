@@ -58,6 +58,14 @@ export const E2E_USERS: Record<string, E2EUser> = {
     workerType: 'MACHINE',
     machineType: 'HAND_PRESS',
   },
+  // CUSTOMER_SERVICE user — needed for CS accumulate E2E (the
+  // recordPayment → accumulateCsSales path only fires when the
+  // bill's salesUser.role === CUSTOMER_SERVICE).
+  customerService: {
+    username: 'e2e-cs',
+    displayName: 'E2E 客服',
+    role: 'CUSTOMER_SERVICE',
+  },
 };
 
 export default async function globalSetup(): Promise<void> {

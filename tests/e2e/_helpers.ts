@@ -152,6 +152,91 @@ export async function seedFinishedOrder(opts: {
   return { orderId, orderNo };
 }
 
+// Wipes ALL SalaryPeriods + CommissionRecords for an e2e-* user.
+// Required for CS-accumulate E2E so each run starts with a known-
+// empty period (totalSales=0). Same e2e-* guard as resetBillsForUser
+// so this can never wipe a real CS user's salary state.
+//
+// CustomerServiceCommission has a RESTRICT FK to SalaryPeriod, so we
+// drop commissions first, then periods.
+export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
+  await withDb(async (db) => {
+    const r = await db.query<{ username: string }>(
+      'SELECT username FROM "User" WHERE id = $1',
+      [userId],
+    );
+    if (r.rowCount === 0) {
+      throw new Error(`resetCsSalaryStateForUser: user id ${userId} not found`);
+    }
+    const username = r.rows[0]!.username;
+    if (!username.startsWith('e2e-')) {
+      throw new Error(
+        `resetCsSalaryStateForUser refuses to wipe non-E2E user "${username}".`,
+      );
+    }
+    await db.query(
+      `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
+      [userId],
+    );
+    await db.query(`DELETE FROM "SalaryPeriod" WHERE "csUserId" = $1`, [userId]);
+  });
+}
+
+// Seeds an IN_PROGRESS SalaryPeriod that brackets `now`. The CS
+// accumulate path looks for a period where periodStart ≤ at AND
+// periodEnd ≥ at AND status = IN_PROGRESS — these dates give us a
+// generous window so test wall-clock drift can't push us out of it.
+export async function seedActiveCsPeriod(opts: {
+  csUserId: string;
+  monthlyBase: string; // decimal string, e.g. "5000.00"
+}): Promise<{ periodId: string }> {
+  const periodId = `e2e-csp-${randomBytes(8).toString('hex')}`;
+  const now = new Date();
+  // [1 month ago, 3 months from now] in UTC; @db.Date strips time so
+  // the day-level grain is enough.
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 3, 0);
+  await withDb(async (db) => {
+    await db.query(
+      `
+      INSERT INTO "SalaryPeriod" (
+        id, "csUserId", "periodStart", "periodEnd",
+        "durationMonths", "totalSales", "initialSales", "monthlyBase",
+        status, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4, 4, 0, 0, $5, 'IN_PROGRESS'::"SalaryPeriodStatus",
+        NOW(), NOW()
+      )
+      `,
+      [
+        periodId,
+        opts.csUserId,
+        start.toISOString().slice(0, 10),
+        end.toISOString().slice(0, 10),
+        opts.monthlyBase,
+      ],
+    );
+  });
+  return { periodId };
+}
+
+// Reads SalaryPeriod.totalSales for the user's currently active
+// (IN_PROGRESS) period. Returns null if the user has no active
+// period — caller decides what that means.
+export async function readActiveCsTotalSales(
+  csUserId: string,
+): Promise<{ periodId: string; totalSales: string } | null> {
+  return withDb(async (db) => {
+    const r = await db.query<{ id: string; totalSales: string }>(
+      `SELECT id, "totalSales"::text AS "totalSales" FROM "SalaryPeriod"
+        WHERE "csUserId" = $1 AND status = 'IN_PROGRESS'`,
+      [csUserId],
+    );
+    if (r.rowCount === 0) return null;
+    return { periodId: r.rows[0]!.id, totalSales: r.rows[0]!.totalSales };
+  });
+}
+
 // Returns a UTC Date that's safely in the middle of the current
 // Shanghai calendar month (15th, noon UTC). Used by bill-flow E2E so
 // the seeded order's `finishedAt` matches the period the UI defaults
