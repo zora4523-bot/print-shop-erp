@@ -1,5 +1,6 @@
 'use client';
 
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -36,6 +37,16 @@ const SEGMENT_LABELS: Record<string, string> = {
   new: '新建',
 };
 
+// Routes that are layout-only (no page.tsx) — linking them produces
+// 404s. Render those segments as text instead. Codex round 78 / P2.
+// Keep this in sync with the file tree in `app/`; if a layout-only
+// shell becomes a real page, drop the entry here.
+const LAYOUT_ONLY_PATHS = new Set<string>([
+  '/owner',
+  '/foreman',
+  '/sales',
+]);
+
 function labelFor(segment: string): string {
   return SEGMENT_LABELS[segment] ?? segment;
 }
@@ -62,23 +73,28 @@ export function AdminBreadcrumb() {
         {segments.map((seg, i) => {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
+          // Layout-only paths can't be navigated to (404)；render the
+          // label as text not link. Codex round 78 / P2.
+          const isLinkable = !LAYOUT_ONLY_PATHS.has(href);
           return (
-            <BreadcrumbItem key={href}>
-              {isLast ? (
-                <BreadcrumbPage>{labelFor(seg)}</BreadcrumbPage>
-              ) : (
-                <>
-                  {/* shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
-                      useRender，不接受 Radix 的 asChild —— 走 render
-                      prop 把 <a> 替换成 next/link，写法与 AppSidebar
-                      的 SidebarMenuButton 保持一致。 */}
+            // Separator must be a SIBLING of BreadcrumbItem, not a
+            // child — both render `<li>`, and `<li>` inside `<li>` is
+            // invalid DOM. Codex round 78 / P2.
+            <Fragment key={href}>
+              <BreadcrumbItem>
+                {isLast || !isLinkable ? (
+                  <BreadcrumbPage>{labelFor(seg)}</BreadcrumbPage>
+                ) : (
+                  // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
+                  // useRender，不接受 Radix 的 asChild —— 走 render
+                  // prop 把 <a> 替换成 next/link。
                   <BreadcrumbLink render={<Link href={href} />}>
                     {labelFor(seg)}
                   </BreadcrumbLink>
-                  <BreadcrumbSeparator />
-                </>
-              )}
-            </BreadcrumbItem>
+                )}
+              </BreadcrumbItem>
+              {!isLast && <BreadcrumbSeparator />}
+            </Fragment>
           );
         })}
       </BreadcrumbList>

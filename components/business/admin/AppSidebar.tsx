@@ -62,18 +62,32 @@ type AppSidebarProps = {
   roleBadge: string;
 };
 
-// 当前路径是否落在该菜单项内：
-// - 完全相等：肯定 active
-// - href 不是根 / 占位 "#"：startsWith 命中也算 active（覆盖 detail 页）
-function isActiveHref(pathname: string, href: string): boolean {
-  if (href === '#') return false;
-  if (pathname === href) return true;
-  if (href === '/') return false;
-  return pathname.startsWith(href + '/');
+// Active state must be UNIQUE per sidebar render — otherwise a child
+// route highlights both the child item and any ancestor (e.g.
+// /orders/new lights up both "创建工单" and "我的工单"). The fix is
+// "longest matching href wins": collect every candidate href that
+// could be active for the current pathname, pick the longest, then
+// only the item whose href equals that gets `active=true`.
+// Codex round 78 / P2.
+function pickActiveHref(
+  pathname: string,
+  candidates: readonly string[],
+): string | null {
+  let best: string | null = null;
+  for (const href of candidates) {
+    if (href === '#' || href === '/') continue; // root/placeholder never wins
+    const matches = pathname === href || pathname.startsWith(href + '/');
+    if (!matches) continue;
+    if (best === null || href.length > best.length) best = href;
+  }
+  return best;
 }
 
 export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const pathname = usePathname();
+  // Flatten all hrefs once per render; pick the single best match.
+  const allHrefs = menuGroups.flatMap((g) => g.items.map((i) => i.href));
+  const activeHref = pickActiveHref(pathname, allHrefs);
 
   return (
     <Sidebar collapsible="icon">
@@ -95,7 +109,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
               <SidebarMenu>
                 {group.items.map((item) => {
                   const Icon = ICONS[item.iconName];
-                  const active = isActiveHref(pathname, item.href);
+                  const active = item.href === activeHref;
                   // 占位 # 的项保留按钮形态但不跳转（disabled 视觉）。
                   if (item.href === '#') {
                     return (
