@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 
 // Idempotent E2E user fixture. Runs once before the test suite.
@@ -68,6 +69,14 @@ export default async function globalSetup(): Promise<void> {
       // ON CONFLICT mirrors the upsert semantics: if the row exists
       // we re-hash the password and reactivate. createdAt is set on
       // first insert and never touched again.
+      //
+      // ID is generated in JS (not via gen_random_uuid()) so we don't
+      // require the pgcrypto extension at the DB level — the repo's
+      // migrations don't install it, so a clean CI / local PG would
+      // throw `function gen_random_uuid() does not exist` (Codex round
+      // 76 / P1). User.id is just a `text` column populated by Prisma's
+      // client-side cuid() in production; any unique string works.
+      const id = `e2e-${randomBytes(12).toString('hex')}`;
       await client.query(
         `
         INSERT INTO "User" (
@@ -75,8 +84,7 @@ export default async function globalSetup(): Promise<void> {
           role, "workerType", "machineType", "isActive",
           "createdAt", "updatedAt"
         ) VALUES (
-          gen_random_uuid()::text,
-          $1, $2, $3, $4::"Role", $5::"WorkerType", $6::"MachineType",
+          $1, $2, $3, $4, $5::"Role", $6::"WorkerType", $7::"MachineType",
           TRUE, NOW(), NOW()
         )
         ON CONFLICT (username) DO UPDATE SET
@@ -89,6 +97,7 @@ export default async function globalSetup(): Promise<void> {
           "updatedAt" = NOW()
         `,
         [
+          id,
           u.username,
           u.displayName,
           passwordHash,

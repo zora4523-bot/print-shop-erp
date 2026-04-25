@@ -15,7 +15,7 @@ import {
 // order-cascade。HANDOFF 历史里 round 39 P0 race 就埋在 cascade 锁内
 // fresh-read Order.status，没有 E2E 真实跑过那段就只能靠相信单测。
 test.describe('生产流程 — golden path', () => {
-  test('SALES create → submit, FOREMAN schedule, WORKER report → 工单 FINISHED', async ({
+  test('SALES create → submit, FOREMAN schedule, WORKER report → 工单 COMPLETED (cascade)', async ({
     page,
   }) => {
     test.setTimeout(60_000); // 多角色切换 + 多次表单提交，给点余量
@@ -138,7 +138,7 @@ test.describe('生产流程 — golden path', () => {
       ).toBeVisible({ timeout: 10_000 });
     });
 
-    await test.step('OWNER 视角验证工单 cascade 到 FINISHED', async () => {
+    await test.step('OWNER 视角验证工单 cascade 到 COMPLETED', async () => {
       await logout(page);
       await login(page, {
         from: orderUrl,
@@ -149,14 +149,26 @@ test.describe('生产流程 — golden path', () => {
       // 用工单详情页里 Row 渲染状态那一格 + customerRef 双重确认我们看的
       // 是同一个工单。
       // orderRef 在 customerRef row、item name、OrderLog 各出现一次
-      // —— first() 避开 strict mode。订单详情页头部的 status badge
-      // 渲染&ldquo;已完工&rdquo;。两个一起断言确认我们看的是这个工单且 cascade
-      // 真的触发了 (HANDOFF round 39: cascade 锁后 fresh-read race
-      // —— 这一断言是这条 E2E 的核心价值)。
+      // —— first() 避开 strict mode。
       await expect(page.getByText(orderRef).first()).toBeVisible();
-      await expect(
-        page.locator('span').filter({ hasText: /^已完工$/ }).first(),
-      ).toBeVisible();
+
+      // 状态校验：cascade 应把 Order 从 IN_PRODUCTION 推到
+      // OrderStatus.COMPLETED（&ldquo;已完工&rdquo;），HANDOFF round 39 fresh-
+      // read race 就在这条路径上。
+      //
+      // 注意：FINISHED 才是 OrderStatus 的终态（&ldquo;已完成&rdquo;），由
+      // SHIPPED → FINISHED 的发货流程到达，不在这条 E2E 范围内。
+      // 不要写&ldquo;已完成&rdquo;断言或宽匹配 /^已完工$/，因为
+      //   1) 这两个文本是不同状态（COMPLETED vs FINISHED），
+      //   2) &ldquo;已完工&rdquo;同时出现在 OrderLog 的&ldquo;状态变更&rdquo;行里——
+      //      cascade 没真触发也可能因 log 文本通过。
+      // 用 OrderStatusBadge 渲染的 [data-slot=&ldquo;badge&rdquo;] + 文本完全
+      // 等于&ldquo;已完工&rdquo;来精确锁定头部那个 status badge。
+      const statusBadge = page
+        .locator('[data-slot="badge"]')
+        .filter({ hasText: /^已完工$/ });
+      await expect(statusBadge).toHaveCount(1);
+      await expect(statusBadge).toBeVisible();
     });
   });
 });
