@@ -18,29 +18,48 @@ export async function register() {
   const Sentry = await import('@sentry/nextjs');
   const release = process.env.APP_VERSION || 'dev';
 
+  // Defense-in-depth header / body scrubber. Sentry's
+  // captureRequestError + the default RequestData integration would
+  // otherwise forward `event.request.headers` (Authorization, Cookie,
+  // any custom API keys) and `event.request.data` (which can include
+  // 薪资金额 / customer refs in Server Action payloads) to the Sentry
+  // server. `sendDefaultPii: false` does NOT gate this — it only gates
+  // IP collection (Codex round 65 / P1). Strip aggressively before
+  // send: keep `url` + `method` for routing failures back to code,
+  // drop everything else regardless of which capture path produced it.
+  const beforeSend: NonNullable<
+    Parameters<typeof Sentry.init>[0]
+  >['beforeSend'] = (event) => {
+    if (event.request) {
+      event.request = {
+        url: event.request.url,
+        method: event.request.method,
+      };
+    }
+    return event;
+  };
+
+  const baseInit = {
+    dsn: process.env.SENTRY_DSN,
+    release,
+    // Lower trace sample for high-traffic endpoints once we ship;
+    // 0.2 is a starter for pre-launch when we want decent visibility.
+    tracesSampleRate: 0.2,
+    // Don't surface PII in error scopes by default. Salary amounts /
+    // customer refs may end up in messages — keep send-default-pii
+    // off and let specific call sites attach context explicitly.
+    sendDefaultPii: false,
+    beforeSend,
+  };
+
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      release,
-      // Lower trace sample for high-traffic endpoints once we ship;
-      // 0.2 is a starter for pre-launch when we want decent visibility.
-      tracesSampleRate: 0.2,
-      // Don't surface PII in error scopes by default. Salary amounts /
-      // customer refs may end up in messages — keep send-default-pii
-      // off and let specific call sites attach context explicitly.
-      sendDefaultPii: false,
-    });
+    Sentry.init(baseInit);
   }
 
   if (process.env.NEXT_RUNTIME === 'edge') {
     // Edge runtime can't load the full Node SDK — @sentry/nextjs
     // routes init() to its edge-safe variant transparently here.
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      release,
-      tracesSampleRate: 0.2,
-      sendDefaultPii: false,
-    });
+    Sentry.init(baseInit);
   }
 
   // TODO(p1-otel): wire @opentelemetry/sdk-node + auto-instrumentations
