@@ -19,6 +19,13 @@ export type PrintTask = {
   id: string;
   craftName: string;
   workerDisplayName?: string | null;
+  // Pre-rendered QR code SVG (from `qrcode` server package). Server-
+  // side pre-render avoids the &ldquo;two React copies&rdquo; hook bug that
+  // qrcode.react triggers when renderToStaticMarkup dynamically pulls
+  // in react-dom/server (Next 16 / Turbopack guard forces dynamic
+  // import; that loads its own React vs the bundled one). String SVG
+  // sidesteps the entire hook ecosystem.
+  qrSvg: string;
 };
 
 export type PrintOrderItem = {
@@ -55,4 +62,7 @@ export type PrintOrder = {
   // doesn't need to import auth/role-labels and stays role-agnostic.
   submitterRoleLabel: string;
   items: PrintOrderItem[];
+  // Same rationale as PrintTask.qrSvg — pre-rendered to avoid the
+  // qrcode.react / hooks bug under renderToStaticMarkup.
+  orderQrSvg: string;
 };

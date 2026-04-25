@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { buildPrintHtml } from '../print-html';
 import type { PrintOrder } from '../../../components/business/order/OrderPrintLayout.types';
 
+// Tiny placeholder SVG — tests don't care about QR pixel content,
+// only that the layout consumes whatever string the view-model gives.
+const STUB_QR_SVG = '<svg data-stub-qr="1"></svg>';
+
 function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
   return {
     id: 'order_abc',
@@ -18,6 +22,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     createdAt: new Date('2026-04-23T02:00:00Z'),
     submitterDisplayName: '小王',
     submitterRoleLabel: '销售',
+    orderQrSvg: STUB_QR_SVG,
     items: [
       {
         id: 'item_1',
@@ -112,6 +117,7 @@ describe('buildPrintHtml', () => {
                 id: 'task_xyzabc',
                 craftName: '烫金',
                 workerDisplayName: '李师傅',
+                qrSvg: STUB_QR_SVG,
               },
             ],
           },

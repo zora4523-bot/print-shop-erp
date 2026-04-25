@@ -1,4 +1,3 @@
-import { QRCodeSVG } from 'qrcode.react';
 import {
   DESIGN_GRID_WARN_THRESHOLD,
   pickDesignGridClass,
@@ -49,9 +48,14 @@ export function OrderPrintLayout({
             <h1 className="order-title">工 单</h1>
             <div className="order-no">{order.orderNo}</div>
           </div>
-          <div>
-            <QRCodeSVG value={`order:${order.id}`} size={95} />
-          </div>
+          <div
+            // QR SVG pre-rendered server-side via the `qrcode` package.
+            // We can't use qrcode.react here: renderToStaticMarkup +
+            // dynamic-imported react-dom/server pulls in a separate React
+            // copy from the one qrcode.react was bundled against → "Invalid
+            // hook call". String injection bypasses the hook system.
+            dangerouslySetInnerHTML={{ __html: order.orderQrSvg }}
+          />
         </div>
 
         <div className="order-meta">
@@ -145,9 +149,9 @@ function OrderItemBlock({ item }: { item: PrintOrderItem }) {
                 <td>{shortId(task.id)}</td>
                 <td>{task.craftName}</td>
                 <td>{task.workerDisplayName ?? '未分配'}</td>
-                <td>
-                  <QRCodeSVG value={`task:${task.id}`} size={55} />
-                </td>
+                <td
+                  dangerouslySetInnerHTML={{ __html: task.qrSvg }}
+                />
               </tr>
             ))}
           </tbody>

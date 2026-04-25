@@ -1,3 +1,4 @@
+import qrcode from 'qrcode';
 import { db } from '../db';
 import { Role } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
@@ -8,6 +9,21 @@ import type {
   PrintOrderItem,
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
+
+// QR SVG pre-render. Layout consumes plain SVG strings via
+// dangerouslySetInnerHTML to dodge the qrcode.react / two-Reacts bug
+// when the PDF route's renderToStaticMarkup dynamically imports
+// react-dom/server (which loads its own React vs the bundled one and
+// breaks hooks). margin=1 keeps the quiet zone tight; errorCorrection
+// 'M' is the SPEC default (handles ~15% damage which prints can take).
+async function buildQrSvg(value: string, size: number): Promise<string> {
+  return qrcode.toString(value, {
+    type: 'svg',
+    errorCorrectionLevel: 'M',
+    width: size,
+    margin: 1,
+  });
+}
 
 // Loads the narrow shape the print layout needs. Scope filter mirrors
 // getOrderDetail so SALES / CUSTOMER_SERVICE only print their own,
@@ -63,6 +79,18 @@ export async function getOrderForPrint(
     for (const row of rows) craftNameById.set(row.id, row.name);
   }
 
+  // Pre-render every QR SVG in one Promise.all so we don't serialize
+  // the I/O-bound calls. Order QR + one per task; task counts cap out
+  // around 10–20 in practice.
+  const taskQrPairs = order.items.flatMap((item) => item.tasks);
+  const [orderQrSvg, ...taskQrSvgs] = await Promise.all([
+    buildQrSvg(`order:${order.id}`, 95),
+    ...taskQrPairs.map((t) => buildQrSvg(`task:${t.id}`, 55)),
+  ]);
+  const taskQrById = new Map(
+    taskQrPairs.map((t, i) => [t.id, taskQrSvgs[i] as string]),
+  );
+
   const printItems: PrintOrderItem[] = order.items.map((item) => ({
     id: item.id,
     sequence: item.sequence,
@@ -95,6 +123,7 @@ export async function getOrderForPrint(
         id: t.id,
         craftName: t.craft.name,
         workerDisplayName: t.worker?.displayName ?? null,
+        qrSvg: taskQrById.get(t.id) ?? '',
       }),
     ),
   }));
@@ -115,5 +144,6 @@ export async function getOrderForPrint(
     submitterDisplayName: order.submitter.displayName,
     submitterRoleLabel: roleLabel(order.submitter.role),
     items: printItems,
+    orderQrSvg,
   };
 }
