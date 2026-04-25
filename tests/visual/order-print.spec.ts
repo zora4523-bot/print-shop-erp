@@ -22,12 +22,13 @@ import {
 //     so no network fetch / no image caching variance.
 //   - print-footer (打印时间) is masked — wall-clock varies.
 //   - Snapshot is scoped to `.print-container` (the OrderPrintLayout
-//     root <div>), NOT the page. Codex rounds 90→92 traced a chain
-//     of issues from running fullPage against `pnpm dev`: Next's
-//     dev-toolbar floats outside print-container and would diff on
-//     any Next upgrade. Snapshotting just the layout element makes
-//     the visual baseline depend on OrderPrintLayout's CSS / DOM
-//     output and nothing else.
+//     root <div>), NOT the page — Next dev-toolbar / page chrome /
+//     error overlays sit outside it.
+//   - For `.print-container` taller than viewport (10-design bucket),
+//     Playwright scroll-stitches and position:fixed dev toolbar can
+//     bleed in. So the mask list ALSO covers the &ldquo;Open Next.js
+//     Dev Tools&rdquo; button as a belt-and-suspenders (Codex rounds
+//     90→93 chronicle this).
 //
 // Platform: baselines are committed for darwin. Linux / Windows runs
 // will see "snapshot doesn't exist" on first invocation —
@@ -57,13 +58,25 @@ test.describe('OrderPrintLayout 截图回归', () => {
       // 用一个&ldquo;关键内容已渲染&rdquo;的 expect 替代。
       await expect(page.locator('text=VR 款式').first()).toBeVisible();
 
-      // 只截 OrderPrintLayout 那个根 div；dev 模式的 Next toolbar、
-      // 错误 overlay、其他外层 chrome 都在它外面，自然不入境。
+      // 截 OrderPrintLayout 的根 div；多数 chrome 因此自然不入境。
+      // 但 .print-container 比 viewport 高时（如 10-design 桶），
+      // Playwright 滚动拼接，position:fixed 的 Next dev toolbar 会
+      // bleed 进截图——所以仍然要 mask 那个按钮（Codex round 93 / P2）。
+      // 三层防御组合后：
+      //   - 短 print-container：toolbar 在截图范围外 → mask no-op
+      //   - 高 print-container：toolbar bleed in → mask 罩住
+      //   - prod build：button 不存在 → mask no-op
+      // 错误 overlay 不被 mask（它是另一个组件，不匹配按钮 selector）。
       await expect(page.locator('.print-container')).toHaveScreenshot(
         `order-print-${count}-designs.png`,
         {
-          // 打印时间每次跑都不一样 —— 必须 mask。
-          mask: [page.locator('.print-footer')],
+          mask: [
+            // 打印时间每次跑都不一样 —— 必须 mask。
+            page.locator('.print-footer'),
+            // dev toolbar bleed-through 防御，仅在 toolbar 真的在截图
+            // 区里时罩住（locator 不匹配 → 该 mask 等同没传）。
+            page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
+          ],
         },
       );
     });
