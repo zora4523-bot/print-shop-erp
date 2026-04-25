@@ -7,7 +7,7 @@ test.describe('登录闸口', () => {
     await expect(page).toHaveURL(/\/login(\?|$)/);
   });
 
-  test('admin / admin@2026 能登录并落到首页', async ({ page }) => {
+  test('seeded admin 能登录并落到首页', async ({ page }) => {
     await login(page);
     await expect(page).toHaveURL('/');
     // 不写死 displayName 文案（seed 里是&ldquo;老板&rdquo;，业主可能改）；
@@ -22,8 +22,11 @@ test.describe('登录闸口', () => {
     await page.locator('#username').fill(ADMIN_USERNAME);
     await page.locator('#password').fill('wrong-password');
     await page.getByRole('button', { name: /登录|登 录/ }).click();
-    // 给后端一点时间返回错误，但不能离开 /login。
-    await page.waitForTimeout(500);
+    // 断言「实际有错误返回」 —— LoginForm 在 generalError 时渲染
+    // <p role="alert">. 之前只断 URL 还在 /login，但 URL 在 submit
+    // 之前就是 /login，按钮坏掉 / 校验拦截 / action 抛错都会假绿
+    // (Codex round 73 / P2)。
+    await expect(page.getByRole('alert')).toBeVisible({ timeout: 5_000 });
     await expect(page).toHaveURL(/\/login/);
   });
 });

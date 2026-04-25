@@ -1,4 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config as loadEnv } from 'dotenv';
+
+// Mirror Next's .env loading so tests can reuse SEED_ADMIN_PASSWORD
+// from .env without having to re-set E2E_ADMIN_PASSWORD on every run.
+// Playwright's test runner doesn't load .env on its own — Next.js
+// only loads it for the dev server it spawns. Loading here populates
+// process.env for both the runner AND the spawned dev server.
+loadEnv();
 
 // E2E config — runs against the Next.js dev server. Locally we reuse
 // whatever dev server is already running on :3000 (via `pnpm dev`);

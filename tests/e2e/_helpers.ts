@@ -1,10 +1,23 @@
 import { expect, type Page } from '@playwright/test';
 
-// Default seed credentials (prisma/seed.ts; .env SEED_ADMIN_PASSWORD).
-// Tests assume the seed has run on the dev DB. For CI we'd point at a
-// dedicated test DB and seed it in a fixture; MVP runs against dev DB.
+// Seed admin credentials. We DON'T fall back to a hardcoded password:
+// .env.example ships SEED_ADMIN_PASSWORD blank → seed.ts then mints a
+// random one-time password and prints it to stdout. Defaulting to
+// "admin@2026" here would silently fail on every clean machine / CI
+// env (Codex round 73 / P1). Username defaults to "admin" because
+// that's the seed's fixed default in `.env.example`.
 export const ADMIN_USERNAME = process.env.E2E_ADMIN_USERNAME ?? 'admin';
-export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'admin@2026';
+export const ADMIN_PASSWORD = (() => {
+  const v = process.env.E2E_ADMIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD;
+  if (!v || v.trim() === '') {
+    throw new Error(
+      'E2E suite requires E2E_ADMIN_PASSWORD (or SEED_ADMIN_PASSWORD) ' +
+        'to be set. Either point it at the seeded admin password, or run ' +
+        'the seed with a known SEED_ADMIN_PASSWORD before pnpm test:e2e.',
+    );
+  }
+  return v;
+})();
 
 // Logs in via the /login form. `from` is the protected URL the caller
 // will go to next — the form preserves it as ?from=... so the post-
