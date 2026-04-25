@@ -71,16 +71,21 @@ export async function resetBillsForUser(userId: string): Promise<void> {
           'created by globalSetup.ts).',
       );
     }
-    // Wipe order: BillItem → Bill RESTRICT, so do BillItems first.
-    // Then bills (full wipe — user is e2e-* test-only). Then ALL the
-    // user's orders, regardless of orderNo prefix: Codex round 82 / P1
-    // pointed out generateBillsForPeriod selects FINISHED orders by
-    // submitterId only, so a non-E2E-prefix order (e.g. one shipped
-    // via wave 4 SHIP flow that uses real nextOrderNumber) would
-    // leak back into a fresh run's bill. Order children
-    // (OrderItem, OrderLog, OrderItemDesign via OrderItem,
-    // ProductionTask via OrderItem, OutsourceOrder.orderId → SET NULL)
-    // all cascade automatically per the schema's FK rules.
+    // Step 1: clear all BillItems for this user's bills
+    //   (BillItem → Bill is RESTRICT, must go first).
+    // Step 2: clear all Bills for this user (full wipe — e2e-* user
+    //   is test-only; round 80 contract).
+    // Step 3: clear FINISHED orders for this user.
+    //
+    // We narrow Order delete to status=FINISHED to avoid cross-spec
+    // interference (Codex round 83 / P2): production-flow.spec.ts
+    // leaves orders at status=COMPLETED for the same fixture user;
+    // those are not bill-relevant (generateBillsForPeriod only picks
+    // FINISHED) but ARE state another spec may rely on for rerun
+    // observability. round-82's unconditional Order wipe was too
+    // broad. Order children cascade automatically (OrderItem +
+    // OrderLog ON DELETE CASCADE, ProductionTask + OrderItemDesign
+    // via OrderItem, OutsourceOrder.orderId → SET NULL).
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT id FROM "Bill" WHERE "salesUserId" = $1
@@ -88,7 +93,10 @@ export async function resetBillsForUser(userId: string): Promise<void> {
       [userId],
     );
     await db.query(`DELETE FROM "Bill" WHERE "salesUserId" = $1`, [userId]);
-    await db.query(`DELETE FROM "Order" WHERE "submitterId" = $1`, [userId]);
+    await db.query(
+      `DELETE FROM "Order" WHERE "submitterId" = $1 AND status = 'FINISHED'`,
+      [userId],
+    );
   });
 }
 
