@@ -8,12 +8,13 @@
 
 ## 当前任务
 
-P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端落地 clean（status machine + lib + actions + tests，rounds 52-54 闭合）。**下一步：P0 #6 Slices B/C/D — owner UI + sales UI + 月初 cron。**
+P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端 clean（rounds 52-54）。**Slice B 老板账单 UI 落地 clean（rounds 55-60）。下一步：P0 #6 Slices C/D — sales UI + 月初 cron。**
 
 ## 本次 session 主要产出
 
 - P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮，2 个 P1 修复（generate race + CS atomicity + migration pre-dedupe）。
 - **P0 #5 daily-salary race 补齐**（commit `50956ee`）—— 和 hourly round 48 同构的 paid-row race：findUnique(isPaid) → upsert 两次 round-trip 间被 markDailySalaryPaid 翻转。修法沿用 per-(worker,date) advisory lock + tx，`markDailySalaryPaid` 取同一锁。+4 单测（累计 776）。
+- **P0 #6 Slice B 老板账单 UI**（commits `135cbd2 → 65f7789`）—— 5 commits，0 单测（Server Component UI，无单测框架），Codex rounds 55–60 共 6 轮（1 个 P2 真 bug + 4 轮 UI 文案精度迭代）。`/owner/bills` 列表（FilterBar + 3 张统计卡 + GenerateBillsForm）、`/owner/bills/[id]` 详情（总额/已收/未收 + 进度条 + 状态机按钮），`BILL_STATUS_LABELS` 入 role-labels.ts，根页老板入口补链接。**Round 55 P2**：`isValidYm` 只查形状不查月份范围，`?period=2026-13` 会让 `parseShanghaiMonth` 抛错崩页——补 1-12 range check。剩余 5 轮全是生成流程"漏抓"文案精度迭代，最终定稿：`BillItems` 在发单那一刻冻结，两类漏抓（发单前未点生成 / 发单后才 FINISHED）都需要业主线下补单。
 
 同一 session 前半段已完成 P0 #5 Slice C（时薪工 + 考勤），+90 单测，Codex rounds 48–51。
 
@@ -42,36 +43,29 @@ P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端落地 cle
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 #6 Slice A 后端已完成**（status machine + lib + actions，rounds 52-54 clean）。剩下三片 UI / cron：
-
-**Slice B — Owner 账单 UI `/owner/bills`**
-- 列表：salesUser 姓名 / 周期 / totalAmount / paidAmount / 状态；FilterBar（status / period / salesUserId）；3 张统计卡（已发但未收 / 全部未收 / 本月新生成数）
-- 详情 `/owner/bills/[id]`：
-  - BillItems 表格（orderNo / customerRef / finishedAt / orderAmount）
-  - 状态展示 + paidAmount 进度条
-  - DRAFT → 显示&ldquo;发单&rdquo;按钮（`issueBillAction`）
-  - ISSUED / PARTIAL_PAID → 显示&ldquo;录入付款&rdquo;表单（`recordBillPaymentAction`，amount field）
-  - FULLY_PAID → 只读，显示 `csAccumulated` 提示
-- 索引页：`/owner/bills/generate` 或详情页顶部&ldquo;生成 YYYY-MM 月账单&rdquo;按钮 → `generateBillsAction`
-- 权限 layout gate: OWNER only
+**P0 #6 Slice A + B 已完成**（rounds 52-60 clean）。剩下两片：
 
 **Slice C — Sales / CS UI `/sales/bills`**
 - 仅看自己的账单（`salesUserId === session.user.id`）
-- 列表 + 详情只读；显示付款进度、BillItems
-- 权限：`bill:view:self` （SALES / CUSTOMER_SERVICE）
+- 列表 + 详情只读；显示付款进度、BillItems 明细
+- 权限：`bill:view:self`（SALES / CUSTOMER_SERVICE）
+- 需要新建 `app/sales/layout.tsx`（若不存在）做 SALES + CUSTOMER_SERVICE gate
+- 复用 `app/owner/bills/*` 的 UI 结构，剥掉 action 按钮和 generate 表单即可
+- 可复用：`lib/bill.ts listBills` / `getBillDetail`（现有 fn 不做 salesUserId 过滤——Slice C 要在 action 层或页面层自己加 `salesUserId === session.user.id` 过滤）
 
 **Slice D — Cron `POST /api/cron/generate-bills`**
-- shared-secret Bearer
+- shared-secret Bearer（参照 `POST /api/cron/daily-salary`）
 - 默认 period=上月 Shanghai
 - 调 `generateBillsForPeriod(period, systemActor)`
-- 响应 COUNTS ONLY（复用 daily-salary pattern from round 49）
+- 响应 **COUNTS ONLY**（复用 daily-salary round 49 pattern）——不返回 generated[] / errors[] 明细，防 pg_cron 日志泄露金额
 
-已建范式照抄：
-- `/owner/salary/daily` 列表 + FilterBar + stat cards（最相似）
-- `/owner/salary/cs/[id]` 详情页 + action buttons 条件渲染
+已建范式照抄（Slice B 刚做完）：
+- `/owner/bills` 列表 + FilterBar + stat cards
+- `/owner/bills/[id]` 详情页（Decimal 进度条 + `total=0` 防除零）
+- `components/business/bill/*` 三件套（GenerateBillsForm / IssueBillButton / RecordPaymentForm）
 - `POST /api/cron/daily-salary` shared-secret + 昨日 fallback pattern
 
-**P0 #5 已知未修残留**：无（commit `50956ee` 闭合了 daily-salary race + now 贯穿 —— rule 读本就接 `now`，新增一条测试锁定）。
+**P0 #5 已知未修残留**：无（commit `50956ee` 闭合了 daily-salary race + now 贯穿）。
 
 ## 卡住的问题
 
