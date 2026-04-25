@@ -8,19 +8,41 @@
 
 ## 当前任务
 
-**P0 #1–#6 全部完成 clean** + 上线前运维补齐已完成。下一阶段（P1）待业主拍板优先级。
+**P0 #1–#6 全部完成 clean** + 上线前运维补齐 + 本地真实跑起来发现的 4 个 prod-only bug 全修 + Playwright E2E + 视觉回归 + SHIP/FINISH 状态机端到端打通。整体&ldquo;能上线&rdquo;级别。下一阶段（P1）待业主拍板优先级。
 
 ## 本次 session 主要产出
 
-- P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 commits，+56 单测（累计 772），Codex rounds 52–54。
-- **P0 #5 daily-salary race 补齐**（commit `50956ee`）—— per-(worker,date) advisory lock + tx，`markDailySalaryPaid` 取同一锁。+4 单测（累计 776）。
-- **P0 #6 Slice B 老板账单 UI**（commits `135cbd2 → 65f7789`）—— 5 commits，0 单测（Server Component UI），Codex rounds 55–60（1 个 P2 真 bug + 4 轮"漏抓"文案精度迭代）。
-- **P0 #6 Slices C+D**（commits `ffbc3ca → 07edf02`）—— 3 commits，0 单测，Codex rounds 61–63（2 个 P2/P3 真 bug + 1 轮 layout-pathname 限制讨论）。
-  - Slice C：`app/sales/layout.tsx`（SALES + CUSTOMER_SERVICE gate，OWNER 不在此 layer 转发——见 round 62）+ `/sales/bills` 列表 + `/sales/bills/[id]` 详情（**资源所有权双闸：404 而非 403 防 id 枚举**），权限补 CUSTOMER_SERVICE 进 `bill:view:self`。
-  - Slice D：`POST /api/cron/generate-bills` 镜像 daily-salary 的 shared-secret + COUNTS-ONLY pattern；上月 default；**explicit-vs-absent period 区分**（round 61 P2：`{"period":""}` 不能静默 fallback）。
-  - Round 62：layout.tsx 拿不到 pathname，OWNER 转发 `/sales/bills/<id>` → `/owner/bills` list 会丢 leaf id；干脆删掉 OWNER 转发，OWNER 走根页找入口。
+跨度大，按层归类。
 
-同一 session 前半段已完成 P0 #5 Slice C（时薪工 + 考勤），+90 单测，Codex rounds 48–51。
+### A. 本地启动暴露的 4 个 prod-only bug（mock 单测全漏）
+1. `pg_advisory_xact_lock` 返 void → Prisma 7 `$queryRaw` 反序列化炸；16 个 callsite + 5 narrow tx 类型 + 7 测试 mock 一律切到 `$executeRaw`。commit `5481d58`。
+2. `react-dom/server` 静态 import → Next 16 build guard 拒；改动态 import + buildPrintHtml 改 async；commit `dae18ba`。
+3. `qrcode.react` 跨 React 实例 hooks 炸 → 改服务端 `qrcode.toString` 预渲染 SVG 字符串，layout 用 `dangerouslySetInnerHTML`；删 `qrcode.react` 依赖；commit `7847415`。
+4. Puppeteer Chrome 没装（pnpm 默认跳过 postinstall）；`npx puppeteer browsers install chrome` + README §🚢 §6 写明 + hint regex 加 Chrome 支持 + 同时覆盖&ldquo;没装&rdquo;和&ldquo;路径错配&rdquo;两种原因；commits `9489696` / `f218cca`。
+
+### B. E2E + 视觉回归（waves 1–5）
+- 12 Playwright 测试 / ~12s 总时长。803 单测仍全绿。
+- **Wave 1**（auth + order create）3 commits。`tests/e2e/auth.spec.ts`（3 测）+ `order-create.spec.ts`（1 测）。`@next/env` 加载 `.env*`；E2E_PASSWORD 必填守 guard；bad-password 断言 `role=alert`。
+- **Wave 2**（production flow）SALES create → submit → FOREMAN schedule → WORKER report → cascade COMPLETED → SHIP → FINISHED 整链 1 个测试。
+- **Wave 3**（bill flow）OWNER 生成 → 发单 → 录入全款 → FULLY_PAID。
+- **Wave 4**（CS 业绩累加）payment 后 SalaryPeriod.totalSales 真 increment。**关键**：拆 1500+1500 两笔，否则 delta vs cumulative 回归测不出来（Codex round 85）。
+- **Wave 5**（视觉回归）OrderPrintLayout 6 个 design-grid bucket（1/2/3/5/8/10）。**架构关键**：locator-scoped screenshot（`.print-container`）+ button mask `Open Next.js Dev Tools` 双层防御 ——`page` 全屏会卷 dev toolbar，element 范围又会因 fixed-position 在高 bucket 滚动时 bleed in（rounds 90→93 迭代）。
+- **测试基础设施**：`tests/e2e/global-setup.ts`（4 个 e2e- 用户 idempotent upsert）；`tests/e2e/_helpers.ts` 一组 helpers（login / logout / seedFinishedOrder / resetBillsForUser / seedActiveCsPeriod / seedPrintableOrder / midShanghaiMonth）。**`resetBillsForUser` 的 e2e- 用户 guard** 是反复迭代后的最终设计（rounds 79→80→82→83）：拒绝非 e2e- 用户 + 全 wipe + Order 仅清 status=FINISHED（不冲掉 production-flow 的 COMPLETED）。
+
+### C. SHIP / FINISH 状态机收尾（feat）
+- COMPLETED → SHIPPED → FINISHED 之前只在状态机声明，没 UI/action。本 session 补全：`shipOrder` / `finishOrder` lib + 2 actions + `ShipOrderForm` + `FinishOrderButton` + 工单详情页 conditional 渲染 + 9 单测 + 扩 production-flow E2E。
+- 顺手把所有 Order.status 写入路径（submit/cancel/ship/finish/scheduleOrder/worker cascade/createOutsourceOrder）统一在同一把 advisory lock `print-shop-erp:order-cascade:<id>`（rounds 87→88，2 轮迭代才覆盖完整）。
+- 加 `canAttachOutsource()` helper：SHIPPED/FINISHED/CANCELLED 状态拒绝新建外协（lib + UI 双闸）。
+
+### D. Admin shell scaffolding（feat）
+- 用户在 session 中并行做的——committed shadcn UI 组件（avatar/breadcrumb/sidebar/...）+ `lib/auth/permissions-dict.ts`（拆 PERMISSIONS 字典出 next-auth）+ `lib/navigation/admin-menu.ts`（按角色提供 menu 配置）+ `(admin)`/`(worker)`/`(auth)` 路由组。
+- Claude 这边补 `components/business/admin/AppSidebar.tsx` + `AdminBreadcrumb.tsx`：三个 P2 修迭代到 round 81 收敛——嵌套 `<li>` / breadcrumb 404 / sidebar multi-active / `<BreadcrumbPage>` 的 aria-current 副作用。
+- `hooks/use-mobile.ts` 重写成 `useSyncExternalStore`，避 `react-hooks/set-state-in-effect` lint 规则。
+
+### E. Codex review 总览
+本 session 跑了 rounds 70–94，共约 25 轮 review，最终全部 clean。意外学到的事：
+- 我 `git add -A` 把 user 并行 commit 留下的 untracked 文件卷进了我的 commit，回滚才看清。规则已存 memory：**`git ls-files --others --exclude-standard` 看一眼再删/staging**。
+- 多次出现"修法过犹不及"模式：90 隐藏整个 portal → 91 揭示连错误 overlay 一起吞了；82 wipe 全部 order → 83 揭示 cross-spec 干扰。每次正确答案是更精准的 scope，不是把锁、mask、wipe 范围拧得更宽。
 
 - **Slice A 排产**（rounds 37 / 38）
   - `lib/production.ts scheduleOrder`：tx 内批量 createMany + 状态机转换 + OrderLog。按 Craft.isOutsource 拆两条路径，每个 item × non-outsource craft 对要求唯一 assignment。
@@ -47,16 +69,21 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 + 运维补齐都完成 clean**。下一步：
+**P0 + 上线前运维 + prod-only bug 全修 + E2E + 视觉 + SHIP/FINISH 已交付**。下一步：
 
-1. **业主拍板 P1 优先级**。SPEC §10 / `PROGRESS.md` 列了 E-full（款式级编辑）、推送、报表、Docker 化等候选——建议从工作流痛点回收（业主用一天给反馈）。
-2. **运维剩下的硬件 / 平台动作**（代码侧 done，剩纯 ops）：
-   - `.env` 真实填 CRON_SECRET / SENTRY_DSN / OSS 5 必填变量（README §🚢 §1 表格列了影响）
-   - 上线后 cron 由 shared-secret curl 切到 Pigsty pg_cron（README §🚢 §2 4 个 endpoint 都给了 curl 示例）
-   - Pigsty pgbackrest 启用 + 季度恢复演练（README §🚢 §3）
-3. **已知未做但 SPEC 写过的非 P0 项**：CS 提成&ldquo;工单 FINISHED 时累加 vs 账单 mark-paid 累加&rdquo;二选一仍未拍板（HANDOFF 卡住的问题里），目前实现是后者；退单语义未实现（业主拍板）。
+1. **业主拍板 P1 优先级**。候选：
+   - **老板 Dashboard**（SPEC §6）—— 业主每天首屏，验收标准之一&ldquo;一眼看到今日工单 / 产量 / 待发货&rdquo;。今天没做。
+   - **企业微信推送**（SPEC §3.10）—— `lib/notification/` 是空壳；急单 3 秒推送是验收标准。10 个事件类型已 enum 占位。
+   - **E-full 工单款式级编辑**（P0 #3 当时延期）—— 业主反馈优先级低但 SPEC 写过。
+   - **报表**（SPEC §6 完整版）—— 先 Dashboard 顶替，看业主用一段时间反馈再做。
+   - **Docker 化**（CLAUDE.md 说 MVP 稳定 2-3 月后做）—— 现在还早。
+2. **Admin shell wire 进 layout**：`AppSidebar` + `AdminBreadcrumb` scaffolding 已就绪但未 wire。补一个 `app/(admin)/layout.tsx` 引入两件套是下一步小工作（半天）。
+3. **运维剩下的纯 ops 动作**：填 `.env` 真值；cron 切 pg_cron；pgbackrest 启用。
+4. **已知未拍板的业务空白**（HANDOFF&ldquo;卡住的问题&rdquo;里）：CS 提成累加触发链 vs 退单语义；考勤录入 UI 形态；历史业绩导入。
 
-**Codex review 闸口**：所有提交都过 Codex review（最近 round 69 no findings）。776 单测 / lint / typecheck 全绿。
+**E2E 现状**：13 个 Playwright 测试，覆盖核心 5 条状态机链 + 4 个钱相关路径。每个真实 advisory lock / cascade / 状态机 transition 都被真 PG 跑过一次。Mock 单测漏抓的 4 个 prod-only bug 各有专测守护。
+
+**Codex review 闸口**：本 session 跑了 ~25 轮，最终全部 clean。803 单测 / lint / typecheck / 13 Playwright 全绿。
 
 ## 卡住的问题
 
@@ -86,7 +113,7 @@
 
 ## 上次会话结束时间
 
-2026-04-25
+2026-04-26
 
 ---
 
@@ -103,3 +130,8 @@
 - 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。和 hourly round 48 同构的 paid-row race —— compute 的 findUnique(isPaid) 和 upsert 之间被 markDailySalaryPaid 翻转，update 分支静默覆盖金额。修法镜像 hourly：per-(worker,date) advisory lock + tx（compute 和 mark-paid 共用同一把锁，rule 读留在 tx 外）。+4 单测（累计 776）。
 - 2026-04-25：完成 P0 #6 Slice B 老板账单 UI + Slices C/D 销售 UI + cron。8 个 commits（5 + 3），0 新单测（纯 Server Component UI），Codex rounds 55–63 共 9 轮。Slice B 1 个 P2 真 bug（period 月份范围）+ 4 轮文案精度迭代；Slice C/D 2 个 P2/P3 真 bug（cron malformed period 静默 fallback、sales layout OWNER 转发丢 leaf id）+ 1 轮 layout-pathname 限制讨论（最终决定不在 layout 做 OWNER 转发，留给 middleware）。**至此 P0 #1-#6 全部 clean，776 测试全绿**。
 - 2026-04-25：上线前运维补齐（业主选项 A）。1 个初始 commit（`fe3c668`）+ 5 轮 Codex 进步式 privacy 收紧（rounds 64–68，最终 round 69 clean）。`.env.example` 加 CRON_SECRET / SENTRY_DSN / APP_VERSION + 影响说明；instrumentation.ts 真实 Sentry init（DSN-gated graceful no-op）；README 加&ldquo;上线运维&rdquo;章节（env 表格 + cron pg_cron 切换 + pgbackrest + Sentry + OSS RAM + 10 步 smoke checklist）。**Sentry 隐私收紧关键路径**：Codex 5 轮进步式发现 `captureRequestError` 默认捕获 (1) headers 含 Authorization / Cookie，(2) URL query 含 reset token，(3) transaction event vs exception event 双路径，(4) span.data + span.description，(5) `contexts.nextjs.request_path`，(6) OTel 新旧 method 键名 + Prisma 的 `?` 在 SQL 不能被 URL trim 误伤。最终方案：`scrubEvent()` 同时挂 `beforeSend` + `beforeSendTransaction`，URL 一律 strip query → pathname；span data 走 SAFE_SPAN_DATA_KEYS allowlist；HTTP-op 才 trim description。776 测试不变，无新代码逻辑。
+- 2026-04-25 → 2026-04-26：本地真跑暴露 4 个 prod-only bug（mock 单测全漏）。commits `5481d58`（advisory lock $queryRaw → $executeRaw，16 callsite）/ `dae18ba`（PDF react-dom/server 动态 import）/ `7847415`（QR pre-render，删 qrcode.react）/ `f218cca`（Puppeteer install hint 双因素）。Codex rounds 70–72。
+- 2026-04-26：Playwright E2E + 视觉回归落地，5 个 wave，9 个 test 文件，13 个 Playwright 测试 / ~12s。Wave 1（auth + order create）→ Wave 2（production flow 含 SHIP/FINISH 全链）→ Wave 3（bill flow）→ Wave 4（CS accumulate，1500+1500 拆笔抓 delta vs cumulative）→ Wave 5（视觉，6 design-grid bucket，element-scope screenshot）。Codex rounds 73–94 共 ~25 轮 review，主要修法包括：`@next/env` 加载 .env\*；e2e- 用户 guard + 全 wipe + status=FINISHED 范围；视觉测试逐步收敛 element-scope + button-mask 双层防御。**Mock 单测漏抓的 4 个 bug 至此每条都有 E2E 守护**。
+- 2026-04-26：SHIP / FINISH 状态机收尾。commits `7bbfa0a` (feat) / `c6c42be`（round 87 race lock + outsource gate）/ `60c5f28`（round 88 schedule lock 统一）。**所有 Order.status 写入路径**（submit/cancel/ship/finish/scheduleOrder/worker cascade/createOutsourceOrder）现在共享同一把 advisory lock `print-shop-erp:order-cascade:<id>`。SHIP 接受可选 trackingNo（whitespace 边界 case 已 cover）；FINISH 是终态。canAttachOutsource() 显式拒绝 SHIPPED/FINISHED/CANCELLED 状态新建外协。+10 单测（含 7 SHIP/FINISH + 3 outsource scope）。
+- 2026-04-26：Admin shell scaffolding（user 并行 commit + Claude 补 P2 修复）。AppSidebar / AdminBreadcrumb 双组件，3 P2（嵌套 `<li>` / breadcrumb 404 / sidebar multi-active）+ 1 P3（layout-only crumb 误报 aria-current）4 轮收敛 round 81。`hooks/use-mobile.ts` 重写 `useSyncExternalStore` 避 React 19 lint 规则。组件还没 wire 进任何 layout，类型正确即可。
+- 2026-04-26：DECISIONS / memory 学习——**永远不 git add -A**，user 并行 commit 时 untracked 文件会被卷入；写入 `~/.claude/.../memory/feedback_untracked_files.md`。
