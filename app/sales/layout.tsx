@@ -17,10 +17,12 @@ export default async function SalesLayout({
   const session = await getSession();
   if (!session) redirect('/login');
   const { user } = session;
-  // OWNER 复制粘贴 /sales/bills 链接 → 直接转 /owner/bills（同业务，
-  // 老板视角）。其他非 SALES / CS 角色走根页。Codex round 61 / P3：
-  // 注释当时承诺了这条转发，但 redirect 落到了 / 而不是 /owner/bills。
-  if (user.role === Role.OWNER) redirect('/owner/bills');
+  // 非 SALES / CS 一律去根页。OWNER 不在这里特意转 /owner/bills：
+  // App Router layout 拿不到 pathname，单转到 /owner/bills 的 list
+  // 视图会丢失 /sales/bills/[id] 复制粘贴时的详情 id 和 query
+  // （Codex round 62 / P2）。OWNER 自然在根页找到&ldquo;销售应收账单&rdquo;
+  // 入口；要做 leaf-preserving 的 cross-shell rewrite 应在 middleware
+  // 层做，目前 P0 用不上。
   if (user.role !== Role.SALES && user.role !== Role.CUSTOMER_SERVICE) {
     redirect('/');
   }
