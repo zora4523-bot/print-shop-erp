@@ -52,10 +52,18 @@ const OWNER_MENU: AdminMenuItem[] = [
   { label: 'Dashboard',   href: '#',                iconName: 'LayoutDashboard', roles: [Role.OWNER] },
   { label: '工单',         href: '/orders',          iconName: 'ClipboardList',   requiredPermission: 'order:view:all' },
   { label: '账单',         href: '/owner/bills',     iconName: 'Wallet',          requiredPermission: 'bill:view:all' },
-  { label: '师傅日薪',     href: '/owner/salary/daily',  iconName: 'Calculator',  requiredPermission: 'salary:view:all' },
+  // 薪资总览页 /owner/salary 是 daily/cs/hourly 三项的入口；不显式列
+  // 它的话，用户在 /owner/salary 时 sidebar 没有 active 项 (Codex
+  // round 97 / P2)。下面的 daily/cs/hourly 各自匹配自己的 leaf 路径。
+  { label: '薪资总览',     href: '/owner/salary',        iconName: 'Calculator',    requiredPermission: 'salary:view:all' },
+  { label: '师傅日薪',     href: '/owner/salary/daily',  iconName: 'Calculator',    requiredPermission: 'salary:view:all' },
   { label: '客服周期',     href: '/owner/salary/cs',     iconName: 'CalendarClock', requiredPermission: 'salary:view:all' },
-  { label: '时薪工月结',   href: '/owner/salary/hourly', iconName: 'Clock',       requiredPermission: 'salary:view:all' },
-  { label: '字典管理',     href: '/owner/crafts',    iconName: 'BookOpen',        requiredPermission: 'dict:craft:manage' },
+  { label: '时薪工月结',   href: '/owner/salary/hourly', iconName: 'Clock',         requiredPermission: 'salary:view:all' },
+  { label: '工艺字典',     href: '/owner/crafts',    iconName: 'BookOpen',        requiredPermission: 'dict:craft:manage' },
+  // 产品字典原本靠 Dashboard /owner 的 startsWith 匹配获得 active 状态；
+  // Dashboard 改 # 后必须显式列，否则 /owner/products{,/[id],/new} 在
+  // sidebar 没有 active 项 (round 97 / P2)。
+  { label: '产品字典',     href: '/owner/products',  iconName: 'PackageOpen',     requiredPermission: 'dict:product:manage' },
   { label: '用户管理',     href: '/owner/accounts',  iconName: 'Users',           requiredPermission: 'account:manage' },
 ];
 

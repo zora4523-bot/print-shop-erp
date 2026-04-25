@@ -12,28 +12,31 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
-  it('OWNER 看到 8 项菜单（含 Dashboard / 字典管理 / 用户管理）', () => {
+  it('OWNER 看到 10 项菜单（含 Dashboard / 工艺/产品字典 / 用户管理）', () => {
     const items = flatten(getAdminMenuItems({ role: Role.OWNER }));
-    expect(items).toHaveLength(8);
+    expect(items).toHaveLength(10);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
       '账单',
+      '薪资总览',
       '师傅日薪',
       '客服周期',
       '时薪工月结',
-      '字典管理',
+      '工艺字典',
+      '产品字典',
       '用户管理',
     ]);
   });
 
-  it('FOREMAN 看不到老板独占的"账单 / 用户管理 / 字典管理"', () => {
+  it('FOREMAN 看不到老板独占项（账单 / 用户管理 / 工艺字典 / 产品字典）', () => {
     const labels = flatten(getAdminMenuItems({ role: Role.FOREMAN })).map(
       (i) => i.label,
     );
     expect(labels).not.toContain('账单');
     expect(labels).not.toContain('用户管理');
-    expect(labels).not.toContain('字典管理');
+    expect(labels).not.toContain('工艺字典');
+    expect(labels).not.toContain('产品字典');
     // 但有自己的 Dashboard / 排产 / 外协 / 工时录入
     expect(labels).toContain('Dashboard');
     expect(labels).toContain('排产');
@@ -46,7 +49,8 @@ describe('getAdminMenuItems', () => {
       (i) => i.label,
     );
     expect(labels).not.toContain('账号管理');
-    expect(labels).not.toContain('字典管理');
+    expect(labels).not.toContain('工艺字典');
+    expect(labels).not.toContain('产品字典');
     expect(labels).not.toContain('排产');
     expect(labels).not.toContain('外协');
     expect(labels).toContain('我的 Dashboard');
