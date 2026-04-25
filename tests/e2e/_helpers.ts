@@ -3,6 +3,106 @@ import { expect, type Page } from '@playwright/test';
 // Re-export so specs don't have to import from global-setup directly.
 export { E2E_PASSWORD, E2E_USERS } from './global-setup';
 
+// ---- DB-side fixture helpers ----
+//
+// These do raw SQL inserts to skip multi-step UI choreography in
+// scenarios that aren't about that choreography (e.g. the bill flow
+// shouldn't have to drive a 6-step production sequence just to get
+// a FINISHED order on the books). We use raw `pg` for the same reason
+// global-setup does — Playwright's CJS runner can't load the generated
+// Prisma client cleanly.
+
+import { randomBytes } from 'node:crypto';
+import { Client } from 'pg';
+
+async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  try {
+    return await fn(db);
+  } finally {
+    await db.end();
+  }
+}
+
+export async function getUserIdByUsername(username: string): Promise<string> {
+  return withDb(async (db) => {
+    const r = await db.query<{ id: string }>(
+      'SELECT id FROM "User" WHERE username = $1',
+      [username],
+    );
+    if (r.rowCount === 0) throw new Error(`E2E user ${username} not found`);
+    return r.rows[0]!.id;
+  });
+}
+
+// Wipes all bill+order rows owned by the given user. Used by bill-flow
+// E2E to keep each run independent — generateBillsForPeriod upserts
+// per-(salesUser, period) so prior runs leave aggregated state that
+// would otherwise bleed across runs (totalAmount keeps growing,
+// status moves past DRAFT, generate then errors out).
+//
+// Order is sensitive: BillItem fk → Bill, BillItem fk → Order, so
+// drop BillItem first, then Bill + Order. Limit to E2E-prefix orders
+// so a bug in this helper can't nuke real data.
+export async function resetBillsForUser(userId: string): Promise<void> {
+  await withDb(async (db) => {
+    await db.query(
+      `DELETE FROM "BillItem" WHERE "billId" IN (
+         SELECT id FROM "Bill" WHERE "salesUserId" = $1
+       )`,
+      [userId],
+    );
+    await db.query(`DELETE FROM "Bill" WHERE "salesUserId" = $1`, [userId]);
+    await db.query(
+      `DELETE FROM "Order" WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'`,
+      [userId],
+    );
+  });
+}
+
+// Seeds one Order with status=FINISHED, finishedAt=NOW(), no items.
+// Bills E2E uses this to skip the whole submit→schedule→report→cascade
+// chain (that's wave 2's job). Returns the new order's id + orderNo.
+export async function seedFinishedOrder(opts: {
+  submitterId: string;
+  submitterRole: 'SALES' | 'CUSTOMER_SERVICE';
+  customerRef: string;
+  totalAmount: string; // decimal string, e.g. "5000.00"
+}): Promise<{ orderId: string; orderNo: string }> {
+  const orderId = `e2e-ord-${randomBytes(8).toString('hex')}`;
+  // orderNo is UNIQUE — we don't follow the YYYYMMDD-NNNN convention
+  // because that would race with real production code's nextOrderNumber.
+  // Prefix lets us spot test rows in the dev DB.
+  const orderNo = `E2E-${randomBytes(4).toString('hex').toUpperCase()}`;
+  await withDb(async (db) => {
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "customerRef", "totalAmount",
+        "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4::"Role", $3,
+        'FINISHED'::"OrderStatus", FALSE, $5, $6,
+        NOW(), NOW(), NOW(), NOW(), NOW(),
+        NOW(), NOW()
+      )
+      `,
+      [
+        orderId,
+        orderNo,
+        opts.submitterId,
+        opts.submitterRole,
+        opts.customerRef,
+        opts.totalAmount,
+      ],
+    );
+  });
+  return { orderId, orderNo };
+}
+
 // Seed admin credentials. We DON'T fall back to a hardcoded password:
 // .env.example ships SEED_ADMIN_PASSWORD blank → seed.ts then mints a
 // random one-time password and prints it to stdout. Defaulting to
