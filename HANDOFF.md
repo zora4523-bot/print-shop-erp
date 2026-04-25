@@ -8,13 +8,17 @@
 
 ## 当前任务
 
-P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端 clean（rounds 52-54）。**Slice B 老板账单 UI 落地 clean（rounds 55-60）。下一步：P0 #6 Slices C/D — sales UI + 月初 cron。**
+**P0 #1–#6 全部完成 clean**。P0 阶段收尾，下一阶段（P1）待业主拍板优先级。
 
 ## 本次 session 主要产出
 
-- P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 个 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮，2 个 P1 修复（generate race + CS atomicity + migration pre-dedupe）。
-- **P0 #5 daily-salary race 补齐**（commit `50956ee`）—— 和 hourly round 48 同构的 paid-row race：findUnique(isPaid) → upsert 两次 round-trip 间被 markDailySalaryPaid 翻转。修法沿用 per-(worker,date) advisory lock + tx，`markDailySalaryPaid` 取同一锁。+4 单测（累计 776）。
-- **P0 #6 Slice B 老板账单 UI**（commits `135cbd2 → 65f7789`）—— 5 commits，0 单测（Server Component UI，无单测框架），Codex rounds 55–60 共 6 轮（1 个 P2 真 bug + 4 轮 UI 文案精度迭代）。`/owner/bills` 列表（FilterBar + 3 张统计卡 + GenerateBillsForm）、`/owner/bills/[id]` 详情（总额/已收/未收 + 进度条 + 状态机按钮），`BILL_STATUS_LABELS` 入 role-labels.ts，根页老板入口补链接。**Round 55 P2**：`isValidYm` 只查形状不查月份范围，`?period=2026-13` 会让 `parseShanghaiMonth` 抛错崩页——补 1-12 range check。剩余 5 轮全是生成流程"漏抓"文案精度迭代，最终定稿：`BillItems` 在发单那一刻冻结，两类漏抓（发单前未点生成 / 发单后才 FINISHED）都需要业主线下补单。
+- P0 #6 Slice A 应收账单后端（commits `ec86612 → 503e438`）—— 4 commits，+56 单测（累计 772），Codex rounds 52–54。
+- **P0 #5 daily-salary race 补齐**（commit `50956ee`）—— per-(worker,date) advisory lock + tx，`markDailySalaryPaid` 取同一锁。+4 单测（累计 776）。
+- **P0 #6 Slice B 老板账单 UI**（commits `135cbd2 → 65f7789`）—— 5 commits，0 单测（Server Component UI），Codex rounds 55–60（1 个 P2 真 bug + 4 轮"漏抓"文案精度迭代）。
+- **P0 #6 Slices C+D**（commits `ffbc3ca → 07edf02`）—— 3 commits，0 单测，Codex rounds 61–63（2 个 P2/P3 真 bug + 1 轮 layout-pathname 限制讨论）。
+  - Slice C：`app/sales/layout.tsx`（SALES + CUSTOMER_SERVICE gate，OWNER 不在此 layer 转发——见 round 62）+ `/sales/bills` 列表 + `/sales/bills/[id]` 详情（**资源所有权双闸：404 而非 403 防 id 枚举**），权限补 CUSTOMER_SERVICE 进 `bill:view:self`。
+  - Slice D：`POST /api/cron/generate-bills` 镜像 daily-salary 的 shared-secret + COUNTS-ONLY pattern；上月 default；**explicit-vs-absent period 区分**（round 61 P2：`{"period":""}` 不能静默 fallback）。
+  - Round 62：layout.tsx 拿不到 pathname，OWNER 转发 `/sales/bills/<id>` → `/owner/bills` list 会丢 leaf id；干脆删掉 OWNER 转发，OWNER 走根页找入口。
 
 同一 session 前半段已完成 P0 #5 Slice C（时薪工 + 考勤），+90 单测，Codex rounds 48–51。
 
@@ -43,29 +47,17 @@ P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端 clean（r
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 #6 Slice A + B 已完成**（rounds 52-60 clean）。剩下两片：
+**P0 全部完成 clean**。所有 known race / 状态机 / 权限闸口 / 快照化已盖章。下一步是：
 
-**Slice C — Sales / CS UI `/sales/bills`**
-- 仅看自己的账单（`salesUserId === session.user.id`）
-- 列表 + 详情只读；显示付款进度、BillItems 明细
-- 权限：`bill:view:self`（SALES / CUSTOMER_SERVICE）
-- 需要新建 `app/sales/layout.tsx`（若不存在）做 SALES + CUSTOMER_SERVICE gate
-- 复用 `app/owner/bills/*` 的 UI 结构，剥掉 action 按钮和 generate 表单即可
-- 可复用：`lib/bill.ts listBills` / `getBillDetail`（现有 fn 不做 salesUserId 过滤——Slice C 要在 action 层或页面层自己加 `salesUserId === session.user.id` 过滤）
+1. **业主拍板 P1 优先级**。SPEC §10 / `PROGRESS.md` 列了 E-full（款式级编辑）、推送、报表、Docker 化等候选，但当前没有强 sequencing 约束——建议先从工作流痛点回收（业主用一天给反馈）。
+2. **P0 上线前的运维项**：
+   - `CRON_SECRET` env 配置 → pg_cron 切换
+   - 阿里云 OSS 真实 access key 替换 mock
+   - Sentry / OTel 接入
+   - 备份脚本（pgbackrest）
+3. **已知未做但 SPEC 写过的非 P0 项**：CS 提成"工单 FINISHED 时累加 vs 账单 mark-paid 累加"二选一仍未拍板（HANDOFF 卡住的问题里），目前实现是后者；退单语义未实现（业主拍板）。
 
-**Slice D — Cron `POST /api/cron/generate-bills`**
-- shared-secret Bearer（参照 `POST /api/cron/daily-salary`）
-- 默认 period=上月 Shanghai
-- 调 `generateBillsForPeriod(period, systemActor)`
-- 响应 **COUNTS ONLY**（复用 daily-salary round 49 pattern）——不返回 generated[] / errors[] 明细，防 pg_cron 日志泄露金额
-
-已建范式照抄（Slice B 刚做完）：
-- `/owner/bills` 列表 + FilterBar + stat cards
-- `/owner/bills/[id]` 详情页（Decimal 进度条 + `total=0` 防除零）
-- `components/business/bill/*` 三件套（GenerateBillsForm / IssueBillButton / RecordPaymentForm）
-- `POST /api/cron/daily-salary` shared-secret + 昨日 fallback pattern
-
-**P0 #5 已知未修残留**：无（commit `50956ee` 闭合了 daily-salary race + now 贯穿）。
+**P0 阶段无已知未修残留**——所有 Codex review 都跑过，最近一次（round 63）no findings。776 单测全绿。
 
 ## 卡住的问题
 
@@ -95,7 +87,7 @@ P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端 clean（r
 
 ## 上次会话结束时间
 
-2026-04-24
+2026-04-25
 
 ---
 
@@ -110,3 +102,4 @@ P0 #1–#5 完成（含残留已全部闭合）。P0 #6 Slice A 后端 clean（r
 - 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。12 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮。核心修复：hourly payroll 的 paid-row race → per-(worker, month) advisory lock + tx（round 48 P0）；batch now 贯穿所有 rule getters 防版本漂移（round 48 P1）；**三条 cron 路径统一 COUNTS ONLY 响应**，不返回 settled / errors 避免 pg_cron 日志泄漏薪资（rounds 49-50 P2）；daily batch 改 per-worker try/catch（round 50 P2）；recompute action 补 errors[] 给 owner UI，不然偷摸跳过失败 worker（round 51 P1）。
 - 2026-04-25：完成 P0 #6 Slice A 应收账单后端。4 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮。状态机 DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；核心修复 2 个 P1：generateBillsForPeriod read-diff-write race → per-(salesUser, period) advisory lock + `@@unique([billId, orderId])` DB last-line guard（migration 加 pre-dedupe DELETE）；mark-paid 调 accumulateCsSales 独立开事务 → 改成 tx 贯穿，bill write + CS 累计 atomic。Bill FULLY_PAID 为终态（退款新开负数账单，不回退状态）。
 - 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。和 hourly round 48 同构的 paid-row race —— compute 的 findUnique(isPaid) 和 upsert 之间被 markDailySalaryPaid 翻转，update 分支静默覆盖金额。修法镜像 hourly：per-(worker,date) advisory lock + tx（compute 和 mark-paid 共用同一把锁，rule 读留在 tx 外）。+4 单测（累计 776）。
+- 2026-04-25：完成 P0 #6 Slice B 老板账单 UI + Slices C/D 销售 UI + cron。8 个 commits（5 + 3），0 新单测（纯 Server Component UI），Codex rounds 55–63 共 9 轮。Slice B 1 个 P2 真 bug（period 月份范围）+ 4 轮文案精度迭代；Slice C/D 2 个 P2/P3 真 bug（cron malformed period 静默 fallback、sales layout OWNER 转发丢 leaf id）+ 1 轮 layout-pathname 限制讨论（最终决定不在 layout 做 OWNER 转发，留给 middleware）。**至此 P0 #1-#6 全部 clean，776 测试全绿，等业主拍板 P1**。
