@@ -1,5 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
+// Re-export so specs don't have to import from global-setup directly.
+export { E2E_PASSWORD, E2E_USERS } from './global-setup';
+
 // Seed admin credentials. We DON'T fall back to a hardcoded password:
 // .env.example ships SEED_ADMIN_PASSWORD blank → seed.ts then mints a
 // random one-time password and prints it to stdout. Defaulting to
@@ -46,6 +49,18 @@ export async function login(
 // side, but customerRef and free-text fields could).
 export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// Logs out the currently signed-in user via the header LogoutButton
+// and waits to land on /login. Used by multi-role flow tests where the
+// same browser context switches between SALES → FOREMAN → WORKER →
+// OWNER. We click the form's submit button rather than fetch the
+// signOut endpoint directly so we exercise the same path users do.
+export async function logout(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /退出登录/ }).click();
+  await page.waitForURL((url) => url.pathname.startsWith('/login'), {
+    timeout: 10_000,
+  });
 }
 
 // Defensive assertion: when a Server Action errors, Next dev throws an

@@ -1,12 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { config as loadEnv } from 'dotenv';
+import { loadEnvConfig } from '@next/env';
 
-// Mirror Next's .env loading so tests can reuse SEED_ADMIN_PASSWORD
-// from .env without having to re-set E2E_ADMIN_PASSWORD on every run.
-// Playwright's test runner doesn't load .env on its own — Next.js
-// only loads it for the dev server it spawns. Loading here populates
-// process.env for both the runner AND the spawned dev server.
-loadEnv();
+// Mirror Next's .env loading so tests reuse SEED_ADMIN_PASSWORD without
+// having to re-set an E2E_ env var. Playwright's runner doesn't load
+// .env on its own. We use @next/env (not bare dotenv) so .env.local /
+// .env.test / .env.development precedence and variable expansion match
+// what `next dev` does — bare dotenv only reads .env literally and
+// would diverge from the running app (Codex round 74 / P2).
+loadEnvConfig(process.cwd(), /* dev */ true);
 
 // E2E config — runs against the Next.js dev server. Locally we reuse
 // whatever dev server is already running on :3000 (via `pnpm dev`);
@@ -15,6 +16,7 @@ loadEnv();
 // so reruns don't collide. A separate test DB can be added later.
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false, // share dev DB; serial keeps assertions stable
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
