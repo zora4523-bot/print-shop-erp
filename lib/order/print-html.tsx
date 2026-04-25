@@ -1,4 +1,3 @@
-import { renderToStaticMarkup } from 'react-dom/server';
 import { OrderPrintLayout } from '../../components/business/order/OrderPrintLayout';
 import type { PrintOrder } from '../../components/business/order/OrderPrintLayout.types';
 
@@ -8,10 +7,18 @@ import type { PrintOrder } from '../../components/business/order/OrderPrintLayou
 //
 // The component is pure React — no hooks that read session / route,
 // no async suspense — so renderToStaticMarkup captures it verbatim.
-export function buildPrintHtml(
+//
+// `react-dom/server` is loaded via dynamic import: Next 16 / Turbopack's
+// build-time guard rejects static imports of `react-dom/server` even
+// in Route Handlers (the static analysis can't tell that this module
+// is only ever pulled by server-only entry points). The dynamic
+// import sidesteps the guard and is paid lazily on first call —
+// negligible vs. Puppeteer cold start that comes right after.
+export async function buildPrintHtml(
   order: PrintOrder,
   options: { renderedAt?: Date; factoryName?: string } = {},
-): string {
+): Promise<string> {
+  const { renderToStaticMarkup } = await import('react-dom/server');
   const body = renderToStaticMarkup(
     <OrderPrintLayout
       order={order}

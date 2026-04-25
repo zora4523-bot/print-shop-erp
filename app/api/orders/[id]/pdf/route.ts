@@ -32,7 +32,7 @@ export async function GET(_req: Request, ctx: Params) {
 
   let pdf: Buffer;
   try {
-    const html = buildPrintHtml(order);
+    const html = await buildPrintHtml(order);
     pdf = await renderHtmlToPdf({ html });
   } catch (err) {
     // Most likely cause here is Chromium not yet installed on the
