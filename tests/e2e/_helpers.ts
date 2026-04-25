@@ -36,24 +36,42 @@ export async function getUserIdByUsername(username: string): Promise<string> {
   });
 }
 
-// Wipes all bill+order rows owned by the given user. Used by bill-flow
-// E2E to keep each run independent — generateBillsForPeriod upserts
-// per-(salesUser, period) so prior runs leave aggregated state that
-// would otherwise bleed across runs (totalAmount keeps growing,
-// status moves past DRAFT, generate then errors out).
+// Wipes E2E bill / billItem / order rows owned by the given user.
+// Used by bill-flow E2E to keep each run independent —
+// generateBillsForPeriod upserts per-(salesUser, period) so prior
+// runs leave aggregated state that would otherwise bleed across runs
+// (totalAmount keeps growing, status moves past DRAFT, generate then
+// errors out).
 //
-// Order is sensitive: BillItem fk → Bill, BillItem fk → Order, so
-// drop BillItem first, then Bill + Order. Limit to E2E-prefix orders
-// so a bug in this helper can't nuke real data.
+// Scoping is strict: ONLY rows tied to E2E-prefixed orders. Codex
+// round 79 / P1: the earlier version's Bill DELETE used only
+// salesUserId and would wipe non-E2E bills the same user might have
+// from manual testing. This version drops items whose order is E2E,
+// then drops bills that consequently have zero items remaining.
+//
+// Order matters: BillItem fk → Bill / Order, so we go BillItem first,
+// then orphan Bills, then E2E Orders.
 export async function resetBillsForUser(userId: string): Promise<void> {
   await withDb(async (db) => {
     await db.query(
-      `DELETE FROM "BillItem" WHERE "billId" IN (
-         SELECT id FROM "Bill" WHERE "salesUserId" = $1
-       )`,
+      `DELETE FROM "BillItem"
+         WHERE "orderId" IN (
+           SELECT id FROM "Order"
+            WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'
+         )`,
       [userId],
     );
-    await db.query(`DELETE FROM "Bill" WHERE "salesUserId" = $1`, [userId]);
+    // Bills that lost ALL their items because of the delete above are
+    // pure E2E bills — safe to drop. Bills with surviving items are
+    // mixed (real + E2E) or pure-real and stay intact.
+    await db.query(
+      `DELETE FROM "Bill"
+         WHERE "salesUserId" = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM "BillItem" WHERE "billId" = "Bill".id
+           )`,
+      [userId],
+    );
     await db.query(
       `DELETE FROM "Order" WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'`,
       [userId],
@@ -61,14 +79,23 @@ export async function resetBillsForUser(userId: string): Promise<void> {
   });
 }
 
-// Seeds one Order with status=FINISHED, finishedAt=NOW(), no items.
-// Bills E2E uses this to skip the whole submit→schedule→report→cascade
-// chain (that's wave 2's job). Returns the new order's id + orderNo.
+// Seeds one Order with status=FINISHED, no items. Bills E2E uses this
+// to skip the whole submit→schedule→report→cascade chain (that's
+// wave 2's job). Returns the new order's id + orderNo.
+//
+// `finishedAt` is REQUIRED and must be passed by the caller. The
+// earlier version used PG's NOW(), which depends on the PG session
+// timezone; on UTC-configured Postgres (CI / containers) a Shanghai
+// "today" near month boundaries seeds the order into the wrong
+// month from the perspective of generateBillsForPeriod's JS-side
+// month math, and the bill never generates (Codex round 79 / P2).
+// Caller computes the timestamp deterministically from JS Date.
 export async function seedFinishedOrder(opts: {
   submitterId: string;
   submitterRole: 'SALES' | 'CUSTOMER_SERVICE';
   customerRef: string;
   totalAmount: string; // decimal string, e.g. "5000.00"
+  finishedAt: Date;
 }): Promise<{ orderId: string; orderNo: string }> {
   const orderId = `e2e-ord-${randomBytes(8).toString('hex')}`;
   // orderNo is UNIQUE — we don't follow the YYYYMMDD-NNNN convention
@@ -86,7 +113,7 @@ export async function seedFinishedOrder(opts: {
       ) VALUES (
         $1, $2, $3, $4::"Role", $3,
         'FINISHED'::"OrderStatus", FALSE, $5, $6,
-        NOW(), NOW(), NOW(), NOW(), NOW(),
+        $7, $7, $7, $7, $7,
         NOW(), NOW()
       )
       `,
@@ -97,10 +124,30 @@ export async function seedFinishedOrder(opts: {
         opts.submitterRole,
         opts.customerRef,
         opts.totalAmount,
+        opts.finishedAt.toISOString(),
       ],
     );
   });
   return { orderId, orderNo };
+}
+
+// Returns a UTC Date that's safely in the middle of the current
+// Shanghai calendar month (15th, noon UTC). Used by bill-flow E2E so
+// the seeded order's `finishedAt` matches the period the UI defaults
+// to ("当月" via Intl in Asia/Shanghai), regardless of the PG session
+// timezone.
+export function midShanghaiMonth(now: Date = new Date()): Date {
+  // en-CA gives YYYY-MM. Format in Asia/Shanghai so we get the user-
+  // facing month, not whatever the runner's locale says.
+  const ym = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(now);
+  const [yyyy, mm] = ym.split('-').map(Number);
+  // 15th at 12:00 UTC = 20:00 Shanghai = comfortably inside both
+  // UTC-month bounds and Shanghai-month bounds.
+  return new Date(Date.UTC(yyyy!, mm! - 1, 15, 12, 0, 0));
 }
 
 // Seed admin credentials. We DON'T fall back to a hardcoded password:

@@ -6,6 +6,7 @@ import {
   getUserIdByUsername,
   seedFinishedOrder,
   resetBillsForUser,
+  midShanghaiMonth,
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
 } from './_helpers';
@@ -48,6 +49,10 @@ test.describe('账单全链 — golden path', () => {
       submitterRole: 'SALES',
       customerRef,
       totalAmount,
+      // 中旬 12:00 UTC = 20:00 Shanghai —— 双月份 bound 都稳。NOW()
+      // 在 UTC PG 上靠近 Shanghai 月初会落到上月，bill 永远生不出来
+      // (Codex round 79 / P2)。
+      finishedAt: midShanghaiMonth(),
     });
 
     await test.step('OWNER 登录账单页', async () => {
