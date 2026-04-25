@@ -492,6 +492,27 @@ describe('finishOrder', () => {
   });
 });
 
+describe('transitionWithLog — per-order advisory lock (Codex round 87 / P2)', () => {
+  it('takes the print-shop-erp:order-cascade:<id> lock as the first DB call', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+
+    await shipOrder('o1', ownerActor, null);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    const sql = (dbMock.$executeRaw.mock.calls[0]![0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    // Same key namespace as production.ts orderCascadeLockKey so a
+    // worker cascade can't race a manual transition on the same order.
+    expect(dbMock.$executeRaw.mock.calls[0]![1]).toBe(
+      'print-shop-erp:order-cascade:o1',
+    );
+  });
+});
+
 describe('listOrders / getOrderDetail — scope filter application', () => {
   it('applies getOrderScopeFilter (SALES sees only own) to list', async () => {
     dbMock.order.findMany.mockResolvedValue([]);

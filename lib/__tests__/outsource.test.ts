@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OutsourceStatus, Role } from '../../generated/prisma/client';
+import {
+  OrderStatus,
+  OutsourceStatus,
+  Role,
+} from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
+    order: { findUnique: vi.fn() },
     outsourceOrder: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -25,6 +30,9 @@ import {
 const foremanActor = { id: 'foreman-1', role: Role.FOREMAN };
 
 beforeEach(() => {
+  dbMock.order.findUnique.mockReset().mockResolvedValue({
+    status: OrderStatus.IN_PRODUCTION,
+  });
   dbMock.outsourceOrder.findUnique.mockReset();
   dbMock.outsourceOrder.findMany.mockReset();
   dbMock.outsourceOrder.create.mockReset();
@@ -69,6 +77,42 @@ describe('createOutsourceOrder', () => {
     );
     const data = dbMock.outsourceOrder.create.mock.calls[0][0].data;
     expect(data.amount).toBeNull();
+  });
+
+  // Codex round 87 / P2: SHIP / FINISHED / CANCELLED orders shouldn't
+  // accept new outsource. Lib layer is the authoritative gate.
+  it('throws when the parent order is missing', async () => {
+    dbMock.order.findUnique.mockResolvedValue(null);
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/工单不存在/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    OrderStatus.SHIPPED,
+    OrderStatus.FINISHED,
+    OrderStatus.CANCELLED,
+  ])('refuses outsource creation when order status is %s', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({ status });
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/不允许新建外协/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    OrderStatus.DRAFT,
+    OrderStatus.SUBMITTED,
+    OrderStatus.SCHEDULING,
+    OrderStatus.IN_PRODUCTION,
+    OrderStatus.COMPLETED,
+  ])('allows outsource creation when order status is %s', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({ status });
+    dbMock.outsourceOrder.create.mockResolvedValue({ id: 'o1' });
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).resolves.toEqual({ id: 'o1' });
   });
 });
 

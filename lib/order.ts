@@ -183,6 +183,10 @@ export async function createOrder(
 // Minimal tx surface for status-transition operations (no craft / product
 // cross-table work, unlike create).
 type StatusTxClient = {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
   order: {
     findUnique: (args: {
       where: { id: string };
@@ -197,6 +201,15 @@ type StatusTxClient = {
     create: (args: { data: unknown }) => Promise<unknown>;
   };
 };
+
+// Per-order advisory lock for status-transition writes. We share the
+// SAME namespace as production.ts orderCascadeLockKey
+// (`print-shop-erp:order-cascade:<id>`) so worker reportTask's
+// auto-cascade can't race a manual ship/cancel/submit on the same
+// order — both paths touch Order.status (Codex round 87 / P2).
+function orderTransitionLockKey(orderId: string): string {
+  return `print-shop-erp:order-cascade:${orderId}`;
+}
 
 type TransitionOptions = {
   remark: string | null;
@@ -221,6 +234,17 @@ async function transitionWithLog(
   const now = opts.now ?? new Date();
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as StatusTxClient;
+    // Per-order advisory lock: serialize ALL transitions on this
+    // order. Without this, two concurrent ship calls each read
+    // status=COMPLETED, both pass the status-machine check, both
+    // updates succeed — second silently overwrites trackingNo and
+    // doubles the OrderLog row (Codex round 87 / P2). Same key as
+    // worker-cascade so a manual transition can't interleave with
+    // a sibling task report's auto-cascade either.
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderTransitionLockKey(
+      orderId,
+    )}))`;
+
     const target_order = await txClient.order.findUnique({
       where: { id: orderId },
       select: { id: true, status: true, submitterId: true },

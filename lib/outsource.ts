@@ -5,6 +5,7 @@ import {
   transitionOutsource,
   InvalidOutsourceTransitionError,
 } from './outsource/status-machine';
+import { canAttachOutsource } from './order/status-machine';
 import type {
   CreateOutsourceInput,
   MarkOutsourceReceivedInput,
@@ -32,6 +33,22 @@ export async function createOutsourceOrder(
   actor: { id: string; role: Role },
 ): Promise<CreatedOutsource> {
   void actor;
+  // Reject when the parent order is no longer in a production-active
+  // state — SHIPPED / FINISHED / CANCELLED orders shouldn't accept
+  // new production work (Codex round 87 / P2). Lib layer is the real
+  // gate; the order detail page also hides the entry button for the
+  // same statuses, but that UI hint isn't authoritative.
+  const order = await db.order.findUnique({
+    where: { id: input.orderId },
+    select: { status: true },
+  });
+  if (!order) throw new OutsourceError('工单不存在');
+  if (!canAttachOutsource(order.status)) {
+    throw new OutsourceError(
+      `工单状态 ${order.status} 不允许新建外协（已发货 / 已完成 / 已取消）`,
+    );
+  }
+
   const row = await db.outsourceOrder.create({
     data: {
       orderId: input.orderId,

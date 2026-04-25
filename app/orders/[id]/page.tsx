@@ -3,7 +3,10 @@ import { notFound } from 'next/navigation';
 import { OrderStatus, Role } from '../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
-import { isTerminalOrderStatus } from '@/lib/order/status-machine';
+import {
+  canAttachOutsource,
+  isTerminalOrderStatus,
+} from '@/lib/order/status-machine';
 import {
   editableFieldsetForStatus,
   isOrderEditable,
@@ -70,12 +73,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
       user.role === Role.FOREMAN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
-  // Only foreman / owner creates outsource orders, and only when the
-  // order hasn't terminated. SPEC §3.2 ties outsource creation to the
-  // scheduling step, but in practice it's useful at any active stage.
+  // Only foreman / owner creates outsource orders, and only on
+  // production-active states. SHIPPED is non-terminal but already
+  // out the door — no new production work attaches there (Codex
+  // round 87 / P2). canAttachOutsource() is the canonical gate;
+  // lib/outsource.ts re-checks the same predicate.
   const canCreateOutsource =
     (user.role === Role.OWNER || user.role === Role.FOREMAN) &&
-    !isTerminalOrderStatus(order.status);
+    canAttachOutsource(order.status);
 
   return (
     <div className="space-y-6">
