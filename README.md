@@ -195,3 +195,90 @@ pnpm dev
 4. 标记 `TODO: 需业主确认` 并暂停该任务
 
 **禁止**：自行假设业务规则继续开发。
+
+---
+
+## 🚢 上线运维（P0 部署清单）
+
+P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.example` 列了所有变量，cron endpoints 都有 shared-secret 闸口，instrumentation.ts 是 SENTRY_DSN-gated 的 graceful no-op），运维只需要把环境变量喂进去即可。
+
+### 1. 必填环境变量（`.env`）
+
+| 变量 | 用途 | 不配会怎样 |
+|---|---|---|
+| `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
+| `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
+| `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
+| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 4 个 `/api/cron/*` 全部 503 |
+| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
+
+选填但生产建议：
+| `SENTRY_DSN` | 错误监控 | 留空 → instrumentation.ts no-op，错误只进 Next 默认日志 |
+| `APP_VERSION` | Sentry release / OTel 标签 | 留空 → 'dev'，无法区分版本 |
+| `OSS_ACCESS_KEY_ID` etc. | 设计图 / CDR 直传（5 个变量见 `.env.example`） | 留空 → 上传按钮 disabled，UI 提示&ldquo;未配置&rdquo;（不会假成功） |
+
+### 2. Cron 切换：`Bearer` → `pg_cron`
+
+P0 期间 4 个 cron endpoints 用 shared-secret + 外部 cron 调用：
+
+```bash
+# 每日 24:00 师傅日薪
+curl -X POST https://host/api/cron/daily-salary \
+  -H "Authorization: Bearer $CRON_SECRET"
+
+# 月初 00:00 时薪工月结
+curl -X POST https://host/api/cron/hourly-payroll \
+  -H "Authorization: Bearer $CRON_SECRET"
+
+# 每日扫描已到期客服周期
+curl -X POST https://host/api/cron/cs-settle \
+  -H "Authorization: Bearer $CRON_SECRET"
+
+# 月初 00:30 销售应收账单
+curl -X POST https://host/api/cron/generate-bills \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
+
+### 3. 备份（pgbackrest）
+
+Pigsty 自带 pgbackrest，**不要**自己写 cron 备份脚本。配置点：
+- `/etc/pgbackrest/pgbackrest.conf` 指 stanza
+- 全量 + 增量两条 cron（`pgbackrest --stanza=main backup --type=full` 周末 / `--type=incr` 每天）
+- 异地：S3 / OSS / 本地磁盘 + rsync 至少二选一
+
+恢复演练每季一次。生产数据丢失的代价远大于演练时间。
+
+### 4. Sentry 接入
+
+`instrumentation.ts` 已经写好；只要 `SENTRY_DSN` 喂进去就工作。建议：
+- Sentry 项目 → Settings → Client Keys 拿 DSN
+- `tracesSampleRate` 当前是 0.2（pre-launch 看清楚问题用）；流量起来后调到 0.05 ~ 0.1
+- `sendDefaultPii: false`（不要把 cookies / IP 默认上报）已硬编码——薪资 / 客户 ref 都算敏感，单点 `Sentry.setExtra` 显式带上下文
+
+### 5. OSS（设计图直传）
+
+`lib/oss/config.ts` 接受 5 个必填 + 2 个选填环境变量。**全部填齐才启用**——任一缺失 → `signDesignUpload` 返回 `{ status: 'not-configured' }`，UI 把上传按钮置灰并提示&ldquo;未配置 OSS&rdquo;，不会出现&ldquo;假成功&rdquo;。
+
+生产步骤：
+1. 阿里云 RAM 建一个 `print-shop-erp-oss-uploader` 子账号 → 拿 AK/SK
+2. RAM 建一个 role（`OSS_STS_ROLE_ARN`），给该角色 oss-bucket 写权限
+3. 子账号信任策略允许 AssumeRole 到上一步的 role
+4. `.env` 填 5 个变量；`OSS_PUBLIC_BASE_URL` 设成 CDN 域名（避免直链 OSS）
+
+`OSS_ENDPOINT` 一般留空（按 region 派生）；只有 VPC 内访问 / 特殊端口才需要。
+
+### 6. 上线 smoke checklist
+
+按顺序跑一遍：
+- [ ] `pnpm prisma migrate deploy`（生产 migration）
+- [ ] `pnpm prisma db seed`（首次创建 admin / 工艺字典 / 薪资规则）
+- [ ] 老板登录 `/owner/accounts` 改默认密码
+- [ ] 销售 / 客服 / 师傅各创一个测试账号
+- [ ] 跑通 工单创建 → 排产 → 报工 → 完工 一条链
+- [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
+- [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
+- [ ] OWNER 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
+- [ ] 故意挂掉一个 Server Action（临时改个抛错），确认 Sentry 收到事件后还原
+- [ ] pgbackrest 跑一次 full backup，确认目标位置有文件
