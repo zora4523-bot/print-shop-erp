@@ -41,8 +41,15 @@ export type AdminMenuGroup = {
 
 // 各角色的菜单 —— 不同角色的同一 href 标签可能不同（例：OWNER "工单" /
 // SALES "我的工单"），所以分角色单独写，渲染期再过滤。
+// Dashboard hrefs are `#` placeholders — those role roots
+// (/owner, /foreman, /sales, /customer-service) are layout-only,
+// no page.tsx, so a real link would 404 (Codex round 96 / P2).
+// Same convention as other "feature not built yet" items below
+// (物料 / 报价查询 / 我的业绩 …) — sidebar renders them disabled
+// (cursor-not-allowed + opacity-50). Switch to a real href once
+// the dashboard pages land.
 const OWNER_MENU: AdminMenuItem[] = [
-  { label: 'Dashboard',   href: '/owner',           iconName: 'LayoutDashboard', roles: [Role.OWNER] },
+  { label: 'Dashboard',   href: '#',                iconName: 'LayoutDashboard', roles: [Role.OWNER] },
   { label: '工单',         href: '/orders',          iconName: 'ClipboardList',   requiredPermission: 'order:view:all' },
   { label: '账单',         href: '/owner/bills',     iconName: 'Wallet',          requiredPermission: 'bill:view:all' },
   { label: '师傅日薪',     href: '/owner/salary/daily',  iconName: 'Calculator',  requiredPermission: 'salary:view:all' },
@@ -53,7 +60,7 @@ const OWNER_MENU: AdminMenuItem[] = [
 ];
 
 const FOREMAN_MENU: AdminMenuItem[] = [
-  { label: 'Dashboard',   href: '/foreman',                iconName: 'LayoutDashboard', roles: [Role.FOREMAN] },
+  { label: 'Dashboard',   href: '#',                       iconName: 'LayoutDashboard', roles: [Role.FOREMAN] },
   { label: '工单',         href: '/orders',                 iconName: 'ClipboardList',   requiredPermission: 'order:view:all' },
   { label: '排产',         href: '/foreman/scheduling',     iconName: 'CalendarDays',    requiredPermission: 'order:schedule' },
   { label: '外协',         href: '/foreman/outsource',      iconName: 'PackageOpen',     requiredPermission: 'outsource:manage' },
@@ -63,7 +70,7 @@ const FOREMAN_MENU: AdminMenuItem[] = [
 ];
 
 const SALES_MENU: AdminMenuItem[] = [
-  { label: '我的 Dashboard', href: '/sales',         iconName: 'LayoutDashboard', roles: [Role.SALES] },
+  { label: '我的 Dashboard', href: '#',              iconName: 'LayoutDashboard', roles: [Role.SALES] },
   { label: '创建工单',       href: '/orders/new',    iconName: 'PlusCircle',      requiredPermission: 'order:create' },
   { label: '我的工单',       href: '/orders',        iconName: 'ClipboardList',   requiredPermission: 'order:view:self' },
   { label: '我的账单',       href: '/sales/bills',   iconName: 'Wallet',          requiredPermission: 'bill:view:self' },
@@ -71,7 +78,7 @@ const SALES_MENU: AdminMenuItem[] = [
 ];
 
 const CUSTOMER_SERVICE_MENU: AdminMenuItem[] = [
-  { label: '我的 Dashboard', href: '/customer-service', iconName: 'LayoutDashboard', roles: [Role.CUSTOMER_SERVICE] },
+  { label: '我的 Dashboard', href: '#',                 iconName: 'LayoutDashboard', roles: [Role.CUSTOMER_SERVICE] },
   { label: '创建工单',       href: '/orders/new',       iconName: 'PlusCircle',      requiredPermission: 'order:create' },
   { label: '我的工单',       href: '/orders',           iconName: 'ClipboardList',   requiredPermission: 'order:view:self' },
   { label: '我的业绩',       href: '#',                 iconName: 'TrendingUp',      requiredPermission: 'salary:view:self' },
