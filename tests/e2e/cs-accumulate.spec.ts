@@ -90,31 +90,50 @@ test.describe('CS 业绩累加 — golden path', () => {
       await page.waitForURL(/\/owner\/bills\/[a-z0-9]+/);
     });
 
-    await test.step('发单 + 录入全款', async () => {
+    await test.step('发单', async () => {
       await page
         .getByRole('button', { name: /^发单给销售 \/ 客服$/ })
         .click();
       await expect(page.locator('input[name="amount"]')).toBeVisible({
         timeout: 10_000,
       });
-      await page.locator('input[name="amount"]').fill(totalAmount);
+    });
+
+    // 关键设计：两次部分付款 (1500 + 1500 = 3000)，每次后断言中间
+    // totalSales。单笔全款测不出 delta-vs-cumulative 的回归 (Codex
+    // round 85 / P2)：从 0 开始一次到 3000 时，&ldquo;传 delta&rdquo;和&ldquo;传
+    // newPaidAmount&rdquo;数学上等价。两次半款分两次写：
+    //   第一次：传 delta 1500 → totalSales=1500；传 newPaidAmount 1500 → 1500（仍等价）
+    //   第二次：传 delta 1500 → totalSales=3000；传 newPaidAmount 3000 → 4500
+    // 后者就被这个 expect 抓到。
+    const halfAmount = '1500.00';
+
+    await test.step('录入第一笔半款 (PARTIAL_PAID, totalSales += 1500)', async () => {
+      await page.locator('input[name="amount"]').fill(halfAmount);
       await page.getByRole('button', { name: /^录入付款$/ }).click();
-      // FULLY_PAID badge 出现 = bill 写入成功
+      await expect(
+        page.locator('[data-slot="badge"]').filter({ hasText: /^部分结清$/ }),
+      ).toBeVisible({ timeout: 10_000 });
+
+      const mid = await readActiveCsTotalSales(csUserId);
+      expect(mid?.periodId).toBe(periodId);
+      expect(Number(mid!.totalSales)).toBe(1500);
+    });
+
+    await test.step('录入第二笔半款 (FULLY_PAID, totalSales += 1500 → 3000)', async () => {
+      // PARTIAL_PAID 后 RecordPaymentForm 仍渲染（detail 页同时
+      // 处理 ISSUED 和 PARTIAL_PAID 分支）。
+      await expect(page.locator('input[name="amount"]')).toBeVisible({
+        timeout: 5_000,
+      });
+      await page.locator('input[name="amount"]').fill(halfAmount);
+      await page.getByRole('button', { name: /^录入付款$/ }).click();
       await expect(
         page.locator('[data-slot="badge"]').filter({ hasText: /^已结清$/ }),
       ).toBeVisible({ timeout: 10_000 });
-    });
 
-    await test.step('CS 业绩累加：SalaryPeriod.totalSales 应等于付款金额', async () => {
-      // 核心断言：DB 直读 SalaryPeriod，验证 recordPayment 的 tx
-      // 真把 accumulateCsSales 的 increment 一起 commit (round 52 P1)，
-      // 金额对得上付款额 (round 46 lock 内 fresh-read 后再 increment
-      // 的正确性)。
-      //
-      // 不在 UI 断言 "客服业绩已累计" —— 那段文案在 RecordPaymentForm
-      // 的 success state 里，bill 切到 FULLY_PAID 时父详情页 revalidate
-      // 会把 form 整段卸载（状态分支不渲染 ISSUED/PARTIAL_PAID 时的
-      // form），UI 文案天生有竞态。DB 是 source of truth。
+      // 终态断言：必须正好 3000。如果 recordPayment 把 cumulative
+      // newPaidAmount 传给 accumulateCsSales，这里会变 1500 + 3000 = 4500。
       const after = await readActiveCsTotalSales(csUserId);
       expect(after?.periodId).toBe(periodId);
       expect(Number(after!.totalSales)).toBe(Number(totalAmount));
