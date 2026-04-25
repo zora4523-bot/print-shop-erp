@@ -41,12 +41,20 @@ export async function GET(_req: Request, ctx: Params) {
     // instead of guessing at the browser side.
     // Puppeteer's "no browser" error wording varies by version: older
     // releases said "Could not find Chromium", current ones say
-    // "Could not find Chrome". Match all three (and the generic
-    // "browser") so the hint always fires when this is the cause.
+    // "Could not find Chrome". The SAME error covers two distinct
+    // causes — (a) the browser was never downloaded on this host /
+    // user, or (b) it WAS downloaded but at a path the runtime can't
+    // see (split build/runtime container, different user's
+    // ~/.cache/puppeteer, custom PUPPETEER_CACHE_DIR). Steering
+    // operators at only (a) hides (b) — the regex fires for both
+    // cases now and the hint mentions both (Codex round 71 / P2).
     const hint =
       err instanceof Error &&
       /Could not find (Chrome|Chromium|browser)/i.test(err.message)
-        ? '请在服务器上运行 `npx puppeteer browsers install chrome` 下载渲染所需的浏览器。'
+        ? '未找到 Puppeteer 期望的浏览器。两种典型原因：' +
+          '(1) 当前用户 / 容器还没下载——跑 `npx puppeteer browsers install chrome`；' +
+          '(2) 已下载但路径错配——核对 PUPPETEER_CACHE_DIR 或运行时用户的 ~/.cache/puppeteer 与下载位置是否一致。' +
+          '错误正文里 Puppeteer 已经打印了它实际查的路径。'
         : null;
     return NextResponse.json(
       {
