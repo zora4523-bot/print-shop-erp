@@ -46,8 +46,13 @@ export async function register() {
   // Whitelist of span-data keys that don't carry URL / query / header
   // info and are useful for debugging. Anything else (http.url,
   // http.target, http.query, db.statement, etc.) is dropped.
+  // Includes BOTH legacy (http.method) and current OTel semantic-
+  // conventions (http.request.method) keys — the @sentry/nextjs SDK
+  // emits the new form on Node runtimes; allowing only the legacy
+  // dropped method entirely (Codex round 68 / P2).
   const SAFE_SPAN_DATA_KEYS = new Set([
     'http.method',
+    'http.request.method',
     'http.response.status_code',
     'http.status_code',
     'op',
@@ -78,11 +83,16 @@ export async function register() {
 
     if (Array.isArray(e.spans)) {
       for (const span of e.spans) {
-        // Span description for HTTP-flavored spans is `<METHOD> <URL>`.
-        // Cut the query at first `?` rather than parse — the format
-        // isn't guaranteed to be a clean URL, but `?...` is reliably
-        // the query separator.
-        if (typeof span.description === 'string') {
+        const isHttpSpan =
+          typeof (span as { op?: unknown }).op === 'string' &&
+          ((span as { op: string }).op.startsWith('http.') ||
+            (span as { op: string }).op === 'http');
+        // ONLY HTTP-flavored span descriptions look like `<METHOD>
+        // <URL>` and need the query stripped. Prisma / db spans use
+        // raw SQL as description — and SQL legitimately contains `?`
+        // (JSONB operators, prepared-statement placeholders); cutting
+        // those would corrupt the span name (Codex round 68 / P3).
+        if (isHttpSpan && typeof span.description === 'string') {
           const q = span.description.indexOf('?');
           if (q >= 0) span.description = span.description.slice(0, q);
         }
