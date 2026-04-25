@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Role } from '../../generated/prisma/enums';
+import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
