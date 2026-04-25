@@ -8,7 +8,7 @@
 
 ## 当前任务
 
-**P0 #1–#6 全部完成 clean**。P0 阶段收尾，下一阶段（P1）待业主拍板优先级。
+**P0 #1–#6 全部完成 clean** + 上线前运维补齐已完成。下一阶段（P1）待业主拍板优先级。
 
 ## 本次 session 主要产出
 
@@ -47,17 +47,16 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 全部完成 clean**。所有 known race / 状态机 / 权限闸口 / 快照化已盖章。下一步是：
+**P0 + 运维补齐都完成 clean**。下一步：
 
-1. **业主拍板 P1 优先级**。SPEC §10 / `PROGRESS.md` 列了 E-full（款式级编辑）、推送、报表、Docker 化等候选，但当前没有强 sequencing 约束——建议先从工作流痛点回收（业主用一天给反馈）。
-2. **P0 上线前的运维项**：
-   - `CRON_SECRET` env 配置 → pg_cron 切换
-   - 阿里云 OSS 真实 access key 替换 mock
-   - Sentry / OTel 接入
-   - 备份脚本（pgbackrest）
-3. **已知未做但 SPEC 写过的非 P0 项**：CS 提成"工单 FINISHED 时累加 vs 账单 mark-paid 累加"二选一仍未拍板（HANDOFF 卡住的问题里），目前实现是后者；退单语义未实现（业主拍板）。
+1. **业主拍板 P1 优先级**。SPEC §10 / `PROGRESS.md` 列了 E-full（款式级编辑）、推送、报表、Docker 化等候选——建议从工作流痛点回收（业主用一天给反馈）。
+2. **运维剩下的硬件 / 平台动作**（代码侧 done，剩纯 ops）：
+   - `.env` 真实填 CRON_SECRET / SENTRY_DSN / OSS 5 必填变量（README §🚢 §1 表格列了影响）
+   - 上线后 cron 由 shared-secret curl 切到 Pigsty pg_cron（README §🚢 §2 4 个 endpoint 都给了 curl 示例）
+   - Pigsty pgbackrest 启用 + 季度恢复演练（README §🚢 §3）
+3. **已知未做但 SPEC 写过的非 P0 项**：CS 提成&ldquo;工单 FINISHED 时累加 vs 账单 mark-paid 累加&rdquo;二选一仍未拍板（HANDOFF 卡住的问题里），目前实现是后者；退单语义未实现（业主拍板）。
 
-**P0 阶段无已知未修残留**——所有 Codex review 都跑过，最近一次（round 63）no findings。776 单测全绿。
+**Codex review 闸口**：所有提交都过 Codex review（最近 round 69 no findings）。776 单测 / lint / typecheck 全绿。
 
 ## 卡住的问题
 
@@ -102,4 +101,5 @@
 - 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。12 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮。核心修复：hourly payroll 的 paid-row race → per-(worker, month) advisory lock + tx（round 48 P0）；batch now 贯穿所有 rule getters 防版本漂移（round 48 P1）；**三条 cron 路径统一 COUNTS ONLY 响应**，不返回 settled / errors 避免 pg_cron 日志泄漏薪资（rounds 49-50 P2）；daily batch 改 per-worker try/catch（round 50 P2）；recompute action 补 errors[] 给 owner UI，不然偷摸跳过失败 worker（round 51 P1）。
 - 2026-04-25：完成 P0 #6 Slice A 应收账单后端。4 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮。状态机 DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；核心修复 2 个 P1：generateBillsForPeriod read-diff-write race → per-(salesUser, period) advisory lock + `@@unique([billId, orderId])` DB last-line guard（migration 加 pre-dedupe DELETE）；mark-paid 调 accumulateCsSales 独立开事务 → 改成 tx 贯穿，bill write + CS 累计 atomic。Bill FULLY_PAID 为终态（退款新开负数账单，不回退状态）。
 - 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。和 hourly round 48 同构的 paid-row race —— compute 的 findUnique(isPaid) 和 upsert 之间被 markDailySalaryPaid 翻转，update 分支静默覆盖金额。修法镜像 hourly：per-(worker,date) advisory lock + tx（compute 和 mark-paid 共用同一把锁，rule 读留在 tx 外）。+4 单测（累计 776）。
-- 2026-04-25：完成 P0 #6 Slice B 老板账单 UI + Slices C/D 销售 UI + cron。8 个 commits（5 + 3），0 新单测（纯 Server Component UI），Codex rounds 55–63 共 9 轮。Slice B 1 个 P2 真 bug（period 月份范围）+ 4 轮文案精度迭代；Slice C/D 2 个 P2/P3 真 bug（cron malformed period 静默 fallback、sales layout OWNER 转发丢 leaf id）+ 1 轮 layout-pathname 限制讨论（最终决定不在 layout 做 OWNER 转发，留给 middleware）。**至此 P0 #1-#6 全部 clean，776 测试全绿，等业主拍板 P1**。
+- 2026-04-25：完成 P0 #6 Slice B 老板账单 UI + Slices C/D 销售 UI + cron。8 个 commits（5 + 3），0 新单测（纯 Server Component UI），Codex rounds 55–63 共 9 轮。Slice B 1 个 P2 真 bug（period 月份范围）+ 4 轮文案精度迭代；Slice C/D 2 个 P2/P3 真 bug（cron malformed period 静默 fallback、sales layout OWNER 转发丢 leaf id）+ 1 轮 layout-pathname 限制讨论（最终决定不在 layout 做 OWNER 转发，留给 middleware）。**至此 P0 #1-#6 全部 clean，776 测试全绿**。
+- 2026-04-25：上线前运维补齐（业主选项 A）。1 个初始 commit（`fe3c668`）+ 5 轮 Codex 进步式 privacy 收紧（rounds 64–68，最终 round 69 clean）。`.env.example` 加 CRON_SECRET / SENTRY_DSN / APP_VERSION + 影响说明；instrumentation.ts 真实 Sentry init（DSN-gated graceful no-op）；README 加&ldquo;上线运维&rdquo;章节（env 表格 + cron pg_cron 切换 + pgbackrest + Sentry + OSS RAM + 10 步 smoke checklist）。**Sentry 隐私收紧关键路径**：Codex 5 轮进步式发现 `captureRequestError` 默认捕获 (1) headers 含 Authorization / Cookie，(2) URL query 含 reset token，(3) transaction event vs exception event 双路径，(4) span.data + span.description，(5) `contexts.nextjs.request_path`，(6) OTel 新旧 method 键名 + Prisma 的 `?` 在 SQL 不能被 URL trim 误伤。最终方案：`scrubEvent()` 同时挂 `beforeSend` + `beforeSendTransaction`，URL 一律 strip query → pathname；span data 走 SAFE_SPAN_DATA_KEYS allowlist；HTTP-op 才 trim description。776 测试不变，无新代码逻辑。
