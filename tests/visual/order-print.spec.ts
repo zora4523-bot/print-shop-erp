@@ -21,16 +21,18 @@ import {
 //   - Designs render an inline 1×1 PNG (data:image/png;base64,...)
 //     so no network fetch / no image caching variance.
 //   - print-footer (打印时间) is masked — wall-clock varies.
-//   - Next.js dev-toolbar BUTTON is masked, NOT the whole
-//     <nextjs-portal> host (Codex round 91 / P2): Next renders real
-//     build / runtime error overlays inside the same portal; hiding
-//     the host would silently swallow a broken page.
+//   - Snapshot is scoped to `.print-container` (the OrderPrintLayout
+//     root <div>), NOT the page. Codex rounds 90→92 traced a chain
+//     of issues from running fullPage against `pnpm dev`: Next's
+//     dev-toolbar floats outside print-container and would diff on
+//     any Next upgrade. Snapshotting just the layout element makes
+//     the visual baseline depend on OrderPrintLayout's CSS / DOM
+//     output and nothing else.
 //
 // Platform: baselines are committed for darwin. Linux / Windows runs
 // will see "snapshot doesn't exist" on first invocation —
 // `pnpm test:visual:update` on the target platform writes its own
-// `*-<platform>.png` siblings (Codex round 91 / P1: don't skip,
-// because skipping also blocks the recovery path).
+// `*-<platform>.png` siblings.
 
 const BUCKETS = [1, 2, 3, 5, 8, 10] as const;
 
@@ -55,18 +57,15 @@ test.describe('OrderPrintLayout 截图回归', () => {
       // 用一个&ldquo;关键内容已渲染&rdquo;的 expect 替代。
       await expect(page.locator('text=VR 款式').first()).toBeVisible();
 
-      await expect(page).toHaveScreenshot(`order-print-${count}-designs.png`, {
-        fullPage: true,
-        mask: [
+      // 只截 OrderPrintLayout 那个根 div；dev 模式的 Next toolbar、
+      // 错误 overlay、其他外层 chrome 都在它外面，自然不入境。
+      await expect(page.locator('.print-container')).toHaveScreenshot(
+        `order-print-${count}-designs.png`,
+        {
           // 打印时间每次跑都不一样 —— 必须 mask。
-          page.locator('.print-footer'),
-          // 只 mask Next dev-toolbar 那个浮动按钮 (Open Next.js Dev
-          // Tools)；不 mask 整个 <nextjs-portal>，否则真有运行时
-          // 错误时 dialog 也会被吃掉，截图反而干净 (round 91 / P2)。
-          // 生产构建里这个按钮不存在，mask 是 no-op。
-          page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
-        ],
-      });
+          mask: [page.locator('.print-footer')],
+        },
+      );
     });
   }
 });
