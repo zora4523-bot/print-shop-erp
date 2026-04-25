@@ -36,42 +36,51 @@ export async function getUserIdByUsername(username: string): Promise<string> {
   });
 }
 
-// Wipes E2E bill / billItem / order rows owned by the given user.
-// Used by bill-flow E2E to keep each run independent —
-// generateBillsForPeriod upserts per-(salesUser, period) so prior
-// runs leave aggregated state that would otherwise bleed across runs
-// (totalAmount keeps growing, status moves past DRAFT, generate then
-// errors out).
+// Wipes ALL bill / billItem / order rows owned by the given user —
+// bill-flow E2E uses this to keep each run independent.
 //
-// Scoping is strict: ONLY rows tied to E2E-prefixed orders. Codex
-// round 79 / P1: the earlier version's Bill DELETE used only
-// salesUserId and would wipe non-E2E bills the same user might have
-// from manual testing. This version drops items whose order is E2E,
-// then drops bills that consequently have zero items remaining.
+// generateBillsForPeriod upserts per-(salesUser, period); leftover
+// state from prior runs causes bleed (totalAmount keeps aggregating,
+// status moves past DRAFT, next generate errors out). Cleaning only
+// E2E-prefixed orders (round 79 attempt) doesn't actually fix this —
+// if a real bill exists for the same (salesUser, period), it occupies
+// the unique slot and the next generate either appends E2E items to a
+// real DRAFT bill (mixing data) or fails because that bill is non-
+// DRAFT (Codex round 80 / P1). Plus stripping items from a mixed bill
+// without recomputing totalAmount / paidAmount leaves the real bill
+// internally inconsistent (round 80 / P2).
 //
-// Order matters: BillItem fk → Bill / Order, so we go BillItem first,
-// then orphan Bills, then E2E Orders.
+// Resolution: this helper REQUIRES an E2E-test user (username starts
+// with `e2e-`). Such users are owned by globalSetup.ts and never get
+// real bills — wiping them entirely is safe. Real users will throw,
+// so the helper can't accidentally damage production data.
 export async function resetBillsForUser(userId: string): Promise<void> {
   await withDb(async (db) => {
-    await db.query(
-      `DELETE FROM "BillItem"
-         WHERE "orderId" IN (
-           SELECT id FROM "Order"
-            WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'
-         )`,
+    const r = await db.query<{ username: string }>(
+      'SELECT username FROM "User" WHERE id = $1',
       [userId],
     );
-    // Bills that lost ALL their items because of the delete above are
-    // pure E2E bills — safe to drop. Bills with surviving items are
-    // mixed (real + E2E) or pure-real and stay intact.
+    if (r.rowCount === 0) {
+      throw new Error(`resetBillsForUser: user id ${userId} not found`);
+    }
+    const username = r.rows[0]!.username;
+    if (!username.startsWith('e2e-')) {
+      throw new Error(
+        `resetBillsForUser refuses to wipe non-E2E user "${username}". ` +
+          'Pass a user whose username starts with "e2e-" (E2E fixtures ' +
+          'created by globalSetup.ts).',
+      );
+    }
+    // Order matters: BillItem fk → Bill / Order, so go items first,
+    // then bills, then E2E orders. Bills + Orders cleared in full
+    // because the user is by-construction test-only.
     await db.query(
-      `DELETE FROM "Bill"
-         WHERE "salesUserId" = $1
-           AND NOT EXISTS (
-             SELECT 1 FROM "BillItem" WHERE "billId" = "Bill".id
-           )`,
+      `DELETE FROM "BillItem" WHERE "billId" IN (
+         SELECT id FROM "Bill" WHERE "salesUserId" = $1
+       )`,
       [userId],
     );
+    await db.query(`DELETE FROM "Bill" WHERE "salesUserId" = $1`, [userId]);
     await db.query(
       `DELETE FROM "Order" WHERE "submitterId" = $1 AND "orderNo" LIKE 'E2E-%'`,
       [userId],
