@@ -11,7 +11,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
     };
-    $queryRaw: ReturnType<typeof vi.fn>;
+    $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
     user: {
@@ -21,8 +21,8 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       count: vi.fn(),
     },
-    // $queryRaw is only used to acquire the advisory lock; no return value.
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    // $executeRaw is only used to acquire the advisory lock; no return value.
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     // $transaction runs the callback with the same mock as tx so every
     // lib-layer call inside the transaction observes the same findUnique /
     // update / count state we set up.
@@ -72,7 +72,7 @@ const makeUser = (over: Partial<{
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.user)) fn.mockReset();
-  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -200,8 +200,8 @@ describe('updateUser invariants', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     // First tx-scoped call is the advisory lock — ensures the critical
     // section is serialized against concurrent OWNER mutations.
-    expect(dbMock.$queryRaw).toHaveBeenCalled();
-    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$executeRaw.mock.calls[0];
     const templateText = (firstCall[0] as TemplateStringsArray).join('?');
     expect(templateText).toMatch(/pg_advisory_xact_lock/);
   });
@@ -284,7 +284,7 @@ describe('setUserActive invariants', () => {
     await setUserActive('inactive', true, baseActor);
 
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
-    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    const firstCall = dbMock.$executeRaw.mock.calls[0];
     expect((firstCall[0] as TemplateStringsArray).join('?')).toMatch(/pg_advisory_xact_lock/);
   });
 

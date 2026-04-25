@@ -259,7 +259,7 @@ export async function startCsPeriod(
 // tx in and share atomicity with us (Codex round 52 / P1 — bill
 // payment + CS accumulation must commit / roll back together).
 type CsAccumulateTxClient = {
-  $queryRaw: (
+  $executeRaw: (
     strings: TemplateStringsArray,
     ...values: unknown[]
   ) => Promise<unknown>;
@@ -289,7 +289,7 @@ async function accumulateCsSalesIn(
   // the gap. User-scope lock keeps period state stable in this
   // critical section — either IN_PROGRESS or the settler's auto-
   // created next period.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
     csUserId,
   )}))`;
 
@@ -361,7 +361,7 @@ export async function settleCsPeriod(
 ): Promise<SettledCommission> {
   return db.$transaction(async (tx) => {
     const txc = tx as unknown as RuleTx & {
-      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+      $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
       salaryPeriod: {
         findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
           id: string;
@@ -393,7 +393,7 @@ export async function settleCsPeriod(
     });
     if (!periodLight) throw new CsPeriodError('周期不存在');
 
-    await txc.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+    await txc.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
       periodLight.csUserId,
     )}))`;
 

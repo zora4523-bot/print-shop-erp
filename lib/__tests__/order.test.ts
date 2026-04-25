@@ -13,7 +13,7 @@ const { dbMock } = vi.hoisted(() => {
     craft: { findMany: ReturnType<typeof vi.fn> };
     product: { findUnique: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
-    $queryRaw: ReturnType<typeof vi.fn>;
+    $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
     order: {
@@ -26,7 +26,7 @@ const { dbMock } = vi.hoisted(() => {
     craft: { findMany: vi.fn() },
     product: { findUnique: vi.fn() },
     orderLog: { create: vi.fn() },
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -75,7 +75,7 @@ beforeEach(() => {
   dbMock.craft.findMany.mockReset();
   dbMock.product.findUnique.mockReset();
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
-  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -111,7 +111,7 @@ describe('createOrder', () => {
       new Date('2026-04-23T09:00:00+08:00'),
     );
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
-    const queryRawCalls = dbMock.$queryRaw.mock.calls;
+    const queryRawCalls = dbMock.$executeRaw.mock.calls;
     expect(queryRawCalls.length).toBeGreaterThan(0);
     const firstSql = (queryRawCalls[0][0] as TemplateStringsArray).join('?');
     expect(firstSql).toMatch(/pg_advisory_xact_lock/);

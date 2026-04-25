@@ -24,7 +24,7 @@ const OWNER_INVARIANT_LOCK_KEY = 'print-shop-erp:account:owner-invariant';
 // generator, so we list only the methods we actually call. Keeping this
 // explicit also makes the lib surface auditable.
 type TxClient = {
-  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   user: {
     findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<AccountSummary | null>;
     update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<AccountSummary>;
@@ -34,7 +34,7 @@ type TxClient = {
 
 async function acquireOwnerInvariantLock(tx: TxClient): Promise<void> {
   // hashtext(text) → int4, the argument form pg_advisory_xact_lock expects.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${OWNER_INVARIANT_LOCK_KEY}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OWNER_INVARIANT_LOCK_KEY}))`;
 }
 
 export type AccountSummary = Pick<

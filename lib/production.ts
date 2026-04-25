@@ -40,7 +40,7 @@ function scheduleLockKey(orderId: string): string {
 // upgrade doesn't explode the function signature (same pattern as
 // lib/order.ts's OrderTxClient).
 type ScheduleTxClient = {
-  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
     findFirst: (args: {
       where: unknown;
@@ -129,7 +129,7 @@ export async function scheduleOrder(
     // two STATUS_CHANGE log entries. Lock is per-tx so the second
     // transaction blocks here and then sees SCHEDULING on its own
     // read, tripping transitionOrder's guard (Codex round 37 / P0).
-    await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${scheduleLockKey(
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scheduleLockKey(
       input.orderId,
     )}))`;
 
@@ -322,7 +322,7 @@ export class ReportError extends Error {
 // Tx surface for begin/report. Same narrow-on-purpose style as the
 // scheduling helper.
 type TaskTxClient = {
-  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   productionTask: {
     findUnique: (args: {
       where: { id: string };
@@ -400,7 +400,7 @@ export async function beginTask(
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TaskTxClient;
 
-    await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
 
     const task = await txClient.productionTask.findUnique({
       where: { id: taskId },
@@ -457,7 +457,7 @@ export async function beginTask(
     let orderStatusChanged = false;
     const { order } = task.orderItem;
     if (order.status === OrderStatus.SCHEDULING) {
-      await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
         order.id,
       )}))`;
       // Re-read INSIDE the lock. The snapshot from the initial task
@@ -535,7 +535,7 @@ export async function reportTask(
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TaskTxClient;
 
-    await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
 
     const task = await txClient.productionTask.findUnique({
       where: { id: taskId },
@@ -616,7 +616,7 @@ export async function reportTask(
     // order must be COMPLETED. Acquire cascade lock and re-read the
     // sibling statuses inside the lock.
     const { order } = task.orderItem;
-    await txClient.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       order.id,
     )}))`;
 

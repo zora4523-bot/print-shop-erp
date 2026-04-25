@@ -13,7 +13,7 @@ function makeTx(existingOrderNos: string[] = []) {
     _queryRaw: typeof queryRaw;
     _findFirst: typeof findFirst;
   } = {
-    $queryRaw: queryRaw as unknown as OrderSeqTxClient['$queryRaw'],
+    $executeRaw: queryRaw as unknown as OrderSeqTxClient['$executeRaw'],
     order: { findFirst: findFirst as unknown as OrderSeqTxClient['order']['findFirst'] },
     _queryRaw: queryRaw,
     _findFirst: findFirst,

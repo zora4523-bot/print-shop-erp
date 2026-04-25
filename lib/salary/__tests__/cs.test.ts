@@ -20,7 +20,7 @@ const { dbMock } = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
     },
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -65,7 +65,7 @@ beforeEach(() => {
   dbMock.customerServiceCommission.findUnique.mockReset();
   dbMock.customerServiceCommission.create.mockReset();
   dbMock.customerServiceCommission.update.mockReset();
-  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   // Default: all three CS rules resolve to seed values.
   dbMock.salaryRule.findFirst.mockImplementation(async (args: {
     where: { ruleKey: string };
@@ -246,8 +246,8 @@ describe('accumulateCsSales', () => {
     });
     await accumulateCsSales('cs-1', 5000);
     // Lock comes first — BEFORE any salaryPeriod read.
-    expect(dbMock.$queryRaw).toHaveBeenCalled();
-    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$executeRaw.mock.calls[0];
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
     expect(firstCall[1]).toMatch(/print-shop-erp:cs-user:cs-1/);
@@ -340,8 +340,8 @@ describe('settleCsPeriod', () => {
     dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
     dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
     await settleCsPeriod('period-1');
-    expect(dbMock.$queryRaw).toHaveBeenCalled();
-    const firstCall = dbMock.$queryRaw.mock.calls[0];
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+    const firstCall = dbMock.$executeRaw.mock.calls[0];
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
     // Lock keyed on csUserId so it serializes with accumulateCsSales

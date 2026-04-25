@@ -126,7 +126,7 @@ async function generateBillForSubmitter(
     // @@unique([billId, orderId]) index is the DB-level last-line
     // guard; this lock turns the error into clean serialization
     // (Codex round 52 / P1).
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${billGenerateLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billGenerateLockKey(
       submitterId,
       period,
     )}))`;
@@ -220,7 +220,7 @@ export async function issueBill(
 ): Promise<{ id: string; status: BillStatus }> {
   void _actor;
   return db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${billLockKey(billId)}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billLockKey(billId)}))`;
 
     const bill = await tx.bill.findUnique({
       where: { id: billId },
@@ -270,7 +270,7 @@ export async function recordPayment(
   return db.$transaction(async (tx) => {
     // Serialize concurrent payments on the same bill so paidAmount
     // 累加不丢 update。
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${billLockKey(billId)}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billLockKey(billId)}))`;
 
     const bill = await tx.bill.findUnique({
       where: { id: billId },

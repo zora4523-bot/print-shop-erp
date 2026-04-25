@@ -28,7 +28,7 @@ export class OrderInvariantError extends Error {
 // Minimum TxClient surface the order module needs. Kept local so we don't
 // import from lib/account.ts (different table surface).
 type OrderTxClient = {
-  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
     create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string; orderNo: string }>;
     findFirst: (args: {

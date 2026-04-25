@@ -48,7 +48,7 @@ function formatDatePrefix(date: Date): string {
 // doesn't depend on the lib/account.ts TxClient declaration (different
 // table surfaces).
 export type OrderSeqTxClient = {
-  $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
     findFirst: (args: {
       where: unknown;
@@ -66,7 +66,7 @@ export async function nextOrderNumber(
 
   // Per-day advisory lock — concurrent creates on different days don't
   // block each other (different hash), but same-day creates serialize.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ORDER_SEQ_NAMESPACE}:${prefix}`}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ORDER_SEQ_NAMESPACE}:${prefix}`}))`;
 
   // Highest existing serial. We look at max rather than count because a
   // cancellation may leave holes (cancelled orders stay in the table with

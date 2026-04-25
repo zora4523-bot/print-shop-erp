@@ -158,7 +158,7 @@ export async function computeDailyWorkerSalary(
   // (worker, date) advisory lock so the paid-row guard and the upsert
   // can't be interleaved with a concurrent markDailySalaryPaid.
   return db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
       workerId,
       date,
     )}))`;
@@ -352,7 +352,7 @@ export async function markDailySalaryPaid(
       throw new DailySalaryError('日薪记录不存在');
     }
     const dateKey = row.date.toISOString().slice(0, 10);
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dailyLockKey(
       row.workerId,
       dateKey,
     )}))`;

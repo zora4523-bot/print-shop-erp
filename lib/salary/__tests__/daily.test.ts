@@ -19,7 +19,7 @@ const { dbMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -115,7 +115,7 @@ describe('computeDailyWorkerSalary', () => {
     dbMock.dailyWorkerSalary.findMany.mockReset();
     dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
     dbMock.dailyWorkerSalary.update.mockReset();
-    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
       return fn;
@@ -305,7 +305,7 @@ describe('markDailySalaryPaid', () => {
       id: 'ds-1',
       isPaid: true,
     });
-    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
       return fn;
@@ -340,7 +340,7 @@ describe('markDailySalaryPaid', () => {
     // a concurrent recompute can't overwrite salary fields on a row
     // that's being marked paid.
     await markDailySalaryPaid('ds-1', true);
-    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    const sqlCalls = dbMock.$executeRaw.mock.calls;
     expect(sqlCalls.length).toBeGreaterThan(0);
     const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
@@ -367,7 +367,7 @@ describe('computeDailyWorkerSalary — advisory lock + now pinning (mirrors hour
       .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
     dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
     dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
-    dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
       return fn;
@@ -376,7 +376,7 @@ describe('computeDailyWorkerSalary — advisory lock + now pinning (mirrors hour
 
   it('takes the per-(worker, date) advisory lock (P0)', async () => {
     await computeDailyWorkerSalary('worker-1', '2026-04-23');
-    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    const sqlCalls = dbMock.$executeRaw.mock.calls;
     expect(sqlCalls.length).toBeGreaterThan(0);
     const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);

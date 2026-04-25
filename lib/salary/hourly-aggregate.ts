@@ -102,7 +102,7 @@ export async function computeHourlyPayroll(
   // upsert can't be interleaved with a concurrent mark-paid action
   // (Codex round 48 / P0).
   return db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
       workerId,
       month,
     )}))`;
@@ -416,7 +416,7 @@ export async function markHourlyPayrollPaid(
     if (!row) {
       throw new HourlyAggregateError('月结记录不存在');
     }
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
       row.workerId,
       row.month,
     )}))`;

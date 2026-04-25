@@ -16,7 +16,7 @@ const { dbMock } = vi.hoisted(() => {
       findMany: vi.fn(),
       update: vi.fn(),
     },
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -80,7 +80,7 @@ beforeEach(() => {
     }));
   dbMock.hourlyWorkerPayroll.findMany.mockReset();
   dbMock.hourlyWorkerPayroll.update.mockReset();
-  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -431,7 +431,7 @@ describe('markHourlyPayrollPaid', () => {
     // concurrent recompute can't overwrite salary fields on a row
     // that's being marked paid.
     await markHourlyPayrollPaid('p-1', true);
-    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    const sqlCalls = dbMock.$executeRaw.mock.calls;
     expect(sqlCalls.length).toBeGreaterThan(0);
     const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
@@ -447,7 +447,7 @@ describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)'
     setupAllRules();
     dbMock.attendance.findMany.mockResolvedValue([]);
     await computeHourlyPayroll('worker-1', '2026-05');
-    const sqlCalls = dbMock.$queryRaw.mock.calls;
+    const sqlCalls = dbMock.$executeRaw.mock.calls;
     expect(sqlCalls.length).toBeGreaterThan(0);
     const sql = (sqlCalls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);

@@ -19,7 +19,7 @@ const { dbMock } = vi.hoisted(() => {
       findFirst: vi.fn(),
       update: vi.fn(),
     },
-    $queryRaw: vi.fn().mockResolvedValue(undefined),
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
       return fn;
@@ -51,7 +51,7 @@ beforeEach(() => {
   dbMock.billItem.createMany.mockReset().mockResolvedValue({ count: 0 });
   dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
   dbMock.salaryPeriod.update.mockReset();
-  dbMock.$queryRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
@@ -154,10 +154,10 @@ describe('generateBillsForPeriod', () => {
     dbMock.bill.findUnique.mockResolvedValue(null);
     dbMock.bill.create.mockResolvedValue({ id: 'bill-1' });
     await generateBillsForPeriod('2026-05', ownerActor);
-    expect(dbMock.$queryRaw).toHaveBeenCalled();
-    const sql = (dbMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+    const sql = (dbMock.$executeRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(dbMock.$queryRaw.mock.calls[0][1]).toMatch(
+    expect(dbMock.$executeRaw.mock.calls[0][1]).toMatch(
       /print-shop-erp:bill-gen:sales-a:2026-05/,
     );
   });
@@ -205,9 +205,9 @@ describe('issueBill', () => {
     });
     dbMock.bill.update.mockResolvedValue({ id: 'bill-1', status: BillStatus.ISSUED });
     await issueBill('bill-1', ownerActor);
-    const sql = (dbMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    const sql = (dbMock.$executeRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(dbMock.$queryRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
+    expect(dbMock.$executeRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
   });
 });
 
@@ -323,9 +323,9 @@ describe('recordPayment', () => {
     dbMock.bill.findUnique.mockResolvedValue(billFixture());
     dbMock.bill.update.mockResolvedValue({});
     await recordPayment('bill-1', 100, ownerActor);
-    const sql = (dbMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    const sql = (dbMock.$executeRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(dbMock.$queryRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
+    expect(dbMock.$executeRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
   });
 
   it('SALES account: does NOT call accumulateCsSales', async () => {
