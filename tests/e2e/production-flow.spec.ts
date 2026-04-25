@@ -15,7 +15,7 @@ import {
 // order-cascade。HANDOFF 历史里 round 39 P0 race 就埋在 cascade 锁内
 // fresh-read Order.status，没有 E2E 真实跑过那段就只能靠相信单测。
 test.describe('生产流程 — golden path', () => {
-  test('SALES create → submit, FOREMAN schedule, WORKER report → 工单 COMPLETED (cascade)', async ({
+  test('SALES create → submit, FOREMAN schedule, WORKER report → cascade COMPLETED → SHIP → FINISHED', async ({
     page,
   }) => {
     test.setTimeout(60_000); // 多角色切换 + 多次表单提交，给点余量
@@ -169,6 +169,38 @@ test.describe('生产流程 — golden path', () => {
         .filter({ hasText: /^已完工$/ });
       await expect(statusBadge).toHaveCount(1);
       await expect(statusBadge).toBeVisible();
+    });
+
+    await test.step('OWNER 标记发货 (COMPLETED → SHIPPED)', async () => {
+      // 还在 admin (orderUrl) 上；ShipOrderForm 在 COMPLETED 下渲染。
+      // 填一个运单号 + 提交，验证 status badge 切到&ldquo;已发货&rdquo;。
+      await page
+        .locator('input[name="trackingNo"]')
+        .fill(`SF-${Date.now().toString(36)}`);
+      await page.getByRole('button', { name: /^标记发货$/ }).click();
+      await expect(
+        page
+          .locator('[data-slot="badge"]')
+          .filter({ hasText: /^已发货$/ }),
+      ).toBeVisible({ timeout: 10_000 });
+    });
+
+    await test.step('OWNER 确认完工 (SHIPPED → FINISHED 终态)', async () => {
+      // 发货后 FinishOrderButton 渲染；按一下走到 FINISHED。
+      await page.getByRole('button', { name: /^确认完工$/ }).click();
+      // 终态：badge =&ldquo;已完成&rdquo;（不是&ldquo;已完工&rdquo;）。这里精准断言别
+      // 与 COMPLETED 混淆。
+      await expect(
+        page
+          .locator('[data-slot="badge"]')
+          .filter({ hasText: /^已完成$/ }),
+      ).toBeVisible({ timeout: 10_000 });
+      // 旧的&ldquo;已完工&rdquo;badge 消失。
+      await expect(
+        page
+          .locator('[data-slot="badge"]')
+          .filter({ hasText: /^已完工$/ }),
+      ).toHaveCount(0);
     });
   });
 });

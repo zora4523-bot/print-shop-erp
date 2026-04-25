@@ -40,6 +40,8 @@ import {
   createOrder,
   submitOrder,
   cancelOrder,
+  shipOrder,
+  finishOrder,
   listOrders,
   getOrderDetail,
   updateOrderFields,
@@ -379,6 +381,114 @@ describe('cancelOrder', () => {
     await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
       InvalidOrderTransitionError,
     );
+  });
+});
+
+describe('shipOrder', () => {
+  it('COMPLETED → SHIPPED, stamps shippedAt + trackingNo from arg', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+
+    const clock = new Date('2026-04-25T12:00:00Z');
+    const r = await shipOrder('o1', ownerActor, 'SF1234567890', clock);
+    expect(r.status).toBe(OrderStatus.SHIPPED);
+    const updateArg = dbMock.order.update.mock.calls[0][0];
+    expect(updateArg.data.status).toBe(OrderStatus.SHIPPED);
+    expect(updateArg.data.shippedAt).toBe(clock);
+    expect(updateArg.data.trackingNo).toBe('SF1234567890');
+    // Other timestamp fields not touched
+    expect(updateArg.data.submittedAt).toBeUndefined();
+    expect(updateArg.data.finishedAt).toBeUndefined();
+
+    const logArg = dbMock.orderLog.create.mock.calls[0][0];
+    expect(logArg.data.action).toBe('STATUS_CHANGE');
+    expect(logArg.data.remark).toBe('发货：SF1234567890');
+  });
+
+  it('null trackingNo: log uses default remark, no trackingNo field on update', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, null);
+    const updateArg = dbMock.order.update.mock.calls[0][0];
+    // When no trackingNo, we DON'T spread extraData → no key in data.
+    expect(updateArg.data.trackingNo).toBeUndefined();
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('标记发货');
+  });
+
+  it('trims trackingNo whitespace before logging + persisting', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, '  SF888  ');
+    expect(dbMock.order.update.mock.calls[0][0].data.trackingNo).toBe('SF888');
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('发货：SF888');
+  });
+
+  it('blank trackingNo (whitespace only) treated as null', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, '   ');
+    expect(dbMock.order.update.mock.calls[0][0].data.trackingNo).toBeUndefined();
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('标记发货');
+  });
+
+  it('refuses non-COMPLETED source state (status machine)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      submitterId: 'sales-1',
+    });
+    await expect(shipOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+      InvalidOrderTransitionError,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('finishOrder', () => {
+  it('SHIPPED → FINISHED, stamps finishedAt', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+      submitterId: 'sales-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.FINISHED });
+
+    const clock = new Date('2026-04-26T12:00:00Z');
+    const r = await finishOrder('o1', ownerActor, clock);
+    expect(r.status).toBe(OrderStatus.FINISHED);
+    const updateArg = dbMock.order.update.mock.calls[0][0];
+    expect(updateArg.data.status).toBe(OrderStatus.FINISHED);
+    expect(updateArg.data.finishedAt).toBe(clock);
+    expect(updateArg.data.shippedAt).toBeUndefined();
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('确认完工');
+  });
+
+  it('refuses non-SHIPPED source state (e.g. COMPLETED — must ship first)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    await expect(finishOrder('o1', ownerActor)).rejects.toBeInstanceOf(
+      InvalidOrderTransitionError,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 });
 

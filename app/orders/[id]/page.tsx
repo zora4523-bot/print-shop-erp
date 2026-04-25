@@ -18,6 +18,8 @@ import { buttonVariants } from '@/components/ui/button';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
+import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
+import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -48,6 +50,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
       user.role === Role.FOREMAN);
   const canCancel =
     user.role === Role.OWNER && !isTerminalOrderStatus(order.status);
+  // SHIPPED / FINISHED 转换权限：order:ship = OWNER + FOREMAN（见
+  // permissions.ts）。这里 mirror 该闸口；action 层 requirePermission
+  // 仍是真闸口。
+  const canShipOrFinish =
+    user.role === Role.OWNER || user.role === Role.FOREMAN;
+  const canShip =
+    canShipOrFinish && order.status === OrderStatus.COMPLETED;
+  const canFinish =
+    canShipOrFinish && order.status === OrderStatus.SHIPPED;
 
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; OWNER / FOREMAN
@@ -212,6 +223,28 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </ul>
         )}
       </section>
+
+      {canShip ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+          <h2 className="text-base font-semibold">标记发货</h2>
+          <p className="text-xs text-muted-foreground">
+            所有任务已完工，工单进入 COMPLETED；标记发货后状态切到
+            SHIPPED，可填运单号备查。
+          </p>
+          <ShipOrderForm orderId={order.id} />
+        </section>
+      ) : null}
+
+      {canFinish ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+          <h2 className="text-base font-semibold">确认完工</h2>
+          <p className="text-xs text-muted-foreground">
+            发货确认收件 / 客户对账后点确认完工；状态切到 FINISHED 终态，
+            工单不再活跃，但仍参与月度账单生成。
+          </p>
+          <FinishOrderButton orderId={order.id} />
+        </section>
+      ) : null}
 
       <div className="flex gap-4">
         {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}

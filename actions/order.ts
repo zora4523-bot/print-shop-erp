@@ -6,6 +6,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   createOrderSchema,
   cancelOrderSchema,
+  shipOrderSchema,
   updateEditableOrderSchema,
   setOrderUrgentSchema,
   type CreateOrderInput,
@@ -14,6 +15,8 @@ import {
   createOrder,
   submitOrder,
   cancelOrder,
+  shipOrder,
+  finishOrder,
   updateOrderFields,
   setOrderUrgent,
   OrderInvariantError,
@@ -122,6 +125,63 @@ export async function cancelOrderAction(
 
   try {
     await cancelOrder(orderId, actor, parsed.data.reason);
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
+      return { status: 'error', message: err.message };
+    }
+    if (err instanceof InvalidOrderTransitionError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  return { status: 'success' };
+}
+
+// COMPLETED → SHIPPED. OWNER + FOREMAN per `order:ship` permission.
+// FormData carries optional trackingNo (运单号).
+export async function shipOrderAction(
+  orderId: string,
+  _prev: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:ship');
+
+  const parsed = shipOrderSchema.safeParse({
+    trackingNo: formData.get('trackingNo'),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+  }
+
+  try {
+    await shipOrder(orderId, actor, parsed.data.trackingNo);
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
+      return { status: 'error', message: err.message };
+    }
+    if (err instanceof InvalidOrderTransitionError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  return { status: 'success' };
+}
+
+// SHIPPED → FINISHED (terminal close). Same permission as ship for
+// MVP — no separate `order:finish` business rule today.
+export async function finishOrderAction(
+  orderId: string,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:ship');
+
+  try {
+    await finishOrder(orderId, actor);
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };

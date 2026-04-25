@@ -205,6 +205,11 @@ type TransitionOptions = {
   // Throw OrderInvariantError to reject.
   authz?: (order: { submitterId: string; status: OrderStatus }) => void;
   now?: Date;
+  // Optional extra columns to set on the Order in the same update.
+  // Used by shipOrder to stamp `trackingNo` alongside the status
+  // transition. Each call site is responsible for keeping the keys
+  // valid Prisma update fields.
+  extraData?: Record<string, unknown>;
 };
 
 async function transitionWithLog(
@@ -233,6 +238,11 @@ async function transitionWithLog(
       data: {
         status: target,
         submittedAt: target === OrderStatus.SUBMITTED ? now : undefined,
+        shippedAt: target === OrderStatus.SHIPPED ? now : undefined,
+        finishedAt: target === OrderStatus.FINISHED ? now : undefined,
+        // trackingNo flows through opts.extraData below if provided
+        // (ship action sets it; other transitions don't touch it).
+        ...(opts.extraData ?? {}),
       },
       select: { id: true, status: true },
     });
@@ -282,6 +292,44 @@ export async function cancelOrder(
   // there's no additional ownership guard to run here.
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
     remark: reason ? `取消：${reason}` : '取消工单',
+    now,
+  });
+}
+
+// COMPLETED → SHIPPED. Permission `order:ship` (OWNER + FOREMAN) is
+// enforced at the action layer. Optional trackingNo lands on the same
+// Order row via the transition's extraData so the audit OrderLog and
+// the trackingNo write are atomic.
+export async function shipOrder(
+  orderId: string,
+  actor: { id: string; role: Role },
+  trackingNo: string | null,
+  now: Date = new Date(),
+): Promise<{ id: string; status: OrderStatus }> {
+  // Treat both null AND whitespace-only as &ldquo;no tracking number&rdquo;:
+  // `'   '.trim()` is `''`, not null, so a naive `?? null` would
+  // happily write an empty string to Order.trackingNo.
+  const trimmed = trackingNo?.trim() ?? '';
+  const tracking = trimmed.length > 0 ? trimmed : null;
+  return transitionWithLog(orderId, OrderStatus.SHIPPED, actor, {
+    remark: tracking ? `发货：${tracking}` : '标记发货',
+    now,
+    extraData: tracking !== null ? { trackingNo: tracking } : undefined,
+  });
+}
+
+// SHIPPED → FINISHED (terminal). The ledger close — used after delivery
+// is acknowledged so the order leaves the active workspace. Same
+// `order:ship` permission gate at the action layer (OWNER + FOREMAN);
+// no separate `order:finish` permission since today there's no business
+// rule that distinguishes the two transitions' authority.
+export async function finishOrder(
+  orderId: string,
+  actor: { id: string; role: Role },
+  now: Date = new Date(),
+): Promise<{ id: string; status: OrderStatus }> {
+  return transitionWithLog(orderId, OrderStatus.FINISHED, actor, {
+    remark: '确认完工',
     now,
   });
 }

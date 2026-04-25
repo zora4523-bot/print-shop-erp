@@ -469,6 +469,14 @@ export const cancelOrderSchema = z.object({
 
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
 
+// 标记发货：trackingNo 选填（运单号）。Order.trackingNo 是 nullable
+// text，用同一 optional-trimmed 收尾的 helper。
+export const shipOrderSchema = z.object({
+  trackingNo: optionalTrimmedText('运单号', 64),
+});
+
+export type ShipOrderInput = z.infer<typeof shipOrderSchema>;
+
 // ─────────────────────────────────────────────────────────────────────
 // Order edit (SPEC §3.6 — top-level fields only, E-lean scope)
 // ─────────────────────────────────────────────────────────────────────
