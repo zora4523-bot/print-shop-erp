@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { OutsourceStatus, Role } from '../generated/prisma/enums';
+import { OrderStatus, OutsourceStatus, Role } from '../generated/prisma/enums';
 import { db } from './db';
 import {
   transitionOutsource,
@@ -28,47 +28,77 @@ export type CreatedOutsource = { id: string };
 // Actor is taken but not used today — kept in the signature for
 // forward-compat when we start writing an audit log for
 // outsource-order mutations.
+// Same lock namespace as transitionWithLog + scheduleOrder + worker
+// cascade. Codex round 88 / P2: standalone status read + insert
+// races against shipOrder / cancelOrder; folding both into one tx
+// behind the per-order lock makes "order is still attachable" an
+// atomic decision.
+function orderTransitionLockKey(orderId: string): string {
+  return `print-shop-erp:order-cascade:${orderId}`;
+}
+
+type OutsourceTxClient = {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+  order: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{ status: OrderStatus } | null>;
+  };
+  outsourceOrder: {
+    create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
+  };
+};
+
 export async function createOutsourceOrder(
   input: CreateOutsourceInput,
   actor: { id: string; role: Role },
 ): Promise<CreatedOutsource> {
   void actor;
-  // Reject when the parent order is no longer in a production-active
-  // state — SHIPPED / FINISHED / CANCELLED orders shouldn't accept
-  // new production work (Codex round 87 / P2). Lib layer is the real
-  // gate; the order detail page also hides the entry button for the
-  // same statuses, but that UI hint isn't authoritative.
-  const order = await db.order.findUnique({
-    where: { id: input.orderId },
-    select: { status: true },
-  });
-  if (!order) throw new OutsourceError('工单不存在');
-  if (!canAttachOutsource(order.status)) {
-    throw new OutsourceError(
-      `工单状态 ${order.status} 不允许新建外协（已发货 / 已完成 / 已取消）`,
-    );
-  }
+  return db.$transaction(async (tx) => {
+    const txClient = tx as unknown as OutsourceTxClient;
+    // Per-order advisory lock makes the "order is attachable?" check
+    // and the outsource INSERT atomic relative to ANY other Order-
+    // status writer (ship / cancel / schedule / finish / cascade).
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderTransitionLockKey(
+      input.orderId,
+    )}))`;
 
-  const row = await db.outsourceOrder.create({
-    data: {
-      orderId: input.orderId,
-      orderItemIds: input.orderItemIds,
-      supplierName: input.supplierName,
-      supplierContact: input.supplierContact,
-      craftDescription: input.craftDescription,
-      specialRequirement: input.specialRequirement,
-      totalQty: input.totalQty ?? null,
-      expectedDate: input.expectedDate ?? null,
-      amount:
-        input.amount === null || input.amount === undefined
-          ? null
-          : new Decimal(input.amount).toFixed(2),
-      remark: input.remark,
-      status: OutsourceStatus.SENT,
-    },
-    select: { id: true },
+    const order = await txClient.order.findUnique({
+      where: { id: input.orderId },
+      select: { status: true },
+    });
+    if (!order) throw new OutsourceError('工单不存在');
+    if (!canAttachOutsource(order.status)) {
+      throw new OutsourceError(
+        `工单状态 ${order.status} 不允许新建外协（已发货 / 已完成 / 已取消）`,
+      );
+    }
+
+    const row = await txClient.outsourceOrder.create({
+      data: {
+        orderId: input.orderId,
+        orderItemIds: input.orderItemIds,
+        supplierName: input.supplierName,
+        supplierContact: input.supplierContact,
+        craftDescription: input.craftDescription,
+        specialRequirement: input.specialRequirement,
+        totalQty: input.totalQty ?? null,
+        expectedDate: input.expectedDate ?? null,
+        amount:
+          input.amount === null || input.amount === undefined
+            ? null
+            : new Decimal(input.amount).toFixed(2),
+        remark: input.remark,
+        status: OutsourceStatus.SENT,
+      },
+      select: { id: true },
+    });
+    return row;
   });
-  return row;
 }
 
 export type OutsourceMutationResult = {

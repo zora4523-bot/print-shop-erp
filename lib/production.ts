@@ -29,11 +29,15 @@ export class SchedulingError extends Error {
 }
 
 // Advisory-lock namespace for the scheduling serialization guard.
-// Same `print-shop-erp:<domain>:<invariant>` convention we use in
-// lib/account.ts (OWNER count) and lib/order/order-number.ts
-// (per-day serial).
+// Same key namespace as orderCascadeLockKey below + the
+// transitionWithLog helper in lib/order.ts. Codex round 88 / P1
+// pointed out a separate `:schedule:` lock left scheduleOrder
+// racing with cancelOrder on the same SUBMITTED order — both could
+// commit and you'd end up with ProductionTasks attached to a
+// CANCELLED order. Unifying the namespace makes ALL Order.status
+// writers serialize against each other on the same key.
 function scheduleLockKey(orderId: string): string {
-  return `print-shop-erp:schedule:order:${orderId}`;
+  return `print-shop-erp:order-cascade:${orderId}`;
 }
 
 // Minimal tx surface we need — kept narrow so a typed Prisma client

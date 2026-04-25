@@ -435,8 +435,10 @@ describe('scheduleOrder', () => {
     expect(firstCall).toBeDefined();
     const sql = (firstCall[0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    // Key value is passed as the template parameter.
-    expect(firstCall[1]).toMatch(/print-shop-erp:schedule:order:order-1/);
+    // Key value is passed as the template parameter. Unified key
+    // namespace with transitionWithLog + worker cascade so all
+    // Order.status writers serialize on the same lock (Codex round 88).
+    expect(firstCall[1]).toMatch(/print-shop-erp:order-cascade:order-1/);
   });
 
   it('refuses when a craft on the order has been deactivated (Codex round 37 / P1)', async () => {

@@ -14,6 +14,12 @@ const { dbMock } = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    $executeRaw: vi.fn().mockResolvedValue(undefined),
+    $transaction: vi.fn(async (fn: unknown) => {
+      if (typeof fn === 'function')
+        return await (fn as (tx: unknown) => unknown)(mock);
+      return fn;
+    }),
   };
   return { dbMock: mock };
 });
@@ -37,6 +43,12 @@ beforeEach(() => {
   dbMock.outsourceOrder.findMany.mockReset();
   dbMock.outsourceOrder.create.mockReset();
   dbMock.outsourceOrder.update.mockReset();
+  dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+    if (typeof fn === 'function')
+      return await (fn as (tx: unknown) => unknown)(dbMock);
+    return fn;
+  });
 });
 
 const baseInput = {
@@ -113,6 +125,23 @@ describe('createOutsourceOrder', () => {
     await expect(
       createOutsourceOrder(baseInput, foremanActor),
     ).resolves.toEqual({ id: 'o1' });
+  });
+
+  // Codex round 88 / P2: status check + insert must be atomic vs.
+  // ship/cancel on the same order. Lock taken inside the same tx.
+  it('takes the per-order advisory lock as the first DB call', async () => {
+    dbMock.outsourceOrder.create.mockResolvedValue({ id: 'o1' });
+    await createOutsourceOrder(baseInput, foremanActor);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    const sql = (dbMock.$executeRaw.mock.calls[0]![0] as TemplateStringsArray).join(
+      '?',
+    );
+    expect(sql).toMatch(/pg_advisory_xact_lock/);
+    // Same key as transitionWithLog + scheduleOrder so all writers
+    // serialize through one lock per order.
+    expect(dbMock.$executeRaw.mock.calls[0]![1]).toBe(
+      `print-shop-erp:order-cascade:${baseInput.orderId}`,
+    );
   });
 });
 
