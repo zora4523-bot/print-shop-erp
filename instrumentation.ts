@@ -54,18 +54,22 @@ export async function register() {
 }
 
 // Next.js 15+ hook: receives errors from Server Components / Server
-// Actions / Route Handlers BEFORE Next surfaces them. Forward to
-// Sentry only if configured — same gating as register().
-export async function onRequestError(
-  err: unknown,
-  request: { url?: string; method?: string },
-) {
-  if (!process.env.SENTRY_DSN) return;
-  const Sentry = await import('@sentry/nextjs');
-  Sentry.captureException(err, {
-    extra: {
-      url: request.url,
-      method: request.method,
-    },
-  });
-}
+// Actions / Route Handlers BEFORE Next surfaces them. Next passes a
+// `(err, request, context)` triple where `request` has `{ path,
+// method, headers }` and `context` has `{ routerKind, routePath,
+// routeType }`.
+//
+// We forward via `@sentry/nextjs`'s `captureRequestError` rather than
+// the bare `captureException` because:
+//   1. It awaits the transport flush, so events don't drop on short-
+//      lived Edge / Route Handler invocations (Codex round 64 / P1).
+//   2. It already knows how to project Next's request shape into a
+//      Sentry event with the right route metadata, no manual extras.
+//
+// Same DSN gating as register() so dev / pre-prod is a true no-op.
+export const onRequestError: typeof import('@sentry/nextjs').captureRequestError =
+  async (err, request, context) => {
+    if (!process.env.SENTRY_DSN) return;
+    const Sentry = await import('@sentry/nextjs');
+    await Sentry.captureRequestError(err, request, context);
+  };
