@@ -15,7 +15,10 @@ loadEnvConfig(process.cwd(), /* dev */ true);
 // database (per CLAUDE.md MVP posture) and use unique-per-run inputs
 // so reruns don't collide. A separate test DB can be added later.
 export default defineConfig({
-  testDir: './tests/e2e',
+  // Cover both end-to-end specs (./tests/e2e) and visual regression
+  // specs (./tests/visual) under one runner. testMatch defaults pick
+  // up *.spec.ts in either subdir.
+  testDir: './tests',
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false, // share dev DB; serial keeps assertions stable
   forbidOnly: !!process.env.CI,

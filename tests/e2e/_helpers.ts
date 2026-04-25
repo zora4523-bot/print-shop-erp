@@ -152,6 +152,101 @@ export async function seedFinishedOrder(opts: {
   return { orderId, orderNo };
 }
 
+// Seeds an Order + one OrderItem + N OrderItemDesigns for visual
+// regression tests of OrderPrintLayout. Deterministic across runs:
+// - Fixed orderId per design count (delete-then-insert idempotency)
+// - Stable customerRef / receiverName / item fields → render is
+//   pixel-identical regardless of clock or other state.
+// - Designs use a tiny inline data: PNG so no network fetch is needed
+//   and the image bytes are hashable. Without this the print page
+//   would 404 / hang on the placeholder fileUrl.
+//
+// Caller is responsible for providing submitterId (admin user works).
+// Returns the deterministic orderId so the spec can navigate to
+// /print/orders/<id> directly.
+//
+// 1×1 transparent PNG, base64. Renders as a tiny dot inside whatever
+// CSS sizing the design-grid imposes. Plenty for visual baseline.
+const PLACEHOLDER_PNG_DATA_URL =
+  'data:image/png;base64,' +
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+export async function seedPrintableOrder(opts: {
+  submitterId: string;
+  designCount: number;
+}): Promise<{ orderId: string; orderNo: string; orderItemId: string }> {
+  // Deterministic per (designCount). Same id across runs → same QR
+  // SVG, same screenshot bytes. CASCADE FKs on Order → OrderItem and
+  // OrderItem → OrderItemDesign clean up children automatically.
+  const orderId = `e2e-vr-${opts.designCount}`;
+  const orderNo = `E2E-VR-${opts.designCount}`;
+  const orderItemId = `${orderId}-item`;
+
+  await withDb(async (db) => {
+    await db.query(`DELETE FROM "Order" WHERE id = $1`, [orderId]);
+
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
+        "totalAmount", "submittedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'OWNER'::"Role", $3,
+        'DRAFT'::"OrderStatus", FALSE,
+        'VR-CUSTOMER',
+        'VR 收件人',
+        '13800138000',
+        0,
+        TIMESTAMP '2026-01-01 00:00:00',
+        TIMESTAMP '2026-01-01 00:00:00',
+        TIMESTAMP '2026-01-01 00:00:00'
+      )
+      `,
+      [orderId, orderNo, opts.submitterId],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "OrderItem" (
+        id, "orderId", sequence, name, specification, "paperType",
+        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
+        crafts, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 1, 'VR 款式', '9cm × 17cm', '珠光纸',
+        5000, '金色', TRUE, FALSE,
+        ARRAY[]::text[], NOW(), NOW()
+      )
+      `,
+      [orderItemId, orderId],
+    );
+
+    for (let i = 0; i < opts.designCount; i++) {
+      await db.query(
+        `
+        INSERT INTO "OrderItemDesign" (
+          id, "orderItemId", "fileType", "fileUrl", "fileName",
+          "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+        ) VALUES (
+          $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
+          1024, $3, $5,
+          TIMESTAMP '2026-01-01 00:00:00'
+        )
+        `,
+        [
+          `${orderItemId}-design-${i}`,
+          orderItemId,
+          PLACEHOLDER_PNG_DATA_URL,
+          `design-${i + 1}.png`,
+          opts.submitterId,
+        ],
+      );
+    }
+  });
+
+  return { orderId, orderNo, orderItemId };
+}
+
 // Wipes ALL SalaryPeriods + CommissionRecords for an e2e-* user.
 // Required for CS-accumulate E2E so each run starts with a known-
 // empty period (totalSales=0). Same e2e-* guard as resetBillsForUser
