@@ -82,15 +82,25 @@ export function AdminBreadcrumb() {
             // invalid DOM. Codex round 78 / P2.
             <Fragment key={href}>
               <BreadcrumbItem>
-                {isLast || !isLinkable ? (
+                {isLast ? (
+                  // Real terminal — semantically "current page".
                   <BreadcrumbPage>{labelFor(seg)}</BreadcrumbPage>
-                ) : (
+                ) : isLinkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
                   // prop 把 <a> 替换成 next/link。
                   <BreadcrumbLink render={<Link href={href} />}>
                     {labelFor(seg)}
                   </BreadcrumbLink>
+                ) : (
+                  // Layout-only ancestor: not navigable AND not the
+                  // current page. Plain <span>, no aria-current —
+                  // BreadcrumbPage would hard-code aria-current="page"
+                  // and screen readers would announce two "current"s
+                  // on a single breadcrumb (Codex round 81 / P3).
+                  <span className="text-muted-foreground">
+                    {labelFor(seg)}
+                  </span>
                 )}
               </BreadcrumbItem>
               {!isLast && <BreadcrumbSeparator />}
