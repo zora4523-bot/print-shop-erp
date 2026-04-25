@@ -7,6 +7,8 @@ import { LogoutButton } from '@/components/business/auth/LogoutButton';
 export default async function Home() {
   const { user } = await requireSession();
   const isOwner = user.role === Role.OWNER;
+  const showSalesBills =
+    user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE;
 
   return (
     <div className="min-h-screen bg-muted/40">
@@ -44,6 +46,19 @@ export default async function Home() {
               查看 / 新建 / 提交（按角色范围）
             </span>
           </div>
+          {showSalesBills ? (
+            <div className="mt-3">
+              <Link
+                href="/sales/bills"
+                className="text-base text-primary underline hover:no-underline"
+              >
+                我的应收账单 →
+              </Link>
+              <span className="ml-2 text-sm text-muted-foreground">
+                月度应收 / 已收 / 工单明细（只读）
+              </span>
+            </div>
+          ) : null}
         </div>
         {isOwner ? (
           <div className="rounded-xl border bg-card p-6 shadow-sm">

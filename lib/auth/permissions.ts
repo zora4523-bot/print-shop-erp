@@ -36,7 +36,7 @@ export const PERMISSIONS = {
 
   // 账单
   'bill:view:all':              [Role.OWNER],
-  'bill:view:self':             [Role.SALES],
+  'bill:view:self':             [Role.SALES, Role.CUSTOMER_SERVICE],
   'bill:mark-paid':             [Role.OWNER],
 
   // 薪资
