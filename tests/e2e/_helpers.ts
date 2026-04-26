@@ -483,6 +483,9 @@ export async function seedDashboardSnapshot(opts: {
 
     // Step 3: seed one bill in the current Shanghai month.
     // 5000 总额 / 2000 已收 → outstanding 3000；UI 显示三个数字时都好认。
+    // 状态 PARTIAL_PAID（已发 + 部分付款），issuedAt 必填——dashboard
+    // getMonthlyBillStats 排除 DRAFT（Codex round 98 P1）。DRAFT 状态
+    // 不会进 KPI；只有 ISSUED / PARTIAL_PAID / FULLY_PAID 算&ldquo;应收&rdquo;。
     const billId = `e2e-dash-bill-${randomBytes(4).toString('hex')}`;
     const monthlyTotal = '5000.00';
     const monthlyPaid = '2000.00';
@@ -490,10 +493,10 @@ export async function seedDashboardSnapshot(opts: {
       `
       INSERT INTO "Bill" (
         id, "salesUserId", period, "totalAmount", "paidAmount",
-        status, "createdAt", "updatedAt"
+        status, "issuedAt", "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, $3, $4, $5,
-        'DRAFT'::"BillStatus", NOW(), NOW()
+        'PARTIAL_PAID'::"BillStatus", NOW(), NOW(), NOW()
       )
       `,
       [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],

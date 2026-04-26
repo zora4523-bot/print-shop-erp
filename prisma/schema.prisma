@@ -128,6 +128,13 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@index([isUrgent])
+  // Dashboard KPI ranges hit these timestamp columns directly
+  // (`getTodayOrderStats` runs 5 range counts per landing-page render).
+  // Without these indexes the queries degrade into seq scans on a
+  // growing Order table (Codex round 98 P2).
+  @@index([submittedAt])
+  @@index([completedAt])
+  @@index([shippedAt])
 }
 
 model OrderItem {
@@ -629,6 +636,10 @@ model Bill {
 
   @@unique([salesUserId, period])
   @@index([status])
+  // Dashboard `getMonthlyBillStats` filters by period alone; the
+  // composite (salesUserId, period) unique key can't serve a
+  // period-only predicate (PG needs leading column). Codex round 98 P2.
+  @@index([period])
 }
 
 model BillItem {

@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { BillStatus } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
   currentShanghaiMonth,
@@ -84,8 +85,13 @@ export async function getTodayOrderStats(
 }
 
 /**
- * 当月账单总额 / 已收 / 应收。不区分 BillStatus —— DRAFT 也算 pipeline
- * 的一部分；&ldquo;outstanding&rdquo; 数字本身承担 paid vs total 的视觉信号。
+ * 当月账单：已发的部分（ISSUED / PARTIAL_PAID / FULLY_PAID）的总额、已
+ * 收、应收差额。
+ *
+ * 与 /owner/bills 的口径对齐（appel/(admin)/owner/bills/page.tsx 注释
+ * 明示&ldquo;DRAFT 未发单不算应收&rdquo;）—— Codex round 98 P1：dashboard 把
+ * DRAFT 也算进来会让&ldquo;一生成账单数字就跳&rdquo;，与发单页不一致。DRAFT
+ * 是&ldquo;未对外&rdquo;的草稿期，不应进应收。
  *
  * 用 sumDecimal 而不是 prisma `_sum`：3+ 张账单累加用 JS Number 会
  * 漂移分级精度（0.1 + 0.2 经典坑），Decimal.js 才是数值正确的来源。
@@ -95,7 +101,16 @@ export async function getMonthlyBillStats(
 ): Promise<MonthlyBillStats> {
   const month = currentShanghaiMonth(now);
   const bills = await db.bill.findMany({
-    where: { period: month },
+    where: {
+      period: month,
+      status: {
+        in: [
+          BillStatus.ISSUED,
+          BillStatus.PARTIAL_PAID,
+          BillStatus.FULLY_PAID,
+        ],
+      },
+    },
     select: { totalAmount: true, paidAmount: true },
   });
 

@@ -161,6 +161,19 @@ describe('getMonthlyBillStats', () => {
     expect(where.period).toBe('2026-04');
   });
 
+  it('排除 DRAFT 账单（与 /owner/bills 的应收口径一致，Codex round 98 P1）', async () => {
+    dbMock.bill.findMany.mockResolvedValue([]);
+    await getMonthlyBillStats(new Date('2026-04-25T08:00:00Z'));
+    const where = dbMock.bill.findMany.mock.calls[0][0].where;
+    // 必须有 status 过滤，且不能含 DRAFT
+    expect(where.status).toBeDefined();
+    const allowed = where.status.in as string[];
+    expect(allowed).toContain('ISSUED');
+    expect(allowed).toContain('PARTIAL_PAID');
+    expect(allowed).toContain('FULLY_PAID');
+    expect(allowed).not.toContain('DRAFT');
+  });
+
   it('跨月边界月份 flip', async () => {
     dbMock.bill.findMany.mockResolvedValue([]);
     // Shanghai 2026-04-30 23:59 还是 4 月
