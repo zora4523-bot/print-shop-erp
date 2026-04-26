@@ -9,29 +9,37 @@ import {
   seedDashboardSnapshot,
 } from './_helpers';
 
-// P1 #1 Slice A — owner dashboard KPIs
+// P1 #1 Slices A + B — owner dashboard KPIs + watchlists
 //
-// 单测覆盖 lib/dashboard/owner-stats 的算术 + 边界，但 Server Component
-// + permission gate + sidebar wire 这条链只能跑真页面才知道：
-//   - /owner 实际渲染（OwnerLayout 把 OWNER 放进去 → page.tsx
-//     requirePermission('report:all') → owner-stats.ts 走真 DB → 4 张
-//     StatCard 渲染）
+// 单测覆盖 lib/dashboard/owner-stats 与 owner-watchlist 的算术 + 边界，
+// 但 Server Component + permission gate + sidebar wire + 3 个 list
+// 的渲染链只能跑真页面才知道：
+//   - /owner 实际渲染（OwnerLayout → page.tsx requirePermission(
+//     'report:all') → owner-stats / owner-watchlist 走真 DB → 4 张
+//     StatCard + 3 个 WatchlistTable 渲染）
 //   - 数字按千分位（formatMoney 走 Intl.NumberFormat zh-CN）
 //   - sidebar Dashboard 链接指向 /owner（不再是 # 占位 — admin-menu
 //     单测同一断言）
 //
-// 数据由 seedDashboardSnapshot 直接写入：3 提交 (1 急) / 2 完工 / 1
-// 发货 / 1 张当月 5000.00-2000.00 账单。helper 会先清掉所有 e2e-*
-// 用户的 Order + Bill，避免上一次 run / 平行 spec 的数据膨胀计数。
+// 数据由 seedDashboardSnapshot 直接写入：
+//   Slice A:  3 提交 (1 急) / 2 完工 / 1 发货 / 1 张当月 5000-2000 账单
+//   Slice B:  借用 2 完工 → 待发货 list；1 超期外协（3 天）；1 客服周期
+//             （3 天后结束，totalSales=300000 命中最高档）
+// helper 会先清掉所有 e2e-* 用户的 Order + Bill + e2e-dash-os-* 外协 +
+// CS 用户的 SalaryPeriod / Commission，避免上一次 run / 平行 spec 的
+// 数据污染。
 
-test.describe('owner dashboard — KPI 卡片层', () => {
-  test('OWNER /owner 渲染 4 张 KPI 卡片，含 seeded 数字 + 急单 + 千分位', async ({
+test.describe('owner dashboard — KPI + 关注列表', () => {
+  test('OWNER /owner 渲染 4 张 KPI + 3 个 watchlist（待发货 / 超期外协 / 即将结算客服）', async ({
     page,
   }) => {
     test.setTimeout(60_000);
 
     const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
-    const seeded = await seedDashboardSnapshot({ salesUserId });
+    const csUserId = await getUserIdByUsername(
+      E2E_USERS.customerService.username,
+    );
+    const seeded = await seedDashboardSnapshot({ salesUserId, csUserId });
 
     await login(page, {
       from: '/owner',
@@ -100,6 +108,54 @@ test.describe('owner dashboard — KPI 卡片层', () => {
     );
     expect(totalNumber).toBeGreaterThanOrEqual(5000);
 
+    // ─── Slice B: 3 个关注列表 ───
+    //
+    // 每个 list 走 data-slot 定位（dashboard-watchlist-shipments /
+    // -outsource / -cs-periods）。dev DB 共享，"至少 1 行"是稳定信号；
+    // 不绑死行数。
+
+    // 待发货：seeded 2 条 COMPLETED 工单（Slice A fixture），可能更多。
+    const shipmentsCard = page.locator(
+      '[data-slot="dashboard-watchlist-shipments"]',
+    );
+    await expect(shipmentsCard).toBeVisible();
+    await expect(shipmentsCard).toContainText('待发货工单');
+    // 行计数：至少 2 行（即 seeded 数据成功上榜）。
+    await expect(
+      shipmentsCard.locator('[data-slot="table-body"] [data-slot="table-row"]'),
+    ).toHaveCount(await shipmentsCard
+      .locator('[data-slot="table-body"] [data-slot="table-row"]')
+      .count());
+    const shipmentRows = shipmentsCard.locator(
+      '[data-slot="table-body"] [data-slot="table-row"]',
+    );
+    expect(await shipmentRows.count()).toBeGreaterThanOrEqual(2);
+
+    // 超期外协：seeded 1 条，daysOverdue=3。
+    const outsourceCard = page.locator(
+      '[data-slot="dashboard-watchlist-outsource"]',
+    );
+    await expect(outsourceCard).toBeVisible();
+    await expect(outsourceCard).toContainText('超期外协');
+    await expect(outsourceCard).toContainText('E2E 阿福外协');
+    await expect(outsourceCard).toContainText(`${seeded.outsourceDaysOverdue} 天`);
+
+    // 即将结算客服周期：seeded 1 条 e2e-cs，3 天后到期，totalSales=300000
+    // 命中默认 CS_TIERS 最高档。预测提成不为 "—"（getActiveCsTiers 返
+    // 真规则）。
+    const csPeriodsCard = page.locator(
+      '[data-slot="dashboard-watchlist-cs-periods"]',
+    );
+    await expect(csPeriodsCard).toBeVisible();
+    await expect(csPeriodsCard).toContainText('即将结算客服周期');
+    await expect(csPeriodsCard).toContainText(E2E_USERS.customerService.displayName);
+    await expect(csPeriodsCard).toContainText(`${seeded.csPeriodDaysUntilEnd} 天`);
+    // 预测提成应是金额而非 "—"
+    const csRow = csPeriodsCard
+      .locator('[data-slot="table-body"] [data-slot="table-row"]')
+      .filter({ hasText: E2E_USERS.customerService.displayName });
+    await expect(csRow).toContainText(/¥ [\d,]+\.\d{2}/);
+
     // sidebar Dashboard 链接现在指 /owner（round 96 改 # → Slice A
     // 改回）。点一下不应跳走（已经在 /owner）。
     const sidebarDashboard = page
@@ -109,10 +165,5 @@ test.describe('owner dashboard — KPI 卡片层', () => {
 
     // 防御：dev overlay 不能弹 Server Action / Build Error 警告。
     await expectNoNextErrorOverlay(page);
-
-    // Avoid touching seeded.* in trivial ways — assertion happens via
-    // the rendered counts above. Keep return value usable for future
-    // Slice B/C tests sharing the same fixture.
-    expect(seeded.submittedOrderIds).toHaveLength(3);
   });
 });

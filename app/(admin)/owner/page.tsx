@@ -1,16 +1,31 @@
+import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getMonthlyBillStats,
   getTodayOrderStats,
 } from '@/lib/dashboard/owner-stats';
+import {
+  getEndingPeriods,
+  getOverdueOutsourcing,
+  getPendingShipments,
+  type EndingPeriodRow,
+  type OverdueOutsourceRow,
+  type PendingShipmentRow,
+} from '@/lib/dashboard/owner-watchlist';
 import { formatMoney } from '@/lib/dashboard/format';
 import { StatCard } from '@/components/business/dashboard/StatCard';
+import {
+  WatchlistTable,
+  type WatchlistColumn,
+} from '@/components/business/dashboard/WatchlistTable';
+import { Badge } from '@/components/ui/badge';
+import { OutsourceStatus } from '@/generated/prisma/enums';
 
 export const metadata = { title: '老板 Dashboard' };
 
 // /owner is the OWNER landing page. Layered build (P1 #1):
-//   - Slice A: 4 KPI cards (this commit)
-//   - Slice B: watchlist tables (待发货 / 超期外协 / 即将结算客服周期)
+//   - Slice A: 4 KPI cards
+//   - Slice B: 3 watchlist tables (this commit)
 //   - Slice C: charts (近 30 天产量 / 销售业绩 / 产品分布)
 //
 // Permission: `report:all` is OWNER-only; matches the (admin)/owner
@@ -20,10 +35,14 @@ export const metadata = { title: '老板 Dashboard' };
 export default async function OwnerDashboardPage() {
   await requirePermission('report:all');
 
-  const [today, monthly] = await Promise.all([
-    getTodayOrderStats(),
-    getMonthlyBillStats(),
-  ]);
+  const [today, monthly, pendingShipments, overdueOutsourcing, endingPeriods] =
+    await Promise.all([
+      getTodayOrderStats(),
+      getMonthlyBillStats(),
+      getPendingShipments(),
+      getOverdueOutsourcing(),
+      getEndingPeriods(),
+    ]);
 
   // 完工同比：今日 vs 昨日。差值正→上升，负→下降，0→持平。
   const completedDiff = today.completedToday - today.completedYesterday;
@@ -72,6 +91,208 @@ export default async function OwnerDashboardPage() {
           }
         />
       </section>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <WatchlistTable
+          slot="dashboard-watchlist-shipments"
+          title="待发货工单"
+          description="完工但未发货 · 急单优先"
+          rows={pendingShipments.rows}
+          rowKey={(r) => r.id}
+          emptyText="暂无待发货工单 — 所有完工单已发货。"
+          columns={pendingShipmentColumns}
+          footer={
+            pendingShipments.hasMore ? (
+              <span>
+                还有更多待发货工单 ·{' '}
+                <Link
+                  href="/orders?status=COMPLETED"
+                  className="font-medium underline"
+                >
+                  查看全部 →
+                </Link>
+              </span>
+            ) : null
+          }
+        />
+
+        <WatchlistTable
+          slot="dashboard-watchlist-outsource"
+          title="超期外协"
+          description="预计交付日已过仍未收"
+          rows={overdueOutsourcing}
+          rowKey={(r) => r.id}
+          emptyText="暂无超期外协。"
+          columns={overdueOutsourceColumns}
+        />
+      </div>
+
+      <WatchlistTable
+        slot="dashboard-watchlist-cs-periods"
+        title="即将结算客服周期"
+        description="7 天内 periodEnd · 含按当前规则预测的提成 / 总收入"
+        rows={endingPeriods}
+        rowKey={(r) => r.id}
+        emptyText="未来 7 天内无客服周期到期。"
+        columns={endingPeriodColumns}
+      />
     </div>
   );
+}
+
+// ─── columns ───
+
+const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
+  {
+    header: '工单号',
+    cell: (r) => (
+      <Link
+        href={`/orders/${r.id}`}
+        className="font-mono text-xs underline-offset-2 hover:underline"
+      >
+        {r.orderNo}
+      </Link>
+    ),
+  },
+  {
+    header: '客户',
+    cell: (r) => r.customerRef ?? '—',
+  },
+  {
+    header: '提交人',
+    cell: (r) => r.submitterDisplayName,
+  },
+  {
+    header: '完工时间',
+    cell: (r) => formatDateTimeShanghai(r.completedAt),
+    align: 'right',
+    className: 'font-mono text-xs',
+  },
+  {
+    header: '急单',
+    cell: (r) =>
+      r.isUrgent ? <Badge variant="destructive">急</Badge> : null,
+    align: 'center',
+  },
+];
+
+const OUTSOURCE_STATUS_LABELS: Record<OutsourceStatus, string> = {
+  [OutsourceStatus.SENT]: '已发出',
+  [OutsourceStatus.IN_PROGRESS]: '进行中',
+  [OutsourceStatus.RECEIVED]: '已收',
+  [OutsourceStatus.CANCELLED]: '取消',
+};
+
+const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
+  [
+    {
+      header: '工单号',
+      cell: (r) =>
+        r.orderNo ? (
+          <span className="font-mono text-xs">{r.orderNo}</span>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      header: '供应商',
+      cell: (r) => r.supplierName,
+    },
+    {
+      header: '预计交付',
+      cell: (r) => formatDateShanghai(r.expectedDate),
+      align: 'right',
+      className: 'font-mono text-xs',
+    },
+    {
+      header: '超期',
+      cell: (r) => (
+        <Badge variant="destructive">{r.daysOverdue} 天</Badge>
+      ),
+      align: 'center',
+    },
+    {
+      header: '状态',
+      cell: (r) => (
+        <Badge variant="outline">{OUTSOURCE_STATUS_LABELS[r.status]}</Badge>
+      ),
+      align: 'center',
+    },
+  ];
+
+const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
+  {
+    header: '客服',
+    cell: (r) => r.csDisplayName,
+  },
+  {
+    header: '周期',
+    cell: (r) => (
+      <span className="font-mono text-xs">
+        {formatDateShanghai(r.periodStart)} → {formatDateShanghai(r.periodEnd)}
+      </span>
+    ),
+  },
+  {
+    header: '剩余',
+    cell: (r) => (
+      <Badge variant={r.daysUntilEnd <= 1 ? 'destructive' : 'outline'}>
+        {r.daysUntilEnd === 0 ? '今日' : `${r.daysUntilEnd} 天`}
+      </Badge>
+    ),
+    align: 'center',
+  },
+  {
+    header: '已累计业绩',
+    cell: (r) => formatMoney(r.totalSales),
+    align: 'right',
+    className: 'font-mono',
+  },
+  {
+    header: '预测提成',
+    cell: (r) =>
+      r.predictedCommission == null ? (
+        <span className="text-muted-foreground">—</span>
+      ) : r.predictedBelowAllTiers ? (
+        <span className="text-muted-foreground">未达档位</span>
+      ) : (
+        formatMoney(r.predictedCommission)
+      ),
+    align: 'right',
+    className: 'font-mono',
+  },
+  {
+    header: '预测总收入',
+    cell: (r) =>
+      r.predictedTotalIncome == null ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        formatMoney(r.predictedTotalIncome)
+      ),
+    align: 'right',
+    className: 'font-mono font-semibold',
+  },
+];
+
+// ─── helpers ───
+
+function formatDateShanghai(d: Date): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+function formatDateTimeShanghai(d: Date): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
 }

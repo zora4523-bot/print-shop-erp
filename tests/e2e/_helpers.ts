@@ -332,23 +332,32 @@ export async function readActiveCsTotalSales(
   });
 }
 
-// ---- Owner dashboard E2E (P1 #1 Slice A) ----
+// ---- Owner dashboard E2E (P1 #1 Slice A + B) ----
 //
-// Seeds a deterministic snapshot for /owner KPI assertions:
-//   - 3 orders submitted today (1 urgent) → 今日提交 / 急单 cards
-//   - 2 orders completed today           → 今日完工 card
-//   - 1 order shipped today              → 今日发货 card
-//   - 1 Bill in current Shanghai month   → 本月应收 card
+// Seeds a deterministic snapshot for /owner. Slice A KPI cards +
+// Slice B watchlist tables share one fixture so the page renders all
+// 4 cards + 3 lists from a single seed call:
 //
-// Why a fresh wipe of *all* e2e-* orders + bills before seeding: the
-// dashboard counts globally (no per-user filter), and earlier specs
-// in this same playwright run (bill-flow, production-flow) leave
-// orders behind that would inflate the counters across reruns. We
-// wipe only e2e-prefixed users, same guard as resetBillsForUser, so
-// production data is untouched.
+//   Slice A (KPI cards):
+//     - 3 orders submitted today (1 urgent) → 今日提交 / 急单 cards
+//     - 2 orders completed today            → 今日完工 card + 待发货
+//     - 1 order shipped today               → 今日发货 card
+//     - 1 Bill (current Shanghai month, PARTIAL_PAID)
+//                                           → 本月应收 card
 //
-// Returns the seeded order ids + bill id for callers that want to
-// assert deeper than the rendered KPIs.
+//   Slice B (watchlist tables):
+//     - 2 COMPLETED orders above            → 待发货工单 list
+//     - 1 OutsourceOrder w/ expectedDate=今日 - 3d, status=IN_PROGRESS
+//                                           → 超期外协 list
+//     - 1 SalaryPeriod (e2e-cs) periodEnd=今日 + 3d, IN_PROGRESS
+//                                           → 即将结算客服周期 list
+//
+// Why a fresh wipe of *all* e2e-* orders + bills + outsource +
+// salary-periods before seeding: dashboard queries are global (no per-
+// user filter), and earlier specs (bill-flow, production-flow) in the
+// same run leave state behind that inflates lists across reruns. We
+// wipe only e2e-prefixed users / e2e-dash-prefixed rows, same guard
+// idea as resetBillsForUser — real data untouched.
 export type DashboardSnapshot = {
   submittedOrderIds: string[];
   urgentOrderId: string;
@@ -357,11 +366,19 @@ export type DashboardSnapshot = {
   billId: string;
   monthlyTotal: string; // 5000.00
   monthlyPaid: string; // 2000.00
+  // Slice B fixtures
+  outsourceId: string;
+  outsourceDaysOverdue: number; // 3
+  csPeriodId: string;
+  csPeriodDaysUntilEnd: number; // 3
 };
 
 export async function seedDashboardSnapshot(opts: {
   // 业绩归属：bill 的销售人。e2e-sales 是 globalSetup 建好的固定 SALES 用户。
   salesUserId: string;
+  // CS 周期归属：e2e-cs 是 globalSetup 的 CUSTOMER_SERVICE 用户。
+  // 没传时 Slice B 的 ending-period fixture 不 seed（只渲染空 list）。
+  csUserId?: string;
 }): Promise<DashboardSnapshot> {
   const now = new Date();
   // Shanghai 中午 12:00 = UTC 04:00 —— 离日界 (UTC 16:00 / Shanghai
@@ -378,10 +395,45 @@ export async function seedDashboardSnapshot(opts: {
   );
   const period = `${yyyy}-${String(mm).padStart(2, '0')}`;
 
+  // Slice B watchlist boundaries. Both targets use precise math
+  // (`Math.floor((todayStart − expected) / 1day)` for outsource;
+  // `Math.floor((expected − todayStart) / 1day)` for cs-period) so we
+  // have to land on integer-day boundaries, not "noon", to avoid the
+  // 0.5-day rounding drift across runs.
+  //
+  // todayStart = UTC start of (Shanghai today) = UTC 16:00 of
+  // (Shanghai today − 1). Set both fixtures relative to that:
+  //   - 外协 expectedDate = todayStart − 3d (UTC instant, full
+  //     DateTime column) → daysOverdue = 3 exactly.
+  //   - SalaryPeriod periodEnd is a `@db.Date` column; PG stores the
+  //     YYYY-MM-DD parsed from the ISO date prefix at UTC 00:00. To
+  //     get daysUntilEnd = 3 we need UTC 00:00 of date D where
+  //     D − todayStart = exactly 3*1day (modulo intra-day rounding).
+  //     UTC 00:00 of (Shanghai today + 3) = UTC 00:00 of (Shanghai
+  //     today + 3). todayStart = UTC 16:00 of (today − 1). Diff =
+  //     3*24 + 16 hours = 3.67d → floor 3. ✓
+  const SHANGHAI_OFFSET_HOURS = 8;
+  const dayMs = 24 * 60 * 60 * 1000;
+  // todayStart in UTC instants, mirroring lib/dashboard/shanghai-clock.
+  const todayShanghaiUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd!));
+  const todayStartUtc = new Date(
+    todayShanghaiUtcMidnight.getTime() - SHANGHAI_OFFSET_HOURS * 60 * 60 * 1000,
+  );
+  const overdueExpectedDate = new Date(todayStartUtc.getTime() - 3 * dayMs);
+  // For SalaryPeriod (@db.Date), PG reads back UTC 00:00 of the stored
+  // date. We pass `'YYYY-MM-DD'` strings; date-add via JS Date.UTC.
+  const csPeriodStartUtcMidnight = new Date(
+    Date.UTC(yyyy!, mm! - 1, dd! - 90),
+  );
+  const csPeriodEndUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
+
   return withDb(async (db) => {
-    // Step 1: wipe ALL orders + bills owned by e2e-* users so prior
-    // runs / parallel specs don't inflate global counters.
-    // Bills first (BillItem → Bill RESTRICT), then Orders.
+    // Step 1: wipe Slice A + B fixtures.
+    // Bills first (BillItem → Bill RESTRICT), then Orders, then Slice
+    // B aux state. OutsourceOrder.orderId → ON DELETE SET NULL so a
+    // wide Order delete leaves orphaned OutsourceOrder rows pointing
+    // at no order — those would still surface in 超期外协 list. Wipe
+    // them by id-prefix instead.
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT b.id FROM "Bill" b
@@ -399,6 +451,23 @@ export async function seedDashboardSnapshot(opts: {
          SELECT id FROM "User" WHERE username LIKE 'e2e-%'
        )`,
     );
+    // Slice B: nuke any prior dashboard-fixture outsource rows.
+    // (id LIKE 'e2e-dash-os-%' — narrow scope so other specs' outsource
+    // fixtures stay intact.)
+    await db.query(
+      `DELETE FROM "OutsourceOrder" WHERE id LIKE 'e2e-dash-os-%'`,
+    );
+    // Slice B: nuke prior CS commission + period rows for the cs user.
+    // Same RESTRICT order as resetCsSalaryStateForUser.
+    if (opts.csUserId) {
+      await db.query(
+        `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
+        [opts.csUserId],
+      );
+      await db.query(`DELETE FROM "SalaryPeriod" WHERE "csUserId" = $1`, [
+        opts.csUserId,
+      ]);
+    }
 
     // Step 2: seed orders. ids are deterministic per-shape so a re-run
     // of the dashboard spec without a wipe in between would idempotent-
@@ -502,6 +571,52 @@ export async function seedDashboardSnapshot(opts: {
       [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],
     );
 
+    // Step 4 (Slice B): seed one overdue outsource order linked to the
+    // first completed order, so 超期外协 list has one row with a real
+    // orderNo (more useful UI signal than orphaned).
+    const outsourceId = 'e2e-dash-os-1';
+    const linkedOrderId = completedOrderIds[0]!;
+    await db.query(
+      `
+      INSERT INTO "OutsourceOrder" (
+        id, "orderId", "supplierName", "expectedDate",
+        status, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 'E2E 阿福外协',
+        $3, 'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
+      )
+      `,
+      [outsourceId, linkedOrderId, overdueExpectedDate.toISOString()],
+    );
+
+    // Step 5 (Slice B): seed one IN_PROGRESS salary period that ends in
+    // ~3 days (only when caller provides csUserId). totalSales=300000
+    // hits the highest tier in the seeded CS_TIERS rule (commission
+    // visible in UI as a non-"—" non-"未达档位" value).
+    let csPeriodId = '';
+    const csPeriodDaysUntilEnd = 3;
+    if (opts.csUserId) {
+      csPeriodId = `e2e-dash-csp-${randomBytes(4).toString('hex')}`;
+      await db.query(
+        `
+        INSERT INTO "SalaryPeriod" (
+          id, "csUserId", "periodStart", "periodEnd",
+          "durationMonths", "totalSales", "initialSales", "monthlyBase",
+          status, "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, $4, 4, 300000, 0, 5000,
+          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
+        )
+        `,
+        [
+          csPeriodId,
+          opts.csUserId,
+          csPeriodStartUtcMidnight.toISOString().slice(0, 10),
+          csPeriodEndUtcMidnight.toISOString().slice(0, 10),
+        ],
+      );
+    }
+
     return {
       submittedOrderIds,
       urgentOrderId: 'e2e-dash-sub-3-urgent',
@@ -510,6 +625,10 @@ export async function seedDashboardSnapshot(opts: {
       billId,
       monthlyTotal,
       monthlyPaid,
+      outsourceId,
+      outsourceDaysOverdue: 3,
+      csPeriodId,
+      csPeriodDaysUntilEnd,
     };
   });
 }
