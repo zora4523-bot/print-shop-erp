@@ -27,6 +27,10 @@ describe('getAdminMenuItems', () => {
       '产品字典',
       '用户管理',
     ]);
+    // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
+    // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
+    const dashboard = items.find((i) => i.label === 'Dashboard');
+    expect(dashboard?.href).toBe('/owner');
   });
 
   it('FOREMAN 看不到老板独占项（账单 / 用户管理 / 工艺字典 / 产品字典）', () => {

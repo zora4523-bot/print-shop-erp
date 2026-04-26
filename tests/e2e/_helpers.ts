@@ -332,6 +332,185 @@ export async function readActiveCsTotalSales(
   });
 }
 
+// ---- Owner dashboard E2E (P1 #1 Slice A) ----
+//
+// Seeds a deterministic snapshot for /owner KPI assertions:
+//   - 3 orders submitted today (1 urgent) → 今日提交 / 急单 cards
+//   - 2 orders completed today           → 今日完工 card
+//   - 1 order shipped today              → 今日发货 card
+//   - 1 Bill in current Shanghai month   → 本月应收 card
+//
+// Why a fresh wipe of *all* e2e-* orders + bills before seeding: the
+// dashboard counts globally (no per-user filter), and earlier specs
+// in this same playwright run (bill-flow, production-flow) leave
+// orders behind that would inflate the counters across reruns. We
+// wipe only e2e-prefixed users, same guard as resetBillsForUser, so
+// production data is untouched.
+//
+// Returns the seeded order ids + bill id for callers that want to
+// assert deeper than the rendered KPIs.
+export type DashboardSnapshot = {
+  submittedOrderIds: string[];
+  urgentOrderId: string;
+  completedOrderIds: string[];
+  shippedOrderId: string;
+  billId: string;
+  monthlyTotal: string; // 5000.00
+  monthlyPaid: string; // 2000.00
+};
+
+export async function seedDashboardSnapshot(opts: {
+  // 业绩归属：bill 的销售人。e2e-sales 是 globalSetup 建好的固定 SALES 用户。
+  salesUserId: string;
+}): Promise<DashboardSnapshot> {
+  const now = new Date();
+  // Shanghai 中午 12:00 = UTC 04:00 —— 离日界 (UTC 16:00 / Shanghai
+  // 00:00) 远，运行时刻在月初/月末附近也不会落到隔壁日 / 隔壁月。
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const [yyyy, mm, dd] = ymd.split('-').map(Number);
+  const todayShanghaiNoonUtc = new Date(
+    Date.UTC(yyyy!, mm! - 1, dd!, 4, 0, 0),
+  );
+  const period = `${yyyy}-${String(mm).padStart(2, '0')}`;
+
+  return withDb(async (db) => {
+    // Step 1: wipe ALL orders + bills owned by e2e-* users so prior
+    // runs / parallel specs don't inflate global counters.
+    // Bills first (BillItem → Bill RESTRICT), then Orders.
+    await db.query(
+      `DELETE FROM "BillItem" WHERE "billId" IN (
+         SELECT b.id FROM "Bill" b
+         JOIN "User" u ON u.id = b."salesUserId"
+         WHERE u.username LIKE 'e2e-%'
+       )`,
+    );
+    await db.query(
+      `DELETE FROM "Bill" WHERE "salesUserId" IN (
+         SELECT id FROM "User" WHERE username LIKE 'e2e-%'
+       )`,
+    );
+    await db.query(
+      `DELETE FROM "Order" WHERE "submitterId" IN (
+         SELECT id FROM "User" WHERE username LIKE 'e2e-%'
+       )`,
+    );
+
+    // Step 2: seed orders. ids are deterministic per-shape so a re-run
+    // of the dashboard spec without a wipe in between would idempotent-
+    // upsert (we don't bother — the wipe above is the contract).
+    const submittedOrderIds: string[] = [];
+    const submittedSpecs = [
+      { suffix: 'sub-1', urgent: false },
+      { suffix: 'sub-2', urgent: false },
+      { suffix: 'sub-3-urgent', urgent: true },
+    ];
+    for (const spec of submittedSpecs) {
+      const orderId = `e2e-dash-${spec.suffix}`;
+      const orderNo = `E2E-DASH-${spec.suffix.toUpperCase()}`;
+      await db.query(
+        `
+        INSERT INTO "Order" (
+          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          status, "isUrgent", "totalAmount",
+          "submittedAt", "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 'SALES'::"Role", $3,
+          'SUBMITTED'::"OrderStatus", $4, 0,
+          $5, $5, $5
+        )
+        `,
+        [
+          orderId,
+          orderNo,
+          opts.salesUserId,
+          spec.urgent,
+          todayShanghaiNoonUtc.toISOString(),
+        ],
+      );
+      submittedOrderIds.push(orderId);
+    }
+
+    const completedOrderIds: string[] = [];
+    for (const i of [1, 2]) {
+      const orderId = `e2e-dash-completed-${i}`;
+      const orderNo = `E2E-DASH-COMPLETED-${i}`;
+      await db.query(
+        `
+        INSERT INTO "Order" (
+          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          status, "isUrgent", "totalAmount",
+          "submittedAt", "scheduledAt", "completedAt",
+          "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 'SALES'::"Role", $3,
+          'COMPLETED'::"OrderStatus", FALSE, 0,
+          $4, $4, $4,
+          $4, $4
+        )
+        `,
+        [
+          orderId,
+          orderNo,
+          opts.salesUserId,
+          todayShanghaiNoonUtc.toISOString(),
+        ],
+      );
+      completedOrderIds.push(orderId);
+    }
+
+    const shippedOrderId = 'e2e-dash-shipped-1';
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "totalAmount",
+        "submittedAt", "scheduledAt", "completedAt", "shippedAt",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", $2,
+        'SHIPPED'::"OrderStatus", FALSE, 0,
+        $3, $3, $3, $3,
+        $3, $3
+      )
+      `,
+      [shippedOrderId, opts.salesUserId, todayShanghaiNoonUtc.toISOString()],
+    );
+
+    // Step 3: seed one bill in the current Shanghai month.
+    // 5000 总额 / 2000 已收 → outstanding 3000；UI 显示三个数字时都好认。
+    const billId = `e2e-dash-bill-${randomBytes(4).toString('hex')}`;
+    const monthlyTotal = '5000.00';
+    const monthlyPaid = '2000.00';
+    await db.query(
+      `
+      INSERT INTO "Bill" (
+        id, "salesUserId", period, "totalAmount", "paidAmount",
+        status, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        'DRAFT'::"BillStatus", NOW(), NOW()
+      )
+      `,
+      [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],
+    );
+
+    return {
+      submittedOrderIds,
+      urgentOrderId: 'e2e-dash-sub-3-urgent',
+      completedOrderIds,
+      shippedOrderId,
+      billId,
+      monthlyTotal,
+      monthlyPaid,
+    };
+  });
+}
+
 // Returns a UTC Date that's safely in the middle of the current
 // Shanghai calendar month (15th, noon UTC). Used by bill-flow E2E so
 // the seeded order's `finishedAt` matches the period the UI defaults
