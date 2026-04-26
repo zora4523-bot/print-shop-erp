@@ -256,3 +256,21 @@
 - **理由**：finance-of-record bedrock（DECISIONS 2026-04-24 薪资铁律）同样适用于账单。一旦打标 FULLY_PAID，关联的 CS 业绩已累计进 `SalaryPeriod.totalSales`、甚至可能已在月底 settle 成 `CustomerServiceCommission`——回退账单状态会让历史金额不可信。续收的场景下金额在变但状态不变，是合理的 no-transition；状态机保留&ldquo;自反即 bug&rdquo;的严格性用来抓 re-issue / re-pay 误用。
 - **影响**：`lib/bill/status-machine.ts BILL_TRANSITIONS` 不含任何 self-loop；`lib/bill.ts recordPayment` 显式 `if (targetStatus !== bill.status) transitionBill(...)` 跳过续收的 self-transition。UI 在 detail 页要隐藏 `FULLY_PAID` 单的&ldquo;录入付款&rdquo;按钮（Slice B 落地）。未来 P1 加退款功能时，新加 `ADJUSTED` 或 `CREDITED` 状态、或者保持双账单模式。
 - **相关文档**：`lib/bill/status-machine.ts`、`lib/bill.ts recordPayment`、Codex round 52。
+
+---
+
+## 2026-04-26：老板 Dashboard 业绩 / 排行 / 分布按 `Order.submittedAt` 计入
+
+- **决策**：老板 Dashboard 上一切&ldquo;销售/客服业绩&rdquo;视角的统计——本月销售排行（Slice C）、产品线分布（Slice C）、即将结算客服周期的预测金额（Slice B）——业绩归属时间统一按 `Order.submittedAt`（工单提交时刻）。**不**按 `Order.finishedAt`（资金最终落账）。&ldquo;待发货&rdquo;关注列表则继续按 `Order.completedAt`（生产完工时刻）排序，因为它问的是&ldquo;什么时候能发&rdquo;不是&ldquo;什么时候算业绩&rdquo;。
+- **理由**：业主明确倾向。`submittedAt` 是销售/客服真正出力气的时刻，给业绩反馈最即时；`finishedAt` 在长账期客户上要等 2-3 个月才出数，dashboard 看不到&ldquo;这个月谁拼了&rdquo;。代价是退单/取消会让历史业绩&ldquo;掉&rdquo;（CANCELLED 工单不计），但当前 SPEC 退单极少且 dashboard 只看&ldquo;趋势&rdquo;，不是结算证据。结算证据走 Bill / `accumulateCsSales`（独立链路，对应 DECISIONS 2026-04-25 应收账单 paid-ledger 语义）。
+- **影响**：`lib/dashboard/owner-watchlist.ts` 的 `getEndingPeriods` 用 `submittedAt` 计算 totalSales 预测；Slice C 的 `getSalesRanking` / `getCategoryDistribution` 都按 `submittedAt` 月聚合，不与 `finishedAt`-based 客服真实提成（`SalaryPeriod.totalSales`）混用。Dashboard 数字可能会和 `/owner/salary/cs` 同期数字不一致——文案要点出&ldquo;本月销售排行（按提交时间）&rdquo;让 owner 不混淆两条链路。
+- **相关文档**：`lib/dashboard/owner-watchlist.ts`、`lib/dashboard/owner-charts.ts`（Slice C）、`SPEC v1.2 §6 销售业绩看板`。
+
+---
+
+## 2026-04-26：老板 Dashboard 图表选 recharts，锁版本 3.8.1
+
+- **决策**：Slice C 的 3 个图（30 天产量曲线 / 销售排行 horizontal BarChart / 产品线分布 PieChart）用 `recharts@3.8.1`（精确版本，无 `^` / `~`，按 CLAUDE.md §2 锁版本规范）。Server 端 lib 只产纯数据数组；`'use client'` 包裹的 chart 组件接 props 直接渲染。`<ResponsiveContainer>` + `isAnimationActive={false}` 是必备配置（前者解决 SSR 高度 0，后者保证视觉回归基线稳定）。
+- **理由**：候选 chart.js / visx / nivo / Apache ECharts 都看了；recharts 选中是 4 条原因的并集——(1) React 19 peer 兼容（v3.x 系列；2.x 不支持），(2) SVG 输出对视觉回归友好（pixel-stable，不像 Canvas-based chart.js 抗锯齿在不同 GPU 上飘），(3) TypeScript 类型完备且 SSR 友好（next/dynamic 兜底也容易），(4) 项目已经用 shadcn 风格，recharts 的纯 component API 比 ECharts 的 `option = {...}` 配置式更贴。代价：bundle ~150KB（接受，dashboard 是 OWNER 内部页，不在公开访问者关键路径）。
+- **影响**：Slice C 第一步 `pnpm add recharts@3.8.1`（精确版本）；如果首次 `pnpm dev` 加载报 React 19 相关 hydration warning，回退方案是 `dynamic(() => import('...'), { ssr: false })` 包裹各 chart 组件，但默认走 SSR；图表 props 全部用 `string` / `number`（不传 Decimal，避免序列化崩溃）；视觉回归基线 fixture 走 `seedDashboardChartFixture()` 插入确定性数据，每个 chart 单独 snapshot。未来 P2 如果 dashboard 性能 > 500ms，引入预聚合表（DashboardSnapshot），不换 chart 库。
+- **相关文档**：`lib/dashboard/owner-charts.ts`（Slice C）、`components/business/dashboard/*Chart.tsx`、CLAUDE.md §2 版本锁定策略。
