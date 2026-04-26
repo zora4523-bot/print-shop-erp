@@ -102,16 +102,11 @@ export default async function OwnerDashboardPage() {
           emptyText="暂无待发货工单 — 所有完工单已发货。"
           columns={pendingShipmentColumns}
           footer={
+            // 没做 /orders?status=COMPLETED 过滤入口（orders index 不读
+            // searchParams，Codex round 99 low）；先只提示&ldquo;有更多&rdquo;，链接
+            // 等订单管理页支持 status filter 后再加。
             pendingShipments.hasMore ? (
-              <span>
-                还有更多待发货工单 ·{' '}
-                <Link
-                  href="/orders?status=COMPLETED"
-                  className="font-medium underline"
-                >
-                  查看全部 →
-                </Link>
-              </span>
+              <span>还有更多待发货工单（仅显示前 10 条）。</span>
             ) : null
           }
         />
@@ -243,8 +238,23 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
     align: 'center',
   },
   {
-    header: '已累计业绩',
-    cell: (r) => formatMoney(r.totalSales),
+    // 业绩合计（算档用）= totalSales + initialSales。同 owner/salary/cs/[id]
+    // 详情页的口径，保证与右侧"预测提成"档位一致（Codex round 99 medium：
+    // 不能让显示数比命中档低，否则 owner 看不出为什么提成是这个金额）。
+    header: '业绩合计',
+    cell: (r) => {
+      const initial = Number(r.initialSales);
+      return (
+        <div className="flex flex-col items-end">
+          <span>{formatMoney(r.salesForTier)}</span>
+          {initial > 0 ? (
+            <span className="text-xs text-muted-foreground">
+              含期初 {formatMoney(r.initialSales)}
+            </span>
+          ) : null}
+        </div>
+      );
+    },
     align: 'right',
     className: 'font-mono',
   },

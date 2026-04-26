@@ -239,6 +239,11 @@ describe('getEndingPeriods', () => {
     const r = await getEndingPeriods(new Date('2026-04-26T08:00:00Z'));
     // (50000 + 60000) ≥ 100000 → 命中 0.01 → 1100 提成
     expect(r[0]!.predictedCommission).toBe('1100.00');
+    // salesForTier = totalSales + initialSales = 110000.00（UI 列&ldquo;业绩
+    // 合计&rdquo;直接用，避免显示数和提成口径分裂；Codex round 99 medium）。
+    expect(r[0]!.salesForTier).toBe('110000.00');
+    expect(r[0]!.totalSales).toBe('50000.00');
+    expect(r[0]!.initialSales).toBe('60000.00');
   });
 
   it('totalSales 未达档 → predictedBelowAllTiers=true，提成=0.00', async () => {

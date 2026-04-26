@@ -150,8 +150,12 @@ export type EndingPeriodRow = {
   periodStart: Date;
   periodEnd: Date;
   durationMonths: number;
-  totalSales: string;
-  initialSales: string;
+  totalSales: string; // 本期累计（不含期初）
+  initialSales: string; // 期初导入
+  // 业绩合计（算档用） = totalSales + initialSales。这是 calcCsCommission
+  // 实际喂入的数字，UI 渲染&ldquo;业绩合计&rdquo;列时直接用，避免显示数与提成
+  // 计算口径分裂（Codex round 99 medium）。
+  salesForTier: string;
   monthlyBase: string;
   daysUntilEnd: number;
   // null = 找不到生效中的 tier 规则（极少见，UI 显示&ldquo;—&rdquo;不崩）
@@ -236,6 +240,7 @@ export async function getEndingPeriods(
       initialSales: new Decimal(
         p.initialSales as unknown as Decimal.Value,
       ).toFixed(2),
+      salesForTier: totalForCommission.toFixed(2),
       monthlyBase: new Decimal(
         p.monthlyBase as unknown as Decimal.Value,
       ).toFixed(2),
