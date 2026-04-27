@@ -50,9 +50,18 @@ export async function getProductionTrend(
   );
   const endExclusive = new Date(todayStart.getTime() + MS_PER_DAY);
 
+  // PG `AT TIME ZONE` 语义陷阱（Codex round 100 high）：`completedAt`
+  // 列是 `timestamp without time zone`，Prisma 把 UTC 瞬时写进去。对
+  // naked timestamp 跑 `AT TIME ZONE 'Asia/Shanghai'` 会被 PG 解读
+  // 成"把这个本地 Shanghai 时间转回 UTC"——方向反了。必须先 `AT TIME
+  // ZONE 'UTC'` 把 naked timestamp 升成 timestamptz（声明它本身是
+  // UTC），再 `AT TIME ZONE 'Asia/Shanghai'` 转到上海日历。
   const rows = await db.$queryRaw<Array<{ day: string; count: bigint }>>`
     SELECT
-      to_char(("completedAt" AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
+      to_char(
+        (("completedAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date,
+        'YYYY-MM-DD'
+      ) AS day,
       count(*) AS count
     FROM "Order"
     WHERE "completedAt" >= ${startExclusive}
@@ -192,8 +201,12 @@ export async function getCategoryDistribution(
       AND o."submittedAt" < ${monthEnd}
       AND o.status != 'CANCELLED'
     GROUP BY category
-    ORDER BY order_count DESC
+    ORDER BY order_count DESC, category ASC
   `;
+  // Secondary `category ASC` keeps pie slice / legend order stable
+  // when multiple categories have the same count (Codex round 100
+  // medium). Without it PG chooses arbitrary tie-break order →
+  // visual baseline drifts + UI flickers across refreshes.
 
   return rows.map((r) => ({
     category: r.category,

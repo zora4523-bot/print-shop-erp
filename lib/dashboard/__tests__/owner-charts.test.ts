@@ -60,7 +60,7 @@ describe('getProductionTrend', () => {
   it('raw query 用 status IN [COMPLETED, SHIPPED, FINISHED]', async () => {
     dbMock.$queryRaw.mockResolvedValue([]);
     await getProductionTrend(new Date('2026-04-25T08:00:00Z'));
-    // Tagged template — recharts 内部走 prisma.$queryRaw`...` 即 strings + values
+    // Tagged template — prisma.$queryRaw`...` 即 strings + values
     // 数组。把 strings join 起来检查 SQL fragment。
     const call = dbMock.$queryRaw.mock.calls[0];
     const strings = call[0] as TemplateStringsArray;
@@ -68,6 +68,19 @@ describe('getProductionTrend', () => {
     expect(sql).toContain('AT TIME ZONE');
     expect(sql).toContain("'Asia/Shanghai'");
     expect(sql).toContain("status IN ('COMPLETED', 'SHIPPED', 'FINISHED')");
+  });
+
+  it('raw query 走两层 AT TIME ZONE（UTC → Shanghai）防 PG 时区陷阱（round 100 high）', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+    await getProductionTrend(new Date('2026-04-25T08:00:00Z'));
+    const call = dbMock.$queryRaw.mock.calls[0];
+    const strings = call[0] as TemplateStringsArray;
+    const sql = Array.from(strings).join(' ');
+    // 必须先 UTC 后 Shanghai —— 单层 'Asia/Shanghai' 会被 PG 当成
+    // "naked timestamp 已经在 Shanghai" 处理，方向反。
+    expect(sql).toContain("AT TIME ZONE 'UTC'");
+    expect(sql).toContain("AT TIME ZONE 'Asia/Shanghai'");
+    expect(sql.indexOf("'UTC'")).toBeLessThan(sql.indexOf("'Asia/Shanghai'"));
   });
 
   it('count: bigint → number 转换', async () => {
@@ -225,6 +238,15 @@ describe('getCategoryDistribution', () => {
     const values = call.slice(1) as Date[];
     expect(values[0]?.toISOString()).toBe('2026-03-31T16:00:00.000Z');
     expect(values[1]?.toISOString()).toBe('2026-04-30T16:00:00.000Z');
+  });
+
+  it('ORDER BY count DESC + category ASC（同 count 按 category 字典序，防 pie 抖动）', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+    await getCategoryDistribution(new Date('2026-04-25T08:00:00Z'));
+    const call = dbMock.$queryRaw.mock.calls[0];
+    const strings = call[0] as TemplateStringsArray;
+    const sql = Array.from(strings).join(' ');
+    expect(sql).toContain('ORDER BY order_count DESC, category ASC');
   });
 
   it('count: bigint → number 转换（递归 sanity check）', async () => {

@@ -79,8 +79,12 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
           <Tooltip
             isAnimationActive={false}
             contentStyle={{ fontSize: 12 }}
+            // tooltip 走&ldquo;精确到分&rdquo;格式，**不**用 formatAxisMoney——后者
+            // 会把 5000.50 圆成 5,001、把 12500 压成 1.3 万，这是 axis
+            // tick 的密度妥协，不是金额展示口径（Codex round 100
+            // medium）。
             formatter={(value) => [
-              `¥ ${formatAxisMoney(Number(value))}`,
+              `¥ ${formatTooltipMoney(Number(value))}`,
               '业绩',
             ]}
             labelFormatter={(label) => String(label ?? '')}
@@ -100,10 +104,20 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
 }
 
 // 简化的轴文案：1 万以上压成"X.X 万"，否则千分位整数。这是 axis tick
-// 视觉密度，不是金额展示——主体金额在 tooltip 里精确到分。
+// 视觉密度，**有损**——金额展示请用 formatTooltipMoney 走精确到分。
 function formatAxisMoney(v: number): string {
   if (Math.abs(v) >= 10000) {
     return `${(v / 10000).toFixed(1)} 万`;
   }
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(v);
+}
+
+// 精确金额格式：千分位 + 2 位小数，与 lib/dashboard/format.ts 的
+// formatMoney 同口径（Decimal-string 通常是 toFixed(2) 已经精确，这里
+// 接 number；走 zh-CN locale 千分位）。
+function formatTooltipMoney(v: number): string {
+  return new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v);
 }
