@@ -12,12 +12,20 @@ import {
   type OverdueOutsourceRow,
   type PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
+import {
+  getCategoryDistribution,
+  getProductionTrend,
+  getSalesRanking,
+} from '@/lib/dashboard/owner-charts';
 import { formatMoney } from '@/lib/dashboard/format';
 import { StatCard } from '@/components/business/dashboard/StatCard';
 import {
   WatchlistTable,
   type WatchlistColumn,
 } from '@/components/business/dashboard/WatchlistTable';
+import { ProductionTrendChart } from '@/components/business/dashboard/ProductionTrendChart';
+import { SalesRankingChart } from '@/components/business/dashboard/SalesRankingChart';
+import { CategoryDistributionChart } from '@/components/business/dashboard/CategoryDistributionChart';
 import { Badge } from '@/components/ui/badge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 
@@ -25,8 +33,8 @@ export const metadata = { title: '老板 Dashboard' };
 
 // /owner is the OWNER landing page. Layered build (P1 #1):
 //   - Slice A: 4 KPI cards
-//   - Slice B: 3 watchlist tables (this commit)
-//   - Slice C: charts (近 30 天产量 / 销售业绩 / 产品分布)
+//   - Slice B: 3 watchlist tables
+//   - Slice C: 3 charts — 30 天产量 / 销售业绩 Top10 / 产品分布
 //
 // Permission: `report:all` is OWNER-only; matches the (admin)/owner
 // layout gate but keeps the page-level guard as defense in depth (the
@@ -35,14 +43,25 @@ export const metadata = { title: '老板 Dashboard' };
 export default async function OwnerDashboardPage() {
   await requirePermission('report:all');
 
-  const [today, monthly, pendingShipments, overdueOutsourcing, endingPeriods] =
-    await Promise.all([
-      getTodayOrderStats(),
-      getMonthlyBillStats(),
-      getPendingShipments(),
-      getOverdueOutsourcing(),
-      getEndingPeriods(),
-    ]);
+  const [
+    today,
+    monthly,
+    pendingShipments,
+    overdueOutsourcing,
+    endingPeriods,
+    productionTrend,
+    salesRanking,
+    categoryDistribution,
+  ] = await Promise.all([
+    getTodayOrderStats(),
+    getMonthlyBillStats(),
+    getPendingShipments(),
+    getOverdueOutsourcing(),
+    getEndingPeriods(),
+    getProductionTrend(),
+    getSalesRanking(),
+    getCategoryDistribution(),
+  ]);
 
   // 完工同比：今日 vs 昨日。差值正→上升，负→下降，0→持平。
   const completedDiff = today.completedToday - today.completedYesterday;
@@ -131,7 +150,59 @@ export default async function OwnerDashboardPage() {
         emptyText="未来 7 天内无客服周期到期。"
         columns={endingPeriodColumns}
       />
+
+      <ChartCard
+        slot="dashboard-chart-trend-card"
+        title="近 30 天产量趋势"
+        description="按完工时间汇总 · COMPLETED / SHIPPED / FINISHED"
+      >
+        <ProductionTrendChart data={productionTrend} />
+      </ChartCard>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartCard
+          slot="dashboard-chart-ranking-card"
+          title="本月销售业绩 Top 10"
+          description="按提交时间归属 · SALES 蓝色 / 客服 绿色"
+        >
+          <SalesRankingChart data={salesRanking} />
+        </ChartCard>
+        <ChartCard
+          slot="dashboard-chart-category-card"
+          title="本月产品线分布"
+          description="按工单计数（同一工单多款式只计 1 次）"
+        >
+          <CategoryDistributionChart data={categoryDistribution} />
+        </ChartCard>
+      </div>
     </div>
+  );
+}
+
+function ChartCard({
+  slot,
+  title,
+  description,
+  children,
+}: {
+  slot: string;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      data-slot={slot}
+      className="rounded-xl border bg-card shadow-sm"
+    >
+      <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
+        <h2 className="text-base font-semibold">{title}</h2>
+        {description ? (
+          <p className="text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </header>
+      <div className="p-4">{children}</div>
+    </section>
   );
 }
 

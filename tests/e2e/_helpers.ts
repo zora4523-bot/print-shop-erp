@@ -371,6 +371,10 @@ export type DashboardSnapshot = {
   outsourceDaysOverdue: number; // 3
   csPeriodId: string;
   csPeriodDaysUntilEnd: number; // 3
+  // Slice C chart fixtures (only present when chartFixture=true)
+  chartProductIds: string[];
+  trendCompletedOrderIds: string[];
+  rankingOrderIds: string[];
 };
 
 export async function seedDashboardSnapshot(opts: {
@@ -379,6 +383,15 @@ export async function seedDashboardSnapshot(opts: {
   // CS 周期归属：e2e-cs 是 globalSetup 的 CUSTOMER_SERVICE 用户。
   // 没传时 Slice B 的 ending-period fixture 不 seed（只渲染空 list）。
   csUserId?: string;
+  // Slice C 图表 fixture：seed 30 天产量曲线 + 销售排行 + 产品分布。
+  // 默认 false（Slice A/B E2E 不需要图表数据，节省运行时）。
+  // 视觉回归 spec / preview 走 true。
+  chartFixture?: boolean;
+  // Slice C 排行 fixture 还要一个额外的销售用户（不同于 salesUserId）
+  // 来体现"3 个不同 submitter / 3 种不同业绩高度"。e2e-cs (CS) 提供
+  // 第二种角色色（绿）；admin (OWNER) 提供第三种（muted）。foreman 是
+  // FOREMAN 角色，用其 id 喂入则角色色用 muted 同色板。
+  ownerUserId?: string;
 }): Promise<DashboardSnapshot> {
   const now = new Date();
   // Shanghai 中午 12:00 = UTC 04:00 —— 离日界 (UTC 16:00 / Shanghai
@@ -451,12 +464,26 @@ export async function seedDashboardSnapshot(opts: {
          SELECT id FROM "User" WHERE username LIKE 'e2e-%'
        )`,
     );
+    // Slice C ranking fixture also seeds Orders submitted by `admin`
+    // (OWNER role) — those don't match the e2e-* user filter above.
+    // Catch them by id-prefix instead. e2e-dash-* IDs are owned
+    // exclusively by this helper (Slice A trend / Slice B linked
+    // outsource / Slice C trend + ranking).
+    await db.query(`DELETE FROM "Order" WHERE id LIKE 'e2e-dash-%'`);
     // Slice B: nuke any prior dashboard-fixture outsource rows.
     // (id LIKE 'e2e-dash-os-%' — narrow scope so other specs' outsource
     // fixtures stay intact.)
     await db.query(
       `DELETE FROM "OutsourceOrder" WHERE id LIKE 'e2e-dash-os-%'`,
     );
+    // Slice C: nuke prior chart-fixture products (used to back
+    // OrderItem.productId for category distribution). Same id-prefix
+    // contract as outsource so other specs' products stay intact.
+    if (opts.chartFixture) {
+      await db.query(
+        `DELETE FROM "Product" WHERE id LIKE 'e2e-dash-prod-%'`,
+      );
+    }
     // Slice B: nuke prior CS commission + period rows for the cs user.
     // Same RESTRICT order as resetCsSalaryStateForUser.
     if (opts.csUserId) {
@@ -617,6 +644,208 @@ export async function seedDashboardSnapshot(opts: {
       );
     }
 
+    // Step 6 (Slice C): chart-shape fixture. Adds:
+    //   - 6 Products spanning 3 ProductCategory values + 1 OrderItem
+    //     left without productId (UNCATEGORIZED bucket).
+    //   - 30-day production trend: 7 randomized non-zero days
+    //     (deterministic per-day count → stable visual baseline).
+    //   - Sales ranking: 3 different submitters with ¥5k / ¥3k / ¥1.5k
+    //     totals across the current month.
+    //   - Category distribution: each ranking order seeds 1 OrderItem
+    //     pointing at one of the seeded products + 1 with null
+    //     productId (UNCATEGORIZED).
+    //
+    // ids all live under e2e-dash-* prefix so the next run's wipe
+    // (above) re-bases cleanly.
+    const chartProductIds: string[] = [];
+    const trendCompletedOrderIds: string[] = [];
+    const rankingOrderIds: string[] = [];
+
+    if (opts.chartFixture) {
+      // Pick 7 of last 30 days w/ a fixed-pattern count (1, 3, 2, 4,
+      // 1, 5, 2). Days are 28, 22, 18, 12, 7, 3, 1 days back from today.
+      // The peak (5) lands at day-3 so the chart's interesting bit
+      // shows up near the right edge — readable as "recent activity".
+      const trendPattern: Array<{ daysBack: number; count: number }> = [
+        { daysBack: 28, count: 1 },
+        { daysBack: 22, count: 3 },
+        { daysBack: 18, count: 2 },
+        { daysBack: 12, count: 4 },
+        { daysBack: 7, count: 1 },
+        { daysBack: 3, count: 5 },
+        { daysBack: 1, count: 2 },
+      ];
+      for (const { daysBack, count } of trendPattern) {
+        const completedAt = new Date(
+          Date.UTC(yyyy!, mm! - 1, dd! - daysBack, 4, 0),
+        );
+        for (let i = 0; i < count; i++) {
+          const orderId = `e2e-dash-trend-${daysBack}-${i}`;
+          const orderNo = `E2E-TREND-${daysBack}-${i}`;
+          await db.query(
+            `
+            INSERT INTO "Order" (
+              id, "orderNo", "submitterId", "submitterRole", "createdById",
+              status, "isUrgent", "totalAmount",
+              "submittedAt", "scheduledAt", "completedAt",
+              "createdAt", "updatedAt"
+            ) VALUES (
+              $1, $2, $3, 'SALES'::"Role", $3,
+              'COMPLETED'::"OrderStatus", FALSE, 0,
+              $4, $4, $4,
+              $4, $4
+            )
+            `,
+            [orderId, orderNo, opts.salesUserId, completedAt.toISOString()],
+          );
+          trendCompletedOrderIds.push(orderId);
+        }
+      }
+
+      // 6 Products spanning 3 categories so the pie chart shows 3 +
+      // UNCATEGORIZED slices (4 distinct colors). 2 per category.
+      const productSpecs: Array<{
+        idSuffix: string;
+        category: string;
+        name: string;
+      }> = [
+        { idSuffix: 'p-blank-1', category: 'BLANK_STOCK', name: '空白现货 9cm' },
+        { idSuffix: 'p-blank-2', category: 'BLANK_STOCK', name: '空白现货 12cm' },
+        {
+          idSuffix: 'p-foil-1',
+          category: 'CUSTOM_FLAT_FOIL',
+          name: '专版烫金 苹果福',
+        },
+        {
+          idSuffix: 'p-foil-2',
+          category: 'CUSTOM_FLAT_FOIL',
+          name: '专版烫金 LV福',
+        },
+        {
+          idSuffix: 'p-color-1',
+          category: 'COLOR_PRINT',
+          name: '彩印 麒麟纹',
+        },
+        {
+          idSuffix: 'p-color-2',
+          category: 'COLOR_PRINT',
+          name: '彩印 锦鲤纹',
+        },
+      ];
+      for (const spec of productSpecs) {
+        const id = `e2e-dash-prod-${spec.idSuffix}`;
+        chartProductIds.push(id);
+        await db.query(
+          `
+          INSERT INTO "Product" (
+            id, category, name, "isActive", "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2::"ProductCategory", $3, TRUE, NOW(), NOW()
+          )
+          `,
+          [id, spec.category, spec.name],
+        );
+      }
+
+      // Sales ranking: 3 submitters × different total amounts.
+      //   - salesUserId (SALES, blue):       ¥5,000
+      //   - csUserId (CS, green):            ¥3,000   (only when provided)
+      //   - ownerUserId (OWNER, muted):      ¥1,500   (only when provided)
+      // Each order goes through the current month at varying days so
+      // submittedAt is a believable spread.
+      const monthlyMidUtc = new Date(Date.UTC(yyyy!, mm! - 1, 15, 4, 0));
+      const rankingSpecs: Array<{
+        submitterId: string;
+        submitterRole: string;
+        amount: string;
+        daysOffset: number;
+        productSuffix: string | null; // null → UNCATEGORIZED
+      }> = [
+        {
+          submitterId: opts.salesUserId,
+          submitterRole: 'SALES',
+          amount: '5000.00',
+          daysOffset: -10,
+          productSuffix: 'p-blank-1',
+        },
+      ];
+      if (opts.csUserId) {
+        rankingSpecs.push({
+          submitterId: opts.csUserId,
+          submitterRole: 'CUSTOMER_SERVICE',
+          amount: '3000.00',
+          daysOffset: -5,
+          productSuffix: 'p-foil-1',
+        });
+      }
+      if (opts.ownerUserId) {
+        rankingSpecs.push({
+          submitterId: opts.ownerUserId,
+          submitterRole: 'OWNER',
+          amount: '1500.00',
+          daysOffset: -2,
+          productSuffix: null, // → UNCATEGORIZED bucket
+        });
+      }
+      // Plus one more SALES order from salesUserId with a COLOR_PRINT
+      // product so pie chart has all three filled categories.
+      rankingSpecs.push({
+        submitterId: opts.salesUserId,
+        submitterRole: 'SALES',
+        amount: '2500.00',
+        daysOffset: -7,
+        productSuffix: 'p-color-1',
+      });
+
+      let rankIdx = 0;
+      for (const spec of rankingSpecs) {
+        const orderId = `e2e-dash-rank-${rankIdx}`;
+        const orderNo = `E2E-RANK-${rankIdx}`;
+        const submittedAt = new Date(
+          monthlyMidUtc.getTime() + spec.daysOffset * dayMs,
+        );
+        await db.query(
+          `
+          INSERT INTO "Order" (
+            id, "orderNo", "submitterId", "submitterRole", "createdById",
+            status, "isUrgent", "totalAmount",
+            "submittedAt", "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, $3, $4::"Role", $3,
+            'SUBMITTED'::"OrderStatus", FALSE, $5,
+            $6, $6, $6
+          )
+          `,
+          [
+            orderId,
+            orderNo,
+            spec.submitterId,
+            spec.submitterRole,
+            spec.amount,
+            submittedAt.toISOString(),
+          ],
+        );
+        await db.query(
+          `
+          INSERT INTO "OrderItem" (
+            id, "orderId", sequence, name, "productId",
+            quantity, crafts, "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, 1, '排行 fixture', $3,
+            5000, ARRAY[]::text[], NOW(), NOW()
+          )
+          `,
+          [
+            `${orderId}-item`,
+            orderId,
+            spec.productSuffix ? `e2e-dash-prod-${spec.productSuffix}` : null,
+          ],
+        );
+        rankingOrderIds.push(orderId);
+        rankIdx += 1;
+      }
+    }
+
     return {
       submittedOrderIds,
       urgentOrderId: 'e2e-dash-sub-3-urgent',
@@ -629,6 +858,9 @@ export async function seedDashboardSnapshot(opts: {
       outsourceDaysOverdue: 3,
       csPeriodId,
       csPeriodDaysUntilEnd,
+      chartProductIds,
+      trendCompletedOrderIds,
+      rankingOrderIds,
     };
   });
 }

@@ -156,6 +156,39 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
       .filter({ hasText: E2E_USERS.customerService.displayName });
     await expect(csRow).toContainText(/¥ [\d,]+\.\d{2}/);
 
+    // ─── Slice C: 3 个图表 ───
+    //
+    // 视觉回归在 tests/visual/owner-dashboard.spec.ts 里负责像素稳定。
+    // 这里只做&ldquo;render-without-crash&rdquo;断言：3 个 chart card 可见 + 各自
+    // 的 recharts SVG 已经 paint（ResponsiveContainer 没 stuck 在 0 高）。
+    const trendCard = page.locator(
+      '[data-slot="dashboard-chart-trend-card"]',
+    );
+    const rankingCard = page.locator(
+      '[data-slot="dashboard-chart-ranking-card"]',
+    );
+    const categoryCard = page.locator(
+      '[data-slot="dashboard-chart-category-card"]',
+    );
+    await expect(trendCard).toBeVisible();
+    await expect(rankingCard).toBeVisible();
+    await expect(categoryCard).toBeVisible();
+    await expect(trendCard).toContainText('近 30 天产量趋势');
+    await expect(rankingCard).toContainText('本月销售业绩 Top 10');
+    await expect(categoryCard).toContainText('本月产品线分布');
+    // 3 个 SVG（每个 chart 一个）—— recharts 渲染失败 / SSR 不出 SVG 时
+    // 会少。chart fixture 没在这条 spec 里 seed，所以不能保证数据非空，
+    // 但至少 ResponsiveContainer 必出 svg.recharts-surface 占位。
+    // 注：本 spec 的 seed 只走 Slice A/B（chartFixture=false），ranking
+    // 和 category 在无业绩数据下渲染&ldquo;暂无数据&rdquo;占位（不带 SVG）；trend
+    // 走 30 天聚合，即使空也输出 SVG。所以期望 SVG 数量 ≥ 1。
+    await expect(page.locator('svg.recharts-surface')).toHaveCount(
+      await page.locator('svg.recharts-surface').count(),
+    );
+    expect(await page.locator('svg.recharts-surface').count()).toBeGreaterThanOrEqual(
+      1,
+    );
+
     // sidebar Dashboard 链接现在指 /owner（round 96 改 # → Slice A
     // 改回）。点一下不应跳走（已经在 /owner）。
     const sidebarDashboard = page
