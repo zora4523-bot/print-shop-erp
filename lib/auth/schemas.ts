@@ -934,3 +934,78 @@ export const recordBillPaymentSchema = z.object({
 });
 
 export type RecordBillPaymentInput = z.infer<typeof recordBillPaymentSchema>;
+
+// ============================================================
+// 推送配置（SPEC §8 / P1 #2）
+// ============================================================
+
+const channelNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写群名（如 排产群）')
+  .max(64, '群名过长（最多 64 个字符）');
+
+// 企业微信 webhook URL 的官方格式：
+//   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<uuid>
+// 严格 origin 检查：避免老板把任意 URL 粘进来踩 SSRF / 误投递。
+// HTTPS 强制——HTTP 在 prod 会被 reject 但本地 mock URL 也走 https://...
+// 所以不放宽。query 参数允许任意（key、可能的扩展字段）。
+const channelWebhookUrlField = z
+  .string()
+  .trim()
+  .min(1, '请填写企业微信 Webhook URL')
+  .max(512, 'Webhook URL 过长')
+  .refine(
+    (v) => /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?/.test(v),
+    'Webhook URL 必须形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
+  );
+
+export const createNotificationChannelSchema = z.object({
+  channelKey: z
+    .string()
+    .trim()
+    .min(1, '请填写 channelKey（英文小写 / 下划线，例：scheduling_group）')
+    .max(64, 'channelKey 过长')
+    .regex(
+      /^[a-z][a-z0-9_]*$/,
+      'channelKey 必须以小写字母开头，仅允许小写字母 / 数字 / 下划线',
+    ),
+  channelName: channelNameField,
+  webhookUrl: channelWebhookUrlField,
+  isActive: formBoolean,
+});
+
+export type CreateNotificationChannelInput = z.infer<
+  typeof createNotificationChannelSchema
+>;
+
+// 编辑场景下不让 owner 改 channelKey（key 是稳定标识，被 audit log
+// 引用；改 key 等同于&ldquo;新建+删除&rdquo;）—— UI 把 key 渲染成只读。
+export const updateNotificationChannelSchema = z.object({
+  channelName: channelNameField,
+  webhookUrl: channelWebhookUrlField,
+  isActive: formBoolean,
+});
+
+export type UpdateNotificationChannelInput = z.infer<
+  typeof updateNotificationChannelSchema
+>;
+
+// rule 编辑：eventType 由 URL path 提供且固定 enum，不在 schema 里；
+// owner 只能改 messageTemplate / channelIds / isActive。
+export const updateNotificationRuleSchema = z.object({
+  messageTemplate: z
+    .string()
+    .trim()
+    .min(1, '请填写消息模板')
+    .max(4000, '模板过长（企业微信单条 markdown 上限 4096 字节，留余量）'),
+  // FormData 里多选 checkbox 走 getAll('channelIds'); 这里接 string[]。
+  // 允许空数组——但 isActive=true && empty 在 server action 里业务校验
+  // 拒绝（schema 不能跨字段拒，留给 action 层）。
+  channelIds: z.array(z.string().min(1)).default([]),
+  isActive: formBoolean,
+});
+
+export type UpdateNotificationRuleInput = z.infer<
+  typeof updateNotificationRuleSchema
+>;

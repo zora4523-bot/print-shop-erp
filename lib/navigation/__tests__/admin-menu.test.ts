@@ -12,9 +12,9 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
-  it('OWNER 看到 10 项菜单（含 Dashboard / 工艺/产品字典 / 用户管理）', () => {
+  it('OWNER 看到 11 项菜单（含 Dashboard / 工艺/产品字典 / 用户管理 / 推送配置）', () => {
     const items = flatten(getAdminMenuItems({ role: Role.OWNER }));
-    expect(items).toHaveLength(10);
+    expect(items).toHaveLength(11);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -26,11 +26,16 @@ describe('getAdminMenuItems', () => {
       '工艺字典',
       '产品字典',
       '用户管理',
+      '推送配置',
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
     // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
     const dashboard = items.find((i) => i.label === 'Dashboard');
     expect(dashboard?.href).toBe('/owner');
+    // P1 #2 Slice B：推送配置走 /owner/notifications，权限 notification:config
+    const notif = items.find((i) => i.label === '推送配置');
+    expect(notif?.href).toBe('/owner/notifications');
+    expect(notif?.requiredPermission).toBe('notification:config');
   });
 
   it('FOREMAN 看不到老板独占项（账单 / 用户管理 / 工艺字典 / 产品字典）', () => {

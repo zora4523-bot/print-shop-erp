@@ -1,0 +1,158 @@
+'use client';
+
+import Link from 'next/link';
+import { useActionState } from 'react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
+
+type ChannelOption = {
+  id: string;
+  channelName: string;
+  isActive: boolean;
+};
+
+type Props = {
+  eventType: string;
+  initial: {
+    messageTemplate: string;
+    channelIds: string[];
+    isActive: boolean;
+  };
+  channels: readonly ChannelOption[];
+  // payloadFields: 提示 owner 这个事件支持哪些 placeholder（来自
+  // events.ts payload 类型，只读展示）
+  payloadFields: readonly string[];
+  action: (
+    prev: NotificationMutationResult | null,
+    fd: FormData,
+  ) => Promise<NotificationMutationResult>;
+};
+
+export function RuleForm({
+  eventType,
+  initial,
+  channels,
+  payloadFields,
+  action,
+}: Props) {
+  const [state, formAction, pending] = useActionState<
+    NotificationMutationResult | null,
+    FormData
+  >(action, null);
+  const fieldErrors =
+    state?.status === 'invalid' ? state.fieldErrors : undefined;
+  const selected = new Set(initial.channelIds);
+
+  return (
+    <form action={formAction} className="space-y-5">
+      <div className="space-y-2">
+        <Label>事件</Label>
+        <div className="rounded-md border bg-muted/30 px-3 py-2 font-mono text-sm">
+          {eventType}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          事件类型固定，不可修改。
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="messageTemplate">消息模板（Markdown）</Label>
+        <textarea
+          id="messageTemplate"
+          name="messageTemplate"
+          defaultValue={initial.messageTemplate}
+          rows={8}
+          required
+          aria-invalid={!!fieldErrors?.messageTemplate}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        />
+        {fieldErrors?.messageTemplate?.map((m, i) => (
+          <p key={i} className="text-sm text-destructive">
+            {m}
+          </p>
+        ))}
+        <p className="text-xs text-muted-foreground">
+          可用占位符：
+          {payloadFields.map((f, i) => (
+            <span key={f}>
+              {i > 0 ? '、' : ' '}
+              <code className="rounded bg-muted px-1">{`{${f}}`}</code>
+            </span>
+          ))}
+        </p>
+      </div>
+
+      <fieldset className="space-y-2">
+        <Label>推送到群（多选）</Label>
+        {channels.length === 0 ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+            还没建任何群。请先{' '}
+            <Link
+              href="/owner/notifications/channels/new"
+              className="font-medium underline"
+            >
+              新建群
+            </Link>
+            。
+          </p>
+        ) : (
+          <div className="space-y-2 rounded-md border bg-card p-3">
+            {channels.map((c) => (
+              <label key={c.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="channelIds"
+                  value={c.id}
+                  defaultChecked={selected.has(c.id)}
+                  disabled={!c.isActive}
+                  className="h-4 w-4 rounded border-input"
+                />
+                <span className={c.isActive ? '' : 'text-muted-foreground'}>
+                  {c.channelName}
+                  {!c.isActive ? '（已停用）' : ''}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+        {fieldErrors?.channelIds?.map((m, i) => (
+          <p key={i} className="text-sm text-destructive">
+            {m}
+          </p>
+        ))}
+      </fieldset>
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isActive"
+          name="isActive"
+          type="checkbox"
+          defaultChecked={initial.isActive}
+          className="h-4 w-4 rounded border-input"
+        />
+        <Label htmlFor="isActive" className="cursor-pointer">
+          启用此规则（关闭后此事件不再触发推送）
+        </Label>
+      </div>
+
+      {state?.status === 'error' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {state.message}
+        </p>
+      ) : null}
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" disabled={pending}>
+          保存修改
+        </Button>
+        <Link
+          href="/owner/notifications"
+          className={buttonVariants({ variant: 'outline' })}
+        >
+          取消
+        </Link>
+      </div>
+    </form>
+  );
+}

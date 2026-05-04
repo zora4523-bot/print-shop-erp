@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Bell,
   BookOpen,
   Boxes,
   Calculator,
@@ -55,6 +56,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   FileText,
   TrendingUp,
   Sparkles,
+  Bell,
 };
 
 type AppSidebarProps = {

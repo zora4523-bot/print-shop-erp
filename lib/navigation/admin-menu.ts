@@ -22,7 +22,8 @@ export type IconName =
   | 'Clock'
   | 'FileText'
   | 'TrendingUp'
-  | 'Sparkles';
+  | 'Sparkles'
+  | 'Bell';
 
 export type AdminMenuItem = {
   label: string;
@@ -64,6 +65,7 @@ const OWNER_MENU: AdminMenuItem[] = [
   // sidebar 没有 active 项 (round 97 / P2)。
   { label: '产品字典',     href: '/owner/products',  iconName: 'PackageOpen',     requiredPermission: 'dict:product:manage' },
   { label: '用户管理',     href: '/owner/accounts',  iconName: 'Users',           requiredPermission: 'account:manage' },
+  { label: '推送配置',     href: '/owner/notifications', iconName: 'Bell',        requiredPermission: 'notification:config' },
 ];
 
 const FOREMAN_MENU: AdminMenuItem[] = [

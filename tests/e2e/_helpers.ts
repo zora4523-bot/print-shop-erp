@@ -332,6 +332,36 @@ export async function readActiveCsTotalSales(
   });
 }
 
+// ---- Owner notifications E2E (P1 #2 Slice B) ----
+//
+// 删掉所有 channelKey 以 'e2e_' 开头的 NotificationChannel + 对应 log，
+// 把 ORDER_SUBMITTED / URGENT_ORDER 这两条 rule 重置成"未启用 / 空
+// channelIds"——E2E 会现场绑定。
+//
+// 范围注：只清 e2e_-prefix 的 channel 和这 2 条 rule 的状态；其他 8
+// 条 rule + 真实 channel（如果 owner 已经手测建过）不动。
+export async function resetNotificationFixture(): Promise<void> {
+  await withDb(async (db) => {
+    // Step 1: nuke all logs that point at e2e_-prefix channels（FK 拒
+    // 删 channel 否则）。包括 __TEST__ event log。
+    await db.query(
+      `DELETE FROM "NotificationLog" WHERE "channelId" IN (
+         SELECT id FROM "NotificationChannel" WHERE "channelKey" LIKE 'e2e_%'
+       )`,
+    );
+    // Step 2: nuke channels
+    await db.query(
+      `DELETE FROM "NotificationChannel" WHERE "channelKey" LIKE 'e2e_%'`,
+    );
+    // Step 3: reset 测试涉及的 rule（spec 会现场绑、改 isActive）
+    await db.query(
+      `UPDATE "NotificationRule"
+         SET "channelIds" = ARRAY[]::text[], "isActive" = false
+       WHERE "eventType" IN ('ORDER_SUBMITTED', 'URGENT_ORDER')`,
+    );
+  });
+}
+
 // ---- Owner dashboard E2E (P1 #1 Slice A + B) ----
 //
 // Seeds a deterministic snapshot for /owner. Slice A KPI cards +

@@ -1,0 +1,374 @@
+import { db } from '../db';
+import {
+  NotificationStatus,
+  type NotificationStatus as NotificationStatusType,
+} from '../../generated/prisma/enums';
+import { NOTIFICATION_EVENTS, type NotificationEvent } from './events';
+
+// 推送配置 / 日志的 admin-side 读写。Prisma 调用集中在这里（CLAUDE.md
+// 三层架构：app → actions → lib → Prisma）。Server Actions 在
+// actions/owner-notifications.ts 里封装权限 + 表单解析，业务在这里。
+
+// ─────────────────────────────────────────────────────────────────────
+// Channel 列表 / 详情 / CRUD
+// ─────────────────────────────────────────────────────────────────────
+
+export type ChannelSummary = {
+  id: string;
+  channelKey: string;
+  channelName: string;
+  webhookUrl: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  // 引用此 channel 的 active rule 数（>0 时禁删）
+  referencingActiveRuleCount: number;
+};
+
+/**
+ * 列出全部 channel + 每个 channel 被多少 active rule 引用（用于
+ * UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
+ * `String[]`，没 FK，得 JS 侧 cross-reference。
+ */
+export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
+  const [channels, activeRules] = await Promise.all([
+    db.notificationChannel.findMany({
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        channelKey: true,
+        channelName: true,
+        webhookUrl: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    db.notificationRule.findMany({
+      where: { isActive: true },
+      select: { channelIds: true },
+    }),
+  ]);
+  // 把所有 active rule 引用的 channelId 拍平成 multiset，count by channelId
+  const refCount = new Map<string, number>();
+  for (const r of activeRules) {
+    for (const cid of r.channelIds) {
+      refCount.set(cid, (refCount.get(cid) ?? 0) + 1);
+    }
+  }
+  return channels.map((c) => ({
+    ...c,
+    referencingActiveRuleCount: refCount.get(c.id) ?? 0,
+  }));
+}
+
+export async function getChannel(id: string): Promise<ChannelSummary | null> {
+  const c = await db.notificationChannel.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      channelKey: true,
+      channelName: true,
+      webhookUrl: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  if (!c) return null;
+  // 单条详情不必做交叉引用，referencingActiveRuleCount 留 0（caller
+  // 会从 list 拿，或者编辑场景下不需要）。
+  return { ...c, referencingActiveRuleCount: 0 };
+}
+
+export type CreateChannelInput = {
+  channelKey: string;
+  channelName: string;
+  webhookUrl: string;
+  isActive: boolean;
+};
+
+export async function createChannel(
+  input: CreateChannelInput,
+): Promise<{ id: string }> {
+  const created = await db.notificationChannel.create({
+    data: input,
+    select: { id: true },
+  });
+  return created;
+}
+
+export type UpdateChannelInput = {
+  channelName: string;
+  webhookUrl: string;
+  isActive: boolean;
+};
+
+export async function updateChannel(
+  id: string,
+  input: UpdateChannelInput,
+): Promise<void> {
+  await db.notificationChannel.update({
+    where: { id },
+    data: input,
+  });
+}
+
+export class ChannelInUseError extends Error {
+  constructor(
+    public readonly channelId: string,
+    public readonly referencingRules: readonly { eventType: string }[],
+  ) {
+    super(`channel ${channelId} 被 ${referencingRules.length} 个启用规则引用`);
+    this.name = 'ChannelInUseError';
+  }
+}
+
+/**
+ * 删除 channel 前置检查：被任何 active rule 的 channelIds 引用就拒绝。
+ * 强一致性走 transaction：检查 + delete 在同一个 tx 内，避免&ldquo;检查通过
+ * 之后另一个 owner 把 rule 加上&rdquo;的 race。
+ *
+ * NotificationLog FK channelId → ON DELETE 没设 cascade（schema 默认
+ * RESTRICT）；但已删 channel 不该再生新 log。如果有历史 log 引用，
+ * delete 会被 PG FK 拒绝——也是合理保护（保留 audit）。
+ */
+export async function deleteChannel(id: string): Promise<void> {
+  await db.$transaction(async (tx) => {
+    const referencingRules = await tx.notificationRule.findMany({
+      where: {
+        isActive: true,
+        channelIds: { has: id },
+      },
+      select: { eventType: true },
+    });
+    if (referencingRules.length > 0) {
+      throw new ChannelInUseError(id, referencingRules);
+    }
+    await tx.notificationChannel.delete({ where: { id } });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Rule 列表 / 详情 / 更新（lazy upsert 默认 10 条）
+// ─────────────────────────────────────────────────────────────────────
+
+export type RuleSummary = {
+  eventType: string;
+  channelIds: string[];
+  messageTemplate: string;
+  isActive: boolean;
+  updatedAt: Date;
+};
+
+/**
+ * 列出全部 10 条 rule（按 eventType 字母序固定，让 UI 顺序稳定）。
+ * 兼容场景：seed.ts 把 10 条 rule upsert 出来；如果某条因为 schema
+ * 飘忽缺失，这里仍然返已有的（UI 显示&ldquo;未配置&rdquo;空槽）。
+ */
+export async function listRules(): Promise<RuleSummary[]> {
+  const rules = await db.notificationRule.findMany({
+    orderBy: { eventType: 'asc' },
+    select: {
+      eventType: true,
+      channelIds: true,
+      messageTemplate: true,
+      isActive: true,
+      updatedAt: true,
+    },
+  });
+  return rules;
+}
+
+export async function getRule(eventType: string): Promise<RuleSummary | null> {
+  return db.notificationRule.findUnique({
+    where: { eventType },
+    select: {
+      eventType: true,
+      channelIds: true,
+      messageTemplate: true,
+      isActive: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export type UpdateRuleInput = {
+  messageTemplate: string;
+  channelIds: string[];
+  isActive: boolean;
+};
+
+export class RuleNotFoundError extends Error {
+  constructor(public readonly eventType: string) {
+    super(`通知规则 ${eventType} 不存在`);
+    this.name = 'RuleNotFoundError';
+  }
+}
+
+export class StaleChannelIdsError extends Error {
+  constructor(public readonly invalidIds: readonly string[]) {
+    super(`channelIds 含已删除/不存在的 channel：${invalidIds.join(', ')}`);
+    this.name = 'StaleChannelIdsError';
+  }
+}
+
+/**
+ * 更新 rule。校验：
+ * 1. eventType 必须是 NOTIFICATION_EVENTS 已定义的（防 owner 通过
+ *    URL 直接传 `/owner/notifications/rules/INVALID_EVENT`）。
+ * 2. channelIds 引用的 channel 必须全部存在（避免悬空 ID）。
+ * 3. isActive=true 时 channelIds 不能空（业务校验，schema 跨字段约束）。
+ *
+ * 注：notify.ts 自己也容忍 stale ID（写 console.warn），但 UI 这里
+ * 严格挡，因为 owner 是手动选的，stale 一定是 race（其他 admin 同时
+ * 删了 channel）—— 让 owner 重选最干净。
+ */
+export async function updateRule(
+  eventType: string,
+  input: UpdateRuleInput,
+): Promise<void> {
+  // 1. event 合法性
+  const valid = (Object.values(NOTIFICATION_EVENTS) as string[]).includes(
+    eventType,
+  );
+  if (!valid) {
+    throw new RuleNotFoundError(eventType);
+  }
+
+  await db.$transaction(async (tx) => {
+    // 2. rule 存在性（lazy upsert 不在这条路径——seed 已建好）
+    const rule = await tx.notificationRule.findUnique({
+      where: { eventType },
+      select: { eventType: true },
+    });
+    if (!rule) {
+      throw new RuleNotFoundError(eventType);
+    }
+
+    // 3. channelIds 合法性
+    if (input.channelIds.length > 0) {
+      const found = await tx.notificationChannel.findMany({
+        where: { id: { in: input.channelIds } },
+        select: { id: true },
+      });
+      const foundIds = new Set(found.map((c) => c.id));
+      const invalid = input.channelIds.filter((id) => !foundIds.has(id));
+      if (invalid.length > 0) {
+        throw new StaleChannelIdsError(invalid);
+      }
+    }
+
+    await tx.notificationRule.update({
+      where: { eventType },
+      data: input,
+    });
+  });
+}
+
+export class EmptyChannelIdsError extends Error {
+  constructor(public readonly eventType: string) {
+    super(`规则 ${eventType} 启用时必须至少绑定 1 个渠道`);
+    this.name = 'EmptyChannelIdsError';
+  }
+}
+
+/**
+ * Action 层调用：先做"启用 + 空 channelIds"的跨字段校验（schema 不能
+ * 跨字段约束，留给 action）。然后委托给 updateRule。
+ */
+export async function updateRuleWithGuard(
+  eventType: string,
+  input: UpdateRuleInput,
+): Promise<void> {
+  if (input.isActive && input.channelIds.length === 0) {
+    throw new EmptyChannelIdsError(eventType);
+  }
+  return updateRule(eventType, input);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 日志列表（owner UI 显示）
+// ─────────────────────────────────────────────────────────────────────
+
+export type LogFilter = {
+  eventType?: NotificationEvent;
+  status?: NotificationStatusType;
+  // 按 createdAt 范围（半开区间）
+  start?: Date;
+  end?: Date;
+  limit?: number; // 默认 50
+};
+
+export type LogRow = {
+  id: string;
+  eventType: string;
+  channelId: string;
+  channelName: string | null; // join 出来；channel 已删则 null
+  messageContent: string;
+  status: NotificationStatusType;
+  errorMessage: string | null;
+  retryCount: number;
+  relatedOrderId: string | null;
+  sentAt: Date | null;
+  createdAt: Date;
+};
+
+export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
+  const limit = filter.limit ?? 50;
+  const rows = await db.notificationLog.findMany({
+    where: {
+      ...(filter.eventType ? { eventType: filter.eventType } : {}),
+      ...(filter.status ? { status: filter.status } : {}),
+      ...(filter.start || filter.end
+        ? {
+            createdAt: {
+              ...(filter.start ? { gte: filter.start } : {}),
+              ...(filter.end ? { lt: filter.end } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      eventType: true,
+      channelId: true,
+      messageContent: true,
+      status: true,
+      errorMessage: true,
+      retryCount: true,
+      relatedOrderId: true,
+      sentAt: true,
+      createdAt: true,
+      channel: { select: { channelName: true } },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    eventType: r.eventType,
+    channelId: r.channelId,
+    channelName: r.channel?.channelName ?? null,
+    messageContent: r.messageContent,
+    status: r.status as NotificationStatusType,
+    errorMessage: r.errorMessage,
+    retryCount: r.retryCount,
+    relatedOrderId: r.relatedOrderId,
+    sentAt: r.sentAt,
+    createdAt: r.createdAt,
+  }));
+}
+
+// 让 UI 一眼看出"最近一次推送是不是失败"——dashboard 顶部告警条
+export async function countRecentFailures(
+  windowHours = 24,
+): Promise<number> {
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+  return db.notificationLog.count({
+    where: {
+      status: NotificationStatus.FAILED,
+      createdAt: { gte: since },
+    },
+  });
+}
