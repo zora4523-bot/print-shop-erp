@@ -267,6 +267,19 @@ export async function updateRule(
 
     // 3. channelIds 合法性
     if (input.channelIds.length > 0) {
+      // Codex round 106：SELECT FOR UPDATE 锁住引用的 channel 行，
+      // 阻塞并发 UPDATE NotificationChannel SET isActive=false 直到
+      // 本 tx 提交。否则 admin A 读到 c2 active → admin B 关 c2 →
+      // admin A 提交带 c2 binding 的规则，留下&ldquo;active rule + inactive
+      // channel&rdquo;的脏状态。FOR UPDATE 配合 db.$transaction 的隐式
+      // READ COMMITTED 隔离已足够——锁在 tx 提交后释放，B 必须等。
+      // Prisma 没有 forUpdate 选项，走 $queryRaw（没用 $executeRaw
+      // 因为我们要拿回结果做 isActive 检查）。
+      await tx.$queryRaw`
+        SELECT id FROM "NotificationChannel"
+        WHERE id = ANY(${input.channelIds}::text[])
+        FOR UPDATE
+      `;
       const found = await tx.notificationChannel.findMany({
         where: { id: { in: input.channelIds } },
         select: { id: true, isActive: true },

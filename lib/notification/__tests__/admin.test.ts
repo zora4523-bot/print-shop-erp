@@ -11,6 +11,9 @@ const { dbMock, txMock } = vi.hoisted(() => {
       findMany: vi.fn(),
       delete: vi.fn(),
     },
+    // SELECT ... FOR UPDATE 走 $queryRaw（Codex round 106）；mock
+    // 默认返 [] 即可，updateRule 拿值靠下一句 findMany。
+    $queryRaw: vi.fn(async () => []),
   };
   const mock = {
     notificationChannel: {
@@ -56,6 +59,7 @@ beforeEach(() => {
   txMock.notificationRule.update.mockReset();
   txMock.notificationChannel.findMany.mockReset();
   txMock.notificationChannel.delete.mockReset();
+  txMock.$queryRaw.mockReset().mockResolvedValue([]);
 });
 
 describe('listChannelsWithRefCount', () => {
@@ -278,6 +282,23 @@ describe('updateRule', () => {
       isActive: true,
     });
     expect(txMock.notificationRule.update).toHaveBeenCalled();
+  });
+
+  it('SELECT FOR UPDATE 锁住引用 channel 行（Codex round 106 race fix）', async () => {
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', isActive: true },
+    ]);
+    await updateRule('ORDER_SUBMITTED', {
+      messageTemplate: 'x',
+      channelIds: ['c1'],
+      isActive: true,
+    });
+    // $queryRaw 调一次：FOR UPDATE on the channel rows
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+    const call = txMock.$queryRaw.mock.calls[0] as readonly unknown[];
+    const sql = Array.from(call[0] as readonly string[]).join(' ');
+    expect(sql).toMatch(/FOR UPDATE/);
+    expect(sql).toMatch(/"NotificationChannel"/);
   });
 });
 
