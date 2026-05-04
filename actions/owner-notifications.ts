@@ -12,6 +12,7 @@ import {
 import {
   ChannelInUseError,
   EmptyChannelIdsError,
+  InactiveChannelBindError,
   RuleNotFoundError,
   StaleChannelIdsError,
   createChannel,
@@ -210,6 +211,16 @@ export async function updateRuleAction(
         fieldErrors: {
           channelIds: [
             `选中的群已被删除：${err.invalidIds.join('、')}。请重新选择。`,
+          ],
+        },
+      };
+    }
+    if (err instanceof InactiveChannelBindError) {
+      return {
+        status: 'invalid',
+        fieldErrors: {
+          channelIds: [
+            `不能新绑定已停用的群：${err.inactiveIds.join('、')}。请先到群配置启用。`,
           ],
         },
       };

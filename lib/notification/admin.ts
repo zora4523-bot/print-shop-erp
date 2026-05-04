@@ -222,6 +222,15 @@ export class StaleChannelIdsError extends Error {
   }
 }
 
+export class InactiveChannelBindError extends Error {
+  constructor(public readonly inactiveIds: readonly string[]) {
+    super(
+      `不能新绑定已停用的 channel：${inactiveIds.join(', ')}（先启用再绑）`,
+    );
+    this.name = 'InactiveChannelBindError';
+  }
+}
+
 /**
  * 更新 rule。校验：
  * 1. eventType 必须是 NOTIFICATION_EVENTS 已定义的（防 owner 通过
@@ -246,10 +255,11 @@ export async function updateRule(
   }
 
   await db.$transaction(async (tx) => {
-    // 2. rule 存在性（lazy upsert 不在这条路径——seed 已建好）
+    // 2. rule 存在性（lazy upsert 不在这条路径——seed 已建好）+ 拿
+    //    OLD channelIds 用于"新增的 channelId 必须 active"校验
     const rule = await tx.notificationRule.findUnique({
       where: { eventType },
-      select: { eventType: true },
+      select: { eventType: true, channelIds: true },
     });
     if (!rule) {
       throw new RuleNotFoundError(eventType);
@@ -259,12 +269,25 @@ export async function updateRule(
     if (input.channelIds.length > 0) {
       const found = await tx.notificationChannel.findMany({
         where: { id: { in: input.channelIds } },
-        select: { id: true },
+        select: { id: true, isActive: true },
       });
       const foundIds = new Set(found.map((c) => c.id));
       const invalid = input.channelIds.filter((id) => !foundIds.has(id));
       if (invalid.length > 0) {
         throw new StaleChannelIdsError(invalid);
+      }
+      // Codex round 105：服务端对称防"新增 inactive 绑定"。RuleForm
+      // 已 disable 客户端 checkbox，但并发场景（admin A 加载表单 →
+      // admin B 关闭 channel → admin A 提交）/ 直接 POST 不走 UI
+      // 都能突破前端。OLD channelIds 里已有的 inactive ID 允许保留
+      // （round 103 #2 承诺&ldquo;停用 channel 不丢现有 binding&rdquo;），仅
+      // 拒&ldquo;新增的 inactive&rdquo;。
+      const oldBound = new Set(rule.channelIds);
+      const newlyAddedInactive = found
+        .filter((c) => !c.isActive && !oldBound.has(c.id))
+        .map((c) => c.id);
+      if (newlyAddedInactive.length > 0) {
+        throw new InactiveChannelBindError(newlyAddedInactive);
       }
     }
 

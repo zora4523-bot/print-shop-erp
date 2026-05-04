@@ -32,6 +32,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   ChannelInUseError,
   EmptyChannelIdsError,
+  InactiveChannelBindError,
   RuleNotFoundError,
   StaleChannelIdsError,
   countRecentFailures,
@@ -156,6 +157,7 @@ describe('updateRule', () => {
   beforeEach(() => {
     txMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
+      channelIds: [],
     });
     txMock.notificationChannel.findMany.mockResolvedValue([]);
   });
@@ -182,7 +184,9 @@ describe('updateRule', () => {
   });
 
   it('channelIds 引用不存在 channel → StaleChannelIdsError', async () => {
-    txMock.notificationChannel.findMany.mockResolvedValue([{ id: 'c1' }]);
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', isActive: true },
+    ]);
     await expect(
       updateRule('ORDER_SUBMITTED', {
         messageTemplate: 'x',
@@ -192,10 +196,10 @@ describe('updateRule', () => {
     ).rejects.toBeInstanceOf(StaleChannelIdsError);
   });
 
-  it('channelIds 全部命中 → update 调用', async () => {
+  it('channelIds 全部 active 命中 → update 调用', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1' },
-      { id: 'c2' },
+      { id: 'c1', isActive: true },
+      { id: 'c2', isActive: true },
     ]);
     await updateRule('ORDER_SUBMITTED', {
       messageTemplate: '工单 {orderNo}',
@@ -221,12 +225,67 @@ describe('updateRule', () => {
     expect(txMock.notificationChannel.findMany).not.toHaveBeenCalled();
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });
+
+  it('新绑 inactive channel → InactiveChannelBindError（Codex round 105）', async () => {
+    // OLD rule.channelIds 不含 c2；NEW input 包含；c2 是 inactive
+    txMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: [],
+    });
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c2', isActive: false },
+    ]);
+    await expect(
+      updateRule('ORDER_SUBMITTED', {
+        messageTemplate: 'x',
+        channelIds: ['c2'],
+        isActive: false,
+      }),
+    ).rejects.toBeInstanceOf(InactiveChannelBindError);
+    expect(txMock.notificationRule.update).not.toHaveBeenCalled();
+  });
+
+  it('保留已有 inactive 绑定（Codex round 103 #2 承诺）→ 通过', async () => {
+    // OLD rule 已绑定 c2（inactive）；NEW 也保留
+    txMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c2'],
+    });
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c2', isActive: false },
+    ]);
+    await updateRule('ORDER_SUBMITTED', {
+      messageTemplate: 'x',
+      channelIds: ['c2'],
+      isActive: false,
+    });
+    expect(txMock.notificationRule.update).toHaveBeenCalled();
+  });
+
+  it('混合：保留旧 inactive + 新加 active → 通过；同时新加 inactive → 拒', async () => {
+    txMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c-old-inactive'],
+    });
+    // c-old-inactive (kept) + c-new-active (新加) → 通过
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c-old-inactive', isActive: false },
+      { id: 'c-new-active', isActive: true },
+    ]);
+    await updateRule('ORDER_SUBMITTED', {
+      messageTemplate: 'x',
+      channelIds: ['c-old-inactive', 'c-new-active'],
+      isActive: true,
+    });
+    expect(txMock.notificationRule.update).toHaveBeenCalled();
+  });
 });
 
 describe('updateRuleWithGuard', () => {
   beforeEach(() => {
     txMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
+      channelIds: [],
     });
   });
 
@@ -250,8 +309,10 @@ describe('updateRuleWithGuard', () => {
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });
 
-  it('isActive=true && channelIds 非空 → 走 updateRule 正常路径', async () => {
-    txMock.notificationChannel.findMany.mockResolvedValue([{ id: 'c1' }]);
+  it('isActive=true && channelIds 非空（active 端点）→ 走 updateRule 正常路径', async () => {
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', isActive: true },
+    ]);
     await updateRuleWithGuard('ORDER_SUBMITTED', {
       messageTemplate: 'x',
       channelIds: ['c1'],
