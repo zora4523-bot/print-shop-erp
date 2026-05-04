@@ -158,8 +158,19 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
 
     // ─── Slice C: 3 个图表 ───
     //
-    // 视觉回归在 tests/visual/owner-dashboard.spec.ts 里负责像素稳定。
-    // 这里只做&ldquo;render-without-crash&rdquo;断言：3 个 chart card 可见 + 各自
+    // **视觉回归 spec 已移除**（2026-04-27 决定）：
+    //   - trend chart 的 X 轴标签是真实日期（`MM-DD`），每天滚动一次
+    //     → baseline 必然 daily drift
+    //   - category 数据按 `current Shanghai month` 聚合，跨月边界 +
+    //     dev DB 历史污染让 baseline 也漂浮
+    //   - 三个图绑同一个 spec 跑，想救只能整套重做（注入可测试 now /
+    //     mask 整片日期带）—— ROI 不值。
+    // 取舍：完全删掉 tests/visual/owner-dashboard.spec.ts；图表回归改
+    // 由本文件的 presence 断言（card 可见 + svg 出现）+ 修改 chart
+    // 组件时人工 review screenshot 承担。如果未来引入&ldquo;可注入 now&rdquo;
+    // 基础设施（确定性 E2E、时间旅行），可以重新加视觉回归。
+    //
+    // 这里做&ldquo;render-without-crash&rdquo;断言：3 个 chart card 可见 + 各自
     // 的 recharts SVG 已经 paint（ResponsiveContainer 没 stuck 在 0 高）。
     const trendCard = page.locator(
       '[data-slot="dashboard-chart-trend-card"]',
