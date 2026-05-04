@@ -77,6 +77,9 @@ describe('notify', () => {
       orderId: 'o1',
       orderNo: 'O-1',
       submitterName: '张三',
+      customerRef: null,
+      totalAmount: '0',
+      urgentMark: '',
     });
     expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
     expect(okSender).not.toHaveBeenCalled();
@@ -93,11 +96,17 @@ describe('notify', () => {
       orderId: 'o1',
       orderNo: 'O-1',
       submitterName: '张三',
+      customerRef: null,
+      totalAmount: '0',
+      urgentMark: '',
     });
     expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
   });
 
-  it('rule.channelIds 为空 → 不写 log', async () => {
+  it('rule.channelIds 为空 → 不写 log + console.warn', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
       channelIds: [],
@@ -108,8 +117,41 @@ describe('notify', () => {
       orderId: 'o1',
       orderNo: 'O-1',
       submitterName: '张三',
+      customerRef: null,
+      totalAmount: '0',
+      urgentMark: '',
     });
     expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('channelIds empty'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('全部 channelIds stale（已删除）→ 不写 log + console.warn', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['stale1', 'stale2'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([]);
+    await notify('ORDER_SUBMITTED', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      submitterName: '张三',
+      customerRef: null,
+      totalAmount: '0',
+      urgentMark: '',
+    });
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('all channelIds stale'),
+    );
+    warnSpy.mockRestore();
   });
 
   it('mock-mode → 不调 sender，写 status=SUCCESS errorMessage=MOCK', async () => {
@@ -120,12 +162,19 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/x' },
+      { id: 'c1', webhookUrl: 'https://qy/x', isActive: true },
     ]);
 
     await notify(
       'ORDER_SUBMITTED',
-      { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
       { mockMode: true },
     );
 
@@ -148,13 +197,18 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
-      { id: 'c2', webhookUrl: 'https://qy/2' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
     ]);
 
     await notify(
       'URGENT_ORDER',
-      { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+      },
       { webhookSender: okSender, mockMode: false },
     );
 
@@ -166,25 +220,77 @@ describe('notify', () => {
     expect(channels).toEqual(['c1', 'c2']);
   });
 
-  it('inactive channel 由 findMany 的 isActive=true 过滤掉', async () => {
+  it('inactive channel 写 FAILED log（不 send；Codex round 101 P2）', async () => {
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
       channelIds: ['c1', 'c2'],
       messageTemplate: 'x',
       isActive: true,
     });
-    // findMany 受 isActive: true 约束，模拟 c1 active / c2 not (only c1 returned)
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: false },
     ]);
     await notify(
       'ORDER_SUBMITTED',
-      { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
+      { webhookSender: okSender, mockMode: false },
+    );
+    // 仅 active channel 真发；inactive 不调 sender
+    expect(okSender).toHaveBeenCalledTimes(1);
+    // 但 2 条 log 都写：c1=SUCCESS, c2=FAILED w/ errorMessage='channel inactive'
+    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(2);
+    const c1Data = dbMock.notificationLog.create.mock.calls[0][0].data;
+    const c2Data = dbMock.notificationLog.create.mock.calls[1][0].data;
+    expect(c1Data.channelId).toBe('c1');
+    expect(c1Data.status).toBe('SUCCESS');
+    expect(c2Data.channelId).toBe('c2');
+    expect(c2Data.status).toBe('FAILED');
+    expect(c2Data.errorMessage).toBe('channel inactive');
+    expect(c2Data.sentAt).toBeNull();
+    // findMany 不应再过滤 isActive（要把 inactive 也拉回来分流）
+    const where = dbMock.notificationChannel.findMany.mock.calls[0][0].where;
+    expect(where.isActive).toBeUndefined();
+  });
+
+  it('部分 channelIds stale → 已存在的还发，console.warn', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c1', 'stale-id'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    await notify(
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
       { webhookSender: okSender, mockMode: false },
     );
     expect(okSender).toHaveBeenCalledTimes(1);
-    const where = dbMock.notificationChannel.findMany.mock.calls[0][0].where;
-    expect(where.isActive).toBe(true);
+    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('some channelIds stale'),
+    );
+    warnSpy.mockRestore();
   });
 
   it('webhook 失败 → status=FAILED + retryCount + errorMessage（不抛）', async () => {
@@ -195,13 +301,20 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
     ]);
 
     await expect(
       notify(
         'ORDER_SUBMITTED',
-        { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+        {
+          orderId: 'o1',
+          orderNo: 'O-1',
+          submitterName: '张三',
+          customerRef: null,
+          totalAmount: '0',
+          urgentMark: '',
+        },
         { webhookSender: failSender, mockMode: false },
       ),
     ).resolves.toBeUndefined();
@@ -221,12 +334,12 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
     ]);
 
     await notify(
       'DAILY_WORKER_SALARY',
-      { date: '2026-04-27', workerCount: 5 },
+      { date: '2026-04-27', workerCount: 5, totalAmount: '3,200.00' },
       { mockMode: true },
     );
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;
@@ -234,6 +347,9 @@ describe('notify', () => {
   });
 
   it('顶层错误（DB 查 rule 抛）被 catch → 不抛', async () => {
+    const errSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     dbMock.notificationRule.findUnique.mockRejectedValue(
       new Error('connection lost'),
     );
@@ -242,12 +358,19 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
       }),
     ).resolves.toBeUndefined();
     expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 
   it('log 写入失败被 catch → 仍不抛', async () => {
+    const errSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'ORDER_SUBMITTED',
       channelIds: ['c1'],
@@ -255,17 +378,25 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
     ]);
     dbMock.notificationLog.create.mockRejectedValue(new Error('FK violation'));
 
     await expect(
       notify(
         'ORDER_SUBMITTED',
-        { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+        {
+          orderId: 'o1',
+          orderNo: 'O-1',
+          submitterName: '张三',
+          customerRef: null,
+          totalAmount: '0',
+          urgentMark: '',
+        },
         { webhookSender: okSender, mockMode: false },
       ),
     ).resolves.toBeUndefined();
+    errSpy.mockRestore();
   });
 
   it('sender 内部 throw 被 catch，写 FAILED log（不抛）', async () => {
@@ -276,7 +407,7 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
     ]);
     const buggyErr = new Error('boom');
     buggyErr.name = 'BuggyError';
@@ -286,7 +417,14 @@ describe('notify', () => {
 
     await notify(
       'ORDER_SUBMITTED',
-      { orderId: 'o1', orderNo: 'O-1', submitterName: '张三' },
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
       { webhookSender: buggySender, mockMode: false },
     );
 
@@ -303,12 +441,19 @@ describe('notify', () => {
       isActive: true,
     });
     dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1' },
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
     ]);
 
     await notify(
       'ORDER_SUBMITTED',
-      { orderId: 'o1', orderNo: 'O-99', submitterName: '李四' },
+      {
+        orderId: 'o1',
+        orderNo: 'O-99',
+        submitterName: '李四',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
       { mockMode: true },
     );
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;

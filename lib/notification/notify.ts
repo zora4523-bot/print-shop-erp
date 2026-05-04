@@ -67,53 +67,83 @@ export async function notify<E extends NotificationEvent>(
       return;
     }
     if (rule.channelIds.length === 0) {
-      // 配了但没绑 channel：等同关闭，不写 log。
+      // 配了规则但没绑 channel：等同&ldquo;开了 active 却没收件人&rdquo;。
+      // 没法写 NotificationLog（channelId 是 FK 必填），只能打
+      // console 让 ops 看到。Slice B 的 admin UI 会在 isActive=true
+      // && channelIds=[] 时拒绝保存，杜绝这条路径。
+      console.warn(
+        `[notify] rule active but channelIds empty event=${event}`,
+      );
       return;
     }
 
     // 渲染一次，所有 channel 共用同一份 content（同事件就是同消息）。
     const content = renderTemplate(rule.messageTemplate, payload);
 
-    // 拉到所有引用的 channel 一起；过滤 inactive。
+    // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
+    // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
+    // 静默漏推；Codex round 101 P2）。
     const channels = await db.notificationChannel.findMany({
-      where: {
-        id: { in: rule.channelIds },
-        isActive: true,
-      },
-      select: { id: true, webhookUrl: true },
+      where: { id: { in: rule.channelIds } },
+      select: { id: true, webhookUrl: true, isActive: true },
     });
-    if (channels.length === 0) return;
+    if (channels.length === 0) {
+      // channelIds 全是 stale ID（指向已删 channel）。FK 不让我们
+      // 写 NotificationLog，只能打 console。Slice B 的 channel 删
+      // 除会拒绝&ldquo;有 active rule 引用&rdquo;的 channel，杜绝此路径。
+      console.warn(
+        `[notify] rule active but all channelIds stale event=${event}`,
+      );
+      return;
+    }
+    if (channels.length < rule.channelIds.length) {
+      // 部分 ID stale（其他还能用）—— 打 console 提示，但能发的还发。
+      console.warn(
+        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${rule.channelIds.length}`,
+      );
+    }
 
     // payload.orderId / outsourceId / periodId 任一存在就关联到日志，
     // 让 dashboard 后期能 join 反查。仅 Order 是被 schema 显式索引的
     // (relatedOrderId)；其他 fk 暂留 null（schema 没建对应列）。
     const relatedOrderId = extractOrderId(payload);
 
-    // 顺序发送（不并行）：单 server action 触发 1-2 channel 不并行无影响；
-    // 并行会让 NotificationLog 写入顺序乱，dashboard 显示&ldquo;时间倒置&rdquo;。
+    // 顺序处理（不并行）：单 server action 触发 1-2 channel 不并行无
+    // 影响；并行会让 NotificationLog 写入顺序乱，dashboard 显示&ldquo;时
+    // 间倒置&rdquo;。
     for (const channel of channels) {
       let result;
-      try {
-        result = await sender(channel.webhookUrl, content);
-      } catch (err) {
-        // sender 不应抛（webhook.ts 内部已 catch），但留兜底
+      if (!channel.isActive) {
+        // Inactive channel：不发 webhook，但**仍写 FAILED log** —
+        // 否则 owner 关掉 channel 后会以为推送&ldquo;成功&rdquo;了（其实没发）。
+        // NotificationLog 是 single source of truth，必须留证据。
         result = {
-          ok: false,
+          ok: false as const,
           retries: 0,
-          errorMessage: err instanceof Error ? err.name : 'sender error',
+          errorMessage: 'channel inactive',
         };
+      } else {
+        try {
+          result = await sender(channel.webhookUrl, content);
+        } catch (err) {
+          // sender 不应抛（webhook.ts 内部已 catch），但留兜底
+          result = {
+            ok: false as const,
+            retries: 0,
+            errorMessage: err instanceof Error ? err.name : 'sender error',
+          };
+        }
       }
       const status = result.ok
         ? NotificationStatus.SUCCESS
         : NotificationStatus.FAILED;
       // mock-mode 成功时打 'MOCK' 标记，让 owner 在 log 列表能区分
       // "真送出" 和 "测试 / 开发期"。
-      const errorMessage =
-        mock && result.ok
+      const errorMessage = result.ok
+        ? mock
           ? MOCK_ERROR_MESSAGE
-          : result.ok
-            ? null
-            : (result.errorMessage ?? 'unknown error');
+          : null
+        : (result.errorMessage ?? 'unknown error');
       // best-effort log write —— 写入失败不抛
       try {
         await db.notificationLog.create({
