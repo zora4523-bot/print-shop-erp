@@ -90,7 +90,7 @@ describe('listChannelsWithRefCount', () => {
     expect(r[1]!.referencingActiveRuleCount).toBe(1);
   });
 
-  it('inactive rule 不算引用（findMany where isActive=true）', async () => {
+  it('inactive rule 也算引用（Codex round 103 #1：避免悬空 channelIds）', async () => {
     dbMock.notificationChannel.findMany.mockResolvedValue([
       {
         id: 'c1',
@@ -102,11 +102,15 @@ describe('listChannelsWithRefCount', () => {
         updatedAt: new Date(),
       },
     ]);
-    dbMock.notificationRule.findMany.mockResolvedValue([]);
+    // 1 inactive rule 引用 c1
+    dbMock.notificationRule.findMany.mockResolvedValue([
+      { channelIds: ['c1'] },
+    ]);
     const r = await listChannelsWithRefCount();
-    expect(r[0]!.referencingActiveRuleCount).toBe(0);
-    const where = dbMock.notificationRule.findMany.mock.calls[0][0].where;
-    expect(where.isActive).toBe(true);
+    expect(r[0]!.referencingActiveRuleCount).toBe(1);
+    // findMany 不再过滤 isActive
+    const args = dbMock.notificationRule.findMany.mock.calls[0][0];
+    expect(args.where).toBeUndefined();
   });
 });
 
@@ -130,12 +134,21 @@ describe('deleteChannel', () => {
     });
   });
 
-  it('查询是&ldquo;active rule + has channelId&rdquo;的复合条件', async () => {
+  it('查询不再过滤 isActive（Codex round 103 #1：inactive 引用也拒删）', async () => {
     txMock.notificationRule.findMany.mockResolvedValue([]);
     await deleteChannel('c1');
     const where = txMock.notificationRule.findMany.mock.calls[0][0].where;
-    expect(where.isActive).toBe(true);
+    expect(where.isActive).toBeUndefined();
     expect(where.channelIds).toEqual({ has: 'c1' });
+  });
+
+  it('inactive rule 引用也拒删（Codex round 103 #1）', async () => {
+    txMock.notificationRule.findMany.mockResolvedValue([
+      { eventType: 'ORDER_SUBMITTED' }, // 这条 inactive 的引用应触发拒
+    ]);
+    await expect(deleteChannel('c1')).rejects.toBeInstanceOf(
+      ChannelInUseError,
+    );
   });
 });
 
@@ -270,5 +283,12 @@ describe('countRecentFailures', () => {
       .gte as Date;
     const diff = Date.now() - since.getTime();
     expect(diff).toBeLessThanOrEqual(60 * 60 * 1000 + 1000);
+  });
+
+  it('排除 __TEST__ event（Codex round 103 #3：测试失败不应让 dashboard 永远红）', async () => {
+    dbMock.notificationLog.count.mockResolvedValue(0);
+    await countRecentFailures(24);
+    const where = dbMock.notificationLog.count.mock.calls[0][0].where;
+    expect(where.NOT).toEqual({ eventType: '__TEST__' });
   });
 });

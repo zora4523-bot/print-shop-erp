@@ -26,12 +26,16 @@ export type ChannelSummary = {
 };
 
 /**
- * 列出全部 channel + 每个 channel 被多少 active rule 引用（用于
- * UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
+ * 列出全部 channel + 每个 channel 被多少 rule 引用（不管 isActive，
+ * 用于 UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
  * `String[]`，没 FK，得 JS 侧 cross-reference。
+ *
+ * Codex round 103 #1：之前只数 active rule 的引用，导致&ldquo;rule 关掉但
+ * channelIds 还指着&rdquo;的情况下能删 channel，留下 stale id。后续 owner
+ * 重启 rule 就拿到悬空配置。所以这里数所有 rule，不管 isActive。
  */
 export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
-  const [channels, activeRules] = await Promise.all([
+  const [channels, allRules] = await Promise.all([
     db.notificationChannel.findMany({
       orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
       select: {
@@ -45,13 +49,13 @@ export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
       },
     }),
     db.notificationRule.findMany({
-      where: { isActive: true },
+      // 故意不过滤 isActive —— 见函数注释。
       select: { channelIds: true },
     }),
   ]);
-  // 把所有 active rule 引用的 channelId 拍平成 multiset，count by channelId
+  // 把所有 rule 引用的 channelId 拍平成 multiset，count by channelId
   const refCount = new Map<string, number>();
-  for (const r of activeRules) {
+  for (const r of allRules) {
     for (const cid of r.channelIds) {
       refCount.set(cid, (refCount.get(cid) ?? 0) + 1);
     }
@@ -125,9 +129,14 @@ export class ChannelInUseError extends Error {
 }
 
 /**
- * 删除 channel 前置检查：被任何 active rule 的 channelIds 引用就拒绝。
- * 强一致性走 transaction：检查 + delete 在同一个 tx 内，避免&ldquo;检查通过
- * 之后另一个 owner 把 rule 加上&rdquo;的 race。
+ * 删除 channel 前置检查：被任何 rule（不管 isActive）的 channelIds
+ * 引用就拒绝。强一致性走 transaction：检查 + delete 在同一个 tx 内，
+ * 避免&ldquo;检查通过之后另一个 owner 把 rule 加上&rdquo;的 race。
+ *
+ * Codex round 103 #1：之前只过滤 isActive=true 的 rule，导致 owner
+ * 把 rule 关掉就能删 channel，留下 channelIds 里的 stale id —— 后续
+ * 启用规则时是悬空 ID。所以&ldquo;被任何 rule 引用&rdquo;就拒绝；要彻底删
+ * channel，先去所有 rule（含未启用的）里把它从 channelIds 移除。
  *
  * NotificationLog FK channelId → ON DELETE 没设 cascade（schema 默认
  * RESTRICT）；但已删 channel 不该再生新 log。如果有历史 log 引用，
@@ -137,7 +146,7 @@ export async function deleteChannel(id: string): Promise<void> {
   await db.$transaction(async (tx) => {
     const referencingRules = await tx.notificationRule.findMany({
       where: {
-        isActive: true,
+        // 故意不过滤 isActive —— 见函数注释。
         channelIds: { has: id },
       },
       select: { eventType: true },
@@ -360,7 +369,12 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
   }));
 }
 
-// 让 UI 一眼看出"最近一次推送是不是失败"——dashboard 顶部告警条
+// 让 UI 一眼看出"最近一次推送是不是失败"——dashboard 顶部告警条。
+//
+// Codex round 103 #3：手动测试按钮也写 NotificationLog 行（eventType
+// = '__TEST__'）；如果 owner 测过一次失败的 webhook URL，那条 log
+// 会让 24h 告警条无限挂红——与"真生产推送健康"的状态混淆。所以这里
+// 显式排除 __TEST__ event，告警条只反应真业务事件失败。
 export async function countRecentFailures(
   windowHours = 24,
 ): Promise<number> {
@@ -369,6 +383,7 @@ export async function countRecentFailures(
     where: {
       status: NotificationStatus.FAILED,
       createdAt: { gte: since },
+      NOT: { eventType: '__TEST__' },
     },
   });
 }

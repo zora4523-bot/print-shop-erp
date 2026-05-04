@@ -100,12 +100,18 @@ export function RuleForm({
           <div className="space-y-2 rounded-md border bg-card p-3">
             {channels.map((c) => (
               <label key={c.id} className="flex items-center gap-2">
+                {/*
+                  Codex round 103 #2: 不能 disable inactive 的 checkbox。
+                  disabled 的 checkbox 不进 FormData，下次保存时本规则
+                  会丢掉对该 channel 的引用——与"停用 channel 保留配置"
+                  的承诺直接冲突。改：保持 enabled，仅视觉标记"已停用"，
+                  让 owner 手动取消勾选才丢绑定。
+                */}
                 <input
                   type="checkbox"
                   name="channelIds"
                   value={c.id}
                   defaultChecked={selected.has(c.id)}
-                  disabled={!c.isActive}
                   className="h-4 w-4 rounded border-input"
                 />
                 <span className={c.isActive ? '' : 'text-muted-foreground'}>
