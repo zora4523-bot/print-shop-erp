@@ -108,6 +108,23 @@ export type UpdateChannelInput = {
   isActive: boolean;
 };
 
+/**
+ * 编辑 channel：name / webhookUrl / isActive。
+ *
+ * **不**做"如果 isActive 翻 false 则拒绝有规则引用"的 cross-check。
+ * 这是有意设计（DECISIONS Slice B）：
+ * - Round 103 #2 立约&ldquo;停用 channel 不丢现有 binding&rdquo; —— 即业务允许
+ *   "rule.channelIds 引用 inactive channel"这种共存状态
+ * - notify() 见到 inactive channel 写 status=FAILED log（Slice A 设
+ *   计）—— owner 从 dashboard 红色告警条看到，可手动重启或解绑
+ * - 删除路径不同：删了 channel 留下 stale ID 是无法恢复的，必须严
+ *   防（deleteChannel 的 FOR UPDATE 会聚锁路径）
+ *
+ * Codex round 107 #1 说&ldquo;并发 deactivate + 新绑同一 channel 会留下
+ * 'active rule + inactive channel' 状态&rdquo;——这与单 admin 顺序 'bind
+ * 然后 deactivate' 的合法终态是同一个状态，安全网（notify FAILED
+ * log）已覆盖。所以这条不锁，避免 UI 出现"先解绑才能停用"的繁琐。
+ */
 export async function updateChannel(
   id: string,
   input: UpdateChannelInput,
@@ -138,12 +155,28 @@ export class ChannelInUseError extends Error {
  * 启用规则时是悬空 ID。所以&ldquo;被任何 rule 引用&rdquo;就拒绝；要彻底删
  * channel，先去所有 rule（含未启用的）里把它从 channelIds 移除。
  *
+ * Codex round 107 #2：和 updateRule 之间的并发竞态——admin A 在
+ * updateRule 里 SELECT FOR UPDATE 了 c2，正在 read rules / 准备 update；
+ * 同时 admin B 调 deleteChannel(c2)。如果 B 没有自己 FOR UPDATE c2，
+ * B 的 findMany 可能在 A 提交前看不到 A 的新 rule.channelIds 引用，
+ * 然后 B 删了 c2，A 提交后 rule.channelIds 留下 stale ID。修：先 FOR
+ * UPDATE c2 行，与 updateRule 的锁路径会聚一处——A 持锁时 B 等，B 持
+ * 锁时 A 等；都拿到锁后再 findMany rules，看到对方已 commit 的引用。
+ *
  * NotificationLog FK channelId → ON DELETE 没设 cascade（schema 默认
  * RESTRICT）；但已删 channel 不该再生新 log。如果有历史 log 引用，
  * delete 会被 PG FK 拒绝——也是合理保护（保留 audit）。
  */
 export async function deleteChannel(id: string): Promise<void> {
   await db.$transaction(async (tx) => {
+    // FOR UPDATE 锁 c2 行 —— 与 updateRule 的相同锁路径会聚（Codex
+    // round 107 #2）。如果 c2 已不存在，FOR UPDATE 返空，下面的
+    // delete 自然抛 RecordNotFound。
+    await tx.$queryRaw`
+      SELECT id FROM "NotificationChannel"
+      WHERE id = ${id}
+      FOR UPDATE
+    `;
     const referencingRules = await tx.notificationRule.findMany({
       where: {
         // 故意不过滤 isActive —— 见函数注释。

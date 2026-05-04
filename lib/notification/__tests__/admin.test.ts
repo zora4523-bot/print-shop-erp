@@ -139,6 +139,16 @@ describe('deleteChannel', () => {
     });
   });
 
+  it('SELECT FOR UPDATE 锁 channel 行 + findMany rules（Codex round 107 #2）', async () => {
+    txMock.notificationRule.findMany.mockResolvedValue([]);
+    await deleteChannel('c1');
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+    const call = txMock.$queryRaw.mock.calls[0] as readonly unknown[];
+    const sql = Array.from(call[0] as readonly string[]).join(' ');
+    expect(sql).toMatch(/FOR UPDATE/);
+    expect(sql).toMatch(/"NotificationChannel"/);
+  });
+
   it('查询不再过滤 isActive（Codex round 103 #1：inactive 引用也拒删）', async () => {
     txMock.notificationRule.findMany.mockResolvedValue([]);
     await deleteChannel('c1');
