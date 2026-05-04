@@ -124,7 +124,7 @@ export default async function OwnerNotificationsPage() {
                           channelId={c.id}
                           channelName={c.channelName}
                           disabled={c.referencingActiveRuleCount > 0}
-                          disabledReason={`被 ${c.referencingActiveRuleCount} 条启用规则引用，先在规则里移除`}
+                          disabledReason={`被 ${c.referencingActiveRuleCount} 条规则引用（含未启用），先在规则里移除`}
                         />
                       </div>
                     </td>

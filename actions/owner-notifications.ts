@@ -148,7 +148,7 @@ export async function deleteChannelAction(
       const refs = err.referencingRules.map((r) => r.eventType).join('、');
       return {
         status: 'error',
-        message: `该群仍被 ${err.referencingRules.length} 条启用规则引用（${refs}），先在规则里移除再删。`,
+        message: `该群仍被 ${err.referencingRules.length} 条规则引用（含未启用：${refs}），先在规则里移除再删。`,
       };
     }
     // PG FK from NotificationLog —— 历史 log 引用此 channel 时 PG 拒删
