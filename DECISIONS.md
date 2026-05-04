@@ -274,3 +274,21 @@
 - **理由**：候选 chart.js / visx / nivo / Apache ECharts 都看了；recharts 选中是 4 条原因的并集——(1) React 19 peer 兼容（v3.x 系列；2.x 不支持），(2) SVG 输出对视觉回归友好（pixel-stable，不像 Canvas-based chart.js 抗锯齿在不同 GPU 上飘），(3) TypeScript 类型完备且 SSR 友好（next/dynamic 兜底也容易），(4) 项目已经用 shadcn 风格，recharts 的纯 component API 比 ECharts 的 `option = {...}` 配置式更贴。代价：bundle ~150KB（接受，dashboard 是 OWNER 内部页，不在公开访问者关键路径）。
 - **影响**：Slice C 第一步 `pnpm add recharts@3.8.1`（精确版本）；如果首次 `pnpm dev` 加载报 React 19 相关 hydration warning，回退方案是 `dynamic(() => import('...'), { ssr: false })` 包裹各 chart 组件，但默认走 SSR；图表 props 全部用 `string` / `number`（不传 Decimal，避免序列化崩溃）；视觉回归基线 fixture 走 `seedDashboardChartFixture()` 插入确定性数据，每个 chart 单独 snapshot。未来 P2 如果 dashboard 性能 > 500ms，引入预聚合表（DashboardSnapshot），不换 chart 库。
 - **相关文档**：`lib/dashboard/owner-charts.ts`（Slice C）、`components/business/dashboard/*Chart.tsx`、CLAUDE.md §2 版本锁定策略。
+
+---
+
+## 2026-04-27：notify() 是 best-effort 永不抛，业务永不感知推送失败
+
+- **决策**：`lib/notification/notify(event, payload)` 内部 catch all → 永不向调用方抛异常。任何阶段（rule 查询 / 模板渲染 / webhook fetch / NotificationLog 写入）的错误都吞掉，转写到 NotificationLog（status=FAILED + errorMessage）或最坏情况下打 console。调用方（Server Action / cron）写法：`await notify(...)` 后不需要 try/catch，业务事务也不会被推送失败回滚。
+- **理由**：SPEC §8.2 已约定&ldquo;失败重试 3 次后写 NotificationLog.status=FAILED，老板 Dashboard 显示告警&rdquo;——这本身就否定了&ldquo;推送失败 → 业务回滚&rdquo;的语义。工单已提交、薪资已结算、外协已超期，这些是业务事实；&ldquo;群消息没发出去&rdquo;不是事实变化、不应回滚事务。把 notify 设计成永不抛后：(a) 调用点写法极简（无 try/catch 噪音）、(b) tx 在 notify 之前已 commit，没有相互污染、(c) NotificationLog 是单一证据来源，dashboard 直接读这张表显示告警。
+- **影响**：notify.ts 顶层 `try { ... } catch { /* swallow + best-effort log */ }`；webhook.ts 内部失败 throw 给 notify 上层处理，但永不冒到调用方；调用点（lib/order.ts、lib/production.ts、cron 路由）不写 try/catch；单测断言 `await notify(...)` 不抛；E2E 通过 NotificationLog 行内容检查推送是否触发。**严禁** notify 内部把业务字段（特别是金额）写进 errorMessage——那个字段只存 HTTP 状态码 / 异常类型字符串（DECISIONS 2026-04-24 推论）。
+- **相关文档**：`lib/notification/notify.ts`、CLAUDE.md §7、SPEC §8.2、DECISIONS 2026-04-24（cron 响应只返计数）。
+
+---
+
+## 2026-04-27：notify dev / 测试默认 mock-mode，prod 显式 false
+
+- **决策**：`process.env.NODE_ENV !== 'production'` 时 `NOTIFICATION_MOCK_MODE` 默认开启；`production` 时默认关闭，显式 `NOTIFICATION_MOCK_MODE=true` 也支持（演练 / debug 期）。Mock-mode 行为：跳过真实 fetch，写 `NotificationLog{ status: SUCCESS, errorMessage: 'MOCK' }`，给开发 / 测试以"推送已触发"的可见证据。
+- **理由**：(a) 测试环境跑 E2E / 单测时 webhook URL 是 fake (`https://qyapi.weixin.qq.com/...key=test`)，真发会被企业微信拒（4xx）然后 NotificationLog 全是 FAILED，混淆"代码 bug"与"测试 webhook 不通"。Mock-mode 让 NotificationLog status=SUCCESS（with errorMessage='MOCK'）作为&ldquo;notify 流程跑通&rdquo;的最简证据。(b) Dev 期 owner 在 /owner/notifications 点&ldquo;测试&rdquo;按钮：mock-mode 下立刻写 SUCCESS+'MOCK'，让 owner 看到&ldquo;链路通了，只差真 webhook URL&rdquo;，不会以为坏掉。
+- **影响**：`.env.example` 默认 `NOTIFICATION_MOCK_MODE=true`；prod 部署时改 `false`（README 上线运维章节加一句）。webhook.ts / notify.ts 第一行读 env，dev 默认走短路。E2E 跑在 `NODE_ENV=development`，自然走 mock-mode；不需要在 spec 里手动 set env。
+- **相关文档**：`lib/notification/notify.ts`、`.env.example`、README §🚢 运维。
