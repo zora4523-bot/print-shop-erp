@@ -72,7 +72,12 @@ export type NotificationPayloads = {
   ORDER_SHIPPED: {
     orderId: string;
     orderNo: string;
-    trackingNo?: string | null;
+    // 必填 string —— prisma/seed.ts 的默认 template 引用 {trackingNo}，
+    // null 会让 renderTemplate 留下 raw `{trackingNo}` 流到群消息
+    // （Codex round 102 P1）。lib/order.ts:shipOrder 业务允许 trackingNo
+    // 为 null（'   '.trim() === '' → null）；调用方在 Slice C wire 时
+    // 责任：`trackingNo ?? '未填'` 之类映射后传入。
+    trackingNo: string;
   };
   OUTSOURCE_OVERDUE: {
     outsourceId: string;
