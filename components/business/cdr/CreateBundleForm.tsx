@@ -159,16 +159,19 @@ export function CreateBundleForm({
               (mock-mode：URL 是占位，OSS 配齐后才能真下载)
             </span>
           ) : null}
-          {/* 显示绝对 URL（含 host）—— 外协方可直接复制粘贴到
-              微信 / 邮件；本地点击仍走相对 path 用 Next Link 内部跳。
-              （Codex round 119 high：相对 path 在 IM 里粘出去打不开） */}
+          {/* href 用绝对 URL（不是 relativePath）—— owner 在 admin
+              host 上右键&ldquo;复制链接地址&rdquo;时拿到的是 APP_PUBLIC_URL 域，
+              而不是当前 admin 域（split-origin 部署：staff 走内网域，
+              外协拿公网域）。Codex round 119 → 120 follow-up。 */}
           <div className="mt-2 break-all font-mono text-xs">
-            <Link
-              href={state.relativePath}
+            <a
+              href={state.downloadUrl}
               className="underline underline-offset-2"
+              // 同源时 fallback 到正常导航；跨源会被浏览器当外链打开。
+              rel="noreferrer"
             >
               {state.downloadUrl}
-            </Link>
+            </a>
           </div>
           <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
             链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。复制

@@ -209,7 +209,8 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 4 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 6 个 `/api/cron/*` 全部 503 |
+| `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线） | CDR 24h 短链拼成 `http://localhost:3000/...`，外协方拿到死链（SPEC §3.5） |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
 
 选填但生产建议：

@@ -52,18 +52,22 @@ test.describe('CDR 汇总下载 — golden path', () => {
     // 任一可见即可）
     await expect(page.getByText(/mock-mode|OSS 未配置/).first()).toBeVisible();
 
-    // success banner 里的 link：href 是 relativePath（同源 Next Link），
-    // 文本是绝对 URL（外协方复制粘贴用）；同样指向 /api/cdr/bundles/<id>
-    // （Codex round 119 high）。
+    // success banner 里的 link：href = 绝对 URL（含 host），文本也是
+    // 绝对 URL —— "复制链接地址"和"复制文字"得到一致结果（Codex
+    // round 120 medium：split-origin 部署下 relativePath href 会被
+    // 浏览器解到当前 admin 域而非公网域）。
     const downloadLink = page
-      .locator('a[href^="/api/cdr/bundles/"]')
+      .locator('a[href*="/api/cdr/bundles/"]')
       .first();
     await expect(downloadLink).toBeVisible();
-    const relativePath = await downloadLink.getAttribute('href');
-    expect(relativePath).toMatch(/^\/api\/cdr\/bundles\/[a-z0-9]+$/);
-    // 显示文本应该是绝对 URL（含 host），让外协能复制
+    const downloadHref = await downloadLink.getAttribute('href');
+    expect(downloadHref).toMatch(/^https?:\/\/.+\/api\/cdr\/bundles\/[a-z0-9]+$/);
     const linkText = await downloadLink.textContent();
-    expect(linkText).toMatch(/^https?:\/\/.+\/api\/cdr\/bundles\/[a-z0-9]+$/);
+    expect(linkText).toBe(downloadHref);
+    // 提取 path 部分用于真访问
+    const url = new URL(downloadHref!);
+    const relativePath = url.pathname;
+    expect(relativePath).toMatch(/^\/api\/cdr\/bundles\/[a-z0-9]+$/);
 
     // 真去访问 downloadUrl —— mock-mode zipFileUrl 形如 mock://...，
     // 路由识别后返 503（不是 404，不是 redirect 到 mock://）。
