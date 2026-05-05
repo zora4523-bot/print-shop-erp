@@ -1,5 +1,8 @@
+import Decimal from 'decimal.js';
 import { NextResponse } from 'next/server';
 import { computeDailyForAllMachineWorkers } from '@/lib/salary/daily';
+import { dispatchNotification } from '@/lib/notification/dispatch';
+import { formatMoneyPlain } from '@/lib/dashboard/format';
 
 // Node runtime: Prisma + decimal.js aren't edge-compatible.
 export const runtime = 'nodejs';
@@ -51,6 +54,26 @@ export async function POST(req: Request) {
 
   try {
     const { settled, errors } = await computeDailyForAllMachineWorkers(date);
+
+    // Slice D wire ─ DAILY_WORKER_SALARY（仅在有 settled 行时触发；
+    // dispatchNotification 走 after() + 单测降级）。totalAmount 是
+    // settled 行 actualSalary 的 sum——这条消息发到&ldquo;车间群&rdquo;的认证
+    // WeCom，含金额是预期（DECISIONS 2026-04-24 限定的&ldquo;cron stdout
+    // 不含金额&rdquo;只是 cron 响应 / pg_cron 日志侧）。
+    if (settled.length > 0) {
+      const totalAmount = settled
+        .reduce<Decimal>(
+          (acc, r) => acc.plus(new Decimal(r.actualSalary)),
+          new Decimal(0),
+        )
+        .toFixed(2);
+      dispatchNotification('DAILY_WORKER_SALARY', {
+        date,
+        workerCount: settled.length,
+        totalAmount: formatMoneyPlain(totalAmount),
+      });
+    }
+
     // COUNTS ONLY — full per-worker salary amounts would leak into
     // scheduler / pg_cron logs (Codex round 49 / P2). Per-worker
     // errors likewise embed salary amounts in the paid-row refusal

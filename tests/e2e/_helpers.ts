@@ -1036,7 +1036,10 @@ export async function seedNotificationWireFixture(): Promise<{
       [channelId],
     );
 
-    // Step 3: bind + activate 5 status-machine rules.
+    // Step 3: bind + activate **all 9 wired events**（5 status-machine
+    // + 4 cron）。Slice C wire 只用 5 个；Slice D wire cron 又用了 4 个
+    // （DAILY_WORKER_SALARY / CS_PERIOD_SETTLED / OUTSOURCE_OVERDUE /
+    // CS_PERIOD_ENDING）。STOCK_ALERT 仍未 wire（Material 模型 P1）。
     await db.query(
       `
       UPDATE "NotificationRule"
@@ -1045,13 +1048,99 @@ export async function seedNotificationWireFixture(): Promise<{
              "updatedAt" = NOW()
        WHERE "eventType" IN (
          'ORDER_SUBMITTED', 'URGENT_ORDER', 'ORDER_SCHEDULED',
-         'ORDER_COMPLETED', 'ORDER_SHIPPED'
+         'ORDER_COMPLETED', 'ORDER_SHIPPED',
+         'DAILY_WORKER_SALARY', 'CS_PERIOD_SETTLED',
+         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING'
        )
       `,
       [channelId],
     );
 
     return { channelId };
+  });
+}
+
+// Seeds 1 overdue OutsourceOrder for /api/cron/outsource-overdue tests.
+// id-prefixed `e2e-cron-os-` so seedDashboardSnapshot's wipe scope
+// (`e2e-dash-os-%`) doesn't accidentally clobber it.
+export async function seedOverdueOutsourceForCron(): Promise<{
+  outsourceId: string;
+}> {
+  return withDb(async (db) => {
+    // Wipe prior cron-fixture rows (this fixture is rerun every cron
+    // E2E run; idempotency).
+    await db.query(
+      `DELETE FROM "OutsourceOrder" WHERE id LIKE 'e2e-cron-os-%'`,
+    );
+    const outsourceId = `e2e-cron-os-${randomBytes(4).toString('hex')}`;
+    // expectedDate 在 5 天前（UTC 任意时间，肯定 < 今日 Shanghai 0:00）
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await db.query(
+      `
+      INSERT INTO "OutsourceOrder" (
+        id, "supplierName", "expectedDate",
+        status, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'E2E cron 阿福外协', $2,
+        'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
+      )
+      `,
+      [outsourceId, fiveDaysAgo.toISOString()],
+    );
+    return { outsourceId };
+  });
+}
+
+// Seeds 1 ending-soon SalaryPeriod for /api/cron/cs-period-ending.
+// periodEnd = 今日 + 3d Shanghai → daysUntilEnd = 3 (matches
+// seedDashboardSnapshot's csPeriod 计算)。csUserId 必传；调用方 wipe
+// 其他 SalaryPeriod 通过 resetCsSalaryStateForUser。
+export async function seedEndingPeriodForCron(opts: {
+  csUserId: string;
+}): Promise<{ periodId: string }> {
+  return withDb(async (db) => {
+    // Same wipe-by-user pattern as resetCsSalaryStateForUser
+    await db.query(
+      `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
+      [opts.csUserId],
+    );
+    await db.query(`DELETE FROM "SalaryPeriod" WHERE "csUserId" = $1`, [
+      opts.csUserId,
+    ]);
+
+    const now = new Date();
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+    const [yyyy, mm, dd] = ymd.split('-').map(Number);
+    // periodEnd = today + 3d (UTC midnight of that date — @db.Date strips
+    // time anyway). periodStart = today - 90d.
+    const periodEnd = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
+    const periodStart = new Date(Date.UTC(yyyy!, mm! - 1, dd! - 90));
+
+    const periodId = `e2e-cron-csp-${randomBytes(4).toString('hex')}`;
+    await db.query(
+      `
+      INSERT INTO "SalaryPeriod" (
+        id, "csUserId", "periodStart", "periodEnd",
+        "durationMonths", "totalSales", "initialSales", "monthlyBase",
+        status, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, $4, 4, 100000, 0, 5000,
+        'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
+      )
+      `,
+      [
+        periodId,
+        opts.csUserId,
+        periodStart.toISOString().slice(0, 10),
+        periodEnd.toISOString().slice(0, 10),
+      ],
+    );
+    return { periodId };
   });
 }
 

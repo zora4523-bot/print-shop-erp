@@ -219,10 +219,10 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 
 ### 2. Cron 切换：`Bearer` → `pg_cron`
 
-P0 期间 4 个 cron endpoints 用 shared-secret + 外部 cron 调用：
+P0 + P1 #2 期间 6 个 cron endpoints 用 shared-secret + 外部 cron 调用：
 
 ```bash
-# 每日 24:00 师傅日薪
+# 每日 24:00 师傅日薪（P1 #2 起：完成后推 DAILY_WORKER_SALARY 到车间群）
 curl -X POST https://host/api/cron/daily-salary \
   -H "Authorization: Bearer $CRON_SECRET"
 
@@ -230,16 +230,26 @@ curl -X POST https://host/api/cron/daily-salary \
 curl -X POST https://host/api/cron/hourly-payroll \
   -H "Authorization: Bearer $CRON_SECRET"
 
-# 每日扫描已到期客服周期
+# 每日扫描已到期客服周期（P1 #2 起：每条结算推 CS_PERIOD_SETTLED 到老板群+客服）
 curl -X POST https://host/api/cron/cs-settle \
   -H "Authorization: Bearer $CRON_SECRET"
 
 # 月初 00:30 销售应收账单
 curl -X POST https://host/api/cron/generate-bills \
   -H "Authorization: Bearer $CRON_SECRET"
+
+# P1 #2 新增：每日扫超期外协 → OUTSOURCE_OVERDUE 推送到管理群
+curl -X POST https://host/api/cron/outsource-overdue \
+  -H "Authorization: Bearer $CRON_SECRET"
+
+# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到老板群
+curl -X POST https://host/api/cron/cs-period-ending \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
+
+**6 个 cron endpoints 都不走 session 中间件**（middleware.ts matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgbackrest）
 
@@ -294,4 +304,6 @@ npx puppeteer browsers install chrome
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] OWNER 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 故意挂掉一个 Server Action（临时改个抛错），确认 Sentry 收到事件后还原
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 老板在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 老板会以为推送已发其实没真发。
+- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] pgbackrest 跑一次 full backup，确认目标位置有文件
