@@ -375,7 +375,9 @@ describe('submitOrder', () => {
       orderNo: 'O-1',
       submitterName: '张三',
       customerRef: '苹果福',
-      totalAmount: '¥ 5,000.00', // formatMoney 千分位
+      // formatMoneyPlain 千分位 + 2 位小数，**不带 `¥ ` 前缀**——seed
+      // 模板 `金额：¥{totalAmount}` 已含 ¥（Codex round 109 P2）。
+      totalAmount: '5,000.00',
       urgentMark: '',
     });
   });

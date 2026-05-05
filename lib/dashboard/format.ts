@@ -27,3 +27,11 @@ export function formatMoney(value: Decimal.Value): string {
   // with what `${decimal}` does in the rest of the app.
   return `¥ ${FORMATTER.format(Number(d.toFixed(2)))}`;
 }
+
+// 同上但不带 `¥ ` 前缀——给 NotificationRule.messageTemplate 用，
+// 模板自己决定要不要加货币符号（seed.ts 默认 template 已写
+// `金额：¥{totalAmount}`，再加前缀会双 ¥¥；Codex round 109 P2）。
+export function formatMoneyPlain(value: Decimal.Value): string {
+  const d = new Decimal(value);
+  return FORMATTER.format(Number(d.toFixed(2)));
+}

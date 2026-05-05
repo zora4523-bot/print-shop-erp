@@ -307,15 +307,14 @@ export async function scheduleOrder(
     };
   });
 
-  // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；notify best-effort）。
-  // payload 需要 orderNo + taskCount。result.tasksCreated 已有 count；
-  // orderNo 走一条 select。
+  // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；fire-and-forget；
+  // round 109 P1 详细注释见 lib/order.ts:submitOrder）。
   const payload = await db.order.findUnique({
     where: { id: result.orderId },
     select: { orderNo: true },
   });
   if (payload) {
-    await notify('ORDER_SCHEDULED', {
+    void notify('ORDER_SCHEDULED', {
       orderId: result.orderId,
       orderNo: payload.orderNo,
       taskCount: result.tasksCreated,
@@ -709,7 +708,7 @@ export async function reportTask(
   });
 
   // Slice C wire ─ ORDER_COMPLETED（仅 cascade 路径；tx 已 commit；
-  // notify best-effort）。fetch order info via task → orderItem chain。
+  // fire-and-forget；round 109 P1 详细注释见 lib/order.ts:submitOrder）。
   if (result.orderCompleted) {
     const taskWithOrder = await db.productionTask.findUnique({
       where: { id: result.taskId },
@@ -725,7 +724,7 @@ export async function reportTask(
     });
     const order = taskWithOrder?.orderItem.order;
     if (order) {
-      await notify('ORDER_COMPLETED', {
+      void notify('ORDER_COMPLETED', {
         orderId: order.id,
         orderNo: order.orderNo,
         customerRef: order.customerRef,

@@ -18,7 +18,7 @@ import {
   editableFieldsetForStatus,
 } from './order/editable-fields';
 import { notify } from './notification';
-import { formatMoney } from './dashboard/format';
+import { formatMoneyPlain } from './dashboard/format';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -308,10 +308,19 @@ export async function submitOrder(
   });
 
   // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit；
-  // notify 永不抛 best-effort）。fetch payload 用一条 select：
-  // orderNo / customerRef / totalAmount / isUrgent / submitter.displayName。
-  // 失败（极端：order 在 tx commit 后被另一个 admin 删了）→ notify
-  // 顶层 catch 吞掉，业务事实"提交成功"不受影响。
+  // notify best-effort 永不抛 + **fire-and-forget**）。
+  //
+  // 不 await notify：webhook.ts 里 3 次重试 × 5s 超时 × 2 个 channel
+  // worst case 30s+。await 它会把"工单已提交"这个用户操作 hang 住等
+  // WeCom 回应——一旦 webhook URL 失效，所有 SUBMIT 用户都被卡在
+  // loading（Codex round 109 P1）。换成 `void notify(...)` 后：
+  //   - notify 同步触发（spy / 单测仍能 assert "called"）
+  //   - 真实 webhook fetch + 重试 + 写 NotificationLog 都在后台
+  //   - Server Action 在 tx commit + revalidate 后立刻返回
+  //
+  // 部署假设：CLAUDE.md §2 锁的 pm2 单机部署不会 freeze 进程，后台
+  // promise 跑到完成。如果未来切到 Vercel serverless 才需要换 Next 16
+  // `after()` API。这里写成 `void` 而不是 `after()` 让单测 spy 简单。
   const payload = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -324,11 +333,14 @@ export async function submitOrder(
     },
   });
   if (payload) {
-    const totalAmount = formatMoney(
+    // formatMoneyPlain：千分位 + 2 位小数，**不带 `¥ ` 前缀**。模板里
+    // 的 `金额：¥{totalAmount}` 自带 ¥ —— 再加会变成 `¥¥ 5,000.00`
+    // （Codex round 109 P2）。
+    const totalAmount = formatMoneyPlain(
       payload.totalAmount as unknown as Decimal.Value,
     );
     const urgentMark = payload.isUrgent ? '🚨 急单' : '';
-    await notify('ORDER_SUBMITTED', {
+    void notify('ORDER_SUBMITTED', {
       orderId: payload.id,
       orderNo: payload.orderNo,
       submitterName: payload.submitter.displayName,
@@ -340,7 +352,7 @@ export async function submitOrder(
     // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
     // 看到，排产群从 ORDER_SUBMITTED 看到。
     if (payload.isUrgent) {
-      await notify('URGENT_ORDER', {
+      void notify('URGENT_ORDER', {
         orderId: payload.id,
         orderNo: payload.orderNo,
         submitterName: payload.submitter.displayName,
@@ -392,7 +404,8 @@ export async function shipOrder(
     },
   );
 
-  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；notify best-effort）。
+  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；fire-and-forget；
+  // round 109 P1 详细注释见 submitOrder）。
   // **关键 null 映射**：events.ts:ORDER_SHIPPED.trackingNo 必填 string，
   // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
   // raw 字面量流到群消息（HANDOFF round 102 Slice C TODO）。这里映射
@@ -402,7 +415,7 @@ export async function shipOrder(
     select: { id: true, orderNo: true },
   });
   if (payload) {
-    await notify('ORDER_SHIPPED', {
+    void notify('ORDER_SHIPPED', {
       orderId: payload.id,
       orderNo: payload.orderNo,
       trackingNo: tracking ?? '未填',
