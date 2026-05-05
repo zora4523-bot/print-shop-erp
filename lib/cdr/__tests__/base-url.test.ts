@@ -196,6 +196,36 @@ describe('deriveBaseUrlFromHeaders', () => {
     ).toBe('http://localhost:3000');
   });
 
+  it('IPv6 字面量 default-port `[::1]:443` over https → fallback（Codex round 126：port 必须严格 round-trip）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: '[::1]:443',
+        host: null,
+      }),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('IPv6 字面量 leading-zero port `[::1]:00080` → fallback（Codex round 126）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'http',
+        forwardedHost: '[::1]:00080',
+        host: null,
+      }),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('IPv6 字面量非 default port `[::1]:8443` → 接受（hostname 折叠 OK，port 原样）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: '[::1]:8443',
+        host: null,
+      }),
+    ).toBe('https://[::1]:8443');
+  });
+
   it('proto+host 大小写不敏感（`Erp.EXAMPLE.com` → 小写 round-trip 接受）', () => {
     expect(
       deriveBaseUrlFromHeaders({

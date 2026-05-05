@@ -46,11 +46,17 @@ export function deriveBaseUrlFromHeaders(input: {
   // 严格 round-trip 校验：URL parser 接受的输入若被静默 canonicalize
   // （IPv4 短格式 `127.1`、empty port `host:`、leading-zero `:000443`、
   // default-port 剥离 etc.），foreman 看到的链接域会和 header 不同。
-  // 拒绝。IPv6 字面量（带方括号）例外——URL 对 IPv6 的 zero-fold /
-  // IPv4-mapped 折叠是 WHATWG 标准里的合法 canonicalization，外协拿
-  // 任一 URL parser 都解析回同一 host。
-  const isBracketedIPv6 = host.startsWith('[');
-  if (!isBracketedIPv6 && host.toLowerCase() !== url.host) {
+  // 拒绝。IPv6 字面量（带方括号）的 hostname 部分例外——URL 对 IPv6
+  // 的 zero-fold / IPv4-mapped 折叠是 WHATWG 标准里的合法 canonicalization。
+  // **port 部分仍严格比对**，否则 `[::1]:443` 会被 URL 静默剥成 `[::1]`
+  // （Codex round 126：carve-out 不能覆盖 port）。
+  if (host.startsWith('[')) {
+    const closeBracket = host.indexOf(']');
+    if (closeBracket < 0) return FALLBACK;
+    const portPart = host.slice(closeBracket + 1);
+    const expectedPort = url.port ? `:${url.port}` : '';
+    if (portPart !== expectedPort) return FALLBACK;
+  } else if (host.toLowerCase() !== url.host) {
     return FALLBACK;
   }
   return url.origin;
