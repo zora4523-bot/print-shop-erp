@@ -8,14 +8,15 @@
 //   - 从 headers 读但不验 → multi-proxy `https,http` 死链（round 122 medium）
 // 最终：APP_PUBLIC_URL 优先，否则从 headers 推 + multi-hop 解析 + 格式校验。
 
-// host 接受三种合法形态：
-//   - DNS-style：`erp.example.com` / `erp.example.com:8443`
-//   - IPv4-style：`192.168.1.1` / `192.168.1.1:3000`（也匹配 DNS 正则）
-//   - IPv6-style：`[::1]` / `[2001:db8::1]:8443`（必须带方括号——
-//     URL 标准要求 IPv6 字面量在 `://` 后用方括号包；裸 `::1` 在
-//     URL 里会和 port 分隔符 `:` 撞）
-// 拒绝包含空格 / 单引号 / 等任何注入字符的输入。
-const HOST_RE = /^(?:[\w.-]+|\[[0-9a-fA-F:]+\])(:\d+)?$/;
+// host 接受任何 WHATWG URL 解析器认可的 host 形态——DNS / IPv4 /
+// IPv6 字面量（含方括号 + IPv4-mapped 如 `[::ffff:127.0.0.1]`）。
+// 通过 `new URL()` 实测代替 regex（Codex round 123→124：手写正则
+// 既漏 IPv4-mapped 又放过 `[abc]` 之类无效字面量；URL 解析器是
+// authoritative source of truth）。
+//
+// 校验：构造 `${proto}://${host}/` 让 URL 解析；解析成功且 .host
+// 与 input 一致（防 URL 修订），拒绝任何 path / query / userinfo /
+// fragment 注入字符。
 
 export function deriveBaseUrlFromHeaders(input: {
   proto: string | null | undefined;
@@ -25,13 +26,27 @@ export function deriveBaseUrlFromHeaders(input: {
   const proto = firstHopValue(input.proto);
   const host =
     firstHopValue(input.forwardedHost) ?? firstHopValue(input.host);
-  if (proto && host && /^https?$/.test(proto) && HOST_RE.test(host)) {
-    return `${proto}://${host}`;
+  if (!proto || !host) return FALLBACK;
+  if (!/^https?$/.test(proto)) return FALLBACK;
+  // 注入前置过滤：host 不应含 path / query / userinfo / fragment
+  // 边界字符。这是 URL.parse 之前的快速拒绝，省得后面 origin
+  // 拿到&ldquo;helpful&rdquo;修订过的奇怪 URL。
+  if (/[\s/?#@\\]/.test(host)) return FALLBACK;
+  let url: URL;
+  try {
+    url = new URL(`${proto}://${host}/`);
+  } catch {
+    return FALLBACK;
   }
-  // proto 缺失 / 格式不合法 → fallback localhost；不默认 http 给错的
-  // 降级链。
-  return 'http://localhost:3000';
+  // 返 URL.origin（自带 canonicalization：IPv6 zero-fold、大小写统一、
+  // IPv4-mapped IPv6 重写）。这是 WHATWG URL 解析器 authoritative 的
+  // host 表示，发到外协处可被任何 URL parser 重新解析。Codex round
+  // 123→124：手写正则要么漏（IPv4-mapped）要么放过非法（[abc]），让
+  // URL parser 全权决定。
+  return url.origin;
 }
+
+const FALLBACK = 'http://localhost:3000';
 
 // x-forwarded-* 多 proxy hop 时是 `value1, value2` —— 取第一个原始
 // 值（最靠近客户端那跳）。
