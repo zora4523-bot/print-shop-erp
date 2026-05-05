@@ -17,7 +17,7 @@ import type {
 } from './auth/schemas';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import { getActiveMachineRule } from './salary/rules';
-import { notify } from './notification';
+import { dispatchNotification } from './notification/dispatch';
 
 // Thrown when a scheduling request violates the allowlist contract
 // (duplicate / missing / unknown craft-item pairs, bad worker, etc.).
@@ -314,7 +314,7 @@ export async function scheduleOrder(
     select: { orderNo: true },
   });
   if (payload) {
-    void notify('ORDER_SCHEDULED', {
+    dispatchNotification('ORDER_SCHEDULED', {
       orderId: result.orderId,
       orderNo: payload.orderNo,
       taskCount: result.tasksCreated,
@@ -724,7 +724,7 @@ export async function reportTask(
     });
     const order = taskWithOrder?.orderItem.order;
     if (order) {
-      void notify('ORDER_COMPLETED', {
+      dispatchNotification('ORDER_COMPLETED', {
         orderId: order.id,
         orderNo: order.orderNo,
         customerRef: order.customerRef,

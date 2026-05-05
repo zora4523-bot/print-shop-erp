@@ -47,11 +47,14 @@ const { dbMock } = vi.hoisted(() => {
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-// Slice C：spy notify() 验证 wire 点 fire 正确事件 + payload。
+// Slice C：spy dispatchNotification() 验证 wire 点 fire 正确事件 +
+// payload。详见 lib/__tests__/order.test.ts 同名注释。
 const { notifyMock } = vi.hoisted(() => ({
-  notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
 }));
-vi.mock('@/lib/notification', () => ({ notify: notifyMock }));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: notifyMock,
+}));
 
 import {
   scheduleOrder,

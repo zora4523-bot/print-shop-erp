@@ -36,14 +36,19 @@ const { dbMock } = vi.hoisted(() => {
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-// Slice C：spy notify() 验证 wire 点 fire 正确事件 + payload。模块整
-// 体替换成 spy；formatMoney 不 mock（lib/dashboard/format 是纯函数，
-// 测试要看真实输出）。typed as accepting any args so vi.fn 推断的
-// `[][]` 不阻 mock.calls[0]![1] 这类下标访问。
+// Slice C：spy dispatchNotification() 验证 wire 点 fire 正确事件 +
+// payload。模块整体替换成 spy；formatMoney 不 mock（lib/dashboard/
+// format 是纯函数，测试要看真实输出）。typed as accepting any args
+// so vi.fn 推断的 `[][]` 不阻 mock.calls[0]![1] 这类下标访问。
+//
+// dispatchNotification 是 Slice C wire 用的实际入口（封装 Next 16
+// `after()` + 单测降级 void）；spy 这里 = spy 整条 dispatch chain。
 const { notifyMock } = vi.hoisted(() => ({
-  notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
 }));
-vi.mock('@/lib/notification', () => ({ notify: notifyMock }));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: notifyMock,
+}));
 
 import {
   createOrder,

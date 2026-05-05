@@ -17,7 +17,7 @@ import {
   SHIPPING_EDITABLE_FIELDS,
   editableFieldsetForStatus,
 } from './order/editable-fields';
-import { notify } from './notification';
+import { dispatchNotification } from './notification/dispatch';
 import { formatMoneyPlain } from './dashboard/format';
 
 export class OrderInvariantError extends Error {
@@ -308,19 +308,15 @@ export async function submitOrder(
   });
 
   // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit；
-  // notify best-effort 永不抛 + **fire-and-forget**）。
+  // 走 dispatchNotification —— Next 16 `after()` + 单测降级 void 的
+  // 包装；详见 lib/notification/dispatch.ts）。
   //
-  // 不 await notify：webhook.ts 里 3 次重试 × 5s 超时 × 2 个 channel
-  // worst case 30s+。await 它会把"工单已提交"这个用户操作 hang 住等
-  // WeCom 回应——一旦 webhook URL 失效，所有 SUBMIT 用户都被卡在
-  // loading（Codex round 109 P1）。换成 `void notify(...)` 后：
-  //   - notify 同步触发（spy / 单测仍能 assert "called"）
-  //   - 真实 webhook fetch + 重试 + 写 NotificationLog 都在后台
-  //   - Server Action 在 tx commit + revalidate 后立刻返回
-  //
-  // 部署假设：CLAUDE.md §2 锁的 pm2 单机部署不会 freeze 进程，后台
-  // promise 跑到完成。如果未来切到 Vercel serverless 才需要换 Next 16
-  // `after()` API。这里写成 `void` 而不是 `after()` 让单测 spy 简单。
+  // 不 await：webhook.ts 单 channel 最差 ~16s 重试，急单 2 channel +
+  // 多 rule 串起来 30s+ 用户等待（round 109 P1）。
+  // 不 raw void：pm2 reload / SIGTERM 会切掉进行中的 promise 把
+  // NotificationLog 也一起丢（round 110 P1）。
+  // 折中：`after()` 让 Next runtime 在响应已发但请求 scope 还 managed
+  // 时跑 notify，SIGTERM 时 runtime 等它收尾。
   const payload = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -340,7 +336,7 @@ export async function submitOrder(
       payload.totalAmount as unknown as Decimal.Value,
     );
     const urgentMark = payload.isUrgent ? '🚨 急单' : '';
-    void notify('ORDER_SUBMITTED', {
+    dispatchNotification('ORDER_SUBMITTED', {
       orderId: payload.id,
       orderNo: payload.orderNo,
       submitterName: payload.submitter.displayName,
@@ -352,7 +348,7 @@ export async function submitOrder(
     // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
     // 看到，排产群从 ORDER_SUBMITTED 看到。
     if (payload.isUrgent) {
-      void notify('URGENT_ORDER', {
+      dispatchNotification('URGENT_ORDER', {
         orderId: payload.id,
         orderNo: payload.orderNo,
         submitterName: payload.submitter.displayName,
@@ -415,7 +411,7 @@ export async function shipOrder(
     select: { id: true, orderNo: true },
   });
   if (payload) {
-    void notify('ORDER_SHIPPED', {
+    dispatchNotification('ORDER_SHIPPED', {
       orderId: payload.id,
       orderNo: payload.orderNo,
       trackingNo: tracking ?? '未填',

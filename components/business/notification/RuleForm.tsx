@@ -81,6 +81,20 @@ export function RuleForm({
             </span>
           ))}
         </p>
+        {/* totalAmount / totalSales / commission 是&ldquo;千分位 + 2 位小数&rdquo;
+            纯数字，**不**含 ¥ 前缀。需要货币符号请在模板里手写
+            （如默认 `金额：¥{totalAmount}` →&ldquo;金额：¥1,234.56&rdquo;）。
+            Codex round 110 P2：避免 owner 误以为占位符已含 ¥。 */}
+        {payloadFields.some((f) =>
+          /^(totalAmount|totalSales|commission)$/.test(f),
+        ) ? (
+          <p className="text-xs text-muted-foreground">
+            金额类占位符（<code className="rounded bg-muted px-1">totalAmount</code>
+            / <code className="rounded bg-muted px-1">totalSales</code> /
+            <code className="rounded bg-muted px-1">commission</code>
+            ）只是千分位数字，**不含**货币符号。需要 ¥ 请在模板里手写。
+          </p>
+        ) : null}
       </div>
 
       <fieldset className="space-y-2">

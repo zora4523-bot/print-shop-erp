@@ -32,9 +32,12 @@ export type NotificationEvent =
 // 一一对应（Codex round 101 P1）—— 任何不一致会让模板渲染时留 raw
 // `{placeholder}` 文本流到群消息。修改字段名时同步改 seed.ts。
 //
-// 金额字段：用 string（Decimal-string）而不是 number。理由：(a) 一致性，
-// 所有 lib 边界已经是 string；(b) 模板内只是字符串拼接不做算术；
-// (c) `formatMoney()` 由调用方在传入前完成。
+// 金额字段：用 string（千分位 + 2 位小数；走 lib/dashboard/format
+// `formatMoneyPlain`）。**不含** `¥ ` 前缀——seed 默认模板自带
+// `金额：¥{totalAmount}`，再让 payload 也带 ¥ 会变成 `¥¥ 5,000.00`
+// 双前缀（Codex round 109 P2 / round 110 P2）。模板编辑器（Slice B
+// RuleForm）已加 hint 提示 owner&ldquo;金额占位符不含 ¥&rdquo;。改 contract
+// 时同步改：events.ts payload 注释 + RuleForm hint + seed.ts 模板。
 //
 // 范围注：DECISIONS 2026-04-24 限定的是 cron HTTP 响应 / pg_cron stdout
 // 不漏金额；企业微信群消息是已认证收件人（老板群 / 排产群），含金额
