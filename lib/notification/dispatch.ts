@@ -21,9 +21,30 @@ import { notify } from './notify';
 //   - 在 Server Action / Route Handler 里调用 → after() 走 Next 管理；
 //     notify 在响应后跑，SIGTERM 时 runtime 会等。
 //   - 在 vitest / 一次性脚本里调 → 没有 Next request scope，after()
-//     抛 `Error: after() may only be called within a Server Component,
-//     Server Action, Route Handler, or Middleware`。catch 后降级成
-//     `void notify(...)`，让单测的 spy 仍能记录调用、走到 mock 路径。
+//     抛&ldquo;outside request scope&rdquo;错误。catch 这一类后降级成 `void
+//     notify(...)`，让单测的 spy 仍能记录调用、走到 mock 路径。
+//   - **任何其他**错误（Next runtime broken / after() 实现挂了 / 未来
+//     api 变 throws 别的）→ console.warn 留 ops 信号再降级。否则
+//     after()-without-after 静默回到&ldquo;SIGTERM 丢推送&rdquo;的状态，本文件
+//     存在的意义就被绕开了（Codex round 111 medium）。
+//
+// 识别 expected error：Next 抛的 message 含 `request scope`（Next 16
+// 的实现在 src/server/after/after.ts，错误消息&ldquo;cannot be called
+// outside of a request&rdquo; / 类似变体）。这里用 substring 而不是 instanceof
+// 因为 Next 不导出错误类。版本漂移时最坏情况 = console.warn 上多一
+// 条 noise，不会让 wire 失效。
+
+const EXPECTED_NO_SCOPE_PATTERNS = [
+  'request scope',
+  'request store',
+  'outside of a request',
+];
+
+function isExpectedNoScope(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return EXPECTED_NO_SCOPE_PATTERNS.some((p) => msg.includes(p));
+}
 
 export function dispatchNotification<E extends NotificationEvent>(
   event: E,
@@ -31,10 +52,20 @@ export function dispatchNotification<E extends NotificationEvent>(
 ): void {
   try {
     after(() => notify(event, payload));
-  } catch {
-    // No request scope (unit test / CLI script) → fall back to fire-
-    // and-forget. notify 永不抛（best-effort 顶层 catch），所以这条
-    // void promise 不会在 unhandled rejection 里冒头。
+  } catch (err) {
+    if (!isExpectedNoScope(err)) {
+      // 非预期错误——可能是 Next runtime 故障或 api 变更。打 console
+      // 让 ops 看到，再降级到 void。降级后 SIGTERM 风险回归，但至少
+      // wire 还能 deliver；ops 收到信号能立刻查 Next 版本。
+      console.warn(
+        `[dispatchNotification] after() failed unexpectedly: ${
+          err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+        } — falling back to void notify()`,
+      );
+    }
+    // No request scope (unit test / CLI script) OR unexpected failure
+    // → fire-and-forget。notify 永不抛（best-effort 顶层 catch），
+    // 这条 void promise 不会在 unhandled rejection 里冒头。
     void notify(event, payload);
   }
 }
