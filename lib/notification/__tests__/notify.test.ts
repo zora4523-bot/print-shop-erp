@@ -291,6 +291,39 @@ describe('notify', () => {
     warnSpy.mockRestore();
   });
 
+  it('rule.channelIds 含重复 id → 仅发一次（Codex round 117 medium 防回归）', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c1', 'c1', 'c2', 'c1'], // 重复 c1
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
+    ]);
+    await notify(
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
+      { webhookSender: okSender, mockMode: false },
+    );
+    // 2 个 unique channel → 各一次（不是 4 次）
+    expect(okSender).toHaveBeenCalledTimes(2);
+    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(2);
+    const channelIds = dbMock.notificationLog.create.mock.calls.map(
+      (c) => c[0].data.channelId,
+    );
+    // 顺序保留：c1 在前（重复折叠到第一次出现）
+    expect(channelIds).toEqual(['c1', 'c2']);
+  });
+
   it('CS_PERIOD privacy cap 按 rule.channelIds 顺序选第 1 个，不被 PG `IN()` 乱序影响（Codex round 116 high）', async () => {
     const warnSpy = vi
       .spyOn(console, 'warn')

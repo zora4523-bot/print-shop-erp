@@ -97,8 +97,20 @@ export async function notify<E extends NotificationEvent>(
     // group']` 可能把客服金额发到 sales-group 而漏 owner-group。channels
     // 顺序在 schema 里就是 rule.channelIds 数组顺序，是 owner 配置时的
     // 优先级语义。
+    //
+    // **同时去重**（Codex round 117 medium）：rule.channelIds 可能含
+    // 重复 id（schema 是 String[]，不强制 unique）。findMany 隐式去重
+    // —— 直接 map findMany 结果按 id 没问题；但用 rule.channelIds 重
+    // 排时 ['c1','c1'] 会变两条 → 两次 webhook + 两条 log。Set-based
+    // 一次过过滤。
     const byId = new Map(fetched.map((c) => [c.id, c]));
+    const seen = new Set<string>();
     const channels = rule.channelIds
+      .filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
       .map((id) => byId.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
     if (channels.length === 0) {
