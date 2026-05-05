@@ -10,6 +10,10 @@ import {
   sendWebhook,
   type WebhookSender,
 } from './webhook';
+import {
+  PRIVATE_EVENT_MAX_CHANNELS,
+  isPrivatePerCsEvent,
+} from './admin';
 
 // notify(event, payload) 是企业微信推送的**唯一公开入口**（CLAUDE.md
 // §7.1）。永不抛（DECISIONS 2026-04-27 best-effort）：业务事务已 commit，
@@ -103,6 +107,26 @@ export async function notify<E extends NotificationEvent>(
       );
     }
 
+    // **Runtime privacy cap for CS_PERIOD_***（Codex round 115 high）：
+    // updateRuleWithGuard 是写时校验，对升级前已存在的多 channel 行
+    // 无效。这里 send-side cap 兜底——CS_PERIOD_* 含具体客服业绩 /
+    // 提成数据，绑多 channel 会让所有群看到所有客服金额。运行时 slice
+    // 到 PRIVATE_EVENT_MAX_CHANNELS 并 console.warn，让 ops 知道有
+    // legacy 配置该 owner 手动清理（schema 加 per-user 路由前的兜底）。
+    let effectiveChannels = channels;
+    if (
+      isPrivatePerCsEvent(event) &&
+      effectiveChannels.length > PRIVATE_EVENT_MAX_CHANNELS
+    ) {
+      console.warn(
+        `[notify] CS_PERIOD privacy cap event=${event} configured=${effectiveChannels.length} sending_to=${PRIVATE_EVENT_MAX_CHANNELS} (legacy config; owner please trim in /owner/notifications)`,
+      );
+      effectiveChannels = effectiveChannels.slice(
+        0,
+        PRIVATE_EVENT_MAX_CHANNELS,
+      );
+    }
+
     // payload.orderId / outsourceId / periodId 任一存在就关联到日志，
     // 让 dashboard 后期能 join 反查。仅 Order 是被 schema 显式索引的
     // (relatedOrderId)；其他 fk 暂留 null（schema 没建对应列）。
@@ -111,7 +135,7 @@ export async function notify<E extends NotificationEvent>(
     // 顺序处理（不并行）：单 server action 触发 1-2 channel 不并行无
     // 影响；并行会让 NotificationLog 写入顺序乱，dashboard 显示&ldquo;时
     // 间倒置&rdquo;。
-    for (const channel of channels) {
+    for (const channel of effectiveChannels) {
       let result;
       if (!channel.isActive) {
         // Inactive channel：不发 webhook，但**仍写 FAILED log** —

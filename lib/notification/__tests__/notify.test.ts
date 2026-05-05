@@ -260,6 +260,89 @@ describe('notify', () => {
     expect(where.isActive).toBeUndefined();
   });
 
+  it('CS_PERIOD_ENDING + legacy 多 channel → 运行时 cap 到 1 + console.warn（Codex round 115 high）', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'CS_PERIOD_ENDING',
+      channelIds: ['c1', 'c2', 'c3'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
+      { id: 'c3', webhookUrl: 'https://qy/3', isActive: true },
+    ]);
+    await notify(
+      'CS_PERIOD_ENDING',
+      { periodId: 'p1', csName: '张', daysLeft: 3, totalSales: '100,000.00' },
+      { webhookSender: okSender, mockMode: false },
+    );
+    // 只发 1 个 channel（cap）
+    expect(okSender).toHaveBeenCalledTimes(1);
+    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.channelId).toBe('c1');
+    // console.warn 留 ops 信号
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('CS_PERIOD privacy cap'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('CS_PERIOD_SETTLED + 单 channel → 不 cap 不 warn', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'CS_PERIOD_SETTLED',
+      channelIds: ['c1'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+    ]);
+    await notify(
+      'CS_PERIOD_SETTLED',
+      { settledCount: 1, csName: '张', totalSales: '10,000.00', commission: '300.00' },
+      { webhookSender: okSender, mockMode: false },
+    );
+    expect(okSender).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('CS_PERIOD privacy cap'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('其他事件 ORDER_SUBMITTED + 多 channel → 不 cap', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c1', 'c2'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
+    ]);
+    await notify(
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
+      { webhookSender: okSender, mockMode: false },
+    );
+    // 两个都发
+    expect(okSender).toHaveBeenCalledTimes(2);
+  });
+
   it('部分 channelIds stale → 已存在的还发，console.warn', async () => {
     const warnSpy = vi
       .spyOn(console, 'warn')

@@ -415,6 +415,24 @@ describe('updateRuleWithGuard', () => {
     });
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });
+
+  it('CS_PERIOD_* + isActive=false + 多 channel → 允许（draft；Codex round 115 medium）', async () => {
+    txMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'CS_PERIOD_ENDING',
+      channelIds: [],
+    });
+    // disable channel.findMany guard via mocking active for both
+    txMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', isActive: true },
+      { id: 'c2', isActive: true },
+    ]);
+    await updateRuleWithGuard('CS_PERIOD_ENDING', {
+      messageTemplate: 'x',
+      channelIds: ['c1', 'c2'],
+      isActive: false,
+    });
+    expect(txMock.notificationRule.update).toHaveBeenCalled();
+  });
 });
 
 describe('countRecentFailures', () => {

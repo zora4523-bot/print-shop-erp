@@ -107,9 +107,10 @@ export function RuleForm({
         {(eventType === 'CS_PERIOD_ENDING' ||
           eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
           <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-            ⚠️ 此事件含具体客服业绩 / 提成数据。<strong>建议只绑老板群一个
-            channel</strong>，绑多群会让所有群看到所有客服的金额（schema
-            暂无&ldquo;对应客服&rdquo;1:1 路由）。
+            ⚠️ 此事件含具体客服业绩 / 提成数据。启用规则时<strong>最多
+            只能绑 1 个 channel</strong>（避免不同客服互相看到金额；schema
+            暂无&ldquo;对应客服&rdquo;1:1 路由，等 P2 加 per-user 字段后放开）。
+            禁用 draft 状态可暂存多个，便于切换。
           </p>
         ) : null}
         {channels.length === 0 ? (

@@ -378,9 +378,12 @@ export class TooManyChannelsForPrivateEventError extends Error {
  * Action 层调用：跨字段 + 跨事件类型的多重校验（schema 不能跨字段，
  * 留给 action）：
  *   1. 启用规则 + channelIds 空 → EmptyChannelIdsError
- *   2. CS_PERIOD_* 事件 channelIds > 1 → TooManyChannelsForPrivateEventError
- *      （Codex round 114 high：privacy enforcement，UI 警告必须有
- *      server-side guard 兜底）
+ *   2. **启用规则** + CS_PERIOD_* + channelIds > 1 →
+ *      TooManyChannelsForPrivateEventError（Codex round 114 high：
+ *      privacy enforcement，UI 警告必须有 server-side guard 兜底）
+ *      只对 isActive=true 生效——禁用 draft 即使 channelIds 多也允许保存
+ *      （&ldquo;disable first, clean up later&rdquo;的 owner 操作模式不被打断；
+ *      Codex round 115 medium）。
  * 校验通过后委托给 updateRule。
  */
 export async function updateRuleWithGuard(
@@ -391,6 +394,7 @@ export async function updateRuleWithGuard(
     throw new EmptyChannelIdsError(eventType);
   }
   if (
+    input.isActive &&
     PRIVATE_PER_CS_EVENTS.has(eventType) &&
     input.channelIds.length > MAX_PRIVATE_CHANNELS
   ) {
@@ -401,6 +405,15 @@ export async function updateRuleWithGuard(
   }
   return updateRule(eventType, input);
 }
+
+// 暴露给 notify 端的运行时 cap：legacy rule 行可能已有多 channel，
+// updateRuleWithGuard 是写时校验，对已存在数据无效（Codex round 115
+// high）。notify.ts 在 fan-out 前 cap CS_PERIOD_* 到 1 个 channel +
+// console.warn，让 ops 看到&ldquo;有 legacy 配置该清理&rdquo;。
+export function isPrivatePerCsEvent(eventType: string): boolean {
+  return PRIVATE_PER_CS_EVENTS.has(eventType);
+}
+export const PRIVATE_EVENT_MAX_CHANNELS = MAX_PRIVATE_CHANNELS;
 
 // ─────────────────────────────────────────────────────────────────────
 // 日志列表（owner UI 显示）
