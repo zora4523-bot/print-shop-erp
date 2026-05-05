@@ -36,6 +36,15 @@ const { dbMock } = vi.hoisted(() => {
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
+// Slice C：spy notify() 验证 wire 点 fire 正确事件 + payload。模块整
+// 体替换成 spy；formatMoney 不 mock（lib/dashboard/format 是纯函数，
+// 测试要看真实输出）。typed as accepting any args so vi.fn 推断的
+// `[][]` 不阻 mock.calls[0]![1] 这类下标访问。
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+}));
+vi.mock('@/lib/notification', () => ({ notify: notifyMock }));
+
 import {
   createOrder,
   submitOrder,
@@ -82,6 +91,7 @@ beforeEach(() => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
   });
+  notifyMock.mockReset().mockResolvedValue(undefined);
 
   // Default: no existing orders for today (fresh serial), every craft
   // exists + is active, no productId references.
@@ -274,12 +284,25 @@ describe('createOrder', () => {
 });
 
 describe('submitOrder', () => {
+  // Slice C wire 后 submitOrder 走两次 findUnique：
+  //   1. tx 内取 { id, status, submitterId } 走状态机
+  //   2. tx 后取 { id, orderNo, customerRef, totalAmount, isUrgent,
+  //              submitter.displayName } 喂 notify
+  // mockResolvedValue 复用同一返回值就够了（第一次读 .status，
+  // 第二次读 .totalAmount 等；都是属性存取，互不干扰）。
+  const submittedRichRow = {
+    id: 'o1',
+    status: OrderStatus.DRAFT,
+    submitterId: 'sales-1',
+    orderNo: 'O-1',
+    customerRef: '苹果福',
+    totalAmount: '5000.00',
+    isUrgent: false,
+    submitter: { displayName: '张三' },
+  };
+
   it('transitions DRAFT → SUBMITTED and stamps submittedAt from the injected clock', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.DRAFT,
-      submitterId: 'sales-1',
-    });
+    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
 
     const clock = new Date('2026-04-23T10:00:00+08:00');
@@ -314,8 +337,7 @@ describe('submitOrder', () => {
 
   it('OWNER may submit on behalf of another submitter (global override)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.DRAFT,
+      ...submittedRichRow,
       submitterId: 'someone-else',
     });
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
@@ -339,6 +361,52 @@ describe('submitOrder', () => {
   it('throws OrderInvariantError if the target is missing', async () => {
     dbMock.order.findUnique.mockResolvedValue(null);
     await expect(submitOrder('nope', salesActor)).rejects.toBeInstanceOf(OrderInvariantError);
+  });
+
+  // ─── Slice C wire spec ───
+  it('submitOrder fires notify("ORDER_SUBMITTED") with rendered payload', async () => {
+    dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
+    await submitOrder('o1', salesActor);
+    // 1 call (not urgent → 不触 URGENT_ORDER)
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('ORDER_SUBMITTED', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      submitterName: '张三',
+      customerRef: '苹果福',
+      totalAmount: '¥ 5,000.00', // formatMoney 千分位
+      urgentMark: '',
+    });
+  });
+
+  it('submitOrder + isUrgent=true → 同时 fire URGENT_ORDER（独立事件，不替代 ORDER_SUBMITTED）', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      ...submittedRichRow,
+      isUrgent: true,
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
+    await submitOrder('o1', salesActor);
+    expect(notifyMock).toHaveBeenCalledTimes(2);
+    const [first, second] = notifyMock.mock.calls;
+    expect(first[0]).toBe('ORDER_SUBMITTED');
+    expect((first[1] as { urgentMark: string }).urgentMark).toBe('🚨 急单');
+    expect(second[0]).toBe('URGENT_ORDER');
+    expect(second[1]).toEqual({
+      orderId: 'o1',
+      orderNo: 'O-1',
+      submitterName: '张三',
+      customerRef: '苹果福',
+    });
+  });
+
+  it('submitOrder 业务异常时**不**触发 notify（tx 没 commit）', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      ...submittedRichRow,
+      submitterId: 'someone-else',
+    });
+    await expect(submitOrder('o1', salesActor)).rejects.toThrow();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
 
@@ -457,6 +525,72 @@ describe('shipOrder', () => {
       InvalidOrderTransitionError,
     );
     expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  // ─── Slice C wire spec ───
+  it('shipOrder fires notify("ORDER_SHIPPED") with provided trackingNo', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, 'SF1234567890');
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('ORDER_SHIPPED', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      trackingNo: 'SF1234567890',
+    });
+  });
+
+  // **Round 102 P1 wire-side regression**: trackingNo: null/undefined/blank
+  // 必须在传给 notify 前映射成 '未填'，否则 renderTemplate 会让模板里
+  // 的 `{trackingNo}` 留 raw 字面量流到群消息（HANDOFF Slice C TODO）。
+  it('shipOrder null trackingNo → notify payload trackingNo="未填"（不漏 raw {trackingNo}）', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, null);
+    expect(notifyMock).toHaveBeenCalledWith('ORDER_SHIPPED', {
+      orderId: 'o1',
+      orderNo: 'O-1',
+      trackingNo: '未填',
+    });
+    // 防 future-edit accidentally re-introduce null：payload.trackingNo 不能
+    // 等于 null / undefined / 空字符串
+    const payload = notifyMock.mock.calls[0]![1] as unknown as { trackingNo: string };
+    expect(payload.trackingNo).toBeTruthy();
+    expect(typeof payload.trackingNo).toBe('string');
+    expect(payload.trackingNo).not.toBe('');
+  });
+
+  it('shipOrder blank/whitespace trackingNo also → "未填"', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+    });
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    await shipOrder('o1', ownerActor, '   ');
+    const payload = notifyMock.mock.calls[0]![1] as unknown as { trackingNo: string };
+    expect(payload.trackingNo).toBe('未填');
+  });
+
+  it('shipOrder 业务异常（状态机拒绝）→ 不触发 notify', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      submitterId: 'sales-1',
+    });
+    await expect(shipOrder('o1', ownerActor, 'SF1')).rejects.toThrow();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
 

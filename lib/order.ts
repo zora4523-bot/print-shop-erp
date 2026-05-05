@@ -17,6 +17,8 @@ import {
   SHIPPING_EDITABLE_FIELDS,
   editableFieldsetForStatus,
 } from './order/editable-fields';
+import { notify } from './notification';
+import { formatMoney } from './dashboard/format';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -292,7 +294,7 @@ export async function submitOrder(
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
-  return transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, {
+  const result = await transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, {
     remark: '提交工单',
     now,
     authz: (order) => {
@@ -304,6 +306,50 @@ export async function submitOrder(
       }
     },
   });
+
+  // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit；
+  // notify 永不抛 best-effort）。fetch payload 用一条 select：
+  // orderNo / customerRef / totalAmount / isUrgent / submitter.displayName。
+  // 失败（极端：order 在 tx commit 后被另一个 admin 删了）→ notify
+  // 顶层 catch 吞掉，业务事实"提交成功"不受影响。
+  const payload = await db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNo: true,
+      customerRef: true,
+      totalAmount: true,
+      isUrgent: true,
+      submitter: { select: { displayName: true } },
+    },
+  });
+  if (payload) {
+    const totalAmount = formatMoney(
+      payload.totalAmount as unknown as Decimal.Value,
+    );
+    const urgentMark = payload.isUrgent ? '🚨 急单' : '';
+    await notify('ORDER_SUBMITTED', {
+      orderId: payload.id,
+      orderNo: payload.orderNo,
+      submitterName: payload.submitter.displayName,
+      customerRef: payload.customerRef,
+      totalAmount,
+      urgentMark,
+    });
+    // SPEC §8.1：急单提交 → 排产群+老板群（独立 rule，独立事件）。
+    // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
+    // 看到，排产群从 ORDER_SUBMITTED 看到。
+    if (payload.isUrgent) {
+      await notify('URGENT_ORDER', {
+        orderId: payload.id,
+        orderNo: payload.orderNo,
+        submitterName: payload.submitter.displayName,
+        customerRef: payload.customerRef,
+      });
+    }
+  }
+
+  return result;
 }
 
 export async function cancelOrder(
@@ -335,11 +381,35 @@ export async function shipOrder(
   // happily write an empty string to Order.trackingNo.
   const trimmed = trackingNo?.trim() ?? '';
   const tracking = trimmed.length > 0 ? trimmed : null;
-  return transitionWithLog(orderId, OrderStatus.SHIPPED, actor, {
-    remark: tracking ? `发货：${tracking}` : '标记发货',
-    now,
-    extraData: tracking !== null ? { trackingNo: tracking } : undefined,
+  const result = await transitionWithLog(
+    orderId,
+    OrderStatus.SHIPPED,
+    actor,
+    {
+      remark: tracking ? `发货：${tracking}` : '标记发货',
+      now,
+      extraData: tracking !== null ? { trackingNo: tracking } : undefined,
+    },
+  );
+
+  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；notify best-effort）。
+  // **关键 null 映射**：events.ts:ORDER_SHIPPED.trackingNo 必填 string，
+  // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
+  // raw 字面量流到群消息（HANDOFF round 102 Slice C TODO）。这里映射
+  // null → '未填'。
+  const payload = await db.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, orderNo: true },
   });
+  if (payload) {
+    await notify('ORDER_SHIPPED', {
+      orderId: payload.id,
+      orderNo: payload.orderNo,
+      trackingNo: tracking ?? '未填',
+    });
+  }
+
+  return result;
 }
 
 // SHIPPED → FINISHED (terminal). The ledger close — used after delivery

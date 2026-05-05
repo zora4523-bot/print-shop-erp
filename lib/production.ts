@@ -17,6 +17,7 @@ import type {
 } from './auth/schemas';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import { getActiveMachineRule } from './salary/rules';
+import { notify } from './notification';
 
 // Thrown when a scheduling request violates the allowlist contract
 // (duplicate / missing / unknown craft-item pairs, bad worker, etc.).
@@ -123,7 +124,7 @@ export async function scheduleOrder(
   input: ScheduleOrderInput,
   actor: { id: string; role: Role },
 ): Promise<ScheduleOrderResult> {
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const txClient = tx as unknown as ScheduleTxClient;
 
     // Serialize concurrent scheduling attempts on the same order.
@@ -305,6 +306,23 @@ export async function scheduleOrder(
       skippedOutsourceCrafts,
     };
   });
+
+  // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；notify best-effort）。
+  // payload 需要 orderNo + taskCount。result.tasksCreated 已有 count；
+  // orderNo 走一条 select。
+  const payload = await db.order.findUnique({
+    where: { id: result.orderId },
+    select: { orderNo: true },
+  });
+  if (payload) {
+    await notify('ORDER_SCHEDULED', {
+      orderId: result.orderId,
+      orderNo: payload.orderNo,
+      taskCount: result.tasksCreated,
+    });
+  }
+
+  return result;
 }
 
 export { SchedulingError as ProductionSchedulingError };
@@ -536,7 +554,10 @@ export async function reportTask(
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<ReportTaskResult> {
-  return db.$transaction(async (tx) => {
+  // Slice C wire ─ 需要 cascade 后的 orderId 来 fire ORDER_COMPLETED。
+  // tx 内拿不到 orderId 单独传出（要保留接口稳定），下面在 tx 关闭后
+  // 单查一次 task → orderItem.orderId。
+  const result = await db.$transaction(async (tx) => {
     const txClient = tx as unknown as TaskTxClient;
 
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
@@ -686,6 +707,33 @@ export async function reportTask(
       orderCompleted,
     };
   });
+
+  // Slice C wire ─ ORDER_COMPLETED（仅 cascade 路径；tx 已 commit；
+  // notify best-effort）。fetch order info via task → orderItem chain。
+  if (result.orderCompleted) {
+    const taskWithOrder = await db.productionTask.findUnique({
+      where: { id: result.taskId },
+      select: {
+        orderItem: {
+          select: {
+            order: {
+              select: { id: true, orderNo: true, customerRef: true },
+            },
+          },
+        },
+      },
+    });
+    const order = taskWithOrder?.orderItem.order;
+    if (order) {
+      await notify('ORDER_COMPLETED', {
+        orderId: order.id,
+        orderNo: order.orderNo,
+        customerRef: order.customerRef,
+      });
+    }
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────

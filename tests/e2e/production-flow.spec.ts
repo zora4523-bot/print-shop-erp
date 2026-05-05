@@ -7,6 +7,8 @@ import {
   E2E_USERS,
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
+  seedNotificationWireFixture,
+  readNotificationLogs,
 } from './_helpers';
 
 // 这条测试的具体使命：把 SALES 创建 → 提交 → FOREMAN 排产 → WORKER
@@ -26,6 +28,12 @@ test.describe('生产流程 — golden path', () => {
     const itemName = `E2E 款式 ${orderRef}`;
     let orderUrl = '';
     let orderId = '';
+
+    // Slice C wire (P1 #2): 绑定 5 条状态机 rule 到一个 mock channel。
+    // 跑完每一步生产链路后就读 NotificationLog，断言 wire 触发。
+    // mock-mode（NODE_ENV !== production）下 notify 不真发 HTTP，但
+    // 仍写 status=SUCCESS errorMessage='MOCK' 行——这就是 wire 的证据。
+    const { channelId: notifyChannelId } = await seedNotificationWireFixture();
 
     await test.step('SALES 登录并创建工单', async () => {
       await login(page, {
@@ -60,6 +68,39 @@ test.describe('生产流程 — golden path', () => {
       await expect(
         page.getByRole('button', { name: /^提交工单$/ }),
       ).toHaveCount(0, { timeout: 10_000 });
+
+      // Slice C 断言：ORDER_SUBMITTED 触发 → 1 条 NotificationLog。
+      // 非急单 → URGENT_ORDER 不触发。relatedOrderId 锁定本测试的工单。
+      // expect.poll 等 notify 真正写到 DB（button 消失到 log 落库间
+      // 偶有 100-200ms gap，估值不稳，poll 才稳）。
+      await expect
+        .poll(
+          async () => {
+            const logs = await readNotificationLogs({
+              eventType: 'ORDER_SUBMITTED',
+              channelId: notifyChannelId,
+            });
+            return logs.filter((l) => l.relatedOrderId === orderId).length;
+          },
+          { timeout: 5_000, intervals: [200, 400, 800] },
+        )
+        .toBeGreaterThanOrEqual(1);
+      const submittedLogs = await readNotificationLogs({
+        eventType: 'ORDER_SUBMITTED',
+        channelId: notifyChannelId,
+      });
+      const mine = submittedLogs.filter((l) => l.relatedOrderId === orderId);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.status).toBe('SUCCESS');
+      expect(mine[0]!.errorMessage).toBe('MOCK');
+      expect(mine[0]!.messageContent).toContain('新工单提交');
+      const urgentLogs = await readNotificationLogs({
+        eventType: 'URGENT_ORDER',
+        channelId: notifyChannelId,
+      });
+      expect(
+        urgentLogs.filter((l) => l.relatedOrderId === orderId),
+      ).toHaveLength(0);
     });
 
     await test.step('FOREMAN 登录 → 直接到排产详情页', async () => {
@@ -99,6 +140,28 @@ test.describe('生产流程 — golden path', () => {
           !url.pathname.startsWith(`/foreman/scheduling/${orderId}`),
         { timeout: 10_000 },
       );
+
+      // Slice C 断言：ORDER_SCHEDULED 触发。同前 poll 等真正落库。
+      await expect
+        .poll(
+          async () => {
+            const logs = await readNotificationLogs({
+              eventType: 'ORDER_SCHEDULED',
+              channelId: notifyChannelId,
+            });
+            return logs.filter((l) => l.relatedOrderId === orderId).length;
+          },
+          { timeout: 5_000, intervals: [200, 400, 800] },
+        )
+        .toBeGreaterThanOrEqual(1);
+      const scheduledLogs = await readNotificationLogs({
+        eventType: 'ORDER_SCHEDULED',
+        channelId: notifyChannelId,
+      });
+      const mine = scheduledLogs.filter((l) => l.relatedOrderId === orderId);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.status).toBe('SUCCESS');
+      expect(mine[0]!.messageContent).toContain('工单已排产');
     });
 
     await test.step('WORKER 登录任务列表 → 进入任务详情', async () => {
@@ -136,6 +199,29 @@ test.describe('生产流程 — golden path', () => {
       await expect(
         page.getByRole('heading', { name: '已完工' }),
       ).toBeVisible({ timeout: 10_000 });
+
+      // Slice C 断言：reportTask cascade 把 Order → COMPLETED 后触发
+      // ORDER_COMPLETED。
+      await expect
+        .poll(
+          async () => {
+            const logs = await readNotificationLogs({
+              eventType: 'ORDER_COMPLETED',
+              channelId: notifyChannelId,
+            });
+            return logs.filter((l) => l.relatedOrderId === orderId).length;
+          },
+          { timeout: 5_000, intervals: [200, 400, 800] },
+        )
+        .toBeGreaterThanOrEqual(1);
+      const completedLogs = await readNotificationLogs({
+        eventType: 'ORDER_COMPLETED',
+        channelId: notifyChannelId,
+      });
+      const mine = completedLogs.filter((l) => l.relatedOrderId === orderId);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.status).toBe('SUCCESS');
+      expect(mine[0]!.messageContent).toContain('工单完工');
     });
 
     await test.step('OWNER 视角验证工单 cascade 到 COMPLETED', async () => {
@@ -171,18 +257,44 @@ test.describe('生产流程 — golden path', () => {
       await expect(statusBadge).toBeVisible();
     });
 
+    let trackingNoForLog = '';
     await test.step('OWNER 标记发货 (COMPLETED → SHIPPED)', async () => {
       // 还在 admin (orderUrl) 上；ShipOrderForm 在 COMPLETED 下渲染。
       // 填一个运单号 + 提交，验证 status badge 切到&ldquo;已发货&rdquo;。
-      await page
-        .locator('input[name="trackingNo"]')
-        .fill(`SF-${Date.now().toString(36)}`);
+      trackingNoForLog = `SF-${Date.now().toString(36)}`;
+      await page.locator('input[name="trackingNo"]').fill(trackingNoForLog);
       await page.getByRole('button', { name: /^标记发货$/ }).click();
       await expect(
         page
           .locator('[data-slot="badge"]')
           .filter({ hasText: /^已发货$/ }),
       ).toBeVisible({ timeout: 10_000 });
+
+      // Slice C 断言：ORDER_SHIPPED 触发，messageContent 含真实
+      // trackingNo（不是 raw `{trackingNo}`，回归 round 102 P1 wire 端）。
+      await expect
+        .poll(
+          async () => {
+            const logs = await readNotificationLogs({
+              eventType: 'ORDER_SHIPPED',
+              channelId: notifyChannelId,
+            });
+            return logs.filter((l) => l.relatedOrderId === orderId).length;
+          },
+          { timeout: 5_000, intervals: [200, 400, 800] },
+        )
+        .toBeGreaterThanOrEqual(1);
+      const shippedLogs = await readNotificationLogs({
+        eventType: 'ORDER_SHIPPED',
+        channelId: notifyChannelId,
+      });
+      const mine = shippedLogs.filter((l) => l.relatedOrderId === orderId);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.status).toBe('SUCCESS');
+      expect(mine[0]!.messageContent).toContain(trackingNoForLog);
+      // 防 future-edit 漏 null mapping：messageContent 永不能含 raw
+      // `{trackingNo}` placeholder（render.ts 缺 key 留原样的设计）。
+      expect(mine[0]!.messageContent).not.toContain('{trackingNo}');
     });
 
     await test.step('OWNER 确认完工 (SHIPPED → FINISHED 终态)', async () => {

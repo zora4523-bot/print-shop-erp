@@ -988,3 +988,119 @@ export async function expectNoNextErrorOverlay(page: Page): Promise<void> {
   );
   await expect(overlay).toHaveCount(0);
 }
+
+// ---- Slice C wire fixtures (P1 #2) ----
+//
+// Seeds 1 mock channel `e2e_wire_test_group` + binds the 5 status-machine
+// rules (ORDER_SUBMITTED / URGENT_ORDER / ORDER_SCHEDULED / ORDER_COMPLETED
+// / ORDER_SHIPPED) to it + flips them isActive=true. Existing seed.ts
+// default templates (already populated by globalSetup → seed.ts) provide
+// the message bodies — no extra writes needed.
+//
+// Why a fixed channelKey 'e2e_wire_test_group' (not random): wipe
+// idempotency. resetNotificationFixture deletes channelKey LIKE 'e2e_%';
+// reusing the same key on rerun keeps the wipe scope tight and predictable.
+//
+// 在 NOTIFICATION_MOCK_MODE=true（dev / test 默认）环境下，notify 不会
+// 真发 HTTP — 只写 NotificationLog 行（status=SUCCESS errorMessage='MOCK'），
+// 这是 E2E 校验 wire 的唯一证据。
+export async function seedNotificationWireFixture(): Promise<{
+  channelId: string;
+}> {
+  return withDb(async (db) => {
+    // Step 1: same wipe as resetNotificationFixture (e2e_-prefix scoped)
+    await db.query(
+      `DELETE FROM "NotificationLog" WHERE "channelId" IN (
+         SELECT id FROM "NotificationChannel" WHERE "channelKey" LIKE 'e2e_%'
+       )`,
+    );
+    await db.query(
+      `DELETE FROM "NotificationChannel" WHERE "channelKey" LIKE 'e2e_%'`,
+    );
+
+    // Step 2: insert mock channel. webhookUrl 不会真用（mock-mode），
+    // 但 schema 要 String NOT NULL；放一个明显的 fake 域名让 ops 一眼
+    // 看出&ldquo;这条 channel 是 e2e fixture&rdquo;。
+    const channelId = `e2e-notif-wire-${randomBytes(4).toString('hex')}`;
+    await db.query(
+      `
+      INSERT INTO "NotificationChannel" (
+        id, "channelKey", "channelName", "webhookUrl",
+        "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'e2e_wire_test_group', 'E2E 推送测试群',
+        'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=E2E_FIXTURE',
+        TRUE, NOW(), NOW()
+      )
+      `,
+      [channelId],
+    );
+
+    // Step 3: bind + activate 5 status-machine rules.
+    await db.query(
+      `
+      UPDATE "NotificationRule"
+         SET "channelIds" = ARRAY[$1]::text[],
+             "isActive" = true,
+             "updatedAt" = NOW()
+       WHERE "eventType" IN (
+         'ORDER_SUBMITTED', 'URGENT_ORDER', 'ORDER_SCHEDULED',
+         'ORDER_COMPLETED', 'ORDER_SHIPPED'
+       )
+      `,
+      [channelId],
+    );
+
+    return { channelId };
+  });
+}
+
+// 读取按 createdAt 升序排的 NotificationLog 行，可选按 eventType 过滤。
+// E2E 用：跑完一步生产流程后断言"出现一条新 ORDER_SUBMITTED log"。
+export async function readNotificationLogs(filter: {
+  eventType?: string;
+  channelId?: string;
+}): Promise<
+  Array<{
+    id: string;
+    eventType: string;
+    channelId: string;
+    status: string;
+    errorMessage: string | null;
+    messageContent: string;
+    relatedOrderId: string | null;
+    createdAt: Date;
+  }>
+> {
+  return withDb(async (db) => {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (filter.eventType) {
+      params.push(filter.eventType);
+      conditions.push(`"eventType" = $${params.length}`);
+    }
+    if (filter.channelId) {
+      params.push(filter.channelId);
+      conditions.push(`"channelId" = $${params.length}`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const r = await db.query(
+      `SELECT id, "eventType", "channelId", status::text AS status,
+              "errorMessage", "messageContent", "relatedOrderId", "createdAt"
+         FROM "NotificationLog"
+        ${where}
+        ORDER BY "createdAt" ASC`,
+      params,
+    );
+    return r.rows as Array<{
+      id: string;
+      eventType: string;
+      channelId: string;
+      status: string;
+      errorMessage: string | null;
+      messageContent: string;
+      relatedOrderId: string | null;
+      createdAt: Date;
+    }>;
+  });
+}

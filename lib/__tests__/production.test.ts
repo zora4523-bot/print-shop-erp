@@ -47,6 +47,12 @@ const { dbMock } = vi.hoisted(() => {
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
+// Slice C：spy notify() 验证 wire 点 fire 正确事件 + payload。
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+}));
+vi.mock('@/lib/notification', () => ({ notify: notifyMock }));
+
 import {
   scheduleOrder,
   SchedulingError,
@@ -145,6 +151,7 @@ beforeEach(() => {
 
   dbMock.productionTask.createMany.mockResolvedValue({ count: 0 });
   dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.SCHEDULING });
+  notifyMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('scheduleOrder', () => {
@@ -490,6 +497,51 @@ describe('scheduleOrder', () => {
         foremanActor,
       ),
     ).rejects.toBeInstanceOf(SchedulingError);
+  });
+
+  // ─── Slice C wire spec ───
+  it('scheduleOrder fires notify("ORDER_SCHEDULED") with orderNo + taskCount', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.user.findMany.mockResolvedValue([fixtureWorker('worker-1')]);
+    dbMock.productionTask.createMany.mockResolvedValue({ count: 2 });
+    // post-tx findUnique 取 orderNo
+    dbMock.order.findUnique.mockResolvedValue({ orderNo: 'O-42' });
+
+    await scheduleOrder(
+      {
+        orderId: 'order-1',
+        assignments: [
+          { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
+          { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-1' },
+        ],
+      },
+      foremanActor,
+    );
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('ORDER_SCHEDULED', {
+      orderId: 'order-1',
+      orderNo: 'O-42',
+      taskCount: 2,
+    });
+  });
+
+  it('scheduleOrder 业务异常（dup assignment）→ 不触发 notify', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    await expect(
+      scheduleOrder(
+        {
+          orderId: 'order-1',
+          assignments: [
+            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
+            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-2' },
+          ],
+        },
+        foremanActor,
+      ),
+    ).rejects.toThrow();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
 
@@ -940,5 +992,84 @@ describe('reportTask', () => {
     await expect(
       reportTask('task-1', validInput, workerActor),
     ).rejects.toBeInstanceOf(InvalidTaskTransitionError);
+  });
+
+  // ─── Slice C wire spec ───
+  it('reportTask cascade COMPLETED 后 fire notify("ORDER_COMPLETED")', async () => {
+    dbMock.productionTask.findUnique
+      .mockResolvedValueOnce(
+        // tx 内：取 task w/ orderItem.order
+        fixtureTask({
+          status: TaskStatus.IN_PROGRESS,
+          orderStatus: OrderStatus.IN_PRODUCTION,
+        }),
+      )
+      .mockResolvedValueOnce({
+        // tx 后：单查 task → orderItem.order.{id, orderNo, customerRef}
+        orderItem: {
+          order: {
+            id: 'order-1',
+            orderNo: 'O-77',
+            customerRef: '客户 A',
+          },
+        },
+      });
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.COMPLETED,
+    });
+
+    await reportTask('task-1', validInput, workerActor);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('ORDER_COMPLETED', {
+      orderId: 'order-1',
+      orderNo: 'O-77',
+      customerRef: '客户 A',
+    });
+  });
+
+  it('reportTask 非 cascade 路径（还有兄弟任务未完）→ 不 fire notify', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    // 还有 1 个 IN_PROGRESS 兄弟 → cascade 不触发
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+      { id: 'task-2', status: TaskStatus.IN_PROGRESS },
+    ]);
+
+    const r = await reportTask('task-1', validInput, workerActor);
+    expect(r.orderCompleted).toBe(false);
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('reportTask 业务异常（PENDING task）→ 不 fire notify', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({ status: TaskStatus.PENDING }),
+    );
+    await expect(
+      reportTask('task-1', validInput, workerActor),
+    ).rejects.toBeInstanceOf(InvalidTaskTransitionError);
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
