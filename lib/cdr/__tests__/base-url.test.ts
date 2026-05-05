@@ -82,6 +82,36 @@ describe('deriveBaseUrlFromHeaders', () => {
     ).toBe('https://erp.example.com:8443');
   });
 
+  it('IPv6 字面量带方括号（带端口）→ OK（Codex round 123）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: '[2001:db8::1]:8443',
+        host: null,
+      }),
+    ).toBe('https://[2001:db8::1]:8443');
+  });
+
+  it('IPv6 loopback `[::1]:3000` → OK', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'http',
+        forwardedHost: '[::1]:3000',
+        host: null,
+      }),
+    ).toBe('http://[::1]:3000');
+  });
+
+  it('IPv6 不带方括号（裸 `::1`）→ 拒绝 fallback（URL 标准要求方括号）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'http',
+        forwardedHost: '::1',
+        host: null,
+      }),
+    ).toBe('http://localhost:3000');
+  });
+
   it('两个 header 都空 → fallback localhost', () => {
     expect(
       deriveBaseUrlFromHeaders({
