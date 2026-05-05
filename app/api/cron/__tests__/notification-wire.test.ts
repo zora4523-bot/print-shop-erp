@@ -292,7 +292,7 @@ describe('POST /api/cron/outsource-overdue → OUTSOURCE_OVERDUE', () => {
 // ─── /api/cron/cs-period-ending (NEW) ───
 
 describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
-  it('rows[N] → N 条 CS_PERIOD_ENDING notify', async () => {
+  it('rows[N] → N 条 CS_PERIOD_ENDING notify（用 salesForTier 不是 totalSales）', async () => {
     getEndingPeriodsMock.mockResolvedValue([
       {
         id: 'p1',
@@ -301,8 +301,11 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
         periodStart: new Date('2026-01-01T00:00:00Z'),
         periodEnd: new Date('2026-04-30T00:00:00Z'),
         durationMonths: 4,
-        totalSales: '300000.00',
-        initialSales: '0.00',
+        // 关键：totalSales=200k 但 initialSales=100k → salesForTier=300k
+        // 命中最高档；只发 totalSales 会让消息&ldquo;业绩 200k&rdquo;但实际命中
+        // 300k 档位的提成（Codex round 112 medium）。
+        totalSales: '200000.00',
+        initialSales: '100000.00',
         salesForTier: '300000.00',
         monthlyBase: '5000.00',
         daysUntilEnd: 3,
@@ -320,7 +323,7 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
       periodId: 'p1',
       csName: 'CS 张',
       daysLeft: 3,
-      // formatMoneyPlain 千分位
+      // **salesForTier 千分位**，不是 totalSales 千分位
       totalSales: '300,000.00',
     });
   });
