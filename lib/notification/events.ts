@@ -98,7 +98,14 @@ export type NotificationPayloads = {
     periodId: string;
     csName: string;
     daysLeft: number;
-    totalSales: string; // Decimal-string，已 formatMoney
+    // **业绩合计（含期初 initialSales）**——同 dashboard `salesForTier`
+    // 口径，与提成档位计算一致（Codex round 113 medium）。CS_TIERS 是
+    // 按 totalSales + initialSales 算的；如果这里只发 totalSales，
+    // initialSales != 0 时消息&ldquo;业绩&rdquo;会比命中档位低，老板看不出 why。
+    // Slice D wire (`/api/cron/cs-period-ending`) 用 lib/dashboard/
+    // owner-watchlist.salesForTier 喂入。seed.ts 模板&ldquo;业绩合计&rdquo;标签
+    // 同步反映这一点。
+    totalSales: string; // Decimal-string，已 formatMoneyPlain
   };
   CS_PERIOD_SETTLED: {
     settledCount: number;

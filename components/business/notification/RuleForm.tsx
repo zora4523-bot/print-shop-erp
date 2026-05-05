@@ -99,6 +99,19 @@ export function RuleForm({
 
       <fieldset className="space-y-2">
         <Label>推送到群（多选）</Label>
+        {/* Privacy 警告：CS_PERIOD_* 事件含具体客服业绩 / 提成数据，
+            绑多个 channel 会让所有 channel 看到所有客服的业绩。
+            schema 暂无 per-user 路由（SPEC §8.1 &ldquo;对应客服&rdquo; 待 P2 加
+            User.notificationChannelId 后实现）。Codex round 113 high：
+            源码注释敌不过 owner 误配；UI 需明示。 */}
+        {(eventType === 'CS_PERIOD_ENDING' ||
+          eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
+          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+            ⚠️ 此事件含具体客服业绩 / 提成数据。<strong>建议只绑老板群一个
+            channel</strong>，绑多群会让所有群看到所有客服的金额（schema
+            暂无&ldquo;对应客服&rdquo;1:1 路由）。
+          </p>
+        ) : null}
         {channels.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
             还没建任何群。请先{' '}

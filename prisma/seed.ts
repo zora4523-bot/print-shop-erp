@@ -390,9 +390,13 @@ async function seedNotificationEvents() {
       eventType: 'STOCK_ALERT',
       messageTemplate: '📦 **库存告警**\n物料：{materialName}\n当前库存：{currentStock}\n安全库存：{safetyStock}',
     },
+    // &ldquo;业绩合计&rdquo;反映 Slice D wire 喂入的 salesForTier (= totalSales
+    // + initialSales)，与提成档位口径一致（Codex round 113 medium）。
+    // 之前写&ldquo;当前业绩&rdquo;会让 initialSales != 0 的客服看到&ldquo;业绩&rdquo;
+    // 比命中档位低，老板看不出 why。
     {
       eventType: 'CS_PERIOD_ENDING',
-      messageTemplate: '📅 **客服周期即将结束**\n客服：{csName}\n当前业绩：¥{totalSales}\n还有{daysLeft}天结算',
+      messageTemplate: '📅 **客服周期即将结束**\n客服：{csName}\n业绩合计：¥{totalSales}\n还有{daysLeft}天结算',
     },
     {
       eventType: 'CS_PERIOD_SETTLED',
