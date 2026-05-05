@@ -87,10 +87,20 @@ export async function notify<E extends NotificationEvent>(
     // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
     // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
     // 静默漏推；Codex round 101 P2）。
-    const channels = await db.notificationChannel.findMany({
+    const fetched = await db.notificationChannel.findMany({
       where: { id: { in: rule.channelIds } },
       select: { id: true, webhookUrl: true, isActive: true },
     });
+    // **PG `IN (...)` 不保证返回顺序**——必须按 rule.channelIds 顺序
+    // 重排（Codex round 116 high）。否则 CS_PERIOD_* runtime cap 的
+    // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
+    // group']` 可能把客服金额发到 sales-group 而漏 owner-group。channels
+    // 顺序在 schema 里就是 rule.channelIds 数组顺序，是 owner 配置时的
+    // 优先级语义。
+    const byId = new Map(fetched.map((c) => [c.id, c]));
+    const channels = rule.channelIds
+      .map((id) => byId.get(id))
+      .filter((c): c is NonNullable<typeof c> => c !== undefined);
     if (channels.length === 0) {
       // channelIds 全是 stale ID（指向已删 channel）。FK 不让我们
       // 写 NotificationLog，只能打 console。Slice B 的 channel 删

@@ -291,6 +291,38 @@ describe('notify', () => {
     warnSpy.mockRestore();
   });
 
+  it('CS_PERIOD privacy cap 按 rule.channelIds 顺序选第 1 个，不被 PG `IN()` 乱序影响（Codex round 116 high）', async () => {
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    // rule 里 owner-group 在前，sales-group 在后——owner 期望优先发
+    // owner-group。
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'CS_PERIOD_SETTLED',
+      channelIds: ['owner-group', 'sales-group'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    // 但 PG 返回顺序乱了（sales-group 在前）—— 模拟 IN(...) 不保证顺序。
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'sales-group', webhookUrl: 'https://qy/sales', isActive: true },
+      { id: 'owner-group', webhookUrl: 'https://qy/owner', isActive: true },
+    ]);
+    await notify(
+      'CS_PERIOD_SETTLED',
+      { settledCount: 1, csName: '张', totalSales: '10,000', commission: '300' },
+      { webhookSender: okSender, mockMode: false },
+    );
+    // **必须发到 owner-group**（rule.channelIds[0]），不能是 sales-group
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.channelId).toBe(
+      'owner-group',
+    );
+    expect(okSender).toHaveBeenCalledTimes(1);
+    // sender 第一个参数（webhook URL）也应该是 owner 的，不是 sales 的
+    expect(okSender).toHaveBeenCalledWith('https://qy/owner', expect.any(String));
+    warnSpy.mockRestore();
+  });
+
   it('CS_PERIOD_SETTLED + 单 channel → 不 cap 不 warn', async () => {
     const warnSpy = vi
       .spyOn(console, 'warn')
