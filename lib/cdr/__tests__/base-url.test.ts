@@ -142,13 +142,17 @@ describe('deriveBaseUrlFromHeaders', () => {
     ).toBe('http://localhost:3000');
   });
 
-  it('host 含 path / `?` / `@` / `\\` 注入字符 → fallback', () => {
+  it('host 含 path / `?` / `@` / `\\` / `%` 注入字符 → fallback', () => {
     for (const evil of [
       'erp.example.com/evil',
       'erp.example.com?x=1',
       'user@erp.example.com',
       'erp.example.com\\evil',
       'erp.example.com#frag',
+      // percent-encoding：URL parser 会解码 `%65rp` → `erp`，让 foreman
+      // 看到的链接域和 header 输入不同（Codex round 125）
+      '%65rp.example.com',
+      'erp.%65xample.com',
     ]) {
       expect(
         deriveBaseUrlFromHeaders({
@@ -158,6 +162,48 @@ describe('deriveBaseUrlFromHeaders', () => {
         }),
       ).toBe('http://localhost:3000');
     }
+  });
+
+  it('IPv4 短格式 / hex（如 `127.1` / `0x7f000001`）→ fallback（URL parser 会改写，Codex round 125）', () => {
+    for (const evil of ['127.1', '0x7f000001', '0177.0.0.1']) {
+      expect(
+        deriveBaseUrlFromHeaders({
+          proto: 'http',
+          forwardedHost: evil,
+          host: null,
+        }),
+      ).toBe('http://localhost:3000');
+    }
+  });
+
+  it('host 末尾空 port（`example.com:`）→ fallback（URL parser 会剥，Codex round 125）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: 'example.com:',
+        host: null,
+      }),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('port 含 leading-zero（`:000443`）→ fallback（URL parser 会改写，Codex round 125）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: 'example.com:000443',
+        host: null,
+      }),
+    ).toBe('http://localhost:3000');
+  });
+
+  it('proto+host 大小写不敏感（`Erp.EXAMPLE.com` → 小写 round-trip 接受）', () => {
+    expect(
+      deriveBaseUrlFromHeaders({
+        proto: 'https',
+        forwardedHost: 'Erp.EXAMPLE.com',
+        host: null,
+      }),
+    ).toBe('https://erp.example.com');
   });
 
   it('两个 header 都空 → fallback localhost', () => {
