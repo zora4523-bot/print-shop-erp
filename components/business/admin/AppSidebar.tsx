@@ -11,6 +11,7 @@ import {
   CalendarDays,
   ClipboardList,
   Clock,
+  FileArchive,
   FileText,
   LayoutDashboard,
   PackageOpen,
@@ -57,6 +58,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   TrendingUp,
   Sparkles,
   Bell,
+  FileArchive,
 };
 
 type AppSidebarProps = {

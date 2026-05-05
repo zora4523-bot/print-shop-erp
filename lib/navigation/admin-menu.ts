@@ -23,7 +23,8 @@ export type IconName =
   | 'FileText'
   | 'TrendingUp'
   | 'Sparkles'
-  | 'Bell';
+  | 'Bell'
+  | 'FileArchive';
 
 export type AdminMenuItem = {
   label: string;
@@ -76,6 +77,7 @@ const FOREMAN_MENU: AdminMenuItem[] = [
   { label: '物料',         href: '#',                       iconName: 'Boxes',           requiredPermission: 'material:manage' },
   { label: '师傅日薪',     href: '#',                       iconName: 'Calculator',      requiredPermission: 'salary:view:team' },
   { label: '工时录入',     href: '/foreman/attendance',     iconName: 'Clock',           requiredPermission: 'task:assign' },
+  { label: 'CDR 汇总',     href: '/foreman/cdr',            iconName: 'FileArchive',     requiredPermission: 'design:bundle:create' },
 ];
 
 const SALES_MENU: AdminMenuItem[] = [

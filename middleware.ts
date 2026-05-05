@@ -25,12 +25,16 @@ export default auth((req) => {
 // Only run on pages the user would land on. Exclude Next.js internals, the
 // Auth.js API route itself, static assets, and any file-like paths.
 //
-// `api/cron` is also excluded —— cron 端点已有自己的 Bearer 认证
-// (CRON_SECRET，DECISIONS 2026-04-24)，不应被 session-based 中间件
-// 拦截 redirect 到 /login（pre-existing latent bug，Slice D E2E 才
-// surface 出来——之前 cron 路由都是 mocked 单测覆盖，没真 HTTP 跑过）。
+// `api/cron` 排除原因：cron 端点已有自己的 Bearer 认证（CRON_SECRET，
+// DECISIONS 2026-04-24），不应被 session-based 中间件拦截 redirect
+// 到 /login（pre-existing latent bug，P1 #2 Slice D E2E 才 surface
+// 出来）。
+//
+// `api/cdr` 排除原因：CDR bundle 下载路由用 cuid token（DesignBundle.id，
+// ~125 bits 熵 + 24h 过期）做无 session 鉴权——业务上外协方拿 URL 下载
+// 时不会有我们系统的登录态（SPEC §3.5）。匹配规则同 cron。
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|api/auth|api/cron|favicon.ico|login|.*\\..*).*)',
+    '/((?!_next/static|_next/image|api/auth|api/cron|api/cdr|favicon.ico|login|.*\\..*).*)',
   ],
 };

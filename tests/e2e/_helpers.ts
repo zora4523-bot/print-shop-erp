@@ -977,6 +977,96 @@ export async function logout(page: Page): Promise<void> {
 // Defensive assertion: when a Server Action errors, Next dev throws an
 // in-page error dialog. We check for the actual error dialog (not the
 // `<nextjs-portal>` shell which is present on every dev page for the
+// ---- CDR E2E (P0 #7) ----
+//
+// 种 1 个 SUBMITTED 工单，含 N 个 CDR-type OrderItemDesign。foreman
+// 在 /foreman/cdr 选当天 → 看到这条工单 → 勾 → 生成下载包。
+//
+// **deterministic id 前缀** `e2e-cdr-` 让重跑的 E2E 走同一行（替代）
+// 而不是堆积。每次运行先 wipe 再 insert。
+export async function seedCdrOrder(opts: {
+  submitterId: string;
+  // 当天提交（Asia/Shanghai noon UTC）—— UI 默认 from=today / to=today
+  // 抓得住。
+  cdrCount?: number;
+}): Promise<{ orderId: string; orderNo: string }> {
+  const cdrCount = opts.cdrCount ?? 2;
+  const orderId = 'e2e-cdr-1';
+  const orderNo = 'E2E-CDR-1';
+  const orderItemId = `${orderId}-item`;
+
+  // 当天 Shanghai noon → UTC 04:00 of today
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const [yyyy, mm, dd] = ymd.split('-').map(Number);
+  const submittedAt = new Date(Date.UTC(yyyy!, mm! - 1, dd!, 4, 0, 0));
+
+  return withDb(async (db) => {
+    // CASCADE 顺序：DesignBundle.designIds 引用是 string[]（无 FK），
+    // 不影响 wipe；Order delete CASCADE 到 OrderItem → OrderItemDesign。
+    await db.query(`DELETE FROM "Order" WHERE id = $1`, [orderId]);
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "totalAmount",
+        "submittedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'SALES'::"Role", $3,
+        'SUBMITTED'::"OrderStatus", FALSE, 0,
+        $4, $4, $4
+      )
+      `,
+      [orderId, orderNo, opts.submitterId, submittedAt.toISOString()],
+    );
+    await db.query(
+      `
+      INSERT INTO "OrderItem" (
+        id, "orderId", sequence, name, "specification", "paperType",
+        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
+        crafts, "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, 1, 'CDR 测试款', '9cm', '珠光纸',
+        5000, '金色', FALSE, FALSE,
+        ARRAY[]::text[], NOW(), NOW()
+      )
+      `,
+      [orderItemId, orderId],
+    );
+    for (let i = 0; i < cdrCount; i++) {
+      await db.query(
+        `
+        INSERT INTO "OrderItemDesign" (
+          id, "orderItemId", "fileType", "fileUrl", "fileName",
+          "fileSize", "uploadedBy", "uploadedAt"
+        ) VALUES (
+          $1, $2, 'CDR'::"DesignFileType",
+          $3, $4, 1024, $5, NOW()
+        )
+        `,
+        [
+          `${orderItemId}-cdr-${i}`,
+          orderItemId,
+          // 占位 URL；mock-mode 不真 fetch 它，只走 metadata 路径
+          `https://oss.example.com/${orderItemId}-${i}.cdr`,
+          `design-${i + 1}.cdr`,
+          opts.submitterId,
+        ],
+      );
+    }
+    // 同时清掉之前 E2E 留下的 DesignBundle，让 recent 列表看起来干净
+    await db.query(`DELETE FROM "DesignBundle" WHERE "createdById" IN (
+       SELECT id FROM "User" WHERE username LIKE 'e2e-%'
+     )`);
+
+    return { orderId, orderNo };
+  });
+}
+
 // dev tools indicator). If selectors drift on a future Next bump, tests
 // still pass — surrounding URL / content assertions catch real failures.
 export async function expectNoNextErrorOverlay(page: Page): Promise<void> {

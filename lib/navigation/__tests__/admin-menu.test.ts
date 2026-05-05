@@ -46,11 +46,17 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('用户管理');
     expect(labels).not.toContain('工艺字典');
     expect(labels).not.toContain('产品字典');
-    // 但有自己的 Dashboard / 排产 / 外协 / 工时录入
+    // 但有自己的 Dashboard / 排产 / 外协 / 工时录入 / CDR 汇总
     expect(labels).toContain('Dashboard');
     expect(labels).toContain('排产');
     expect(labels).toContain('外协');
     expect(labels).toContain('工时录入');
+    // P0 #7：CDR 汇总（design:bundle:create 权限）
+    const cdr = flatten(getAdminMenuItems({ role: Role.FOREMAN })).find(
+      (i) => i.label === 'CDR 汇总',
+    );
+    expect(cdr?.href).toBe('/foreman/cdr');
+    expect(cdr?.requiredPermission).toBe('design:bundle:create');
   });
 
   it('SALES 菜单不含老板/主管独占项', () => {
