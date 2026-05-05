@@ -351,9 +351,37 @@ export class EmptyChannelIdsError extends Error {
   }
 }
 
+// CS 业绩 / 提成事件（含具体客服金额）只能绑 ≤ 1 个 channel——多绑
+// 会让所有 channel 看到所有客服的金额。schema 没 per-user 路由
+// （SPEC §8.1 &ldquo;对应客服&rdquo; 1:1 推送等 P2 加 User.notificationChannelId
+// 后实现）。Codex round 113 high → round 114 high：UI 警告易被
+// 直接 POST / replay 绕开，server side 必须 enforce。
+const PRIVATE_PER_CS_EVENTS = new Set([
+  'CS_PERIOD_ENDING',
+  'CS_PERIOD_SETTLED',
+]);
+const MAX_PRIVATE_CHANNELS = 1;
+
+export class TooManyChannelsForPrivateEventError extends Error {
+  constructor(
+    public readonly eventType: string,
+    public readonly count: number,
+  ) {
+    super(
+      `${eventType} 含具体客服金额，最多绑 ${MAX_PRIVATE_CHANNELS} 个 channel（当前 ${count}）`,
+    );
+    this.name = 'TooManyChannelsForPrivateEventError';
+  }
+}
+
 /**
- * Action 层调用：先做"启用 + 空 channelIds"的跨字段校验（schema 不能
- * 跨字段约束，留给 action）。然后委托给 updateRule。
+ * Action 层调用：跨字段 + 跨事件类型的多重校验（schema 不能跨字段，
+ * 留给 action）：
+ *   1. 启用规则 + channelIds 空 → EmptyChannelIdsError
+ *   2. CS_PERIOD_* 事件 channelIds > 1 → TooManyChannelsForPrivateEventError
+ *      （Codex round 114 high：privacy enforcement，UI 警告必须有
+ *      server-side guard 兜底）
+ * 校验通过后委托给 updateRule。
  */
 export async function updateRuleWithGuard(
   eventType: string,
@@ -361,6 +389,15 @@ export async function updateRuleWithGuard(
 ): Promise<void> {
   if (input.isActive && input.channelIds.length === 0) {
     throw new EmptyChannelIdsError(eventType);
+  }
+  if (
+    PRIVATE_PER_CS_EVENTS.has(eventType) &&
+    input.channelIds.length > MAX_PRIVATE_CHANNELS
+  ) {
+    throw new TooManyChannelsForPrivateEventError(
+      eventType,
+      input.channelIds.length,
+    );
   }
   return updateRule(eventType, input);
 }

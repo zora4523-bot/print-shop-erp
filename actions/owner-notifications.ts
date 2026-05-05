@@ -15,6 +15,7 @@ import {
   InactiveChannelBindError,
   RuleNotFoundError,
   StaleChannelIdsError,
+  TooManyChannelsForPrivateEventError,
   createChannel,
   deleteChannel,
   updateChannel,
@@ -203,6 +204,16 @@ export async function updateRuleAction(
       return {
         status: 'invalid',
         fieldErrors: { channelIds: ['启用规则时必须至少选择 1 个群'] },
+      };
+    }
+    if (err instanceof TooManyChannelsForPrivateEventError) {
+      return {
+        status: 'invalid',
+        fieldErrors: {
+          channelIds: [
+            '此事件含具体客服业绩 / 提成数据，最多绑 1 个群（避免不同客服互相看到金额）',
+          ],
+        },
       };
     }
     if (err instanceof StaleChannelIdsError) {
