@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { requirePermission } from '@/lib/auth/permissions';
 import { CdrBundleError, createBundle } from '@/lib/cdr/bundle';
 import { parseStrictYmd } from '@/lib/auth/schemas';
@@ -41,9 +42,15 @@ export async function createBundleAction(
     return { status: 'invalid', fieldErrors };
   }
 
+  // 拼绝对 downloadUrl 用的 base：优先 APP_PUBLIC_URL（部署期固定）
+  // > 请求 headers (proto + host)（dev / split-origin 自然跟随当前
+  // 访问域）> 默认 localhost。Codex round 121 medium：之前从 env 读
+  // 在 dev (127.0.0.1 / ngrok) 会回退到 localhost:3000 死链。
+  const baseUrl = await deriveBaseUrl();
+
   try {
     const result = await createBundle(
-      { from, to, orderIds },
+      { from, to, orderIds, baseUrl },
       { id: actor.id },
     );
     revalidatePath('/foreman/cdr');
@@ -62,4 +69,30 @@ export async function createBundleAction(
     }
     throw err;
   }
+}
+
+/**
+ * 从 Next.js request headers 推 baseUrl（含 protocol、不含尾斜线）。
+ *   1. APP_PUBLIC_URL env 显式配置 → 直接用（部署期最稳，跨进程一致）
+ *   2. x-forwarded-proto + (x-forwarded-host || host) → 推 base（dev /
+ *      Vercel preview / 内网代理 默认走这条；自动跟随当前访问域）
+ *   3. 兜底 http://localhost:3000（极端情况，单测 / scripts 没 request
+ *      scope 时不会走到 action 层，所以不会真用到）
+ */
+async function deriveBaseUrl(): Promise<string> {
+  if (process.env.APP_PUBLIC_URL) {
+    return process.env.APP_PUBLIC_URL.replace(/\/+$/, '');
+  }
+  try {
+    const h = await headers();
+    const proto =
+      h.get('x-forwarded-proto') ?? (h.get('host') ? 'http' : null);
+    const host = h.get('x-forwarded-host') ?? h.get('host');
+    if (proto && host) {
+      return `${proto}://${host}`;
+    }
+  } catch {
+    // headers() 抛 = no request scope；走兜底
+  }
+  return 'http://localhost:3000';
 }

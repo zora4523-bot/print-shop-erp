@@ -105,6 +105,12 @@ export type CreateBundleInput = {
   // 与 listEligibleOrders 的 input 保持一致即可。
   from: string;
   to?: string;
+  // 拼绝对 URL 用 base（含 protocol，无尾斜线，如
+  // 'https://erp.example.com'）。action 层从请求 headers 推导
+  // （host + x-forwarded-proto），保证 split-origin 部署也得到对的
+  // 公网域。Codex round 121 medium：之前从 env 读会让 dev 端点 (127.0.0.1
+  // / ngrok) 拿到 localhost:3000 死链。
+  baseUrl: string;
 };
 
 export type CreateBundleResult = {
@@ -226,14 +232,11 @@ export async function createBundle(
   // 当前 mock-mode 下，route 看到 `mock://...` 直接 503。
   //
   // **绝对 URL**——SPEC §3.5 是&ldquo;复制链接发外协&rdquo;的语义，外协在
-  // WeChat / 邮件里点链接得直接打开（Codex round 119 high）。base 优
-  // 先级：APP_PUBLIC_URL（部署 env）> AUTH_URL（NextAuth 同款 fallback）
-  // > 默认 http://localhost:3000（dev）。
-  const baseUrl = (
-    process.env.APP_PUBLIC_URL ??
-    process.env.AUTH_URL ??
-    'http://localhost:3000'
-  ).replace(/\/+$/, '');
+  // WeChat / 邮件里点链接得直接打开（Codex round 119 high）。
+  // baseUrl 由 action 层从 request headers 推导（host + x-forwarded-
+  // proto / x-forwarded-host），保证 dev (127.0.0.1 / ngrok) 也得对的
+  // 域而不是回到 localhost。Codex round 121 medium。
+  const baseUrl = input.baseUrl.replace(/\/+$/, '');
   const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
 
   await db.designBundle.update({

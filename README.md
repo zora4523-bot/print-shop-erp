@@ -210,7 +210,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
 | `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 6 个 `/api/cron/*` 全部 503 |
-| `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线） | CDR 24h 短链拼成 `http://localhost:3000/...`，外协方拿到死链（SPEC §3.5） |
+| `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**留空推荐**——action 层会从请求 headers 推（dev/prod 都自然跟随）；显式配置仅当部署期固定公网域不希望被 host header 影响时 | 留空：CDR 短链跟随访问域；非空：始终用此值 |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
 
 选填但生产建议：
