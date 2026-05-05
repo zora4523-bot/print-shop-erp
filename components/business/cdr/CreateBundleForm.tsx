@@ -27,7 +27,10 @@ export function CreateBundleForm({
     FormData
   >(createBundleAction, null);
 
-  // 全选 / 反选 / 单选状态
+  // 全选 / 反选 / 单选状态。useState 初始化只跑一次，所以**外层用
+  // `key={eligibleIdsKey}` 强制 remount**——日期 filter 变化 → 候选
+  // 集换组 → form 重挂 → setSelected 拿新 allIds（Codex round 119
+  // medium）。比 useEffect+setState 更纯。
   const allIds = useMemo(() => eligible.map((o) => o.id), [eligible]);
   const [selected, setSelected] = useState<Set<string>>(new Set(allIds));
 
@@ -156,16 +159,20 @@ export function CreateBundleForm({
               (mock-mode：URL 是占位，OSS 配齐后才能真下载)
             </span>
           ) : null}
+          {/* 显示绝对 URL（含 host）—— 外协方可直接复制粘贴到
+              微信 / 邮件；本地点击仍走相对 path 用 Next Link 内部跳。
+              （Codex round 119 high：相对 path 在 IM 里粘出去打不开） */}
           <div className="mt-2 break-all font-mono text-xs">
             <Link
-              href={state.downloadUrl}
+              href={state.relativePath}
               className="underline underline-offset-2"
             >
               {state.downloadUrl}
             </Link>
           </div>
           <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
-            链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。
+            链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。复制
+            上方完整 URL 发给外协。
           </div>
         </div>
       ) : null}

@@ -4,6 +4,9 @@ import {
   BundleNotFoundError,
   consumeBundle,
 } from '@/lib/cdr/bundle';
+// BundleExpiredError 仍 import 用作 instanceof 判定；UI 文案对外
+// 一致返 404，但内部分支保留以便将来加 audit log（&ldquo;有人探到了
+// 已过期的 token X 次/小时&rdquo;）。
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,15 +41,18 @@ export async function GET(
   try {
     bundle = await consumeBundle(id);
   } catch (err) {
-    if (err instanceof BundleNotFoundError) {
-      // 404 而不是 410 —— 攻击者无法区分&ldquo;猜对了 id 但已过期&rdquo;和&ldquo;根本
-      // 不存在&rdquo;，降低暴力探测可见性。
-      return NextResponse.json({ error: '链接已失效或不存在' }, { status: 404 });
-    }
-    if (err instanceof BundleExpiredError) {
+    if (
+      err instanceof BundleNotFoundError ||
+      err instanceof BundleExpiredError
+    ) {
+      // **404 + 同款文案**——攻击者无法区分&ldquo;猜对了 id 但已过期&rdquo;和
+      // &ldquo;根本不存在&rdquo;，降低暴力探测可见性（Codex round 119 medium：
+      // 之前&ldquo;过期&rdquo;返 410 + expiredAt 字段会泄漏&ldquo;这个 id 曾经有效&rdquo;）。
+      // 业务上对外协方信息一致：&ldquo;链接已失效或不存在，请联系车间主管
+      // 重新生成&rdquo;。
       return NextResponse.json(
-        { error: '链接已过期（24 小时有效）', expiredAt: err.expiredAt.toISOString() },
-        { status: 410 },
+        { error: '链接已失效或不存在' },
+        { status: 404 },
       );
     }
     return NextResponse.json(

@@ -51,6 +51,7 @@ export async function createBundleAction(
       status: 'success',
       bundleId: result.bundleId,
       downloadUrl: result.downloadUrl,
+      relativePath: result.relativePath,
       expiresAt: result.expiresAt.toISOString(),
       fileCount: result.fileCount,
       isMock: result.isMock,

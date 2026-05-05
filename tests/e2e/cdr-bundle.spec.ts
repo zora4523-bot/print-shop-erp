@@ -52,26 +52,33 @@ test.describe('CDR 汇总下载 — golden path', () => {
     // 任一可见即可）
     await expect(page.getByText(/mock-mode|OSS 未配置/).first()).toBeVisible();
 
-    // 抓 downloadUrl 文本（在 success banner 里）
+    // success banner 里的 link：href 是 relativePath（同源 Next Link），
+    // 文本是绝对 URL（外协方复制粘贴用）；同样指向 /api/cdr/bundles/<id>
+    // （Codex round 119 high）。
     const downloadLink = page
       .locator('a[href^="/api/cdr/bundles/"]')
       .first();
     await expect(downloadLink).toBeVisible();
-    const downloadUrl = await downloadLink.getAttribute('href');
-    expect(downloadUrl).toMatch(/^\/api\/cdr\/bundles\/[a-z0-9]+$/);
+    const relativePath = await downloadLink.getAttribute('href');
+    expect(relativePath).toMatch(/^\/api\/cdr\/bundles\/[a-z0-9]+$/);
+    // 显示文本应该是绝对 URL（含 host），让外协能复制
+    const linkText = await downloadLink.textContent();
+    expect(linkText).toMatch(/^https?:\/\/.+\/api\/cdr\/bundles\/[a-z0-9]+$/);
 
     // 真去访问 downloadUrl —— mock-mode zipFileUrl 形如 mock://...，
     // 路由识别后返 503（不是 404，不是 redirect 到 mock://）。
-    const res = await request.get(`http://localhost:3000${downloadUrl}`);
+    const res = await request.get(`http://localhost:3000${relativePath}`);
     expect(res.status()).toBe(503);
     const body = await res.json();
     expect(body.error).toMatch(/OSS 未配置/);
 
-    // 不存在的 bundle id → 404
+    // 不存在的 bundle id → 404（与&ldquo;过期&rdquo;不区分文案；round 119 medium）
     const fake = await request.get(
       'http://localhost:3000/api/cdr/bundles/cknotrealid000000000000000',
     );
     expect(fake.status()).toBe(404);
+    const fakeBody = await fake.json();
+    expect(fakeBody.error).toMatch(/链接已失效或不存在/);
 
     // session 未认证也能访问下载路由（middleware 已排除 api/cdr）
     // —— 这是 SPEC §3.5 设计意图：外协方拿链接直下，无登录态。

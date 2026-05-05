@@ -110,7 +110,10 @@ export type CreateBundleInput = {
 export type CreateBundleResult = {
   bundleId: string;
   zipFileUrl: string;
+  // 绝对 URL，外协方可直接复制粘贴（base 来自 APP_PUBLIC_URL / AUTH_URL）
   downloadUrl: string;
+  // /api/cdr/bundles/<id>——E2E / 同源测试用
+  relativePath: string;
   expiresAt: Date;
   fileCount: number;
   isMock: boolean;
@@ -221,7 +224,17 @@ export async function createBundle(
   // 下载链接走我们自己的 token-route，不直接暴露 OSS 对象 URL：
   // 下载时再签 OSS GET URL（TODO: STS 接进来后实现 ossSignGetUrl）。
   // 当前 mock-mode 下，route 看到 `mock://...` 直接 503。
-  const downloadUrl = `/api/cdr/bundles/${bundle.id}`;
+  //
+  // **绝对 URL**——SPEC §3.5 是&ldquo;复制链接发外协&rdquo;的语义，外协在
+  // WeChat / 邮件里点链接得直接打开（Codex round 119 high）。base 优
+  // 先级：APP_PUBLIC_URL（部署 env）> AUTH_URL（NextAuth 同款 fallback）
+  // > 默认 http://localhost:3000（dev）。
+  const baseUrl = (
+    process.env.APP_PUBLIC_URL ??
+    process.env.AUTH_URL ??
+    'http://localhost:3000'
+  ).replace(/\/+$/, '');
+  const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
 
   await db.designBundle.update({
     where: { id: bundle.id },
@@ -236,6 +249,7 @@ export async function createBundle(
     bundleId: bundle.id,
     zipFileUrl: upload.zipFileUrl,
     downloadUrl,
+    relativePath: `/api/cdr/bundles/${bundle.id}`,
     expiresAt: upload.expiresAt,
     fileCount: files.length,
     isMock: upload.isMock,

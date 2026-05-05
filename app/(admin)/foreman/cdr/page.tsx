@@ -62,7 +62,12 @@ export default async function ForemanCdrPage({
 
       <FilterBar from={from} to={to} />
 
+      {/* key prop 强制 form 在 filter URL 变化时重挂（Codex round 119
+          medium）—— 否则 selected useState 初始化保留旧 eligible IDs，
+          表面候选都未勾、提交报"至少勾选 1"。key 用 from-to 即可
+          区分窗口。 */}
       <CreateBundleForm
+        key={`${from}|${to}`}
         from={from}
         to={to}
         eligible={eligible.map((o) => ({
@@ -114,9 +119,12 @@ export default async function ForemanCdrPage({
                         ) : isMock ? (
                           <Badge variant="outline">mock URL</Badge>
                         ) : (
+                          // b.downloadUrl 是绝对 URL（lib 写入时拼了
+                          // APP_PUBLIC_URL）。外协方复制粘贴；本地点击
+                          // 直接走该 host。
                           <a
                             href={b.downloadUrl}
-                            className="font-mono text-xs underline-offset-2 hover:underline"
+                            className="font-mono text-xs break-all underline-offset-2 hover:underline"
                           >
                             {b.downloadUrl}
                           </a>

@@ -184,7 +184,12 @@ describe('createBundle', () => {
     expect(r.bundleId).toBe('b1');
     expect(r.fileCount).toBe(2);
     expect(r.isMock).toBe(true);
-    expect(r.downloadUrl).toBe('/api/cdr/bundles/b1');
+    // 绝对 URL（base 来自 APP_PUBLIC_URL / AUTH_URL / 默认 localhost；
+    // Codex round 119 high）
+    expect(r.downloadUrl).toMatch(
+      /^https?:\/\/[^/]+\/api\/cdr\/bundles\/b1$/,
+    );
+    expect(r.relativePath).toBe('/api/cdr/bundles/b1');
 
     // create 第一次：占位 row（zipFileUrl/downloadUrl 空字符串）
     const createData = dbMock.designBundle.create.mock.calls[0][0].data;
@@ -204,14 +209,46 @@ describe('createBundle', () => {
     expect(uploadInput.files[0]!.orderNo).toBe('O-1');
 
     // update 第二次：写真 zipFileUrl + downloadUrl + expiresAt
-    expect(dbMock.designBundle.update).toHaveBeenCalledWith({
-      where: { id: 'b1' },
-      data: {
-        zipFileUrl: 'mock://bundle/b1.zip',
-        downloadUrl: '/api/cdr/bundles/b1',
-        expiresAt: new Date('2026-05-06T00:00:00Z'),
+    const updateCall = dbMock.designBundle.update.mock.calls[0][0];
+    expect(updateCall.where).toEqual({ id: 'b1' });
+    expect(updateCall.data.zipFileUrl).toBe('mock://bundle/b1.zip');
+    expect(updateCall.data.downloadUrl).toMatch(
+      /^https?:\/\/[^/]+\/api\/cdr\/bundles\/b1$/,
+    );
+    expect(updateCall.data.expiresAt).toEqual(new Date('2026-05-06T00:00:00Z'));
+  });
+
+  it('downloadUrl base 优先级：APP_PUBLIC_URL > AUTH_URL > localhost 默认', async () => {
+    setupOrders([
+      {
+        id: 'o1',
+        orderNo: 'O-1',
+        designs: [{ id: 'd1', fileName: 'a.cdr', fileUrl: 'https://x' }],
       },
+    ]);
+    dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
+    uploadMock.mockResolvedValue({
+      zipFileUrl: 'mock://bundle/b1.zip',
+      expiresAt: new Date('2026-05-06T00:00:00Z'),
+      isMock: true,
     });
+
+    const original = process.env.APP_PUBLIC_URL;
+    try {
+      process.env.APP_PUBLIC_URL = 'https://erp.example.com/';
+      const r = await createBundle(
+        { from: '2026-05-05', orderIds: ['o1'] },
+        { id: 'u1' },
+      );
+      // 末尾 / 应该被剥（避免 erp.example.com//api/...）
+      expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
+    } finally {
+      if (original === undefined) {
+        delete process.env.APP_PUBLIC_URL;
+      } else {
+        process.env.APP_PUBLIC_URL = original;
+      }
+    }
   });
 
   it('uploadBundleZip 抛 OssNotWiredError → 删占位 + CdrBundleError 友好文案', async () => {
