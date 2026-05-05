@@ -84,33 +84,26 @@ export async function notify<E extends NotificationEvent>(
     // 渲染一次，所有 channel 共用同一份 content（同事件就是同消息）。
     const content = renderTemplate(rule.messageTemplate, payload);
 
+    // **去重 + 保序**：rule.channelIds 可能含重复 id（schema String[]
+    // 不强制 unique；Codex round 117 medium）。先 dedupe 出 unique 列表，
+    // 后续 stale 比较和 reorder 都基于这条（避免 round 118 medium：
+    // 用 raw rule.channelIds.length 做 stale 比较会把&ldquo;有重复&rdquo;误报成
+    // &ldquo;有 stale id&rdquo;）。
+    const uniqueRuleChannelIds = Array.from(new Set(rule.channelIds));
+
     // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
     // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
     // 静默漏推；Codex round 101 P2）。
     const fetched = await db.notificationChannel.findMany({
-      where: { id: { in: rule.channelIds } },
+      where: { id: { in: uniqueRuleChannelIds } },
       select: { id: true, webhookUrl: true, isActive: true },
     });
-    // **PG `IN (...)` 不保证返回顺序**——必须按 rule.channelIds 顺序
-    // 重排（Codex round 116 high）。否则 CS_PERIOD_* runtime cap 的
+    // **PG `IN (...)` 不保证返回顺序**——必须按 uniqueRuleChannelIds 顺
+    // 序重排（Codex round 116 high）。否则 CS_PERIOD_* runtime cap 的
     // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
-    // group']` 可能把客服金额发到 sales-group 而漏 owner-group。channels
-    // 顺序在 schema 里就是 rule.channelIds 数组顺序，是 owner 配置时的
-    // 优先级语义。
-    //
-    // **同时去重**（Codex round 117 medium）：rule.channelIds 可能含
-    // 重复 id（schema 是 String[]，不强制 unique）。findMany 隐式去重
-    // —— 直接 map findMany 结果按 id 没问题；但用 rule.channelIds 重
-    // 排时 ['c1','c1'] 会变两条 → 两次 webhook + 两条 log。Set-based
-    // 一次过过滤。
+    // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
     const byId = new Map(fetched.map((c) => [c.id, c]));
-    const seen = new Set<string>();
-    const channels = rule.channelIds
-      .filter((id) => {
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      })
+    const channels = uniqueRuleChannelIds
       .map((id) => byId.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
     if (channels.length === 0) {
@@ -122,10 +115,12 @@ export async function notify<E extends NotificationEvent>(
       );
       return;
     }
-    if (channels.length < rule.channelIds.length) {
-      // 部分 ID stale（其他还能用）—— 打 console 提示，但能发的还发。
+    if (channels.length < uniqueRuleChannelIds.length) {
+      // 部分 unique ID stale（其他还能用）—— 打 console 提示。
+      // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报
+      // （Codex round 118 medium）。
       console.warn(
-        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${rule.channelIds.length}`,
+        `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueRuleChannelIds.length}`,
       );
     }
 
