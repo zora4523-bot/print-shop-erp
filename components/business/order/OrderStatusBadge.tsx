@@ -1,32 +1,31 @@
 import { OrderStatus } from '../../../generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
+import {
+  ORDER_STATUS_TO_BADGE,
+  StatusBadge,
+} from '@/components/ui-business';
 
-const STATUS_LABELS: Record<OrderStatus, string> = {
-  [OrderStatus.DRAFT]: '草稿',
-  [OrderStatus.SUBMITTED]: '已提交',
-  [OrderStatus.SCHEDULING]: '排产中',
-  [OrderStatus.IN_PRODUCTION]: '生产中',
-  [OrderStatus.COMPLETED]: '已完工',
-  [OrderStatus.SHIPPED]: '已发货',
-  [OrderStatus.FINISHED]: '已完成',
-  [OrderStatus.CANCELLED]: '已取消',
-};
-
-const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'outline'> = {
-  [OrderStatus.DRAFT]: 'outline',
-  [OrderStatus.SUBMITTED]: 'default',
-  [OrderStatus.SCHEDULING]: 'default',
-  [OrderStatus.IN_PRODUCTION]: 'default',
-  [OrderStatus.COMPLETED]: 'default',
-  [OrderStatus.SHIPPED]: 'default',
-  [OrderStatus.FINISHED]: 'secondary',
-  [OrderStatus.CANCELLED]: 'secondary',
-};
+// 工单状态徽章——委托给 ui-business 的 StatusBadge + ORDER_STATUS_TO_BADGE
+// 集中映射，让&ldquo;状态色 / dot / 文案&rdquo;在跨页面（OrdersTable / 详情头 /
+// dashboard 列表 / production-flow E2E）保持一致。
+//
+// 旧版本（直接调 shadcn Badge variant=default/secondary/outline）所有
+// "运行中" 状态都用同一种 default 色——无法区分 SUBMITTED/SCHEDULING/
+// IN_PRODUCTION/COMPLETED/SHIPPED。新版按状态语义着色，看一眼就知道。
 
 export function orderStatusLabel(status: OrderStatus): string {
-  return STATUS_LABELS[status] ?? status;
+  return ORDER_STATUS_TO_BADGE[status]?.label ?? status;
 }
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  return <Badge variant={STATUS_VARIANT[status]}>{orderStatusLabel(status)}</Badge>;
+  const cfg = ORDER_STATUS_TO_BADGE[status];
+  if (!cfg) {
+    // schema 加新状态但 map 漏配——退化成 neutral 而不是抛错，避免
+    // 一个状态枚举的疏漏导致整个工单页崩。
+    return <StatusBadge tone="neutral">{status}</StatusBadge>;
+  }
+  return (
+    <StatusBadge tone={cfg.tone} dot={cfg.dot}>
+      {cfg.label}
+    </StatusBadge>
+  );
 }

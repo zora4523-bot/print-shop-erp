@@ -25,7 +25,10 @@ export function StatusBadge({
 }: StatusBadgeProps) {
   return (
     <span
-      data-slot="status-badge"
+      // `data-slot="badge"` 沿用 shadcn Badge 的 slot 命名，让 E2E 已有
+      // 的 `[data-slot="badge"]` 选择器在迁移后继续命中（多种 badge 共
+      // 存时配合 .filter({ hasText: ... }) 文本筛选已成项目惯例）。
+      data-slot="badge"
       data-tone={tone}
       className={cn(
         'inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium',
@@ -58,16 +61,21 @@ export function StatusBadge({
 // 工单状态 → tone/label 映射。集中在这里方便维护——状态机变了改一处。
 // 注意：业务方仍然通过 `<StatusBadge tone={...}>` 调用，这个 helper 只
 // 是&ldquo;别名层&rdquo;，不强制使用。
+//
+// label 与 components/business/order/OrderStatusBadge 之前的文案对齐，
+// 不另起新的术语：&ldquo;已完工&rdquo;（COMPLETED 生产完工） vs &ldquo;已完成&rdquo;（FINISHED
+// 整单关闭）是项目沿用的语义切分（production-flow.spec.ts 直接断言这两个
+// 文本），改字会破断言。
 export const ORDER_STATUS_TO_BADGE: Record<
   string,
   { tone: Tone; label: string; dot?: boolean }
 > = {
   DRAFT: { tone: 'neutral', label: '草稿' },
-  SUBMITTED: { tone: 'info', label: '待审核' },
-  SCHEDULED: { tone: 'info', label: '已排产', dot: true },
+  SUBMITTED: { tone: 'info', label: '已提交' },
+  SCHEDULING: { tone: 'info', label: '排产中', dot: true },
   IN_PRODUCTION: { tone: 'primary', label: '生产中', dot: true },
-  COMPLETED: { tone: 'success', label: '已完成' },
+  COMPLETED: { tone: 'success', label: '已完工' },
   SHIPPED: { tone: 'success', label: '已发货' },
-  FINISHED: { tone: 'success', label: '已结案' },
+  FINISHED: { tone: 'neutral', label: '已完成' },
   CANCELLED: { tone: 'neutral', label: '已取消' },
 };

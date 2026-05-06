@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Inbox } from 'lucide-react';
 import type { OrderListRow } from '@/lib/order';
 import {
   Table,
@@ -9,6 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 
 function formatDate(d: Date): string {
@@ -18,7 +20,13 @@ function formatDate(d: Date): string {
 
 export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
   if (orders.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无工单</p>;
+    return (
+      <EmptyState
+        icon={Inbox}
+        title="暂无工单"
+        description="工单提交后会出现在这里。"
+      />
+    );
   }
 
   return (

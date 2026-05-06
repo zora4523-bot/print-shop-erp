@@ -1,15 +1,9 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Role } from '../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from '@/components/ui/sidebar';
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/business/admin/AppSidebar';
-import { AdminBreadcrumb } from '@/components/business/admin/AdminBreadcrumb';
-import { LogoutButton } from '@/components/business/auth/LogoutButton';
+import { AdminHeader } from '@/components/business/admin/AdminHeader';
 import {
   getAdminMenuItems,
   ADMIN_ROLE_BADGE,
@@ -50,24 +44,7 @@ export default async function AdminShellLayout({
     <SidebarProvider>
       <AppSidebar menuGroups={menuGroups} roleBadge={roleBadge} />
       <SidebarInset>
-        <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4">
-          <SidebarTrigger />
-          <div className="flex-1 min-w-0">
-            <AdminBreadcrumb />
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-muted-foreground hidden sm:inline">
-              {user.displayName}
-            </span>
-            <Link
-              href="/account/password"
-              className="text-muted-foreground hover:text-foreground underline"
-            >
-              修改密码
-            </Link>
-            <LogoutButton />
-          </div>
-        </header>
+        <AdminHeader displayName={user.displayName} roleLabel={roleBadge} />
         <main className="flex-1 px-6 py-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>
