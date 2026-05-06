@@ -52,7 +52,7 @@ export default async function ForemanCdrPage({
       </div>
 
       {mock ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground">
           ⚠️ <strong>OSS 未配置 / mock-mode</strong>：可以走完&ldquo;勾选 → 生成下载包&rdquo;
           流程并写入 DesignBundle 记录，但 ZIP 文件 URL 是占位 (
           <code>mock://...</code>)，外协下载会返 503。上线时业主在 .env

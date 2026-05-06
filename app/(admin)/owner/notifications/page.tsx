@@ -42,7 +42,7 @@ export default async function OwnerNotificationsPage() {
       {mock ? (
         <div
           data-slot="notifications-mock-banner"
-          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-foreground"
         >
           ⚠️ 当前 <strong>mock-mode</strong>：通知不会真发到企业微信，
           NotificationLog 仍然记录（status=SUCCESS / errorMessage=MOCK）。

@@ -47,7 +47,7 @@ export function ChangePasswordForm() {
       ) : null}
 
       {success ? (
-        <p role="status" className="text-sm text-emerald-600">
+        <p role="status" className="text-sm text-success">
           ✓ 密码已更新
         </p>
       ) : null}

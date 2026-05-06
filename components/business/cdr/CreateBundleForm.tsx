@@ -152,7 +152,7 @@ export function CreateBundleForm({
       </div>
 
       {state?.status === 'success' ? (
-        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
+        <div className="rounded-md border border-success/40 bg-success/10 px-4 py-3 text-sm text-success-foreground">
           ✅ 已生成 {state.fileCount} 个 CDR 文件的下载包。
           {state.isMock ? (
             <span className="ml-2 text-xs">
@@ -173,7 +173,7 @@ export function CreateBundleForm({
               {state.downloadUrl}
             </a>
           </div>
-          <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+          <div className="mt-1 text-xs text-success-foreground/80">
             链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。复制
             上方完整 URL 发给外协。
           </div>

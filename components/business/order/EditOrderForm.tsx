@@ -50,7 +50,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
       className="space-y-6"
     >
       {isShippingOnly && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           工单已进入排产 / 生产，仅可修改收货信息与备注（SPEC §3.6）。
         </div>
       )}

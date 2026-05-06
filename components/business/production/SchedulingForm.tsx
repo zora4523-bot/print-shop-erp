@@ -114,7 +114,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                 <td className="px-3 py-2">{r.craftName}</td>
                 <td className="px-3 py-2">
                   {r.isOutsource ? (
-                    <span className="text-xs text-amber-700">外协</span>
+                    <span className="text-xs text-warning-foreground">外协</span>
                   ) : r.recommendedMachine ? (
                     <span className="text-xs">
                       {machineTypeLabels[r.recommendedMachine] ?? r.recommendedMachine}

@@ -51,7 +51,7 @@ export function ResetPasswordForm({ userId }: { userId: string }) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-emerald-600">
+        <p role="status" className="text-sm text-success">
           ✓ 密码已重置
         </p>
       ) : null}
