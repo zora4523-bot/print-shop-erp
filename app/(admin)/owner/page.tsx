@@ -1,4 +1,14 @@
 import Link from 'next/link';
+import {
+  Bell,
+  ClipboardList,
+  PackageOpen,
+  PlusCircle,
+  Send,
+  TrendingUp,
+  Truck,
+  Wallet,
+} from 'lucide-react';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getMonthlyBillStats,
@@ -18,7 +28,11 @@ import {
   getSalesRanking,
 } from '@/lib/dashboard/owner-charts';
 import { formatMoney } from '@/lib/dashboard/format';
-import { StatCard } from '@/components/business/dashboard/StatCard';
+import {
+  ActionShortcut,
+  HeroBanner,
+  StatCard,
+} from '@/components/ui-business';
 import {
   WatchlistTable,
   type WatchlistColumn,
@@ -28,6 +42,7 @@ import { SalesRankingChart } from '@/components/business/dashboard/SalesRankingC
 import { CategoryDistributionChart } from '@/components/business/dashboard/CategoryDistributionChart';
 import { Badge } from '@/components/ui/badge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
+import { requireSession } from '@/lib/auth/session';
 
 export const metadata = { title: '老板 Dashboard' };
 
@@ -42,6 +57,9 @@ export const metadata = { title: '老板 Dashboard' };
 // as a fragment — defensive habit, no measurable cost).
 export default async function OwnerDashboardPage() {
   await requirePermission('report:all');
+
+  // displayName 用于 HeroBanner welcome；权限 gate 已通过，session 必有。
+  const { user } = await requireSession();
 
   const [
     today,
@@ -74,12 +92,29 @@ export default async function OwnerDashboardPage() {
 
   return (
     <div className="space-y-6">
+      <HeroBanner
+        title={`欢迎回来，${user.displayName}`}
+        subtitle={
+          <>
+            今日 <span className="font-mono">{today.date}</span> · 本月{' '}
+            <span className="font-mono">{monthly.month}</span> · 时区
+            Asia/Shanghai
+          </>
+        }
+        cta={
+          <Link
+            href="/orders"
+            className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+          >
+            查看全部工单 →
+          </Link>
+        }
+      />
+
       <div>
         <h1 className="text-xl font-semibold">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
-          今日 <span className="font-mono">{today.date}</span> · 本月{' '}
-          <span className="font-mono">{monthly.month}</span> · 时区
-          Asia/Shanghai
+          关键指标 · 关注列表 · 30 天趋势
         </p>
       </div>
 
@@ -87,6 +122,8 @@ export default async function OwnerDashboardPage() {
         <StatCard
           label="今日提交工单"
           value={`${today.submittedToday} 单`}
+          icon={ClipboardList}
+          tone="primary"
           hint={
             today.urgentSubmittedToday > 0
               ? `其中急单 ${today.urgentSubmittedToday}`
@@ -96,18 +133,61 @@ export default async function OwnerDashboardPage() {
         <StatCard
           label="今日完工"
           value={`${today.completedToday} 单`}
+          icon={TrendingUp}
+          tone="info"
           hint={completedDiffLabel}
         />
-        <StatCard label="今日发货" value={`${today.shippedToday} 单`} />
+        <StatCard
+          label="今日发货"
+          value={`${today.shippedToday} 单`}
+          icon={Truck}
+          tone="success"
+        />
         <StatCard
           label="本月应收"
           value={formatMoney(monthly.total)}
+          icon={Wallet}
+          tone="warning"
           hint={
             <>
               已收 {formatMoney(monthly.paid)} · 未收{' '}
               <span className="font-mono">{formatMoney(monthly.outstanding)}</span>
             </>
           }
+        />
+      </section>
+
+      <section
+        data-slot="dashboard-shortcuts"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      >
+        <ActionShortcut
+          href="/orders/new"
+          icon={PlusCircle}
+          label="新建工单"
+          description="创建生产工单"
+          tone="primary"
+        />
+        <ActionShortcut
+          href="/owner/products"
+          icon={PackageOpen}
+          label="产品库"
+          description="规格、建议单价"
+          tone="info"
+        />
+        <ActionShortcut
+          href="/owner/bills"
+          icon={Send}
+          label="销售应收账单"
+          description="月账单生成、发单"
+          tone="warning"
+        />
+        <ActionShortcut
+          href="/owner/notifications"
+          icon={Bell}
+          label="推送配置"
+          description="企业微信群组绑定"
+          tone="success"
         />
       </section>
 
