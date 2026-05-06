@@ -19,7 +19,11 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    files: ["app/**/*.{ts,tsx}", "components/business/**/*.{ts,tsx}"],
+    files: [
+      "app/**/*.{ts,tsx}",
+      "components/business/**/*.{ts,tsx}",
+      "components/ui-business/**/*.{ts,tsx}",
+    ],
     rules: {
       "no-restricted-syntax": [
         "error",
