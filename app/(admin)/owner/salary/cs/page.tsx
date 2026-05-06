@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import { CalendarClock } from 'lucide-react';
 import { listCsPeriods } from '@/lib/salary/cs';
 import { SalaryPeriodStatus } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
+import { EmptyState, PageHeader } from '@/components/ui-business';
 
 export const metadata = { title: '客服周期与提成' };
 
@@ -35,29 +37,29 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">客服周期与提成</h1>
-          <p className="text-sm text-muted-foreground">
-            每位客服一条活跃周期（默认 4 个月）。周期到期后扫档位 → 生成提成记录 → 自动开启下一个。
-          </p>
-        </div>
-        <Link
-          href="/owner/salary/cs/new"
-          className={buttonVariants({ size: 'sm' })}
-        >
-          + 新建周期
-        </Link>
-      </div>
+      <PageHeader
+        title="客服周期与提成"
+        subtitle="每位客服一条活跃周期（默认 4 个月）。周期到期后扫档位 → 生成提成记录 → 自动开启下一个。"
+        actions={
+          <Link
+            href="/owner/salary/cs/new"
+            className={buttonVariants({ size: 'sm' })}
+          >
+            + 新建周期
+          </Link>
+        }
+      />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <SettleReadyCsButton />
       </section>
 
       {periods.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          暂无周期数据。先新建一个周期。
-        </div>
+        <EmptyState
+          icon={CalendarClock}
+          title="暂无周期数据"
+          description="点击右上角&ldquo;新建周期&rdquo;为客服开启首个业绩周期。"
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">

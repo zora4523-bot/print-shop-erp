@@ -79,3 +79,17 @@ export const ORDER_STATUS_TO_BADGE: Record<
   FINISHED: { tone: 'neutral', label: '已完成' },
   CANCELLED: { tone: 'neutral', label: '已取消' },
 };
+
+// 销售应收账单状态 → tone/label。lib/auth/role-labels:BILL_STATUS_LABELS
+// 是文案权威；这里只补 tone（DRAFT 中性 / ISSUED 待付款偏 warning /
+// PARTIAL_PAID 进度蓝 / FULLY_PAID 已收绿）。/owner/bills 与 /sales/bills
+// 共用避免双份本地定义漂移。
+export const BILL_STATUS_TO_BADGE: Record<
+  string,
+  { tone: Tone; label: string; dot?: boolean }
+> = {
+  DRAFT: { tone: 'neutral', label: '草稿' },
+  ISSUED: { tone: 'warning', label: '已发单', dot: true },
+  PARTIAL_PAID: { tone: 'info', label: '部分付款', dot: true },
+  FULLY_PAID: { tone: 'success', label: '已结清' },
+};

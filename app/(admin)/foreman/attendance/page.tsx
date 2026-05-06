@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Users } from 'lucide-react';
 import { db } from '@/lib/db';
 import { Role, WorkerType } from '@/generated/prisma/enums';
 import { listMonthlyAttendance, parseShanghaiMonth } from '@/lib/attendance';
@@ -7,6 +8,7 @@ import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
+import { EmptyState, PageHeader } from '@/components/ui-business';
 
 export const metadata = { title: '时薪工考勤' };
 
@@ -108,28 +110,30 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">时薪工考勤</h1>
-        <p className="text-sm text-muted-foreground">
-          PACKER / CLEANER / COOK 每日录入工时。未录 = 请假。月底
-          &ldquo;时薪工月结&rdquo; 按此汇总计算工资。
-          {workHours ? (
-            <>
-              {' · '}当前工时段:{' '}
-              <span className="font-mono">
-                {workHours.morning.start}–{workHours.morning.end} +{' '}
-                {workHours.afternoon.start}–{workHours.afternoon.end}
+      <PageHeader
+        title="时薪工考勤"
+        subtitle={
+          <>
+            PACKER / CLEANER / COOK 每日录入工时。未录 = 请假。月底
+            &ldquo;时薪工月结&rdquo; 按此汇总计算工资。
+            {workHours ? (
+              <>
+                {' · '}当前工时段:{' '}
+                <span className="font-mono">
+                  {workHours.morning.start}–{workHours.morning.end} +{' '}
+                  {workHours.afternoon.start}–{workHours.afternoon.end}
+                </span>
+                ，加班 <span className="font-mono">{workHours.otStart}</span> 起
+              </>
+            ) : (
+              <span className="text-destructive">
+                {' '}
+                · WORK_HOURS 规则未配置，快速填&ldquo;全勤&rdquo;不可用
               </span>
-              ，加班 <span className="font-mono">{workHours.otStart}</span> 起
-            </>
-          ) : (
-            <span className="text-destructive">
-              {' '}
-              · WORK_HOURS 规则未配置，快速填&ldquo;全勤&rdquo;不可用
-            </span>
-          )}
-        </p>
-      </div>
+            )}
+          </>
+        }
+      />
 
       <FilterBar
         selectedMonth={selectedMonth}
@@ -138,13 +142,19 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
       />
 
       {!selectedWorker ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          没有活跃的时薪工（PACKER / CLEANER / COOK）。先在{' '}
-          <Link href="/owner/accounts" className="underline">
-            账号管理
-          </Link>{' '}
-          里创建或启用。
-        </div>
+        <EmptyState
+          icon={Users}
+          title="没有活跃的时薪工"
+          description={
+            <>
+              先在
+              <Link href="/owner/accounts" className="mx-1 underline">
+                账号管理
+              </Link>
+              里创建或启用 PACKER / CLEANER / COOK。
+            </>
+          }
+        />
       ) : (
         <div className="space-y-6">
           <div className="rounded-xl border bg-card p-4 shadow-sm">

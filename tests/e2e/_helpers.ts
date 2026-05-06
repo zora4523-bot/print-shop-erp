@@ -962,13 +962,29 @@ export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-// Logs out the currently signed-in user via the header LogoutButton
+// Logs out the currently signed-in user via the header UserMenu dropdown
 // and waits to land on /login. Used by multi-role flow tests where the
 // same browser context switches between SALES → FOREMAN → WORKER →
 // OWNER. We click the form's submit button rather than fetch the
 // signOut endpoint directly so we exercise the same path users do.
+//
+// Phase D（2026-05-06）退出按钮收进 AdminHeader 的 UserMenu dropdown：
+// (a) 先点头像 trigger 展开 menu（aria-label 以&ldquo;用户菜单&rdquo;开头），
+// (b) data-slot="user-menu-logout" 锁定 form 内 submit 按钮。
+// Worker (H5) 仍是 inline LogoutButton —— 用 role=button name=退出登录
+// 兜底（dropdown 路径找不到时降级）。
 export async function logout(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /退出登录/ }).click();
+  const userMenuTrigger = page.locator('button[aria-label^="用户菜单"]');
+  if (await userMenuTrigger.isVisible().catch(() => false)) {
+    await userMenuTrigger.click();
+    // dropdown 内的 logout 是平铺 form>button（非 DropdownMenuItem，避
+    // 免 form/menuitem 嵌套冲突）。data-slot 锁定 + auto-wait 等 portal
+    // 内容真正渲染。
+    await page.locator('[data-slot="user-menu-logout"]').click();
+  } else {
+    // worker 端 H5 layout 没接 admin shell，仍是 inline button。
+    await page.getByRole('button', { name: /退出登录/ }).click();
+  }
   await page.waitForURL((url) => url.pathname.startsWith('/login'), {
     timeout: 10_000,
   });

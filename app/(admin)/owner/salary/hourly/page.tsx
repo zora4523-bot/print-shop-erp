@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import Link from 'next/link';
+import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { WorkerType } from '@/generated/prisma/enums';
@@ -7,6 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
+import {
+  EmptyState,
+  PageHeader,
+  StatCard as UiStatCard,
+} from '@/components/ui-business';
 
 export const metadata = { title: '时薪工月结' };
 
@@ -53,22 +59,34 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">时薪工月结</h1>
-        <p className="text-sm text-muted-foreground">
-          PACKER / CLEANER / COOK — 按 Asia/Shanghai 日历月汇总 Attendance，
-          PACKER/CLEANER 走时薪 + 加班倍率，COOK 按月薪 + 空闲打包时薪。已发行拒绝重算。
-        </p>
-      </div>
+      <PageHeader
+        title="时薪工月结"
+        subtitle="PACKER / CLEANER / COOK — 按 Asia/Shanghai 日历月汇总 Attendance，PACKER/CLEANER 走时薪 + 加班倍率，COOK 按月薪 + 空闲打包时薪。已发行拒绝重算。"
+      />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <RecomputeHourlyForm defaultMonth={selectedMonth} />
       </section>
 
-      <div className="grid grid-cols-3 gap-4 text-sm">
-        <StatCard label="记录数" value={`${rows.length} 条`} />
-        <StatCard label="实发合计" value={`¥${totalSalary}`} />
-        <StatCard label="未发合计" value={`¥${unpaidSalary}`} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <UiStatCard
+          label="记录数"
+          value={`${rows.length} 条`}
+          icon={FileText}
+          tone="info"
+        />
+        <UiStatCard
+          label="实发合计"
+          value={`¥${totalSalary}`}
+          icon={Calculator}
+          tone="primary"
+        />
+        <UiStatCard
+          label="未发合计"
+          value={`¥${unpaidSalary}`}
+          icon={Calculator}
+          tone="warning"
+        />
       </div>
 
       <FilterBar
@@ -78,9 +96,11 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       />
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          {selectedMonth} 暂无月结记录。先&ldquo;重算该月全员时薪工月结&rdquo;生成数据。
-        </div>
+        <EmptyState
+          icon={FileText}
+          title={`${selectedMonth} 暂无月结记录`}
+          description="先点击上方&ldquo;重算该月全员时薪工月结&rdquo;生成数据。"
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
@@ -143,15 +163,6 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           </table>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold font-mono">{value}</div>
     </div>
   );
 }

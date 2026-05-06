@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { CalendarCheck } from 'lucide-react';
 import { listPendingSchedulingOrders } from '@/lib/production';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { EmptyState, PageHeader } from '@/components/ui-business';
 
 export const metadata = { title: '待排产工单' };
 
@@ -21,17 +23,17 @@ export default async function SchedulingListPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">待排产</h1>
-        <p className="text-sm text-muted-foreground">
-          已提交（SUBMITTED）的工单按急单优先、提交时间先后排列。点击&ldquo;排产&rdquo;为每个款式的非外协工艺派师傅。
-        </p>
-      </div>
+      <PageHeader
+        title="待排产"
+        subtitle="已提交（SUBMITTED）的工单按急单优先、提交时间先后排列。点击&ldquo;排产&rdquo;为每个款式的非外协工艺派师傅。"
+      />
 
       {orders.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          没有待排产的工单。
-        </div>
+        <EmptyState
+          icon={CalendarCheck}
+          title="没有待排产的工单"
+          description="销售 / 客服提交的工单会出现在这里等待排产。"
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">

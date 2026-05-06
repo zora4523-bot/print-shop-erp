@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -51,13 +52,18 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="flex items-center gap-2">
-          <UserCircle aria-hidden className="size-4 text-muted-foreground" />
-          <span className="flex flex-col">
-            <span className="text-sm font-medium">{displayName}</span>
-            <span className="text-xs text-muted-foreground">{roleLabel}</span>
-          </span>
-        </DropdownMenuLabel>
+        {/* DropdownMenuLabel 是 Base UI 的 MenuPrimitive.GroupLabel，必
+            须在 <DropdownMenuGroup> 内（否则 MenuGroupRootContext 缺失，
+            页面跑成 Runtime Error）。 */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex items-center gap-2">
+            <UserCircle aria-hidden className="size-4 text-muted-foreground" />
+            <span className="flex flex-col">
+              <span className="text-sm font-medium">{displayName}</span>
+              <span className="text-xs text-muted-foreground">{roleLabel}</span>
+            </span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link href="/account/password" />}>
           <KeyRound aria-hidden className="size-4" />
@@ -65,21 +71,19 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* signOutAction 进 form：禁 JS / 慢网络也能登出（保留 LogoutButton
-            的核心特性）。dropdown 关掉时按钮的 form 仍能 submit。 */}
-        <form action={signOutAction}>
-          <DropdownMenuItem
-            render={
-              <button
-                type="submit"
-                className="w-full text-left"
-                data-slot="user-menu-logout"
-              />
-            }
-            className="text-destructive focus:text-destructive"
+            核心特性）。**不**包进 DropdownMenuItem——Base UI 的 MenuItem
+            会和 form > button 嵌套互相劫持事件 + 弄丢 a11y role（实测
+            E2E 找不到 menuitem name=退出登录）。直接平铺一个 styled button
+            是最稳的解。视觉手动对齐 DropdownMenuItem 的 padding/hover。 */}
+        <form action={signOutAction} className="p-1">
+          <button
+            type="submit"
+            data-slot="user-menu-logout"
+            className="relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:bg-destructive/10"
           >
             <LogOut aria-hidden className="size-4" />
             <span>退出登录</span>
-          </DropdownMenuItem>
+          </button>
         </form>
       </DropdownMenuContent>
     </DropdownMenu>

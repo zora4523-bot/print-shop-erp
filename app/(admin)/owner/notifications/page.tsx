@@ -11,6 +11,7 @@ import {
 import { isMockMode } from '@/lib/notification';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
+import { PageHeader } from '@/components/ui-business';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -32,12 +33,10 @@ export default async function OwnerNotificationsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold">推送配置</h1>
-        <p className="text-sm text-muted-foreground">
-          企业微信群机器人 webhook 配置 + 10 个事件规则。
-        </p>
-      </div>
+      <PageHeader
+        title="推送配置"
+        subtitle="企业微信群机器人 webhook 配置 + 10 个事件规则。"
+      />
 
       {mock ? (
         <div

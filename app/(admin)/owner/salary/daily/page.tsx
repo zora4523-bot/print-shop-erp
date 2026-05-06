@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { Calculator, FileText } from 'lucide-react';
 import { listDailyWorkerSalaries } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { MachineType } from '@/generated/prisma/enums';
@@ -8,6 +9,11 @@ import { buttonVariants } from '@/components/ui/button';
 import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
+import {
+  EmptyState,
+  PageHeader,
+  StatCard as UiStatCard,
+} from '@/components/ui-business';
 
 export const metadata = { title: '师傅日薪' };
 
@@ -74,22 +80,34 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">师傅日薪</h1>
-        <p className="text-sm text-muted-foreground">
-          按 Asia/Shanghai 日历天汇总当日已完工的 `ProductionTask` 计件，取
-          max(汇总, 当日保底)。
-        </p>
-      </div>
+      <PageHeader
+        title="师傅日薪"
+        subtitle="按 Asia/Shanghai 日历天汇总当日已完工的 `ProductionTask` 计件，取 max(汇总, 当日保底)。"
+      />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <RecomputeDailyForm defaultDate={selectedDate} />
       </section>
 
-      <div className="grid grid-cols-3 gap-4 text-sm">
-        <StatCard label="记录数" value={rows.length.toString()} />
-        <StatCard label="当日实发合计" value={`¥ ${totalActual}`} />
-        <StatCard label="未发合计" value={`¥ ${unpaidActual}`} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <UiStatCard
+          label="记录数"
+          value={rows.length.toString()}
+          icon={FileText}
+          tone="info"
+        />
+        <UiStatCard
+          label="当日实发合计"
+          value={`¥ ${totalActual}`}
+          icon={Calculator}
+          tone="primary"
+        />
+        <UiStatCard
+          label="未发合计"
+          value={`¥ ${unpaidActual}`}
+          icon={Calculator}
+          tone="warning"
+        />
       </div>
 
       <FilterBar
@@ -99,9 +117,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       />
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          {selectedDate} 暂无日薪记录。先&ldquo;重算该日全员日薪&rdquo;生成数据。
-        </div>
+        <EmptyState
+          icon={FileText}
+          title={`${selectedDate} 暂无日薪记录`}
+          description="先点击上方&ldquo;重算该日全员日薪&rdquo;生成数据。"
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
@@ -157,15 +177,6 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           </table>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold font-mono">{value}</div>
     </div>
   );
 }

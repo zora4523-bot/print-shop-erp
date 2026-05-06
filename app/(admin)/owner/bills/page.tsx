@@ -1,14 +1,21 @@
 import Decimal from 'decimal.js';
 import Link from 'next/link';
+import { CalendarRange, Inbox, ReceiptText, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import {
   BILL_STATUS_LABELS,
   ROLE_LABELS,
 } from '@/lib/auth/role-labels';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
+import {
+  BILL_STATUS_TO_BADGE,
+  EmptyState,
+  PageHeader,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui-business';
 
 export const metadata = { title: '销售应收账单' };
 
@@ -112,13 +119,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">销售应收账单</h1>
-        <p className="text-sm text-muted-foreground">
-          月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位
-          一条账单，老板发单后记录付款。
-        </p>
-      </div>
+      <PageHeader
+        title="销售应收账单"
+        subtitle="月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位一条账单，老板发单后记录付款。"
+      />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
@@ -134,12 +138,24 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
         </p>
       </section>
 
-      <div className="grid grid-cols-3 gap-4 text-sm">
-        <StatCard label="已发但未收" value={`¥ ${issuedUnpaid}`} />
-        <StatCard label="全部未收" value={`¥ ${allUnpaid}`} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard
+          label="已发但未收"
+          value={`¥ ${issuedUnpaid}`}
+          icon={ReceiptText}
+          tone="warning"
+        />
+        <StatCard
+          label="全部未收"
+          value={`¥ ${allUnpaid}`}
+          icon={Wallet}
+          tone="primary"
+        />
         <StatCard
           label={`本月（${currentMonth}）新生成数`}
           value={`${currentMonthCount} 条`}
+          icon={CalendarRange}
+          tone="info"
         />
       </div>
 
@@ -150,10 +166,15 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
       />
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          当前筛选条件下暂无账单。若想新建本月账单，先在上方&ldquo;生成 / 追加
-          月账单&rdquo;触发。
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="当前筛选条件下暂无账单"
+          description={
+            <>
+              若想新建本月账单，先在上方<strong>&ldquo;生成 / 追加月账单&rdquo;</strong>触发。
+            </>
+          }
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
@@ -184,7 +205,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
                     ¥ {String(r.paidAmount)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <StatusBadge status={r.status} />
+                    <BillStatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatDateTime(r.issuedAt)}
@@ -210,29 +231,16 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+// 账单状态徽章——委托给 ui-business StatusBadge + BILL_STATUS_TO_BADGE map
+// 集中色调（与 /sales/bills 共用，避免双份本地定义飘移）。
+function BillStatusBadge({ status }: { status: BillStatus }) {
+  const cfg = BILL_STATUS_TO_BADGE[status];
+  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
   return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold font-mono">{value}</div>
-    </div>
+    <StatusBadge tone={cfg.tone} dot={cfg.dot}>
+      {cfg.label}
+    </StatusBadge>
   );
-}
-
-function StatusBadge({ status }: { status: BillStatus }) {
-  const label = BILL_STATUS_LABELS[status] ?? status;
-  switch (status) {
-    case BillStatus.FULLY_PAID:
-      return <Badge>{label}</Badge>;
-    case BillStatus.PARTIAL_PAID:
-      return <Badge variant="secondary">{label}</Badge>;
-    case BillStatus.ISSUED:
-      return <Badge variant="destructive">{label}</Badge>;
-    case BillStatus.DRAFT:
-      return <Badge variant="outline">{label}</Badge>;
-    default:
-      return <Badge variant="outline">{label}</Badge>;
-  }
 }
 
 function FilterBar({

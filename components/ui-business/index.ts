@@ -7,6 +7,7 @@ export type { StatCardProps, StatDelta } from './StatCard';
 export {
   StatusBadge,
   ORDER_STATUS_TO_BADGE,
+  BILL_STATUS_TO_BADGE,
 } from './StatusBadge';
 export type { StatusBadgeProps } from './StatusBadge';
 

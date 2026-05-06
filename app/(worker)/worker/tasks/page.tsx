@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import { Inbox } from 'lucide-react';
 import { requireSession } from '@/lib/auth/session';
 import { listWorkerTasks } from '@/lib/production';
 import { Badge } from '@/components/ui/badge';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { TaskStatus } from '@/generated/prisma/enums';
+import { EmptyState } from '@/components/ui-business';
 
 export const metadata = { title: '我的任务' };
 
@@ -21,9 +23,11 @@ export default async function WorkerTasksPage() {
       </div>
 
       {tasks.length === 0 ? (
-        <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-          暂无待处理任务。
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="暂无待处理任务"
+          description="车间主管派工后会出现在这里。"
+        />
       ) : (
         <ul className="space-y-2">
           {tasks.map((t) => (

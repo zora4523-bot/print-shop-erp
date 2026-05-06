@@ -8,6 +8,8 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState, PageHeader } from '@/components/ui-business';
+import { FileArchive } from 'lucide-react';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -44,12 +46,10 @@ export default async function ForemanCdrPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">CDR 汇总下载</h1>
-        <p className="text-sm text-muted-foreground">
-          按日期窗口勾选工单 → 生成 ZIP 包 → 24 小时有效短链发外协。
-        </p>
-      </div>
+      <PageHeader
+        title="CDR 汇总下载"
+        subtitle="按日期窗口勾选工单 → 生成 ZIP 包 → 24 小时有效短链发外协。"
+      />
 
       {mock ? (
         <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground">
@@ -82,9 +82,11 @@ export default async function ForemanCdrPage({
       <section className="space-y-3">
         <h2 className="text-base font-semibold">最近生成的下载包</h2>
         {recentBundles.length === 0 ? (
-          <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-            尚未生成过 CDR 下载包。
-          </div>
+          <EmptyState
+            icon={FileArchive}
+            title="尚未生成过 CDR 下载包"
+            description="勾选上方候选工单即可生成 24 小时有效的下载链接。"
+          />
         ) : (
           <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
             <table className="w-full text-sm">

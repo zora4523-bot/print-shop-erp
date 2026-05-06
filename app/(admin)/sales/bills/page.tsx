@@ -1,11 +1,18 @@
 import Decimal from 'decimal.js';
 import Link from 'next/link';
+import { CheckCircle2, Inbox, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
+import {
+  BILL_STATUS_TO_BADGE,
+  EmptyState,
+  PageHeader,
+  StatCard,
+  StatusBadge,
+} from '@/components/ui-business';
 
 export const metadata = { title: '我的应收账单' };
 
@@ -81,22 +88,24 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">我的应收账单</h1>
-        <p className="text-sm text-muted-foreground">
-          月度账单由老板生成 / 发单 / 录入付款，这里只读展示你的进度。
-        </p>
-      </div>
+      <PageHeader
+        title="我的应收账单"
+        subtitle="月度账单由老板生成 / 发单 / 录入付款，这里只读展示你的进度。"
+      />
 
-      <div className="grid grid-cols-2 gap-4 text-sm">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard
           label="未结清"
           value={`¥ ${unpaidTotal}`}
+          icon={Wallet}
+          tone="warning"
           hint="ISSUED + PARTIAL_PAID 的余额合计"
         />
         <StatCard
           label="已结清"
           value={`¥ ${fullyPaidTotal}`}
+          icon={CheckCircle2}
+          tone="success"
           hint="FULLY_PAID 总额累计"
         />
       </div>
@@ -104,9 +113,11 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
       <FilterBar status={statusFilter} period={periodFilter} />
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          当前筛选条件下暂无账单。月初老板生成后会出现在这里。
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="当前筛选条件下暂无账单"
+          description="月初老板生成后会出现在这里。"
+        />
       ) : (
         <div className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
@@ -132,7 +143,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
                     ¥ {String(r.paidAmount)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <StatusBadge status={r.status} />
+                    <BillStatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatDateTime(r.issuedAt)}
@@ -161,40 +172,14 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
   );
 }
 
-function StatCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
+function BillStatusBadge({ status }: { status: BillStatus }) {
+  const cfg = BILL_STATUS_TO_BADGE[status];
+  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
   return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold font-mono">{value}</div>
-      {hint ? (
-        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
-      ) : null}
-    </div>
+    <StatusBadge tone={cfg.tone} dot={cfg.dot}>
+      {cfg.label}
+    </StatusBadge>
   );
-}
-
-function StatusBadge({ status }: { status: BillStatus }) {
-  const label = BILL_STATUS_LABELS[status] ?? status;
-  switch (status) {
-    case BillStatus.FULLY_PAID:
-      return <Badge>{label}</Badge>;
-    case BillStatus.PARTIAL_PAID:
-      return <Badge variant="secondary">{label}</Badge>;
-    case BillStatus.ISSUED:
-      return <Badge variant="destructive">{label}</Badge>;
-    case BillStatus.DRAFT:
-      return <Badge variant="outline">{label}</Badge>;
-    default:
-      return <Badge variant="outline">{label}</Badge>;
-  }
 }
 
 function FilterBar({
