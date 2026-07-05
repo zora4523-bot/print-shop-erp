@@ -79,10 +79,12 @@ function validate(params: SignUploadParams): Record<string, string[]> | null {
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-// STS 凭证有效期：1 小时。浏览器拿到 token 后立即开始 PUT，正常
-// 上传（含 100 MiB CDR 的分片重试）远小于此窗口；不设更长以缩小
-// 泄漏影响面。
-const STS_DURATION_SECONDS = 3600;
+// STS 凭证有效期：15 分钟（STS 允许的最小值附近）。浏览器拿到 token
+// 后立即开始 PUT，100 MiB CDR 在一般宽带上也远小于此窗口。刻意压短：
+// 预签 PUT URL 在寿命内可重复使用，登记后再 PUT 可替换对象内容——
+// 短凭证把这个"重放覆写"窗口压到最小（Codex upload-ui review #1；
+// ETag 固定校验属 P1，需 schema 加列）。
+const STS_DURATION_SECONDS = 900;
 
 // Real STS AssumeRole via ali-oss. The session policy narrows the
 // temporary credential to exactly ONE object key — even narrower than

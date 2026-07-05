@@ -242,7 +242,7 @@ describe('signDesignUpload — real STS signing', () => {
     });
     expect(signatureUrlMock).toHaveBeenCalledWith(r.objectKey, {
       method: 'PUT',
-      expires: 3600,
+      expires: 900,
       'Content-Type': 'image/jpeg',
     });
     expect(r.putUrl).toMatch(/^https:\/\//);
@@ -255,7 +255,7 @@ describe('signDesignUpload — real STS signing', () => {
     const [roleArn, policy, duration, sessionName] =
       assumeRoleMock.mock.calls[0];
     expect(roleArn).toBe('acs:ram::111:role/uploader');
-    expect(duration).toBe(3600);
+    expect(duration).toBe(900);
     expect(sessionName).toBe('erp-design-upload');
     expect(policy).toEqual({
       Version: '1',

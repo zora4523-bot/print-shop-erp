@@ -63,6 +63,8 @@ export function DesignUploadPanel({
     const mapped = EXT_TO_TYPE[ext];
     if (!mapped) {
       setMessage('仅支持 jpg / jpeg / png / webp / cdr 文件');
+      // 不清 value 的话，再次选同一个文件不会触发 onChange
+      if (inputRef.current) inputRef.current.value = '';
       return;
     }
     setBusy(true);
@@ -99,13 +101,13 @@ export function DesignUploadPanel({
         setMessage(`上传失败（OSS ${putResp.status}），请重试`);
         return;
       }
+      // fileSize 不传——服务端以 OSS HEAD 的 Content-Length 为准
       const recorded = await recordDesignUploadAction({
         orderId,
         orderItemId,
         objectKey: signed.objectKey,
         fileType: mapped.fileType,
         fileName: file.name,
-        fileSize: file.size,
       });
       if (!recorded.ok) {
         setMessage(recorded.message);

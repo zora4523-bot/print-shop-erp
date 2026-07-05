@@ -3,7 +3,9 @@ import { Role, OrderStatus, DesignFileType } from '../../generated/prisma/enums'
 
 const { dbMock, txMock, headMock, ossCtorMock } = vi.hoisted(() => {
   const tx = {
-    orderItemDesign: { create: vi.fn(), delete: vi.fn() },
+    $executeRaw: vi.fn(),
+    orderItem: { findFirst: vi.fn() },
+    orderItemDesign: { create: vi.fn(), delete: vi.fn(), findUnique: vi.fn() },
     orderLog: { create: vi.fn() },
   };
   return {
@@ -31,6 +33,7 @@ vi.mock('ali-oss', () => {
 
 import {
   OrderDesignError,
+  assertCanUploadDesign,
   recordOrderItemDesign,
   removeOrderItemDesign,
 } from '../order-design';
@@ -55,7 +58,6 @@ const baseInput = {
   objectKey: goodKey,
   fileType: DesignFileType.IMAGE,
   fileName: 'design.jpg',
-  fileSize: 1024,
 };
 
 const draftItem = (over: Record<string, unknown> = {}) => ({
@@ -68,28 +70,66 @@ const draftItem = (over: Record<string, unknown> = {}) => ({
   },
 });
 
+const headOk = (contentLength: string) => ({
+  res: { status: 200, headers: { 'content-length': contentLength } },
+});
+
 beforeEach(() => {
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(draftItem());
   dbMock.orderItemDesign.findUnique.mockReset();
   dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
+  txMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+  txMock.orderItem.findFirst.mockReset().mockResolvedValue(draftItem());
   txMock.orderItemDesign.create.mockReset().mockResolvedValue({ id: 'd1' });
   txMock.orderItemDesign.delete.mockReset().mockResolvedValue({ id: 'd1' });
+  txMock.orderItemDesign.findUnique.mockReset();
   txMock.orderLog.create.mockReset().mockResolvedValue({ id: 'log1' });
-  headMock.mockReset().mockResolvedValue({ status: 200 });
+  headMock.mockReset().mockResolvedValue(headOk('2048'));
   ossCtorMock.mockReset();
 });
 
+describe('assertCanUploadDesign', () => {
+  it('款式不存在 / 非 DRAFT / 非本人 → 拒绝；OWNER 放行', async () => {
+    dbMock.orderItem.findFirst.mockResolvedValue(null);
+    await expect(
+      assertCanUploadDesign('o1', 'i1', salesActor),
+    ).rejects.toBeInstanceOf(OrderDesignError);
+
+    dbMock.orderItem.findFirst.mockResolvedValue(
+      draftItem({ status: OrderStatus.SUBMITTED }),
+    );
+    await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow(
+      /草稿状态/,
+    );
+
+    dbMock.orderItem.findFirst.mockResolvedValue(
+      draftItem({ submitterId: 'someone-else' }),
+    );
+    await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow(
+      /自己创建/,
+    );
+    await expect(
+      assertCanUploadDesign('o1', 'i1', ownerActor),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('recordOrderItemDesign', () => {
-  it('happy path：HEAD 确认后写 design 行 + OrderLog（同 tx）', async () => {
+  it('happy path：锁 + fresh-read + HEAD 权威 size 写行 + OrderLog（同 tx）', async () => {
     await recordOrderItemDesign(baseInput, salesActor, configuredEnv);
 
     expect(headMock).toHaveBeenCalledWith(goodKey);
+    // 与 submit/cancel 同一把 order-cascade advisory lock
+    const lockSql = txMock.$executeRaw.mock.calls[0];
+    expect(lockSql[0].join('?')).toContain('pg_advisory_xact_lock');
+    expect(lockSql[1]).toBe('print-shop-erp:order-cascade:o1');
+    // fileSize 来自 HEAD Content-Length，不是客户端申报
     expect(txMock.orderItemDesign.create.mock.calls[0][0].data).toMatchObject({
       orderItemId: 'i1',
       fileType: DesignFileType.IMAGE,
       fileUrl: `https://my-bucket.oss-cn-shenzhen.aliyuncs.com/${goodKey}`,
       fileName: 'design.jpg',
-      fileSize: BigInt(1024),
+      fileSize: BigInt(2048),
       uploadedBy: 'sales1',
     });
     expect(txMock.orderLog.create.mock.calls[0][0].data).toMatchObject({
@@ -100,6 +140,17 @@ describe('recordOrderItemDesign', () => {
     });
   });
 
+  it('TOCTOU：预检时 DRAFT、锁内 fresh-read 已 SUBMITTED → 拒绝且不写行', async () => {
+    dbMock.orderItem.findFirst.mockResolvedValue(draftItem()); // 预检通过
+    txMock.orderItem.findFirst.mockResolvedValue(
+      draftItem({ status: OrderStatus.SUBMITTED }), // 锁内已被提交
+    );
+    await expect(
+      recordOrderItemDesign(baseInput, salesActor, configuredEnv),
+    ).rejects.toThrow(/草稿状态/);
+    expect(txMock.orderItemDesign.create).not.toHaveBeenCalled();
+  });
+
   it('OSS 未配置 → OrderDesignError', async () => {
     await expect(
       recordOrderItemDesign(baseInput, salesActor, {} as NodeJS.ProcessEnv),
@@ -107,7 +158,7 @@ describe('recordOrderItemDesign', () => {
     expect(headMock).not.toHaveBeenCalled();
   });
 
-  it('objectKey 指向别的工单/款式 → 拒绝', async () => {
+  it('objectKey 指向别的工单/款式/前缀 → 拒绝', async () => {
     for (const bad of [
       `design/o2/i1/image-${UUID}.jpg`, // 别的工单
       `design/o1/i2/image-${UUID}.jpg`, // 别的款式
@@ -135,27 +186,6 @@ describe('recordOrderItemDesign', () => {
     ).rejects.toBeInstanceOf(OrderDesignError);
   });
 
-  it('非 DRAFT 状态 → 拒绝（提交后的增删属于 A05）', async () => {
-    dbMock.orderItem.findFirst.mockResolvedValue(
-      draftItem({ status: OrderStatus.SUBMITTED }),
-    );
-    await expect(
-      recordOrderItemDesign(baseInput, salesActor, configuredEnv),
-    ).rejects.toThrow(/草稿状态/);
-  });
-
-  it('SALES 非本人工单 → 拒绝；OWNER 全局放行', async () => {
-    dbMock.orderItem.findFirst.mockResolvedValue(
-      draftItem({ submitterId: 'someone-else' }),
-    );
-    await expect(
-      recordOrderItemDesign(baseInput, salesActor, configuredEnv),
-    ).rejects.toThrow(/自己创建/);
-
-    await recordOrderItemDesign(baseInput, ownerActor, configuredEnv);
-    expect(txMock.orderItemDesign.create).toHaveBeenCalledTimes(1);
-  });
-
   it('HEAD 失败（对象没传上去）→ 拒绝且不写库', async () => {
     const consoleSpy = vi
       .spyOn(console, 'error')
@@ -168,16 +198,19 @@ describe('recordOrderItemDesign', () => {
     consoleSpy.mockRestore();
   });
 
-  it('fileSize 非法 → 拒绝', async () => {
-    for (const bad of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-      await expect(
-        recordOrderItemDesign(
-          { ...baseInput, fileSize: bad },
-          salesActor,
-          configuredEnv,
-        ),
-      ).rejects.toBeInstanceOf(OrderDesignError);
-    }
+  it('HEAD 实际大小超过类型上限 → 拒绝（申报小文件、实传大文件被抓）', async () => {
+    headMock.mockResolvedValue(headOk(String(11 * 1024 * 1024))); // IMAGE 上限 10 MiB
+    await expect(
+      recordOrderItemDesign(baseInput, salesActor, configuredEnv),
+    ).rejects.toThrow(/超过大小上限/);
+    expect(txMock.orderItemDesign.create).not.toHaveBeenCalled();
+  });
+
+  it('HEAD 缺 Content-Length → 拒绝', async () => {
+    headMock.mockResolvedValue({ res: { status: 200, headers: {} } });
+    await expect(
+      recordOrderItemDesign(baseInput, salesActor, configuredEnv),
+    ).rejects.toThrow(/无法确认/);
   });
 });
 
@@ -191,10 +224,20 @@ describe('removeOrderItemDesign', () => {
     },
   });
 
-  it('happy path：删行 + OrderLog，返回 orderId', async () => {
-    dbMock.orderItemDesign.findUnique.mockResolvedValue(designRow());
+  beforeEach(() => {
+    dbMock.orderItemDesign.findUnique.mockResolvedValue({
+      id: 'd1',
+      orderItem: { orderId: 'o1' },
+    });
+    txMock.orderItemDesign.findUnique.mockResolvedValue(designRow());
+  });
+
+  it('happy path：锁内 fresh-read → 删行 + OrderLog，返回 orderId', async () => {
     const r = await removeOrderItemDesign('d1', salesActor);
     expect(r.orderId).toBe('o1');
+    expect(txMock.$executeRaw.mock.calls[0][1]).toBe(
+      'print-shop-erp:order-cascade:o1',
+    );
     expect(txMock.orderItemDesign.delete).toHaveBeenCalledWith({
       where: { id: 'd1' },
     });
@@ -212,15 +255,15 @@ describe('removeOrderItemDesign', () => {
     );
   });
 
-  it('非 DRAFT / 非本人 → 拒绝', async () => {
-    dbMock.orderItemDesign.findUnique.mockResolvedValue(
+  it('锁内 fresh-read 非 DRAFT / 非本人 → 拒绝', async () => {
+    txMock.orderItemDesign.findUnique.mockResolvedValue(
       designRow({ status: OrderStatus.SUBMITTED }),
     );
     await expect(removeOrderItemDesign('d1', salesActor)).rejects.toThrow(
       /草稿状态/,
     );
 
-    dbMock.orderItemDesign.findUnique.mockResolvedValue(
+    txMock.orderItemDesign.findUnique.mockResolvedValue(
       designRow({ submitterId: 'someone-else' }),
     );
     await expect(removeOrderItemDesign('d1', salesActor)).rejects.toThrow(

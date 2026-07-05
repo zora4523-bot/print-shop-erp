@@ -7,6 +7,7 @@ import { signDesignUpload } from '@/lib/oss/sign';
 import type { SignUploadResult } from '@/lib/oss/types';
 import {
   OrderDesignError,
+  assertCanUploadDesign,
   recordOrderItemDesign,
   removeOrderItemDesign,
 } from '@/lib/order-design';
@@ -40,6 +41,22 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
     return { status: 'invalid', fieldErrors };
   }
 
+  // 铸凭证前先过授权闸：目标款式必须真实存在、工单 DRAFT、actor 有权
+  // 编辑。否则任何有 design:upload 权限的人都能对任意 id 铸 STS 凭证
+  // 往 bucket 写孤儿对象（Codex upload-ui review #3）。
+  try {
+    await assertCanUploadDesign(
+      parsed.data.orderId,
+      parsed.data.orderItemId,
+      { id: user.id, role: user.role },
+    );
+  } catch (err) {
+    if (err instanceof OrderDesignError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
   // signDesignUpload 自身把 STS 失败与配置解析失败都折叠成
   // { status: 'error' }，四态 union 对 UI 穷尽——不需要 try/catch 翻译层。
   return signDesignUpload({
@@ -54,13 +71,13 @@ export type DesignMutationResult =
   | { ok: true }
   | { ok: false; message: string };
 
+// fileSize 不收客户端申报值——lib 层以 OSS HEAD 的 Content-Length 为准。
 const recordDesignUploadSchema = z.object({
   orderId: z.string().trim().min(1).max(64),
   orderItemId: z.string().trim().min(1).max(64),
   objectKey: z.string().trim().min(1).max(512),
   fileType: z.nativeEnum(DesignFileType),
   fileName: z.string().trim().min(1).max(256),
-  fileSize: z.number().int().min(1),
 });
 
 export async function recordDesignUploadAction(
