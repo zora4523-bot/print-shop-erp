@@ -144,7 +144,7 @@ Never auto-merge. Never apply production database operations from this backlog.
 
 ## A06 - OSS STS And Real CDR Bundle Upload
 
-- Status: `done` (one owner console step pending, see below)
+- Status: `done`
 - Priority: P1
 - Risk: medium
 - Suggested branch: `codex/oss-sts-cdr-real-upload`
@@ -165,11 +165,13 @@ Never auto-merge. Never apply production database operations from this backlog.
     instead of 500ing `/foreman/cdr`.
   - Live smoke against real Aliyun: AssumeRole / temp-cred PUT `design/*` /
     session-policy escape guard all passed.
-- Remaining owner step:
-  - Attach policy `print-shop-erp-oss-object-rw` directly to RAM user
-    `webhongbao` (CDR bundling reads `design/*` and writes `bundles/*` with
-    long-term creds). Smoke showed AccessDenied until attached; re-run smoke
-    after attaching.
+- Verified 2026-07-05 (after owner attached `print-shop-erp-oss-object-rw`
+  to RAM user `webhongbao`):
+  - Full live smoke green: AssumeRole, temp-cred PUT `design/*`, escape
+    guard, direct GET `design/*`, direct PUT `bundles/*`, 24h signed URL.
+  - Real `uploadBundleZip` end-to-end: streamed two `design/*` objects
+    through archiver into `bundles/*`, downloaded via signed URL, ZIP magic
+    verified.
 
 ## A07 - Notification Per-User Routing
 

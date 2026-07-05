@@ -8,7 +8,9 @@
 
 ## 当前任务
 
-**A06 OSS STS 真实接入完成**（浏览器直传链路真实冒烟全通）+ STOCK_ALERT 接线（SPEC §8.1 10/10）+ 大批次提交固化。A06 剩一步业主控制台操作：给 RAM 子账号 `webhongbao` 挂 `print-shop-erp-oss-object-rw` 策略（CDR 服务端打包用长期凭证直连，冒烟显示 AccessDenied 直到挂上）。挂上后重跑 `scratchpad/oss-smoke.mjs` 同款验证即可收官。
+**A06 OSS STS 真实接入收官** ✅ —— 业主已给 `webhongbao` 挂对象策略，复跑冒烟 6/6 全通，并用真实 `uploadBundleZip` 端到端跑了一次（两个 design/* 文件 → archiver → bundles/*.zip → 预签 URL 真下载，ZIP 魔数校验通过）。至此 OSS 直传 + CDR 真打包整条链路在真实阿里云环境验证完毕。剩余任务全部 `needs-owner-input`（A05 / A07 / A20 / A21）。
+
+**下一个自然任务候选**：上传 UI 前端接线——`signDesignUploadAction` 后端已真实可用，检查订单表单是否已有调用它并 PUT 到 OSS 的前端流（P0 #3 Slice C 当时只做了 action 层脚手架）；如无则补 client 上传组件 + OrderItemDesign.fileUrl 写库，是 A06 的自然延伸（无需业主输入）。
 
 ## 本次 session 主要产出（2026-07-05）
 
