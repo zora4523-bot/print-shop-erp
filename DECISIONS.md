@@ -418,3 +418,12 @@
 - **理由**：跨越检测在事件发生的瞬间告警且天然去重，不需要 cron 轮询 + 已告警状态表；管理群收到的每条告警都对应一次真实跌破。推送在 tx 提交后 dispatch 是 P1 #2 Slice C 的既有铁律（tx 内发送会在回滚时留下幽灵消息）。采购收货是入库方向不可能跌破，仅手工出入库与取消收货两条 OUT 路径接线。
 - **影响**：修改 `safetyStock` 阈值本身不触发告警（只影响后续出库判断）；若业主需要"上调安全库存立即提醒"或"低位周期性重复提醒"，再补 cron 扫描端点（复用现有 payload 与模板）。`MaterialStockMovementResult` 增加 `stockAlert` 字段，纯函数内不做 IO。
 - **相关文档**：`lib/material.ts`、`lib/purchase.ts`、`lib/notification/events.ts`、SPEC §8.1、`prisma/seed.ts` STOCK_ALERT 默认模板。
+
+---
+
+## 2026-07-05：OSS STS 真实接入 —— ali-oss 单包 + 双凭证模型（A06）
+
+- **决策**：`signViaSts` 与 CDR 打包用 `ali-oss`（官方 JS SDK，一个包同时覆盖 STS AssumeRole、对象读写、预签 URL），ZIP 用 `archiver`。凭证分两条路：(1) **浏览器直传** 走 STS AssumeRole，session policy 收缩到本次签发的单个 objectKey（比角色策略 design/*+bundles/* 更窄），有效期 1h；(2) **CDR 服务端打包** 用 RAM 子账号长期凭证直连——预签 GET URL 的寿命受签发凭证寿命限制，STS 临时凭证最长 1h 签不出 24h 下载链接，因此对象读写策略除挂在角色上外，还必须直接挂在子账号上。
+- **理由**：单依赖降低维护面；session policy per-key 收缩让泄漏的临时凭证只能写它自己那一个路径（真实冒烟已验证越权被拒）。CDR 24h 链接与 DesignBundle.expiresAt 语义对齐，只能用长期凭证签。
+- **影响**：`OssNotWiredError` 桩删除，`signDesignUpload` 把 AssumeRole 失败折叠成 `{ status: 'error' }`（SDK 错误只进服务端日志不回显浏览器）；`bundle.ts` 把打包失败翻译成 CdrBundleError。新增 `CDR_BUNDLE_MOCK_MODE` env（本地开发已配真实凭证时显式设 true，防 E2E 往真 bucket 写包；生产留空即真实路径）。RAM 侧要求写入 .env.example 注释。策略无 DeleteObject——孤儿清理（P1 待办）实现时再最小化增授。
+- **相关文档**：`lib/oss/sign.ts`、`lib/cdr/zip.ts`、`.env.example`、`docs/AGENT-BACKLOG.md` A06、SPEC §3.1 / 附录 H。

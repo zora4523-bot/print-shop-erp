@@ -256,7 +256,7 @@ describe('createBundle', () => {
     expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
   });
 
-  it('uploadBundleZip 抛 OssNotWiredError → 删占位 + CdrBundleError 友好文案', async () => {
+  it('uploadBundleZip 失败 → 删占位 + CdrBundleError 友好文案', async () => {
     setupOrders([
       {
         id: 'o1',
@@ -265,8 +265,10 @@ describe('createBundle', () => {
       },
     ]);
     dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
-    const { OssNotWiredError } = await import('@/lib/oss/sign');
-    uploadMock.mockRejectedValue(new OssNotWiredError());
+    const consoleSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    uploadMock.mockRejectedValue(new Error('AccessDenied: 403'));
 
     await expect(
       createBundle(
@@ -277,11 +279,12 @@ describe('createBundle', () => {
         },
         { id: 'u1' },
       ),
-    ).rejects.toThrow(/OSS STS SDK 未接入/);
+    ).rejects.toThrow(/CDR 打包上传失败：AccessDenied/);
     // 占位行清理
     expect(dbMock.designBundle.delete).toHaveBeenCalledWith({
       where: { id: 'b1' },
     });
+    consoleSpy.mockRestore();
   });
 });
 

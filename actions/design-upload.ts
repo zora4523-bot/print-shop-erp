@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
-import { signDesignUpload, OssNotWiredError } from '@/lib/oss/sign';
+import { signDesignUpload } from '@/lib/oss/sign';
 import type { SignUploadResult } from '@/lib/oss/types';
 import { DesignFileType } from '../generated/prisma/enums';
 
@@ -34,19 +34,10 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
     return { status: 'invalid', fieldErrors };
   }
 
-  try {
-    return await signDesignUpload({
-      userId: user.id,
-      ...parsed.data,
-    });
-  } catch (err) {
-    if (err instanceof OssNotWiredError) {
-      // The env says "ready" but the lib hasn't been plugged into a real
-      // STS provider yet. Surface it as error rather than re-throw so the
-      // UI gets a deterministic response and the message can be
-      // surfaced verbatim during rollout.
-      return { status: 'error', message: err.message };
-    }
-    throw err;
-  }
+  // signDesignUpload 自身把 STS 失败折叠成 { status: 'error' }，四态
+  // union 对 UI 是穷尽的——这里不再需要 try/catch 翻译层。
+  return signDesignUpload({
+    userId: user.id,
+    ...parsed.data,
+  });
 }

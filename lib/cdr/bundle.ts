@@ -1,5 +1,4 @@
 import { db } from '../db';
-import { OssNotWiredError } from '../oss/sign';
 import { uploadBundleZip, type ZipUploadResult } from './zip';
 import { parseStrictYmd } from '../auth/schemas';
 
@@ -216,15 +215,12 @@ export async function createBundle(
       bundleId: bundle.id,
     });
   } catch (err) {
-    // OSS 真接入前 generateRealZip throws OssNotWiredError；删掉
-    // 占位 row 让 UI 看到清晰失败状态。
+    // OSS 打包失败（凭证 403 / 网络 / 对象缺失）：删掉占位 row 让 UI
+    // 看到清晰失败状态，并把原因翻译成 CdrBundleError 给表单展示。
     await db.designBundle.delete({ where: { id: bundle.id } }).catch(() => {});
-    if (err instanceof OssNotWiredError) {
-      throw new CdrBundleError(
-        'OSS STS SDK 未接入；CDR 打包暂不可用（业主请配齐 OSS 环境后重试）',
-      );
-    }
-    throw err;
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('[cdr] bundle zip upload failed:', detail);
+    throw new CdrBundleError(`CDR 打包上传失败：${detail}`);
   }
 
   // 下载链接走我们自己的 token-route，不直接暴露 OSS 对象 URL：
