@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import { createOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
+import type { CustomerPartyOption } from '@/lib/party';
 
 export type CraftOption = {
   id: string;
@@ -31,6 +32,7 @@ export type ProductOption = {
 type Props = {
   crafts: CraftOption[];
   products: ProductOption[];
+  customerParties: CustomerPartyOption[];
 };
 
 const BLANK_ITEM: CreateOrderInput['items'][number] = {
@@ -48,7 +50,7 @@ const BLANK_ITEM: CreateOrderInput['items'][number] = {
   remark: null,
 };
 
-export function OrderForm({ crafts, products }: Props) {
+export function OrderForm({ crafts, products, customerParties }: Props) {
   const form = useForm<CreateOrderInput>({
     // zodResolver's generics don't fully compose with preprocess-bearing
     // schemas (moneyOptionalField uses `z.preprocess`, which splits
@@ -58,6 +60,7 @@ export function OrderForm({ crafts, products }: Props) {
     mode: 'onBlur',
     defaultValues: {
       customerRef: null,
+      customerPartyId: null,
       receiverName: null,
       receiverPhone: null,
       receiverAddress: null,
@@ -73,8 +76,12 @@ export function OrderForm({ crafts, products }: Props) {
     register,
     handleSubmit,
     formState: { errors },
+    setValue,
   } = form;
   const itemsArray = useFieldArray({ control, name: 'items' });
+  const partySelectRegistration = register('customerPartyId', {
+    setValueAs: (v) => (v === '' ? null : v),
+  });
 
   // createOrderAction succeeds by throwing NEXT_REDIRECT — useActionState
   // returns state on non-redirect outcomes (invalid / error) only.
@@ -87,6 +94,35 @@ export function OrderForm({ crafts, products }: Props) {
   const onValid: SubmitHandler<CreateOrderInput> = (data) => {
     startSubmit(() => {
       dispatch(data);
+    });
+  };
+
+  const applyCustomerParty = (partyId: string) => {
+    const selected = customerParties.find((party) => party.id === partyId);
+    if (!selected) {
+      setValue('customerPartyId', null, { shouldDirty: true });
+      return;
+    }
+
+    setValue('customerPartyId', selected.id, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue('customerRef', selected.code, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue('receiverName', selected.receiverName ?? selected.contactName, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue('receiverPhone', selected.receiverPhone ?? selected.contactPhone, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue('receiverAddress', selected.receiverAddress, {
+      shouldDirty: true,
+      shouldValidate: true,
     });
   };
 
@@ -105,6 +141,30 @@ export function OrderForm({ crafts, products }: Props) {
     <form onSubmit={handleSubmit(onValid)} className="space-y-6" noValidate>
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">基本信息</h2>
+
+        <div className="space-y-1">
+          <Label>客户主数据（选填）</Label>
+          <select
+            className={selectClass}
+            {...partySelectRegistration}
+            onChange={(event) => {
+              partySelectRegistration.onChange(event);
+              applyCustomerParty(event.target.value);
+            }}
+          >
+            <option value="">— 不关联 —</option>
+            {customerParties.map((party) => (
+              <option key={party.id} value={party.id}>
+                {party.code} · {party.shortName ?? party.name}
+              </option>
+            ))}
+          </select>
+          {errors.customerPartyId?.message ? (
+            <p className="text-xs text-destructive">
+              {errors.customerPartyId.message}
+            </p>
+          ) : null}
+        </div>
 
         <div className="grid grid-cols-2 gap-4">
           <TextField

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { OrderStatus, Role } from '../generated/prisma/client';
+import { OrderStatus, PartyType, Prisma, Role } from '../generated/prisma/client';
 import { db } from './db';
 import { nextOrderNumber } from './order/order-number';
 import {
@@ -19,6 +19,7 @@ import {
 } from './order/editable-fields';
 import { dispatchNotification } from './notification/dispatch';
 import { formatMoneyPlain } from './dashboard/format';
+import { sortBySearchRelevance } from './search-ranking';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -50,6 +51,12 @@ type OrderTxClient = {
       where: { id: string };
       select?: unknown;
     }) => Promise<{ id: string; isActive: boolean } | null>;
+  };
+  party: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{ id: string; type: PartyType; isActive: boolean } | null>;
   };
 };
 
@@ -103,6 +110,22 @@ export async function createOrder(
       );
     }
 
+    if (input.customerPartyId) {
+      const party = await txClient.party.findUnique({
+        where: { id: input.customerPartyId },
+        select: { id: true, type: true, isActive: true },
+      });
+      if (!party) {
+        throw new OrderInvariantError(`客户主数据不存在：${input.customerPartyId}`);
+      }
+      if (!party.isActive) {
+        throw new OrderInvariantError(`客户主数据已停用：${input.customerPartyId}`);
+      }
+      if (party.type === PartyType.SUPPLIER) {
+        throw new OrderInvariantError(`供应商不能作为工单客户：${input.customerPartyId}`);
+      }
+    }
+
     // (3) product FK per item (if supplied). Cheaper to do per-id since
     // most items won't reference a product explicitly.
     for (const item of input.items) {
@@ -133,6 +156,7 @@ export async function createOrder(
         submitterId: actor.id,
         submitterRole: actor.role,
         createdById: actor.id,
+        customerPartyId: input.customerPartyId ?? null,
         status: OrderStatus.DRAFT,
         isUrgent: input.isUrgent,
         customerRef: input.customerRef,
@@ -644,17 +668,48 @@ export type OrderListRow = {
   isUrgent: boolean;
   customerRef: string | null;
   receiverName: string | null;
+  receiverPhone: string | null;
+  trackingNo: string | null;
+  expressCode: string | null;
+  searchPinyin: string | null;
+  searchPinyinInitials: string | null;
   totalAmount: unknown; // Prisma Decimal — UI layer formats
   submitterId: string;
   createdAt: Date;
   updatedAt: Date;
 };
 
+function normalizeSearchQuery(q?: string | null): string | null {
+  const trimmed = q?.trim();
+  return trimmed ? trimmed.slice(0, 80) : null;
+}
+
+function orderSearchFilter(q?: string | null): Prisma.OrderWhereInput | undefined {
+  const query = normalizeSearchQuery(q);
+  if (!query) return undefined;
+  return {
+    OR: [
+      { orderNo: { contains: query, mode: 'insensitive' } },
+      { customerRef: { contains: query, mode: 'insensitive' } },
+      { receiverName: { contains: query, mode: 'insensitive' } },
+      { receiverPhone: { contains: query, mode: 'insensitive' } },
+      { trackingNo: { contains: query, mode: 'insensitive' } },
+      { expressCode: { contains: query, mode: 'insensitive' } },
+      { searchPinyin: { contains: query, mode: 'insensitive' } },
+      { searchPinyinInitials: { contains: query, mode: 'insensitive' } },
+    ],
+  };
+}
+
 export async function listOrders(
   user: { id: string; role: Role },
+  opts: { q?: string | null } = {},
 ): Promise<OrderListRow[]> {
-  return db.order.findMany({
-    where: getOrderScopeFilter(user),
+  const scope = getOrderScopeFilter(user);
+  const query = normalizeSearchQuery(opts.q);
+  const search = orderSearchFilter(query);
+  const rows = await db.order.findMany({
+    where: search ? { AND: [scope, search] } : scope,
     select: {
       id: true,
       orderNo: true,
@@ -662,6 +717,11 @@ export async function listOrders(
       isUrgent: true,
       customerRef: true,
       receiverName: true,
+      receiverPhone: true,
+      trackingNo: true,
+      expressCode: true,
+      searchPinyin: true,
+      searchPinyinInitials: true,
       totalAmount: true,
       submitterId: true,
       createdAt: true,
@@ -669,6 +729,18 @@ export async function listOrders(
     },
     orderBy: [{ isUrgent: 'desc' }, { createdAt: 'desc' }],
   });
+
+  return sortBySearchRelevance(rows, query, (row) => ({
+    fields: [
+      row.orderNo,
+      row.customerRef,
+      row.receiverName,
+      row.receiverPhone,
+      row.trackingNo,
+      row.expressCode,
+    ],
+    pinyinFields: [row.searchPinyin, row.searchPinyinInitials],
+  }));
 }
 
 export async function getOrderDetail(id: string, user: { id: string; role: Role }) {
@@ -682,7 +754,17 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
     include: {
       items: {
         orderBy: { sequence: 'asc' },
-        include: { designs: true },
+        include: {
+          designs: true,
+          product: {
+            select: {
+              id: true,
+              name: true,
+              categoryNodeId: true,
+              categoryNode: { select: { id: true, name: true } },
+            },
+          },
+        },
       },
       logs: {
         orderBy: { createdAt: 'desc' },

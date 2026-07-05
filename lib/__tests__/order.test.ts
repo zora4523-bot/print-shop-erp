@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderStatus, Role } from '../../generated/prisma/client';
+import { OrderStatus, PartyType, Role } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -12,6 +12,7 @@ const { dbMock } = vi.hoisted(() => {
     };
     craft: { findMany: ReturnType<typeof vi.fn> };
     product: { findUnique: ReturnType<typeof vi.fn> };
+    party: { findUnique: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -25,6 +26,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     craft: { findMany: vi.fn() },
     product: { findUnique: vi.fn() },
+    party: { findUnique: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
@@ -90,6 +92,7 @@ beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.craft.findMany.mockReset();
   dbMock.product.findUnique.mockReset();
+  dbMock.party.findUnique.mockReset();
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
@@ -216,6 +219,88 @@ describe('createOrder', () => {
         new Date('2026-04-23T09:00:00+08:00'),
       ),
     ).rejects.toThrowError(/产品已停用/);
+  });
+
+  it('stores an optional active customer party link while keeping snapshots', async () => {
+    dbMock.party.findUnique.mockResolvedValueOnce({
+      id: 'party1',
+      type: PartyType.CUSTOMER,
+      isActive: true,
+    });
+    await createOrder(
+      {
+        customerPartyId: 'party1',
+        customerRef: 'CUST_001',
+        receiverName: '王小姐',
+        receiverPhone: '13800000000',
+        receiverAddress: '广州番禺',
+        expressCode: null,
+        packageRequirement: null,
+        remark: null,
+        isUrgent: false,
+        items: [baseItem()],
+      },
+      salesActor,
+      new Date('2026-04-23T09:00:00+08:00'),
+    );
+    const createArg = dbMock.order.create.mock.calls[0][0];
+    expect(createArg.data.customerPartyId).toBe('party1');
+    expect(createArg.data.customerRef).toBe('CUST_001');
+    expect(createArg.data.receiverName).toBe('王小姐');
+  });
+
+  it('refuses inactive customer party links', async () => {
+    dbMock.party.findUnique.mockResolvedValueOnce({
+      id: 'party1',
+      type: PartyType.CUSTOMER,
+      isActive: false,
+    });
+    await expect(
+      createOrder(
+        {
+          customerPartyId: 'party1',
+          customerRef: 'CUST_001',
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: null,
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          isUrgent: false,
+          items: [baseItem()],
+        },
+        salesActor,
+        new Date('2026-04-23T09:00:00+08:00'),
+      ),
+    ).rejects.toThrowError(/客户主数据已停用/);
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses supplier-only party links for sales orders', async () => {
+    dbMock.party.findUnique.mockResolvedValueOnce({
+      id: 'supplier1',
+      type: PartyType.SUPPLIER,
+      isActive: true,
+    });
+    await expect(
+      createOrder(
+        {
+          customerPartyId: 'supplier1',
+          customerRef: 'SUP_001',
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: null,
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          isUrgent: false,
+          items: [baseItem()],
+        },
+        salesActor,
+        new Date('2026-04-23T09:00:00+08:00'),
+      ),
+    ).rejects.toThrowError(/供应商不能作为工单客户/);
+    expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 
   it('computes subtotal + totalAmount with Decimal math (no JS float rounding)', async () => {
@@ -676,6 +761,63 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
     expect(where).toEqual({
       items: { some: { tasks: { some: { workerId: 'worker-1' } } } },
     });
+  });
+
+  it('combines q search with role scope instead of replacing it', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await listOrders(salesActor, { q: ' 苹果福 ' });
+    const where = dbMock.order.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({
+      AND: [
+        { submitterId: 'sales-1' },
+        {
+          OR: [
+            { orderNo: { contains: '苹果福', mode: 'insensitive' } },
+            { customerRef: { contains: '苹果福', mode: 'insensitive' } },
+            { receiverName: { contains: '苹果福', mode: 'insensitive' } },
+            { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
+            { trackingNo: { contains: '苹果福', mode: 'insensitive' } },
+            { expressCode: { contains: '苹果福', mode: 'insensitive' } },
+            { searchPinyin: { contains: '苹果福', mode: 'insensitive' } },
+            { searchPinyinInitials: { contains: '苹果福', mode: 'insensitive' } },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('ignores blank q and keeps the plain scope filter', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await listOrders(salesActor, { q: '   ' });
+    const where = dbMock.order.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({ submitterId: 'sales-1' });
+  });
+
+  it('sorts q results by relevance after preserving the scoped query', async () => {
+    const base = {
+      status: OrderStatus.DRAFT,
+      isUrgent: false,
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      trackingNo: null,
+      expressCode: null,
+      searchPinyin: null,
+      searchPinyinInitials: null,
+      totalAmount: '0.00',
+      submitterId: 'sales-1',
+      createdAt: new Date('2026-06-28T00:00:00Z'),
+      updatedAt: new Date('2026-06-28T00:00:00Z'),
+    };
+    dbMock.order.findMany.mockResolvedValue([
+      { ...base, id: 'contains', orderNo: '20260628-0001', customerRef: '佛山苹果福' },
+      { ...base, id: 'exact', orderNo: '苹果福' },
+      { ...base, id: 'prefix', orderNo: '苹果福-加急' },
+    ]);
+
+    const rows = await listOrders(salesActor, { q: '苹果福' });
+
+    expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
   });
 
   it('getOrderDetail enforces the scope filter by id (SALES cannot peek at others)', async () => {

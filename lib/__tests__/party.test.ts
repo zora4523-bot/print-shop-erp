@@ -1,0 +1,258 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { PartyType } from '../../generated/prisma/client';
+
+const { dbMock, txMock } = vi.hoisted(() => {
+  const tx = {
+    party: {
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    partyContact: {
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    partyAddress: {
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      findFirst: vi.fn(),
+    },
+  };
+  return {
+    txMock: tx,
+    dbMock: {
+      party: {
+        findMany: vi.fn(),
+        findUnique: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+      partyContact: {
+        create: vi.fn(),
+      },
+      partyAddress: {
+        create: vi.fn(),
+      },
+      $transaction: vi.fn((cb: (txArg: typeof tx) => unknown) => cb(tx)),
+    },
+  };
+});
+
+vi.mock('@/lib/db', () => ({ db: dbMock }));
+
+import {
+  createParty,
+  formatPartyAddress,
+  listCustomerPartyOptions,
+  listParties,
+  PartyInvariantError,
+  setPartyActive,
+  updateParty,
+} from '../party';
+
+const now = new Date('2026-06-28T00:00:00Z');
+
+const makeParty = (over = {}) => ({
+  id: 'party1',
+  type: PartyType.CUSTOMER,
+  code: 'CUST_001',
+  name: '苹果福',
+  shortName: '苹果',
+  searchPinyin: null,
+  searchPinyinInitials: null,
+  isActive: true,
+  createdAt: now,
+  updatedAt: now,
+  contacts: [
+    {
+      id: 'contact1',
+      name: '王小姐',
+      phone: '13800000000',
+      wechat: null,
+      isPrimary: true,
+      sortOrder: 0,
+    },
+  ],
+  addresses: [
+    {
+      id: 'addr1',
+      receiverName: '王小姐',
+      receiverPhone: '13800000000',
+      province: '广东',
+      city: '广州',
+      district: '番禺',
+      detail: '市桥街道 1 号',
+      isDefault: true,
+      sortOrder: 0,
+    },
+  ],
+  ...over,
+});
+
+beforeEach(() => {
+  for (const fn of Object.values(dbMock.party)) fn.mockReset();
+  dbMock.partyContact.create.mockReset();
+  dbMock.partyAddress.create.mockReset();
+  dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
+  for (const group of [
+    txMock.party,
+    txMock.partyContact,
+    txMock.partyAddress,
+  ]) {
+    for (const fn of Object.values(group)) fn.mockReset();
+  }
+});
+
+describe('listParties', () => {
+  it('searches code, name, shortName, pinyin, contacts, phone, and address', async () => {
+    dbMock.party.findMany.mockResolvedValue([]);
+
+    await listParties({ q: '  苹果 ' });
+
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            {
+              OR: expect.arrayContaining([
+                { code: { contains: '苹果', mode: 'insensitive' } },
+                { name: { contains: '苹果', mode: 'insensitive' } },
+                { shortName: { contains: '苹果', mode: 'insensitive' } },
+                { searchPinyin: { contains: '苹果', mode: 'insensitive' } },
+                { searchPinyinInitials: { contains: '苹果', mode: 'insensitive' } },
+                expect.objectContaining({ contacts: expect.any(Object) }),
+                expect.objectContaining({ addresses: expect.any(Object) }),
+              ]),
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('keeps search relevance for default sorting', async () => {
+    dbMock.party.findMany.mockResolvedValue([
+      makeParty({ id: 'contains', name: '广州苹果福印刷' }),
+      makeParty({ id: 'exact', name: '苹果福' }),
+      makeParty({ id: 'prefix', name: '苹果福一店' }),
+    ]);
+
+    const rows = await listParties({ q: '苹果福' });
+
+    expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
+  });
+});
+
+describe('listCustomerPartyOptions', () => {
+  it('only asks for active CUSTOMER/BOTH rows and maps defaults for order form', async () => {
+    dbMock.party.findMany.mockResolvedValue([makeParty()]);
+
+    const options = await listCustomerPartyOptions();
+
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isActive: true,
+          OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
+        },
+      }),
+    );
+    expect(options[0]).toMatchObject({
+      code: 'CUST_001',
+      contactName: '王小姐',
+      receiverName: '王小姐',
+      receiverPhone: '13800000000',
+      receiverAddress: '广东广州番禺市桥街道 1 号',
+    });
+  });
+});
+
+describe('createParty', () => {
+  it('creates a party with primary contact and default address', async () => {
+    txMock.party.create.mockResolvedValue({ id: 'party1' });
+    dbMock.party.findUnique.mockResolvedValue(makeParty());
+
+    await createParty({
+      type: PartyType.CUSTOMER,
+      code: 'CUST_001',
+      name: '苹果福',
+      shortName: null,
+      primaryContactName: '王小姐',
+      primaryContactPhone: '13800000000',
+      primaryContactWechat: null,
+      defaultReceiverName: '王小姐',
+      defaultReceiverPhone: '13800000000',
+      defaultProvince: '广东',
+      defaultCity: '广州',
+      defaultDistrict: '番禺',
+      defaultAddressDetail: '市桥街道 1 号',
+    });
+
+    expect(txMock.party.create.mock.calls[0][0].data).toMatchObject({
+      code: 'CUST_001',
+      isActive: true,
+    });
+    expect(txMock.partyContact.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          partyId: 'party1',
+          name: '王小姐',
+          isPrimary: true,
+        }),
+      }),
+    );
+    expect(txMock.partyAddress.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          partyId: 'party1',
+          detail: '市桥街道 1 号',
+          isDefault: true,
+        }),
+      }),
+    );
+  });
+});
+
+describe('updateParty', () => {
+  it('throws when target is missing', async () => {
+    dbMock.party.findUnique.mockResolvedValue(null);
+    await expect(
+      updateParty('missing', {
+        type: PartyType.CUSTOMER,
+        code: 'CUST_001',
+        name: '苹果福',
+        shortName: null,
+        primaryContactName: null,
+        primaryContactPhone: null,
+        primaryContactWechat: null,
+        defaultReceiverName: null,
+        defaultReceiverPhone: null,
+        defaultProvince: null,
+        defaultCity: null,
+        defaultDistrict: null,
+        defaultAddressDetail: null,
+      }),
+    ).rejects.toBeInstanceOf(PartyInvariantError);
+  });
+});
+
+describe('setPartyActive', () => {
+  it('returns existing row when active state is unchanged', async () => {
+    dbMock.party.findUnique.mockResolvedValue(makeParty({ isActive: true }));
+
+    const result = await setPartyActive('party1', true);
+
+    expect(result.isActive).toBe(true);
+    expect(dbMock.party.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('formatPartyAddress', () => {
+  it('joins region and detail without dropping blanks', () => {
+    expect(formatPartyAddress(makeParty().addresses[0])).toBe(
+      '广东广州番禺市桥街道 1 号',
+    );
+  });
+});
