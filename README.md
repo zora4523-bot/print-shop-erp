@@ -12,6 +12,11 @@
 | **CLAUDE.md** | 开发规范与工作准则 | Claude Code / Codex |
 | **prisma/schema.prisma** | 数据库Schema | 开发 |
 | **prisma/seed.ts** | 初始化种子数据 | 开发 |
+| **PIGSTY-EXTENSIONS.md** | Pigsty 扩展适配与开发计划 | 开发 / 运维 |
+| **docs/pigsty-production-activation-runbook.md** | Pigsty 生产扩展启用 runbook | 运维 / Owner |
+| **docs/deployment-smoke-checklist.md** | 部署前 smoke 与备份检查清单 | 开发 / 运维 |
+| **docs/AGENT-BACKLOG.md** | Agent 自动化开发任务队列 | 开发 / Codex routines |
+| **docs/AGENT-ROUTINES.md** | Agent 自动 prompt / draft PR 执行协议 | 开发 / Codex routines |
 | **CHANGELOG.md** | 版本变更历史 | 所有人 |
 | **SPEC-v1.0.md / v1.1.md** | 历史版本（仅归档） | 参考 |
 

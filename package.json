@@ -13,6 +13,8 @@
     "test:e2e:install": "playwright install chromium",
     "test:visual:update": "playwright test tests/visual --update-snapshots",
     "typecheck": "tsc --noEmit",
+    "deploy:smoke": "node scripts/deploy-smoke.mjs",
+    "agent:next": "node scripts/agent-next-task.mjs",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio"

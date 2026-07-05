@@ -292,3 +292,120 @@
 - **理由**：(a) 测试环境跑 E2E / 单测时 webhook URL 是 fake (`https://qyapi.weixin.qq.com/...key=test`)，真发会被企业微信拒（4xx）然后 NotificationLog 全是 FAILED，混淆"代码 bug"与"测试 webhook 不通"。Mock-mode 让 NotificationLog status=SUCCESS（with errorMessage='MOCK'）作为&ldquo;notify 流程跑通&rdquo;的最简证据。(b) Dev 期 owner 在 /owner/notifications 点&ldquo;测试&rdquo;按钮：mock-mode 下立刻写 SUCCESS+'MOCK'，让 owner 看到&ldquo;链路通了，只差真 webhook URL&rdquo;，不会以为坏掉。
 - **影响**：`.env.example` 默认 `NOTIFICATION_MOCK_MODE=true`；prod 部署时改 `false`（README 上线运维章节加一句）。webhook.ts / notify.ts 第一行读 env，dev 默认走短路。E2E 跑在 `NODE_ENV=development`，自然走 mock-mode；不需要在 spec 里手动 set env。
 - **相关文档**：`lib/notification/notify.ts`、`.env.example`、README §🚢 运维。
+
+---
+
+## 2026-06-28：Pigsty 扩展采用白名单分阶段引入，不替代应用层认证鉴权
+
+- **决策**：Pigsty 扩展只作为 PostgreSQL 能力增强，按白名单分阶段引入。第一阶段优先 `pg_trgm` / `pg_bigm` / `citext` / `pg_stat_statements` / `pg_cron` / `pg_net`；第二阶段再看商品动态属性、价格区间、多级分类和拼音搜索（`pg_jsonschema` / `btree_gist` / `ltree` / `pg_pinyin`）；第三阶段处理库存聚合、流水分区、脱敏和审计（`pg_ivm` / `pg_partman` / `anon` / `pgaudit` / `auto_explain` / `index_advisor`）。数据库 JWT、DB 账号安全类扩展不替代 Auth.js、bcrypt、JWT session 和 `PERMISSIONS` RBAC。
+- **理由**：项目当前架构已经稳定在 Next.js App Router + Server Actions + Prisma 7 + PostgreSQL + Auth.js。Pigsty 对应用层透明，最适合补搜索、观测、cron、库存聚合、分区、脱敏等数据库能力；把登录/业务权限下沉到数据库 JWT 扩展会和现有 Server Action 权限模型冲突，也无法表达工单归属、薪资快照、账单状态机这些业务规则。分阶段引入能先拿到工单/商品搜索收益，同时避免一开始把生产数据库配置复杂化。
+- **影响**：新增 `PIGSTY-EXTENSIONS.md` 作为扩展实施计划。后续扩展 PR 必须先确认属于白名单，并标明启用层级：普通 migration、hand-written SQL migration、还是 Pigsty 集群配置。需要 `shared_preload_libraries` 或后台 worker 的扩展不得只靠 Prisma migration 偷偷启用。所有搜索、库存、分区改动都要保留现有权限 scope、薪资快照和账单 finance-of-record 语义。
+- **相关文档**：`PIGSTY-EXTENSIONS.md`、README 文档索引、Pigsty Extension Catalog。
+
+---
+
+## 2026-06-28：商品/账号/物料编码大小写不敏感，产品内部编码命名为 `Product.code`
+
+- **决策**：启用 `citext` 承载大小写不敏感标识。`User.username` 和 `Material.code` 原字段迁移为 `citext`；产品字典新增可选 `Product.code` 作为内部 SKU / 快速检索编码，唯一且大小写不敏感。迁移前用 `lower(...) GROUP BY` 显式检查既有账号名/物料编码是否存在大小写冲突，发现冲突就中止迁移。
+- **理由**：ERP 操作员不会稳定区分 `HB001` / `hb001` 这类大小写；让数据库按业务语义保证唯一，比在每个表单里手写 `lower()` 去重更可靠。`Product.code` 先做可选字段，不强迫历史产品补码，也不阻断当前工单录入；真正需要严格 SKU 体系时再把字段改为必填。
+- **影响**：产品创建/编辑表单新增“产品编码（选填）”；产品列表和产品搜索包含编码；P2002 唯一冲突映射到 `code` 字段错误。Auth.js 登录仍走 `username` 查找，迁移后由 citext 保证大小写不敏感匹配。
+- **相关文档**：`prisma/migrations/20260628001000_add_citext_product_code/migration.sql`、`prisma/schema.prisma`、`components/business/product/ProductForm.tsx`、`actions/owner-products.ts`。
+
+---
+
+## 2026-06-28：报价字典先加数据库不变量，完整报价 UI 后置
+
+- **决策**：PR-4 先落数据库约束，不提前扩展报价 UI。`PriceTier` 启用 `btree_gist` 并增加两个不变量：`effectiveTo` 必须为空或晚于 `effectiveFrom`；同一 `productId + minQty` 的有效期窗口不能重叠。`PriceAdjustment.triggerCondition` 在 Pigsty 环境存在 `pg_jsonschema` 时增加 JSON Schema check，当前只约束为 JSON object，避免在业务语义未确认前过度限制字段结构。
+- **理由**：SPEC 已把完整价格阶梯和加价规则降为 P1/P2，但数据库层可以先防止最危险的数据污染：同一商品同一数量档出现多个同时生效价格。`triggerCondition` 目前没有冻结业务 schema，强行定义 required fields 会让后续报价规则难以调整；先保证它是 object，后续报价 UI/规则引擎确定后再收紧 schema。
+- **影响**：`PriceTier` 历史数据若已存在重叠窗口，migration 会用明确错误中止。`pg_jsonschema` 约束在本地非 Pigsty PG 缺扩展时会跳过并打印 NOTICE；生产 Pigsty 环境应安装并启用。应用层报价逻辑不变。
+- **相关文档**：`prisma/migrations/20260628002000_price_constraints/migration.sql`、`PIGSTY-EXTENSIONS.md`。
+
+---
+
+## 2026-06-28：商品分类树使用 `ltree` 生成列，保留 legacy enum 快照
+
+- **决策**：PR-5 新增 `ProductCategoryNode` 作为商品分类树。应用和 Prisma 写入普通文本 `path`，PostgreSQL 通过生成列 `"pathLtree" ltree GENERATED ALWAYS AS ("path"::ltree) STORED` 做树校验和 GIST 索引；`Product` 新增 `categoryNodeId` 外键。`Product.category` 暂时保留为 denormalized legacy enum，由选中的分类节点 `legacyCategory` 派生写入。
+- **理由**：Prisma 7.7 目前不能用 `@db.LTree` 原生表达 ltree；直接让业务代码操作 unsupported 类型会增加维护成本。文本 `path` + 生成列可以让表单、Server Action 和 Prisma Client 维持普通字符串模型，同时把 Pigsty/PostgreSQL 的树索引留在数据库层。保留旧 enum 可以避免订单录入、报表、历史统计一次性重构。
+- **影响**：产品创建/编辑从 enum select 改为分类节点 select；老产品迁移时按 enum 映射到默认节点。未来要做真正多级分类管理时，只需要扩展 `ProductCategoryNode` 的管理 UI 和树查询，不需要再改现有产品写入路径。
+- **相关文档**：`prisma/migrations/20260628003000_product_category_ltree/migration.sql`、`prisma/schema.prisma`、`lib/product.ts`、`components/business/product/ProductForm.tsx`。
+
+---
+
+## 2026-06-28：拼音搜索优先用 `pg_pinyin` 生成列，不引入 `pg_search`
+
+- **决策**：PR-6 为 `Order`、`Product` 和 `Material` 增加 `searchPinyin` 全拼列和 `searchPinyinInitials` 简拼列，并用 `pg_trgm` GIN 索引加速。Pigsty `pg_pinyin` 可用时，这两列是 `public.pinyin_char_romanize(...)` 驱动的 generated column；非 Pigsty 本地库缺少扩展包时，migration 退化为普通可空列以保持 schema 可部署。应用层仍保留一个 `q` 输入框，查询条件在原中文字段之外追加拼音列 `contains q`。
+- **理由**：Pigsty 的 `pg_pinyin` 文档给出了 generated column + trigram search 和 word tokenization + `pg_search` 两条路线。本项目当前搜索目标是工单号、客户代号、收货人、商品名、物料名这类短文本；先用生成列能覆盖中文/拼音输入，同时不引入 BM25、tokenizer、排序权重和额外扩展依赖。
+- **影响**：生产 Pigsty 数据库必须安装 `pg_pinyin` 才算拼音搜索 ready；本地非 Pigsty PostgreSQL 仍可跑完 migration，但 `/owner/pigsty` 和 `app_ops.search_index_readiness` 会把缺失 `pg_pinyin` 报告为 blocker。后续如果搜索需要“精确优先、相似度排序、权重排序”，再单独引入排序表达式或评估 `pg_search`。
+- **相关文档**：`prisma/migrations/20260628004000_pinyin_search/migration.sql`、`lib/order.ts`、`lib/product.ts`、`lib/material-inventory.ts`、Pigsty `pg_pinyin` 文档。
+
+---
+
+## 2026-06-28：库存看板聚合使用 `pg_ivm` 优先、普通 view 兜底
+
+- **决策**：PR-7 为 `MaterialTransaction` 增加两个读取对象：`material_inventory_movement_summary`（按物料累计入库、出库、净变动）和 `material_inventory_daily_summary`（按物料 + 上海日期聚合当日入库、出库、净变动）。如果数据库已安装且 preload `pg_ivm`，migration 使用 `pgivm.create_immv(...)` 创建 IMMV；否则创建同名普通 view。应用层通过 `lib/material-inventory.ts` 读取这些对象并结合 `Material.currentStock`、`safetyStock`、`averageCost` 形成库存看板数据源。
+- **理由**：`pg_ivm` 官方要求 `shared_preload_libraries` 或 `session_preload_libraries`，不能在普通 Prisma migration 里假装已经完成集群配置。用同名普通 view 兜底可以让本地开发和测试不依赖 Pigsty 包；生产 Pigsty 配好 preload 后才获得增量维护收益。`Material.currentStock` 仍是事务内事实字段，IMMV 只服务看板聚合，不改变库存扣减语义。
+- **影响**：物料流水量增大后，Dashboard/物料页可直接调用 `getMaterialInventoryDashboard()`，避免每次请求扫描全量 `MaterialTransaction`。批量导入或大规模回补流水前，需要考虑暂时禁用/重建 IMMV 或执行 `pgivm.refresh_immv(...)` 的运维流程。
+- **相关文档**：`prisma/migrations/20260628005000_inventory_ivm_summary/migration.sql`、`lib/material-inventory.ts`、Pigsty `pg_ivm` 文档。
+
+---
+
+## 2026-06-28：`pg_partman` 先落 readiness，不直接重写现有日志表
+
+- **决策**：PR-8 不在普通业务 migration 中直接把 `MaterialTransaction`、`OrderLog`、`NotificationLog` 改成分区表。先创建 `app_ops.partition_candidate` 和 `app_ops.partition_readiness`：列出候选表、分区键、月分区、保留策略、`pg_partman` 可用/安装状态，以及阻塞项。若环境有 `pg_partman` 包，migration 会创建 `partman` schema 并 `CREATE EXTENSION pg_partman WITH SCHEMA partman`。
+- **理由**：当前三张表都是 `id` 单列主键；PostgreSQL 原生分区表上的唯一/主键约束必须包含分区键。直接改成按 `createdAt` / `occurredAt` 分区，会牵动 Prisma 主键模型和外键切换。`pg_partman` 的 `create_parent` 适合已经设计为 partitioned parent 的表；对现有生产表应走单独 cutover runbook，而不是静默迁移。
+- **影响**：运维可以先查询 `app_ops.partition_readiness`，看到 `parent_table_is_not_partitioned`、`primary_key_does_not_include_control_column`、`incoming_foreign_keys_need_cutover_plan` 等 blocker。未来新建 `AuditLog` 或重构流水表时，先把主键设计为包含分区键，再用 readiness 里的 `create_parent_sql` / `run_maintenance_sql` 接入 `pg_partman`。
+- **相关文档**：`prisma/migrations/20260628006000_partition_readiness/migration.sql`、`lib/partition-maintenance.ts`、Pigsty `pg_partman` 文档。
+
+---
+
+## 2026-06-28：`anon` / `pgaudit` 先落敏感策略与 readiness，不在 migration 中执行脱敏
+
+- **决策**：PR-9 新增 `app_ops.sensitive_column_policy`、`app_ops.sensitive_column_readiness`、`app_ops.security_audit_table_readiness` 和 `app_ops.security_extension_readiness`，登记敏感列、生成 `anon` 安全标签建议、生成 `pgaudit.role` 表级授权建议，并检查扩展可用/安装/preload 状态。migration 不执行 `anon.anonymize_database()`，也不设置全局 `pgaudit.log`。
+- **理由**：Pigsty `anon` 文档把静态脱敏定义为原地改写数据；这类操作不能混入普通业务迁移。动态脱敏和 `pgaudit` 都依赖 Pigsty/PostgreSQL 集群层 preload 与角色配置，不能由 Prisma migration 单独完成。薪资、账单金额是快照化事实数据，随机化会破坏对账和复现；演示库导出时应显式 redaction，生产库则依赖 Auth.js/RBAC、数据库审计和最小化导出流程。
+- **影响**：测试/演示库脱敏流程改为先查询 `app_ops.security_extension_readiness`，再执行 `recommended_anon_steps`、`sensitive_column_readiness.apply_anon_label_sql` 和手工金额 redaction。DBA 直连审计按 `security_audit_table_readiness.audit_grant_sql` 授权到 `erp_auditor`，并建议 `pgaudit.log = 'write, ddl, role'`、`pgaudit.log_parameter = off`、`pgaudit.log_relation = on`，避免全库 SELECT 和 SQL 参数把业务正文刷进日志。
+- **相关文档**：`prisma/migrations/20260628007000_security_masking_audit_readiness/migration.sql`、`lib/security-readiness.ts`、Pigsty `anon` / `pgaudit` 文档。
+
+---
+
+## 2026-06-28：`pg_cron` / `pg_net` 和观测扩展先落 manifest + readiness，不自动启用生产任务
+
+- **决策**：PR-10 新增 `app_ops.cron_http_job_candidate`、`app_ops.cron_http_job_readiness`、`app_ops.ops_extension_readiness`、`app_ops.query_observation_candidate` 和 `app_ops.query_observability_readiness`。6 个 `/api/cron/*` endpoint 作为 HTTP cron job manifest 登记，readiness 输出 `cron.schedule(...)` + `net.http_post(...)` SQL；查询观测登记工单搜索、商品搜索、Dashboard、账单、库存、薪资等候选路径。migration 不直接调用 `cron.schedule`。
+- **理由**：`pg_cron` 和 `pg_net` 都依赖 Pigsty/PostgreSQL 集群层 preload；`pg_cron` 还要求 `cron.database_name`，`pg_net` HTTP 调用还需要生产域名和 `CRON_SECRET`。这些配置不齐时自动 schedule 会造成无声失败或错误重试。把任务写成 manifest + generated SQL 可以让运维在确认 `app.erp_base_url` / `app.cron_secret` 后显式启用，同时保留外部 cron / 手工 curl 的兜底路径。
+- **影响**：生产切到 Pigsty 调度时先查 `app_ops.ops_extension_readiness` 和 `app_ops.cron_http_job_readiness`。只在 `ready_to_schedule=true` 时执行 `schedule_sql`。`pg_stat_statements` 用于持续观察 calls / mean_exec_time / rows；`auto_explain` 只用于短诊断窗口并建议 `auto_explain.log_parameter_max_length = 0`；`index_advisor` 只在诊断环境给索引建议，不把输出自动写进生产 migration。
+- **相关文档**：`prisma/migrations/20260628008000_ops_scheduler_observability_readiness/migration.sql`、`lib/ops-readiness.ts`、Pigsty `pg_cron` / `pg_net` / `pg_stat_statements` / `auto_explain` / `index_advisor` 文档。
+
+---
+
+## 2026-06-28：搜索 V1 上线必须有数据库侧 readiness 和 EXPLAIN 清单
+
+- **决策**：新增 `app_ops.search_surface_candidate` 和 `app_ops.search_index_readiness`。工单搜索与商品搜索各登记必需扩展、可选扩展、必需索引、可选 `pg_bigm` 索引、样例查询和上线前 EXPLAIN SQL；`/owner/pigsty` 直接展示这些结果。
+- **理由**：`pg_trgm` / `pg_bigm` / `pg_pinyin` 索引是否创建成功，不能只靠 migration 文件存在来判断。生产 Pigsty 可能缺某个扩展包，也可能因为迁移顺序或权限问题缺索引；没有 readiness 时，搜索表面可用但实际退化成全表扫描。把 EXPLAIN SQL 写入数据库侧 manifest，可以让运维按同一条查询检查真实计划。
+- **影响**：搜索相关 PR 必须同步更新 `app_ops.search_surface_candidate`，不能只改页面查询条件。`pg_bigm` 仍是可选增强，不作为 blocker；`pg_trgm`、`pg_pinyin` 和必需 GIN 索引缺失会让 readiness 报告 blocker。`Product.code` 是 `citext`，搜索索引统一使用 `code::text` 表达式。
+- **相关文档**：`prisma/migrations/20260628009000_search_readiness/migration.sql`、`lib/search-readiness.ts`、`app/(admin)/owner/pigsty/page.tsx`、`PIGSTY-EXTENSIONS.md`。
+
+---
+
+## 2026-06-28：物料先做库存看板和搜索，不在 Pigsty PR 中扩展 CRUD
+
+- **决策**：新增 `/foreman/materials` 作为只读库存看板，使用 `material:manage` 权限，读取 `lib/material-inventory.ts` 汇总结果，展示安全库存、当日出入库、累计出入库和库存金额。物料搜索覆盖 `Material.code`、`Material.name`、`Material.specification`、`Material.unit` 和 `pg_pinyin` 生成的全拼/简拼列，并追加 `pg_trgm` / 可选 `pg_bigm` 索引与 search readiness。
+- **理由**：本轮目标是落 Pigsty 扩展路线，而不是补完整物料 CRUD。`pg_ivm` 的业务价值在“流水增长后看板不重扫全表”，所以先把看板和搜索入口打通，让扩展能力可见；物料入库、出库、盘点、CRUD 仍应作为后续库存业务 PR 单独设计状态、审计和库存事务。
+- **影响**：FOREMAN 侧边栏“物料”从占位变为 `/foreman/materials`。OWNER 可因 `/foreman` layout 允许 OWNER+FOREMAN 直接访问，但暂不把该入口加入 OWNER 菜单，避免老板后台菜单继续膨胀。后续新增物料写入路径时，必须保证 `Material.currentStock` 和 `MaterialTransaction` 同事务更新，不能只写流水或只改事实字段。
+- **相关文档**：`app/(admin)/foreman/materials/page.tsx`、`lib/material-inventory.ts`、`prisma/migrations/20260628008500_material_search_indexes/migration.sql`、`prisma/migrations/20260628009000_search_readiness/migration.sql`。
+
+---
+
+## 2026-06-28：搜索结果先做应用层相关度重排，SQL 仍保留业务稳定排序
+
+- **决策**：新增 `lib/search-ranking.ts`，在 `listOrders`、`listProducts`、`getMaterialInventoryDashboard` 的 `q` 搜索结果上做稳定重排：精确命中优先，其次前缀命中、包含命中、拼音/简拼命中；相同 rank 保留数据库返回顺序。空查询仍完全使用原有业务排序。
+- **理由**：当前三个搜索入口都要保留既有权限 scope 和业务默认排序。直接改成 raw SQL `ORDER BY similarity(...)` 会放大鉴权和 Prisma 类型维护面，尤其工单搜索必须保留销售/客服只能看自己工单的 scope。先用应用层稳定重排，可以解决最常见的“精确订单号/编码命中被排到后面”，同时继续让 `pg_trgm` / `pg_bigm` / `pg_pinyin` 负责过滤和索引加速。
+- **影响**：搜索列表返回对象会多选隐藏搜索字段用于排序，UI 不展示这些字段。后续如果生产 EXPLAIN 和 pg_stat_statements 证明排序成本或结果质量不够，再单独引入数据库侧 `similarity()` / `word_similarity()` 排序或 `pg_search`，但必须同步更新 search readiness 和权限测试。
+- **相关文档**：`lib/search-ranking.ts`、`lib/order.ts`、`lib/product.ts`、`lib/material-inventory.ts`、`PIGSTY-EXTENSIONS.md`。
+
+---
+
+## 2026-06-28：Agent 自动开发只能开 draft PR，不允许自动合并或执行生产操作
+
+- **决策**：新增 `docs/AGENT-BACKLOG.md` 作为自动化任务队列，新增 `docs/AGENT-ROUTINES.md` 作为 routine 执行协议，新增 `scripts/agent-next-task.mjs` 生成下一条 `agent-ready` 任务 prompt，并新增 GitHub PR 模板。自动 agent 可以选择任务、建分支、实现、测试、提交、推送并打开 draft PR；不能自动 merge，不能执行生产 Pigsty 操作，不能处理 `needs-owner-input` / `manual-ops-only` 任务。
+- **理由**：项目里还有 OSS、物料事务、分类管理、报价 UI、E2E、Pigsty 生产 runbook 等后续工作，适合用 routine 批量推进。但薪资、账单、库存、分区 cutover、生产 cron、脱敏审计都带业务或生产风险，必须通过 backlog 状态和 PR 审查把自动化边界固定下来。
+- **影响**：后续 routine 统一先运行 `pnpm agent:next` 获取 prompt，再按 `docs/AGENT-ROUTINES.md` 执行。每个自动 PR 必须包含选中 backlog 项、验证命令、数据库影响、风险和人工 follow-up。没有 `agent-ready` 任务时 routine 应失败关闭，而不是自行发明任务。
+- **相关文档**：`docs/AGENT-BACKLOG.md`、`docs/AGENT-ROUTINES.md`、`scripts/agent-next-task.mjs`、`.github/pull_request_template.md`。
