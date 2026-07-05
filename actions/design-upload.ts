@@ -1,9 +1,15 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
 import { signDesignUpload } from '@/lib/oss/sign';
 import type { SignUploadResult } from '@/lib/oss/types';
+import {
+  OrderDesignError,
+  recordOrderItemDesign,
+  removeOrderItemDesign,
+} from '@/lib/order-design';
 import { DesignFileType } from '../generated/prisma/enums';
 
 // Client form submits a small JSON payload; Zod validates shape before
@@ -40,4 +46,68 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
     userId: user.id,
     ...parsed.data,
   });
+}
+
+// ── 浏览器 PUT 成功后：登记 OrderItemDesign 行 ──────────────────────
+
+export type DesignMutationResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+const recordDesignUploadSchema = z.object({
+  orderId: z.string().trim().min(1).max(64),
+  orderItemId: z.string().trim().min(1).max(64),
+  objectKey: z.string().trim().min(1).max(512),
+  fileType: z.nativeEnum(DesignFileType),
+  fileName: z.string().trim().min(1).max(256),
+  fileSize: z.number().int().min(1),
+});
+
+export async function recordDesignUploadAction(
+  raw: unknown,
+): Promise<DesignMutationResult> {
+  const user = await requirePermission('design:upload');
+  const parsed = recordDesignUploadSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, message: '参数校验失败' };
+  }
+  try {
+    await recordOrderItemDesign(parsed.data, { id: user.id, role: user.role });
+  } catch (err) {
+    if (err instanceof OrderDesignError) {
+      return { ok: false, message: err.message };
+    }
+    throw err;
+  }
+  revalidatePath(`/orders/${parsed.data.orderId}`);
+  return { ok: true };
+}
+
+const deleteOrderItemDesignSchema = z.object({
+  designId: z.string().trim().min(1).max(64),
+});
+
+export async function deleteOrderItemDesignAction(
+  raw: unknown,
+): Promise<DesignMutationResult> {
+  const user = await requirePermission('design:upload');
+  const parsed = deleteOrderItemDesignSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, message: '参数校验失败' };
+  }
+  let orderId: string;
+  try {
+    const result = await removeOrderItemDesign(parsed.data.designId, {
+      id: user.id,
+      role: user.role,
+    });
+    orderId = result.orderId;
+  } catch (err) {
+    if (err instanceof OrderDesignError) {
+      return { ok: false, message: err.message };
+    }
+    throw err;
+  }
+  revalidatePath(`/orders/${orderId}`);
+  return { ok: true };
 }

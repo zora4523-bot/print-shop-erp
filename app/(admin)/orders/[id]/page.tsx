@@ -24,6 +24,7 @@ import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
+import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 
@@ -76,6 +77,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       user.role === Role.FOREMAN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
+  // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
+  const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
   // Only foreman / owner creates outsource orders, and only on
   // production-active states. SHIPPED is non-terminal but already
   // out the door — no new production work attaches there (Codex
@@ -182,6 +186,19 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 />
                 {item.remark ? <Row label="款式备注" value={item.remark} full /> : null}
               </dl>
+              <DesignUploadPanel
+                orderId={order.id}
+                orderItemId={item.id}
+                canEdit={canEditDesigns}
+                designs={item.designs.map((d) => ({
+                  id: d.id,
+                  fileName: d.fileName,
+                  fileType: d.fileType,
+                  fileUrl: d.fileUrl,
+                  // BigInt 不能过 RSC 序列化边界
+                  fileSize: String(d.fileSize),
+                }))}
+              />
             </li>
           ))}
         </ol>

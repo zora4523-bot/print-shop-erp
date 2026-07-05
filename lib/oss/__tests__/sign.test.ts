@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock ali-oss 的 STS 客户端：单测只验证我们这层的契约（参数校验、
-// objectKey 构造、session policy 收缩、错误折叠），不真调阿里云。
-const { assumeRoleMock, stsCtorMock } = vi.hoisted(() => ({
-  assumeRoleMock: vi.fn(),
-  stsCtorMock: vi.fn(),
-}));
+// Mock ali-oss 的 STS 客户端 + OSS 客户端（预签 PUT URL 用）：单测只
+// 验证我们这层的契约（参数校验、objectKey 构造、session policy 收缩、
+// 错误折叠），不真调阿里云。
+const { assumeRoleMock, stsCtorMock, ossCtorMock, signatureUrlMock } =
+  vi.hoisted(() => ({
+    assumeRoleMock: vi.fn(),
+    stsCtorMock: vi.fn(),
+    ossCtorMock: vi.fn(),
+    signatureUrlMock: vi.fn(),
+  }));
 vi.mock('ali-oss', () => {
   class MockSTS {
     constructor(opts: unknown) {
@@ -13,7 +17,14 @@ vi.mock('ali-oss', () => {
     }
     assumeRole = assumeRoleMock;
   }
-  return { default: { STS: MockSTS } };
+  class MockOSS {
+    static STS = MockSTS;
+    constructor(opts: unknown) {
+      ossCtorMock(opts);
+    }
+    signatureUrl = signatureUrlMock;
+  }
+  return { default: MockOSS };
 });
 
 import { signDesignUpload } from '../sign';
@@ -39,6 +50,10 @@ const configuredEnv = {
 
 beforeEach(() => {
   stsCtorMock.mockReset();
+  ossCtorMock.mockReset();
+  signatureUrlMock
+    .mockReset()
+    .mockReturnValue('https://my-bucket.oss-cn-shenzhen.aliyuncs.com/signed-put?sig=x');
   assumeRoleMock.mockReset().mockResolvedValue({
     credentials: {
       AccessKeyId: 'STS.mock-ak',
@@ -210,6 +225,27 @@ describe('signDesignUpload — real STS signing', () => {
       accessKeyId: 'ak',
       accessKeySecret: 'sk',
     });
+  });
+
+  it('mints a presigned PUT URL with the temp credentials, bound to Content-Type', async () => {
+    const r = await signDesignUpload(validParams, configuredEnv);
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    // 预签客户端必须用 STS 临时凭证 + config endpoint 构造
+    expect(ossCtorMock).toHaveBeenCalledWith({
+      accessKeyId: 'STS.mock-ak',
+      accessKeySecret: 'mock-temp-sk',
+      stsToken: 'mock-token',
+      bucket: 'my-bucket',
+      endpoint: 'https://oss-cn-shenzhen.aliyuncs.com',
+      secure: true,
+    });
+    expect(signatureUrlMock).toHaveBeenCalledWith(r.objectKey, {
+      method: 'PUT',
+      expires: 3600,
+      'Content-Type': 'image/jpeg',
+    });
+    expect(r.putUrl).toMatch(/^https:\/\//);
   });
 
   it('scopes the session policy to exactly the minted object key', async () => {

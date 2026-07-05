@@ -156,8 +156,24 @@ export async function signDesignUpload(
   const cfg = result.cfg;
 
   let credentials: StsCredentials;
+  let putUrl: string;
   try {
     credentials = await signViaSts(cfg, objectKey);
+    // 用临时凭证再签一个预签 PUT URL（寿命 = 凭证寿命 1h，绑定
+    // Content-Type）——浏览器普通 fetch 就能上传，无需前端 SDK。
+    const tempClient = new OSS({
+      accessKeyId: credentials.accessKeyId,
+      accessKeySecret: credentials.accessKeySecret,
+      stsToken: credentials.securityToken,
+      bucket: cfg.bucket,
+      endpoint: cfg.endpoint,
+      secure: cfg.endpoint.startsWith('https://'),
+    });
+    putUrl = tempClient.signatureUrl(objectKey, {
+      method: 'PUT',
+      expires: STS_DURATION_SECONDS,
+      'Content-Type': params.mimeType,
+    });
   } catch (err) {
     // AssumeRole 失败（AK 错、角色信任策略不含本子账号、网络等）。
     // 原始错误进服务端日志给 ops；给 UI 的 message 不回显 SDK 错误
@@ -184,6 +200,7 @@ export async function signDesignUpload(
     // here: that value can be a read-only CDN / custom domain (round
     // 30). Stored designs still read from publicBaseUrl.
     uploadUrl: `${cfg.bucketUrl}/${objectKey}`,
+    putUrl,
     publicUrl: `${cfg.publicBaseUrl}/${objectKey}`,
   };
 }
