@@ -8,9 +8,9 @@
 
 ## 当前任务
 
-**A06 OSS STS 真实接入收官** ✅ —— 业主已给 `webhongbao` 挂对象策略，复跑冒烟 6/6 全通，并用真实 `uploadBundleZip` 端到端跑了一次（两个 design/* 文件 → archiver → bundles/*.zip → 预签 URL 真下载，ZIP 魔数校验通过）。至此 OSS 直传 + CDR 真打包整条链路在真实阿里云环境验证完毕。剩余任务全部 `needs-owner-input`（A05 / A07 / A20 / A21）。
+**设计图上传 UI 接线完成** ✅（A06 最后一块拼图）—— 工单详情页款式卡片新增设计图面板：DRAFT 状态可上传（JPG/PNG/WEBP/CDR）与删除，其余状态只读展示。链路：sign 前置授权闸 → 预签 PUT URL（15min、绑 Content-Type）浏览器裸 fetch 直传 → HEAD 权威 size + order-cascade 锁内重校 → OrderItemDesign 行 + OrderLog。commits `3849cbd`（feat）+ `ed9733e`（Codex 5 findings 修复，复核 clean）。预签 PUT 真实冒烟通过（200 / 错 Content-Type 403 / HEAD 确认）。**1242 单测全绿**。
 
-**下一个自然任务候选**：上传 UI 前端接线——`signDesignUploadAction` 后端已真实可用，检查订单表单是否已有调用它并 PUT 到 OSS 的前端流（P0 #3 Slice C 当时只做了 action 层脚手架）；如无则补 client 上传组件 + OrderItemDesign.fileUrl 写库，是 A06 的自然延伸（无需业主输入）。
+**至此设计图从上传 → 打印视图 → CDR 打包下载的完整业务流全部真实可用**。剩余任务全部 `needs-owner-input`（A05 / A07 / A20 / A21）。
 
 ## 本次 session 主要产出（2026-07-05）
 
@@ -33,8 +33,13 @@
 
 ## 卡住的问题
 
-- A05/A06/A07/A20/A21 全部等业务输入（见 backlog Needs 小节）。
+- A05/A07/A20/A21 全部等业务输入（见 backlog Needs 小节）。
 - `pnpm-workspace.yaml` 有一段 `allowBuilds` 占位符改动（值是字面量 "set this to true or false"），像是 pnpm 命令生成后未填完，未提交，等业主确认。
+
+## P1 技术债（本 session 新增）
+
+- **设计图 ETag 固定**：预签 PUT URL 在 15 分钟寿命内可重复使用，登记后仍可替换对象内容。彻底修复：OrderItemDesign 加 etag 列（HEAD 时记录），打印/CDR 消费端校验。见 DECISIONS 2026-07-05。
+- **设计孤儿对象清理**：sign 后未登记的对象 + 删除设计图后的 OSS 对象都留在 bucket（策略无 DeleteObject）。原 P1 待办，现在有真实上传流了，优先级上调。
 
 ## 相关文件清单（下次 AI 必读）
 
@@ -76,3 +81,5 @@
 - 2026-07-05：（本 session）UI Phase A–E 之后的工作区大批次全量验证绿（1214 单测 / 21 Playwright / build / lint / typecheck / migrate deploy）；A09 分区 cutover 计划交付 `docs/partition-cutover-plan.md`（Codex 2 findings 闭合）；PROGRESS.md 刷新到真实状态。队列无 `agent-ready` 任务，剩余项等业主输入。
 - 2026-07-05：（业主授权）大批次按模块拆 12 commit 固化（`c84162f → accb713`）；STOCK_ALERT 出库跨越检测接线收官 SPEC §8.1 10/10 事件（`3184a26` + `4f76a85`，Codex 抓 payload 丢尾零 + 测试锁提交顺序，复核 clean）。1220 单测 / lint / typecheck 全绿。
 - 2026-07-05：**A06 OSS STS 真实接入**（`968b131` feat + `d65804f` / `89b1302` fix，Codex rounds 抓 6 真 bug）。业主提供 bucket `hongbaowebdb` / region `oss-cn-guangzhou` / 角色 `erp-oss-upload` / 子账号 `webhongbao` AK（**曾误填 .env.example，已迁 .env 并恢复模板，密钥未进 git**；region 从完整域名归一化）。`ali-oss` + `archiver` 落地：signViaSts 真 AssumeRole（session policy 收缩单 objectKey，1h）+ CDR 流式打包（get→zip→putStream bundles/* + 24h 预签 GET，长期凭证——STS 1h 签不出 24h 链接）。Codex 6 修：endpoint 走 config、putStream settled 折叠防 unhandled rejection、CDR mock 非生产默认开、expiresAt 对齐签发时刻、malformed OSS_ENDPOINT 双路径降级（sign 折叠 error / isMockMode 降级 mock 防 /foreman/cdr 500）、PassThrough destroy 需先挂 error 监听器（否则崩进程）。真实冒烟：AssumeRole ✅ / 临时凭证 PUT design/* ✅ / 越权护栏 ✅ / 子账号直连 ❌（等业主挂策略）。测试对象遗留 bucket（无 DeleteObject 权限，预期）。1229 单测全绿。pnpm store v10/v11 冲突用 `CI=true pnpm install` 重链接解决。
+- 2026-07-05：A06 全链路验证收官——业主挂好 `webhongbao` 对象策略后复跑冒烟 6/6 全通；真实 `uploadBundleZip` 端到端（archiver 流式打包 + 预签 URL 下载 + ZIP 魔数校验）通过。
+- 2026-07-05：设计图上传 UI 接线（`3849cbd` + `ed9733e`）。工单详情页款式卡设计图面板（DRAFT 增删/其余只读）；预签 PUT URL 直传（前端零 SDK）；Codex 抓 5 真 bug 全修：sign 前置授权闸（防任意 id 铸凭证写孤儿对象）、HEAD Content-Length 权威 size + 上限兜底（防申报小传大）、order-cascade 锁内 fresh-read（防与提交并发 TOCTOU）、凭证 1h→15min（压缩重放覆写窗口，ETag 固定记 P1）、input 重置。预签 PUT 真实冒烟（含错误 Content-Type 403 护栏）通过。1242 单测。
