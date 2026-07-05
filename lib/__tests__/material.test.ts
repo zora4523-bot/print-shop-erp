@@ -358,19 +358,31 @@ describe('createMaterialTransaction', () => {
   };
 
   // STOCK_ALERT 跨越检测（SPEC §8.1；makeMaterial 的 safetyStock = 2.00）
-  it('fires STOCK_ALERT when stock-out crosses below safety stock', async () => {
+  it('fires STOCK_ALERT after tx commit when stock-out crosses below safety stock', async () => {
+    // 锁死"提交后才推送"的顺序——tx 内 dispatch 会在回滚时留幽灵消息
+    const callOrder: string[] = [];
+    dbMock.$transaction.mockImplementation(async (cb) => {
+      const result = await cb(txMock);
+      callOrder.push('commit');
+      return result;
+    });
+    notifyMock.mockImplementation(() => {
+      callOrder.push('dispatch');
+    });
+
     const result = await runStockOut('3.00', '2', { currentStock: '1.00' });
     expect(result.stockAlert).toEqual({
       materialName: 'A4 白卡纸',
-      currentStock: 1,
-      safetyStock: 2,
+      currentStock: '1.00',
+      safetyStock: '2.00',
     });
     expect(notifyMock).toHaveBeenCalledTimes(1);
     expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
       materialName: 'A4 白卡纸',
-      currentStock: 1,
-      safetyStock: 2,
+      currentStock: '1.00',
+      safetyStock: '2.00',
     });
+    expect(callOrder).toEqual(['commit', 'dispatch']);
   });
 
   it('does not fire when stock stays at or above safety stock', async () => {

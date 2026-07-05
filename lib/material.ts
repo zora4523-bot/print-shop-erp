@@ -298,8 +298,8 @@ export type CreateMaterialTransactionData = {
 // （applyMaterialStockMovement 跑在 tx 内，tx 回滚时不能已发消息）。
 export type MaterialStockAlert = {
   materialName: string;
-  currentStock: number;
-  safetyStock: number;
+  currentStock: string; // toFixed(2)，保尾零与库存 UI / Decimal(12,2) 一致
+  safetyStock: string;
 };
 
 export type MaterialStockMovementResult = {
@@ -493,8 +493,8 @@ export async function applyMaterialStockMovement(
     safety && current.gte(safety) && next.lt(safety)
       ? {
           materialName: material.name,
-          currentStock: Number(next.toFixed(2)),
-          safetyStock: Number(safety.toFixed(2)),
+          currentStock: next.toFixed(2),
+          safetyStock: safety.toFixed(2),
         }
       : null;
 

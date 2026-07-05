@@ -365,15 +365,27 @@ describe('cancelPurchaseReceipt', () => {
     txMock.purchaseOrder.update.mockResolvedValue({ id: 'po1' });
     dbMock.purchaseOrder.findUnique.mockResolvedValue(detail);
 
+    // 锁死"提交后才推送"的顺序
+    const callOrder: string[] = [];
+    dbMock.$transaction.mockImplementation(async (cb) => {
+      const result = await cb(txMock);
+      callOrder.push('commit');
+      return result;
+    });
+    notifyMock.mockImplementation(() => {
+      callOrder.push('dispatch');
+    });
+
     await cancelPurchaseReceipt('pr1', actor, null, now);
 
     // 5.00 - 4.00 = 1.00 < 安全库存 2.00，且取消前 >= 2.00 → 跨越告警
     expect(notifyMock).toHaveBeenCalledTimes(1);
     expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
       materialName: 'A4 白卡纸',
-      currentStock: 1,
-      safetyStock: 2,
+      currentStock: '1.00',
+      safetyStock: '2.00',
     });
+    expect(callOrder).toEqual(['commit', 'dispatch']);
   });
 
   it('refuses cancellation when stock would become negative', async () => {

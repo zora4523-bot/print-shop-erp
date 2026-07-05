@@ -92,8 +92,8 @@ export type NotificationPayloads = {
   };
   STOCK_ALERT: {
     materialName: string;
-    currentStock: number;
-    safetyStock: number;
+    currentStock: string; // 已 toFixed(2)，如 '1.50'——number 会丢尾零（1.50 → '1.5'）
+    safetyStock: string; // 同上
   };
   CS_PERIOD_ENDING: {
     periodId: string;
