@@ -13,6 +13,7 @@ import {
 } from './admin/table';
 import { db } from './db';
 import { MATERIAL_CATEGORY_LABELS } from './material-labels';
+import { dispatchNotification } from './notification/dispatch';
 import { sortBySearchRelevance } from './search-ranking';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
@@ -291,9 +292,20 @@ export type CreateMaterialTransactionData = {
   operatorId: string;
 };
 
+// STOCK_ALERT（SPEC §8.1）payload。跨越检测：仅当本次变动把库存从
+// >=安全库存 带到 <安全库存 时才携带——持续低位的后续出库不重复告警，
+// 库存回补后再次跌破会重新触发。推送必须由事务外的调用方 dispatch
+// （applyMaterialStockMovement 跑在 tx 内，tx 回滚时不能已发消息）。
+export type MaterialStockAlert = {
+  materialName: string;
+  currentStock: number;
+  safetyStock: number;
+};
+
 export type MaterialStockMovementResult = {
   material: MaterialSummary;
   transaction: MaterialTransactionSummary;
+  stockAlert: MaterialStockAlert | null;
 };
 
 type StockTxClient = {
@@ -475,13 +487,28 @@ export async function applyMaterialStockMovement(
     }),
   ]);
 
-  return { material, transaction };
+  const safety =
+    material.safetyStock == null ? null : new Decimal(material.safetyStock);
+  const stockAlert =
+    safety && current.gte(safety) && next.lt(safety)
+      ? {
+          materialName: material.name,
+          currentStock: Number(next.toFixed(2)),
+          safetyStock: Number(safety.toFixed(2)),
+        }
+      : null;
+
+  return { material, transaction, stockAlert };
 }
 
 export async function createMaterialTransaction(
   data: CreateMaterialTransactionData,
 ): Promise<MaterialStockMovementResult> {
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     return applyMaterialStockMovement(tx, data);
   });
+  if (result.stockAlert) {
+    dispatchNotification('STOCK_ALERT', result.stockAlert);
+  }
+  return result;
 }

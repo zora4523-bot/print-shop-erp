@@ -15,7 +15,9 @@ import { db } from './db';
 import {
   applyMaterialStockMovement,
   MaterialInvariantError,
+  type MaterialStockAlert,
 } from './material';
+import { dispatchNotification } from './notification/dispatch';
 import type {
   CreatePurchaseOrderInput,
   CreatePurchaseReceiptInput,
@@ -484,6 +486,9 @@ export async function cancelPurchaseReceipt(
   now: Date = new Date(),
 ): Promise<PurchaseOrderDetail> {
   let purchaseOrderId: string | null = null;
+  // 取消入库是出库方向，可能把库存带破安全线；告警在 tx 提交后统一
+  // dispatch（tx 内发会在回滚时留下幽灵消息）。
+  const stockAlerts: MaterialStockAlert[] = [];
 
   await db.$transaction(async (tx) => {
     const receipt = await tx.purchaseReceipt.findUnique({
@@ -520,9 +525,11 @@ export async function cancelPurchaseReceipt(
     }
     purchaseOrderId = receipt.purchaseOrderId;
 
+    stockAlerts.length = 0; // 事务重跑时不残留上一轮的告警
+
     for (const item of receipt.items) {
       const quantity = new Decimal(item.quantity);
-      await applyPurchaseStockMovement(tx, {
+      const movement = await applyPurchaseStockMovement(tx, {
         materialId: item.materialId,
         locationId: item.materialTransactions[0]?.locationId ?? null,
         direction: TxDirection.OUT,
@@ -533,6 +540,7 @@ export async function cancelPurchaseReceipt(
         remark: `取消采购入库 ${receipt.receiptNo}${reason ? `：${reason}` : ''}`,
         purchaseReceiptItemId: item.id,
       });
+      if (movement.stockAlert) stockAlerts.push(movement.stockAlert);
 
       const lockedItems = await tx.$queryRaw<
         { id: string; quantity: Decimal.Value; receivedQuantity: Decimal.Value }[]
@@ -575,6 +583,9 @@ export async function cancelPurchaseReceipt(
   });
 
   if (!purchaseOrderId) throw new PurchaseInvariantError('采购单不存在');
+  for (const alert of stockAlerts) {
+    dispatchNotification('STOCK_ALERT', alert);
+  }
   const detail = await getPurchaseOrderDetail(purchaseOrderId);
   if (!detail) throw new PurchaseInvariantError('采购单取消入库后读取失败');
   return detail;

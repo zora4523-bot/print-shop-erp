@@ -35,6 +35,15 @@ const { dbMock, txMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
+// spy dispatch 整条链（同 order.test.ts 的 wire 测试模式）：
+// STOCK_ALERT 必须在 tx 提交后由 createMaterialTransaction 发出。
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
+}));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: notifyMock,
+}));
+
 import {
   createMaterial,
   createMaterialTransaction,
@@ -62,6 +71,7 @@ beforeEach(() => {
   txMock.material.update.mockReset();
   txMock.materialLocationStock.update.mockReset().mockResolvedValue({ id: 'stock1' });
   txMock.materialTransaction.create.mockReset();
+  notifyMock.mockReset();
 });
 
 const makeMaterial = (over = {}) => ({
@@ -311,6 +321,99 @@ describe('createMaterialTransaction', () => {
     ).rejects.toBeInstanceOf(MaterialInvariantError);
     expect(txMock.material.update).not.toHaveBeenCalled();
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
+  });
+
+  const mockTransactionRow = (over = {}) => ({
+    id: 'tx1',
+    materialId: 'mat1',
+    warehouseId: 'wh-default',
+    locationId: 'loc-default',
+    direction: TxDirection.OUT,
+    quantity: '2.00',
+    reasonType: 'PRODUCTION_USE',
+    purchaseReceiptItemId: null,
+    unitCost: null,
+    remark: null,
+    operatorId: 'owner1',
+    occurredAt: new Date('2026-07-05T01:00:00Z'),
+    createdAt: new Date('2026-07-05T01:00:00Z'),
+    ...over,
+  });
+
+  const runStockOut = async (currentStock: string, quantity: string, materialOver = {}) => {
+    txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'mat1', currentStock }])
+      .mockResolvedValueOnce([{ id: 'stock1', currentStock }]);
+    txMock.material.update.mockResolvedValue(makeMaterial(materialOver));
+    txMock.materialTransaction.create.mockResolvedValue(mockTransactionRow({ quantity }));
+    return createMaterialTransaction({
+      materialId: 'mat1',
+      direction: TxDirection.OUT,
+      quantity,
+      reasonType: 'PRODUCTION_USE',
+      unitCost: null,
+      remark: null,
+      operatorId: 'owner1',
+    });
+  };
+
+  // STOCK_ALERT 跨越检测（SPEC §8.1；makeMaterial 的 safetyStock = 2.00）
+  it('fires STOCK_ALERT when stock-out crosses below safety stock', async () => {
+    const result = await runStockOut('3.00', '2', { currentStock: '1.00' });
+    expect(result.stockAlert).toEqual({
+      materialName: 'A4 白卡纸',
+      currentStock: 1,
+      safetyStock: 2,
+    });
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
+      materialName: 'A4 白卡纸',
+      currentStock: 1,
+      safetyStock: 2,
+    });
+  });
+
+  it('does not fire when stock stays at or above safety stock', async () => {
+    // 落到恰好等于安全库存也不算跌破
+    const result = await runStockOut('3.00', '1', { currentStock: '2.00' });
+    expect(result.stockAlert).toBeNull();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('does not re-fire when stock was already below safety stock', async () => {
+    const result = await runStockOut('1.50', '0.5', { currentStock: '1.00' });
+    expect(result.stockAlert).toBeNull();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fire when safety stock is unset', async () => {
+    const result = await runStockOut('3.00', '2', {
+      currentStock: '1.00',
+      safetyStock: null,
+    });
+    expect(result.stockAlert).toBeNull();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fire on stock-in', async () => {
+    txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'mat1', currentStock: '1.00' }])
+      .mockResolvedValueOnce([{ id: 'stock1', currentStock: '1.00' }]);
+    txMock.material.update.mockResolvedValue(makeMaterial({ currentStock: '4.00' }));
+    txMock.materialTransaction.create.mockResolvedValue(
+      mockTransactionRow({ direction: TxDirection.IN, quantity: '3.00', reasonType: 'PURCHASE' }),
+    );
+    const result = await createMaterialTransaction({
+      materialId: 'mat1',
+      direction: TxDirection.IN,
+      quantity: '3',
+      reasonType: 'PURCHASE',
+      unitCost: null,
+      remark: null,
+      operatorId: 'owner1',
+    });
+    expect(result.stockAlert).toBeNull();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('throws when target material is missing', async () => {

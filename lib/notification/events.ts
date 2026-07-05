@@ -5,9 +5,10 @@
 // const，没用 PG enum，所以这里改名要小心（要写 migration 改 historic
 // log 行）。
 //
-// SPEC §8.1 列了 10 个事件；STOCK_ALERT 在本波 P1 #2 不实现（Material
-// 模型是 P1 后置），但 const 仍保留——让未来加物料的人不用动这层。
-// 调用 notify('STOCK_ALERT', ...) 现在不会有 active rule，会早 return。
+// SPEC §8.1 列了 10 个事件，现已全部接线。STOCK_ALERT 的 wire 点在
+// lib/material.ts createMaterialTransaction 与 lib/purchase.ts
+// cancelPurchaseReceipt（跨越检测：库存从 >=安全库存 跌破那一次变动
+// 才触发，持续低位不重复；见 DECISIONS 2026-07-05）。
 
 export const NOTIFICATION_EVENTS = {
   ORDER_SUBMITTED: 'ORDER_SUBMITTED',

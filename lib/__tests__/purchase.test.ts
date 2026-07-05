@@ -51,6 +51,15 @@ const { dbMock, txMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
+// STOCK_ALERT wire spy：取消入库（OUT 方向）可能把库存带破安全线，
+// dispatch 必须发生在 tx 提交后。
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
+}));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: notifyMock,
+}));
+
 import {
   cancelPurchaseReceipt,
   createPurchaseOrder,
@@ -105,6 +114,7 @@ beforeEach(() => {
   txMock.warehouseLocation.findUnique.mockReset().mockResolvedValue(defaultLocation);
   txMock.warehouseLocation.findFirst.mockReset().mockResolvedValue(defaultLocation);
   txMock.materialLocationStock.update.mockReset().mockResolvedValue({ id: 'stock1' });
+  notifyMock.mockReset();
 });
 
 describe('createPurchaseOrder', () => {
@@ -318,6 +328,54 @@ describe('cancelPurchaseReceipt', () => {
     );
   });
 
+  it('fires STOCK_ALERT after commit when cancellation crosses below safety stock', async () => {
+    txMock.purchaseReceipt.findUnique.mockResolvedValue({
+      id: 'pr1',
+      purchaseOrderId: 'po1',
+      receiptNo: 'PR20260628-0001',
+      status: PurchaseReceiptStatus.POSTED,
+      items: [
+        {
+          id: 'pri1',
+          purchaseOrderItemId: 'poi1',
+          materialId: 'mat1',
+          quantity: '4.00',
+          unitCost: null,
+          materialTransactions: [{ locationId: 'loc-default' }],
+        },
+      ],
+    });
+    txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'mat1', currentStock: '5.00' }])
+      .mockResolvedValueOnce([{ id: 'stock1', currentStock: '5.00' }])
+      .mockResolvedValueOnce([
+        { id: 'poi1', quantity: '10.00', receivedQuantity: '4.00' },
+      ]);
+    txMock.material.update.mockResolvedValue({
+      id: 'mat1',
+      name: 'A4 白卡纸',
+      safetyStock: '2.00',
+    });
+    txMock.materialTransaction.create.mockResolvedValue({ id: 'tx2' });
+    txMock.purchaseOrderItem.update.mockResolvedValue({ id: 'poi1' });
+    txMock.purchaseReceipt.update.mockResolvedValue({ id: 'pr1' });
+    txMock.purchaseOrderItem.findMany.mockResolvedValue([
+      { quantity: '10.00', receivedQuantity: '0.00' },
+    ]);
+    txMock.purchaseOrder.update.mockResolvedValue({ id: 'po1' });
+    dbMock.purchaseOrder.findUnique.mockResolvedValue(detail);
+
+    await cancelPurchaseReceipt('pr1', actor, null, now);
+
+    // 5.00 - 4.00 = 1.00 < 安全库存 2.00，且取消前 >= 2.00 → 跨越告警
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
+      materialName: 'A4 白卡纸',
+      currentStock: 1,
+      safetyStock: 2,
+    });
+  });
+
   it('refuses cancellation when stock would become negative', async () => {
     txMock.purchaseReceipt.findUnique.mockResolvedValue({
       id: 'pr1',
@@ -343,5 +401,7 @@ describe('cancelPurchaseReceipt', () => {
       PurchaseInvariantError,
     );
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
+    // 事务失败时不得发出任何库存告警（幽灵消息）
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
