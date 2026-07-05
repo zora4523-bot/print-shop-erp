@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**P0 全部收官（9/9）+ P1 Dashboard / 企业微信推送完成 + Pigsty 扩展与 ERP 主数据大批次已交付（待提交）**。自动化任务队列（`docs/AGENT-BACKLOG.md`）中已无 `agent-ready` 任务，剩余项全部需要业主拍板。
+**P0 全部收官（9/9）+ P1 Dashboard / 企业微信推送完成（SPEC §8.1 事件 10/10 全接线）+ Pigsty 扩展与 ERP 主数据大批次已提交**。自动化任务队列（`docs/AGENT-BACKLOG.md`）中已无 `agent-ready` 任务，剩余项全部需要业主拍板。
 
 ## 最后更新
 
@@ -40,12 +40,14 @@
 - [x] **A22 业务审计日志**（BusinessAuditLog + 敏感字段掩码）
 - [x] **A23 复杂页客户端数据层 POC**（库存盘点页 + `/api/admin/*` 路由复用权限）
 - [x] **UI Phase A–E**（已提交 `fde48b8 → 245be5c`）：design tokens、业务原子组件、admin shell 统一
-- [x] **2026-07-05 全量验证**：prisma validate / tsc / eslint / **1214 单测** / next build / migrate deploy（16 个新 migration）/ **21 Playwright E2E + 视觉** 全绿
-- [x] **A09 分区 cutover 计划**（plan-only）：`docs/partition-cutover-plan.md`
+- [x] **2026-07-05 全量验证**：prisma validate / tsc / eslint / next build / migrate deploy（16 个新 migration）/ **21 Playwright E2E + 视觉** 全绿
+- [x] **2026-07-05 大批次提交固化**：按模块拆成 12 个 commit（`c84162f → accb713`），随时可按提交粒度回滚
+- [x] **A09 分区 cutover 计划**（plan-only）：`docs/partition-cutover-plan.md`，Codex 2 findings 已闭合
+- [x] **STOCK_ALERT 接线**（`3184a26` + `4f76a85`）：出库跨越检测，SPEC §8.1 **10/10 事件全接通**；**1220 单测**
 
 ## 进行中
 
-- **工作区大批次待提交**：~127 个文件（A12–A23 + orders 迁入 `(admin)` 路由组 + schema 832 行变更 + 16 migrations）已全量验证绿，等业主决定提交切分方式（建议按 backlog 任务号分批 commit）。
+（无——等业主拍板下一任务）
 
 ## 下一步
 
@@ -61,9 +63,9 @@
 ## 待澄清的业务问题
 
 - A05/A06/A07/A20/A21 的 Needs 清单（见 `docs/AGENT-BACKLOG.md`）
-- **STOCK_ALERT 推送 wire**：物料模型已落地，安全库存告警何时触发（cron 扫描 or 出库时检查）需业主确认
 - **ProductCategory 中文标签**：业主过一眼 `/owner/product-categories` 与 SPEC 附录 C 对一遍
 - **CDR 预览方案**：等真实上传流跑起来再定
+- **STOCK_ALERT 补充语义**（可选）：当前为跨越检测（跌破那次告警、低位不重复）；若需"低位周期重复提醒"或"上调安全库存立即提醒"再加 cron 扫描端点
 
 ## 已知技术债
 

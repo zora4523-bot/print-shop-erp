@@ -8,7 +8,7 @@
 
 ## 当前任务
 
-**验证并收尾 2026-06 大批次（Pigsty 扩展 + admin 框架 + ERP 主数据 A12–A23）**。批次代码在工作区**已全量验证绿但未提交**；自动化队列（`docs/AGENT-BACKLOG.md`）已无 `agent-ready` 任务，剩余项全部 `needs-owner-input`，等业主拍板。
+**2026-06 大批次已提交固化 + STOCK_ALERT 接线完成（SPEC §8.1 事件 10/10 全接通）**。自动化队列（`docs/AGENT-BACKLOG.md`）已无 `agent-ready` 任务，剩余项全部 `needs-owner-input`，等业主拍板。
 
 ## 本次 session 主要产出（2026-07-05）
 
@@ -20,19 +20,19 @@
    - **21 Playwright E2E + 视觉回归全绿**（40.6s，含 smoke.spec 覆盖 Pigsty readiness 页与物料搜索）
 2. **A09 分区 cutover 计划交付（plan-only）**：新增 `docs/partition-cutover-plan.md` —— 三张日志表复合主键改造、入向外键复核 SQL（当前为 0）、按月回填、rename-swap 切换、验证/保留/回滚步骤、Prisma `@@id` 复合化及 `findUnique` 调用点排查清单。backlog A09 已标记 Delivered（执行仍 manual-ops-only）。
 3. **PROGRESS.md 整体刷新**（原文停在 4-25"P0 6/9"，已更新到当前真实状态）。
+4. **大批次提交固化（业主授权后）**：按模块拆 12 个 commit `c84162f → accb713`（db/Pigsty → admin 框架 → audit → material → party → product → price → purchase/warehouse → bom → orders 路由迁移 → e2e smoke → docs），提交后 1214 单测 + tsc 复验绿。`pnpm-workspace.yaml` 留了一段未填的 `allowBuilds` 占位符改动**未提交**，等业主确认意图。
+5. **STOCK_ALERT 接线（SPEC §8.1 收官，10/10 事件全通）**：commits `3184a26` + `4f76a85`。出库跨越检测（>=安全库存 跌破 <安全库存 那次变动触发，低位不重复，回补后再跌破重新触发）；wire 点 `createMaterialTransaction` + `cancelPurchaseReceipt`，tx 提交后 dispatch。Codex 2 轮：抓 payload number 丢尾零（改 toFixed(2) 字符串）+ 测试未锁提交顺序（callOrder 断言），复核 clean。决策已记 DECISIONS 2026-07-05。**1220 单测**全绿。
 
 ## 下一步具体指令（给下次 AI）
 
-1. **等业主决定大批次提交切分**：工作区未提交内容建议按 backlog 任务号分批 commit（Pigsty migrations → A12/A13 框架 → A16 → A17 → A18 → A19 → A22 → A23 → orders 路由迁移）。**注意 memory 规则：永远不要 `git add -A`**，逐文件 staging。
-2. **业主拍板后可开工的任务**（按优先级）：A05 工单款式级编辑 / A06 OSS STS 真实接入 / A20 生产单拆分 / A21 应收应付扩展 / A07 推送按人路由——Needs 清单都在 `docs/AGENT-BACKLOG.md`。
-3. **STOCK_ALERT 推送 wire**：物料模型已就绪（`Material.safetyStock` + `currentStock`），10/10 事件全接通只差这一个；触发方式（cron 扫描 vs 出库时检查）需业主确认后即可做，工作量约半天。
-4. **纯运维**（生产上线时）：`.env` 真值、cron 切 pg_cron、pgbackrest、Pigsty 扩展安装按 `docs/pigsty-production-activation-runbook.md`。
+1. **业主拍板后可开工的任务**（按优先级）：A05 工单款式级编辑 / A06 OSS STS 真实接入 / A20 生产单拆分 / A21 应收应付扩展 / A07 推送按人路由——Needs 清单都在 `docs/AGENT-BACKLOG.md`。
+2. **纯运维**（生产上线时）：`.env` 真值、cron 切 pg_cron、pgbackrest、Pigsty 扩展安装按 `docs/pigsty-production-activation-runbook.md`。
+3. **可选小活**：`pnpm-workspace.yaml` 的 allowBuilds 占位符处理；STOCK_ALERT 低位周期重复提醒（如业主要求，加 cron 端点复用现有 payload）。
 
 ## 卡住的问题
 
-- **大批次提交权在业主**：本次未替业主 commit（untracked 文件可能与业主并行工作交叉，见 memory `feedback_untracked_files`）。
 - A05/A06/A07/A20/A21 全部等业务输入（见 backlog Needs 小节）。
-- STOCK_ALERT 触发时机未拍板。
+- `pnpm-workspace.yaml` 有一段 `allowBuilds` 占位符改动（值是字面量 "set this to true or false"），像是 pnpm 命令生成后未填完，未提交，等业主确认。
 
 ## 相关文件清单（下次 AI 必读）
 
@@ -71,4 +71,5 @@
 - 2026-05-05：P0 #7 CDR 汇总下载落地。+20 单测（累计 1011）。
 - 2026-05-06：CDR 收尾审计 8 轮（rounds 119–126，baseUrl 推导硬化）。+12 单测（累计 1035）。**P0 9/9 收官**。
 - 2026-06-28：（Codex 批次，工作区交付）Pigsty 扩展 PR-1..10 + admin 框架 A11–A15 + ERP 主数据 A16–A19 + 审计 A22 + 客户端数据层 POC A23 + agent 自动化协议（backlog / routines / agent:next）。16 个新 migration。
-- 2026-07-05：（本 session）UI Phase A–E 之后的工作区大批次全量验证绿（1214 单测 / 21 Playwright / build / lint / typecheck / migrate deploy）；A09 分区 cutover 计划交付 `docs/partition-cutover-plan.md`；PROGRESS.md 刷新到真实状态。队列无 `agent-ready` 任务，剩余项等业主输入。
+- 2026-07-05：（本 session）UI Phase A–E 之后的工作区大批次全量验证绿（1214 单测 / 21 Playwright / build / lint / typecheck / migrate deploy）；A09 分区 cutover 计划交付 `docs/partition-cutover-plan.md`（Codex 2 findings 闭合）；PROGRESS.md 刷新到真实状态。队列无 `agent-ready` 任务，剩余项等业主输入。
+- 2026-07-05：（业主授权）大批次按模块拆 12 commit 固化（`c84162f → accb713`）；STOCK_ALERT 出库跨越检测接线收官 SPEC §8.1 10/10 事件（`3184a26` + `4f76a85`，Codex 抓 payload 丢尾零 + 测试锁提交顺序，复核 clean）。1220 单测 / lint / typecheck 全绿。
