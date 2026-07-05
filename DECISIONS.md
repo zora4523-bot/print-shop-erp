@@ -427,3 +427,12 @@
 - **理由**：单依赖降低维护面；session policy per-key 收缩让泄漏的临时凭证只能写它自己那一个路径（真实冒烟已验证越权被拒）。CDR 24h 链接与 DesignBundle.expiresAt 语义对齐，只能用长期凭证签。
 - **影响**：`OssNotWiredError` 桩删除，`signDesignUpload` 把 AssumeRole 失败折叠成 `{ status: 'error' }`（SDK 错误只进服务端日志不回显浏览器）；`bundle.ts` 把打包失败翻译成 CdrBundleError。新增 `CDR_BUNDLE_MOCK_MODE` env（本地开发已配真实凭证时显式设 true，防 E2E 往真 bucket 写包；生产留空即真实路径）。RAM 侧要求写入 .env.example 注释。策略无 DeleteObject——孤儿清理（P1 待办）实现时再最小化增授。
 - **相关文档**：`lib/oss/sign.ts`、`lib/cdr/zip.ts`、`.env.example`、`docs/AGENT-BACKLOG.md` A06、SPEC §3.1 / 附录 H。
+
+---
+
+## 2026-07-05：设计图上传 UI 走预签 PUT 直传，增删仅限 DRAFT
+
+- **决策**：上传三步：Server Action 铸凭证前先过授权闸（款式真实存在 + 工单 DRAFT + 所有权）→ 浏览器用 STS 临时凭证签发的预签 PUT URL（绑定 Content-Type、15 分钟）裸 fetch 直传 → `recordOrderItemDesign` 以 OSS HEAD 的 Content-Length 为权威文件大小（兜类型上限）后在 order-cascade advisory lock 内 fresh-read 重校并写行 + OrderLog。设计图增删**仅 DRAFT**——提交后的增删属 A05 款式级编辑，业主拍板前不开口子。删除只删 DB 行（策略无 DeleteObject，孤儿对象归 P1 清理任务）。
+- **理由**：预签 URL 让前端零 SDK（ali-oss 浏览器包 ~200KB+）；客户端申报的 fileSize/路径一律不信，服务端 HEAD + objectKey 形状校验双兜底；与 submit 共享同一把锁堵"提交与登记并发"的 TOCTOU。凭证压到 15 分钟是对"预签 URL 在寿命内可重复 PUT 覆写已登记对象"的窗口压缩。
+- **影响**：工单详情页款式卡片新增设计图面板（缩略图/CDR chip/上传/删除）。**已知残余风险（P1）**：登记后 ≤15 分钟内上传者仍可用同一预签 URL 替换对象内容；彻底修复需 OrderItemDesign 加 ETag 列 + 消费端校验。
+- **相关文档**：`lib/order-design.ts`、`lib/oss/sign.ts`、`components/business/order/DesignUploadPanel.tsx`、SPEC §3.1 / 附录 F。
