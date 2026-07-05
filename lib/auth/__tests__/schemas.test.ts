@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Role, WorkerType, MachineType } from '../../../generated/prisma/client';
+import {
+  MachineType,
+  PartyType,
+  Role,
+  WorkerType,
+} from '../../../generated/prisma/client';
 import {
   loginSchema,
   changePasswordSchema,
@@ -9,6 +14,9 @@ import {
   createCraftSchema,
   updateCraftSchema,
   createProductSchema,
+  createPartySchema,
+  createPurchaseOrderSchema,
+  createPurchaseReceiptSchema,
   updateProductSchema,
 } from '../schemas';
 
@@ -525,10 +533,9 @@ describe('updateCraftSchema', () => {
 // Product dictionary (P0 #2 Slice B)
 // ─────────────────────────────────────────────────────────────────────
 
-import { ProductCategory } from '../../../generated/prisma/client';
-
 const validProduct = {
-  category: ProductCategory.BLANK_STOCK,
+  code: '',
+  categoryNodeId: 'cat_blank_stock',
   name: '空白红包',
   specification: '',
   paperType: '',
@@ -547,16 +554,44 @@ describe('createProductSchema', () => {
     }
   });
 
-  describe('category', () => {
-    it('rejects an unknown enum value', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, category: 'NOPE' });
+  describe('code', () => {
+    it('empty string is normalized to null', () => {
+      const r = createProductSchema.safeParse({ ...validProduct, code: '' });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.code).toBeNull();
+    });
+
+    it.each(['HB001', 'hb001', 'FOIL_STOCK', 'foil-stock-01'])(
+      'accepts product code %j',
+      (code) => {
+        const r = createProductSchema.safeParse({ ...validProduct, code });
+        expect(r.success, code).toBe(true);
+        if (r.success) expect(r.data.code).toBe(code);
+      },
+    );
+
+    it.each(['红包001', 'HB 001', 'HB.001', 'HB/001'])(
+      'rejects product code %j',
+      (code) => {
+        const r = createProductSchema.safeParse({ ...validProduct, code });
+        expect(r.success, code).toBe(false);
+      },
+    );
+  });
+
+  describe('categoryNodeId', () => {
+    it('rejects empty category node id', () => {
+      const r = createProductSchema.safeParse({ ...validProduct, categoryNodeId: '' });
       expect(r.success).toBe(false);
     });
-    it('accepts every ProductCategory value', () => {
-      for (const c of Object.values(ProductCategory)) {
-        const r = createProductSchema.safeParse({ ...validProduct, category: c });
-        expect(r.success, c).toBe(true);
-      }
+
+    it('trims category node id', () => {
+      const r = createProductSchema.safeParse({
+        ...validProduct,
+        categoryNodeId: '  cat_blank_stock  ',
+      });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.categoryNodeId).toBe('cat_blank_stock');
     });
   });
 
@@ -679,5 +714,114 @@ describe('updateProductSchema', () => {
     const r = updateProductSchema.safeParse({ ...validProduct, isActive: 'on' });
     expect(r.success).toBe(true);
     if (r.success) expect('isActive' in r.data).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Party master data (A16)
+// ─────────────────────────────────────────────────────────────────────
+
+const validParty = {
+  type: PartyType.CUSTOMER,
+  code: 'CUST_001',
+  name: '苹果福',
+  shortName: '',
+  primaryContactName: '王小姐',
+  primaryContactPhone: '13800000000',
+  primaryContactWechat: '',
+  defaultReceiverName: '王小姐',
+  defaultReceiverPhone: '13800000000',
+  defaultProvince: '广东',
+  defaultCity: '广州',
+  defaultDistrict: '番禺',
+  defaultAddressDetail: '市桥街道 1 号',
+};
+
+describe('createPartySchema', () => {
+  it('accepts a customer party and normalizes blank optional fields to null', () => {
+    const r = createPartySchema.safeParse(validParty);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.type).toBe(PartyType.CUSTOMER);
+      expect(r.data.shortName).toBeNull();
+      expect(r.data.primaryContactWechat).toBeNull();
+    }
+  });
+
+  it('accepts supplier and both party types', () => {
+    expect(createPartySchema.safeParse({ ...validParty, type: PartyType.SUPPLIER }).success).toBe(true);
+    expect(createPartySchema.safeParse({ ...validParty, type: PartyType.BOTH }).success).toBe(true);
+  });
+
+  it('rejects non-code-safe values', () => {
+    for (const code of ['苹果福', 'CUST 001', 'CUST.001', 'CUST/001']) {
+      const r = createPartySchema.safeParse({ ...validParty, code });
+      expect(r.success, code).toBe(false);
+    }
+  });
+
+  it('rejects an empty name after trim', () => {
+    const r = createPartySchema.safeParse({ ...validParty, name: '   ' });
+    expect(r.success).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Purchase schemas (A17)
+// ─────────────────────────────────────────────────────────────────────
+
+const validPurchaseOrder = {
+  supplierPartyId: 'supplier_1',
+  materialId: 'mat_1',
+  quantity: '10.00',
+  unitCost: '1.2300',
+  expectedDate: '2026-07-01',
+  remark: '',
+};
+
+describe('createPurchaseOrderSchema', () => {
+  it('accepts a valid purchase order and normalizes blank remark', () => {
+    const r = createPurchaseOrderSchema.safeParse(validPurchaseOrder);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.quantity).toBe('10.00');
+      expect(r.data.unitCost).toBe('1.2300');
+      expect(r.data.remark).toBeNull();
+    }
+  });
+
+  it('accepts a blank expected date as null', () => {
+    const r = createPurchaseOrderSchema.safeParse({
+      ...validPurchaseOrder,
+      expectedDate: '',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.expectedDate).toBeNull();
+  });
+
+  it('rejects non-positive or malformed quantities', () => {
+    for (const quantity of ['0', '-1', 'abc', '1.234']) {
+      const r = createPurchaseOrderSchema.safeParse({
+        ...validPurchaseOrder,
+        quantity,
+      });
+      expect(r.success, quantity).toBe(false);
+    }
+  });
+});
+
+describe('createPurchaseReceiptSchema', () => {
+  it('accepts a receipt quantity and optional unit cost', () => {
+    const r = createPurchaseReceiptSchema.safeParse({
+      purchaseOrderItemId: 'poi_1',
+      quantity: '3.50',
+      unitCost: '',
+      remark: '到货一部分',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.unitCost).toBeNull();
+      expect(r.data.remark).toBe('到货一部分');
+    }
   });
 });

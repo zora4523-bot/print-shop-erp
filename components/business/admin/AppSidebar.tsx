@@ -11,6 +11,7 @@ import {
   CalendarDays,
   ClipboardList,
   Clock,
+  Database,
   FileArchive,
   FileText,
   LayoutDashboard,
@@ -59,6 +60,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   Sparkles,
   Bell,
   FileArchive,
+  Database,
 };
 
 type AppSidebarProps = {
@@ -96,11 +98,13 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex flex-col gap-0.5 px-2 py-1.5">
-          <span className="text-sm font-semibold leading-tight">
+        <div className="flex flex-col gap-1 px-2 py-2">
+          <span className="text-sm font-semibold leading-tight tracking-normal">
             红包印刷 ERP
           </span>
-          <span className="text-xs text-muted-foreground">{roleBadge}</span>
+          <span className="w-fit rounded-md bg-sidebar-accent px-1.5 py-0.5 text-xs text-sidebar-accent-foreground">
+            {roleBadge}
+          </span>
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -136,6 +140,11 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                         isActive={active}
                         tooltip={item.label}
                         render={<Link href={item.href} />}
+                        className={
+                          active
+                            ? 'border-l-2 border-primary bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+                            : undefined
+                        }
                       >
                         <Icon />
                         <span>{item.label}</span>

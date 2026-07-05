@@ -5,10 +5,13 @@ import { z } from 'zod';
 // bundle. /enums exports plain `const` objects with the same values as
 // /client but without the `@prisma/client` runtime (node:module etc.).
 import {
+  AdjustmentType,
+  MaterialCategory,
+  PartyType,
+  ProductCategory,
   Role,
   WorkerType,
   MachineType,
-  ProductCategory,
 } from '../../generated/prisma/enums';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
@@ -309,6 +312,15 @@ const productNameField = z
   .min(1, '请填写产品名')
   .max(64, '产品名过长（最多 64 个字符）');
 
+const productCodeField = z
+  .string()
+  .trim()
+  .max(32, '产品编码过长（最多 32 个字符）')
+  .refine((v) => v === '' || /^[A-Za-z0-9_-]+$/.test(v), {
+    message: '产品编码只能包含英文字母、数字、下划线、短横线',
+  })
+  .transform((v) => (v === '' ? null : v));
+
 const productTextFieldOptional = (label: string, max = 64) =>
   z
     .string()
@@ -364,10 +376,53 @@ const minOrderQtyField = z.preprocess(
     .optional(),
 );
 
-const productCategoryField = z.nativeEnum(ProductCategory);
+const productCategoryNodeIdField = z
+  .string()
+  .trim()
+  .min(1, '请选择产品分类');
+
+const productCategoryPathField = z
+  .string()
+  .trim()
+  .min(3, '分类路径过短')
+  .max(128, '分类路径过长（最多 128 个字符）')
+  .regex(
+    /^product\.[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/,
+    '分类路径必须以 product. 开头，只能包含字母、数字、下划线和点',
+  );
+
+const productCategoryNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写分类名')
+  .max(64, '分类名过长（最多 64 个字符）');
+
+const productCategorySortOrderField = z.coerce
+  .number({ message: '排序必须是数字' })
+  .int('排序必须是整数')
+  .min(1, '排序必须 ≥ 1（建议从 10 起，每 10 留一档）')
+  .max(9999, '排序过大');
+
+export const createProductCategoryNodeSchema = z.object({
+  path: productCategoryPathField,
+  name: productCategoryNameField,
+  legacyCategory: z.nativeEnum(ProductCategory),
+  sortOrder: productCategorySortOrderField,
+});
+
+export type CreateProductCategoryNodeInput = z.infer<
+  typeof createProductCategoryNodeSchema
+>;
+
+export const updateProductCategoryNodeSchema = createProductCategoryNodeSchema;
+
+export type UpdateProductCategoryNodeInput = z.infer<
+  typeof updateProductCategoryNodeSchema
+>;
 
 export const createProductSchema = z.object({
-  category: productCategoryField,
+  code: productCodeField,
+  categoryNodeId: productCategoryNodeIdField,
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
@@ -378,7 +433,8 @@ export const createProductSchema = z.object({
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 
 export const updateProductSchema = z.object({
-  category: productCategoryField,
+  code: productCodeField,
+  categoryNodeId: productCategoryNodeIdField,
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
@@ -387,6 +443,514 @@ export const updateProductSchema = z.object({
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+// ============================================================
+// Party master data: customers / suppliers
+// ============================================================
+
+const partyCodeField = z
+  .string()
+  .trim()
+  .min(1, '请填写客户/供应商编码')
+  .max(32, '编码过长（最多 32 个字符）')
+  .regex(/^[A-Za-z0-9_-]+$/, '编码只能包含英文字母、数字、下划线、短横线');
+
+const partyNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写客户/供应商名称')
+  .max(128, '名称过长（最多 128 个字符）');
+
+export const createPartySchema = z.object({
+  type: z.nativeEnum(PartyType),
+  code: partyCodeField,
+  name: partyNameField,
+  shortName: productTextFieldOptional('简称', 64),
+  primaryContactName: productTextFieldOptional('默认联系人', 64),
+  primaryContactPhone: productTextFieldOptional('默认联系电话', 32),
+  primaryContactWechat: productTextFieldOptional('默认微信', 64),
+  defaultReceiverName: productTextFieldOptional('默认收货人', 64),
+  defaultReceiverPhone: productTextFieldOptional('默认收货电话', 32),
+  defaultProvince: productTextFieldOptional('省份', 32),
+  defaultCity: productTextFieldOptional('城市', 32),
+  defaultDistrict: productTextFieldOptional('区县', 32),
+  defaultAddressDetail: productTextFieldOptional('详细地址', 256),
+});
+
+export type CreatePartyInput = z.infer<typeof createPartySchema>;
+
+export const updatePartySchema = createPartySchema;
+
+export type UpdatePartyInput = z.infer<typeof updatePartySchema>;
+
+// ============================================================
+// Price dictionary (P1)
+// ============================================================
+
+const priceDictionaryIdField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `请选择${label}`)
+    .max(64, `${label}格式非法`)
+    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
+
+const pricePositiveIntField = (label: string) =>
+  z.preprocess(
+    (v) => {
+      if (typeof v === 'number') return v;
+      if (typeof v !== 'string') return v;
+      const trimmed = v.trim();
+      if (trimmed === '') return undefined;
+      if (!/^\d+$/.test(trimmed)) return null;
+      return Number.parseInt(trimmed, 10);
+    },
+    z
+      .number({ message: `${label}必须是正整数` })
+      .finite(`${label}必须是有限数`)
+      .int(`${label}必须是整数`)
+      .min(1, `${label}必须 ≥ 1`)
+      .max(9_999_999, `${label}过大`),
+  );
+
+const priceMoneyField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `请填写${label}`)
+    .regex(/^\d{1,6}(\.\d{1,4})?$/, {
+      message: `${label}格式错误（整数部分最多 6 位、小数最多 4 位、非负数）`,
+    });
+
+const priceDateField = (label: string) =>
+  z.preprocess((v) => {
+    if (v instanceof Date) return v;
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (trimmed === '') return undefined;
+      return parseStrictYmd(trimmed) ?? 'invalid-date';
+    }
+    return 'invalid-date';
+  }, z.date({ message: `请选择合法${label}（YYYY-MM-DD）` }));
+
+const priceOptionalDateField = (label: string) =>
+  z.preprocess((v) => {
+    if (v === null || v === undefined) return null;
+    if (v instanceof Date) return v;
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (trimmed === '') return null;
+      return parseStrictYmd(trimmed) ?? 'invalid-date';
+    }
+    return 'invalid-date';
+  }, z.date({ message: `${label}格式非法（YYYY-MM-DD）` }).nullable());
+
+const triggerConditionJsonObjectField = z
+  .string()
+  .trim()
+  .max(2000, '触发条件过长（最多 2000 个字符）')
+  .transform((value, ctx): Record<string, unknown> | null => {
+    if (value === '') return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      ctx.addIssue({ code: 'custom', message: '触发条件必须是合法 JSON' });
+      return z.NEVER;
+    }
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      ctx.addIssue({ code: 'custom', message: '触发条件必须是 JSON object' });
+      return z.NEVER;
+    }
+    return parsed as Record<string, unknown>;
+  });
+
+export const createPriceTierSchema = z
+  .object({
+    productId: priceDictionaryIdField('产品'),
+    minQty: pricePositiveIntField('起订量'),
+    unitPrice: priceMoneyField('单价'),
+    effectiveFrom: priceDateField('有效起始日期'),
+    effectiveTo: priceOptionalDateField('有效截止日期'),
+  })
+  .superRefine((data, ctx) => {
+    if (data.effectiveTo && data.effectiveTo <= data.effectiveFrom) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['effectiveTo'],
+        message: '有效截止日期必须晚于有效起始日期',
+      });
+    }
+  });
+
+export type CreatePriceTierInput = z.infer<typeof createPriceTierSchema>;
+
+export const updatePriceTierSchema = createPriceTierSchema;
+
+export type UpdatePriceTierInput = z.infer<typeof updatePriceTierSchema>;
+
+export const createPriceAdjustmentSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, '请填写加价规则名称')
+    .max(64, '加价规则名称过长（最多 64 个字符）'),
+  adjustmentType: z.nativeEnum(AdjustmentType),
+  amount: priceMoneyField('加价金额'),
+  triggerCondition: triggerConditionJsonObjectField,
+});
+
+export type CreatePriceAdjustmentInput = z.infer<
+  typeof createPriceAdjustmentSchema
+>;
+
+export const updatePriceAdjustmentSchema = createPriceAdjustmentSchema;
+
+export type UpdatePriceAdjustmentInput = z.infer<
+  typeof updatePriceAdjustmentSchema
+>;
+
+// ============================================================
+// Material dictionary and stock transactions (SPEC §5 / P1)
+// ============================================================
+
+const materialCodeField = z
+  .string()
+  .trim()
+  .min(1, '请填写物料编码')
+  .max(32, '物料编码过长（最多 32 个字符）')
+  .regex(/^[A-Za-z0-9_-]+$/, '物料编码只能包含英文字母、数字、下划线、短横线');
+
+const materialNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写物料名称')
+  .max(64, '物料名称过长（最多 64 个字符）');
+
+const materialUnitField = z
+  .string()
+  .trim()
+  .min(1, '请填写单位')
+  .max(16, '单位过长（最多 16 个字符）');
+
+const decimalOptionalField = ({
+  label,
+  integerDigits,
+  fractionDigits,
+}: {
+  label: string;
+  integerDigits: number;
+  fractionDigits: number;
+}) =>
+  z.preprocess(
+    (v) => (v === null || v === undefined ? '' : v),
+    z
+      .string()
+      .trim()
+      .refine(
+        (v) =>
+          v === '' ||
+          new RegExp(`^\\d{1,${integerDigits}}(\\.\\d{1,${fractionDigits}})?$`).test(v),
+        {
+          message: `${label}格式错误（整数部分最多 ${integerDigits} 位、小数最多 ${fractionDigits} 位、非负数）`,
+        },
+      )
+      .transform((v) => (v === '' ? null : v)),
+  );
+
+const decimalRequiredField = ({
+  label,
+  integerDigits,
+  fractionDigits,
+}: {
+  label: string;
+  integerDigits: number;
+  fractionDigits: number;
+}) =>
+  z.preprocess(
+    (v) => (v === null || v === undefined ? '' : v),
+    z
+      .string()
+      .trim()
+      .regex(
+        new RegExp(`^\\d{1,${integerDigits}}(\\.\\d{1,${fractionDigits}})?$`),
+        `${label}格式错误（整数部分最多 ${integerDigits} 位、小数最多 ${fractionDigits} 位、非负数）`,
+      )
+      .refine((v) => Number(v) > 0, `${label}必须大于 0`),
+  );
+
+const materialDecimal12Optional = decimalOptionalField({
+  label: '数量',
+  integerDigits: 10,
+  fractionDigits: 2,
+});
+const materialDecimal12Required = decimalRequiredField({
+  label: '数量',
+  integerDigits: 10,
+  fractionDigits: 2,
+});
+const materialDecimal10Optional = decimalOptionalField({
+  label: '金额',
+  integerDigits: 6,
+  fractionDigits: 4,
+});
+
+export const createMaterialSchema = z.object({
+  code: materialCodeField,
+  name: materialNameField,
+  category: z.nativeEnum(MaterialCategory),
+  specification: productTextFieldOptional('规格', 64),
+  unit: materialUnitField,
+  safetyStock: materialDecimal12Optional,
+  averageCost: materialDecimal10Optional,
+});
+
+export type CreateMaterialInput = z.infer<typeof createMaterialSchema>;
+
+export const updateMaterialSchema = createMaterialSchema;
+
+export type UpdateMaterialInput = z.infer<typeof updateMaterialSchema>;
+
+export const materialStockTransactionSchema = z.object({
+  materialId: z.string().trim().min(1, '物料 id 不能为空'),
+  locationId: z
+    .string()
+    .trim()
+    .max(64, '库位格式非法')
+    .transform((v) => (v === '' ? null : v))
+    .nullable(),
+  direction: z.enum(['IN', 'OUT']),
+  quantity: materialDecimal12Required,
+  reasonType: z
+    .string()
+    .trim()
+    .min(1, '请填写原因')
+    .max(64, '原因过长（最多 64 个字符）'),
+  unitCost: materialDecimal10Optional,
+  remark: productTextFieldOptional('备注', 500),
+});
+
+export type MaterialStockTransactionInput = z.infer<
+  typeof materialStockTransactionSchema
+>;
+
+// ============================================================
+// Warehouse / location dictionary (A18)
+// ============================================================
+
+const warehouseCodeField = z
+  .string()
+  .trim()
+  .min(1, '请填写仓库编码')
+  .max(32, '仓库编码过长（最多 32 个字符）')
+  .regex(/^[A-Za-z0-9_-]+$/, '仓库编码只能包含英文字母、数字、下划线、短横线');
+
+const warehouseLocationCodeField = z
+  .string()
+  .trim()
+  .min(1, '请填写库位编码')
+  .max(32, '库位编码过长（最多 32 个字符）')
+  .regex(/^[A-Za-z0-9_-]+$/, '库位编码只能包含英文字母、数字、下划线、短横线');
+
+const warehouseNameField = z
+  .string()
+  .trim()
+  .min(1, '请填写名称')
+  .max(64, '名称过长（最多 64 个字符）');
+
+export const createWarehouseSchema = z.object({
+  code: warehouseCodeField,
+  name: warehouseNameField,
+});
+
+export type CreateWarehouseInput = z.infer<typeof createWarehouseSchema>;
+
+export const createWarehouseLocationSchema = z.object({
+  warehouseId: z
+    .string()
+    .trim()
+    .min(1, '请选择仓库')
+    .max(64, '仓库格式非法')
+    .regex(/^[A-Za-z0-9_-]+$/, '仓库格式非法'),
+  code: warehouseLocationCodeField,
+  name: warehouseNameField,
+});
+
+export type CreateWarehouseLocationInput = z.infer<
+  typeof createWarehouseLocationSchema
+>;
+
+// ============================================================
+// BOM / material usage planning (A19)
+// ============================================================
+
+const bomIdField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `请选择${label}`)
+    .max(64, `${label}格式非法`)
+    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
+
+const optionalBomIdField = (label: string) =>
+  z.preprocess(
+    (v) => (v === null || v === undefined ? '' : v),
+    z
+      .string()
+      .trim()
+      .max(64, `${label}格式非法`)
+      .refine((v) => v === '' || /^[A-Za-z0-9_-]+$/.test(v), {
+        message: `${label}格式非法`,
+      })
+      .transform((v) => (v === '' ? null : v)),
+  );
+
+const bomPositiveIntField = (label: string) =>
+  z.preprocess(
+    (v) => {
+      if (typeof v === 'number') return v;
+      if (typeof v !== 'string') return v;
+      const trimmed = v.trim();
+      if (trimmed === '') return undefined;
+      if (!/^\d+$/.test(trimmed)) return null;
+      return Number.parseInt(trimmed, 10);
+    },
+    z
+      .number({ message: `${label}必须是正整数` })
+      .finite(`${label}必须是有限数`)
+      .int(`${label}必须是整数`)
+      .min(1, `${label}必须 ≥ 1`)
+      .max(999_999, `${label}过大`),
+  );
+
+const bomMaterialQuantityField = decimalRequiredField({
+  label: 'BOM 用量',
+  integerDigits: 8,
+  fractionDigits: 4,
+});
+
+export const createBomSchema = z
+  .object({
+    targetType: z.enum(['PRODUCT', 'CATEGORY']),
+    productId: optionalBomIdField('产品'),
+    categoryNodeId: optionalBomIdField('产品分类'),
+    name: z
+      .string()
+      .trim()
+      .min(1, '请填写 BOM 名称')
+      .max(64, 'BOM 名称过长（最多 64 个字符）'),
+    version: bomPositiveIntField('版本号'),
+    baseQuantity: bomPositiveIntField('基准产量'),
+    items: z
+      .array(
+        z.object({
+          materialId: bomIdField('物料'),
+          quantity: bomMaterialQuantityField,
+          remark: productTextFieldOptional('备注', 200),
+        }),
+      )
+      .min(1, '至少添加 1 行物料')
+      .max(20, 'BOM 物料行最多 20 行'),
+  })
+  .superRefine((data, ctx) => {
+    if (data.targetType === 'PRODUCT' && !data.productId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['productId'],
+        message: '请选择产品',
+      });
+    }
+    if (data.targetType === 'CATEGORY' && !data.categoryNodeId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['categoryNodeId'],
+        message: '请选择产品分类',
+      });
+    }
+    const seen = new Set<string>();
+    data.items.forEach((item, index) => {
+      if (seen.has(item.materialId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, 'materialId'],
+          message: '同一个 BOM 中物料不能重复',
+        });
+      }
+      seen.add(item.materialId);
+    });
+  });
+
+export type CreateBomInput = z.infer<typeof createBomSchema>;
+
+// ============================================================
+// Purchase orders / receipts (A17)
+// ============================================================
+
+const purchaseIdField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `请选择${label}`)
+    .max(64, `${label}格式非法`)
+    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
+
+const optionalPurchaseIdField = (label: string) =>
+  z.preprocess(
+    (v) => (v === null || v === undefined ? '' : v),
+    z
+      .string()
+      .trim()
+      .max(64, `${label}格式非法`)
+      .refine((v) => v === '' || /^[A-Za-z0-9_-]+$/.test(v), {
+        message: `${label}格式非法`,
+      })
+      .transform((v) => (v === '' ? null : v)),
+  );
+
+const purchaseDateField = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式必须是 YYYY-MM-DD')
+  .transform((value) => (value === '' ? null : value))
+  .nullable()
+  .or(z.literal('').transform(() => null));
+
+export const createPurchaseOrderSchema = z.object({
+  supplierPartyId: purchaseIdField('供应商'),
+  materialId: purchaseIdField('物料'),
+  quantity: materialDecimal12Required,
+  unitCost: materialDecimal10Optional,
+  expectedDate: purchaseDateField,
+  remark: productTextFieldOptional('备注', 500),
+});
+
+export type CreatePurchaseOrderInput = z.infer<
+  typeof createPurchaseOrderSchema
+>;
+
+export const createPurchaseReceiptSchema = z.object({
+  purchaseOrderItemId: purchaseIdField('采购明细'),
+  locationId: optionalPurchaseIdField('库位'),
+  quantity: materialDecimal12Required,
+  unitCost: materialDecimal10Optional,
+  remark: productTextFieldOptional('备注', 500),
+});
+
+export type CreatePurchaseReceiptInput = z.infer<
+  typeof createPurchaseReceiptSchema
+>;
+
+export const cancelPurchaseReceiptSchema = z.object({
+  reason: productTextFieldOptional('取消原因', 500),
+});
+
+export type CancelPurchaseReceiptInput = z.infer<
+  typeof cancelPurchaseReceiptSchema
+>;
 
 // ============================================================
 // Order creation (SPEC §3.1 / §4.1)
@@ -447,6 +1011,7 @@ const orderItemSchema = z.object({
 export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
 export const createOrderSchema = z.object({
+  customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
   customerRef: optionalTrimmedText('客户代号', 64),
   receiverName: optionalTrimmedText('收货人', 64),
   receiverPhone: optionalTrimmedText('收货电话', 32),

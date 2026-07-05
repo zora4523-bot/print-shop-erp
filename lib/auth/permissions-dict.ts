@@ -36,6 +36,12 @@ export const PERMISSIONS = {
   'material:manage':            [Role.OWNER, Role.FOREMAN],
   'material:issue':             [Role.OWNER, Role.FOREMAN, Role.WORKER],
 
+  // 采购
+  'purchase:manage':            [Role.OWNER],
+
+  // 仓库 / 库位
+  'warehouse:manage':           [Role.OWNER],
+
   // 账单
   'bill:view:all':              [Role.OWNER],
   'bill:view:self':             [Role.SALES, Role.CUSTOMER_SERVICE],
@@ -48,12 +54,17 @@ export const PERMISSIONS = {
   'salary:rule:manage':         [Role.OWNER],
 
   // 字典管理
+  'party:manage':               [Role.OWNER],
   'dict:product:manage':        [Role.OWNER],
   'dict:craft:manage':          [Role.OWNER],
   'dict:price:manage':          [Role.OWNER],
+  'bom:manage':                 [Role.OWNER],
 
   // 推送
   'notification:config':        [Role.OWNER],
+
+  // 运维
+  'ops:pigsty:view':            [Role.OWNER],
 
   // 账号管理
   'account:manage':             [Role.OWNER],

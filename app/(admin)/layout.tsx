@@ -6,6 +6,7 @@ import { AppSidebar } from '@/components/business/admin/AppSidebar';
 import { AdminHeader } from '@/components/business/admin/AdminHeader';
 import {
   getAdminMenuItems,
+  getAdminQuickLinks,
   ADMIN_ROLE_BADGE,
 } from '@/lib/navigation/admin-menu';
 
@@ -38,13 +39,24 @@ export default async function AdminShellLayout({
   if (!ALLOWED.includes(user.role)) redirect('/');
 
   const menuGroups = getAdminMenuItems(user);
+  const quickLinks = getAdminQuickLinks(user);
   const roleBadge = ADMIN_ROLE_BADGE[user.role] ?? user.role;
+  const environmentLabel =
+    process.env.NEXT_PUBLIC_APP_ENV ??
+    process.env.APP_ENV ??
+    process.env.NODE_ENV ??
+    'dev';
 
   return (
     <SidebarProvider>
       <AppSidebar menuGroups={menuGroups} roleBadge={roleBadge} />
       <SidebarInset>
-        <AdminHeader displayName={user.displayName} roleLabel={roleBadge} />
+        <AdminHeader
+          displayName={user.displayName}
+          roleLabel={roleBadge}
+          environmentLabel={environmentLabel}
+          quickLinks={quickLinks}
+        />
         <main className="flex-1 px-6 py-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>

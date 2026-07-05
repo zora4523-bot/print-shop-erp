@@ -21,10 +21,21 @@ const SEGMENT_LABELS: Record<string, string> = {
   'customer-service': '客服',
   worker: '师傅',
   orders: '工单',
+  purchases: '采购单',
   bills: '账单',
   accounts: '账号管理',
+  parties: '客户/供应商',
   crafts: '工艺',
   products: '产品',
+  'product-categories': '产品分类',
+  boms: 'BOM/用料',
+  materials: '物料',
+  warehouses: '仓库/库位',
+  prices: '价格',
+  adjustments: '加价规则',
+  tiers: '价格阶梯',
+  notifications: '推送配置',
+  pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '师傅日薪',
   hourly: '时薪工月结',
@@ -35,6 +46,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   account: '账户',
   password: '修改密码',
   new: '新建',
+  count: '盘点',
 };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
@@ -42,7 +54,6 @@ const SEGMENT_LABELS: Record<string, string> = {
 // Keep this in sync with the file tree in `app/`; if a layout-only
 // shell becomes a real page, drop the entry here.
 const LAYOUT_ONLY_PATHS = new Set<string>([
-  '/owner',
   '/foreman',
   '/sales',
 ]);
