@@ -1,9 +1,8 @@
 import { notFound } from 'next/navigation';
-import { getProductSummary } from '@/lib/product';
+import { getProductSummary, listProductCategoryOptions } from '@/lib/product';
 import { updateProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
-import { productCategoryLabel } from '@/lib/auth/role-labels';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -17,15 +16,31 @@ export default async function EditProductPage({ params }: PageProps) {
   const { id } = await params;
   const product = await getProductSummary(id);
   if (!product) notFound();
+  const categoryOptions = await listProductCategoryOptions({
+    includeInactiveIds: [product.categoryNodeId],
+  });
 
   const boundUpdate = updateProductAction.bind(null, id);
+  const formInitial = {
+    code: product.code,
+    categoryNodeId: product.categoryNodeId,
+    name: product.name,
+    specification: product.specification,
+    paperType: product.paperType,
+    baseUnitPrice:
+      product.baseUnitPrice === null || product.baseUnitPrice === undefined
+        ? null
+        : String(product.baseUnitPrice),
+    minOrderQty: product.minOrderQty,
+    isActive: product.isActive,
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">编辑产品：{product.name}</h1>
         <p className="text-sm text-muted-foreground">
-          {productCategoryLabel(product.category)}
+          {product.categoryNode.name}
           {product.isActive ? ' · 启用' : ' · 停用'}
         </p>
       </div>
@@ -36,7 +51,8 @@ export default async function EditProductPage({ params }: PageProps) {
           key={`${product.id}-${product.updatedAt.toISOString()}`}
           mode="edit"
           action={boundUpdate}
-          initial={product}
+          initial={formInitial}
+          categoryNodes={categoryOptions}
         />
       </section>
 

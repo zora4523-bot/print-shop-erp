@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createProductSchema, updateProductSchema } from '@/lib/auth/schemas';
 import {
@@ -11,6 +12,23 @@ import {
   ProductInvariantError,
 } from '@/lib/product';
 import type { ProductMutationResult } from './owner-products.types';
+
+const PRODUCT_CODE_UNIQUE_SYNONYMS: readonly string[] = ['code', 'Product_code_key'];
+
+function normalizeTargets(target: unknown): string[] {
+  if (Array.isArray(target)) return target.filter((v): v is string => typeof v === 'string');
+  return typeof target === 'string' ? [target] : [];
+}
+
+function mapUniqueViolation(err: unknown): ProductMutationResult | null {
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+    const targets = normalizeTargets(err.meta?.target);
+    if (targets.some((t) => PRODUCT_CODE_UNIQUE_SYNONYMS.includes(t))) {
+      return { status: 'invalid', fieldErrors: { code: ['该产品编码已被占用'] } };
+    }
+  }
+  return null;
+}
 
 function collectFieldErrors(
   issues: readonly { path: readonly PropertyKey[]; message: string }[],
@@ -30,7 +48,8 @@ function normalizeFormInput(formData: FormData) {
     return typeof v === 'string' ? v : undefined;
   };
   return {
-    category: get('category'),
+    code: get('code') ?? '',
+    categoryNodeId: get('categoryNodeId'),
     name: get('name'),
     specification: get('specification') ?? '',
     paperType: get('paperType') ?? '',
@@ -56,6 +75,8 @@ export async function createProductAction(
     const created = await createProduct(parsed.data);
     createdId = created.id;
   } catch (err) {
+    const unique = mapUniqueViolation(err);
+    if (unique) return unique;
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };
     }
@@ -81,6 +102,8 @@ export async function updateProductAction(
   try {
     await updateProduct(id, parsed.data);
   } catch (err) {
+    const unique = mapUniqueViolation(err);
+    if (unique) return unique;
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };
     }

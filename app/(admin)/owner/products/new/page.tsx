@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { createProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
+import { listProductCategoryOptions } from '@/lib/product';
 
 export const metadata = {
   title: '新建产品 · 红包印刷 ERP',
 };
 
-export default function NewProductPage() {
+export default async function NewProductPage() {
+  const categoryNodes = await listProductCategoryOptions();
+
   return (
     <div className="space-y-4">
       <div>
@@ -19,7 +22,11 @@ export default function NewProductPage() {
         </p>
       </div>
       <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <ProductForm mode="create" action={createProductAction} />
+        <ProductForm
+          mode="create"
+          action={createProductAction}
+          categoryNodes={categoryNodes}
+        />
       </div>
     </div>
   );

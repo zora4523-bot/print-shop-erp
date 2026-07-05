@@ -9,12 +9,24 @@ const { dbMock } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    productCategoryNode: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   listProducts,
+  listProductCategoryOptions,
+  listProductCategoryNodes,
+  getProductCategoryNodeSummary,
+  createProductCategoryNode,
+  updateProductCategoryNode,
+  setProductCategoryNodeActive,
   getProductSummary,
   createProduct,
   updateProduct,
@@ -24,11 +36,24 @@ import {
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
+  for (const fn of Object.values(dbMock.productCategoryNode)) fn.mockReset();
+});
+
+const makeCategoryNode = (over = {}) => ({
+  id: 'cat_custom_flat_foil',
+  path: 'product.custom_flat_foil',
+  name: '专版烫金',
+  legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
+  sortOrder: 30,
+  isActive: true,
+  ...over,
 });
 
 const makeProduct = (over = {}) => ({
   id: 'p1',
+  code: 'HB001',
   category: ProductCategory.CUSTOM_FLAT_FOIL,
+  categoryNodeId: 'cat_custom_flat_foil',
   name: '专版红包 100x200',
   specification: '100×200',
   paperType: '铜版纸',
@@ -37,6 +62,13 @@ const makeProduct = (over = {}) => ({
   isActive: true,
   createdAt: new Date('2026-04-23T00:00:00Z'),
   updatedAt: new Date('2026-04-23T00:00:00Z'),
+  categoryNode: {
+    id: 'cat_custom_flat_foil',
+    path: 'product.custom_flat_foil',
+    name: '专版烫金',
+    legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
+    isActive: true,
+  },
   ...over,
 });
 
@@ -50,13 +82,162 @@ describe('listProducts', () => {
       }),
     );
   });
+
+  it('adds q search across product code, category, name, specification, paper type, and pinyin', async () => {
+    dbMock.product.findMany.mockResolvedValue([]);
+    await listProducts({ q: '  铜版纸 ' });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { name: { contains: '铜版纸', mode: 'insensitive' } },
+            { code: { contains: '铜版纸', mode: 'insensitive' } },
+            { categoryNode: { is: { name: { contains: '铜版纸', mode: 'insensitive' } } } },
+            { specification: { contains: '铜版纸', mode: 'insensitive' } },
+            { paperType: { contains: '铜版纸', mode: 'insensitive' } },
+            { searchPinyin: { contains: '铜版纸', mode: 'insensitive' } },
+            { searchPinyinInitials: { contains: '铜版纸', mode: 'insensitive' } },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('keeps no where filter for blank q', async () => {
+    dbMock.product.findMany.mockResolvedValue([]);
+    await listProducts({ q: '   ' });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: undefined }),
+    );
+  });
+
+  it('sorts q results by relevance while keeping database order as tie-break', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      makeProduct({ id: 'contains', name: '专版红包', searchPinyin: null, searchPinyinInitials: null }),
+      makeProduct({ id: 'exact', name: '红包', searchPinyin: null, searchPinyinInitials: null }),
+      makeProduct({ id: 'prefix', name: '红包袋', searchPinyin: null, searchPinyinInitials: null }),
+    ]);
+
+    const rows = await listProducts({ q: '红包' });
+
+    expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
+  });
+});
+
+describe('listProductCategoryOptions', () => {
+  it('lists active category nodes by sortOrder then path', async () => {
+    dbMock.productCategoryNode.findMany.mockResolvedValue([makeCategoryNode()]);
+    await listProductCategoryOptions();
+    expect(dbMock.productCategoryNode.findMany).toHaveBeenCalledWith({
+      where: { isActive: true },
+      select: {
+        id: true,
+        path: true,
+        name: true,
+        legacyCategory: true,
+        sortOrder: true,
+        isActive: true,
+      },
+      orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
+    });
+  });
+
+  it('can include the current inactive category for existing product edits', async () => {
+    dbMock.productCategoryNode.findMany.mockResolvedValue([makeCategoryNode()]);
+    await listProductCategoryOptions({ includeInactiveIds: ['cat_disabled'] });
+    expect(dbMock.productCategoryNode.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { isActive: true },
+          { id: { in: ['cat_disabled'] } },
+        ],
+      },
+      select: {
+        id: true,
+        path: true,
+        name: true,
+        legacyCategory: true,
+        sortOrder: true,
+        isActive: true,
+      },
+      orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
+    });
+  });
+});
+
+describe('product category node management', () => {
+  it('lists all category nodes with product counts', async () => {
+    dbMock.productCategoryNode.findMany.mockResolvedValue([
+      { ...makeCategoryNode(), createdAt: new Date(), updatedAt: new Date(), _count: { products: 2 } },
+    ]);
+    await listProductCategoryNodes();
+    expect(dbMock.productCategoryNode.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
+      }),
+    );
+  });
+
+  it('creates active category nodes', async () => {
+    dbMock.productCategoryNode.create.mockResolvedValue(makeCategoryNode());
+    await createProductCategoryNode({
+      path: 'product.custom.new',
+      name: '新分类',
+      legacyCategory: ProductCategory.COLOR_PRINT,
+      sortOrder: 70,
+    });
+    expect(dbMock.productCategoryNode.create.mock.calls[0][0].data).toEqual({
+      path: 'product.custom.new',
+      name: '新分类',
+      legacyCategory: ProductCategory.COLOR_PRINT,
+      sortOrder: 70,
+      isActive: true,
+    });
+  });
+
+  it('updates category node editable fields', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
+    dbMock.productCategoryNode.update.mockResolvedValue(makeCategoryNode({ name: '改名' }));
+    await updateProductCategoryNode('cat_custom_flat_foil', {
+      path: 'product.custom.flat',
+      name: '改名',
+      legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
+      sortOrder: 35,
+    });
+    expect(dbMock.productCategoryNode.update.mock.calls[0][0].data).toEqual({
+      path: 'product.custom.flat',
+      name: '改名',
+      legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
+      sortOrder: 35,
+    });
+  });
+
+  it('flips category node active status', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({ isActive: true }),
+    );
+    dbMock.productCategoryNode.update.mockResolvedValue(
+      makeCategoryNode({ isActive: false }),
+    );
+    await setProductCategoryNodeActive('cat_custom_flat_foil', false);
+    expect(dbMock.productCategoryNode.update.mock.calls[0][0].data).toEqual({
+      isActive: false,
+    });
+  });
+
+  it('returns null when category node is absent', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(null);
+    await expect(getProductCategoryNodeSummary('missing')).resolves.toBeNull();
+  });
 });
 
 describe('createProduct', () => {
   it('forces isActive=true and passes Decimal-compatible string through', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.product.create.mockResolvedValue(makeProduct());
     await createProduct({
-      category: ProductCategory.BLANK_STOCK,
+      code: 'HB001',
+      categoryNodeId: 'cat_custom_flat_foil',
       name: '空白红包',
       specification: '通用',
       paperType: null,
@@ -65,14 +246,19 @@ describe('createProduct', () => {
     });
     const data = dbMock.product.create.mock.calls[0][0].data;
     expect(data.isActive).toBe(true);
+    expect(data.code).toBe('HB001');
+    expect(data.category).toBe(ProductCategory.CUSTOM_FLAT_FOIL);
+    expect(data.categoryNodeId).toBe('cat_custom_flat_foil');
     expect(data.baseUnitPrice).toBe('0.1200');
     expect(data.minOrderQty).toBe(500);
   });
 
   it('normalizes omitted minOrderQty to null', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.product.create.mockResolvedValue(makeProduct());
     await createProduct({
-      category: ProductCategory.BLANK_STOCK,
+      code: null,
+      categoryNodeId: 'cat_custom_flat_foil',
       name: '空白红包',
       specification: null,
       paperType: null,
@@ -82,6 +268,21 @@ describe('createProduct', () => {
     expect(data.minOrderQty).toBeNull();
     expect(data.baseUnitPrice).toBeNull();
   });
+
+  it('rejects missing or inactive category node', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(null);
+    await expect(
+      createProduct({
+        code: null,
+        categoryNodeId: 'missing',
+        name: '空白红包',
+        specification: null,
+        paperType: null,
+        baseUnitPrice: null,
+      }),
+    ).rejects.toBeInstanceOf(ProductInvariantError);
+    expect(dbMock.product.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('updateProduct', () => {
@@ -89,7 +290,8 @@ describe('updateProduct', () => {
     dbMock.product.findUnique.mockResolvedValue(null);
     await expect(
       updateProduct('nope', {
-        category: ProductCategory.BLANK_STOCK,
+        code: null,
+        categoryNodeId: 'cat_custom_flat_foil',
         name: 'X',
         specification: null,
         paperType: null,
@@ -101,9 +303,16 @@ describe('updateProduct', () => {
 
   it('updates the editable fields', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        id: 'cat_color_print',
+        legacyCategory: ProductCategory.COLOR_PRINT,
+      }),
+    );
     dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
     await updateProduct('p1', {
-      category: ProductCategory.COLOR_PRINT,
+      code: 'NEW001',
+      categoryNodeId: 'cat_color_print',
       name: '改名',
       specification: '新规格',
       paperType: '新纸',
@@ -111,15 +320,49 @@ describe('updateProduct', () => {
       minOrderQty: 2000,
     });
     const data = dbMock.product.update.mock.calls[0][0].data;
+    expect(data.code).toBe('NEW001');
+    expect(data.category).toBe(ProductCategory.COLOR_PRINT);
+    expect(data.categoryNodeId).toBe('cat_color_print');
     expect(data.name).toBe('改名');
     expect(data.baseUnitPrice).toBe('1.5000');
   });
 
+  it('allows saving a product that already uses a disabled category node', async () => {
+    dbMock.product.findUnique.mockResolvedValue(
+      makeProduct({
+        categoryNodeId: 'cat_disabled',
+        category: ProductCategory.COLOR_PRINT,
+        categoryNode: {
+          id: 'cat_disabled',
+          path: 'product.disabled',
+          name: '已停用分类',
+          legacyCategory: ProductCategory.COLOR_PRINT,
+          isActive: false,
+        },
+      }),
+    );
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
+    await updateProduct('p1', {
+      code: null,
+      categoryNodeId: 'cat_disabled',
+      name: '改名',
+      specification: null,
+      paperType: null,
+      baseUnitPrice: null,
+    });
+    expect(dbMock.productCategoryNode.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.product.update.mock.calls[0][0].data.category).toBe(
+      ProductCategory.COLOR_PRINT,
+    );
+  });
+
   it('never writes isActive through the update path', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.product.update.mockResolvedValue(makeProduct());
     await updateProduct('p1', {
-      category: ProductCategory.BLANK_STOCK,
+      code: null,
+      categoryNodeId: 'cat_custom_flat_foil',
       name: 'x',
       specification: null,
       paperType: null,

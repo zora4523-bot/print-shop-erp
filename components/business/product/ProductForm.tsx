@@ -2,15 +2,15 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { ProductCategory } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
-import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
+import type { ProductCategoryOption } from '@/lib/product';
 
 type EditInitial = {
-  category: ProductCategory;
+  code: string | null;
+  categoryNodeId: string;
   name: string;
   specification: string | null;
   paperType: string | null;
@@ -26,6 +26,7 @@ type Props =
         prev: ProductMutationResult | null,
         fd: FormData,
       ) => Promise<ProductMutationResult>;
+      categoryNodes: ProductCategoryOption[];
     }
   | {
       mode: 'edit';
@@ -34,19 +35,11 @@ type Props =
         fd: FormData,
       ) => Promise<ProductMutationResult>;
       initial: EditInitial;
+      categoryNodes: ProductCategoryOption[];
     };
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
-
-const CATEGORY_OPTIONS = [
-  ProductCategory.BLANK_STOCK,
-  ProductCategory.GENERIC_STOCK,
-  ProductCategory.CUSTOM_FLAT_FOIL,
-  ProductCategory.COLOR_PRINT,
-  ProductCategory.STOCK_FOIL_ADD,
-  ProductCategory.BYO_MATERIAL,
-] as const;
 
 export function ProductForm(props: Props) {
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
@@ -59,6 +52,7 @@ export function ProductForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
 
   const priceDefault =
     initial?.baseUnitPrice === null || initial?.baseUnitPrice === undefined
@@ -67,23 +61,38 @@ export function ProductForm(props: Props) {
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
+      <TextField
+        id="code"
+        label="产品编码（选填）"
+        hint="用于内部 SKU / 快速搜索；大小写不敏感。可用字母、数字、_、-。"
+        disabled={pending}
+        error={errs.code?.[0]}
+        defaultValue={initial?.code ?? ''}
+      />
+
       <div className="space-y-2">
-        <Label htmlFor="category">分类</Label>
+        <Label htmlFor="categoryNodeId">分类</Label>
         <select
-          id="category"
-          name="category"
+          id="categoryNodeId"
+          name="categoryNodeId"
           className={selectClass}
-          defaultValue={initial?.category ?? CATEGORY_OPTIONS[0]}
+          defaultValue={defaultCategoryNodeId}
           disabled={pending}
         >
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c} value={c}>
-              {PRODUCT_CATEGORY_LABELS[c]}
-            </option>
-          ))}
+          {props.categoryNodes.map((node) => {
+            const depth = Math.max(0, node.path.split('.').length - 2);
+            const prefix = depth > 0 ? `${'· '.repeat(depth)}` : '';
+            return (
+              <option key={node.id} value={node.id}>
+                {prefix}
+                {node.name}
+                {node.isActive ? '' : '（已停用）'}
+              </option>
+            );
+          })}
         </select>
-        {errs.category?.[0] ? (
-          <p className="text-sm text-destructive">{errs.category[0]}</p>
+        {errs.categoryNodeId?.[0] ? (
+          <p className="text-sm text-destructive">{errs.categoryNodeId[0]}</p>
         ) : null}
       </div>
 

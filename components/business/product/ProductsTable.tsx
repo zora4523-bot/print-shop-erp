@@ -9,7 +9,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { productCategoryLabel } from '@/lib/auth/role-labels';
 
 function formatPrice(v: ProductSummary['baseUnitPrice']): string {
   if (v === null || v === undefined) return '—';
@@ -26,6 +25,7 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
     <Table>
       <TableHeader>
         <TableRow>
+          <TableHead>编码</TableHead>
           <TableHead>分类</TableHead>
           <TableHead>产品名</TableHead>
           <TableHead>规格</TableHead>
@@ -39,8 +39,9 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
       <TableBody>
         {products.map((p) => (
           <TableRow key={p.id} className={!p.isActive ? 'opacity-60' : undefined}>
+            <TableCell className="font-mono text-xs">{p.code ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">
-              {productCategoryLabel(p.category)}
+              {p.categoryNode.name}
             </TableCell>
             <TableCell>{p.name}</TableCell>
             <TableCell className="text-muted-foreground">{p.specification ?? '—'}</TableCell>
