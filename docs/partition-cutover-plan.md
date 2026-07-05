@@ -92,10 +92,17 @@ CREATE TABLE public."NotificationLog_p" (LIKE public."NotificationLog" INCLUDING
 PARTITION BY RANGE ("createdAt");
 
 ALTER TABLE public."NotificationLog_p" ADD PRIMARY KEY ("id", "createdAt");
--- 重建原表全部二级索引（eventType / status / createdAt）与出向外键：
+-- 重建原表全部二级索引（eventType / status / createdAt）与出向外键。
+-- 外键必须逐字复制原表定义（含 ON DELETE / ON UPDATE 行为——Prisma 默认是
+-- ON DELETE RESTRICT ON UPDATE CASCADE，OrderLog.orderId 是 ON DELETE CASCADE），
+-- 先用下面查询导出原定义再改表名套用，禁止手写裸 REFERENCES：
+--   SELECT conname, pg_get_constraintdef(oid)
+--   FROM pg_constraint
+--   WHERE conrelid = 'public."NotificationLog"'::regclass AND contype = 'f';
 ALTER TABLE public."NotificationLog_p"
   ADD CONSTRAINT "NotificationLog_p_channelId_fkey"
-  FOREIGN KEY ("channelId") REFERENCES public."NotificationChannel"("id");
+  FOREIGN KEY ("channelId") REFERENCES public."NotificationChannel"("id")
+  ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX ON public."NotificationLog_p" ("eventType");
 CREATE INDEX ON public."NotificationLog_p" ("status");
 CREATE INDEX ON public."NotificationLog_p" ("createdAt");
@@ -131,6 +138,13 @@ WHERE NOT EXISTS (
   WHERE p."id" = t."id" AND p."createdAt" = t."createdAt");
 ALTER TABLE public."NotificationLog" RENAME TO "NotificationLog_old";
 ALTER TABLE public."NotificationLog_p" RENAME TO "NotificationLog";
+-- 关键：pg_partman 的 part_config.parent_table 是纯 text，RENAME 不会跟随，
+-- 不改这行的话 retention / run_maintenance 会挂在已不存在的 _p 名字上。
+-- 先 SELECT parent_table FROM partman.part_config 确认 create_parent 实际
+-- 存储的字符串（引号/大小写以存储值为准），再在同一事务里改写：
+UPDATE partman.part_config
+SET parent_table = replace(parent_table, 'NotificationLog_p', 'NotificationLog')
+WHERE parent_table LIKE '%NotificationLog_p%';
 COMMIT;
 ```
 
@@ -169,7 +183,7 @@ DROP TABLE public."NotificationLog_old";  -- 最后一步，确认无回滚需�
 ## 6. 回滚
 
 - **切换事务内失败**：`ROLLBACK` 即可，原表未动。
-- **切换后发现问题（`_old` 未删）**：再开维护窗口反向 rename——把分区表改回 `_p` 名、`_old` 改回原名；将窗口期间写入分区表的增量行（`createdAt` > 切换时刻）`INSERT` 回原表；回滚应用 PR（复合主键 → 单列 `@id`）。
+- **切换后发现问题（`_old` 未删）**：再开维护窗口反向 rename——把分区表改回 `_p` 名、`_old` 改回原名，并把 `partman.part_config.parent_table` 同事务改回 `_p` 名（同 §5.3 的 UPDATE，方向相反）；将窗口期间写入分区表的增量行（`createdAt` > 切换时刻）`INSERT` 回原表；回滚应用 PR（复合主键 → 单列 `@id`）。
 - **`_old` 已删**：从 pgbackrest PITR 恢复，属事故级操作，故 §5.5 要求延迟删除。
 
 ## 7. 明确不做
