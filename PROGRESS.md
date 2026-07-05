@@ -43,7 +43,8 @@
 - [x] **2026-07-05 全量验证**：prisma validate / tsc / eslint / next build / migrate deploy（16 个新 migration）/ **21 Playwright E2E + 视觉** 全绿
 - [x] **2026-07-05 大批次提交固化**：按模块拆成 12 个 commit（`c84162f → accb713`），随时可按提交粒度回滚
 - [x] **A09 分区 cutover 计划**（plan-only）：`docs/partition-cutover-plan.md`，Codex 2 findings 已闭合
-- [x] **STOCK_ALERT 接线**（`3184a26` + `4f76a85`）：出库跨越检测，SPEC §8.1 **10/10 事件全接通**；**1220 单测**
+- [x] **STOCK_ALERT 接线**（`3184a26` + `4f76a85`）：出库跨越检测，SPEC §8.1 **10/10 事件全接通**
+- [x] **A06 OSS STS 真实接入**（`968b131` + `d65804f` + `89b1302`）：ali-oss AssumeRole（session policy 收缩到单 objectKey）+ CDR 真打包（流式 zip → bundles/* + 24h 预签 URL）；真实冒烟直传链路全通；**1229 单测**。业主剩一步：`webhongbao` 子账号挂对象读写策略（CDR 打包路径 AccessDenied 待解）
 
 ## 进行中
 
@@ -53,8 +54,8 @@
 
 队列里已无 `agent-ready` 任务，以下全部**需业主拍板**后才能推进：
 
-1. **A05 工单款式级编辑**（P1）— 需确认允许编辑的状态、设计图增删规则、金额是否自动重算
-2. **A06 OSS STS 真实接入 + CDR 真打包**（P1）— 需 OSS region/bucket/RAM role 凭证
+1. **A06 收尾**：业主在 RAM 控制台给 `webhongbao` 挂 `print-shop-erp-oss-object-rw` 策略 → 重跑冒烟验证 CDR 直连路径 → 上传 UI 接线（订单表单实际调用 signDesignUploadAction 的前端部分待确认现状）
+2. **A05 工单款式级编辑**（P1）— 需确认允许编辑的状态、设计图增删规则、金额是否自动重算
 3. **A07 推送按人路由**（P2）— 需确认客服/师傅是否有私有 webhook
 4. **A20 生产单拆分**（P1）— 需确认生产单粒度与发料时机
 5. **A21 应收应付扩展**（P1）— 需确认是否保持轻量记账

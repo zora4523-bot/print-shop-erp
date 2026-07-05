@@ -144,17 +144,32 @@ Never auto-merge. Never apply production database operations from this backlog.
 
 ## A06 - OSS STS And Real CDR Bundle Upload
 
-- Status: `needs-owner-input`
+- Status: `done` (one owner console step pending, see below)
 - Priority: P1
 - Risk: medium
 - Suggested branch: `codex/oss-sts-cdr-real-upload`
-- Needs:
-  - Real OSS region, bucket, role/policy, and whether CDN is used.
-  - Choice of SDK package and credential rotation policy.
-- Scope Draft:
-  - Replace `lib/oss/sign.ts` placeholder with real STS signing.
-  - Replace CDR mock ZIP URL with upload and signed GET URL.
-  - Preserve current not-configured UI behavior when env vars are missing.
+- Needs (resolved 2026-07-05):
+  - OSS: bucket `hongbaowebdb`, region `oss-cn-guangzhou`, no CDN; RAM role
+    `erp-oss-upload` + sub-account AK in server `.env`.
+  - SDK: `ali-oss` (single package for STS + object ops) + `archiver` for ZIP.
+- Delivered:
+  - Replaced `lib/oss/sign.ts` stub with real `OSS.STS.assumeRole`; session
+    policy scoped to the single minted objectKey, 1h expiry; AssumeRole and
+    config-parse failures fold into `{ status: 'error' }` (four-state union
+    stays exhaustive; SDK errors go to server logs only).
+  - Replaced CDR mock ZIP with streaming get -> archiver -> putStream
+    `bundles/<id>.zip` + 24h signed GET URL (long-term sub-account creds;
+    STS tokens max 1h cannot sign 24h links). `expiresAt` aligned to sign time.
+  - `CDR_BUNDLE_MOCK_MODE`: unset -> real only in production; dev/E2E default
+    mock even with real creds. Malformed `OSS_ENDPOINT` degrades to mock
+    instead of 500ing `/foreman/cdr`.
+  - Live smoke against real Aliyun: AssumeRole / temp-cred PUT `design/*` /
+    session-policy escape guard all passed.
+- Remaining owner step:
+  - Attach policy `print-shop-erp-oss-object-rw` directly to RAM user
+    `webhongbao` (CDR bundling reads `design/*` and writes `bundles/*` with
+    long-term creds). Smoke showed AccessDenied until attached; re-run smoke
+    after attaching.
 
 ## A07 - Notification Per-User Routing
 
