@@ -39,24 +39,30 @@ enum WorkerType {
 }
 
 enum MachineType {
-  HAND_PRESS  // 开机仔
-  WINDMILL    // 风车机
-  GLUE        // 黏封机
+  HAND_PRESS // 开机仔
+  WINDMILL // 风车机
+  GLUE // 黏封机
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
 }
 
 model User {
-  id           String       @id @default(cuid())
-  username     String       @unique
-  password     String       // bcrypt哈希
-  role         Role
-  workerType   WorkerType?  // 仅 role=WORKER 时有值
-  machineType  MachineType? // 仅 workerType=MACHINE 时有值
-  displayName  String
-  phone        String?
-  avatar       String?
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id          String       @id @default(cuid())
+  username    String       @unique @db.Citext
+  password    String // bcrypt哈希
+  role        Role
+  workerType  WorkerType? // 仅 role=WORKER 时有值
+  machineType MachineType? // 仅 workerType=MACHINE 时有值
+  displayName String
+  phone       String?
+  avatar      String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   // 关系
   submittedOrders     Order[]                     @relation("OrderSubmitter")
@@ -72,9 +78,75 @@ model User {
   bills               Bill[]
   designBundles       DesignBundle[]
   materialTxs         MaterialTransaction[]
+  purchaseReceipts    PurchaseReceipt[]
+  businessAuditLogs   BusinessAuditLog[]
 
   @@index([role])
   @@index([workerType])
+}
+
+// ============================================================
+// 客户 / 供应商主数据
+// ============================================================
+
+model Party {
+  id                   String    @id @default(cuid())
+  type                 PartyType
+  code                 String    @unique @db.Citext
+  name                 String
+  shortName            String?
+  searchPinyin         String?
+  searchPinyinInitials String?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  contacts       PartyContact[]
+  addresses      PartyAddress[]
+  customerOrders Order[]        @relation("OrderCustomerParty")
+  purchaseOrders PurchaseOrder[] @relation("PurchaseOrderSupplierParty")
+
+  @@index([type])
+  @@index([isActive])
+  @@index([name])
+}
+
+model PartyContact {
+  id        String   @id @default(cuid())
+  partyId   String
+  name      String
+  phone     String?
+  wechat    String?
+  isPrimary Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@index([phone])
+  @@index([isPrimary])
+}
+
+model PartyAddress {
+  id            String   @id @default(cuid())
+  partyId       String
+  receiverName  String?
+  receiverPhone String?
+  province      String?
+  city          String?
+  district      String?
+  detail        String
+  isDefault     Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@index([isDefault])
 }
 
 // ============================================================
@@ -93,38 +165,43 @@ enum OrderStatus {
 }
 
 model Order {
-  id                 String      @id @default(cuid())
-  orderNo            String      @unique // YYYYMMDD-XXXX
-  submitterId        String
-  submitterRole      Role // 冗余：SALES 或 CUSTOMER_SERVICE
-  createdById        String // 代下单场景
-  status             OrderStatus @default(DRAFT)
-  isUrgent           Boolean     @default(false)
-  customerRef        String? // 客户代号，如"苹果福"
-  receiverName       String?
-  receiverPhone      String?
-  receiverAddress    String?
-  expressCode        String? // 快递代码/菜鸟码
-  packageRequirement String?
-  remark             String?
-  totalAmount        Decimal     @default(0) @db.Decimal(12, 2)
-  trackingNo         String? // 快递单号
-  submittedAt        DateTime?
-  scheduledAt        DateTime?
-  completedAt        DateTime?
-  shippedAt          DateTime?
-  finishedAt         DateTime?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  id                   String      @id @default(cuid())
+  orderNo              String      @unique // YYYYMMDD-XXXX
+  submitterId          String
+  submitterRole        Role // 冗余：SALES 或 CUSTOMER_SERVICE
+  createdById          String // 代下单场景
+  customerPartyId       String?
+  status               OrderStatus @default(DRAFT)
+  isUrgent             Boolean     @default(false)
+  customerRef          String? // 客户代号，如"苹果福"
+  receiverName         String?
+  receiverPhone        String?
+  receiverAddress      String?
+  expressCode          String? // 快递代码/菜鸟码
+  packageRequirement   String?
+  remark               String?
+  totalAmount          Decimal     @default(0) @db.Decimal(12, 2)
+  trackingNo           String? // 快递单号
+  searchPinyin         String?
+  searchPinyinInitials String?
+  submittedAt          DateTime?
+  scheduledAt          DateTime?
+  completedAt          DateTime?
+  shippedAt            DateTime?
+  finishedAt           DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
   submitter       User             @relation("OrderSubmitter", fields: [submitterId], references: [id])
   createdBy       User             @relation("OrderCreator", fields: [createdById], references: [id])
+  customerParty   Party?           @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
   items           OrderItem[]
   outsourceOrders OutsourceOrder[]
   logs            OrderLog[]
   billItems       BillItem[]
 
   @@index([submitterId])
+  @@index([customerPartyId])
   @@index([status])
   @@index([createdAt])
   @@index([isUrgent])
@@ -138,29 +215,29 @@ model Order {
 }
 
 model OrderItem {
-  id              String   @id @default(cuid())
-  orderId         String
-  sequence        Int
-  name            String
-  productId       String?
-  specification   String?
-  paperType       String?
-  quantity        Int
-  crafts          String[] // 工艺ID数组
-  foilColor       String?
-  isDoubleSided   Boolean  @default(false)
-  isDoubleColor   Boolean  @default(false)
-  unitPrice       Decimal  @default(0) @db.Decimal(10, 4)
-  subtotal        Decimal  @default(0) @db.Decimal(12, 2)
-  suggestedPrice  Decimal? @db.Decimal(12, 2)
-  remark          String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  orderId        String
+  sequence       Int
+  name           String
+  productId      String?
+  specification  String?
+  paperType      String?
+  quantity       Int
+  crafts         String[] // 工艺ID数组
+  foilColor      String?
+  isDoubleSided  Boolean  @default(false)
+  isDoubleColor  Boolean  @default(false)
+  unitPrice      Decimal  @default(0) @db.Decimal(10, 4)
+  subtotal       Decimal  @default(0) @db.Decimal(12, 2)
+  suggestedPrice Decimal? @db.Decimal(12, 2)
+  remark         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  order    Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product  Product?            @relation(fields: [productId], references: [id])
-  designs  OrderItemDesign[]
-  tasks    ProductionTask[]
+  order   Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product?          @relation(fields: [productId], references: [id])
+  designs OrderItemDesign[]
+  tasks   ProductionTask[]
 
   @@index([orderId])
 }
@@ -171,15 +248,15 @@ enum DesignFileType {
 }
 
 model OrderItemDesign {
-  id            String         @id @default(cuid())
-  orderItemId   String
-  fileType      DesignFileType
-  fileUrl       String // OSS地址
-  fileName      String
-  fileSize      BigInt
-  thumbnailUrl  String?
-  uploadedBy    String
-  uploadedAt    DateTime       @default(now())
+  id           String         @id @default(cuid())
+  orderItemId  String
+  fileType     DesignFileType
+  fileUrl      String // OSS地址
+  fileName     String
+  fileSize     BigInt
+  thumbnailUrl String?
+  uploadedBy   String
+  uploadedAt   DateTime       @default(now())
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 
@@ -189,18 +266,41 @@ model OrderItemDesign {
 }
 
 model OrderLog {
-  id             String   @id @default(cuid())
-  orderId        String
-  operatorId     String
-  action         String // CREATE/UPDATE/STATUS_CHANGE/DELETE
-  changedFields  Json? // { field: { before, after } }
-  remark         String?
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  orderId       String
+  operatorId    String
+  action        String // CREATE/UPDATE/STATUS_CHANGE/DELETE
+  changedFields Json? // { field: { before, after } }
+  remark        String?
+  createdAt     DateTime @default(now())
 
   order    Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   operator User  @relation(fields: [operatorId], references: [id])
 
   @@index([orderId])
+  @@index([createdAt])
+}
+
+model BusinessAuditLog {
+  id               String   @id @default(cuid())
+  actorId          String?
+  actorRole        Role?
+  actorUsername    String?
+  actorDisplayName String?
+  action           String
+  entityType       String
+  entityId         String
+  before           Json?
+  after            Json?
+  diff             Json?
+  requestMetadata  Json?
+  createdAt        DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
   @@index([createdAt])
 }
 
@@ -216,25 +316,25 @@ enum TaskStatus {
 }
 
 model ProductionTask {
-  id                   String       @id @default(cuid())
-  orderItemId          String
-  craftId              String
-  workerId             String?
-  machineType          MachineType? // 派单时快照
-  status               TaskStatus   @default(PENDING)
-  plannedQty           Int
-  boardCount           Int          @default(0) // 板数（计算值）
-  pressCount           Int          @default(0) // 下数（计算值）
-  completedQty         Int          @default(0)
-  defectQty            Int          @default(0)
-  reworkQty            Int          @default(0)
-  pieceworkAmount      Decimal      @default(0) @db.Decimal(10, 2)
-  salaryRuleSnapshot   Json? // 完工时锁定的规则
-  startedAt            DateTime?
-  completedAt          DateTime?
-  remark               String?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  orderItemId        String
+  craftId            String
+  workerId           String?
+  machineType        MachineType? // 派单时快照
+  status             TaskStatus   @default(PENDING)
+  plannedQty         Int
+  boardCount         Int          @default(0) // 板数（计算值）
+  pressCount         Int          @default(0) // 下数（计算值）
+  completedQty       Int          @default(0)
+  defectQty          Int          @default(0)
+  reworkQty          Int          @default(0)
+  pieceworkAmount    Decimal      @default(0) @db.Decimal(10, 2)
+  salaryRuleSnapshot Json? // 完工时锁定的规则
+  startedAt          DateTime?
+  completedAt        DateTime?
+  remark             String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   craft     Craft     @relation(fields: [craftId], references: [id])
@@ -257,21 +357,21 @@ enum OutsourceStatus {
 }
 
 model OutsourceOrder {
-  id                  String          @id @default(cuid())
-  orderId             String?
-  orderItemIds        String[] // 关联款式
-  supplierName        String
-  supplierContact     String?
-  craftDescription    String?
-  specialRequirement  String? // 特殊要求
-  totalQty            Int?
-  expectedDate        DateTime?
-  actualDate          DateTime?
-  amount              Decimal?        @db.Decimal(12, 2)
-  status              OutsourceStatus @default(SENT)
-  remark              String?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  id                 String          @id @default(cuid())
+  orderId            String?
+  orderItemIds       String[] // 关联款式
+  supplierName       String
+  supplierContact    String?
+  craftDescription   String?
+  specialRequirement String? // 特殊要求
+  totalQty           Int?
+  expectedDate       DateTime?
+  actualDate         DateTime?
+  amount             Decimal?        @db.Decimal(12, 2)
+  status             OutsourceStatus @default(SENT)
+  remark             String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   order Order? @relation(fields: [orderId], references: [id])
 
@@ -285,17 +385,17 @@ model OutsourceOrder {
 // ============================================================
 
 model DesignBundle {
-  id             String   @id @default(cuid())
-  createdById    String
-  dateRangeFrom  DateTime
-  dateRangeTo    DateTime
-  orderIds       String[]
-  designIds      String[]
-  zipFileUrl     String
-  downloadUrl    String
-  expiresAt      DateTime
-  downloadCount  Int      @default(0)
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  createdById   String
+  dateRangeFrom DateTime
+  dateRangeTo   DateTime
+  orderIds      String[]
+  designIds     String[]
+  zipFileUrl    String
+  downloadUrl   String
+  expiresAt     DateTime
+  downloadCount Int      @default(0)
+  createdAt     DateTime @default(now())
 
   createdBy User @relation(fields: [createdById], references: [id])
 
@@ -308,15 +408,15 @@ model DesignBundle {
 // ============================================================
 
 model Craft {
-  id                  String       @id @default(cuid())
-  name                String       @unique
-  code                String       @unique
-  isOutsource         Boolean      @default(false)
-  defaultMachineType  MachineType? // 默认机器
-  sortOrder           Int          @default(0)
-  isActive            Boolean      @default(true)
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  name               String       @unique
+  code               String       @unique
+  isOutsource        Boolean      @default(false)
+  defaultMachineType MachineType? // 默认机器
+  sortOrder          Int          @default(0)
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   tasks ProductionTask[]
 
@@ -337,32 +437,57 @@ enum ProductCategory {
 }
 
 model Product {
-  id             String           @id @default(cuid())
-  category       ProductCategory
-  name           String
-  specification  String?
-  paperType      String?
-  baseUnitPrice  Decimal?         @db.Decimal(10, 4)
-  minOrderQty    Int?
-  isActive       Boolean          @default(true)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id                   String          @id @default(cuid())
+  code                 String?         @unique @db.Citext
+  category             ProductCategory
+  categoryNodeId       String
+  name                 String
+  specification        String?
+  paperType            String?
+  searchPinyin         String?
+  searchPinyinInitials String?
+  baseUnitPrice        Decimal?        @db.Decimal(10, 4)
+  minOrderQty          Int?
+  isActive             Boolean         @default(true)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
-  orderItems OrderItem[]
-  priceTiers PriceTier[]
+  categoryNode ProductCategoryNode @relation(fields: [categoryNodeId], references: [id])
+  orderItems   OrderItem[]
+  priceTiers   PriceTier[]
+  boms         BillOfMaterial[]
 
+  @@index([categoryNodeId])
   @@index([category])
   @@index([isActive])
 }
 
+model ProductCategoryNode {
+  id             String                @id @default(cuid())
+  path           String                @unique
+  pathLtree      Unsupported("ltree")? @map("pathLtree")
+  name           String
+  legacyCategory ProductCategory
+  sortOrder      Int                   @default(0)
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  products Product[]
+  boms     BillOfMaterial[]
+
+  @@index([legacyCategory])
+  @@index([isActive])
+}
+
 model PriceTier {
-  id             String    @id @default(cuid())
-  productId      String
-  minQty         Int
-  unitPrice      Decimal   @db.Decimal(10, 4)
-  effectiveFrom  DateTime  @default(now())
-  effectiveTo    DateTime?
-  createdAt      DateTime  @default(now())
+  id            String    @id @default(cuid())
+  productId     String
+  minQty        Int
+  unitPrice     Decimal   @db.Decimal(10, 4)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -388,6 +513,50 @@ model PriceAdjustment {
 }
 
 // ============================================================
+// BOM / 用料（A19）
+// ============================================================
+
+model BillOfMaterial {
+  id             String   @id @default(cuid())
+  productId      String?
+  categoryNodeId String?
+  name           String
+  version        Int      @default(1)
+  baseQuantity   Int      @default(1)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product      Product?             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  categoryNode ProductCategoryNode? @relation(fields: [categoryNodeId], references: [id], onDelete: Cascade)
+  items        BillOfMaterialItem[]
+
+  @@unique([productId, version])
+  @@unique([categoryNodeId, version])
+  @@index([productId])
+  @@index([categoryNodeId])
+  @@index([isActive])
+}
+
+model BillOfMaterialItem {
+  id         String   @id @default(cuid())
+  bomId      String
+  materialId String
+  quantity   Decimal  @db.Decimal(12, 4)
+  sortOrder  Int      @default(10)
+  remark     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  bom      BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  material Material       @relation(fields: [materialId], references: [id])
+
+  @@unique([bomId, materialId])
+  @@index([bomId])
+  @@index([materialId])
+}
+
+// ============================================================
 // 物料（P1阶段）
 // ============================================================
 
@@ -400,20 +569,26 @@ enum MaterialCategory {
 }
 
 model Material {
-  id             String           @id @default(cuid())
-  code           String           @unique
-  name           String
-  category       MaterialCategory
-  specification  String?
-  unit           String
-  currentStock   Decimal          @default(0) @db.Decimal(12, 2)
-  safetyStock    Decimal?         @db.Decimal(12, 2)
-  averageCost    Decimal?         @db.Decimal(10, 4)
-  isActive       Boolean          @default(true)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id                   String           @id @default(cuid())
+  code                 String           @unique @db.Citext
+  name                 String
+  category             MaterialCategory
+  specification        String?
+  unit                 String
+  searchPinyin         String?
+  searchPinyinInitials String?
+  currentStock         Decimal          @default(0) @db.Decimal(12, 2)
+  safetyStock          Decimal?         @db.Decimal(12, 2)
+  averageCost          Decimal?         @db.Decimal(10, 4)
+  isActive             Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   transactions MaterialTransaction[]
+  purchaseOrderItems   PurchaseOrderItem[]
+  purchaseReceiptItems PurchaseReceiptItem[]
+  locationStocks       MaterialLocationStock[]
+  bomItems             BillOfMaterialItem[]
 
   @@index([category])
 }
@@ -423,25 +598,188 @@ enum TxDirection {
   OUT
 }
 
+model Warehouse {
+  id        String   @id @default(cuid())
+  code      String   @unique @db.Citext
+  name      String
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  locations    WarehouseLocation[]
+  stocks       MaterialLocationStock[]
+  transactions MaterialTransaction[]
+
+  @@index([isActive])
+  @@index([isDefault])
+}
+
+model WarehouseLocation {
+  id          String   @id @default(cuid())
+  warehouseId String
+  code        String
+  name        String
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  warehouse    Warehouse               @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stocks       MaterialLocationStock[]
+  transactions MaterialTransaction[]
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId])
+  @@index([isActive])
+  @@index([isDefault])
+}
+
+model MaterialLocationStock {
+  id           String   @id @default(cuid())
+  materialId   String
+  warehouseId  String
+  locationId   String
+  currentStock Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  material  Material          @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  location  WarehouseLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, locationId])
+  @@index([materialId])
+  @@index([warehouseId])
+  @@index([locationId])
+}
+
 model MaterialTransaction {
-  id               String      @id @default(cuid())
-  materialId       String
-  direction        TxDirection
-  quantity         Decimal     @db.Decimal(12, 2)
-  reasonType       String // PURCHASE/PRODUCTION_USE/etc
-  relatedOrderId   String?
-  relatedTaskId    String?
-  operatorId       String
-  unitCost         Decimal?    @db.Decimal(10, 4)
-  remark           String?
-  occurredAt       DateTime    @default(now())
-  createdAt        DateTime    @default(now())
+  id             String      @id @default(cuid())
+  materialId     String
+  warehouseId    String?
+  locationId     String?
+  direction      TxDirection
+  quantity       Decimal     @db.Decimal(12, 2)
+  reasonType     String // PURCHASE/PRODUCTION_USE/etc
+  relatedOrderId String?
+  relatedTaskId  String?
+  purchaseReceiptItemId String?
+  operatorId     String
+  unitCost       Decimal?    @db.Decimal(10, 4)
+  remark         String?
+  occurredAt     DateTime    @default(now())
+  createdAt      DateTime    @default(now())
 
   material Material @relation(fields: [materialId], references: [id])
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   operator User     @relation(fields: [operatorId], references: [id])
+  purchaseReceiptItem PurchaseReceiptItem? @relation(fields: [purchaseReceiptItemId], references: [id], onDelete: SetNull)
 
   @@index([materialId])
+  @@index([warehouseId])
+  @@index([locationId])
+  @@index([purchaseReceiptItemId])
   @@index([occurredAt])
+}
+
+// ============================================================
+// 采购与入库（A17）
+// ============================================================
+
+enum PurchaseOrderStatus {
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum PurchaseReceiptStatus {
+  POSTED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id              String              @id @default(cuid())
+  purchaseNo      String              @unique
+  supplierPartyId String?
+  supplierCode    String
+  supplierName    String
+  status          PurchaseOrderStatus @default(ORDERED)
+  expectedDate    DateTime?
+  remark          String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  supplierParty Party?              @relation("PurchaseOrderSupplierParty", fields: [supplierPartyId], references: [id], onDelete: SetNull)
+  items         PurchaseOrderItem[]
+  receipts      PurchaseReceipt[]
+
+  @@index([supplierPartyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseOrderItem {
+  id                String   @id @default(cuid())
+  purchaseOrderId   String
+  materialId        String
+  quantity          Decimal  @db.Decimal(12, 2)
+  receivedQuantity  Decimal  @default(0) @db.Decimal(12, 2)
+  unitCost          Decimal? @db.Decimal(10, 4)
+  remark            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  material      Material              @relation(fields: [materialId], references: [id])
+  receiptItems  PurchaseReceiptItem[]
+
+  @@index([purchaseOrderId])
+  @@index([materialId])
+}
+
+model PurchaseReceipt {
+  id              String                @id @default(cuid())
+  receiptNo       String                @unique
+  purchaseOrderId String
+  receivedById    String
+  status          PurchaseReceiptStatus @default(POSTED)
+  receivedAt      DateTime              @default(now())
+  cancelledAt     DateTime?
+  cancelReason    String?
+  remark          String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id])
+  receivedBy    User                  @relation(fields: [receivedById], references: [id])
+  items         PurchaseReceiptItem[]
+
+  @@index([purchaseOrderId])
+  @@index([receivedById])
+  @@index([status])
+  @@index([receivedAt])
+}
+
+model PurchaseReceiptItem {
+  id                  String   @id @default(cuid())
+  receiptId           String
+  purchaseOrderItemId String
+  materialId          String
+  quantity            Decimal  @db.Decimal(12, 2)
+  unitCost            Decimal? @db.Decimal(10, 4)
+  createdAt           DateTime @default(now())
+
+  receipt              PurchaseReceipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem    PurchaseOrderItem    @relation(fields: [purchaseOrderItemId], references: [id])
+  material             Material             @relation(fields: [materialId], references: [id])
+  materialTransactions MaterialTransaction[]
+
+  @@index([receiptId])
+  @@index([purchaseOrderItemId])
+  @@index([materialId])
 }
 
 // ============================================================
@@ -456,15 +794,15 @@ enum SalaryRuleType {
 }
 
 model SalaryRule {
-  id             String         @id @default(cuid())
-  ruleType       SalaryRuleType
-  ruleKey        String // 具体规则键
-  ruleValue      Json // 规则值（结构随ruleType不同）
-  effectiveFrom  DateTime       @default(now())
-  effectiveTo    DateTime?
-  remark         String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id            String         @id @default(cuid())
+  ruleType      SalaryRuleType
+  ruleKey       String // 具体规则键
+  ruleValue     Json // 规则值（结构随ruleType不同）
+  effectiveFrom DateTime       @default(now())
+  effectiveTo   DateTime?
+  remark        String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@unique([ruleType, ruleKey, effectiveFrom])
   @@index([ruleType])
@@ -501,20 +839,20 @@ enum SalaryPeriodStatus {
 }
 
 model SalaryPeriod {
-  id             String              @id @default(cuid())
+  id             String             @id @default(cuid())
   csUserId       String
-  periodStart    DateTime            @db.Date
-  periodEnd      DateTime            @db.Date
-  durationMonths Int                 @default(4)
-  totalSales     Decimal             @default(0) @db.Decimal(12, 2)
-  initialSales   Decimal             @default(0) @db.Decimal(12, 2) // 导入的期初业绩
-  monthlyBase    Decimal             @db.Decimal(10, 2)
-  status         SalaryPeriodStatus  @default(IN_PROGRESS)
+  periodStart    DateTime           @db.Date
+  periodEnd      DateTime           @db.Date
+  durationMonths Int                @default(4)
+  totalSales     Decimal            @default(0) @db.Decimal(12, 2)
+  initialSales   Decimal            @default(0) @db.Decimal(12, 2) // 导入的期初业绩
+  monthlyBase    Decimal            @db.Decimal(10, 2)
+  status         SalaryPeriodStatus @default(IN_PROGRESS)
   settledAt      DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
-  csUser      User                         @relation(fields: [csUserId], references: [id])
+  csUser      User                        @relation(fields: [csUserId], references: [id])
   commissions CustomerServiceCommission[]
 
   @@index([csUserId])
@@ -524,25 +862,25 @@ model SalaryPeriod {
 
 // 客服提成记录
 model CustomerServiceCommission {
-  id                  String    @id @default(cuid())
-  csUserId            String
-  salaryPeriodId      String    @unique
-  totalSales          Decimal   @db.Decimal(12, 2)
-  tierRate            Decimal   @db.Decimal(6, 4)
-  commissionAmount    Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal    Decimal   @db.Decimal(10, 2)
-  totalIncome         Decimal   @db.Decimal(12, 2)
-  paidBase            Decimal   @default(0) @db.Decimal(12, 2)
-  paidCommission      Decimal   @default(0) @db.Decimal(12, 2)
-  isFullyPaid         Boolean   @default(false)
-  settledAt           DateTime
-  paidAt              DateTime?
+  id                 String    @id @default(cuid())
+  csUserId           String
+  salaryPeriodId     String    @unique
+  totalSales         Decimal   @db.Decimal(12, 2)
+  tierRate           Decimal   @db.Decimal(6, 4)
+  commissionAmount   Decimal   @db.Decimal(12, 2)
+  monthlyBaseTotal   Decimal   @db.Decimal(10, 2)
+  totalIncome        Decimal   @db.Decimal(12, 2)
+  paidBase           Decimal   @default(0) @db.Decimal(12, 2)
+  paidCommission     Decimal   @default(0) @db.Decimal(12, 2)
+  isFullyPaid        Boolean   @default(false)
+  settledAt          DateTime
+  paidAt             DateTime?
   // Full rule snapshot at settlement time: CS_TIERS (including mode),
   // CS_BASE_SALARY, CS_PERIOD_LENGTH. Enough to reproduce WHY this
   // specific tierRate was picked even after the tier table is edited
   // (CLAUDE.md §4.4 rule-snapshot bedrock).
-  salaryRuleSnapshot  Json?
-  createdAt           DateTime  @default(now())
+  salaryRuleSnapshot Json?
+  createdAt          DateTime  @default(now())
 
   csUser       User         @relation(fields: [csUserId], references: [id])
   salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id])
@@ -553,28 +891,28 @@ model CustomerServiceCommission {
 
 // 时薪工月度工资
 model HourlyWorkerPayroll {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   workerId           String
   month              String // YYYY-MM
-  totalWorkHours     Decimal  @db.Decimal(6, 2)
-  totalOtHours       Decimal  @default(0) @db.Decimal(6, 2)
-  totalSpareHours    Decimal  @default(0) @db.Decimal(6, 2) // COOK 专用
-  hourlyRate         Decimal  @db.Decimal(6, 2)
-  otMultiplier       Decimal  @db.Decimal(4, 2)
-  baseSalary         Decimal  @db.Decimal(10, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
-  otSalary           Decimal  @default(0) @db.Decimal(10, 2) // PACKER/CLEANER only
-  spareSalary        Decimal  @default(0) @db.Decimal(10, 2) // COOK only
-  totalSalary        Decimal  @db.Decimal(10, 2)
+  totalWorkHours     Decimal   @db.Decimal(6, 2)
+  totalOtHours       Decimal   @default(0) @db.Decimal(6, 2)
+  totalSpareHours    Decimal   @default(0) @db.Decimal(6, 2) // COOK 专用
+  hourlyRate         Decimal   @db.Decimal(6, 2)
+  otMultiplier       Decimal   @db.Decimal(4, 2)
+  baseSalary         Decimal   @db.Decimal(10, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
+  otSalary           Decimal   @default(0) @db.Decimal(10, 2) // PACKER/CLEANER only
+  spareSalary        Decimal   @default(0) @db.Decimal(10, 2) // COOK only
+  totalSalary        Decimal   @db.Decimal(10, 2)
   dailyDetail        Json? // 每日工时明细
   // Full rule snapshot at settlement time: hourlyRate / cookMonthly /
   // spareHourlyRate / otMultiplier / workHours config. Enough to
   // reproduce the pay even after the rules table is later edited
   // (CLAUDE.md §4.4 rule-snapshot bedrock, same pattern as CS commission).
   salaryRuleSnapshot Json?
-  isPaid             Boolean  @default(false)
+  isPaid             Boolean   @default(false)
   paidAt             DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   worker User @relation(fields: [workerId], references: [id])
 
@@ -619,17 +957,17 @@ enum BillStatus {
 }
 
 model Bill {
-  id           String     @id @default(cuid())
-  salesUserId  String
-  period       String // YYYY-MM
-  totalAmount  Decimal    @db.Decimal(12, 2)
-  paidAmount   Decimal    @default(0) @db.Decimal(12, 2)
-  status       BillStatus @default(DRAFT)
-  issuedAt     DateTime?
-  paidAt       DateTime?
-  remark       String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id          String     @id @default(cuid())
+  salesUserId String
+  period      String // YYYY-MM
+  totalAmount Decimal    @db.Decimal(12, 2)
+  paidAmount  Decimal    @default(0) @db.Decimal(12, 2)
+  status      BillStatus @default(DRAFT)
+  issuedAt    DateTime?
+  paidAt      DateTime?
+  remark      String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   salesUser User       @relation(fields: [salesUserId], references: [id])
   items     BillItem[]
@@ -643,11 +981,11 @@ model Bill {
 }
 
 model BillItem {
-  id            String   @id @default(cuid())
-  billId        String
-  orderId       String
-  orderAmount   Decimal  @db.Decimal(12, 2)
-  createdAt     DateTime @default(now())
+  id          String   @id @default(cuid())
+  billId      String
+  orderId     String
+  orderAmount Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
 
   bill  Bill  @relation(fields: [billId], references: [id], onDelete: Cascade)
   order Order @relation(fields: [orderId], references: [id])
@@ -695,16 +1033,16 @@ enum NotificationStatus {
 }
 
 model NotificationLog {
-  id               String             @id @default(cuid())
-  eventType        String
-  channelId        String
-  messageContent   String
-  status           NotificationStatus
-  errorMessage     String?
-  retryCount       Int                @default(0)
-  relatedOrderId   String?
-  sentAt           DateTime?
-  createdAt        DateTime           @default(now())
+  id             String             @id @default(cuid())
+  eventType      String
+  channelId      String
+  messageContent String
+  status         NotificationStatus
+  errorMessage   String?
+  retryCount     Int                @default(0)
+  relatedOrderId String?
+  sentAt         DateTime?
+  createdAt      DateTime           @default(now())
 
   channel NotificationChannel @relation(fields: [channelId], references: [id])
 
