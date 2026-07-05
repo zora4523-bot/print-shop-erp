@@ -195,8 +195,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   id: d.id,
                   fileName: d.fileName,
                   fileType: d.fileType,
-                  // bucket 私有：裸 fileUrl 会 403，服务端换成 30min 预签 GET
-                  fileUrl: signDesignReadUrl(d.fileUrl),
+                  // bucket 私有：IMAGE 缩略图换成 30min 预签 GET。CDR 不签
+                  // ——面板只显示 chip，把可用下载 URL 发给无 CDR 权限的
+                  // 角色是越权（受控下载口在 /api/cdr/bundles）。
+                  fileUrl:
+                    d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : '',
                   // BigInt 不能过 RSC 序列化边界
                   fileSize: String(d.fileSize),
                 }))}

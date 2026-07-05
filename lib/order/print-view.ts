@@ -113,11 +113,15 @@ export async function getOrderForPrint(
       (d): PrintDesign => ({
         id: d.id,
         fileType: d.fileType,
-        // bucket 私有：裸 fileUrl 会 403，渲染前换成 30min 预签 GET
-        // （浏览器打印和 Puppeteer PDF 都在窗口内完成）。
-        fileUrl: signDesignReadUrl(d.fileUrl),
+        // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
+        // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
+        // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
+        fileUrl:
+          d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
         fileName: d.fileName,
-        thumbnailUrl: d.thumbnailUrl ? signDesignReadUrl(d.thumbnailUrl) : d.thumbnailUrl,
+        thumbnailUrl: d.thumbnailUrl
+          ? signDesignReadUrl(d.thumbnailUrl)
+          : d.thumbnailUrl,
         uploadedAt: d.uploadedAt,
       }),
     ),

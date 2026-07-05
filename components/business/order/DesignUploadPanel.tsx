@@ -19,6 +19,8 @@ export type DesignItem = {
   id: string;
   fileName: string;
   fileType: 'IMAGE' | 'CDR';
+  // IMAGE：30min 预签 GET（页面层签）。CDR：空串——面板只显示 chip，
+  // 不提供下载链接（受控下载口在 CDR 汇总）。
   fileUrl: string;
   // BigInt 不能过 RSC 序列化边界，页面层先转 string
   fileSize: string;
