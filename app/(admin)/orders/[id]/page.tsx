@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { OrderStatus, Role } from '../../../generated/prisma/enums';
+import { OrderStatus, Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import {
@@ -24,6 +24,8 @@ import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
+import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
+import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -45,6 +47,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();
+  const materialEstimate = await estimateMaterialUsageForOrderItems(order.items);
 
   const canSubmit =
     order.status === OrderStatus.DRAFT &&
@@ -183,6 +186,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
           ))}
         </ol>
       </section>
+
+      <OrderMaterialUsageEstimate estimate={materialEstimate} />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
         <h2 className="text-base font-semibold">修改日志</h2>

@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
-import { Role } from '../../../generated/prisma/enums';
+import { Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listCrafts } from '@/lib/craft';
+import { listCustomerPartyOptions } from '@/lib/party';
 import { listProducts } from '@/lib/product';
 import { OrderForm } from '@/components/business/order/OrderForm';
 
@@ -18,7 +19,11 @@ export default async function NewOrderPage() {
     user.role === Role.FOREMAN;
   if (!canCreate) redirect('/orders');
 
-  const [allCrafts, allProducts] = await Promise.all([listCrafts(), listProducts()]);
+  const [allCrafts, allProducts, customerParties] = await Promise.all([
+    listCrafts(),
+    listProducts(),
+    listCustomerPartyOptions(),
+  ]);
 
   // Only show active entries in the picker — the server-side guard in
   // createOrder.ts would reject inactive refs anyway.
@@ -38,7 +43,11 @@ export default async function NewOrderPage() {
           进入详情页后再点 &ldquo;提交工单&rdquo; 进入排产流程。
         </p>
       </div>
-      <OrderForm crafts={crafts} products={products} />
+      <OrderForm
+        crafts={crafts}
+        products={products}
+        customerParties={customerParties}
+      />
     </div>
   );
 }
