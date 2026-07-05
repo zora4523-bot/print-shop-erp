@@ -2,6 +2,7 @@ import qrcode from 'qrcode';
 import { db } from '../db';
 import { Role } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
+import { signDesignReadUrl } from '../oss/read-url';
 import { roleLabel } from '../auth/role-labels';
 import type {
   PrintDesign,
@@ -112,9 +113,11 @@ export async function getOrderForPrint(
       (d): PrintDesign => ({
         id: d.id,
         fileType: d.fileType,
-        fileUrl: d.fileUrl,
+        // bucket 私有：裸 fileUrl 会 403，渲染前换成 30min 预签 GET
+        // （浏览器打印和 Puppeteer PDF 都在窗口内完成）。
+        fileUrl: signDesignReadUrl(d.fileUrl),
         fileName: d.fileName,
-        thumbnailUrl: d.thumbnailUrl,
+        thumbnailUrl: d.thumbnailUrl ? signDesignReadUrl(d.thumbnailUrl) : d.thumbnailUrl,
         uploadedAt: d.uploadedAt,
       }),
     ),

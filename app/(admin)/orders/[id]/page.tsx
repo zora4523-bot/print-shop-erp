@@ -25,6 +25,7 @@ import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
+import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 
@@ -194,7 +195,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   id: d.id,
                   fileName: d.fileName,
                   fileType: d.fileType,
-                  fileUrl: d.fileUrl,
+                  // bucket 私有：裸 fileUrl 会 403，服务端换成 30min 预签 GET
+                  fileUrl: signDesignReadUrl(d.fileUrl),
                   // BigInt 不能过 RSC 序列化边界
                   fileSize: String(d.fileSize),
                 }))}
