@@ -38,6 +38,11 @@ type E2EUser = {
 };
 
 export const E2E_USERS: Record<string, E2EUser> = {
+  owner: {
+    username: 'e2e-owner',
+    displayName: 'E2E 老板',
+    role: 'OWNER',
+  },
   sales: {
     username: 'e2e-sales',
     displayName: 'E2E 销售',

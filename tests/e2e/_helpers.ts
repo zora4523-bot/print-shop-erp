@@ -962,6 +962,314 @@ export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// ---- Automation smoke fixtures ----
+//
+// The smoke suite is intentionally narrow: it proves that protected routes,
+// owner-only Pigsty readiness, and the three search surfaces render against a
+// real dev database. Fixtures are idempotent and use fixed CODX/E2E values so
+// failed runs are easy to inspect manually.
+export async function seedSearchSmokeFixtures(opts: {
+  ownerId: string;
+}): Promise<{
+  productCode: string;
+  productName: string;
+  orderId: string;
+  orderNo: string;
+  customerRef: string;
+  materialCode: string;
+  materialName: string;
+  partyId: string;
+  partyCode: string;
+  partyName: string;
+  partyContactName: string;
+  partyContactPhone: string;
+  partyAddress: string;
+}> {
+  const productCode = 'CODX-E2E-PROD-001';
+  const productName = 'Codex E2E 测试红包';
+  const orderId = 'codx_e2e_order_search_001';
+  const orderNo = 'CODX-E2E-ORDER-001';
+  const customerRef = 'CODX-E2E客户代号';
+  const materialCode = 'CODX-E2E-MAT-001';
+  const materialName = 'Codex E2E 测试铜版纸';
+  const partyId = 'codx_e2e_party_search_001';
+  const partyCode = 'CODX_E2E_CUST_001';
+  const partyName = 'Codex E2E 客户主数据';
+  const partyContactName = 'Codex E2E 联系人';
+  const partyContactPhone = '13800002222';
+  const partyAddress = '广东深圳南山科技园 1 号';
+
+  await withDb(async (db) => {
+    const categoryNode = await db.query<{
+      id: string;
+      legacyCategory: string;
+    }>(
+      `SELECT id, "legacyCategory" AS "legacyCategory"
+         FROM "ProductCategoryNode"
+        WHERE "isActive" = true
+        ORDER BY "sortOrder" ASC, path ASC
+        LIMIT 1`,
+    );
+    if (categoryNode.rowCount === 0) {
+      throw new Error('seedSearchSmokeFixtures: no active product category');
+    }
+
+    await db.query(
+      `
+      INSERT INTO "Product" (
+        id, code, category, "categoryNodeId", name, specification,
+        "paperType", "baseUnitPrice", "minOrderQty", "isActive",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_product_search_001', $1, $2::"ProductCategory", $3,
+        $4, '7寸 单色', '铜版纸', 0.1200, 1000, true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        category = EXCLUDED.category,
+        "categoryNodeId" = EXCLUDED."categoryNodeId",
+        name = EXCLUDED.name,
+        specification = EXCLUDED.specification,
+        "paperType" = EXCLUDED."paperType",
+        "baseUnitPrice" = EXCLUDED."baseUnitPrice",
+        "minOrderQty" = EXCLUDED."minOrderQty",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [
+        productCode,
+        categoryNode.rows[0]!.legacyCategory,
+        categoryNode.rows[0]!.id,
+        productName,
+      ],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Material" (
+        id, code, name, category, specification, unit, "currentStock",
+        "safetyStock", "averageCost", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_material_search_001', $1, $2, 'PAPER'::"MaterialCategory",
+        '250g A4', '张', 8800.00, 1000.00, 0.0800, true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        name = EXCLUDED.name,
+        category = EXCLUDED.category,
+        specification = EXCLUDED.specification,
+        unit = EXCLUDED.unit,
+        "currentStock" = EXCLUDED."currentStock",
+        "safetyStock" = EXCLUDED."safetyStock",
+        "averageCost" = EXCLUDED."averageCost",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [materialCode, materialName],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Party" (
+        id, type, code, name, "shortName", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'CUSTOMER'::"PartyType", $2, $3, 'E2E客户', true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        type = EXCLUDED.type,
+        name = EXCLUDED.name,
+        "shortName" = EXCLUDED."shortName",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [partyId, partyCode, partyName],
+    );
+    await db.query(`DELETE FROM "PartyContact" WHERE "partyId" = $1`, [partyId]);
+    await db.query(`DELETE FROM "PartyAddress" WHERE "partyId" = $1`, [partyId]);
+    await db.query(
+      `
+      INSERT INTO "PartyContact" (
+        id, "partyId", name, phone, "isPrimary", "sortOrder", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_party_contact_001', $1, $2, $3, true, 0, NOW(), NOW()
+      )
+      `,
+      [partyId, partyContactName, partyContactPhone],
+    );
+    await db.query(
+      `
+      INSERT INTO "PartyAddress" (
+        id, "partyId", "receiverName", "receiverPhone",
+        province, city, district, detail, "isDefault", "sortOrder",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_party_address_001', $1, $2, $3,
+        '广东', '深圳', '南山', '科技园 1 号', true, 0,
+        NOW(), NOW()
+      )
+      `,
+      [partyId, partyContactName, partyContactPhone],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
+        "receiverAddress", "expressCode", "trackingNo", "createdAt",
+        "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'OWNER'::"Role", $3,
+        'DRAFT'::"OrderStatus", true, $4, 'Codex E2E 收货人',
+        '13900001111', 'E2E 测试地址', 'SF-CODX-E2E',
+        'SF123456789E2E', NOW(), NOW()
+      )
+      ON CONFLICT ("orderNo") DO UPDATE SET
+        "submitterId" = EXCLUDED."submitterId",
+        "createdById" = EXCLUDED."createdById",
+        "isUrgent" = true,
+        "customerRef" = EXCLUDED."customerRef",
+        "receiverName" = EXCLUDED."receiverName",
+        "receiverPhone" = EXCLUDED."receiverPhone",
+        "receiverAddress" = EXCLUDED."receiverAddress",
+        "expressCode" = EXCLUDED."expressCode",
+        "trackingNo" = EXCLUDED."trackingNo",
+        "updatedAt" = NOW()
+      `,
+      [orderId, orderNo, opts.ownerId, customerRef],
+    );
+
+    await db.query(`DELETE FROM "OrderItem" WHERE "orderId" = $1`, [orderId]);
+    await db.query(
+      `
+      INSERT INTO "OrderItem" (
+        id, "orderId", sequence, name, "productId", specification,
+        "paperType", quantity, crafts, "unitPrice", subtotal,
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_order_item_search_001', $1, 1, 'Codex E2E 款式',
+        'codx_e2e_product_search_001', '7寸 单色', '铜版纸',
+        2000, ARRAY[]::text[], 0.1200, 240.00, NOW(), NOW()
+      )
+      `,
+      [orderId],
+    );
+
+    await db.query(
+      `DELETE FROM "BillOfMaterial"
+        WHERE id = 'codx_e2e_bom_search_001'
+           OR "productId" = 'codx_e2e_product_search_001'`,
+    );
+    await db.query(
+      `
+      INSERT INTO "BillOfMaterial" (
+        id, "productId", "categoryNodeId", name, version,
+        "baseQuantity", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_bom_search_001', 'codx_e2e_product_search_001',
+        NULL, 'Codex E2E 标准 BOM', 1, 1000, true, NOW(), NOW()
+      )
+      `,
+    );
+    await db.query(
+      `
+      INSERT INTO "BillOfMaterialItem" (
+        id, "bomId", "materialId", quantity, "sortOrder",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_bom_item_search_001', 'codx_e2e_bom_search_001',
+        'codx_e2e_material_search_001', 500.0000, 10, NOW(), NOW()
+      )
+      `,
+    );
+
+    const generatedColumns = await db.query<{
+      tableName: string;
+      columnName: string;
+      isGenerated: string;
+    }>(
+      `
+      SELECT table_name AS "tableName", column_name AS "columnName",
+             is_generated AS "isGenerated"
+        FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name IN ('Order', 'Product', 'Material', 'Party')
+         AND column_name IN ('searchPinyin', 'searchPinyinInitials')
+      `,
+    );
+    const canWriteSearchColumn = (tableName: string, columnName: string) =>
+      generatedColumns.rows.some(
+        (row) =>
+          row.tableName === tableName &&
+          row.columnName === columnName &&
+          row.isGenerated === 'NEVER',
+      );
+
+    if (
+      canWriteSearchColumn('Product', 'searchPinyin') &&
+      canWriteSearchColumn('Product', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Product"
+            SET "searchPinyin" = 'codexeeceshihongbao',
+                "searchPinyinInitials" = 'cdxeecshb'
+          WHERE code = $1`,
+        [productCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Material', 'searchPinyin') &&
+      canWriteSearchColumn('Material', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Material"
+            SET "searchPinyin" = 'codexeeceshitongbanzhi',
+                "searchPinyinInitials" = 'cdxeecstbz'
+          WHERE code = $1`,
+        [materialCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Party', 'searchPinyin') &&
+      canWriteSearchColumn('Party', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Party"
+            SET "searchPinyin" = 'codexeecekehuzhushuju',
+                "searchPinyinInitials" = 'cdxeeckhzsj'
+          WHERE code = $1`,
+        [partyCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Order', 'searchPinyin') &&
+      canWriteSearchColumn('Order', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Order"
+            SET "searchPinyin" = 'codexeekehu',
+                "searchPinyinInitials" = 'cdxeekh'
+          WHERE "orderNo" = $1`,
+        [orderNo],
+      );
+    }
+  });
+
+  return {
+    productCode,
+    productName,
+    orderId,
+    orderNo,
+    customerRef,
+    materialCode,
+    materialName,
+    partyId,
+    partyCode,
+    partyName,
+    partyContactName,
+    partyContactPhone,
+    partyAddress,
+  };
+}
+
 // Logs out the currently signed-in user via the header UserMenu dropdown
 // and waits to land on /login. Used by multi-role flow tests where the
 // same browser context switches between SALES → FOREMAN → WORKER →

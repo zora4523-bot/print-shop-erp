@@ -9,8 +9,11 @@ import { loadEnvConfig } from '@next/env';
 // would diverge from the running app (Codex round 74 / P2).
 loadEnvConfig(process.cwd(), /* dev */ true);
 
+const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
+const webServerPort = new URL(baseURL).port || '3000';
+
 // E2E config — runs against the Next.js dev server. Locally we reuse
-// whatever dev server is already running on :3000 (via `pnpm dev`);
+// whatever dev server is already running at E2E_BASE_URL (default :3000);
 // CI / one-shot `pnpm test:e2e` spawns its own. Tests share the dev
 // database (per CLAUDE.md MVP posture) and use unique-per-run inputs
 // so reruns don't collide. A separate test DB can be added later.
@@ -26,7 +29,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['github'], ['html']] : 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL,
     // Trace + screenshot on first retry — cheap to keep on, useful when
     // a failure surfaces in CI / a stale environment.
     trace: 'on-first-retry',
@@ -39,8 +42,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:3000',
+    command: `node ./node_modules/next/dist/bin/next dev --port ${webServerPort}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
     stdout: 'pipe',
