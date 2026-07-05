@@ -47,8 +47,15 @@ const SIGNED_URL_EXPIRES_SECONDS = 24 * 60 * 60;
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CDR_BUNDLE_MOCK_MODE === 'true') return true;
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
-  // OSS 未配齐 → 强制 mock；不能真打包
-  const cfg = readOssConfig(env);
+  // OSS 未配齐 → 强制 mock；不能真打包。malformed OSS_ENDPOINT 会让
+  // readOssConfig throw——视同未配齐，页面（/foreman/cdr 渲染时调本
+  // 函数）降级到 mock 告警条而不是 500（Codex A06 verify round）。
+  let cfg: ReturnType<typeof readOssConfig>;
+  try {
+    cfg = readOssConfig(env);
+  } catch {
+    return true;
+  }
   if (!cfg.configured) return true;
   // 留空 + 已配齐：非生产默认 mock——dev/E2E 会自动触发打包流程，
   // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包（Codex A06

@@ -108,6 +108,15 @@ describe('isMockMode', () => {
       } as unknown as NodeJS.ProcessEnv),
     ).toBe(true);
   });
+  it('OSS_ENDPOINT 非法（readOssConfig throw）→ true（页面降级 mock 而非 500）', () => {
+    expect(
+      isMockMode({
+        ...(configuredEnv as unknown as Record<string, string>),
+        OSS_ENDPOINT: 'not a url',
+        NODE_ENV: 'production',
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBe(true);
+  });
   it('留空 + OSS 配齐 + 生产 → false（真实打包）', () => {
     expect(
       isMockMode({
