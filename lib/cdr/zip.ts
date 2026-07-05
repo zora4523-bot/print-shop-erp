@@ -49,7 +49,11 @@ export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
   // OSS 未配齐 → 强制 mock；不能真打包
   const cfg = readOssConfig(env);
-  return !cfg.configured;
+  if (!cfg.configured) return true;
+  // 留空 + 已配齐：非生产默认 mock——dev/E2E 会自动触发打包流程，
+  // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包（Codex A06
+  // review #3；同 NOTIFICATION_MOCK_MODE 的 dev 默认语义）。
+  return env.NODE_ENV !== 'production';
 }
 
 // 从存储的 fileUrl 反推 OSS 对象 key。fileUrl 由 sign.ts 以
@@ -72,7 +76,7 @@ function deriveObjectKey(fileUrl: string): string {
 
 async function generateRealZip(
   input: ZipUploadInput,
-  now: Date,
+  nowFn: () => Date,
   env: NodeJS.ProcessEnv,
 ): Promise<ZipUploadResult> {
   const cfgResult = readOssConfig(env);
@@ -89,17 +93,23 @@ async function generateRealZip(
     objectKey: deriveObjectKey(f.fileUrl),
   }));
 
+  // endpoint 用 config 已校验的值（支持 OSS_ENDPOINT 覆盖：VPC 内网、
+  // 自定义端口等），不能只凭 region 拼默认公网域名（Codex A06 review #1）。
   const client = new OSS({
     accessKeyId: cfg.accessKeyId,
     accessKeySecret: cfg.accessKeySecret,
     bucket: cfg.bucket,
-    region: cfg.region,
-    secure: true,
+    endpoint: cfg.endpoint,
+    secure: cfg.endpoint.startsWith('https://'),
   });
 
   const zipObjectKey = `bundles/${input.bundleId}.zip`;
   const archive = new ZipArchive({ zlib: { level: 9 } });
   const out = new PassThrough();
+  // destroy(err) 会在流上 emit 'error'；没有监听器时 Node 视为
+  // uncaught exception 直接崩进程。错误本体已经通过 putSettled /
+  // archiveError 传递，这里只需吞掉事件。
+  out.on('error', () => {});
   let archiveError: Error | null = null;
   archive.on('error', (err) => {
     archiveError = err;
@@ -109,7 +119,20 @@ async function generateRealZip(
   archive.pipe(out);
 
   // putStream 与 append 并发：archiver 边压边写，整包不落内存/磁盘。
-  const putPromise = client.putStream(zipObjectKey, out);
+  // 立刻折叠成 settled 对象（永不 reject）：PUT 在 append 循环期间早期
+  // 失败（403 / DNS / socket）时不会成为 unhandled rejection，同时
+  // destroy 输出流释放 archiver 背压，让 finalize 尽快失败而不是挂死
+  // （Codex A06 review #2）。
+  const putSettled: Promise<
+    { ok: true } | { ok: false; err: Error }
+  > = client.putStream(zipObjectKey, out).then(
+    () => ({ ok: true as const }),
+    (err: unknown) => {
+      const e = err instanceof Error ? err : new Error(String(err));
+      out.destroy(e);
+      return { ok: false as const, err: e };
+    },
+  );
 
   try {
     // ZIP 内按工单号分目录；同名文件追加序号，避免静默覆盖。
@@ -126,19 +149,21 @@ async function generateRealZip(
       archive.append(result.stream, { name });
     }
     await archive.finalize();
-    await putPromise;
   } catch (err) {
-    // 半途失败：终止 archiver 并确保 putPromise 不产生 unhandled
-    // rejection（对象可能已写入半截，OSS 端以 PUT 完成与否为准）。
+    // 半途失败：终止 archiver；putSettled 永不 reject，等它收尾即可。
     archive.abort();
     out.destroy();
-    await putPromise.catch(() => {});
+    await putSettled;
     throw err;
   }
+  const putResult = await putSettled;
+  if (!putResult.ok) throw putResult.err;
   if (archiveError) throw archiveError;
 
-  // 预签 24h GET URL。下载路由拿 zipFileUrl 直接 302；链接寿命与
-  // DesignBundle.expiresAt 一致。
+  // 预签 24h GET URL。**上传完成后**取当前时间——URL 的 24h 从签发
+  // 起算，DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务
+  // 白白缩短外协的下载窗口（Codex A06 review #4）。
+  const signedAt = nowFn();
   const zipFileUrl = client.signatureUrl(zipObjectKey, {
     expires: SIGNED_URL_EXPIRES_SECONDS,
     method: 'GET',
@@ -146,7 +171,7 @@ async function generateRealZip(
 
   return {
     zipFileUrl,
-    expiresAt: new Date(now.getTime() + TWENTY_FOUR_HOURS_MS),
+    expiresAt: new Date(signedAt.getTime() + TWENTY_FOUR_HOURS_MS),
     isMock: false,
   };
 }
@@ -159,14 +184,20 @@ export async function uploadBundleZip(
   input: ZipUploadInput,
   opts: { mockMode?: boolean; now?: Date; env?: NodeJS.ProcessEnv } = {},
 ): Promise<ZipUploadResult> {
-  const now = opts.now ?? new Date();
   const mock = opts.mockMode ?? isMockMode(opts.env ?? process.env);
   if (mock) {
+    const now = opts.now ?? new Date();
     return {
       zipFileUrl: `mock://bundle/${input.bundleId}.zip`,
       expiresAt: new Date(now.getTime() + TWENTY_FOUR_HOURS_MS),
       isMock: true,
     };
   }
-  return generateRealZip(input, now, opts.env ?? process.env);
+  // 真实路径的时间在预签 URL 时才取（对齐 URL 寿命）；opts.now 仅供
+  // 测试注入确定性时钟。
+  return generateRealZip(
+    input,
+    () => opts.now ?? new Date(),
+    opts.env ?? process.env,
+  );
 }

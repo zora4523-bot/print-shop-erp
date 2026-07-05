@@ -237,6 +237,20 @@ describe('signDesignUpload — real STS signing', () => {
     });
   });
 
+  it('folds malformed OSS_ENDPOINT into { status: error } instead of throwing (Codex A06 #5)', async () => {
+    const consoleSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const r = await signDesignUpload(validParams, {
+      ...(configuredEnv as unknown as Record<string, string>),
+      OSS_ENDPOINT: 'not a url',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toMatch(/OSS_ENDPOINT/);
+    expect(assumeRoleMock).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
   it('folds AssumeRole failure into { status: error } without leaking SDK details', async () => {
     const consoleSpy = vi
       .spyOn(console, 'error')

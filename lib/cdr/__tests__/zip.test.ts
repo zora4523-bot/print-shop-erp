@@ -100,6 +100,22 @@ describe('isMockMode', () => {
       } as unknown as NodeJS.ProcessEnv),
     ).toBe(true);
   });
+  it('留空 + OSS 配齐 + 非生产 → true（dev/E2E 不写真 bucket）', () => {
+    expect(
+      isMockMode({
+        ...(configuredEnv as unknown as Record<string, string>),
+        NODE_ENV: 'development',
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBe(true);
+  });
+  it('留空 + OSS 配齐 + 生产 → false（真实打包）', () => {
+    expect(
+      isMockMode({
+        ...(configuredEnv as unknown as Record<string, string>),
+        NODE_ENV: 'production',
+      } as unknown as NodeJS.ProcessEnv),
+    ).toBe(false);
+  });
 });
 
 describe('uploadBundleZip — mock path', () => {
@@ -133,11 +149,13 @@ describe('uploadBundleZip — real path', () => {
       { mockMode: false, now, env: configuredEnv },
     );
 
+    // endpoint 必须来自 config（支持 OSS_ENDPOINT 覆盖），不能只凭
+    // region 拼默认域名（Codex A06 review #1）
     expect(ossCtorMock).toHaveBeenCalledWith({
       accessKeyId: 'ak',
       accessKeySecret: 'sk',
       bucket: 'my-bucket',
-      region: 'oss-cn-shenzhen',
+      endpoint: 'https://oss-cn-shenzhen.aliyuncs.com',
       secure: true,
     });
     expect(getStreamMock.mock.calls.map((c) => c[0])).toEqual([
@@ -195,6 +213,22 @@ describe('uploadBundleZip — real path', () => {
     ).rejects.toBeInstanceOf(CdrZipError);
     expect(ossCtorMock).not.toHaveBeenCalled();
     expect(putStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('putStream 失败（如 bundles/* 403）→ 抛原错误且不签 URL，无 unhandled rejection', async () => {
+    putStreamMock.mockRejectedValue(new Error('AccessDenied: bundles'));
+    await expect(
+      uploadBundleZip(
+        {
+          files: [
+            { orderNo: 'O-1', fileName: 'a.cdr', fileUrl: designUrl('cdr-1.cdr') },
+          ],
+          bundleId: 'b1',
+        },
+        { mockMode: false, now, env: configuredEnv },
+      ),
+    ).rejects.toThrow('AccessDenied: bundles');
+    expect(signatureUrlMock).not.toHaveBeenCalled();
   });
 
   it('单个设计文件拉取失败 → abort 打包并抛出', async () => {

@@ -34,8 +34,8 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
     return { status: 'invalid', fieldErrors };
   }
 
-  // signDesignUpload 自身把 STS 失败折叠成 { status: 'error' }，四态
-  // union 对 UI 是穷尽的——这里不再需要 try/catch 翻译层。
+  // signDesignUpload 自身把 STS 失败与配置解析失败都折叠成
+  // { status: 'error' }，四态 union 对 UI 穷尽——不需要 try/catch 翻译层。
   return signDesignUpload({
     userId: user.id,
     ...parsed.data,

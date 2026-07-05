@@ -124,7 +124,22 @@ export async function signDesignUpload(
   params: SignUploadParams,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SignUploadResult> {
-  const result = readOssConfig(env);
+  // readOssConfig 对 malformed OSS_ENDPOINT 会 throw——同样折叠成
+  // status:'error'，保证四态 union 对调用方真正穷尽，不让 Server
+  // Action 500（Codex A06 review #5）。
+  let result: ReturnType<typeof readOssConfig>;
+  try {
+    result = readOssConfig(env);
+  } catch (err) {
+    console.error(
+      '[oss] config parse failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return {
+      status: 'error',
+      message: 'OSS 环境配置无效（OSS_ENDPOINT 格式错误），请联系管理员修正。',
+    };
+  }
   if (!result.configured) {
     return {
       status: 'not-configured',
