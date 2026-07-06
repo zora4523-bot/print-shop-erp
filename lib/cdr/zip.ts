@@ -49,7 +49,7 @@ export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
   // OSS 未配齐 → 强制 mock；不能真打包。malformed OSS_ENDPOINT 会让
   // readOssConfig throw——视同未配齐，页面（/foreman/cdr 渲染时调本
-  // 函数）降级到 mock 告警条而不是 500（Codex A06 verify round）。
+  // 函数）降级到 mock 告警条而不是 500。
   let cfg: ReturnType<typeof readOssConfig>;
   try {
     cfg = readOssConfig(env);
@@ -58,8 +58,8 @@ export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   }
   if (!cfg.configured) return true;
   // 留空 + 已配齐：非生产默认 mock——dev/E2E 会自动触发打包流程，
-  // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包（Codex A06
-  // review #3；同 NOTIFICATION_MOCK_MODE 的 dev 默认语义）。
+  // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包
+  // （同 NOTIFICATION_MOCK_MODE 的 dev 默认语义）。
   return env.NODE_ENV !== 'production';
 }
 
@@ -101,7 +101,7 @@ async function generateRealZip(
   }));
 
   // endpoint 用 config 已校验的值（支持 OSS_ENDPOINT 覆盖：VPC 内网、
-  // 自定义端口等），不能只凭 region 拼默认公网域名（Codex A06 review #1）。
+  // 自定义端口等），不能只凭 region 拼默认公网域名。
   const client = new OSS({
     accessKeyId: cfg.accessKeyId,
     accessKeySecret: cfg.accessKeySecret,
@@ -128,8 +128,7 @@ async function generateRealZip(
   // putStream 与 append 并发：archiver 边压边写，整包不落内存/磁盘。
   // 立刻折叠成 settled 对象（永不 reject）：PUT 在 append 循环期间早期
   // 失败（403 / DNS / socket）时不会成为 unhandled rejection，同时
-  // destroy 输出流释放 archiver 背压，让 finalize 尽快失败而不是挂死
-  // （Codex A06 review #2）。
+  // destroy 输出流释放 archiver 背压，让 finalize 尽快失败而不是挂死。
   const putSettled: Promise<
     { ok: true } | { ok: false; err: Error }
   > = client.putStream(zipObjectKey, out).then(
@@ -169,7 +168,7 @@ async function generateRealZip(
 
   // 预签 24h GET URL。**上传完成后**取当前时间——URL 的 24h 从签发
   // 起算，DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务
-  // 白白缩短外协的下载窗口（Codex A06 review #4）。
+  // 白白缩短外协的下载窗口。
   const signedAt = nowFn();
   const zipFileUrl = client.signatureUrl(zipObjectKey, {
     expires: SIGNED_URL_EXPIRES_SECONDS,

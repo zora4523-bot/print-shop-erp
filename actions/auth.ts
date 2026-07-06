@@ -32,7 +32,7 @@ export async function signInWithCredentials(
   }
 
   // Sanitize the post-login target so `/login?from=//evil.example` can't turn
-  // the auth flow into an open redirect (Codex round 8).
+  // the auth flow into an open redirect .
   const from = safeInternalPath(formData.get('from'));
 
   try {

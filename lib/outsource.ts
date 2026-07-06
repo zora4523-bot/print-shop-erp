@@ -29,7 +29,7 @@ export type CreatedOutsource = { id: string };
 // forward-compat when we start writing an audit log for
 // outsource-order mutations.
 // Same lock namespace as transitionWithLog + scheduleOrder + worker
-// cascade. Codex round 88 / P2: standalone status read + insert
+// cascade。
 // races against shipOrder / cancelOrder; folding both into one tx
 // behind the per-order lock makes "order is still attachable" an
 // atomic decision.

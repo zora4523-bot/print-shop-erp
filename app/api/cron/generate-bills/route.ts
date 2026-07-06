@@ -9,8 +9,7 @@ export const dynamic = 'force-dynamic';
 // Shared-secret endpoint for the "月初汇总上月销售应收账单" job (P0 #6
 // Slice D / SPEC §3.1). Same shape as /api/cron/daily-salary —
 // pg_cron-friendly POST, COUNTS-ONLY response so generated[] /
-// errors[] don't leak金额 / 销售名 into pg_cron logs (Codex round 49
-// pattern reused).
+// errors[] don't leak金额 / 销售名 into pg_cron logs.
 //
 // Usage:
 //   curl -X POST https://host/api/cron/generate-bills \
@@ -44,8 +43,7 @@ export async function POST(req: Request) {
   // Distinguish "field absent → use default" from "field present but
   // malformed → reject 400". On a mutating endpoint, silently treating
   // {"period": ""} as &ldquo;run for last month&rdquo; would re-process the
-  // previous period when the caller meant something specific (Codex
-  // round 61 / P2).
+  // previous period when the caller meant something specific.
   const extracted = extractPeriod(body);
   if (extracted.explicit && extracted.value === null) {
     return NextResponse.json(

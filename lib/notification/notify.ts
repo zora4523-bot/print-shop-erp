@@ -85,7 +85,7 @@ export async function notify<E extends NotificationEvent>(
     const content = renderTemplate(rule.messageTemplate, payload);
 
     // **去重 + 保序**：rule.channelIds 可能含重复 id（schema String[]
-    // 不强制 unique；Codex round 117 medium）。先 dedupe 出 unique 列表，
+    // 不强制 unique）。先 dedupe 出 unique 列表，
     // 后续 stale 比较和 reorder 都基于这条（避免 round 118 medium：
     // 用 raw rule.channelIds.length 做 stale 比较会把&ldquo;有重复&rdquo;误报成
     // &ldquo;有 stale id&rdquo;）。
@@ -93,13 +93,13 @@ export async function notify<E extends NotificationEvent>(
 
     // 拉到所有引用的 channel——**不**过滤 isActive。下面分流：active
     // 真发送，inactive 写 FAILED log（避免&ldquo;启用 channel 又被关&rdquo;的
-    // 静默漏推；Codex round 101 P2）。
+    // 静默漏推）。
     const fetched = await db.notificationChannel.findMany({
       where: { id: { in: uniqueRuleChannelIds } },
       select: { id: true, webhookUrl: true, isActive: true },
     });
     // **PG `IN (...)` 不保证返回顺序**——必须按 uniqueRuleChannelIds 顺
-    // 序重排（Codex round 116 high）。否则 CS_PERIOD_* runtime cap 的
+    // 序重排。否则 CS_PERIOD_* runtime cap 的
     // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
     // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
     const byId = new Map(fetched.map((c) => [c.id, c]));
@@ -117,14 +117,13 @@ export async function notify<E extends NotificationEvent>(
     }
     if (channels.length < uniqueRuleChannelIds.length) {
       // 部分 unique ID stale（其他还能用）—— 打 console 提示。
-      // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报
-      // （Codex round 118 medium）。
+      // 用 unique 而非 raw rule.channelIds 比较，避免重复 id 误报。
       console.warn(
         `[notify] some channelIds stale event=${event} have=${channels.length} expected=${uniqueRuleChannelIds.length}`,
       );
     }
 
-    // **Runtime privacy cap for CS_PERIOD_***（Codex round 115 high）：
+    // **Runtime privacy cap for CS_PERIOD_***：
     // updateRuleWithGuard 是写时校验，对升级前已存在的多 channel 行
     // 无效。这里 send-side cap 兜底——CS_PERIOD_* 含具体客服业绩 /
     // 提成数据，绑多 channel 会让所有群看到所有客服金额。运行时 slice

@@ -47,7 +47,7 @@ export async function GET(_req: Request, ctx: Params) {
     // see (split build/runtime container, different user's
     // ~/.cache/puppeteer, custom PUPPETEER_CACHE_DIR). Steering
     // operators at only (a) hides (b) — the regex fires for both
-    // cases now and the hint mentions both (Codex round 71 / P2).
+    // cases now and the hint mentions both .
     const hint =
       err instanceof Error &&
       /Could not find (Chrome|Chromium|browser)/i.test(err.message)

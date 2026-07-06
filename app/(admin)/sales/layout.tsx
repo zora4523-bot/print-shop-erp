@@ -4,8 +4,8 @@ import { getSession } from '@/lib/auth/session';
 
 // SALES + CUSTOMER_SERVICE only. Parent (admin) layout already
 // gated to admin roles; this narrows further. OWNER hitting
-// /sales/bills/<id> bounces to / (not /owner/bills, see Codex
-// round 62 — App Router layout can't get pathname, so a one-shot
+// /sales/bills/<id> bounces to / (not /owner/bills — App Router
+// layout can't get pathname, so a one-shot
 // redirect to a list view would lose the deep-link id).
 //
 // Chrome lives in (admin)/layout.tsx; nothing else here.

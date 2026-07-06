@@ -83,8 +83,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
   // Only foreman / owner creates outsource orders, and only on
   // production-active states. SHIPPED is non-terminal but already
-  // out the door — no new production work attaches there (Codex
-  // round 87 / P2). canAttachOutsource() is the canonical gate;
+  // out the door — no new production work attaches there.
+  // canAttachOutsource() is the canonical gate;
   // lib/outsource.ts re-checks the same predicate.
   const canCreateOutsource =
     (user.role === Role.OWNER || user.role === Role.FOREMAN) &&

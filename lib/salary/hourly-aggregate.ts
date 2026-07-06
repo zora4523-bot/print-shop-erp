@@ -47,7 +47,7 @@ function dec(v: unknown): Decimal {
   return new Decimal(v as Decimal.Value);
 }
 
-// Per-(worker, month) advisory lock. Closes two races (Codex round 48 / P0):
+// Per-(worker, month) advisory lock. Closes two races :
 // 1. recompute vs mark-paid: recompute reads isPaid=false, mark-paid
 //    flips to true, recompute's upsert still rewrites the now-paid row.
 // 2. two concurrent recomputes for the same (worker, month) both
@@ -61,8 +61,7 @@ function hourlyLockKey(workerId: string, month: string): string {
 // Monthly computation for a single hourly worker. @@unique([workerId,
 // month]) → upsert. Called per-worker from the cron batch and from
 // the owner's "重算" button. `now` pins both the rule-resolution
-// timestamp (so a batch sees a consistent rule version, Codex round
-// 48 / P1) AND the paidAt stamp when paths flip state.
+// timestamp (so a batch sees a consistent rule version) AND the paidAt stamp when paths flip state.
 export async function computeHourlyPayroll(
   workerId: string,
   month: string,
@@ -100,7 +99,7 @@ export async function computeHourlyPayroll(
   // Everything past here runs in ONE transaction under the per-
   // (worker, month) advisory lock so the paid-row guard and the
   // upsert can't be interleaved with a concurrent mark-paid action
-  // (Codex round 48 / P0).
+  // .
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
       workerId,
@@ -151,7 +150,7 @@ export async function computeHourlyPayroll(
 
     // Resolve rules AT `now` — batches pin one timestamp so every
     // worker in that month's settlement snapshots against the same
-    // rule version (Codex round 48 / P1). Rule reads still go via
+    // rule version . Rule reads still go via
     // global `db` rather than `tx`; that's safe because rule edits
     // mint new rows (they don't delete / mutate the row we read)
     // and the advisory lock means no concurrent writer to OUR payroll
@@ -370,7 +369,7 @@ export async function listHourlyPayrolls(filter: {
 }) {
   if (filter.month !== undefined) {
     // Validate month format early — same reason listDailyWorkerSalaries
-    // validates date early (Codex round 44).
+    // validates date early .
     parseShanghaiMonth(filter.month);
   }
   return db.hourlyWorkerPayroll.findMany({
@@ -407,7 +406,7 @@ export async function markHourlyPayrollPaid(
 ): Promise<{ id: string; isPaid: boolean }> {
   // Same advisory lock as computeHourlyPayroll so a mark-paid landing
   // mid-recompute blocks until the recompute's tx commits — no more
-  // paid-row amount overwrite (Codex round 48 / P0).
+  // paid-row amount overwrite .
   return db.$transaction(async (tx) => {
     const row = await tx.hourlyWorkerPayroll.findUnique({
       where: { id },

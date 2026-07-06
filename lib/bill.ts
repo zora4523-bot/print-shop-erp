@@ -40,7 +40,6 @@ function billLockKey(billId: string): string {
 
 // Generate 路径在 Bill 还没创建之前就需要锁——用 (salesUser, period)
 // 做 key，防两次并发生成同一张账单时双写 item 或同时 create。
-// Codex round 52 / P1。
 function billGenerateLockKey(salesUserId: string, period: string): string {
   return `print-shop-erp:bill-gen:${salesUserId}:${period}`;
 }
@@ -125,7 +124,7 @@ async function generateBillForSubmitter(
     // an orderId is missing, and both createMany a duplicate. The
     // @@unique([billId, orderId]) index is the DB-level last-line
     // guard; this lock turns the error into clean serialization
-    // (Codex round 52 / P1).
+    // .
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${billGenerateLockKey(
       submitterId,
       period,
@@ -332,7 +331,7 @@ export async function recordPayment(
     // SALES 的账单不累计（SALES 不走客服周期 / 提成系统）。
     //
     // Pass our tx into accumulateCsSales so the CS-period write
-    // shares atomicity with the bill update (Codex round 52 / P1).
+    // shares atomicity with the bill update .
     // Prisma 的 $transaction 不是真嵌套；不传 tx 会开独立事务，bill
     // 外层 rollback 时 CS 已经 commit 了。传 tx 后两者同生共死。
     let csAccumulated = false;

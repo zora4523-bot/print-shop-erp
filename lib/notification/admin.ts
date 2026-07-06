@@ -30,7 +30,7 @@ export type ChannelSummary = {
  * 用于 UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
  * `String[]`，没 FK，得 JS 侧 cross-reference。
  *
- * Codex round 103 #1：之前只数 active rule 的引用，导致&ldquo;rule 关掉但
+ * 之前只数 active rule 的引用，导致&ldquo;rule 关掉但
  * channelIds 还指着&rdquo;的情况下能删 channel，留下 stale id。后续 owner
  * 重启 rule 就拿到悬空配置。所以这里数所有 rule，不管 isActive。
  */
@@ -120,7 +120,7 @@ export type UpdateChannelInput = {
  * - 删除路径不同：删了 channel 留下 stale ID 是无法恢复的，必须严
  *   防（deleteChannel 的 FOR UPDATE 会聚锁路径）
  *
- * Codex round 107 #1 说&ldquo;并发 deactivate + 新绑同一 channel 会留下
+ * 已知边界：&ldquo;并发 deactivate + 新绑同一 channel 会留下
  * 'active rule + inactive channel' 状态&rdquo;——这与单 admin 顺序 'bind
  * 然后 deactivate' 的合法终态是同一个状态，安全网（notify FAILED
  * log）已覆盖。所以这条不锁，避免 UI 出现"先解绑才能停用"的繁琐。
@@ -150,12 +150,12 @@ export class ChannelInUseError extends Error {
  * 引用就拒绝。强一致性走 transaction：检查 + delete 在同一个 tx 内，
  * 避免&ldquo;检查通过之后另一个 owner 把 rule 加上&rdquo;的 race。
  *
- * Codex round 103 #1：之前只过滤 isActive=true 的 rule，导致 owner
+ * 之前只过滤 isActive=true 的 rule，导致 owner
  * 把 rule 关掉就能删 channel，留下 channelIds 里的 stale id —— 后续
  * 启用规则时是悬空 ID。所以&ldquo;被任何 rule 引用&rdquo;就拒绝；要彻底删
  * channel，先去所有 rule（含未启用的）里把它从 channelIds 移除。
  *
- * Codex round 107 #2：和 updateRule 之间的并发竞态——admin A 在
+ * 和 updateRule 之间的并发竞态——admin A 在
  * updateRule 里 SELECT FOR UPDATE 了 c2，正在 read rules / 准备 update；
  * 同时 admin B 调 deleteChannel(c2)。如果 B 没有自己 FOR UPDATE c2，
  * B 的 findMany 可能在 A 提交前看不到 A 的新 rule.channelIds 引用，
@@ -169,8 +169,8 @@ export class ChannelInUseError extends Error {
  */
 export async function deleteChannel(id: string): Promise<void> {
   await db.$transaction(async (tx) => {
-    // FOR UPDATE 锁 c2 行 —— 与 updateRule 的相同锁路径会聚（Codex
-    // round 107 #2）。如果 c2 已不存在，FOR UPDATE 返空，下面的
+    // FOR UPDATE 锁 c2 行 —— 与 updateRule 的相同锁路径会聚。
+    //如果 c2 已不存在，FOR UPDATE 返空，下面的
     // delete 自然抛 RecordNotFound。
     await tx.$queryRaw`
       SELECT id FROM "NotificationChannel"
@@ -300,7 +300,7 @@ export async function updateRule(
 
     // 3. channelIds 合法性
     if (input.channelIds.length > 0) {
-      // Codex round 106：SELECT FOR UPDATE 锁住引用的 channel 行，
+      // SELECT FOR UPDATE 锁住引用的 channel 行，
       // 阻塞并发 UPDATE NotificationChannel SET isActive=false 直到
       // 本 tx 提交。否则 admin A 读到 c2 active → admin B 关 c2 →
       // admin A 提交带 c2 binding 的规则，留下&ldquo;active rule + inactive
@@ -322,7 +322,7 @@ export async function updateRule(
       if (invalid.length > 0) {
         throw new StaleChannelIdsError(invalid);
       }
-      // Codex round 105：服务端对称防"新增 inactive 绑定"。RuleForm
+      // 服务端对称防"新增 inactive 绑定"。RuleForm
       // 已 disable 客户端 checkbox，但并发场景（admin A 加载表单 →
       // admin B 关闭 channel → admin A 提交）/ 直接 POST 不走 UI
       // 都能突破前端。OLD channelIds 里已有的 inactive ID 允许保留
@@ -354,7 +354,7 @@ export class EmptyChannelIdsError extends Error {
 // CS 业绩 / 提成事件（含具体客服金额）只能绑 ≤ 1 个 channel——多绑
 // 会让所有 channel 看到所有客服的金额。schema 没 per-user 路由
 // （SPEC §8.1 &ldquo;对应客服&rdquo; 1:1 推送等 P2 加 User.notificationChannelId
-// 后实现）。Codex round 113 high → round 114 high：UI 警告易被
+// 后实现）。
 // 直接 POST / replay 绕开，server side 必须 enforce。
 const PRIVATE_PER_CS_EVENTS = new Set([
   'CS_PERIOD_ENDING',
@@ -379,11 +379,10 @@ export class TooManyChannelsForPrivateEventError extends Error {
  * 留给 action）：
  *   1. 启用规则 + channelIds 空 → EmptyChannelIdsError
  *   2. **启用规则** + CS_PERIOD_* + channelIds > 1 →
- *      TooManyChannelsForPrivateEventError（Codex round 114 high：
+ *      TooManyChannelsForPrivateEventError（
  *      privacy enforcement，UI 警告必须有 server-side guard 兜底）
  *      只对 isActive=true 生效——禁用 draft 即使 channelIds 多也允许保存
- *      （&ldquo;disable first, clean up later&rdquo;的 owner 操作模式不被打断；
- *      Codex round 115 medium）。
+ *      （&ldquo;disable first, clean up later&rdquo;的 owner 操作模式不被打断）。
  * 校验通过后委托给 updateRule。
  */
 export async function updateRuleWithGuard(
@@ -407,8 +406,7 @@ export async function updateRuleWithGuard(
 }
 
 // 暴露给 notify 端的运行时 cap：legacy rule 行可能已有多 channel，
-// updateRuleWithGuard 是写时校验，对已存在数据无效（Codex round 115
-// high）。notify.ts 在 fan-out 前 cap CS_PERIOD_* 到 1 个 channel +
+// updateRuleWithGuard 是写时校验，对已存在数据无效。notify.ts 在 fan-out 前 cap CS_PERIOD_* 到 1 个 channel +
 // console.warn，让 ops 看到&ldquo;有 legacy 配置该清理&rdquo;。
 export function isPrivatePerCsEvent(eventType: string): boolean {
   return PRIVATE_PER_CS_EVENTS.has(eventType);
@@ -490,7 +488,7 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
 
 // 让 UI 一眼看出"最近一次推送是不是失败"——dashboard 顶部告警条。
 //
-// Codex round 103 #3：手动测试按钮也写 NotificationLog 行（eventType
+// 手动测试按钮也写 NotificationLog 行（eventType
 // = '__TEST__'）；如果 owner 测过一次失败的 webhook URL，那条 log
 // 会让 24h 告警条无限挂红——与"真生产推送健康"的状态混淆。所以这里
 // 显式排除 __TEST__ event，告警条只反应真业务事件失败。

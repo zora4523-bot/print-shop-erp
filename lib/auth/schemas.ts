@@ -20,7 +20,7 @@ import {
 // first 72 bytes. If we let users *set* passwords longer than 72 bytes,
 // they can later log in with any suffix — a real security weakening.
 //
-// Short-circuited guard, both checks in one superRefine (Codex round 12):
+// Short-circuited guard, both checks in one superRefine :
 // separate `.max(72)` and `.refine(byteCheck)` don't compose into
 // short-circuiting — Zod runs every check in the chain even after an
 // earlier one fails, so TextEncoder.encode would still allocate for a 10k
@@ -203,8 +203,7 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 // HTML checkboxes submit value="on" when checked and omit the field when
 // unchecked — unless the form sets an explicit value. Accept both the
 // browser-default 'on' and explicit 'true' / boolean so the schema works
-// whether the form is stock HTML or a JS-driven component (Codex round 13
-// / P2).
+// whether the form is stock HTML or a JS-driven component.
 const formBoolean = z.preprocess((v) => {
   if (typeof v === 'boolean') return v;
   if (typeof v === 'string') return v === 'true' || v === 'on';
@@ -275,7 +274,7 @@ const optionalMachineTypeField = z
 // FormData always hands us strings; accept the string form too and coerce.
 // Min is 1 (not 0) so an untouched create form — where the default-empty
 // input coerces to 0 — fails validation rather than accidentally sorting
-// the new craft ahead of every existing one (Codex round 18 / P2).
+// the new craft ahead of every existing one .
 const sortOrderField = z.coerce
   .number({ message: '排序必须是数字' })
   .int('排序必须是整数')
@@ -1283,7 +1282,7 @@ export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSch
 
 // The recompute-daily endpoint takes a date and optionally a single
 // workerId (for "recompute just this row" from the UI). Strict calendar
-// validation — refuses 2026-02-31 and the like (Codex round 43 / P1).
+// validation — refuses 2026-02-31 and the like .
 export const recomputeDailySalarySchema = z.object({
   date: z
     .string()

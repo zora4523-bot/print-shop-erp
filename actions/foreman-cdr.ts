@@ -45,7 +45,7 @@ export async function createBundleAction(
 
   // 拼绝对 downloadUrl 用的 base：优先 APP_PUBLIC_URL（部署期固定）
   // > 请求 headers (proto + host)（dev / split-origin 自然跟随当前
-  // 访问域）> 默认 localhost。Codex round 121 medium：之前从 env 读
+  // 访问域）> 默认 localhost。
   // 在 dev (127.0.0.1 / ngrok) 会回退到 localhost:3000 死链。
   const baseUrl = await deriveBaseUrl();
 
@@ -82,7 +82,7 @@ export async function createBundleAction(
  *
  * Multi-proxy 场景下 x-forwarded-* 是 comma-separated hop list（如
  * `https, http`）—— 取第一个 + trim，避免拼出 `https,http://...` 死链
- * （Codex round 122 medium）。proto 缺失时**不**默认 http：让 base 为
+ * 。proto 缺失时**不**默认 http：让 base 为
  * 空回退到 fallback，比给个错的 https-降级 http 链更安全。
  */
 async function deriveBaseUrl(): Promise<string> {

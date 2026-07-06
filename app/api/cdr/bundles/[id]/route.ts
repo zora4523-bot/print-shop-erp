@@ -46,7 +46,7 @@ export async function GET(
       err instanceof BundleExpiredError
     ) {
       // **404 + 同款文案**——攻击者无法区分&ldquo;猜对了 id 但已过期&rdquo;和
-      // &ldquo;根本不存在&rdquo;，降低暴力探测可见性（Codex round 119 medium：
+      // &ldquo;根本不存在&rdquo;，降低暴力探测可见性（
       // 之前&ldquo;过期&rdquo;返 410 + expiredAt 字段会泄漏&ldquo;这个 id 曾经有效&rdquo;）。
       // 业务上对外协方信息一致：&ldquo;链接已失效或不存在，请联系车间主管
       // 重新生成&rdquo;。

@@ -53,8 +53,8 @@ export function isTerminalOrderStatus(status: OrderStatus): boolean {
 // Whether new outsource work can still be attached to an order in
 // this status. Distinct from `isTerminalOrderStatus` because SHIPPED
 // is non-terminal (it can still go to FINISHED) yet shouldn't accept
-// new production work — the goods are already out the door (Codex
-// round 87 / P2). Production-active states only.
+// new production work — the goods are already out the door.
+// Production-active states only.
 export function canAttachOutsource(status: OrderStatus): boolean {
   switch (status) {
     case OrderStatus.DRAFT:

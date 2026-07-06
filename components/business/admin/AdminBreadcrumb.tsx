@@ -50,7 +50,7 @@ const SEGMENT_LABELS: Record<string, string> = {
 };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
-// 404s. Render those segments as text instead. Codex round 78 / P2.
+// 404s. Render those segments as text instead。
 // Keep this in sync with the file tree in `app/`; if a layout-only
 // shell becomes a real page, drop the entry here.
 const LAYOUT_ONLY_PATHS = new Set<string>([
@@ -85,12 +85,12 @@ export function AdminBreadcrumb() {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
           // Layout-only paths can't be navigated to (404)；render the
-          // label as text not link. Codex round 78 / P2.
+          // label as text not link。
           const isLinkable = !LAYOUT_ONLY_PATHS.has(href);
           return (
             // Separator must be a SIBLING of BreadcrumbItem, not a
             // child — both render `<li>`, and `<li>` inside `<li>` is
-            // invalid DOM. Codex round 78 / P2.
+            // invalid DOM。
             <Fragment key={href}>
               <BreadcrumbItem>
                 {isLast ? (
@@ -108,7 +108,7 @@ export function AdminBreadcrumb() {
                   // current page. Plain <span>, no aria-current —
                   // BreadcrumbPage would hard-code aria-current="page"
                   // and screen readers would announce two "current"s
-                  // on a single breadcrumb (Codex round 81 / P3).
+                  // on a single breadcrumb .
                   <span className="text-muted-foreground">
                     {labelFor(seg)}
                   </span>

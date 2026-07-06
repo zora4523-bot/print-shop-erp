@@ -232,7 +232,7 @@ type StatusTxClient = {
 // SAME namespace as production.ts orderCascadeLockKey
 // (`print-shop-erp:order-cascade:<id>`) so worker reportTask's
 // auto-cascade can't race a manual ship/cancel/submit on the same
-// order — both paths touch Order.status (Codex round 87 / P2).
+// order — both paths touch Order.status .
 function orderTransitionLockKey(orderId: string): string {
   return `print-shop-erp:order-cascade:${orderId}`;
 }
@@ -264,7 +264,7 @@ async function transitionWithLog(
     // order. Without this, two concurrent ship calls each read
     // status=COMPLETED, both pass the status-machine check, both
     // updates succeed — second silently overwrites trackingNo and
-    // doubles the OrderLog row (Codex round 87 / P2). Same key as
+    // doubles the OrderLog row . Same key as
     // worker-cascade so a manual transition can't interleave with
     // a sibling task report's auto-cascade either.
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderTransitionLockKey(
@@ -354,8 +354,7 @@ export async function submitOrder(
   });
   if (payload) {
     // formatMoneyPlain：千分位 + 2 位小数，**不带 `¥ ` 前缀**。模板里
-    // 的 `金额：¥{totalAmount}` 自带 ¥ —— 再加会变成 `¥¥ 5,000.00`
-    // （Codex round 109 P2）。
+    // 的 `金额：¥{totalAmount}` 自带 ¥ —— 再加会变成 `¥¥ 5,000.00`。
     const totalAmount = formatMoneyPlain(
       payload.totalAmount as unknown as Decimal.Value,
     );

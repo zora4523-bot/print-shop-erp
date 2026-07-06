@@ -154,7 +154,7 @@ export type EndingPeriodRow = {
   initialSales: string; // 期初导入
   // 业绩合计（算档用） = totalSales + initialSales。这是 calcCsCommission
   // 实际喂入的数字，UI 渲染&ldquo;业绩合计&rdquo;列时直接用，避免显示数与提成
-  // 计算口径分裂（Codex round 99 medium）。
+  // 计算口径分裂。
   salesForTier: string;
   monthlyBase: string;
   daysUntilEnd: number;

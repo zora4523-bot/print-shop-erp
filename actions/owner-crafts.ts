@@ -39,8 +39,8 @@ function collectFieldErrors(
 //   - single `string` constraint/index name: 'Craft_code_key'
 //
 // Match with exact element equality against an allowlist of known synonyms
-// per column so neither substring false-positives (Codex round 16) nor
-// exact-match false-negatives (Codex round 17) can slip through. The
+// per column so neither substring false-positives  nor
+// exact-match false-negatives  can slip through. The
 // constraint-name format follows Prisma's default `<Model>_<column>_key`
 // (confirmed in prisma/migrations/.../migration.sql).
 const CRAFT_UNIQUE_SYNONYMS = {

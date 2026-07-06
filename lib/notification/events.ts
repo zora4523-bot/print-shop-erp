@@ -30,13 +30,13 @@ export type NotificationEvent =
 // rule 里写 `{orderNo}` 时，对应 payload 必须有 orderNo 字段。
 //
 // 字段名与 prisma/seed.ts:seedNotificationEvents 里的默认 template
-// 一一对应（Codex round 101 P1）—— 任何不一致会让模板渲染时留 raw
+// 一一对应—— 任何不一致会让模板渲染时留 raw
 // `{placeholder}` 文本流到群消息。修改字段名时同步改 seed.ts。
 //
 // 金额字段：用 string（千分位 + 2 位小数；走 lib/dashboard/format
 // `formatMoneyPlain`）。**不含** `¥ ` 前缀——seed 默认模板自带
 // `金额：¥{totalAmount}`，再让 payload 也带 ¥ 会变成 `¥¥ 5,000.00`
-// 双前缀（Codex round 109 P2 / round 110 P2）。模板编辑器（Slice B
+// 双前缀。模板编辑器（Slice B
 // RuleForm）已加 hint 提示 owner&ldquo;金额占位符不含 ¥&rdquo;。改 contract
 // 时同步改：events.ts payload 注释 + RuleForm hint + seed.ts 模板。
 //
@@ -78,7 +78,7 @@ export type NotificationPayloads = {
     orderNo: string;
     // 必填 string —— prisma/seed.ts 的默认 template 引用 {trackingNo}，
     // null 会让 renderTemplate 留下 raw `{trackingNo}` 流到群消息
-    // （Codex round 102 P1）。lib/order.ts:shipOrder 业务允许 trackingNo
+    // 。lib/order.ts:shipOrder 业务允许 trackingNo
     // 为 null（'   '.trim() === '' → null）；调用方在 Slice C wire 时
     // 责任：`trackingNo ?? '未填'` 之类映射后传入。
     trackingNo: string;
@@ -100,7 +100,7 @@ export type NotificationPayloads = {
     csName: string;
     daysLeft: number;
     // **业绩合计（含期初 initialSales）**——同 dashboard `salesForTier`
-    // 口径，与提成档位计算一致（Codex round 113 medium）。CS_TIERS 是
+    // 口径，与提成档位计算一致。CS_TIERS 是
     // 按 totalSales + initialSales 算的；如果这里只发 totalSales，
     // initialSales != 0 时消息&ldquo;业绩&rdquo;会比命中档位低，老板看不出 why。
     // Slice D wire (`/api/cron/cs-period-ending`) 用 lib/dashboard/

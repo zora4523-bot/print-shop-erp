@@ -74,7 +74,6 @@ type AppSidebarProps = {
 // "longest matching href wins": collect every candidate href that
 // could be active for the current pathname, pick the longest, then
 // only the item whose href equals that gets `active=true`.
-// Codex round 78 / P2.
 function pickActiveHref(
   pathname: string,
   candidates: readonly string[],

@@ -14,7 +14,7 @@ type PageProps = {
 export default async function LoginPage({ searchParams }: PageProps) {
   const session = await getSession();
   const { from } = await searchParams;
-  // Guard against open-redirect via `?from=//evil` (Codex round 8).
+  // Guard against open-redirect via `?from=//evil` .
   const safeFrom = safeInternalPath(from);
 
   if (session) {

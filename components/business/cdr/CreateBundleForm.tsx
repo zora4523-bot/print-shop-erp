@@ -29,8 +29,7 @@ export function CreateBundleForm({
 
   // 全选 / 反选 / 单选状态。useState 初始化只跑一次，所以**外层用
   // `key={eligibleIdsKey}` 强制 remount**——日期 filter 变化 → 候选
-  // 集换组 → form 重挂 → setSelected 拿新 allIds（Codex round 119
-  // medium）。比 useEffect+setState 更纯。
+  // 集换组 → form 重挂 → setSelected 拿新 allIds。比 useEffect+setState 更纯。
   const allIds = useMemo(() => eligible.map((o) => o.id), [eligible]);
   const [selected, setSelected] = useState<Set<string>>(new Set(allIds));
 
@@ -162,7 +161,7 @@ export function CreateBundleForm({
           {/* href 用绝对 URL（不是 relativePath）—— owner 在 admin
               host 上右键&ldquo;复制链接地址&rdquo;时拿到的是 APP_PUBLIC_URL 域，
               而不是当前 admin 域（split-origin 部署：staff 走内网域，
-              外协拿公网域）。Codex round 119 → 120 follow-up。 */}
+              外协拿公网域）。 */}
           <div className="mt-2 break-all font-mono text-xs">
             <a
               href={state.downloadUrl}

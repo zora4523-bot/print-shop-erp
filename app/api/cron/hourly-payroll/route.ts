@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     const { settled, errors } = await computeHourlyForAllInMonth(month);
     // Return COUNTS ONLY — both the `settled` rows (full salary
     // breakdown) AND the `errors` messages (paid-row refusal embeds
-    // existing totalSalary per Codex round 49 / P2) would leak
+    // existing totalSalary) would leak
     // payroll figures into scheduler / pg_cron logs. Owner sees the
     // per-row state at /owner/salary/hourly; operator sees whether
     // the cron succeeded at all via counts.

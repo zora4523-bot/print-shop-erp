@@ -81,8 +81,7 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
             contentStyle={{ fontSize: 12 }}
             // tooltip 走&ldquo;精确到分&rdquo;格式，**不**用 formatAxisMoney——后者
             // 会把 5000.50 圆成 5,001、把 12500 压成 1.3 万，这是 axis
-            // tick 的密度妥协，不是金额展示口径（Codex round 100
-            // medium）。
+            // tick 的密度妥协，不是金额展示口径。
             formatter={(value) => [
               `¥ ${formatTooltipMoney(Number(value))}`,
               '业绩',

@@ -62,7 +62,7 @@ export default async function ForemanCdrPage({
 
       <FilterBar from={from} to={to} />
 
-      {/* key prop 强制 form 在 filter URL 变化时重挂（Codex round 119
+      {/* key prop 强制 form 在 filter URL 变化时重挂（
           medium）—— 否则 selected useState 初始化保留旧 eligible IDs，
           表面候选都未勾、提交报"至少勾选 1"。key 用 from-to 即可
           区分窗口。 */}

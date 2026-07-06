@@ -16,7 +16,7 @@ export class AccountInvariantError extends Error {
 // cheap, and fully serialize concurrent mutations that care about the same
 // invariant. Without the lock, two transactions against different OWNER
 // rows can both observe "one other active owner" and both commit,
-// stranding the system with zero active OWNERs (Codex round 13 / P1).
+// stranding the system with zero active OWNERs .
 const OWNER_INVARIANT_LOCK_KEY = 'print-shop-erp:account:owner-invariant';
 
 // Minimal shape of the Prisma client we use inside $transaction callbacks.

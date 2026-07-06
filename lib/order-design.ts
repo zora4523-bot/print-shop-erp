@@ -17,7 +17,7 @@ import { ALLOWED_EXTENSIONS, FILE_SIZE_LIMITS } from './oss/types';
 // 并发正确性：登记/删除的写事务持有与所有 Order.status 写入路径同一把
 // advisory lock（print-shop-erp:order-cascade:<id>），并在锁内 fresh-read
 // 重校状态/所有权——防"提交与登记并发，设计图落在已提交工单上"的
-// TOCTOU（Codex upload-ui review #4）。
+// TOCTOU。
 //
 // 已知残余风险（记录在案，非本层修复）：预签 PUT URL 在其 15 分钟寿命
 // 内可重复使用，登记后再次 PUT 可静默替换对象内容。窗口已通过
@@ -118,7 +118,7 @@ const ORDER_ITEM_WITH_ORDER = {
  * 签发上传凭证前的授权闸：目标款式必须真实存在、工单是 DRAFT、且
  * actor 有权编辑。没有这道闸，任何有 design:upload 权限的人都能对
  * 任意（含他人/已提交/不存在的）orderId 铸 STS 凭证往 bucket 写孤儿
- * 对象（Codex upload-ui review #3）。
+ * 对象。
  */
 export async function assertCanUploadDesign(
   orderId: string,
@@ -166,7 +166,7 @@ export async function recordOrderItemDesign(
 
   // HEAD 确认对象真的传上去了，并以 OSS 返回的 Content-Length 为
   // **权威文件大小**——客户端申报值可以撒谎（申报小文件拿凭证、实传
-  // 大文件），这里同时兜大小上限（Codex upload-ui review #2）。
+  // 大文件），这里同时兜大小上限。
   // 网络 IO 放在 PG 事务/锁之外（项目惯例：不在 tx 里挂 OSS IO）。
   const client = new OSS({
     accessKeyId: cfg.accessKeyId,

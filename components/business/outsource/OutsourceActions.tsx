@@ -53,7 +53,7 @@ export function OutsourceActions({ id, canReceive, canCancel }: Props) {
           ) : null}
           {receiveState?.status === 'invalid' ? (
             // Surface per-field Zod errors — otherwise an invalid
-            // actualDate silently fails (Codex round 41 UX note).
+            // actualDate silently fails .
             <ul className="text-xs text-destructive">
               {Object.entries(receiveState.fieldErrors).flatMap(
                 ([field, msgs]) =>

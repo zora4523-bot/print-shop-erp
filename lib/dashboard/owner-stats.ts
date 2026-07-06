@@ -89,7 +89,7 @@ export async function getTodayOrderStats(
  * 收、应收差额。
  *
  * 与 /owner/bills 的口径对齐（appel/(admin)/owner/bills/page.tsx 注释
- * 明示&ldquo;DRAFT 未发单不算应收&rdquo;）—— Codex round 98 P1：dashboard 把
+ * 明示&ldquo;DRAFT 未发单不算应收&rdquo;）——dashboard 把
  * DRAFT 也算进来会让&ldquo;一生成账单数字就跳&rdquo;，与发单页不一致。DRAFT
  * 是&ldquo;未对外&rdquo;的草稿期，不应进应收。
  *

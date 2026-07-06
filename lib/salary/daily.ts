@@ -27,8 +27,7 @@ export class DailySalaryError extends Error {
 // range. Pure helper, exported for testing.
 export function shanghaiDayRange(date: string): { start: Date; end: Date } {
   // Strict calendar check — rejects 2026-02-31 and other rollover
-  // traps that `new Date(string)` would silently normalize (Codex
-  // round 43 / P1). parseStrictYmd returns a UTC-midnight Date for
+  // traps that `new Date(string)` would silently normalize. parseStrictYmd returns a UTC-midnight Date for
   // the input calendar date.
   const utcMidnight = parseStrictYmd(date);
   if (!utcMidnight) {
@@ -91,8 +90,7 @@ export type DailyWorkerSalaryResult = {
   orderCount: number;
 };
 
-// Per-(worker, date) advisory lock. Closes two races (mirrors Codex
-// round 48 hourly fix / P0):
+// Per-(worker, date) advisory lock. Closes two races (mirrors the hourly fix):
 // 1. recompute vs mark-paid: recompute reads isPaid=false, mark-paid
 //    flips to true, recompute's upsert still rewrites the now-paid row.
 // 2. two concurrent recomputes for the same (worker, date) both
@@ -165,7 +163,7 @@ export async function computeDailyWorkerSalary(
 
     // Refuse to recompute an already-paid row: the paid amount is a
     // finance-of-record value, and silently overwriting it would break
-    // audit (Codex round 43 / P0). Owner must explicitly 撤销发放 first,
+    // audit . Owner must explicitly 撤销发放 first,
     // recompute, then re-mark paid — the trail stays visible.
     const existing = await tx.dailyWorkerSalary.findUnique({
       where: { workerId_date: { workerId, date: dateCol } },
@@ -255,7 +253,7 @@ export type BatchDailyResult = {
 // etc.) doesn't abort the whole batch — matches the hourly + cs
 // batch patterns (rounds 45, 48). Also closes a cron-log leak path:
 // aborting the batch propagated error messages with salary amounts
-// up to the cron JSON response (Codex round 50 / P2). With per-
+// up to the cron JSON response . With per-
 // worker error capture, the cron can return counts only.
 export async function computeDailyForAllMachineWorkers(
   date: string,
@@ -302,7 +300,7 @@ export async function listDailyWorkerSalaries(filter: {
   if (filter.date) {
     // Strict calendar parse on the read path too, so an invalid
     // ?date=2026-02-31 filter doesn't silently match March 3 rows
-    // (Codex round 44 / P3).
+    // .
     const parsed = parseStrictYmd(filter.date);
     if (!parsed) {
       throw new DailySalaryError(

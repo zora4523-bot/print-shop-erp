@@ -23,7 +23,7 @@ import {
 
 // Advisory-lock namespace: one lock per CS USER (not per period)
 // protects both the settle flow and the per-bill accumulate flow
-// from stepping on each other (Codex round 46 / P0).
+// from stepping on each other .
 //
 // Why user-level not period-level: accumulateCsSales has to FIND the
 // period before it can lock it. A concurrent settler running between
@@ -38,7 +38,7 @@ function csUserLockKey(csUserId: string): string {
 
 // Minimal tx surface for rule reads — we need to go through `tx`
 // (not global `db`) so rule lookups participate in the settlement
-// snapshot's isolation (Codex round 45 / P2).
+// snapshot's isolation .
 type RuleTx = {
   salaryRule: {
     findFirst: (args: {
@@ -256,7 +256,7 @@ export async function startCsPeriod(
 // to be called from the bill mark-paid flow in P0 #6 — wired via this
 // thin accessor now so we don't need to touch lib/cs.ts from bill code.
 // Minimal tx-client surface so outer transactions can pass their own
-// tx in and share atomicity with us (Codex round 52 / P1 — bill
+// tx in and share atomicity with us (bill
 // payment + CS accumulation must commit / roll back together).
 type CsAccumulateTxClient = {
   $executeRaw: (
@@ -284,7 +284,7 @@ async function accumulateCsSalesIn(
   amount: string | number | Decimal,
   at: Date,
 ): Promise<{ periodId: string; newTotalSales: string } | null> {
-  // Lock FIRST (Codex round 46 / P0). If we searched before locking,
+  // Lock FIRST . If we searched before locking,
   // a concurrent settler could flip our target period to SETTLED in
   // the gap. User-scope lock keeps period state stable in this
   // critical section — either IN_PROGRESS or the settler's auto-
@@ -385,8 +385,7 @@ export async function settleCsPeriod(
     // First look up csUserId (un-locked but ID is immutable, so no
     // race). Then acquire the user-scope lock BEFORE re-reading the
     // period in full, so accumulateCsSales and any concurrent
-    // settler for the SAME user all serialize through it (Codex
-    // round 46 / P0).
+    // settler for the SAME user all serialize through it.
     const periodLight = await txc.salaryPeriod.findUnique({
       where: { id: periodId },
       select: { csUserId: true },
@@ -419,7 +418,7 @@ export async function settleCsPeriod(
     // the first winner already did the work.
     transitionCsPeriod(period.status, SalaryPeriodStatus.SETTLED);
 
-    // Rule reads go through the tx (Codex round 45 / P2) so a
+    // Rule reads go through the tx  so a
     // concurrent rule edit can't have us observe mixed versions.
     const tiers = await txActiveCsRule<CsTiersConfig>(txc, 'CS_TIERS', now);
     if (!tiers) {
@@ -449,7 +448,7 @@ export async function settleCsPeriod(
       breakdown.commissionAmount,
     );
 
-    // Full rule snapshot (Codex round 45 / P1). Stored on the
+    // Full rule snapshot . Stored on the
     // commission so "what was tier 5 then?" stays answerable from
     // persisted data even after the tier table is later edited.
     const ruleSnapshot = {
@@ -541,7 +540,7 @@ export type BatchSettleResult = {
 // Batch: finds every IN_PROGRESS period whose periodEnd has passed
 // and settles each. Per-period try/catch so one bad period doesn't
 // abort the whole batch (e.g. missing CS_TIERS rule, or a concurrent
-// settler already handled this period — Codex round 45 / P1).
+// settler already handled this period).
 export async function settleReadyCsPeriods(
   now: Date = new Date(),
 ): Promise<BatchSettleResult> {

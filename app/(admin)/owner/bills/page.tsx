@@ -58,7 +58,7 @@ function isValidYm(s: string | undefined): s is string {
   // error; catching the throw in the Server Component would only make
   // the page crash silently. Pre-validate range here so a bookmark /
   // hand-edited URL like ?period=2026-13 cleanly falls back to
-  // &ldquo;no filter&rdquo; (Codex round 56 / P2).
+  // &ldquo;no filter&rdquo; .
   const mo = Number(m[2]);
   return mo >= 1 && mo <= 12;
 }

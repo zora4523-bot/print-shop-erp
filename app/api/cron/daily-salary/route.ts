@@ -75,9 +75,9 @@ export async function POST(req: Request) {
     }
 
     // COUNTS ONLY — full per-worker salary amounts would leak into
-    // scheduler / pg_cron logs (Codex round 49 / P2). Per-worker
+    // scheduler / pg_cron logs . Per-worker
     // errors likewise embed salary amounts in the paid-row refusal
-    // path (Codex round 50 / P2). Owner sees details at
+    // path . Owner sees details at
     // /owner/salary/daily.
     return NextResponse.json({
       status: 'ok',

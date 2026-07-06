@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     }
 
     // COUNTS ONLY — per-commission totals / tier rates would leak via
-    // scheduler logs (Codex round 49 / P2 rationale applied across
+    // scheduler logs (same rationale across
     // all three cron endpoints). Owner sees details at
     // /owner/salary/cs.
     return NextResponse.json({
@@ -67,8 +67,7 @@ export async function POST(req: Request) {
   } catch (err) {
     // Scrub err.message —— 同 daily-salary / outsource-overdue / cs-
     // period-ending 一致：Prisma 错误里可能 embed 周期金额 / tier 数据，
-    // 流到 cron stdout / pg_cron 日志会泄漏（Codex round 50 / round
-    // 112 medium）。owner 走 /owner/salary/cs 详情页查具体原因。
+    // 流到 cron stdout / pg_cron 日志会泄漏。owner 走 /owner/salary/cs 详情页查具体原因。
     void err;
     return NextResponse.json(
       { status: 'error', message: '批处理失败；查看 owner /owner/salary/cs 页面确认' },

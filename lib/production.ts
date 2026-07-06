@@ -31,7 +31,7 @@ export class SchedulingError extends Error {
 
 // Advisory-lock namespace for the scheduling serialization guard.
 // Same key namespace as orderCascadeLockKey below + the
-// transitionWithLog helper in lib/order.ts. Codex round 88 / P1
+// transitionWithLog helper in lib/order.ts。
 // pointed out a separate `:schedule:` lock left scheduleOrder
 // racing with cancelOrder on the same SUBMITTED order — both could
 // commit and you'd end up with ProductionTasks attached to a
@@ -133,7 +133,7 @@ export async function scheduleOrder(
     // both createMany — producing duplicate ProductionTask rows and
     // two STATUS_CHANGE log entries. Lock is per-tx so the second
     // transaction blocks here and then sees SCHEDULING on its own
-    // read, tripping transitionOrder's guard (Codex round 37 / P0).
+    // read, tripping transitionOrder's guard .
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scheduleLockKey(
       input.orderId,
     )}))`;
@@ -485,8 +485,7 @@ export async function beginTask(
       // fetch can be stale by the time we get here — a concurrent
       // beginTask on a sibling task may have already transitioned the
       // order, and the status-machine would then throw a spurious
-      // error when we try to re-run the same transition (Codex round
-      // 39 / P2).
+      // error when we try to re-run the same transition .
       const fresh = await txClient.order.findUnique({
         where: { id: order.id },
         select: { id: true, status: true },
@@ -664,7 +663,7 @@ export async function reportTask(
       // taken at the top of the tx can be stale: when two workers
       // simultaneously finish the last two tasks, the first to take
       // the cascade lock transitions order to COMPLETED; the second
-      // must notice that and skip (Codex round 39 / P1). Acting on
+      // must notice that and skip . Acting on
       // the stale IN_PRODUCTION would write a duplicate
       // STATUS_CHANGE log for a transition that already happened.
       const fresh = await txClient.order.findUnique({

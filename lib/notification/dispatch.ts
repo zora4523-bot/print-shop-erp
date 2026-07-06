@@ -13,8 +13,7 @@ import { notify } from './notify';
 //      retry，await 会让&ldquo;工单已提交&rdquo;在用户屏幕上挂半分钟。
 //   2. **不被 SIGTERM 静默吞掉** —— `void notify(...)` 是裸 fire-and-
 //      forget；pm2 reload / Vercel serverless freeze 都会把进行中的
-//      promise 一起切掉，连同 NotificationLog 一起丢（Codex round 110
-//      P1）。Next 16 的 `after()` 是&ldquo;响应已发出但请求 scope 还
+//      promise 一起切掉，连同 NotificationLog 一起丢。Next 16 的 `after()` 是&ldquo;响应已发出但请求 scope 还
 //      managed&rdquo;的官方机制——runtime 会等它跑完才允许进程退出。
 //
 // 失败模式：
@@ -26,7 +25,7 @@ import { notify } from './notify';
 //   - **任何其他**错误（Next runtime broken / after() 实现挂了 / 未来
 //     api 变 throws 别的）→ console.warn 留 ops 信号再降级。否则
 //     after()-without-after 静默回到&ldquo;SIGTERM 丢推送&rdquo;的状态，本文件
-//     存在的意义就被绕开了（Codex round 111 medium）。
+//     存在的意义就被绕开了。
 //
 // 识别 expected error：Next 抛的 message 含 `request scope`（Next 16
 // 的实现在 src/server/after/after.ts，错误消息&ldquo;cannot be called

@@ -202,7 +202,7 @@ export default async function OwnerDashboardPage() {
           columns={pendingShipmentColumns}
           footer={
             // 没做 /orders?status=COMPLETED 过滤入口（orders index 不读
-            // searchParams，Codex round 99 low）；先只提示&ldquo;有更多&rdquo;，链接
+            // searchParams）；先只提示&ldquo;有更多&rdquo;，链接
             // 等订单管理页支持 status filter 后再加。
             pendingShipments.hasMore ? (
               <span>还有更多待发货工单（仅显示前 10 条）。</span>
@@ -390,7 +390,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   },
   {
     // 业绩合计（算档用）= totalSales + initialSales。同 owner/salary/cs/[id]
-    // 详情页的口径，保证与右侧"预测提成"档位一致（Codex round 99 medium：
+    // 详情页的口径，保证与右侧"预测提成"档位一致（
     // 不能让显示数比命中档低，否则 owner 看不出为什么提成是这个金额）。
     header: '业绩合计',
     cell: (r) => {

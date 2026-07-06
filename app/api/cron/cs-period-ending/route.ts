@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // = IN_PROGRESS, periodEnd 在 [今日 0:00, 今日 + 7d)）每条触发一次
 // 推送。同 Bearer 认证 + COUNTS ONLY 响应。
 //
-// 路由限制（Codex round 112 high）：notify() 按 eventType 单 rule 取
+// 路由限制：notify 按 eventType 单 rule 取
 // channelIds 全发；当前 schema 没 per-user 路由字段，所以 SPEC §8.1
 // &ldquo;老板群 + 对应客服&rdquo;只能落&ldquo;老板群&rdquo;那部分——owner 在
 // /owner/notifications 给 CS_PERIOD_ENDING rule 绑老板群 channel
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
         // 在 round 99 已修过（owner-page 用 salesForTier 显示&ldquo;业绩
         // 合计&rdquo;）。这里 cron 推送同口径——否则有 initialSales 的客服
         // 推送出来的&ldquo;当前业绩&rdquo;会比命中档位的业绩低，老板看不出为什么
-        // 提成是这么多（Codex round 112 medium）。formatMoneyPlain 千分位
+        // 提成是这么多。formatMoneyPlain 千分位
         // 不带 ¥（DECISIONS 2026-04-27 + round 109 P2）。
         totalSales: formatMoneyPlain(r.salesForTier),
       });

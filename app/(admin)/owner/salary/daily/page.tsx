@@ -48,7 +48,7 @@ function formatDate(d: Date): string {
 export default async function DailySalaryPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   // Strict calendar validation on the filter path: `?date=2026-02-31`
-  // must not silently normalize to March 3 (Codex round 44 / P3).
+  // must not silently normalize to March 3 .
   // Fall back to today when the query is malformed.
   const selectedDate =
     sp.date && parseStrictYmd(sp.date) ? sp.date : todayShanghai();
@@ -62,8 +62,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
   });
 
   // Aggregate in Decimal — rows are Prisma Decimal, and JS float
-  // addition can drift by cents when summing 50+ rows (Codex round
-  // 43 / P2).
+  // addition can drift by cents when summing 50+ rows.
   const totalActual = rows
     .reduce(
       (acc, r) => acc.plus(new Decimal(r.actualSalary as unknown as string)),
