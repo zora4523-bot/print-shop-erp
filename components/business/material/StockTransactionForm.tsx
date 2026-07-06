@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
+import { TX_REASON_OPTIONS } from '@/lib/material-labels';
 
 type Props = {
   action: (
@@ -78,18 +79,29 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <TextField
-          id="reasonType"
-          label="原因"
-          hint="例如 PURCHASE、PRODUCTION_USE、ADJUSTMENT。"
-          disabled={pending}
-          error={errs.reasonType?.[0]}
-          defaultValue="ADJUSTMENT"
-        />
+        <div className="space-y-2">
+          <Label htmlFor="reasonType">原因</Label>
+          <select
+            id="reasonType"
+            name="reasonType"
+            className={selectClass}
+            defaultValue="ADJUSTMENT"
+            disabled={pending}
+          >
+            {TX_REASON_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {errs.reasonType?.[0] ? (
+            <p className="text-sm text-destructive">{errs.reasonType[0]}</p>
+          ) : null}
+        </div>
         <TextField
           id="unitCost"
           label="单位成本（选填）"
-          hint="Decimal(10,4)，入库时建议填写。"
+          hint="每单位进价，如 0.12；入库时建议填写。"
           disabled={pending}
           error={errs.unitCost?.[0]}
         />

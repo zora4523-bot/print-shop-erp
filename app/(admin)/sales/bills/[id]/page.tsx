@@ -1,3 +1,4 @@
+import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -139,7 +140,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     {formatDate(it.order.finishedAt)}
                   </td>
                   <td className="px-4 py-3 text-center text-xs">
-                    {it.order.status}
+                    <OrderStatusBadge status={it.order.status} />
                   </td>
                   <td className="px-4 py-3 text-right font-mono">
                     ¥ {String(it.orderAmount)}

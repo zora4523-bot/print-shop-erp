@@ -22,7 +22,6 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
         <TableRow>
           <TableHead className="w-24">排序</TableHead>
           <TableHead>工艺名</TableHead>
-          <TableHead>代码</TableHead>
           <TableHead>外协</TableHead>
           <TableHead>默认机器</TableHead>
           <TableHead>状态</TableHead>
@@ -34,7 +33,6 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
           <TableRow key={c.id} className={!c.isActive ? 'opacity-60' : undefined}>
             <TableCell className="text-muted-foreground">{c.sortOrder}</TableCell>
             <TableCell>{c.name}</TableCell>
-            <TableCell className="font-mono text-xs">{c.code}</TableCell>
             <TableCell>
               {c.isOutsource ? (
                 <Badge variant="secondary">外协</Badge>
