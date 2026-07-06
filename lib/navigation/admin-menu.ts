@@ -111,7 +111,7 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
 
 // Role-specific 标题，渲染在 sidebar 顶部 / 顶部条 role badge。
 export const ADMIN_ROLE_BADGE: Record<Role, string> = {
-  [Role.OWNER]: '老板后台',
+  [Role.OWNER]: '管理员后台',
   [Role.FOREMAN]: '车间',
   [Role.SALES]: '销售',
   [Role.CUSTOMER_SERVICE]: '客服',

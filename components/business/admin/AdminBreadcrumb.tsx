@@ -15,7 +15,7 @@ import {
 // 固定段名 → 中文标签。匹配不到的段（如 [id] 这类）直接回落到原 segment
 // 字符串显示。新增顶层导航时同步更新。
 const SEGMENT_LABELS: Record<string, string> = {
-  owner: '老板后台',
+  owner: '管理员后台',
   foreman: '车间',
   sales: '销售',
   'customer-service': '客服',
