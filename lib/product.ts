@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   Prisma,
   ProductCategory,
@@ -235,20 +236,44 @@ export async function getProductSummary(id: string): Promise<ProductSummary | nu
 }
 
 export type CreateProductCategoryNodeData = {
-  path: string;
+  // null = 顶级分类
+  parentId: string | null;
   name: string;
   legacyCategory: ProductCategory;
   sortOrder: number;
 };
 
-export type UpdateProductCategoryNodeData = CreateProductCategoryNodeData;
+export type UpdateProductCategoryNodeData = {
+  name: string;
+  legacyCategory: ProductCategory;
+  sortOrder: number;
+};
+
+// ltree path 是纯内部实现（树索引 + 唯一性），段名自动生成，UI 不
+// 展示也不让用户填。段字符集限 [a-z0-9_]（ltree label 约束）。
+function generateCategoryPathSegment(): string {
+  return `n${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+}
 
 export async function createProductCategoryNode(
   data: CreateProductCategoryNodeData,
 ): Promise<ProductCategoryNodeSummary> {
+  let parentPath = 'product';
+  if (data.parentId) {
+    const parent = await db.productCategoryNode.findUnique({
+      where: { id: data.parentId },
+      select: { path: true, isActive: true },
+    });
+    if (!parent) throw new ProductInvariantError('上级分类不存在');
+    if (!parent.isActive) {
+      throw new ProductInvariantError('上级分类已停用，不能在其下新建子分类');
+    }
+    parentPath = parent.path;
+  }
+
   return db.productCategoryNode.create({
     data: {
-      path: data.path,
+      path: `${parentPath}.${generateCategoryPathSegment()}`,
       name: data.name,
       legacyCategory: data.legacyCategory,
       sortOrder: data.sortOrder,
@@ -265,10 +290,11 @@ export async function updateProductCategoryNode(
   const target = await getProductCategoryNodeSummary(id);
   if (!target) throw new ProductInvariantError('目标产品分类不存在');
 
+  // 刻意不允许改 path：移动子树需要级联改所有后代 path + 迁移产品
+  // 归属，属独立功能；这里只改展示属性。
   return db.productCategoryNode.update({
     where: { id },
     data: {
-      path: data.path,
       name: data.name,
       legacyCategory: data.legacyCategory,
       sortOrder: data.sortOrder,

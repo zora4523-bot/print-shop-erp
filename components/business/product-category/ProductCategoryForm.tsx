@@ -10,11 +10,14 @@ import { Label } from '@/components/ui/label';
 import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
 
 type CategoryInitial = {
-  path: string;
   name: string;
   legacyCategory: ProductCategory;
   sortOrder: number;
 };
+
+// 上级分类选项：label 由页面层按层级缩进好（树内部的 ltree 路径不
+// 暴露给用户）。
+export type ParentCategoryOption = { id: string; label: string };
 
 type Props =
   | {
@@ -23,6 +26,7 @@ type Props =
         prev: ProductCategoryNodeMutationResult | null,
         fd: FormData,
       ) => Promise<ProductCategoryNodeMutationResult>;
+      parentOptions: ParentCategoryOption[];
     }
   | {
       mode: 'edit';
@@ -49,15 +53,31 @@ export function ProductCategoryForm(props: Props) {
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      <TextField
-        id="path"
-        label="分类路径"
-        hint="例如 product.custom.flat_foil；必须以 product. 开头。"
-        required
-        disabled={pending}
-        error={errs.path?.[0]}
-        defaultValue={initial?.path ?? 'product.'}
-      />
+      {props.mode === 'create' ? (
+        <div className="space-y-2">
+          <Label htmlFor="parentId">上级分类</Label>
+          <select
+            id="parentId"
+            name="parentId"
+            className={selectClass}
+            defaultValue=""
+            disabled={pending}
+          >
+            <option value="">（顶级分类）</option>
+            {props.parentOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            不选则创建为顶级分类；层级创建后不可移动。
+          </p>
+          {errs.parentId?.[0] ? (
+            <p className="text-sm text-destructive">{errs.parentId[0]}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <TextField
         id="name"

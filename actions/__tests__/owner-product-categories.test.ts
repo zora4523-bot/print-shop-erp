@@ -56,7 +56,7 @@ const ownerActor = {
 };
 
 const validCategory = {
-  path: 'product.custom.new',
+  parentId: 'cat_custom',
   name: '新分类',
   legacyCategory: 'COLOR_PRINT',
   sortOrder: '70',
@@ -93,11 +93,11 @@ describe('createProductCategoryNodeAction', () => {
     expect(productMock.createProductCategoryNode).not.toHaveBeenCalled();
   });
 
-  it('returns invalid for non-ltree-safe path', async () => {
+  it('returns invalid for empty name', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     const result = await createProductCategoryNodeAction(
       null,
-      fd({ ...validCategory, path: 'bad path' }),
+      fd({ ...validCategory, name: '  ' }),
     );
     expect(result.status).toBe('invalid');
     expect(productMock.createProductCategoryNode).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ describe('createProductCategoryNodeAction', () => {
       createProductCategoryNodeAction(null, fd(validCategory)),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(productMock.createProductCategoryNode).toHaveBeenCalledWith({
-      path: 'product.custom.new',
+      parentId: 'cat_custom',
       name: '新分类',
       legacyCategory: ProductCategory.COLOR_PRINT,
       sortOrder: 70,
@@ -118,7 +118,7 @@ describe('createProductCategoryNodeAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
   });
 
-  it('maps P2002 path conflict to invalid.path', async () => {
+  it('maps P2002 path collision to a retry-level field error（自动段名，撞键概率可忽略）', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProductCategoryNode.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('dup', {
@@ -130,11 +130,11 @@ describe('createProductCategoryNodeAction', () => {
     const result = await createProductCategoryNodeAction(null, fd(validCategory));
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
-      expect(result.fieldErrors.path).toContain('该分类路径已被占用');
+      expect(result.fieldErrors.name).toContain('分类创建冲突，请重试');
     }
   });
 
-  it('maps database ltree constraint errors to invalid.path', async () => {
+  it('maps database ltree constraint errors to a general error（表单无 path 字段可指）', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProductCategoryNode.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('constraint', {
@@ -143,11 +143,9 @@ describe('createProductCategoryNodeAction', () => {
       }),
     );
     const result = await createProductCategoryNodeAction(null, fd(validCategory));
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.path).toContain(
-        '分类路径不符合 PostgreSQL ltree 格式要求',
-      );
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.message).toMatch(/内部路径校验未通过/);
     }
   });
 });

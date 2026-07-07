@@ -23,7 +23,6 @@ export function ProductCategoryNodesTable({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>路径</TableHead>
           <TableHead>分类名</TableHead>
           <TableHead>旧分类快照</TableHead>
           <TableHead className="text-right">排序</TableHead>
@@ -41,7 +40,6 @@ export function ProductCategoryNodesTable({
               key={node.id}
               className={!node.isActive ? 'opacity-60' : undefined}
             >
-              <TableCell className="font-mono text-xs">{node.path}</TableCell>
               <TableCell>
                 {prefix}
                 {node.name}

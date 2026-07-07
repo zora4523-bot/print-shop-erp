@@ -380,15 +380,13 @@ const productCategoryNodeIdField = z
   .trim()
   .min(1, '请选择产品分类');
 
-const productCategoryPathField = z
+// 上级分类：空串 = 顶级。内部 ltree path 由服务端从上级分类派生 +
+// 自动生成段名——面向业主的 UI 不暴露路径细节。
+const productCategoryParentField = z
   .string()
   .trim()
-  .min(3, '分类路径过短')
-  .max(128, '分类路径过长（最多 128 个字符）')
-  .regex(
-    /^product\.[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/,
-    '分类路径必须以 product. 开头，只能包含字母、数字、下划线和点',
-  );
+  .max(64, '上级分类无效')
+  .transform((v) => (v === '' ? null : v));
 
 const productCategoryNameField = z
   .string()
@@ -403,7 +401,7 @@ const productCategorySortOrderField = z.coerce
   .max(9999, '排序过大');
 
 export const createProductCategoryNodeSchema = z.object({
-  path: productCategoryPathField,
+  parentId: productCategoryParentField,
   name: productCategoryNameField,
   legacyCategory: z.nativeEnum(ProductCategory),
   sortOrder: productCategorySortOrderField,
@@ -413,7 +411,13 @@ export type CreateProductCategoryNodeInput = z.infer<
   typeof createProductCategoryNodeSchema
 >;
 
-export const updateProductCategoryNodeSchema = createProductCategoryNodeSchema;
+// 编辑不允许改层级——移动子树会让子分类/产品挂错位置（现实现不级联
+// 子节点 path）；只能改名/旧分类快照/排序。
+export const updateProductCategoryNodeSchema = z.object({
+  name: productCategoryNameField,
+  legacyCategory: z.nativeEnum(ProductCategory),
+  sortOrder: productCategorySortOrderField,
+});
 
 export type UpdateProductCategoryNodeInput = z.infer<
   typeof updateProductCategoryNodeSchema

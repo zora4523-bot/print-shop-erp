@@ -436,3 +436,12 @@
 - **理由**：预签 URL 让前端零 SDK（ali-oss 浏览器包 ~200KB+）；客户端申报的 fileSize/路径一律不信，服务端 HEAD + objectKey 形状校验双兜底；与 submit 共享同一把锁堵"提交与登记并发"的 TOCTOU。凭证压到 15 分钟是对"预签 URL 在寿命内可重复 PUT 覆写已登记对象"的窗口压缩。
 - **影响**：工单详情页款式卡片新增设计图面板（缩略图/CDR chip/上传/删除）。**已知残余风险（P1）**：登记后 ≤15 分钟内上传者仍可用同一预签 URL 替换对象内容；彻底修复需 OrderItemDesign 加 ETag 列 + 消费端校验。
 - **相关文档**：`lib/order-design.ts`、`lib/oss/sign.ts`、`components/business/order/DesignUploadPanel.tsx`、SPEC §3.1 / 附录 F。
+
+---
+
+## 2026-07-07：产品分类 UI 不暴露 ltree 路径，层级由"上级分类"表达
+
+- **决策**：`/owner/product-categories` 列表移除"路径"列（层级用分类名缩进表达）；新建表单从"手写 ltree 路径"改为"上级分类"下拉（不选 = 顶级），path 段名由服务端自动生成（`n` + UUID 前 10 位 hex，满足 ltree label 字符集）；编辑表单不允许改层级——移动子树需级联改所有后代 path + 产品归属，属独立功能，当前实现改 path 不级联子节点反而是数据隐患，直接关闭入口。
+- **理由**：ltree path 是树索引的内部实现（DECISIONS 2026-06-28），A03 交付时的表单让业主手写 `product.custom.flat_foil` 是开发者捷径——要求用户理解英文段名、点分隔、前缀规则，纯增负担。业主视角只需要"这个分类挂在哪个分类下面叫什么"。
+- **影响**：`createProductCategoryNodeSchema` 从 path 改 parentId；`updateProductCategoryNodeSchema` 只剩 name/legacyCategory/sortOrder。既有节点 path 不变，无 migration。未来若需要"移动分类"，做成独立操作（级联后代 + 校验产品归属）。
+- **相关文档**：`lib/product.ts`、`lib/auth/schemas.ts`、`components/business/product-category/`、DECISIONS 2026-06-28（ltree 选型）。

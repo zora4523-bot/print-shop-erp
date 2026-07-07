@@ -24,17 +24,28 @@ import {
 } from '@/lib/product';
 import type { ProductCategoryNodeMutationResult } from './owner-product-categories.types';
 
+// path 由服务端自动生成（随机段名），撞唯一键的概率可忽略；万一发生
+// （或 DB 侧 ltree 约束拒绝）给一个"重试"级别的一般错误即可——用户
+// 表单里没有 path 字段可指。
 const CATEGORY_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
   {
-    field: 'path',
+    field: 'name',
     targets: ['path', 'ProductCategoryNode_path_key'],
-    message: '该分类路径已被占用',
+    message: '分类创建冲突，请重试',
   },
 ];
 
-function normalizeProductCategoryFormInput(formData: FormData) {
+function normalizeProductCategoryCreateInput(formData: FormData) {
   return {
-    path: getFormString(formData, 'path'),
+    parentId: getFormStringOr(formData, 'parentId', ''),
+    name: getFormString(formData, 'name'),
+    legacyCategory: getFormString(formData, 'legacyCategory'),
+    sortOrder: getFormStringOr(formData, 'sortOrder', '0'),
+  };
+}
+
+function normalizeProductCategoryUpdateInput(formData: FormData) {
+  return {
     name: getFormString(formData, 'name'),
     legacyCategory: getFormString(formData, 'legacyCategory'),
     sortOrder: getFormStringOr(formData, 'sortOrder', '0'),
@@ -48,28 +59,16 @@ function mapCategoryDbError(
   if (unique) return unique;
 
   if (
-    err instanceof Prisma.PrismaClientKnownRequestError &&
-    (err.code === 'P2004' || err.code === 'P2010')
+    (err instanceof Prisma.PrismaClientKnownRequestError &&
+      (err.code === 'P2004' || err.code === 'P2010')) ||
+    (err instanceof Prisma.PrismaClientUnknownRequestError &&
+      /ltree|ProductCategoryNode_path_ltree_safe|invalid input syntax/i.test(
+        err.message,
+      ))
   ) {
     return {
-      status: 'invalid',
-      fieldErrors: {
-        path: ['分类路径不符合 PostgreSQL ltree 格式要求'],
-      },
-    };
-  }
-
-  if (
-    err instanceof Prisma.PrismaClientUnknownRequestError &&
-    /ltree|ProductCategoryNode_path_ltree_safe|invalid input syntax/i.test(
-      err.message,
-    )
-  ) {
-    return {
-      status: 'invalid',
-      fieldErrors: {
-        path: ['分类路径不符合 PostgreSQL ltree 格式要求'],
-      },
+      status: 'error',
+      message: '分类保存失败（内部路径校验未通过），请重试或联系管理员',
     };
   }
 
@@ -83,7 +82,7 @@ export async function createProductCategoryNodeAction(
   await requirePermission('dict:product:manage');
 
   const parsed = createProductCategoryNodeSchema.safeParse(
-    normalizeProductCategoryFormInput(formData),
+    normalizeProductCategoryCreateInput(formData),
   );
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
@@ -111,7 +110,7 @@ export async function updateProductCategoryNodeAction(
   await requirePermission('dict:product:manage');
 
   const parsed = updateProductCategoryNodeSchema.safeParse(
-    normalizeProductCategoryFormInput(formData),
+    normalizeProductCategoryUpdateInput(formData),
   );
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 

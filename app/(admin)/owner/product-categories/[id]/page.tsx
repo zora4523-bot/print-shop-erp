@@ -25,7 +25,6 @@ export default async function EditProductCategoryPage({ params }: PageProps) {
 
   const boundUpdate = updateProductCategoryNodeAction.bind(null, id);
   const formInitial = {
-    path: node.path,
     name: node.name,
     legacyCategory: node.legacyCategory,
     sortOrder: node.sortOrder,
@@ -35,7 +34,7 @@ export default async function EditProductCategoryPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`编辑产品分类：${node.name}`}
-        subtitle={`${node.path} · ${PRODUCT_CATEGORY_LABELS[node.legacyCategory]} · ${node._count.products} 个产品`}
+        subtitle={`${PRODUCT_CATEGORY_LABELS[node.legacyCategory]} · ${node._count.products} 个产品`}
         actions={
           <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>
             {node.isActive ? '启用' : '停用'}

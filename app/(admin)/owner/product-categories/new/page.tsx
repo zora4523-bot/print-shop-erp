@@ -4,6 +4,7 @@ import { ProductCategoryForm } from '@/components/business/product-category/Prod
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
+import { listProductCategoryNodes } from '@/lib/product';
 
 export const metadata = {
   title: '新建产品分类 · 红包印刷 ERP',
@@ -11,12 +12,22 @@ export const metadata = {
 
 export default async function NewProductCategoryPage() {
   await requirePermission('dict:product:manage');
+  // 上级分类选项：仅激活节点；按 path 排序让子分类紧跟父级，缩进由
+  // 层级深度派生（ltree 路径本身不展示给用户）。
+  const nodes = await listProductCategoryNodes();
+  const parentOptions = nodes
+    .filter((n) => n.isActive)
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((n) => {
+      const depth = Math.max(0, n.path.split('.').length - 2);
+      return { id: n.id, label: `${'　'.repeat(depth)}${n.name}` };
+    });
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="新建产品分类"
-        subtitle="新分类默认启用；路径用于树查询和排序辅助，不会改写历史产品。"
+        subtitle="新分类默认启用；选择上级分类即可形成层级，不会改写历史产品。"
         actions={
           <Link
             href="/owner/product-categories"
@@ -31,6 +42,7 @@ export default async function NewProductCategoryPage() {
         <ProductCategoryForm
           mode="create"
           action={createProductCategoryNodeAction}
+          parentOptions={parentOptions}
         />
       </section>
     </div>

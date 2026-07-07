@@ -178,16 +178,18 @@ describe('product category node management', () => {
     );
   });
 
-  it('creates active category nodes', async () => {
+  it('creates a top-level node with auto-generated ltree segment', async () => {
     dbMock.productCategoryNode.create.mockResolvedValue(makeCategoryNode());
     await createProductCategoryNode({
-      path: 'product.custom.new',
+      parentId: null,
       name: '新分类',
       legacyCategory: ProductCategory.COLOR_PRINT,
       sortOrder: 70,
     });
-    expect(dbMock.productCategoryNode.create.mock.calls[0][0].data).toEqual({
-      path: 'product.custom.new',
+    const data = dbMock.productCategoryNode.create.mock.calls[0][0].data;
+    // 段名自动生成（用户不接触 ltree 路径），顶级挂在 product 下
+    expect(data.path).toMatch(/^product\.n[0-9a-f]{10}$/);
+    expect(data).toMatchObject({
       name: '新分类',
       legacyCategory: ProductCategory.COLOR_PRINT,
       sortOrder: 70,
@@ -195,17 +197,56 @@ describe('product category node management', () => {
     });
   });
 
+  it('creates a child node under the parent path; rejects missing/inactive parent', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue({
+      path: 'product.custom',
+      isActive: true,
+    });
+    dbMock.productCategoryNode.create.mockResolvedValue(makeCategoryNode());
+    await createProductCategoryNode({
+      parentId: 'cat_custom',
+      name: '子分类',
+      legacyCategory: ProductCategory.COLOR_PRINT,
+      sortOrder: 10,
+    });
+    expect(
+      dbMock.productCategoryNode.create.mock.calls[0][0].data.path,
+    ).toMatch(/^product\.custom\.n[0-9a-f]{10}$/);
+
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(null);
+    await expect(
+      createProductCategoryNode({
+        parentId: 'missing',
+        name: 'x',
+        legacyCategory: ProductCategory.COLOR_PRINT,
+        sortOrder: 10,
+      }),
+    ).rejects.toThrow(/上级分类不存在/);
+
+    dbMock.productCategoryNode.findUnique.mockResolvedValue({
+      path: 'product.custom',
+      isActive: false,
+    });
+    await expect(
+      createProductCategoryNode({
+        parentId: 'cat_custom',
+        name: 'x',
+        legacyCategory: ProductCategory.COLOR_PRINT,
+        sortOrder: 10,
+      }),
+    ).rejects.toThrow(/已停用/);
+  });
+
   it('updates category node editable fields', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.productCategoryNode.update.mockResolvedValue(makeCategoryNode({ name: '改名' }));
     await updateProductCategoryNode('cat_custom_flat_foil', {
-      path: 'product.custom.flat',
       name: '改名',
       legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
       sortOrder: 35,
     });
+    // path 不可改（层级移动是独立功能）——update data 不含 path
     expect(dbMock.productCategoryNode.update.mock.calls[0][0].data).toEqual({
-      path: 'product.custom.flat',
       name: '改名',
       legacyCategory: ProductCategory.CUSTOM_FLAT_FOIL,
       sortOrder: 35,
