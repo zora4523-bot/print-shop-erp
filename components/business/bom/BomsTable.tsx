@@ -10,15 +10,29 @@ import {
 } from '@/components/ui/table';
 import type { BomSummary } from '@/lib/bom';
 
-function targetLabel(bom: BomSummary): string {
+function targetLabel(
+  bom: BomSummary,
+  categoryLabelById: Record<string, string>,
+): string {
   if (bom.product) {
     return `${bom.product.code ? `${bom.product.code} · ` : ''}${bom.product.name}`;
   }
-  if (bom.categoryNode) return `分类 · ${bom.categoryNode.name}`;
+  if (bom.categoryNode) {
+    // 名称链（"定制 / 平面烫金"）消歧跨父级重名的分类
+    const label =
+      categoryLabelById[bom.categoryNode.id] ?? bom.categoryNode.name;
+    return `分类 · ${label}`;
+  }
   return '—';
 }
 
-export function BomsTable({ boms }: { boms: BomSummary[] }) {
+export function BomsTable({
+  boms,
+  categoryLabelById,
+}: {
+  boms: BomSummary[];
+  categoryLabelById: Record<string, string>;
+}) {
   if (boms.length === 0) {
     return <p className="text-sm text-muted-foreground">暂无 BOM。</p>;
   }
@@ -40,7 +54,9 @@ export function BomsTable({ boms }: { boms: BomSummary[] }) {
         {boms.map((bom) => (
           <TableRow key={bom.id} className={!bom.isActive ? 'opacity-60' : undefined}>
             <TableCell>{bom.name}</TableCell>
-            <TableCell className="text-muted-foreground">{targetLabel(bom)}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {targetLabel(bom, categoryLabelById)}
+            </TableCell>
             <TableCell className="text-right font-mono text-xs">
               v{bom.version}
             </TableCell>

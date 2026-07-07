@@ -234,6 +234,27 @@ export function orderCategoryNodesAsTree<
   return out;
 }
 
+// 分类的用户可读层级标签（如"定制 / 平面烫金"）——分类名允许跨父级
+// 重名，非树形展示的场景（BOM 目标标签等）用名称链消歧，取代内部
+// ltree 路径。祖先名缺失（脏数据/未加载）时退回自身名。
+export function categoryChainLabelMap(
+  nodes: ReadonlyArray<{ id: string; path: string; name: string }>,
+): Map<string, string> {
+  const nameByPath = new Map(nodes.map((n) => [n.path, n.name]));
+  const labels = new Map<string, string>();
+  for (const n of nodes) {
+    const segments = n.path.split('.');
+    const names: string[] = [];
+    for (let depth = 2; depth <= segments.length; depth++) {
+      const ancestorPath = segments.slice(0, depth).join('.');
+      const name = nameByPath.get(ancestorPath);
+      if (name) names.push(name);
+    }
+    labels.set(n.id, names.length > 0 ? names.join(' / ') : n.name);
+  }
+  return labels;
+}
+
 export async function listProductCategoryNodes(): Promise<
   ProductCategoryNodeSummary[]
 > {

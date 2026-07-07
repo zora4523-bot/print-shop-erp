@@ -4,15 +4,28 @@ import { PageHeader } from '@/components/ui-business';
 import { ToggleBomActiveButton } from '@/components/business/bom/ToggleBomActiveButton';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getBomDetail } from '@/lib/bom';
+import {
+  categoryChainLabelMap,
+  listProductCategoryNodes,
+} from '@/lib/product';
 
 type PageProps = { params: Promise<{ id: string }> };
 
-function targetLabel(bom: Awaited<ReturnType<typeof getBomDetail>>): string {
+async function targetLabel(
+  bom: Awaited<ReturnType<typeof getBomDetail>>,
+): Promise<string> {
   if (!bom) return '—';
   if (bom.product) {
     return `${bom.product.code ? `${bom.product.code} · ` : ''}${bom.product.name}`;
   }
-  if (bom.categoryNode) return `分类 · ${bom.categoryNode.name}`;
+  if (bom.categoryNode) {
+    // 名称链消歧跨父级重名的分类
+    const nodes = await listProductCategoryNodes();
+    const label =
+      categoryChainLabelMap(nodes).get(bom.categoryNode.id) ??
+      bom.categoryNode.name;
+    return `分类 · ${label}`;
+  }
   return '—';
 }
 
@@ -32,7 +45,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={bom.name}
-        subtitle={`${targetLabel(bom)} · v${bom.version} · 基准产量 ${bom.baseQuantity}`}
+        subtitle={`${await targetLabel(bom)} · v${bom.version} · 基准产量 ${bom.baseQuantity}`}
         actions={
           <Badge variant={bom.isActive ? 'outline' : 'secondary'}>
             {bom.isActive ? '启用' : '停用'}

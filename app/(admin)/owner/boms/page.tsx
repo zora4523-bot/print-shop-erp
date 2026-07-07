@@ -4,6 +4,10 @@ import { BomsTable } from '@/components/business/bom/BomsTable';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBoms } from '@/lib/bom';
+import {
+  categoryChainLabelMap,
+  listProductCategoryNodes,
+} from '@/lib/product';
 
 export const metadata = {
   title: 'BOM/用料 · 红包印刷 ERP',
@@ -11,7 +15,14 @@ export const metadata = {
 
 export default async function OwnerBomsPage() {
   await requirePermission('bom:manage');
-  const boms = await listBoms();
+  const [boms, categoryNodes] = await Promise.all([
+    listBoms(),
+    listProductCategoryNodes(),
+  ]);
+  // 分类目标用名称链消歧（分类名允许跨父级重名）
+  const categoryLabelById = Object.fromEntries(
+    categoryChainLabelMap(categoryNodes),
+  );
 
   return (
     <div className="space-y-6">
@@ -26,7 +37,7 @@ export default async function OwnerBomsPage() {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <BomsTable boms={boms} />
+        <BomsTable boms={boms} categoryLabelById={categoryLabelById} />
       </section>
     </div>
   );

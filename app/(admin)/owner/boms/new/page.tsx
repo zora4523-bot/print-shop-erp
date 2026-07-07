@@ -3,7 +3,11 @@ import { BomForm } from '@/components/business/bom/BomForm';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listMaterials } from '@/lib/material';
-import { listProductCategoryOptions, listProductOptions } from '@/lib/product';
+import {
+  categoryChainLabelMap,
+  listProductCategoryOptions,
+  listProductOptions,
+} from '@/lib/product';
 
 export const metadata = {
   title: '新建 BOM · 红包印刷 ERP',
@@ -33,13 +37,18 @@ export default async function NewBomPage() {
             name: product.name,
             categoryName: product.categoryNode.name,
           }))}
-          categories={categories
-            .filter((category) => category.isActive)
-            .map((category) => ({
-              id: category.id,
-              path: category.path,
-              name: category.name,
-            }))}
+          categories={(() => {
+            // 名称链标签（"定制 / 平面烫金"）消歧跨父级重名；链用全量
+            // 节点算（父级可能已停用），选项只列激活节点。
+            const chainLabels = categoryChainLabelMap(categories);
+            return categories
+              .filter((category) => category.isActive)
+              .map((category) => ({
+                id: category.id,
+                path: category.path,
+                name: chainLabels.get(category.id) ?? category.name,
+              }));
+          })()}
           materials={materials
             .filter((material) => material.isActive)
             .map((material) => ({
