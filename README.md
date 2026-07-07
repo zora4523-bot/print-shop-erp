@@ -214,7 +214,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 6 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：CDR 短链跟随访问域，split-origin 时外协拿到内网链接 |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
 
@@ -225,7 +225,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 
 ### 2. Cron 切换：`Bearer` → `pg_cron`
 
-P0 + P1 #2 期间 6 个 cron endpoints 用 shared-secret + 外部 cron 调用：
+P0 + P1 #2 期间 7 个 cron endpoints 用 shared-secret + 外部 cron 调用：
 
 ```bash
 # 每日 24:00 师傅日薪（P1 #2 起：完成后推 DAILY_WORKER_SALARY 到车间群）
@@ -251,11 +251,15 @@ curl -X POST https://host/api/cron/outsource-overdue \
 # P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到老板群
 curl -X POST https://host/api/cron/cs-period-ending \
   -H "Authorization: Bearer $CRON_SECRET"
+
+# 2026-07-07 新增：每日扫承诺交期已过仍未发货的工单 → ORDER_OVERDUE 推送到管理群
+curl -X POST https://host/api/cron/order-overdue \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
 
-**6 个 cron endpoints 都不走 session 中间件**（middleware.ts matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**7 个 cron endpoints 都不走 session 中间件**（middleware.ts matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgbackrest）
 

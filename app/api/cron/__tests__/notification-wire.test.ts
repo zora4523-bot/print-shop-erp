@@ -6,6 +6,7 @@ const {
   computeDailyMock,
   settleReadyCsMock,
   getOverdueOutsourcingMock,
+  getDueOrdersMock,
   getEndingPeriodsMock,
   dbMock,
   dispatchMock,
@@ -13,6 +14,7 @@ const {
   computeDailyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOverdueOutsourcingMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  getDueOrdersMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getEndingPeriodsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   dbMock: {
     user: { findMany: vi.fn() },
@@ -26,6 +28,7 @@ vi.mock('@/lib/salary/cs', () => ({ settleReadyCsPeriods: settleReadyCsMock }));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
   getOverdueOutsourcing: getOverdueOutsourcingMock,
   getEndingPeriods: getEndingPeriodsMock,
+  getDueOrders: getDueOrdersMock,
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
@@ -35,6 +38,7 @@ vi.mock('@/lib/notification/dispatch', () => ({
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as outsourceOverduePost } from '../outsource-overdue/route';
+import { POST as orderOverduePost } from '../order-overdue/route';
 import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
 
 const SECRET = 'test-cron-secret-12345';
@@ -43,6 +47,7 @@ beforeEach(() => {
   computeDailyMock.mockReset();
   settleReadyCsMock.mockReset();
   getOverdueOutsourcingMock.mockReset();
+  getDueOrdersMock.mockReset();
   getEndingPeriodsMock.mockReset();
   dbMock.user.findMany.mockReset();
   dispatchMock.mockReset();
@@ -342,5 +347,69 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
         .status,
     ).toBe(401);
     expect(dispatchMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── /api/cron/order-overdue (ORDER_OVERDUE，业主 2026-07-07 新增) ───
+
+describe('POST /api/cron/order-overdue → ORDER_OVERDUE', () => {
+  const dueRow = (over: Record<string, unknown> = {}) => ({
+    id: 'o1',
+    orderNo: '20260701-0001',
+    customerRef: '苹果福',
+    status: 'IN_PRODUCTION',
+    isUrgent: false,
+    promisedDate: new Date('2026-07-04T00:00:00Z'),
+    daysLeft: -3,
+    ...over,
+  });
+
+  it('只推送 daysLeft < 0 的逾期单；due-soon（>=0）不进群', async () => {
+    getDueOrdersMock.mockResolvedValue([
+      dueRow(),
+      dueRow({ id: 'o2', orderNo: '20260701-0002', daysLeft: 0 }),
+      dueRow({ id: 'o3', orderNo: '20260701-0003', daysLeft: 2 }),
+    ]);
+    const res = await orderOverduePost(
+      authedReq('http://x/api/cron/order-overdue'),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: 'ok', overdueCount: 1 });
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    const [event, payload] = dispatchMock.mock.calls[0]!;
+    expect(event).toBe('ORDER_OVERDUE');
+    const p = payload as Record<string, unknown>;
+    expect(p.orderNo).toBe('20260701-0001');
+    expect(p.customerRef).toBe('苹果福');
+    expect(p.daysOverdue).toBe(3);
+    expect(p.status).toBe('生产中'); // 中文标签，不是裸枚举
+    expect(p.promisedDate).toMatch(/2026\/07\/04/);
+  });
+
+  it('customerRef null → 映射为「未填」（模板必填占位符不留 raw）', async () => {
+    getDueOrdersMock.mockResolvedValue([dueRow({ customerRef: null })]);
+    await orderOverduePost(authedReq('http://x/api/cron/order-overdue'));
+    const p = dispatchMock.mock.calls[0]![1] as Record<string, unknown>;
+    expect(p.customerRef).toBe('未填');
+  });
+
+  it('401 / 503 / 500 路径', async () => {
+    delete process.env.CRON_SECRET;
+    expect(
+      (await orderOverduePost(authedReq('http://x/api/cron/order-overdue'))).status,
+    ).toBe(503);
+    process.env.CRON_SECRET = SECRET;
+    expect(
+      (await orderOverduePost(unauthedReq('http://x/api/cron/order-overdue'))).status,
+    ).toBe(401);
+    expect(dispatchMock).not.toHaveBeenCalled();
+
+    getDueOrdersMock.mockRejectedValue(new Error('db down: secret detail'));
+    const res = await orderOverduePost(
+      authedReq('http://x/api/cron/order-overdue'),
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).not.toMatch(/secret detail/);
   });
 });

@@ -387,6 +387,10 @@ async function seedNotificationEvents() {
       messageTemplate: '⚠️ **外协超期**\n外协单：{outsourceId}\n供应商：{supplierName}\n预计回货日：{expectedDate}',
     },
     {
+      eventType: 'ORDER_OVERDUE',
+      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n客户：{customerRef}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
+    },
+    {
       eventType: 'STOCK_ALERT',
       messageTemplate: '📦 **库存告警**\n物料：{materialName}\n当前库存：{currentStock}\n安全库存：{safetyStock}',
     },

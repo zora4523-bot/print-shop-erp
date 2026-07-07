@@ -9,6 +9,10 @@
 // lib/material.ts createMaterialTransaction 与 lib/purchase.ts
 // cancelPurchaseReceipt（跨越检测：库存从 >=安全库存 跌破那一次变动
 // 才触发，持续低位不重复；见 DECISIONS 2026-07-05）。
+//
+// ORDER_OVERDUE 是 SPEC 之外的业主新增需求（2026-07-07 拍板）：工单
+// 承诺交期已过仍未发货，每日 cron 扫描推送管理群；口径与 dashboard
+// 交期预警共用 lib/order/promised-date。
 
 export const NOTIFICATION_EVENTS = {
   ORDER_SUBMITTED: 'ORDER_SUBMITTED',
@@ -17,6 +21,7 @@ export const NOTIFICATION_EVENTS = {
   ORDER_COMPLETED: 'ORDER_COMPLETED',
   ORDER_SHIPPED: 'ORDER_SHIPPED',
   OUTSOURCE_OVERDUE: 'OUTSOURCE_OVERDUE',
+  ORDER_OVERDUE: 'ORDER_OVERDUE',
   STOCK_ALERT: 'STOCK_ALERT',
   CS_PERIOD_ENDING: 'CS_PERIOD_ENDING',
   CS_PERIOD_SETTLED: 'CS_PERIOD_SETTLED',
@@ -89,6 +94,15 @@ export type NotificationPayloads = {
     orderNo?: string | null;
     daysOverdue: number;
     expectedDate: string; // YYYY-MM-DD（已 zh-CN format）
+  };
+  ORDER_OVERDUE: {
+    orderId: string;
+    orderNo: string;
+    // 必填 string——seed 模板引用 {customerRef}；调用方负责 null → '未填'
+    customerRef: string;
+    promisedDate: string; // YYYY/MM/DD（已 zh-CN format）
+    daysOverdue: number;
+    status: string; // 中文状态标签（调用方用 orderStatusZh 映射）
   };
   STOCK_ALERT: {
     materialName: string;

@@ -35,7 +35,7 @@ export default async function OwnerNotificationsPage() {
     <div className="space-y-8">
       <PageHeader
         title="推送配置"
-        subtitle="企业微信群机器人 webhook 配置 + 10 个事件规则。"
+        subtitle="企业微信群机器人 webhook 配置 + 11 个事件规则。"
       />
 
       {mock ? (
@@ -135,7 +135,7 @@ export default async function OwnerNotificationsPage() {
         )}
       </section>
 
-      {/* ─── 事件规则（10 条固定） ─── */}
+      {/* ─── 事件规则（11 条固定） ─── */}
       <section className="space-y-3">
         <h2 className="text-base font-semibold">事件规则</h2>
         {rules.length === 0 ? (

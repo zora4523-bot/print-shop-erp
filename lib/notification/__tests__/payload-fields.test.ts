@@ -51,8 +51,8 @@ function extractSeedTemplates(): SeedTemplate[] {
 describe('seed.ts notification templates ⊆ NOTIFICATION_PAYLOAD_FIELDS', () => {
   const seeds = extractSeedTemplates();
 
-  it('能从 seed.ts 抽出 10 条 rule', () => {
-    expect(seeds.length).toBe(10);
+  it('能从 seed.ts 抽出 11 条 rule', () => {
+    expect(seeds.length).toBe(11);
   });
 
   it('每条 rule 的 eventType 都是 NOTIFICATION_EVENTS 已定义的', () => {
