@@ -4,6 +4,7 @@ import {
   getUserIdByUsername,
   seedNotificationWireFixture,
   seedOverdueOutsourceForCron,
+  seedOrderOverdueForCron,
   seedEndingPeriodForCron,
   readNotificationLogs,
 } from './_helpers';
@@ -131,5 +132,48 @@ test.describe('cron notify wire', () => {
     expect(mine[0]!.messageContent).toContain('100,000.00');
     expect(mine[0]!.messageContent).not.toMatch(/\{[a-z]+\}/i);
     void periodId;
+  });
+
+  test('/api/cron/order-overdue → ORDER_OVERDUE NotificationLog', async ({
+    request,
+  }) => {
+    const { channelId } = await seedNotificationWireFixture();
+    const { orderNo } = await seedOrderOverdueForCron();
+
+    const res = await request.post(
+      'http://localhost:3000/api/cron/order-overdue',
+      {
+        headers: { authorization: `Bearer ${CRON_SECRET}` },
+      },
+    );
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('ok');
+    expect(body.overdueCount).toBeGreaterThanOrEqual(1);
+
+    await expect
+      .poll(
+        async () => {
+          const logs = await readNotificationLogs({
+            eventType: 'ORDER_OVERDUE',
+            channelId,
+          });
+          return logs.filter((l) => l.messageContent.includes(orderNo)).length;
+        },
+        { timeout: 5_000, intervals: [200, 400, 800] },
+      )
+      .toBeGreaterThanOrEqual(1);
+
+    const logs = await readNotificationLogs({
+      eventType: 'ORDER_OVERDUE',
+      channelId,
+    });
+    const mine = logs.filter((l) => l.messageContent.includes(orderNo));
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.status).toBe('SUCCESS');
+    expect(mine[0]!.messageContent).toContain('交期逾期');
+    expect(mine[0]!.messageContent).toContain('已逾期：5 天');
+    expect(mine[0]!.messageContent).toContain('生产中'); // 中文状态非裸枚举
+    expect(mine[0]!.messageContent).not.toMatch(/\{[a-z]+\}/i);
   });
 });

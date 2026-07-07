@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 // Re-export so specs don't have to import from global-setup directly.
+import { E2E_USERS } from './global-setup';
 export { E2E_PASSWORD, E2E_USERS } from './global-setup';
 
 // ---- DB-side fixture helpers ----
@@ -1450,10 +1451,9 @@ export async function seedNotificationWireFixture(): Promise<{
       [channelId],
     );
 
-    // Step 3: bind + activate **all 9 wired events**（5 status-machine
-    // + 4 cron）。Slice C wire 只用 5 个；Slice D wire cron 又用了 4 个
-    // （DAILY_WORKER_SALARY / CS_PERIOD_SETTLED / OUTSOURCE_OVERDUE /
-    // CS_PERIOD_ENDING）。STOCK_ALERT 仍未 wire（Material 模型 P1）。
+    // Step 3: bind + activate all wired events（5 状态机 + 5 cron/库存）。
+    // STOCK_ALERT 由出库跨越检测触发；ORDER_OVERDUE 由
+    // /api/cron/order-overdue 触发（2026-07-07 新增）。
     await db.query(
       `
       UPDATE "NotificationRule"
@@ -1464,13 +1464,44 @@ export async function seedNotificationWireFixture(): Promise<{
          'ORDER_SUBMITTED', 'URGENT_ORDER', 'ORDER_SCHEDULED',
          'ORDER_COMPLETED', 'ORDER_SHIPPED',
          'DAILY_WORKER_SALARY', 'CS_PERIOD_SETTLED',
-         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING'
+         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING', 'ORDER_OVERDUE'
        )
       `,
       [channelId],
     );
 
     return { channelId };
+  });
+}
+
+// Seeds 1 overdue Order (promisedDate 5 天前 + IN_PRODUCTION) for
+// /api/cron/order-overdue tests. id 前缀 e2e-cron-order-，每次先 wipe。
+export async function seedOrderOverdueForCron(): Promise<{
+  orderId: string;
+  orderNo: string;
+}> {
+  return withDb(async (db) => {
+    await db.query(`DELETE FROM "Order" WHERE id LIKE 'e2e-cron-order-%'`);
+    const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const suffix = randomBytes(4).toString('hex');
+    const orderId = `e2e-cron-order-${suffix}`;
+    const orderNo = `E2E-DUE-${suffix.toUpperCase()}`;
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        status, "isUrgent", "customerRef", "totalAmount", "promisedDate",
+        "submittedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'SALES'::"Role", $3,
+        'IN_PRODUCTION'::"OrderStatus", false, 'E2E交期客户', 100, $4,
+        NOW(), NOW(), NOW()
+      )
+      `,
+      [orderId, orderNo, salesId, fiveDaysAgo.toISOString()],
+    );
+    return { orderId, orderNo };
   });
 }
 

@@ -17,7 +17,7 @@ import {
 //
 // Stability tactics:
 //   - seedPrintableOrder uses a deterministic orderId per count, so
-//     QR pixels (encoded `order:<id>`) hash identically every run.
+//     QR pixels (encoded `{base}/orders/<id>` URL) hash identically every run.
 //   - Designs render an inline 1×1 PNG (data:image/png;base64,...)
 //     so no network fetch / no image caching variance.
 //   - print-footer (打印时间) is masked — wall-clock varies.
