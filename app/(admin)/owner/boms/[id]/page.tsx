@@ -12,7 +12,7 @@ function targetLabel(bom: Awaited<ReturnType<typeof getBomDetail>>): string {
   if (bom.product) {
     return `${bom.product.code ? `${bom.product.code} · ` : ''}${bom.product.name}`;
   }
-  if (bom.categoryNode) return `${bom.categoryNode.path} · ${bom.categoryNode.name}`;
+  if (bom.categoryNode) return `分类 · ${bom.categoryNode.name}`;
   return '—';
 }
 

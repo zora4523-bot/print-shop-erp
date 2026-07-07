@@ -113,7 +113,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
             <option value="">请选择分类</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
-                {category.path} · {category.name}
+                {category.name}
               </option>
             ))}
           </select>

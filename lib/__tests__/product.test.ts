@@ -32,6 +32,7 @@ import {
   updateProduct,
   setProductActive,
   ProductInvariantError,
+  orderCategoryNodesAsTree,
 } from '../product';
 
 beforeEach(() => {
@@ -162,6 +163,39 @@ describe('listProductCategoryOptions', () => {
       },
       orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
     });
+  });
+});
+
+describe('orderCategoryNodesAsTree', () => {
+  const n = (path: string, sortOrder: number, name: string) => ({
+    path,
+    sortOrder,
+    name,
+  });
+
+  it('子节点紧跟父节点，即使子节点 sortOrder 更小（防悬空缩进行）', () => {
+    const rows = [
+      n('product.b.child', 1, '子'),
+      n('product.a', 10, '甲'),
+      n('product.b', 20, '乙'),
+    ];
+    expect(orderCategoryNodesAsTree(rows).map((r) => r.name)).toEqual([
+      '甲',
+      '乙',
+      '子',
+    ]);
+  });
+
+  it('兄弟按 sortOrder 排，孤儿节点兜底追加不丢行', () => {
+    const rows = [
+      n('product.a', 20, '后'),
+      n('product.b', 10, '先'),
+      n('product.gone.orphan', 1, '孤儿'), // 父节点不在结果集
+    ];
+    const ordered = orderCategoryNodesAsTree(rows).map((r) => r.name);
+    expect(ordered.slice(0, 2)).toEqual(['先', '后']);
+    expect(ordered).toContain('孤儿');
+    expect(ordered).toHaveLength(3);
   });
 });
 

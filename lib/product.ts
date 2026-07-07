@@ -200,13 +200,48 @@ export async function listProductOptions(
   });
 }
 
+// 树序（DFS）：父节点在前、子节点紧随其后，兄弟按 sortOrder → 名称。
+// 列表/选择器的层级只靠缩进表达（path 不展示），全局按 sortOrder 排
+// 会让 sortOrder 小的子节点漂到父节点上面变成"悬空缩进行"。孤儿节点
+// （父被删/脏数据）兜底追加到末尾，保证不丢行。
+export function orderCategoryNodesAsTree<
+  T extends { path: string; sortOrder: number; name: string },
+>(nodes: T[]): T[] {
+  const byParent = new Map<string, T[]>();
+  for (const n of nodes) {
+    const idx = n.path.lastIndexOf('.');
+    const parent = idx >= 0 ? n.path.slice(0, idx) : '';
+    const bucket = byParent.get(parent);
+    if (bucket) bucket.push(n);
+    else byParent.set(parent, [n]);
+  }
+  const bySibling = (a: T, b: T) =>
+    a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-CN');
+  const out: T[] = [];
+  const visit = (parentPath: string) => {
+    const kids = byParent.get(parentPath);
+    if (!kids) return;
+    for (const kid of [...kids].sort(bySibling)) {
+      out.push(kid);
+      visit(kid.path);
+    }
+  };
+  visit('product');
+  if (out.length !== nodes.length) {
+    const seen = new Set(out);
+    for (const n of nodes) if (!seen.has(n)) out.push(n);
+  }
+  return out;
+}
+
 export async function listProductCategoryNodes(): Promise<
   ProductCategoryNodeSummary[]
 > {
-  return db.productCategoryNode.findMany({
+  const rows = await db.productCategoryNode.findMany({
     select: CATEGORY_NODE_SUMMARY_SELECT,
     orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
   });
+  return orderCategoryNodesAsTree(rows);
 }
 
 export async function getProductCategoryNodeSummary(

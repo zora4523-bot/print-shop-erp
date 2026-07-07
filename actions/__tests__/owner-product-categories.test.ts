@@ -118,7 +118,7 @@ describe('createProductCategoryNodeAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
   });
 
-  it('maps P2002 path collision to a retry-level field error（自动段名，撞键概率可忽略）', async () => {
+  it('maps P2002 path collision to a retry-level general error（自动段名，无表单字段可指）', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProductCategoryNode.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('dup', {
@@ -128,9 +128,9 @@ describe('createProductCategoryNodeAction', () => {
       }),
     );
     const result = await createProductCategoryNodeAction(null, fd(validCategory));
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.name).toContain('分类创建冲突，请重试');
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.message).toBe('分类创建冲突，请重试');
     }
   });
 

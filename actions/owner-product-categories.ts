@@ -7,9 +7,7 @@ import {
   getFormStringOr,
   invalidFromIssues,
   mapInvariantError,
-  mapPrismaUniqueViolation,
   revalidatePaths,
-  type UniqueViolationMapping,
 } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -24,16 +22,6 @@ import {
 } from '@/lib/product';
 import type { ProductCategoryNodeMutationResult } from './owner-product-categories.types';
 
-// path 由服务端自动生成（随机段名），撞唯一键的概率可忽略；万一发生
-// （或 DB 侧 ltree 约束拒绝）给一个"重试"级别的一般错误即可——用户
-// 表单里没有 path 字段可指。
-const CATEGORY_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
-  {
-    field: 'name',
-    targets: ['path', 'ProductCategoryNode_path_key'],
-    message: '分类创建冲突，请重试',
-  },
-];
 
 function normalizeProductCategoryCreateInput(formData: FormData) {
   return {
@@ -52,11 +40,18 @@ function normalizeProductCategoryUpdateInput(formData: FormData) {
   };
 }
 
+// path 由服务端自动生成（随机段名），撞唯一键的概率可忽略；万一发生
+// （或 DB 侧 ltree 约束拒绝）给"重试"级别的一般错误——表单里没有
+// path 字段可指，挂到具体字段上会误导用户改错东西。
 function mapCategoryDbError(
   err: unknown,
 ): ProductCategoryNodeMutationResult | null {
-  const unique = mapPrismaUniqueViolation(err, CATEGORY_UNIQUE_VIOLATIONS);
-  if (unique) return unique;
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === 'P2002'
+  ) {
+    return { status: 'error', message: '分类创建冲突，请重试' };
+  }
 
   if (
     (err instanceof Prisma.PrismaClientKnownRequestError &&

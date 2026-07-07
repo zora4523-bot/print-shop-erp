@@ -12,12 +12,12 @@ export const metadata = {
 
 export default async function NewProductCategoryPage() {
   await requirePermission('dict:product:manage');
-  // 上级分类选项：仅激活节点；按 path 排序让子分类紧跟父级，缩进由
-  // 层级深度派生（ltree 路径本身不展示给用户）。
+  // 上级分类选项：仅激活节点。listProductCategoryNodes 已按树序返回
+  // （父在前、兄弟按 sortOrder），缩进由层级深度派生，ltree 路径不
+  // 展示给用户。
   const nodes = await listProductCategoryNodes();
   const parentOptions = nodes
     .filter((n) => n.isActive)
-    .sort((a, b) => a.path.localeCompare(b.path))
     .map((n) => {
       const depth = Math.max(0, n.path.split('.').length - 2);
       return { id: n.id, label: `${'　'.repeat(depth)}${n.name}` };
