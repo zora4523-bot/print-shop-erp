@@ -445,3 +445,21 @@
 - **理由**：ltree path 是树索引的内部实现（DECISIONS 2026-06-28），A03 交付时的表单让业主手写 `product.custom.flat_foil` 是开发者捷径——要求用户理解英文段名、点分隔、前缀规则，纯增负担。业主视角只需要"这个分类挂在哪个分类下面叫什么"。
 - **影响**：`createProductCategoryNodeSchema` 从 path 改 parentId；`updateProductCategoryNodeSchema` 只剩 name/legacyCategory/sortOrder。既有节点 path 不变，无 migration。未来若需要"移动分类"，做成独立操作（级联后代 + 校验产品归属）。
 - **相关文档**：`lib/product.ts`、`lib/auth/schemas.ts`、`components/business/product-category/`、DECISIONS 2026-06-28（ltree 选型）。
+
+---
+
+## 2026-07-07：承诺交期字段 + 交期预警 + ORDER_OVERDUE 推送（业主拍板新增）
+
+- **决策**：`Order.promisedDate`（可空，migration `20260707010000`）承载对客户的承诺交期。预警口径集中在 `lib/order/promised-date.ts`：只对未发货状态（DRAFT..COMPLETED）预警，上海日历日比较，逾期红 / 3 天内到期黄；详情页徽标、dashboard「交期预警」关注列表、每日 cron 三处共用。新推送事件 `ORDER_OVERDUE`（SPEC §8.1 之外的业主新增，事件规则第 11 条）由 `/api/cron/order-overdue` 每日扫描触发——只推"已逾期"，"即将到期"留在 dashboard 不进群刷屏。编辑规则：promisedDate 属 FULL 字段集（DRAFT/SUBMITTED 可改，排产后锁定），修改进 OrderLog diff。
+- **理由**：交期是老板最关心的履约风险，但 SPEC 原文没有此字段；预警阈值 3 天与客服周期"7 天预警"区分（生产周期短）。逾期推送每日重复直至发货或改期，同 OUTSOURCE_OVERDUE 语义。
+- **影响**：seed 事件规则 10 → 11 条；README cron 6 → 7 端点，生产 crontab 需加一行。工单打印视图页眉新增"承诺交期"行。
+- **相关文档**：`lib/order/promised-date.ts`、`app/api/cron/order-overdue/route.ts`、`prisma/migrations/20260707010000_order_promised_date/`。
+
+---
+
+## 2026-07-07：工单二维码内容从裸 id 改为绝对 URL（微信扫码直达）
+
+- **决策**：打印工单的二维码内容从 `order:<id>` / `task:<id>` 纯文本改为 `{base}/orders/<id>` / `{base}/worker/tasks/<id>` 绝对 URL。base 推导抽成 `lib/public-base-url.ts`（APP_PUBLIC_URL 优先 → 请求头推导 → localhost 兜底），与 CDR 下载链接共用同一套头部解析/校验纯函数；foreman-cdr action 的本地实现随之去重。
+- **理由**：SPEC §3.3 的设计意图就是"扫码直达报工页"，裸 id 需要专用扫码器，微信扫出来只是一串文本。URL 化后师傅微信"扫一扫"→（未登录先登录回跳）→ 任务详情开始/报工，零新依赖。
+- **影响**：打印视图视觉基线全部重生成（QR 图案变化 + 新增交期行），按惯例截图经业主确认后提交。生产部署时 `APP_PUBLIC_URL` 必须配置为公网域名，否则打印出的码指向反代推导域。
+- **相关文档**：`lib/order/print-view.ts`、`lib/public-base-url.ts`、README §🚢 env 表。

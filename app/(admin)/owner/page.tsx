@@ -17,8 +17,10 @@ import {
 import {
   getEndingPeriods,
   getOverdueOutsourcing,
+  getDueOrders,
   getPendingShipments,
   type EndingPeriodRow,
+  type DueOrderRow,
   type OverdueOutsourceRow,
   type PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
@@ -41,6 +43,7 @@ import { ProductionTrendChart } from '@/components/business/dashboard/Production
 import { SalesRankingChart } from '@/components/business/dashboard/SalesRankingChart';
 import { CategoryDistributionChart } from '@/components/business/dashboard/CategoryDistributionChart';
 import { Badge } from '@/components/ui/badge';
+import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 
@@ -66,6 +69,7 @@ export default async function OwnerDashboardPage() {
     monthly,
     pendingShipments,
     overdueOutsourcing,
+    dueOrders,
     endingPeriods,
     productionTrend,
     salesRanking,
@@ -75,6 +79,7 @@ export default async function OwnerDashboardPage() {
     getMonthlyBillStats(),
     getPendingShipments(),
     getOverdueOutsourcing(),
+    getDueOrders(),
     getEndingPeriods(),
     getProductionTrend(),
     getSalesRanking(),
@@ -219,6 +224,16 @@ export default async function OwnerDashboardPage() {
           emptyText="暂无超期外协。"
           columns={overdueOutsourceColumns}
         />
+
+        <WatchlistTable
+          slot="dashboard-watchlist-due-orders"
+          title="交期预警"
+          description="承诺交期已逾期或 3 天内到期 · 未发货工单"
+          rows={dueOrders}
+          rowKey={(r) => r.id}
+          emptyText="暂无交期风险工单。"
+          columns={dueOrderColumns}
+        />
       </div>
 
       <WatchlistTable
@@ -318,6 +333,50 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     header: '急单',
     cell: (r) =>
       r.isUrgent ? <Badge variant="destructive">急</Badge> : null,
+    align: 'center',
+  },
+];
+
+const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
+  {
+    header: '工单号',
+    cell: (r) => (
+      <Link
+        href={`/orders/${r.id}`}
+        className="font-mono text-xs underline-offset-2 hover:underline"
+      >
+        {r.orderNo}
+      </Link>
+    ),
+  },
+  {
+    header: '客户',
+    cell: (r) => r.customerRef ?? '—',
+  },
+  {
+    header: '状态',
+    cell: (r) => <OrderStatusBadge status={r.status} />,
+    align: 'center',
+  },
+  {
+    header: '承诺交期',
+    cell: (r) => r.promisedDate.toISOString().slice(0, 10),
+    align: 'right',
+    className: 'font-mono text-xs',
+  },
+  {
+    header: '交期',
+    cell: (r) =>
+      r.daysLeft < 0 ? (
+        <Badge variant="destructive">逾期 {-r.daysLeft} 天</Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className="border-warning/50 bg-warning/10 text-warning-foreground"
+        >
+          {r.daysLeft === 0 ? '今天到期' : `剩 ${r.daysLeft} 天`}
+        </Badge>
+      ),
     align: 'center',
   },
 ];

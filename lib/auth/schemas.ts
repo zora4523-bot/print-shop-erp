@@ -1013,6 +1013,34 @@ const orderItemSchema = z.object({
 
 export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
+// 严格 YYYY-MM-DD → Date（parseStrictYmd 拒绝 2024-02-31 这类滚动日期；
+// 函数声明有提升，此处提前引用安全）。空串/缺失 → null。
+const optionalDateField = z.preprocess((v) => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '') return null;
+    const parsed = parseStrictYmd(t);
+    return parsed ?? 'invalid-date';
+  }
+  return 'invalid-date';
+}, z.date().nullable());
+
+// partial-update 版：undefined = 缺 key 不改；空串 = 清空为 null。
+const optionalDateFieldPartial = z.preprocess((v) => {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '') return null;
+    const parsed = parseStrictYmd(t);
+    return parsed ?? 'invalid-date';
+  }
+  return 'invalid-date';
+}, z.date().nullable().optional());
+
 export const createOrderSchema = z.object({
   customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
   customerRef: optionalTrimmedText('客户代号', 64),
@@ -1022,6 +1050,7 @@ export const createOrderSchema = z.object({
   expressCode: optionalTrimmedText('快递代码', 32),
   packageRequirement: optionalTrimmedText('包装要求', 500),
   remark: optionalTrimmedText('工单备注', 1000),
+  promisedDate: optionalDateField,
   isUrgent: formBoolean,
   items: z
     .array(orderItemSchema)
@@ -1066,6 +1095,7 @@ export const updateEditableOrderSchema = z.object({
   expressCode: optionalTrimmedText('快递代码', 32).optional(),
   packageRequirement: optionalTrimmedText('包装要求', 500).optional(),
   remark: optionalTrimmedText('工单备注', 1000).optional(),
+  promisedDate: optionalDateFieldPartial,
   isUrgent: optionalFormBoolean,
 });
 
@@ -1239,18 +1269,6 @@ export function parseStrictYmd(s: string): Date | null {
   }
   return date;
 }
-
-const optionalDateField = z.preprocess((v) => {
-  if (v === null || v === undefined) return null;
-  if (v instanceof Date) return v;
-  if (typeof v === 'string') {
-    const t = v.trim();
-    if (t === '') return null;
-    const parsed = parseStrictYmd(t);
-    return parsed ?? 'invalid-date';
-  }
-  return 'invalid-date';
-}, z.date().nullable());
 
 export const createOutsourceSchema = z.object({
   orderId: safeId('工单 id'),

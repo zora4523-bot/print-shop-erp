@@ -25,6 +25,7 @@ export const FULL_EDITABLE_FIELDS = [
   'expressCode',
   'packageRequirement',
   'remark',
+  'promisedDate',
   'isUrgent',
 ] as const;
 

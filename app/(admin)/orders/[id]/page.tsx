@@ -25,6 +25,7 @@ import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
+import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
@@ -155,6 +156,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <Row label="收货地址" value={order.receiverAddress} full />
           <Row label="包装要求" value={order.packageRequirement} full />
           <Row label="备注" value={order.remark} full />
+          <div>
+            <dt className="text-muted-foreground">承诺交期</dt>
+            <dd className="mt-0.5 flex items-center gap-2">
+              {order.promisedDate
+                ? order.promisedDate.toISOString().slice(0, 10)
+                : '—'}
+              <PromisedDateBadge
+                promisedDate={order.promisedDate}
+                status={order.status}
+              />
+            </dd>
+          </div>
           <Row label="总额" value={String(order.totalAmount)} mono />
         </dl>
       </section>

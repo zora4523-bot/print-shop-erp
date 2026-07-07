@@ -181,6 +181,7 @@ model Order {
   packageRequirement   String?
   remark               String?
   totalAmount          Decimal     @default(0) @db.Decimal(12, 2)
+  promisedDate         DateTime? // 承诺交期（对客户）；逾期预警扫描用
   trackingNo           String? // 快递单号
   searchPinyin         String?
   searchPinyinInitials String?
@@ -205,6 +206,8 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@index([isUrgent])
+  // 交期预警：dashboard 关注列表 + 每日 cron 都按 promisedDate 范围扫
+  @@index([promisedDate])
   // Dashboard KPI ranges hit these timestamp columns directly
   // (`getTodayOrderStats` runs 5 range counts per landing-page render).
   // Without these indexes the queries degrade into seq scans on a

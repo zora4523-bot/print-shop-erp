@@ -67,6 +67,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
       expressCode: null,
       packageRequirement: null,
       remark: null,
+      promisedDate: null,
       isUrgent: false,
       items: [{ ...BLANK_ITEM }],
     },
@@ -207,6 +208,15 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
           error={errors.remark?.message}
           rows={2}
         />
+
+        <div className="grid grid-cols-2 gap-4">
+          <TextField
+            label="承诺交期（选填）"
+            type="date"
+            registration={register('promisedDate')}
+            error={errors.promisedDate?.message as string | undefined}
+          />
+        </div>
 
         <label className="flex items-center gap-2 text-sm">
           <input

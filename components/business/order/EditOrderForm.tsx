@@ -23,6 +23,8 @@ export type EditOrderInitialValues = {
   expressCode: string | null;
   packageRequirement: string | null;
   remark: string | null;
+  // YYYY-MM-DD（页面层从 Date 转好）
+  promisedDate: string | null;
   isUrgent: boolean;
 };
 
@@ -106,6 +108,15 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             errors={fieldErrors(state, 'remark')}
           />
           {!isShippingOnly && (
+            <Field
+              name="promisedDate"
+              label="承诺交期"
+              type="date"
+              initial={initial.promisedDate}
+              errors={fieldErrors(state, 'promisedDate')}
+            />
+          )}
+          {!isShippingOnly && (
             <div className="col-span-2 flex items-center gap-2">
               <input
                 id="isUrgent"
@@ -154,6 +165,7 @@ function Field({
   full,
   multiline,
   disabled,
+  type = 'text',
 }: {
   name: string;
   label: string;
@@ -162,6 +174,7 @@ function Field({
   full?: boolean;
   multiline?: boolean;
   disabled?: boolean;
+  type?: string;
 }) {
   return (
     <div className={full ? 'col-span-2' : undefined}>
@@ -181,6 +194,7 @@ function Field({
         <Input
           id={name}
           name={name}
+          type={type}
           disabled={disabled}
           defaultValue={initial ?? ''}
           className="mt-1"

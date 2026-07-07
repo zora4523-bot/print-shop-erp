@@ -166,6 +166,7 @@ export async function createOrder(
         expressCode: input.expressCode,
         packageRequirement: input.packageRequirement,
         remark: input.remark,
+        promisedDate: input.promisedDate ?? null,
         totalAmount,
         items: {
           create: itemsWithSubtotals.map((it, idx) => ({
@@ -483,6 +484,7 @@ type EditTxClient = {
           expressCode: string | null;
           packageRequirement: string | null;
           remark: string | null;
+          promisedDate: Date | null;
           isUrgent: boolean;
         }
       | null
@@ -498,7 +500,7 @@ type EditTxClient = {
   };
 };
 
-type EditableOrderFieldValue = string | boolean | null;
+type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
   customerRef: string | null;
@@ -508,6 +510,7 @@ type EditableOrderSnapshot = {
   expressCode: string | null;
   packageRequirement: string | null;
   remark: string | null;
+  promisedDate: Date | null;
   isUrgent: boolean;
 };
 
@@ -516,8 +519,23 @@ type EditableOrderSnapshot = {
 // treat "user cleared the field" the same as the DB's null state.
 function normalizeEditableValue(raw: unknown): EditableOrderFieldValue {
   if (raw === undefined || raw === '') return null;
+  if (raw instanceof Date) return raw;
   if (typeof raw === 'boolean' || typeof raw === 'string') return raw;
   return null;
+}
+
+// Date 用时间戳比较（=== 对两个等值 Date 恒为 false，会把"没改"误判成
+// 改动，刷出多余的 OrderLog）。
+function editableValueEquals(
+  a: EditableOrderFieldValue,
+  b: EditableOrderFieldValue,
+): boolean {
+  if (a instanceof Date || b instanceof Date) {
+    return (
+      a instanceof Date && b instanceof Date && a.getTime() === b.getTime()
+    );
+  }
+  return a === b;
 }
 
 // Shallow-pick only the fields that are editable at this status. Anything
@@ -546,7 +564,7 @@ function diffEditableFields(
   > = {};
   for (const [key, after] of Object.entries(next)) {
     const prev = (before as unknown as Record<string, EditableOrderFieldValue>)[key] ?? null;
-    if (prev !== after) {
+    if (!editableValueEquals(prev, after)) {
       changes[key] = { before: prev, after };
     }
   }
@@ -583,6 +601,7 @@ export async function updateOrderFields(
         expressCode: true,
         packageRequirement: true,
         remark: true,
+        promisedDate: true,
         isUrgent: true,
       },
     });

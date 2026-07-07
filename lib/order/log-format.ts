@@ -11,6 +11,7 @@ const FIELD_LABELS: Record<string, string> = {
   expressCode: '快递代码',
   packageRequirement: '包装要求',
   remark: '工单备注',
+  promisedDate: '承诺交期',
   isUrgent: '急单',
   // Status changes land in the same log table under action='STATUS_CHANGE'
   status: '状态',
@@ -29,6 +30,11 @@ const STATUS_LABELS: Record<string, string> = {
   CANCELLED: '已取消',
 };
 
+// 工单状态中文标签（cron 推送 / 日志渲染共用）。
+export function orderStatusZh(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
 export function fieldLabel(name: string): string {
   return FIELD_LABELS[name] ?? name;
 }
@@ -45,6 +51,11 @@ export function formatLogValue(
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (fieldName === 'status' && typeof value === 'string') {
     return STATUS_LABELS[value] ?? value;
+  }
+  // 日期字段：diff 里的 Date 落 JSON 后是 ISO 串，只展示日期部分
+  if (fieldName === 'promisedDate') {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string') return value.slice(0, 10);
   }
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   // Unexpected shape — show JSON so reviewers can still decode it

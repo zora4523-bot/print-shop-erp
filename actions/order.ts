@@ -216,6 +216,7 @@ export async function updateOrderAction(
     'expressCode',
     'packageRequirement',
     'remark',
+    'promisedDate',
     'isUrgent',
   ] as const) {
     const value = formData.get(key);

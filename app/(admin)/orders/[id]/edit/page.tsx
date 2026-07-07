@@ -49,6 +49,9 @@ export default async function EditOrderPage({ params }: PageProps) {
           expressCode: order.expressCode,
           packageRequirement: order.packageRequirement,
           remark: order.remark,
+          promisedDate: order.promisedDate
+            ? order.promisedDate.toISOString().slice(0, 10)
+            : null,
           isUrgent: order.isUrgent,
         }}
       />

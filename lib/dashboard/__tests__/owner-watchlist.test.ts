@@ -18,6 +18,7 @@ vi.mock('../../salary/rules', () => ({
 
 import {
   getEndingPeriods,
+  getDueOrders,
   getOverdueOutsourcing,
   getPendingShipments,
 } from '../owner-watchlist';
@@ -91,6 +92,43 @@ describe('getPendingShipments', () => {
       completedAt,
       submitterDisplayName: '小王',
     });
+  });
+});
+
+describe('getDueOrders', () => {
+  // now = UTC 2026-07-07T04:00 = 上海 2026-07-07 12:00
+  const NOW = new Date('2026-07-07T04:00:00Z');
+
+  it('查询条件：未发货状态 + promisedDate < 今日+4 天上海日界 + NOT null', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await getDueOrders(NOW);
+    const args = dbMock.order.findMany.mock.calls[0][0];
+    expect(args.where.status).toEqual({
+      in: ['DRAFT', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
+    });
+    // todayStart = UTC 2026-07-06T16:00；horizon = +4 天 = 07-10T16:00
+    expect((args.where.promisedDate.lt as Date).toISOString()).toBe(
+      '2026-07-10T16:00:00.000Z',
+    );
+    expect(args.where.NOT).toEqual({ promisedDate: null });
+  });
+
+  it('daysLeft：逾期为负、今天 0、3 天内为正（上海日历日口径）', async () => {
+    const row = (id: string, ymd: string) => ({
+      id,
+      orderNo: `O-${id}`,
+      customerRef: null,
+      status: 'IN_PRODUCTION',
+      isUrgent: false,
+      promisedDate: new Date(`${ymd}T00:00:00Z`),
+    });
+    dbMock.order.findMany.mockResolvedValue([
+      row('a', '2026-07-05'),
+      row('b', '2026-07-07'),
+      row('c', '2026-07-10'),
+    ]);
+    const r = await getDueOrders(NOW);
+    expect(r.map((x) => x.daysLeft)).toEqual([-2, 0, 3]);
   });
 });
 

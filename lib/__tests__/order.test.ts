@@ -124,6 +124,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [baseItem()],
       },
@@ -147,6 +148,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [baseItem()],
       },
@@ -166,6 +168,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [baseItem()],
       },
@@ -190,7 +193,8 @@ describe('createOrder', () => {
           expressCode: null,
           packageRequirement: null,
           remark: null,
-          isUrgent: false,
+          promisedDate: null,
+        isUrgent: false,
           items: [baseItem({ crafts: ['does-not-exist'] })],
         },
         salesActor,
@@ -212,7 +216,8 @@ describe('createOrder', () => {
           expressCode: null,
           packageRequirement: null,
           remark: null,
-          isUrgent: false,
+          promisedDate: null,
+        isUrgent: false,
           items: [baseItem({ productId: 'p1' })],
         },
         salesActor,
@@ -237,6 +242,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [baseItem()],
       },
@@ -266,7 +272,8 @@ describe('createOrder', () => {
           expressCode: null,
           packageRequirement: null,
           remark: null,
-          isUrgent: false,
+          promisedDate: null,
+        isUrgent: false,
           items: [baseItem()],
         },
         salesActor,
@@ -293,7 +300,8 @@ describe('createOrder', () => {
           expressCode: null,
           packageRequirement: null,
           remark: null,
-          isUrgent: false,
+          promisedDate: null,
+        isUrgent: false,
           items: [baseItem()],
         },
         salesActor,
@@ -313,6 +321,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [
           baseItem({ quantity: 3, unitPrice: '0.1' }),
@@ -341,6 +350,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: false,
         items: [baseItem({ quantity: 500, unitPrice: null })],
       },
@@ -361,6 +371,7 @@ describe('createOrder', () => {
         expressCode: null,
         packageRequirement: null,
         remark: null,
+        promisedDate: null,
         isUrgent: true,
         items: [baseItem()],
       },
@@ -387,7 +398,8 @@ describe('submitOrder', () => {
     orderNo: 'O-1',
     customerRef: '苹果福',
     totalAmount: '5000.00',
-    isUrgent: false,
+    promisedDate: null,
+        isUrgent: false,
     submitter: { displayName: '张三' },
   };
 
@@ -796,7 +808,8 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
   it('sorts q results by relevance after preserving the scoped query', async () => {
     const base = {
       status: OrderStatus.DRAFT,
-      isUrgent: false,
+      promisedDate: null,
+        isUrgent: false,
       customerRef: null,
       receiverName: null,
       receiverPhone: null,
@@ -842,7 +855,8 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       expressCode: null,
       packageRequirement: null,
       remark: null,
-      isUrgent: false,
+      promisedDate: null,
+        isUrgent: false,
       ...overrides,
     };
   }
@@ -975,6 +989,47 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     await updateOrderFields('order-1', { remark: '' }, salesActor);
     const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.remark).toBeNull();
+  });
+
+  it('promisedDate 修改写入 Date 并记 diff；等值 Date 不算改动（时间戳比较）', async () => {
+    const promised = new Date('2026-07-15T00:00:00Z');
+    // 等值但不同实例的 Date：=== 恒 false，必须按时间戳比较判 no-op
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ promisedDate: new Date('2026-07-15T00:00:00Z') }),
+    );
+    const noop = await updateOrderFields(
+      'order-1',
+      { promisedDate: promised },
+      salesActor,
+    );
+    expect(noop.changed).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+
+    // 真实修改：null → 2026-07-15，data 写 Date，diff 记录 before/after
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ promisedDate: null }));
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
+    const changed = await updateOrderFields(
+      'order-1',
+      { promisedDate: promised },
+      salesActor,
+    );
+    expect(changed.changed).toBe(true);
+    expect(changed.changedFields).toEqual(['promisedDate']);
+    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.promisedDate).toEqual(promised);
+  });
+
+  it('SHIPPING_ONLY 状态下 promisedDate 不在可改集合内（被静默丢弃 → no-op）', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ status: OrderStatus.IN_PRODUCTION, promisedDate: null }),
+    );
+    const result = await updateOrderFields(
+      'order-1',
+      { promisedDate: new Date('2026-07-15T00:00:00Z') },
+      ownerActor,
+    );
+    expect(result.changed).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 });
 

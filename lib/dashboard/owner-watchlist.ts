@@ -6,6 +6,11 @@ import {
   SalaryPeriodStatus,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
+import {
+  DUE_SOON_DAYS,
+  PROMISE_ALERT_STATUSES,
+  promisedDaysLeft,
+} from '../order/promised-date';
 import { calcCsCommission } from '../salary/cs-commission';
 import { getActiveCsTiers } from '../salary/rules';
 import { shanghaiDayBoundary, todayShanghai } from './shanghai-clock';
@@ -136,6 +141,68 @@ export async function getOverdueOutsourcing(
     daysOverdue: Math.floor(
       (todayStart.getTime() - (r.expectedDate as Date).getTime()) / MS_PER_DAY,
     ),
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 交期预警 — promisedDate 已逾期或 DUE_SOON_DAYS 内到期，且工单未发货
+// ─────────────────────────────────────────────────────────────────────
+
+export type DueOrderRow = {
+  id: string;
+  orderNo: string;
+  customerRef: string | null;
+  status: OrderStatus;
+  isUrgent: boolean;
+  promisedDate: Date;
+  // 负 = 已逾期天数取反（-2 = 逾期 2 天），0 = 今天到期，正 = 剩余天数
+  daysLeft: number;
+};
+
+/**
+ * 交期预警：未发货状态（PROMISE_ALERT_STATUSES）+ promisedDate 落在
+ * "已逾期 .. 今日+DUE_SOON_DAYS" 窗口。promisedDate = null 不预警
+ * （没承诺交期的单不发噪音）。口径与详情页徽标 / cron 推送共用
+ * lib/order/promised-date。
+ *
+ * promisedDate 存日历日的 UTC 零点；以 Shanghai 次日边界比较可精确
+ * 取"日历日 ≤ 今日+N"（D 的 UTC 零点恒大于 D-1 的上海日界、小于
+ * D 的上海日界 — 与超期外协同款表示法）。
+ */
+export async function getDueOrders(
+  now: Date = new Date(),
+): Promise<DueOrderRow[]> {
+  const today = todayShanghai(now);
+  const { start: todayStart } = shanghaiDayBoundary(today);
+  const horizon = new Date(
+    todayStart.getTime() + (DUE_SOON_DAYS + 1) * MS_PER_DAY,
+  );
+
+  const raw = await db.order.findMany({
+    where: {
+      status: { in: [...PROMISE_ALERT_STATUSES] },
+      promisedDate: { lt: horizon },
+      NOT: { promisedDate: null },
+    },
+    orderBy: [{ promisedDate: 'asc' }, { isUrgent: 'desc' }],
+    select: {
+      id: true,
+      orderNo: true,
+      customerRef: true,
+      status: true,
+      isUrgent: true,
+      promisedDate: true,
+    },
+  });
+
+  return raw.map((r) => ({
+    id: r.id,
+    orderNo: r.orderNo,
+    customerRef: r.customerRef,
+    status: r.status,
+    isUrgent: r.isUrgent,
+    promisedDate: r.promisedDate as Date,
+    daysLeft: promisedDaysLeft(r.promisedDate as Date, now),
   }));
 }
 
