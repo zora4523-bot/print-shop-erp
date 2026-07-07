@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getOrderForPrint } from '@/lib/order/print-view';
+import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { buildPrintHtml } from '@/lib/order/print-html';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 
@@ -22,10 +23,12 @@ export async function GET(_req: Request, ctx: Params) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const order = await getOrderForPrint(id, {
-    id: session.user.id,
-    role: session.user.role,
-  });
+  const baseUrl = await derivePublicBaseUrl();
+  const order = await getOrderForPrint(
+    id,
+    { id: session.user.id, role: session.user.role },
+    baseUrl,
+  );
   if (!order) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }

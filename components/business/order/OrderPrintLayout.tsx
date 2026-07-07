@@ -65,6 +65,10 @@ export function OrderPrintLayout({
             提交人：{order.submitterDisplayName}（{order.submitterRoleLabel}）
           </div>
           <div>急单：{order.isUrgent ? '【是】' : '否'}</div>
+          <div>
+            承诺交期：
+            {order.promisedDate ? formatShanghaiDate(order.promisedDate) : '-'}
+          </div>
         </div>
 
         {order.items.map((item) => (

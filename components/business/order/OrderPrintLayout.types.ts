@@ -48,6 +48,7 @@ export type PrintOrder = {
   id: string;
   orderNo: string;
   isUrgent: boolean;
+  promisedDate?: Date | null;
   customerRef?: string | null;
   receiverName?: string | null;
   receiverPhone?: string | null;

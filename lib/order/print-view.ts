@@ -35,6 +35,10 @@ async function buildQrSvg(value: string, size: number): Promise<string> {
 export async function getOrderForPrint(
   id: string,
   user: { id: string; role: Role },
+  // 二维码内容的绝对 URL base（调用方用 derivePublicBaseUrl 推导）。
+  // 码里存 URL 而不是裸 id：师傅用微信"扫一扫"直接打开报工页
+  // （未登录先登录再回跳），不需要专用扫码器。
+  baseUrl: string,
 ): Promise<PrintOrder | null> {
   const order = await db.order.findFirst({
     where: {
@@ -84,9 +88,10 @@ export async function getOrderForPrint(
   // the I/O-bound calls. Order QR + one per task; task counts cap out
   // around 10–20 in practice.
   const taskQrPairs = order.items.flatMap((item) => item.tasks);
+  const base = baseUrl.replace(/\/+$/, '');
   const [orderQrSvg, ...taskQrSvgs] = await Promise.all([
-    buildQrSvg(`order:${order.id}`, 95),
-    ...taskQrPairs.map((t) => buildQrSvg(`task:${t.id}`, 55)),
+    buildQrSvg(`${base}/orders/${order.id}`, 95),
+    ...taskQrPairs.map((t) => buildQrSvg(`${base}/worker/tasks/${t.id}`, 55)),
   ]);
   const taskQrById = new Map(
     taskQrPairs.map((t, i) => [t.id, taskQrSvgs[i] as string]),
@@ -139,6 +144,7 @@ export async function getOrderForPrint(
     id: order.id,
     orderNo: order.orderNo,
     isUrgent: order.isUrgent,
+    promisedDate: order.promisedDate,
     customerRef: order.customerRef,
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
