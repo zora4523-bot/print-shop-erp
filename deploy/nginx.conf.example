@@ -1,0 +1,52 @@
+# Nginx 反向代理示例（红包印刷 ERP）。
+#
+# 用法：复制到 /etc/nginx/conf.d/print-shop-erp.conf，改 server_name 与证书路径，
+#      nginx -t 测试通过后 systemctl reload nginx。
+#
+# 关键点（部署审计强调，漏配会静默出问题）：
+#   1. 必须转发 X-Forwarded-Proto: https —— 否则 (a) 登录 cookie 的 Secure 标志失效，
+#      (b) 工单打印二维码/CDR 外协短链的 base URL 推导退化成 localhost 死链。
+#   2. 必须转发 Host / X-Forwarded-Host —— 二维码/短链域名跟随它。
+#   3. proxy_read_timeout 放宽 —— CDR 汇总打包在服务端同步跑，大文件可能几十秒到几分钟。
+#
+# 设计图上传是浏览器直传 OSS（不经过本服务器），所以 client_max_body_size 不需要很大；
+# 20m 足够覆盖 PDF、普通表单。
+
+# ── HTTP → HTTPS 跳转 ──
+server {
+    listen 80;
+    server_name erp.example.com;          # ← 改成你的域名
+    return 301 https://$host$request_uri;
+}
+
+# ── HTTPS 主服务 ──
+server {
+    listen 443 ssl http2;
+    server_name erp.example.com;          # ← 改成你的域名
+
+    ssl_certificate     /etc/nginx/ssl/erp.example.com.pem;   # ← 证书路径
+    ssl_certificate_key /etc/nginx/ssl/erp.example.com.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # —— 下面 4 行是二维码/短链/cookie 正确的关键 ——
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Proto $scheme;   # https
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP         $remote_addr;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # CDR 打包等长任务：放宽读超时（默认 60s 会截断大包生成）
+        proxy_read_timeout   300s;
+        proxy_send_timeout   300s;
+        proxy_connect_timeout 10s;
+    }
+}
