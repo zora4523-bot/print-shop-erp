@@ -43,7 +43,10 @@ declare module '@auth/core/jwt' {
 export const authConfigEdge = {
   session: {
     strategy: 'jwt',
-    maxAge: 60 * 60 * 24 * 7, // 7 days (CLAUDE decision C)
+    // 30 天免登（DECISIONS 2026-07-08 覆盖原决策 C 的 7 天）：师傅只用
+    // 个人微信、无免密方案，拉长会话减少扫码报工时的重复登录。撤销仍
+    // 靠 AUTH_SECRET rotate。
+    maxAge: 60 * 60 * 24 * 30,
   },
   trustHost: true,
   pages: {
