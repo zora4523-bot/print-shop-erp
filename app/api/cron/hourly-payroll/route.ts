@@ -56,13 +56,27 @@ export async function POST(req: Request) {
       errorCount: errors.length,
     });
   } catch (err) {
-    const message =
-      err instanceof HourlyAggregateError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : String(err);
-    return NextResponse.json({ status: 'error', month, message }, { status: 500 });
+    // 领域错误消息是安全文案（如"已发放行拒绝重算"），可回显；意外错误
+    // （Prisma 等）可能 embed 金额/内部细节，scrub 后只留服务端日志——
+    // 与其余 6 个 cron 的 COUNTS-ONLY / scrub 约定一致（DECISIONS 2026-04-24）。
+    if (err instanceof HourlyAggregateError) {
+      return NextResponse.json(
+        { status: 'error', month, message: err.message },
+        { status: 500 },
+      );
+    }
+    console.error(
+      '[cron:hourly-payroll] unexpected error:',
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
+    return NextResponse.json(
+      {
+        status: 'error',
+        month,
+        message: '批处理失败；查看 owner /owner/salary/hourly 页面确认',
+      },
+      { status: 500 },
+    );
   }
 }
 
