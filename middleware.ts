@@ -33,8 +33,11 @@ export default auth((req) => {
 // `api/cdr` 排除原因：CDR bundle 下载路由用 cuid token（DesignBundle.id，
 // ~125 bits 熵 + 24h 过期）做无 session 鉴权——业务上外协方拿 URL 下载
 // 时不会有我们系统的登录态（SPEC §3.5）。匹配规则同 cron。
+//
+// `api/health` 排除原因：liveness 探针供 PM2 / Nginx / 监控无 session
+// 探活，不应被中间件 redirect 到 /login。
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|api/auth|api/cron|api/cdr|favicon.ico|login|.*\\..*).*)',
+    '/((?!_next/static|_next/image|api/auth|api/cron|api/cdr|api/health|favicon.ico|login|.*\\..*).*)',
   ],
 };
