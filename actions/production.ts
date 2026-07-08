@@ -5,7 +5,6 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   reportTaskSchema,
   scheduleOrderSchema,
-  type ScheduleOrderInput,
 } from '@/lib/auth/schemas';
 import {
   scheduleOrder,
@@ -69,15 +68,6 @@ export async function scheduleOrderAction(
     }
     throw err;
   }
-}
-
-// Thin pass-through for trusted callers (seeds / integration tests)
-// that have already validated the input.
-export async function scheduleOrderFromInput(
-  input: ScheduleOrderInput,
-  actor: { id: string; role: import('../generated/prisma/client').Role },
-) {
-  return scheduleOrder(input, actor);
 }
 
 function mapTaskError(err: unknown): TaskMutationResult | null {

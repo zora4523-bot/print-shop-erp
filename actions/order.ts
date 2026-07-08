@@ -9,7 +9,6 @@ import {
   shipOrderSchema,
   updateEditableOrderSchema,
   setOrderUrgentSchema,
-  type CreateOrderInput,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
@@ -65,16 +64,6 @@ export async function createOrderAction(
 
   revalidatePath('/orders');
   redirect(`/orders/${createdId}`);
-}
-
-// A thin no-permission-check helper for callers that have already resolved
-// the input via a trusted path (tests, seed scripts). Not exported via
-// `'use server'` semantics.
-export async function createOrderFromInput(
-  input: CreateOrderInput,
-  actor: { id: string; role: import('../generated/prisma/client').Role },
-) {
-  return createOrder(input, actor);
 }
 
 export async function submitOrderAction(
