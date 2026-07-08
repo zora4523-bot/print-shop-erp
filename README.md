@@ -215,13 +215,17 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
 | `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
-| `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：CDR 短链跟随访问域，split-origin 时外协拿到内网链接 |
+| `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
+| `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | **留空**（按 NODE_ENV：生产真发、dev mock）。**切勿设 `"true"`**——否则推送静默 mock，急单 3 秒推送验收项形同虚设 |
+| `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
 
 选填但生产建议：
 | `SENTRY_DSN` | 错误监控 | 留空 → instrumentation.ts no-op，错误只进 Next 默认日志 |
 | `APP_VERSION` | Sentry release / OTel 标签 | 留空 → 'dev'，无法区分版本 |
 | `OSS_ACCESS_KEY_ID` etc. | 设计图 / CDR 直传（5 个变量见 `.env.example`） | 留空 → 上传按钮 disabled，UI 提示&ldquo;未配置&rdquo;（不会假成功） |
+
+> **⚠️ OSS 手动运维（代码改不了，容易漏）：设计图/CDR 走浏览器直传 PUT，必须在阿里云 OSS 控制台给生产 bucket 配 CORS**——AllowedOrigin=`APP_PUBLIC_URL` 域名（split-origin 则 staff 域也加）、AllowedMethod=`PUT/GET/HEAD`、AllowedHeader=`*`、ExposeHeader=`ETag`。不配则上传预检失败、浏览器静默拦截，签名正常也传不上去。上线 smoke 必须真机点一次上传验证 200。
 
 ### 2. Cron 切换：`Bearer` → `pg_cron`
 
