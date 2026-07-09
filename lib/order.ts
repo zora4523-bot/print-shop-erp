@@ -48,10 +48,10 @@ type OrderTxClient = {
     }) => Promise<Array<{ id: string }>>;
   };
   product: {
-    findUnique: (args: {
-      where: { id: string };
+    findMany: (args: {
+      where: unknown;
       select?: unknown;
-    }) => Promise<{ id: string; isActive: boolean } | null>;
+    }) => Promise<Array<{ id: string; isActive: boolean }>>;
   };
   party: {
     findUnique: (args: {
@@ -127,19 +127,31 @@ export async function createOrder(
       }
     }
 
-    // (3) product FK per item (if supplied). Cheaper to do per-id since
-    // most items won't reference a product explicitly.
-    for (const item of input.items) {
-      if (!item.productId) continue;
-      const product = await txClient.product.findUnique({
-        where: { id: item.productId },
+    // (3) product FK check — one batch findMany over the distinct ids
+    // (was per-item findUnique: a 10-item order paid up to 10 round
+    // trips inside the tx). No productId → no query at all. Deliberately
+    // NOT filtering isActive in the where: 不存在 and 已停用 are two
+    // distinct messages, and the per-item loop keeps first-error order.
+    const productIds = [
+      ...new Set(
+        input.items.flatMap((it) => (it.productId ? [it.productId] : [])),
+      ),
+    ];
+    if (productIds.length > 0) {
+      const foundProducts = await txClient.product.findMany({
+        where: { id: { in: productIds } },
         select: { id: true, isActive: true },
       });
-      if (!product) {
-        throw new OrderInvariantError(`产品不存在：${item.productId}`);
-      }
-      if (!product.isActive) {
-        throw new OrderInvariantError(`产品已停用：${item.productId}`);
+      const productById = new Map(foundProducts.map((p) => [p.id, p]));
+      for (const item of input.items) {
+        if (!item.productId) continue;
+        const product = productById.get(item.productId);
+        if (!product) {
+          throw new OrderInvariantError(`产品不存在：${item.productId}`);
+        }
+        if (!product.isActive) {
+          throw new OrderInvariantError(`产品已停用：${item.productId}`);
+        }
       }
     }
 

@@ -11,7 +11,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
     };
     craft: { findMany: ReturnType<typeof vi.fn> };
-    product: { findUnique: ReturnType<typeof vi.fn> };
+    product: { findMany: ReturnType<typeof vi.fn> };
     party: { findUnique: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
@@ -25,7 +25,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     craft: { findMany: vi.fn() },
-    product: { findUnique: vi.fn() },
+    product: { findMany: vi.fn() },
     party: { findUnique: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
@@ -91,7 +91,7 @@ function baseItem(over: Partial<Record<string, unknown>> = {}) {
 beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.craft.findMany.mockReset();
-  dbMock.product.findUnique.mockReset();
+  dbMock.product.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
@@ -205,7 +205,7 @@ describe('createOrder', () => {
   });
 
   it('refuses when a referenced productId is inactive', async () => {
-    dbMock.product.findUnique.mockResolvedValueOnce({ id: 'p1', isActive: false });
+    dbMock.product.findMany.mockResolvedValueOnce([{ id: 'p1', isActive: false }]);
     await expect(
       createOrder(
         {
