@@ -9,6 +9,8 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
 import {
   collectFieldErrors,
+  collectFieldErrorsDeep,
+  invalidFromIssuesDeep,
   getFormString,
   getFormStringOr,
   invalidFromIssues,
@@ -33,6 +35,33 @@ describe('admin action helpers', () => {
     ).toEqual({
       name: ['请填写名称', '名称过长'],
       _: ['整体错误'],
+    });
+  });
+
+  it('deep variant flattens compound paths so nested array forms can target rows', () => {
+    expect(
+      collectFieldErrorsDeep([
+        { path: ['items', 0, 'quantity'], message: '数量必须为正整数' },
+        { path: ['receiverName'], message: '请填写收货人' },
+        { path: [], message: '整体错误' },
+      ]),
+    ).toEqual({
+      'items.0.quantity': ['数量必须为正整数'],
+      receiverName: ['请填写收货人'],
+      _: ['整体错误'],
+    });
+    // 对照：shallow 版会把嵌套路径折叠到首段，丢失行定位。
+    expect(
+      collectFieldErrors([{ path: ['items', 0, 'quantity'], message: 'x' }]),
+    ).toEqual({ items: ['x'] });
+  });
+
+  it('builds a deep invalid mutation result from validation issues', () => {
+    expect(
+      invalidFromIssuesDeep([{ path: ['items', 2, 'name'], message: '必填' }]),
+    ).toEqual({
+      status: 'invalid',
+      fieldErrors: { 'items.2.name': ['必填'] },
     });
   });
 

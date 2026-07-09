@@ -19,17 +19,7 @@ import type {
   ScheduleOrderResult,
   TaskMutationResult,
 } from './production.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Accepts a structured payload (the UI assembles { orderId, assignments })
 // rather than FormData because the assignments array would flatten poorly
@@ -42,7 +32,7 @@ export async function scheduleOrderAction(
 
   const parsed = scheduleOrderSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -122,7 +112,7 @@ export async function reportTaskAction(
     reworkQty: formData.get('reworkQty'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {

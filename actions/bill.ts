@@ -18,17 +18,7 @@ import type {
   GenerateBillsResult,
   RecordBillPaymentResult,
 } from './bill.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 function mapBillError(
   err: unknown,
@@ -56,7 +46,7 @@ export async function generateBillsAction(
   if (!parsed.success) {
     return {
       status: 'invalid',
-      fieldErrors: collectFieldErrors(parsed.error.issues),
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
     };
   }
 
@@ -111,7 +101,7 @@ export async function recordBillPaymentAction(
   if (!parsed.success) {
     return {
       status: 'invalid',
-      fieldErrors: collectFieldErrors(parsed.error.issues),
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
     };
   }
 

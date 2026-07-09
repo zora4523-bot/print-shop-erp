@@ -12,23 +12,12 @@ import {
   CraftInvariantError,
 } from '@/lib/craft';
 import type { CraftMutationResult } from './owner-crafts.types';
+import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 // NB: Next.js strips every non-async-function export from a 'use server'
 // module, so re-exporting the type here would disappear at RSC compile
 // time. All callers import `CraftMutationResult` from
 // './owner-crafts.types' directly.
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
 
 // P2002 → field-level error. Both `name` and `code` carry a unique
 // constraint on the Craft table; Prisma's `meta.target` distinguishes them.

@@ -22,19 +22,7 @@ import {
   InvalidOrderTransitionError,
 } from '@/lib/order';
 import type { OrderMutationResult } from './order.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    // Compound paths like ['items', 0, 'quantity'] flatten to
-    // 'items.0.quantity' so the client form can target the right row.
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
@@ -48,7 +36,7 @@ export async function createOrderAction(
 
   const parsed = createOrderSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   let createdId: string;
@@ -109,7 +97,7 @@ export async function cancelOrderAction(
     reason: formData.get('reason'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -142,7 +130,7 @@ export async function shipOrderAction(
     trackingNo: formData.get('trackingNo'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -223,7 +211,7 @@ export async function updateOrderAction(
 
   const parsed = updateEditableOrderSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -253,7 +241,7 @@ export async function setOrderUrgentAction(
     isUrgent: formData.get('isUrgent'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {

@@ -12,6 +12,7 @@ import {
   removeOrderItemDesign,
 } from '@/lib/order-design';
 import { DesignFileType } from '../generated/prisma/enums';
+import { invalidFromIssues } from '@/lib/admin/action-helpers';
 
 // Client form submits a small JSON payload; Zod validates shape before
 // we commit server resources. Keep the UI call site thin: POST { orderId,
@@ -33,12 +34,7 @@ export async function signDesignUploadAction(raw: unknown): Promise<SignUploadRe
 
   const parsed = signDesignUploadSchema.safeParse(raw);
   if (!parsed.success) {
-    const fieldErrors: Record<string, string[]> = {};
-    for (const issue of parsed.error.issues) {
-      const key = issue.path[0] === undefined ? '_' : String(issue.path[0]);
-      (fieldErrors[key] ??= []).push(issue.message);
-    }
-    return { status: 'invalid', fieldErrors };
+    return invalidFromIssues(parsed.error.issues);
   }
 
   // 铸凭证前先过授权闸：目标款式必须真实存在、工单 DRAFT、actor 有权

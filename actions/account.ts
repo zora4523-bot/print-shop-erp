@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { requireSession } from '@/lib/auth/session';
 import { signOut } from '@/lib/auth/config';
 import { changePasswordSchema } from '@/lib/auth/schemas';
+import { invalidFromIssues } from '@/lib/admin/action-helpers';
 
 export type ChangePasswordResult =
   | { status: 'success' }
@@ -23,12 +24,7 @@ export async function changeMyPassword(
     confirmPassword: formData.get('confirmPassword'),
   });
   if (!parsed.success) {
-    const fieldErrors: Record<string, string[]> = {};
-    for (const issue of parsed.error.issues) {
-      const key = (issue.path[0] as string | undefined) ?? '_';
-      (fieldErrors[key] ??= []).push(issue.message);
-    }
-    return { status: 'invalid', fieldErrors };
+    return invalidFromIssues(parsed.error.issues);
   }
 
   const me = await db.user.findUnique({ where: { id: session.user.id } });

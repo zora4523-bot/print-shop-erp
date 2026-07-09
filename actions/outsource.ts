@@ -15,17 +15,7 @@ import {
   InvalidOutsourceTransitionError,
 } from '@/lib/outsource';
 import type { OutsourceMutationResult } from './outsource.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 function mapOutsourceError(err: unknown): OutsourceMutationResult | null {
   if (err instanceof OutsourceError) {
@@ -46,7 +36,7 @@ export async function createOutsourceAction(
 
   const parsed = createOutsourceSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   let createdId: string;
@@ -73,7 +63,7 @@ export async function markOutsourceReceivedAction(
     actualDate: formData.get('actualDate'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
   try {
     await markOutsourceReceived(id, parsed.data, actor);

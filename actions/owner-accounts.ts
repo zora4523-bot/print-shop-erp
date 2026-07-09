@@ -17,24 +17,13 @@ import {
   AccountInvariantError,
 } from '@/lib/account';
 import type { AccountMutationResult } from './owner-accounts.types';
+import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 // NB: Next.js strips every non-async-function export from a 'use server'
 // module, so a `export type { AccountMutationResult }` re-export here would
 // be silently dropped at RSC compile time. All callers — pages, client
 // components, and tests — must import the type from './owner-accounts.types'
 // directly.
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
 
 // P2002 on the User table's unique username column. `meta.target` comes in
 // several shapes depending on the driver — `string[]` of columns, a single

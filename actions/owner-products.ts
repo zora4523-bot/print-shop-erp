@@ -12,6 +12,7 @@ import {
   ProductInvariantError,
 } from '@/lib/product';
 import type { ProductMutationResult } from './owner-products.types';
+import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 const PRODUCT_CODE_UNIQUE_SYNONYMS: readonly string[] = ['code', 'Product_code_key'];
 
@@ -28,18 +29,6 @@ function mapUniqueViolation(err: unknown): ProductMutationResult | null {
     }
   }
   return null;
-}
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
 }
 
 function normalizeFormInput(formData: FormData) {

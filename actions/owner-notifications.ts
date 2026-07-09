@@ -23,22 +23,11 @@ import {
 } from '@/lib/notification/admin';
 import { TEST_EVENT_TYPE } from '@/lib/notification/events';
 import type { NotificationMutationResult, ChannelTestResult } from './owner-notifications.types';
+import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 // NB: 同 actions/owner-accounts.ts 的注释——`'use server'` module 只能
 // 导出 async function；类型 re-export 会被 RSC 编译时静默吃掉。客户端
 // 类型必须从 './owner-notifications.types' 直接 import。
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
 
 const CHANNEL_KEY_UNIQUE_SYNONYMS = [
   'channelKey',

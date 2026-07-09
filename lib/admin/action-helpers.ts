@@ -42,6 +42,27 @@ export function invalidFromIssues(
   return { status: 'invalid', fieldErrors: collectFieldErrors(issues) };
 }
 
+// Deep 变体：复合路径 ['items', 0, 'quantity'] 展平为 'items.0.quantity'，
+// 让嵌套数组表单能定位到具体行。与 collectFieldErrors（只取 path[0]）
+// 是两个语义家族——扁平表单用 shallow，含数组/嵌套对象的表单用 deep；
+// 给 shallow 表单换 deep 无害，反向替换会破坏嵌套字段的错误定位。
+export function collectFieldErrorsDeep(
+  issues: readonly ValidationIssueLike[],
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const issue of issues) {
+    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
+    (out[key] ??= []).push(issue.message);
+  }
+  return out;
+}
+
+export function invalidFromIssuesDeep(
+  issues: readonly ValidationIssueLike[],
+): InvalidMutationResult {
+  return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(issues) };
+}
+
 export function getFormString(
   formData: FormData,
   key: string,

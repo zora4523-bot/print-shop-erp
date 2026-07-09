@@ -39,17 +39,7 @@ import type {
   SettleReadyCsResult,
   RecomputeHourlyResult,
 } from './owner-salary.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Owner kicks the daily-salary computation manually — useful when
 // cron missed, when a worker's late report changes the totals, or
@@ -64,7 +54,7 @@ export async function recomputeDailySalaryAction(
 
   const parsed = recomputeDailySalarySchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -110,7 +100,7 @@ export async function setDailySalaryPaidAction(
     isPaid: formData.get('isPaid'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   await markDailySalaryPaid(id, parsed.data.isPaid);
@@ -145,7 +135,7 @@ export async function startCsPeriodAction(
 
   const parsed = startCsPeriodSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -221,7 +211,7 @@ export async function markCsCommissionPaidAction(
     isPaid: formData.get('isPaid'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -250,7 +240,7 @@ export async function recomputeHourlyPayrollAction(
 
   const parsed = recomputeHourlyPayrollSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -296,7 +286,7 @@ export async function setHourlyPayrollPaidAction(
     isPaid: formData.get('isPaid'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   await markHourlyPayrollPaid(id, parsed.data.isPaid);
