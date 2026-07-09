@@ -10,16 +10,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { formatDateShanghai } from '@/lib/format/dates';
 import {
   roleLabel,
   workerTypeLabel,
   machineTypeLabel,
 } from '@/lib/auth/role-labels';
-
-function formatDate(d: Date): string {
-  const z = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-}
 
 function workerDetail(a: AccountSummary): string {
   if (a.role !== Role.WORKER) return '—';
@@ -64,7 +60,7 @@ export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
                 <Badge variant="secondary">停用</Badge>
               )}
             </TableCell>
-            <TableCell className="text-muted-foreground">{formatDate(a.createdAt)}</TableCell>
+            <TableCell className="text-muted-foreground">{formatDateShanghai(a.createdAt)}</TableCell>
             <TableCell>
               <Link
                 href={`/owner/accounts/${a.id}`}

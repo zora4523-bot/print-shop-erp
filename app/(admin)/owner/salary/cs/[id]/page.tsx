@@ -5,31 +5,9 @@ import { SalaryPeriodStatus } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { MarkCsPaidForm } from '@/components/business/salary/MarkCsPaidForm';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -54,7 +32,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             客服周期 · {period.csUser.displayName}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {formatDate(period.periodStart)} ~ {formatDate(period.periodEnd)} ·
+            {formatDateShanghai(period.periodStart)} ~ {formatDateShanghai(period.periodEnd)} ·
             月数 {period.durationMonths}
           </p>
         </div>
@@ -87,7 +65,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             )}`}
             mono
           />
-          <Row label="结算时间" value={formatDateTime(period.settledAt)} />
+          <Row label="结算时间" value={formatDateTimeShanghai(period.settledAt)} />
         </dl>
       </section>
 
@@ -124,7 +102,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
               {period.commissions.map((c) => (
                 <tr key={c.id}>
                   <td className="px-4 py-3 text-xs">
-                    {formatDateTime(c.settledAt)}
+                    {formatDateTimeShanghai(c.settledAt)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono">
                     {String(c.totalSales)}

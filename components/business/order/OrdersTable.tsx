@@ -12,11 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
-
-function formatDate(d: Date): string {
-  const z = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-}
+import { formatDateShanghai } from '@/lib/format/dates';
 
 export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
   if (orders.length === 0) {
@@ -58,7 +54,7 @@ export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
             <TableCell>
               {o.isUrgent ? <Badge variant="destructive">急单</Badge> : <span>—</span>}
             </TableCell>
-            <TableCell className="text-muted-foreground">{formatDate(o.createdAt)}</TableCell>
+            <TableCell className="text-muted-foreground">{formatDateShanghai(o.createdAt)}</TableCell>
             <TableCell>
               <Link
                 href={`/orders/${o.id}`}

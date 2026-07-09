@@ -6,6 +6,7 @@ import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
   BILL_STATUS_TO_BADGE,
   EmptyState,
@@ -19,19 +20,6 @@ export const metadata = { title: '我的应收账单' };
 type PageProps = {
   searchParams: Promise<{ status?: string; period?: string }>;
 };
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
 
 function isValidYm(s: string | undefined): s is string {
   if (!s) return false;
@@ -146,10 +134,10 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
                     <BillStatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(r.issuedAt)}
+                    {formatDateTimeShanghai(r.issuedAt)}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(r.paidAt)}
+                    {formatDateTimeShanghai(r.paidAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

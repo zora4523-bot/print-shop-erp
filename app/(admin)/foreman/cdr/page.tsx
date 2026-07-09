@@ -10,6 +10,7 @@ import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { FileArchive } from 'lucide-react';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -108,8 +109,8 @@ export default async function ForemanCdrPage({
                   return (
                     <tr key={b.id}>
                       <td className="px-4 py-3 font-mono text-xs">
-                        {formatDate(b.dateRangeFrom)} →{' '}
-                        {formatDate(
+                        {formatDateShanghai(b.dateRangeFrom)} →{' '}
+                        {formatDateShanghai(
                           new Date(b.dateRangeTo.getTime() - 1),
                         )}
                       </td>
@@ -133,7 +134,7 @@ export default async function ForemanCdrPage({
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        {formatDateTime(b.expiresAt)}
+                        {formatDateTimeShanghai(b.expiresAt)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {b.downloadCount}
@@ -199,26 +200,5 @@ function todayShanghai(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-}
-
-function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
 }
 

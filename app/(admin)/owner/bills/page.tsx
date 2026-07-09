@@ -9,6 +9,7 @@ import {
 } from '@/lib/auth/role-labels';
 import { buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
   BILL_STATUS_TO_BADGE,
   EmptyState,
@@ -35,19 +36,6 @@ function currentMonthShanghai(): string {
   }).format(new Date());
   // en-CA formats as "YYYY-MM"; already the shape we want.
   return parts;
-}
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
 }
 
 function isValidYm(s: string | undefined): s is string {
@@ -208,7 +196,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
                     <BillStatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(r.issuedAt)}
+                    {formatDateTimeShanghai(r.issuedAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

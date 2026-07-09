@@ -6,21 +6,13 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
 import { EmptyState, PageHeader } from '@/components/ui-business';
+import { formatDateShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '客服周期与提成' };
 
 type PageProps = {
   searchParams: Promise<{ status?: string; csUserId?: string }>;
 };
-
-function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
 
 export default async function CsSalaryListPage({ searchParams }: PageProps) {
   const sp = await searchParams;
@@ -80,7 +72,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
                 <tr key={p.id}>
                   <td className="px-4 py-3">{p.csUser.displayName}</td>
                   <td className="px-4 py-3 text-xs font-mono">
-                    {formatDate(p.periodStart)} ~ {formatDate(p.periodEnd)}
+                    {formatDateShanghai(p.periodStart)} ~ {formatDateShanghai(p.periodEnd)}
                   </td>
                   <td className="px-4 py-3 text-center">{p.durationMonths}</td>
                   <td className="px-4 py-3 text-right font-mono text-xs">

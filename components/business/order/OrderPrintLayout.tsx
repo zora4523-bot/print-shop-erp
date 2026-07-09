@@ -2,6 +2,10 @@ import {
   DESIGN_GRID_WARN_THRESHOLD,
   pickDesignGridClass,
 } from './design-grid';
+import {
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import type {
   PrintDesign,
   PrintOrder,
@@ -201,29 +205,13 @@ function DesignGrid({ designs }: { designs: PrintDesign[] }) {
   );
 }
 
-const SHANGHAI_DATE = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-const SHANGHAI_DATETIME = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
-
+// 打印视图的空值占位用 '-'（窄字符，打印排版紧凑），与页面端 '—' 区分。
 function formatShanghaiDate(d: Date | null | undefined): string {
-  if (!d) return '-';
-  return SHANGHAI_DATE.format(d);
+  return formatDateShanghai(d, '-');
 }
 
 function formatShanghaiDateTime(d: Date): string {
-  return SHANGHAI_DATETIME.format(d);
+  return formatDateTimeShanghai(d);
 }
 
 function shortId(id: string): string {

@@ -7,31 +7,9 @@ import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { requirePermission } from '@/lib/auth/permissions';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -61,8 +39,8 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
             账单 · {bill.period}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {bill.issuedAt ? `发单 ${formatDateTime(bill.issuedAt)}` : '尚未发单'}
-            {bill.paidAt ? ` · 结清 ${formatDateTime(bill.paidAt)}` : ''}
+            {bill.issuedAt ? `发单 ${formatDateTimeShanghai(bill.issuedAt)}` : '尚未发单'}
+            {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
         </div>
         <StatusBadge status={bill.status} />
@@ -137,7 +115,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                   </td>
                   <td className="px-4 py-3">{it.order.customerRef ?? '—'}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(it.order.finishedAt)}
+                    {formatDateShanghai(it.order.finishedAt)}
                   </td>
                   <td className="px-4 py-3 text-center text-xs">
                     <OrderStatusBadge status={it.order.status} />

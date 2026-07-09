@@ -3,6 +3,7 @@ import { listOutsourceOrders } from '@/lib/outsource';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { formatDateShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '外协单' };
 
@@ -12,16 +13,6 @@ const STATUS_LABELS: Record<OutsourceStatus, string> = {
   [OutsourceStatus.RECEIVED]: '已回货',
   [OutsourceStatus.CANCELLED]: '已取消',
 };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
 
 export default async function OutsourceListPage() {
   const rows = await listOutsourceOrders();
@@ -74,7 +65,7 @@ export default async function OutsourceListPage() {
                     {r.totalQty?.toLocaleString() ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(r.expectedDate)}
+                    {formatDateShanghai(r.expectedDate)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusPill status={r.status} />

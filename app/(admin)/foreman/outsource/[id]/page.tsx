@@ -5,6 +5,7 @@ import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import { Badge } from '@/components/ui/badge';
 import { OutsourceActions } from '@/components/business/outsource/OutsourceActions';
+import { formatDateShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -14,16 +15,6 @@ const STATUS_LABELS: Record<OutsourceStatus, string> = {
   [OutsourceStatus.RECEIVED]: '已回货',
   [OutsourceStatus.CANCELLED]: '已取消',
 };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -95,8 +86,8 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
             mono
           />
           <Row label="金额" value={row.amount ? `¥ ${row.amount}` : '—'} mono />
-          <Row label="预计回货" value={formatDate(row.expectedDate)} />
-          <Row label="实际回货" value={formatDate(row.actualDate)} />
+          <Row label="预计回货" value={formatDateShanghai(row.expectedDate)} />
+          <Row label="实际回货" value={formatDateShanghai(row.actualDate)} />
           <Row
             label="关联款式"
             value={row.orderItemIds.length.toString()}

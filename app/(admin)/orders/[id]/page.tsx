@@ -29,20 +29,13 @@ import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
   return { title: `工单 · ${id.slice(0, 8)}` };
-}
-
-function formatDateTime(d: Date): string {
-  const z = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ` +
-    `${z(d.getHours())}:${z(d.getMinutes())}`
-  );
 }
 
 export default async function OrderDetailPage({ params }: PageProps) {
@@ -105,7 +98,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </h1>
           <p className="text-sm text-muted-foreground">
             提交人：{order.submitter.displayName}（{roleLabel(order.submitter.role)}）
-            · 创建于 {formatDateTime(order.createdAt)}
+            · 创建于 {formatDateTimeShanghai(order.createdAt)}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -236,7 +229,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <li key={log.id} className="py-3 first:pt-0 last:pb-0">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-muted-foreground">
-                      {formatDateTime(log.createdAt)}
+                      {formatDateTimeShanghai(log.createdAt)}
                     </span>
                     <span className="font-medium">{actionLabel(log.action)}</span>
                     <span className="text-muted-foreground">

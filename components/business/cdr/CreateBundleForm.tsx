@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type EligibleOrder = {
   id: string;
@@ -114,7 +115,7 @@ export function CreateBundleForm({
                     <td className="px-3 py-2">{o.customerRef ?? '—'}</td>
                     <td className="px-3 py-2 text-right">{o.cdrCount}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {formatDateTime(o.submittedAt)}
+                      {formatDateTimeShanghai(new Date(o.submittedAt))}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Link
@@ -173,7 +174,7 @@ export function CreateBundleForm({
             </a>
           </div>
           <div className="mt-1 text-xs text-success-foreground/80">
-            链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。复制
+            链接 24 小时有效（{formatDateTimeShanghai(new Date(state.expiresAt))} 过期）。复制
             上方完整 URL 发给外协。
           </div>
         </div>
@@ -182,15 +183,3 @@ export function CreateBundleForm({
   );
 }
 
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}

@@ -46,6 +46,7 @@ import { Badge } from '@/components/ui/badge';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '老板 Dashboard' };
 
@@ -496,23 +497,3 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
 
 // ─── helpers ───
 
-function formatDateShanghai(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTimeShanghai(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}

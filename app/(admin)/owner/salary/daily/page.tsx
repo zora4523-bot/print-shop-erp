@@ -9,6 +9,7 @@ import { buttonVariants } from '@/components/ui/button';
 import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
+import { formatDateShanghai } from '@/lib/format/dates';
 import {
   EmptyState,
   PageHeader,
@@ -34,15 +35,6 @@ function todayShanghai(): string {
     day: '2-digit',
   }).format(new Date());
   return parts;
-}
-
-function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
 }
 
 export default async function DailySalaryPage({ searchParams }: PageProps) {
@@ -141,7 +133,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td className="px-4 py-3 font-mono text-xs">
-                    {formatDate(r.date)}
+                    {formatDateShanghai(r.date)}
                   </td>
                   <td className="px-4 py-3">{r.worker.displayName}</td>
                   <td className="px-4 py-3 text-xs">

@@ -11,31 +11,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -66,8 +44,8 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           <p className="text-sm text-muted-foreground">
             周期 <span className="font-mono">{bill.period}</span> ·{' '}
             {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
-            {bill.issuedAt ? ` · 发单 ${formatDateTime(bill.issuedAt)}` : ''}
-            {bill.paidAt ? ` · 结清 ${formatDateTime(bill.paidAt)}` : ''}
+            {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
+            {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
         </div>
         <StatusBadge status={bill.status} />
@@ -170,7 +148,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                   </td>
                   <td className="px-4 py-3">{it.order.customerRef ?? '—'}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(it.order.finishedAt)}
+                    {formatDateShanghai(it.order.finishedAt)}
                   </td>
                   <td className="px-4 py-3 text-center text-xs">
                     <OrderStatusBadge status={it.order.status} />

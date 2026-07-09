@@ -5,18 +5,9 @@ import { roleLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { EmptyState, PageHeader } from '@/components/ui-business';
+import { formatDateShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '待排产工单' };
-
-function formatShanghaiDate(d: Date | null): string {
-  if (!d) return '-';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
 
 export default async function SchedulingListPage() {
   const orders = await listPendingSchedulingOrders();
@@ -68,7 +59,7 @@ export default async function SchedulingListPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {formatShanghaiDate(o.submittedAt ?? o.createdAt)}
+                      {formatDateShanghai(o.submittedAt ?? o.createdAt, '-')}
                     </td>
                     <td className="px-4 py-3 text-center font-mono text-xs">
                       {o.items.length} / {craftTotal}

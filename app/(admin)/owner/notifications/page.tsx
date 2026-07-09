@@ -12,6 +12,7 @@ import { isMockMode } from '@/lib/notification';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { PageHeader } from '@/components/ui-business';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -213,7 +214,7 @@ export default async function OwnerNotificationsPage() {
                 {logs.map((l) => (
                   <tr key={l.id}>
                     <td className="px-3 py-2 font-mono text-xs">
-                      {formatDateTime(l.createdAt)}
+                      {formatDateTimeShanghai(l.createdAt)}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{l.eventType}</td>
                     <td className="px-3 py-2 text-xs">
@@ -265,14 +266,3 @@ function firstLine(s: string): string {
   return line.length > 60 ? `${line.slice(0, 60)}…` : line;
 }
 
-function formatDateTime(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}

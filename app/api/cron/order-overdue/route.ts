@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDueOrders } from '@/lib/dashboard/owner-watchlist';
 import { orderStatusZh } from '@/lib/order/log-format';
 import { dispatchNotification } from '@/lib/notification/dispatch';
+import { formatDateShanghai } from '@/lib/format/dates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,12 +62,3 @@ export async function POST(req: Request) {
   }
 }
 
-function formatDateShanghai(d: Date): string {
-  // 与 owner watchlist 显示一致：YYYY/MM/DD
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
