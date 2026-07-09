@@ -1,5 +1,5 @@
-import OSS from 'ali-oss';
 import { readOssConfig } from './config';
+import { createOssClient } from './client';
 
 // 设计图只读 URL 签发（服务端渲染时用）。
 //
@@ -65,13 +65,7 @@ export function signDesignReadUrl(
   }
   if (!objectKey || !objectKey.startsWith('design/')) return fileUrl;
 
-  const client = new OSS({
-    accessKeyId: cfg.accessKeyId,
-    accessKeySecret: cfg.accessKeySecret,
-    bucket: cfg.bucket,
-    endpoint: cfg.endpoint,
-    secure: cfg.endpoint.startsWith('https://'),
-  });
+  const client = createOssClient(cfg);
   return client.signatureUrl(objectKey, {
     expires: READ_URL_EXPIRES_SECONDS,
     method: 'GET',

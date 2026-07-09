@@ -1,8 +1,9 @@
-import OSS from 'ali-oss';
 import { Role, OrderStatus, DesignFileType } from '../generated/prisma/enums';
 import { db } from './db';
 import { readOssConfig } from './oss/config';
+import { createOssClient } from './oss/client';
 import { ALLOWED_EXTENSIONS, FILE_SIZE_LIMITS } from './oss/types';
+import { orderCascadeLockKey } from './order/locks';
 
 // 设计图记录层（A06 延伸：上传 UI 接线）。
 //
@@ -33,9 +34,6 @@ export class OrderDesignError extends Error {
 
 // 与 lib/order.ts / lib/production.ts 同一命名空间——设计图登记必须和
 // submit/cancel 等状态转换互斥。
-function orderCascadeLockKey(orderId: string): string {
-  return `print-shop-erp:order-cascade:${orderId}`;
-}
 
 type DesignTxClient = {
   $executeRaw: (
@@ -168,13 +166,7 @@ export async function recordOrderItemDesign(
   // **权威文件大小**——客户端申报值可以撒谎（申报小文件拿凭证、实传
   // 大文件），这里同时兜大小上限。
   // 网络 IO 放在 PG 事务/锁之外（项目惯例：不在 tx 里挂 OSS IO）。
-  const client = new OSS({
-    accessKeyId: cfg.accessKeyId,
-    accessKeySecret: cfg.accessKeySecret,
-    bucket: cfg.bucket,
-    endpoint: cfg.endpoint,
-    secure: cfg.endpoint.startsWith('https://'),
-  });
+  const client = createOssClient(cfg);
   let actualSize: number;
   try {
     const head = await client.head(input.objectKey);

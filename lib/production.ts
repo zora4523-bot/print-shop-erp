@@ -15,6 +15,7 @@ import type {
   ReportTaskInput,
   ScheduleOrderInput,
 } from './auth/schemas';
+import { orderCascadeLockKey } from './order/locks';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import { getActiveMachineRule } from './salary/rules';
 import { dispatchNotification } from './notification/dispatch';
@@ -27,18 +28,6 @@ export class SchedulingError extends Error {
     super(message);
     this.name = 'SchedulingError';
   }
-}
-
-// Advisory-lock namespace for the scheduling serialization guard.
-// Same key namespace as orderCascadeLockKey below + the
-// transitionWithLog helper in lib/order.ts。
-// pointed out a separate `:schedule:` lock left scheduleOrder
-// racing with cancelOrder on the same SUBMITTED order — both could
-// commit and you'd end up with ProductionTasks attached to a
-// CANCELLED order. Unifying the namespace makes ALL Order.status
-// writers serialize against each other on the same key.
-function scheduleLockKey(orderId: string): string {
-  return `print-shop-erp:order-cascade:${orderId}`;
 }
 
 // Minimal tx surface we need — kept narrow so a typed Prisma client
@@ -134,7 +123,7 @@ export async function scheduleOrder(
     // two STATUS_CHANGE log entries. Lock is per-tx so the second
     // transaction blocks here and then sees SCHEDULING on its own
     // read, tripping transitionOrder's guard .
-    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${scheduleLockKey(
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.orderId,
     )}))`;
 
@@ -391,16 +380,12 @@ type TaskTxClient = {
   };
 };
 
-// Advisory-lock helpers for the two cross-row invariants in this flow.
+// Per-task advisory lock — serializes begin/report on the same task.
+// The order-level lock is orderCascadeLockKey (lib/order/locks.ts):
+// scheduling and the worker-report cascade both take it, so ALL
+// Order.status writers serialize against each other on one key.
 function taskLockKey(taskId: string): string {
   return `print-shop-erp:task:${taskId}`;
-}
-function orderCascadeLockKey(orderId: string): string {
-  // Order-status cascade reads sibling task statuses, so any two
-  // workers reporting at the same instant on the same order must
-  // serialize through this lock. Distinct from the scheduling lock
-  // (same order may hold both at different tx boundaries).
-  return `print-shop-erp:order-cascade:${orderId}`;
 }
 
 export type BeginTaskResult = {

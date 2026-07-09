@@ -6,6 +6,7 @@ import {
   InvalidOutsourceTransitionError,
 } from './outsource/status-machine';
 import { canAttachOutsource } from './order/status-machine';
+import { orderCascadeLockKey } from './order/locks';
 import type {
   CreateOutsourceInput,
   MarkOutsourceReceivedInput,
@@ -33,9 +34,6 @@ export type CreatedOutsource = { id: string };
 // races against shipOrder / cancelOrder; folding both into one tx
 // behind the per-order lock makes "order is still attachable" an
 // atomic decision.
-function orderTransitionLockKey(orderId: string): string {
-  return `print-shop-erp:order-cascade:${orderId}`;
-}
 
 type OutsourceTxClient = {
   $executeRaw: (
@@ -63,7 +61,7 @@ export async function createOutsourceOrder(
     // Per-order advisory lock makes the "order is attachable?" check
     // and the outsource INSERT atomic relative to ANY other Order-
     // status writer (ship / cancel / schedule / finish / cascade).
-    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderTransitionLockKey(
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.orderId,
     )}))`;
 

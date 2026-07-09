@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream';
-import OSS from 'ali-oss';
 import { ZipArchive } from 'archiver';
 import { readOssConfig } from '../oss/config';
+import { createOssClient } from '../oss/client';
 
 // CDR 汇总下载（SPEC §3.6）的"打包到 OSS"步骤。
 //
@@ -102,13 +102,7 @@ async function generateRealZip(
 
   // endpoint 用 config 已校验的值（支持 OSS_ENDPOINT 覆盖：VPC 内网、
   // 自定义端口等），不能只凭 region 拼默认公网域名。
-  const client = new OSS({
-    accessKeyId: cfg.accessKeyId,
-    accessKeySecret: cfg.accessKeySecret,
-    bucket: cfg.bucket,
-    endpoint: cfg.endpoint,
-    secure: cfg.endpoint.startsWith('https://'),
-  });
+  const client = createOssClient(cfg);
 
   const zipObjectKey = `bundles/${input.bundleId}.zip`;
   const archive = new ZipArchive({ zlib: { level: 9 } });

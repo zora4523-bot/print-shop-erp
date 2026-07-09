@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import OSS from 'ali-oss';
 import { readOssConfig, type OssConfig } from './config';
+import { createOssClient } from './client';
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_MIME,
@@ -162,14 +163,7 @@ export async function signDesignUpload(
     credentials = await signViaSts(cfg, objectKey);
     // 用临时凭证再签一个预签 PUT URL（寿命 = 凭证寿命 1h，绑定
     // Content-Type）——浏览器普通 fetch 就能上传，无需前端 SDK。
-    const tempClient = new OSS({
-      accessKeyId: credentials.accessKeyId,
-      accessKeySecret: credentials.accessKeySecret,
-      stsToken: credentials.securityToken,
-      bucket: cfg.bucket,
-      endpoint: cfg.endpoint,
-      secure: cfg.endpoint.startsWith('https://'),
-    });
+    const tempClient = createOssClient(cfg, credentials);
     putUrl = tempClient.signatureUrl(objectKey, {
       method: 'PUT',
       expires: STS_DURATION_SECONDS,

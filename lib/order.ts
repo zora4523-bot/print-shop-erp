@@ -12,6 +12,7 @@ import type {
   UpdateShippingOrderInput,
 } from './auth/schemas';
 import { getOrderScopeFilter } from './auth/order-scope';
+import { orderCascadeLockKey } from './order/locks';
 import {
   FULL_EDITABLE_FIELDS,
   SHIPPING_EDITABLE_FIELDS,
@@ -234,9 +235,6 @@ type StatusTxClient = {
 // (`print-shop-erp:order-cascade:<id>`) so worker reportTask's
 // auto-cascade can't race a manual ship/cancel/submit on the same
 // order — both paths touch Order.status .
-function orderTransitionLockKey(orderId: string): string {
-  return `print-shop-erp:order-cascade:${orderId}`;
-}
 
 type TransitionOptions = {
   remark: string | null;
@@ -268,7 +266,7 @@ async function transitionWithLog(
     // doubles the OrderLog row . Same key as
     // worker-cascade so a manual transition can't interleave with
     // a sibling task report's auto-cascade either.
-    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderTransitionLockKey(
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       orderId,
     )}))`;
 
