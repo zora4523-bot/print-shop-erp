@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { computeDailyForAllMachineWorkers } from '@/lib/salary/daily';
 import { dispatchNotification } from '@/lib/notification/dispatch';
 import { formatMoneyPlain } from '@/lib/dashboard/format';
+import { requireCronAuth } from '@/lib/cron-auth';
 
 // Node runtime: Prisma + decimal.js aren't edge-compatible.
 export const runtime = 'nodejs';
@@ -24,18 +25,8 @@ export const dynamic = 'force-dynamic';
 // day — that's the usual "process yesterday's shift at 00:00 today"
 // pattern, so the cron call doesn't need to know the date itself.
 export async function POST(req: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    return NextResponse.json(
-      { error: 'CRON_SECRET not configured' },
-      { status: 503 },
-    );
-  }
-
-  const auth = req.headers.get('authorization');
-  if (!auth || auth !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const denied = requireCronAuth(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {

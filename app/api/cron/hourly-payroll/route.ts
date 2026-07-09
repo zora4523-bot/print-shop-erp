@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { computeHourlyForAllInMonth, HourlyAggregateError } from '@/lib/salary/hourly-aggregate';
+import { requireCronAuth } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,18 +17,8 @@ export const dynamic = 'force-dynamic';
 //     -H "Authorization: Bearer $CRON_SECRET" \
 //     -d '{"month":"2026-05"}'
 export async function POST(req: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    return NextResponse.json(
-      { error: 'CRON_SECRET not configured' },
-      { status: 503 },
-    );
-  }
-
-  const auth = req.headers.get('authorization');
-  if (!auth || auth !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const denied = requireCronAuth(req);
+  if (denied) return denied;
 
   let body: unknown;
   try {
