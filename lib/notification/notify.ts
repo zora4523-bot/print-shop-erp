@@ -1,6 +1,8 @@
 import { db } from '../db';
 import { NotificationStatus } from '../../generated/prisma/enums';
 import {
+  PRIVATE_EVENT_MAX_CHANNELS,
+  isPrivatePerCsEvent,
   type NotificationEvent,
   type NotificationPayloadFor,
 } from './events';
@@ -10,10 +12,6 @@ import {
   sendWebhook,
   type WebhookSender,
 } from './webhook';
-import {
-  PRIVATE_EVENT_MAX_CHANNELS,
-  isPrivatePerCsEvent,
-} from './admin';
 
 // notify(event, payload) 是企业微信推送的**唯一公开入口**（CLAUDE.md
 // §7.1）。永不抛（DECISIONS 2026-04-27 best-effort）：业务事务已 commit，

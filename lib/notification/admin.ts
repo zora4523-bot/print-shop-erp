@@ -3,7 +3,13 @@ import {
   NotificationStatus,
   type NotificationStatus as NotificationStatusType,
 } from '../../generated/prisma/enums';
-import { NOTIFICATION_EVENTS, type NotificationEvent } from './events';
+import {
+  NOTIFICATION_EVENTS,
+  PRIVATE_EVENT_MAX_CHANNELS,
+  TEST_EVENT_TYPE,
+  isPrivatePerCsEvent,
+  type NotificationEvent,
+} from './events';
 
 // 推送配置 / 日志的 admin-side 读写。Prisma 调用集中在这里（CLAUDE.md
 // 三层架构：app → actions → lib → Prisma）。Server Actions 在
@@ -356,11 +362,6 @@ export class EmptyChannelIdsError extends Error {
 // （SPEC §8.1 &ldquo;对应客服&rdquo; 1:1 推送等 P2 加 User.notificationChannelId
 // 后实现）。
 // 直接 POST / replay 绕开，server side 必须 enforce。
-const PRIVATE_PER_CS_EVENTS = new Set([
-  'CS_PERIOD_ENDING',
-  'CS_PERIOD_SETTLED',
-]);
-const MAX_PRIVATE_CHANNELS = 1;
 
 export class TooManyChannelsForPrivateEventError extends Error {
   constructor(
@@ -368,7 +369,7 @@ export class TooManyChannelsForPrivateEventError extends Error {
     public readonly count: number,
   ) {
     super(
-      `${eventType} 含具体客服金额，最多绑 ${MAX_PRIVATE_CHANNELS} 个 channel（当前 ${count}）`,
+      `${eventType} 含具体客服金额，最多绑 ${PRIVATE_EVENT_MAX_CHANNELS} 个 channel（当前 ${count}）`,
     );
     this.name = 'TooManyChannelsForPrivateEventError';
   }
@@ -394,8 +395,8 @@ export async function updateRuleWithGuard(
   }
   if (
     input.isActive &&
-    PRIVATE_PER_CS_EVENTS.has(eventType) &&
-    input.channelIds.length > MAX_PRIVATE_CHANNELS
+    isPrivatePerCsEvent(eventType) &&
+    input.channelIds.length > PRIVATE_EVENT_MAX_CHANNELS
   ) {
     throw new TooManyChannelsForPrivateEventError(
       eventType,
@@ -404,14 +405,6 @@ export async function updateRuleWithGuard(
   }
   return updateRule(eventType, input);
 }
-
-// 暴露给 notify 端的运行时 cap：legacy rule 行可能已有多 channel，
-// updateRuleWithGuard 是写时校验，对已存在数据无效。notify.ts 在 fan-out 前 cap CS_PERIOD_* 到 1 个 channel +
-// console.warn，让 ops 看到&ldquo;有 legacy 配置该清理&rdquo;。
-export function isPrivatePerCsEvent(eventType: string): boolean {
-  return PRIVATE_PER_CS_EVENTS.has(eventType);
-}
-export const PRIVATE_EVENT_MAX_CHANNELS = MAX_PRIVATE_CHANNELS;
 
 // ─────────────────────────────────────────────────────────────────────
 // 日志列表（owner UI 显示）
@@ -500,7 +493,7 @@ export async function countRecentFailures(
     where: {
       status: NotificationStatus.FAILED,
       createdAt: { gte: since },
-      NOT: { eventType: '__TEST__' },
+      NOT: { eventType: TEST_EVENT_TYPE },
     },
   });
 }

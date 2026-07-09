@@ -21,6 +21,7 @@ import {
   updateChannel,
   updateRuleWithGuard,
 } from '@/lib/notification/admin';
+import { TEST_EVENT_TYPE } from '@/lib/notification/events';
 import type { NotificationMutationResult, ChannelTestResult } from './owner-notifications.types';
 
 // NB: 同 actions/owner-accounts.ts 的注释——`'use server'` module 只能
@@ -320,7 +321,7 @@ export async function testChannelAction(
   try {
     await db.notificationLog.create({
       data: {
-        eventType: '__TEST__',
+        eventType: TEST_EVENT_TYPE,
         channelId: channel.id,
         messageContent: content,
         status: result.ok

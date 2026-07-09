@@ -140,3 +140,31 @@ export type NotificationPayloads = {
 // 出 payload 形状必须含 orderNo / submitterName 等。
 export type NotificationPayloadFor<E extends NotificationEvent> =
   NotificationPayloads[E];
+
+// ─────────────────────────────────────────────────────────────────────
+// 事件级策略常量 —— 定义在 events.ts（事件的"属性"跟事件枚举同住），
+// 而非 admin.ts/notify.ts（那会让发送管道反向依赖管理端 CRUD 模块）。
+// ─────────────────────────────────────────────────────────────────────
+
+// CS_PERIOD_* 事件含具体客服的业绩/提成金额，schema 没有 per-user
+// 路由（P2 才加 User.notificationChannelId），多 channel 即广播隐私。
+// 写侧（admin.updateRuleWithGuard）与发送侧（notify fan-out cap）共用
+// 这一份判定。注意保持 ReadonlySet<string>：调用方传的是 string 列值。
+const PRIVATE_PER_CS_EVENTS: ReadonlySet<string> = new Set([
+  NOTIFICATION_EVENTS.CS_PERIOD_ENDING,
+  NOTIFICATION_EVENTS.CS_PERIOD_SETTLED,
+]);
+
+export function isPrivatePerCsEvent(eventType: string): boolean {
+  return PRIVATE_PER_CS_EVENTS.has(eventType);
+}
+
+export const PRIVATE_EVENT_MAX_CHANNELS = 1;
+
+// owner "测试发送" 写入 NotificationLog 的哨兵 eventType。**不并入**
+// NOTIFICATION_EVENTS —— 那会让 '__TEST__' 变成可配置规则事件
+// （admin.updateRule 与 rules/[event] 页面都用 Object.values(...) 校验）。
+// 写入方 actions/owner-notifications.ts 与排除方 admin.countRecentFailures
+// 必须引用同一常量：两处字符串一旦漂移，24h 失败告警会把测试失败
+// 误计入生产推送健康度。
+export const TEST_EVENT_TYPE = '__TEST__';
