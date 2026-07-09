@@ -15,6 +15,8 @@ import {
 import {
   getActiveCsMonthlyBase,
   getActiveCsPeriodLength,
+  getActiveRuleValue,
+  type SalaryRuleClient,
 } from './rules';
 import {
   transitionCsPeriod,
@@ -37,36 +39,6 @@ function csUserLockKey(csUserId: string): string {
 }
 
 // Minimal tx surface for rule reads — we need to go through `tx`
-// (not global `db`) so rule lookups participate in the settlement
-// snapshot's isolation .
-type RuleTx = {
-  salaryRule: {
-    findFirst: (args: {
-      where: unknown;
-      orderBy?: unknown;
-      select?: unknown;
-    }) => Promise<{ ruleValue: unknown } | null>;
-  };
-};
-
-async function txActiveCsRule<T>(
-  tx: RuleTx,
-  ruleKey: string,
-  now: Date,
-): Promise<T | null> {
-  const rule = await tx.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.CS_COMMISSION,
-      ruleKey,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  return rule.ruleValue as unknown as T;
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // CS period lifecycle (SPEC §3.7 / §5.3 / §5.5)
@@ -360,7 +332,7 @@ export async function settleCsPeriod(
   now: Date = new Date(),
 ): Promise<SettledCommission> {
   return db.$transaction(async (tx) => {
-    const txc = tx as unknown as RuleTx & {
+    const txc = tx as unknown as SalaryRuleClient & {
       $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
       salaryPeriod: {
         findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
@@ -420,19 +392,26 @@ export async function settleCsPeriod(
 
     // Rule reads go through the tx  so a
     // concurrent rule edit can't have us observe mixed versions.
-    const tiers = await txActiveCsRule<CsTiersConfig>(txc, 'CS_TIERS', now);
+    const tiers = await getActiveRuleValue<CsTiersConfig>(
+      SalaryRuleType.CS_COMMISSION,
+      'CS_TIERS',
+      now,
+      txc,
+    );
     if (!tiers) {
       throw new CsPeriodError('无当前生效的 CS_TIERS 规则');
     }
-    const activeBase = await txActiveCsRule<{ monthlyBase: number }>(
-      txc,
+    const activeBase = await getActiveRuleValue<{ monthlyBase: number }>(
+      SalaryRuleType.CS_COMMISSION,
       'CS_BASE_SALARY',
       now,
-    );
-    const activeDurationValue = await txActiveCsRule<{ months: number }>(
       txc,
+    );
+    const activeDurationValue = await getActiveRuleValue<{ months: number }>(
+      SalaryRuleType.CS_COMMISSION,
       'CS_PERIOD_LENGTH',
       now,
+      txc,
     );
 
     // SPEC §5.3: commission is on (totalSales + initialSales)

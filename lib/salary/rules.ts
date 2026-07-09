@@ -14,14 +14,33 @@ import type { CsTiersConfig } from './cs-commission';
 
 export type MachineRuleWithBase = MachineSalaryRule & { dailyBase: string | number };
 
-export async function getActiveMachineRule(
-  machineType: string,
-  now: Date = new Date(),
-): Promise<MachineRuleWithBase | null> {
-  const rule = await db.salaryRule.findFirst({
+// 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
+// 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。
+export type SalaryRuleClient = {
+  salaryRule: {
+    findFirst: (args: {
+      where: unknown;
+      orderBy?: unknown;
+      select?: unknown;
+    }) => Promise<{ ruleValue: unknown } | null>;
+  };
+};
+
+// 版本化规则"当前生效"查询的**唯一实现**（此前同形 findFirst 复制
+// 6 处：machine/cs/hourly/cook + cs.ts 的 tx 版）。语义：effectiveFrom
+// <= now 中最新一条，且 effectiveTo 为 null 或 > now。
+// ruleValue 是 Prisma Json——形状由 seed / owner 规则编辑器在写入侧
+// 保证，读侧信任断言为 T。
+export async function getActiveRuleValue<T>(
+  ruleType: SalaryRuleType,
+  ruleKey: string,
+  now: Date,
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
+): Promise<T | null> {
+  const rule = await client.salaryRule.findFirst({
     where: {
-      ruleType: SalaryRuleType.WORKER_MACHINE,
-      ruleKey: machineType,
+      ruleType,
+      ruleKey,
       effectiveFrom: { lte: now },
       OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
     },
@@ -29,11 +48,18 @@ export async function getActiveMachineRule(
     select: { ruleValue: true },
   });
   if (!rule) return null;
-  // ruleValue is Json in Prisma; the seed shape is
-  // { dailyBase, pieceRate, boardRate, smallOrderThreshold,
-  //   smallOrderFlatPrice, multiplierFactors }.
-  // We trust the seed / owner-side rule editor to validate on write.
-  return rule.ruleValue as unknown as MachineRuleWithBase;
+  return rule.ruleValue as unknown as T;
+}
+
+export async function getActiveMachineRule(
+  machineType: string,
+  now: Date = new Date(),
+): Promise<MachineRuleWithBase | null> {
+  return getActiveRuleValue<MachineRuleWithBase>(
+    SalaryRuleType.WORKER_MACHINE,
+    machineType,
+    now,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -54,18 +80,7 @@ async function getActiveCsRule<T>(
   ruleKey: string,
   now: Date,
 ): Promise<T | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.CS_COMMISSION,
-      ruleKey,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  return rule.ruleValue as unknown as T;
+  return getActiveRuleValue<T>(SalaryRuleType.CS_COMMISSION, ruleKey, now);
 }
 
 export async function getActiveCsMonthlyBase(
@@ -109,18 +124,7 @@ async function getActiveHourlyRule<T>(
   ruleKey: string,
   now: Date,
 ): Promise<T | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.WORKER_HOURLY,
-      ruleKey,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  return rule.ruleValue as unknown as T;
+  return getActiveRuleValue<T>(SalaryRuleType.WORKER_HOURLY, ruleKey, now);
 }
 
 export async function getActivePackerHourlyRate(
@@ -186,17 +190,10 @@ export async function getActiveWorkHours(
 export async function getActiveCookMonthlyBase(
   now: Date = new Date(),
 ): Promise<number | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.COOK_SALARY,
-      ruleKey: 'COOK_MONTHLY',
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  const v = rule.ruleValue as unknown as { monthlyBase: number };
+  const v = await getActiveRuleValue<{ monthlyBase: number }>(
+    SalaryRuleType.COOK_SALARY,
+    'COOK_MONTHLY',
+    now,
+  );
   return v?.monthlyBase ?? null;
 }
