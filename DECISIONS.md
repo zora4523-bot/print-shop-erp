@@ -472,3 +472,12 @@
 - **理由**：师傅端归属靠"排产分派 workerId + 报工时登录核对身份"，而师傅只用**个人微信**（工厂无企业微信成员账号，故不做企业微信免密 OAuth）。扫码报工每次遇到 session 过期就要重输工号密码是主要摩擦点；拉长到 30 天让师傅一个月只登一次，明显降低车间使用阻力。
 - **影响**：JWT 与登录 cookie 存活期同步延长到 30 天（Auth.js v5 JWT 策略下 `session.maxAge` 同时驱动二者）。安全权衡：会话失窃后有效窗口更长，但工厂内网 + 手机自持设备场景风险可接受；紧急撤销仍靠 rotate `AUTH_SECRET`（会一次性踢掉所有会话）。老板改师傅密码不会立即踢掉其已有会话——如需即时失效，rotate secret。
 - **相关文档**：`lib/auth/config.edge.ts`，覆盖 DECISIONS 2026-04-22 决策 C。
+
+---
+
+## 2026-07-09：架构体检批次——去重收敛的边界与"不做清单"
+
+- **决策**：实施 7 个"行为零变化"重构切片（日期格式化 / cron 认证 / OSS 客户端工厂 / order-cascade 锁 key 单一出口 / 通知策略常量归位 / collectFieldErrors 收敛 / createOrder 批量校验 / 薪资规则查询单一实现），同时**明确否决**五类"顺手优化"：React cache() 包 detail getter（请求级作用域会让审计日志 after==before、取消后返回旧状态）、cron scrub-500 统一 wrapper（各路由 500 响应体差异是刻意设计）、shanghai-clock 并入 lib/format/dates.ts（zod 巨石进 client bundle）、timingSafeEqual 顺手升级（行为变更需独立 commit）、非 order-cascade 锁 key 集中化（单模块私有，搬迁无收益）。
+- **理由**：每条提案先经独立 agent 四项核查（测试 mock 耦合 / client-server 边界 / import 环 / 貌似重复实则有差异），验证否决的方案均有具体损坏场景佐证；只收敛"同一约定的多份手工拷贝"，不动任何刻意差异。
+- **影响**：跨模块唯一的共享锁不变量（order-cascade）从"5 处字符串别打错字"升级为编译期保证；后续新增 Order.status 写入路径 import `lib/order/locks.ts` 即自动入队。完整问题清单与路线图见 `docs/架构体检报告-2026-07-09.md`。
+- **相关文档**：`docs/架构体检报告-2026-07-09.md`、commits `06ecc62`/`b449b68`/`d57a2ec`/`610096a`/`a310e23`/`d3c700e`/`f4b6ab7`。

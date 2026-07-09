@@ -8,53 +8,25 @@
 
 ## 当前任务
 
-**设计图上传 UI 接线完成** ✅（A06 最后一块拼图）—— 工单详情页款式卡片新增设计图面板：DRAFT 状态可上传（JPG/PNG/WEBP/CDR）与删除，其余状态只读展示。链路：sign 前置授权闸 → 预签 PUT URL（15min、绑 Content-Type）浏览器裸 fetch 直传 → HEAD 权威 size + order-cascade 锁内重校 → OrderItemDesign 行 + OrderLog。commits `3849cbd`（feat）+ `ed9733e`（Codex 5 findings 修复，复核 clean）。预签 PUT 真实冒烟通过（200 / 错 Content-Type 403 / HEAD 确认）。**1242 单测全绿**。
+**全库架构体检 + 去重收敛批次完成** ✅（2026-07-09）。6 子系统并行深读 + 44 agent 逐提案风险验证；实施 7 个"行为零变化"重构切片（`06ecc62` 日期 / `b449b68` cron 认证 / `d57a2ec` OSS 工厂+锁 key / `610096a` 通知常量 / `a310e23` collectFieldErrors / `d3c700e` createOrder 批量 / `f4b6ab7` 薪资规则查询），每切片 tsc+eslint+全量单测验证，Codex 复核 **PASS**。**1272 单测全绿**。
 
-**至此设计图从上传 → 打印视图 → CDR 打包下载的完整业务流全部真实可用**。剩余任务全部 `needs-owner-input`（A05 / A07 / A20 / A21）。
-
-## 本次 session 主要产出（2026-07-05）
-
-1. **工作区大批次全量验证通过**（127 文件、schema +832 行、16 个新 migration、30+ 新模块文件）：
-   - `prisma validate` ✅ / `tsc --noEmit` ✅ / `eslint .` ✅
-   - **1214 单测全绿**（80 文件，4.5s）
-   - `next build` ✅（全部新路由编译通过：parties / purchases / warehouses / boms / prices / product-categories / materials(count) / pigsty / orders 迁入 `(admin)`）
-   - `prisma migrate deploy` 应用 7 个 pending migration 到本地库 ✅
-   - **21 Playwright E2E + 视觉回归全绿**（40.6s，含 smoke.spec 覆盖 Pigsty readiness 页与物料搜索）
-2. **A09 分区 cutover 计划交付（plan-only）**：新增 `docs/partition-cutover-plan.md` —— 三张日志表复合主键改造、入向外键复核 SQL（当前为 0）、按月回填、rename-swap 切换、验证/保留/回滚步骤、Prisma `@@id` 复合化及 `findUnique` 调用点排查清单。backlog A09 已标记 Delivered（执行仍 manual-ops-only）。
-3. **PROGRESS.md 整体刷新**（原文停在 4-25"P0 6/9"，已更新到当前真实状态）。
-4. **大批次提交固化（业主授权后）**：按模块拆 12 个 commit `c84162f → accb713`（db/Pigsty → admin 框架 → audit → material → party → product → price → purchase/warehouse → bom → orders 路由迁移 → e2e smoke → docs），提交后 1214 单测 + tsc 复验绿。`pnpm-workspace.yaml` 留了一段未填的 `allowBuilds` 占位符改动**未提交**，等业主确认意图。
-5. **STOCK_ALERT 接线（SPEC §8.1 收官，10/10 事件全通）**：commits `3184a26` + `4f76a85`。出库跨越检测（>=安全库存 跌破 <安全库存 那次变动触发，低位不重复，回补后再跌破重新触发）；wire 点 `createMaterialTransaction` + `cancelPurchaseReceipt`，tx 提交后 dispatch。Codex 2 轮：抓 payload number 丢尾零（改 toFixed(2) 字符串）+ 测试未锁提交顺序（callOrder 断言），复核 clean。决策已记 DECISIONS 2026-07-05。**1220 单测**全绿。
+完整报告（架构概述 / 问题区域 / 路线图 / 不做清单）：**`docs/架构体检报告-2026-07-09.md`** ← 下次做重构类任务前必读，尤其"不做清单"（React cache() 等五个已验证否决的方案）。
 
 ## 下一步具体指令（给下次 AI）
 
-1. **业主拍板后可开工的任务**（按优先级）：A05 工单款式级编辑 / A06 OSS STS 真实接入 / A20 生产单拆分 / A21 应收应付扩展 / A07 推送按人路由——Needs 清单都在 `docs/AGENT-BACKLOG.md`。
-2. **纯运维**（生产上线时）：`.env` 真值、cron 切 pg_cron、pgbackrest、Pigsty 扩展安装按 `docs/pigsty-production-activation-runbook.md`。
-3. **可选小活**：`pnpm-workspace.yaml` 的 allowBuilds 占位符处理；STOCK_ALERT 低位周期重复提醒（如业主要求，加 cron 端点复用现有 payload）。
+1. **需业主拍板的行为缺口**（报告 §二A，按危害排序）：
+   - A1 cancelOrder 不级联取消 ProductionTask——取消工单后师傅仍可开工报工**计件进工资**（SPEC 未写取消工单的任务处置，禁止猜测，先问业主）；
+   - A2 约 23 个管理页面无页面级权限检查（soft-nav 下 layout 不重跑）；
+   - A3 3 个页面直接 import Prisma（违反 §3）；A4 3 个 action 模块吞未知错误不进 Sentry；A5 markCsCommissionPaid 缺锁；A6 BOM Toggle 吞错误。
+2. **可直接开工的重构路线图**（报告 §三，全部已通过独立验证，含实施细节与陷阱）：parseStrictYmd 抽出 → schemas.ts 拆分（验收必须加 pnpm build）→ Toggle 按钮统一（顺带修 A6）→ .types.ts 别名化（8 文件，不含 outsource/production）→ TextField 去重（9/14 份）→ 状态机工厂 → transitionWithLog 复用 → 组件测试（@vitest/browser-playwright 独立包；"合格+不良+返工=计划数"规则不存在，别写假断言）。
+3. **业主拍板后的功能任务**：A05 工单款式级编辑 / A20 生产单拆分 / A21 应收应付扩展 / A07 推送按人路由——Needs 清单在 `docs/AGENT-BACKLOG.md`。
+4. **纯运维**（生产上线时）：按 `docs/部署指南.md` + README §🚢。
 
 ## 卡住的问题
 
-- A05/A07/A20/A21 全部等业务输入（见 backlog Needs 小节）。
-- `pnpm-workspace.yaml` 有一段 `allowBuilds` 占位符改动（值是字面量 "set this to true or false"），像是 pnpm 命令生成后未填完，未提交，等业主确认。
-
-## P1 技术债（本 session 新增）
-
-- **设计图 ETag 固定**：预签 PUT URL 在 15 分钟寿命内可重复使用，登记后仍可替换对象内容。彻底修复：OrderItemDesign 加 etag 列（HEAD 时记录），打印/CDR 消费端校验。见 DECISIONS 2026-07-05。
-- **设计孤儿对象清理**：sign 后未登记的对象 + 删除设计图后的 OSS 对象都留在 bucket（策略无 DeleteObject）。原 P1 待办，现在有真实上传流了，优先级上调。
-
-## 相关文件清单（下次 AI 必读）
-
-- `docs/AGENT-BACKLOG.md` — 任务队列与状态（A01–A23）
-- `docs/AGENT-ROUTINES.md` — routine 执行协议（先 `pnpm agent:next`）
-- `docs/partition-cutover-plan.md` — 本次新增的 A09 计划
-- `docs/pigsty-production-activation-runbook.md` — 生产扩展启用 runbook
-- `docs/ADMIN-FRAMEWORK-PLAN.md` / `docs/SOYBEANADMIN-ADOPTION.md` — admin 框架蓝图
-- `PIGSTY-EXTENSIONS.md` — 扩展清单与降级策略
-
-## 上次会话结束时间
-
-2026-07-05
-
----
+- 视觉基线 6 张 png（承诺交期 + QR URL 化引起）仍待业主看截图确认后以 `[visual-regression]` commit 提交。
+- `pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
+- A05/A07/A20/A21 等业务输入（backlog Needs 小节）。
 
 ## 历史（追加式时间线）
 
@@ -86,3 +58,4 @@
 - 2026-07-06：上线前检查 + 注释清理（`f0cebce`）。全库移除 90+ 处 "Codex round N" 溯源标注（保留约束说明；历史在 git log/HANDOFF/DECISIONS 可查），49 文件纯注释改动。教训：第一版全局正则把代码里的 `()` 也删了——回滚重做，改成只作用于注释行的脚本 + 跨行引用逐处手修。验证：tsc / eslint / 1249 单测 / next build / deploy:smoke（prisma validate + migrate status + mock-mode + Puppeteer + 路由探测）/ 21 Playwright E2E+视觉 全绿。生产部署剩纯运维动作（README §🚢）：服务器 .env 真值、NOTIFICATION_MOCK_MODE=false、OSS CORS 加生产域名、pg_cron 切换、pgbackrest、Pigsty 扩展安装。
 - 2026-07-07：承诺交期 + 交期预警 + ORDER_OVERDUE 推送 + 二维码 URL 化（`d240061` / `1483867` / `5d6b04a` / `6c3fdc5`）。Order.promisedDate（2 个 migration：字段 + 规则行数据迁移）；预警口径集中 lib/order/promised-date（详情徽标 / dashboard 关注列表 / 每日 cron 三处共用）；第 11 个推送事件 ORDER_OVERDUE 只推逾期；QR 内容改 {base}/orders|worker/tasks URL（lib/public-base-url 与 CDR 共用推导，foreman-cdr 去重）；打印页眉加承诺交期行。Codex 抓 3 真问题：升级库缺规则行（数据 migration 修，高危）、视觉基线（按惯例截图待业主确认后提交）、cron E2E 缺口（补全链测试）。1264 单测 / 22 E2E 全绿。**待办：视觉基线 6 张 png 等业主看截图 OK 后以 [visual-regression] commit 提交。**
 - 2026-07-08：上线前多维度审计（6 维度并行 audit → 逐条对抗性验证 workflow，54 agent；含手动核实）。发现并**即修 4 项**：(1) **blocker** `createOrderFromInput`/`scheduleOrderFromInput` 从 'use server' 导出成公开 Server Action、信任调用方 actor 无 requirePermission = 越权+审计伪造后门，零调用方直接删除（`5bdf5a3`）；(2) **high** `.env.example` 出厂 `NOTIFICATION_MOCK_MODE="true"` 会诱导运维带进生产静默 mock 推送→改留空按 NODE_ENV 判定（`3eaf050`）；(3) README env 表补 mock 开关行+OSS CORS 手动步骤+APP_PUBLIC_URL 扩到二维码、6→7 cron 漂移修正（`3eaf050`）；(4) **low** hourly-payroll cron 意外错误 scrub 对齐 COUNTS-ONLY（`c5ac707`）。1264 单测/tsc/eslint/build 全绿。**剩余为纯手动运维项**（见报告）：生产 .env 注入（APP_PUBLIC_URL/SENTRY_DSN/AUTH_SECRET 新值/DATABASE_URL 生产库）、OSS 控制台配 CORS、首次 seed、cron 调度器（crontab/pg_cron 7 端点）、Pigsty 扩展安装、pgbackrest、Puppeteer chrome、PM2/Nginx 自备。视觉基线 6 png 仍待业主确认后提交。
+- 2026-07-09：全库架构体检（6 子系统深读 + 44 agent 提案验证 workflow）→ 7 个行为零变化重构切片落地（日期/cron 认证/OSS 工厂+锁 key/通知常量/collectFieldErrors/createOrder 批量/薪资规则查询，`06ecc62`→`f4b6ab7`），Codex 复核 PASS，1272 单测全绿；交付 `docs/架构体检报告-2026-07-09.md`（含行为缺口 A1-A7、结构债清单、已验证路线图、不做清单）；DECISIONS 记录去重边界决策。
