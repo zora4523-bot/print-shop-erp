@@ -193,7 +193,10 @@ export async function settleReadyCsPeriodsAction(): Promise<SettleReadyCsResult>
       errors,
     };
   } catch (err) {
-    if (err instanceof Error) {
+    // Only the known business error is a safe UI message; anything else
+    // (Prisma, etc.) rethrows to onRequestError → Sentry rather than
+    // being swallowed into a toast that hides the fault from monitoring.
+    if (err instanceof CsPeriodError) {
       return { status: 'error', message: err.message };
     }
     throw err;

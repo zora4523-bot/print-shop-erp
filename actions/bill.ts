@@ -63,7 +63,9 @@ export async function generateBillsAction(
   } catch (err) {
     const mapped = mapBillError(err);
     if (mapped) return mapped;
-    if (err instanceof Error) return { status: 'error', message: err.message };
+    // Unknown error (Prisma, etc.) — rethrow so it reaches Next's
+    // onRequestError → Sentry instead of leaking its message to the UI
+    // as a graceful toast (matches issueBillAction / production.ts).
     throw err;
   }
 }

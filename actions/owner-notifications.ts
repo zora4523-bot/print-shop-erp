@@ -86,10 +86,9 @@ export async function createChannelAction(
   } catch (err) {
     const mapped = mapPrismaError(err);
     if (mapped) return mapped;
-    return {
-      status: 'error',
-      message: err instanceof Error ? err.message : '创建失败',
-    };
+    // Unknown error — rethrow to onRequestError → Sentry rather than
+    // swallowing it into a toast (hides real faults from monitoring).
+    throw err;
   }
 
   revalidatePath('/owner/notifications');
@@ -118,10 +117,10 @@ export async function updateChannelAction(
   try {
     await updateChannel(channelId, parsed.data);
   } catch (err) {
-    return {
-      status: 'error',
-      message: err instanceof Error ? err.message : '保存失败',
-    };
+    const mapped = mapPrismaError(err);
+    if (mapped) return mapped;
+    // Unknown error — rethrow to onRequestError → Sentry.
+    throw err;
   }
 
   revalidatePath('/owner/notifications');
@@ -153,10 +152,8 @@ export async function deleteChannelAction(
         message: '该群有历史推送日志，无法删除。请改为停用（isActive=false）。',
       };
     }
-    return {
-      status: 'error',
-      message: err instanceof Error ? err.message : '删除失败',
-    };
+    // Unknown error — rethrow to onRequestError → Sentry.
+    throw err;
   }
   revalidatePath('/owner/notifications');
   return { status: 'success' };
@@ -232,10 +229,8 @@ export async function updateRuleAction(
         message: `事件 ${err.eventType} 不存在或已下线`,
       };
     }
-    return {
-      status: 'error',
-      message: err instanceof Error ? err.message : '保存失败',
-    };
+    // Unknown error — rethrow to onRequestError → Sentry.
+    throw err;
   }
 
   revalidatePath('/owner/notifications');

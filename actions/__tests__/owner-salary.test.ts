@@ -435,13 +435,22 @@ describe('settleReadyCsPeriodsAction', () => {
     }
   });
 
-  it('maps scan-level errors to { status: error }', async () => {
+  it('maps a known CsPeriodError to { status: error }', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     csMock.settleReadyCsPeriods.mockRejectedValueOnce(
-      new Error('db down'),
+      new MockCsPeriodError('结算冲突'),
     );
     const r = await settleReadyCsPeriodsAction();
     expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toBe('结算冲突');
+  });
+
+  it('rethrows an unknown error instead of swallowing it into a toast (→ Sentry)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    csMock.settleReadyCsPeriods.mockRejectedValueOnce(new Error('db down'));
+    // Unknown errors must bubble to Next onRequestError → Sentry, not be
+    // returned as a graceful { status: 'error' } that hides the fault.
+    await expect(settleReadyCsPeriodsAction()).rejects.toThrow('db down');
   });
 });
 
