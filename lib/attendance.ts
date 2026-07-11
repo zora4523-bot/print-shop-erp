@@ -22,6 +22,31 @@ export const HOURLY_WORKER_TYPES = [
   WorkerType.COOK,
 ] as const;
 
+export type HourlyWorkerOption = {
+  id: string;
+  displayName: string;
+  workerType: WorkerType;
+  username: string;
+};
+
+// Active hourly workers (PACKER / CLEANER / COOK) for the attendance
+// page's worker picker. Kept in lib/ so the page never touches Prisma
+// directly (CLAUDE.md §3). The `in` filter guarantees a non-null
+// workerType; Prisma's generated type can't narrow through the filter,
+// so we assert the narrowed shape here once.
+export async function listActiveHourlyWorkers(): Promise<HourlyWorkerOption[]> {
+  const rows = await db.user.findMany({
+    where: {
+      role: Role.WORKER,
+      isActive: true,
+      workerType: { in: [...HOURLY_WORKER_TYPES] },
+    },
+    orderBy: [{ workerType: 'asc' }, { displayName: 'asc' }],
+    select: { id: true, displayName: true, workerType: true, username: true },
+  });
+  return rows as HourlyWorkerOption[];
+}
+
 export type RecordAttendanceInput = {
   normalHours: string | number | Decimal;
   otHours: string | number | Decimal;

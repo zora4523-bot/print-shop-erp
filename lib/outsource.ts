@@ -176,6 +176,28 @@ export async function listOutsourceOrders(
   });
 }
 
+// Order + items for the "创建外协单" form (checkbox list of items).
+// Foreman sees everything, so no scope filter — but the read lives in
+// lib/ so the page never touches Prisma directly (CLAUDE.md §3).
+export async function getOrderForOutsourceForm(orderId: string) {
+  return db.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNo: true,
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          name: true,
+          quantity: true,
+        },
+      },
+    },
+  });
+}
+
 export async function getOutsourceOrderDetail(id: string) {
   return db.outsourceOrder.findUnique({
     where: { id },

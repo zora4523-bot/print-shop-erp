@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
-import { db } from '@/lib/db';
+import { getOrderForOutsourceForm } from '@/lib/outsource';
 import { CreateOutsourceForm } from '@/components/business/outsource/CreateOutsourceForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = {
   searchParams: Promise<{ orderId?: string }>;
@@ -9,28 +10,16 @@ type PageProps = {
 export const metadata = { title: '创建外协单' };
 
 export default async function NewOutsourcePage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('outsource:manage');
   const { orderId } = await searchParams;
   if (!orderId) notFound();
 
   // Foreman layout already gates the role. We fetch the order + items
   // directly (no scope filter needed — foreman sees everything) so
   // the form can list items as checkboxes.
-  const order = await db.order.findUnique({
-    where: { id: orderId },
-    select: {
-      id: true,
-      orderNo: true,
-      items: {
-        orderBy: { sequence: 'asc' },
-        select: {
-          id: true,
-          sequence: true,
-          name: true,
-          quantity: true,
-        },
-      },
-    },
-  });
+  const order = await getOrderForOutsourceForm(orderId);
   if (!order) notFound();
 
   return (

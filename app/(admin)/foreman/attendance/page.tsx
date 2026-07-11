@@ -1,14 +1,18 @@
 import Link from 'next/link';
 import { Users } from 'lucide-react';
-import { db } from '@/lib/db';
-import { Role, WorkerType } from '@/generated/prisma/enums';
-import { listMonthlyAttendance, parseShanghaiMonth } from '@/lib/attendance';
+import { WorkerType } from '@/generated/prisma/enums';
+import {
+  listActiveHourlyWorkers,
+  listMonthlyAttendance,
+  parseShanghaiMonth,
+} from '@/lib/attendance';
 import { getActiveWorkHours } from '@/lib/salary/rules';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '时薪工考勤' };
 
@@ -61,31 +65,20 @@ function computeFullDayNormalHours(rule: {
 }
 
 export default async function ForemanAttendancePage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  // TODO(tech-debt): reuses 'task:assign' because there is no dedicated
+  // attendance permission (its role set [OWNER, FOREMAN] matches the
+  // attendance write action). If attendance ever needs finer control,
+  // add attendance:read / attendance:write and update the permission
+  // matrix, menu, pages, actions and tests together.
+  await requirePermission('task:assign');
   const sp = await searchParams;
   const selectedMonth =
     sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();
 
   // Selected worker drives the calendar view. Default: first hourly worker.
-  const rawHourlyWorkers = await db.user.findMany({
-    where: {
-      role: Role.WORKER,
-      isActive: true,
-      workerType: {
-        in: [WorkerType.PACKER, WorkerType.CLEANER, WorkerType.COOK],
-      },
-    },
-    orderBy: [{ workerType: 'asc' }, { displayName: 'asc' }],
-    select: { id: true, displayName: true, workerType: true, username: true },
-  });
-  // workerType is nullable at the schema level; the `in` filter above
-  // guarantees non-null but TS's narrowing doesn't see through Prisma
-  // filters. Cast once here so downstream props stay cleanly typed.
-  const hourlyWorkers = rawHourlyWorkers as Array<{
-    id: string;
-    displayName: string;
-    workerType: WorkerType;
-    username: string;
-  }>;
+  const hourlyWorkers = await listActiveHourlyWorkers();
 
   const selectedWorkerId = sp.workerId ?? hourlyWorkers[0]?.id ?? null;
   const selectedWorker = selectedWorkerId
