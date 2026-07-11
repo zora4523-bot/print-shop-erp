@@ -617,6 +617,47 @@ describe('beginTask', () => {
     );
   });
 
+  it('refuses to begin a task cancelled with its order (A1)', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({ status: TaskStatus.CANCELLED }),
+    );
+    await expect(beginTask('task-1', workerActor)).rejects.toThrow(
+      /已随工单取消，不能开工/,
+    );
+    // No status write happens for a voided task.
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('serializes the task write on the per-ORDER cascade lock — the same key cancelOrder holds (A1 race guard)', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(fixtureTask());
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.IN_PROGRESS,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+    });
+
+    await beginTask('task-1', workerActor);
+
+    // The FIRST advisory lock taken is the order-cascade key (shared with
+    // cancelOrder), NOT the per-task key — this is what serializes 开工
+    // against a concurrent 取消 and prevents the resurrection/half-cancel.
+    const firstLockValue = dbMock.$executeRaw.mock.calls[0][1];
+    expect(firstLockValue).toBe('print-shop-erp:order-cascade:order-1');
+
+    // And it is acquired BEFORE the task status is written.
+    const lockCallOrder = dbMock.$executeRaw.mock.invocationCallOrder[0];
+    const taskUpdateOrder =
+      dbMock.productionTask.update.mock.invocationCallOrder[0];
+    expect(lockCallOrder).toBeLessThan(taskUpdateOrder);
+  });
+
   it('OWNER global override starts someone else\'s task', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(
       fixtureTask({ workerId: 'worker-OTHER' }),
@@ -769,6 +810,18 @@ describe('reportTask', () => {
     await expect(
       reportTask('task-1', validInput, workerActor),
     ).rejects.toThrow(/不支持计件报工/);
+  });
+
+  it('refuses to report a task cancelled with its order — no piecework computed (A1)', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({ status: TaskStatus.CANCELLED }),
+    );
+    await expect(
+      reportTask('task-1', validInput, workerActor),
+    ).rejects.toThrow(/已随工单取消，不能报工/);
+    // Guarded before any rule lookup or piecework write.
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
   });
 
   it('refuses to report when no active SalaryRule exists for the machineType', async () => {

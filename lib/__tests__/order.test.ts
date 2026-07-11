@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderStatus, PartyType, Role } from '../../generated/prisma/client';
+import { OrderStatus, PartyType, Role, TaskStatus } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -13,6 +13,11 @@ const { dbMock } = vi.hoisted(() => {
     craft: { findMany: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
     party: { findUnique: ReturnType<typeof vi.fn> };
+    productionTask: {
+      findMany: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
+    outsourceOrder: { findMany: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -27,6 +32,8 @@ const { dbMock } = vi.hoisted(() => {
     craft: { findMany: vi.fn() },
     product: { findMany: vi.fn() },
     party: { findUnique: vi.fn() },
+    productionTask: { findMany: vi.fn(), update: vi.fn() },
+    outsourceOrder: { findMany: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
@@ -93,6 +100,11 @@ beforeEach(() => {
   dbMock.craft.findMany.mockReset();
   dbMock.product.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
+  // Default: order has no production tasks (cancelOrder cascade reads []).
+  dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionTask.update.mockReset().mockResolvedValue({});
+  // Default: order has no in-flight outsource orders.
+  dbMock.outsourceOrder.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
@@ -553,6 +565,155 @@ describe('cancelOrder', () => {
     await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
       InvalidOrderTransitionError,
     );
+  });
+
+  // ── A1 (DECISIONS 2026-07-09): cancel cascades to ProductionTask ──
+
+  it('voids every PENDING task to CANCELLED in the same cancel tx', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 't1', status: TaskStatus.PENDING },
+      { id: 't2', status: TaskStatus.PENDING },
+    ]);
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+
+    const r = await cancelOrder('o1', ownerActor, '客户取消');
+    expect(r.status).toBe(OrderStatus.CANCELLED);
+
+    // Each PENDING task written to CANCELLED.
+    const updated = dbMock.productionTask.update.mock.calls.map((c) => ({
+      id: c[0].where.id,
+      status: c[0].data.status,
+    }));
+    expect(updated).toEqual([
+      { id: 't1', status: TaskStatus.CANCELLED },
+      { id: 't2', status: TaskStatus.CANCELLED },
+    ]);
+
+    // An audit log records how many tasks were voided.
+    const remarks = dbMock.orderLog.create.mock.calls.map((c) => c[0].data.remark);
+    expect(remarks).toContain('随工单取消 2 个未开工任务');
+  });
+
+  it('blocks cancel when a task is already IN_PROGRESS — writes nothing (no half-cancel)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 't1', status: TaskStatus.IN_PROGRESS },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+      OrderInvariantError,
+    );
+    await expect(cancelOrder('o1', ownerActor, null)).rejects.toThrow(
+      /已开工\/已报工任务/,
+    );
+    // Cascade throws BEFORE the order row or any task is written.
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks cancel when a task is already COMPLETED — no cascade, no order write', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 't1', status: TaskStatus.COMPLETED },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+      OrderInvariantError,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks cancel when a linked outsource order is SENT/IN_PROGRESS (A1-A2) — no writes', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    // Tasks are all PENDING (task check passes); the outsource order is
+    // what blocks the cancel.
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 't1', status: TaskStatus.PENDING },
+    ]);
+    dbMock.outsourceOrder.findMany.mockResolvedValue([{ id: 'os1' }]);
+
+    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+      OrderInvariantError,
+    );
+    await expect(cancelOrder('o1', ownerActor, null)).rejects.toThrow(
+      /已发送或进行中的外协单/,
+    );
+    // We do NOT auto-cancel the outsource order, void the PENDING task,
+    // or cancel the order — the operator must handle outsource first.
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('cancels normally when linked outsource orders are only RECEIVED/CANCELLED (A1-A2)', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    // The status:{ in: [SENT, IN_PROGRESS] } filter means RECEIVED /
+    // CANCELLED outsource orders never come back from this query.
+    dbMock.outsourceOrder.findMany.mockResolvedValue([]);
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+
+    const r = await cancelOrder('o1', ownerActor, null);
+    expect(r.status).toBe(OrderStatus.CANCELLED);
+    // The block query filters to in-flight statuses only.
+    const where = dbMock.outsourceOrder.findMany.mock.calls[0][0].where;
+    expect(where.status.in).toEqual(['SENT', 'IN_PROGRESS']);
+  });
+
+  it('voids only PENDING tasks, leaving already-CANCELLED siblings untouched', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 't1', status: TaskStatus.PENDING },
+      { id: 't2', status: TaskStatus.CANCELLED },
+    ]);
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+
+    await cancelOrder('o1', ownerActor, null);
+    // Only t1 is written; t2 (already CANCELLED) is left alone.
+    expect(dbMock.productionTask.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.productionTask.update.mock.calls[0][0].where.id).toBe('t1');
+  });
+
+  it('cancels a task-free order (DRAFT) with no cascade writes', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
+
+    const r = await cancelOrder('o1', ownerActor, null);
+    expect(r.status).toBe(OrderStatus.CANCELLED);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+    // Only the status-change log; no task-cascade log.
+    const remarks = dbMock.orderLog.create.mock.calls.map((c) => c[0].data.remark);
+    expect(remarks).toEqual(['取消工单']);
   });
 });
 

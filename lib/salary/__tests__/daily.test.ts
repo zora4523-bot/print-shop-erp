@@ -204,6 +204,16 @@ describe('computeDailyWorkerSalary', () => {
     );
   });
 
+  it('payroll counts only COMPLETED tasks — CANCELLED tasks never enter wages (A1)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+    const where = dbMock.productionTask.findMany.mock.calls[0][0].where;
+    // The status filter is the structural guard: a task voided with its
+    // order (CANCELLED) can never match this query, so it can't be paid.
+    expect(where.status).toBe('COMPLETED');
+  });
+
   it('recompute: update path does not write isPaid (finance ledger protected)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([

@@ -380,10 +380,14 @@ type TaskTxClient = {
   };
 };
 
-// Per-task advisory lock — serializes begin/report on the same task.
-// The order-level lock is orderCascadeLockKey (lib/order/locks.ts):
-// scheduling and the worker-report cascade both take it, so ALL
-// Order.status writers serialize against each other on one key.
+// Per-task advisory lock — serializes concurrent reports on the SAME
+// task (double-submit guard). Note beginTask and cancelOrder both write
+// ProductionTask.status under orderCascadeLockKey (lib/order/locks.ts),
+// NOT this key: any task-status write that a cancel must serialize
+// against goes through the per-order lock. reportTask only ever acts on
+// an already-IN_PROGRESS task, and cancelOrder refuses to cancel an
+// order that has an IN_PROGRESS task — so a report can never race a
+// cancel, and this per-task lock is enough for the double-submit case.
 function taskLockKey(taskId: string): string {
   return `print-shop-erp:task:${taskId}`;
 }
@@ -406,8 +410,29 @@ export async function beginTask(
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TaskTxClient;
 
-    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(taskId)}))`;
+    // Pre-read (unlocked) just to learn the orderId. EVERY
+    // ProductionTask.status write for an order must serialize on the
+    // per-ORDER cascade lock — the SAME key cancelOrder holds (A1).
+    // beginTask used to write the task under a per-TASK lock only, which
+    // shared no lock with cancelOrder's cascade: a concurrent 开工/取消
+    // could resurrect a just-voided PENDING task to IN_PROGRESS and
+    // leave it on a CANCELLED order (→ reported → paid). Taking the
+    // order lock BEFORE any task write closes that race (and avoids the
+    // lock-ordering deadlock the per-task-lock-then-order-lock sequence
+    // created against cancelOrder).
+    const pre = await txClient.productionTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, orderItem: { select: { orderId: true } } },
+    });
+    if (!pre) throw new ReportError('任务不存在');
 
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      pre.orderItem.orderId,
+    )}))`;
+
+    // Fresh read INSIDE the lock — the pre-read can be stale: a
+    // concurrent cancelOrder holding this same lock may have just voided
+    // the task, and it committed before we acquired the lock.
     const task = await txClient.productionTask.findUnique({
       where: { id: taskId },
       select: {
@@ -436,6 +461,14 @@ export async function beginTask(
       throw new ReportError('只能开始分配给自己的任务');
     }
 
+    // Cancelled with its order (A1). Checked on the FRESH (in-lock) read,
+    // so a cancel that committed just before we got the lock is seen. The
+    // status machine below would also reject CANCELLED → IN_PROGRESS
+    // (terminal); this surfaces a clear business message instead.
+    if (task.status === TaskStatus.CANCELLED) {
+      throw new ReportError('该任务已随工单取消，不能开工');
+    }
+
     // Idempotent: same worker restarting their own already-started
     // task is a no-op. We intentionally don't advance startedAt here
     // since the first-begin timestamp is the audit-useful one.
@@ -455,30 +488,20 @@ export async function beginTask(
       select: { id: true, status: true },
     });
 
-    // Cascade Order SCHEDULING → IN_PRODUCTION on first task pickup.
-    // SPEC §3.2 implies this transition when production actually
-    // starts. Guard with a second advisory lock so two workers
-    // clicking "开始" simultaneously on two different tasks of the
-    // same order don't both try to transition.
+    // Cascade Order SCHEDULING → IN_PRODUCTION on first task pickup
+    // (SPEC §3.2). We already hold orderCascadeLock from the top, so a
+    // sibling beginTask can't interleave; re-read the order fresh for the
+    // status-machine guard.
     let orderStatusChanged = false;
     const { order } = task.orderItem;
     if (order.status === OrderStatus.SCHEDULING) {
-      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-        order.id,
-      )}))`;
-      // Re-read INSIDE the lock. The snapshot from the initial task
-      // fetch can be stale by the time we get here — a concurrent
-      // beginTask on a sibling task may have already transitioned the
-      // order, and the status-machine would then throw a spurious
-      // error when we try to re-run the same transition .
       const fresh = await txClient.order.findUnique({
         where: { id: order.id },
         select: { id: true, status: true },
       });
       if (!fresh) throw new ReportError('工单不存在');
       if (fresh.status !== OrderStatus.SCHEDULING) {
-        // Another worker's beginTask already moved the order. Nothing
-        // for us to do on the cascade side.
+        // A sibling beginTask already moved the order. Nothing to do.
         return {
           taskId: task.id,
           status: TaskStatus.IN_PROGRESS,
@@ -571,6 +594,13 @@ export async function reportTask(
     const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
     if (!globalOverride && task.workerId !== actor.id) {
       throw new ReportError('只能报工分配给自己的任务');
+    }
+
+    // Cancelled with its order (A1). The status machine below would also
+    // reject CANCELLED → COMPLETED (terminal); clearer message here means
+    // no piecework is ever computed or written for a voided task.
+    if (task.status === TaskStatus.CANCELLED) {
+      throw new ReportError('该任务已随工单取消，不能报工');
     }
 
     if (!task.machineType) {
