@@ -556,36 +556,66 @@ export async function markCsCommissionPaid(
   isPaid: boolean,
   now: Date = new Date(),
 ): Promise<{ id: string; isFullyPaid: boolean }> {
-  const existing = await db.customerServiceCommission.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      monthlyBaseTotal: true,
-      commissionAmount: true,
-    },
-  });
-  if (!existing) throw new CsPeriodError('提成记录不存在');
+  // Finance-of-record write (CLAUDE.md §4.4). Wrap in a tx + the same
+  // per-cs-user advisory lock settleCsPeriod / accumulate hold, so this
+  // paid-state write serializes with a settle for the same CS user —
+  // matching markDailySalaryPaid / markHourlyPayrollPaid, whose lock
+  // guards a paid row against a concurrent recompute.
+  //
+  // Note: the commission's amounts are write-once today (settleCsPeriod
+  // creates the row once — salaryPeriodId is @unique and SETTLED is a
+  // terminal status — and nothing else rewrites monthlyBaseTotal /
+  // commissionAmount). So this closes the structural asymmetry the two
+  // siblings already have and future-proofs any later amend/re-settle
+  // path, rather than fixing a currently-reproducible race.
+  return db.$transaction(async (tx) => {
+    const existing = await tx.customerServiceCommission.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        csUserId: true,
+        monthlyBaseTotal: true,
+        commissionAmount: true,
+      },
+    });
+    if (!existing) throw new CsPeriodError('提成记录不存在');
 
-  const updated = await db.customerServiceCommission.update({
-    where: { id },
-    data: {
-      isFullyPaid: isPaid,
-      paidBase: isPaid
-        ? (existing.monthlyBaseTotal as unknown as string)
-        : '0',
-      paidCommission: isPaid
-        ? (existing.commissionAmount as unknown as string)
-        : '0',
-      paidAt: isPaid ? now : null,
-    },
-    select: { id: true, isFullyPaid: true },
+    // csUserId is immutable, so reading it before the lock is safe.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+      existing.csUserId,
+    )}))`;
+
+    const updated = await tx.customerServiceCommission.update({
+      where: { id },
+      data: {
+        isFullyPaid: isPaid,
+        paidBase: isPaid
+          ? (existing.monthlyBaseTotal as unknown as string)
+          : '0',
+        paidCommission: isPaid
+          ? (existing.commissionAmount as unknown as string)
+          : '0',
+        paidAt: isPaid ? now : null,
+      },
+      select: { id: true, isFullyPaid: true },
+    });
+    return updated;
   });
-  return updated;
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Reads for the UI
 // ─────────────────────────────────────────────────────────────────────
+
+// Active 客服 accounts for the "新建客服周期" form picker. Kept in lib/
+// so the page never imports Prisma directly (CLAUDE.md §3).
+export async function listActiveCsUsers() {
+  return db.user.findMany({
+    where: { role: Role.CUSTOMER_SERVICE, isActive: true },
+    orderBy: { displayName: 'asc' },
+    select: { id: true, displayName: true, username: true },
+  });
+}
 
 export async function listCsPeriods(filter: {
   csUserId?: string;

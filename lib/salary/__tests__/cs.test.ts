@@ -506,6 +506,7 @@ describe('settleReadyCsPeriods', () => {
 describe('markCsCommissionPaid', () => {
   const commFixture = {
     id: 'comm-1',
+    csUserId: 'cs-7',
     monthlyBaseTotal: '8000.00',
     commissionAmount: '33000.00',
   };
@@ -523,6 +524,24 @@ describe('markCsCommissionPaid', () => {
     expect(data.paidBase).toBe('8000.00');
     expect(data.paidCommission).toBe('33000.00');
     expect(data.paidAt).toBe(now);
+  });
+
+  it('serializes on the per-cs-user advisory lock — same key as settle (A5)', async () => {
+    dbMock.customerServiceCommission.findUnique.mockResolvedValue(commFixture);
+    dbMock.customerServiceCommission.update.mockResolvedValue({
+      id: 'comm-1',
+      isFullyPaid: true,
+    });
+    await markCsCommissionPaid('comm-1', true);
+    // The paid write takes the cs-user lock so it can't run concurrently
+    // with a settle/accumulate for the same CS user.
+    const lockValue = dbMock.$executeRaw.mock.calls[0][1];
+    expect(lockValue).toBe('print-shop-erp:cs-user:cs-7');
+    // And the lock is acquired before the update is written.
+    const lockOrder = dbMock.$executeRaw.mock.invocationCallOrder[0];
+    const updateOrder =
+      dbMock.customerServiceCommission.update.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(updateOrder);
   });
 
   it('un-pay clears the counters + paidAt', async () => {
