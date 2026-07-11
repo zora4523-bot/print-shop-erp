@@ -2,12 +2,16 @@ import Link from 'next/link';
 import { createProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
 import { listProductCategoryOptions } from '@/lib/product';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '新建产品 · 红包印刷 ERP',
 };
 
 export default async function NewProductPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:product:manage');
   const categoryNodes = await listProductCategoryOptions();
 
   return (

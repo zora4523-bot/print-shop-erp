@@ -3,6 +3,7 @@ import { getSchedulingView } from '@/lib/production';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { SchedulingForm } from '@/components/business/production/SchedulingForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -12,6 +13,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function SchedulingDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('order:schedule');
   const { id } = await params;
   const view = await getSchedulingView(id);
   if (!view) {

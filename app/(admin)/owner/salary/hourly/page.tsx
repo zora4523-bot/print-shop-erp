@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   EmptyState,
   PageHeader,
@@ -31,6 +32,9 @@ function currentShanghaiMonth(): string {
 }
 
 export default async function HourlySalaryPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const sp = await searchParams;
   const selectedMonth =
     sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();

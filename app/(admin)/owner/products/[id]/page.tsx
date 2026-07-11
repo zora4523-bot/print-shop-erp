@@ -3,6 +3,7 @@ import { getProductSummary, listProductCategoryOptions } from '@/lib/product';
 import { updateProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -13,6 +14,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditProductPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:product:manage');
   const { id } = await params;
   const product = await getProductSummary(id);
   if (!product) notFound();

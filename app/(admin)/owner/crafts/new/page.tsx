@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { createCraftAction } from '@/actions/owner-crafts';
 import { CraftForm } from '@/components/business/craft/CraftForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '新建工艺 · 红包印刷 ERP',
 };
 
-export default function NewCraftPage() {
+export default async function NewCraftPage() {
+  // Page-level server-side authz (defense-in-depth; the create action
+  // also re-checks). Layout gate doesn't re-run on soft navigation.
+  await requirePermission('dict:craft:manage');
   return (
     <div className="space-y-4">
       <div>

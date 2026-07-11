@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -21,6 +22,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function OwnerBillDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('bill:view:all');
   const { id } = await params;
   const bill = await getBillDetail(id);
   if (!bill) notFound();

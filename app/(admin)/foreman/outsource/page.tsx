@@ -4,6 +4,7 @@ import { OutsourceStatus } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '外协单' };
 
@@ -15,6 +16,9 @@ const STATUS_LABELS: Record<OutsourceStatus, string> = {
 };
 
 export default async function OutsourceListPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('outsource:manage');
   const rows = await listOutsourceOrders();
 
   return (

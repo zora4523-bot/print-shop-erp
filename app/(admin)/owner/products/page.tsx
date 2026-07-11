@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { listProducts } from '@/lib/product';
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { PageHeader } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '产品字典 · 红包印刷 ERP',
@@ -21,6 +22,9 @@ function firstParam(v: string | string[] | undefined): string {
 }
 
 export default async function ProductsListPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:product:manage');
   const sp = await searchParams;
   const q = firstParam(sp.q).trim();
   const products = await listProducts({ q });

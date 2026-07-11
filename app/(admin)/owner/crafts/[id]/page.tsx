@@ -3,6 +3,7 @@ import { getCraftSummary } from '@/lib/craft';
 import { updateCraftAction } from '@/actions/owner-crafts';
 import { CraftForm } from '@/components/business/craft/CraftForm';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -17,6 +18,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditCraftPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:craft:manage');
   const { id } = await params;
   const craft = await getCraftSummary(id);
   if (!craft) notFound();

@@ -3,12 +3,16 @@ import { buttonVariants } from '@/components/ui/button';
 import { listCrafts } from '@/lib/craft';
 import { CraftsTable } from '@/components/business/craft/CraftsTable';
 import { PageHeader } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '工艺字典 · 红包印刷 ERP',
 };
 
 export default async function CraftsListPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:craft:manage');
   const crafts = await listCrafts();
 
   return (

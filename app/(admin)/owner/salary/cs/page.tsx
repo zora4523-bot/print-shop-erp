@@ -7,6 +7,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '客服周期与提成' };
 
@@ -15,6 +16,9 @@ type PageProps = {
 };
 
 export default async function CsSalaryListPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const sp = await searchParams;
   const status =
     sp.status === 'IN_PROGRESS'

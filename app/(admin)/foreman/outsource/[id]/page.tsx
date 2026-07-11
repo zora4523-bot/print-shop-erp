@@ -6,6 +6,7 @@ import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import { Badge } from '@/components/ui/badge';
 import { OutsourceActions } from '@/components/business/outsource/OutsourceActions';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function OutsourceDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('outsource:manage');
   const { id } = await params;
   const row = await getOutsourceOrderDetail(id);
   if (!row) notFound();

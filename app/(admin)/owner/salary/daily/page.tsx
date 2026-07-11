@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   EmptyState,
   PageHeader,
@@ -38,6 +39,9 @@ function todayShanghai(): string {
 }
 
 export default async function DailySalaryPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const sp = await searchParams;
   // Strict calendar validation on the filter path: `?date=2026-02-31`
   // must not silently normalize to March 3 .

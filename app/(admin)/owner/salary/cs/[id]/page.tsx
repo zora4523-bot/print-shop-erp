@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { MarkCsPaidForm } from '@/components/business/salary/MarkCsPaidForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -15,6 +16,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function CsPeriodDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const { id } = await params;
   const period = await getCsPeriodDetail(id);
   if (!period) notFound();

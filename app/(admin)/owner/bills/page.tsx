@@ -10,6 +10,7 @@ import {
 import { buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   BILL_STATUS_TO_BADGE,
   EmptyState,
@@ -56,6 +57,9 @@ function isBillStatus(s: string | undefined): s is BillStatus {
 }
 
 export default async function OwnerBillsPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('bill:view:all');
   const sp = await searchParams;
   const currentMonth = currentMonthShanghai();
 

@@ -4,6 +4,7 @@ import { updateUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
 import { ResetPasswordForm } from '@/components/business/account/ResetPasswordForm';
 import { ToggleActiveButton } from '@/components/business/account/ToggleActiveButton';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -18,6 +19,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditAccountPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('account:manage');
   const { id } = await params;
   const account = await getUserSummary(id);
   if (!account) notFound();

@@ -3,10 +3,14 @@ import { Calculator, CalendarClock, Clock } from 'lucide-react';
 import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '薪资总览' };
 
 export default async function SalaryIndexPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const s = await getSalaryIndexSummary();
 
   return (

@@ -6,10 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '待排产工单' };
 
 export default async function SchedulingListPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('order:schedule');
   const orders = await listPendingSchedulingOrders();
 
   return (

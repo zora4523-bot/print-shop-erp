@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { createUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '新建账号 · 红包印刷 ERP',
 };
 
-export default function NewAccountPage() {
+export default async function NewAccountPage() {
+  // Page-level server-side authz (defense-in-depth; the create action
+  // also re-checks). Layout gate doesn't re-run on soft navigation.
+  await requirePermission('account:manage');
   return (
     <div className="space-y-4">
       <div>
