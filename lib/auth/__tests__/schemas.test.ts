@@ -15,6 +15,14 @@ import {
   updateCraftSchema,
   createProductSchema,
   createPartySchema,
+  updatePartySchema,
+  createMaterialSchema,
+  updateMaterialSchema,
+  createWarehouseSchema,
+  createWarehouseLocationSchema,
+  createStockTransferSchema,
+  postInventoryCountSchema,
+  materialStockTransactionSchema,
   createPurchaseOrderSchema,
   createPurchaseReceiptSchema,
   updateProductSchema,
@@ -417,6 +425,12 @@ describe('createCraftSchema', () => {
   });
 
   describe('code', () => {
+    it('normalizes a blank create code to null for automatic generation', () => {
+      const r = createCraftSchema.safeParse({ ...validCraft, code: '' });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.code).toBeNull();
+    });
+
     it('rejects lowercase', () => {
       const r = createCraftSchema.safeParse({ ...validCraft, code: 'flat_foil_single' });
       expect(r.success).toBe(false);
@@ -526,6 +540,12 @@ describe('updateCraftSchema', () => {
   it('reuses the code / name regex', () => {
     const r = updateCraftSchema.safeParse({ ...validUpdate, code: 'bad-code' });
     expect(r.success).toBe(false);
+  });
+
+  it('still requires the stable code when editing', () => {
+    expect(updateCraftSchema.safeParse({ ...validUpdate, code: '' }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -738,6 +758,12 @@ const validParty = {
 };
 
 describe('createPartySchema', () => {
+  it('normalizes a blank create code to null for automatic generation', () => {
+    const r = createPartySchema.safeParse({ ...validParty, code: '' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.code).toBeNull();
+  });
+
   it('accepts a customer party and normalizes blank optional fields to null', () => {
     const r = createPartySchema.safeParse(validParty);
     expect(r.success).toBe(true);
@@ -763,6 +789,50 @@ describe('createPartySchema', () => {
   it('rejects an empty name after trim', () => {
     const r = createPartySchema.safeParse({ ...validParty, name: '   ' });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('updatePartySchema', () => {
+  it('keeps code required for existing master data', () => {
+    expect(updatePartySchema.safeParse({ ...validParty, code: '' }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('auto-generated master-data code schemas', () => {
+  const material = {
+    code: '',
+    name: 'A4 白卡纸',
+    category: 'PAPER',
+    specification: '',
+    unit: '张',
+    safetyStock: '',
+    averageCost: '',
+  };
+
+  it('accepts blank codes on material, warehouse, and location creation', () => {
+    const materialResult = createMaterialSchema.safeParse(material);
+    const warehouseResult = createWarehouseSchema.safeParse({
+      code: '',
+      name: '一号仓',
+    });
+    const locationResult = createWarehouseLocationSchema.safeParse({
+      warehouseId: 'wh1',
+      code: '',
+      name: 'A01',
+    });
+
+    expect(materialResult.success).toBe(true);
+    expect(warehouseResult.success).toBe(true);
+    expect(locationResult.success).toBe(true);
+    if (materialResult.success) expect(materialResult.data.code).toBeNull();
+    if (warehouseResult.success) expect(warehouseResult.data.code).toBeNull();
+    if (locationResult.success) expect(locationResult.data.code).toBeNull();
+  });
+
+  it('keeps material code required on edit', () => {
+    expect(updateMaterialSchema.safeParse(material).success).toBe(false);
   });
 });
 
@@ -813,6 +883,7 @@ describe('createPurchaseOrderSchema', () => {
 describe('createPurchaseReceiptSchema', () => {
   it('accepts a receipt quantity and optional unit cost', () => {
     const r = createPurchaseReceiptSchema.safeParse({
+      idempotencyKey: '00000000-0000-4000-8000-000000000001',
       purchaseOrderItemId: 'poi_1',
       quantity: '3.50',
       unitCost: '',
@@ -823,5 +894,80 @@ describe('createPurchaseReceiptSchema', () => {
       expect(r.data.unitCost).toBeNull();
       expect(r.data.remark).toBe('到货一部分');
     }
+  });
+});
+
+describe('warehouse operation schemas', () => {
+  const idempotencyKey = '00000000-0000-4000-8000-000000000001';
+
+  it('accepts a positive stock transfer and rejects zero quantity', () => {
+    const valid = {
+      idempotencyKey,
+      materialId: 'mat_1',
+      sourceLocationId: 'loc_a',
+      destinationLocationId: 'loc_b',
+      quantity: '1.25',
+      remark: '',
+    };
+    expect(createStockTransferSchema.safeParse(valid).success).toBe(true);
+    expect(
+      createStockTransferSchema.safeParse({ ...valid, quantity: '0' }).success,
+    ).toBe(false);
+  });
+
+  it('accepts zero as a real inventory count and requires at least one item', () => {
+    const valid = {
+      idempotencyKey,
+      remark: '',
+      items: [
+        { materialId: 'mat_1', locationId: 'loc_a', countedQuantity: '0' },
+      ],
+    };
+    expect(postInventoryCountSchema.safeParse(valid).success).toBe(true);
+    expect(
+      postInventoryCountSchema.safeParse({ ...valid, items: [] }).success,
+    ).toBe(false);
+  });
+});
+
+describe('materialStockTransactionSchema', () => {
+  const base = {
+    materialId: 'mat_1',
+    locationId: '',
+    direction: 'IN',
+    quantity: '1.00',
+    unitCost: '',
+    remark: '',
+  };
+
+  it('rejects purchase and inventory-count reasons on the manual endpoint', () => {
+    for (const reasonType of ['PURCHASE', 'PURCHASE_RECEIPT', 'ADJUSTMENT']) {
+      expect(
+        materialStockTransactionSchema.safeParse({ ...base, reasonType }).success,
+        reasonType,
+      ).toBe(false);
+    }
+  });
+
+  it('enforces the relationship between movement direction and reason', () => {
+    expect(
+      materialStockTransactionSchema.safeParse({
+        ...base,
+        reasonType: 'RETURN',
+      }).success,
+    ).toBe(true);
+    expect(
+      materialStockTransactionSchema.safeParse({
+        ...base,
+        reasonType: 'PRODUCTION_USE',
+      }).success,
+    ).toBe(false);
+    expect(
+      materialStockTransactionSchema.safeParse({
+        ...base,
+        direction: 'OUT',
+        reasonType: 'PRODUCTION_USE',
+      }).success,
+    ).toBe(true);
   });
 });

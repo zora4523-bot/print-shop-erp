@@ -67,7 +67,7 @@ export default async function OwnerPurchasesPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="采购单"
-        subtitle="记录供应商采购、分批入库和入库取消；所有库存变化都会写入物料流水。"
+        subtitle="采购单记录订购承诺，到货后可分批收货过账；只有收货过账才会改变库存。"
         actions={
           <Link href="/owner/purchases/new" className={buttonVariants()}>
             新建采购单

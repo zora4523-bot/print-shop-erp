@@ -35,7 +35,7 @@ describe('listInventoryCountMaterials', () => {
             id: 'stock1',
             currentStock: { toString: () => '80.00' },
             warehouse: { code: 'DEFAULT', name: '默认仓库' },
-            location: { code: 'DEFAULT', name: '默认库位' },
+            location: { id: 'loc-default', code: 'DEFAULT', name: '默认库位' },
           },
         ],
       },
@@ -69,6 +69,7 @@ describe('listInventoryCountMaterials', () => {
         locations: [
           {
             id: 'stock1',
+            locationId: 'loc-default',
             warehouseCode: 'DEFAULT',
             warehouseName: '默认仓库',
             locationCode: 'DEFAULT',

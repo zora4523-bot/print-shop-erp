@@ -1,15 +1,29 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import {
+  useActionState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import type { MutationResult } from '@/lib/admin/action-helpers';
 import type { InventoryCountMaterialRow } from '@/lib/inventory-count';
 import { MATERIAL_CATEGORY_LABELS } from '@/lib/material-labels';
 
-type ApiResponse = {
-  materials: InventoryCountMaterialRow[];
+type ApiResponse = { materials: InventoryCountMaterialRow[] };
+
+type Props = {
+  action: (
+    prev: MutationResult | null,
+    formData: FormData,
+  ) => Promise<MutationResult>;
+  initialIdempotencyKey: string;
 };
 
 function decimal(value: string | null): string {
@@ -29,15 +43,17 @@ function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
   return diff > 0 ? 'outline' : 'destructive';
 }
 
-export function InventoryCountClient() {
+export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [rows, setRows] = useState<InventoryCountMaterialRow[]>([]);
   const [counts, setCounts] = useState<Record<string, string>>({});
+  const [remark, setRemark] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [fetchPending, startTransition] = useTransition();
 
-  const fetchRows = (q: string) => {
+  const fetchRows = useCallback((q: string) => {
     startTransition(async () => {
       setError(null);
       try {
@@ -47,34 +63,70 @@ export function InventoryCountClient() {
         const res = await fetch(`/api/admin/inventory-count/materials?${params}`, {
           cache: 'no-store',
         });
-        if (!res.ok) {
-          throw new Error(`库存盘点数据读取失败（${res.status}）`);
-        }
+        if (!res.ok) throw new Error(`库存盘点数据读取失败（${res.status}）`);
         const data = (await res.json()) as ApiResponse;
         setRows(data.materials);
       } catch (err) {
         setError(err instanceof Error ? err.message : '库存盘点数据读取失败');
       }
     });
-  };
+  }, []);
 
   useEffect(() => {
     fetchRows('');
-  }, []);
+  }, [fetchRows]);
+
+  const submitCount = useCallback(
+    async (prev: MutationResult | null, formData: FormData) => {
+      const result = await action(prev, formData);
+      if (result.status === 'success') {
+        setIdempotencyKey(window.crypto.randomUUID());
+        setCounts({});
+        setRemark('');
+        fetchRows(submittedQuery);
+      }
+      return result;
+    },
+    [action, fetchRows, submittedQuery],
+  );
+  const [state, formAction, actionPending] = useActionState<
+    MutationResult | null,
+    FormData
+  >(submitCount, null);
+
+  const submittedItems = useMemo(
+    () =>
+      rows.flatMap((row) =>
+        row.locations.flatMap((location) => {
+          const counted = parseDecimal(counts[`${row.id}:${location.locationId}`] ?? '');
+          return counted === null
+            ? []
+            : [{
+                materialId: row.id,
+                locationId: location.locationId,
+                countedQuantity: counted.toFixed(2),
+              }];
+        }),
+      ),
+    [counts, rows],
+  );
 
   const totals = useMemo(() => {
     let changed = 0;
     let surplus = 0;
     let shortage = 0;
     for (const row of rows) {
-      const counted = parseDecimal(counts[row.id] ?? '');
-      if (counted === null) continue;
-      const current = Number(row.currentStock);
-      const diff = counted - current;
-      if (diff === 0) continue;
-      changed += 1;
-      if (diff > 0) surplus += diff;
-      else shortage += Math.abs(diff);
+      for (const location of row.locations) {
+        const counted = parseDecimal(
+          counts[`${row.id}:${location.locationId}`] ?? '',
+        );
+        if (counted === null) continue;
+        const diff = counted - Number(location.currentStock);
+        if (diff === 0) continue;
+        changed += 1;
+        if (diff > 0) surplus += diff;
+        else shortage += Math.abs(diff);
+      }
     }
     return {
       changed,
@@ -82,6 +134,10 @@ export function InventoryCountClient() {
       shortage: shortage.toFixed(2),
     };
   }, [counts, rows]);
+
+  const actionErrors = state?.status === 'invalid' ? state.fieldErrors : {};
+  const actionError = state?.status === 'error' ? state.message : null;
+  const success = state?.status === 'success' ? state.message : null;
 
   return (
     <section className="space-y-4">
@@ -103,13 +159,11 @@ export function InventoryCountClient() {
           />
         </div>
         <div className="flex gap-2">
-          <Button type="submit" disabled={isPending}>
-            搜索
-          </Button>
+          <Button type="submit" disabled={fetchPending}>搜索</Button>
           <Button
             type="button"
             variant="outline"
-            disabled={isPending}
+            disabled={fetchPending}
             onClick={() => fetchRows(submittedQuery)}
           >
             <RefreshCw aria-hidden className="size-4" />
@@ -119,118 +173,151 @@ export function InventoryCountClient() {
       </form>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <Summary label="已录差异物料" value={`${totals.changed}`} />
+        <Summary label="有差异库位" value={`${totals.changed}`} />
         <Summary label="盘盈合计" value={totals.surplus} />
         <Summary label="盘亏合计" value={totals.shortage} />
       </div>
 
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 
-      <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="px-4 py-3">物料</th>
-              <th className="px-4 py-3">分类</th>
-              <th className="px-4 py-3">库位库存</th>
-              <th className="px-4 py-3 text-right">账面库存</th>
-              <th className="px-4 py-3 text-right">实盘数</th>
-              <th className="px-4 py-3 text-right">差异</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isPending && rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                  正在读取库存...
-                </td>
+      <form action={formAction} className="space-y-4">
+        <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+        <input type="hidden" name="items" value={JSON.stringify(submittedItems)} />
+        <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="px-4 py-3">物料</th>
+                <th className="px-4 py-3">分类</th>
+                <th className="px-4 py-3">仓库 / 库位</th>
+                <th className="px-4 py-3 text-right">账面数</th>
+                <th className="px-4 py-3 text-right">实盘数</th>
+                <th className="px-4 py-3 text-right">差异</th>
               </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                  暂无匹配物料。
-                </td>
-              </tr>
-            ) : (
-              rows.map((row) => {
-                const countedRaw = counts[row.id] ?? '';
-                const counted = parseDecimal(countedRaw);
-                const current = Number(row.currentStock);
-                const diff = counted === null ? null : counted - current;
-                return (
-                  <tr key={row.id} className="border-b last:border-0">
-                    <td className="px-4 py-3 align-top">
-                      <div className="font-medium">{row.name}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {row.code}
-                      </div>
-                      {row.specification ? (
-                        <div className="text-xs text-muted-foreground">
-                          {row.specification}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <Badge variant={row.isActive ? 'outline' : 'secondary'}>
-                        {MATERIAL_CATEGORY_LABELS[row.category]}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      {row.locations.length === 0 ? (
-                        <span className="text-muted-foreground">无库位记录</span>
-                      ) : (
-                        <ul className="space-y-1">
-                          {row.locations.map((location) => (
-                            <li key={location.id} className="text-xs">
-                              {location.warehouseName} / {location.locationName}
-                              <span className="ml-2 font-mono">
-                                {decimal(location.currentStock)} {row.unit}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right align-top font-mono text-xs">
-                      {decimal(row.currentStock)} {row.unit}
-                    </td>
-                    <td className="px-4 py-3 text-right align-top">
-                      <Input
-                        inputMode="decimal"
-                        value={countedRaw}
-                        onChange={(event) =>
-                          setCounts((current) => ({
-                            ...current,
-                            [row.id]: event.target.value,
-                          }))
-                        }
-                        className="ml-auto w-28 text-right font-mono text-xs"
-                        aria-label={`${row.name} 实盘数`}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-right align-top">
-                      {diff === null ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <Badge variant={diffTone(diff)}>
-                          {diff > 0 ? '+' : ''}
-                          {diff.toFixed(2)} {row.unit}
-                        </Badge>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {fetchPending && rows.length === 0 ? (
+                <EmptyRow text="正在读取库存..." />
+              ) : rows.length === 0 ? (
+                <EmptyRow text="暂无匹配物料。" />
+              ) : (
+                rows.flatMap((row) => {
+                  if (row.locations.length === 0) {
+                    return [
+                      <tr key={row.id} className="border-b last:border-0">
+                        <MaterialCells row={row} />
+                        <td colSpan={4} className="px-4 py-3 text-muted-foreground">
+                          无库位库存记录，请先通过收货、调拨或其他入库建立库位。
+                        </td>
+                      </tr>,
+                    ];
+                  }
+                  return row.locations.map((location, index) => {
+                    const key = `${row.id}:${location.locationId}`;
+                    const countedRaw = counts[key] ?? '';
+                    const counted = parseDecimal(countedRaw);
+                    const diff = counted === null
+                      ? null
+                      : counted - Number(location.currentStock);
+                    return (
+                      <tr key={key} className="border-b last:border-0">
+                        {index === 0 ? <MaterialCells row={row} rowSpan={row.locations.length} /> : null}
+                        <td className="px-4 py-3 align-top">
+                          <div>{location.warehouseName} / {location.locationName}</div>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {location.warehouseCode} / {location.locationCode}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right align-top font-mono text-xs">
+                          {decimal(location.currentStock)} {row.unit}
+                        </td>
+                        <td className="px-4 py-3 text-right align-top">
+                          <Input
+                            inputMode="decimal"
+                            value={countedRaw}
+                            onChange={(event) => setCounts((current) => ({
+                              ...current,
+                              [key]: event.target.value,
+                            }))}
+                            className="ml-auto w-28 text-right font-mono text-xs"
+                            aria-label={row.locations.length === 1
+                              ? `${row.name} 实盘数`
+                              : `${row.name} ${location.warehouseName}/${location.locationName} 实盘数`}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-right align-top">
+                          {diff === null ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            <Badge variant={diffTone(diff)}>
+                              {diff > 0 ? '+' : ''}{diff.toFixed(2)} {row.unit}
+                            </Badge>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="flex-1 space-y-2">
+              <label htmlFor="inventory-count-remark" className="text-sm font-medium">
+                盘点备注（选填）
+              </label>
+              <Input
+                id="inventory-count-remark"
+                name="remark"
+                value={remark}
+                onChange={(event) => setRemark(event.target.value)}
+                disabled={actionPending}
+              />
+            </div>
+            <Button type="submit" disabled={actionPending || submittedItems.length === 0}>
+              {actionPending ? '过账中…' : `提交盘点过账（${submittedItems.length} 条）`}
+            </Button>
+          </div>
+          {actionErrors.items?.[0] ? <p className="mt-2 text-sm text-destructive">{actionErrors.items[0]}</p> : null}
+          {actionError ? <p className="mt-2 text-sm text-destructive">{actionError}</p> : null}
+          {success ? <p className="mt-2 text-sm text-success">✓ {success}</p> : null}
+          <p className="mt-2 text-xs text-muted-foreground">
+            未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
+          </p>
+        </div>
+      </form>
     </section>
   );
+}
+
+function MaterialCells({
+  row,
+  rowSpan,
+}: {
+  row: InventoryCountMaterialRow;
+  rowSpan?: number;
+}) {
+  return (
+    <>
+      <td rowSpan={rowSpan} className="px-4 py-3 align-top">
+        <div className="font-medium">{row.name}</div>
+        <div className="font-mono text-xs text-muted-foreground">{row.code}</div>
+        {row.specification ? <div className="text-xs text-muted-foreground">{row.specification}</div> : null}
+      </td>
+      <td rowSpan={rowSpan} className="px-4 py-3 align-top">
+        <Badge variant={row.isActive ? 'outline' : 'secondary'}>
+          {MATERIAL_CATEGORY_LABELS[row.category]}
+        </Badge>
+      </td>
+    </>
+  );
+}
+
+function EmptyRow({ text }: { text: string }) {
+  return <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{text}</td></tr>;
 }
 
 function Summary({ label, value }: { label: string; value: string }) {

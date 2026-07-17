@@ -10,6 +10,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 import {
   collectFieldErrors,
   collectFieldErrorsDeep,
+  extractPrismaUniqueTargets,
   invalidFromIssuesDeep,
   getFormString,
   getFormStringOr,
@@ -93,6 +94,29 @@ describe('admin action helpers', () => {
     expect(normalizePrismaUniqueTargets(null)).toEqual([]);
   });
 
+  it('extracts unique fields from Prisma 7 driver-adapter metadata', () => {
+    expect(
+      extractPrismaUniqueTargets({
+        driverAdapterError: {
+          cause: {
+            constraint: { fields: ['code'] },
+          },
+        },
+      }),
+    ).toEqual(['code']);
+
+    expect(
+      extractPrismaUniqueTargets({
+        target: ['code'],
+        driverAdapterError: {
+          cause: {
+            constraint: { fields: ['code', 'version'] },
+          },
+        },
+      }),
+    ).toEqual(['code', 'version']);
+  });
+
   it('maps P2002 unique violations into field errors', () => {
     const err = new Prisma.PrismaClientKnownRequestError('dup', {
       code: 'P2002',
@@ -111,6 +135,34 @@ describe('admin action helpers', () => {
     ).toEqual({
       status: 'invalid',
       fieldErrors: { code: ['该物料编码已被占用'] },
+    });
+  });
+
+  it('maps Prisma 7 driver-adapter P2002 violations into field errors', () => {
+    const err = new Prisma.PrismaClientKnownRequestError('dup', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: {
+        modelName: 'Party',
+        driverAdapterError: {
+          cause: {
+            constraint: { fields: ['code'] },
+          },
+        },
+      },
+    });
+
+    expect(
+      mapPrismaUniqueViolation(err, [
+        {
+          field: 'code',
+          targets: ['code', 'Party_code_key'],
+          message: '该客户/供应商编码已被占用',
+        },
+      ]),
+    ).toEqual({
+      status: 'invalid',
+      fieldErrors: { code: ['该客户/供应商编码已被占用'] },
     });
   });
 

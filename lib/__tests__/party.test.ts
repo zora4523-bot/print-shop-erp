@@ -5,6 +5,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
   const tx = {
     party: {
       create: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
     partyContact: {
@@ -23,6 +24,9 @@ const { dbMock, txMock } = vi.hoisted(() => {
   return {
     txMock: tx,
     dbMock: {
+      businessCodeSequence: {
+        upsert: vi.fn(),
+      },
       party: {
         findMany: vi.fn(),
         findUnique: vi.fn(),
@@ -47,6 +51,7 @@ import {
   formatPartyAddress,
   listCustomerPartyOptions,
   listParties,
+  listSupplierPartyOptions,
   PartyInvariantError,
   setPartyActive,
   updateParty,
@@ -92,6 +97,7 @@ const makeParty = (over = {}) => ({
 });
 
 beforeEach(() => {
+  dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.party)) fn.mockReset();
   dbMock.partyContact.create.mockReset();
   dbMock.partyAddress.create.mockReset();
@@ -169,7 +175,56 @@ describe('listCustomerPartyOptions', () => {
   });
 });
 
+describe('listSupplierPartyOptions', () => {
+  it('only asks for active SUPPLIER/BOTH rows and maps supplier labels', async () => {
+    dbMock.party.findMany.mockResolvedValue([
+      makeParty({ type: PartyType.SUPPLIER, code: 'SUP_001', name: '纸张供应商' }),
+    ]);
+
+    const options = await listSupplierPartyOptions();
+
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isActive: true,
+          OR: [{ type: PartyType.SUPPLIER }, { type: PartyType.BOTH }],
+        },
+      }),
+    );
+    expect(options[0]).toMatchObject({
+      code: 'SUP_001',
+      name: '纸张供应商',
+      contactName: '王小姐',
+      contactPhone: '13800000000',
+    });
+  });
+});
+
 describe('createParty', () => {
+  it('generates a party code when the operator leaves it blank', async () => {
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 8 });
+    txMock.party.create.mockResolvedValue({ id: 'party1' });
+    dbMock.party.findUnique.mockResolvedValue(makeParty({ code: 'PTY-000008' }));
+
+    await createParty({
+      type: PartyType.SUPPLIER,
+      code: null,
+      name: '纸张供应商',
+      shortName: null,
+      primaryContactName: null,
+      primaryContactPhone: null,
+      primaryContactWechat: null,
+      defaultReceiverName: null,
+      defaultReceiverPhone: null,
+      defaultProvince: null,
+      defaultCity: null,
+      defaultDistrict: null,
+      defaultAddressDetail: null,
+    });
+
+    expect(txMock.party.create.mock.calls[0][0].data.code).toBe('PTY-000008');
+  });
+
   it('creates a party with primary contact and default address', async () => {
     txMock.party.create.mockResolvedValue({ id: 'party1' });
     dbMock.party.findUnique.mockResolvedValue(makeParty());
@@ -217,7 +272,7 @@ describe('createParty', () => {
 
 describe('updateParty', () => {
   it('throws when target is missing', async () => {
-    dbMock.party.findUnique.mockResolvedValue(null);
+    txMock.party.findUnique.mockResolvedValue(null);
     await expect(
       updateParty('missing', {
         type: PartyType.CUSTOMER,
@@ -235,6 +290,60 @@ describe('updateParty', () => {
         defaultAddressDetail: null,
       }),
     ).rejects.toBeInstanceOf(PartyInvariantError);
+  });
+
+  it('refuses removing supplier capability when purchase orders reference the party', async () => {
+    txMock.party.findUnique.mockResolvedValue({
+      id: 'party1',
+      type: PartyType.SUPPLIER,
+      _count: { customerOrders: 0, purchaseOrders: 1 },
+    });
+
+    await expect(
+      updateParty('party1', {
+        type: PartyType.CUSTOMER,
+        code: 'SUP_001',
+        name: '纸张供应商',
+        shortName: null,
+        primaryContactName: null,
+        primaryContactPhone: null,
+        primaryContactWechat: null,
+        defaultReceiverName: null,
+        defaultReceiverPhone: null,
+        defaultProvince: null,
+        defaultCity: null,
+        defaultDistrict: null,
+        defaultAddressDetail: null,
+      }),
+    ).rejects.toThrowError(/不能移除供应商类型/);
+    expect(txMock.party.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses removing customer capability when orders reference the party', async () => {
+    txMock.party.findUnique.mockResolvedValue({
+      id: 'party1',
+      type: PartyType.BOTH,
+      _count: { customerOrders: 1, purchaseOrders: 0 },
+    });
+
+    await expect(
+      updateParty('party1', {
+        type: PartyType.SUPPLIER,
+        code: 'BOTH_001',
+        name: '客户兼供应商',
+        shortName: null,
+        primaryContactName: null,
+        primaryContactPhone: null,
+        primaryContactWechat: null,
+        defaultReceiverName: null,
+        defaultReceiverPhone: null,
+        defaultProvince: null,
+        defaultCity: null,
+        defaultDistrict: null,
+        defaultAddressDetail: null,
+      }),
+    ).rejects.toThrowError(/不能移除客户类型/);
+    expect(txMock.party.update).not.toHaveBeenCalled();
   });
 });
 

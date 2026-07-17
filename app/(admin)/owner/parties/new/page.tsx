@@ -1,16 +1,40 @@
 import Link from 'next/link';
+import { PartyType } from '@/generated/prisma/enums';
 import { createPartyAction } from '@/actions/owner-parties';
 import { PartyForm } from '@/components/business/party/PartyForm';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
+import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '新建客户/供应商 · 红包印刷 ERP',
 };
 
-export default async function NewOwnerPartyPage() {
+type PageProps = {
+  searchParams: Promise<{
+    type?: string | string[];
+    returnTo?: string | string[];
+  }>;
+};
+
+const PURCHASE_RETURN_TO = '/owner/purchases/new' as const;
+
+function parseInitialType(value: string): PartyType {
+  return Object.values(PartyType).includes(value as PartyType)
+    ? (value as PartyType)
+    : PartyType.CUSTOMER;
+}
+
+export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
   await requirePermission('party:manage');
+  const query = await searchParams;
+  const initialType = parseInitialType(firstSearchParam(query.type));
+  const returnTo =
+    firstSearchParam(query.returnTo) === PURCHASE_RETURN_TO
+      ? PURCHASE_RETURN_TO
+      : undefined;
+  const backHref = returnTo ?? '/owner/parties';
 
   return (
     <div className="space-y-6">
@@ -19,16 +43,21 @@ export default async function NewOwnerPartyPage() {
         subtitle="编码用于搜索和工单客户代号；联系人和默认地址会在新建工单时自动带入快照字段。"
         actions={
           <Link
-            href="/owner/parties"
+            href={backHref}
             className={buttonVariants({ variant: 'outline' })}
           >
-            返回列表
+            {returnTo ? '返回采购单' : '返回列表'}
           </Link>
         }
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <PartyForm mode="create" action={createPartyAction} />
+        <PartyForm
+          mode="create"
+          action={createPartyAction}
+          initialType={initialType}
+          returnTo={returnTo}
+        />
       </section>
     </div>
   );

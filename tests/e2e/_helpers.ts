@@ -963,6 +963,49 @@ export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+export async function cleanupAutoCodePartyFixture(opts: {
+  partyId: string;
+  expectedName: string;
+}): Promise<void> {
+  if (!opts.expectedName.startsWith('Codex E2E 自动编码供应商 ')) {
+    throw new Error('cleanupAutoCodePartyFixture refuses a non-E2E name');
+  }
+
+  await withDb(async (db) => {
+    const result = await db.query<{
+      id: string;
+      code: string;
+      name: string;
+      type: string;
+      customerOrderCount: string;
+      purchaseOrderCount: string;
+    }>(
+      `SELECT p.id, p.code, p.name, p.type::text AS type,
+              (SELECT COUNT(*)::text FROM "Order" o
+                WHERE o."customerPartyId" = p.id) AS "customerOrderCount",
+              (SELECT COUNT(*)::text FROM "PurchaseOrder" po
+                WHERE po."supplierPartyId" = p.id) AS "purchaseOrderCount"
+         FROM "Party" p
+        WHERE p.id = $1`,
+      [opts.partyId],
+    );
+
+    if (result.rowCount === 0) return;
+    const row = result.rows[0]!;
+    if (
+      row.name !== opts.expectedName ||
+      row.type !== 'SUPPLIER' ||
+      !/^PTY-\d{6}$/.test(row.code) ||
+      row.customerOrderCount !== '0' ||
+      row.purchaseOrderCount !== '0'
+    ) {
+      throw new Error('cleanupAutoCodePartyFixture refuses unexpected data');
+    }
+
+    await db.query(`DELETE FROM "Party" WHERE id = $1`, [opts.partyId]);
+  });
+}
+
 // ---- Automation smoke fixtures ----
 //
 // The smoke suite is intentionally narrow: it proves that protected routes,
@@ -979,12 +1022,16 @@ export async function seedSearchSmokeFixtures(opts: {
   customerRef: string;
   materialCode: string;
   materialName: string;
+  materialCurrentStock: string;
   partyId: string;
   partyCode: string;
   partyName: string;
   partyContactName: string;
   partyContactPhone: string;
   partyAddress: string;
+  supplierPartyId: string;
+  supplierPartyCode: string;
+  supplierPartyName: string;
 }> {
   const productCode = 'CODX-E2E-PROD-001';
   const productName = 'Codex E2E 测试红包';
@@ -999,6 +1046,10 @@ export async function seedSearchSmokeFixtures(opts: {
   const partyContactName = 'Codex E2E 联系人';
   const partyContactPhone = '13800002222';
   const partyAddress = '广东深圳南山科技园 1 号';
+  const supplierPartyId = 'codx_e2e_supplier_search_001';
+  const supplierPartyCode = 'CODX_E2E_SUP_001';
+  const supplierPartyName = 'Codex E2E 纸张供应商';
+  let materialCurrentStock = '0.00';
 
   await withDb(async (db) => {
     const categoryNode = await db.query<{
@@ -1047,24 +1098,44 @@ export async function seedSearchSmokeFixtures(opts: {
     await db.query(
       `
       INSERT INTO "Material" (
-        id, code, name, category, specification, unit, "currentStock",
+        id, code, name, category, specification, unit,
         "safetyStock", "averageCost", "isActive", "createdAt", "updatedAt"
       ) VALUES (
         'codx_e2e_material_search_001', $1, $2, 'PAPER'::"MaterialCategory",
-        '250g A4', '张', 8800.00, 1000.00, 0.0800, true, NOW(), NOW()
+        '250g A4', '张', 1000.00, 0.0800, true, NOW(), NOW()
       )
       ON CONFLICT (code) DO UPDATE SET
         name = EXCLUDED.name,
         category = EXCLUDED.category,
         specification = EXCLUDED.specification,
         unit = EXCLUDED.unit,
-        "currentStock" = EXCLUDED."currentStock",
         "safetyStock" = EXCLUDED."safetyStock",
         "averageCost" = EXCLUDED."averageCost",
         "isActive" = true,
         "updatedAt" = NOW()
       `,
       [materialCode, materialName],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "MaterialLocationStock" (
+        id, "materialId", "warehouseId", "locationId", "currentStock",
+        "createdAt", "updatedAt"
+      )
+      SELECT
+        'mls_' || md5(material.id || ':default_location'),
+        material.id,
+        'default_warehouse',
+        'default_location',
+        0,
+        NOW(),
+        NOW()
+      FROM "Material" material
+      WHERE material.code = $1
+      ON CONFLICT ("materialId", "locationId") DO NOTHING
+      `,
+      [materialCode],
     );
 
     await db.query(
@@ -1082,6 +1153,22 @@ export async function seedSearchSmokeFixtures(opts: {
         "updatedAt" = NOW()
       `,
       [partyId, partyCode, partyName],
+    );
+    await db.query(
+      `
+      INSERT INTO "Party" (
+        id, type, code, name, "shortName", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'SUPPLIER'::"PartyType", $2, $3, 'E2E供应商', true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        type = EXCLUDED.type,
+        name = EXCLUDED.name,
+        "shortName" = EXCLUDED."shortName",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [supplierPartyId, supplierPartyCode, supplierPartyName],
     );
     await db.query(`DELETE FROM "PartyContact" WHERE "partyId" = $1`, [partyId]);
     await db.query(`DELETE FROM "PartyAddress" WHERE "partyId" = $1`, [partyId]);
@@ -1252,6 +1339,14 @@ export async function seedSearchSmokeFixtures(opts: {
         [orderNo],
       );
     }
+
+    const materialStock = await db.query<{ currentStock: string }>(
+      `SELECT "currentStock"::text AS "currentStock"
+         FROM "Material"
+        WHERE code = $1`,
+      [materialCode],
+    );
+    materialCurrentStock = materialStock.rows[0]?.currentStock ?? '0.00';
   });
 
   return {
@@ -1262,12 +1357,16 @@ export async function seedSearchSmokeFixtures(opts: {
     customerRef,
     materialCode,
     materialName,
+    materialCurrentStock,
     partyId,
     partyCode,
     partyName,
     partyContactName,
     partyContactPhone,
     partyAddress,
+    supplierPartyId,
+    supplierPartyCode,
+    supplierPartyName,
   };
 }
 

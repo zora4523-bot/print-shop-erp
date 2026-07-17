@@ -44,8 +44,21 @@ function WarehouseCreateForm() {
   return (
     <form action={formAction} className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
       <h2 className="text-base font-semibold">新增仓库</h2>
-      <TextField id="code" label="仓库编码" error={errs.code?.[0]} disabled={pending} />
       <TextField id="name" label="仓库名称" error={errs.name?.[0]} disabled={pending} />
+      <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
+        <summary className="cursor-pointer text-sm text-muted-foreground">
+          高级设置：自定义仓库编码（通常无需填写）
+        </summary>
+        <div className="mt-3">
+          <TextField
+            id="code"
+            label="自定义编码（选填）"
+            hint="留空将自动生成，例如 WH-000001。"
+            error={errs.code?.[0]}
+            disabled={pending}
+          />
+        </div>
+      </details>
       <ActionFeedback error={error} success={success} />
       <Button type="submit" disabled={pending}>
         {pending ? '提交中…' : '创建仓库'}
@@ -62,6 +75,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const error = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success' ? state.message ?? null : null;
+  const missingWarehouses = warehouses.length === 0;
 
   return (
     <form action={formAction} className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
@@ -72,7 +86,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
           id="warehouseId"
           name="warehouseId"
           className={selectClass}
-          disabled={pending}
+          disabled={pending || missingWarehouses}
           defaultValue=""
         >
           <option value="">请选择仓库</option>
@@ -85,11 +99,29 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
         {errs.warehouseId?.[0] ? (
           <p className="text-sm text-destructive">{errs.warehouseId[0]}</p>
         ) : null}
+        {missingWarehouses ? (
+          <p role="alert" className="text-sm text-warning-foreground">
+            暂无启用仓库，请先在左侧创建仓库。
+          </p>
+        ) : null}
       </div>
-      <TextField id="code" label="库位编码" error={errs.code?.[0]} disabled={pending} />
       <TextField id="name" label="库位名称" error={errs.name?.[0]} disabled={pending} />
+      <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
+        <summary className="cursor-pointer text-sm text-muted-foreground">
+          高级设置：自定义库位编码（通常无需填写）
+        </summary>
+        <div className="mt-3">
+          <TextField
+            id="code"
+            label="自定义编码（选填）"
+            hint="留空将自动生成，例如 LOC-000001。"
+            error={errs.code?.[0]}
+            disabled={pending}
+          />
+        </div>
+      </details>
       <ActionFeedback error={error} success={success} />
-      <Button type="submit" disabled={pending}>
+      <Button type="submit" disabled={pending || missingWarehouses}>
         {pending ? '提交中…' : '创建库位'}
       </Button>
     </form>
@@ -99,19 +131,35 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
 function TextField({
   id,
   label,
+  hint,
   error,
   disabled,
 }: {
   id: string;
   label: string;
+  hint?: string;
   error?: string | undefined;
   disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} name={id} disabled={disabled} aria-invalid={Boolean(error)} />
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      <Input
+        id={id}
+        name={id}
+        disabled={disabled}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+      />
+      {error ? (
+        <p id={`${id}-error`} className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : hint ? (
+        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }

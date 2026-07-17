@@ -92,7 +92,7 @@ export function PurchaseOrdersTable({
           />
           <TableHead>物料</TableHead>
           <TableHead className="text-right">数量</TableHead>
-          <TableHead className="text-right">已入库</TableHead>
+          <TableHead className="text-right">已收货</TableHead>
           <SortHead
             field="status"
             label="状态"

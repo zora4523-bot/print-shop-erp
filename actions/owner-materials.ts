@@ -177,5 +177,7 @@ function revalidateMaterialPaths(id: string) {
     `/owner/materials/${id}`,
     '/foreman/materials',
     `/foreman/materials/${id}`,
+    '/owner/purchases/new',
+    '/owner/boms/new',
   ]);
 }

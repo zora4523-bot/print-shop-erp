@@ -6,6 +6,7 @@ import {
   type ProductCategoryNode,
 } from '../generated/prisma/client';
 import { db } from './db';
+import { resolveBusinessCode } from './business-code';
 import { sortBySearchRelevance } from './search-ranking';
 
 export class ProductInvariantError extends Error {
@@ -386,9 +387,10 @@ export type CreateProductData = {
 
 export async function createProduct(data: CreateProductData): Promise<ProductSummary> {
   const categoryNode = await requireActiveCategoryNode(data.categoryNodeId);
+  const code = await resolveBusinessCode('PRODUCT', data.code);
   return db.product.create({
     data: {
-      code: data.code,
+      code,
       category: categoryNode.legacyCategory,
       categoryNodeId: categoryNode.id,
       name: data.name,

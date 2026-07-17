@@ -1,4 +1,5 @@
 import { type Craft, type MachineType } from '../generated/prisma/client';
+import { resolveBusinessCode } from './business-code';
 import { db } from './db';
 
 // Thrown when a mutation is refused for a reason the UI should surface,
@@ -52,17 +53,18 @@ export async function getCraftSummary(id: string): Promise<CraftSummary | null> 
 
 export type CreateCraftData = {
   name: string;
-  code: string;
+  code: string | null;
   isOutsource: boolean;
   defaultMachineType: MachineType | null;
   sortOrder: number;
 };
 
 export async function createCraft(data: CreateCraftData): Promise<CraftSummary> {
+  const code = await resolveBusinessCode('CRAFT', data.code);
   return db.craft.create({
     data: {
       name: data.name,
-      code: data.code,
+      code,
       isOutsource: data.isOutsource,
       defaultMachineType: data.defaultMachineType,
       sortOrder: data.sortOrder,

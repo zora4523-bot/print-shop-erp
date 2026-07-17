@@ -52,6 +52,7 @@ export function ProductForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const missingCategoryNodes = props.categoryNodes.length === 0;
   const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
 
   const priceDefault =
@@ -61,23 +62,51 @@ export function ProductForm(props: Props) {
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      <TextField
-        id="code"
-        label="产品编码（选填）"
-        hint="用于内部 SKU / 快速搜索；大小写不敏感。可用字母、数字、_、-。"
-        disabled={pending}
-        error={errs.code?.[0]}
-        defaultValue={initial?.code ?? ''}
-      />
+      {isCreate ? (
+        <details
+          className="rounded-lg border border-dashed p-3"
+          open={Boolean(errs.code?.[0])}
+        >
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            高级设置：自定义产品编码（通常无需填写）
+          </summary>
+          <div className="mt-3">
+            <TextField
+              id="code"
+              label="自定义编码（选填）"
+              hint="留空将自动生成，例如 PRD-000001。"
+              disabled={pending}
+              error={errs.code?.[0]}
+            />
+          </div>
+        </details>
+      ) : (
+        <TextField
+          id="code"
+          label="产品编码"
+          hint="用于内部 SKU / 快速搜索；大小写不敏感。"
+          disabled={pending}
+          error={errs.code?.[0]}
+          defaultValue={initial?.code ?? ''}
+        />
+      )}
 
       <div className="space-y-2">
-        <Label htmlFor="categoryNodeId">分类</Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="categoryNodeId">分类</Label>
+          <Link
+            href="/owner/product-categories/new"
+            className="text-xs text-primary hover:underline"
+          >
+            新建分类
+          </Link>
+        </div>
         <select
           id="categoryNodeId"
           name="categoryNodeId"
           className={selectClass}
           defaultValue={defaultCategoryNodeId}
-          disabled={pending}
+          disabled={pending || missingCategoryNodes}
         >
           {props.categoryNodes.map((node) => {
             const depth = Math.max(0, node.path.split('.').length - 2);
@@ -93,6 +122,11 @@ export function ProductForm(props: Props) {
         </select>
         {errs.categoryNodeId?.[0] ? (
           <p className="text-sm text-destructive">{errs.categoryNodeId[0]}</p>
+        ) : null}
+        {missingCategoryNodes ? (
+          <p role="alert" className="text-sm text-warning-foreground">
+            暂无可用产品分类，请先创建并启用分类。
+          </p>
         ) : null}
       </div>
 
@@ -157,7 +191,7 @@ export function ProductForm(props: Props) {
       ) : null}
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || missingCategoryNodes}>
           {pending ? '提交中…' : isCreate ? '创建产品' : '保存修改'}
         </Button>
         <Link href="/owner/products" className={buttonVariants({ variant: 'outline' })}>

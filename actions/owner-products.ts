@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { Prisma } from '../generated/prisma/client';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createProductSchema, updateProductSchema } from '@/lib/auth/schemas';
 import {
@@ -12,23 +11,22 @@ import {
   ProductInvariantError,
 } from '@/lib/product';
 import type { ProductMutationResult } from './owner-products.types';
-import { collectFieldErrors } from '@/lib/admin/action-helpers';
+import {
+  collectFieldErrors,
+  mapPrismaUniqueViolation,
+  type UniqueViolationMapping,
+} from '@/lib/admin/action-helpers';
 
-const PRODUCT_CODE_UNIQUE_SYNONYMS: readonly string[] = ['code', 'Product_code_key'];
-
-function normalizeTargets(target: unknown): string[] {
-  if (Array.isArray(target)) return target.filter((v): v is string => typeof v === 'string');
-  return typeof target === 'string' ? [target] : [];
-}
+const PRODUCT_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
+  {
+    field: 'code',
+    targets: ['code', 'Product_code_key'],
+    message: '该产品编码已被占用',
+  },
+];
 
 function mapUniqueViolation(err: unknown): ProductMutationResult | null {
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-    const targets = normalizeTargets(err.meta?.target);
-    if (targets.some((t) => PRODUCT_CODE_UNIQUE_SYNONYMS.includes(t))) {
-      return { status: 'invalid', fieldErrors: { code: ['该产品编码已被占用'] } };
-    }
-  }
-  return null;
+  return mapPrismaUniqueViolation(err, PRODUCT_UNIQUE_VIOLATIONS);
 }
 
 function normalizeFormInput(formData: FormData) {
@@ -72,7 +70,7 @@ export async function createProductAction(
     throw err;
   }
 
-  revalidatePath('/owner/products');
+  revalidateProductPaths(createdId);
   redirect(`/owner/products/${createdId}`);
 }
 
@@ -99,8 +97,7 @@ export async function updateProductAction(
     throw err;
   }
 
-  revalidatePath('/owner/products');
-  revalidatePath(`/owner/products/${id}`);
+  revalidateProductPaths(id);
   return { status: 'success' };
 }
 
@@ -119,7 +116,14 @@ export async function setProductActiveAction(
     throw err;
   }
 
+  revalidateProductPaths(id);
+  return { status: 'success' };
+}
+
+function revalidateProductPaths(id: string) {
   revalidatePath('/owner/products');
   revalidatePath(`/owner/products/${id}`);
-  return { status: 'success' };
+  revalidatePath('/orders/new');
+  revalidatePath('/owner/boms/new');
+  revalidatePath('/owner/prices/tiers/new');
 }

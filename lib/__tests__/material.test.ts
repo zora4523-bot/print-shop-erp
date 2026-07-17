@@ -19,6 +19,9 @@ const { dbMock, txMock } = vi.hoisted(() => {
   return {
     txMock: tx,
     dbMock: {
+      businessCodeSequence: {
+        upsert: vi.fn(),
+      },
       material: {
         findMany: vi.fn(),
         findUnique: vi.fn(),
@@ -56,6 +59,7 @@ import {
 } from '../material';
 
 beforeEach(() => {
+  dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.material)) fn.mockReset();
   dbMock.materialTransaction.create.mockReset();
   dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
@@ -177,6 +181,23 @@ describe('listMaterialsPage', () => {
 });
 
 describe('createMaterial', () => {
+  it('generates a material code when the operator leaves it blank', async () => {
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 23 });
+    dbMock.material.create.mockResolvedValue(makeMaterial({ code: 'MAT-000023' }));
+
+    await createMaterial({
+      code: null,
+      name: 'A4 白卡纸',
+      category: MaterialCategory.PAPER,
+      specification: null,
+      unit: '张',
+      safetyStock: null,
+      averageCost: null,
+    });
+
+    expect(dbMock.material.create.mock.calls[0][0].data.code).toBe('MAT-000023');
+  });
+
   it('forces isActive=true and leaves stock changes to transaction flow', async () => {
     dbMock.material.create.mockResolvedValue(makeMaterial());
     await createMaterial({

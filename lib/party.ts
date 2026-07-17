@@ -11,6 +11,7 @@ import {
   type SortDirection,
 } from './admin/table';
 import { db } from './db';
+import { resolveBusinessCode } from './business-code';
 import { sortBySearchRelevance } from './search-ranking';
 import type { CreatePartyInput, UpdatePartyInput } from './auth/schemas';
 
@@ -337,6 +338,14 @@ export async function listSupplierPartyOptions(): Promise<SupplierPartyOption[]>
 export type CreatePartyData = CreatePartyInput;
 export type UpdatePartyData = UpdatePartyInput;
 
+function supportsCustomer(type: PartyType): boolean {
+  return type === PartyType.CUSTOMER || type === PartyType.BOTH;
+}
+
+function supportsSupplier(type: PartyType): boolean {
+  return type === PartyType.SUPPLIER || type === PartyType.BOTH;
+}
+
 function hasContactData(data: CreatePartyData | UpdatePartyData): boolean {
   return Boolean(
     data.primaryContactName ||
@@ -375,11 +384,12 @@ function defaultAddressData(data: CreatePartyData | UpdatePartyData) {
 }
 
 export async function createParty(data: CreatePartyData): Promise<PartySummary> {
+  const code = await resolveBusinessCode('PARTY', data.code);
   const created = await db.$transaction(async (tx) => {
     const party = await tx.party.create({
       data: {
         type: data.type,
-        code: data.code,
+        code,
         name: data.name,
         shortName: data.shortName,
         isActive: true,
@@ -413,10 +423,41 @@ export async function updateParty(
   id: string,
   data: UpdatePartyData,
 ): Promise<PartySummary> {
-  const target = await getPartySummary(id);
-  if (!target) throw new PartyInvariantError('目标客户/供应商不存在');
-
   await db.$transaction(async (tx) => {
+    const target = await tx.party.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        type: true,
+        _count: {
+          select: {
+            customerOrders: true,
+            purchaseOrders: true,
+          },
+        },
+      },
+    });
+    if (!target) throw new PartyInvariantError('目标客户/供应商不存在');
+
+    if (
+      supportsCustomer(target.type) &&
+      !supportsCustomer(data.type) &&
+      target._count.customerOrders > 0
+    ) {
+      throw new PartyInvariantError(
+        '该主数据已有工单关联，不能移除客户类型；可改为“客户/供应商”',
+      );
+    }
+    if (
+      supportsSupplier(target.type) &&
+      !supportsSupplier(data.type) &&
+      target._count.purchaseOrders > 0
+    ) {
+      throw new PartyInvariantError(
+        '该主数据已有采购单关联，不能移除供应商类型；可改为“客户/供应商”',
+      );
+    }
+
     await tx.party.update({
       where: { id },
       data: {

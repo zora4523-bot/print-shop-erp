@@ -52,6 +52,12 @@ function normalizePartyFormInput(formData: FormData) {
   };
 }
 
+function purchaseReturnPath(formData: FormData, supplierPartyId: string) {
+  return getFormStringOr(formData, 'returnTo', '') === '/owner/purchases/new'
+    ? `/owner/purchases/new?supplierPartyId=${encodeURIComponent(supplierPartyId)}`
+    : null;
+}
+
 export async function createPartyAction(
   _prev: PartyMutationResult | null,
   formData: FormData,
@@ -74,7 +80,9 @@ export async function createPartyAction(
   }
 
   revalidatePartyPaths(createdId);
-  redirect(`/owner/parties/${createdId}`);
+  redirect(
+    purchaseReturnPath(formData, createdId) ?? `/owner/parties/${createdId}`,
+  );
 }
 
 export async function updatePartyAction(
@@ -137,5 +145,6 @@ function revalidatePartyPaths(id: string) {
     '/owner/parties',
     `/owner/parties/${id}`,
     '/orders/new',
+    '/owner/purchases/new',
   ]);
 }

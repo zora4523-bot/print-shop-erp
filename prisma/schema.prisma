@@ -79,10 +79,22 @@ model User {
   designBundles       DesignBundle[]
   materialTxs         MaterialTransaction[]
   purchaseReceipts    PurchaseReceipt[]
+  stockTransfers      StockTransfer[]
+  inventoryCounts     InventoryCount[]
   businessAuditLogs   BusinessAuditLog[]
 
   @@index([role])
   @@index([workerType])
+}
+
+// ============================================================
+// 业务主数据编码序列
+// ============================================================
+
+model BusinessCodeSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 // ============================================================
@@ -596,6 +608,8 @@ model Material {
   purchaseReceiptItems PurchaseReceiptItem[]
   locationStocks       MaterialLocationStock[]
   bomItems             BillOfMaterialItem[]
+  stockTransfers       StockTransfer[]
+  inventoryCountItems  InventoryCountItem[]
 
   @@index([category])
 }
@@ -632,9 +646,12 @@ model WarehouseLocation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  warehouse    Warehouse               @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  stocks       MaterialLocationStock[]
-  transactions MaterialTransaction[]
+  warehouse           Warehouse               @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  stocks              MaterialLocationStock[]
+  transactions        MaterialTransaction[]
+  outgoingTransfers   StockTransfer[]         @relation("StockTransferSource")
+  incomingTransfers   StockTransfer[]         @relation("StockTransferDestination")
+  inventoryCountItems InventoryCountItem[]
 
   @@unique([warehouseId, code])
   @@index([warehouseId])
@@ -652,8 +669,8 @@ model MaterialLocationStock {
   updatedAt    DateTime @updatedAt
 
   material  Material          @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  location  WarehouseLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  location  WarehouseLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@unique([materialId, locationId])
   @@index([materialId])
@@ -672,6 +689,8 @@ model MaterialTransaction {
   relatedOrderId        String?
   relatedTaskId         String?
   purchaseReceiptItemId String?
+  stockTransferId       String?
+  inventoryCountItemId  String?     @unique
   operatorId            String
   unitCost              Decimal?    @db.Decimal(10, 4)
   remark                String?
@@ -679,16 +698,81 @@ model MaterialTransaction {
   createdAt             DateTime    @default(now())
 
   material            Material             @relation(fields: [materialId], references: [id])
-  warehouse           Warehouse?           @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  location            WarehouseLocation?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  warehouse           Warehouse?           @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  location            WarehouseLocation?   @relation(fields: [locationId], references: [id], onDelete: Restrict)
   operator            User                 @relation(fields: [operatorId], references: [id])
   purchaseReceiptItem PurchaseReceiptItem? @relation(fields: [purchaseReceiptItemId], references: [id], onDelete: SetNull)
+  stockTransfer       StockTransfer?       @relation(fields: [stockTransferId], references: [id], onDelete: Restrict)
+  inventoryCountItem  InventoryCountItem?  @relation(fields: [inventoryCountItemId], references: [id], onDelete: Restrict)
 
+  @@unique([stockTransferId, direction])
   @@index([materialId])
   @@index([warehouseId])
   @@index([locationId])
   @@index([purchaseReceiptItemId])
+  @@index([stockTransferId])
   @@index([occurredAt])
+}
+
+model StockTransfer {
+  id                    String   @id @default(cuid())
+  transferNo            String   @unique
+  idempotencyKey        String   @unique
+  materialId            String
+  sourceLocationId      String
+  destinationLocationId String
+  quantity              Decimal  @db.Decimal(12, 2)
+  operatorId            String
+  remark                String?
+  occurredAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  material             Material              @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  sourceLocation       WarehouseLocation     @relation("StockTransferSource", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  destinationLocation  WarehouseLocation     @relation("StockTransferDestination", fields: [destinationLocationId], references: [id], onDelete: Restrict)
+  operator             User                  @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+  materialTransactions MaterialTransaction[]
+
+  @@index([materialId])
+  @@index([sourceLocationId])
+  @@index([destinationLocationId])
+  @@index([occurredAt])
+}
+
+model InventoryCount {
+  id             String   @id @default(cuid())
+  countNo        String   @unique
+  idempotencyKey String   @unique
+  countedById    String
+  countedAt      DateTime @default(now())
+  remark         String?
+  createdAt      DateTime @default(now())
+
+  countedBy User                 @relation(fields: [countedById], references: [id], onDelete: Restrict)
+  items     InventoryCountItem[]
+
+  @@index([countedById])
+  @@index([countedAt])
+}
+
+model InventoryCountItem {
+  id               String   @id @default(cuid())
+  inventoryCountId String
+  materialId       String
+  locationId       String
+  bookQuantity     Decimal  @db.Decimal(12, 2)
+  countedQuantity  Decimal  @db.Decimal(12, 2)
+  difference       Decimal  @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+
+  inventoryCount      InventoryCount       @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  material            Material             @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  location            WarehouseLocation    @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  materialTransaction MaterialTransaction?
+
+  @@unique([inventoryCountId, materialId, locationId])
+  @@index([materialId])
+  @@index([locationId])
 }
 
 // ============================================================
@@ -750,6 +834,7 @@ model PurchaseOrderItem {
 model PurchaseReceipt {
   id              String                @id @default(cuid())
   receiptNo       String                @unique
+  idempotencyKey  String                @unique
   purchaseOrderId String
   receivedById    String
   status          PurchaseReceiptStatus @default(POSTED)

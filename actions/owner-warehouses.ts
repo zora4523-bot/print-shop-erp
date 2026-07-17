@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import {
   getFormString,
   invalidFromIssues,
@@ -100,4 +101,7 @@ function revalidateWarehousePaths() {
     '/foreman/materials',
     '/owner/purchases',
   ]);
+  revalidatePath('/owner/materials/[id]', 'page');
+  revalidatePath('/foreman/materials/[id]', 'page');
+  revalidatePath('/owner/purchases/[id]', 'page');
 }

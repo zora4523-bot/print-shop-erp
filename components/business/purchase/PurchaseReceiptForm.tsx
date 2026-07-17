@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useCallback, useState } from 'react';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,7 @@ type Props = {
   defaultUnitCost: string | null;
   remainingQuantity: string;
   locationOptions: WarehouseLocationOption[];
+  initialIdempotencyKey: string;
 };
 
 const selectClass =
@@ -29,11 +30,23 @@ export function PurchaseReceiptForm({
   defaultUnitCost,
   remainingQuantity,
   locationOptions,
+  initialIdempotencyKey,
 }: Props) {
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
+  const submitReceipt = useCallback(
+    async (prev: PurchaseMutationResult | null, formData: FormData) => {
+      const result = await action(prev, formData);
+      if (result.status === 'success') {
+        setIdempotencyKey(window.crypto.randomUUID());
+      }
+      return result;
+    },
+    [action],
+  );
   const [state, formAction, pending] = useActionState<
     PurchaseMutationResult | null,
     FormData
-  >(action, null);
+  >(submitReceipt, null);
 
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
@@ -41,9 +54,10 @@ export function PurchaseReceiptForm({
 
   return (
     <form action={formAction} className="space-y-4" noValidate>
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="purchaseOrderItemId" value={purchaseOrderItemId} />
       <div className="space-y-2">
-        <Label htmlFor={`location-${purchaseOrderItemId}`}>入库库位</Label>
+        <Label htmlFor={`location-${purchaseOrderItemId}`}>收货库位</Label>
         <select
           id={`location-${purchaseOrderItemId}`}
           name="locationId"
@@ -65,14 +79,16 @@ export function PurchaseReceiptForm({
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <TextField
-          id="quantity"
-          label={`本次入库数量（${unit}）`}
+          id={`receipt-quantity-${purchaseOrderItemId}`}
+          name="quantity"
+          label={`本次收货数量（${unit}）`}
           hint={`剩余 ${remainingQuantity} ${unit}`}
           disabled={pending}
           error={errs.quantity?.[0]}
         />
         <TextField
-          id="unitCost"
+          id={`receipt-unit-cost-${purchaseOrderItemId}`}
+          name="unitCost"
           label="单位成本（选填）"
           disabled={pending}
           error={errs.unitCost?.[0]}
@@ -80,9 +96,9 @@ export function PurchaseReceiptForm({
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="remark">备注（选填）</Label>
+        <Label htmlFor={`receipt-remark-${purchaseOrderItemId}`}>备注（选填）</Label>
         <textarea
-          id="remark"
+          id={`receipt-remark-${purchaseOrderItemId}`}
           name="remark"
           rows={2}
           disabled={pending}
@@ -104,7 +120,7 @@ export function PurchaseReceiptForm({
         </p>
       ) : null}
       <Button type="submit" disabled={pending}>
-        {pending ? '提交中…' : '确认入库'}
+        {pending ? '提交中…' : '确认收货过账'}
       </Button>
     </form>
   );
@@ -112,6 +128,7 @@ export function PurchaseReceiptForm({
 
 function TextField({
   id,
+  name,
   label,
   hint,
   error,
@@ -119,6 +136,7 @@ function TextField({
   disabled,
 }: {
   id: string;
+  name: string;
   label: string;
   hint?: string;
   error?: string | undefined;
@@ -130,7 +148,7 @@ function TextField({
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
-        name={id}
+        name={name}
         defaultValue={defaultValue}
         disabled={disabled}
         aria-invalid={Boolean(error)}

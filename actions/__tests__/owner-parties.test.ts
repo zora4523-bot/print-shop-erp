@@ -100,6 +100,19 @@ beforeEach(() => {
 });
 
 describe('createPartyAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    partyMock.createParty.mockResolvedValue({ id: 'party1' });
+
+    await expect(
+      createPartyAction(null, fd({ ...validParty, code: '' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(partyMock.createParty).toHaveBeenCalledWith(
+      expect.objectContaining({ code: null }),
+    );
+  });
+
   it("first-line requirePermission('party:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -144,6 +157,40 @@ describe('createPartyAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1');
   });
 
+  it('only honors the approved purchase return path and preselects the new supplier', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    partyMock.createParty.mockResolvedValue({ id: 'supplier 1' });
+
+    await expect(
+      createPartyAction(
+        null,
+        fd({
+          ...validParty,
+          type: 'SUPPLIER',
+          returnTo: '/owner/purchases/new',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/purchases/new?supplierPartyId=supplier%201',
+    );
+  });
+
+  it('ignores an unapproved return path', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    partyMock.createParty.mockResolvedValue({ id: 'party1' });
+
+    await expect(
+      createPartyAction(
+        null,
+        fd({ ...validParty, returnTo: 'https://example.com/steal' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith('/owner/parties/party1');
+  });
+
   it('maps P2002 on party code to invalid.code field error', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     partyMock.createParty.mockRejectedValueOnce(
@@ -158,6 +205,32 @@ describe('createPartyAction', () => {
     if (result.status === 'invalid') {
       expect(result.fieldErrors.code).toContain('该客户/供应商编码已被占用');
     }
+  });
+
+  it('maps Prisma 7 driver-adapter P2002 metadata to invalid.code', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    partyMock.createParty.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: {
+          modelName: 'Party',
+          driverAdapterError: {
+            cause: {
+              constraint: { fields: ['code'] },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await createPartyAction(null, fd(validParty));
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: { code: ['该客户/供应商编码已被占用'] },
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 });
 
@@ -180,7 +253,7 @@ describe('updatePartyAction', () => {
     expect(result.status).toBe('error');
   });
 
-  it('revalidates party list, detail, and order creation picker on success', async () => {
+  it('revalidates party list, detail, and all party pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     partyMock.getPartySummary.mockResolvedValue({ id: 'party1', name: '旧客户' });
     partyMock.updateParty.mockResolvedValue({ id: 'party1' });
@@ -189,6 +262,7 @@ describe('updatePartyAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/parties');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/parties/party1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/purchases/new');
   });
 
   it('writes a standardized business audit log on success', async () => {

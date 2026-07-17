@@ -12,6 +12,7 @@ import {
   type SortDirection,
 } from './admin/table';
 import { db } from './db';
+import { resolveBusinessCode } from './business-code';
 import { MATERIAL_CATEGORY_LABELS } from './material-labels';
 import { dispatchNotification } from './notification/dispatch';
 import { sortBySearchRelevance } from './search-ranking';
@@ -214,7 +215,7 @@ export async function listMaterialLocationStocks(
 }
 
 export type CreateMaterialData = {
-  code: string;
+  code: string | null;
   name: string;
   category: MaterialCategory;
   specification: string | null;
@@ -223,14 +224,17 @@ export type CreateMaterialData = {
   averageCost: string | null;
 };
 
-export type UpdateMaterialData = CreateMaterialData;
+export type UpdateMaterialData = Omit<CreateMaterialData, 'code'> & {
+  code: string;
+};
 
 export async function createMaterial(
   data: CreateMaterialData,
 ): Promise<MaterialSummary> {
+  const code = await resolveBusinessCode('MATERIAL', data.code);
   return db.material.create({
     data: {
-      code: data.code,
+      code,
       name: data.name,
       category: data.category,
       specification: data.specification,
@@ -287,6 +291,8 @@ export type CreateMaterialTransactionData = {
   quantity: string;
   reasonType: string;
   purchaseReceiptItemId?: string | null;
+  stockTransferId?: string | null;
+  inventoryCountItemId?: string | null;
   unitCost: string | null;
   remark: string | null;
   operatorId: string;
@@ -445,16 +451,21 @@ export async function applyMaterialStockMovement(
     throw new MaterialInvariantError('库存不足，不能出库到负数');
   }
 
-  const [material, , transaction] = await Promise.all([
+  // Location stock is authoritative. Its database trigger synchronizes the
+  // Material.currentStock summary before the guarded summary update below.
+  // Keeping these writes sequential prevents the summary guard from observing
+  // the old location balance under real PostgreSQL scheduling.
+  await txClient.materialLocationStock.update({
+    where: { id: lockedLocation[0]!.id },
+    data: { currentStock: nextLocation.toFixed(2) },
+    select: { id: true },
+  });
+
+  const [material, transaction] = await Promise.all([
     txClient.material.update({
       where: { id: data.materialId },
       data: { currentStock: next.toFixed(2) },
       select: MATERIAL_SELECT,
-    }),
-    txClient.materialLocationStock.update({
-      where: { id: lockedLocation[0]!.id },
-      data: { currentStock: nextLocation.toFixed(2) },
-      select: { id: true },
     }),
     txClient.materialTransaction.create({
       data: {
@@ -465,6 +476,8 @@ export async function applyMaterialStockMovement(
         quantity: quantity.toFixed(2),
         reasonType: data.reasonType,
         purchaseReceiptItemId: data.purchaseReceiptItemId,
+        stockTransferId: data.stockTransferId,
+        inventoryCountItemId: data.inventoryCountItemId,
         unitCost: data.unitCost,
         remark: data.remark,
         operatorId: data.operatorId,

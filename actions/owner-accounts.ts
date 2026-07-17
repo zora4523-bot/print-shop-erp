@@ -100,7 +100,7 @@ export async function createUserAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
+  revalidateAccountPickerPaths(createdId);
   // Send the operator straight to the edit page — clearer feedback than a
   // silent "✓ 已保存" and prevents accidental double-submit from a lingering
   // filled-in create form.
@@ -129,8 +129,7 @@ export async function updateUserAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
-  revalidatePath(`/owner/accounts/${id}`);
+  revalidateAccountPickerPaths(id);
   return { status: 'success' };
 }
 
@@ -149,8 +148,7 @@ export async function setUserActiveAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
-  revalidatePath(`/owner/accounts/${id}`);
+  revalidateAccountPickerPaths(id);
   return { status: 'success' };
 }
 
@@ -177,4 +175,11 @@ export async function resetUserPasswordAction(
 
   revalidatePath(`/owner/accounts/${id}`);
   return { status: 'success' };
+}
+
+function revalidateAccountPickerPaths(id: string) {
+  revalidatePath('/owner/accounts');
+  revalidatePath(`/owner/accounts/${id}`);
+  revalidatePath('/owner/salary/cs/new');
+  revalidatePath('/foreman/scheduling/[id]', 'page');
 }

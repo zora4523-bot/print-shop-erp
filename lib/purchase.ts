@@ -32,13 +32,13 @@ export class PurchaseInvariantError extends Error {
 
 export const PURCHASE_ORDER_STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
   ORDERED: '已下单',
-  PARTIALLY_RECEIVED: '部分入库',
-  RECEIVED: '已入库',
+  PARTIALLY_RECEIVED: '部分收货',
+  RECEIVED: '已收货',
   CANCELLED: '已取消',
 };
 
 export const PURCHASE_RECEIPT_STATUS_LABELS: Record<PurchaseReceiptStatus, string> = {
-  POSTED: '已入库',
+  POSTED: '已收货过账',
   CANCELLED: '已取消',
 };
 
@@ -392,13 +392,27 @@ export async function createPurchaseReceipt(
   const receiptQuantity = parsePositiveDecimal(input.quantity, '入库数量');
 
   await db.$transaction(async (tx) => {
-    const order = await tx.purchaseOrder.findUnique({
-      where: { id: purchaseOrderId },
-      select: { id: true, status: true },
-    });
+    const lockedOrders = await tx.$queryRaw<
+      { id: string; status: PurchaseOrderStatus }[]
+    >`SELECT id, status
+        FROM "PurchaseOrder"
+       WHERE id = ${purchaseOrderId}
+       FOR UPDATE`;
+    const order = lockedOrders[0];
     if (!order) throw new PurchaseInvariantError('采购单不存在');
     if (order.status === PurchaseOrderStatus.CANCELLED) {
       throw new PurchaseInvariantError('已取消采购单不能入库');
+    }
+
+    const existingRequest = await tx.purchaseReceipt.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: { purchaseOrderId: true },
+    });
+    if (existingRequest) {
+      if (existingRequest.purchaseOrderId !== purchaseOrderId) {
+        throw new PurchaseInvariantError('入库请求标识已被其他采购单使用');
+      }
+      return;
     }
 
     const lockedItems = await tx.$queryRaw<
@@ -428,6 +442,7 @@ export async function createPurchaseReceipt(
     const receipt = await tx.purchaseReceipt.create({
       data: {
         receiptNo,
+        idempotencyKey: input.idempotencyKey,
         purchaseOrderId,
         receivedById: actor.id,
         receivedAt: now,
@@ -491,6 +506,35 @@ export async function cancelPurchaseReceipt(
   const stockAlerts: MaterialStockAlert[] = [];
 
   await db.$transaction(async (tx) => {
+    const receiptPointer = await tx.purchaseReceipt.findUnique({
+      where: { id: receiptId },
+      select: { id: true, purchaseOrderId: true },
+    });
+    if (!receiptPointer) throw new PurchaseInvariantError('入库单不存在');
+
+    const lockedOrders = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id
+        FROM "PurchaseOrder"
+       WHERE id = ${receiptPointer.purchaseOrderId}
+       FOR UPDATE
+    `;
+    if (lockedOrders.length === 0) {
+      throw new PurchaseInvariantError('采购单不存在');
+    }
+
+    const lockedReceipts = await tx.$queryRaw<
+      { id: string; status: PurchaseReceiptStatus }[]
+    >`SELECT id, status
+        FROM "PurchaseReceipt"
+       WHERE id = ${receiptId}
+         AND "purchaseOrderId" = ${receiptPointer.purchaseOrderId}
+       FOR UPDATE`;
+    const lockedReceipt = lockedReceipts[0];
+    if (!lockedReceipt) throw new PurchaseInvariantError('入库单不存在');
+    if (lockedReceipt.status === PurchaseReceiptStatus.CANCELLED) {
+      throw new PurchaseInvariantError('入库单已取消');
+    }
+
     const receipt = await tx.purchaseReceipt.findUnique({
       where: { id: receiptId },
       select: {
@@ -520,9 +564,6 @@ export async function cancelPurchaseReceipt(
       },
     });
     if (!receipt) throw new PurchaseInvariantError('入库单不存在');
-    if (receipt.status === PurchaseReceiptStatus.CANCELLED) {
-      throw new PurchaseInvariantError('入库单已取消');
-    }
     purchaseOrderId = receipt.purchaseOrderId;
 
     stockAlerts.length = 0; // 事务重跑时不残留上一轮的告警
@@ -592,18 +633,34 @@ export async function cancelPurchaseReceipt(
 }
 
 export async function cancelPurchaseOrder(id: string): Promise<PurchaseOrderDetail> {
-  const detail = await getPurchaseOrderDetail(id);
-  if (!detail) throw new PurchaseInvariantError('采购单不存在');
-  if (detail.status === PurchaseOrderStatus.CANCELLED) return detail;
-  if (detail.items.some((item) => new Decimal(item.receivedQuantity).gt(0))) {
-    throw new PurchaseInvariantError('已有入库记录的采购单不能直接取消，请先取消入库单');
-  }
+  await db.$transaction(async (tx) => {
+    const lockedOrders = await tx.$queryRaw<
+      { id: string; status: PurchaseOrderStatus }[]
+    >`SELECT id, status
+        FROM "PurchaseOrder"
+       WHERE id = ${id}
+       FOR UPDATE`;
+    const order = lockedOrders[0];
+    if (!order) throw new PurchaseInvariantError('采购单不存在');
+    if (order.status === PurchaseOrderStatus.CANCELLED) return;
 
-  await db.purchaseOrder.update({
-    where: { id },
-    data: { status: PurchaseOrderStatus.CANCELLED },
-    select: { id: true },
+    const items = await tx.purchaseOrderItem.findMany({
+      where: { purchaseOrderId: id },
+      select: { receivedQuantity: true },
+    });
+    if (items.some((item) => new Decimal(item.receivedQuantity).gt(0))) {
+      throw new PurchaseInvariantError(
+        '已有入库记录的采购单不能直接取消，请先取消入库单',
+      );
+    }
+
+    await tx.purchaseOrder.update({
+      where: { id },
+      data: { status: PurchaseOrderStatus.CANCELLED },
+      select: { id: true },
+    });
   });
+
   const updated = await getPurchaseOrderDetail(id);
   if (!updated) throw new PurchaseInvariantError('采购单取消后读取失败');
   return updated;

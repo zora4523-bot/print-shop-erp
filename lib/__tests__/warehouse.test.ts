@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    businessCodeSequence: {
+      upsert: vi.fn(),
+    },
     warehouse: {
       findMany: vi.fn(),
       create: vi.fn(),
@@ -24,6 +27,7 @@ import {
 } from '../warehouse';
 
 beforeEach(() => {
+  dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.warehouse)) fn.mockReset();
   for (const fn of Object.values(dbMock.warehouseLocation)) fn.mockReset();
 });
@@ -75,6 +79,15 @@ describe('listActiveWarehouseLocationOptions', () => {
 });
 
 describe('createWarehouse', () => {
+  it('generates a warehouse code when omitted', async () => {
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 3 });
+    dbMock.warehouse.create.mockResolvedValue({ id: 'wh1' });
+
+    await createWarehouse({ code: null, name: '三号仓' });
+
+    expect(dbMock.warehouse.create.mock.calls[0][0].data.code).toBe('WH-000003');
+  });
+
   it('creates non-default active warehouses', async () => {
     dbMock.warehouse.create.mockResolvedValue({ id: 'wh1' });
 
@@ -94,6 +107,22 @@ describe('createWarehouse', () => {
 });
 
 describe('createWarehouseLocation', () => {
+  it('generates a location code after validating the warehouse', async () => {
+    dbMock.warehouse.findUnique.mockResolvedValue({ id: 'wh1', isActive: true });
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 9 });
+    dbMock.warehouseLocation.create.mockResolvedValue({ id: 'loc1' });
+
+    await createWarehouseLocation({
+      warehouseId: 'wh1',
+      code: null,
+      name: '九号库位',
+    });
+
+    expect(dbMock.warehouseLocation.create.mock.calls[0][0].data.code).toBe(
+      'LOC-000009',
+    );
+  });
+
   it('rejects locations under inactive warehouses', async () => {
     dbMock.warehouse.findUnique.mockResolvedValue({ id: 'wh1', isActive: false });
 

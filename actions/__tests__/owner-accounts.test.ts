@@ -207,6 +207,11 @@ describe('createUserAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/foreman/scheduling/[id]',
+      'page',
+    );
     expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1');
   });
 });

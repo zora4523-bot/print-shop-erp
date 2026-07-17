@@ -68,15 +68,35 @@ export function MaterialForm(props: Props) {
     <form action={formAction} className="space-y-5" noValidate>
       <input type="hidden" name="routeBase" value={props.routeBase} />
 
-      <TextField
-        id="code"
-        label="物料编码"
-        hint="大小写不敏感；可用字母、数字、_、-。"
-        required
-        disabled={pending}
-        error={errs.code?.[0]}
-        defaultValue={initial?.code ?? ''}
-      />
+      {isCreate ? (
+        <details
+          className="rounded-lg border border-dashed p-3"
+          open={Boolean(errs.code?.[0])}
+        >
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            高级设置：自定义物料编码（通常无需填写）
+          </summary>
+          <div className="mt-3">
+            <TextField
+              id="code"
+              label="自定义编码（选填）"
+              hint="留空将自动生成，例如 MAT-000001。"
+              disabled={pending}
+              error={errs.code?.[0]}
+            />
+          </div>
+        </details>
+      ) : (
+        <TextField
+          id="code"
+          label="物料编码"
+          hint="大小写不敏感；修改前请确认对库存对接的影响。"
+          required
+          disabled={pending}
+          error={errs.code?.[0]}
+          defaultValue={initial?.code ?? ''}
+        />
+      )}
 
       <TextField
         id="name"

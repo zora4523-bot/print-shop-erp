@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,13 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success' ? state.message ?? '库存已更新' : null;
+  const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
+  const [reasonType, setReasonType] = useState<'PRODUCTION_USE' | 'RETURN' | 'OTHER'>('RETURN');
+  const reasonOptions = TX_REASON_OPTIONS.filter((option) =>
+    direction === 'IN'
+      ? option.value === 'RETURN' || option.value === 'OTHER'
+      : option.value === 'PRODUCTION_USE' || option.value === 'OTHER',
+  );
 
   return (
     <form action={formAction} className="space-y-4" noValidate>
@@ -38,7 +45,12 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
             id="direction"
             name="direction"
             className={selectClass}
-            defaultValue="IN"
+            value={direction}
+            onChange={(event) => {
+              const next = event.target.value === 'OUT' ? 'OUT' : 'IN';
+              setDirection(next);
+              setReasonType(next === 'IN' ? 'RETURN' : 'PRODUCTION_USE');
+            }}
             disabled={pending}
           >
             <option value="IN">入库</option>
@@ -85,10 +97,13 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
             id="reasonType"
             name="reasonType"
             className={selectClass}
-            defaultValue="ADJUSTMENT"
+            value={reasonType}
+            onChange={(event) =>
+              setReasonType(event.target.value as typeof reasonType)
+            }
             disabled={pending}
           >
-            {TX_REASON_OPTIONS.map((o) => (
+            {reasonOptions.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

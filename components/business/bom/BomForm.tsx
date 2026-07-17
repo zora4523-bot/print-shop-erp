@@ -46,8 +46,14 @@ export function BomForm({ action, products, categories, materials }: Props) {
     FormData
   >(action, null);
   const [rows, setRows] = useState([{ key: 0 }]);
+  const [targetType, setTargetType] = useState<'PRODUCT' | 'CATEGORY'>('PRODUCT');
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const error = state?.status === 'error' ? state.message : null;
+  const missingProducts = products.length === 0;
+  const missingCategories = categories.length === 0;
+  const missingMaterials = materials.length === 0;
+  const missingTarget =
+    targetType === 'PRODUCT' ? missingProducts : missingCategories;
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
@@ -60,7 +66,10 @@ export function BomForm({ action, products, categories, materials }: Props) {
             id="targetType"
             name="targetType"
             className={selectClass}
-            defaultValue="PRODUCT"
+            value={targetType}
+            onChange={(event) =>
+              setTargetType(event.target.value as 'PRODUCT' | 'CATEGORY')
+            }
             disabled={pending}
           >
             <option value="PRODUCT">产品</option>
@@ -80,13 +89,18 @@ export function BomForm({ action, products, categories, materials }: Props) {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="productId">产品</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="productId">产品</Label>
+            <Link href="/owner/products/new" className="text-xs text-primary hover:underline">
+              新建产品
+            </Link>
+          </div>
           <select
             id="productId"
             name="productId"
             className={selectClass}
             defaultValue=""
-            disabled={pending}
+            disabled={pending || targetType !== 'PRODUCT' || missingProducts}
           >
             <option value="">请选择产品</option>
             {products.map((product) => (
@@ -102,13 +116,21 @@ export function BomForm({ action, products, categories, materials }: Props) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="categoryNodeId">产品分类</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="categoryNodeId">产品分类</Label>
+            <Link
+              href="/owner/product-categories/new"
+              className="text-xs text-primary hover:underline"
+            >
+              新建分类
+            </Link>
+          </div>
           <select
             id="categoryNodeId"
             name="categoryNodeId"
             className={selectClass}
             defaultValue=""
-            disabled={pending}
+            disabled={pending || targetType !== 'CATEGORY' || missingCategories}
           >
             <option value="">请选择分类</option>
             {categories.map((category) => (
@@ -122,6 +144,14 @@ export function BomForm({ action, products, categories, materials }: Props) {
           ) : null}
         </div>
       </div>
+
+      {missingTarget ? (
+        <p role="alert" className="text-sm text-warning-foreground">
+          {targetType === 'PRODUCT'
+            ? '暂无可用产品，请先创建并启用产品。'
+            : '暂无可用产品分类，请先创建并启用分类。'}
+        </p>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <TextField
@@ -181,13 +211,23 @@ export function BomForm({ action, products, categories, materials }: Props) {
               </div>
               <div className="grid gap-3 md:grid-cols-[1fr_10rem_1fr]">
                 <div className="space-y-2">
-                  <Label htmlFor={`items.${index}.materialId`}>物料</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor={`items.${index}.materialId`}>物料</Label>
+                    {index === 0 ? (
+                      <Link
+                        href="/owner/materials/new"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        新建物料
+                      </Link>
+                    ) : null}
+                  </div>
                   <select
                     id={`items.${index}.materialId`}
                     name={`items.${index}.materialId`}
                     className={selectClass}
                     defaultValue=""
-                    disabled={pending}
+                    disabled={pending || missingMaterials}
                   >
                     <option value="">请选择物料</option>
                     {materials.map((material) => (
@@ -215,6 +255,12 @@ export function BomForm({ action, products, categories, materials }: Props) {
         </div>
       </section>
 
+      {missingMaterials ? (
+        <p role="alert" className="text-sm text-warning-foreground">
+          暂无可用物料，请先创建并启用至少一种物料。
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -222,7 +268,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || missingTarget || missingMaterials}>
           {pending ? '提交中…' : '创建 BOM'}
         </Button>
         <Link href="/owner/boms" className={buttonVariants({ variant: 'outline' })}>

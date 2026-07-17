@@ -180,6 +180,7 @@ describe('updateProductCategoryNodeAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
   });
 });
 

@@ -185,6 +185,9 @@ describe('createProductAction', () => {
       /NEXT_REDIRECT/,
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
     expect(redirectMock).toHaveBeenCalledWith('/owner/products/p1');
   });
 });
@@ -219,13 +222,16 @@ describe('updateProductAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
-  it('revalidates both list + item on success', async () => {
+  it('revalidates list, item, and all product pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
     const result = await updateProductAction('p1', null, fd(baseUpdate));
     expect(result.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/p1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
   });
 });
 

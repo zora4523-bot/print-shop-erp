@@ -3,6 +3,9 @@ import { ProductCategory } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    businessCodeSequence: {
+      upsert: vi.fn(),
+    },
     product: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -36,6 +39,7 @@ import {
 } from '../product';
 
 beforeEach(() => {
+  dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
   for (const fn of Object.values(dbMock.productCategoryNode)) fn.mockReset();
 });
@@ -330,6 +334,7 @@ describe('createProduct', () => {
 
   it('normalizes omitted minOrderQty to null', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 12 });
     dbMock.product.create.mockResolvedValue(makeProduct());
     await createProduct({
       code: null,
@@ -340,6 +345,7 @@ describe('createProduct', () => {
       baseUnitPrice: null,
     });
     const data = dbMock.product.create.mock.calls[0][0].data;
+    expect(data.code).toBe('PRD-000012');
     expect(data.minOrderQty).toBeNull();
     expect(data.baseUnitPrice).toBeNull();
   });

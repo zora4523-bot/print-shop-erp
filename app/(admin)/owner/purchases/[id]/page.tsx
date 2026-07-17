@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import { PurchaseOrderStatus, PurchaseReceiptStatus } from '../../../../../generated/prisma/enums';
 import { createPurchaseReceiptAction } from '@/actions/owner-purchases';
@@ -70,7 +71,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="py-2 pr-3">物料</th>
                 <th className="py-2 pr-3 text-right">采购数量</th>
-                <th className="py-2 pr-3 text-right">已入库</th>
+                <th className="py-2 pr-3 text-right">已收货</th>
                 <th className="py-2 pr-3 text-right">剩余</th>
                 <th className="py-2 pr-3 text-right">单位成本</th>
               </tr>
@@ -105,7 +106,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
 
       {canReceive ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold">采购入库</h2>
+          <h2 className="mb-4 text-base font-semibold">采购收货过账</h2>
           <div className="space-y-5">
             {order.items.map((item) => {
               const remain = remaining(item.quantity, item.receivedQuantity);
@@ -122,6 +123,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                     defaultUnitCost={item.unitCost ? String(item.unitCost) : null}
                     remainingQuantity={remain}
                     locationOptions={locationOptions}
+                    initialIdempotencyKey={randomUUID()}
                   />
                 </div>
               );
@@ -131,9 +133,9 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
       ) : null}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <h2 className="mb-4 text-base font-semibold">入库记录</h2>
+        <h2 className="mb-4 text-base font-semibold">收货记录</h2>
         {order.receipts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无入库记录。</p>
+          <p className="text-sm text-muted-foreground">暂无收货记录。</p>
         ) : (
           <div className="space-y-4">
             {order.receipts.map((receipt) => (
@@ -173,7 +175,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-2 text-base font-semibold">取消采购单</h2>
           <p className="mb-3 text-sm text-muted-foreground">
-            只有未入库的采购单可以直接取消；已有入库请先取消入库单。
+            只有尚未收货的采购单可以直接取消；已有收货记录时请先取消对应收货单。
           </p>
           <CancelPurchaseOrderButton purchaseOrderId={order.id} />
         </section>

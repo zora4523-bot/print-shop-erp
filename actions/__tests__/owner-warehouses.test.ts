@@ -60,6 +60,22 @@ beforeEach(() => {
 });
 
 describe('createWarehouseAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    warehouseMock.createWarehouse.mockResolvedValue({ id: 'wh1' });
+
+    const result = await createWarehouseAction(
+      null,
+      fd({ code: '', name: '自动编码仓库' }),
+    );
+
+    expect(result.status).toBe('success');
+    expect(warehouseMock.createWarehouse).toHaveBeenCalledWith({
+      code: null,
+      name: '自动编码仓库',
+    });
+  });
+
   it("first-line requirePermission('warehouse:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -90,6 +106,14 @@ describe('createWarehouseAction', () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/warehouses');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/materials');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/materials/[id]',
+      'page',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/purchases/[id]',
+      'page',
+    );
   });
 
   it('maps duplicate warehouse code to invalid.code field error', async () => {
@@ -115,6 +139,23 @@ describe('createWarehouseAction', () => {
 });
 
 describe('createWarehouseLocationAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    warehouseMock.createWarehouseLocation.mockResolvedValue({ id: 'loc1' });
+
+    const result = await createWarehouseLocationAction(
+      null,
+      fd({ warehouseId: 'wh1', code: '', name: '自动编码库位' }),
+    );
+
+    expect(result.status).toBe('success');
+    expect(warehouseMock.createWarehouseLocation).toHaveBeenCalledWith({
+      warehouseId: 'wh1',
+      code: null,
+      name: '自动编码库位',
+    });
+  });
+
   it('passes parsed location fields to lib.createWarehouseLocation', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     warehouseMock.createWarehouseLocation.mockResolvedValue({ id: 'loc1' });

@@ -36,6 +36,7 @@ function normalizePurchaseOrderFormInput(formData: FormData) {
 
 function normalizeReceiptFormInput(formData: FormData) {
   return {
+    idempotencyKey: getFormString(formData, 'idempotencyKey'),
     purchaseOrderItemId: getFormString(formData, 'purchaseOrderItemId'),
     locationId: getFormStringOr(formData, 'locationId', ''),
     quantity: getFormString(formData, 'quantity'),
@@ -91,7 +92,7 @@ export async function createPurchaseReceiptAction(
 
   revalidatePurchasePaths(purchaseOrderId);
   revalidatePaths(['/owner/materials', '/foreman/materials']);
-  return { status: 'success', message: '采购入库已提交' };
+  return { status: 'success', message: '采购收货已过账' };
 }
 
 export async function cancelPurchaseReceiptAction(
@@ -122,7 +123,7 @@ export async function cancelPurchaseReceiptAction(
 
   revalidatePurchasePaths(purchaseOrderId);
   revalidatePaths(['/owner/materials', '/foreman/materials']);
-  return { status: 'success', message: '入库单已取消并写入反向库存流水' };
+  return { status: 'success', message: '收货单已取消并写入反向库存流水' };
 }
 
 export async function cancelPurchaseOrderAction(

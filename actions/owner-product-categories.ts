@@ -147,5 +147,6 @@ function revalidateProductCategoryPaths(id: string) {
     `/owner/product-categories/${id}`,
     '/owner/products',
     '/owner/products/new',
+    '/owner/boms/new',
   ]);
 }

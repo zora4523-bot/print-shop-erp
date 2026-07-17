@@ -3,6 +3,9 @@ import { MachineType } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    businessCodeSequence: {
+      upsert: vi.fn(),
+    },
     craft: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -44,6 +47,7 @@ const makeCraft = (over: Partial<{
 });
 
 beforeEach(() => {
+  dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.craft)) fn.mockReset();
 });
 
@@ -60,6 +64,21 @@ describe('listCrafts', () => {
 });
 
 describe('createCraft', () => {
+  it('generates a stable code when the create input leaves it blank', async () => {
+    dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 7 });
+    dbMock.craft.create.mockResolvedValue(makeCraft({ code: 'CRF_000007' }));
+
+    await createCraft({
+      name: '新工艺',
+      code: null,
+      isOutsource: false,
+      defaultMachineType: null,
+      sortOrder: 80,
+    });
+
+    expect(dbMock.craft.create.mock.calls[0][0].data.code).toBe('CRF_000007');
+  });
+
   it('inserts with isActive=true regardless of input', async () => {
     dbMock.craft.create.mockResolvedValue(makeCraft());
     await createCraft({

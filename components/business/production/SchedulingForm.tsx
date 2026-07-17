@@ -73,6 +73,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
   const allAssigned = nonOutsourceRows.every(
     (r) => assignments[rowKey(r.itemId, r.craftId)],
   );
+  const missingWorkers = view.workers.length === 0 && nonOutsourceRows.length > 0;
 
   function handleSubmit() {
     const payload = {
@@ -149,6 +150,12 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
           })}
         </tbody>
       </table>
+
+      {missingWorkers ? (
+        <p role="alert" className="text-sm text-warning-foreground">
+          暂无启用师傅，无法完成排产；请联系老板在用户管理中创建或启用师傅账号。
+        </p>
+      ) : null}
 
       {state?.status === 'error' ? (
         <p className="text-sm text-destructive">{state.message}</p>
@@ -234,4 +241,3 @@ function WorkerSelect({
     </select>
   );
 }
-

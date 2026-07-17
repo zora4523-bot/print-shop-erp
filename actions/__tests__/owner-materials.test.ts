@@ -87,6 +87,19 @@ beforeEach(() => {
 });
 
 describe('createMaterialAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.createMaterial.mockResolvedValue({ id: 'mat1' });
+
+    await expect(
+      createMaterialAction(null, fd({ ...validMaterial, code: '' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(materialMock.createMaterial).toHaveBeenCalledWith(
+      expect.objectContaining({ code: null }),
+    );
+  });
+
   it("first-line requirePermission('material:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -186,7 +199,7 @@ describe('updateMaterialAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
-  it('revalidates owner and foreman material paths on success', async () => {
+  it('revalidates material pages and required-material pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     materialMock.updateMaterial.mockResolvedValue({ id: 'mat1' });
     const result = await updateMaterialAction('mat1', null, fd(validMaterial));
@@ -195,6 +208,8 @@ describe('updateMaterialAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/materials/mat1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/materials');
     expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/materials/mat1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/purchases/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
   });
 });
 

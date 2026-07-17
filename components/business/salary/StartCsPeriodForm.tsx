@@ -24,6 +24,7 @@ export function StartCsPeriodForm({ csUsers }: Props) {
     null,
   );
   const [pending, startTransition] = useTransition();
+  const missingCsUsers = csUsers.length === 0;
 
   // startCsPeriodAction ends in redirect() on success, so the
   // useActionState 'success' branch is never observed in practice.
@@ -49,8 +50,9 @@ export function StartCsPeriodForm({ csUsers }: Props) {
             name="csUserId"
             className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
             defaultValue=""
+            disabled={pending || missingCsUsers}
           >
-            <option value="">选择客服…</option>
+            <option value="">{missingCsUsers ? '暂无可用客服' : '选择客服…'}</option>
             {csUsers.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.displayName}（{u.username}）
@@ -60,6 +62,11 @@ export function StartCsPeriodForm({ csUsers }: Props) {
           {errs(state, 'csUserId').length > 0 ? (
             <p className="mt-1 text-xs text-destructive">
               {errs(state, 'csUserId')[0]}
+            </p>
+          ) : null}
+          {missingCsUsers ? (
+            <p role="alert" className="mt-1 text-xs text-warning-foreground">
+              暂无启用的客服账号，请先在用户管理中创建或启用客服。
             </p>
           ) : null}
         </div>
@@ -136,14 +143,14 @@ export function StartCsPeriodForm({ csUsers }: Props) {
       ) : null}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || missingCsUsers}>
           {pending ? '创建中…' : '创建周期'}
         </Button>
         <Link
-          href="/owner/salary/cs"
+          href={missingCsUsers ? '/owner/accounts/new' : '/owner/salary/cs'}
           className={buttonVariants({ variant: 'outline' })}
         >
-          取消
+          {missingCsUsers ? '新建客服账号' : '取消'}
         </Link>
       </div>
     </form>

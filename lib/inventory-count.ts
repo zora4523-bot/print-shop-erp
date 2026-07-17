@@ -3,6 +3,7 @@ import { db } from './db';
 
 export type InventoryCountLocationRow = {
   id: string;
+  locationId: string;
   warehouseCode: string;
   warehouseName: string;
   locationCode: string;
@@ -73,6 +74,7 @@ export async function listInventoryCountMaterials(
           },
           location: {
             select: {
+              id: true,
               code: true,
               name: true,
               isDefault: true,
@@ -103,6 +105,7 @@ export async function listInventoryCountMaterials(
     isActive: row.isActive,
     locations: row.locationStocks.map((stock) => ({
       id: stock.id,
+      locationId: stock.location.id,
       warehouseCode: stock.warehouse.code,
       warehouseName: stock.warehouse.name,
       locationCode: stock.location.code,

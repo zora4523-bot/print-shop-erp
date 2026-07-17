@@ -68,15 +68,35 @@ export function CraftForm(props: Props) {
         defaultValue={initial?.name}
       />
 
-      <TextField
-        id="code"
-        label="代码"
-        hint="2–32 字符，大写字母/数字/下划线，字母开头（如 FLAT_FOIL_SINGLE）。作为历史工单的稳定标识，生效后谨慎修改。"
-        required
-        disabled={pending}
-        error={errs.code?.[0]}
-        defaultValue={initial?.code}
-      />
+      {isCreate ? (
+        <details
+          className="rounded-lg border border-dashed p-3"
+          open={Boolean(errs.code?.[0])}
+        >
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            高级设置：自定义工艺代码（通常无需填写）
+          </summary>
+          <div className="mt-3">
+            <TextField
+              id="code"
+              label="自定义代码（选填）"
+              hint="留空将自动生成，例如 CRF_000001。仅在对接旧系统时需要自定义。"
+              disabled={pending}
+              error={errs.code?.[0]}
+            />
+          </div>
+        </details>
+      ) : (
+        <TextField
+          id="code"
+          label="工艺代码"
+          hint="这是历史工单的稳定标识，修改前请确认外部对接影响。"
+          required
+          disabled={pending}
+          error={errs.code?.[0]}
+          defaultValue={initial?.code}
+        />
+      )}
 
       <label className="flex items-start gap-2 text-sm">
         <input

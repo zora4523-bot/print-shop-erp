@@ -258,6 +258,13 @@ const craftCodeField = z
   .max(32, '代码过长（最多 32 个字符）')
   .regex(/^[A-Z][A-Z0-9_]*$/, '代码只能包含大写字母、数字、下划线，且必须以字母开头');
 
+const optionalCraftCodeField = z
+  .preprocess(
+    (value) => (value === null || value === undefined ? '' : value),
+    z.union([z.literal(''), craftCodeField]),
+  )
+  .transform((value) => (value === '' ? null : value));
+
 const craftNameField = z
   .string()
   .trim()
@@ -283,7 +290,7 @@ const sortOrderField = z.coerce
 
 export const createCraftSchema = z.object({
   name: craftNameField,
-  code: craftCodeField,
+  code: optionalCraftCodeField,
   isOutsource: formBoolean,
   defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
@@ -458,15 +465,21 @@ const partyCodeField = z
   .max(32, '编码过长（最多 32 个字符）')
   .regex(/^[A-Za-z0-9_-]+$/, '编码只能包含英文字母、数字、下划线、短横线');
 
+const optionalPartyCodeField = z
+  .preprocess(
+    (value) => (value === null || value === undefined ? '' : value),
+    z.union([z.literal(''), partyCodeField]),
+  )
+  .transform((value) => (value === '' ? null : value));
+
 const partyNameField = z
   .string()
   .trim()
   .min(1, '请填写客户/供应商名称')
   .max(128, '名称过长（最多 128 个字符）');
 
-export const createPartySchema = z.object({
+const partySchemaFields = {
   type: z.nativeEnum(PartyType),
-  code: partyCodeField,
   name: partyNameField,
   shortName: productTextFieldOptional('简称', 64),
   primaryContactName: productTextFieldOptional('默认联系人', 64),
@@ -478,11 +491,19 @@ export const createPartySchema = z.object({
   defaultCity: productTextFieldOptional('城市', 32),
   defaultDistrict: productTextFieldOptional('区县', 32),
   defaultAddressDetail: productTextFieldOptional('详细地址', 256),
+} as const;
+
+export const createPartySchema = z.object({
+  ...partySchemaFields,
+  code: optionalPartyCodeField,
 });
 
 export type CreatePartyInput = z.infer<typeof createPartySchema>;
 
-export const updatePartySchema = createPartySchema;
+export const updatePartySchema = z.object({
+  ...partySchemaFields,
+  code: partyCodeField,
+});
 
 export type UpdatePartyInput = z.infer<typeof updatePartySchema>;
 
@@ -628,6 +649,13 @@ const materialCodeField = z
   .max(32, '物料编码过长（最多 32 个字符）')
   .regex(/^[A-Za-z0-9_-]+$/, '物料编码只能包含英文字母、数字、下划线、短横线');
 
+const optionalMaterialCodeField = z
+  .preprocess(
+    (value) => (value === null || value === undefined ? '' : value),
+    z.union([z.literal(''), materialCodeField]),
+  )
+  .transform((value) => (value === '' ? null : value));
+
 const materialNameField = z
   .string()
   .trim()
@@ -702,40 +730,63 @@ const materialDecimal10Optional = decimalOptionalField({
   fractionDigits: 4,
 });
 
-export const createMaterialSchema = z.object({
-  code: materialCodeField,
+const materialSchemaFields = {
   name: materialNameField,
   category: z.nativeEnum(MaterialCategory),
   specification: productTextFieldOptional('规格', 64),
   unit: materialUnitField,
   safetyStock: materialDecimal12Optional,
   averageCost: materialDecimal10Optional,
+} as const;
+
+export const createMaterialSchema = z.object({
+  ...materialSchemaFields,
+  code: optionalMaterialCodeField,
 });
 
 export type CreateMaterialInput = z.infer<typeof createMaterialSchema>;
 
-export const updateMaterialSchema = createMaterialSchema;
+export const updateMaterialSchema = z.object({
+  ...materialSchemaFields,
+  code: materialCodeField,
+});
 
 export type UpdateMaterialInput = z.infer<typeof updateMaterialSchema>;
 
-export const materialStockTransactionSchema = z.object({
-  materialId: z.string().trim().min(1, '物料 id 不能为空'),
-  locationId: z
-    .string()
-    .trim()
-    .max(64, '库位格式非法')
-    .transform((v) => (v === '' ? null : v))
-    .nullable(),
-  direction: z.enum(['IN', 'OUT']),
-  quantity: materialDecimal12Required,
-  reasonType: z
-    .string()
-    .trim()
-    .min(1, '请填写原因')
-    .max(64, '原因过长（最多 64 个字符）'),
-  unitCost: materialDecimal10Optional,
-  remark: productTextFieldOptional('备注', 500),
-});
+export const materialStockTransactionSchema = z
+  .object({
+    materialId: z.string().trim().min(1, '物料 id 不能为空'),
+    locationId: z
+      .string()
+      .trim()
+      .max(64, '库位格式非法')
+      .transform((v) => (v === '' ? null : v))
+      .nullable(),
+    direction: z.enum(['IN', 'OUT']),
+    quantity: materialDecimal12Required,
+    // 采购收货、盘点和调拨都有专用单据，禁止从手工入口伪造这些原因。
+    reasonType: z.enum(['PRODUCTION_USE', 'RETURN', 'OTHER'], {
+      message: '请选择允许的手工出入库原因',
+    }),
+    unitCost: materialDecimal10Optional,
+    remark: productTextFieldOptional('备注', 500),
+  })
+  .superRefine((value, context) => {
+    if (value.direction === 'IN' && value.reasonType === 'PRODUCTION_USE') {
+      context.addIssue({
+        code: 'custom',
+        path: ['reasonType'],
+        message: '生产领用只能出库',
+      });
+    }
+    if (value.direction === 'OUT' && value.reasonType === 'RETURN') {
+      context.addIssue({
+        code: 'custom',
+        path: ['reasonType'],
+        message: '退回入库只能入库',
+      });
+    }
+  });
 
 export type MaterialStockTransactionInput = z.infer<
   typeof materialStockTransactionSchema
@@ -752,12 +803,26 @@ const warehouseCodeField = z
   .max(32, '仓库编码过长（最多 32 个字符）')
   .regex(/^[A-Za-z0-9_-]+$/, '仓库编码只能包含英文字母、数字、下划线、短横线');
 
+const optionalWarehouseCodeField = z
+  .preprocess(
+    (value) => (value === null || value === undefined ? '' : value),
+    z.union([z.literal(''), warehouseCodeField]),
+  )
+  .transform((value) => (value === '' ? null : value));
+
 const warehouseLocationCodeField = z
   .string()
   .trim()
   .min(1, '请填写库位编码')
   .max(32, '库位编码过长（最多 32 个字符）')
   .regex(/^[A-Za-z0-9_-]+$/, '库位编码只能包含英文字母、数字、下划线、短横线');
+
+const optionalWarehouseLocationCodeField = z
+  .preprocess(
+    (value) => (value === null || value === undefined ? '' : value),
+    z.union([z.literal(''), warehouseLocationCodeField]),
+  )
+  .transform((value) => (value === '' ? null : value));
 
 const warehouseNameField = z
   .string()
@@ -766,7 +831,7 @@ const warehouseNameField = z
   .max(64, '名称过长（最多 64 个字符）');
 
 export const createWarehouseSchema = z.object({
-  code: warehouseCodeField,
+  code: optionalWarehouseCodeField,
   name: warehouseNameField,
 });
 
@@ -779,12 +844,59 @@ export const createWarehouseLocationSchema = z.object({
     .min(1, '请选择仓库')
     .max(64, '仓库格式非法')
     .regex(/^[A-Za-z0-9_-]+$/, '仓库格式非法'),
-  code: warehouseLocationCodeField,
+  code: optionalWarehouseLocationCodeField,
   name: warehouseNameField,
 });
 
 export type CreateWarehouseLocationInput = z.infer<
   typeof createWarehouseLocationSchema
+>;
+
+const warehouseQuantityField = z
+  .string()
+  .trim()
+  .regex(/^\d{1,10}(\.\d{1,2})?$/, '数量格式错误（非负数，最多 2 位小数）');
+
+const warehouseEntityIdField = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, `请选择${label}`)
+    .max(64, `${label}格式非法`)
+    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
+
+export const createStockTransferSchema = z.object({
+  idempotencyKey: z.string().uuid('调拨请求标识格式非法'),
+  materialId: warehouseEntityIdField('物料'),
+  sourceLocationId: warehouseEntityIdField('来源库位'),
+  destinationLocationId: warehouseEntityIdField('目标库位'),
+  quantity: warehouseQuantityField.refine((value) => Number(value) > 0, {
+    message: '调拨数量必须大于 0',
+  }),
+  remark: productTextFieldOptional('备注', 500),
+});
+
+export type CreateStockTransferInput = z.infer<
+  typeof createStockTransferSchema
+>;
+
+export const postInventoryCountSchema = z.object({
+  idempotencyKey: z.string().uuid('盘点请求标识格式非法'),
+  remark: productTextFieldOptional('备注', 500),
+  items: z
+    .array(
+      z.object({
+        materialId: warehouseEntityIdField('物料'),
+        locationId: warehouseEntityIdField('库位'),
+        countedQuantity: warehouseQuantityField,
+      }),
+    )
+    .min(1, '请至少录入一个实盘数')
+    .max(100, '单次盘点最多提交 100 个库位物料'),
+});
+
+export type PostInventoryCountInput = z.infer<
+  typeof postInventoryCountSchema
 >;
 
 // ============================================================
@@ -936,6 +1048,7 @@ export type CreatePurchaseOrderInput = z.infer<
 >;
 
 export const createPurchaseReceiptSchema = z.object({
+  idempotencyKey: z.string().uuid('入库请求标识格式非法'),
   purchaseOrderItemId: purchaseIdField('采购明细'),
   locationId: optionalPurchaseIdField('库位'),
   quantity: materialDecimal12Required,

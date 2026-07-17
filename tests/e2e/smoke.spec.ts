@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test';
 import {
+  cleanupAutoCodePartyFixture,
   E2E_PASSWORD,
   E2E_USERS,
   expectNoNextErrorOverlay,
   getUserIdByUsername,
   login,
   seedSearchSmokeFixtures,
+  uniqueSuffix,
 } from './_helpers';
 
 test.describe('automation smoke', () => {
@@ -76,8 +78,53 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/parties/new');
     await expect(page.getByRole('heading', { name: '新建客户/供应商' })).toBeVisible();
-    await expect(page.getByLabel('编码')).toBeVisible();
+    await expect(
+      page.getByText('高级设置：自定义客户/供应商编码（通常无需填写）'),
+    ).toBeVisible();
     await expectNoNextErrorOverlay(page);
+
+    await page.goto(
+      '/owner/parties/new?type=SUPPLIER&returnTo=%2Fowner%2Fpurchases%2Fnew',
+    );
+    await page
+      .getByText('高级设置：自定义客户/供应商编码（通常无需填写）')
+      .click();
+    await page
+      .getByLabel('自定义编码（选填）')
+      .fill(fixture.supplierPartyCode.toLowerCase());
+    await page.getByLabel('名称', { exact: true }).fill('重复供应商回归');
+    await page.getByRole('button', { name: '创建客户/供应商' }).click();
+    await expect(page.getByText('该客户/供应商编码已被占用')).toBeVisible();
+    await expect(page).toHaveURL(/\/owner\/parties\/new\?/);
+    await expectNoNextErrorOverlay(page);
+
+    const autoSupplierName = `Codex E2E 自动编码供应商 ${uniqueSuffix()}`;
+    let autoSupplierId: string | null = null;
+    try {
+      await page.goto(
+        '/owner/parties/new?type=SUPPLIER&returnTo=%2Fowner%2Fpurchases%2Fnew',
+      );
+      await page.getByLabel('名称', { exact: true }).fill(autoSupplierName);
+      await page.getByRole('button', { name: '创建客户/供应商' }).click();
+      await page.waitForURL((url) => {
+        autoSupplierId = url.searchParams.get('supplierPartyId');
+        return url.pathname === '/owner/purchases/new' && Boolean(autoSupplierId);
+      });
+
+      const selectedSupplier = page
+        .getByLabel('供应商')
+        .locator('option:checked');
+      await expect(selectedSupplier).toHaveText(/^PTY-\d{6} · Codex E2E 自动编码供应商 /);
+      await expect(page.getByLabel('供应商')).toHaveValue(autoSupplierId!);
+      await expectNoNextErrorOverlay(page);
+    } finally {
+      if (autoSupplierId) {
+        await cleanupAutoCodePartyFixture({
+          partyId: autoSupplierId,
+          expectedName: autoSupplierName,
+        });
+      }
+    }
 
     await page.goto('/owner/purchases');
     await expect(page.getByRole('heading', { name: '采购单' })).toBeVisible();
@@ -85,18 +132,28 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/purchases/new');
     await expect(page.getByRole('heading', { name: '新建采购单' })).toBeVisible();
-    await expect(page.getByLabel('供应商')).toBeVisible();
+    const supplierSelect = page.getByLabel('供应商');
+    await expect(supplierSelect).toBeVisible();
+    await expect(supplierSelect).toContainText(fixture.supplierPartyCode);
+    await supplierSelect.selectOption(fixture.supplierPartyId);
+    await expect(supplierSelect).toHaveValue(fixture.supplierPartyId);
     await expect(page.getByLabel('物料')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/warehouses');
-    await expect(page.getByRole('heading', { name: '仓库/库位' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '仓库列表' })).toBeVisible();
-    await expect(page.getByText('默认仓库', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '仓库作业台' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '采购待收货' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '最近库存流水' })).toBeVisible();
+    await expect(page.getByText('库存一致性', { exact: true })).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/orders/new');
     await expect(page.getByRole('heading', { name: '新建工单' })).toBeVisible();
+    // The heading is present in the server-rendered HTML before OrderForm's
+    // client event handlers have necessarily hydrated. Waiting for network
+    // idle keeps selectOption from racing hydration and being reset to the
+    // server-rendered placeholder value.
+    await page.waitForLoadState('networkidle');
     await page.locator('select[name="customerPartyId"]').selectOption(fixture.partyId);
     await expect(page.locator('input[name="customerRef"]')).toHaveValue(fixture.partyCode);
     await expect(page.locator('input[name="receiverName"]')).toHaveValue(fixture.partyContactName);
@@ -142,7 +199,9 @@ test.describe('automation smoke', () => {
       .fill(fixture.materialCode);
     await page.getByRole('button', { name: '搜索' }).click();
     await expect(page.getByText(fixture.materialCode)).toBeVisible();
-    await page.getByLabel(`${fixture.materialName} 实盘数`).fill('8801');
+    await page
+      .getByLabel(`${fixture.materialName} 实盘数`)
+      .fill(String(Number(fixture.materialCurrentStock) + 1));
     await expect(page.getByText('+1.00 张')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
@@ -155,7 +214,9 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/materials/new');
     await expect(page.getByRole('heading', { name: '新建物料' })).toBeVisible();
-    await expect(page.getByLabel('物料编码')).toBeVisible();
+    await expect(
+      page.getByText('高级设置：自定义物料编码（通常无需填写）'),
+    ).toBeVisible();
     await expectNoNextErrorOverlay(page);
   });
 });

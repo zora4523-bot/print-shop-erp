@@ -31,6 +31,8 @@ type Props =
         prev: PartyMutationResult | null,
         fd: FormData,
       ) => Promise<PartyMutationResult>;
+      initialType?: PartyType;
+      returnTo?: '/owner/purchases/new';
     }
   | {
       mode: 'edit';
@@ -57,12 +59,23 @@ export function PartyForm(props: Props) {
   >(props.action, null);
 
   const initial = props.mode === 'edit' ? props.initial : undefined;
+  const initialType =
+    props.mode === 'create'
+      ? (props.initialType ?? PartyType.CUSTOMER)
+      : props.initial.type;
+  const backHref =
+    props.mode === 'create' && props.returnTo
+      ? props.returnTo
+      : '/owner/parties';
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
 
   return (
     <form action={formAction} className="space-y-6" noValidate>
+      {props.mode === 'create' && props.returnTo ? (
+        <input type="hidden" name="returnTo" value={props.returnTo} />
+      ) : null}
       <section className="space-y-4">
         <h2 className="text-base font-semibold">基本信息</h2>
         <div className="grid gap-4 md:grid-cols-2">
@@ -72,7 +85,7 @@ export function PartyForm(props: Props) {
               id="type"
               name="type"
               className={selectClass}
-              defaultValue={initial?.type ?? PartyType.CUSTOMER}
+              defaultValue={initialType}
               disabled={pending}
             >
               {PARTY_TYPE_OPTIONS.map((option) => (
@@ -86,15 +99,35 @@ export function PartyForm(props: Props) {
             ) : null}
           </div>
 
-          <TextField
-            id="code"
-            label="编码"
-            hint="大小写不敏感；可用字母、数字、_、-。"
-            required
-            disabled={pending}
-            error={errs.code?.[0]}
-            defaultValue={initial?.code ?? ''}
-          />
+          {props.mode === 'create' ? (
+            <details
+              className="rounded-lg border border-dashed p-3 md:col-span-2"
+              open={Boolean(errs.code?.[0])}
+            >
+              <summary className="cursor-pointer text-sm text-muted-foreground">
+                高级设置：自定义客户/供应商编码（通常无需填写）
+              </summary>
+              <div className="mt-3">
+                <TextField
+                  id="code"
+                  label="自定义编码（选填）"
+                  hint="留空将自动生成，例如 PTY-000001。"
+                  disabled={pending}
+                  error={errs.code?.[0]}
+                />
+              </div>
+            </details>
+          ) : (
+            <TextField
+              id="code"
+              label="编码"
+              hint="大小写不敏感；修改前请确认外部对接影响。"
+              required
+              disabled={pending}
+              error={errs.code?.[0]}
+              defaultValue={initial?.code ?? ''}
+            />
+          )}
 
           <TextField
             id="name"
@@ -211,8 +244,8 @@ export function PartyForm(props: Props) {
               ? '创建客户/供应商'
               : '保存修改'}
         </Button>
-        <Link href="/owner/parties" className={buttonVariants({ variant: 'outline' })}>
-          返回列表
+        <Link href={backHref} className={buttonVariants({ variant: 'outline' })}>
+          {props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
         </Link>
       </div>
     </form>

@@ -187,6 +187,7 @@ describe('createPurchaseReceipt', () => {
       status: PurchaseOrderStatus.ORDERED,
     });
     txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1', status: PurchaseOrderStatus.ORDERED }])
       .mockResolvedValueOnce([
         {
           id: 'poi1',
@@ -197,6 +198,7 @@ describe('createPurchaseReceipt', () => {
       ])
       .mockResolvedValueOnce([{ id: 'mat1', currentStock: '5.00' }])
       .mockResolvedValueOnce([{ id: 'stock1', currentStock: '5.00' }]);
+    txMock.purchaseReceipt.findUnique.mockResolvedValue(null);
     txMock.purchaseReceipt.findFirst.mockResolvedValue(null);
     txMock.purchaseReceipt.create.mockResolvedValue({ id: 'pr1' });
     txMock.purchaseReceiptItem.create.mockResolvedValue({ id: 'pri1' });
@@ -215,6 +217,7 @@ describe('createPurchaseReceipt', () => {
     await createPurchaseReceipt(
       'po1',
       {
+        idempotencyKey: '00000000-0000-4000-8000-000000000001',
         purchaseOrderItemId: 'poi1',
         locationId: null,
         quantity: '4.00',
@@ -246,19 +249,23 @@ describe('createPurchaseReceipt', () => {
       id: 'po1',
       status: PurchaseOrderStatus.ORDERED,
     });
-    txMock.$queryRaw.mockResolvedValueOnce([
-      {
-        id: 'poi1',
-        materialId: 'mat1',
-        quantity: '10.00',
-        receivedQuantity: '8.00',
-      },
-    ]);
+    txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1', status: PurchaseOrderStatus.ORDERED }])
+      .mockResolvedValueOnce([
+        {
+          id: 'poi1',
+          materialId: 'mat1',
+          quantity: '10.00',
+          receivedQuantity: '8.00',
+        },
+      ]);
+    txMock.purchaseReceipt.findUnique.mockResolvedValue(null);
 
     await expect(
       createPurchaseReceipt(
         'po1',
         {
+          idempotencyKey: '00000000-0000-4000-8000-000000000002',
           purchaseOrderItemId: 'poi1',
           locationId: null,
           quantity: '3.00',
@@ -269,6 +276,31 @@ describe('createPurchaseReceipt', () => {
         now,
       ),
     ).rejects.toThrowError(/入库数量不能超过剩余 2.00/);
+    expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('treats the same request key as an idempotent replay', async () => {
+    txMock.$queryRaw.mockResolvedValueOnce([
+      { id: 'po1', status: PurchaseOrderStatus.PARTIALLY_RECEIVED },
+    ]);
+    txMock.purchaseReceipt.findUnique.mockResolvedValue({ purchaseOrderId: 'po1' });
+    dbMock.purchaseOrder.findUnique.mockResolvedValue(detail);
+
+    await createPurchaseReceipt(
+      'po1',
+      {
+        idempotencyKey: '00000000-0000-4000-8000-000000000003',
+        purchaseOrderItemId: 'poi1',
+        locationId: null,
+        quantity: '4.00',
+        unitCost: null,
+        remark: null,
+      },
+      actor,
+      now,
+    );
+
+    expect(txMock.purchaseReceipt.create).not.toHaveBeenCalled();
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
   });
 });
@@ -292,6 +324,8 @@ describe('cancelPurchaseReceipt', () => {
       ],
     });
     txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1' }])
+      .mockResolvedValueOnce([{ id: 'pr1', status: PurchaseReceiptStatus.POSTED }])
       .mockResolvedValueOnce([{ id: 'mat1', currentStock: '9.00' }])
       .mockResolvedValueOnce([{ id: 'stock1', currentStock: '9.00' }])
       .mockResolvedValueOnce([
@@ -346,6 +380,8 @@ describe('cancelPurchaseReceipt', () => {
       ],
     });
     txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1' }])
+      .mockResolvedValueOnce([{ id: 'pr1', status: PurchaseReceiptStatus.POSTED }])
       .mockResolvedValueOnce([{ id: 'mat1', currentStock: '5.00' }])
       .mockResolvedValueOnce([{ id: 'stock1', currentStock: '5.00' }])
       .mockResolvedValueOnce([
@@ -406,6 +442,8 @@ describe('cancelPurchaseReceipt', () => {
       ],
     });
     txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1' }])
+      .mockResolvedValueOnce([{ id: 'pr1', status: PurchaseReceiptStatus.POSTED }])
       .mockResolvedValueOnce([{ id: 'mat1', currentStock: '1.00' }])
       .mockResolvedValueOnce([{ id: 'stock1', currentStock: '1.00' }]);
 
@@ -415,5 +453,22 @@ describe('cancelPurchaseReceipt', () => {
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
     // 事务失败时不得发出任何库存告警（幽灵消息）
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('rechecks cancellation status after locking the receipt', async () => {
+    txMock.purchaseReceipt.findUnique.mockResolvedValue({
+      id: 'pr1',
+      purchaseOrderId: 'po1',
+    });
+    txMock.$queryRaw
+      .mockResolvedValueOnce([{ id: 'po1' }])
+      .mockResolvedValueOnce([
+        { id: 'pr1', status: PurchaseReceiptStatus.CANCELLED },
+      ]);
+
+    await expect(cancelPurchaseReceipt('pr1', actor, null, now)).rejects.toThrow(
+      /入库单已取消/,
+    );
+    expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ export function CancelPurchaseReceiptButton({
         <Input id={`reason-${receiptId}`} name="reason" disabled={pending} />
       </div>
       <Button type="submit" variant="destructive" disabled={pending}>
-        {pending ? '提交中…' : '取消入库'}
+        {pending ? '提交中…' : '取消收货过账'}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-destructive">

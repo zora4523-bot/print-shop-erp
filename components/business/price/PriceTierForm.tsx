@@ -54,19 +54,26 @@ export function PriceTierForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const missingProducts = props.products.length === 0;
   const defaultProductId = initial?.productId ?? props.products[0]?.id ?? '';
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
       <div className="space-y-2">
-        <Label htmlFor="productId">产品</Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="productId">产品</Label>
+          <Link href="/owner/products/new" className="text-xs text-primary hover:underline">
+            新建产品
+          </Link>
+        </div>
         <select
           id="productId"
           name="productId"
           className={selectClass}
           defaultValue={defaultProductId}
-          disabled={pending || props.products.length === 0}
+          disabled={pending || missingProducts}
         >
+          {missingProducts ? <option value="">暂无可用产品</option> : null}
           {props.products.map((product) => (
             <option key={product.id} value={product.id}>
               {productLabel(product)}
@@ -75,6 +82,11 @@ export function PriceTierForm(props: Props) {
         </select>
         {errs.productId?.[0] ? (
           <p className="text-sm text-destructive">{errs.productId[0]}</p>
+        ) : null}
+        {missingProducts ? (
+          <p role="alert" className="text-sm text-warning-foreground">
+            请先创建并启用至少一个产品，再维护价格阶梯。
+          </p>
         ) : null}
       </div>
 
@@ -133,7 +145,7 @@ export function PriceTierForm(props: Props) {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending || props.products.length === 0}>
+        <Button type="submit" disabled={pending || missingProducts}>
           {pending ? '提交中…' : props.mode === 'create' ? '创建价格阶梯' : '保存修改'}
         </Button>
         <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>

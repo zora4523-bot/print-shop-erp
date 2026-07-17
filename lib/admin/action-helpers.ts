@@ -1,5 +1,4 @@
 import { revalidatePath } from 'next/cache';
-import { Prisma } from '../../generated/prisma/client';
 
 export type MutationResult =
   | { status: 'success'; message?: string }
@@ -86,18 +85,48 @@ export function normalizePrismaUniqueTargets(target: unknown): string[] {
   return typeof target === 'string' ? [target] : [];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Prisma's error metadata differs by query engine/driver adapter:
+ *
+ * - query engine: `meta.target = ['code']`
+ * - Prisma 7 driver adapter:
+ *   `meta.driverAdapterError.cause.constraint.fields = ['code']`
+ *
+ * Keep this structural so Server Action bundling does not depend on a single
+ * Prisma error-class identity.
+ */
+export function extractPrismaUniqueTargets(meta: unknown): string[] {
+  if (!isRecord(meta)) return [];
+
+  const targets = normalizePrismaUniqueTargets(meta.target);
+  const driverError = isRecord(meta.driverAdapterError)
+    ? meta.driverAdapterError
+    : null;
+  const cause = driverError && isRecord(driverError.cause) ? driverError.cause : null;
+  const constraint = cause?.constraint;
+  const adapterTargets =
+    typeof constraint === 'string'
+      ? [constraint]
+      : isRecord(constraint)
+        ? normalizePrismaUniqueTargets(constraint.fields)
+        : [];
+
+  return [...new Set([...targets, ...adapterTargets])];
+}
+
 export function mapPrismaUniqueViolation(
   err: unknown,
   mappings: readonly UniqueViolationMapping[],
 ): InvalidMutationResult | null {
-  if (
-    !(err instanceof Prisma.PrismaClientKnownRequestError) ||
-    err.code !== 'P2002'
-  ) {
+  if (!isRecord(err) || err.code !== 'P2002') {
     return null;
   }
 
-  const targets = normalizePrismaUniqueTargets(err.meta?.target);
+  const targets = extractPrismaUniqueTargets(err.meta);
   for (const mapping of mappings) {
     if (targets.some((target) => mapping.targets.includes(target))) {
       return {

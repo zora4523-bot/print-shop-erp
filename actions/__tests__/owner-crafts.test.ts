@@ -80,6 +80,19 @@ beforeEach(() => {
 });
 
 describe('createCraftAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
+
+    await expect(
+      createCraftAction(null, fd({ ...validCreateFields, code: '' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(craftMock.createCraft).toHaveBeenCalledWith(
+      expect.objectContaining({ code: null }),
+    );
+  });
+
   it("first-line requirePermission('dict:craft:manage'); unauth bubbles", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
