@@ -66,15 +66,30 @@ export type OrderPdfJobWaitResult =
 
 export async function waitForOrderPdfJob(
   jobId: string,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    expected?: { orderId: string; actorId: string };
+  } = {},
 ): Promise<OrderPdfJobWaitResult> {
   const deadline = Date.now() + Math.max(1_000, options.timeoutMs ?? 120_000);
   while (Date.now() < deadline && !options.signal?.aborted) {
     const job = await db.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { status: true, result: true, lastErrorCode: true },
+      select: {
+        type: true,
+        payload: true,
+        status: true,
+        result: true,
+        lastErrorCode: true,
+      },
     });
     if (!job) return { status: 'failed', errorCode: 'JobNotFound' };
+    if (options.expected && !matchesExpectedPdfJob(job, options.expected)) {
+      // Do not reveal whether a caller-supplied job id exists or belongs to a
+      // different user/order.
+      return { status: 'failed', errorCode: 'JobNotFound' };
+    }
     if (job.status === BackgroundJobStatus.SUCCEEDED) {
       const result = asRecord(job.result);
       return { status: 'ready', artifactName: requiredString(result.artifactName) };
@@ -88,6 +103,22 @@ export async function waitForOrderPdfJob(
     await delay(300, options.signal);
   }
   return { status: 'timeout' };
+}
+
+function matchesExpectedPdfJob(
+  job: { type: string; payload: Prisma.JsonValue },
+  expected: { orderId: string; actorId: string },
+): boolean {
+  if (job.type !== BACKGROUND_JOB_TYPES.ORDER_PDF) return false;
+  try {
+    const payload = asRecord(job.payload);
+    const actor = asRecord(payload.actor);
+    return (
+      payload.orderId === expected.orderId && actor.id === expected.actorId
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function readAndDeletePdfArtifact(name: string): Promise<Buffer> {

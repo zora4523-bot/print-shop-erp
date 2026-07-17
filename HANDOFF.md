@@ -8,14 +8,16 @@
 
 ## 当前任务
 
-**生产硬化批次完成** ✅（2026-07-17）：备份验收、监控、任务可靠性和资源隔离已落地。
+**生产硬化审查修复完成** ✅（2026-07-17）：`ebe2300` 的 durable 任务与资源隔离实现已完成上线前纠偏。
 
 - PostgreSQL 持久化任务账本：`FOR UPDATE SKIP LOCKED`、租约/心跳、有界退避重试、死信、幂等 key、逐次审计。
 - 7 个 cron 和企微通知进 LIGHT 队列；CDR 压缩与 Puppeteer PDF 进 HEAVY 队列。
-- PM2 拆为 Web/LIGHT/HEAVY 三进程，HEAVY 并发 1，各自有内存上限和优雅排水。
+- PM2 拆为 Web/LIGHT/HEAVY 三进程；worker 用 `node --import tsx` 在 PM2 管理的同一 PID 内运行，V8 heap 上限和 `max_memory_restart` 现在覆盖真实工作进程；重启带指数退避。
+- durable 入队失败不会把已 commit 的业务操作重新表现为 500；DEAD/CANCELLED dedupe scope 可重新入队，CDR 取消/死信/租约耗尽会同步 FAILED，未知任务走标准失败流程。
+- 7 个 cron + 通知 + CDR + PDF 的生产分支已有显式测试；PDF 排队超时改为可见的自动重试页面，并校验 job 与用户/工单绑定。
 - `/api/health/live`、`/api/health/ready`、worker Sentry、OWNER 后台任务看板/重试/取消已落地。
 - pgBackRest 只读验收 `pnpm check:backup`；SLO/RPO/RTO/恢复演练见 `docs/production-slo-and-recovery.md`。
-- 本地已执行 migration `20260717090000_background_jobs`；89 测试文件 / 1296 测试、typecheck、lint、production build 全绿。PDF 经 HEAVY worker 真实生成并校验 `%PDF`。
+- migration `20260717090000_background_jobs` 未改；94 测试文件 / 1353 测试、typecheck、lint、Prisma validate、production build 全绿。worker 生产入口已用真实 Node 命令验证 heap 参数与退出语义。
 
 ## 下一步具体指令（给下次 AI）
 
@@ -23,6 +25,7 @@
 2. 上线门禁：`pnpm check:env` → migrate/build → `pm2 startOrReload deploy/ecosystem.config.cjs` → `/api/health/ready` → `pnpm check:backup`。
 3. 多机扩容前，PDF 产物必须迁到共享对象存储；当前单机 PM2 基线用 `/var/tmp/print-shop-erp/pdf`。
 4. 原架构报告 A1–A6 与 A05/A07/A20/A21 业务待办仍保留，见 `docs/架构体检报告-2026-07-09.md` / `docs/AGENT-BACKLOG.md`。
+5. 提交前只选择本次生产硬化修复文件；当前工作区还包含另一批业务编码/UI/视觉基线改动，禁止混成一个大 commit。
 
 ## 卡住的问题
 
@@ -30,6 +33,7 @@
 - 视觉基线 6 张 png（承诺交期 + QR URL 化引起）仍待业主看截图确认后以 `[visual-regression]` commit 提交。
 - `pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
 - A05/A07/A20/A21 等业务输入（backlog Needs 小节）。
+- 后台任务账本尚无自动保留清理策略；上线后按实际增长率决定 SUCCEEDED/CANCELLED/DEAD 的保留窗口，并单独设计清理任务。
 
 ## 历史（追加式时间线）
 
@@ -63,3 +67,4 @@
 - 2026-07-08：上线前多维度审计（6 维度并行 audit → 逐条对抗性验证 workflow，54 agent；含手动核实）。发现并**即修 4 项**：(1) **blocker** `createOrderFromInput`/`scheduleOrderFromInput` 从 'use server' 导出成公开 Server Action、信任调用方 actor 无 requirePermission = 越权+审计伪造后门，零调用方直接删除（`5bdf5a3`）；(2) **high** `.env.example` 出厂 `NOTIFICATION_MOCK_MODE="true"` 会诱导运维带进生产静默 mock 推送→改留空按 NODE_ENV 判定（`3eaf050`）；(3) README env 表补 mock 开关行+OSS CORS 手动步骤+APP_PUBLIC_URL 扩到二维码、6→7 cron 漂移修正（`3eaf050`）；(4) **low** hourly-payroll cron 意外错误 scrub 对齐 COUNTS-ONLY（`c5ac707`）。1264 单测/tsc/eslint/build 全绿。**剩余为纯手动运维项**（见报告）：生产 .env 注入（APP_PUBLIC_URL/SENTRY_DSN/AUTH_SECRET 新值/DATABASE_URL 生产库）、OSS 控制台配 CORS、首次 seed、cron 调度器（crontab/pg_cron 7 端点）、Pigsty 扩展安装、pgbackrest、Puppeteer chrome、PM2/Nginx 自备。视觉基线 6 png 仍待业主确认后提交。
 - 2026-07-09：全库架构体检（6 子系统深读 + 44 agent 提案验证 workflow）→ 7 个行为零变化重构切片落地（日期/cron 认证/OSS 工厂+锁 key/通知常量/collectFieldErrors/createOrder 批量/薪资规则查询，`06ecc62`→`f4b6ab7`），Codex 复核 PASS，1272 单测全绿；交付 `docs/架构体检报告-2026-07-09.md`（含行为缺口 A1-A7、结构债清单、已验证路线图、不做清单）；DECISIONS 记录去重边界决策。
 - 2026-07-17：生产硬化：PostgreSQL 任务账本 + LIGHT/HEAVY worker + cron/通知持久化 + CDR/PDF 资源隔离 + live/ready + OWNER 任务看板 + pgBackRest 验收脚本落地。本地 migration 和 PDF worker 真实演练通过；1296 单测 / lint / typecheck / build 全绿。
+- 2026-07-17：生产硬化上线前纠偏：修复 worker 资源限制落在 tsx 包装进程、durable 通知可抛、终态 dedupe 永久占位、CDR 永久 PENDING、未知任务不进 fail、部署 env/重启配置和 PDF 排队体验；补齐生产分支测试，1353 单测 / lint / typecheck / Prisma validate / build 全绿。

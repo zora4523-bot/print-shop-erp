@@ -41,34 +41,47 @@ export async function GET(_req: Request, ctx: Params) {
 
   let pdf: Buffer;
   if (backgroundJobsMode() === 'durable') {
-    const jobId = await enqueueOrderPdfJob({
-      orderId: id,
-      actor: { id: session.user.id, role: session.user.role },
-      baseUrl,
-    });
+    const requestedJobId = new URL(_req.url).searchParams.get('jobId');
+    if (requestedJobId && !/^[A-Za-z0-9_-]{1,64}$/.test(requestedJobId)) {
+      return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
+    }
+    const jobId =
+      requestedJobId ??
+      (await enqueueOrderPdfJob({
+        orderId: id,
+        actor: { id: session.user.id, role: session.user.role },
+        baseUrl,
+      }));
     const result = await waitForOrderPdfJob(jobId, {
-      timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 120_000,
+      timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
       signal: _req.signal,
+      expected: { orderId: id, actorId: session.user.id },
     });
     if (result.status === 'timeout') {
-      return NextResponse.json(
-        { error: 'PDF 生成仍在排队', jobId },
-        { status: 202, headers: { 'Retry-After': '5' } },
-      );
+      return pdfStatusPage({
+        title: 'PDF 正在生成',
+        message: '任务仍在排队，本页将在 5 秒后自动重试。',
+        status: 202,
+        retryUrl: pdfRetryUrl(_req.url, jobId),
+      });
     }
     if (result.status === 'failed') {
-      return NextResponse.json(
-        { error: 'PDF 生成失败', errorCode: result.errorCode },
-        { status: 500 },
-      );
+      return pdfStatusPage({
+        title: 'PDF 生成失败',
+        message: `错误码：${result.errorCode ?? 'UnknownError'}。请点击下方按钮重新生成。`,
+        status: 500,
+        retryUrl: new URL(_req.url).pathname,
+      });
     }
     try {
       pdf = await readAndDeletePdfArtifact(result.artifactName);
     } catch {
-      return NextResponse.json(
-        { error: 'PDF 产物不可用，请重试', errorCode: 'ArtifactUnavailable' },
-        { status: 500 },
-      );
+      return pdfStatusPage({
+        title: 'PDF 产物不可用',
+        message: '生成结果已过期或被清理，请点击下方按钮重新生成。',
+        status: 500,
+        retryUrl: new URL(_req.url).pathname,
+      });
     }
   } else {
     try {
@@ -116,6 +129,53 @@ export async function GET(_req: Request, ctx: Params) {
       'Cache-Control': 'private, no-store',
     },
   });
+}
+
+function pdfRetryUrl(requestUrl: string, jobId: string): string {
+  const url = new URL(requestUrl);
+  url.search = '';
+  url.searchParams.set('jobId', jobId);
+  return `${url.pathname}${url.search}`;
+}
+
+function pdfStatusPage(input: {
+  title: string;
+  message: string;
+  status: number;
+  retryUrl: string;
+}): Response {
+  const retryUrl = escapeHtml(input.retryUrl);
+  const autoRefresh = input.status === 202;
+  const refreshMeta = autoRefresh
+    ? `<meta http-equiv="refresh" content="5;url=${retryUrl}">`
+    : '';
+  return new Response(
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">${refreshMeta}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 1.5rem;line-height:1.6"><h1>${escapeHtml(input.title)}</h1><p>${escapeHtml(input.message)}</p><p><a href="${retryUrl}">立即重试</a></p></body></html>`,
+    {
+      status: input.status,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'private, no-store',
+        ...(autoRefresh
+          ? { 'Retry-After': '5', Refresh: `5;url=${input.retryUrl}` }
+          : {}),
+      },
+    },
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[character]!,
+  );
 }
 
 // RFC 5987 / 6266: ship an ASCII fallback for legacy clients and the

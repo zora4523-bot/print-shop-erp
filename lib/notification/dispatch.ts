@@ -52,10 +52,21 @@ export async function dispatchNotification<E extends NotificationEvent>(
     // Lazy import keeps the inline test/dev path free of lib/db side effects.
     // It also avoids loading Prisma into a process that only exercises the
     // pure notification renderer.
-    const { enqueueNotificationJob } = await import(
-      '../background-jobs/notification'
-    );
-    await enqueueNotificationJob(event, payload, options);
+    try {
+      const { enqueueNotificationJob } = await import(
+        '../background-jobs/notification'
+      );
+      await enqueueNotificationJob(event, payload, options);
+    } catch (error) {
+      // 业务事务通常已经提交，任务账本写入失败不能把已成功的用户操作
+      // 重新表现成 500。只记录脱敏错误类型，并降级到 notify() 自身的
+      // best-effort 顶层兜底；notify() 的公开契约仍然是永不抛。
+      console.error(
+        '[dispatchNotification] durable enqueue failed:',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
+      void notify(event, payload);
+    }
     return;
   }
 

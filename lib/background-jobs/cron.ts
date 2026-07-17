@@ -29,9 +29,9 @@ export async function enqueueCronJob(input: {
   type: BackgroundJobType;
   scope: string;
   payload?: Prisma.InputJsonValue;
-}): Promise<{ jobId: string; created: boolean }> {
+}): Promise<{ jobId: string; created: boolean; requeued: boolean }> {
   if (!CRON_TYPES.has(input.type)) throw new InvalidCronJobPayloadError();
-  const { job, created } = await enqueueBackgroundJob({
+  const { job, created, requeued } = await enqueueBackgroundJob({
     type: input.type,
     queue: BackgroundJobQueue.LIGHT,
     dedupeKey: `cron:${input.type}:${input.scope}`,
@@ -39,7 +39,7 @@ export async function enqueueCronJob(input: {
     priority: 150,
     maxAttempts: 4,
   });
-  return { jobId: job.id, created };
+  return { jobId: job.id, created, requeued };
 }
 
 export async function handleCronJob(

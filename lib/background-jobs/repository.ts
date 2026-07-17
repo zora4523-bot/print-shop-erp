@@ -18,6 +18,7 @@ type EnqueueClient = Pick<Prisma.TransactionClient, 'backgroundJob'>;
 export type EnqueueBackgroundJobResult = {
   job: BackgroundJob;
   created: boolean;
+  requeued: boolean;
 };
 
 export class BackgroundJobLeaseLostError extends Error {
@@ -43,7 +44,7 @@ export async function enqueueBackgroundJob(
         availableAt: input.availableAt,
       },
     });
-    return { job, created: true };
+    return { job, created: true, requeued: false };
   } catch (error) {
     if (
       !(error instanceof Prisma.PrismaClientKnownRequestError) ||
@@ -55,7 +56,47 @@ export async function enqueueBackgroundJob(
       where: { dedupeKey: input.dedupeKey },
     });
     if (!job) throw error;
-    return { job, created: false };
+
+    // SUCCEEDED/RUNNING/PENDING are real duplicates and must stay idempotent.
+    // DEAD/CANCELLED are terminal delivery failures: keeping their unique key
+    // forever would make an operator retry of the same logical scope silently
+    // no-op. Re-arm the same ledger row so attempt history stays attached.
+    if (
+      job.status === BackgroundJobStatus.DEAD ||
+      job.status === BackgroundJobStatus.CANCELLED
+    ) {
+      const retryBudget = input.maxAttempts ?? 5;
+      const updated = await client.backgroundJob.updateMany({
+        where: {
+          id: job.id,
+          status: {
+            in: [BackgroundJobStatus.DEAD, BackgroundJobStatus.CANCELLED],
+          },
+        },
+        data: {
+          type: input.type,
+          queue: input.queue,
+          payload: input.payload,
+          priority: input.priority ?? 100,
+          maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
+          availableAt: input.availableAt ?? new Date(),
+          result: Prisma.JsonNull,
+          status: BackgroundJobStatus.PENDING,
+          finishedAt: null,
+          lockedBy: null,
+          lockedAt: null,
+          heartbeatAt: null,
+          lastErrorCode: null,
+        },
+      });
+      const current = await client.backgroundJob.findUnique({
+        where: { dedupeKey: input.dedupeKey },
+      });
+      if (!current) throw error;
+      return { job: current, created: false, requeued: updated.count === 1 };
+    }
+
+    return { job, created: false, requeued: false };
   }
 }
 
@@ -113,6 +154,20 @@ export async function claimNextBackgroundJob(input: {
        WHERE "status" = 'RUNNING'::"BackgroundJobStatus"
          AND "attempts" >= "maxAttempts"
          AND COALESCE("heartbeatAt", "lockedAt") < ${leaseCutoff}
+    `;
+
+    // A final-attempt CDR worker can disappear before its handler records the
+    // terminal bundle state. Reconcile from the authoritative job ledger so
+    // the download page never remains PENDING forever.
+    await tx.$executeRaw`
+      UPDATE "DesignBundle" AS bundle
+         SET "status" = 'FAILED'::"DesignBundleStatus",
+             "lastErrorCode" = COALESCE(job."lastErrorCode", 'WorkerLeaseExpired')
+        FROM "BackgroundJob" AS job
+       WHERE bundle."backgroundJobId" = job."id"
+         AND bundle."status" = 'PENDING'::"DesignBundleStatus"
+         AND job."status" = 'DEAD'::"BackgroundJobStatus"
+         AND job."type" = 'CDR_BUNDLE'
     `;
 
     const rows = await tx.$queryRaw<ClaimedRow[]>`
@@ -258,6 +313,16 @@ export async function failBackgroundJob(
     });
     if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
 
+    if (exhausted && job.type === 'CDR_BUNDLE') {
+      await tx.designBundle.updateMany({
+        where: { backgroundJobId: job.id },
+        data: {
+          status: 'FAILED',
+          lastErrorCode: errorCode,
+        },
+      });
+    }
+
     await tx.backgroundJobAttempt.update({
       where: {
         jobId_attempt: { jobId: job.id, attempt: job.attempts },
@@ -306,7 +371,7 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
   return db.$transaction(async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { status: true, attempts: true, maxAttempts: true },
+      select: { status: true, type: true, attempts: true, maxAttempts: true },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
     await tx.backgroundJob.update({
@@ -319,20 +384,34 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
         lastErrorCode: null,
       },
     });
+    if (job.type === 'CDR_BUNDLE') {
+      await tx.designBundle.updateMany({
+        where: { backgroundJobId: jobId },
+        data: { status: 'PENDING', lastErrorCode: null },
+      });
+    }
     return true;
   });
 }
 
 export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean> {
-  const updated = await db.backgroundJob.updateMany({
-    where: { id: jobId, status: BackgroundJobStatus.PENDING },
-    data: {
-      status: BackgroundJobStatus.CANCELLED,
-      finishedAt: new Date(),
-      lockedBy: null,
-      lockedAt: null,
-      heartbeatAt: null,
-    },
+  return db.$transaction(async (tx) => {
+    const updated = await tx.backgroundJob.updateMany({
+      where: { id: jobId, status: BackgroundJobStatus.PENDING },
+      data: {
+        status: BackgroundJobStatus.CANCELLED,
+        finishedAt: new Date(),
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: 'CancelledByOperator',
+      },
+    });
+    if (updated.count !== 1) return false;
+    await tx.designBundle.updateMany({
+      where: { backgroundJobId: jobId, status: 'PENDING' },
+      data: { status: 'FAILED', lastErrorCode: 'CancelledByOperator' },
+    });
+    return true;
   });
-  return updated.count === 1;
 }

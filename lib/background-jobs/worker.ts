@@ -60,11 +60,11 @@ async function runLane(
         continue;
       }
 
-      const handler = options.handlers[job.type];
-      if (!handler) throw new UnknownBackgroundJobTypeError(job.type);
-
       const heartbeat = startHeartbeat(job, leaseMs, options.onError);
       try {
+        const handler = options.handlers[job.type];
+        if (!handler) throw new UnknownBackgroundJobTypeError(job.type);
+
         const result = await handler(job);
         await completeBackgroundJob(job, result);
       } catch (error) {

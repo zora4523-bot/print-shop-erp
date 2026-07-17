@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findMany: vi.fn() },
+    $transaction: vi.fn(),
     designBundle: {
       create: vi.fn(),
       update: vi.fn(),
@@ -20,12 +21,20 @@ const { uploadMock } = vi.hoisted(() => ({
 }));
 vi.mock('../zip', () => ({ uploadBundleZip: uploadMock }));
 
+const { enqueueBackgroundJobMock } = vi.hoisted(() => ({
+  enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+}));
+vi.mock('@/lib/background-jobs/repository', () => ({
+  enqueueBackgroundJob: enqueueBackgroundJobMock,
+}));
+
 import {
   BundleExpiredError,
   BundleNotFoundError,
   CdrBundleError,
   consumeBundle,
   createBundle,
+  enqueueBundle,
   listEligibleOrders,
   listRecentBundles,
 } from '../bundle';
@@ -34,6 +43,10 @@ beforeEach(() => {
   Object.values(dbMock.order).forEach((fn) => fn.mockReset());
   Object.values(dbMock.designBundle).forEach((fn) => fn.mockReset());
   uploadMock.mockReset();
+  enqueueBackgroundJobMock.mockReset();
+  dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
+    callback(dbMock),
+  );
   // Default: bundle.update succeeds
   dbMock.designBundle.update.mockResolvedValue({});
   dbMock.designBundle.delete.mockResolvedValue({});
@@ -285,6 +298,63 @@ describe('createBundle', () => {
       where: { id: 'b1' },
     });
     consoleSpy.mockRestore();
+  });
+});
+
+describe('enqueueBundle durable path', () => {
+  it('persists bundle and HEAVY job in one transaction', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'o1',
+        orderNo: 'O-1',
+        items: [
+          {
+            designs: [
+              { id: 'd1', fileName: 'a.cdr', fileUrl: 'https://x/a.cdr' },
+            ],
+          },
+        ],
+      },
+    ]);
+    dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
+    dbMock.designBundle.update.mockResolvedValue({});
+    enqueueBackgroundJobMock.mockResolvedValue({
+      job: { id: 'job-1' },
+      created: true,
+      requeued: false,
+    });
+
+    await expect(
+      enqueueBundle(
+        {
+          from: '2026-05-05',
+          orderIds: ['o1'],
+          baseUrl: 'https://erp.example.com',
+        },
+        { id: 'u1' },
+      ),
+    ).resolves.toMatchObject({
+      bundleId: 'b1',
+      jobId: 'job-1',
+      fileCount: 1,
+    });
+
+    expect(enqueueBackgroundJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'CDR_BUNDLE',
+        queue: 'HEAVY',
+        dedupeKey: 'cdr-bundle:b1',
+        payload: { bundleId: 'b1' },
+      }),
+      dbMock,
+    );
+    expect(dbMock.designBundle.update).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      data: {
+        backgroundJobId: 'job-1',
+        downloadUrl: 'https://erp.example.com/api/cdr/bundles/b1',
+      },
+    });
   });
 });
 

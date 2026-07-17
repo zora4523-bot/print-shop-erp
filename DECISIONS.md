@@ -508,3 +508,12 @@
 - **理由**：应用自己调备份会分裂 Pigsty 的恢复链和凭证边界；但只写运维文档无法阻止备份实际早已过期。因此仓库负责验收而不负责执行备份。
 - **影响**：本地无 stanza/pgBackRest 时检查刻意失败，不伪造绿灯；生产上线须在 Pigsty 节点注入 stanza 后运行。
 - **相关文档**：`scripts/check-backup-readiness.mjs`、`docs/production-slo-and-recovery.md`。
+
+---
+
+## 2026-07-17：终态任务允许重入队，worker 资源限制必须落在真实 PID
+
+- **决策**：唯一 `dedupeKey` 对 PENDING/RUNNING/SUCCEEDED 继续保持幂等；命中 DEAD/CANCELLED 时重启同一账本行并追加 retry budget，保留原 attempt 审计。CDR 的取消、最终失败和租约耗尽同步更新 DesignBundle。PM2 worker 不再执行会 spawn 子进程的 `tsx` CLI，改为 `node --import tsx scripts/background-worker.ts`；生产环境变量由入口先用 `@next/env` 加载，再动态 import Prisma/业务模块。
+- **理由**：终态 key 永久占位会让人工重跑静默空转；CDR 业务状态不能与权威任务账本永久分裂。`tsx` CLI 的包装 PID 让 V8 heap 上限和 PM2 memory restart 都监控错进程，无法兑现 Web/LIGHT/HEAVY 的资源隔离。
+- **影响**：同一 cron scope 在成功后仍不会重复执行，但死信/取消后再次触发可恢复；worker OOM 由真实 heap 上限和 PM2 阈值约束。`dispatchNotification` 在 durable 入队失败时记录脱敏错误并 best-effort 降级，保持业务提交后永不抛。
+- **相关文档**：`lib/background-jobs/repository.ts`、`lib/background-jobs/worker.ts`、`lib/notification/dispatch.ts`、`scripts/background-worker.ts`、`deploy/ecosystem.config.cjs`。

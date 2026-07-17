@@ -9,8 +9,9 @@ const common = {
   instances: 1,
   exec_mode: 'fork',
   autorestart: true,
-  max_restarts: 10,
-  min_uptime: '60s',
+  max_restarts: 1_000,
+  min_uptime: '10s',
+  exp_backoff_restart_delay: 1_000,
   merge_logs: true,
   time: true,
   env: {
@@ -35,11 +36,13 @@ module.exports = {
     {
       ...common,
       name: 'print-shop-erp-worker-light',
-      script: 'node_modules/tsx/dist/cli.mjs',
-      args: 'scripts/background-worker.ts --queue=LIGHT',
+      script: 'scripts/background-worker.ts',
+      args: '--queue=LIGHT',
       interpreter: 'node',
       max_memory_restart: '384M',
-      node_args: '--max-old-space-size=320',
+      // `tsx` CLI 会再 spawn 一个实际 worker，导致 PM2/heap limit 只
+      // 监控包装进程。Node --import 在同一 pid 内转译 TS。
+      node_args: '--import tsx --max-old-space-size=320',
       kill_timeout: 60_000,
       error_file: `${logs}/worker-light-error.log`,
       out_file: `${logs}/worker-light-out.log`,
@@ -47,11 +50,11 @@ module.exports = {
     {
       ...common,
       name: 'print-shop-erp-worker-heavy',
-      script: 'node_modules/tsx/dist/cli.mjs',
-      args: 'scripts/background-worker.ts --queue=HEAVY',
+      script: 'scripts/background-worker.ts',
+      args: '--queue=HEAVY',
       interpreter: 'node',
       max_memory_restart: '1280M',
-      node_args: '--max-old-space-size=1024',
+      node_args: '--import tsx --max-old-space-size=1024',
       kill_timeout: 300_000,
       error_file: `${logs}/worker-heavy-error.log`,
       out_file: `${logs}/worker-heavy-out.log`,

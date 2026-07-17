@@ -17,9 +17,9 @@ export async function enqueueNotificationJob<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
   options: { dedupeKey?: string } = {},
-): Promise<{ jobId: string; created: boolean }> {
+): Promise<{ jobId: string; created: boolean; requeued: boolean }> {
   const body = JSON.parse(JSON.stringify({ event, payload })) as Prisma.InputJsonValue;
-  const { job, created } = await enqueueBackgroundJob({
+  const { job, created, requeued } = await enqueueBackgroundJob({
     type: BACKGROUND_JOB_TYPES.NOTIFICATION,
     queue: BackgroundJobQueue.LIGHT,
     dedupeKey:
@@ -28,7 +28,7 @@ export async function enqueueNotificationJob<E extends NotificationEvent>(
     maxAttempts: 5,
     priority: 200,
   });
-  return { jobId: job.id, created };
+  return { jobId: job.id, created, requeued };
 }
 
 export async function handleNotificationJob(

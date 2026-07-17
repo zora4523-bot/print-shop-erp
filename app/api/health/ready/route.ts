@@ -23,23 +23,14 @@ export async function GET(): Promise<Response> {
       {
         status: assessment.status,
         db: 'ok',
-        version,
         time,
         warnings: assessment.warnings,
-        workers: jobs.activeWorkers,
-        jobs: {
-          pending: jobs.pending,
-          oldestPendingAt: jobs.oldestPendingAt,
-          running: jobs.running,
-          staleRunning: jobs.staleRunning,
-          deadLast24h: jobs.deadLast24h,
-        },
       },
       { status: assessment.available ? 200 : 503 },
     );
   } catch {
     return NextResponse.json(
-      { status: 'error', db: 'down', version, time },
+      { status: 'error', db: 'down', time },
       { status: 503 },
     );
   }

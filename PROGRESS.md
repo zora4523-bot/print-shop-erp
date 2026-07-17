@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-**P0/P1 + Pigsty/ERP 主数据 + 生产硬化已完成**。应用已具备备份验收、可观测性、持久化任务与重任务资源隔离的代码/部署基线；剩余是生产环境激活与需业主拍板的业务项。
+**P0/P1 + Pigsty/ERP 主数据 + 生产硬化已完成**。生产硬化的上线前审查问题已纠偏，应用已具备备份验收、可观测性、持久化任务与真实生效的重任务资源隔离基线；剩余是生产环境激活与需业主拍板的业务项。
 
 ## 最后更新
 
@@ -28,6 +28,13 @@
 
 - [x] **P1 #1 老板 Dashboard** 三层：KPI 卡 + 关注列表 + recharts 图表（累计 870 单测）
 - [x] **P1 #2 企业微信推送** 四切片：notify 引擎（mock-mode）→ admin UI → 5 状态机事件 wire → cron 事件 + 2 新端点；SPEC §8.1 9/10 事件接通（STOCK_ALERT 依赖物料模型，现已具备 wire 条件）（累计 1011 单测）
+
+### 生产硬化审查修复（2026-07-17）
+
+- [x] worker 改为 PM2 管理 PID 内的 `node --import tsx`，heap limit / memory restart 对真实进程生效；生产 env 按 `@next/env` 加载，重启带指数退避。
+- [x] durable 通知恢复“永不抛”契约；DEAD/CANCELLED dedupe 可重入队；CDR 终态同步；未知任务进入标准 fail/dead 流程。
+- [x] 7 cron + 通知 + CDR + PDF durable 路径、repository、worker、handler registry 测试落地；**94 文件 / 1353 单测**全绿。
+- [x] PDF 排队改自动重试 HTML，jobId 强绑定 actor/order；匿名 ready 响应移除任务明细与版本。
 
 ### Pigsty 扩展 + 内部 Admin 框架 + ERP 主数据（2026-06-28 批次，工作区已验证、待提交）
 
@@ -74,4 +81,5 @@
 - Puppeteer 部署需 `npx puppeteer browsers install chrome`（README 已写）
 - PDF 产物目录是单机 PM2 共享目录；未来多机部署需迁往对象存储。
 - 通知事件在业务事务 commit 后入队；已持久化且调用方 await，但严格 transactional outbox 仍可作未来增强。
+- BackgroundJob 账本暂无自动保留清理策略；待生产增长率可观测后确定清理窗口。
 - `pg_pinyin` / `pg_ivm` / `pg_partman` 等在非 Pigsty 本地库降级为普通列/视图/缺席，生产安装按 `docs/pigsty-production-activation-runbook.md`

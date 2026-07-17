@@ -1,18 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock collaborators before importing dispatch.
-const { notifyMock, afterMock } = vi.hoisted(() => ({
+const { notifyMock, afterMock, modeMock, enqueueNotificationJobMock } = vi.hoisted(() => ({
   notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
   afterMock: vi.fn<(cb: () => unknown) => void>(),
+  modeMock: vi.fn<() => 'inline' | 'durable'>(() => 'inline'),
+  enqueueNotificationJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
 }));
 vi.mock('../notify', () => ({ notify: notifyMock }));
 vi.mock('next/server', () => ({ after: afterMock }));
+vi.mock('../../background-jobs/mode', () => ({ backgroundJobsMode: modeMock }));
+vi.mock('../../background-jobs/notification', () => ({
+  enqueueNotificationJob: enqueueNotificationJobMock,
+}));
 
 import { dispatchNotification } from '../dispatch';
 
 beforeEach(() => {
   notifyMock.mockReset().mockResolvedValue(undefined);
   afterMock.mockReset();
+  modeMock.mockReset().mockReturnValue('inline');
+  enqueueNotificationJobMock.mockReset().mockResolvedValue({
+    jobId: 'job-1',
+    created: true,
+  });
 });
 
 describe('dispatchNotification', () => {
@@ -93,5 +104,62 @@ describe('dispatchNotification', () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     warnSpy.mockRestore();
+  });
+
+  it('durable 模式只入队，不在请求进程直接 notify', async () => {
+    modeMock.mockReturnValue('durable');
+
+    await expect(
+      dispatchNotification(
+        'ORDER_SUBMITTED',
+        {
+          orderId: 'o1',
+          orderNo: 'O-1',
+          submitterName: '张三',
+          customerRef: null,
+          totalAmount: '0',
+          urgentMark: '',
+        },
+        { dedupeKey: 'notification:ORDER_SUBMITTED:o1' },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(enqueueNotificationJobMock).toHaveBeenCalledWith(
+      'ORDER_SUBMITTED',
+      expect.objectContaining({ orderId: 'o1', orderNo: 'O-1' }),
+      { dedupeKey: 'notification:ORDER_SUBMITTED:o1' },
+    );
+    expect(afterMock).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('durable 入队失败仍永不抛，并降级 best-effort notify', async () => {
+    modeMock.mockReturnValue('durable');
+    enqueueNotificationJobMock.mockRejectedValue(
+      Object.assign(new Error('connection string must stay private'), {
+        name: 'DatabaseUnavailableError',
+      }),
+    );
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      dispatchNotification('ORDER_COMPLETED', {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        customerRef: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[dispatchNotification] durable enqueue failed:',
+      'DatabaseUnavailableError',
+    );
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain(
+      'connection string',
+    );
+    errorSpy.mockRestore();
   });
 });

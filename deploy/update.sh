@@ -32,14 +32,14 @@ git pull --ff-only
 
 NEW_COMMIT="$(git rev-parse --short HEAD)"
 if [ "$PREV_COMMIT" = "$NEW_COMMIT" ]; then
-  echo "==> 代码无更新（仍是 $PREV_COMMIT）。如只想重启：pm2 reload $APP_NAME"
+  echo "==> 代码无更新（仍是 $PREV_COMMIT）。如只想重启：pm2 startOrReload deploy/ecosystem.config.cjs --update-env"
 fi
 
 echo "==> [2/7] 安装依赖"
 CI=true pnpm install --frozen-lockfile
 
 echo "==> [3/7] 环境变量预检"
-node scripts/check-env.mjs
+NODE_ENV=production node scripts/check-env.mjs
 
 echo "==> [4/7] 数据库迁移（migrate deploy，无新迁移则 no-op）"
 pnpm exec prisma migrate deploy
