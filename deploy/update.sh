@@ -11,7 +11,7 @@
 #   4. check:env 预检环境变量（抓 mock-mode 等陷阱）
 #   5. prisma migrate deploy（有新迁移才实际改库）
 #   6. prisma generate + build
-#   7. pm2 reload（平滑重启，不中断在线用户）
+#   7. PM2 startOrReload（同时更新 Web + 轻/重 worker）
 #   8. 健康检查探活
 #
 # 首次部署不要用本脚本（需先配 .env / seed / OSS CORS 等，见 docs/部署指南.md）。
@@ -19,8 +19,7 @@
 
 set -euo pipefail
 
-APP_NAME="${APP_NAME:-print-shop-erp}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health/ready}"
 
 cd "$(dirname "$0")/.."   # 切到项目根
 echo "==> 部署目录：$(pwd)"
@@ -52,7 +51,7 @@ echo "==> [6/7] 构建生产包"
 pnpm build
 
 echo "==> [7/7] 平滑重启 PM2"
-pm2 reload "$APP_NAME" --update-env
+pm2 startOrReload deploy/ecosystem.config.cjs --update-env
 
 echo "==> 等待应用就绪并探活…"
 ok=0
@@ -65,7 +64,7 @@ if [ "$ok" = "1" ]; then
   echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，健康检查通过。"
 else
   echo "❌ 健康检查未通过！应用可能没起来。"
-  echo "   查日志：pm2 logs $APP_NAME --lines 50"
-  echo "   回滚：git checkout $PREV_COMMIT && CI=true pnpm install && pnpm build && pm2 reload $APP_NAME"
+  echo "   查日志：pm2 logs print-shop-erp --lines 50"
+  echo "   回滚：还原上一版代码后重新 migrate/build，再执行 pm2 startOrReload deploy/ecosystem.config.cjs"
   exit 1
 fi

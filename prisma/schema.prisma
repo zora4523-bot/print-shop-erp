@@ -103,7 +103,7 @@ model Party {
 
   contacts       PartyContact[]
   addresses      PartyAddress[]
-  customerOrders Order[]        @relation("OrderCustomerParty")
+  customerOrders Order[]         @relation("OrderCustomerParty")
   purchaseOrders PurchaseOrder[] @relation("PurchaseOrderSupplierParty")
 
   @@index([type])
@@ -170,7 +170,7 @@ model Order {
   submitterId          String
   submitterRole        Role // 冗余：SALES 或 CUSTOMER_SERVICE
   createdById          String // 代下单场景
-  customerPartyId       String?
+  customerPartyId      String?
   status               OrderStatus @default(DRAFT)
   isUrgent             Boolean     @default(false)
   customerRef          String? // 客户代号，如"苹果福"
@@ -388,21 +388,25 @@ model OutsourceOrder {
 // ============================================================
 
 model DesignBundle {
-  id            String   @id @default(cuid())
-  createdById   String
-  dateRangeFrom DateTime
-  dateRangeTo   DateTime
-  orderIds      String[]
-  designIds     String[]
-  zipFileUrl    String
-  downloadUrl   String
-  expiresAt     DateTime
-  downloadCount Int      @default(0)
-  createdAt     DateTime @default(now())
+  id              String             @id @default(cuid())
+  createdById     String
+  dateRangeFrom   DateTime
+  dateRangeTo     DateTime
+  orderIds        String[]
+  designIds       String[]
+  zipFileUrl      String
+  downloadUrl     String
+  expiresAt       DateTime
+  downloadCount   Int                @default(0)
+  status          DesignBundleStatus @default(PENDING)
+  backgroundJobId String?            @unique
+  lastErrorCode   String?
+  createdAt       DateTime           @default(now())
 
   createdBy User @relation(fields: [createdById], references: [id])
 
   @@index([createdById])
+  @@index([status, createdAt])
   @@index([createdAt])
 }
 
@@ -587,7 +591,7 @@ model Material {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
-  transactions MaterialTransaction[]
+  transactions         MaterialTransaction[]
   purchaseOrderItems   PurchaseOrderItem[]
   purchaseReceiptItems PurchaseReceiptItem[]
   locationStocks       MaterialLocationStock[]
@@ -658,26 +662,26 @@ model MaterialLocationStock {
 }
 
 model MaterialTransaction {
-  id             String      @id @default(cuid())
-  materialId     String
-  warehouseId    String?
-  locationId     String?
-  direction      TxDirection
-  quantity       Decimal     @db.Decimal(12, 2)
-  reasonType     String // PURCHASE/PRODUCTION_USE/etc
-  relatedOrderId String?
-  relatedTaskId  String?
+  id                    String      @id @default(cuid())
+  materialId            String
+  warehouseId           String?
+  locationId            String?
+  direction             TxDirection
+  quantity              Decimal     @db.Decimal(12, 2)
+  reasonType            String // PURCHASE/PRODUCTION_USE/etc
+  relatedOrderId        String?
+  relatedTaskId         String?
   purchaseReceiptItemId String?
-  operatorId     String
-  unitCost       Decimal?    @db.Decimal(10, 4)
-  remark         String?
-  occurredAt     DateTime    @default(now())
-  createdAt      DateTime    @default(now())
+  operatorId            String
+  unitCost              Decimal?    @db.Decimal(10, 4)
+  remark                String?
+  occurredAt            DateTime    @default(now())
+  createdAt             DateTime    @default(now())
 
-  material Material @relation(fields: [materialId], references: [id])
-  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  location WarehouseLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  operator User     @relation(fields: [operatorId], references: [id])
+  material            Material             @relation(fields: [materialId], references: [id])
+  warehouse           Warehouse?           @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location            WarehouseLocation?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  operator            User                 @relation(fields: [operatorId], references: [id])
   purchaseReceiptItem PurchaseReceiptItem? @relation(fields: [purchaseReceiptItemId], references: [id], onDelete: SetNull)
 
   @@index([materialId])
@@ -725,15 +729,15 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id                String   @id @default(cuid())
-  purchaseOrderId   String
-  materialId        String
-  quantity          Decimal  @db.Decimal(12, 2)
-  receivedQuantity  Decimal  @default(0) @db.Decimal(12, 2)
-  unitCost          Decimal? @db.Decimal(10, 4)
-  remark            String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String   @id @default(cuid())
+  purchaseOrderId  String
+  materialId       String
+  quantity         Decimal  @db.Decimal(12, 2)
+  receivedQuantity Decimal  @default(0) @db.Decimal(12, 2)
+  unitCost         Decimal? @db.Decimal(10, 4)
+  remark           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   purchaseOrder PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   material      Material              @relation(fields: [materialId], references: [id])
@@ -775,9 +779,9 @@ model PurchaseReceiptItem {
   unitCost            Decimal? @db.Decimal(10, 4)
   createdAt           DateTime @default(now())
 
-  receipt              PurchaseReceipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  purchaseOrderItem    PurchaseOrderItem    @relation(fields: [purchaseOrderItemId], references: [id])
-  material             Material             @relation(fields: [materialId], references: [id])
+  receipt              PurchaseReceipt       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem    PurchaseOrderItem     @relation(fields: [purchaseOrderItemId], references: [id])
+  material             Material              @relation(fields: [materialId], references: [id])
   materialTransactions MaterialTransaction[]
 
   @@index([receiptId])
@@ -1052,6 +1056,91 @@ model NotificationLog {
   @@index([eventType])
   @@index([status])
   @@index([createdAt])
+}
+
+// ============================================================
+// 持久后台任务（PostgreSQL + Worker）
+// ============================================================
+
+enum BackgroundJobQueue {
+  LIGHT // 通知、定时扫描、结算等轻任务
+  HEAVY // Puppeteer PDF、CDR 压缩等资源密集任务
+}
+
+enum BackgroundJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  DEAD
+  CANCELLED
+}
+
+enum BackgroundJobAttemptStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  ABANDONED
+}
+
+enum DesignBundleStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+model BackgroundJob {
+  id            String              @id @default(cuid())
+  type          String
+  queue         BackgroundJobQueue
+  dedupeKey     String              @unique
+  payload       Json
+  result        Json?
+  status        BackgroundJobStatus @default(PENDING)
+  priority      Int                 @default(100)
+  attempts      Int                 @default(0)
+  maxAttempts   Int                 @default(5)
+  availableAt   DateTime            @default(now())
+  lockedBy      String?
+  lockedAt      DateTime?
+  heartbeatAt   DateTime?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  lastErrorCode String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  attemptLogs BackgroundJobAttempt[]
+
+  @@index([queue, status, priority, availableAt])
+  @@index([status, createdAt])
+  @@index([lockedAt])
+}
+
+model BackgroundJobAttempt {
+  id         String                     @id @default(cuid())
+  jobId      String
+  attempt    Int
+  workerId   String
+  status     BackgroundJobAttemptStatus @default(RUNNING)
+  errorCode  String?
+  startedAt  DateTime                   @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+
+  job BackgroundJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, attempt])
+  @@index([status, startedAt])
+}
+
+model BackgroundWorkerHeartbeat {
+  workerId   String             @id
+  queue      BackgroundJobQueue
+  version    String
+  startedAt  DateTime
+  lastSeenAt DateTime
+
+  @@index([queue, lastSeenAt])
 }
 
 // ============================================================

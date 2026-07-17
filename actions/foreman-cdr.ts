@@ -2,7 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
-import { CdrBundleError, createBundle } from '@/lib/cdr/bundle';
+import {
+  CdrBundleError,
+  createBundle,
+  enqueueBundle,
+} from '@/lib/cdr/bundle';
+import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import type { CreateBundleResult } from './foreman-cdr.types';
@@ -49,6 +54,20 @@ export async function createBundleAction(
   const baseUrl = await derivePublicBaseUrl();
 
   try {
+    if (backgroundJobsMode() === 'durable') {
+      const queued = await enqueueBundle(
+        { from, to, orderIds, baseUrl },
+        { id: actor.id },
+      );
+      revalidatePath('/foreman/cdr');
+      return {
+        status: 'queued',
+        bundleId: queued.bundleId,
+        jobId: queued.jobId,
+        fileCount: queued.fileCount,
+      };
+    }
+
     const result = await createBundle(
       { from, to, orderIds, baseUrl },
       { id: actor.id },
@@ -70,4 +89,3 @@ export async function createBundleAction(
     throw err;
   }
 }
-

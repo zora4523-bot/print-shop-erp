@@ -296,18 +296,21 @@ export async function scheduleOrder(
     };
   });
 
-  // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；fire-and-forget；
-  // round 109 P1 详细注释见 lib/order.ts:submitOrder）。
+  // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；生产入持久化队列）。
   const payload = await db.order.findUnique({
     where: { id: result.orderId },
     select: { orderNo: true },
   });
   if (payload) {
-    dispatchNotification('ORDER_SCHEDULED', {
-      orderId: result.orderId,
-      orderNo: payload.orderNo,
-      taskCount: result.tasksCreated,
-    });
+    await dispatchNotification(
+      'ORDER_SCHEDULED',
+      {
+        orderId: result.orderId,
+        orderNo: payload.orderNo,
+        taskCount: result.tasksCreated,
+      },
+      { dedupeKey: `notification:ORDER_SCHEDULED:${result.orderId}` },
+    );
   }
 
   return result;
@@ -722,7 +725,7 @@ export async function reportTask(
   });
 
   // Slice C wire ─ ORDER_COMPLETED（仅 cascade 路径；tx 已 commit；
-  // fire-and-forget；round 109 P1 详细注释见 lib/order.ts:submitOrder）。
+  // 生产入持久化队列）。
   if (result.orderCompleted) {
     const taskWithOrder = await db.productionTask.findUnique({
       where: { id: result.taskId },
@@ -738,11 +741,15 @@ export async function reportTask(
     });
     const order = taskWithOrder?.orderItem.order;
     if (order) {
-      dispatchNotification('ORDER_COMPLETED', {
-        orderId: order.id,
-        orderNo: order.orderNo,
-        customerRef: order.customerRef,
-      });
+      await dispatchNotification(
+        'ORDER_COMPLETED',
+        {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          customerRef: order.customerRef,
+        },
+        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
+      );
     }
   }
 

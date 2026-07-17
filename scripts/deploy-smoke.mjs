@@ -74,6 +74,16 @@ function checkNotificationMode() {
   }
 }
 
+function checkBackgroundJobsMode() {
+  info('checking background jobs mode');
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.BACKGROUND_JOBS_MODE === 'inline'
+  ) {
+    fail('production smoke refuses BACKGROUND_JOBS_MODE=inline');
+  }
+}
+
 async function request(path, init = {}) {
   const url = new URL(path, baseUrl);
   return fetch(url, {
@@ -94,6 +104,23 @@ async function checkRoutes() {
   const login = await request('/login');
   if (login.status !== 200) {
     fail(`/login expected 200, got ${login.status}`);
+  }
+
+  const live = await request('/api/health/live');
+  if (live.status !== 200) fail(`/api/health/live expected 200, got ${live.status}`);
+
+  const ready = await request('/api/health/ready');
+  if (ready.status !== 200) {
+    fail(`/api/health/ready expected 200, got ${ready.status}`);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    const body = await ready.json();
+    const queues = new Set(
+      Array.isArray(body.workers) ? body.workers.map((worker) => worker.queue) : [],
+    );
+    if (!queues.has('LIGHT') || !queues.has('HEAVY')) {
+      fail('/api/health/ready does not report both LIGHT and HEAVY workers');
+    }
   }
 
   const protectedRoute = await request('/owner/pigsty');
@@ -138,6 +165,7 @@ async function main() {
   }
 
   checkNotificationMode();
+  checkBackgroundJobsMode();
 
   if (!skipPdfBrowser) {
     await checkPdfBrowser();

@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**P0 全部收官（9/9）+ P1 Dashboard / 企业微信推送完成（SPEC §8.1 事件 10/10 全接线）+ Pigsty 扩展与 ERP 主数据大批次已提交**。自动化任务队列（`docs/AGENT-BACKLOG.md`）中已无 `agent-ready` 任务，剩余项全部需要业主拍板。
+**P0/P1 + Pigsty/ERP 主数据 + 生产硬化已完成**。应用已具备备份验收、可观测性、持久化任务与重任务资源隔离的代码/部署基线；剩余是生产环境激活与需业主拍板的业务项。
 
 ## 最后更新
 
-2026-07-05
+2026-07-17
 
 ## 已完成
 
@@ -48,18 +48,18 @@
 
 ## 进行中
 
-（无——等业主拍板下一任务）
+（无；本地实施和验证已完成）
 
 ## 下一步
 
 队列里已无 `agent-ready` 任务，以下全部**需业主拍板**后才能推进：
 
-1. **A06 收尾**：业主在 RAM 控制台给 `webhongbao` 挂 `print-shop-erp-oss-object-rw` 策略 → 重跑冒烟验证 CDR 直连路径 → 上传 UI 接线（订单表单实际调用 signDesignUploadAction 的前端部分待确认现状）
+1. **生产激活**：按 `docs/部署指南.md` 配 `.env`、PM2/Nginx、Pigsty pgBackRest 两 repo/WAL、OSS 版本化与 Sentry，然后跑 ready + backup gate。
 2. **A05 工单款式级编辑**（P1）— 需确认允许编辑的状态、设计图增删规则、金额是否自动重算
 3. **A07 推送按人路由**（P2）— 需确认客服/师傅是否有私有 webhook
 4. **A20 生产单拆分**（P1）— 需确认生产单粒度与发料时机
 5. **A21 应收应付扩展**（P1）— 需确认是否保持轻量记账
-6. **纯运维动作**：填生产 `.env`、cron 切 pg_cron、pgbackrest 启用、Pigsty 扩展生产安装（见 runbook）
+6. **架构报告 A1–A6**：按危害顺序处理需业主确认的行为缺口。
 
 ## 待澄清的业务问题
 
@@ -71,6 +71,7 @@
 ## 已知技术债
 
 - `middleware.ts` Next.js 16 deprecation warning（注释里有 TODO，独立一次迁移）
-- OSS `signViaSts` / CDR `generateRealZip` 仍是显式桩（A06 一并替换）
 - Puppeteer 部署需 `npx puppeteer browsers install chrome`（README 已写）
+- PDF 产物目录是单机 PM2 共享目录；未来多机部署需迁往对象存储。
+- 通知事件在业务事务 commit 后入队；已持久化且调用方 await，但严格 transactional outbox 仍可作未来增强。
 - `pg_pinyin` / `pg_ivm` / `pg_partman` 等在非 Pigsty 本地库降级为普通列/视图/缺席，生产安装按 `docs/pigsty-production-activation-runbook.md`

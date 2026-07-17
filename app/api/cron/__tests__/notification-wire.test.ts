@@ -86,12 +86,16 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
     );
     expect(res.status).toBe(200);
     expect(dispatchMock).toHaveBeenCalledTimes(1);
-    expect(dispatchMock).toHaveBeenCalledWith('DAILY_WORKER_SALARY', {
-      date: '2026-04-27',
-      workerCount: 3,
-      // 千分位 + 不含 ¥（formatMoneyPlain；round 109 P2）
-      totalAmount: '201.00',
-    });
+    expect(dispatchMock).toHaveBeenCalledWith(
+      'DAILY_WORKER_SALARY',
+      {
+        date: '2026-04-27',
+        workerCount: 3,
+        // 千分位 + 不含 ¥（formatMoneyPlain；round 109 P2）
+        totalAmount: '201.00',
+      },
+      { dedupeKey: 'notification:DAILY_WORKER_SALARY:2026-04-27' },
+    );
   });
 
   it('settled empty → 不触发推送', async () => {
@@ -175,18 +179,28 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
     const res = await csSettlePost(authedReq('http://x/api/cron/cs-settle'));
     expect(res.status).toBe(200);
     expect(dispatchMock).toHaveBeenCalledTimes(2);
-    expect(dispatchMock).toHaveBeenNthCalledWith(1, 'CS_PERIOD_SETTLED', {
-      settledCount: 2,
-      csName: 'CS 张',
-      totalSales: '300,000.00',
-      commission: '9,000.00',
-    });
-    expect(dispatchMock).toHaveBeenNthCalledWith(2, 'CS_PERIOD_SETTLED', {
-      settledCount: 2,
-      csName: 'CS 李',
-      totalSales: '50,000.00',
-      commission: '250.00',
-    });
+    expect(dispatchMock).toHaveBeenNthCalledWith(
+      1,
+      'CS_PERIOD_SETTLED',
+      {
+        settledCount: 2,
+        csName: 'CS 张',
+        totalSales: '300,000.00',
+        commission: '9,000.00',
+      },
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
+    );
+    expect(dispatchMock).toHaveBeenNthCalledWith(
+      2,
+      'CS_PERIOD_SETTLED',
+      {
+        settledCount: 2,
+        csName: 'CS 李',
+        totalSales: '50,000.00',
+        commission: '250.00',
+      },
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p2' },
+    );
   });
 
   it('settled empty → 不触发推送 + 不查 user', async () => {
@@ -324,13 +338,21 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
     );
     expect(res.status).toBe(200);
     expect(dispatchMock).toHaveBeenCalledTimes(1);
-    expect(dispatchMock).toHaveBeenCalledWith('CS_PERIOD_ENDING', {
-      periodId: 'p1',
-      csName: 'CS 张',
-      daysLeft: 3,
-      // **salesForTier 千分位**，不是 totalSales 千分位
-      totalSales: '300,000.00',
-    });
+    expect(dispatchMock).toHaveBeenCalledWith(
+      'CS_PERIOD_ENDING',
+      {
+        periodId: 'p1',
+        csName: 'CS 张',
+        daysLeft: 3,
+        // **salesForTier 千分位**，不是 totalSales 千分位
+        totalSales: '300,000.00',
+      },
+      {
+        dedupeKey: expect.stringMatching(
+          /^notification:CS_PERIOD_ENDING:\d{4}-\d{2}-\d{2}:p1$/,
+        ),
+      },
+    );
   });
 
   it('rows empty → 不触发', async () => {

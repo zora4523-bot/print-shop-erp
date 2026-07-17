@@ -389,16 +389,9 @@ export async function submitOrder(
     },
   });
 
-  // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit；
-  // 走 dispatchNotification —— Next 16 `after()` + 单测降级 void 的
-  // 包装；详见 lib/notification/dispatch.ts）。
-  //
-  // 不 await：webhook.ts 单 channel 最差 ~16s 重试，急单 2 channel +
-  // 多 rule 串起来 30s+ 用户等待（round 109 P1）。
-  // 不 raw void：pm2 reload / SIGTERM 会切掉进行中的 promise 把
-  // NotificationLog 也一起丢（round 110 P1）。
-  // 折中：`after()` 让 Next runtime 在响应已发但请求 scope 还 managed
-  // 时跑 notify，SIGTERM 时 runtime 等它收尾。
+  // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit）。
+  // 生产只 await 快速入库，webhook 由 LIGHT worker 重试；dev/test
+  // 降级到 Next `after()`。详见 lib/notification/dispatch.ts。
   const payload = await db.order.findUnique({
     where: { id: orderId },
     select: {
@@ -417,24 +410,32 @@ export async function submitOrder(
       payload.totalAmount as unknown as Decimal.Value,
     );
     const urgentMark = payload.isUrgent ? '🚨 急单' : '';
-    dispatchNotification('ORDER_SUBMITTED', {
-      orderId: payload.id,
-      orderNo: payload.orderNo,
-      submitterName: payload.submitter.displayName,
-      customerRef: payload.customerRef,
-      totalAmount,
-      urgentMark,
-    });
-    // SPEC §8.1：急单提交 → 排产群+老板群（独立 rule，独立事件）。
-    // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
-    // 看到，排产群从 ORDER_SUBMITTED 看到。
-    if (payload.isUrgent) {
-      dispatchNotification('URGENT_ORDER', {
+    await dispatchNotification(
+      'ORDER_SUBMITTED',
+      {
         orderId: payload.id,
         orderNo: payload.orderNo,
         submitterName: payload.submitter.displayName,
         customerRef: payload.customerRef,
-      });
+        totalAmount,
+        urgentMark,
+      },
+      { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+    );
+    // SPEC §8.1：急单提交 → 排产群+老板群（独立 rule，独立事件）。
+    // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
+    // 看到，排产群从 ORDER_SUBMITTED 看到。
+    if (payload.isUrgent) {
+      await dispatchNotification(
+        'URGENT_ORDER',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+        },
+        { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+      );
     }
   }
 
@@ -556,8 +557,7 @@ export async function shipOrder(
     },
   );
 
-  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；fire-and-forget；
-  // round 109 P1 详细注释见 submitOrder）。
+  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；生产入持久化队列）。
   // **关键 null 映射**：events.ts:ORDER_SHIPPED.trackingNo 必填 string，
   // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
   // raw 字面量流到群消息（HANDOFF round 102 Slice C TODO）。这里映射
@@ -567,11 +567,15 @@ export async function shipOrder(
     select: { id: true, orderNo: true },
   });
   if (payload) {
-    dispatchNotification('ORDER_SHIPPED', {
-      orderId: payload.id,
-      orderNo: payload.orderNo,
-      trackingNo: tracking ?? '未填',
-    });
+    await dispatchNotification(
+      'ORDER_SHIPPED',
+      {
+        orderId: payload.id,
+        orderNo: payload.orderNo,
+        trackingNo: tracking ?? '未填',
+      },
+      { dedupeKey: `notification:ORDER_SHIPPED:${payload.id}` },
+    );
   }
 
   return result;

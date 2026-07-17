@@ -8,22 +8,25 @@
 
 ## 当前任务
 
-**全库架构体检 + 去重收敛批次完成** ✅（2026-07-09）。6 子系统并行深读 + 44 agent 逐提案风险验证；实施 7 个"行为零变化"重构切片（`06ecc62` 日期 / `b449b68` cron 认证 / `d57a2ec` OSS 工厂+锁 key / `610096a` 通知常量 / `a310e23` collectFieldErrors / `d3c700e` createOrder 批量 / `f4b6ab7` 薪资规则查询），每切片 tsc+eslint+全量单测验证，Codex 复核 **PASS**。**1272 单测全绿**。
+**生产硬化批次完成** ✅（2026-07-17）：备份验收、监控、任务可靠性和资源隔离已落地。
 
-完整报告（架构概述 / 问题区域 / 路线图 / 不做清单）：**`docs/架构体检报告-2026-07-09.md`** ← 下次做重构类任务前必读，尤其"不做清单"（React cache() 等五个已验证否决的方案）。
+- PostgreSQL 持久化任务账本：`FOR UPDATE SKIP LOCKED`、租约/心跳、有界退避重试、死信、幂等 key、逐次审计。
+- 7 个 cron 和企微通知进 LIGHT 队列；CDR 压缩与 Puppeteer PDF 进 HEAVY 队列。
+- PM2 拆为 Web/LIGHT/HEAVY 三进程，HEAVY 并发 1，各自有内存上限和优雅排水。
+- `/api/health/live`、`/api/health/ready`、worker Sentry、OWNER 后台任务看板/重试/取消已落地。
+- pgBackRest 只读验收 `pnpm check:backup`；SLO/RPO/RTO/恢复演练见 `docs/production-slo-and-recovery.md`。
+- 本地已执行 migration `20260717090000_background_jobs`；89 测试文件 / 1296 测试、typecheck、lint、production build 全绿。PDF 经 HEAVY worker 真实生成并校验 `%PDF`。
 
 ## 下一步具体指令（给下次 AI）
 
-1. **需业主拍板的行为缺口**（报告 §二A，按危害排序）：
-   - A1 cancelOrder 不级联取消 ProductionTask——取消工单后师傅仍可开工报工**计件进工资**（SPEC 未写取消工单的任务处置，禁止猜测，先问业主）；
-   - A2 约 23 个管理页面无页面级权限检查（soft-nav 下 layout 不重跑）；
-   - A3 3 个页面直接 import Prisma（违反 §3）；A4 3 个 action 模块吞未知错误不进 Sentry；A5 markCsCommissionPaid 缺锁；A6 BOM Toggle 吞错误。
-2. **可直接开工的重构路线图**（报告 §三，全部已通过独立验证，含实施细节与陷阱）：parseStrictYmd 抽出 → schemas.ts 拆分（验收必须加 pnpm build）→ Toggle 按钮统一（顺带修 A6）→ .types.ts 别名化（8 文件，不含 outsource/production）→ TextField 去重（9/14 份）→ 状态机工厂 → transitionWithLog 复用 → 组件测试（@vitest/browser-playwright 独立包；"合格+不良+返工=计划数"规则不存在，别写假断言）。
-3. **业主拍板后的功能任务**：A05 工单款式级编辑 / A20 生产单拆分 / A21 应收应付扩展 / A07 推送按人路由——Needs 清单在 `docs/AGENT-BACKLOG.md`。
-4. **纯运维**（生产上线时）：按 `docs/部署指南.md` + README §🚢。
+1. 生产激活只执行外部运维步骤：真实 `.env`、Pigsty 的两个 pgBackRest repo + WAL、OSS 版本化/跨区复制、PM2/Nginx。未获得生产主机与凭证时不能代替执行。
+2. 上线门禁：`pnpm check:env` → migrate/build → `pm2 startOrReload deploy/ecosystem.config.cjs` → `/api/health/ready` → `pnpm check:backup`。
+3. 多机扩容前，PDF 产物必须迁到共享对象存储；当前单机 PM2 基线用 `/var/tmp/print-shop-erp/pdf`。
+4. 原架构报告 A1–A6 与 A05/A07/A20/A21 业务待办仍保留，见 `docs/架构体检报告-2026-07-09.md` / `docs/AGENT-BACKLOG.md`。
 
 ## 卡住的问题
 
+- 本机没有 pgBackRest 且未配 `PGBACKREST_STANZA`；`pnpm check:backup` 会正确失败并阻断上线，不伪造生产备份绿灯。
 - 视觉基线 6 张 png（承诺交期 + QR URL 化引起）仍待业主看截图确认后以 `[visual-regression]` commit 提交。
 - `pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
 - A05/A07/A20/A21 等业务输入（backlog Needs 小节）。
@@ -59,3 +62,4 @@
 - 2026-07-07：承诺交期 + 交期预警 + ORDER_OVERDUE 推送 + 二维码 URL 化（`d240061` / `1483867` / `5d6b04a` / `6c3fdc5`）。Order.promisedDate（2 个 migration：字段 + 规则行数据迁移）；预警口径集中 lib/order/promised-date（详情徽标 / dashboard 关注列表 / 每日 cron 三处共用）；第 11 个推送事件 ORDER_OVERDUE 只推逾期；QR 内容改 {base}/orders|worker/tasks URL（lib/public-base-url 与 CDR 共用推导，foreman-cdr 去重）；打印页眉加承诺交期行。Codex 抓 3 真问题：升级库缺规则行（数据 migration 修，高危）、视觉基线（按惯例截图待业主确认后提交）、cron E2E 缺口（补全链测试）。1264 单测 / 22 E2E 全绿。**待办：视觉基线 6 张 png 等业主看截图 OK 后以 [visual-regression] commit 提交。**
 - 2026-07-08：上线前多维度审计（6 维度并行 audit → 逐条对抗性验证 workflow，54 agent；含手动核实）。发现并**即修 4 项**：(1) **blocker** `createOrderFromInput`/`scheduleOrderFromInput` 从 'use server' 导出成公开 Server Action、信任调用方 actor 无 requirePermission = 越权+审计伪造后门，零调用方直接删除（`5bdf5a3`）；(2) **high** `.env.example` 出厂 `NOTIFICATION_MOCK_MODE="true"` 会诱导运维带进生产静默 mock 推送→改留空按 NODE_ENV 判定（`3eaf050`）；(3) README env 表补 mock 开关行+OSS CORS 手动步骤+APP_PUBLIC_URL 扩到二维码、6→7 cron 漂移修正（`3eaf050`）；(4) **low** hourly-payroll cron 意外错误 scrub 对齐 COUNTS-ONLY（`c5ac707`）。1264 单测/tsc/eslint/build 全绿。**剩余为纯手动运维项**（见报告）：生产 .env 注入（APP_PUBLIC_URL/SENTRY_DSN/AUTH_SECRET 新值/DATABASE_URL 生产库）、OSS 控制台配 CORS、首次 seed、cron 调度器（crontab/pg_cron 7 端点）、Pigsty 扩展安装、pgbackrest、Puppeteer chrome、PM2/Nginx 自备。视觉基线 6 png 仍待业主确认后提交。
 - 2026-07-09：全库架构体检（6 子系统深读 + 44 agent 提案验证 workflow）→ 7 个行为零变化重构切片落地（日期/cron 认证/OSS 工厂+锁 key/通知常量/collectFieldErrors/createOrder 批量/薪资规则查询，`06ecc62`→`f4b6ab7`），Codex 复核 PASS，1272 单测全绿；交付 `docs/架构体检报告-2026-07-09.md`（含行为缺口 A1-A7、结构债清单、已验证路线图、不做清单）；DECISIONS 记录去重边界决策。
+- 2026-07-17：生产硬化：PostgreSQL 任务账本 + LIGHT/HEAVY worker + cron/通知持久化 + CDR/PDF 资源隔离 + live/ready + OWNER 任务看板 + pgBackRest 验收脚本落地。本地 migration 和 PDF worker 真实演练通过；1296 单测 / lint / typecheck / build 全绿。

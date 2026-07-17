@@ -276,6 +276,18 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'ops:pigsty:view',
   },
   {
+    id: 'owner.backgroundJobs',
+    label: '后台任务',
+    routeBase: '/owner/background-jobs',
+    iconName: 'Clock',
+    breadcrumbLabel: '后台任务',
+    menuSection: 'operations',
+    status: 'implemented',
+    menuOrder: 145,
+    menuRoles: [Role.OWNER],
+    requiredPermission: 'ops:jobs:manage',
+  },
+  {
     id: 'foreman.dashboard',
     label: 'Dashboard',
     routeBase: '#',

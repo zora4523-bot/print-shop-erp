@@ -508,7 +508,7 @@ export async function createMaterialTransaction(
     return applyMaterialStockMovement(tx, data);
   });
   if (result.stockAlert) {
-    dispatchNotification('STOCK_ALERT', result.stockAlert);
+    await dispatchNotification('STOCK_ALERT', result.stockAlert);
   }
   return result;
 }

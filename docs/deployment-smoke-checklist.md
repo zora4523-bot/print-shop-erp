@@ -142,16 +142,15 @@ FROM app_ops.cron_http_job_readiness
 ORDER BY priority, job_name;
 ```
 
-## pgBackRest Placeholders
+## pgBackRest 自动验收
 
-Pigsty owns backups through pgBackRest. This repository does not run backup
-commands automatically.
+Pigsty owns backups through pgBackRest. This repository does not create or
+delete backups; it now includes a read-only readiness gate:
 
 Production checklist for operations:
 
 ```bash
-pgbackrest --stanza=<stanza> check
-pgbackrest --stanza=<stanza> info
+PGBACKREST_STANZA=<stanza> BACKUP_REQUIRED_REPOS=2 pnpm check:backup
 ```
 
 Before high-risk migrations:

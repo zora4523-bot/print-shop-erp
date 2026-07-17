@@ -481,3 +481,30 @@
 - **理由**：每条提案先经独立 agent 四项核查（测试 mock 耦合 / client-server 边界 / import 环 / 貌似重复实则有差异），验证否决的方案均有具体损坏场景佐证；只收敛"同一约定的多份手工拷贝"，不动任何刻意差异。
 - **影响**：跨模块唯一的共享锁不变量（order-cascade）从"5 处字符串别打错字"升级为编译期保证；后续新增 Order.status 写入路径 import `lib/order/locks.ts` 即自动入队。完整问题清单与路线图见 `docs/架构体检报告-2026-07-09.md`。
 - **相关文档**：`docs/架构体检报告-2026-07-09.md`、commits `06ecc62`/`b449b68`/`d57a2ec`/`610096a`/`a310e23`/`d3c700e`/`f4b6ab7`。
+
+---
+
+## 2026-07-17：后台任务用 PostgreSQL 持久化账本，不引入 Redis/MQ
+
+- **决策**：通知、7 个 cron、CDR 与 PDF 统一写入 `BackgroundJob` / `BackgroundJobAttempt`。worker 用 `FOR UPDATE SKIP LOCKED` 抢任务，通过租约心跳恢复崩溃任务，重试耗尽进 DEAD。业务幂等性由唯一 `dedupeKey` 保证。
+- **理由**：项目已经依赖 Pigsty/PostgreSQL，MVP 新增 Redis/RabbitMQ 只会扩大部署和备份面。PostgreSQL 足以承载当前低中吞吐后台任务，且任务审计与业务数据同库备份。
+- **影响**：生产 `BACKGROUND_JOBS_MODE=durable`；cron 成功响应变为 HTTP 202 queued。OWNER 可在 `/owner/background-jobs` 查死信、取消 PENDING 或给 DEAD 增加 3 次尝试（不重置 attempt 序号）。
+- **相关文档**：`prisma/migrations/20260717090000_background_jobs/`、`lib/background-jobs/`、`app/(admin)/owner/background-jobs/`。
+
+---
+
+## 2026-07-17：Web/LIGHT/HEAVY 三进程隔离，PDF 用单机共享产物目录
+
+- **决策**：PM2 运行一个 Web、一个 LIGHT worker 和一个 HEAVY worker。CDR 流式压缩与 Chromium PDF 只在 HEAVY 中运行，并发固定为 1。PDF 完成后以 0600 原子写到 `PDF_ARTIFACT_DIR`，Web 读取后删除，worker 清理超 1 小时孤儿。
+- **理由**：Puppeteer/ZIP 的 CPU 和内存峰值不应与登录、开单、报工争抢同一 Node 进程。当前基线是单机 PM2，共享本地目录比把 PDF 大二进制存进 PostgreSQL 更合理。
+- **影响**：多机扩容前必须把 PDF 产物迁到 OSS/共享存储；ready 探针要求 LIGHT/HEAVY 两种心跳都存在。Nginx 对登录和 PDF 请求限流作为额外保护。
+- **相关文档**：`deploy/ecosystem.config.cjs`、`lib/background-jobs/pdf.ts`、`app/api/health/ready/route.ts`。
+
+---
+
+## 2026-07-17：备份由 Pigsty/pgBackRest 执行，应用仓库只提供可失败验收门禁
+
+- **决策**：备份目标固定为每日 full、连续 WAL、30 天、本地+异地两 repo；RPO ≤ 5 分钟，RTO ≤ 60 分钟，每月恢复演练。`pnpm check:backup` 只读取 `pgbackrest info --output=json`，任一 repo/full/WAL 不达标即非零退出。
+- **理由**：应用自己调备份会分裂 Pigsty 的恢复链和凭证边界；但只写运维文档无法阻止备份实际早已过期。因此仓库负责验收而不负责执行备份。
+- **影响**：本地无 stanza/pgBackRest 时检查刻意失败，不伪造绿灯；生产上线须在 Pigsty 节点注入 stanza 后运行。
+- **相关文档**：`scripts/check-backup-readiness.mjs`、`docs/production-slo-and-recovery.md`。

@@ -215,6 +215,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
 | `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
+| `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR 进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
 | `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | **留空**（按 NODE_ENV：生产真发、dev mock）。**切勿设 `"true"`**——否则推送静默 mock，急单 3 秒推送验收项形同虚设 |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
@@ -265,14 +266,16 @@ curl -X POST https://host/api/cron/order-overdue \
 
 **7 个 cron endpoints 都不走 session 中间件**（middleware.ts matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
-### 3. 备份（pgbackrest）
+### 3. 备份（pgBackRest）
 
-Pigsty 自带 pgbackrest，**不要**自己写 cron 备份脚本。配置点：
-- `/etc/pgbackrest/pgbackrest.conf` 指 stanza
-- 全量 + 增量两条 cron（`pgbackrest --stanza=main backup --type=full` 周末 / `--type=incr` 每天）
-- 异地：S3 / OSS / 本地磁盘 + rsync 至少二选一
+Pigsty 自带 pgBackRest，**不要**在应用里自己实现备份。生产基线：
 
-恢复演练每季一次。生产数据丢失的代价远大于演练时间。
+- 每日 full + 连续 WAL，备份链保留 30 天。
+- 本地 repository + 异地对象存储 repository，两份都要健康。
+- 每日在 Pigsty 节点跑 `PGBACKREST_STANZA=<stanza> pnpm check:backup`。
+- 每月恢复演练，RPO ≤ 5 分钟、RTO ≤ 60 分钟。
+
+详见 `docs/production-slo-and-recovery.md`。
 
 ### 4. Sentry 接入
 
@@ -320,4 +323,6 @@ npx puppeteer browsers install chrome
 - [ ] 故意挂掉一个 Server Action（临时改个抛错），确认 Sentry 收到事件后还原
 - [ ] **`NOTIFICATION_MOCK_MODE=false` + 老板在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 老板会以为推送已发其实没真发。
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
-- [ ] pgbackrest 跑一次 full backup，确认目标位置有文件
+- [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
+- [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
+- [ ] `pnpm check:backup` 通过，确认两个 repo 的 full + WAL

@@ -4,6 +4,12 @@
 
 export type CreateBundleResult =
   | {
+      status: 'queued';
+      bundleId: string;
+      jobId: string;
+      fileCount: number;
+    }
+  | {
       status: 'success';
       bundleId: string;
       // 绝对 URL（含 host），外协方复制粘贴用

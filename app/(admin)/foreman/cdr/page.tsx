@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { FileArchive } from 'lucide-react';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { DesignBundleStatus } from '@/generated/prisma/enums';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -117,7 +118,11 @@ export default async function ForemanCdrPage({
                       <td className="px-4 py-3 text-right">{b.orderCount}</td>
                       <td className="px-4 py-3 text-right">{b.fileCount}</td>
                       <td className="px-4 py-3">
-                        {expired ? (
+                        {b.status === DesignBundleStatus.PENDING ? (
+                          <Badge variant="outline">排队生成中</Badge>
+                        ) : b.status === DesignBundleStatus.FAILED ? (
+                          <Badge variant="destructive">生成失败</Badge>
+                        ) : expired ? (
                           <Badge variant="outline">已过期</Badge>
                         ) : isMock ? (
                           <Badge variant="outline">mock URL</Badge>
@@ -201,4 +206,3 @@ function todayShanghai(): string {
     day: '2-digit',
   }).format(new Date());
 }
-

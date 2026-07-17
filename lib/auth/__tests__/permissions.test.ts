@@ -68,6 +68,7 @@ describe('PERMISSIONS map', () => {
       'bom:manage',
       'notification:config',
       'ops:pigsty:view',
+      'ops:jobs:manage',
       'account:manage',
       'report:all',
       'report:production',
@@ -100,6 +101,7 @@ describe('PERMISSIONS map', () => {
       'bom:manage',
       'notification:config',
       'ops:pigsty:view',
+      'ops:jobs:manage',
       'account:manage',
       'report:all',
     ];

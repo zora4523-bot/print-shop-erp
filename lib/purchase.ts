@@ -584,7 +584,7 @@ export async function cancelPurchaseReceipt(
 
   if (!purchaseOrderId) throw new PurchaseInvariantError('采购单不存在');
   for (const alert of stockAlerts) {
-    dispatchNotification('STOCK_ALERT', alert);
+    await dispatchNotification('STOCK_ALERT', alert);
   }
   const detail = await getPurchaseOrderDetail(purchaseOrderId);
   if (!detail) throw new PurchaseInvariantError('采购单取消入库后读取失败');

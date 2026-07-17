@@ -7,10 +7,15 @@
 #   1. 必须转发 X-Forwarded-Proto: https —— 否则 (a) 登录 cookie 的 Secure 标志失效，
 #      (b) 工单打印二维码/CDR 外协短链的 base URL 推导退化成 localhost 死链。
 #   2. 必须转发 Host / X-Forwarded-Host —— 二维码/短链域名跟随它。
-#   3. proxy_read_timeout 放宽 —— CDR 汇总打包在服务端同步跑，大文件可能几十秒到几分钟。
+#   3. 登录和 PDF 生成端点独立限流，避免爆破与 Chromium 资源耗尽。
+#   4. CDR 生成已在 HEAVY worker 异步执行，不占 Nginx 长连接。
 #
 # 设计图上传是浏览器直传 OSS（不经过本服务器），所以 client_max_body_size 不需要很大；
 # 20m 足够覆盖 PDF、普通表单。
+
+# conf.d 通常被 include 在 http {} 内，因此 limit_req_zone 可放在此处。
+limit_req_zone $binary_remote_addr zone=erp_auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=erp_heavy:10m rate=10r/m;
 
 # ── HTTP → HTTPS 跳转 ──
 server {
@@ -28,7 +33,39 @@ server {
     ssl_certificate_key /etc/nginx/ssl/erp.example.com.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
 
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     client_max_body_size 20m;
+
+    # Auth.js 凭据回调：严格按 IP 限流，burst 只吸收正常连点。
+    location = /api/auth/callback/credentials {
+        limit_req zone=erp_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # PDF 仍是按需 Chromium 生成；限流避免同一来源并发压垮 Web。
+    location ~ ^/api/orders/[^/]+/pdf$ {
+        limit_req zone=erp_heavy burst=2 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 180s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -44,9 +81,8 @@ server {
         proxy_set_header Upgrade    $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        # CDR 打包等长任务：放宽读超时（默认 60s 会截断大包生成）
-        proxy_read_timeout   300s;
-        proxy_send_timeout   300s;
+        proxy_read_timeout   120s;
+        proxy_send_timeout   120s;
         proxy_connect_timeout 10s;
     }
 }

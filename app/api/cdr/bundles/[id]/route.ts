@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   BundleExpiredError,
   BundleNotFoundError,
+  BundleNotReadyError,
   consumeBundle,
 } from '@/lib/cdr/bundle';
 // BundleExpiredError 仍 import 用作 instanceof 判定；UI 文案对外
@@ -41,6 +42,12 @@ export async function GET(
   try {
     bundle = await consumeBundle(id);
   } catch (err) {
+    if (err instanceof BundleNotReadyError) {
+      return NextResponse.json(
+        { error: err.status === 'FAILED' ? '下载包生成失败' : '下载包正在生成' },
+        { status: 409, headers: { 'Retry-After': '5' } },
+      );
+    }
     if (
       err instanceof BundleNotFoundError ||
       err instanceof BundleExpiredError

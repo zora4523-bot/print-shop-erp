@@ -522,11 +522,15 @@ describe('scheduleOrder', () => {
       foremanActor,
     );
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('ORDER_SCHEDULED', {
-      orderId: 'order-1',
-      orderNo: 'O-42',
-      taskCount: 2,
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SCHEDULED',
+      {
+        orderId: 'order-1',
+        orderNo: 'O-42',
+        taskCount: 2,
+      },
+      { dedupeKey: 'notification:ORDER_SCHEDULED:order-1' },
+    );
   });
 
   it('scheduleOrder 业务异常（dup assignment）→ 不触发 notify', async () => {
@@ -1089,11 +1093,15 @@ describe('reportTask', () => {
 
     await reportTask('task-1', validInput, workerActor);
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('ORDER_COMPLETED', {
-      orderId: 'order-1',
-      orderNo: 'O-77',
-      customerRef: '客户 A',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_COMPLETED',
+      {
+        orderId: 'order-1',
+        orderNo: 'O-77',
+        customerRef: '客户 A',
+      },
+      { dedupeKey: 'notification:ORDER_COMPLETED:order-1' },
+    );
   });
 
   it('reportTask 非 cascade 路径（还有兄弟任务未完）→ 不 fire notify', async () => {

@@ -55,6 +55,12 @@ if (isProd && env.CDR_BUNDLE_MOCK_MODE === 'true') {
   );
 }
 
+if (isProd && env.BACKGROUND_JOBS_MODE === 'inline') {
+  errors.push(
+    'BACKGROUND_JOBS_MODE="inline" 且 NODE_ENV=production —— 通知/cron/CDR 会回到 Web 进程执行，丢失持久化、重试和资源隔离保障。',
+  );
+}
+
 // —— 审计陷阱 2：APP_PUBLIC_URL 空 → 二维码/短链跟随请求头，易成死链 ——
 if (isProd && (!env.APP_PUBLIC_URL || env.APP_PUBLIC_URL.trim() === '')) {
   warnings.push(
@@ -94,6 +100,9 @@ if (ossSet.length > 0 && ossSet.length < OSS_KEYS.length) {
 // —— Sentry：生产建议但不阻塞 ——
 if (isProd && (!env.SENTRY_DSN || env.SENTRY_DSN.trim() === '')) {
   warnings.push('SENTRY_DSN 未设 —— 生产无错误监控，上线首周建议接。');
+}
+if (isProd && (!env.APP_VERSION || env.APP_VERSION.trim() === '')) {
+  warnings.push('APP_VERSION 未设 —— 无法把错误、健康检查和部署版本对齐。');
 }
 
 // —— NODE_ENV 提示 ——

@@ -4,19 +4,17 @@ import {
   type NotificationPayloadFor,
 } from './events';
 import { notify } from './notify';
+import { backgroundJobsMode } from '../background-jobs/mode';
 
 // `dispatchNotification` 是 5 个状态机 wire 点的标准入口（CLAUDE.md
 // §7.1 公开 API 仍是 `notify`，wire 内部走这里）。
 //
-// 设计目标：
-//   1. **不阻塞 Server Action** —— webhook.ts 最差 ~16s/channel 的
-//      retry，await 会让&ldquo;工单已提交&rdquo;在用户屏幕上挂半分钟。
-//   2. **不被 SIGTERM 静默吞掉** —— `void notify(...)` 是裸 fire-and-
-//      forget；pm2 reload / Vercel serverless freeze 都会把进行中的
-//      promise 一起切掉，连同 NotificationLog 一起丢。Next 16 的 `after()` 是&ldquo;响应已发出但请求 scope 还
-//      managed&rdquo;的官方机制——runtime 会等它跑完才允许进程退出。
+// 生产 durable 模式只在请求内将事件写入 PostgreSQL 任务账本；
+// webhook 重试由 LIGHT worker 执行，因此响应不被外部 HTTP 阻塞，
+// PM2 reload 也不会丢掉已入队任务。dev/test 的 inline 模式仍使用
+// Next 16 `after()`，以保持本地开发无需额外 worker。
 //
-// 失败模式：
+// inline 模式的失败模式：
 //   - 在 Server Action / Route Handler 里调用 → after() 走 Next 管理；
 //     notify 在响应后跑，SIGTERM 时 runtime 会等。
 //   - 在 vitest / 一次性脚本里调 → 没有 Next request scope，after()
@@ -45,10 +43,22 @@ function isExpectedNoScope(err: unknown): boolean {
   return EXPECTED_NO_SCOPE_PATTERNS.some((p) => msg.includes(p));
 }
 
-export function dispatchNotification<E extends NotificationEvent>(
+export async function dispatchNotification<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
-): void {
+  options: { dedupeKey?: string } = {},
+): Promise<void> {
+  if (backgroundJobsMode() === 'durable') {
+    // Lazy import keeps the inline test/dev path free of lib/db side effects.
+    // It also avoids loading Prisma into a process that only exercises the
+    // pure notification renderer.
+    const { enqueueNotificationJob } = await import(
+      '../background-jobs/notification'
+    );
+    await enqueueNotificationJob(event, payload, options);
+    return;
+  }
+
   try {
     after(() => notify(event, payload));
   } catch (err) {

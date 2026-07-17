@@ -484,16 +484,20 @@ describe('submitOrder', () => {
     await submitOrder('o1', salesActor);
     // 1 call (not urgent → 不触 URGENT_ORDER)
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('ORDER_SUBMITTED', {
-      orderId: 'o1',
-      orderNo: 'O-1',
-      submitterName: '张三',
-      customerRef: '苹果福',
-      // formatMoneyPlain 千分位 + 2 位小数，**不带 `¥ ` 前缀**——seed
-      // 模板 `金额：¥{totalAmount}` 已含 ¥（Codex round 109 P2）。
-      totalAmount: '5,000.00',
-      urgentMark: '',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: '苹果福',
+        // formatMoneyPlain 千分位 + 2 位小数，**不带 `¥ ` 前缀**——seed
+        // 模板 `金额：¥{totalAmount}` 已含 ¥（Codex round 109 P2）。
+        totalAmount: '5,000.00',
+        urgentMark: '',
+      },
+      { dedupeKey: 'notification:ORDER_SUBMITTED:o1' },
+    );
   });
 
   it('submitOrder + isUrgent=true → 同时 fire URGENT_ORDER（独立事件，不替代 ORDER_SUBMITTED）', async () => {
@@ -803,11 +807,15 @@ describe('shipOrder', () => {
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
     await shipOrder('o1', ownerActor, 'SF1234567890');
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('ORDER_SHIPPED', {
-      orderId: 'o1',
-      orderNo: 'O-1',
-      trackingNo: 'SF1234567890',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SHIPPED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        trackingNo: 'SF1234567890',
+      },
+      { dedupeKey: 'notification:ORDER_SHIPPED:o1' },
+    );
   });
 
   // **Round 102 P1 wire-side regression**: trackingNo: null/undefined/blank
@@ -822,11 +830,15 @@ describe('shipOrder', () => {
     });
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
     await shipOrder('o1', ownerActor, null);
-    expect(notifyMock).toHaveBeenCalledWith('ORDER_SHIPPED', {
-      orderId: 'o1',
-      orderNo: 'O-1',
-      trackingNo: '未填',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SHIPPED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        trackingNo: '未填',
+      },
+      { dedupeKey: 'notification:ORDER_SHIPPED:o1' },
+    );
     // 防 future-edit accidentally re-introduce null：payload.trackingNo 不能
     // 等于 null / undefined / 空字符串
     const payload = notifyMock.mock.calls[0]![1] as unknown as { trackingNo: string };

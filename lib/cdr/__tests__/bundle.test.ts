@@ -299,6 +299,7 @@ describe('consumeBundle', () => {
   it('已过期 → BundleExpiredError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-04T00:00:00Z'), // 已过
       downloadCount: 0,
@@ -311,6 +312,7 @@ describe('consumeBundle', () => {
   it('未过期 → 返 row + 增 downloadCount（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 5,
@@ -326,6 +328,7 @@ describe('consumeBundle', () => {
   it('downloadCount 自增写入失败不影响下载（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'https://oss/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 0,

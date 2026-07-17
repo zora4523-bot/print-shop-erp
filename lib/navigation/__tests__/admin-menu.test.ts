@@ -16,7 +16,7 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
-  it('OWNER 看到 19 项菜单（含 Dashboard / 采购单 / 客户供应商 / 工艺/产品/产品分类/价格/BOM/物料/仓库 / 用户管理 / 推送配置 / Pigsty 运维）', () => {
+  it('OWNER 看到 20 项菜单（含 Dashboard / 业务字典 / 后台任务 / Pigsty 运维）', () => {
     const groups = getAdminMenuItems({ role: Role.OWNER });
     const items = flatten(groups);
     expect(groups.map((g) => g.label)).toEqual([
@@ -27,7 +27,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(19);
+    expect(items).toHaveLength(20);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -47,6 +47,7 @@ describe('getAdminMenuItems', () => {
       '仓库/库位',
       '用户管理',
       '推送配置',
+      '后台任务',
       'Pigsty 运维',
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
@@ -66,6 +67,9 @@ describe('getAdminMenuItems', () => {
     const pigsty = items.find((i) => i.label === 'Pigsty 运维');
     expect(pigsty?.href).toBe('/owner/pigsty');
     expect(pigsty?.requiredPermission).toBe('ops:pigsty:view');
+    const backgroundJobs = items.find((i) => i.label === '后台任务');
+    expect(backgroundJobs?.href).toBe('/owner/background-jobs');
+    expect(backgroundJobs?.requiredPermission).toBe('ops:jobs:manage');
     const materials = items.find((i) => i.label === '物料');
     expect(materials?.href).toBe('/owner/materials');
     expect(materials?.requiredPermission).toBe('material:manage');

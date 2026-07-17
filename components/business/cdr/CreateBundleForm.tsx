@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
@@ -23,6 +24,7 @@ export function CreateBundleForm({
   to: string;
   eligible: readonly EligibleOrder[];
 }) {
+  const router = useRouter();
   const [state, formAction, isPending] = useActionState<
     CreateBundleResult | null,
     FormData
@@ -33,6 +35,16 @@ export function CreateBundleForm({
   // 集换组 → form 重挂 → setSelected 拿新 allIds。比 useEffect+setState 更纯。
   const allIds = useMemo(() => eligible.map((o) => o.id), [eligible]);
   const [selected, setSelected] = useState<Set<string>>(new Set(allIds));
+
+  useEffect(() => {
+    if (state?.status !== 'queued') return;
+    const timer = window.setInterval(() => router.refresh(), 3_000);
+    const stop = window.setTimeout(() => window.clearInterval(timer), 120_000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
+  }, [router, state]);
 
   function toggleAll() {
     if (selected.size === allIds.length) {
@@ -179,7 +191,16 @@ export function CreateBundleForm({
           </div>
         </div>
       ) : null}
+
+      {state?.status === 'queued' ? (
+        <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm">
+          已将 {state.fileCount} 个 CDR 文件加入重任务队列。打包在独立进程中进行，
+          完成后会出现在下方列表。
+          <span className="ml-2 font-mono text-xs text-muted-foreground">
+            任务 {state.jobId}
+          </span>
+        </div>
+      ) : null}
     </form>
   );
 }
-

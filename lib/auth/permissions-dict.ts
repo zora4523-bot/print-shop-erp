@@ -65,6 +65,7 @@ export const PERMISSIONS = {
 
   // 运维
   'ops:pigsty:view':            [Role.OWNER],
+  'ops:jobs:manage':            [Role.OWNER],
 
   // 账号管理
   'account:manage':             [Role.OWNER],
