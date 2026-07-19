@@ -1,4 +1,4 @@
-import { SalaryRuleType } from '../../generated/prisma/enums';
+import { MachineType, SalaryRuleType } from '../../generated/prisma/enums';
 import { db } from '../db';
 import type { MachineSalaryRule } from './machine-piecework';
 import type { CsTiersConfig } from './cs-commission';
@@ -54,7 +54,23 @@ export async function getActiveRuleValue<T>(
 export async function getActiveMachineRule(
   machineType: string,
   now: Date = new Date(),
+  workerId?: string,
 ): Promise<MachineRuleWithBase | null> {
+  if (workerId) {
+    const workerRule = await db.workerMachineSalaryRule.findFirst({
+      where: {
+        workerId,
+        machineType: machineType as MachineType,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      orderBy: { effectiveFrom: 'desc' },
+      select: { ruleValue: true },
+    });
+    if (workerRule) {
+      return workerRule.ruleValue as unknown as MachineRuleWithBase;
+    }
+  }
   return getActiveRuleValue<MachineRuleWithBase>(
     SalaryRuleType.WORKER_MACHINE,
     machineType,

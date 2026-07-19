@@ -3,7 +3,6 @@ import {
   PartyType,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
-  type Prisma,
   TxDirection,
 } from '../generated/prisma/client';
 import {
@@ -12,6 +11,10 @@ import {
   type SortDirection,
 } from './admin/table';
 import { db } from './db';
+import {
+  DailyDocumentNumberExhaustedError,
+  nextDailyDocumentNumber,
+} from './daily-document-number';
 import {
   applyMaterialStockMovement,
   MaterialInvariantError,
@@ -236,59 +239,6 @@ export async function getPurchaseOrderDetail(id: string) {
   });
 }
 
-function ymd(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
-}
-
-async function nextPurchaseNo(
-  tx: {
-    $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-    purchaseOrder: {
-      findFirst: (
-        args: Prisma.PurchaseOrderFindFirstArgs,
-      ) => Promise<{ purchaseNo: string } | null>;
-    };
-  },
-  now: Date,
-): Promise<string> {
-  const prefix = `PO${ymd(now)}-`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:purchase-no:${prefix}`}))`;
-  const last = await tx.purchaseOrder.findFirst({
-    where: { purchaseNo: { startsWith: prefix } },
-    orderBy: { purchaseNo: 'desc' },
-    select: { purchaseNo: true },
-  });
-  const previous = last?.purchaseNo.slice(prefix.length) ?? '0000';
-  const next = Number.parseInt(previous, 10) + 1;
-  return `${prefix}${String(next).padStart(4, '0')}`;
-}
-
-async function nextReceiptNo(
-  tx: {
-    $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-    purchaseReceipt: {
-      findFirst: (
-        args: Prisma.PurchaseReceiptFindFirstArgs,
-      ) => Promise<{ receiptNo: string } | null>;
-    };
-  },
-  now: Date,
-): Promise<string> {
-  const prefix = `PR${ymd(now)}-`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:receipt-no:${prefix}`}))`;
-  const last = await tx.purchaseReceipt.findFirst({
-    where: { receiptNo: { startsWith: prefix } },
-    orderBy: { receiptNo: 'desc' },
-    select: { receiptNo: true },
-  });
-  const previous = last?.receiptNo.slice(prefix.length) ?? '0000';
-  const next = Number.parseInt(previous, 10) + 1;
-  return `${prefix}${String(next).padStart(4, '0')}`;
-}
-
 function parsePositiveDecimal(value: string, label: string): Decimal {
   const decimal = new Decimal(value);
   if (!decimal.isFinite() || decimal.lte(0)) {
@@ -321,6 +271,7 @@ export async function createPurchaseOrder(
   now: Date = new Date(),
 ): Promise<PurchaseOrderDetail> {
   const quantity = parsePositiveDecimal(input.quantity, '采购数量');
+  const purchaseNo = await reservePurchaseDocumentNumber('PURCHASE_ORDER', now);
 
   const createdId = await db.$transaction(async (tx) => {
     const [supplier, material] = await Promise.all([
@@ -341,7 +292,6 @@ export async function createPurchaseOrder(
     if (!material) throw new PurchaseInvariantError('物料不存在');
     if (!material.isActive) throw new PurchaseInvariantError('物料已停用');
 
-    const purchaseNo = await nextPurchaseNo(tx, now);
     const created = await tx.purchaseOrder.create({
       data: {
         purchaseNo,
@@ -391,6 +341,21 @@ export async function createPurchaseReceipt(
 ): Promise<PurchaseOrderDetail> {
   const receiptQuantity = parsePositiveDecimal(input.quantity, '入库数量');
 
+  const existingBeforeReservation = await db.purchaseReceipt.findUnique({
+    where: { idempotencyKey: input.idempotencyKey },
+    select: { purchaseOrderId: true },
+  });
+  if (existingBeforeReservation) {
+    if (existingBeforeReservation.purchaseOrderId !== purchaseOrderId) {
+      throw new PurchaseInvariantError('入库请求标识已被其他采购单使用');
+    }
+    const existingDetail = await getPurchaseOrderDetail(purchaseOrderId);
+    if (!existingDetail) throw new PurchaseInvariantError('采购单不存在');
+    return existingDetail;
+  }
+
+  const receiptNo = await reservePurchaseDocumentNumber('PURCHASE_RECEIPT', now);
+
   await db.$transaction(async (tx) => {
     const lockedOrders = await tx.$queryRaw<
       { id: string; status: PurchaseOrderStatus }[]
@@ -438,7 +403,6 @@ export async function createPurchaseReceipt(
       throw new PurchaseInvariantError(`入库数量不能超过剩余 ${remaining.toFixed(2)}`);
     }
 
-    const receiptNo = await nextReceiptNo(tx, now);
     const receipt = await tx.purchaseReceipt.create({
       data: {
         receiptNo,
@@ -492,6 +456,20 @@ export async function createPurchaseReceipt(
   const detail = await getPurchaseOrderDetail(purchaseOrderId);
   if (!detail) throw new PurchaseInvariantError('采购单入库后读取失败');
   return detail;
+}
+
+async function reservePurchaseDocumentNumber(
+  kind: 'PURCHASE_ORDER' | 'PURCHASE_RECEIPT',
+  now: Date,
+): Promise<string> {
+  try {
+    return await nextDailyDocumentNumber(kind, now);
+  } catch (error) {
+    if (error instanceof DailyDocumentNumberExhaustedError) {
+      throw new PurchaseInvariantError(error.message);
+    }
+    throw error;
+  }
 }
 
 export async function cancelPurchaseReceipt(

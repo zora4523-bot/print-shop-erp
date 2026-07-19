@@ -52,22 +52,22 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
         <h2 className="text-base font-semibold">周期参数</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-          <Row label="月底薪" value={`¥ ${String(period.monthlyBase)}`} mono />
-          <Row label="期初业绩" value={String(period.initialSales)} mono />
-          <Row label="本期累计业绩" value={String(period.totalSales)} mono />
+          <Row label="月底薪" value={`¥ ${String(period.monthlyBase)}`} tabular />
+          <Row label="期初业绩" value={String(period.initialSales)} tabular />
+          <Row label="本期累计业绩" value={String(period.totalSales)} tabular />
           <Row
             label="业绩合计（算档用）"
             value={String(
               Number(period.totalSales) + Number(period.initialSales),
             )}
-            mono
+            tabular
           />
           <Row
             label="底薪合计"
             value={`¥ ${(Number(period.monthlyBase) * period.durationMonths).toFixed(
               2,
             )}`}
-            mono
+            tabular
           />
           <Row label="结算时间" value={formatDateTimeShanghai(period.settledAt)} />
         </dl>
@@ -108,19 +108,19 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                   <td className="px-4 py-3 text-xs">
                     {formatDateTimeShanghai(c.settledAt)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(c.totalSales)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(c.tierRate)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {String(c.commissionAmount)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                     ¥ {String(c.monthlyBaseTotal)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono font-medium">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                     ¥ {String(c.totalIncome)}
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -153,16 +153,16 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  tabular?: boolean;
 }) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono' : undefined}>{value}</dd>
+      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{value}</dd>
     </div>
   );
 }

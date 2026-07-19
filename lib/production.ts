@@ -614,7 +614,11 @@ export async function reportTask(
 
     transitionProductionTask(task.status, TaskStatus.COMPLETED);
 
-    const rule = await getActiveMachineRule(task.machineType, now);
+    const rule = await getActiveMachineRule(
+      task.machineType,
+      now,
+      task.workerId ?? undefined,
+    );
     if (!rule) {
       throw new ReportError(
         `无当前生效的 ${task.machineType} 薪资规则，请联系老板补规则后再报工`,

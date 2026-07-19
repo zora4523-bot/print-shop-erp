@@ -75,17 +75,17 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
               {periods.map((p) => (
                 <tr key={p.id}>
                   <td className="px-4 py-3">{p.csUser.displayName}</td>
-                  <td className="px-4 py-3 text-xs font-mono">
+                  <td className="px-4 py-3 text-xs font-sans tabular-nums">
                     {formatDateShanghai(p.periodStart)} ~ {formatDateShanghai(p.periodEnd)}
                   </td>
                   <td className="px-4 py-3 text-center">{p.durationMonths}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                     {String(p.initialSales)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(p.totalSales)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                     {String(p.monthlyBase)}
                   </td>
                   <td className="px-4 py-3 text-center">

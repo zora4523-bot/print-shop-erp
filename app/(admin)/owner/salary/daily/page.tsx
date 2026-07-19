@@ -1,6 +1,9 @@
 import Decimal from 'decimal.js';
-import { Calculator, FileText } from 'lucide-react';
-import { listDailyWorkerSalaries } from '@/lib/salary/daily';
+import { Calculator, Download, FileText, Settings } from 'lucide-react';
+import {
+  listDailyWorkerSalaries,
+  listMachineWorkersForSalary,
+} from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { MachineType } from '@/generated/prisma/enums';
 import { parseStrictYmd } from '@/lib/auth/schemas';
@@ -17,7 +20,7 @@ import {
   StatCard as UiStatCard,
 } from '@/components/ui-business';
 
-export const metadata = { title: '师傅日薪' };
+export const metadata = { title: '计件工资' };
 
 // URL filters travel as plain query params. `date` defaults to today's
 // Shanghai calendar date; `paid` accepts "paid" | "unpaid" | anything
@@ -51,11 +54,14 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
 
-  const rows = await listDailyWorkerSalaries({
-    date: selectedDate,
-    isPaid,
-    workerId: sp.workerId,
-  });
+  const [rows, workers] = await Promise.all([
+    listDailyWorkerSalaries({
+      date: selectedDate,
+      isPaid,
+      workerId: sp.workerId,
+    }),
+    listMachineWorkersForSalary(),
+  ]);
 
   // Aggregate in Decimal — rows are Prisma Decimal, and JS float
   // addition can drift by cents when summing 50+ rows.
@@ -76,8 +82,26 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="师傅日薪"
-        subtitle="按 Asia/Shanghai 日历天汇总当日已完工的 `ProductionTask` 计件，取 max(汇总, 当日保底)。"
+        title="计件工资"
+        subtitle="按上海日历天汇总已完工任务，逐项关联工单；工资取计件合计与当日保底较高者，再加人工调整。"
+        actions={
+          <div className="flex gap-2">
+            <Link
+              href="/owner/salary/piecework-rules"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              <Settings className="mr-2 size-4" />
+              计件规则
+            </Link>
+            <Link
+              href={`/api/salary/piecework/export?date=${selectedDate}${sp.workerId ? `&workerId=${encodeURIComponent(sp.workerId)}` : ''}`}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              <Download className="mr-2 size-4" />
+              导出 Excel
+            </Link>
+          </div>
+        }
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
@@ -109,6 +133,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
         selectedDate={selectedDate}
         paid={sp.paid}
         workerId={sp.workerId}
+        workers={workers}
       />
 
       {rows.length === 0 ? (
@@ -127,6 +152,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                 <th className="px-4 py-2 text-left">机型</th>
                 <th className="px-4 py-2 text-right">计件合计</th>
                 <th className="px-4 py-2 text-right">保底</th>
+                <th className="px-4 py-2 text-right">调整</th>
                 <th className="px-4 py-2 text-right">实发</th>
                 <th className="px-4 py-2 text-center">任务 / 工单</th>
                 <th className="px-4 py-2 text-center">状态</th>
@@ -136,7 +162,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-mono text-xs">
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">
                     {formatDateShanghai(r.date)}
                   </td>
                   <td className="px-4 py-3">{r.worker.displayName}</td>
@@ -144,16 +170,20 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                     {MACHINE_TYPE_LABELS[r.machineType as MachineType] ??
                       r.machineType}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(r.totalPieceworkAmount)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs text-muted-foreground">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs text-muted-foreground">
                     {String(r.baseSalary)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono font-medium">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
+                    {Number(r.adjustmentAmount) > 0 ? '+' : ''}
+                    {String(r.adjustmentAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                     ¥ {String(r.actualSalary)}
                   </td>
-                  <td className="px-4 py-3 text-center text-xs font-mono">
+                  <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
                     {r.taskCount} / {r.orderCount}
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -164,7 +194,15 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <MarkPaidForm id={r.id} currentPaid={r.isPaid} />
+                    <div className="flex justify-end gap-2">
+                      <Link
+                        href={`/owner/salary/daily/${r.id}`}
+                        className={buttonVariants({ size: 'sm', variant: 'outline' })}
+                      >
+                        核对明细
+                      </Link>
+                      <MarkPaidForm id={r.id} currentPaid={r.isPaid} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -180,10 +218,12 @@ function FilterBar({
   selectedDate,
   paid,
   workerId,
+  workers,
 }: {
   selectedDate: string;
   paid: string | undefined;
   workerId: string | undefined;
+  workers: Array<{ id: string; displayName: string; username: string }>;
 }) {
   // Plain GET form — the searchParams round-trip is server-rendered
   // so filtering doesn't need any client JS. No form action attribute
@@ -212,14 +252,19 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">师傅 id (可选)</label>
-        <input
-          type="text"
+        <label className="text-xs text-muted-foreground">师傅</label>
+        <select
           name="workerId"
           defaultValue={workerId ?? ''}
-          placeholder="留空=全部"
           className="rounded-md border bg-background px-3 py-1 text-sm"
-        />
+        >
+          <option value="">全部师傅</option>
+          {workers.map((worker) => (
+            <option key={worker.id} value={worker.id}>
+              {worker.displayName}（{worker.username}）
+            </option>
+          ))}
+        </select>
       </div>
       <button
         type="submit"

@@ -109,7 +109,7 @@ export default async function ForemanCdrPage({
                   const isMock = b.zipFileUrl.startsWith('mock://');
                   return (
                     <tr key={b.id}>
-                      <td className="px-4 py-3 font-mono text-xs">
+                      <td className="px-4 py-3 font-sans tabular-nums text-xs">
                         {formatDateShanghai(b.dateRangeFrom)} →{' '}
                         {formatDateShanghai(
                           new Date(b.dateRangeTo.getTime() - 1),

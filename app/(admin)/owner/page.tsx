@@ -102,8 +102,8 @@ export default async function OwnerDashboardPage() {
         title={`欢迎回来，${user.displayName}`}
         subtitle={
           <>
-            今日 <span className="font-mono">{today.date}</span> · 本月{' '}
-            <span className="font-mono">{monthly.month}</span> · 时区
+            今日 <span className="font-sans tabular-nums">{today.date}</span> · 本月{' '}
+            <span className="font-sans tabular-nums">{monthly.month}</span> · 时区
             Asia/Shanghai
           </>
         }
@@ -157,7 +157,7 @@ export default async function OwnerDashboardPage() {
           hint={
             <>
               已收 {formatMoney(monthly.paid)} · 未收{' '}
-              <span className="font-mono">{formatMoney(monthly.outstanding)}</span>
+              <span className="font-sans tabular-nums">{formatMoney(monthly.outstanding)}</span>
             </>
           }
         />
@@ -310,7 +310,7 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     cell: (r) => (
       <Link
         href={`/orders/${r.id}`}
-        className="font-mono text-xs underline-offset-2 hover:underline"
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
       >
         {r.orderNo}
       </Link>
@@ -328,7 +328,7 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     header: '完工时间',
     cell: (r) => formatDateTimeShanghai(r.completedAt),
     align: 'right',
-    className: 'font-mono text-xs',
+    className: 'font-sans tabular-nums text-xs',
   },
   {
     header: '急单',
@@ -344,7 +344,7 @@ const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
     cell: (r) => (
       <Link
         href={`/orders/${r.id}`}
-        className="font-mono text-xs underline-offset-2 hover:underline"
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
       >
         {r.orderNo}
       </Link>
@@ -363,7 +363,7 @@ const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
     header: '承诺交期',
     cell: (r) => r.promisedDate.toISOString().slice(0, 10),
     align: 'right',
-    className: 'font-mono text-xs',
+    className: 'font-sans tabular-nums text-xs',
   },
   {
     header: '交期',
@@ -395,7 +395,7 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
       header: '工单号',
       cell: (r) =>
         r.orderNo ? (
-          <span className="font-mono text-xs">{r.orderNo}</span>
+          <span className="font-sans tabular-nums text-xs">{r.orderNo}</span>
         ) : (
           '—'
         ),
@@ -408,7 +408,7 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
       header: '预计交付',
       cell: (r) => formatDateShanghai(r.expectedDate),
       align: 'right',
-      className: 'font-mono text-xs',
+      className: 'font-sans tabular-nums text-xs',
     },
     {
       header: '超期',
@@ -434,7 +434,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   {
     header: '周期',
     cell: (r) => (
-      <span className="font-mono text-xs">
+      <span className="font-sans tabular-nums text-xs">
         {formatDateShanghai(r.periodStart)} → {formatDateShanghai(r.periodEnd)}
       </span>
     ),
@@ -467,7 +467,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
       );
     },
     align: 'right',
-    className: 'font-mono',
+    className: 'font-sans tabular-nums',
   },
   {
     header: '预测提成',
@@ -480,7 +480,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
         formatMoney(r.predictedCommission)
       ),
     align: 'right',
-    className: 'font-mono',
+    className: 'font-sans tabular-nums',
   },
   {
     header: '预测总收入',
@@ -491,7 +491,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
         formatMoney(r.predictedTotalIncome)
       ),
     align: 'right',
-    className: 'font-mono font-semibold',
+    className: 'font-sans tabular-nums font-semibold',
   },
 ];
 

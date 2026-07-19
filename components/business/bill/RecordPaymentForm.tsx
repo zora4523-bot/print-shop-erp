@@ -30,7 +30,7 @@ export function RecordPaymentForm({ billId, remainingAmount }: Props) {
           name="amount"
           inputMode="decimal"
           placeholder={`最多 ${remainingAmount}`}
-          className="max-w-[180px] font-mono"
+          className="max-w-[180px] font-sans tabular-nums"
         />
         <Button type="submit" disabled={pending}>
           {pending ? '录入中…' : '录入付款'}

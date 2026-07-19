@@ -47,10 +47,10 @@ export function ProductCategoryNodesTable({
               <TableCell className="text-muted-foreground">
                 {PRODUCT_CATEGORY_LABELS[node.legacyCategory]}
               </TableCell>
-              <TableCell className="text-right font-mono text-xs">
+              <TableCell className="text-right font-sans tabular-nums text-xs">
                 {node.sortOrder}
               </TableCell>
-              <TableCell className="text-right font-mono text-xs">
+              <TableCell className="text-right font-sans tabular-nums text-xs">
                 {node._count.products}
               </TableCell>
               <TableCell>

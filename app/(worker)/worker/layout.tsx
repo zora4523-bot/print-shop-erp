@@ -22,16 +22,29 @@ export default async function WorkerLayout({
   return (
     <div className="min-h-screen bg-muted/40">
       <header className="border-b bg-background">
-        <div className="mx-auto flex max-w-xl items-center justify-between px-4 py-3">
-          <Link href="/worker/tasks" className="text-base font-semibold">
-            我的任务
-          </Link>
-          <div className="flex items-center gap-3 text-sm">
-            <span className="text-muted-foreground">
-              {user.displayName}（{roleLabel(user.role)}）
-            </span>
-            <LogoutButton />
+        <div className="mx-auto max-w-xl px-4 py-3">
+          <div className="flex items-center justify-between">
+            <Link href="/worker/tasks" className="text-base font-semibold">
+              师傅工作台
+            </Link>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="text-muted-foreground">
+                {user.displayName}（{roleLabel(user.role)}）
+              </span>
+              <LogoutButton />
+            </div>
           </div>
+          <nav aria-label="师傅工作台导航" className="mt-3 flex gap-2 text-sm">
+            <Link href="/worker/tasks" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+              我的任务
+            </Link>
+            <Link href="/worker/orders" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+              我的工单
+            </Link>
+            <Link href="/worker/salary" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+              我的计件工资
+            </Link>
+          </nav>
         </div>
       </header>
       <main className="mx-auto max-w-xl px-4 py-4">{children}</main>

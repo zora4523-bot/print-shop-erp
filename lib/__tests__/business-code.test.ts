@@ -5,6 +5,7 @@ const { dbMock } = vi.hoisted(() => ({
     businessCodeSequence: {
       upsert: vi.fn(),
     },
+    $executeRaw: vi.fn(),
   },
 }));
 
@@ -18,6 +19,7 @@ import {
 
 beforeEach(() => {
   dbMock.businessCodeSequence.upsert.mockReset();
+  dbMock.$executeRaw.mockReset().mockResolvedValue(1);
 });
 
 describe('nextBusinessCode', () => {
@@ -54,6 +56,16 @@ describe('resolveBusinessCode', () => {
       'PAPER-A4',
     );
     expect(dbMock.businessCodeSequence.upsert).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('advances the sequence for a custom code using the automatic format', async () => {
+    await expect(resolveBusinessCode('MATERIAL', 'mat-000042')).resolves.toBe(
+      'mat-000042',
+    );
+    expect(dbMock.businessCodeSequence.upsert).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.$executeRaw.mock.calls[0]!.slice(1)).toEqual(['MATERIAL', 42]);
   });
 
   it('generates a code when the field is blank', async () => {

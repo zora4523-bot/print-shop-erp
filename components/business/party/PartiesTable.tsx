@@ -104,7 +104,7 @@ export function PartiesTable({
       <TableBody>
         {parties.map((party) => (
           <TableRow key={party.id} className={!party.isActive ? 'opacity-60' : undefined}>
-            <TableCell className="font-mono text-xs">{party.code}</TableCell>
+            <TableCell className="font-sans tabular-nums text-xs">{party.code}</TableCell>
             <TableCell>
               <div className="font-medium">{party.name}</div>
               {party.shortName ? (
@@ -113,7 +113,7 @@ export function PartiesTable({
             </TableCell>
             <TableCell>{PARTY_TYPE_LABELS[party.type]}</TableCell>
             <TableCell>{party.primaryContact?.name ?? '—'}</TableCell>
-            <TableCell className="font-mono text-xs">
+            <TableCell className="font-sans tabular-nums text-xs">
               {party.primaryContact?.phone ?? party.defaultAddress?.receiverPhone ?? '—'}
             </TableCell>
             <TableCell className="max-w-xs truncate text-muted-foreground">

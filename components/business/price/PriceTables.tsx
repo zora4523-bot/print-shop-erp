@@ -55,17 +55,17 @@ export function PriceTiersTable({ tiers }: { tiers: PriceTierSummary[] }) {
           >
             <TableCell>
               <div className="font-medium">{tier.product.name}</div>
-              <div className="font-mono text-xs text-muted-foreground">
+              <div className="font-sans tabular-nums text-xs text-muted-foreground">
                 {tier.product.code ?? '无编码'}
               </div>
             </TableCell>
             <TableCell className="text-muted-foreground">
               {tier.product.categoryNode.name}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {tier.minQty}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(tier.unitPrice)}
             </TableCell>
             <TableCell>{date(tier.effectiveFrom)}</TableCell>
@@ -114,7 +114,7 @@ export function PriceAdjustmentsTable({
             <TableCell className="text-muted-foreground">
               {ADJUSTMENT_TYPE_LABELS[adjustment.adjustmentType]}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(adjustment.amount)}
             </TableCell>
             <TableCell className="max-w-md truncate font-mono text-xs text-muted-foreground">

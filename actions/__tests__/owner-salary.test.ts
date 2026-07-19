@@ -13,13 +13,22 @@ const {
   MockCsPeriodError,
   MockInvalidCsPeriodTransitionError,
   MockHourlyAggregateError,
+  pieceworkAdminMock,
+  auditMock,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   salaryMock: {
     computeDailyWorkerSalary: vi.fn(),
     computeDailyForAllMachineWorkers: vi.fn(),
     markDailySalaryPaid: vi.fn(),
+    addDailySalaryAdjustment: vi.fn(),
   },
+  pieceworkAdminMock: {
+    createWorkerMachineSalaryRule: vi.fn(),
+    salaryAdjustmentInputSchema: { safeParse: vi.fn() },
+    workerMachineRuleInputSchema: { safeParse: vi.fn() },
+  },
+  auditMock: { writeAuditLog: vi.fn() },
   csMock: {
     startCsPeriod: vi.fn(),
     settleCsPeriod: vi.fn(),
@@ -68,7 +77,20 @@ vi.mock('@/lib/salary/daily', () => ({
   computeDailyWorkerSalary: salaryMock.computeDailyWorkerSalary,
   computeDailyForAllMachineWorkers: salaryMock.computeDailyForAllMachineWorkers,
   markDailySalaryPaid: salaryMock.markDailySalaryPaid,
+  addDailySalaryAdjustment: salaryMock.addDailySalaryAdjustment,
   DailySalaryError: MockDailySalaryError,
+}));
+vi.mock('@/lib/salary/piecework-admin', () => ({
+  createWorkerMachineSalaryRule:
+    pieceworkAdminMock.createWorkerMachineSalaryRule,
+  salaryAdjustmentInputSchema:
+    pieceworkAdminMock.salaryAdjustmentInputSchema,
+  workerMachineRuleInputSchema:
+    pieceworkAdminMock.workerMachineRuleInputSchema,
+  PieceworkRuleError: class extends Error {},
+}));
+vi.mock('@/lib/audit-log', () => ({
+  writeAuditLog: auditMock.writeAuditLog,
 }));
 vi.mock('@/lib/salary/cs', () => ({
   startCsPeriod: csMock.startCsPeriod,

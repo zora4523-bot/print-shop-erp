@@ -39,14 +39,14 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
       <TableBody>
         {products.map((p) => (
           <TableRow key={p.id} className={!p.isActive ? 'opacity-60' : undefined}>
-            <TableCell className="font-mono text-xs">{p.code ?? '—'}</TableCell>
+            <TableCell className="font-sans tabular-nums text-xs">{p.code ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">
               {p.categoryNode.name}
             </TableCell>
             <TableCell>{p.name}</TableCell>
             <TableCell className="text-muted-foreground">{p.specification ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">{p.paperType ?? '—'}</TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {formatPrice(p.baseUnitPrice)}
             </TableCell>
             <TableCell className="text-right text-muted-foreground">

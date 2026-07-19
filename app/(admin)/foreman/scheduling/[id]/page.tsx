@@ -31,7 +31,7 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">
-          排产 <span className="font-mono">{view.orderNo}</span>
+          排产 <span className="font-sans tabular-nums">{view.orderNo}</span>
           {view.isUrgent ? (
             <Badge variant="destructive" className="ml-3">
               急单

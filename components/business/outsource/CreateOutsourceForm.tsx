@@ -72,7 +72,7 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
     <div className="space-y-6">
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">
-          选择款式（工单 <span className="font-mono">{orderNo}</span>）
+          选择款式（工单 <span className="font-sans tabular-nums">{orderNo}</span>）
         </h2>
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">该工单没有可外协的款式。</p>

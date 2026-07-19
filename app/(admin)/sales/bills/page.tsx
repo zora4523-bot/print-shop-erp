@@ -123,11 +123,11 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-mono text-xs">{r.period}</td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.period}</td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {String(r.totalAmount)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {String(r.paidAmount)}
                   </td>
                   <td className="px-4 py-3 text-center">

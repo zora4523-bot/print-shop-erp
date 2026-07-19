@@ -233,7 +233,8 @@ const PRINT_CSS = `
     .page-break { page-break-before: always; }
   }
   .print-container {
-    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC",
+      "Microsoft YaHei", Arial, sans-serif;
     color: #000;
     line-height: 1.5;
   }

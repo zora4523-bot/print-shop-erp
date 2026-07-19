@@ -1,8 +1,11 @@
 import Decimal from 'decimal.js';
-import { TxDirection, type Prisma } from '../generated/prisma/client';
+import { Prisma, TxDirection } from '../generated/prisma/client';
 import type { PostInventoryCountInput } from './auth/schemas';
 import { db } from './db';
-import { applyMaterialStockMovement, MaterialInvariantError } from './material';
+import {
+  DailyDocumentNumberExhaustedError,
+  nextDailyDocumentNumber,
+} from './daily-document-number';
 
 export class InventoryCountInvariantError extends Error {
   constructor(message: string) {
@@ -40,27 +43,10 @@ export type InventoryCountSummary = Prisma.InventoryCountGetPayload<{
   select: typeof INVENTORY_COUNT_SELECT;
 }>;
 
-function ymd(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
-}
-
-async function nextCountNo(
-  tx: Prisma.TransactionClient,
-  now: Date,
-): Promise<string> {
-  const prefix = `IC${ymd(now)}-`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:inventory-count-no:${prefix}`}))`;
-  const last = await tx.inventoryCount.findFirst({
-    where: { countNo: { startsWith: prefix } },
-    orderBy: { countNo: 'desc' },
-    select: { countNo: true },
-  });
-  const previous = last?.countNo.slice(prefix.length) ?? '0000';
-  return `${prefix}${String(Number.parseInt(previous, 10) + 1).padStart(4, '0')}`;
-}
+const INVENTORY_COUNT_TRANSACTION_OPTIONS = {
+  maxWait: 5_000,
+  timeout: 30_000,
+} as const;
 
 export async function postInventoryCount(
   input: PostInventoryCountInput,
@@ -85,115 +71,206 @@ export async function postInventoryCount(
     }
   }
 
-  const createdId = await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:inventory-count-request:${input.idempotencyKey}`}))`;
-    const existing = await tx.inventoryCount.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: { id: true },
-    });
-    if (existing) return existing.id;
+  const existingBeforeReservation = await db.inventoryCount.findUnique({
+    where: { idempotencyKey: input.idempotencyKey },
+    select: { id: true },
+  });
+  if (existingBeforeReservation) {
+    return readInventoryCount(existingBeforeReservation.id);
+  }
 
-    const countNo = await nextCountNo(tx, now);
-    const inventoryCount = await tx.inventoryCount.create({
-      data: {
-        countNo,
-        idempotencyKey: input.idempotencyKey,
-        countedById: actor.id,
-        countedAt: now,
-        remark: input.remark,
-      },
-      select: { id: true },
-    });
+  let countNo: string;
+  try {
+    countNo = await nextDailyDocumentNumber('INVENTORY_COUNT', now);
+  } catch (error) {
+    if (error instanceof DailyDocumentNumberExhaustedError) {
+      throw new InventoryCountInvariantError(error.message);
+    }
+    throw error;
+  }
 
-    for (const item of items) {
-      const [material, location] = await Promise.all([
-        tx.material.findUnique({
-          where: { id: item.materialId },
-          select: { id: true, isActive: true },
-        }),
-        tx.warehouseLocation.findUnique({
-          where: { id: item.locationId },
-          select: {
-            id: true,
-            warehouseId: true,
-            isActive: true,
-            warehouse: { select: { isActive: true } },
-          },
-        }),
-      ]);
-      if (!material) throw new InventoryCountInvariantError('盘点物料不存在');
-      if (!material.isActive) throw new InventoryCountInvariantError('盘点物料已停用');
-      if (!location) throw new InventoryCountInvariantError('盘点库位不存在');
-      if (!location.isActive || !location.warehouse.isActive) {
-        throw new InventoryCountInvariantError('盘点库位或所属仓库已停用');
+  const materialIds = [...new Set(items.map((item) => item.materialId))].sort();
+  const locationIds = [...new Set(items.map((item) => item.locationId))].sort();
+
+  const createdId = await db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:inventory-count-request:${input.idempotencyKey}`}))`;
+      const existing = await tx.inventoryCount.findUnique({
+        where: { idempotencyKey: input.idempotencyKey },
+        select: { id: true },
+      });
+      if (existing) return existing.id;
+
+      const lockedMaterials = await tx.$queryRaw<
+        { id: string; isActive: boolean }[]
+      >(Prisma.sql`
+        SELECT id, "isActive"
+          FROM "Material"
+         WHERE id IN (${Prisma.join(materialIds)})
+         ORDER BY id
+         FOR UPDATE
+      `);
+      const materialById = new Map(
+        lockedMaterials.map((material) => [material.id, material]),
+      );
+      for (const materialId of materialIds) {
+        const material = materialById.get(materialId);
+        if (!material) throw new InventoryCountInvariantError('盘点物料不存在');
+        if (!material.isActive) {
+          throw new InventoryCountInvariantError('盘点物料已停用');
+        }
       }
 
-      await tx.$queryRaw`
-        SELECT id
-          FROM "Material"
-         WHERE id = ${item.materialId}
-         FOR UPDATE
-      `;
-      await tx.$executeRaw`
-        INSERT INTO "MaterialLocationStock" (
-          id, "materialId", "warehouseId", "locationId", "currentStock", "createdAt", "updatedAt"
-        ) VALUES (
-          'mls_' || md5(${item.materialId} || ':' || ${item.locationId}),
-          ${item.materialId},
-          ${location.warehouseId},
-          ${item.locationId},
-          0,
-          NOW(),
-          NOW()
-        )
-        ON CONFLICT ("materialId", "locationId") DO NOTHING
-      `;
-      const lockedStocks = await tx.$queryRaw<{ currentStock: unknown }[]>`
-        SELECT "currentStock"
-          FROM "MaterialLocationStock"
-         WHERE "materialId" = ${item.materialId}
-           AND "locationId" = ${item.locationId}
-         FOR UPDATE
-      `;
-      const book = new Decimal(String(lockedStocks[0]?.currentStock ?? 0));
-      const difference = item.counted.minus(book);
-      const countItem = await tx.inventoryCountItem.create({
+      const locations = await tx.warehouseLocation.findMany({
+        where: { id: { in: locationIds } },
+        select: {
+          id: true,
+          warehouseId: true,
+          isActive: true,
+          warehouse: { select: { isActive: true } },
+        },
+      });
+      const locationById = new Map(
+        locations.map((location) => [location.id, location]),
+      );
+      for (const locationId of locationIds) {
+        const location = locationById.get(locationId);
+        if (!location) throw new InventoryCountInvariantError('盘点库位不存在');
+        if (!location.isActive || !location.warehouse.isActive) {
+          throw new InventoryCountInvariantError('盘点库位或所属仓库已停用');
+        }
+      }
+
+      const inventoryCount = await tx.inventoryCount.create({
         data: {
-          inventoryCountId: inventoryCount.id,
-          materialId: item.materialId,
-          locationId: item.locationId,
-          bookQuantity: book.toFixed(2),
-          countedQuantity: item.counted.toFixed(2),
-          difference: difference.toFixed(2),
+          countNo,
+          idempotencyKey: input.idempotencyKey,
+          countedById: actor.id,
+          countedAt: now,
+          remark: input.remark,
         },
         select: { id: true },
       });
 
-      if (difference.eq(0)) continue;
-      try {
-        await applyMaterialStockMovement(tx, {
+      await tx.$executeRaw(Prisma.sql`
+        INSERT INTO "MaterialLocationStock" (
+          id, "materialId", "warehouseId", "locationId", "currentStock", "createdAt", "updatedAt"
+        ) VALUES ${Prisma.join(
+          items.map((item) => {
+            const location = locationById.get(item.locationId)!;
+            return Prisma.sql`(
+              'mls_' || md5(${item.materialId} || ':' || ${item.locationId}),
+              ${item.materialId}, ${location.warehouseId}, ${item.locationId}, 0, NOW(), NOW()
+            )`;
+          }),
+        )}
+        ON CONFLICT ("materialId", "locationId") DO NOTHING
+      `);
+
+      const lockedStocks = await tx.$queryRaw<
+        {
+          id: string;
+          materialId: string;
+          locationId: string;
+          currentStock: Prisma.Decimal;
+        }[]
+      >(Prisma.sql`
+        SELECT id, "materialId", "locationId", "currentStock"
+          FROM "MaterialLocationStock"
+         WHERE ("materialId", "locationId") IN (${Prisma.join(
+           items.map(
+             (item) => Prisma.sql`(${item.materialId}, ${item.locationId})`,
+           ),
+         )})
+         ORDER BY "materialId", "locationId"
+         FOR UPDATE
+      `);
+      const stockByKey = new Map(
+        lockedStocks.map((stock) => [
+          `${stock.materialId}:${stock.locationId}`,
+          stock,
+        ]),
+      );
+      if (stockByKey.size !== items.length) {
+        throw new InventoryCountInvariantError('物料库位库存初始化失败');
+      }
+
+      const countRows = items.map((item) => {
+        const stock = stockByKey.get(item.key)!;
+        const book = new Decimal(stock.currentStock);
+        const difference = item.counted.minus(book);
+        return {
+          ...item,
+          book,
+          difference,
+          warehouseId: locationById.get(item.locationId)!.warehouseId,
+        };
+      });
+      const createdItems = await tx.inventoryCountItem.createManyAndReturn({
+        data: countRows.map((item) => ({
+          inventoryCountId: inventoryCount.id,
           materialId: item.materialId,
           locationId: item.locationId,
-          direction: difference.gt(0) ? TxDirection.IN : TxDirection.OUT,
-          quantity: difference.abs().toFixed(2),
-          reasonType: 'INVENTORY_COUNT',
-          inventoryCountItemId: countItem.id,
-          operatorId: actor.id,
-          unitCost: null,
-          remark: `库存盘点 ${countNo}`,
-        });
-      } catch (error) {
-        if (error instanceof MaterialInvariantError) {
-          throw new InventoryCountInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
-    return inventoryCount.id;
-  });
+          bookQuantity: item.book.toFixed(2),
+          countedQuantity: item.counted.toFixed(2),
+          difference: item.difference.toFixed(2),
+        })),
+        select: { id: true, materialId: true, locationId: true },
+      });
 
+      const changedRows = countRows.filter((item) => !item.difference.eq(0));
+      if (changedRows.length > 0) {
+        const updated = await tx.$executeRaw(Prisma.sql`
+          UPDATE "MaterialLocationStock" AS stock
+             SET "currentStock" = changes."countedQuantity"::DECIMAL(12,2),
+                 "updatedAt" = NOW()
+            FROM (VALUES ${Prisma.join(
+              changedRows.map(
+                (item) =>
+                  Prisma.sql`(${item.materialId}, ${item.locationId}, ${item.counted.toFixed(2)})`,
+              ),
+            )}) AS changes("materialId", "locationId", "countedQuantity")
+           WHERE stock."materialId" = changes."materialId"
+             AND stock."locationId" = changes."locationId"
+        `);
+        if (updated !== changedRows.length) {
+          throw new InventoryCountInvariantError('盘点库存批量更新不完整');
+        }
+
+        const countItemByKey = new Map(
+          createdItems.map((item) => [
+            `${item.materialId}:${item.locationId}`,
+            item.id,
+          ]),
+        );
+        await tx.materialTransaction.createMany({
+          data: changedRows.map((item) => ({
+            materialId: item.materialId,
+            warehouseId: item.warehouseId,
+            locationId: item.locationId,
+            direction: item.difference.gt(0) ? TxDirection.IN : TxDirection.OUT,
+            quantity: item.difference.abs().toFixed(2),
+            reasonType: 'INVENTORY_COUNT',
+            inventoryCountItemId: countItemByKey.get(item.key)!,
+            operatorId: actor.id,
+            unitCost: null,
+            remark: `库存盘点 ${countNo}`,
+            occurredAt: now,
+          })),
+        });
+      }
+
+      return inventoryCount.id;
+    },
+    INVENTORY_COUNT_TRANSACTION_OPTIONS,
+  );
+
+  return readInventoryCount(createdId);
+}
+
+async function readInventoryCount(id: string): Promise<InventoryCountSummary> {
   const created = await db.inventoryCount.findUnique({
-    where: { id: createdId },
+    where: { id },
     select: INVENTORY_COUNT_SELECT,
   });
   if (!created) throw new InventoryCountInvariantError('盘点单创建后读取失败');

@@ -19,13 +19,13 @@ export default async function SalaryIndexPage() {
         title="薪资总览"
         subtitle={
           <>
-            今日：<span className="font-mono">{s.today}</span> · 所有金额按 Asia/Shanghai 日历。
+            今日：<span className="font-sans tabular-nums">{s.today}</span> · 所有金额按 Asia/Shanghai 日历。
           </>
         }
       />
 
       <section className="space-y-3">
-        <h2 className="text-base font-semibold">师傅日薪</h2>
+        <h2 className="text-base font-semibold">生产师傅计件工资</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard
             label="今日记录"
@@ -53,7 +53,7 @@ export default async function SalaryIndexPage() {
             href="/owner/salary/daily"
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
-            查看日薪列表 →
+            查看计件工资明细 →
           </Link>
         </div>
       </section>

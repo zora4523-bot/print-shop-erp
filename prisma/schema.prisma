@@ -82,6 +82,9 @@ model User {
   stockTransfers      StockTransfer[]
   inventoryCounts     InventoryCount[]
   businessAuditLogs   BusinessAuditLog[]
+  workerSalaryRules   WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleWorker")
+  createdSalaryRules  WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleCreator")
+  salaryAdjustments   SalaryAdjustment[]          @relation("SalaryAdjustmentCreator")
 
   @@index([role])
   @@index([workerType])
@@ -92,6 +95,15 @@ model User {
 // ============================================================
 
 model BusinessCodeSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// Daily human-readable document numbers. The counter is reserved in a short,
+// independent statement so long-running stock transactions do not serialize
+// behind a transaction-scoped advisory lock.
+model DailyDocumentSequence {
   key       String   @id
   value     Int      @default(0)
   updatedAt DateTime @updatedAt
@@ -351,9 +363,10 @@ model ProductionTask {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  craft     Craft     @relation(fields: [craftId], references: [id])
-  worker    User?     @relation(fields: [workerId], references: [id])
+  orderItem       OrderItem              @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  craft           Craft                  @relation(fields: [craftId], references: [id])
+  worker          User?                  @relation(fields: [workerId], references: [id])
+  dailySalaryItem DailyWorkerSalaryItem?
 
   @@index([workerId])
   @@index([status])
@@ -885,6 +898,12 @@ enum SalaryRuleType {
   COOK_SALARY
 }
 
+enum SalaryAdjustmentType {
+  BONUS
+  DEDUCTION
+  CORRECTION
+}
+
 model SalaryRule {
   id            String         @id @default(cuid())
   ruleType      SalaryRuleType
@@ -901,6 +920,26 @@ model SalaryRule {
   @@index([effectiveFrom, effectiveTo])
 }
 
+// 师傅个人计件规则。完整保存一套规则，命中时优先于机型统一规则；
+// 通过 effectiveFrom/effectiveTo 版本化，历史工资不随后台改价漂移。
+model WorkerMachineSalaryRule {
+  id            String      @id @default(cuid())
+  workerId      String
+  machineType   MachineType
+  ruleValue     Json
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  remark        String?
+  createdById   String
+  createdAt     DateTime    @default(now())
+
+  worker    User @relation("WorkerMachineSalaryRuleWorker", fields: [workerId], references: [id], onDelete: Restrict)
+  createdBy User @relation("WorkerMachineSalaryRuleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([workerId, machineType, effectiveFrom])
+  @@index([workerId, machineType, effectiveFrom, effectiveTo])
+}
+
 // 开机师傅日薪
 model DailyWorkerSalary {
   id                   String      @id @default(cuid())
@@ -909,6 +948,7 @@ model DailyWorkerSalary {
   machineType          MachineType
   baseSalary           Decimal     @db.Decimal(10, 2)
   totalPieceworkAmount Decimal     @db.Decimal(10, 2)
+  adjustmentAmount     Decimal     @default(0) @db.Decimal(10, 2)
   actualSalary         Decimal     @db.Decimal(10, 2) // max(两者)
   taskCount            Int         @default(0)
   orderCount           Int         @default(0)
@@ -918,10 +958,61 @@ model DailyWorkerSalary {
   paidAt               DateTime?
   createdAt            DateTime    @default(now())
 
-  worker User @relation(fields: [workerId], references: [id])
+  worker      User                    @relation(fields: [workerId], references: [id])
+  items       DailyWorkerSalaryItem[]
+  adjustments SalaryAdjustment[]
 
   @@unique([workerId, date])
   @@index([date])
+}
+
+// 不可变的计件任务账本。日薪重算时从 ProductionTask 重建；标记发放后
+// 日薪被锁定，因此这些快照能稳定支撑后台核查和 Excel 导出。
+model DailyWorkerSalaryItem {
+  id                 String      @id @default(cuid())
+  dailySalaryId      String
+  productionTaskId   String      @unique
+  orderId            String
+  orderNo            String
+  orderItemId        String
+  orderItemName      String
+  craftId            String
+  craftName          String
+  machineType        MachineType
+  completedQty       Int
+  defectQty          Int
+  reworkQty          Int
+  boardCount         Int
+  pressCount         Int
+  pieceworkAmount    Decimal     @db.Decimal(10, 2)
+  salaryRuleSnapshot Json
+  completedAt        DateTime
+  createdAt          DateTime    @default(now())
+
+  dailySalary    DailyWorkerSalary @relation(fields: [dailySalaryId], references: [id], onDelete: Cascade)
+  productionTask ProductionTask    @relation(fields: [productionTaskId], references: [id], onDelete: Restrict)
+
+  @@index([dailySalaryId])
+  @@index([orderId])
+  @@index([completedAt])
+}
+
+// 奖金、扣款和修正采用追加式账目，不覆盖原始任务计件。amount 使用有符号
+// 金额：奖金为正、扣款为负、修正可正可负。
+model SalaryAdjustment {
+  id            String               @id @default(cuid())
+  dailySalaryId String
+  type          SalaryAdjustmentType
+  amount        Decimal              @db.Decimal(10, 2)
+  reason        String
+  createdById   String
+  createdAt     DateTime             @default(now())
+
+  dailySalary DailyWorkerSalary @relation(fields: [dailySalaryId], references: [id], onDelete: Cascade)
+  createdBy   User              @relation("SalaryAdjustmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([dailySalaryId, createdAt])
+  @@index([createdById])
 }
 
 // 客服业绩周期

@@ -24,7 +24,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     <div className="space-y-5">
       <header className="space-y-1">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm">{task.orderItem.order.orderNo}</span>
+          <span className="font-sans tabular-nums text-sm">{task.orderItem.order.orderNo}</span>
           {task.orderItem.order.isUrgent ? (
             <Badge variant="destructive">急单</Badge>
           ) : null}
@@ -45,7 +45,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
         <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-          <Row label="计划数量" value={task.plannedQty.toLocaleString()} mono />
+          <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
           <Row label="规格" value={task.orderItem.specification ?? '—'} />
           <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
           <Row
@@ -72,15 +72,15 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="mb-2 text-sm font-semibold">已完工</h2>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-            <Row label="合格数" value={task.completedQty.toLocaleString()} mono />
-            <Row label="不良数" value={task.defectQty.toLocaleString()} mono />
-            <Row label="返工数" value={task.reworkQty.toLocaleString()} mono />
-            <Row label="板数" value={String(task.boardCount)} mono />
-            <Row label="下数" value={task.pressCount.toLocaleString()} mono />
+            <Row label="合格数" value={task.completedQty.toLocaleString()} tabular />
+            <Row label="不良数" value={task.defectQty.toLocaleString()} tabular />
+            <Row label="返工数" value={task.reworkQty.toLocaleString()} tabular />
+            <Row label="板数" value={String(task.boardCount)} tabular />
+            <Row label="下数" value={task.pressCount.toLocaleString()} tabular />
             <Row
               label="计件金额"
               value={`¥ ${String(task.pieceworkAmount)}`}
-              mono
+              tabular
               full
             />
           </dl>
@@ -112,18 +112,18 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
   full,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  tabular?: boolean;
   full?: boolean;
 }) {
   return (
     <div className={full ? 'col-span-2' : undefined}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono' : undefined}>{value}</dd>
+      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{value}</dd>
     </div>
   );
 }

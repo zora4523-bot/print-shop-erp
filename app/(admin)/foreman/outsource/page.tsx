@@ -55,7 +55,7 @@ export default async function OutsourceListPage() {
                 <tr key={r.id}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono">
+                      <span className="font-sans tabular-nums">
                         {r.order?.orderNo ?? '—'}
                       </span>
                       {r.order?.isUrgent ? (
@@ -65,7 +65,7 @@ export default async function OutsourceListPage() {
                   </td>
                   <td className="px-4 py-3">{r.supplierName}</td>
                   <td className="px-4 py-3">{r.craftDescription ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {r.totalQty?.toLocaleString() ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">

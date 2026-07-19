@@ -14,7 +14,13 @@ import { EmptyState } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
 
-export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
+export function OrdersTable({
+  orders,
+  showPieceworkCost = false,
+}: {
+  orders: OrderListRow[];
+  showPieceworkCost?: boolean;
+}) {
   if (orders.length === 0) {
     return (
       <EmptyState
@@ -33,6 +39,9 @@ export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
           <TableHead>客户</TableHead>
           <TableHead>收货人</TableHead>
           <TableHead className="text-right">金额</TableHead>
+          {showPieceworkCost ? (
+            <TableHead className="text-right">计件成本</TableHead>
+          ) : null}
           <TableHead>状态</TableHead>
           <TableHead>标记</TableHead>
           <TableHead>创建于</TableHead>
@@ -42,12 +51,17 @@ export function OrdersTable({ orders }: { orders: OrderListRow[] }) {
       <TableBody>
         {orders.map((o) => (
           <TableRow key={o.id}>
-            <TableCell className="font-mono text-xs">{o.orderNo}</TableCell>
+            <TableCell className="font-sans tabular-nums text-xs">{o.orderNo}</TableCell>
             <TableCell>{o.customerRef ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">{o.receiverName ?? '—'}</TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {String(o.totalAmount)}
             </TableCell>
+            {showPieceworkCost ? (
+              <TableCell className="text-right font-sans tabular-nums text-xs">
+                ¥ {o.pieceworkCost ?? '0.00'}
+              </TableCell>
+            ) : null}
             <TableCell>
               <OrderStatusBadge status={o.status} />
             </TableCell>

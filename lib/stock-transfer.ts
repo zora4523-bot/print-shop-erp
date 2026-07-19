@@ -2,6 +2,10 @@ import Decimal from 'decimal.js';
 import { TxDirection, type Prisma } from '../generated/prisma/client';
 import type { CreateStockTransferInput } from './auth/schemas';
 import { db } from './db';
+import {
+  DailyDocumentNumberExhaustedError,
+  nextDailyDocumentNumber,
+} from './daily-document-number';
 import { applyMaterialStockMovement, MaterialInvariantError } from './material';
 
 export class StockTransferInvariantError extends Error {
@@ -43,28 +47,6 @@ export type StockTransferSummary = Prisma.StockTransferGetPayload<{
   select: typeof STOCK_TRANSFER_SELECT;
 }>;
 
-function ymd(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
-}
-
-async function nextTransferNo(
-  tx: Prisma.TransactionClient,
-  now: Date,
-): Promise<string> {
-  const prefix = `ST${ymd(now)}-`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:stock-transfer-no:${prefix}`}))`;
-  const last = await tx.stockTransfer.findFirst({
-    where: { transferNo: { startsWith: prefix } },
-    orderBy: { transferNo: 'desc' },
-    select: { transferNo: true },
-  });
-  const previous = last?.transferNo.slice(prefix.length) ?? '0000';
-  return `${prefix}${String(Number.parseInt(previous, 10) + 1).padStart(4, '0')}`;
-}
-
 export async function createStockTransfer(
   input: CreateStockTransferInput,
   actor: { id: string },
@@ -76,6 +58,24 @@ export async function createStockTransfer(
   const quantity = new Decimal(input.quantity);
   if (!quantity.isFinite() || quantity.lte(0)) {
     throw new StockTransferInvariantError('调拨数量必须大于 0');
+  }
+
+  const existingBeforeReservation = await db.stockTransfer.findUnique({
+    where: { idempotencyKey: input.idempotencyKey },
+    select: { id: true },
+  });
+  if (existingBeforeReservation) {
+    return readStockTransfer(existingBeforeReservation.id);
+  }
+
+  let reservedTransferNo: string;
+  try {
+    reservedTransferNo = await nextDailyDocumentNumber('STOCK_TRANSFER', now);
+  } catch (error) {
+    if (error instanceof DailyDocumentNumberExhaustedError) {
+      throw new StockTransferInvariantError(error.message);
+    }
+    throw error;
   }
 
   const createdId = await db.$transaction(async (tx) => {
@@ -119,10 +119,9 @@ export async function createStockTransfer(
       throw new StockTransferInvariantError('目标库位或所属仓库已停用');
     }
 
-    const transferNo = await nextTransferNo(tx, now);
     const transfer = await tx.stockTransfer.create({
       data: {
-        transferNo,
+        transferNo: reservedTransferNo,
         idempotencyKey: input.idempotencyKey,
         materialId: input.materialId,
         sourceLocationId: input.sourceLocationId,
@@ -145,7 +144,7 @@ export async function createStockTransfer(
         stockTransferId: transfer.id,
         operatorId: actor.id,
         unitCost: null,
-        remark: `库存调拨 ${transferNo} 出库`,
+        remark: `库存调拨 ${reservedTransferNo} 出库`,
       });
       await applyMaterialStockMovement(tx, {
         materialId: input.materialId,
@@ -156,7 +155,7 @@ export async function createStockTransfer(
         stockTransferId: transfer.id,
         operatorId: actor.id,
         unitCost: null,
-        remark: `库存调拨 ${transferNo} 入库`,
+        remark: `库存调拨 ${reservedTransferNo} 入库`,
       });
     } catch (error) {
       if (error instanceof MaterialInvariantError) {
@@ -167,8 +166,12 @@ export async function createStockTransfer(
     return transfer.id;
   });
 
+  return readStockTransfer(createdId);
+}
+
+async function readStockTransfer(id: string): Promise<StockTransferSummary> {
   const created = await db.stockTransfer.findUnique({
-    where: { id: createdId },
+    where: { id },
     select: STOCK_TRANSFER_SELECT,
   });
   if (!created) throw new StockTransferInvariantError('调拨单创建后读取失败');

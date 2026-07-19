@@ -49,7 +49,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
             {row.order ? (
               <Link
                 href={`/orders/${row.order.id}`}
-                className="font-mono underline hover:text-foreground"
+                className="font-sans tabular-nums underline hover:text-foreground"
               >
                 {row.order.orderNo}
               </Link>
@@ -87,15 +87,15 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           <Row
             label="总数量"
             value={row.totalQty?.toLocaleString() ?? '—'}
-            mono
+            tabular
           />
-          <Row label="金额" value={row.amount ? `¥ ${row.amount}` : '—'} mono />
+          <Row label="金额" value={row.amount ? `¥ ${row.amount}` : '—'} tabular />
           <Row label="预计回货" value={formatDateShanghai(row.expectedDate)} />
           <Row label="实际回货" value={formatDateShanghai(row.actualDate)} />
           <Row
             label="关联款式"
             value={row.orderItemIds.length.toString()}
-            mono
+            tabular
           />
           {row.remark ? <Row label="备注" value={row.remark} full /> : null}
         </dl>
@@ -118,18 +118,18 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
   full,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  tabular?: boolean;
   full?: boolean;
 }) {
   return (
     <div className={full ? 'col-span-2' : undefined}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono' : undefined}>{value}</dd>
+      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{value}</dd>
     </div>
   );
 }

@@ -57,10 +57,10 @@ export function BomsTable({
             <TableCell className="text-muted-foreground">
               {targetLabel(bom, categoryLabelById)}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               v{bom.version}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {bom.baseQuantity}
             </TableCell>
             <TableCell className="text-right">{bom.items.length}</TableCell>

@@ -831,6 +831,7 @@ export type OrderListRow = {
   submitterId: string;
   createdAt: Date;
   updatedAt: Date;
+  pieceworkCost: string | null;
 };
 
 function normalizeSearchQuery(q?: string | null): string | null {
@@ -884,7 +885,27 @@ export async function listOrders(
     orderBy: [{ isUrgent: 'desc' }, { createdAt: 'desc' }],
   });
 
-  return sortBySearchRelevance(rows, query, (row) => ({
+  const pieceworkByOrder = new Map<string, string>();
+  if (user.role === Role.OWNER && rows.length > 0) {
+    const totals = await db.dailyWorkerSalaryItem.groupBy({
+      by: ['orderId'],
+      where: { orderId: { in: rows.map((row) => row.id) } },
+      _sum: { pieceworkAmount: true },
+    });
+    for (const total of totals) {
+      pieceworkByOrder.set(
+        total.orderId,
+        String(total._sum.pieceworkAmount ?? '0.00'),
+      );
+    }
+  }
+  const withPiecework = rows.map((row) => ({
+    ...row,
+    pieceworkCost:
+      user.role === Role.OWNER ? pieceworkByOrder.get(row.id) ?? '0.00' : null,
+  }));
+
+  return sortBySearchRelevance(withPiecework, query, (row) => ({
     fields: [
       row.orderNo,
       row.customerRef,

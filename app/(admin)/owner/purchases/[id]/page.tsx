@@ -81,20 +81,20 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                 <tr key={item.id} className="border-b last:border-0">
                   <td className="py-3 pr-3">
                     <div className="font-medium">{item.material.name}</div>
-                    <div className="font-mono text-xs text-muted-foreground">
+                    <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {item.material.code}
                     </div>
                   </td>
-                  <td className="py-3 pr-3 text-right font-mono text-xs">
+                  <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                     {decimal(item.quantity)} {item.material.unit}
                   </td>
-                  <td className="py-3 pr-3 text-right font-mono text-xs">
+                  <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                     {decimal(item.receivedQuantity)} {item.material.unit}
                   </td>
-                  <td className="py-3 pr-3 text-right font-mono text-xs">
+                  <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                     {remaining(item.quantity, item.receivedQuantity)} {item.material.unit}
                   </td>
-                  <td className="py-3 pr-3 text-right font-mono text-xs">
+                  <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                     {decimal(item.unitCost)}
                   </td>
                 </tr>
@@ -142,7 +142,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               <div key={receipt.id} className="rounded-lg border p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="font-mono text-sm">{receipt.receiptNo}</div>
+                    <div className="font-sans tabular-nums text-sm">{receipt.receiptNo}</div>
                     <div className="text-xs text-muted-foreground">
                       {receipt.receivedAt.toLocaleString('zh-CN')}
                     </div>

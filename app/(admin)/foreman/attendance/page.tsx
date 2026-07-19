@@ -112,11 +112,11 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
             {workHours ? (
               <>
                 {' · '}当前工时段:{' '}
-                <span className="font-mono">
+                <span className="font-sans tabular-nums">
                   {workHours.morning.start}–{workHours.morning.end} +{' '}
                   {workHours.afternoon.start}–{workHours.afternoon.end}
                 </span>
-                ，加班 <span className="font-mono">{workHours.otStart}</span> 起
+                ，加班 <span className="font-sans tabular-nums">{workHours.otStart}</span> 起
               </>
             ) : (
               <span className="text-destructive">
@@ -171,13 +171,13 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                   >
                     <summary className="cursor-pointer">
                       <div className="flex items-center justify-between">
-                        <span className="font-mono">{d.slice(8)}</span>
+                        <span className="font-sans tabular-nums">{d.slice(8)}</span>
                         <span className="text-muted-foreground">
                           {['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}
                         </span>
                       </div>
                       {att ? (
-                        <div className="mt-1 font-mono text-[10px] leading-tight">
+                        <div className="mt-1 font-sans tabular-nums text-[10px] leading-tight">
                           N {String(att.normalHours)}
                           {Number(att.otHours) > 0 ? (
                             <>

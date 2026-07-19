@@ -138,7 +138,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
               <tr key={row.id}>
                 <td className="px-4 py-3">
                   <div className="font-medium">{row.name}</div>
-                  <div className="mt-1 font-mono text-xs text-muted-foreground">
+                  <div className="mt-1 font-sans tabular-nums text-xs text-muted-foreground">
                     {row.code}
                   </div>
                 </td>
@@ -148,21 +148,21 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
                     {row.specification ?? '-'} · {row.unit}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-right font-mono">
+                <td className="px-4 py-3 text-right font-sans tabular-nums">
                   {qty(row.currentStock, row.unit)}
                 </td>
-                <td className="px-4 py-3 text-right font-mono">
+                <td className="px-4 py-3 text-right font-sans tabular-nums">
                   {row.safetyStock ? qty(row.safetyStock, row.unit) : '-'}
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-xs">
+                <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                   <div>入 {qty(row.todayIn, row.unit)}</div>
                   <div>出 {qty(row.todayOut, row.unit)}</div>
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-xs">
+                <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                   <div>入 {qty(row.totalIn, row.unit)}</div>
                   <div>出 {qty(row.totalOut, row.unit)}</div>
                 </td>
-                <td className="px-4 py-3 text-right font-mono">
+                <td className="px-4 py-3 text-right font-sans tabular-nums">
                   {money(row.stockValue)}
                 </td>
                 <td className="px-4 py-3">

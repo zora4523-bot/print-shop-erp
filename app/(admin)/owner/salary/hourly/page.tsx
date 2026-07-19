@@ -128,26 +128,26 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                 const isCook = wt === WorkerType.COOK;
                 return (
                   <tr key={r.id}>
-                    <td className="px-4 py-3 font-mono text-xs">{r.month}</td>
+                    <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
                     <td className="px-4 py-3">{r.worker.displayName}</td>
                     <td className="px-4 py-3 text-xs">
                       {wt ? (WORKER_TYPE_LABELS[wt] ?? wt) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {String(r.totalWorkHours)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {isCook
                         ? `${String(r.totalSpareHours)} (代班)`
                         : `${String(r.totalOtHours)} (加班)`}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums">
                       {String(r.baseSalary)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs text-muted-foreground">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs text-muted-foreground">
                       {isCook ? String(r.spareSalary) : String(r.otSalary)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-medium">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                       ¥ {String(r.totalSalary)}
                     </td>
                     <td className="px-4 py-3 text-center">

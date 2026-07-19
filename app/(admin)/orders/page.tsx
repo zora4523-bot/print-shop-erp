@@ -70,7 +70,10 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
         </div>
       </form>
       <div className="rounded-xl border bg-card p-4 shadow-sm">
-        <OrdersTable orders={orders} />
+        <OrdersTable
+          orders={orders}
+          showPieceworkCost={user.role === Role.OWNER}
+        />
       </div>
     </div>
   );

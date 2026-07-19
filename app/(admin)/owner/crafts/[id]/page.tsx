@@ -32,7 +32,7 @@ export default async function EditCraftPage({ params }: PageProps) {
       <div>
         <h1 className="text-xl font-semibold">编辑工艺：{craft.name}</h1>
         <p className="text-sm text-muted-foreground">
-          代码 <span className="font-mono">{craft.code}</span>
+          代码 <span className="font-sans tabular-nums">{craft.code}</span>
           {craft.isActive ? ' · 启用' : ' · 停用'}
           {craft.isOutsource ? ' · 外协' : ''}
         </p>

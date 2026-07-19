@@ -6,10 +6,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* 苹方优先。PingFang SC 只在 macOS/iOS 存在：Windows 落到微软雅黑，
-     Android/鸿蒙落到各自系统中文字体（车间师傅 H5 端）。 */
-  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-    "Noto Sans SC", "Helvetica Neue", Arial, system-ui, sans-serif;
+  /* 跨平台 UI 无衬线字体栈：拉丁字符优先系统 UI 字体，中文按
+     macOS/iOS 苹方、Windows 雅黑、Linux Noto CJK 逐字形回退。 */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", Arial, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo,
     Consolas, monospace;
   --font-heading: var(--font-sans);

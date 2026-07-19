@@ -15,8 +15,16 @@ import {
   computeDailyForAllMachineWorkers,
   computeDailyWorkerSalary,
   markDailySalaryPaid,
+  addDailySalaryAdjustment,
   DailySalaryError,
 } from '@/lib/salary/daily';
+import {
+  createWorkerMachineSalaryRule,
+  PieceworkRuleError,
+  salaryAdjustmentInputSchema,
+  workerMachineRuleInputSchema,
+} from '@/lib/salary/piecework-admin';
+import { writeAuditLog } from '@/lib/audit-log';
 import {
   startCsPeriod,
   settleCsPeriod,
@@ -38,6 +46,7 @@ import type {
   SettleCsPeriodResult,
   SettleReadyCsResult,
   RecomputeHourlyResult,
+  PieceworkRuleMutationResult,
 } from './owner-salary.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
@@ -106,6 +115,102 @@ export async function setDailySalaryPaidAction(
   await markDailySalaryPaid(id, parsed.data.isPaid);
   revalidatePath('/owner/salary/daily');
   return { status: 'success' };
+}
+
+export async function addDailySalaryAdjustmentAction(
+  dailySalaryId: string,
+  _prev: SalaryMutationResult | null,
+  formData: FormData,
+): Promise<SalaryMutationResult> {
+  const actor = await requirePermission('salary:rule:manage');
+  const parsed = salaryAdjustmentInputSchema.safeParse({
+    dailySalaryId,
+    type: formData.get('type'),
+    amount: formData.get('amount'),
+    reason: formData.get('reason'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const created = await addDailySalaryAdjustment({
+      ...parsed.data,
+      createdById: actor.id,
+    });
+    await writeAuditLog({
+      actor,
+      action: 'CREATE',
+      entityType: 'SalaryAdjustment',
+      entityId: created.id,
+      after: { ...parsed.data, signedAmount: created.amount },
+      requestMetadata: {
+        source: 'owner-salary.addDailySalaryAdjustmentAction',
+        route: `/owner/salary/daily/${dailySalaryId}`,
+      },
+    });
+  } catch (err) {
+    if (err instanceof DailySalaryError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+  revalidatePath('/owner/salary/daily');
+  revalidatePath(`/owner/salary/daily/${dailySalaryId}`);
+  return { status: 'success' };
+}
+
+export async function createWorkerMachineSalaryRuleAction(
+  _prev: PieceworkRuleMutationResult | null,
+  formData: FormData,
+): Promise<PieceworkRuleMutationResult> {
+  const actor = await requirePermission('salary:rule:manage');
+  const parsed = workerMachineRuleInputSchema.safeParse({
+    workerId: formData.get('workerId'),
+    machineType: formData.get('machineType'),
+    dailyBase: formData.get('dailyBase'),
+    pieceRate: formData.get('pieceRate'),
+    boardRate: formData.get('boardRate'),
+    smallOrderThreshold: formData.get('smallOrderThreshold'),
+    smallOrderFlatPrice: formData.get('smallOrderFlatPrice'),
+    multiplierFactors: formData.getAll('multiplierFactors'),
+    effectiveFrom: formData.get('effectiveFrom'),
+    remark: formData.get('remark'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const created = await createWorkerMachineSalaryRule({
+      ...parsed.data,
+      createdById: actor.id,
+    });
+    await writeAuditLog({
+      actor,
+      action: 'CREATE',
+      entityType: 'WorkerMachineSalaryRule',
+      entityId: created.id,
+      after: created,
+      requestMetadata: {
+        source: 'owner-salary.createWorkerMachineSalaryRuleAction',
+        route: '/owner/salary/piecework-rules',
+      },
+    });
+    revalidatePath('/owner/salary/piecework-rules');
+    return { status: 'success', ruleId: created.id };
+  } catch (err) {
+    if (err instanceof PieceworkRuleError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────

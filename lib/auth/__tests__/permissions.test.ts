@@ -132,6 +132,8 @@ describe('requirePermission', () => {
     [Role.FOREMAN, 'order:create'],
     [Role.OWNER, 'account:manage'],
     [Role.WORKER, 'task:report'],
+    [Role.WORKER, 'order:view:self'],
+    [Role.WORKER, 'salary:view:self'],
     [Role.OWNER, 'salary:rule:manage'],
     [Role.FOREMAN, 'report:production'],
   ] as const)('role %s is allowed for %s', async (role, perm) => {

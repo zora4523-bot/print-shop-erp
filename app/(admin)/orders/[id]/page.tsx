@@ -30,6 +30,7 @@ import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -43,7 +44,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();
-  const materialEstimate = await estimateMaterialUsageForOrderItems(order.items);
+  const [materialEstimate, pieceworkSummary] = await Promise.all([
+    estimateMaterialUsageForOrderItems(order.items),
+    user.role === Role.OWNER
+      ? getOrderPieceworkSummary(order.id)
+      : Promise.resolve(null),
+  ]);
 
   const canSubmit =
     order.status === OrderStatus.DRAFT &&
@@ -89,7 +95,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">
-            <span className="font-mono">{order.orderNo}</span>
+            <span className="font-sans tabular-nums">{order.orderNo}</span>
             {order.isUrgent ? (
               <Badge variant="destructive" className="ml-3">
                 急单
@@ -161,7 +167,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
             </dd>
           </div>
-          <Row label="总额" value={String(order.totalAmount)} mono />
+          <Row label="总额" value={String(order.totalAmount)} tabular />
         </dl>
       </section>
 
@@ -174,7 +180,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <div className="font-medium">
                   #{item.sequence} · {item.name}
                 </div>
-                <div className="font-mono text-xs text-muted-foreground">
+                <div className="font-sans tabular-nums text-xs text-muted-foreground">
                   {item.quantity} × {String(item.unitPrice)} = {String(item.subtotal)}
                 </div>
               </div>
@@ -216,6 +222,44 @@ export default async function OrderDetailPage({ params }: PageProps) {
       </section>
 
       <OrderMaterialUsageEstimate estimate={materialEstimate} />
+
+      {pieceworkSummary ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold">计件工资关联</h2>
+              <p className="text-xs text-muted-foreground">
+                仅老板可见；金额来自已生成的日薪任务明细。
+              </p>
+            </div>
+            <strong className="font-sans tabular-nums text-primary">
+              合计 ¥ {pieceworkSummary.total}
+            </strong>
+          </div>
+          {pieceworkSummary.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无已汇总计件明细。</p>
+          ) : (
+            <ul className="divide-y text-sm">
+              {pieceworkSummary.items.map((item) => (
+                <li
+                  key={item.id}
+                  className="grid gap-2 py-3 sm:grid-cols-[120px_1fr_100px_140px]"
+                >
+                  <span>{item.dailySalary.worker.displayName}</span>
+                  <span>{item.orderItemName} · {item.craftName}</span>
+                  <span className="text-right font-sans tabular-nums">¥ {String(item.pieceworkAmount)}</span>
+                  <Link
+                    href={`/owner/salary/daily/${item.dailySalaryId}`}
+                    className="text-right text-xs text-primary underline"
+                  >
+                    查看工资明细
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
         <h2 className="text-base font-semibold">修改日志</h2>
@@ -303,19 +347,19 @@ export default async function OrderDetailPage({ params }: PageProps) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
   full,
 }: {
   label: string;
   value: string | null | undefined;
-  mono?: boolean;
+  tabular?: boolean;
   full?: boolean;
 }) {
   const display = value === null || value === undefined || value === '' ? '—' : value;
   return (
     <div className={full ? 'col-span-2' : undefined}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono' : undefined}>{display}</dd>
+      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{display}</dd>
     </div>
   );
 }

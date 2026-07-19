@@ -78,7 +78,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
                         </span>
                       ) : null}
                     </td>
-                    <td className="py-3 pr-3 text-right font-mono text-xs">
+                    <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                       {String(item.quantity)} {item.material.unit}
                     </td>
                     <td className="py-3 pr-3 text-muted-foreground">

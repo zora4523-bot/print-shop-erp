@@ -41,7 +41,7 @@ export function OrderMaterialUsageEstimate({
                   <tr key={item.orderItemId} className="border-b last:border-0">
                     <td className="py-3 pr-3 align-top">
                       #{item.sequence} · {item.itemName}
-                      <div className="font-mono text-xs text-muted-foreground">
+                      <div className="font-sans tabular-nums text-xs text-muted-foreground">
                         数量 {item.quantity}
                       </div>
                     </td>
@@ -50,7 +50,7 @@ export function OrderMaterialUsageEstimate({
                       {item.bom ? (
                         <>
                           {item.bom.name}
-                          <div className="font-mono text-xs text-muted-foreground">
+                          <div className="font-sans tabular-nums text-xs text-muted-foreground">
                             v{item.bom.version} / 基准 {item.bom.baseQuantity}
                           </div>
                         </>
@@ -66,7 +66,7 @@ export function OrderMaterialUsageEstimate({
                           {item.materials.map((material) => (
                             <li key={material.materialId}>
                               {material.code} · {material.name}
-                              <span className="ml-2 font-mono text-xs">
+                              <span className="ml-2 font-sans tabular-nums text-xs">
                                 {material.quantity} {material.unit}
                               </span>
                             </li>
@@ -92,7 +92,7 @@ export function OrderMaterialUsageEstimate({
                     <span>
                       {material.code} · {material.name}
                     </span>
-                    <span className="font-mono text-xs">
+                    <span className="font-sans tabular-nums text-xs">
                       {material.quantity} {material.unit}
                     </span>
                   </div>

@@ -81,12 +81,12 @@ export default async function OwnerWarehousesPage() {
             <tbody>
               {dashboard.pendingReceipts.length === 0 ? <EmptyRow columns={7} text="暂无待收货明细。" /> : dashboard.pendingReceipts.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">
-                  <td className="px-3 py-2"><Link className="font-mono text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><Badge variant="outline">{PURCHASE_ORDER_STATUS_LABELS[item.purchaseOrder.status]}</Badge></div></td>
+                  <td className="px-3 py-2"><Link className="font-sans tabular-nums text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><Badge variant="outline">{PURCHASE_ORDER_STATUS_LABELS[item.purchaseOrder.status]}</Badge></div></td>
                   <td className="px-3 py-2">{item.purchaseOrder.supplierName}</td>
-                  <td className="px-3 py-2"><div>{item.material.name}</div><div className="font-mono text-xs text-muted-foreground">{item.material.code}</div></td>
-                  <td className="px-3 py-2 text-right font-mono">{item.orderedQuantity} {item.material.unit}</td>
-                  <td className="px-3 py-2 text-right font-mono">{item.receivedQuantity} {item.material.unit}</td>
-                  <td className="px-3 py-2 text-right font-mono font-semibold">{item.remainingQuantity} {item.material.unit}</td>
+                  <td className="px-3 py-2"><div>{item.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{item.material.code}</div></td>
+                  <td className="px-3 py-2 text-right font-sans tabular-nums">{item.orderedQuantity} {item.material.unit}</td>
+                  <td className="px-3 py-2 text-right font-sans tabular-nums">{item.receivedQuantity} {item.material.unit}</td>
+                  <td className="px-3 py-2 text-right font-sans tabular-nums font-semibold">{item.remainingQuantity} {item.material.unit}</td>
                   <td className="px-3 py-2">{formatDateShanghai(item.purchaseOrder.expectedDate)}</td>
                 </tr>
               ))}
@@ -117,9 +117,9 @@ export default async function OwnerWarehousesPage() {
             <tbody>
               {dashboard.locationStocks.length === 0 ? <EmptyRow columns={3} text="暂无库位库存记录。" /> : dashboard.locationStocks.map((stock) => (
                 <tr key={`${stock.materialId}:${stock.locationId}`} className="border-b last:border-0">
-                  <td className="px-3 py-2"><div>{stock.warehouse.name} / {stock.location.name}</div><div className="font-mono text-xs text-muted-foreground">{stock.warehouse.code} / {stock.location.code}</div></td>
-                  <td className="px-3 py-2"><div>{stock.material.name}</div><div className="font-mono text-xs text-muted-foreground">{stock.material.code}</div></td>
-                  <td className="px-3 py-2 text-right font-mono">{stock.currentStock} {stock.material.unit}</td>
+                  <td className="px-3 py-2"><div>{stock.warehouse.name} / {stock.location.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.warehouse.code} / {stock.location.code}</div></td>
+                  <td className="px-3 py-2"><div>{stock.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.material.code}</div></td>
+                  <td className="px-3 py-2 text-right font-sans tabular-nums">{stock.currentStock} {stock.material.unit}</td>
                 </tr>
               ))}
             </tbody>
@@ -136,10 +136,10 @@ export default async function OwnerWarehousesPage() {
               {dashboard.recentTransactions.length === 0 ? <EmptyRow columns={6} text="暂无库存流水。" /> : dashboard.recentTransactions.map((transaction) => (
                 <tr key={transaction.id} className="border-b last:border-0">
                   <td className="px-3 py-2 whitespace-nowrap">{formatDateTimeShanghai(transaction.occurredAt)}</td>
-                  <td className="px-3 py-2"><div>{transaction.material.name}</div><div className="font-mono text-xs text-muted-foreground">{transaction.material.code}</div></td>
+                  <td className="px-3 py-2"><div>{transaction.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{transaction.material.code}</div></td>
                   <td className="px-3 py-2"><Badge variant={transaction.direction === 'IN' ? 'outline' : 'secondary'}>{transaction.direction === 'IN' ? '入库' : '出库'} · {txReasonLabel(transaction.reasonType)}</Badge></td>
                   <td className="px-3 py-2">{transaction.warehouse?.name ?? '—'} / {transaction.location?.name ?? '—'}</td>
-                  <td className="px-3 py-2 text-right font-mono">{transaction.direction === 'IN' ? '+' : '-'}{transaction.quantity} {transaction.material.unit}</td>
+                  <td className="px-3 py-2 text-right font-sans tabular-nums">{transaction.direction === 'IN' ? '+' : '-'}{transaction.quantity} {transaction.material.unit}</td>
                   <td className="px-3 py-2">{transaction.operator.displayName}</td>
                 </tr>
               ))}
@@ -180,8 +180,8 @@ export default async function OwnerWarehousesPage() {
           <div className="space-y-4">
             {dashboard.warehouses.map((warehouse) => (
               <div key={warehouse.id} className="rounded-lg border p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><div className="font-medium">{warehouse.name}</div><div className="font-mono text-xs text-muted-foreground">{warehouse.code}</div></div><div className="flex gap-2">{warehouse.isDefault ? <Badge variant="outline">默认</Badge> : null}<Badge variant={warehouse.isActive ? 'outline' : 'secondary'}>{warehouse.isActive ? '启用' : '停用'}</Badge></div></div>
-                <div className="grid gap-2 md:grid-cols-2">{warehouse.locations.map((location) => <div key={location.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"><div><div>{location.name}</div><div className="font-mono text-xs text-muted-foreground">{location.code}</div></div><div className="flex gap-2">{location.isDefault ? <Badge variant="outline">默认</Badge> : null}<Badge variant={location.isActive ? 'outline' : 'secondary'}>{location.isActive ? '启用' : '停用'}</Badge></div></div>)}</div>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div><div className="font-medium">{warehouse.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{warehouse.code}</div></div><div className="flex gap-2">{warehouse.isDefault ? <Badge variant="outline">默认</Badge> : null}<Badge variant={warehouse.isActive ? 'outline' : 'secondary'}>{warehouse.isActive ? '启用' : '停用'}</Badge></div></div>
+                <div className="grid gap-2 md:grid-cols-2">{warehouse.locations.map((location) => <div key={location.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"><div><div>{location.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{location.code}</div></div><div className="flex gap-2">{location.isDefault ? <Badge variant="outline">默认</Badge> : null}<Badge variant={location.isActive ? 'outline' : 'secondary'}>{location.isActive ? '启用' : '停用'}</Badge></div></div>)}</div>
               </div>
             ))}
           </div>
@@ -199,7 +199,7 @@ function DocumentList({ title, empty, rows }: { title: string; empty: string; ro
   return (
     <div className="rounded-xl border bg-card p-5 shadow-sm">
       <h2 className="mb-4 font-semibold">{title}</h2>
-      {rows.length === 0 ? <p className="text-sm text-muted-foreground">{empty}</p> : <div className="space-y-3">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><div className="font-mono text-sm font-medium">{row.number}</div><div className="mt-1 text-xs text-muted-foreground">{row.description}</div><div className="mt-1 text-xs text-muted-foreground">{row.time}</div></div><Badge variant="outline">{row.quantity}</Badge></div>)}</div>}
+      {rows.length === 0 ? <p className="text-sm text-muted-foreground">{empty}</p> : <div className="space-y-3">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><div className="font-sans tabular-nums text-sm font-medium">{row.number}</div><div className="mt-1 text-xs text-muted-foreground">{row.description}</div><div className="mt-1 text-xs text-muted-foreground">{row.time}</div></div><Badge variant="outline">{row.quantity}</Badge></div>)}</div>}
     </div>
   );
 }

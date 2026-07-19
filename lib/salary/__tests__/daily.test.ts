@@ -13,11 +13,16 @@ const { dbMock } = vi.hoisted(() => {
     user: { findUnique: vi.fn(), findMany: vi.fn() },
     productionTask: { findMany: vi.fn() },
     salaryRule: { findFirst: vi.fn() },
+    workerMachineSalaryRule: { findFirst: vi.fn() },
     dailyWorkerSalary: {
       upsert: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+    },
+    dailyWorkerSalaryItem: {
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
     },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
@@ -46,6 +51,28 @@ const HAND_PRESS_RULE = {
   smallOrderFlatPrice: 12,
   multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
 };
+
+function dailyTask(pieceworkAmount: string, orderId: string, id = `${orderId}-${pieceworkAmount}`) {
+  return {
+    id,
+    machineType: MachineType.HAND_PRESS,
+    completedQty: 100,
+    defectQty: 0,
+    reworkQty: 0,
+    boardCount: 1,
+    pressCount: 100,
+    pieceworkAmount,
+    salaryRuleSnapshot: HAND_PRESS_RULE,
+    completedAt: new Date('2026-04-23T02:00:00Z'),
+    craft: { id: 'craft-1', name: '烫金' },
+    orderItem: {
+      id: `item-${orderId}`,
+      orderId,
+      name: `款式-${orderId}`,
+      order: { orderNo: `NO-${orderId}` },
+    },
+  };
+}
 
 describe('shanghaiDayRange', () => {
   it('returns the UTC instant range for a Shanghai calendar date', () => {
@@ -111,10 +138,13 @@ describe('computeDailyWorkerSalary', () => {
     dbMock.salaryRule.findFirst
       .mockReset()
       .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
-    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
+    dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({ id: 'ds-1' });
     dbMock.dailyWorkerSalary.findMany.mockReset();
     dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
     dbMock.dailyWorkerSalary.update.mockReset();
+    dbMock.dailyWorkerSalaryItem.deleteMany.mockReset().mockResolvedValue({ count: 0 });
+    dbMock.dailyWorkerSalaryItem.createMany.mockReset().mockResolvedValue({ count: 0 });
     dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -150,10 +180,10 @@ describe('computeDailyWorkerSalary', () => {
   it('SPEC §7.1 张三 reproduction: tasks sum 201, base 100 → actualSalary 201', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '12.00', orderItem: { orderId: 'o1' } },
-      { pieceworkAmount: '61.00', orderItem: { orderId: 'o2' } },
-      { pieceworkAmount: '52.00', orderItem: { orderId: 'o2' } },
-      { pieceworkAmount: '76.00', orderItem: { orderId: 'o3' } },
+      dailyTask('12.00', 'o1'),
+      dailyTask('61.00', 'o2', 'o2-a'),
+      dailyTask('52.00', 'o2', 'o2-b'),
+      dailyTask('76.00', 'o3'),
     ]);
     const r = await computeDailyWorkerSalary('worker-1', '2026-04-23');
     expect(r.totalPieceworkAmount).toBe('201.00');
@@ -175,7 +205,7 @@ describe('computeDailyWorkerSalary', () => {
   it('upserts with Shanghai-midnight date column + snapshots rule value', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+      dailyTask('40.00', 'o1'),
     ]);
     await computeDailyWorkerSalary('worker-1', '2026-04-23');
     const call = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0];
@@ -188,6 +218,21 @@ describe('computeDailyWorkerSalary', () => {
       pieceRate: 0.007,
       boardRate: 5,
       dailyBase: 100,
+    });
+    expect(dbMock.dailyWorkerSalaryItem.deleteMany).toHaveBeenCalledWith({
+      where: { dailySalaryId: 'ds-1' },
+    });
+    expect(dbMock.dailyWorkerSalaryItem.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          dailySalaryId: 'ds-1',
+          productionTaskId: 'o1-40.00',
+          orderId: 'o1',
+          orderNo: 'NO-o1',
+          craftName: '烫金',
+          pieceworkAmount: '40.00',
+        }),
+      ],
     });
   });
 
@@ -217,7 +262,7 @@ describe('computeDailyWorkerSalary', () => {
   it('recompute: update path does not write isPaid (finance ledger protected)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+      dailyTask('40.00', 'o1'),
     ]);
     await computeDailyWorkerSalary('worker-1', '2026-04-23');
     const call = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0];
@@ -230,7 +275,7 @@ describe('computeDailyWorkerSalary', () => {
   it('refuses to recompute an already-paid row (Codex round 43 / P0)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+      dailyTask('40.00', 'o1'),
     ]);
     dbMock.dailyWorkerSalary.findUnique.mockResolvedValue({
       id: 'ds-existing',
@@ -246,7 +291,7 @@ describe('computeDailyWorkerSalary', () => {
   it('allows recompute when the existing row is unpaid', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+      dailyTask('40.00', 'o1'),
     ]);
     dbMock.dailyWorkerSalary.findUnique.mockResolvedValue({
       id: 'ds-existing',
@@ -260,7 +305,7 @@ describe('computeDailyWorkerSalary', () => {
   it('allows first-time compute when no row exists yet (findUnique null)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
-      { pieceworkAmount: '40.00', orderItem: { orderId: 'o1' } },
+      dailyTask('40.00', 'o1'),
     ]);
     dbMock.dailyWorkerSalary.findUnique.mockResolvedValue(null);
     await computeDailyWorkerSalary('worker-1', '2026-04-23');
@@ -375,7 +420,10 @@ describe('computeDailyWorkerSalary — advisory lock + now pinning (mirrors hour
     dbMock.salaryRule.findFirst
       .mockReset()
       .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
-    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({});
+    dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({ id: 'ds-1' });
+    dbMock.dailyWorkerSalaryItem.deleteMany.mockReset().mockResolvedValue({ count: 0 });
+    dbMock.dailyWorkerSalaryItem.createMany.mockReset().mockResolvedValue({ count: 0 });
     dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
     dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {

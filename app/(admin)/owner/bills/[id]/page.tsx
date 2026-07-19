@@ -46,7 +46,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             账单 · {bill.salesUser.displayName}
           </h1>
           <p className="text-sm text-muted-foreground">
-            周期 <span className="font-mono">{bill.period}</span> ·{' '}
+            周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}
             {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
             {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
             {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
@@ -57,19 +57,19 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
         <div className="grid grid-cols-3 gap-4">
-          <Row label="总额" value={`¥ ${String(bill.totalAmount)}`} mono />
-          <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} mono />
+          <Row label="总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
+          <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} tabular />
           <Row
             label="未收"
             value={`¥ ${remaining.toFixed(2)}`}
-            mono
+            tabular
             highlight={remaining.gt(0)}
           />
         </div>
         <div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>收款进度</span>
-            <span className="font-mono">{paidPercent.toFixed(1)}%</span>
+            <span className="font-sans tabular-nums">{paidPercent.toFixed(1)}%</span>
           </div>
           <div className="mt-1 h-2 rounded-full bg-muted">
             <div
@@ -101,7 +101,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           <h2 className="text-base font-semibold">录入付款</h2>
           <p className="text-xs text-muted-foreground">
             累加式记账；累计 = 总额自动切 FULLY_PAID 终态（不可回退）。最多可录
-            入 <span className="font-mono">¥ {remaining.toFixed(2)}</span>。
+            入 <span className="font-sans tabular-nums">¥ {remaining.toFixed(2)}</span>。
             {bill.salesUser.role === Role.CUSTOMER_SERVICE
               ? ' 该账单归属客服；收款时会按金额累计到对应客服周期的业绩。'
               : ''}
@@ -147,7 +147,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             <tbody className="divide-y">
               {bill.items.map((it) => (
                 <tr key={it.id}>
-                  <td className="px-4 py-3 font-mono text-xs">
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">
                     {it.order.orderNo}
                   </td>
                   <td className="px-4 py-3">{it.order.customerRef ?? '—'}</td>
@@ -157,7 +157,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                   <td className="px-4 py-3 text-center text-xs">
                     <OrderStatusBadge status={it.order.status} />
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {String(it.orderAmount)}
                   </td>
                 </tr>
@@ -189,19 +189,19 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
   highlight,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  tabular?: boolean;
   highlight?: boolean;
 }) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={`${mono ? 'font-mono' : ''} ${
+        className={`${tabular ? 'font-sans tabular-nums' : ''} ${
           highlight ? 'text-destructive font-semibold' : ''
         } text-base`}
       >

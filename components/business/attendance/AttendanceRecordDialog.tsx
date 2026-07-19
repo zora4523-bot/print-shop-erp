@@ -89,7 +89,7 @@ export function AttendanceRecordDialog({
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-semibold">
-            {workerName} · <span className="font-mono">{date}</span>
+            {workerName} · <span className="font-sans tabular-nums">{date}</span>
           </div>
           <div className="text-xs text-muted-foreground">
             {workerTypeLabel(workerType)}

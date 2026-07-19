@@ -224,11 +224,11 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                         {index === 0 ? <MaterialCells row={row} rowSpan={row.locations.length} /> : null}
                         <td className="px-4 py-3 align-top">
                           <div>{location.warehouseName} / {location.locationName}</div>
-                          <div className="font-mono text-xs text-muted-foreground">
+                          <div className="font-sans tabular-nums text-xs text-muted-foreground">
                             {location.warehouseCode} / {location.locationCode}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right align-top font-mono text-xs">
+                        <td className="px-4 py-3 text-right align-top font-sans tabular-nums text-xs">
                           {decimal(location.currentStock)} {row.unit}
                         </td>
                         <td className="px-4 py-3 text-right align-top">
@@ -239,7 +239,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                               ...current,
                               [key]: event.target.value,
                             }))}
-                            className="ml-auto w-28 text-right font-mono text-xs"
+                            className="ml-auto w-28 text-right font-sans tabular-nums text-xs"
                             aria-label={row.locations.length === 1
                               ? `${row.name} 实盘数`
                               : `${row.name} ${location.warehouseName}/${location.locationName} 实盘数`}
@@ -304,7 +304,7 @@ function MaterialCells({
     <>
       <td rowSpan={rowSpan} className="px-4 py-3 align-top">
         <div className="font-medium">{row.name}</div>
-        <div className="font-mono text-xs text-muted-foreground">{row.code}</div>
+        <div className="font-sans tabular-nums text-xs text-muted-foreground">{row.code}</div>
         {row.specification ? <div className="text-xs text-muted-foreground">{row.specification}</div> : null}
       </td>
       <td rowSpan={rowSpan} className="px-4 py-3 align-top">
@@ -324,7 +324,7 @@ function Summary({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-card px-4 py-3 shadow-sm">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 font-mono text-lg font-semibold">{value}</div>
+      <div className="mt-1 font-sans tabular-nums text-lg font-semibold">{value}</div>
     </div>
   );
 }

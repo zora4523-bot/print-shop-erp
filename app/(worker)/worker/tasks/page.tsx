@@ -39,7 +39,7 @@ export default async function WorkerTasksPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm">
+                      <span className="font-sans tabular-nums text-sm">
                         {t.order.orderNo}
                       </span>
                       {t.order.isUrgent ? (
@@ -66,7 +66,7 @@ export default async function WorkerTasksPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-xs text-muted-foreground">计划</div>
-                    <div className="font-mono text-base">
+                    <div className="font-sans tabular-nums text-base">
                       {t.plannedQty.toLocaleString()}
                     </div>
                   </div>

@@ -50,5 +50,37 @@ export async function resolveBusinessCode(
   requestedCode: string | null | undefined,
 ): Promise<string> {
   const customCode = requestedCode?.trim();
-  return customCode || nextBusinessCode(kind);
+  if (!customCode) return nextBusinessCode(kind);
+
+  const serial = generatedCodeSerial(kind, customCode);
+  if (serial !== null) {
+    // A custom code may intentionally use the public automatic-code format.
+    // Advance the counter before the entity insert so future automatic codes
+    // never walk backwards into an already occupied value. Gaps are acceptable
+    // for human-readable identifiers; duplicate identifiers are not.
+    await db.$executeRaw`
+      INSERT INTO "BusinessCodeSequence" ("key", "value", "updatedAt")
+      VALUES (${kind}, ${serial}, NOW())
+      ON CONFLICT ("key") DO UPDATE
+         SET "value" = GREATEST("BusinessCodeSequence"."value", EXCLUDED."value"),
+             "updatedAt" = NOW()
+    `;
+  }
+
+  return customCode;
+}
+
+function generatedCodeSerial(
+  kind: BusinessCodeKind,
+  code: string,
+): number | null {
+  const spec = CODE_SPECS[kind];
+  const pattern = new RegExp(
+    `^${spec.prefix}${spec.separator}(\\d{${spec.width}})$`,
+    'i',
+  );
+  const match = pattern.exec(code);
+  if (!match) return null;
+  const serial = Number.parseInt(match[1]!, 10);
+  return Number.isSafeInteger(serial) ? serial : null;
 }

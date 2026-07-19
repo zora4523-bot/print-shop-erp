@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TxDirection } from '../../generated/prisma/client';
 
-const { dbMock, txMock, movementMock } = vi.hoisted(() => {
+const { dbMock, txMock, movementMock, numberMock } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     stockTransfer: {
@@ -15,6 +15,7 @@ const { dbMock, txMock, movementMock } = vi.hoisted(() => {
   return {
     txMock: tx,
     movementMock: vi.fn(),
+    numberMock: vi.fn(),
     dbMock: {
       $transaction: vi.fn((cb: (client: typeof tx) => unknown) => cb(tx)),
       stockTransfer: { findUnique: vi.fn(), findMany: vi.fn() },
@@ -23,6 +24,10 @@ const { dbMock, txMock, movementMock } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/daily-document-number', () => ({
+  nextDailyDocumentNumber: numberMock,
+  DailyDocumentNumberExhaustedError: class DailyDocumentNumberExhaustedError extends Error {},
+}));
 vi.mock('@/lib/material', () => ({
   applyMaterialStockMovement: movementMock,
   MaterialInvariantError: class MaterialInvariantError extends Error {},
@@ -62,6 +67,7 @@ beforeEach(() => {
   dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
   dbMock.stockTransfer.findUnique.mockReset();
   movementMock.mockReset().mockResolvedValue({ stockAlert: null });
+  numberMock.mockReset().mockResolvedValue('ST20260717-0001');
 });
 
 describe('createStockTransfer', () => {
@@ -73,11 +79,17 @@ describe('createStockTransfer', () => {
     txMock.warehouseLocation.findUnique
       .mockResolvedValueOnce({ id: 'loc-a', isActive: true, warehouse: { isActive: true } })
       .mockResolvedValueOnce({ id: 'loc-b', isActive: true, warehouse: { isActive: true } });
-    dbMock.stockTransfer.findUnique.mockResolvedValue(summary);
+    dbMock.stockTransfer.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(summary);
 
     await createStockTransfer(input, { id: 'owner1' }, new Date('2026-07-17T10:00:00+08:00'));
 
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(numberMock).toHaveBeenCalledWith(
+      'STOCK_TRANSFER',
+      new Date('2026-07-17T10:00:00+08:00'),
+    );
     expect(movementMock).toHaveBeenCalledTimes(2);
     expect(movementMock.mock.calls[0][1]).toMatchObject({
       direction: TxDirection.OUT,
@@ -99,5 +111,6 @@ describe('createStockTransfer', () => {
 
     expect(txMock.stockTransfer.create).not.toHaveBeenCalled();
     expect(movementMock).not.toHaveBeenCalled();
+    expect(numberMock).not.toHaveBeenCalled();
   });
 });

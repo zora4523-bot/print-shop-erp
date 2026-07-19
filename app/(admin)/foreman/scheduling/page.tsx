@@ -49,7 +49,7 @@ export default async function SchedulingListPage() {
                   <tr key={o.id}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono">{o.orderNo}</span>
+                        <span className="font-sans tabular-nums">{o.orderNo}</span>
                         {o.isUrgent ? (
                           <Badge variant="destructive">急单</Badge>
                         ) : null}
@@ -65,7 +65,7 @@ export default async function SchedulingListPage() {
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {formatDateShanghai(o.submittedAt ?? o.createdAt, '-')}
                     </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs">
+                    <td className="px-4 py-3 text-center font-sans tabular-nums text-xs">
                       {o.items.length} / {craftTotal}
                     </td>
                     <td className="px-4 py-3 text-right">

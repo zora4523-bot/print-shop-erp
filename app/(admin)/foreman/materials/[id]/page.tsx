@@ -109,7 +109,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
                   <tr key={stock.id} className="border-b last:border-0">
                     <td className="py-3 pr-3">{stock.warehouse.name}</td>
                     <td className="py-3 pr-3">{stock.location.name}</td>
-                    <td className="py-3 pr-3 text-right font-mono text-xs">
+                    <td className="py-3 pr-3 text-right font-sans tabular-nums text-xs">
                       {decimal(stock.currentStock)} {material.unit}
                     </td>
                   </tr>

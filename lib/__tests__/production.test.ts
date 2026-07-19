@@ -22,6 +22,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
     };
     salaryRule: { findFirst: ReturnType<typeof vi.fn> };
+    workerMachineSalaryRule: { findFirst: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -36,6 +37,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     salaryRule: { findFirst: vi.fn() },
+    workerMachineSalaryRule: { findFirst: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
@@ -145,6 +147,7 @@ beforeEach(() => {
   dbMock.productionTask.findMany.mockReset();
   dbMock.productionTask.update.mockReset();
   dbMock.salaryRule.findFirst.mockReset();
+  dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {

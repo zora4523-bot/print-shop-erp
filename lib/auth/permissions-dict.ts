@@ -15,7 +15,7 @@ export const PERMISSIONS = {
   'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
   'order:update:post-schedule': [Role.OWNER, Role.FOREMAN],
   'order:view:all':             [Role.OWNER, Role.FOREMAN],
-  'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE],
+  'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
   'order:schedule':             [Role.OWNER, Role.FOREMAN],
   'order:ship':                 [Role.OWNER, Role.FOREMAN],
   'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],

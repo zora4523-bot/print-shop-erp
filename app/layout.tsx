@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-// 正文走系统苹方字体栈（globals.css --font-sans），无需网络字体；
-// 等宽字体保留 Geist Mono，工单号 / 金额列用。
+// 正文走跨平台系统 UI 无衬线字体栈（globals.css --font-sans）；
+// Geist Mono 仅用于日志、配置键和原始技术标识；业务数字使用系统 UI
+// 字体配合 tabular-nums，避免斜线零并保持表格数字对齐。
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],

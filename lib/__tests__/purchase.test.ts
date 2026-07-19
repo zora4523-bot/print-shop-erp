@@ -6,7 +6,7 @@ import {
   TxDirection,
 } from '../../generated/prisma/client';
 
-const { dbMock, txMock } = vi.hoisted(() => {
+const { dbMock, txMock, numberMock } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
@@ -38,18 +38,24 @@ const { dbMock, txMock } = vi.hoisted(() => {
   };
   return {
     txMock: tx,
+    numberMock: vi.fn(),
     dbMock: {
       purchaseOrder: {
         findMany: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
       },
+      purchaseReceipt: { findUnique: vi.fn() },
       $transaction: vi.fn((cb: (txArg: typeof tx) => unknown) => cb(tx)),
     },
   };
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/daily-document-number', () => ({
+  nextDailyDocumentNumber: numberMock,
+  DailyDocumentNumberExhaustedError: class DailyDocumentNumberExhaustedError extends Error {},
+}));
 
 // STOCK_ALERT wire spy：取消入库（OUT 方向）可能把库存带破安全线，
 // dispatch 必须发生在 tx 提交后。
@@ -89,6 +95,7 @@ beforeEach(() => {
   dbMock.purchaseOrder.findMany.mockReset();
   dbMock.purchaseOrder.findUnique.mockReset();
   dbMock.purchaseOrder.update.mockReset();
+  dbMock.purchaseReceipt.findUnique.mockReset().mockResolvedValue(null);
   dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
   for (const group of [
     txMock.party,
@@ -115,6 +122,9 @@ beforeEach(() => {
   txMock.warehouseLocation.findFirst.mockReset().mockResolvedValue(defaultLocation);
   txMock.materialLocationStock.update.mockReset().mockResolvedValue({ id: 'stock1' });
   notifyMock.mockReset();
+  numberMock.mockReset().mockImplementation((kind: string) =>
+    kind === 'PURCHASE_ORDER' ? 'PO20260628-0001' : 'PR20260628-0001',
+  );
 });
 
 describe('createPurchaseOrder', () => {
@@ -152,6 +162,7 @@ describe('createPurchaseOrder', () => {
       quantity: '10.00',
       unitCost: '1.2300',
     });
+    expect(numberMock).toHaveBeenCalledWith('PURCHASE_ORDER', now);
   });
 
   it('refuses customer-only parties as suppliers', async () => {
@@ -242,6 +253,7 @@ describe('createPurchaseReceipt', () => {
     expect(txMock.purchaseOrder.update.mock.calls[0][0].data.status).toBe(
       PurchaseOrderStatus.PARTIALLY_RECEIVED,
     );
+    expect(numberMock).toHaveBeenCalledWith('PURCHASE_RECEIPT', now);
   });
 
   it('refuses receiving more than the remaining quantity', async () => {
@@ -280,10 +292,7 @@ describe('createPurchaseReceipt', () => {
   });
 
   it('treats the same request key as an idempotent replay', async () => {
-    txMock.$queryRaw.mockResolvedValueOnce([
-      { id: 'po1', status: PurchaseOrderStatus.PARTIALLY_RECEIVED },
-    ]);
-    txMock.purchaseReceipt.findUnique.mockResolvedValue({ purchaseOrderId: 'po1' });
+    dbMock.purchaseReceipt.findUnique.mockResolvedValue({ purchaseOrderId: 'po1' });
     dbMock.purchaseOrder.findUnique.mockResolvedValue(detail);
 
     await createPurchaseReceipt(
@@ -302,6 +311,7 @@ describe('createPurchaseReceipt', () => {
 
     expect(txMock.purchaseReceipt.create).not.toHaveBeenCalled();
     expect(txMock.materialTransaction.create).not.toHaveBeenCalled();
+    expect(numberMock).not.toHaveBeenCalled();
   });
 });
 

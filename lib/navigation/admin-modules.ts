@@ -109,10 +109,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'owner.salary.daily',
-    label: '师傅日薪',
+    label: '计件工资',
     routeBase: '/owner/salary/daily',
     iconName: 'Calculator',
-    breadcrumbLabel: '师傅日薪',
+    breadcrumbLabel: '计件工资',
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 50,

@@ -29,7 +29,8 @@ export type MachineSalaryRule = {
   // null 表示该机型无小单保护（例如黏封机）。
   smallOrderThreshold: number | null;
   // 小单 flat price — 只有在触发小单保护时才使用。
-  smallOrderFlatPrice: string | number;
+  // May be null when smallOrderThreshold is null (no small-order mode).
+  smallOrderFlatPrice: string | number | null;
   multiplierFactors: readonly MachineMultiplierFactor[];
 };
 
@@ -78,7 +79,7 @@ export function calcMachinePieceworkBreakdown(
       multiplier: 1,
       boardCount: 0,
       pressCount: 0,
-      amount: new Decimal(rule.smallOrderFlatPrice),
+      amount: new Decimal(rule.smallOrderFlatPrice ?? 0),
     };
   }
 

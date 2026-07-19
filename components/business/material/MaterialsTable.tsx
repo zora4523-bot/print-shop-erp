@@ -123,7 +123,7 @@ export function MaterialsTable({
       <TableBody>
         {materials.map((m) => (
           <TableRow key={m.id} className={!m.isActive ? 'opacity-60' : undefined}>
-            <TableCell className="font-mono text-xs">{m.code}</TableCell>
+            <TableCell className="font-sans tabular-nums text-xs">{m.code}</TableCell>
             <TableCell>{m.name}</TableCell>
             <TableCell className="text-muted-foreground">
               {MATERIAL_CATEGORY_LABELS[m.category]}
@@ -132,13 +132,13 @@ export function MaterialsTable({
               {m.specification ?? '—'}
             </TableCell>
             <TableCell>{m.unit}</TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(m.currentStock)}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(m.safetyStock)}
             </TableCell>
-            <TableCell className="text-right font-mono text-xs">
+            <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(m.averageCost)}
             </TableCell>
             <TableCell>

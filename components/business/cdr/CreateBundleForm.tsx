@@ -121,7 +121,7 @@ export function CreateBundleForm({
                         onChange={() => toggleOne(o.id)}
                       />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">
+                    <td className="px-3 py-2 font-sans tabular-nums text-xs">
                       {o.orderNo}
                     </td>
                     <td className="px-3 py-2">{o.customerRef ?? '—'}</td>

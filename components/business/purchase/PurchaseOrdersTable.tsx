@@ -109,10 +109,10 @@ export function PurchaseOrdersTable({
           const firstItem = order.items[0];
           return (
             <TableRow key={order.id}>
-              <TableCell className="font-mono text-xs">{order.purchaseNo}</TableCell>
+              <TableCell className="font-sans tabular-nums text-xs">{order.purchaseNo}</TableCell>
               <TableCell>
                 <div className="font-medium">{order.supplierName}</div>
-                <div className="font-mono text-xs text-muted-foreground">
+                <div className="font-sans tabular-nums text-xs text-muted-foreground">
                   {order.supplierCode}
                 </div>
               </TableCell>
@@ -120,7 +120,7 @@ export function PurchaseOrdersTable({
                 {firstItem ? (
                   <>
                     <div>{firstItem.material.name}</div>
-                    <div className="font-mono text-xs text-muted-foreground">
+                    <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {firstItem.material.code}
                     </div>
                   </>
@@ -128,10 +128,10 @@ export function PurchaseOrdersTable({
                   '—'
                 )}
               </TableCell>
-              <TableCell className="text-right font-mono text-xs">
+              <TableCell className="text-right font-sans tabular-nums text-xs">
                 {firstItem ? `${decimal(firstItem.quantity)} ${firstItem.material.unit}` : '—'}
               </TableCell>
-              <TableCell className="text-right font-mono text-xs">
+              <TableCell className="text-right font-sans tabular-nums text-xs">
                 {firstItem
                   ? `${decimal(firstItem.receivedQuantity)} ${firstItem.material.unit}`
                   : '—'}
