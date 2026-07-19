@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:install": "playwright install chromium",
+    "test:worker-ui": "playwright test tests/visual/worker-responsive.spec.ts",
     "test:visual:update": "playwright test tests/visual --update-snapshots",
     "typecheck": "tsc --noEmit",
     "deploy:smoke": "node scripts/deploy-smoke.mjs",
@@ -58,6 +59,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/ali-oss": "^6.23.3",

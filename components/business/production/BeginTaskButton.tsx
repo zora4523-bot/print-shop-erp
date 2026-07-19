@@ -17,11 +17,18 @@ export function BeginTaskButton({ taskId }: Props) {
 
   return (
     <form action={() => startTransition(() => formAction())}>
-      <Button type="submit" disabled={pending} size="lg" className="w-full">
+      <Button
+        type="submit"
+        disabled={pending}
+        size="lg"
+        className="min-h-11 w-full bg-foreground text-background hover:bg-foreground/80"
+      >
         {pending ? '开始中…' : '开始生产'}
       </Button>
       {state?.status === 'error' ? (
-        <p className="mt-2 text-sm text-destructive">{state.message}</p>
+        <p aria-live="polite" className="mt-2 text-sm text-destructive">
+          {state.message}
+        </p>
       ) : null}
     </form>
   );

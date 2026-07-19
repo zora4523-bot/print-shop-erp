@@ -36,7 +36,7 @@ export function ReportTaskForm({ taskId, plannedQty }: Props) {
       action={(fd) => startTransition(() => formAction(fd))}
       className="space-y-4"
     >
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField
           name="completedQty"
           label="合格数"
@@ -58,16 +58,23 @@ export function ReportTaskForm({ taskId, plannedQty }: Props) {
         />
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="worker-wrap-anywhere text-xs text-muted-foreground">
         计划数量 {plannedQty.toLocaleString()}。合格 + 不良 + 返工 合计需
         &gt; 0；计件金额按&ldquo;合计压片 × 单价&rdquo;算。
       </p>
 
       {state?.status === 'error' ? (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p aria-live="polite" className="text-sm text-destructive">
+          {state.message}
+        </p>
       ) : null}
 
-      <Button type="submit" disabled={pending} size="lg" className="w-full">
+      <Button
+        type="submit"
+        disabled={pending}
+        size="lg"
+        className="min-h-11 w-full bg-foreground text-background hover:bg-foreground/80"
+      >
         {pending ? '提交中…' : '完工报工'}
       </Button>
     </form>
@@ -95,8 +102,10 @@ function NumberField({
   errors: string[];
   autoFocus?: boolean;
 }) {
+  const errorId = `${name}-error`;
+
   return (
-    <div>
+    <div className="min-w-0">
       <Label htmlFor={name} className="text-xs text-muted-foreground">
         {label}
       </Label>
@@ -109,10 +118,14 @@ function NumberField({
         step={1}
         defaultValue={defaultValue}
         autoFocus={autoFocus}
-        className={`mt-1 text-lg ${errors.length > 0 ? 'border-destructive' : ''}`}
+        aria-invalid={errors.length > 0}
+        aria-describedby={errors.length > 0 ? errorId : undefined}
+        className={`mt-1 min-h-11 text-lg ${errors.length > 0 ? 'border-destructive' : ''}`}
       />
       {errors.length > 0 ? (
-        <p className="mt-1 text-xs text-destructive">{errors[0]}</p>
+        <p id={errorId} className="mt-1 text-xs text-destructive">
+          {errors[0]}
+        </p>
       ) : null}
     </div>
   );

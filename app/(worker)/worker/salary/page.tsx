@@ -25,22 +25,26 @@ export default async function WorkerSalaryPage() {
     );
 
   return (
-    <div className="space-y-4">
-      <header>
+    <div className="min-w-0 space-y-4">
+      <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的计件工资</h1>
         <p className="text-xs text-muted-foreground">
           只显示当前登录师傅自己的日薪；点击日期核对关联工单和每项计件。
         </p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 text-sm">
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
+        <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">累计工资</p>
-          <p className="mt-1 font-sans tabular-nums text-lg font-semibold">¥ {total.toFixed(2)}</p>
+          <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
+            ¥ {total.toFixed(2)}
+          </p>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">尚未发放</p>
-          <p className="mt-1 font-sans tabular-nums text-lg font-semibold">¥ {unpaid.toFixed(2)}</p>
+          <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums text-lg font-semibold">
+            ¥ {unpaid.toFixed(2)}
+          </p>
         </div>
       </section>
 
@@ -56,24 +60,34 @@ export default async function WorkerSalaryPage() {
             <li key={salary.id}>
               <Link
                 href={`/worker/salary/${salary.id}`}
-                className="block rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+                className="block min-h-11 min-w-0 rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <strong>{formatDateShanghai(salary.date)}</strong>
-                      {salary.isPaid ? <Badge>已发</Badge> : <Badge variant="outline">未发</Badge>}
+                      {salary.isPaid ? (
+                        <Badge variant="secondary">已发</Badge>
+                      ) : (
+                        <Badge variant="outline">未发</Badge>
+                      )}
                     </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {MACHINE_TYPE_LABELS[salary.machineType]} · {salary.taskCount} 项任务 / {salary.orderCount} 个工单
+                    <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                      {MACHINE_TYPE_LABELS[salary.machineType]} ·{' '}
+                      {salary.taskCount} 项任务 / {salary.orderCount} 个工单
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      计件 ¥{String(salary.totalPieceworkAmount)} · 保底 ¥{String(salary.baseSalary)} · 调整 {Number(salary.adjustmentAmount) > 0 ? '+' : ''}{String(salary.adjustmentAmount)}
+                    <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                      计件 ¥{String(salary.totalPieceworkAmount)} · 保底 ¥
+                      {String(salary.baseSalary)} · 调整{' '}
+                      {Number(salary.adjustmentAmount) > 0 ? '+' : ''}
+                      {String(salary.adjustmentAmount)}
                     </p>
                   </div>
-                  <div className="text-right">
+                  <div className="ml-auto shrink-0 text-right">
                     <p className="text-xs text-muted-foreground">实发</p>
-                    <p className="font-sans tabular-nums text-lg font-semibold text-primary">¥ {String(salary.actualSalary)}</p>
+                    <p className="font-sans tabular-nums text-lg font-semibold text-foreground">
+                      ¥ {String(salary.actualSalary)}
+                    </p>
                   </div>
                 </div>
               </Link>

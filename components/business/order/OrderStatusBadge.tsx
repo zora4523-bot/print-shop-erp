@@ -16,15 +16,21 @@ export function orderStatusLabel(status: OrderStatus): string {
   return ORDER_STATUS_TO_BADGE[status]?.label ?? status;
 }
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({
+  status,
+  className,
+}: {
+  status: OrderStatus;
+  className?: string;
+}) {
   const cfg = ORDER_STATUS_TO_BADGE[status];
   if (!cfg) {
     // schema 加新状态但 map 漏配——退化成 neutral 而不是抛错，避免
     // 一个状态枚举的疏漏导致整个工单页崩。
-    return <StatusBadge tone="neutral">{status}</StatusBadge>;
+    return <StatusBadge tone="neutral" className={className}>{status}</StatusBadge>;
   }
   return (
-    <StatusBadge tone={cfg.tone} dot={cfg.dot}>
+    <StatusBadge tone={cfg.tone} dot={cfg.dot} className={className}>
       {cfg.label}
     </StatusBadge>
   );

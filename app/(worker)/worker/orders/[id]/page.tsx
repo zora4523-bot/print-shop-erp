@@ -17,12 +17,21 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
   if (!order) notFound();
 
   return (
-    <div className="space-y-5">
-      <header className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-sans tabular-nums text-sm">{order.orderNo}</span>
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere min-w-0 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
+            {order.orderNo}
+          </span>
           <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
-          {order.isUrgent ? <Badge variant="destructive">急单</Badge> : null}
+          {order.isUrgent ? (
+            <Badge
+              variant="destructive"
+              className="bg-destructive text-background dark:bg-destructive dark:text-background"
+            >
+              急单
+            </Badge>
+          ) : null}
         </div>
         <h1 className="text-lg font-semibold">我的工单任务</h1>
         <p className="text-xs text-muted-foreground">
@@ -34,31 +43,52 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
       {(order.packageRequirement || order.remark) ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="mb-2 font-semibold">生产备注</h2>
-          <p>包装要求：{order.packageRequirement ?? '—'}</p>
-          <p className="mt-1">工单备注：{order.remark ?? '—'}</p>
+          <p className="worker-wrap-anywhere">
+            包装要求：{order.packageRequirement ?? '—'}
+          </p>
+          <p className="worker-wrap-anywhere mt-1">
+            工单备注：{order.remark ?? '—'}
+          </p>
         </section>
       ) : null}
 
       <div className="space-y-3">
         {order.items.map((item) => (
-          <section key={item.id} className="rounded-xl border bg-card p-4 shadow-sm">
-            <h2 className="font-medium">#{item.sequence} · {item.name}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {item.specification ?? '未填规格'} · {item.paperType ?? '未填纸张'} · 数量 {item.quantity.toLocaleString()}
-              {' · '}{item.isDoubleSided ? '双面' : '单面'} · {item.isDoubleColor ? '双色' : '单色'}
+          <section
+            key={item.id}
+            className="min-w-0 rounded-xl border bg-card p-4 shadow-sm"
+          >
+            <h2 className="worker-wrap-anywhere font-medium">
+              #{item.sequence} · {item.name}
+            </h2>
+            <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+              {item.specification ?? '未填规格'} ·{' '}
+              {item.paperType ?? '未填纸张'} · 数量{' '}
+              {item.quantity.toLocaleString()} ·{' '}
+              {item.isDoubleSided ? '双面' : '单面'} ·{' '}
+              {item.isDoubleColor ? '双色' : '单色'}
             </p>
-            {item.remark ? <p className="mt-2 text-xs">款式备注：{item.remark}</p> : null}
+            {item.remark ? (
+              <p className="worker-wrap-anywhere mt-2 text-xs">
+                款式备注：{item.remark}
+              </p>
+            ) : null}
             <ul className="mt-3 divide-y border-t">
               {item.tasks.map((task) => (
                 <li key={task.id} className="py-3 text-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <strong>{task.craft.name}</strong>
+                  <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <strong className="worker-wrap-anywhere min-w-0">
+                          {task.craft.name}
+                        </strong>
                         <TaskStatusBadge status={task.status} />
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {task.machineType ? MACHINE_TYPE_LABELS[task.machineType] : '无机型'} · 计划 {task.plannedQty.toLocaleString()}
+                      <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                        {task.machineType
+                          ? MACHINE_TYPE_LABELS[task.machineType]
+                          : '无机型'}{' '}
+                        · 计划 {task.plannedQty.toLocaleString()}
                       </p>
                     </div>
                     <div className="text-right">
@@ -67,7 +97,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                     </div>
                   </div>
                   {task.status === TaskStatus.COMPLETED ? (
-                    <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-3 text-xs">
+                    <dl className="mt-3 grid min-w-0 grid-cols-2 gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-3">
                       <Metric label="良品" value={task.completedQty} />
                       <Metric label="次品" value={task.defectQty} />
                       <Metric label="返工" value={task.reworkQty} />
@@ -78,7 +108,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                   ) : (
                     <Link
                       href={`/worker/tasks/${task.id}`}
-                      className="mt-3 inline-block text-sm text-primary underline"
+                      className="mt-3 inline-flex min-h-11 min-w-11 items-center text-sm text-foreground underline decoration-primary"
                     >
                       前往处理任务
                     </Link>
@@ -94,10 +124,28 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
 }
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const label = status === TaskStatus.PENDING ? '待开始' : status === TaskStatus.IN_PROGRESS ? '进行中' : status === TaskStatus.COMPLETED ? '已完工' : '已取消';
-  return <Badge variant={status === TaskStatus.COMPLETED ? 'default' : 'outline'}>{label}</Badge>;
+  const label =
+    status === TaskStatus.PENDING
+      ? '待开始'
+      : status === TaskStatus.IN_PROGRESS
+        ? '进行中'
+        : status === TaskStatus.COMPLETED
+          ? '已完工'
+          : '已取消';
+  return (
+    <Badge variant={status === TaskStatus.COMPLETED ? 'secondary' : 'outline'}>
+      {label}
+    </Badge>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
-  return <div><dt className="text-muted-foreground">{label}</dt><dd className="font-sans tabular-nums">{value}</dd></div>;
+  return (
+    <div className="min-w-0">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="worker-wrap-anywhere font-sans tabular-nums">
+        {value}
+      </dd>
+    </div>
+  );
 }

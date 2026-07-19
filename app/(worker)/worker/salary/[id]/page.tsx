@@ -22,16 +22,25 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   if (!salary) notFound();
 
   return (
-    <div className="space-y-5">
-      <header>
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold">{formatDateShanghai(salary.date)} 工资明细</h1>
-          {salary.isPaid ? <Badge>已发</Badge> : <Badge variant="outline">未发</Badge>}
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
+            {formatDateShanghai(salary.date)} 工资明细
+          </h1>
+          {salary.isPaid ? (
+            <Badge variant="secondary">已发</Badge>
+          ) : (
+            <Badge variant="outline">未发</Badge>
+          )}
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">{MACHINE_TYPE_LABELS[salary.machineType]} · 只展示当前账号自己的计件记录</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {MACHINE_TYPE_LABELS[salary.machineType]} ·
+          只展示当前账号自己的计件记录
+        </p>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 text-sm">
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Money label="计件合计" value={salary.totalPieceworkAmount} />
         <Money label="每日保底" value={salary.baseSalary} />
         <Money label="人工调整" value={salary.adjustmentAmount} />
@@ -44,11 +53,18 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           <ul className="mt-2 divide-y text-sm">
             {salary.adjustments.map((entry) => (
               <li key={entry.id} className="py-2">
-                <div className="flex justify-between gap-3">
-                  <span>{ADJUSTMENT_LABELS[entry.type]} · {entry.reason}</span>
-                  <span className="font-sans tabular-nums">{Number(entry.amount) > 0 ? '+' : ''}{String(entry.amount)}</span>
+                <div className="flex min-w-0 flex-wrap gap-3 sm:flex-nowrap">
+                  <span className="worker-wrap-anywhere min-w-0 flex-1">
+                    {ADJUSTMENT_LABELS[entry.type]} · {entry.reason}
+                  </span>
+                  <span className="ml-auto shrink-0 font-sans tabular-nums">
+                    {Number(entry.amount) > 0 ? '+' : ''}
+                    {String(entry.amount)}
+                  </span>
                 </div>
-                <p className="text-xs text-muted-foreground">{formatDateTimeShanghai(entry.createdAt)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTimeShanghai(entry.createdAt)}
+                </p>
               </li>
             ))}
           </ul>
@@ -60,25 +76,38 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
         <ul className="mt-2 divide-y">
           {salary.items.map((item) => (
             <li key={item.id} className="py-3 text-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <Link href={`/worker/orders/${item.orderId}`} className="font-sans tabular-nums text-primary underline">
+              <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/worker/orders/${item.orderId}`}
+                    className="worker-wrap-anywhere inline-flex min-h-11 min-w-11 items-center font-sans tabular-nums text-foreground underline decoration-primary"
+                  >
                     {item.orderNo}
                   </Link>
-                  <p className="mt-1">{item.orderItemName} · {item.craftName}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    良品 {item.completedQty} · 次品 {item.defectQty} · 返工 {item.reworkQty} · 板 {item.boardCount} · 下 {item.pressCount}
+                  <p className="worker-wrap-anywhere mt-1">
+                    {item.orderItemName} · {item.craftName}
+                  </p>
+                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    良品 {item.completedQty} · 次品 {item.defectQty} · 返工{' '}
+                    {item.reworkQty} · 板 {item.boardCount} · 下{' '}
+                    {item.pressCount}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="font-sans tabular-nums font-medium">¥ {String(item.pieceworkAmount)}</p>
-                  <p className="text-xs text-muted-foreground">{formatDateTimeShanghai(item.completedAt)}</p>
+                <div className="ml-auto shrink-0 text-right">
+                  <p className="font-sans tabular-nums font-medium">
+                    ¥ {String(item.pieceworkAmount)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTimeShanghai(item.completedAt)}
+                  </p>
                 </div>
               </div>
             </li>
           ))}
           {salary.items.length === 0 ? (
-            <li className="py-6 text-center text-sm text-muted-foreground">该日没有任务明细。</li>
+            <li className="py-6 text-center text-sm text-muted-foreground">
+              该日没有任务明细。
+            </li>
           ) : null}
         </ul>
       </section>
@@ -86,6 +115,25 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   );
 }
 
-function Money({ label, value, strong = false }: { label: string; value: unknown; strong?: boolean }) {
-  return <div className="rounded-xl border bg-card p-4 shadow-sm"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-1 font-sans tabular-nums ${strong ? 'text-lg font-semibold text-primary' : 'font-medium'}`}>¥ {String(value)}</p></div>;
+function Money({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: unknown;
+  strong?: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={`worker-wrap-anywhere mt-1 font-sans tabular-nums ${
+          strong ? 'text-lg font-semibold text-foreground' : 'font-medium'
+        }`}
+      >
+        ¥ {String(value)}
+      </p>
+    </div>
+  );
 }

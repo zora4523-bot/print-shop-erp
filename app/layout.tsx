@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,6 +13,16 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "红包印刷 ERP",
   description: "红包印刷厂内部管理系统",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  // Metadata cannot resolve CSS custom properties. Canvas is the semantic CSS
+  // system color for the document background, so this does not duplicate a
+  // palette literal. The app has no product-level dark-mode switch yet.
+  themeColor: "Canvas",
 };
 
 export default function RootLayout({

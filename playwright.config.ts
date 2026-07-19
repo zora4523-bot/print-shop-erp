@@ -12,6 +12,15 @@ loadEnvConfig(process.cwd(), /* dev */ true);
 const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 const webServerPort = new URL(baseURL).port || '3000';
 
+const workerViewportProjects = [
+  { name: 'worker-375x667', width: 375, height: 667 },
+  { name: 'worker-393x852', width: 393, height: 852 },
+  { name: 'worker-768x1024', width: 768, height: 1024 },
+  { name: 'worker-1024x768', width: 1024, height: 768 },
+  { name: 'worker-1280x800', width: 1280, height: 800 },
+  { name: 'worker-1920x1080', width: 1920, height: 1080 },
+] as const;
+
 // E2E config — runs against the Next.js dev server. Locally we reuse
 // whatever dev server is already running at E2E_BASE_URL (default :3000);
 // CI / one-shot `pnpm test:e2e` spawns its own. Tests share the dev
@@ -38,8 +47,20 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: '**/worker-responsive.spec.ts',
       use: { ...devices['Desktop Chrome'] },
     },
+    ...workerViewportProjects.map(({ name, width, height }) => ({
+      name,
+      testMatch: '**/worker-responsive.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width, height },
+        screen: { width, height },
+        hasTouch: width <= 768,
+        isMobile: width <= 768,
+      },
+    })),
   ],
   webServer: {
     command: `node ./node_modules/next/dist/bin/next dev --port ${webServerPort}`,

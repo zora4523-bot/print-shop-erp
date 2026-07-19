@@ -157,3 +157,53 @@
     @apply font-sans;
   }
 }
+
+@layer utilities {
+  /* Worker H5 shell: keep vh as the legacy fallback, prefer the small
+     viewport while support is partial, then let dvh follow mobile browser
+     chrome on current engines. This scope deliberately does not touch print. */
+  .worker-viewport {
+    min-height: 100vh;
+  }
+
+  @supports (min-height: 100svh) {
+    .worker-viewport {
+      min-height: 100svh;
+    }
+  }
+
+  @supports (min-height: 100dvh) {
+    .worker-viewport {
+      min-height: 100dvh;
+    }
+  }
+
+  .worker-safe-inline {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  .worker-safe-top {
+    padding-top: 0.75rem;
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+  }
+
+  .worker-safe-bottom {
+    padding-bottom: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .worker-wrap-anywhere {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  @supports (overflow-wrap: anywhere) {
+    .worker-wrap-anywhere {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+  }
+}

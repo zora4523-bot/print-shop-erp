@@ -14,8 +14,8 @@ export default async function WorkerOrdersPage() {
   const orders = await listWorkerOrders({ id: user.id, role: user.role });
 
   return (
-    <div className="space-y-4">
-      <header>
+    <div className="min-w-0 space-y-4">
+      <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的工单</h1>
         <p className="text-xs text-muted-foreground">
           只显示至少有一个生产任务分配给你的工单，包含已完成的历史记录。
@@ -34,19 +34,35 @@ export default async function WorkerOrdersPage() {
             <li key={order.id}>
               <Link
                 href={`/worker/orders/${order.id}`}
-                className="block rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+                className="block min-h-11 min-w-0 rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-sans tabular-nums text-sm">{order.orderNo}</span>
-                      <OrderStatusBadge status={order.status} />
-                      {order.isUrgent ? <Badge variant="destructive">急单</Badge> : null}
+                <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
+                        {order.orderNo}
+                      </span>
+                      <OrderStatusBadge
+                        status={order.status}
+                        className="border-border bg-background text-foreground"
+                      />
+                      {order.isUrgent ? (
+                        <Badge
+                          variant="destructive"
+                          className="bg-destructive text-background dark:bg-destructive dark:text-background"
+                        >
+                          急单
+                        </Badge>
+                      ) : null}
                     </div>
-                    <p className="mt-2 text-sm">客户代号：{order.customerRef ?? '—'}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="worker-wrap-anywhere mt-2 text-sm">
+                      客户代号：{order.customerRef ?? '—'}
+                    </p>
+                    <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
                       我的任务 {order.completedTaskCount}/{order.taskCount} 已完成
-                      {order.promisedDate ? ` · 交期 ${formatDateShanghai(order.promisedDate)}` : ''}
+                      {order.promisedDate
+                        ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
+                        : ''}
                     </p>
                   </div>
                   <div className="text-right">

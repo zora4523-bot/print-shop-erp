@@ -20,34 +20,39 @@ export default async function WorkerLayout({
   if (user.role !== Role.WORKER) redirect('/');
 
   return (
-    <div className="min-h-screen bg-muted/40">
+    <div className="worker-viewport bg-muted/40">
       <header className="border-b bg-background">
-        <div className="mx-auto max-w-xl px-4 py-3">
-          <div className="flex items-center justify-between">
-            <Link href="/worker/tasks" className="text-base font-semibold">
+        <div className="worker-safe-inline worker-safe-top mx-auto max-w-xl pb-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Link
+              href="/worker/tasks"
+              className="inline-flex min-h-11 shrink-0 items-center text-base font-semibold"
+            >
               师傅工作台
             </Link>
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-muted-foreground">
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 text-sm [&_button]:min-h-11">
+              <span className="worker-wrap-anywhere min-w-0 text-right text-muted-foreground">
                 {user.displayName}（{roleLabel(user.role)}）
               </span>
               <LogoutButton />
             </div>
           </div>
-          <nav aria-label="师傅工作台导航" className="mt-3 flex gap-2 text-sm">
-            <Link href="/worker/tasks" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+          <nav aria-label="师傅工作台导航" className="mt-2 grid grid-cols-3 gap-2 text-sm">
+            <Link href="/worker/tasks" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
               我的任务
             </Link>
-            <Link href="/worker/orders" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+            <Link href="/worker/orders" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
               我的工单
             </Link>
-            <Link href="/worker/salary" className="rounded-md border px-3 py-1.5 hover:bg-muted">
+            <Link href="/worker/salary" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
               我的计件工资
             </Link>
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-xl px-4 py-4">{children}</main>
+      <main className="worker-safe-inline worker-safe-bottom mx-auto w-full max-w-xl pt-4">
+        {children}
+      </main>
     </div>
   );
 }

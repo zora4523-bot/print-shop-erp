@@ -21,19 +21,26 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
   if (!task) notFound();
 
   return (
-    <div className="space-y-5">
-      <header className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="font-sans tabular-nums text-sm">{task.orderItem.order.orderNo}</span>
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere min-w-0 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
+            {task.orderItem.order.orderNo}
+          </span>
           {task.orderItem.order.isUrgent ? (
-            <Badge variant="destructive">急单</Badge>
+            <Badge
+              variant="destructive"
+              className="bg-destructive text-background dark:bg-destructive dark:text-background"
+            >
+              急单
+            </Badge>
           ) : null}
           <StatusBadge status={task.status} />
         </div>
-        <h1 className="text-lg font-semibold">
+        <h1 className="worker-wrap-anywhere text-lg font-semibold">
           #{task.orderItem.sequence} · {task.orderItem.name}
         </h1>
-        <p className="text-xs text-muted-foreground">
+        <p className="worker-wrap-anywhere text-xs text-muted-foreground">
           客户代号：{task.orderItem.order.customerRef ?? '—'} · 工艺：
           {task.craft.name}
           {task.machineType
@@ -44,7 +51,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
         <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+        <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
           <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
           <Row label="规格" value={task.orderItem.specification ?? '—'} />
           <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
@@ -71,7 +78,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
       {task.status === TaskStatus.COMPLETED ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="mb-2 text-sm font-semibold">已完工</h2>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
             <Row label="合格数" value={task.completedQty.toLocaleString()} tabular />
             <Row label="不良数" value={task.defectQty.toLocaleString()} tabular />
             <Row label="返工数" value={task.reworkQty.toLocaleString()} tabular />
@@ -103,7 +110,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
     case TaskStatus.IN_PROGRESS:
       return <Badge variant="secondary">进行中</Badge>;
     case TaskStatus.COMPLETED:
-      return <Badge>已完工</Badge>;
+      return <Badge variant="secondary">已完工</Badge>;
     case TaskStatus.CANCELLED:
       return <Badge variant="outline">已取消</Badge>;
   }
@@ -121,9 +128,13 @@ function Row({
   full?: boolean;
 }) {
   return (
-    <div className={full ? 'col-span-2' : undefined}>
+    <div className={full ? 'col-span-full min-w-0' : 'min-w-0'}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{value}</dd>
+      <dd
+        className={`worker-wrap-anywhere ${tabular ? 'font-sans tabular-nums' : ''}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
