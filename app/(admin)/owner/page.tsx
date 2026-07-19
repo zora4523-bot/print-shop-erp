@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import {
   Bell,
   ClipboardList,
@@ -39,31 +40,27 @@ import {
   WatchlistTable,
   type WatchlistColumn,
 } from '@/components/business/dashboard/WatchlistTable';
-import { ProductionTrendChart } from '@/components/business/dashboard/ProductionTrendChart';
-import { SalesRankingChart } from '@/components/business/dashboard/SalesRankingChart';
-import { CategoryDistributionChart } from '@/components/business/dashboard/CategoryDistributionChart';
+import { DeferredDashboardCharts } from '@/components/business/dashboard/DeferredDashboardCharts';
 import { Badge } from '@/components/ui/badge';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
-import { requireSession } from '@/lib/auth/session';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
-export const metadata = { title: '老板 Dashboard' };
+export const metadata = { title: '管理员 Dashboard' };
 
-// /owner is the OWNER landing page. Layered build (P1 #1):
+// /owner is the ADMIN landing page. Layered build (P1 #1):
 //   - Slice A: 4 KPI cards
 //   - Slice B: 3 watchlist tables
 //   - Slice C: 3 charts — 30 天产量 / 销售业绩 Top10 / 产品分布
 //
-// Permission: `report:all` is OWNER-only; matches the (admin)/owner
+// Permission: `report:all` is ADMIN-only; matches the (admin)/owner
 // layout gate but keeps the page-level guard as defense in depth (the
 // layout could be bypassed if a future Server Action reuses this page
 // as a fragment — defensive habit, no measurable cost).
 export default async function OwnerDashboardPage() {
-  await requirePermission('report:all');
-
-  // displayName 用于 HeroBanner welcome；权限 gate 已通过，session 必有。
-  const { user } = await requireSession();
+  // requirePermission 已返回通过权限检查的 session user；不要再读一次
+  // session 只为拿 displayName。
+  const user = await requirePermission('report:all');
 
   const [
     today,
@@ -72,9 +69,6 @@ export default async function OwnerDashboardPage() {
     overdueOutsourcing,
     dueOrders,
     endingPeriods,
-    productionTrend,
-    salesRanking,
-    categoryDistribution,
   ] = await Promise.all([
     getTodayOrderStats(),
     getMonthlyBillStats(),
@@ -82,9 +76,6 @@ export default async function OwnerDashboardPage() {
     getOverdueOutsourcing(),
     getDueOrders(),
     getEndingPeriods(),
-    getProductionTrend(),
-    getSalesRanking(),
-    getCategoryDistribution(),
   ]);
 
   // 完工同比：今日 vs 昨日。差值正→上升，负→下降，0→持平。
@@ -247,58 +238,39 @@ export default async function OwnerDashboardPage() {
         columns={endingPeriodColumns}
       />
 
-      <ChartCard
-        slot="dashboard-chart-trend-card"
-        title="近 30 天产量趋势"
-        description="按完工时间汇总 · COMPLETED / SHIPPED / FINISHED"
-      >
-        <ProductionTrendChart data={productionTrend} />
-      </ChartCard>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard
-          slot="dashboard-chart-ranking-card"
-          title="本月销售业绩 Top 10"
-          description="按提交时间归属 · SALES 蓝色 / 客服 绿色"
-        >
-          <SalesRankingChart data={salesRanking} />
-        </ChartCard>
-        <ChartCard
-          slot="dashboard-chart-category-card"
-          title="本月产品线分布"
-          description="按工单计数（同一工单多款式只计 1 次）"
-        >
-          <CategoryDistributionChart data={categoryDistribution} />
-        </ChartCard>
-      </div>
+      <Suspense fallback={<DashboardChartsLoading />}>
+        <DashboardChartsSection />
+      </Suspense>
     </div>
   );
 }
 
-function ChartCard({
-  slot,
-  title,
-  description,
-  children,
-}: {
-  slot: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
+async function DashboardChartsSection() {
+  const [productionTrend, salesRanking, categoryDistribution] =
+    await Promise.all([
+      getProductionTrend(),
+      getSalesRanking(),
+      getCategoryDistribution(),
+    ]);
+
   return (
-    <section
-      data-slot={slot}
-      className="rounded-xl border bg-card shadow-sm"
-    >
-      <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
-        <h2 className="text-base font-semibold">{title}</h2>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
+    <DeferredDashboardCharts
+      productionTrend={productionTrend}
+      salesRanking={salesRanking}
+      categoryDistribution={categoryDistribution}
+    />
+  );
+}
+
+function DashboardChartsLoading() {
+  return (
+    <div aria-busy="true" aria-label="正在加载统计图表" className="space-y-4">
+      <div className="h-[23rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+      </div>
+    </div>
   );
 }
 
@@ -496,4 +468,3 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
 ];
 
 // ─── helpers ───
-

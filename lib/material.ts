@@ -1,19 +1,20 @@
 import Decimal from 'decimal.js';
 import {
   MaterialCategory,
+  Prisma,
   TxDirection,
   type Material,
   type MaterialLocationStock,
   type MaterialTransaction,
 } from '../generated/prisma/client';
 import {
-  paginateItems,
+  paginatedResult,
+  paginationWindow,
   type PaginatedResult,
   type SortDirection,
 } from './admin/table';
 import { db } from './db';
 import { resolveBusinessCode } from './business-code';
-import { MATERIAL_CATEGORY_LABELS } from './material-labels';
 import { dispatchNotification } from './notification/dispatch';
 import { sortBySearchRelevance } from './search-ranking';
 
@@ -132,45 +133,29 @@ export async function listMaterials(
   }));
 }
 
-function compareText(a: string | null, b: string | null): number {
-  return (a ?? '').localeCompare(b ?? '', 'zh-Hans-CN', {
-    numeric: true,
-    sensitivity: 'base',
-  });
-}
-
-function compareDecimalLike(a: unknown, b: unknown): number {
-  return new Decimal(String(a ?? 0)).cmp(new Decimal(String(b ?? 0)));
-}
-
-function compareDate(a: Date, b: Date): number {
-  return a.getTime() - b.getTime();
-}
-
-function sortMaterialsForList(
-  rows: readonly MaterialSummary[],
+function materialListOrderBy(
   sort: MaterialListSortKey,
   direction: SortDirection,
-): MaterialSummary[] {
-  if (sort === 'default') return [...rows];
-
-  const sorted = [...rows].sort((a, b) => {
-    switch (sort) {
-      case 'code':
-        return compareText(a.code, b.code);
-      case 'name':
-        return compareText(a.name, b.name);
-      case 'category':
-        return compareText(MATERIAL_CATEGORY_LABELS[a.category], MATERIAL_CATEGORY_LABELS[b.category]);
-      case 'currentStock':
-        return compareDecimalLike(a.currentStock, b.currentStock);
-      case 'updatedAt':
-        return compareDate(a.updatedAt, b.updatedAt);
-      default:
-        return 0;
-    }
-  });
-  return direction === 'desc' ? sorted.reverse() : sorted;
+): Prisma.MaterialOrderByWithRelationInput[] {
+  switch (sort) {
+    case 'code':
+      return [{ code: direction }, { id: 'asc' }];
+    case 'name':
+      return [{ name: direction }, { id: 'asc' }];
+    case 'category':
+      return [{ category: direction }, { name: 'asc' }, { id: 'asc' }];
+    case 'currentStock':
+      return [{ currentStock: direction }, { id: 'asc' }];
+    case 'updatedAt':
+      return [{ updatedAt: direction }, { id: 'asc' }];
+    default:
+      return [
+        { isActive: 'desc' },
+        { category: 'asc' },
+        { name: 'asc' },
+        { id: 'asc' },
+      ];
+  }
 }
 
 export async function listMaterialsPage(opts: {
@@ -180,9 +165,17 @@ export async function listMaterialsPage(opts: {
   sort: MaterialListSortKey;
   direction: SortDirection;
 }): Promise<PaginatedResult<MaterialSummary>> {
-  const rows = await listMaterials({ q: opts.q });
-  const sorted = sortMaterialsForList(rows, opts.sort, opts.direction);
-  return paginateItems(sorted, opts.page, opts.pageSize);
+  const where = materialSearchFilter(opts.q);
+  const total = await db.material.count({ where });
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.material.findMany({
+    where,
+    select: MATERIAL_SELECT,
+    orderBy: materialListOrderBy(opts.sort, opts.direction),
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows, total, window);
 }
 
 export async function getMaterialSummary(

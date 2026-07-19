@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 // 健康检查端点 —— 供 PM2 / Nginx / 外部监控探活。
 //
-// 无认证（liveness 探针不应依赖登录态），middleware matcher 已排除
+// 无认证（liveness 探针不应依赖登录态），Proxy matcher 已排除
 // `api/health`。刻意只回最小信息：DB 连通 + 版本 + 时间，不泄漏
 // 连接串 / env / 内部细节。
 //

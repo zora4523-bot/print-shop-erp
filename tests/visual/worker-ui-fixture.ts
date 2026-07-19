@@ -1,16 +1,46 @@
 import { Client } from 'pg';
 import { E2E_USERS } from '../e2e/global-setup';
 
-const FIXTURE = {
-  orderId: 'e2e-worker-ui-order',
-  orderItemActiveId: 'e2e-worker-ui-item-active',
-  orderItemCompletedId: 'e2e-worker-ui-item-completed',
-  activeTaskId: 'e2e-worker-ui-task-active',
-  completedTaskId: 'e2e-worker-ui-task-completed',
-  salaryId: 'e2e-worker-ui-salary',
-} as const;
+export type WorkerUiFixture = {
+  orderId: string;
+  orderNo: string;
+  orderItemActiveId: string;
+  orderItemCompletedId: string;
+  activeTaskId: string;
+  completedTaskId: string;
+  salaryId: string;
+  salaryItemId: string;
+  adjustmentId: string;
+  salaryDate: string;
+};
 
-export type WorkerUiFixture = typeof FIXTURE;
+function fixtureFor(namespace: string): WorkerUiFixture {
+  const suffix = namespace
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 32) || 'default';
+  let hash = 0;
+  for (const character of suffix) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  const salaryDate = new Date(Date.UTC(2098, 0, 1 + (hash % 300)))
+    .toISOString()
+    .slice(0, 10);
+  const prefix = `e2e-worker-ui-${suffix}`;
+  return {
+    orderId: `${prefix}-order`,
+    orderNo: `GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789-${suffix.toUpperCase()}`,
+    orderItemActiveId: `${prefix}-item-active`,
+    orderItemCompletedId: `${prefix}-item-completed`,
+    activeTaskId: `${prefix}-task-active`,
+    completedTaskId: `${prefix}-task-completed`,
+    salaryId: `${prefix}-salary`,
+    salaryItemId: `${prefix}-salary-item`,
+    adjustmentId: `${prefix}-adjustment`,
+    salaryDate,
+  };
+}
 
 async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -22,7 +52,10 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   }
 }
 
-export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
+export async function seedWorkerUiFixture(
+  namespace = 'default',
+): Promise<WorkerUiFixture> {
+  const fixture = fixtureFor(namespace);
   await withDb(async (db) => {
     await db.query('BEGIN');
     try {
@@ -48,8 +81,8 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
       );
       if (!craft.rows[0]) throw new Error('Worker UI E2E requires at least one active in-house craft');
 
-      await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [FIXTURE.salaryId]);
-      await db.query(`DELETE FROM "Order" WHERE id = $1`, [FIXTURE.orderId]);
+      await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
 
       await db.query(
         `INSERT INTO "Order" (
@@ -63,8 +96,8 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
          )`,
         [
-          FIXTURE.orderId,
-          'GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789',
+          fixture.orderId,
+          fixture.orderNo,
           salesId,
           '超长客户代号ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证中英混排不裁切',
           '包装要求：请将每一万个分组装箱并标注ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
@@ -80,9 +113,9 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
            ($1, $3, 1, $4, $5, $6, 1234567, ARRAY[$7]::text[], TRUE, TRUE, $8, NOW(), NOW()),
            ($2, $3, 2, $9, $5, $6, 987654, ARRAY[$7]::text[], FALSE, FALSE, $8, NOW(), NOW())`,
         [
-          FIXTURE.orderItemActiveId,
-          FIXTURE.orderItemCompletedId,
-          FIXTURE.orderId,
+          fixture.orderItemActiveId,
+          fixture.orderItemCompletedId,
+          fixture.orderId,
           '超长款式名称红包烫金高级定制版ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           'https://example.invalid/specification/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/very-long-unbroken-value',
           '特种珠光纸ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
@@ -107,10 +140,10 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
             $8::jsonb, TIMESTAMP '2026-07-18 10:00:00', TIMESTAMP '2026-07-18 18:30:00',
             $7, NOW(), NOW())`,
         [
-          FIXTURE.activeTaskId,
-          FIXTURE.completedTaskId,
-          FIXTURE.orderItemActiveId,
-          FIXTURE.orderItemCompletedId,
+          fixture.activeTaskId,
+          fixture.completedTaskId,
+          fixture.orderItemActiveId,
+          fixture.orderItemCompletedId,
           craft.rows[0].id,
           workerId,
           '任务备注ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于检查不可见裁切',
@@ -124,11 +157,16 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
            "adjustmentAmount", "actualSalary", "taskCount", "orderCount",
            "calculationDetail", "salaryRuleSnapshot", "isPaid", "createdAt"
          ) VALUES (
-           $1, $2, DATE '2099-12-31', 'HAND_PRESS'::"MachineType", 300.00, 8888.88,
-           123.45, 9012.33, 1, 1, $3::jsonb, $3::jsonb, FALSE,
+           $1, $2, $3::date, 'HAND_PRESS'::"MachineType", 300.00, 8888.88,
+           123.45, 9012.33, 1, 1, $4::jsonb, $4::jsonb, FALSE,
            TIMESTAMP '2026-07-19 19:00:00'
          )`,
-        [FIXTURE.salaryId, workerId, JSON.stringify({ kind: 'e2e-worker-ui' })],
+        [
+          fixture.salaryId,
+          workerId,
+          fixture.salaryDate,
+          JSON.stringify({ kind: 'e2e-worker-ui' }),
+        ],
       );
 
       await db.query(
@@ -138,16 +176,17 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
            "defectQty", "reworkQty", "boardCount", "pressCount", "pieceworkAmount",
            "salaryRuleSnapshot", "completedAt", "createdAt"
          ) VALUES (
-           'e2e-worker-ui-salary-item', $1, $2, $3, $4, $5, $6, $7, $8,
+           $1, $2, $3, $4, $5, $6, $7, $8, $9,
            'HAND_PRESS'::"MachineType", 987000, 321, 333, 123, 456789, 8888.88,
-           $9::jsonb, TIMESTAMP '2026-07-18 18:30:00', TIMESTAMP '2026-07-19 19:00:00'
+           $10::jsonb, TIMESTAMP '2026-07-18 18:30:00', TIMESTAMP '2026-07-19 19:00:00'
          )`,
         [
-          FIXTURE.salaryId,
-          FIXTURE.completedTaskId,
-          FIXTURE.orderId,
-          'GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789',
-          FIXTURE.orderItemCompletedId,
+          fixture.salaryItemId,
+          fixture.salaryId,
+          fixture.completedTaskId,
+          fixture.orderId,
+          fixture.orderNo,
+          fixture.orderItemCompletedId,
           '已完工款式用于验证工单与工资明细的长文本布局',
           craft.rows[0].id,
           `${craft.rows[0].name}ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`,
@@ -159,11 +198,12 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
         `INSERT INTO "SalaryAdjustment" (
            id, "dailySalaryId", type, amount, reason, "createdById", "createdAt"
          ) VALUES (
-           'e2e-worker-ui-adjustment', $1, 'BONUS'::"SalaryAdjustmentType", 123.45,
-           $2, $3, TIMESTAMP '2026-07-19 20:00:00'
+           $1, $2, 'BONUS'::"SalaryAdjustmentType", 123.45,
+           $3, $4, TIMESTAMP '2026-07-19 20:00:00'
          )`,
         [
-          FIXTURE.salaryId,
+          fixture.adjustmentId,
+          fixture.salaryId,
           '超长奖金原因ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证明细列不会被裁切',
           adminId,
         ],
@@ -176,15 +216,17 @@ export async function seedWorkerUiFixture(): Promise<WorkerUiFixture> {
     }
   });
 
-  return FIXTURE;
+  return fixture;
 }
 
-export async function cleanupWorkerUiFixture(): Promise<void> {
+export async function cleanupWorkerUiFixture(
+  fixture: WorkerUiFixture,
+): Promise<void> {
   await withDb(async (db) => {
     await db.query('BEGIN');
     try {
-      await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [FIXTURE.salaryId]);
-      await db.query(`DELETE FROM "Order" WHERE id = $1`, [FIXTURE.orderId]);
+      await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
       await db.query('COMMIT');
     } catch (error) {
       await db.query('ROLLBACK');

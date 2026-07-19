@@ -6,7 +6,8 @@ import {
   type PartyContact,
 } from '../generated/prisma/client';
 import {
-  paginateItems,
+  paginatedResult,
+  paginationWindow,
   type PaginatedResult,
   type SortDirection,
 } from './admin/table';
@@ -195,39 +196,27 @@ function normalizePartyRow(row: PartyRow): PartySummary {
   };
 }
 
-function compareText(a: string | null, b: string | null): number {
-  return (a ?? '').localeCompare(b ?? '', 'zh-Hans-CN', {
-    numeric: true,
-    sensitivity: 'base',
-  });
-}
-
-function compareDate(a: Date, b: Date): number {
-  return a.getTime() - b.getTime();
-}
-
-function sortPartiesForList(
-  rows: readonly PartySummary[],
+function partyListOrderBy(
   sort: PartyListSortKey,
   direction: SortDirection,
-): PartySummary[] {
-  if (sort === 'default') return [...rows];
-
-  const sorted = [...rows].sort((a, b) => {
-    switch (sort) {
-      case 'code':
-        return compareText(a.code, b.code);
-      case 'name':
-        return compareText(a.name, b.name);
-      case 'type':
-        return compareText(PARTY_TYPE_LABELS[a.type], PARTY_TYPE_LABELS[b.type]);
-      case 'updatedAt':
-        return compareDate(a.updatedAt, b.updatedAt);
-      default:
-        return 0;
-    }
-  });
-  return direction === 'desc' ? sorted.reverse() : sorted;
+): Prisma.PartyOrderByWithRelationInput[] {
+  switch (sort) {
+    case 'code':
+      return [{ code: direction }, { id: 'asc' }];
+    case 'name':
+      return [{ name: direction }, { id: 'asc' }];
+    case 'type':
+      return [{ type: direction }, { name: 'asc' }, { id: 'asc' }];
+    case 'updatedAt':
+      return [{ updatedAt: direction }, { id: 'asc' }];
+    default:
+      return [
+        { isActive: 'desc' },
+        { type: 'asc' },
+        { name: 'asc' },
+        { id: 'asc' },
+      ];
+  }
 }
 
 export async function listParties(opts: {
@@ -272,9 +261,24 @@ export async function listPartiesPage(opts: {
   sort: PartyListSortKey;
   direction: SortDirection;
 }): Promise<PaginatedResult<PartySummary>> {
-  const rows = await listParties({ q: opts.q, type: opts.type });
-  const sorted = sortPartiesForList(rows, opts.sort, opts.direction);
-  return paginateItems(sorted, opts.page, opts.pageSize);
+  const query = normalizeSearchQuery(opts.q);
+  const filters = compact([
+    opts.type ? { type: opts.type } : undefined,
+    partySearchFilter(query),
+  ]);
+  const where: Prisma.PartyWhereInput | undefined = filters.length
+    ? { AND: filters }
+    : undefined;
+  const total = await db.party.count({ where });
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.party.findMany({
+    where,
+    select: PARTY_SELECT,
+    orderBy: partyListOrderBy(opts.sort, opts.direction),
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows.map(normalizePartyRow), total, window);
 }
 
 export async function getPartySummary(

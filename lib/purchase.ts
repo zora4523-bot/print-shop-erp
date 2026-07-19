@@ -1,12 +1,14 @@
 import Decimal from 'decimal.js';
 import {
   PartyType,
+  Prisma,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
   TxDirection,
 } from '../generated/prisma/client';
 import {
-  paginateItems,
+  paginatedResult,
+  paginationWindow,
   type PaginatedResult,
   type SortDirection,
 } from './admin/table';
@@ -172,42 +174,22 @@ function purchaseOrderSearchFilter(q?: string | null) {
   };
 }
 
-function compareText(a: string | null, b: string | null): number {
-  return (a ?? '').localeCompare(b ?? '', 'zh-Hans-CN', {
-    numeric: true,
-    sensitivity: 'base',
-  });
-}
-
-function compareDate(a: Date, b: Date): number {
-  return a.getTime() - b.getTime();
-}
-
-function sortPurchaseOrdersForList(
-  rows: readonly PurchaseOrderSummary[],
+function purchaseOrderListOrderBy(
   sort: PurchaseOrderListSortKey,
   direction: SortDirection,
-): PurchaseOrderSummary[] {
-  if (sort === 'default') return [...rows];
-
-  const sorted = [...rows].sort((a, b) => {
-    switch (sort) {
-      case 'purchaseNo':
-        return compareText(a.purchaseNo, b.purchaseNo);
-      case 'supplierName':
-        return compareText(a.supplierName, b.supplierName);
-      case 'status':
-        return compareText(
-          PURCHASE_ORDER_STATUS_LABELS[a.status],
-          PURCHASE_ORDER_STATUS_LABELS[b.status],
-        );
-      case 'createdAt':
-        return compareDate(a.createdAt, b.createdAt);
-      default:
-        return 0;
-    }
-  });
-  return direction === 'desc' ? sorted.reverse() : sorted;
+): Prisma.PurchaseOrderOrderByWithRelationInput[] {
+  switch (sort) {
+    case 'purchaseNo':
+      return [{ purchaseNo: direction }, { id: 'asc' }];
+    case 'supplierName':
+      return [{ supplierName: direction }, { id: 'asc' }];
+    case 'status':
+      return [{ status: direction }, { purchaseNo: 'desc' }, { id: 'asc' }];
+    case 'createdAt':
+      return [{ createdAt: direction }, { id: 'asc' }];
+    default:
+      return [{ createdAt: 'desc' }, { purchaseNo: 'desc' }, { id: 'asc' }];
+  }
 }
 
 export async function listPurchaseOrders(opts: {
@@ -227,9 +209,17 @@ export async function listPurchaseOrdersPage(opts: {
   sort: PurchaseOrderListSortKey;
   direction: SortDirection;
 }): Promise<PaginatedResult<PurchaseOrderSummary>> {
-  const rows = await listPurchaseOrders({ q: opts.q });
-  const sorted = sortPurchaseOrdersForList(rows, opts.sort, opts.direction);
-  return paginateItems(sorted, opts.page, opts.pageSize);
+  const where = purchaseOrderSearchFilter(opts.q);
+  const total = await db.purchaseOrder.count({ where });
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.purchaseOrder.findMany({
+    where,
+    select: PURCHASE_ORDER_LIST_SELECT,
+    orderBy: purchaseOrderListOrderBy(opts.sort, opts.direction),
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows, total, window);
 }
 
 export async function getPurchaseOrderDetail(id: string) {

@@ -21,6 +21,15 @@ const workerViewportProjects = [
   { name: 'worker-1920x1080', width: 1920, height: 1080 },
 ] as const;
 
+const adminViewportProjects = [
+  { name: 'admin-375x667', width: 375, height: 667 },
+  { name: 'admin-393x852', width: 393, height: 852 },
+  { name: 'admin-768x1024', width: 768, height: 1024 },
+  { name: 'admin-1024x768', width: 1024, height: 768 },
+  { name: 'admin-1280x800', width: 1280, height: 800 },
+  { name: 'admin-1920x1080', width: 1920, height: 1080 },
+] as const;
+
 // E2E config — runs against the Next.js dev server. Locally we reuse
 // whatever dev server is already running at E2E_BASE_URL (default :3000);
 // CI / one-shot `pnpm test:e2e` spawns its own. Tests share the dev
@@ -47,12 +56,26 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: '**/worker-responsive.spec.ts',
+      testIgnore: [
+        '**/worker-responsive.spec.ts',
+        '**/admin-responsive.spec.ts',
+      ],
       use: { ...devices['Desktop Chrome'] },
     },
     ...workerViewportProjects.map(({ name, width, height }) => ({
       name,
       testMatch: '**/worker-responsive.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width, height },
+        screen: { width, height },
+        hasTouch: width <= 768,
+        isMobile: width <= 768,
+      },
+    })),
+    ...adminViewportProjects.map(({ name, width, height }) => ({
+      name,
+      testMatch: '**/admin-responsive.spec.ts',
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width, height },

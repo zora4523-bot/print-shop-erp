@@ -1,6 +1,7 @@
 'use client';
 
-import Link from 'next/link';
+import { useState } from 'react';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Bell,
@@ -15,6 +16,7 @@ import {
   FileArchive,
   FileText,
   LayoutDashboard,
+  LoaderCircle,
   PackageOpen,
   PlusCircle,
   Sparkles,
@@ -34,6 +36,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import type {
   AdminMenuGroup,
@@ -90,6 +93,11 @@ function pickActiveHref(
 
 export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const pathname = usePathname();
+  const { setOpenMobile } = useSidebar();
+  // The sidebar can contain dozens of dynamic routes. Letting every visible
+  // Link auto-prefetch floods the server with authenticated RSC requests.
+  // Enable prefetch only for the latest link that shows real user intent.
+  const [intentHref, setIntentHref] = useState<string | null>(null);
   // Flatten all hrefs once per render; pick the single best match.
   const allHrefs = menuGroups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref = pickActiveHref(pathname, allHrefs);
@@ -138,7 +146,16 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                       <SidebarMenuButton
                         isActive={active}
                         tooltip={item.label}
-                        render={<Link href={item.href} />}
+                        render={
+                          <Link
+                            href={item.href}
+                            prefetch={intentHref === item.href ? null : false}
+                            onMouseEnter={() => setIntentHref(item.href)}
+                            onFocus={() => setIntentHref(item.href)}
+                            onTouchStart={() => setIntentHref(item.href)}
+                            onClick={() => setOpenMobile(false)}
+                          />
+                        }
                         className={
                           active
                             ? 'border-l-2 border-primary bg-sidebar-accent font-medium text-sidebar-accent-foreground'
@@ -147,6 +164,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                       >
                         <Icon />
                         <span>{item.label}</span>
+                        <SidebarLinkPendingIndicator />
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -158,5 +176,21 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
       </SidebarContent>
       <SidebarFooter />
     </Sidebar>
+  );
+}
+
+function SidebarLinkPendingIndicator() {
+  const { pending } = useLinkStatus();
+
+  return (
+    <LoaderCircle
+      aria-hidden="true"
+      data-pending={pending ? 'true' : 'false'}
+      className={`ml-auto size-3.5 shrink-0 transition-opacity duration-150 group-data-[collapsible=icon]:hidden motion-reduce:animate-none ${
+        pending
+          ? 'visible animate-spin opacity-70 delay-100'
+          : 'invisible opacity-0 delay-0'
+      }`}
+    />
   );
 }

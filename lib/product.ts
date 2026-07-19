@@ -6,6 +6,11 @@ import {
   type ProductCategoryNode,
 } from '../generated/prisma/client';
 import { db } from './db';
+import {
+  paginatedResult,
+  paginationWindow,
+  type PaginatedResult,
+} from './admin/table';
 import { resolveBusinessCode } from './business-code';
 import { sortBySearchRelevance } from './search-ranking';
 
@@ -50,6 +55,11 @@ export type ProductOption = Pick<
 > & {
   categoryNode: Pick<ProductCategoryNode, 'name'>;
 };
+
+export type ProductOrderOption = Pick<
+  Product,
+  'id' | 'name' | 'category'
+>;
 
 export type ProductCategoryNodeSummary = Pick<
   ProductCategoryNode,
@@ -165,6 +175,39 @@ export async function listProducts(
     ],
     pinyinFields: [row.searchPinyin, row.searchPinyinInitials],
   }));
+}
+
+export async function listProductsPage(opts: {
+  q?: string | null;
+  page: number;
+  pageSize: number;
+}): Promise<PaginatedResult<ProductSummary>> {
+  const where = productSearchFilter(opts.q);
+  const total = await db.product.count({ where });
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.product.findMany({
+    where,
+    select: SUMMARY_SELECT,
+    orderBy: [
+      { isActive: 'desc' },
+      { category: 'asc' },
+      { name: 'asc' },
+      { id: 'asc' },
+    ],
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows, total, window);
+}
+
+export async function listActiveProductOrderOptions(): Promise<
+  ProductOrderOption[]
+> {
+  return db.product.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, category: true },
+    orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  });
 }
 
 export async function listProductCategoryOptions(

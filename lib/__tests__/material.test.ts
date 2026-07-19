@@ -23,6 +23,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
         upsert: vi.fn(),
       },
       material: {
+        count: vi.fn(),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         create: vi.fn(),
@@ -140,10 +141,9 @@ describe('listMaterials', () => {
 });
 
 describe('listMaterialsPage', () => {
-  it('sorts by code and paginates the result', async () => {
+  it('uses count, skip, take, and database ordering instead of loading all rows', async () => {
+    dbMock.material.count.mockResolvedValue(3);
     dbMock.material.findMany.mockResolvedValue([
-      makeMaterial({ id: 'c', code: 'C' }),
-      makeMaterial({ id: 'a', code: 'A' }),
       makeMaterial({ id: 'b', code: 'B' }),
     ]);
 
@@ -158,11 +158,19 @@ describe('listMaterialsPage', () => {
     expect(page.total).toBe(3);
     expect(page.page).toBe(2);
     expect(page.pageCount).toBe(3);
+    expect(dbMock.material.count).toHaveBeenCalledWith({ where: undefined });
+    expect(dbMock.material.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 1,
+        take: 1,
+        orderBy: [{ code: 'asc' }, { id: 'asc' }],
+      }),
+    );
   });
 
-  it('keeps relevance order for default search sorting before pagination', async () => {
+  it('applies the search filter to both count and bounded row queries', async () => {
+    dbMock.material.count.mockResolvedValue(3);
     dbMock.material.findMany.mockResolvedValue([
-      makeMaterial({ id: 'contains', name: '进口白卡纸' }),
       makeMaterial({ id: 'exact', name: '白卡纸' }),
       makeMaterial({ id: 'prefix', name: '白卡纸 250g' }),
     ]);
@@ -177,6 +185,15 @@ describe('listMaterialsPage', () => {
 
     expect(page.rows.map((row) => row.id)).toEqual(['exact', 'prefix']);
     expect(page.total).toBe(3);
+    const expectedWhere = expect.objectContaining({ OR: expect.any(Array) });
+    expect(dbMock.material.count).toHaveBeenCalledWith({ where: expectedWhere });
+    expect(dbMock.material.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expectedWhere,
+        skip: 0,
+        take: 2,
+      }),
+    );
   });
 });
 

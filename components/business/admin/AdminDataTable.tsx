@@ -46,10 +46,14 @@ export function AdminListToolbar({
             className="pl-8"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button type="submit">搜索</Button>
           {query ? (
-            <Link href={clearHref} className={buttonVariants({ variant: 'outline' })}>
+            <Link
+              href={clearHref}
+              prefetch={false}
+              className={buttonVariants({ variant: 'outline' })}
+            >
               清空
             </Link>
           ) : null}
@@ -79,8 +83,8 @@ export function AdminTableCard({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border bg-card shadow-sm">
-      <div className="p-4">{children}</div>
+    <div className="min-w-0 rounded-xl border bg-card shadow-sm">
+      <div className="min-w-0 p-0 sm:p-4">{children}</div>
       {isEmpty ? (
         <div className="border-t px-4 py-8 text-center">
           <p className="text-sm font-medium">{emptyTitle}</p>
@@ -129,6 +133,7 @@ export function AdminSortLink<T extends string>({
   return (
     <Link
       href={href}
+      prefetch={false}
       className={cn(
         'inline-flex items-center gap-1 hover:text-primary',
         active ? 'text-foreground' : 'text-muted-foreground',
@@ -167,29 +172,39 @@ export function AdminPagination({
       <div className="flex gap-2">
         {page <= 1 ? (
           <span
+            aria-disabled="true"
             className={cn(
               buttonVariants({ variant: 'outline' }),
-              'pointer-events-none opacity-50',
+              'pointer-events-none bg-muted text-muted-foreground',
             )}
           >
             上一页
           </span>
         ) : (
-          <Link href={prevHref} className={buttonVariants({ variant: 'outline' })}>
+          <Link
+            href={prevHref}
+            prefetch={false}
+            className={buttonVariants({ variant: 'outline' })}
+          >
             上一页
           </Link>
         )}
         {page >= pageCount ? (
           <span
+            aria-disabled="true"
             className={cn(
               buttonVariants({ variant: 'outline' }),
-              'pointer-events-none opacity-50',
+              'pointer-events-none bg-muted text-muted-foreground',
             )}
           >
             下一页
           </span>
         ) : (
-          <Link href={nextHref} className={buttonVariants({ variant: 'outline' })}>
+          <Link
+            href={nextHref}
+            prefetch={false}
+            className={buttonVariants({ variant: 'outline' })}
+          >
             下一页
           </Link>
         )}
@@ -215,5 +230,5 @@ export function AdminStatusBadge({
 }
 
 export function AdminRowActions({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center gap-2">{children}</div>;
+  return <div className="flex min-w-max flex-wrap items-center gap-2">{children}</div>;
 }

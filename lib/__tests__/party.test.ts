@@ -28,6 +28,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
         upsert: vi.fn(),
       },
       party: {
+        count: vi.fn(),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         create: vi.fn(),
@@ -51,6 +52,7 @@ import {
   formatPartyAddress,
   listCustomerPartyOptions,
   listParties,
+  listPartiesPage,
   listSupplierPartyOptions,
   PartyInvariantError,
   setPartyActive,
@@ -148,6 +150,57 @@ describe('listParties', () => {
     const rows = await listParties({ q: '苹果福' });
 
     expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
+  });
+});
+
+describe('listPartiesPage', () => {
+  it('counts and fetches only the requested database page', async () => {
+    dbMock.party.count.mockResolvedValue(41);
+    dbMock.party.findMany.mockResolvedValue([
+      makeParty({ id: 'last', code: 'PTY-000041' }),
+    ]);
+
+    const page = await listPartiesPage({
+      page: 99,
+      pageSize: 20,
+      sort: 'updatedAt',
+      direction: 'desc',
+    });
+
+    expect(page).toMatchObject({ total: 41, page: 3, pageCount: 3 });
+    expect(page.rows.map((row) => row.id)).toEqual(['last']);
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 40,
+        take: 20,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('uses the same type and text filters for count and rows', async () => {
+    dbMock.party.count.mockResolvedValue(1);
+    dbMock.party.findMany.mockResolvedValue([makeParty()]);
+
+    await listPartiesPage({
+      q: '苹果',
+      type: PartyType.CUSTOMER,
+      page: 1,
+      pageSize: 20,
+      sort: 'default',
+      direction: 'asc',
+    });
+
+    const expectedWhere = {
+      AND: [
+        { type: PartyType.CUSTOMER },
+        expect.objectContaining({ OR: expect.any(Array) }),
+      ],
+    };
+    expect(dbMock.party.count).toHaveBeenCalledWith({ where: expectedWhere });
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
+    );
   });
 });
 

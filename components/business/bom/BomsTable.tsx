@@ -63,7 +63,7 @@ export function BomsTable({
             <TableCell className="text-right font-sans tabular-nums text-xs">
               {bom.baseQuantity}
             </TableCell>
-            <TableCell className="text-right">{bom.items.length}</TableCell>
+            <TableCell className="text-right">{bom._count.items}</TableCell>
             <TableCell>
               <Badge variant={bom.isActive ? 'outline' : 'secondary'}>
                 {bom.isActive ? '启用' : '停用'}
@@ -72,6 +72,7 @@ export function BomsTable({
             <TableCell>
               <Link
                 href={`/owner/boms/${bom.id}`}
+                prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >
                 查看

@@ -4,6 +4,8 @@ import {
   firstSearchParam,
   nextSortDirection,
   paginateItems,
+  paginatedResult,
+  paginationWindow,
   parsePositiveInt,
   parseSortDirection,
   parseSortKey,
@@ -51,6 +53,34 @@ describe('admin table helpers', () => {
       page: 1,
       pageSize: 10,
       pageCount: 1,
+    });
+  });
+
+  it('resolves a bounded database window and clamps the requested page', () => {
+    const window = paginationWindow(41, 99, 20);
+    expect(window).toEqual({
+      page: 3,
+      pageSize: 20,
+      pageCount: 3,
+      skip: 40,
+      take: 20,
+    });
+    expect(paginatedResult(['last'], 41, window)).toEqual({
+      rows: ['last'],
+      total: 41,
+      page: 3,
+      pageSize: 20,
+      pageCount: 3,
+    });
+  });
+
+  it('keeps an empty database result on page one', () => {
+    expect(paginationWindow(0, 5, 20)).toEqual({
+      page: 1,
+      pageSize: 20,
+      pageCount: 1,
+      skip: 0,
+      take: 20,
     });
   });
 

@@ -6,6 +6,7 @@ const { dbMock } = vi.hoisted(() => ({
     productCategoryNode: { findUnique: vi.fn() },
     material: { findMany: vi.fn() },
     billOfMaterial: {
+      count: vi.fn(),
       create: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -21,6 +22,7 @@ import {
   BomInvariantError,
   createBom,
   estimateMaterialUsageForOrderItems,
+  listBomsPage,
   setBomActive,
 } from '../bom';
 
@@ -71,6 +73,30 @@ beforeEach(() => {
   dbMock.productCategoryNode.findUnique.mockReset();
   dbMock.material.findMany.mockReset();
   for (const fn of Object.values(dbMock.billOfMaterial)) fn.mockReset();
+});
+
+describe('listBomsPage', () => {
+  it('uses a summary count instead of loading every BOM item', async () => {
+    dbMock.billOfMaterial.count.mockResolvedValue(21);
+    dbMock.billOfMaterial.findMany.mockResolvedValue([
+      {
+        ...makeBom({ id: 'bom-21' }),
+        items: undefined,
+        _count: { items: 7 },
+      },
+    ]);
+
+    const page = await listBomsPage({ page: 2, pageSize: 20 });
+
+    expect(page).toMatchObject({ total: 21, page: 2, pageCount: 2 });
+    expect(page.rows[0]?._count.items).toBe(7);
+    const query = dbMock.billOfMaterial.findMany.mock.calls[0][0];
+    expect(query).toMatchObject({ skip: 20, take: 20 });
+    expect(query.select).toMatchObject({
+      _count: { select: { items: true } },
+    });
+    expect(query.select).not.toHaveProperty('items');
+  });
 });
 
 describe('createBom', () => {

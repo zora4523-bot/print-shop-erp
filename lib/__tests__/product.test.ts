@@ -7,6 +7,7 @@ const { dbMock } = vi.hoisted(() => ({
       upsert: vi.fn(),
     },
     product: {
+      count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -23,7 +24,9 @@ const { dbMock } = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
+  listActiveProductOrderOptions,
   listProducts,
+  listProductsPage,
   listProductCategoryOptions,
   listProductCategoryNodes,
   getProductCategoryNodeSummary,
@@ -126,6 +129,64 @@ describe('listProducts', () => {
     const rows = await listProducts({ q: '红包' });
 
     expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
+  });
+});
+
+describe('listProductsPage', () => {
+  it('counts and fetches only the requested product page', async () => {
+    dbMock.product.count.mockResolvedValue(45);
+    dbMock.product.findMany.mockResolvedValue([
+      makeProduct({ id: 'p41', name: '分页产品' }),
+    ]);
+
+    const page = await listProductsPage({ page: 3, pageSize: 20 });
+
+    expect(page).toMatchObject({ total: 45, page: 3, pageCount: 3 });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 40,
+        take: 20,
+        orderBy: [
+          { isActive: 'desc' },
+          { category: 'asc' },
+          { name: 'asc' },
+          { id: 'asc' },
+        ],
+      }),
+    );
+  });
+
+  it('applies the same search filter to count and rows', async () => {
+    dbMock.product.count.mockResolvedValue(1);
+    dbMock.product.findMany.mockResolvedValue([makeProduct()]);
+
+    await listProductsPage({ q: '红包', page: 1, pageSize: 20 });
+
+    const expectedWhere = expect.objectContaining({ OR: expect.any(Array) });
+    expect(dbMock.product.count).toHaveBeenCalledWith({ where: expectedWhere });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
+    );
+  });
+});
+
+describe('listActiveProductOrderOptions', () => {
+  it('selects only active fields required by the order form', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      {
+        id: 'p1',
+        name: '专版红包',
+        category: ProductCategory.CUSTOM_FLAT_FOIL,
+      },
+    ]);
+
+    await listActiveProductOrderOptions();
+
+    expect(dbMock.product.findMany).toHaveBeenCalledWith({
+      where: { isActive: true },
+      select: { id: true, name: true, category: true },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    });
   });
 });
 

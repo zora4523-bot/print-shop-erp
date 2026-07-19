@@ -8,6 +8,14 @@ export type PaginatedResult<T> = {
   pageCount: number;
 };
 
+export type PaginationWindow = {
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  skip: number;
+  take: number;
+};
+
 type SearchParamValue = string | string[] | undefined;
 
 export type TableHrefParams = Record<
@@ -73,6 +81,38 @@ export function paginateItems<T>(
     page: safePage,
     pageSize,
     pageCount,
+  };
+}
+
+/** Resolve a requested page before issuing a bounded database row query. */
+export function paginationWindow(
+  total: number,
+  requestedPage: number,
+  pageSize: number,
+): PaginationWindow {
+  const safePageSize = Math.max(1, pageSize);
+  const pageCount = Math.max(1, Math.ceil(Math.max(0, total) / safePageSize));
+  const page = Math.min(Math.max(requestedPage, 1), pageCount);
+  return {
+    page,
+    pageSize: safePageSize,
+    pageCount,
+    skip: (page - 1) * safePageSize,
+    take: safePageSize,
+  };
+}
+
+export function paginatedResult<T>(
+  rows: T[],
+  total: number,
+  window: PaginationWindow,
+): PaginatedResult<T> {
+  return {
+    rows,
+    total,
+    page: window.page,
+    pageSize: window.pageSize,
+    pageCount: window.pageCount,
   };
 }
 

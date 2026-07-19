@@ -1,10 +1,11 @@
 import Decimal from 'decimal.js';
-import {
-  Prisma,
-  type BillOfMaterial,
-  type BillOfMaterialItem,
-} from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { CreateBomInput } from './auth/schemas';
+import {
+  paginatedResult,
+  paginationWindow,
+  type PaginatedResult,
+} from './admin/table';
 import { db } from './db';
 
 export class BomInvariantError extends Error {
@@ -69,59 +70,68 @@ export type BomDetail = Prisma.BillOfMaterialGetPayload<{
   select: typeof BOM_DETAIL_SELECT;
 }>;
 
-export type BomSummary = Pick<
-  BillOfMaterial,
-  | 'id'
-  | 'productId'
-  | 'categoryNodeId'
-  | 'name'
-  | 'version'
-  | 'baseQuantity'
-  | 'isActive'
-  | 'createdAt'
-  | 'updatedAt'
-> & {
+const BOM_SUMMARY_SELECT = {
+  id: true,
+  productId: true,
+  categoryNodeId: true,
+  name: true,
+  version: true,
+  baseQuantity: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
   product: {
-    id: string;
-    code: string | null;
-    name: string;
-    isActive: boolean;
-    categoryNode: { id: string; name: string; isActive: boolean };
-  } | null;
-  categoryNode: { id: string; path: string; name: string; isActive: boolean } | null;
-  items: Array<
-    Pick<
-      BillOfMaterialItem,
-      | 'id'
-      | 'bomId'
-      | 'materialId'
-      | 'quantity'
-      | 'sortOrder'
-      | 'remark'
-      | 'createdAt'
-      | 'updatedAt'
-    > & {
-      material: {
-        id: string;
-        code: string;
-        name: string;
-        unit: string;
-        isActive: boolean;
-      };
-    }
-  >;
-};
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      isActive: true,
+      categoryNode: { select: { id: true, name: true, isActive: true } },
+    },
+  },
+  categoryNode: {
+    select: {
+      id: true,
+      path: true,
+      name: true,
+      isActive: true,
+    },
+  },
+  _count: { select: { items: true } },
+} satisfies Prisma.BillOfMaterialSelect;
+
+export type BomSummary = Prisma.BillOfMaterialGetPayload<{
+  select: typeof BOM_SUMMARY_SELECT;
+}>;
+
+const BOM_LIST_ORDER = [
+  { isActive: 'desc' as const },
+  { product: { name: 'asc' as const } },
+  { categoryNode: { path: 'asc' as const } },
+  { version: 'desc' as const },
+  { id: 'asc' as const },
+];
 
 export async function listBoms(): Promise<BomSummary[]> {
   return db.billOfMaterial.findMany({
-    select: BOM_DETAIL_SELECT,
-    orderBy: [
-      { isActive: 'desc' },
-      { product: { name: 'asc' } },
-      { categoryNode: { path: 'asc' } },
-      { version: 'desc' },
-    ],
+    select: BOM_SUMMARY_SELECT,
+    orderBy: BOM_LIST_ORDER,
   });
+}
+
+export async function listBomsPage(opts: {
+  page: number;
+  pageSize: number;
+}): Promise<PaginatedResult<BomSummary>> {
+  const total = await db.billOfMaterial.count();
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.billOfMaterial.findMany({
+    select: BOM_SUMMARY_SELECT,
+    orderBy: BOM_LIST_ORDER,
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows, total, window);
 }
 
 export async function getBomDetail(id: string): Promise<BomDetail | null> {

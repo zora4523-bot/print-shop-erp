@@ -41,6 +41,7 @@ const { dbMock, txMock, numberMock } = vi.hoisted(() => {
     numberMock: vi.fn(),
     dbMock: {
       purchaseOrder: {
+        count: vi.fn(),
         findMany: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
@@ -70,6 +71,7 @@ import {
   cancelPurchaseReceipt,
   createPurchaseOrder,
   createPurchaseReceipt,
+  listPurchaseOrdersPage,
   PurchaseInvariantError,
 } from '../purchase';
 
@@ -92,6 +94,7 @@ const detail = {
 };
 
 beforeEach(() => {
+  dbMock.purchaseOrder.count.mockReset();
   dbMock.purchaseOrder.findMany.mockReset();
   dbMock.purchaseOrder.findUnique.mockReset();
   dbMock.purchaseOrder.update.mockReset();
@@ -125,6 +128,52 @@ beforeEach(() => {
   numberMock.mockReset().mockImplementation((kind: string) =>
     kind === 'PURCHASE_ORDER' ? 'PO20260628-0001' : 'PR20260628-0001',
   );
+});
+
+describe('listPurchaseOrdersPage', () => {
+  it('uses a bounded database query with a stable sort tiebreaker', async () => {
+    dbMock.purchaseOrder.count.mockResolvedValue(21);
+    dbMock.purchaseOrder.findMany.mockResolvedValue([
+      { ...detail, id: 'po21', purchaseNo: 'PO20260628-0021' },
+    ]);
+
+    const page = await listPurchaseOrdersPage({
+      page: 2,
+      pageSize: 20,
+      sort: 'supplierName',
+      direction: 'asc',
+    });
+
+    expect(page).toMatchObject({ total: 21, page: 2, pageCount: 2 });
+    expect(dbMock.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 20,
+        take: 20,
+        orderBy: [{ supplierName: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('reuses the material-aware search filter for count and rows', async () => {
+    dbMock.purchaseOrder.count.mockResolvedValue(1);
+    dbMock.purchaseOrder.findMany.mockResolvedValue([detail]);
+
+    await listPurchaseOrdersPage({
+      q: '白卡',
+      page: 1,
+      pageSize: 20,
+      sort: 'default',
+      direction: 'asc',
+    });
+
+    const expectedWhere = expect.objectContaining({ OR: expect.any(Array) });
+    expect(dbMock.purchaseOrder.count).toHaveBeenCalledWith({
+      where: expectedWhere,
+    });
+    expect(dbMock.purchaseOrder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
+    );
+  });
 });
 
 describe('createPurchaseOrder', () => {

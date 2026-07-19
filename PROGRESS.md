@@ -77,7 +77,6 @@
 
 ## 已知技术债
 
-- `middleware.ts` Next.js 16 deprecation warning（注释里有 TODO，独立一次迁移）
 - Puppeteer 部署需 `npx puppeteer browsers install chrome`（README 已写）
 - PDF 产物目录是单机 PM2 共享目录；未来多机部署需迁往对象存储。
 - 通知事件在业务事务 commit 后入队；已持久化且调用方 await，但严格 transactional outbox 仍可作未来增强。
