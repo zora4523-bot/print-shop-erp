@@ -32,7 +32,7 @@ type Props = {
 };
 
 const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+  'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function StockTransferForm({
   action,
@@ -78,7 +78,7 @@ export function StockTransferForm({
     <form action={formAction} className="space-y-4" noValidate>
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <div className="grid gap-4 lg:grid-cols-3">
-        <Field label="物料" error={errors.materialId?.[0]}>
+        <Field id="transfer-material" label="物料" error={errors.materialId?.[0]}>
           <select
             id="transfer-material"
             name="materialId"
@@ -95,7 +95,7 @@ export function StockTransferForm({
             ))}
           </select>
         </Field>
-        <Field label="来源库位" error={errors.sourceLocationId?.[0]}>
+        <Field id="transfer-source" label="来源库位" error={errors.sourceLocationId?.[0]}>
           <select
             id="transfer-source"
             name="sourceLocationId"
@@ -117,7 +117,7 @@ export function StockTransferForm({
             </p>
           ) : null}
         </Field>
-        <Field label="目标库位" error={errors.destinationLocationId?.[0]}>
+        <Field id="transfer-destination" label="目标库位" error={errors.destinationLocationId?.[0]}>
           <select
             id="transfer-destination"
             name="destinationLocationId"
@@ -142,13 +142,14 @@ export function StockTransferForm({
 
       <div className="grid gap-4 md:grid-cols-2">
         <Field
+          id="transfer-quantity"
           label={`调拨数量${selectedMaterial ? `（${selectedMaterial.unit}）` : ''}`}
           error={errors.quantity?.[0]}
         >
-          <Input name="quantity" inputMode="decimal" disabled={pending} />
+          <Input id="transfer-quantity" name="quantity" inputMode="decimal" disabled={pending} />
         </Field>
-        <Field label="备注（选填）" error={errors.remark?.[0]}>
-          <Input name="remark" disabled={pending} />
+        <Field id="transfer-remark" label="备注（选填）" error={errors.remark?.[0]}>
+          <Input id="transfer-remark" name="remark" disabled={pending} />
         </Field>
       </div>
 
@@ -157,8 +158,8 @@ export function StockTransferForm({
           调拨至少需要一个启用物料和两个启用库位。
         </p>
       ) : null}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="text-sm text-success">✓ {success}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {success ? <p role="status" className="text-sm text-success">✓ {success}</p> : null}
       <Button type="submit" disabled={pending || prerequisitesMissing}>
         {pending ? '调拨中…' : '确认调拨'}
       </Button>
@@ -167,19 +168,21 @@ export function StockTransferForm({
 }
 
 function Field({
+  id,
   label,
   error,
   children,
 }: {
+  id: string;
   label: string;
   error?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       {children}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

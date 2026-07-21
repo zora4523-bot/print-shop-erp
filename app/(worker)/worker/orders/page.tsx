@@ -26,7 +26,7 @@ export default async function WorkerOrdersPage() {
         <EmptyState
           icon={ClipboardList}
           title="暂无关联工单"
-          description="车间主管将生产任务分配给你后，对应工单才会显示在这里。"
+          description="管理员将生产任务分配给你后，对应工单才会显示在这里。"
         />
       ) : (
         <ul className="space-y-3">
@@ -65,9 +65,19 @@ export default async function WorkerOrdersPage() {
                         : ''}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">我的计件</p>
-                    <p className="font-sans tabular-nums font-medium">¥ {order.pieceworkAmount}</p>
+                  <div className="ml-auto shrink-0 text-right">
+                    {order.hasPieceworkTasks ? (
+                      <>
+                        <p className="text-xs text-muted-foreground">我的计件</p>
+                        <p className="font-sans tabular-nums font-medium">
+                          ¥ {order.pieceworkAmount}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="worker-wrap-anywhere text-xs text-muted-foreground">
+                        按考勤时薪结算
+                      </p>
+                    )}
                   </div>
                 </div>
               </Link>

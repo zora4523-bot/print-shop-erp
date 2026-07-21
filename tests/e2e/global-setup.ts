@@ -15,7 +15,7 @@ import { Client } from 'pg';
 // whole transformer issue and keeps this file dependency-light.
 //
 // Why direct DB instead of going through the UI: UI-creation requires
-// a logged-in OWNER each test run; that's an extra 2-3 seconds per
+// a logged-in ADMIN each test run; that's an extra 2-3 seconds per
 // cold start and adds a failure surface (account form a11y / validation
 // regressions would block all production E2E from running). Direct
 // upsert is orders of magnitude faster and the production flow we're
@@ -25,7 +25,7 @@ export const E2E_PASSWORD = 'e2e-test-password-1234';
 
 // String literal unions matching the Prisma enums; we don't import
 // the generated enums object (CJS / ESM tangle, see file header).
-type Role = 'OWNER' | 'FOREMAN' | 'SALES' | 'CUSTOMER_SERVICE' | 'WORKER';
+type Role = 'ADMIN' | 'SALES' | 'CUSTOMER_SERVICE' | 'WORKER';
 type WorkerType = 'MACHINE' | 'PACKER' | 'CLEANER' | 'COOK';
 type MachineType = 'HAND_PRESS' | 'WINDMILL' | 'GLUE';
 
@@ -40,8 +40,8 @@ type E2EUser = {
 export const E2E_USERS: Record<string, E2EUser> = {
   owner: {
     username: 'e2e-owner',
-    displayName: 'E2E 老板',
-    role: 'OWNER',
+    displayName: 'E2E 管理员',
+    role: 'ADMIN',
   },
   sales: {
     username: 'e2e-sales',
@@ -50,8 +50,8 @@ export const E2E_USERS: Record<string, E2EUser> = {
   },
   foreman: {
     username: 'e2e-foreman',
-    displayName: 'E2E 主管',
-    role: 'FOREMAN',
+    displayName: 'E2E 管理员 2',
+    role: 'ADMIN',
   },
   // Machine worker on HAND_PRESS so 现货加烫 (defaultMachineType =
   // HAND_PRESS, per seed.ts) shows up as "推荐" in the scheduling
@@ -62,6 +62,13 @@ export const E2E_USERS: Record<string, E2EUser> = {
     role: 'WORKER',
     workerType: 'MACHINE',
     machineType: 'HAND_PRESS',
+  },
+  workerPacker: {
+    username: 'e2e-worker-packer',
+    displayName: 'E2E 打包师傅',
+    role: 'WORKER',
+    workerType: 'PACKER',
+    machineType: null,
   },
   // CUSTOMER_SERVICE user — needed for CS accumulate E2E (the
   // recordPayment → accumulateCsSales path only fires when the

@@ -74,7 +74,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            该账单仍是草稿，老板尚未发单。发单后会变为 ISSUED 并支持收款。
+            该账单仍是草稿，管理员尚未发单。发单后会变为 ISSUED 并支持收款。
           </p>
         </section>
       ) : null}
@@ -82,7 +82,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.FULLY_PAID ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            ✓ 已结清。如有退款 / 折扣，由老板另开负数月账单处理；该账单状态
+            ✓ 已结清。如有退款 / 折扣，由管理员另开负数月账单处理；该账单状态
             不会回退。
           </p>
         </section>
@@ -97,7 +97,13 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
             本账单无工单。
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="账单工单明细"
+            tabIndex={0}
+          >
+          <table className="w-full min-w-[680px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
@@ -127,6 +133,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

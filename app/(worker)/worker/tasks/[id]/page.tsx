@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { TaskStatus } from '@/generated/prisma/enums';
+import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { getWorkerTaskDetail } from '@/lib/production';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
@@ -19,6 +19,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
   const { id } = await params;
   const task = await getWorkerTaskDetail(id, { id: user.id, role: user.role });
   if (!task) notFound();
+  const isPiecework = task.workerType === WorkerType.MACHINE;
 
   return (
     <div className="min-w-0 space-y-5">
@@ -71,7 +72,11 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
       {task.status === TaskStatus.IN_PROGRESS ? (
         <section className="rounded-xl border bg-card p-4 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold">报工</h2>
-          <ReportTaskForm taskId={task.id} plannedQty={task.plannedQty} />
+          <ReportTaskForm
+            taskId={task.id}
+            plannedQty={task.plannedQty}
+            isPiecework={isPiecework}
+          />
         </section>
       ) : null}
 
@@ -82,14 +87,20 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             <Row label="合格数" value={task.completedQty.toLocaleString()} tabular />
             <Row label="不良数" value={task.defectQty.toLocaleString()} tabular />
             <Row label="返工数" value={task.reworkQty.toLocaleString()} tabular />
-            <Row label="板数" value={String(task.boardCount)} tabular />
-            <Row label="下数" value={task.pressCount.toLocaleString()} tabular />
-            <Row
-              label="计件金额"
-              value={`¥ ${String(task.pieceworkAmount)}`}
-              tabular
-              full
-            />
+            {isPiecework ? (
+              <>
+                <Row label="板数" value={String(task.boardCount)} tabular />
+                <Row label="下数" value={task.pressCount.toLocaleString()} tabular />
+                <Row
+                  label="计件金额"
+                  value={`¥ ${String(task.pieceworkAmount)}`}
+                  tabular
+                  full
+                />
+              </>
+            ) : (
+              <Row label="计薪方式" value="按考勤时薪结算" full />
+            )}
           </dl>
         </section>
       ) : null}

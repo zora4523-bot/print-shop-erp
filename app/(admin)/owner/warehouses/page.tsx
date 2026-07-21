@@ -16,7 +16,7 @@ import { StockTransferForm } from '@/components/business/warehouse/StockTransfer
 import { WarehouseForms } from '@/components/business/warehouse/WarehouseForms';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, StatCard } from '@/components/ui-business';
+import { PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { listRecentInventoryCounts } from '@/lib/inventory-count-posting';
@@ -73,7 +73,7 @@ export default async function OwnerWarehousesPage() {
           </div>
           <Link href="/owner/purchases" className={buttonVariants({ variant: 'outline' })}>查看采购单</Link>
         </div>
-        <div className="overflow-x-auto">
+        <TableScrollArea label="采购待收货明细">
           <table className="w-full text-sm">
             <thead><tr className="border-b text-left text-muted-foreground">
               <th className="px-3 py-2">采购单</th><th className="px-3 py-2">供应商</th><th className="px-3 py-2">物料</th><th className="px-3 py-2 text-right">订购</th><th className="px-3 py-2 text-right">已收</th><th className="px-3 py-2 text-right">待收</th><th className="px-3 py-2">预计日期</th>
@@ -92,7 +92,7 @@ export default async function OwnerWarehousesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="rounded-xl border bg-card p-5 shadow-sm">
@@ -111,7 +111,7 @@ export default async function OwnerWarehousesPage() {
 
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="mb-4 font-semibold">库存分布</h2>
-        <div className="overflow-x-auto">
+        <TableScrollArea label="库存分布">
           <table className="w-full text-sm">
             <thead><tr className="border-b text-left text-muted-foreground"><th className="px-3 py-2">仓库 / 库位</th><th className="px-3 py-2">物料</th><th className="px-3 py-2 text-right">库存</th></tr></thead>
             <tbody>
@@ -124,12 +124,12 @@ export default async function OwnerWarehousesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="mb-4 font-semibold">最近库存流水</h2>
-        <div className="overflow-x-auto">
+        <TableScrollArea label="最近库存流水">
           <table className="w-full text-sm">
             <thead><tr className="border-b text-left text-muted-foreground"><th className="px-3 py-2">时间</th><th className="px-3 py-2">物料</th><th className="px-3 py-2">类型</th><th className="px-3 py-2">库位</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2">操作人</th></tr></thead>
             <tbody>
@@ -145,7 +145,7 @@ export default async function OwnerWarehousesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">

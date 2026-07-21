@@ -85,11 +85,16 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
       ) : null}
 
       {period.commissions.length > 0 ? (
-        <section className="rounded-xl border bg-card shadow-sm">
+        <section
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="客服提成记录"
+          tabIndex={0}
+        >
           <h2 className="border-b px-6 py-3 text-base font-semibold">
             提成记录
           </h2>
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">结算时间</th>

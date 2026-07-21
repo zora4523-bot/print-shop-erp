@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   reportTaskSchema,
+  reassignProductionTaskSchema,
   scheduleOrderSchema,
 } from '@/lib/auth/schemas';
 import {
@@ -11,6 +12,7 @@ import {
   SchedulingError,
   beginTask,
   reportTask,
+  reassignProductionTask,
   ReportError,
   InvalidTaskTransitionError,
 } from '@/lib/production';
@@ -77,9 +79,8 @@ function mapTaskError(err: unknown): TaskMutationResult | null {
 }
 
 // Worker clicks "开始生产" on their task — PENDING → IN_PROGRESS.
-// OWNER / FOREMAN can also invoke (task:report permission allowlists
-// WORKER only; the two overrides travel through the lib's ownership
-// guard, not the action permission). Kept minimal — no payload.
+// Only WORKER accounts can invoke this action. The production library also
+// enforces that the task belongs to the current worker. Kept minimal — no payload.
 export async function beginTaskAction(
   taskId: string,
 ): Promise<TaskMutationResult> {
@@ -91,6 +92,32 @@ export async function beginTaskAction(
     if (mapped) return mapped;
     throw err;
   }
+  revalidatePath('/worker/tasks');
+  revalidatePath(`/worker/tasks/${taskId}`);
+  return { status: 'success', taskId };
+}
+
+export async function reassignProductionTaskAction(
+  taskId: string,
+  orderId: string,
+  _prev: TaskMutationResult | null,
+  formData: FormData,
+): Promise<TaskMutationResult> {
+  const actor = await requirePermission('task:assign');
+  const parsed = reassignProductionTaskSchema.safeParse({
+    workerId: formData.get('workerId'),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+  }
+  try {
+    await reassignProductionTask(taskId, parsed.data.workerId, actor);
+  } catch (err) {
+    const mapped = mapTaskError(err);
+    if (mapped) return mapped;
+    throw err;
+  }
+  revalidatePath(`/orders/${orderId}`);
   revalidatePath('/worker/tasks');
   revalidatePath(`/worker/tasks/${taskId}`);
   return { status: 'success', taskId };

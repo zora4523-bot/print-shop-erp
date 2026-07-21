@@ -105,7 +105,7 @@ describe('worker salary visibility', () => {
 
   it('rejects non-worker actors before querying any personal data', async () => {
     await expect(
-      listWorkerSalaries({ id: 'owner-1', role: Role.OWNER }),
+      listWorkerSalaries({ id: 'owner-1', role: Role.ADMIN }),
     ).rejects.toBeInstanceOf(WorkerPortalError);
     expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
   });

@@ -40,7 +40,7 @@ Before any production activation:
 1. Confirm current app revision includes the readiness migrations.
 2. Confirm pgBackRest backup is green and a restore drill has been tested.
 3. Apply and verify this runbook on staging restored from production-like data.
-4. Confirm `/owner/pigsty` can be opened by an OWNER user.
+4. Confirm `/owner/pigsty` can be opened by an ADMIN user.
 5. Keep `CRON_SECRET` and webhook/OSS secrets outside git.
 6. Do not enable cron schedules until the app deployment is live and healthy.
 

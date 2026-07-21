@@ -183,7 +183,12 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
       <form action={formAction} className="space-y-4">
         <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
         <input type="hidden" name="items" value={JSON.stringify(submittedItems)} />
-        <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="盘点物料列表"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

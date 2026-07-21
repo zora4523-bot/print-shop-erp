@@ -77,9 +77,9 @@ describe('writeAuditLog', () => {
     await writeAuditLog({
       actor: {
         id: 'actor-owner',
-        role: Role.OWNER,
+        role: Role.ADMIN,
         username: 'admin',
-        displayName: '老板',
+        displayName: '管理员',
       },
       action: 'UPDATE',
       entityType: 'Party',
@@ -95,9 +95,9 @@ describe('writeAuditLog', () => {
     expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith({
       data: {
         actorId: 'actor-owner',
-        actorRole: Role.OWNER,
+        actorRole: Role.ADMIN,
         actorUsername: 'admin',
-        actorDisplayName: '老板',
+        actorDisplayName: '管理员',
         action: 'UPDATE',
         entityType: 'Party',
         entityId: 'party1',

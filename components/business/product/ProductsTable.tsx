@@ -62,6 +62,7 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
             <TableCell>
               <Link
                 href={`/owner/products/${p.id}`}
+                prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >
                 编辑

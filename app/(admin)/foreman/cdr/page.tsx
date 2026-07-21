@@ -8,6 +8,7 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { FileArchive } from 'lucide-react';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
@@ -17,7 +18,7 @@ export const metadata = { title: 'CDR 汇总下载' };
 
 type SearchParams = Promise<{ from?: string; to?: string }>;
 
-// SPEC §3.5：CDR 汇总下载 = 车间主管按日期窗口勾工单 → 生成 24h 短链
+// SPEC §3.5：CDR 汇总下载 = 管理员按日期窗口勾工单 → 生成 24h 短链
 // → 复制给外协模具厂。本页不显示 admin 工单详情链接（外协方不需要）；
 // 只显示工单号 + 客户代号 + CDR 文件数。
 //
@@ -90,7 +91,12 @@ export default async function ForemanCdrPage({
             description="勾选上方候选工单即可生成 24 小时有效的下载链接。"
           />
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="CDR 打包候选工单"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -156,8 +162,8 @@ export default async function ForemanCdrPage({
 
       <p className="text-xs text-muted-foreground">
         提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。{' '}
-        <Link href="/foreman" className="underline">
-          ← 返回车间首页
+        <Link href="/owner" className="underline">
+          ← 返回管理后台
         </Link>
       </p>
     </div>
@@ -188,12 +194,9 @@ function FilterBar({ from, to }: { from: string; to: string }) {
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button
-        type="submit"
-        className="rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
-      >
+      <Button type="submit" size="sm">
         刷新候选工单
-      </button>
+      </Button>
     </form>
   );
 }

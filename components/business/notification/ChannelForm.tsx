@@ -107,7 +107,7 @@ export function ChannelForm(props: Props) {
           </p>
         ))}
         <p className="text-xs text-muted-foreground">
-          来自企业微信群机器人配置页面。仅老板可见 / 编辑。
+          来自企业微信群机器人配置页面。仅管理员可见 / 编辑。
         </p>
       </div>
 

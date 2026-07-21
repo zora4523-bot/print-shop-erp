@@ -100,7 +100,7 @@ pnpm dev
 
 1. **认证与用户管理**（1周）
    - 登录、密码管理
-   - 老板管账号（增删改）、角色选择
+   - 管理员管账号（增删改）、角色选择
 
 2. **工艺字典与产品字典**（3天）
    - 工艺管理页面
@@ -113,7 +113,7 @@ pnpm dev
    - 状态机严格落地
 
 4. **生产流程**（1周）
-   - 车间主管：排产、派师傅（按工艺推荐）
+   - 管理员：排产、派师傅（按工艺推荐）
    - 外协单管理
    - 工单PDF生成（含任务二维码）
    - 师傅扫码开工/完工
@@ -127,16 +127,16 @@ pnpm dev
 
 6. **应收账单**（3天）
    - 月度自动生成销售账单
-   - 销售查看、老板登记收款
+   - 销售查看、管理员登记收款
 
 7. **CDR汇总**（2天）
-   - 车间主管勾选打包
+   - 管理员勾选打包
    - 24小时临时链接
 
 8. **推送与Dashboard**（1周）
    - 企业微信Webhook配置
    - 10个预置事件
-   - 老板Dashboard
+   - 管理员Dashboard
 
 9. **测试与上线准备**（3天）
    - 关键流程E2E
@@ -160,7 +160,7 @@ pnpm dev
 
 ### 核心算法的正确性
 
-**薪资算法错1元，老板的信任会崩塌**。所以：
+**薪资算法错1元，管理员的信任会崩塌**。所以：
 
 - 所有薪资算法必须100%单元测试覆盖
 - 所有薪资记录必须快照化（改规则不影响历史）
@@ -174,9 +174,9 @@ pnpm dev
 
 - [ ] 销售能在手机上10秒内录完一张简单工单
 - [ ] 师傅能在30秒内完成扫码报工
-- [ ] 车间主管能30秒内汇总当日CDR并拿到分享链接
+- [ ] 管理员能30秒内汇总当日CDR并拿到分享链接
 - [ ] 客服能实时看到自己当前周期的业绩和距离下一档的差额
-- [ ] 老板能在Dashboard上一眼看到今日工单、产量、待发货
+- [ ] 管理员能在Dashboard上一眼看到今日工单、产量、待发货
 - [ ] 急单提交后企业微信群3秒内收到推送
 
 ### 技术验收
@@ -219,7 +219,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
 | `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | **留空**（按 NODE_ENV：生产真发、dev mock）。**切勿设 `"true"`**——否则推送静默 mock，急单 3 秒推送验收项形同虚设 |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
-| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 OWNER | 详见文件顶注释 |
+| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 ADMIN | 详见文件顶注释 |
 
 选填但生产建议：
 | `SENTRY_DSN` | 错误监控 | 留空 → instrumentation.ts no-op，错误只进 Next 默认日志 |
@@ -241,7 +241,7 @@ curl -X POST https://host/api/cron/daily-salary \
 curl -X POST https://host/api/cron/hourly-payroll \
   -H "Authorization: Bearer $CRON_SECRET"
 
-# 每日扫描已到期客服周期（P1 #2 起：每条结算推 CS_PERIOD_SETTLED 到老板群+客服）
+# 每日扫描已到期客服周期（P1 #2 起：每条结算推 CS_PERIOD_SETTLED 到管理员群+客服）
 curl -X POST https://host/api/cron/cs-settle \
   -H "Authorization: Bearer $CRON_SECRET"
 
@@ -253,7 +253,7 @@ curl -X POST https://host/api/cron/generate-bills \
 curl -X POST https://host/api/cron/outsource-overdue \
   -H "Authorization: Bearer $CRON_SECRET"
 
-# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到老板群
+# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到管理员群
 curl -X POST https://host/api/cron/cs-period-ending \
   -H "Authorization: Bearer $CRON_SECRET"
 
@@ -264,7 +264,7 @@ curl -X POST https://host/api/cron/order-overdue \
 
 上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
 
-**7 个 cron endpoints 都不走 session 中间件**（middleware.ts matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**7 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgBackRest）
 
@@ -314,14 +314,14 @@ npx puppeteer browsers install chrome
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
 - [ ] `pnpm prisma db seed`（首次创建 admin / 工艺字典 / 薪资规则）
 - [ ] `npx puppeteer browsers install chrome`（PDF 生成依赖）
-- [ ] 老板登录 `/owner/accounts` 改默认密码
+- [ ] 管理员登录 `/owner/accounts` 改默认密码
 - [ ] 销售 / 客服 / 师傅各创一个测试账号
 - [ ] 跑通 工单创建 → 排产 → 报工 → 完工 一条链
 - [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
-- [ ] OWNER 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
+- [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 故意挂掉一个 Server Action（临时改个抛错），确认 Sentry 收到事件后还原
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 老板在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 老板会以为推送已发其实没真发。
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
 - [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在

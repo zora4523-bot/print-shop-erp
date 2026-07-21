@@ -15,8 +15,8 @@ import {
 // 固定段名 → 中文标签。匹配不到的段（如 [id] 这类）直接回落到原 segment
 // 字符串显示。新增顶层导航时同步更新。
 const SEGMENT_LABELS: Record<string, string> = {
-  owner: '管理员后台',
-  foreman: '车间',
+  owner: '管理后台',
+  foreman: '生产管理',
   sales: '销售',
   'customer-service': '客服',
   worker: '师傅',
@@ -101,7 +101,9 @@ export function AdminBreadcrumb() {
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
                   // prop 把 <a> 替换成 next/link。
-                  <BreadcrumbLink render={<Link href={href} />}>
+                  <BreadcrumbLink
+                    render={<Link href={href} prefetch={false} />}
+                  >
                     {labelFor(seg)}
                   </BreadcrumbLink>
                 ) : (

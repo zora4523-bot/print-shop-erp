@@ -4,6 +4,8 @@ import {
   Role,
   TaskStatus,
   MachineType,
+  OutsourceStatus,
+  WorkerType,
 } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
@@ -14,7 +16,11 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
     };
     craft: { findMany: ReturnType<typeof vi.fn> };
-    user: { findMany: ReturnType<typeof vi.fn> };
+    user: {
+      findMany: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+    };
+    outsourceOrder: { findMany: ReturnType<typeof vi.fn> };
     productionTask: {
       createMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
@@ -29,7 +35,8 @@ const { dbMock } = vi.hoisted(() => {
   } = {
     order: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     craft: { findMany: vi.fn() },
-    user: { findMany: vi.fn() },
+    user: { findMany: vi.fn(), findUnique: vi.fn() },
+    outsourceOrder: { findMany: vi.fn() },
     productionTask: {
       createMany: vi.fn(),
       findUnique: vi.fn(),
@@ -63,14 +70,15 @@ import {
   SchedulingError,
   beginTask,
   reportTask,
+  reassignProductionTask,
   ReportError,
 } from '../production';
 import { OrderInvariantError } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
 import { InvalidTaskTransitionError } from '../production/status-machine';
 
-const foremanActor = { id: 'foreman-1', role: Role.FOREMAN };
-const ownerActor = { id: 'owner-1', role: Role.OWNER };
+const foremanActor = { id: 'foreman-1', role: Role.ADMIN };
+const ownerActor = { id: 'owner-1', role: Role.ADMIN };
 
 function fixtureOrder(
   overrides: Partial<{
@@ -100,6 +108,7 @@ function fixtureCrafts(
     isActive: boolean;
     isOutsource: boolean;
     defaultMachineType: string | null;
+    defaultWorkerType: WorkerType | null;
   }>> = [],
 ) {
   const base = [
@@ -107,18 +116,21 @@ function fixtureCrafts(
       id: 'craft-foil',
       isActive: true,
       isOutsource: false,
+      defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.WINDMILL,
     },
     {
       id: 'craft-glue',
       isActive: true,
       isOutsource: false,
+      defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.GLUE,
     },
     {
       id: 'craft-outsource',
       isActive: true,
       isOutsource: true,
+      defaultWorkerType: null,
       defaultMachineType: null,
     },
   ];
@@ -126,12 +138,18 @@ function fixtureCrafts(
   return base.map((c, i) => ({ ...c, ...overrides[i] }));
 }
 
-function fixtureWorker(id: string, overrides: Partial<{ isActive: boolean; role: Role }> = {}) {
+function fixtureWorker(id: string, overrides: Partial<{
+  isActive: boolean;
+  role: Role;
+  workerType: WorkerType | null;
+  machineType: MachineType | null;
+}> = {}) {
   return {
     id,
     role: Role.WORKER,
     isActive: true,
-    machineType: MachineType.WINDMILL,
+    workerType: WorkerType.MACHINE,
+    machineType: id === 'worker-2' ? MachineType.GLUE : MachineType.WINDMILL,
     ...overrides,
   };
 }
@@ -142,6 +160,16 @@ beforeEach(() => {
   dbMock.order.update.mockReset();
   dbMock.craft.findMany.mockReset();
   dbMock.user.findMany.mockReset();
+  dbMock.user.findUnique.mockReset().mockResolvedValue({
+    id: 'worker-1',
+    role: Role.WORKER,
+    isActive: true,
+    workerType: WorkerType.MACHINE,
+    machineType: MachineType.HAND_PRESS,
+  });
+  dbMock.outsourceOrder.findMany.mockReset().mockResolvedValue([
+    { id: 'outsource-1', status: OutsourceStatus.SENT },
+  ]);
   dbMock.productionTask.createMany.mockReset();
   dbMock.productionTask.findUnique.mockReset();
   dbMock.productionTask.findMany.mockReset();
@@ -400,7 +428,67 @@ describe('scheduleOrder', () => {
     ).rejects.toThrow(/师傅不存在/);
   });
 
-  it('all-outsource order: zero tasks, still transitions to SCHEDULING', async () => {
+  it('rejects a worker whose job type does not match the craft', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.user.findMany.mockResolvedValue([
+      fixtureWorker('worker-1', {
+        workerType: WorkerType.PACKER,
+        machineType: null,
+      }),
+      fixtureWorker('worker-2'),
+    ]);
+    await expect(
+      scheduleOrder(
+        {
+          orderId: 'order-1',
+          assignments: [
+            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
+            { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-2' },
+          ],
+        },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/岗位.*不匹配/);
+  });
+
+  it('creates a non-machine PACKER task with a worker-type snapshot', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      fixtureOrder({
+        items: [{ id: 'item-1', sequence: 1, quantity: 5000, crafts: ['craft-pack'] }],
+      }),
+    );
+    dbMock.craft.findMany.mockResolvedValue([{
+      id: 'craft-pack',
+      isActive: true,
+      isOutsource: false,
+      defaultWorkerType: WorkerType.PACKER,
+      defaultMachineType: null,
+    }]);
+    dbMock.user.findMany.mockResolvedValue([
+      fixtureWorker('packer-1', { workerType: WorkerType.PACKER, machineType: null }),
+    ]);
+    dbMock.productionTask.createMany.mockResolvedValue({ count: 1 });
+    await scheduleOrder(
+      {
+        orderId: 'order-1',
+        assignments: [{
+          orderItemId: 'item-1',
+          craftId: 'craft-pack',
+          workerId: 'packer-1',
+        }],
+      },
+      foremanActor,
+    );
+    expect(dbMock.productionTask.createMany.mock.calls[0][0].data[0]).toEqual(
+      expect.objectContaining({
+        workerType: WorkerType.PACKER,
+        machineType: null,
+      }),
+    );
+  });
+
+  it('all-outsource order: zero tasks, linked outsource keeps it in SCHEDULING', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       fixtureOrder({
         items: [
@@ -424,6 +512,58 @@ describe('scheduleOrder', () => {
     expect(result.status).toBe(OrderStatus.SCHEDULING);
     expect(result.tasksCreated).toBe(0);
     expect(result.skippedOutsourceCrafts).toBe(1);
+  });
+
+  it('refuses to schedule outsource work before an outsource order is linked', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      fixtureOrder({
+        items: [{
+          id: 'item-1',
+          sequence: 1,
+          quantity: 5000,
+          crafts: ['craft-outsource'],
+        }],
+      }),
+    );
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.outsourceOrder.findMany.mockResolvedValue([]);
+    await expect(
+      scheduleOrder({ orderId: 'order-1', assignments: [] }, ownerActor),
+    ).rejects.toThrow(/先.*创建外协单/);
+  });
+
+  it('completes an outsource-only order immediately when all linked work is already received', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      fixtureOrder({
+        items: [{ id: 'item-1', sequence: 1, quantity: 5000, crafts: ['craft-outsource'] }],
+      }),
+    );
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.user.findMany.mockResolvedValue([]);
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      { id: 'outsource-1', status: OutsourceStatus.RECEIVED },
+    ]);
+    dbMock.productionTask.createMany.mockResolvedValue({ count: 0 });
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        status: OrderStatus.SCHEDULING,
+        requiresOutsource: true,
+      })
+      .mockResolvedValueOnce({ orderNo: 'O-OUT', customerRef: null });
+
+    const result = await scheduleOrder(
+      { orderId: 'order-1', assignments: [] },
+      ownerActor,
+    );
+    expect(result.status).toBe(OrderStatus.COMPLETED);
+    expect(result.orderCompleted).toBe(true);
+    expect(dbMock.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: OrderStatus.COMPLETED }),
+      }),
+    );
   });
 
   it('acquires a per-order advisory xact lock before reading (Codex round 37 / P0)', async () => {
@@ -509,7 +649,10 @@ describe('scheduleOrder', () => {
   it('scheduleOrder fires notify("ORDER_SCHEDULED") with orderNo + taskCount', async () => {
     dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
     dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
-    dbMock.user.findMany.mockResolvedValue([fixtureWorker('worker-1')]);
+    dbMock.user.findMany.mockResolvedValue([
+      fixtureWorker('worker-1'),
+      fixtureWorker('worker-2'),
+    ]);
     dbMock.productionTask.createMany.mockResolvedValue({ count: 2 });
     // post-tx findUnique 取 orderNo
     dbMock.order.findUnique.mockResolvedValue({ orderNo: 'O-42' });
@@ -519,7 +662,7 @@ describe('scheduleOrder', () => {
         orderId: 'order-1',
         assignments: [
           { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
-          { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-1' },
+          { orderItemId: 'item-1', craftId: 'craft-glue', workerId: 'worker-2' },
         ],
       },
       foremanActor,
@@ -562,6 +705,7 @@ function fixtureTask(
   overrides: Partial<{
     status: TaskStatus;
     workerId: string | null;
+    workerType: WorkerType | null;
     machineType: MachineType | null;
     plannedQty: number;
     orderStatus: OrderStatus;
@@ -579,6 +723,7 @@ function fixtureTask(
     id: 'task-1',
     status: TaskStatus.PENDING,
     workerId: 'worker-1',
+    workerType: WorkerType.MACHINE,
     machineType: MachineType.HAND_PRESS,
     plannedQty: 5000,
     ...taskLevel,
@@ -635,6 +780,21 @@ describe('beginTask', () => {
     expect(dbMock.productionTask.update).not.toHaveBeenCalled();
   });
 
+  it('refuses pickup when the assigned worker machine no longer matches', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(fixtureTask());
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'worker-1',
+      role: Role.WORKER,
+      isActive: true,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.GLUE,
+    });
+    await expect(beginTask('task-1', workerActor)).rejects.toThrow(
+      /岗位或机型不匹配.*改派/,
+    );
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
   it('serializes the task write on the per-ORDER cascade lock — the same key cancelOrder holds (A1 race guard)', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(fixtureTask());
     dbMock.productionTask.update.mockResolvedValue({
@@ -665,7 +825,7 @@ describe('beginTask', () => {
     expect(lockCallOrder).toBeLessThan(taskUpdateOrder);
   });
 
-  it('OWNER global override starts someone else\'s task', async () => {
+  it('ADMIN global override starts someone else\'s task', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(
       fixtureTask({ workerId: 'worker-OTHER' }),
     );
@@ -681,7 +841,7 @@ describe('beginTask', () => {
       id: 'order-1',
       status: OrderStatus.IN_PRODUCTION,
     });
-    const r = await beginTask('task-1', { id: 'o', role: Role.OWNER });
+    const r = await beginTask('task-1', { id: 'o', role: Role.ADMIN });
     expect(r.status).toBe(TaskStatus.IN_PROGRESS);
   });
 
@@ -791,6 +951,82 @@ describe('beginTask', () => {
   });
 });
 
+describe('reassignProductionTask', () => {
+  it('reassigns a PENDING task to a compatible active worker and logs it', async () => {
+    dbMock.productionTask.findUnique
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        orderItem: { orderId: 'order-1' },
+      })
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        status: TaskStatus.PENDING,
+        workerId: 'worker-old',
+        orderItem: { orderId: 'order-1', name: '款式 A', sequence: 1 },
+        craft: {
+          id: 'craft-foil',
+          isOutsource: false,
+          defaultWorkerType: WorkerType.MACHINE,
+          defaultMachineType: MachineType.WINDMILL,
+        },
+      });
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'worker-new',
+      displayName: '新师傅',
+      role: Role.WORKER,
+      isActive: true,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.WINDMILL,
+    });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      workerId: 'worker-new',
+      status: TaskStatus.PENDING,
+    });
+
+    const result = await reassignProductionTask(
+      'task-1',
+      'worker-new',
+      ownerActor,
+    );
+    expect(result.workerId).toBe('worker-new');
+    expect(dbMock.productionTask.update.mock.calls[0][0].data).toEqual({
+      workerId: 'worker-new',
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.WINDMILL,
+    });
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'TASK_REASSIGN' }),
+      }),
+    );
+  });
+
+  it('refuses to move an already-started task', async () => {
+    dbMock.productionTask.findUnique
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        orderItem: { orderId: 'order-1' },
+      })
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        status: TaskStatus.IN_PROGRESS,
+        workerId: 'worker-old',
+        orderItem: { orderId: 'order-1', name: '款式 A', sequence: 1 },
+        craft: {
+          id: 'craft-foil',
+          isOutsource: false,
+          defaultWorkerType: WorkerType.MACHINE,
+          defaultMachineType: MachineType.WINDMILL,
+        },
+      });
+    await expect(
+      reassignProductionTask('task-1', 'worker-new', ownerActor),
+    ).rejects.toThrow(/只有未开工任务/);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('reportTask', () => {
   const validInput = { completedQty: 4900, defectQty: 50, reworkQty: 50 };
 
@@ -810,13 +1046,46 @@ describe('reportTask', () => {
     ).rejects.toThrow(/只能报工分配给自己的任务/);
   });
 
-  it('refuses to report when task has no machineType', async () => {
+  it('refuses to report when a machine task has no machineType', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(
       fixtureTask({ status: TaskStatus.IN_PROGRESS, machineType: null }),
     );
     await expect(
       reportTask('task-1', validInput, workerActor),
-    ).rejects.toThrow(/不支持计件报工/);
+    ).rejects.toThrow(/缺少机型快照/);
+  });
+
+  it('completes a PACKER task without creating machine piecework', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        workerType: WorkerType.PACKER,
+        machineType: null,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+      }),
+    );
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+      { id: 'task-2', status: TaskStatus.PENDING },
+    ]);
+
+    const result = await reportTask('task-1', validInput, workerActor);
+    expect(result.pieceworkAmount).toBe('0.00');
+    expect(result.boardCount).toBe(0);
+    expect(result.pressCount).toBe(0);
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({
+        salaryRuleSnapshot: {
+          payrollMode: 'HOURLY',
+          workerType: WorkerType.PACKER,
+        },
+      }),
+    );
   });
 
   it('refuses to report a task cancelled with its order — no piecework computed (A1)', async () => {
@@ -1007,6 +1276,35 @@ describe('reportTask', () => {
 
     const r = await reportTask('task-1', validInput, workerActor);
     expect(r.orderCompleted).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('waits for linked outsource work after the final internal task completes', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+      requiresOutsource: true,
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      { id: 'outsource-1', status: OutsourceStatus.IN_PROGRESS },
+    ]);
+
+    const result = await reportTask('task-1', validInput, workerActor);
+    expect(result.orderCompleted).toBe(false);
     expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 

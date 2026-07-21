@@ -65,7 +65,12 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">采购明细</h2>
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="采购明细"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">

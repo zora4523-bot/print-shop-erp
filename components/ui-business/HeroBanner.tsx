@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-// 欢迎横幅——首页那条&ldquo;欢迎回来，老板&rdquo;的渐变红 banner，含右侧装饰位
+// 欢迎横幅——首页那条&ldquo;欢迎回来，管理员&rdquo;的渐变红 banner，含右侧装饰位
 // （screenshot 是印刷机 + 红包插画）。
 //
 // 视觉契约：左 title/subtitle + ctaLink 链接，右 decoration slot。

@@ -85,8 +85,8 @@ describe('PERMISSIONS map', () => {
     }
   });
 
-  it('OWNER-exclusive permissions are exactly [OWNER]', () => {
-    const ownerOnly: Permission[] = [
+  it('administrator-only permissions are exactly [ADMIN]', () => {
+    const adminOnly: Permission[] = [
       'order:cancel',
       'bill:view:all',
       'bill:mark-paid',
@@ -105,8 +105,8 @@ describe('PERMISSIONS map', () => {
       'account:manage',
       'report:all',
     ];
-    for (const perm of ownerOnly) {
-      expect(PERMISSIONS[perm], perm).toEqual([Role.OWNER]);
+    for (const perm of adminOnly) {
+      expect(PERMISSIONS[perm], perm).toEqual([Role.ADMIN]);
     }
   });
 
@@ -128,14 +128,13 @@ describe('requirePermission', () => {
   it.each([
     [Role.SALES, 'order:create'],
     [Role.CUSTOMER_SERVICE, 'order:create'],
-    [Role.OWNER, 'order:create'],
-    [Role.FOREMAN, 'order:create'],
-    [Role.OWNER, 'account:manage'],
+    [Role.ADMIN, 'order:create'],
+    [Role.ADMIN, 'account:manage'],
     [Role.WORKER, 'task:report'],
     [Role.WORKER, 'order:view:self'],
     [Role.WORKER, 'salary:view:self'],
-    [Role.OWNER, 'salary:rule:manage'],
-    [Role.FOREMAN, 'report:production'],
+    [Role.ADMIN, 'salary:rule:manage'],
+    [Role.ADMIN, 'report:production'],
   ] as const)('role %s is allowed for %s', async (role, perm) => {
     mockedGetSession.mockResolvedValue(session(role));
     const user = await requirePermission(perm);
@@ -145,7 +144,6 @@ describe('requirePermission', () => {
   it.each([
     [Role.WORKER, 'order:create'],
     [Role.SALES, 'account:manage'],
-    [Role.FOREMAN, 'account:manage'],
     [Role.CUSTOMER_SERVICE, 'salary:rule:manage'],
     [Role.WORKER, 'order:view:all'],
     [Role.SALES, 'task:report'],
@@ -155,26 +153,25 @@ describe('requirePermission', () => {
   });
 
   it('throws a plain Error (not Unauthorized) when permission key is unknown', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.OWNER));
+    mockedGetSession.mockResolvedValue(session(Role.ADMIN));
     // Bypass the compile-time guard to simulate a runtime bug.
     const badKey = 'does:not:exist' as Permission;
     await expect(requirePermission(badKey)).rejects.toThrow(/未定义的权限/);
   });
 
   it('returned user has id, role, username, displayName', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.OWNER, 'owner-42'));
+    mockedGetSession.mockResolvedValue(session(Role.ADMIN, 'owner-42'));
     const user = await requirePermission('account:manage');
     expect(user.id).toBe('owner-42');
     expect(user.username).toBe('test');
     expect(user.displayName).toBe('测试');
-    expect(user.role).toBe(Role.OWNER);
+    expect(user.role).toBe(Role.ADMIN);
   });
 });
 
 describe('requireOwnership', () => {
   const selfUser: SessionUser = { id: 'u-self', role: Role.SALES };
-  const ownerUser: SessionUser = { id: 'u-owner', role: Role.OWNER };
-  const foremanUser: SessionUser = { id: 'u-foreman', role: Role.FOREMAN };
+  const adminUser: SessionUser = { id: 'u-admin', role: Role.ADMIN };
 
   it('passes when the user is the owner (no global permission given)', async () => {
     const order = { submitterId: 'u-self' };
@@ -191,10 +188,7 @@ describe('requireOwnership', () => {
   it('passes when globalPermission grants access regardless of ownership', async () => {
     const order = { submitterId: 'u-other' };
     await expect(
-      requireOwnership(order, ownerUser, 'submitterId', 'order:view:all'),
-    ).resolves.toBeUndefined();
-    await expect(
-      requireOwnership(order, foremanUser, 'submitterId', 'order:view:all'),
+      requireOwnership(order, adminUser, 'submitterId', 'order:view:all'),
     ).resolves.toBeUndefined();
   });
 
@@ -207,12 +201,8 @@ describe('requireOwnership', () => {
 });
 
 describe('getOrderScopeFilter', () => {
-  it('OWNER sees all orders (empty filter)', () => {
-    expect(getOrderScopeFilter({ id: 'x', role: Role.OWNER })).toEqual({});
-  });
-
-  it('FOREMAN sees all orders (empty filter)', () => {
-    expect(getOrderScopeFilter({ id: 'x', role: Role.FOREMAN })).toEqual({});
+  it('ADMIN sees all orders (empty filter)', () => {
+    expect(getOrderScopeFilter({ id: 'x', role: Role.ADMIN })).toEqual({});
   });
 
   it('SALES sees only their own orders', () => {

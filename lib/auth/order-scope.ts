@@ -6,12 +6,12 @@ import { Role } from '../../generated/prisma/client';
 //
 // Returns a Prisma `where` fragment to apply to Order queries so role
 // visibility matches SPEC §2.2:
-//   - OWNER / FOREMAN: see every order
+//   - ADMIN: see every order
 //   - SALES / CUSTOMER_SERVICE: only their own submissions
 //   - WORKER: only orders whose items have a task assigned to them
 //   - unknown role: an impossible filter (hard-fail rather than leak)
 export function getOrderScopeFilter(user: { id: string; role: Role }) {
-  if (user.role === Role.OWNER || user.role === Role.FOREMAN) {
+  if (user.role === Role.ADMIN) {
     return {};
   }
   if (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) {

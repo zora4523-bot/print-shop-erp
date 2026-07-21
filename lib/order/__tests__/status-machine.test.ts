@@ -106,6 +106,7 @@ describe('canTransitionOrder spot-checks per SPEC §4.3', () => {
     [OrderStatus.DRAFT, OrderStatus.SUBMITTED, true],
     [OrderStatus.SUBMITTED, OrderStatus.SCHEDULING, true],
     [OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, true],
+    [OrderStatus.SCHEDULING, OrderStatus.COMPLETED, true],
     [OrderStatus.IN_PRODUCTION, OrderStatus.COMPLETED, true],
     [OrderStatus.COMPLETED, OrderStatus.SHIPPED, true],
     [OrderStatus.SHIPPED, OrderStatus.FINISHED, true],

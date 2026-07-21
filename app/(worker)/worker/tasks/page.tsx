@@ -4,7 +4,7 @@ import { requireSession } from '@/lib/auth/session';
 import { listWorkerTasks } from '@/lib/production';
 import { Badge } from '@/components/ui/badge';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { TaskStatus } from '@/generated/prisma/enums';
+import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
 import { EmptyState } from '@/components/ui-business';
 
 export const metadata = { title: '我的任务' };
@@ -26,7 +26,7 @@ export default async function WorkerTasksPage() {
         <EmptyState
           icon={Inbox}
           title="暂无待处理任务"
-          description="车间主管派工后会出现在这里。"
+          description="管理员派工后会出现在这里。"
         />
       ) : (
         <ul className="space-y-2">
@@ -63,7 +63,9 @@ export default async function WorkerTasksPage() {
                       {t.craft.name}
                       {t.machineType
                         ? ` · ${MACHINE_TYPE_LABELS[t.machineType] ?? t.machineType}`
-                        : ''}
+                        : t.workerType === WorkerType.MACHINE
+                          ? ' · 机型未配置'
+                          : ' · 时薪任务'}
                       {' · '}
                       {t.item.isDoubleSided ? '双面' : '单面'} ·{' '}
                       {t.item.isDoubleColor ? '双色' : '单色'}

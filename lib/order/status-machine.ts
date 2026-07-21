@@ -21,7 +21,13 @@ export class InvalidOrderTransitionError extends Error {
 export const ORDER_TRANSITIONS = {
   [OrderStatus.DRAFT]: [OrderStatus.SUBMITTED, OrderStatus.CANCELLED],
   [OrderStatus.SUBMITTED]: [OrderStatus.SCHEDULING, OrderStatus.CANCELLED],
-  [OrderStatus.SCHEDULING]: [OrderStatus.IN_PRODUCTION, OrderStatus.CANCELLED],
+  // Pure-outsource orders have no internal task to trigger IN_PRODUCTION;
+  // receiving the last outsource order completes them directly.
+  [OrderStatus.SCHEDULING]: [
+    OrderStatus.IN_PRODUCTION,
+    OrderStatus.COMPLETED,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.IN_PRODUCTION]: [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
   [OrderStatus.COMPLETED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
   [OrderStatus.SHIPPED]: [OrderStatus.FINISHED, OrderStatus.CANCELLED],
@@ -61,8 +67,8 @@ export function canAttachOutsource(status: OrderStatus): boolean {
     case OrderStatus.SUBMITTED:
     case OrderStatus.SCHEDULING:
     case OrderStatus.IN_PRODUCTION:
-    case OrderStatus.COMPLETED:
       return true;
+    case OrderStatus.COMPLETED:
     case OrderStatus.SHIPPED:
     case OrderStatus.FINISHED:
     case OrderStatus.CANCELLED:

@@ -7,7 +7,7 @@ test.describe('创建工单 — golden path', () => {
   // type 'void'" —— $queryRaw + pg_advisory_xact_lock 在 Prisma 7 不
   // 工作。776 个 mock 单测全没抓到。这个 E2E 是地基，确保 nextOrderNumber
   // 真正被 PG 调用过一次。
-  test('OWNER 填最少字段创建工单 → 跳到详情页', async ({ page }) => {
+  test('ADMIN 填最少字段创建工单 → 跳到详情页', async ({ page }) => {
     await login(page, { from: '/orders/new' });
     await expect(page).toHaveURL('/orders/new');
 
@@ -49,5 +49,6 @@ test.describe('创建工单 — golden path', () => {
       page.locator('dd', { hasText: customerRef }),
     ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('E2E 测试款式').first()).toBeVisible();
+    await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
   });
 });

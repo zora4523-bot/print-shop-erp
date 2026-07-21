@@ -126,6 +126,7 @@ export function PartiesTable({
               <AdminRowActions>
                 <Link
                   href={`/owner/parties/${party.id}`}
+                  prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >
                   编辑

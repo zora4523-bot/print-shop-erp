@@ -165,7 +165,7 @@ export async function getActiveCleanerHourlyRate(
 
 // COOK 空闲时间打包按 PACKER 时薪的独立规则（SPEC §5.4 "spare_pay =
 // attendance.spareHours * packer_rule.hourlyRate"）。单独一条规则
-// key 让老板可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
+// key 让管理员可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
 export async function getActiveCookSpareHourlyRate(
   now: Date = new Date(),
 ): Promise<number | null> {

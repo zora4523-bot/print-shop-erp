@@ -57,8 +57,13 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
           description="点击右上角&ldquo;新建周期&rdquo;为客服开启首个业绩周期。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="客服提成周期列表"
+          tabIndex={0}
+        >
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">客服</th>

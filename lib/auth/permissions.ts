@@ -37,7 +37,7 @@ export async function requirePermission(permission: Permission) {
 
 /**
  * 要求用户是资源所有者；如提供 globalPermission 且用户角色在该全局权限的白名单内，
- * 视为通过（典型场景：OWNER/FOREMAN 天生能看所有工单）。
+ * 视为通过（典型场景：ADMIN 天生能看所有工单）。
  */
 export async function requireOwnership<T extends Record<string, unknown>>(
   resource: T,

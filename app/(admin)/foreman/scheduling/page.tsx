@@ -30,14 +30,20 @@ export default async function SchedulingListPage() {
           description="销售 / 客服提交的工单会出现在这里等待排产。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="待排产工单列表"
+          tabIndex={0}
+        >
+          <table className="w-full min-w-[860px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
                 <th className="px-4 py-2 text-left">客户代号</th>
                 <th className="px-4 py-2 text-left">提交人</th>
                 <th className="px-4 py-2 text-left">提交时间</th>
+                <th className="px-4 py-2 text-left">承诺交期</th>
                 <th className="px-4 py-2 text-center">款式 / 工艺数</th>
                 <th className="px-4 py-2"></th>
               </tr>
@@ -64,6 +70,9 @@ export default async function SchedulingListPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {formatDateShanghai(o.submittedAt ?? o.createdAt, '-')}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {formatDateShanghai(o.promisedDate, '未设置')}
                     </td>
                     <td className="px-4 py-3 text-center font-sans tabular-nums text-xs">
                       {o.items.length} / {craftTotal}

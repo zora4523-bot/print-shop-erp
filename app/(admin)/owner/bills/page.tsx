@@ -7,7 +7,7 @@ import {
   BILL_STATUS_LABELS,
   ROLE_LABELS,
 } from '@/lib/auth/role-labels';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -17,6 +17,7 @@ import {
   PageHeader,
   StatCard,
   StatusBadge,
+  TableScrollArea,
 } from '@/components/ui-business';
 
 export const metadata = { title: '销售应收账单' };
@@ -113,7 +114,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="销售应收账单"
-        subtitle="月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位一条账单，老板发单后记录付款。"
+        subtitle="月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位一条账单，管理员发单后记录付款。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
@@ -168,7 +169,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
           }
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea
+          label="销售应收账单列表"
+          className="rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -217,7 +221,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );
@@ -247,8 +251,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="owner-bills-status" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="owner-bills-status"
           name="status"
           defaultValue={status ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -262,8 +267,9 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">周期</label>
+        <label htmlFor="owner-bills-period" className="text-xs text-muted-foreground">周期</label>
         <input
+          id="owner-bills-period"
           type="month"
           name="period"
           defaultValue={period ?? ''}
@@ -271,10 +277,11 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">
+        <label htmlFor="owner-bills-sales-user" className="text-xs text-muted-foreground">
           销售 / 客服 id (可选)
         </label>
         <input
+          id="owner-bills-sales-user"
           type="text"
           name="salesUserId"
           defaultValue={salesUserId ?? ''}
@@ -282,9 +289,9 @@ function FilterBar({
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button type="submit" className={buttonVariants({ size: 'sm' })}>
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/owner/bills"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

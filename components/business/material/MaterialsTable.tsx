@@ -148,6 +148,7 @@ export function MaterialsTable({
               <AdminRowActions>
                 <Link
                   href={`${editBase}/${m.id}`}
+                  prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >
                   编辑

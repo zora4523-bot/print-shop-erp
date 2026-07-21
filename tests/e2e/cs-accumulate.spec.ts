@@ -61,7 +61,7 @@ test.describe('CS 业绩累加 — golden path', () => {
     // pg numeric 序列化为带小数的字符串，"0" / "0.00" 都可能 —— 用 Number 比。
     expect(Number(before!.totalSales)).toBe(0);
 
-    await test.step('OWNER 登录账单页', async () => {
+    await test.step('ADMIN 登录账单页', async () => {
       await login(page, {
         from: '/owner/bills',
         username: ADMIN_USERNAME,

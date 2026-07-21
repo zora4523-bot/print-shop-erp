@@ -88,7 +88,7 @@ export async function issueBillAction(
   return { status: 'success' };
 }
 
-// Record a payment. `bill:mark-paid` is OWNER-only; salesUser never
+// Record a payment. `bill:mark-paid` is ADMIN-only; salesUser never
 // marks their own bills paid.
 export async function recordBillPaymentAction(
   billId: string,

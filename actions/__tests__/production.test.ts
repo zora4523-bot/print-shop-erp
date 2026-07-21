@@ -17,6 +17,7 @@ const {
     scheduleOrder: vi.fn(),
     beginTask: vi.fn(),
     reportTask: vi.fn(),
+    reassignProductionTask: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   MockSchedulingError: class extends Error {
@@ -62,6 +63,7 @@ vi.mock('@/lib/production', () => ({
   scheduleOrder: productionMock.scheduleOrder,
   beginTask: productionMock.beginTask,
   reportTask: productionMock.reportTask,
+  reassignProductionTask: productionMock.reassignProductionTask,
   SchedulingError: MockSchedulingError,
   ReportError: MockReportError,
   InvalidTaskTransitionError: MockInvalidTaskTransitionError,
@@ -76,6 +78,7 @@ import {
   scheduleOrderAction,
   beginTaskAction,
   reportTaskAction,
+  reassignProductionTaskAction,
 } from '../production';
 
 const workerActor = {
@@ -96,8 +99,8 @@ const fd = (data: Record<string, string>): FormData => {
 const foremanActor = {
   id: 'foreman-1',
   username: 'fm',
-  displayName: '车间主管',
-  role: Role.FOREMAN,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
@@ -107,6 +110,7 @@ beforeEach(() => {
   productionMock.scheduleOrder.mockReset();
   productionMock.beginTask.mockReset();
   productionMock.reportTask.mockReset();
+  productionMock.reassignProductionTask.mockReset();
   revalidatePathMock.mockReset();
 });
 
@@ -208,7 +212,7 @@ describe('scheduleOrderAction', () => {
     });
     await scheduleOrderAction(null, validPayload);
     const args = productionMock.scheduleOrder.mock.calls[0];
-    expect(args[1]).toMatchObject({ id: 'foreman-1', role: Role.FOREMAN });
+    expect(args[1]).toMatchObject({ id: 'foreman-1', role: Role.ADMIN });
   });
 });
 
@@ -253,6 +257,32 @@ describe('beginTaskAction', () => {
     expect(r.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks/task-1');
+  });
+});
+
+describe('reassignProductionTaskAction', () => {
+  it('requires task:assign and revalidates the order + worker task views', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    productionMock.reassignProductionTask.mockResolvedValue({
+      taskId: 'task-1',
+      workerId: 'worker-2',
+      status: 'PENDING',
+    });
+    const result = await reassignProductionTaskAction(
+      'task-1',
+      'order-1',
+      null,
+      fd({ workerId: 'worker-2' }),
+    );
+    expect(result).toEqual({ status: 'success', taskId: 'task-1' });
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:assign');
+    expect(productionMock.reassignProductionTask).toHaveBeenCalledWith(
+      'task-1',
+      'worker-2',
+      foremanActor,
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
   });
 });
 

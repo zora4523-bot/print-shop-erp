@@ -1,5 +1,28 @@
 import type { NextAuthConfig } from 'next-auth';
-import type { Role, WorkerType, MachineType } from '../../generated/prisma/client';
+import { Role } from '../../generated/prisma/enums';
+import type { WorkerType, MachineType } from '../../generated/prisma/client';
+
+type LegacyAdminRole = 'OWNER' | 'FOREMAN';
+
+// Existing JWT sessions can live for 30 days. During the role migration,
+// normalize legacy administrator claims so a deploy never locks out a signed-in
+// OWNER/FOREMAN before their browser receives a freshly issued ADMIN token.
+export function normalizeSessionRole(role: Role | LegacyAdminRole): Role {
+  return role === 'OWNER' || role === 'FOREMAN' ? Role.ADMIN : role;
+}
+
+const LEGACY_ADMIN_DISPLAY_NAMES = new Set(['老板', '车间主管']);
+
+// The original seed used role titles as personal display names. Only rewrite
+// those exact legacy defaults; real names and nicknames remain untouched.
+export function normalizeSessionDisplayName(
+  role: Role,
+  displayName: string,
+): string {
+  return role === Role.ADMIN && LEGACY_ADMIN_DISPLAY_NAMES.has(displayName)
+    ? '管理员'
+    : displayName;
+}
 
 // Module augmentations live here so the compiler picks them up from every
 // callsite that transitively imports the auth config (which is ~everywhere).
@@ -63,6 +86,15 @@ export const authConfigEdge = {
         token.role = user.role;
         token.workerType = user.workerType;
         token.machineType = user.machineType;
+      }
+      if (token.role) {
+        token.role = normalizeSessionRole(token.role as Role | LegacyAdminRole);
+      }
+      if (token.role && token.displayName) {
+        token.displayName = normalizeSessionDisplayName(
+          token.role,
+          token.displayName,
+        );
       }
       return token;
     },

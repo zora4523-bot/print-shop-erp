@@ -26,7 +26,12 @@ export function OrderMaterialUsageEstimate({
         </p>
       ) : (
         <div className="space-y-4">
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="工单物料用量估算"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">

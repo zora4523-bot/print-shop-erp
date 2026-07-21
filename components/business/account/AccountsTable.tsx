@@ -64,6 +64,7 @@ export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
             <TableCell>
               <Link
                 href={`/owner/accounts/${a.id}`}
+                prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >
                 编辑

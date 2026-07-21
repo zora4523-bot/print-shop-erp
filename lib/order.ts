@@ -102,7 +102,7 @@ export async function createOrder(
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as OrderTxClient;
 
-    // (1) allocate a fresh YYYYMMDD-XXXX (advisory lock inside).
+    // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
 
     // (2) craft FK + activation check — surfaces a clean invariant error
@@ -381,8 +381,8 @@ export async function submitOrder(
     now,
     authz: (order) => {
       // 'order:create' permission lets SALES / CS create AND submit — but
-      // only for their own rows. OWNER / FOREMAN keep the global override.
-      const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+      // only for their own rows. ADMIN keeps the global override.
+      const globalOverride = actor.role === Role.ADMIN;
       if (!globalOverride && order.submitterId !== actor.id) {
         throw new OrderInvariantError('只能提交自己创建的工单');
       }
@@ -422,8 +422,8 @@ export async function submitOrder(
       },
       { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
     );
-    // SPEC §8.1：急单提交 → 排产群+老板群（独立 rule，独立事件）。
-    // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，老板群从 URGENT_ORDER
+    // SPEC §8.1：急单提交 → 排产群+管理员群（独立 rule，独立事件）。
+    // 不是&ldquo;替代&rdquo; ORDER_SUBMITTED——两条都触发，管理员群从 URGENT_ORDER
     // 看到，排产群从 ORDER_SUBMITTED 看到。
     if (payload.isUrgent) {
       await dispatchNotification(
@@ -448,7 +448,7 @@ export async function cancelOrder(
   reason: string | null,
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
-  // The action-layer `requirePermission('order:cancel')` is OWNER-only, so
+  // The action-layer `requirePermission('order:cancel')` is ADMIN-only, so
   // there's no additional ownership guard to run here.
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
     remark: reason ? `取消：${reason}` : '取消工单',
@@ -531,7 +531,7 @@ export async function cancelOrder(
   });
 }
 
-// COMPLETED → SHIPPED. Permission `order:ship` (OWNER + FOREMAN) is
+// COMPLETED → SHIPPED. Permission `order:ship` (ADMIN) is
 // enforced at the action layer. Optional trackingNo lands on the same
 // Order row via the transition's extraData so the audit OrderLog and
 // the trackingNo write are atomic.
@@ -554,6 +554,22 @@ export async function shipOrder(
       remark: tracking ? `发货：${tracking}` : '标记发货',
       now,
       extraData: tracking !== null ? { trackingNo: tracking } : undefined,
+      cascade: async (tx, id) => {
+        const liveOutsource = await tx.outsourceOrder.findMany({
+          where: {
+            orderId: id,
+            status: {
+              in: [OutsourceStatus.SENT, OutsourceStatus.IN_PROGRESS],
+            },
+          },
+          select: { id: true },
+        });
+        if (liveOutsource.length > 0) {
+          throw new OrderInvariantError(
+            '该工单仍有已发送或进行中的外协单，收货或取消后才能发货',
+          );
+        }
+      },
     },
   );
 
@@ -583,7 +599,7 @@ export async function shipOrder(
 
 // SHIPPED → FINISHED (terminal). The ledger close — used after delivery
 // is acknowledged so the order leaves the active workspace. Same
-// `order:ship` permission gate at the action layer (OWNER + FOREMAN);
+// `order:ship` permission gate at the action layer (ADMIN);
 // no separate `order:finish` permission since today there's no business
 // rule that distinguishes the two transitions' authority.
 export async function finishOrder(
@@ -743,10 +759,10 @@ export async function updateOrderFields(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
 
-    // SALES / CUSTOMER_SERVICE can only edit their own orders. OWNER /
-    // FOREMAN have a global override so they can correct field data for
+    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN /
+    // ADMIN have a global override so they can correct field data for
     // anyone. Same pattern as submitOrder's ownership guard.
-    const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+    const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && order.submitterId !== actor.id) {
       throw new OrderInvariantError('只能修改自己创建的工单');
     }
@@ -886,7 +902,7 @@ export async function listOrders(
   });
 
   const pieceworkByOrder = new Map<string, string>();
-  if (user.role === Role.OWNER && rows.length > 0) {
+  if (user.role === Role.ADMIN && rows.length > 0) {
     const totals = await db.dailyWorkerSalaryItem.groupBy({
       by: ['orderId'],
       where: { orderId: { in: rows.map((row) => row.id) } },
@@ -902,7 +918,7 @@ export async function listOrders(
   const withPiecework = rows.map((row) => ({
     ...row,
     pieceworkCost:
-      user.role === Role.OWNER ? pieceworkByOrder.get(row.id) ?? '0.00' : null,
+      user.role === Role.ADMIN ? pieceworkByOrder.get(row.id) ?? '0.00' : null,
   }));
 
   return sortBySearchRelevance(withPiecework, query, (row) => ({
@@ -947,6 +963,10 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
         include: {
           operator: { select: { displayName: true, role: true } },
         },
+      },
+      outsourceOrders: {
+        select: { id: true, status: true },
+        orderBy: { createdAt: 'desc' },
       },
       submitter: {
         select: { id: true, displayName: true, username: true, role: true },

@@ -11,6 +11,8 @@ import type {
   SchedulingViewCandidate,
 } from '@/lib/production';
 import type { MachineType } from '@/generated/prisma/enums';
+import { WorkerType } from '@/generated/prisma/enums';
+import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 
 type Props = {
   view: SchedulingView;
@@ -51,6 +53,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
       craftName: string;
       isOutsource: boolean;
       recommendedMachine: MachineType | null;
+      requiredWorkerType: WorkerType | null;
     }> = [];
     for (const item of view.items) {
       for (const craft of item.crafts) {
@@ -62,6 +65,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
           craftId: craft.id,
           craftName: craft.name,
           isOutsource: craft.isOutsource,
+          requiredWorkerType: craft.defaultWorkerType,
           recommendedMachine: craft.defaultMachineType,
         });
       }
@@ -70,10 +74,15 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
   }, [view.items]);
 
   const nonOutsourceRows = rows.filter((r) => !r.isOutsource);
+  const assignmentIndexByKey = new Map(
+    nonOutsourceRows.map((row, index) => [rowKey(row.itemId, row.craftId), index]),
+  );
   const allAssigned = nonOutsourceRows.every(
     (r) => assignments[rowKey(r.itemId, r.craftId)],
   );
-  const missingWorkers = view.workers.length === 0 && nonOutsourceRows.length > 0;
+  const missingWorkers = nonOutsourceRows.some(
+    (row) => eligibleWorkers(view.workers, row).length === 0,
+  );
 
   function handleSubmit() {
     const payload = {
@@ -89,19 +98,27 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
 
   return (
     <div className="space-y-6">
-      <table className="w-full border-separate border-spacing-0 text-sm">
+      <div
+        className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="工艺派工表"
+        tabIndex={0}
+      >
+      <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
         <thead>
           <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
             <th className="border-b px-3 py-2 text-left">款式</th>
             <th className="border-b px-3 py-2 text-left">工艺</th>
-            <th className="border-b px-3 py-2 text-left">推荐机型</th>
+            <th className="border-b px-3 py-2 text-left">所需岗位 / 机型</th>
             <th className="border-b px-3 py-2 text-left">派工</th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {rows.map((r) => {
             const key = rowKey(r.itemId, r.craftId);
-            const err = fieldError(state, key);
+            const assignmentIndex = assignmentIndexByKey.get(key);
+            const err = fieldError(state, assignmentIndex);
+            const candidates = eligibleWorkers(view.workers, r);
             return (
               <tr key={key} className="align-top">
                 <td className="px-3 py-2">
@@ -116,9 +133,12 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                 <td className="px-3 py-2">
                   {r.isOutsource ? (
                     <span className="text-xs text-warning-foreground">外协</span>
-                  ) : r.recommendedMachine ? (
+                  ) : r.requiredWorkerType ? (
                     <span className="text-xs">
-                      {machineTypeLabels[r.recommendedMachine] ?? r.recommendedMachine}
+                      {WORKER_TYPE_LABELS[r.requiredWorkerType] ?? r.requiredWorkerType}
+                      {r.recommendedMachine
+                        ? ` · ${machineTypeLabels[r.recommendedMachine] ?? r.recommendedMachine}`
+                        : ''}
                     </span>
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
@@ -131,7 +151,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                     </span>
                   ) : (
                     <WorkerSelect
-                      workers={view.workers}
+                      workers={candidates}
                       machineTypeLabels={machineTypeLabels}
                       recommendedMachine={r.recommendedMachine}
                       value={assignments[key] ?? ''}
@@ -141,6 +161,11 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                       invalid={err.length > 0}
                     />
                   )}
+                  {!r.isOutsource && candidates.length === 0 ? (
+                    <p className="mt-1 text-xs text-destructive">
+                      没有岗位与机型匹配的启用师傅
+                    </p>
+                  ) : null}
                   {err.length > 0 ? (
                     <p className="mt-1 text-xs text-destructive">{err[0]}</p>
                   ) : null}
@@ -150,15 +175,33 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
           })}
         </tbody>
       </table>
+      </div>
+
+      {rows.some((row) => row.isOutsource) ? (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+          该工单包含外协工艺。确认排产前必须先创建外协单，外协收货会与内部任务共同决定工单是否完工。
+          <Link
+            href={`/foreman/outsource/new?orderId=${view.orderId}`}
+            className="ml-2 font-medium text-primary underline"
+          >
+            创建外协单
+          </Link>
+        </div>
+      ) : null}
 
       {missingWorkers ? (
         <p role="alert" className="text-sm text-warning-foreground">
-          暂无启用师傅，无法完成排产；请联系老板在用户管理中创建或启用师傅账号。
+          存在没有匹配师傅的工艺；请先在账号管理中启用对应岗位和机型的师傅。
         </p>
       ) : null}
 
       {state?.status === 'error' ? (
         <p className="text-sm text-destructive">{state.message}</p>
+      ) : null}
+      {state?.status === 'invalid' ? (
+        <div role="alert" className="text-sm text-destructive">
+          排产数据校验失败：{firstValidationMessage(state.fieldErrors)}
+        </div>
       ) : null}
 
       <div className="flex items-center gap-3">
@@ -185,14 +228,29 @@ function rowKey(itemId: string, craftId: string): RowKey {
   return `${itemId}:${craftId}`;
 }
 
-function fieldError(state: ScheduleOrderResult | null, dottedKey: string): string[] {
+function fieldError(
+  state: ScheduleOrderResult | null,
+  assignmentIndex: number | undefined,
+): string[] {
   if (!state || state.status !== 'invalid') return [];
-  // Zod errors come back as dotted paths from the server
-  // (assignments.<index>.workerId). We don't know our index at render
-  // time, but the server rarely rejects individual pairs — usually the
-  // whole payload fails with a single `_` key or one specific row.
-  // Fall back to the generic message if no direct hit.
-  return state.fieldErrors[dottedKey] ?? [];
+  if (assignmentIndex === undefined) return [];
+  return state.fieldErrors[`assignments.${assignmentIndex}.workerId`] ?? [];
+}
+
+function firstValidationMessage(errors: Record<string, string[]>): string {
+  return Object.values(errors).flat()[0] ?? '请检查每一项派工。';
+}
+
+function eligibleWorkers(
+  workers: SchedulingViewCandidate[],
+  row: { requiredWorkerType: WorkerType | null; recommendedMachine: MachineType | null },
+) {
+  return workers.filter(
+    (worker) =>
+      worker.workerType === row.requiredWorkerType &&
+      (row.requiredWorkerType !== WorkerType.MACHINE ||
+        worker.machineType === row.recommendedMachine),
+  );
 }
 
 function WorkerSelect({
@@ -228,9 +286,11 @@ function WorkerSelect({
       <option value="">选择师傅…</option>
       {sorted.map((w) => {
         const match = w.machineType === recommendedMachine;
-        const tag = w.machineType
-          ? `（${machineTypeLabels[w.machineType] ?? w.machineType}${match ? '，推荐' : ''}）`
+        const job = w.workerType ? WORKER_TYPE_LABELS[w.workerType] : '未配岗';
+        const machine = w.machineType
+          ? ` · ${machineTypeLabels[w.machineType] ?? w.machineType}`
           : '';
+        const tag = `（${job}${machine}${match ? '，匹配' : ''}；待办 ${w.pendingTaskCount} / 进行中 ${w.inProgressTaskCount}）`;
         return (
           <option key={w.id} value={w.id}>
             {w.displayName}

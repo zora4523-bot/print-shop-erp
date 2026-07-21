@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { getSchedulingView } from '@/lib/production';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
@@ -25,7 +25,7 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
   }
   // getSchedulingView would have returned null (handled above) but the
   // compiler can't infer that after redirect. Narrow explicitly.
-  if (!view.items.length) notFound();
+  if (!view.items.length) redirect('/foreman/scheduling');
 
   return (
     <div className="space-y-6">

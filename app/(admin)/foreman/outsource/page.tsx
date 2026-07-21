@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import { TableScrollArea } from '@/components/ui-business';
 
 export const metadata = { title: '外协单' };
 
@@ -37,7 +38,10 @@ export default async function OutsourceListPage() {
           暂无外协单。
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea
+          label="外协单列表"
+          className="rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -86,7 +90,7 @@ export default async function OutsourceListPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );

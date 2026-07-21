@@ -3,6 +3,7 @@
 import { useActionState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { generateBillsAction } from '@/actions/bill';
 import type { GenerateBillsResult } from '@/actions/bill.types';
 
@@ -25,18 +26,22 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
       }}
       className="space-y-2"
     >
-      <div className="flex items-center gap-3">
-        <Input
-          type="month"
-          name="period"
-          defaultValue={defaultPeriod}
-          className="max-w-[180px]"
-        />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label htmlFor="generate-bills-period">账单周期</Label>
+          <Input
+            id="generate-bills-period"
+            type="month"
+            name="period"
+            defaultValue={defaultPeriod}
+            className="max-w-45"
+          />
+        </div>
         <Button type="submit" disabled={pending}>
           {pending ? '生成中…' : '生成 / 追加月账单'}
         </Button>
         {state?.status === 'success' ? (
-          <span className="text-xs text-muted-foreground">
+          <span role="status" className="text-xs text-muted-foreground">
             {state.period} 已生成 {state.generatedCount} 条
             {state.errorCount > 0 ? ` · ${state.errorCount} 个失败` : ''}
           </span>
@@ -52,10 +57,10 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
         </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
-        <p className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {Object.values(state.fieldErrors).flat().join('；')}
         </p>
       ) : null}

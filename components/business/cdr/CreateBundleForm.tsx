@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
+import { Button } from '@/components/ui/button';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type EligibleOrder = {
@@ -86,7 +87,12 @@ export function CreateBundleForm({
           所选日期窗口内没有含 CDR 文件的工单。
         </div>
       ) : (
-        <div className="overflow-hidden rounded-md border">
+        <div
+          className="overflow-x-auto rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="CDR 打包工单选择"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -146,13 +152,12 @@ export function CreateBundleForm({
       )}
 
       <div className="flex items-center justify-between">
-        <button
+        <Button
           type="submit"
           disabled={isPending || selected.size === 0}
-          className="rounded-md border bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isPending ? '生成中…' : '生成下载包'}
-        </button>
+        </Button>
         {state?.status === 'error' ? (
           <p className="text-sm text-destructive">{state.message}</p>
         ) : null}

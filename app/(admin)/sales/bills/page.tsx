@@ -4,7 +4,7 @@ import { CheckCircle2, Inbox, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
@@ -13,6 +13,7 @@ import {
   PageHeader,
   StatCard,
   StatusBadge,
+  TableScrollArea,
 } from '@/components/ui-business';
 
 export const metadata = { title: '我的应收账单' };
@@ -78,7 +79,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="我的应收账单"
-        subtitle="月度账单由老板生成 / 发单 / 录入付款，这里只读展示你的进度。"
+        subtitle="月度账单由管理员生成 / 发单 / 录入付款，这里只读展示你的进度。"
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -104,10 +105,13 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
         <EmptyState
           icon={Inbox}
           title="当前筛选条件下暂无账单"
-          description="月初老板生成后会出现在这里。"
+          description="月初管理员生成后会出现在这里。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea
+          label="我的应收账单列表"
+          className="rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -154,7 +158,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );
@@ -180,8 +184,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="sales-bills-status" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="sales-bills-status"
           name="status"
           defaultValue={status ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -195,17 +200,18 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">周期</label>
+        <label htmlFor="sales-bills-period" className="text-xs text-muted-foreground">周期</label>
         <input
+          id="sales-bills-period"
           type="month"
           name="period"
           defaultValue={period ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button type="submit" className={buttonVariants({ size: 'sm' })}>
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/sales/bills"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

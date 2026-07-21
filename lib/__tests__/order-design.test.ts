@@ -50,7 +50,7 @@ const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const goodKey = `design/o1/i1/image-${UUID}.jpg`;
 
 const salesActor = { id: 'sales1', role: Role.SALES };
-const ownerActor = { id: 'owner1', role: Role.OWNER };
+const ownerActor = { id: 'owner1', role: Role.ADMIN };
 
 const baseInput = {
   orderId: 'o1',
@@ -89,7 +89,7 @@ beforeEach(() => {
 });
 
 describe('assertCanUploadDesign', () => {
-  it('款式不存在 / 非 DRAFT / 非本人 → 拒绝；OWNER 放行', async () => {
+  it('款式不存在 / 非 DRAFT / 非本人 → 拒绝；ADMIN 放行', async () => {
     dbMock.orderItem.findFirst.mockResolvedValue(null);
     await expect(
       assertCanUploadDesign('o1', 'i1', salesActor),

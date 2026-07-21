@@ -42,14 +42,14 @@ export default function ShowcasePage() {
 
       <Section title="HeroBanner">
         <HeroBanner
-          title="欢迎回来，老板"
+          title="欢迎回来，管理员"
           subtitle="今日 23 单提交、12 单待排产、5 单已完工待发货。"
           cta={
             <a
               href="/owner"
               className="text-sm font-medium text-primary underline-offset-2 hover:underline"
             >
-              进入老板看板 →
+              进入管理员看板 →
             </a>
           }
         />

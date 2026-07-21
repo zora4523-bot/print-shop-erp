@@ -11,68 +11,68 @@ import { Role } from '../../generated/prisma/enums';
 
 export const PERMISSIONS = {
   // 工单
-  'order:create':               [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:update:post-schedule': [Role.OWNER, Role.FOREMAN],
-  'order:view:all':             [Role.OWNER, Role.FOREMAN],
+  'order:create':               [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:update:post-schedule': [Role.ADMIN],
+  'order:view:all':             [Role.ADMIN],
   'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
-  'order:schedule':             [Role.OWNER, Role.FOREMAN],
-  'order:ship':                 [Role.OWNER, Role.FOREMAN],
-  'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:cancel':               [Role.OWNER],
+  'order:schedule':             [Role.ADMIN],
+  'order:ship':                 [Role.ADMIN],
+  'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:cancel':               [Role.ADMIN],
 
   // 生产任务
-  'task:assign':                [Role.OWNER, Role.FOREMAN],
+  'task:assign':                [Role.ADMIN],
   'task:report':                [Role.WORKER],
 
   // 外协
-  'outsource:manage':           [Role.OWNER, Role.FOREMAN],
+  'outsource:manage':           [Role.ADMIN],
 
   // 设计文件
-  'design:upload':              [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'design:bundle:create':       [Role.OWNER, Role.FOREMAN],
+  'design:upload':              [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'design:bundle:create':       [Role.ADMIN],
 
   // 物料
-  'material:manage':            [Role.OWNER, Role.FOREMAN],
-  'material:issue':             [Role.OWNER, Role.FOREMAN, Role.WORKER],
+  'material:manage':            [Role.ADMIN],
+  'material:issue':             [Role.ADMIN, Role.WORKER],
 
   // 采购
-  'purchase:manage':            [Role.OWNER],
+  'purchase:manage':            [Role.ADMIN],
 
   // 仓库 / 库位
-  'warehouse:manage':           [Role.OWNER],
+  'warehouse:manage':           [Role.ADMIN],
 
   // 账单
-  'bill:view:all':              [Role.OWNER],
+  'bill:view:all':              [Role.ADMIN],
   'bill:view:self':             [Role.SALES, Role.CUSTOMER_SERVICE],
-  'bill:mark-paid':             [Role.OWNER],
+  'bill:mark-paid':             [Role.ADMIN],
 
   // 薪资
-  'salary:view:all':            [Role.OWNER],
+  'salary:view:all':            [Role.ADMIN],
   'salary:view:self':           [Role.CUSTOMER_SERVICE, Role.WORKER],
-  'salary:view:team':           [Role.FOREMAN],
-  'salary:rule:manage':         [Role.OWNER],
+  'salary:view:team':           [Role.ADMIN],
+  'salary:rule:manage':         [Role.ADMIN],
 
   // 字典管理
-  'party:manage':               [Role.OWNER],
-  'dict:product:manage':        [Role.OWNER],
-  'dict:craft:manage':          [Role.OWNER],
-  'dict:price:manage':          [Role.OWNER],
-  'bom:manage':                 [Role.OWNER],
+  'party:manage':               [Role.ADMIN],
+  'dict:product:manage':        [Role.ADMIN],
+  'dict:craft:manage':          [Role.ADMIN],
+  'dict:price:manage':          [Role.ADMIN],
+  'bom:manage':                 [Role.ADMIN],
 
   // 推送
-  'notification:config':        [Role.OWNER],
+  'notification:config':        [Role.ADMIN],
 
   // 运维
-  'ops:pigsty:view':            [Role.OWNER],
-  'ops:jobs:manage':            [Role.OWNER],
+  'ops:pigsty:view':            [Role.ADMIN],
+  'ops:jobs:manage':            [Role.ADMIN],
 
   // 账号管理
-  'account:manage':             [Role.OWNER],
+  'account:manage':             [Role.ADMIN],
 
   // 报表
-  'report:all':                 [Role.OWNER],
-  'report:production':          [Role.OWNER, Role.FOREMAN],
+  'report:all':                 [Role.ADMIN],
+  'report:production':          [Role.ADMIN],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

@@ -28,8 +28,8 @@ const signDesignUploadSchema = z.object({
 
 export async function signDesignUploadAction(raw: unknown): Promise<SignUploadResult> {
   // Open to every role that can create / edit orders + their designs.
-  // Per SPEC §2.2 'design:upload' covers SALES / CUSTOMER_SERVICE / OWNER
-  // / FOREMAN.
+  // Per SPEC §2.2 'design:upload' covers SALES / CUSTOMER_SERVICE / ADMIN
+  // / ADMIN.
   const user = await requirePermission('design:upload');
 
   const parsed = signDesignUploadSchema.safeParse(raw);

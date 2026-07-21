@@ -22,7 +22,7 @@
 - PR-8：分区维护预检已开始落地，`app_ops.partition_readiness` 给出 `pg_partman` 候选表、阻塞项和运维 SQL。
 - PR-9：脱敏与审计预检已开始落地，`app_ops.sensitive_column_*` 和 `app_ops.security_*_readiness` 给出 `anon` / `pgaudit` 策略、阻塞项和运维 SQL。
 - PR-10：调度与观测预检已开始落地，`app_ops.cron_http_job_*` 和 `app_ops.query_observability_*` 给出 `pg_cron` / `pg_net` / `pg_stat_statements` / `auto_explain` / `index_advisor` 的启用状态、阻塞项和运维 SQL。
-- 后台入口：`/owner/pigsty` 已接入 OWNER 菜单，集中展示扩展 readiness、推荐步骤、cron SQL、查询诊断 SQL、脱敏审计策略和分区维护 SQL。
+- 后台入口：`/owner/pigsty` 已接入 ADMIN 菜单，集中展示扩展 readiness、推荐步骤、cron SQL、查询诊断 SQL、脱敏审计策略和分区维护 SQL。
 - A08：生产启用 runbook 已落地到 `docs/pigsty-production-activation-runbook.md`，覆盖扩展安装、preload/restart、readiness SQL、cron 启用和回滚。
 
 本轮实现的目标不是在生产库里自动启用所有扩展。当前代码侧已经固化：
@@ -215,7 +215,7 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 - 入库/出库后看板实时变化。
 - 写入成本可接受；如果批量导入变慢，提供禁用/重建视图的运维指引。
 - 未安装或未 preload `pg_ivm` 的本地开发库仍可用普通 view 运行读路径。
-- 车间主管从侧边栏“物料”进入 `/foreman/materials`，能按编码、名称、规格、单位、全拼和简拼搜索。
+- 管理员从侧边栏“物料”进入 `/foreman/materials`，能按编码、名称、规格、单位、全拼和简拼搜索。
 - `/owner/pigsty` 能看到物料搜索 readiness 和 EXPLAIN SQL。
 
 ### PR-8：流水与日志分区（pg_partman）
@@ -269,9 +269,9 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 - 新增 `app_ops.cron_http_job_readiness`，按 job 输出 `cron.schedule(...)` + `net.http_post(...)` SQL、手工 `curl` 兜底命令、阻塞项和是否可调度。
 - 调度 SQL 不写死真实域名和 secret；Pigsty/PostgreSQL 侧通过 `app.erp_base_url` 和 `app.cron_secret` 自定义 GUC 注入。
 - 新增 `app_ops.ops_extension_readiness`，检查 `pg_cron`、`pg_net`、`pg_stat_statements`、`auto_explain`、`index_advisor` 的可用性、安装状态、preload 状态和配置项。
-- 新增 `app_ops.query_observation_candidate` / `app_ops.query_observability_readiness`，登记工单搜索、商品搜索、老板 Dashboard、账单列表、库存看板、薪资汇总的诊断入口。
+- 新增 `app_ops.query_observation_candidate` / `app_ops.query_observability_readiness`，登记工单搜索、商品搜索、管理员 Dashboard、账单列表、库存看板、薪资汇总的诊断入口。
 - 新增 `lib/ops-readiness.ts`，后台 `/owner/pigsty` 直接读取调度/观测 readiness。
-- 新增 OWNER-only `/owner/pigsty` 运维页，展示扩展状态、推荐步骤、cron 调度 SQL、取消 SQL、手工 curl 和查询诊断 SQL。
+- 新增 ADMIN-only `/owner/pigsty` 运维页，展示扩展状态、推荐步骤、cron 调度 SQL、取消 SQL、手工 curl 和查询诊断 SQL。
 - 不在 migration 里直接调用 `cron.schedule`，避免开发库或未配置 secret 的生产库自动开始执行任务。
 
 验收：
@@ -280,7 +280,7 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 - `pg_stat_statements` 未 preload、`compute_query_id` 未启用时，查询诊断 readiness 明确报告 blocker。
 - `auto_explain` 只作为诊断窗口使用，建议关闭参数日志或设置 `auto_explain.log_parameter_max_length = 0`，避免薪资/客户信息进入 PG 日志。
 - `index_advisor` 只用于诊断环境输出建议，不直接把建议索引自动写进生产 migration。
-- `/owner/pigsty` 受 `ops:pigsty:view` 权限保护；未登录访问跳转登录，非 OWNER 不出现在菜单里。
+- `/owner/pigsty` 受 `ops:pigsty:view` 权限保护；未登录访问跳转登录，非 ADMIN 不出现在菜单里。
 - readiness 相关 migration 未应用时，页面显示具体错误面板，不应 500。
 
 ## 迁移约束

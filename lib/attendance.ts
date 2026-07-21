@@ -3,7 +3,7 @@ import { Role, WorkerType } from '../generated/prisma/enums';
 import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
 
-// 时薪工考勤 (PACKER / CLEANER / COOK) — MVP 车间主管每日录入三个小时
+// 时薪工考勤 (PACKER / CLEANER / COOK) — MVP 管理员每日录入三个小时
 // 数字。请假 = 没有行（删除或不录即可）。WORK_HOURS 规则仅用于录入
 // UI 的"全勤"快速填 hint，不在后端再做任何时段派生。
 
@@ -69,7 +69,7 @@ export type AttendanceRow = {
 };
 
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
-// the previous row. 车间主管可能早上快速录"全勤"再下午细调，这里必须
+// the previous row. 管理员可能早上快速录"全勤"再下午细调，这里必须
 // 宽松（注意事项 2 — 幂等）。
 export async function recordAttendance(
   workerId: string,

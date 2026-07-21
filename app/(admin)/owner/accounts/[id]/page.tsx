@@ -75,7 +75,7 @@ export default async function EditAccountPage({ params }: PageProps) {
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
           {account.isActive
-            ? '停用后该账号无法登录；历史记录全部保留。不能停用自己，也不能停用最后一位活跃 OWNER。'
+            ? '停用后该账号无法登录；历史记录全部保留。不能停用自己，也不能停用最后一位活跃管理员。'
             : '激活后该账号可重新登录。'}
         </p>
         <ToggleActiveButton userId={account.id} currentlyActive={account.isActive} />

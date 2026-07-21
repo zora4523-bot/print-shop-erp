@@ -3,11 +3,14 @@ import {
   OrderStatus,
   OutsourceStatus,
   Role,
+  TaskStatus,
 } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
-    order: { findUnique: vi.fn() },
+    order: { findUnique: vi.fn(), update: vi.fn() },
+    productionTask: { findMany: vi.fn() },
+    orderLog: { create: vi.fn() },
     outsourceOrder: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -24,6 +27,12 @@ const { dbMock } = vi.hoisted(() => {
   return { dbMock: mock };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/notification/dispatch', () => ({
+  dispatchNotification: notifyMock,
+}));
 
 import {
   createOutsourceOrder,
@@ -33,12 +42,15 @@ import {
   InvalidOutsourceTransitionError,
 } from '../outsource';
 
-const foremanActor = { id: 'foreman-1', role: Role.FOREMAN };
+const foremanActor = { id: 'foreman-1', role: Role.ADMIN };
 
 beforeEach(() => {
   dbMock.order.findUnique.mockReset().mockResolvedValue({
     status: OrderStatus.IN_PRODUCTION,
   });
+  dbMock.order.update.mockReset().mockResolvedValue({});
+  dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.outsourceOrder.findUnique.mockReset();
   dbMock.outsourceOrder.findMany.mockReset();
   dbMock.outsourceOrder.create.mockReset();
@@ -49,6 +61,7 @@ beforeEach(() => {
       return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
   });
+  notifyMock.mockReset().mockResolvedValue(undefined);
 });
 
 const baseInput = {
@@ -102,6 +115,7 @@ describe('createOutsourceOrder', () => {
   });
 
   it.each([
+    OrderStatus.COMPLETED,
     OrderStatus.SHIPPED,
     OrderStatus.FINISHED,
     OrderStatus.CANCELLED,
@@ -118,7 +132,6 @@ describe('createOutsourceOrder', () => {
     OrderStatus.SUBMITTED,
     OrderStatus.SCHEDULING,
     OrderStatus.IN_PRODUCTION,
-    OrderStatus.COMPLETED,
   ])('allows outsource creation when order status is %s', async (status) => {
     dbMock.order.findUnique.mockResolvedValue({ status });
     dbMock.outsourceOrder.create.mockResolvedValue({ id: 'o1' });
@@ -193,6 +206,77 @@ describe('markOutsourceReceived', () => {
     expect(dbMock.outsourceOrder.update.mock.calls[0][0].data.actualDate).toBe(
       actualDate,
     );
+  });
+
+  it('completes a pure-outsource order when the final outsource row is received', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      orderId: 'order-1',
+      status: OutsourceStatus.SENT,
+    });
+    dbMock.outsourceOrder.update.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      { id: 'outsource-1', status: OutsourceStatus.RECEIVED },
+    ]);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        status: OrderStatus.SCHEDULING,
+        requiresOutsource: true,
+      })
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        orderNo: 'O-OUT',
+        customerRef: null,
+      });
+
+    const result = await markOutsourceReceived(
+      'outsource-1',
+      { actualDate: null },
+      foremanActor,
+    );
+    expect(result.orderCompleted).toBe(true);
+    expect(dbMock.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: OrderStatus.COMPLETED }),
+      }),
+    );
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_COMPLETED',
+      expect.objectContaining({ orderId: 'order-1', orderNo: 'O-OUT' }),
+      { dedupeKey: 'notification:ORDER_COMPLETED:order-1' },
+    );
+  });
+
+  it('does not complete a mixed order while an internal task is unfinished', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      orderId: 'order-1',
+      status: OutsourceStatus.SENT,
+    });
+    dbMock.outsourceOrder.update.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.IN_PROGRESS },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+      requiresOutsource: true,
+    });
+    const result = await markOutsourceReceived(
+      'outsource-1',
+      { actualDate: null },
+      foremanActor,
+    );
+    expect(result.orderCompleted).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
   it('refuses to re-receive a RECEIVED record', async () => {

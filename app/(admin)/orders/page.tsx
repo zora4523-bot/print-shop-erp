@@ -29,8 +29,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
   const canCreate =
     user.role === Role.SALES ||
     user.role === Role.CUSTOMER_SERVICE ||
-    user.role === Role.OWNER ||
-    user.role === Role.FOREMAN;
+    user.role === Role.ADMIN;
 
   const orders = await listOrders({ id: user.id, role: user.role }, { q });
 
@@ -38,7 +37,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="工单"
-        subtitle="销售 / 客服只看自己提交的；车间主管和老板看全部；师傅看分配给自己的任务所在工单。"
+        subtitle="销售 / 客服只看自己提交的；管理员看全部；师傅看分配给自己的任务所在工单。"
         actions={
           canCreate ? (
             <Link href="/orders/new" className={buttonVariants()}>
@@ -72,7 +71,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
       <div className="rounded-xl border bg-card p-4 shadow-sm">
         <OrdersTable
           orders={orders}
-          showPieceworkCost={user.role === Role.OWNER}
+          showPieceworkCost={user.role === Role.ADMIN}
         />
       </div>
     </div>

@@ -60,6 +60,7 @@ export function ProductCategoryNodesTable({
                 <AdminRowActions>
                   <Link
                     href={`/owner/product-categories/${node.id}`}
+                    prefetch={false}
                     className="text-sm text-primary underline hover:no-underline"
                   >
                     编辑

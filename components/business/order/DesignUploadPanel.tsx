@@ -192,14 +192,16 @@ export function DesignUploadPanel({
               </span>
               <span className="text-muted-foreground">{formatSize(d.fileSize)}</span>
               {canEdit ? (
-                <button
+                <Button
                   type="button"
-                  className="text-destructive hover:underline disabled:opacity-50"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   disabled={deleting}
                   onClick={() => handleDelete(d.id)}
                 >
                   删除
-                </button>
+                </Button>
               ) : null}
             </li>
           ))}

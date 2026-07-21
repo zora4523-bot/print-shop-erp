@@ -95,7 +95,12 @@ export default async function EditOwnerMaterialPage({ params }: PageProps) {
         {locationStocks.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无库位库存记录。</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="物料库位库存"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">

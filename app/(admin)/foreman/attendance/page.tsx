@@ -9,7 +9,7 @@ import {
 import { getActiveWorkHours } from '@/lib/salary/rules';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -68,7 +68,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   // TODO(tech-debt): reuses 'task:assign' because there is no dedicated
-  // attendance permission (its role set [OWNER, FOREMAN] matches the
+  // attendance permission (its role set [ADMIN] matches the
   // attendance write action). If attendance ever needs finer control,
   // add attendance:read / attendance:write and update the permission
   // matrix, menu, pages, actions and tests together.
@@ -271,12 +271,9 @@ function FilterBar({
           ))}
         </select>
       </div>
-      <button
-        type="submit"
-        className={buttonVariants({ size: 'sm' })}
-      >
+      <Button type="submit" size="sm">
         切换
-      </button>
+      </Button>
     </form>
   );
 }

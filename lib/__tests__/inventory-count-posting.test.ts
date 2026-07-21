@@ -14,7 +14,12 @@ const { dbMock, txMock, numberMock } = vi.hoisted(() => {
     txMock: tx,
     numberMock: vi.fn(),
     dbMock: {
-      $transaction: vi.fn((cb: (client: typeof tx) => unknown) => cb(tx)),
+      $transaction: vi.fn(
+        (cb: (client: typeof tx) => unknown, options?: unknown) => {
+          void options;
+          return cb(tx);
+        },
+      ),
       inventoryCount: { findUnique: vi.fn(), findMany: vi.fn() },
     },
   };

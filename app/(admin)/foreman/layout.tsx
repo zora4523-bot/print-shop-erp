@@ -2,8 +2,8 @@ import { redirect } from 'next/navigation';
 import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
 
-// FOREMAN + OWNER only. Parent (admin) layout already gated to
-// admin roles; this narrows for /foreman/*. Server Actions on
+// ADMIN only. The /foreman path is retained for URL compatibility,
+// but it is now part of the unified administrator workspace. Server Actions on
 // every entry point still re-check their own permission
 // (CLAUDE.md §4.6).
 //
@@ -17,7 +17,7 @@ export default async function ForemanLayout({
   const session = await getSession();
   if (!session) redirect('/login');
   const { user } = session;
-  if (user.role !== Role.FOREMAN && user.role !== Role.OWNER) {
+  if (user.role !== Role.ADMIN) {
     redirect('/');
   }
 

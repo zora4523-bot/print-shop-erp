@@ -51,8 +51,8 @@ import {
 const ownerActor = {
   id: 'owner-1',
   username: 'o',
-  displayName: '老板',
-  role: Role.OWNER,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
@@ -153,7 +153,7 @@ describe('issueBillAction', () => {
 });
 
 describe('recordBillPaymentAction', () => {
-  it("requirePermission('bill:mark-paid') [OWNER-only]", async () => {
+  it("requirePermission('bill:mark-paid') [ADMIN-only]", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
@@ -225,7 +225,7 @@ describe('recordBillPaymentAction', () => {
     expect(billMock.recordPayment).toHaveBeenCalledWith(
       'b1',
       '1000',
-      expect.objectContaining({ id: 'owner-1', role: Role.OWNER }),
+      expect.objectContaining({ id: 'owner-1', role: Role.ADMIN }),
     );
   });
 

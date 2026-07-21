@@ -22,7 +22,7 @@ import {
   AttendanceError,
 } from '../attendance';
 
-const foremanActor = { id: 'foreman-1', role: Role.FOREMAN };
+const foremanActor = { id: 'foreman-1', role: Role.ADMIN };
 
 function workerFixture(
   overrides: Partial<{

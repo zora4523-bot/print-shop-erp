@@ -58,7 +58,12 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
         {bom.items.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无物料行。</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="BOM 物料明细"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ChevronDown, KeyRound, LogOut, UserCircle } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,14 +36,17 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`用户菜单：${displayName}`}
-        className="flex items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-3 text-sm shadow-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="flex min-h-11 min-w-11 items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-2 text-sm shadow-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:pr-3"
       >
         <Avatar className="size-7">
           <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
             {initial}
           </AvatarFallback>
         </Avatar>
-        <span className="hidden min-w-0 max-w-[140px] truncate sm:inline">
+        <span
+          className="hidden min-w-0 max-w-[140px] truncate sm:inline"
+          title={displayName}
+        >
           <span className="font-medium">{displayName}</span>
           <span className="ml-1 text-muted-foreground">· {roleLabel}</span>
         </span>
@@ -73,17 +77,18 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         {/* signOutAction 进 form：禁 JS / 慢网络也能登出（保留 LogoutButton
             核心特性）。**不**包进 DropdownMenuItem——Base UI 的 MenuItem
             会和 form > button 嵌套互相劫持事件 + 弄丢 a11y role（实测
-            E2E 找不到 menuitem name=退出登录）。直接平铺一个 styled button
-            是最稳的解。视觉手动对齐 DropdownMenuItem 的 padding/hover。 */}
+            E2E 找不到 menuitem name=退出登录）。直接平铺统一 Button，视觉
+            对齐 DropdownMenuItem 的 padding/hover。 */}
         <form action={signOutAction} className="p-1">
-          <button
+          <Button
             type="submit"
+            variant="ghost"
             data-slot="user-menu-logout"
-            className="relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:bg-destructive/10"
+            className="min-h-11 w-full cursor-default justify-start rounded-sm px-2 text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 active:translate-y-0"
           >
             <LogOut aria-hidden className="size-4" />
             <span>退出登录</span>
-          </button>
+          </Button>
         </form>
       </DropdownMenuContent>
     </DropdownMenu>

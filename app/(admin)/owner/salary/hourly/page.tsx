@@ -5,7 +5,7 @@ import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { WorkerType } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -106,7 +106,12 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           description="先点击上方&ldquo;重算该月全员时薪工月结&rdquo;生成数据。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="时薪月结列表"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -213,12 +218,9 @@ function FilterBar({
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button
-        type="submit"
-        className={buttonVariants({ size: 'sm' })}
-      >
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/owner/salary/hourly"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

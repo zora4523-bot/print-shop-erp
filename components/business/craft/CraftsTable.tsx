@@ -9,7 +9,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { machineTypeLabel } from '@/lib/auth/role-labels';
+import { machineTypeLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 
 export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
   if (crafts.length === 0) {
@@ -23,6 +23,7 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
           <TableHead className="w-24">排序</TableHead>
           <TableHead>工艺名</TableHead>
           <TableHead>外协</TableHead>
+          <TableHead>接单岗位</TableHead>
           <TableHead>默认机器</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>
@@ -41,6 +42,9 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
               )}
             </TableCell>
             <TableCell className="text-muted-foreground">
+              {workerTypeLabel(c.defaultWorkerType) || '—'}
+            </TableCell>
+            <TableCell className="text-muted-foreground">
               {machineTypeLabel(c.defaultMachineType) || '—'}
             </TableCell>
             <TableCell>
@@ -53,6 +57,7 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
             <TableCell>
               <Link
                 href={`/owner/crafts/${c.id}`}
+                prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >
                 编辑

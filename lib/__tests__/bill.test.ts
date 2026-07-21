@@ -39,7 +39,7 @@ import {
   InvalidBillTransitionError,
 } from '../bill';
 
-const ownerActor = { id: 'owner-1', role: Role.OWNER };
+const ownerActor = { id: 'owner-1', role: Role.ADMIN };
 const salesActor = { id: 'sales-1', role: Role.SALES };
 
 beforeEach(() => {

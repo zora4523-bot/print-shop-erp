@@ -55,8 +55,8 @@ import {
 const ownerActor = {
   id: 'actor-owner',
   username: 'admin',
-  displayName: '老板',
-  role: 'OWNER',
+  displayName: '管理员',
+  role: 'ADMIN',
   workerType: null,
   machineType: null,
 };

@@ -45,7 +45,7 @@ import {
   AccountInvariantError,
 } from '../account';
 
-const baseActor = { id: 'owner-self', role: Role.OWNER };
+const baseActor = { id: 'owner-self', role: Role.ADMIN };
 
 const makeUser = (over: Partial<{
   id: string;
@@ -183,8 +183,8 @@ describe('createUser', () => {
 });
 
 describe('updateUser invariants', () => {
-  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
-  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.ADMIN });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.ADMIN });
   const salesPerson = makeUser({ id: 'sales-1', role: Role.SALES });
 
   it('wraps the check + write in a transaction and holds the owner advisory lock (Codex round 13 / P1)', async () => {
@@ -199,16 +199,16 @@ describe('updateUser invariants', () => {
 
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     // First tx-scoped call is the advisory lock — ensures the critical
-    // section is serialized against concurrent OWNER mutations.
+    // section is serialized against concurrent ADMIN mutations.
     expect(dbMock.$executeRaw).toHaveBeenCalled();
     const firstCall = dbMock.$executeRaw.mock.calls[0];
     const templateText = (firstCall[0] as TemplateStringsArray).join('?');
     expect(templateText).toMatch(/pg_advisory_xact_lock/);
   });
 
-  it('refuses to demote the last active OWNER', async () => {
+  it('refuses to demote the last active ADMIN', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
-    dbMock.user.count.mockResolvedValue(0); // no other active OWNER
+    dbMock.user.count.mockResolvedValue(0); // no other active ADMIN
 
     await expect(
       updateUser(
@@ -224,9 +224,9 @@ describe('updateUser invariants', () => {
     expect(dbMock.user.update).not.toHaveBeenCalled();
   });
 
-  it('allows demoting one OWNER when another active OWNER exists', async () => {
+  it('allows demoting one ADMIN when another active ADMIN exists', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
-    dbMock.user.count.mockResolvedValue(1); // some other OWNER
+    dbMock.user.count.mockResolvedValue(1); // some other ADMIN
     dbMock.user.update.mockResolvedValue(makeUser({ id: 'owner-other', role: Role.SALES }));
 
     await expect(
@@ -273,8 +273,8 @@ describe('updateUser invariants', () => {
 });
 
 describe('setUserActive invariants', () => {
-  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
-  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.ADMIN });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.ADMIN });
 
   it('also runs inside the transaction + advisory lock (Codex round 13 / P1)', async () => {
     const inactive = makeUser({ id: 'inactive', isActive: false, role: Role.SALES });
@@ -297,7 +297,7 @@ describe('setUserActive invariants', () => {
     );
   });
 
-  it('refuses to deactivate the last active OWNER', async () => {
+  it('refuses to deactivate the last active ADMIN', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
     dbMock.user.count.mockResolvedValue(0);
 

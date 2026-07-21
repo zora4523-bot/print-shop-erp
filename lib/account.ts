@@ -11,13 +11,13 @@ export class AccountInvariantError extends Error {
   }
 }
 
-// Tag this constant so every OWNER mutation grabs the same PG advisory lock
+// Every administrator mutation grabs the same PG advisory lock
 // inside its transaction. Advisory locks are per-transaction (`_xact_`),
 // cheap, and fully serialize concurrent mutations that care about the same
-// invariant. Without the lock, two transactions against different OWNER
-// rows can both observe "one other active owner" and both commit,
-// stranding the system with zero active OWNERs .
-const OWNER_INVARIANT_LOCK_KEY = 'print-shop-erp:account:owner-invariant';
+// invariant. Without the lock, two transactions against different ADMIN
+// rows can both observe "one other active administrator" and both commit,
+// stranding the system with zero active administrators.
+const ADMIN_INVARIANT_LOCK_KEY = 'print-shop-erp:account:admin-invariant';
 
 // Minimal shape of the Prisma client we use inside $transaction callbacks.
 // Prisma's TransactionClient type isn't easily importable from the rust-free
@@ -32,9 +32,9 @@ type TxClient = {
   };
 };
 
-async function acquireOwnerInvariantLock(tx: TxClient): Promise<void> {
+async function acquireAdminInvariantLock(tx: TxClient): Promise<void> {
   // hashtext(text) → int4, the argument form pg_advisory_xact_lock expects.
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OWNER_INVARIANT_LOCK_KEY}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ADMIN_INVARIANT_LOCK_KEY}))`;
 }
 
 export type AccountSummary = Pick<
@@ -76,13 +76,13 @@ export async function getUserSummary(id: string): Promise<AccountSummary | null>
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Invariants: the system must never end up in a state where no active OWNER
+// Invariants: the system must never end up in a state where no active ADMIN
 // can log in. Mutations that would violate this get rejected with an
 // AccountInvariantError — the caller decides whether to surface the message
 // or map to a generic "操作被拒绝" in the UI.
 // ─────────────────────────────────────────────────────────────────────────
 
-// Runs inside a transaction that already holds the owner-invariant lock, so
+// Runs inside a transaction that already holds the admin-invariant lock, so
 // a concurrent request can't slip an update between our check and write.
 async function assertNotStrandingSystemInTx(
   tx: TxClient,
@@ -90,24 +90,24 @@ async function assertNotStrandingSystemInTx(
   next: { isActive?: boolean; role?: Role },
 ) {
   const stillActive = next.isActive ?? target.isActive;
-  const stillOwner = (next.role ?? target.role) === Role.OWNER;
+  const stillAdmin = (next.role ?? target.role) === Role.ADMIN;
 
-  // If after the change the target is still an active OWNER, nothing to check.
-  if (stillActive && stillOwner) return;
+  // If after the change the target is still an active administrator, nothing to check.
+  if (stillActive && stillAdmin) return;
 
-  const wasActiveOwner = target.isActive && target.role === Role.OWNER;
-  if (!wasActiveOwner) return;
+  const wasActiveAdmin = target.isActive && target.role === Role.ADMIN;
+  if (!wasActiveAdmin) return;
 
   const remaining = await tx.user.count({
     where: {
-      role: Role.OWNER,
+      role: Role.ADMIN,
       isActive: true,
       NOT: { id: target.id },
     },
   });
   if (remaining === 0) {
     throw new AccountInvariantError(
-      '系统至少需要 1 位活跃 OWNER，无法通过此操作让最后一位 OWNER 失活或降级',
+      '系统至少需要 1 位活跃管理员，无法通过此操作让最后一位管理员失活或降级',
     );
   }
 }
@@ -120,8 +120,8 @@ function assertNotSelfTarget(
   if (target.id !== actor.id) return;
   const message =
     action === 'role-change'
-      ? '不能修改自己的角色，请让另一位 OWNER 操作'
-      : '不能停用自己的账号，请让另一位 OWNER 操作';
+      ? '不能修改自己的角色，请让另一位管理员操作'
+      : '不能停用自己的账号，请让另一位管理员操作';
   throw new AccountInvariantError(message);
 }
 
@@ -177,7 +177,7 @@ export async function updateUser(
 ): Promise<AccountSummary> {
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TxClient;
-    await acquireOwnerInvariantLock(txClient);
+    await acquireAdminInvariantLock(txClient);
 
     const target = await txClient.user.findUnique({
       where: { id },
@@ -189,8 +189,8 @@ export async function updateUser(
 
     if (roleChanging) assertNotSelfTarget(target, actor, 'role-change');
 
-    // isActive isn't part of this update, but demoting the last active
-    // OWNER still has to be blocked — assertNotStrandingSystemInTx reads
+    // isActive isn't part of this update, but the last active ADMIN still has
+    // to be protected — assertNotStrandingSystemInTx reads
     // target.isActive when `next.isActive` is omitted, preserving the
     // guard.
     await assertNotStrandingSystemInTx(txClient, target, { role: data.role });
@@ -219,7 +219,7 @@ export async function setUserActive(
 ): Promise<AccountSummary> {
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TxClient;
-    await acquireOwnerInvariantLock(txClient);
+    await acquireAdminInvariantLock(txClient);
 
     const target = await txClient.user.findUnique({
       where: { id },

@@ -74,6 +74,7 @@ export function PriceTiersTable({ tiers }: { tiers: PriceTierSummary[] }) {
               <AdminRowActions>
                 <Link
                   href={`/owner/prices/tiers/${tier.id}`}
+                  prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >
                   编辑
@@ -127,6 +128,7 @@ export function PriceAdjustmentsTable({
               <AdminRowActions>
                 <Link
                   href={`/owner/prices/adjustments/${adjustment.id}`}
+                  prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >
                   编辑

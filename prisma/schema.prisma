@@ -24,8 +24,7 @@ datasource db {
 // ============================================================
 
 enum Role {
-  OWNER
-  FOREMAN
+  ADMIN
   SALES
   CUSTOMER_SERVICE
   WORKER
@@ -190,12 +189,13 @@ enum OrderStatus {
 
 model Order {
   id                   String      @id @default(cuid())
-  orderNo              String      @unique // YYYYMMDD-XXXX
+  orderNo              String      @unique // GD-YYMMDD-XXX; historical formats remain valid
   submitterId          String
   submitterRole        Role // 冗余：SALES 或 CUSTOMER_SERVICE
   createdById          String // 代下单场景
   customerPartyId      String?
   status               OrderStatus @default(DRAFT)
+  requiresOutsource    Boolean     @default(false) // 排产时快照：工单含外协工艺
   isUrgent             Boolean     @default(false)
   customerRef          String? // 客户代号，如"苹果福"
   receiverName         String?
@@ -347,6 +347,7 @@ model ProductionTask {
   orderItemId        String
   craftId            String
   workerId           String?
+  workerType         WorkerType?  // 派工时快照，防止账号后续改岗破坏历史任务
   machineType        MachineType? // 派单时快照
   status             TaskStatus   @default(PENDING)
   plannedQty         Int
@@ -371,6 +372,7 @@ model ProductionTask {
   @@index([workerId])
   @@index([status])
   @@index([completedAt])
+  @@unique([orderItemId, craftId])
 }
 
 // ============================================================
@@ -444,6 +446,7 @@ model Craft {
   name               String       @unique
   code               String       @unique
   isOutsource        Boolean      @default(false)
+  defaultWorkerType  WorkerType?  // 自产工艺的接单岗位；外协工艺为 null
   defaultMachineType MachineType? // 默认机器
   sortOrder          Int          @default(0)
   isActive           Boolean      @default(true)

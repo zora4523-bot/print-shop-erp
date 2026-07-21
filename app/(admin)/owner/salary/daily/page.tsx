@@ -8,7 +8,7 @@ import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { MachineType } from '@/generated/prisma/enums';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
@@ -143,8 +143,13 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           description="先点击上方&ldquo;重算该日全员日薪&rdquo;生成数据。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="日薪记录列表"
+          tabIndex={0}
+        >
+          <table className="w-full min-w-[960px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">日期</th>
@@ -266,12 +271,9 @@ function FilterBar({
           ))}
         </select>
       </div>
-      <button
-        type="submit"
-        className={buttonVariants({ size: 'sm' })}
-      >
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/owner/salary/daily"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

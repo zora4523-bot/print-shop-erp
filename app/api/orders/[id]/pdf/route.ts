@@ -23,7 +23,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, ctx: Params) {
   const session = await getSession();
   if (!session) {
-    // API routes don't go through the page-redirect middleware; return
+    // API routes excluded from the page-redirect Proxy return
     // JSON 401 so a failed download is an obvious error in the
     // download manager / devtools instead of a silent empty file.
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -180,7 +180,7 @@ function escapeHtml(value: string): string {
 
 // RFC 5987 / 6266: ship an ASCII fallback for legacy clients and the
 // UTF-8 spelling via filename*= for anything modern. orderNo is ASCII
-// today (YYYYMMDD-XXXX) but the factory name prefix might leak into
+// today (GD-YYMMDD-XXX) but the factory name prefix might leak into
 // future naming, and the extra header is cheap.
 function buildAttachmentHeader(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');

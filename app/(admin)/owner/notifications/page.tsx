@@ -74,7 +74,12 @@ export default async function OwnerNotificationsPage() {
             还没建任何群。点击右上角&ldquo;新建群&rdquo;开始。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="企业微信群列表"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -144,7 +149,12 @@ export default async function OwnerNotificationsPage() {
             seed 还没初始化默认规则。请运行 <code>pnpm prisma db seed</code>。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="通知事件规则"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -199,7 +209,12 @@ export default async function OwnerNotificationsPage() {
             暂无推送日志。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="最近推送日志"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -265,4 +280,3 @@ function firstLine(s: string): string {
   const line = s.split('\n')[0] ?? '';
   return line.length > 60 ? `${line.slice(0, 60)}…` : line;
 }
-

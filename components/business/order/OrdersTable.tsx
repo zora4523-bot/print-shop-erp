@@ -72,6 +72,7 @@ export function OrdersTable({
             <TableCell>
               <Link
                 href={`/orders/${o.id}`}
+                prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >
                 查看

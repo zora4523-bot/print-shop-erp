@@ -10,13 +10,13 @@ import {
   ADMIN_ROLE_BADGE,
 } from '@/lib/navigation/admin-menu';
 
-// (admin) route group shell — owner / foreman / sales / customer-
+// (admin) route group shell — administrator / sales / customer-
 // service all live underneath. Worker has its own (worker) shell
 // because the H5 task UI doesn't share the sidebar/breadcrumb chrome.
 //
 // Defense-in-depth posture: this layout gates the UI shell. Per-role
 // inner layouts (app/(admin)/owner/layout.tsx etc) keep their own
-// fine-grained role check (OWNER-only / FOREMAN+OWNER / SALES+CS).
+// fine-grained role check (ADMIN-only / SALES+CS).
 // Server Actions still call requirePermission() on every entry point
 // (CLAUDE.md §4.6). UI gating just keeps unauthorized roles from
 // seeing the wrong nav before the action layer rejects them.
@@ -31,8 +31,7 @@ export default async function AdminShellLayout({
   // WORKER goes to /(worker), not here. Anything else means a bad
   // session or a future role we haven't planned for — bounce home.
   const ALLOWED: readonly Role[] = [
-    Role.OWNER,
-    Role.FOREMAN,
+    Role.ADMIN,
     Role.SALES,
     Role.CUSTOMER_SERVICE,
   ];
@@ -48,16 +47,24 @@ export default async function AdminShellLayout({
     'dev';
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="admin-viewport">
+      <a
+        href="#admin-main"
+        className="fixed left-3 top-3 z-50 inline-flex min-h-11 -translate-y-20 items-center rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg focus:translate-y-0"
+      >
+        跳到主要内容
+      </a>
       <AppSidebar menuGroups={menuGroups} roleBadge={roleBadge} />
-      <SidebarInset>
+      <SidebarInset id="admin-main" tabIndex={-1} className="min-w-0">
         <AdminHeader
           displayName={user.displayName}
           roleLabel={roleBadge}
           environmentLabel={environmentLabel}
           quickLinks={quickLinks}
         />
-        <main className="flex-1 px-6 py-6">{children}</main>
+        <div className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
+          {children}
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

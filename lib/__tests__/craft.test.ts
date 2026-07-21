@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MachineType } from '../../generated/prisma/client';
+import { MachineType, WorkerType } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
@@ -7,6 +7,7 @@ const { dbMock } = vi.hoisted(() => ({
       upsert: vi.fn(),
     },
     craft: {
+      count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -17,7 +18,9 @@ const { dbMock } = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
+  listActiveCraftOrderOptions,
   listCrafts,
+  listCraftsPage,
   getCraftSummary,
   createCraft,
   updateCraft,
@@ -30,6 +33,7 @@ const makeCraft = (over: Partial<{
   name: string;
   code: string;
   isOutsource: boolean;
+  defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
   sortOrder: number;
   isActive: boolean;
@@ -38,6 +42,7 @@ const makeCraft = (over: Partial<{
   name: '现货加烫',
   code: 'STOCK_FOIL',
   isOutsource: false,
+  defaultWorkerType: WorkerType.MACHINE,
   defaultMachineType: MachineType.HAND_PRESS,
   sortOrder: 10,
   isActive: true,
@@ -63,6 +68,45 @@ describe('listCrafts', () => {
   });
 });
 
+describe('listCraftsPage', () => {
+  it('fetches only the requested page in the stable craft order', async () => {
+    dbMock.craft.count.mockResolvedValue(21);
+    dbMock.craft.findMany.mockResolvedValue([makeCraft({ id: 'craft-21' })]);
+
+    const page = await listCraftsPage({ page: 2, pageSize: 20 });
+
+    expect(page).toMatchObject({ total: 21, page: 2, pageCount: 2 });
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 20,
+        take: 20,
+        orderBy: [
+          { isActive: 'desc' },
+          { sortOrder: 'asc' },
+          { name: 'asc' },
+          { id: 'asc' },
+        ],
+      }),
+    );
+  });
+});
+
+describe('listActiveCraftOrderOptions', () => {
+  it('selects only active fields required by the order form', async () => {
+    dbMock.craft.findMany.mockResolvedValue([
+      { id: 'craft-1', name: '现货加烫', isOutsource: false },
+    ]);
+
+    await listActiveCraftOrderOptions();
+
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith({
+      where: { isActive: true },
+      select: { id: true, name: true, isOutsource: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    });
+  });
+});
+
 describe('createCraft', () => {
   it('generates a stable code when the create input leaves it blank', async () => {
     dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 7 });
@@ -72,6 +116,7 @@ describe('createCraft', () => {
       name: '新工艺',
       code: null,
       isOutsource: false,
+      defaultWorkerType: WorkerType.PACKER,
       defaultMachineType: null,
       sortOrder: 80,
     });
@@ -85,6 +130,7 @@ describe('createCraft', () => {
       name: '专版单色平烫',
       code: 'FLAT_FOIL_SINGLE',
       isOutsource: false,
+      defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.WINDMILL,
       sortOrder: 20,
     });
@@ -97,23 +143,26 @@ describe('createCraft', () => {
       name: 'UV',
       code: 'UV',
       isOutsource: true,
+      defaultWorkerType: null,
       defaultMachineType: null,
       sortOrder: 60,
     });
     expect(dbMock.craft.create.mock.calls[0][0].data.defaultMachineType).toBeNull();
   });
 
-  it('allows hybrid outsource + defaultMachineType (SPEC §6.1 COLOR_PRINT_FOIL)', async () => {
+  it('clears the internal worker type but preserves an outsource reference machine', async () => {
     dbMock.craft.create.mockResolvedValue(makeCraft());
     await createCraft({
       name: '冰白彩印（印刷+烫金）',
       code: 'COLOR_PRINT_FOIL',
       isOutsource: true,
+      defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.WINDMILL,
       sortOrder: 71,
     });
     const data = dbMock.craft.create.mock.calls[0][0].data;
     expect(data.isOutsource).toBe(true);
+    expect(data.defaultWorkerType).toBeNull();
     expect(data.defaultMachineType).toBe(MachineType.WINDMILL);
   });
 });
@@ -126,6 +175,7 @@ describe('updateCraft', () => {
         name: 'X',
         code: 'XX',
         isOutsource: false,
+        defaultWorkerType: WorkerType.PACKER,
         defaultMachineType: null,
         sortOrder: 10,
       }),
@@ -140,6 +190,7 @@ describe('updateCraft', () => {
       name: '现货加烫(改名)',
       code: 'STOCK_FOIL',
       isOutsource: false,
+      defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.HAND_PRESS,
       sortOrder: 10,
     });
@@ -154,6 +205,7 @@ describe('updateCraft', () => {
       name: 'x',
       code: 'XX',
       isOutsource: false,
+      defaultWorkerType: WorkerType.PACKER,
       defaultMachineType: null,
       sortOrder: 10,
     });

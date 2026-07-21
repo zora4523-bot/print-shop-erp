@@ -16,8 +16,8 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
-  it('OWNER 看到 20 项菜单（含 Dashboard / 业务字典 / 后台任务 / Pigsty 运维）', () => {
-    const groups = getAdminMenuItems({ role: Role.OWNER });
+  it('ADMIN 看到经营管理与生产管理的完整菜单', () => {
+    const groups = getAdminMenuItems({ role: Role.ADMIN });
     const items = flatten(groups);
     expect(groups.map((g) => g.label)).toEqual([
       '概览',
@@ -27,11 +27,15 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(20);
+    expect(items).toHaveLength(25);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
       '采购单',
+      '排产',
+      '外协',
+      '车间用料',
+      '工时录入',
       '账单',
       '薪资总览',
       '计件工资',
@@ -49,6 +53,7 @@ describe('getAdminMenuItems', () => {
       '推送配置',
       '后台任务',
       'Pigsty 运维',
+      'CDR 汇总',
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
     // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
@@ -87,34 +92,35 @@ describe('getAdminMenuItems', () => {
     expect(boms?.requiredPermission).toBe('bom:manage');
   });
 
-  it('FOREMAN 看不到老板独占项（账单 / 用户管理 / 工艺字典 / 产品字典）', () => {
-    const labels = flatten(getAdminMenuItems({ role: Role.FOREMAN })).map(
+  it('ADMIN 同时拥有原经营端与生产端入口，且路由不重复', () => {
+    const labels = flatten(getAdminMenuItems({ role: Role.ADMIN })).map(
       (i) => i.label,
     );
-    expect(labels).not.toContain('账单');
-    expect(labels).not.toContain('用户管理');
-    expect(labels).not.toContain('工艺字典');
-    expect(labels).not.toContain('产品字典');
-    // 但有自己的 Dashboard / 排产 / 外协 / 物料 / 工时录入 / CDR 汇总
+    expect(labels).toContain('账单');
+    expect(labels).toContain('用户管理');
+    expect(labels).toContain('工艺字典');
+    expect(labels).toContain('产品字典');
     expect(labels).toContain('Dashboard');
     expect(labels).toContain('排产');
     expect(labels).toContain('外协');
     expect(labels).toContain('物料');
+    expect(labels).toContain('车间用料');
     expect(labels).toContain('工时录入');
-    const materials = flatten(getAdminMenuItems({ role: Role.FOREMAN })).find(
-      (i) => i.label === '物料',
+    const workshopMaterials = flatten(getAdminMenuItems({ role: Role.ADMIN })).find(
+      (i) => i.label === '车间用料',
     );
-    expect(materials?.href).toBe('/foreman/materials');
-    expect(materials?.requiredPermission).toBe('material:manage');
-    // P0 #7：CDR 汇总（design:bundle:create 权限）
-    const cdr = flatten(getAdminMenuItems({ role: Role.FOREMAN })).find(
+    expect(workshopMaterials?.href).toBe('/foreman/materials');
+    expect(workshopMaterials?.requiredPermission).toBe('material:manage');
+    const cdr = flatten(getAdminMenuItems({ role: Role.ADMIN })).find(
       (i) => i.label === 'CDR 汇总',
     );
     expect(cdr?.href).toBe('/foreman/cdr');
     expect(cdr?.requiredPermission).toBe('design:bundle:create');
+    const hrefs = flatten(getAdminMenuItems({ role: Role.ADMIN })).map((i) => i.href);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it('SALES 菜单不含老板/主管独占项', () => {
+  it('SALES 菜单不含管理员/主管独占项', () => {
     const labels = flatten(getAdminMenuItems({ role: Role.SALES })).map(
       (i) => i.label,
     );
@@ -156,12 +162,7 @@ describe('getAdminMenuItems', () => {
   });
 
   it('所有 requiredPermission 都是 PERMISSIONS 字典里的合法 key', () => {
-    for (const role of [
-      Role.OWNER,
-      Role.FOREMAN,
-      Role.SALES,
-      Role.CUSTOMER_SERVICE,
-    ]) {
+    for (const role of [Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE]) {
       const items = flatten(getAdminMenuItems({ role }));
       for (const item of items) {
         if (item.requiredPermission) {
@@ -175,12 +176,7 @@ describe('getAdminMenuItems', () => {
   });
 
   it('header quick links are real implemented routes', () => {
-    for (const role of [
-      Role.OWNER,
-      Role.FOREMAN,
-      Role.SALES,
-      Role.CUSTOMER_SERVICE,
-    ]) {
+    for (const role of [Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE]) {
       const links = getAdminQuickLinks({ role });
       expect(links.length, `${role} should have quick links`).toBeGreaterThan(0);
       for (const link of links) {

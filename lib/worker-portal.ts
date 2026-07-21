@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { Role, TaskStatus } from '../generated/prisma/client';
+import { Role, TaskStatus, WorkerType } from '../generated/prisma/client';
 import { db } from './db';
 
 export type WorkerActor = { id: string; role: Role };
@@ -51,6 +51,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
             select: {
               id: true,
               status: true,
+              workerType: true,
               pieceworkAmount: true,
             },
           },
@@ -80,6 +81,9 @@ export async function listWorkerOrders(actor: WorkerActor) {
           new Decimal(0),
         )
         .toFixed(2),
+      hasPieceworkTasks: tasks.some(
+        (task) => task.workerType === WorkerType.MACHINE,
+      ),
     };
   });
 }
@@ -120,6 +124,7 @@ export async function getWorkerOrderDetail(
             select: {
               id: true,
               status: true,
+              workerType: true,
               machineType: true,
               plannedQty: true,
               completedQty: true,

@@ -48,6 +48,7 @@ function normalizeFormInput(formData: FormData) {
     name: get('name'),
     code: get('code'),
     isOutsource: get('isOutsource'),
+    defaultWorkerType: get('defaultWorkerType') || '',
     defaultMachineType: get('defaultMachineType') || '',
     sortOrder: get('sortOrder') ?? '0',
     isActive: get('isActive'),

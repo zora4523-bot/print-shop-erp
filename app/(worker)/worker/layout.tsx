@@ -5,7 +5,7 @@ import { getSession } from '@/lib/auth/session';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
 
-// H5 shell for 师傅端. WORKER only — OWNER / FOREMAN have their own
+// H5 shell for 师傅端. WORKER only — ADMIN has its own
 // overrides in the action layer but view the worker tasks through the
 // foreman side. Tighter max-width (640) because this is designed for
 // phones in portrait, not desktop.

@@ -24,7 +24,7 @@ test.describe('automation smoke', () => {
     }
   });
 
-  test('OWNER can open Pigsty readiness and search core ERP surfaces', async ({
+  test('ADMIN can open Pigsty readiness and search core ERP surfaces', async ({
     page,
   }) => {
     test.setTimeout(45_000);

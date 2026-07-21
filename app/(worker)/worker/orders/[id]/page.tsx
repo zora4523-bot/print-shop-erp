@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { TaskStatus } from '@/generated/prisma/enums';
+import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getWorkerOrderDetail } from '@/lib/worker-portal';
 import { orderStatusZh } from '@/lib/order/log-format';
@@ -91,9 +91,19 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                         · 计划 {task.plannedQty.toLocaleString()}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground">计件金额</p>
-                      <p className="font-sans tabular-nums font-medium">¥ {String(task.pieceworkAmount)}</p>
+                    <div className="ml-auto shrink-0 text-right">
+                      {task.workerType === WorkerType.MACHINE ? (
+                        <>
+                          <p className="text-xs text-muted-foreground">计件金额</p>
+                          <p className="font-sans tabular-nums font-medium">
+                            ¥ {String(task.pieceworkAmount)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="worker-wrap-anywhere text-xs text-muted-foreground">
+                          按考勤时薪结算
+                        </p>
+                      )}
                     </div>
                   </div>
                   {task.status === TaskStatus.COMPLETED ? (
@@ -101,9 +111,20 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                       <Metric label="良品" value={task.completedQty} />
                       <Metric label="次品" value={task.defectQty} />
                       <Metric label="返工" value={task.reworkQty} />
-                      <Metric label="板数" value={task.boardCount} />
-                      <Metric label="下数" value={task.pressCount} />
-                      <Metric label="完工" value={task.completedAt ? formatDateTimeShanghai(task.completedAt) : '—'} />
+                      {task.workerType === WorkerType.MACHINE ? (
+                        <>
+                          <Metric label="板数" value={task.boardCount} />
+                          <Metric label="下数" value={task.pressCount} />
+                        </>
+                      ) : null}
+                      <Metric
+                        label="完工"
+                        value={
+                          task.completedAt
+                            ? formatDateTimeShanghai(task.completedAt)
+                            : '—'
+                        }
+                      />
                     </dl>
                   ) : (
                     <Link

@@ -134,7 +134,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             本账单无工单。
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="账单工单明细"
+            tabIndex={0}
+          >
+          <table className="w-full min-w-[680px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
@@ -164,6 +170,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

@@ -11,8 +11,7 @@ import { requireSession } from '@/lib/auth/session';
 // 这里改成 `redirect('/home')` 不影响现有跳转链。
 
 const ROLE_LANDING: Record<Role, string> = {
-  OWNER: '/owner',
-  FOREMAN: '/foreman/scheduling',
+  ADMIN: '/owner',
   SALES: '/orders',
   CUSTOMER_SERVICE: '/orders',
   WORKER: '/worker/tasks',

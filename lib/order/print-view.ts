@@ -28,7 +28,7 @@ async function buildQrSvg(value: string, size: number): Promise<string> {
 
 // Loads the narrow shape the print layout needs. Scope filter mirrors
 // getOrderDetail so SALES / CUSTOMER_SERVICE only print their own,
-// OWNER / FOREMAN everything, WORKER (future) only what they have a
+// ADMIN sees everything, WORKER (future) only what they have a
 // task on. Returns null when the actor can't see the order — the page
 // maps that to notFound() so there's no "this order exists but you
 // can't print it" disclosure.

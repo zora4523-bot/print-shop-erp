@@ -46,7 +46,7 @@ export type NotificationEvent =
 // 时同步改：events.ts payload 注释 + RuleForm hint + seed.ts 模板。
 //
 // 范围注：DECISIONS 2026-04-24 限定的是 cron HTTP 响应 / pg_cron stdout
-// 不漏金额；企业微信群消息是已认证收件人（老板群 / 排产群），含金额
+// 不漏金额；企业微信群消息是已认证收件人（管理员群 / 排产群），含金额
 // 是预期行为（SPEC §8.1 的群定向就是为此）。所以 payload **可以**含
 // totalAmount / commission / totalSales 等。errorMessage 字段仍不放
 // 业务字段（DECISIONS 2026-04-27 推论）。
@@ -116,7 +116,7 @@ export type NotificationPayloads = {
     // **业绩合计（含期初 initialSales）**——同 dashboard `salesForTier`
     // 口径，与提成档位计算一致。CS_TIERS 是
     // 按 totalSales + initialSales 算的；如果这里只发 totalSales，
-    // initialSales != 0 时消息&ldquo;业绩&rdquo;会比命中档位低，老板看不出 why。
+    // initialSales != 0 时消息&ldquo;业绩&rdquo;会比命中档位低，管理员看不出 why。
     // Slice D wire (`/api/cron/cs-period-ending`) 用 lib/dashboard/
     // owner-watchlist.salesForTier 喂入。seed.ts 模板&ldquo;业绩合计&rdquo;标签
     // 同步反映这一点。

@@ -3,6 +3,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { Badge } from '@/components/ui/badge';
 import { AdminBreadcrumb } from './AdminBreadcrumb';
 import { UserMenu } from './UserMenu';
+import { ThemeToggle } from './ThemeToggle';
 import type { AdminMenuItem } from '@/lib/navigation/admin-menu';
 
 // Admin shell 顶栏——sidebar 触发器 + breadcrumb（移动端隐藏、占空间）+
@@ -30,9 +31,9 @@ export function AdminHeader({
   return (
     <header
       data-slot="admin-header"
-      className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b bg-card/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-card/80"
+      className="admin-safe-inline admin-safe-top sticky top-0 z-10 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card/90 py-1 backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-3"
     >
-      <SidebarTrigger />
+      <SidebarTrigger className="size-11 shrink-0" />
       <div className="min-w-0 flex-1">
         <AdminBreadcrumb />
       </div>
@@ -44,7 +45,8 @@ export function AdminHeader({
           <Link
             key={`${item.label}-${item.href}`}
             href={item.href}
-            className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            prefetch={false}
+            className="inline-flex min-h-11 items-center rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             {item.label}
           </Link>
@@ -56,6 +58,7 @@ export function AdminHeader({
       >
         {environmentLabel}
       </Badge>
+      <ThemeToggle />
       <UserMenu displayName={displayName} roleLabel={roleLabel} />
     </header>
   );

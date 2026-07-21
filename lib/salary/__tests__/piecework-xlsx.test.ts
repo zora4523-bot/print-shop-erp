@@ -60,7 +60,7 @@ describe('buildPieceworkWorkbook', () => {
             reason: '急单奖励',
             createdById: 'owner-1',
             createdAt: new Date('2026-07-19T09:00:00Z'),
-            createdBy: { displayName: '老板' },
+            createdBy: { displayName: '管理员' },
           },
         ],
       },

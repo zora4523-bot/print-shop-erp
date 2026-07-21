@@ -101,7 +101,12 @@ export default async function PieceworkRulesPage() {
         <div className="p-5">
           <h2 className="font-semibold">个人规则版本记录</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="个人计件规则版本"
+          tabIndex={0}
+        >
           <table className="w-full min-w-[1000px] text-sm">
             <thead className="border-y bg-muted/40 text-xs text-muted-foreground">
               <tr>

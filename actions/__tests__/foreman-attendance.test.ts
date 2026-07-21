@@ -40,8 +40,8 @@ import {
 const foremanActor = {
   id: 'foreman-1',
   username: 'fm',
-  displayName: '车间主管',
-  role: Role.FOREMAN,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
@@ -201,7 +201,7 @@ describe('removeAttendanceAction', () => {
     expect(attendanceMock.removeAttendance).toHaveBeenCalledWith(
       'w-1',
       '2026-05-01',
-      expect.objectContaining({ id: 'foreman-1', role: Role.FOREMAN }),
+      expect.objectContaining({ id: 'foreman-1', role: Role.ADMIN }),
     );
   });
 

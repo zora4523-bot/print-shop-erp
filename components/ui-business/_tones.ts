@@ -34,7 +34,7 @@ export const TONE_BADGE_SOFT: Record<Tone, string> = {
   warning: 'bg-warning/10 text-warning-foreground border-warning/30',
   info: 'bg-info/10 text-info-foreground border-info/30',
   success: 'bg-success/10 text-success-foreground border-success/30',
-  neutral: 'bg-muted text-muted-foreground border-border',
+  neutral: 'bg-muted text-foreground border-border',
 };
 
 // 文本前景（无背景，纯文字色）：状态文字 / 趋势上下行箭头共用。

@@ -75,7 +75,7 @@ import { InvalidOrderTransitionError } from '../order/status-machine';
 
 const salesActor = { id: 'sales-1', role: Role.SALES };
 const workerActor = { id: 'worker-1', role: Role.WORKER };
-const ownerActor = { id: 'owner-1', role: Role.OWNER };
+const ownerActor = { id: 'owner-1', role: Role.ADMIN };
 
 function baseItem(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -150,7 +150,7 @@ describe('createOrder', () => {
     expect(firstSql).toMatch(/pg_advisory_xact_lock/);
   });
 
-  it('assigns YYYYMMDD-0001 when the day has no existing orders', async () => {
+  it('assigns GD-YYMMDD-001 when the day has no existing orders', async () => {
     const result = await createOrder(
       {
         customerRef: null,
@@ -167,7 +167,7 @@ describe('createOrder', () => {
       salesActor,
       new Date('2026-04-23T09:00:00+08:00'),
     );
-    expect(result.orderNo).toBe('20260423-0001');
+    expect(result.orderNo).toBe('GD-260423-001');
   });
 
   it('stores status=DRAFT and writes an initial CREATE log entry', async () => {
@@ -449,7 +449,7 @@ describe('submitOrder', () => {
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
-  it('OWNER may submit on behalf of another submitter (global override)', async () => {
+  it('ADMIN may submit on behalf of another submitter (global override)', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       ...submittedRichRow,
       submitterId: 'someone-else',
@@ -796,6 +796,20 @@ describe('shipOrder', () => {
     expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
+  it('refuses to ship while a linked outsource order is still live', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([{ id: 'outsource-1' }]);
+    await expect(shipOrder('o1', ownerActor, null)).rejects.toThrow(
+      /外协单.*才能发货/,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
   // ─── Slice C wire spec ───
   it('shipOrder fires notify("ORDER_SHIPPED") with provided trackingNo', async () => {
     dbMock.order.findUnique.mockResolvedValue({
@@ -932,7 +946,7 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
     expect(where).toEqual({ submitterId: 'sales-1' });
   });
 
-  it('OWNER sees everything (empty where)', async () => {
+  it('ADMIN sees everything (empty where)', async () => {
     dbMock.order.findMany.mockResolvedValue([]);
     await listOrders(ownerActor);
     const where = dbMock.order.findMany.mock.calls[0][0].where;
@@ -1050,7 +1064,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     ).rejects.toThrow(/只能修改自己创建的工单/);
   });
 
-  it('OWNER can edit someone else\'s order (global override)', async () => {
+  it('ADMIN can edit someone else\'s order (global override)', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ submitterId: 'sales-OTHER' }),
     );
@@ -1060,7 +1074,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     });
     const result = await updateOrderFields(
       'order-1',
-      { remark: '老板代改' },
+      { remark: '管理员代改' },
       ownerActor,
     );
     expect(result.changed).toBe(true);

@@ -396,7 +396,12 @@ export default async function PigstyOpsPage() {
           title="分区维护"
           description="当前只做 pg_partman 候选表预检，不自动重写现有主键和外键。"
         >
-          <div className="overflow-x-auto rounded-lg border bg-card">
+          <div
+            className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="分区维护预检"
+            tabIndex={0}
+          >
             <table className="w-full min-w-[780px] text-sm">
               <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 <tr>
@@ -476,7 +481,12 @@ function SearchReadinessTable({ rows }: { rows: SearchIndexReadiness[] }) {
       title="搜索索引预检"
       description="工单/商品搜索上线前，确认必需扩展和索引齐全，并执行 EXPLAIN 检查真实生产计划。"
     >
-      <div className="overflow-x-auto rounded-lg border bg-card">
+      <div
+        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="搜索索引预检"
+        tabIndex={0}
+      >
         <table className="w-full min-w-[980px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -581,7 +591,12 @@ function CronJobsTable({ rows }: { rows: CronHttpJobReadiness[] }) {
       title="HTTP Cron 任务"
       description="执行 schedule_sql 前，必须确认 app.erp_base_url 和 app.cron_secret 已在数据库侧设置。"
     >
-      <div className="overflow-x-auto rounded-lg border bg-card">
+      <div
+        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="HTTP Cron 任务"
+        tabIndex={0}
+      >
         <table className="w-full min-w-[980px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -640,7 +655,12 @@ function QueryObservabilityTable({
       title="查询观测候选"
       description="用于定位搜索、Dashboard、账单、库存和薪资路径的慢查询。"
     >
-      <div className="overflow-x-auto rounded-lg border bg-card">
+      <div
+        className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="查询观测候选"
+        tabIndex={0}
+      >
         <table className="w-full min-w-[920px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
@@ -698,7 +718,12 @@ function SensitiveColumnsTable({
   rows: SensitiveColumnReadiness[];
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border bg-card">
+    <div
+      className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      role="region"
+      aria-label="敏感列策略"
+      tabIndex={0}
+    >
       <table className="w-full min-w-[860px] text-sm">
         <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
           <tr>
@@ -757,7 +782,12 @@ function SensitiveColumnsTable({
 
 function AuditTablesTable({ rows }: { rows: SecurityAuditTableReadiness[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border bg-card">
+    <div
+      className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      role="region"
+      aria-label="审计表授权"
+      tabIndex={0}
+    >
       <table className="w-full min-w-[720px] text-sm">
         <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
           <tr>

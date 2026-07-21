@@ -27,7 +27,7 @@ import {
 // NOW() 的 Order 进 DB，跳过 production 链。
 
 test.describe('账单全链 — golden path', () => {
-  test('seed FINISHED order → OWNER 生成 → 发单 → 录入全款 → FULLY_PAID', async ({
+  test('seed FINISHED order → ADMIN 生成 → 发单 → 录入全款 → FULLY_PAID', async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -55,7 +55,7 @@ test.describe('账单全链 — golden path', () => {
       finishedAt: midShanghaiMonth(),
     });
 
-    await test.step('OWNER 登录账单页', async () => {
+    await test.step('ADMIN 登录账单页', async () => {
       await login(page, {
         from: '/owner/bills',
         username: ADMIN_USERNAME,

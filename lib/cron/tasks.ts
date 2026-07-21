@@ -86,7 +86,7 @@ export async function runCsSettleTask() {
 export async function runGenerateBillsTask(period: string) {
   const result = await generateBillsForPeriod(period, {
     id: 'system',
-    role: Role.OWNER,
+    role: Role.ADMIN,
   });
   return {
     status: 'ok' as const,

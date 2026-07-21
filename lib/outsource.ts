@@ -7,6 +7,11 @@ import {
 } from './outsource/status-machine';
 import { canAttachOutsource } from './order/status-machine';
 import { orderCascadeLockKey } from './order/locks';
+import { dispatchNotification } from './notification/dispatch';
+import {
+  maybeCompleteProductionOrder,
+  type ProductionCompletionTx,
+} from './production-completion';
 import type {
   CreateOutsourceInput,
   MarkOutsourceReceivedInput,
@@ -102,53 +107,168 @@ export async function createOutsourceOrder(
 export type OutsourceMutationResult = {
   id: string;
   status: OutsourceStatus;
+  orderCompleted?: boolean;
+  orderId?: string | null;
 };
 
-// SENT / IN_PROGRESS → RECEIVED, stamps actualDate. The lib layer
-// does NOT cascade into the Order status — the outsource gate SPEC
-// describes (§3.2) is intentionally deferred for MVP, since internal
-// scheduling has been happening in parallel anyway.
+type ReceiveOutsourceTxClient = ProductionCompletionTx & {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+  outsourceOrder: ProductionCompletionTx['outsourceOrder'] & {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      orderId: string | null;
+      status: OutsourceStatus;
+    } | null>;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string; status: OutsourceStatus }>;
+  };
+};
+
+// SENT / IN_PROGRESS → RECEIVED. Receiving the final required outsource
+// row participates in the same completion gate as the last internal task.
 export async function markOutsourceReceived(
   id: string,
   input: MarkOutsourceReceivedInput,
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<OutsourceMutationResult> {
-  void actor;
-  const row = await db.outsourceOrder.findUnique({
-    where: { id },
-    select: { id: true, status: true },
-  });
-  if (!row) throw new OutsourceError('外协单不存在');
-  transitionOutsource(row.status, OutsourceStatus.RECEIVED);
+  const result = await db.$transaction(async (tx) => {
+    const txClient = tx as unknown as ReceiveOutsourceTxClient;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:outsource:${id}`}))`;
 
-  const updated = await db.outsourceOrder.update({
-    where: { id },
-    data: {
-      status: OutsourceStatus.RECEIVED,
-      actualDate: input.actualDate ?? now,
-    },
-    select: { id: true, status: true },
+    const row = await txClient.outsourceOrder.findUnique({
+      where: { id },
+      select: { id: true, orderId: true, status: true },
+    });
+    if (!row) throw new OutsourceError('外协单不存在');
+
+    if (row.orderId) {
+      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+        row.orderId,
+      )}))`;
+    }
+
+    // Re-read after the locks so a concurrent receive/cancel cannot leave a
+    // stale transition decision.
+    const fresh = await txClient.outsourceOrder.findUnique({
+      where: { id },
+      select: { id: true, orderId: true, status: true },
+    });
+    if (!fresh) throw new OutsourceError('外协单不存在');
+    transitionOutsource(fresh.status, OutsourceStatus.RECEIVED);
+
+    const updated = await txClient.outsourceOrder.update({
+      where: { id },
+      data: {
+        status: OutsourceStatus.RECEIVED,
+        actualDate: input.actualDate ?? now,
+      },
+      select: { id: true, status: true },
+    });
+
+    const orderCompleted = fresh.orderId
+      ? await maybeCompleteProductionOrder(
+          txClient,
+          fresh.orderId,
+          actor.id,
+          now,
+        )
+      : false;
+    return { ...updated, orderCompleted, orderId: fresh.orderId };
   });
-  return updated;
+
+  if (result.orderCompleted && result.orderId) {
+    const order = await db.order.findUnique({
+      where: { id: result.orderId },
+      select: { id: true, orderNo: true, customerRef: true },
+    });
+    if (order) {
+      await dispatchNotification(
+        'ORDER_COMPLETED',
+        {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          customerRef: order.customerRef,
+        },
+        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
+      );
+    }
+  }
+
+  return {
+    id: result.id,
+    status: result.status,
+    orderCompleted: result.orderCompleted,
+    orderId: result.orderId,
+  };
 }
 
 export async function cancelOutsourceOrder(
   id: string,
   actor: { id: string; role: Role },
 ): Promise<OutsourceMutationResult> {
-  void actor;
-  const row = await db.outsourceOrder.findUnique({
-    where: { id },
-    select: { id: true, status: true },
+  const result = await db.$transaction(async (tx) => {
+    const txClient = tx as unknown as ReceiveOutsourceTxClient;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:outsource:${id}`}))`;
+    const row = await txClient.outsourceOrder.findUnique({
+      where: { id },
+      select: { id: true, orderId: true, status: true },
+    });
+    if (!row) throw new OutsourceError('外协单不存在');
+    if (row.orderId) {
+      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+        row.orderId,
+      )}))`;
+    }
+    const fresh = await txClient.outsourceOrder.findUnique({
+      where: { id },
+      select: { id: true, orderId: true, status: true },
+    });
+    if (!fresh) throw new OutsourceError('外协单不存在');
+    transitionOutsource(fresh.status, OutsourceStatus.CANCELLED);
+    const updated = await txClient.outsourceOrder.update({
+      where: { id },
+      data: { status: OutsourceStatus.CANCELLED },
+      select: { id: true, status: true },
+    });
+    const orderCompleted = fresh.orderId
+      ? await maybeCompleteProductionOrder(
+          txClient,
+          fresh.orderId,
+          actor.id,
+          new Date(),
+        )
+      : false;
+    return { ...updated, orderId: fresh.orderId, orderCompleted };
   });
-  if (!row) throw new OutsourceError('外协单不存在');
-  transitionOutsource(row.status, OutsourceStatus.CANCELLED);
-  return db.outsourceOrder.update({
-    where: { id },
-    data: { status: OutsourceStatus.CANCELLED },
-    select: { id: true, status: true },
-  });
+
+  if (result.orderCompleted && result.orderId) {
+    const order = await db.order.findUnique({
+      where: { id: result.orderId },
+      select: { id: true, orderNo: true, customerRef: true },
+    });
+    if (order) {
+      await dispatchNotification(
+        'ORDER_COMPLETED',
+        {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          customerRef: order.customerRef,
+        },
+        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
+      );
+    }
+  }
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────

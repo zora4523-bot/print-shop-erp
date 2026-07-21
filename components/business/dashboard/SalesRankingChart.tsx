@@ -15,8 +15,8 @@ import {
 // 轴、Y 轴当类目（recharts 的 vertical 命名跟人的直觉相反，但这是
 // 它的约定）。
 //
-// 配色按角色：SALES = 蓝色，CUSTOMER_SERVICE = 绿色。OWNER / FOREMAN
-// 在 dashboard 看排行的概率不大但极少数 owner 自己接的工单也会上榜
+// 配色按角色：SALES = 蓝色，CUSTOMER_SERVICE = 绿色。ADMIN
+// 在 dashboard 看排行的概率不大，但管理员自己接的工单也可能上榜
 // → 用 muted 灰色。
 
 export type SalesRankingChartProps = {
@@ -30,10 +30,9 @@ export type SalesRankingChartProps = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  SALES: '#2563eb',
-  CUSTOMER_SERVICE: '#10b981',
-  OWNER: '#94a3b8',
-  FOREMAN: '#94a3b8',
+  SALES: 'var(--chart-1)',
+  CUSTOMER_SERVICE: 'var(--chart-3)',
+  ADMIN: 'var(--chart-5)',
 };
 
 export function SalesRankingChart({ data }: SalesRankingChartProps) {
@@ -56,29 +55,38 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
 
   return (
     <div data-slot="dashboard-chart-ranking" className="h-80 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        initialDimension={{ width: 1, height: 1 }}
+      >
         <BarChart
           data={rows}
           layout="vertical"
           margin={{ top: 8, right: 32, bottom: 8, left: 16 }}
         >
-          <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" horizontal={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
           <XAxis
             type="number"
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
             fontSize={11}
             tickFormatter={(v: number) => formatAxisMoney(v)}
           />
           <YAxis
             type="category"
             dataKey="displayName"
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
             fontSize={11}
             width={72}
           />
           <Tooltip
             isAnimationActive={false}
-            contentStyle={{ fontSize: 12 }}
+            contentStyle={{
+              fontSize: 12,
+              backgroundColor: 'var(--popover)',
+              borderColor: 'var(--border)',
+              color: 'var(--popover-foreground)',
+            }}
             // tooltip 走&ldquo;精确到分&rdquo;格式，**不**用 formatAxisMoney——后者
             // 会把 5000.50 圆成 5,001、把 12500 压成 1.3 万，这是 axis
             // tick 的密度妥协，不是金额展示口径。
@@ -92,7 +100,7 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
             {rows.map((row) => (
               <Cell
                 key={row.userId}
-                fill={ROLE_COLORS[row.role] ?? '#94a3b8'}
+                fill={ROLE_COLORS[row.role] ?? 'var(--chart-6)'}
               />
             ))}
           </Bar>

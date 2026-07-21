@@ -145,6 +145,7 @@ export function PurchaseOrdersTable({
                 <AdminRowActions>
                   <Link
                     href={`/owner/purchases/${order.id}`}
+                    prefetch={false}
                     className="text-sm text-primary underline hover:no-underline"
                   >
                     查看

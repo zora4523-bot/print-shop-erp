@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { OrderStatus, Role } from '../../../../generated/prisma/enums';
+import {
+  OrderStatus,
+  OutsourceStatus,
+  Role,
+} from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import {
@@ -31,6 +35,8 @@ import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMater
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
+import { getPendingTaskReassignmentView } from '@/lib/production';
+import { ReassignTaskForm } from '@/components/business/production/ReassignTaskForm';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -44,38 +50,44 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();
-  const [materialEstimate, pieceworkSummary] = await Promise.all([
+  const [materialEstimate, pieceworkSummary, reassignmentView] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
-    user.role === Role.OWNER
+    user.role === Role.ADMIN
       ? getOrderPieceworkSummary(order.id)
       : Promise.resolve(null),
+    user.role === Role.ADMIN
+      ? getPendingTaskReassignmentView(order.id)
+      : Promise.resolve({ tasks: [] }),
   ]);
 
   const canSubmit =
     order.status === OrderStatus.DRAFT &&
-    (order.submitterId === user.id ||
-      user.role === Role.OWNER ||
-      user.role === Role.FOREMAN);
+    (order.submitterId === user.id || user.role === Role.ADMIN);
   const canCancel =
-    user.role === Role.OWNER && !isTerminalOrderStatus(order.status);
-  // SHIPPED / FINISHED 转换权限：order:ship = OWNER + FOREMAN（见
+    user.role === Role.ADMIN && !isTerminalOrderStatus(order.status);
+  // SHIPPED / FINISHED 转换权限：order:ship = ADMIN（见
   // permissions.ts）。这里 mirror 该闸口；action 层 requirePermission
   // 仍是真闸口。
   const canShipOrFinish =
-    user.role === Role.OWNER || user.role === Role.FOREMAN;
+    user.role === Role.ADMIN;
+  const hasLiveOutsource = order.outsourceOrders.some(
+    (row) =>
+      row.status === OutsourceStatus.SENT ||
+      row.status === OutsourceStatus.IN_PROGRESS,
+  );
   const canShip =
-    canShipOrFinish && order.status === OrderStatus.COMPLETED;
+    canShipOrFinish &&
+    order.status === OrderStatus.COMPLETED &&
+    !hasLiveOutsource;
   const canFinish =
     canShipOrFinish && order.status === OrderStatus.SHIPPED;
 
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
-  // guard: SALES / CUSTOMER_SERVICE only their own; OWNER / FOREMAN
+  // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
   // any. Server still re-verifies on submit — this is UI-only.
   const canEdit =
     isOrderEditable(order.status) &&
-    (order.submitterId === user.id ||
-      user.role === Role.OWNER ||
-      user.role === Role.FOREMAN);
+    (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
@@ -87,27 +99,29 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // canAttachOutsource() is the canonical gate;
   // lib/outsource.ts re-checks the same predicate.
   const canCreateOutsource =
-    (user.role === Role.OWNER || user.role === Role.FOREMAN) &&
+    (user.role === Role.ADMIN) &&
     canAttachOutsource(order.status);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
-            <span className="font-sans tabular-nums">{order.orderNo}</span>
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
+            <span className="admin-wrap-anywhere min-w-0 font-sans tabular-nums">
+              {order.orderNo}
+            </span>
             {order.isUrgent ? (
-              <Badge variant="destructive" className="ml-3">
+              <Badge variant="destructive">
                 急单
               </Badge>
             ) : null}
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="admin-wrap-anywhere text-sm text-muted-foreground">
             提交人：{order.submitter.displayName}（{roleLabel(order.submitter.role)}）
             · 创建于 {formatDateTimeShanghai(order.createdAt)}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <OrderStatusBadge status={order.status} />
           {canEdit ? (
             <Link
@@ -145,9 +159,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">基本信息</h2>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Row label="客户代号" value={order.customerRef} />
           <Row label="收货人" value={order.receiverName} />
           <Row label="收货电话" value={order.receiverPhone} />
@@ -171,20 +185,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </dl>
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">款式（{order.items.length}）</h2>
         <ol className="space-y-3">
           {order.items.map((item) => (
-            <li key={item.id} className="rounded-lg border p-4 text-sm">
-              <div className="flex items-center justify-between">
-                <div className="font-medium">
+            <li key={item.id} className="min-w-0 rounded-lg border p-4 text-sm">
+              <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div className="admin-wrap-anywhere min-w-0 font-medium">
                   #{item.sequence} · {item.name}
                 </div>
-                <div className="font-sans tabular-nums text-xs text-muted-foreground">
+                <div className="admin-wrap-anywhere font-sans tabular-nums text-xs text-muted-foreground sm:shrink-0 sm:text-right">
                   {item.quantity} × {String(item.unitPrice)} = {String(item.subtotal)}
                 </div>
               </div>
-              <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+              <dl className="mt-2 grid min-w-0 grid-cols-1 gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
                 <Row label="规格" value={item.specification} />
                 <Row label="纸张" value={item.paperType} />
                 <Row label="烫金色" value={item.foilColor} />
@@ -221,18 +235,51 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </ol>
       </section>
 
+      {reassignmentView.tasks.length > 0 ? (
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-base font-semibold">未开工任务改派</h2>
+            <p className="text-xs text-muted-foreground">
+              只能改派未开工任务；已开工或已完工任务会固定师傅与薪资归属。
+            </p>
+          </div>
+          <ul className="divide-y text-sm">
+            {reassignmentView.tasks.map((task) => (
+              <li
+                key={task.id}
+                className="grid items-center gap-3 py-3 sm:grid-cols-[1fr_1fr_minmax(320px,1.5fr)]"
+              >
+                <span>#{task.itemSequence} · {task.itemName}</span>
+                <span>
+                  {task.craftName}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    当前：{task.currentWorkerName ?? '未派工'}
+                  </span>
+                </span>
+                <ReassignTaskForm
+                  taskId={task.id}
+                  orderId={order.id}
+                  currentWorkerId={task.currentWorkerId}
+                  eligibleWorkers={task.eligibleWorkers}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <OrderMaterialUsageEstimate estimate={materialEstimate} />
 
       {pieceworkSummary ? (
-        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
               <h2 className="text-base font-semibold">计件工资关联</h2>
               <p className="text-xs text-muted-foreground">
-                仅老板可见；金额来自已生成的日薪任务明细。
+                仅管理员可见；金额来自已生成的日薪任务明细。
               </p>
             </div>
-            <strong className="font-sans tabular-nums text-primary">
+            <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
               合计 ¥ {pieceworkSummary.total}
             </strong>
           </div>
@@ -246,11 +293,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   className="grid gap-2 py-3 sm:grid-cols-[120px_1fr_100px_140px]"
                 >
                   <span>{item.dailySalary.worker.displayName}</span>
-                  <span>{item.orderItemName} · {item.craftName}</span>
-                  <span className="text-right font-sans tabular-nums">¥ {String(item.pieceworkAmount)}</span>
+                  <span className="admin-wrap-anywhere min-w-0">
+                    {item.orderItemName} · {item.craftName}
+                  </span>
+                  <span className="font-sans tabular-nums sm:text-right">¥ {String(item.pieceworkAmount)}</span>
                   <Link
                     href={`/owner/salary/daily/${item.dailySalaryId}`}
-                    className="text-right text-xs text-primary underline"
+                    className="text-xs text-primary underline sm:justify-end sm:text-right"
                   >
                     查看工资明细
                   </Link>
@@ -261,7 +310,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">修改日志</h2>
         {order.logs.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无</p>
@@ -271,7 +320,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               const changes = formatOrderLogChanges(log.changedFields);
               return (
                 <li key={log.id} className="py-3 first:pt-0 last:pb-0">
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="text-muted-foreground">
                       {formatDateTimeShanghai(log.createdAt)}
                     </span>
@@ -286,15 +335,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   {changes.length > 0 && (
                     <ul className="mt-2 space-y-1 text-xs">
                       {changes.map((c) => (
-                        <li key={c.field} className="flex items-start gap-2">
-                          <span className="min-w-[5rem] text-muted-foreground">
+                        <li key={c.field} className="flex min-w-0 flex-wrap items-start gap-2">
+                          <span className="min-w-20 text-muted-foreground">
                             {c.label}
                           </span>
-                          <span className="line-through text-muted-foreground">
+                          <span className="admin-wrap-anywhere line-through text-muted-foreground">
                             {c.before}
                           </span>
                           <span>→</span>
-                          <span className="font-medium">{c.after}</span>
+                          <span className="admin-wrap-anywhere font-medium">{c.after}</span>
                         </li>
                       ))}
                     </ul>
@@ -317,6 +366,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
+      {canShipOrFinish &&
+      order.status === OrderStatus.COMPLETED &&
+      hasLiveOutsource ? (
+        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+          <h2 className="text-base font-semibold">暂不能发货</h2>
+          <p className="text-sm text-muted-foreground">
+            该工单仍有已发送或进行中的外协单。请先在外协管理中标记收货或取消，系统才会开放发货。
+          </p>
+          <Link
+            href="/foreman/outsource"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看外协单
+          </Link>
+        </section>
+      ) : null}
+
       {canFinish ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">确认完工</h2>
@@ -328,13 +394,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      <div className="flex gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row">
         {canSubmit ? <SubmitOrderButton orderId={order.id} /> : null}
         {canCancel ? (
-          <div className="flex-1 rounded-xl border bg-card p-6 shadow-sm">
+          <div className="min-w-0 flex-1 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
             <h2 className="mb-2 text-base font-semibold">取消工单</h2>
             <p className="mb-3 text-sm text-muted-foreground">
-              取消后工单进入 CANCELLED 终态，不再参与排产 / 生产。仅老板可操作。
+              取消后工单进入 CANCELLED 终态，不再参与排产 / 生产。仅管理员可操作。
             </p>
             <CancelOrderForm orderId={order.id} />
           </div>
@@ -357,9 +423,17 @@ function Row({
 }) {
   const display = value === null || value === undefined || value === '' ? '—' : value;
   return (
-    <div className={full ? 'col-span-2' : undefined}>
+    <div className={full ? 'min-w-0 sm:col-span-2' : 'min-w-0'}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={tabular ? 'font-sans tabular-nums' : undefined}>{display}</dd>
+      <dd
+        className={
+          tabular
+            ? 'admin-wrap-anywhere font-sans tabular-nums'
+            : 'admin-wrap-anywhere'
+        }
+      >
+        {display}
+      </dd>
     </div>
   );
 }

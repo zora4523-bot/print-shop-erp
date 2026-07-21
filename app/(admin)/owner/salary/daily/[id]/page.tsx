@@ -102,7 +102,12 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             金额来自任务完工时锁定的规则，后续改价不会篡改历史。
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="日薪明细"
+          tabIndex={0}
+        >
           <table className="w-full min-w-[1250px] text-sm">
             <thead className="border-y bg-muted/40 text-xs text-muted-foreground">
               <tr>

@@ -140,13 +140,18 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
 
   return (
     <form onSubmit={handleSubmit(onValid)} className="space-y-6" noValidate>
-      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
+      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">基本信息</h2>
 
         <div className="space-y-1">
-          <Label>客户主数据（选填）</Label>
+          <Label htmlFor="customerPartyId">客户主数据（选填）</Label>
           <select
+            id="customerPartyId"
             className={selectClass}
+            aria-invalid={Boolean(errors.customerPartyId?.message)}
+            aria-describedby={
+              errors.customerPartyId?.message ? 'customerPartyId-error' : undefined
+            }
             {...partySelectRegistration}
             onChange={(event) => {
               partySelectRegistration.onChange(event);
@@ -161,13 +166,13 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
             ))}
           </select>
           {errors.customerPartyId?.message ? (
-            <p className="text-xs text-destructive">
+            <p id="customerPartyId-error" role="alert" className="text-xs text-destructive">
               {errors.customerPartyId.message}
             </p>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField
             label="客户代号"
             registration={register('customerRef')}
@@ -209,7 +214,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
           rows={2}
         />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField
             label="承诺交期（选填）"
             type="date"
@@ -228,8 +233,8 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
         </label>
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold">款式（{itemsArray.fields.length}）</h2>
           <Button
             type="button"
@@ -246,8 +251,8 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
 
         <ol className="space-y-4">
           {itemsArray.fields.map((field, index) => (
-            <li key={field.id} className="rounded-lg border p-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between">
+            <li key={field.id} className="min-w-0 space-y-3 rounded-lg border p-4 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs text-muted-foreground">#{index + 1}</span>
                 {itemsArray.fields.length > 1 ? (
                   <Button
@@ -260,7 +265,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                 <TextField
                   label="款式名"
                   required
@@ -268,8 +273,9 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
                   error={errors.items?.[index]?.name?.message}
                 />
                 <div className="space-y-1">
-                  <Label>产品（选填）</Label>
+                  <Label htmlFor={`items.${index}.productId`}>产品（选填）</Label>
                   <select
+                    id={`items.${index}.productId`}
                     className={selectClass}
                     {...register(`items.${index}.productId`, {
                       setValueAs: (v) => (v === '' ? null : v),
@@ -327,7 +333,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
                 />
               </div>
 
-              <div className="flex gap-6">
+              <div className="flex flex-wrap gap-4 sm:gap-6">
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -358,7 +364,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
                         return (
                           <label
                             key={c.id}
-                            className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs cursor-pointer"
+                            className="flex min-h-11 items-center gap-1.5 rounded-md border px-3 py-2 text-xs cursor-pointer"
                           >
                             <input
                               type="checkbox"
@@ -414,7 +420,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
         </p>
       ) : null}
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={submitting}>
           {submitting ? '提交中…' : '创建工单（草稿）'}
         </Button>
@@ -431,7 +437,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
 // ──────────────────────────────────────────────────────────────────────
 
 const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+  'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 type Registration = ReturnType<ReturnType<typeof useForm<CreateOrderInput>>['register']>;
 
@@ -454,23 +460,31 @@ function TextField({
   min?: number;
   step?: number;
 }) {
+  const fieldId = registration.name;
+  const messageId = `${fieldId}-message`;
   return (
-    <div className="space-y-1">
-      <Label>
+    <div className="min-w-0 space-y-1">
+      <Label htmlFor={fieldId}>
         {label}
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
       <Input
+        id={fieldId}
         type={type}
         min={min}
         step={step}
         aria-invalid={Boolean(error)}
+        aria-describedby={error || hint ? messageId : undefined}
         {...registration}
       />
       {error ? (
-        <p className="text-xs text-destructive">{error}</p>
+        <p id={messageId} role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
       ) : hint ? (
-        <p className="text-xs text-muted-foreground">{hint}</p>
+        <p id={messageId} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
       ) : null}
     </div>
   );
@@ -487,16 +501,24 @@ function TextareaField({
   error?: string | undefined;
   registration: Registration;
 }) {
+  const fieldId = registration.name;
+  const messageId = `${fieldId}-error`;
   return (
-    <div className="space-y-1">
-      <Label>{label}</Label>
+    <div className="min-w-0 space-y-1">
+      <Label htmlFor={fieldId}>{label}</Label>
       <textarea
+        id={fieldId}
         rows={rows}
         className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? messageId : undefined}
         {...registration}
       />
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p id={messageId} role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -93,14 +93,14 @@ export async function getTodayOrderStats(
  * DRAFT 也算进来会让&ldquo;一生成账单数字就跳&rdquo;，与发单页不一致。DRAFT
  * 是&ldquo;未对外&rdquo;的草稿期，不应进应收。
  *
- * 用 sumDecimal 而不是 prisma `_sum`：3+ 张账单累加用 JS Number 会
- * 漂移分级精度（0.1 + 0.2 经典坑），Decimal.js 才是数值正确的来源。
+ * 聚合交给数据库，避免把当月全部账单行搬回 Node；Prisma Decimal 转成
+ * 字符串后再交给 Decimal.js 做 outstanding，始终不经过 JS Number。
  */
 export async function getMonthlyBillStats(
   now: Date = new Date(),
 ): Promise<MonthlyBillStats> {
   const month = currentShanghaiMonth(now);
-  const bills = await db.bill.findMany({
+  const aggregation = await db.bill.aggregate({
     where: {
       period: month,
       status: {
@@ -111,11 +111,11 @@ export async function getMonthlyBillStats(
         ],
       },
     },
-    select: { totalAmount: true, paidAmount: true },
+    _sum: { totalAmount: true, paidAmount: true },
   });
 
-  const total = sumDecimal(bills.map((b) => b.totalAmount));
-  const paid = sumDecimal(bills.map((b) => b.paidAmount));
+  const total = new Decimal(aggregation._sum.totalAmount?.toString() ?? '0');
+  const paid = new Decimal(aggregation._sum.paidAmount?.toString() ?? '0');
   const outstanding = total.minus(paid);
 
   return {
@@ -124,15 +124,4 @@ export async function getMonthlyBillStats(
     paid: paid.toFixed(2),
     outstanding: outstanding.toFixed(2),
   };
-}
-
-// Same shape as lib/salary/summary.ts:sumDecimal — duplicated here
-// instead of importing because that module pulls Prisma + the salary
-// module's full type surface, and dashboard helpers should stay
-// thin. If a third callsite shows up we'll promote to lib/utils.
-function sumDecimal(values: readonly unknown[]): Decimal {
-  return values.reduce<Decimal>(
-    (acc, v) => acc.plus(new Decimal(v as Decimal.Value)),
-    new Decimal(0),
-  );
 }

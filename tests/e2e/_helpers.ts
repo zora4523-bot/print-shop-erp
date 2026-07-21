@@ -193,7 +193,7 @@ export async function seedPrintableOrder(opts: {
         status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
         "totalAmount", "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'OWNER'::"Role", $3,
+        $1, $2, $3, 'ADMIN'::"Role", $3,
         'DRAFT'::"OrderStatus", FALSE,
         'VR-CUSTOMER',
         'VR 收件人',
@@ -420,8 +420,8 @@ export async function seedDashboardSnapshot(opts: {
   chartFixture?: boolean;
   // Slice C 排行 fixture 还要一个额外的销售用户（不同于 salesUserId）
   // 来体现"3 个不同 submitter / 3 种不同业绩高度"。e2e-cs (CS) 提供
-  // 第二种角色色（绿）；admin (OWNER) 提供第三种（muted）。foreman 是
-  // FOREMAN 角色，用其 id 喂入则角色色用 muted 同色板。
+  // 第二种角色色（绿）；admin (ADMIN) 提供第三种（muted）。foreman 是
+  // ADMIN 角色，用其 id 喂入则角色色用 muted 同色板。
   ownerUserId?: string;
 }): Promise<DashboardSnapshot> {
   const now = new Date();
@@ -496,7 +496,7 @@ export async function seedDashboardSnapshot(opts: {
        )`,
     );
     // Slice C ranking fixture also seeds Orders submitted by `admin`
-    // (OWNER role) — those don't match the e2e-* user filter above.
+    // (ADMIN role) — those don't match the e2e-* user filter above.
     // Catch them by id-prefix instead. e2e-dash-* IDs are owned
     // exclusively by this helper (Slice A trend / Slice B linked
     // outsource / Slice C trend + ranking).
@@ -781,7 +781,7 @@ export async function seedDashboardSnapshot(opts: {
       // Sales ranking: 3 submitters × different total amounts.
       //   - salesUserId (SALES, blue):       ¥5,000
       //   - csUserId (CS, green):            ¥3,000   (only when provided)
-      //   - ownerUserId (OWNER, muted):      ¥1,500   (only when provided)
+      //   - ownerUserId (ADMIN, muted):      ¥1,500   (only when provided)
       // Each order goes through the current month at varying days so
       // submittedAt is a believable spread.
       const monthlyMidUtc = new Date(Date.UTC(yyyy!, mm! - 1, 15, 4, 0));
@@ -812,7 +812,7 @@ export async function seedDashboardSnapshot(opts: {
       if (opts.ownerUserId) {
         rankingSpecs.push({
           submitterId: opts.ownerUserId,
-          submitterRole: 'OWNER',
+          submitterRole: 'ADMIN',
           amount: '1500.00',
           daysOffset: -2,
           productSuffix: null, // → UNCATEGORIZED bucket
@@ -1205,7 +1205,7 @@ export async function seedSearchSmokeFixtures(opts: {
         "receiverAddress", "expressCode", "trackingNo", "createdAt",
         "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'OWNER'::"Role", $3,
+        $1, $2, $3, 'ADMIN'::"Role", $3,
         'DRAFT'::"OrderStatus", true, $4, 'Codex E2E 收货人',
         '13900001111', 'E2E 测试地址', 'SF-CODX-E2E',
         'SF123456789E2E', NOW(), NOW()
@@ -1372,8 +1372,8 @@ export async function seedSearchSmokeFixtures(opts: {
 
 // Logs out the currently signed-in user via the header UserMenu dropdown
 // and waits to land on /login. Used by multi-role flow tests where the
-// same browser context switches between SALES → FOREMAN → WORKER →
-// OWNER. We click the form's submit button rather than fetch the
+// same browser context switches between SALES → ADMIN → WORKER →
+// ADMIN. We click the form's submit button rather than fetch the
 // signOut endpoint directly so we exercise the same path users do.
 //
 // Phase D（2026-05-06）退出按钮收进 AdminHeader 的 UserMenu dropdown：

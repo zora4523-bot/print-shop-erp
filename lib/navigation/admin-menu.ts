@@ -96,8 +96,12 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
 
 export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
   const preferredByRole: Partial<Record<Role, readonly string[]>> = {
-    [Role.OWNER]: ['/orders', '/owner/purchases', '/owner/boms', '/owner/materials'],
-    [Role.FOREMAN]: ['/orders', '/foreman/scheduling', '/foreman/materials', '/foreman/cdr'],
+    [Role.ADMIN]: [
+      '/orders',
+      '/foreman/scheduling',
+      '/owner/purchases',
+      '/owner/warehouses',
+    ],
     [Role.SALES]: ['/orders/new', '/orders', '/sales/bills'],
     [Role.CUSTOMER_SERVICE]: ['/orders/new', '/orders'],
   };
@@ -111,8 +115,7 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
 
 // Role-specific 标题，渲染在 sidebar 顶部 / 顶部条 role badge。
 export const ADMIN_ROLE_BADGE: Record<Role, string> = {
-  [Role.OWNER]: '管理员后台',
-  [Role.FOREMAN]: '车间',
+  [Role.ADMIN]: '管理员后台',
   [Role.SALES]: '销售',
   [Role.CUSTOMER_SERVICE]: '客服',
   [Role.WORKER]: '师傅',

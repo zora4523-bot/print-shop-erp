@@ -17,7 +17,7 @@ import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 // Foreman records one (worker, date) attendance row. Idempotent by
 // design — same (worker, date) re-posts overwrite via upsert.
 //
-// Permission: reuse 'task:assign' (FOREMAN + OWNER) since the foreman
+// Permission: reuse 'task:assign' (ADMIN) since the administrator
 // already has broad workshop authority; adding a new permission key
 // for attendance alone is yak-shaving at this stage.
 export async function recordAttendanceAction(

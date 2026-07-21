@@ -3,6 +3,8 @@ import {
   Role,
   TaskStatus,
   MachineType,
+  OutsourceStatus,
+  WorkerType,
 } from '../generated/prisma/enums';
 import { db } from './db';
 import { transitionOrder } from './order/status-machine';
@@ -19,6 +21,10 @@ import { orderCascadeLockKey } from './order/locks';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import { getActiveMachineRule } from './salary/rules';
 import { dispatchNotification } from './notification/dispatch';
+import {
+  maybeCompleteProductionOrder,
+  type ProductionCompletionTx,
+} from './production-completion';
 
 // Thrown when a scheduling request violates the allowlist contract
 // (duplicate / missing / unknown craft-item pairs, bad worker, etc.).
@@ -51,6 +57,14 @@ type ScheduleTxClient = {
         crafts: string[];
       }>;
     } | null>;
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      status: OrderStatus;
+      requiresOutsource?: boolean;
+    } | null>;
     update: (args: {
       where: { id: string };
       data: unknown;
@@ -66,7 +80,8 @@ type ScheduleTxClient = {
         id: string;
         isActive: boolean;
         isOutsource: boolean;
-        defaultMachineType: string | null;
+        defaultWorkerType: WorkerType | null;
+        defaultMachineType: MachineType | null;
       }>
     >;
   };
@@ -75,13 +90,29 @@ type ScheduleTxClient = {
       where: unknown;
       select?: unknown;
     }) => Promise<
-      Array<{ id: string; role: Role; isActive: boolean; machineType: string | null }>
+      Array<{
+        id: string;
+        role: Role;
+        isActive: boolean;
+        workerType: WorkerType | null;
+        machineType: MachineType | null;
+      }>
     >;
   };
   productionTask: {
     createMany: (args: {
       data: unknown[];
     }) => Promise<{ count: number }>;
+    findMany: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<Array<{ id: string; status: TaskStatus }>>;
+  };
+  outsourceOrder: {
+    findMany: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<Array<{ id: string; status: OutsourceStatus }>>;
   };
   orderLog: {
     create: (args: { data: unknown }) => Promise<unknown>;
@@ -93,6 +124,7 @@ export type ScheduleOrderResult = {
   status: OrderStatus;
   tasksCreated: number;
   skippedOutsourceCrafts: number;
+  orderCompleted: boolean;
 };
 
 // Core flow (SPEC §3.2):
@@ -107,8 +139,6 @@ export type ScheduleOrderResult = {
 //   6. createMany ProductionTask rows + transition Order → SCHEDULING
 //      + write OrderLog, all in one tx.
 //
-// Outsource-only orders succeed with zero tasks and still transition
-// to SCHEDULING — Slice C will add the outsource-readiness gate.
 export async function scheduleOrder(
   input: ScheduleOrderInput,
   actor: { id: string; role: Role },
@@ -163,6 +193,7 @@ export async function scheduleOrder(
         id: true,
         isActive: true,
         isOutsource: true,
+        defaultWorkerType: true,
         defaultMachineType: true,
       },
     });
@@ -181,6 +212,9 @@ export async function scheduleOrder(
       // foreman has to either change the craft on the order (edit
       // flow) or the owner has to re-enable the craft.
       if (!c.isActive) throw new SchedulingError(`工艺已停用：${cid}`);
+      if (!c.isOutsource) {
+        assertCraftAssignmentConfigured(c);
+      }
     }
 
     // Expected set: for each item, for each non-outsource craft on
@@ -198,6 +232,21 @@ export async function scheduleOrder(
           continue;
         }
         expectedKeys.add(`${item.id}:${cid}`);
+      }
+    }
+
+    if (skippedOutsourceCrafts > 0) {
+      const linkedOutsource = await txClient.outsourceOrder.findMany({
+        where: {
+          orderId: order.id,
+          status: { not: OutsourceStatus.CANCELLED },
+        },
+        select: { id: true, status: true },
+      });
+      if (linkedOutsource.length === 0) {
+        throw new SchedulingError(
+          '工单包含外协工艺，请先在工单详情创建外协单再确认排产',
+        );
       }
     }
 
@@ -235,7 +284,13 @@ export async function scheduleOrder(
     // Verify workers exist + are active + are WORKERs.
     const workers = await txClient.user.findMany({
       where: { id: { in: [...workerIds] } },
-      select: { id: true, role: true, isActive: true, machineType: true },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        workerType: true,
+        machineType: true,
+      },
     });
     const workerById = new Map(workers.map((w) => [w.id, w]));
     for (const wid of workerIds) {
@@ -245,6 +300,12 @@ export async function scheduleOrder(
         throw new SchedulingError(`用户不是师傅：${wid}`);
       }
       if (!w.isActive) throw new SchedulingError(`师傅已停用：${wid}`);
+    }
+    for (const assignment of input.assignments) {
+      assertWorkerCompatible(
+        craftById.get(assignment.craftId)!,
+        workerById.get(assignment.workerId)!,
+      );
     }
 
     // createMany is a single round trip — we assemble the full list
@@ -256,6 +317,7 @@ export async function scheduleOrder(
         orderItemId: a.orderItemId,
         craftId: a.craftId,
         workerId: a.workerId,
+        workerType: craft.defaultWorkerType,
         // Snapshot the machine type at assign time. If we change
         // craft.defaultMachineType later, in-flight tasks keep their
         // original type — same principle as salaryRuleSnapshot.
@@ -271,7 +333,11 @@ export async function scheduleOrder(
     // IN_PRODUCTION (handled in Slice B via beginTask).
     const updated = await txClient.order.update({
       where: { id: order.id },
-      data: { status: OrderStatus.SCHEDULING, scheduledAt: new Date() },
+      data: {
+        status: OrderStatus.SCHEDULING,
+        scheduledAt: new Date(),
+        requiresOutsource: skippedOutsourceCrafts > 0,
+      },
       select: { id: true, status: true },
     });
     await txClient.orderLog.create({
@@ -288,18 +354,29 @@ export async function scheduleOrder(
       },
     });
 
+    const orderCompleted =
+      inserted.count === 0 && skippedOutsourceCrafts > 0
+        ? await maybeCompleteProductionOrder(
+            txClient as unknown as ProductionCompletionTx,
+            order.id,
+            actor.id,
+            new Date(),
+          )
+        : false;
+
     return {
       orderId: updated.id,
-      status: updated.status,
+      status: orderCompleted ? OrderStatus.COMPLETED : updated.status,
       tasksCreated: inserted.count,
       skippedOutsourceCrafts,
+      orderCompleted,
     };
   });
 
   // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；生产入持久化队列）。
   const payload = await db.order.findUnique({
     where: { id: result.orderId },
-    select: { orderNo: true },
+    select: { orderNo: true, customerRef: true },
   });
   if (payload) {
     await dispatchNotification(
@@ -311,9 +388,72 @@ export async function scheduleOrder(
       },
       { dedupeKey: `notification:ORDER_SCHEDULED:${result.orderId}` },
     );
+    if (result.orderCompleted) {
+      await dispatchNotification(
+        'ORDER_COMPLETED',
+        {
+          orderId: result.orderId,
+          orderNo: payload.orderNo,
+          customerRef: payload.customerRef,
+        },
+        { dedupeKey: `notification:ORDER_COMPLETED:${result.orderId}` },
+      );
+    }
   }
 
   return result;
+}
+
+type AssignmentCraft = {
+  id: string;
+  isOutsource: boolean;
+  defaultWorkerType: WorkerType | null;
+  defaultMachineType: MachineType | null;
+};
+
+type AssignmentWorker = {
+  id: string;
+  workerType: WorkerType | null;
+  machineType: MachineType | null;
+};
+
+function assertCraftAssignmentConfigured(craft: AssignmentCraft): void {
+  if (!craft.defaultWorkerType) {
+    throw new SchedulingError(
+      `工艺 ${craft.id} 未配置接单岗位，请先到工艺字典完善配置`,
+    );
+  }
+  if (craft.defaultWorkerType === WorkerType.COOK) {
+    throw new SchedulingError(`工艺 ${craft.id} 不能分配给厨师`);
+  }
+  if (
+    craft.defaultWorkerType === WorkerType.MACHINE &&
+    !craft.defaultMachineType
+  ) {
+    throw new SchedulingError(
+      `工艺 ${craft.id} 是开机工艺但未配置机型`,
+    );
+  }
+}
+
+function assertWorkerCompatible(
+  craft: AssignmentCraft,
+  worker: AssignmentWorker,
+): void {
+  assertCraftAssignmentConfigured(craft);
+  if (worker.workerType !== craft.defaultWorkerType) {
+    throw new SchedulingError(
+      `师傅 ${worker.id} 的岗位与工艺 ${craft.id} 不匹配`,
+    );
+  }
+  if (
+    craft.defaultWorkerType === WorkerType.MACHINE &&
+    worker.machineType !== craft.defaultMachineType
+  ) {
+    throw new SchedulingError(
+      `师傅 ${worker.id} 的机型与工艺 ${craft.id} 不匹配`,
+    );
+  }
 }
 
 export { SchedulingError as ProductionSchedulingError };
@@ -332,6 +472,142 @@ export class ReportError extends Error {
   }
 }
 
+type ReassignTxClient = {
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  productionTask: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      status: TaskStatus;
+      workerId: string | null;
+      orderItem: { orderId: string; name: string; sequence: number };
+      craft: AssignmentCraft;
+    } | null>;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string; status: TaskStatus; workerId: string | null }>;
+  };
+  user: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<
+      | (AssignmentWorker & { role: Role; isActive: boolean; displayName: string })
+      | null
+    >;
+  };
+  orderLog: {
+    create: (args: { data: unknown }) => Promise<unknown>;
+  };
+};
+
+export type ReassignProductionTaskResult = {
+  taskId: string;
+  workerId: string;
+  status: TaskStatus;
+};
+
+// Started/completed work is immutable: changing its worker after pickup would
+// move salary ownership. Administrators may safely correct PENDING tasks.
+export async function reassignProductionTask(
+  taskId: string,
+  workerId: string,
+  actor: { id: string; role: Role },
+): Promise<ReassignProductionTaskResult> {
+  if (actor.role !== Role.ADMIN) {
+    throw new ReportError('只有管理员可以改派生产任务');
+  }
+  return db.$transaction(async (tx) => {
+    const txClient = tx as unknown as ReassignTxClient;
+    const pre = await txClient.productionTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, orderItem: { select: { orderId: true } } },
+    });
+    if (!pre) throw new ReportError('任务不存在');
+
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      pre.orderItem.orderId,
+    )}))`;
+    const task = await txClient.productionTask.findUnique({
+      where: { id: taskId },
+      select: {
+        id: true,
+        status: true,
+        workerId: true,
+        orderItem: { select: { orderId: true, name: true, sequence: true } },
+        craft: {
+          select: {
+            id: true,
+            isOutsource: true,
+            defaultWorkerType: true,
+            defaultMachineType: true,
+          },
+        },
+      },
+    });
+    if (!task) throw new ReportError('任务不存在');
+    if (task.status !== TaskStatus.PENDING) {
+      throw new ReportError('只有未开工任务可以改派');
+    }
+
+    const worker = await txClient.user.findUnique({
+      where: { id: workerId },
+      select: {
+        id: true,
+        displayName: true,
+        role: true,
+        isActive: true,
+        workerType: true,
+        machineType: true,
+      },
+    });
+    if (!worker || worker.role !== Role.WORKER) {
+      throw new ReportError('目标师傅不存在');
+    }
+    if (!worker.isActive) throw new ReportError('目标师傅已停用');
+    try {
+      assertWorkerCompatible(task.craft, worker);
+    } catch (error) {
+      if (error instanceof SchedulingError) throw new ReportError(error.message);
+      throw error;
+    }
+
+    if (task.workerId === workerId) {
+      return { taskId: task.id, workerId, status: task.status };
+    }
+    const updated = await txClient.productionTask.update({
+      where: { id: task.id },
+      data: {
+        workerId,
+        workerType: task.craft.defaultWorkerType,
+        machineType: task.craft.defaultMachineType,
+      },
+      select: { id: true, workerId: true, status: true },
+    });
+    await txClient.orderLog.create({
+      data: {
+        orderId: task.orderItem.orderId,
+        operatorId: actor.id,
+        action: 'TASK_REASSIGN',
+        changedFields: {
+          workerId: { before: task.workerId, after: workerId },
+          taskId: { before: task.id, after: task.id },
+        },
+        remark: `改派：${task.orderItem.name} (#${task.orderItem.sequence}) → ${worker.displayName}`,
+      },
+    });
+    return {
+      taskId: updated.id,
+      workerId: updated.workerId ?? workerId,
+      status: updated.status,
+    };
+  });
+}
+
 // Tx surface for begin/report. Same narrow-on-purpose style as the
 // scheduling helper.
 type TaskTxClient = {
@@ -345,6 +621,7 @@ type TaskTxClient = {
           id: string;
           status: TaskStatus;
           workerId: string | null;
+          workerType?: WorkerType | null;
           machineType: MachineType | null;
           plannedQty: number;
           orderItem: {
@@ -372,7 +649,11 @@ type TaskTxClient = {
     findUnique: (args: {
       where: { id: string };
       select?: unknown;
-    }) => Promise<{ id: string; status: OrderStatus } | null>;
+    }) => Promise<{
+      id: string;
+      status: OrderStatus;
+      requiresOutsource?: boolean;
+    } | null>;
     update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<{
       id: string;
       status: OrderStatus;
@@ -380,6 +661,24 @@ type TaskTxClient = {
   };
   orderLog: {
     create: (args: { data: unknown }) => Promise<unknown>;
+  };
+  user: {
+    findUnique: (args: {
+      where: { id: string };
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      role: Role;
+      isActive: boolean;
+      workerType: WorkerType | null;
+      machineType: MachineType | null;
+    } | null>;
+  };
+  outsourceOrder: {
+    findMany: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<Array<{ id: string; status: OutsourceStatus }>>;
   };
 };
 
@@ -442,6 +741,7 @@ export async function beginTask(
         id: true,
         status: true,
         workerId: true,
+        workerType: true,
         machineType: true,
         plannedQty: true,
         orderItem: {
@@ -459,9 +759,40 @@ export async function beginTask(
     });
     if (!task) throw new ReportError('任务不存在');
 
-    const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+    const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && task.workerId !== actor.id) {
       throw new ReportError('只能开始分配给自己的任务');
+    }
+
+    // Re-check the assigned account at pickup time. It may have been
+    // deactivated or changed after scheduling, and legacy rows may predate the
+    // strict assignment gate. Refuse to start with the wrong payroll/machine
+    // identity; the administrator can safely reassign while still PENDING.
+    const assignedWorker = task.workerId
+      ? await txClient.user.findUnique({
+          where: { id: task.workerId },
+          select: {
+            id: true,
+            role: true,
+            isActive: true,
+            workerType: true,
+            machineType: true,
+          },
+        })
+      : null;
+    const taskWorkerType =
+      task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+    if (
+      !assignedWorker ||
+      assignedWorker.role !== Role.WORKER ||
+      !assignedWorker.isActive ||
+      assignedWorker.workerType !== taskWorkerType ||
+      (taskWorkerType === WorkerType.MACHINE &&
+        assignedWorker.machineType !== task.machineType)
+    ) {
+      throw new ReportError(
+        '任务与当前师傅的岗位或机型不匹配，请联系管理员改派',
+      );
     }
 
     // Cancelled with its order (A1). Checked on the FRESH (in-lock) read,
@@ -577,6 +908,7 @@ export async function reportTask(
         id: true,
         status: true,
         workerId: true,
+        workerType: true,
         machineType: true,
         plannedQty: true,
         orderItem: {
@@ -594,7 +926,7 @@ export async function reportTask(
     });
     if (!task) throw new ReportError('任务不存在');
 
-    const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+    const globalOverride = actor.role === Role.ADMIN;
     if (!globalOverride && task.workerId !== actor.id) {
       throw new ReportError('只能报工分配给自己的任务');
     }
@@ -606,40 +938,57 @@ export async function reportTask(
       throw new ReportError('该任务已随工单取消，不能报工');
     }
 
-    if (!task.machineType) {
-      // MVP: ProductionTask without a machineType = not a machine
-      // worker flow (PACKER / CLEANER tasks are outside P0 #4 scope).
-      throw new ReportError('此任务无机型，不支持计件报工');
-    }
-
     transitionProductionTask(task.status, TaskStatus.COMPLETED);
 
-    const rule = await getActiveMachineRule(
-      task.machineType,
-      now,
-      task.workerId ?? undefined,
-    );
-    if (!rule) {
-      throw new ReportError(
-        `无当前生效的 ${task.machineType} 薪资规则，请联系老板补规则后再报工`,
+    const taskWorkerType =
+      task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+    let boardCount = 0;
+    let pressCount = 0;
+    let pieceworkAmount = '0.00';
+    let salaryRuleSnapshot: Record<string, unknown>;
+
+    if (taskWorkerType === WorkerType.MACHINE) {
+      if (!task.machineType) {
+        throw new ReportError('开机任务缺少机型快照，请联系管理员改派');
+      }
+      const rule = await getActiveMachineRule(
+        task.machineType,
+        now,
+        task.workerId ?? undefined,
       );
+      if (!rule) {
+        throw new ReportError(
+          `无当前生效的 ${task.machineType} 薪资规则，请联系管理员补规则后再报工`,
+        );
+      }
+      const totalPressed =
+        input.completedQty + input.defectQty + input.reworkQty;
+      const breakdown = calcMachinePieceworkBreakdown(
+        {
+          quantity: totalPressed,
+          itemCount: 1,
+          isDoubleSided: task.orderItem.isDoubleSided,
+          isDoubleColor: task.orderItem.isDoubleColor,
+        },
+        rule,
+      );
+      boardCount = breakdown.boardCount;
+      pressCount = breakdown.pressCount;
+      pieceworkAmount = breakdown.amount.toFixed(2);
+      salaryRuleSnapshot = rule as unknown as Record<string, unknown>;
+    } else if (
+      taskWorkerType === WorkerType.PACKER ||
+      taskWorkerType === WorkerType.CLEANER
+    ) {
+      // These tasks still drive production progress, but compensation comes
+      // from attendance/hourly payroll rather than the machine-piecework ledger.
+      salaryRuleSnapshot = {
+        payrollMode: 'HOURLY',
+        workerType: taskWorkerType,
+      };
+    } else {
+      throw new ReportError('任务缺少有效的生产岗位快照，请联系管理员改派');
     }
-
-    // Effective pressed = completed + defect + rework. Each defective
-    // / reworked piece still consumed a press, so the worker is paid
-    // for total activity, not just the good output.
-    const totalPressed =
-      input.completedQty + input.defectQty + input.reworkQty;
-
-    const breakdown = calcMachinePieceworkBreakdown(
-      {
-        quantity: totalPressed,
-        itemCount: 1, // one ProductionTask ↔ one OrderItem in MVP
-        isDoubleSided: task.orderItem.isDoubleSided,
-        isDoubleColor: task.orderItem.isDoubleColor,
-      },
-      rule,
-    );
 
     await txClient.productionTask.update({
       where: { id: taskId },
@@ -648,10 +997,10 @@ export async function reportTask(
         completedQty: input.completedQty,
         defectQty: input.defectQty,
         reworkQty: input.reworkQty,
-        boardCount: breakdown.boardCount,
-        pressCount: breakdown.pressCount,
-        pieceworkAmount: breakdown.amount.toFixed(2),
-        salaryRuleSnapshot: rule as unknown as Record<string, unknown>,
+        boardCount,
+        pressCount,
+        pieceworkAmount,
+        salaryRuleSnapshot,
         completedAt: now,
       },
       select: { id: true, status: true },
@@ -665,65 +1014,19 @@ export async function reportTask(
       order.id,
     )}))`;
 
-    const siblings = await txClient.productionTask.findMany({
-      where: { orderItem: { orderId: order.id } },
-      select: { id: true, status: true },
-    });
-    const activeSiblings = siblings.filter(
-      (t) => t.status !== TaskStatus.CANCELLED,
+    const orderCompleted = await maybeCompleteProductionOrder(
+      txClient as unknown as ProductionCompletionTx,
+      order.id,
+      actor.id,
+      now,
     );
-    // All tasks (including this one) must now be COMPLETED. The just-
-    // updated task is in the list already because the read happens
-    // after the update in the same tx.
-    const allCompleted =
-      activeSiblings.length > 0 &&
-      activeSiblings.every((t) => t.status === TaskStatus.COMPLETED);
-
-    let orderCompleted = false;
-    if (allCompleted) {
-      // Re-read Order.status INSIDE the cascade lock. The snapshot
-      // taken at the top of the tx can be stale: when two workers
-      // simultaneously finish the last two tasks, the first to take
-      // the cascade lock transitions order to COMPLETED; the second
-      // must notice that and skip . Acting on
-      // the stale IN_PRODUCTION would write a duplicate
-      // STATUS_CHANGE log for a transition that already happened.
-      const fresh = await txClient.order.findUnique({
-        where: { id: order.id },
-        select: { id: true, status: true },
-      });
-      if (!fresh) throw new ReportError('工单不存在');
-      if (fresh.status === OrderStatus.IN_PRODUCTION) {
-        transitionOrder(fresh.status, OrderStatus.COMPLETED);
-        await txClient.order.update({
-          where: { id: order.id },
-          data: { status: OrderStatus.COMPLETED, completedAt: now },
-          select: { id: true, status: true },
-        });
-        await txClient.orderLog.create({
-          data: {
-            orderId: order.id,
-            operatorId: actor.id,
-            action: 'STATUS_CHANGE',
-            changedFields: {
-              status: {
-                before: OrderStatus.IN_PRODUCTION,
-                after: OrderStatus.COMPLETED,
-              },
-            },
-            remark: '全部任务完工',
-          },
-        });
-        orderCompleted = true;
-      }
-    }
 
     return {
       taskId: task.id,
       status: TaskStatus.COMPLETED,
-      pieceworkAmount: breakdown.amount.toFixed(2),
-      boardCount: breakdown.boardCount,
-      pressCount: breakdown.pressCount,
+      pieceworkAmount,
+      boardCount,
+      pressCount,
       orderCompleted,
     };
   });
@@ -767,6 +1070,7 @@ export async function reportTask(
 export type WorkerTaskListRow = {
   id: string;
   status: TaskStatus;
+  workerType: WorkerType | null;
   machineType: MachineType | null;
   plannedQty: number;
   item: {
@@ -794,6 +1098,7 @@ export async function listWorkerTasks(
     select: {
       id: true,
       status: true,
+      workerType: true,
       machineType: true,
       plannedQty: true,
       orderItem: {
@@ -819,6 +1124,7 @@ export async function listWorkerTasks(
   return rows.map((r) => ({
     id: r.id,
     status: r.status,
+    workerType: r.workerType,
     machineType: r.machineType,
     plannedQty: r.plannedQty,
     item: {
@@ -839,7 +1145,7 @@ export async function listWorkerTasks(
 }
 
 // Single task detail for the worker report page. Scope guard: only
-// the assigned worker (or OWNER/FOREMAN) can read the record.
+// the assigned worker (or ADMIN) can read the record.
 export async function getWorkerTaskDetail(
   taskId: string,
   actor: { id: string; role: Role },
@@ -850,6 +1156,7 @@ export async function getWorkerTaskDetail(
       id: true,
       status: true,
       workerId: true,
+      workerType: true,
       machineType: true,
       plannedQty: true,
       boardCount: true,
@@ -884,7 +1191,7 @@ export async function getWorkerTaskDetail(
     },
   });
   if (!row) return null;
-  const globalOverride = actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+  const globalOverride = actor.role === Role.ADMIN;
   if (!globalOverride && row.workerId !== actor.id) return null;
   return row;
 }
@@ -900,12 +1207,13 @@ export { InvalidTaskTransitionError };
 // ownership" posture.
 export async function listPendingSchedulingOrders() {
   return db.order.findMany({
-    where: { status: OrderStatus.SUBMITTED },
+    where: { status: OrderStatus.SUBMITTED, items: { some: {} } },
     select: {
       id: true,
       orderNo: true,
       isUrgent: true,
       customerRef: true,
+      promisedDate: true,
       submittedAt: true,
       createdAt: true,
       items: {
@@ -915,7 +1223,11 @@ export async function listPendingSchedulingOrders() {
         select: { displayName: true, role: true },
       },
     },
-    orderBy: [{ isUrgent: 'desc' }, { submittedAt: 'asc' }],
+    orderBy: [
+      { isUrgent: 'desc' },
+      { promisedDate: { sort: 'asc', nulls: 'last' } },
+      { submittedAt: 'asc' },
+    ],
   });
 }
 
@@ -923,6 +1235,7 @@ export type SchedulingViewCraft = {
   id: string;
   name: string;
   isOutsource: boolean;
+  defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
 };
 
@@ -939,7 +1252,10 @@ export type SchedulingViewItem = {
 export type SchedulingViewCandidate = {
   id: string;
   displayName: string;
+  workerType: WorkerType | null;
   machineType: MachineType | null;
+  pendingTaskCount: number;
+  inProgressTaskCount: number;
 };
 
 export type SchedulingView = {
@@ -952,12 +1268,57 @@ export type SchedulingView = {
   workers: SchedulingViewCandidate[];
 };
 
+async function listActiveWorkerCandidates(): Promise<SchedulingViewCandidate[]> {
+  const workers = await db.user.findMany({
+    where: { role: Role.WORKER, isActive: true },
+    select: {
+      id: true,
+      displayName: true,
+      workerType: true,
+      machineType: true,
+    },
+    orderBy: { displayName: 'asc' },
+  });
+  const loadRows = await db.productionTask.groupBy({
+    by: ['workerId', 'status'],
+    where: {
+      workerId: { not: null },
+      status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
+    },
+    _count: { _all: true },
+  });
+  const loadByWorker = new Map<
+    string,
+    { pendingTaskCount: number; inProgressTaskCount: number }
+  >();
+  for (const row of loadRows) {
+    if (!row.workerId) continue;
+    const current = loadByWorker.get(row.workerId) ?? {
+      pendingTaskCount: 0,
+      inProgressTaskCount: 0,
+    };
+    if (row.status === TaskStatus.PENDING) {
+      current.pendingTaskCount = row._count._all;
+    } else if (row.status === TaskStatus.IN_PROGRESS) {
+      current.inProgressTaskCount = row._count._all;
+    }
+    loadByWorker.set(row.workerId, current);
+  }
+  return workers.map((worker) => ({
+    ...worker,
+    ...(loadByWorker.get(worker.id) ?? {
+      pendingTaskCount: 0,
+      inProgressTaskCount: 0,
+    }),
+  }));
+}
+
 // Assembles the view-model the scheduling form needs: the order's items
 // + their crafts resolved to names + isOutsource + machineType, plus
 // the list of active WORKERs as assignment candidates. Returns null
 // when the order is missing OR not in SUBMITTED (so the UI can bounce
 // back to the list). Scope check: `order:schedule` permission is
-// already FOREMAN+OWNER only — no per-order ownership to apply.
+// already ADMIN-only — no per-order ownership to apply.
 export async function getSchedulingView(
   orderId: string,
 ): Promise<SchedulingView | null> {
@@ -996,16 +1357,13 @@ export async function getSchedulingView(
             id: true,
             name: true,
             isOutsource: true,
+            defaultWorkerType: true,
             defaultMachineType: true,
           },
         });
   const craftById = new Map(crafts.map((c) => [c.id, c]));
 
-  const workers = await db.user.findMany({
-    where: { role: Role.WORKER, isActive: true },
-    select: { id: true, displayName: true, machineType: true },
-    orderBy: { displayName: 'asc' },
-  });
+  const workers = await listActiveWorkerCandidates();
 
   return {
     orderId: order.id,
@@ -1025,5 +1383,65 @@ export async function getSchedulingView(
         .filter((c): c is SchedulingViewCraft => typeof c !== 'undefined'),
     })),
     workers,
+  };
+}
+
+export type ReassignmentView = {
+  tasks: Array<{
+    id: string;
+    itemName: string;
+    itemSequence: number;
+    craftName: string;
+    currentWorkerId: string | null;
+    currentWorkerName: string | null;
+    eligibleWorkers: SchedulingViewCandidate[];
+  }>;
+};
+
+export async function getPendingTaskReassignmentView(
+  orderId: string,
+): Promise<ReassignmentView> {
+  const [tasks, workers] = await Promise.all([
+    db.productionTask.findMany({
+      where: {
+        orderItem: { orderId },
+        status: TaskStatus.PENDING,
+      },
+      select: {
+        id: true,
+        workerId: true,
+        orderItem: { select: { name: true, sequence: true } },
+        craft: {
+          select: {
+            name: true,
+            defaultWorkerType: true,
+            defaultMachineType: true,
+          },
+        },
+        worker: { select: { displayName: true } },
+      },
+      orderBy: [
+        { orderItem: { sequence: 'asc' } },
+        { craft: { sortOrder: 'asc' } },
+      ],
+    }),
+    listActiveWorkerCandidates(),
+  ]);
+
+  return {
+    tasks: tasks.map((task) => ({
+      id: task.id,
+      itemName: task.orderItem.name,
+      itemSequence: task.orderItem.sequence,
+      craftName: task.craft.name,
+      currentWorkerId: task.workerId,
+      currentWorkerName: task.worker?.displayName ?? null,
+      eligibleWorkers: workers.filter(
+        (worker) =>
+          worker.workerType === task.craft.defaultWorkerType &&
+          (task.craft.defaultWorkerType !== WorkerType.MACHINE ||
+            worker.machineType === task.craft.defaultMachineType),
+      ),
+    })),
   };
 }

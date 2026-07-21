@@ -99,7 +99,7 @@ function assertDesignEditAllowed(
     throw new OrderDesignError('只有草稿状态的工单可以增删设计图');
   }
   const globalOverride =
-    actor.role === Role.OWNER || actor.role === Role.FOREMAN;
+    actor.role === Role.ADMIN;
   if (!globalOverride && order.submitterId !== actor.id) {
     throw new OrderDesignError('只能修改自己创建的工单的设计图');
   }

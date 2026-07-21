@@ -66,7 +66,8 @@ export async function markOutsourceReceivedAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
   try {
-    await markOutsourceReceived(id, parsed.data, actor);
+    const result = await markOutsourceReceived(id, parsed.data, actor);
+    if (result.orderId) revalidatePath(`/orders/${result.orderId}`);
   } catch (err) {
     const mapped = mapOutsourceError(err);
     if (mapped) return mapped;
@@ -82,7 +83,8 @@ export async function cancelOutsourceAction(
 ): Promise<OutsourceMutationResult> {
   const actor = await requirePermission('outsource:manage');
   try {
-    await cancelOutsourceOrder(id, actor);
+    const result = await cancelOutsourceOrder(id, actor);
+    if (result.orderId) revalidatePath(`/orders/${result.orderId}`);
   } catch (err) {
     const mapped = mapOutsourceError(err);
     if (mapped) return mapped;

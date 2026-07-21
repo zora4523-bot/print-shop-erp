@@ -27,6 +27,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-chart-6: var(--chart-6);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -69,15 +70,15 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   /* 红包印刷品牌红——浅色模式偏 vivid scarlet（OKLCH chroma 0.20+ 显得鲜艳但不刺眼）。 */
-  --primary: oklch(0.62 0.21 25);
+  --primary: oklch(0.55 0.2 25);
   --primary-foreground: oklch(0.99 0.01 25);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.52 0.22 27);
   /* 语义色（KPI tone / banner / 状态徽章共用）。配 bg-warning/10
      这种 alpha-mix 写法即得 soft 背景，不需要再单独建 -soft 变量。 */
   --warning: oklch(0.72 0.16 60);
@@ -89,11 +90,14 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Okabe–Ito 色觉友好分类色的 OKLCH 表达；色相与明度共同区分，
+     不依赖红/绿二分。 */
+  --chart-1: oklch(0.532 0.131 244);
+  --chart-2: oklch(0.753 0.158 76.8);
+  --chart-3: oklch(0.62 0.13 165.5);
+  --chart-4: oklch(0.679 0.118 346.3);
+  --chart-5: oklch(0.735 0.117 236.2);
+  --chart-6: oklch(0.621 0.17 47.5);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -106,6 +110,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -114,7 +119,7 @@
   --popover-foreground: oklch(0.985 0 0);
   /* 暗色模式品牌红稍提亮、降饱和，避免 OLED 上炫光。 */
   --primary: oklch(0.7 0.18 25);
-  --primary-foreground: oklch(0.18 0.04 25);
+  --primary-foreground: oklch(0.1 0.025 25);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -131,11 +136,12 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: oklch(0.6 0.131 244);
+  --chart-2: oklch(0.8 0.158 76.8);
+  --chart-3: oklch(0.69 0.13 165.5);
+  --chart-4: oklch(0.74 0.118 346.3);
+  --chart-5: oklch(0.8 0.117 236.2);
+  --chart-6: oklch(0.69 0.17 47.5);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -204,6 +210,81 @@
     .worker-wrap-anywhere {
       overflow-wrap: anywhere;
       word-break: normal;
+    }
+  }
+
+  .admin-viewport {
+    min-height: 100vh;
+  }
+
+  @supports (min-height: 100svh) {
+    .admin-viewport {
+      min-height: 100svh;
+    }
+  }
+
+  @supports (min-height: 100dvh) {
+    .admin-viewport {
+      min-height: 100dvh;
+    }
+  }
+
+  .admin-safe-inline {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+  }
+
+  @media (min-width: 640px) {
+    .admin-safe-inline {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+      padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+    }
+  }
+
+  .admin-safe-top {
+    padding-top: 0.25rem;
+    padding-top: max(0.25rem, env(safe-area-inset-top, 0px));
+  }
+
+  .admin-safe-bottom {
+    padding-bottom: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-wrap-anywhere {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  @supports (overflow-wrap: anywhere) {
+    .admin-wrap-anywhere {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+  }
+
+  .admin-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])) {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .admin-viewport a[href] {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .admin-viewport *,
+    .admin-viewport *::before,
+    .admin-viewport *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
     }
   }
 }

@@ -19,10 +19,10 @@ export const dynamic = 'force-dynamic';
 //   - bundle.id 是 cuid（~125 bits 熵），URL slug 即 token；猜不到。
 //   - 24h 过期（DesignBundle.expiresAt），lib/cdr/bundle.consumeBundle
 //     校验。
-//   - downloadCount 自增审计；老板 dashboard 看异常活跃 bundle。
+//   - downloadCount 自增审计；管理员 dashboard 看异常活跃 bundle。
 //
-// middleware.ts matcher 已排除 `api/cron`；本路由 `api/cdr` 默认会被
-// session middleware 拦截 → 必须同样加排除（详见 fix 同 commit）。
+// proxy.ts matcher 已排除 `api/cron` 和本路由 `api/cdr`，避免公开下载被
+// session Proxy 重定向到登录页。
 //
 // MVP / OSS 未接入：consumeBundle 返的 zipFileUrl 形如 `mock://bundle/<id>.zip`，
 // 这里识别后返 503，提示 "OSS 未配置"。STS SDK 接进来后，把 mock 路径
@@ -55,7 +55,7 @@ export async function GET(
       // **404 + 同款文案**——攻击者无法区分&ldquo;猜对了 id 但已过期&rdquo;和
       // &ldquo;根本不存在&rdquo;，降低暴力探测可见性（
       // 之前&ldquo;过期&rdquo;返 410 + expiredAt 字段会泄漏&ldquo;这个 id 曾经有效&rdquo;）。
-      // 业务上对外协方信息一致：&ldquo;链接已失效或不存在，请联系车间主管
+      // 业务上对外协方信息一致：&ldquo;链接已失效或不存在，请联系管理员
       // 重新生成&rdquo;。
       return NextResponse.json(
         { error: '链接已失效或不存在' },

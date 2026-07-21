@@ -51,7 +51,7 @@ Never auto-merge. Never apply production database operations from this backlog.
   - Added `tests/e2e/smoke.spec.ts`.
   - Added reusable smoke fixtures in `tests/e2e/_helpers.ts`.
   - Added `E2E_BASE_URL` support in `playwright.config.ts`.
-  - Added an `e2e-owner` OWNER fixture in global setup.
+  - Added an `e2e-owner` ADMIN fixture in global setup.
 
 ## A02 - Material CRUD And Stock Transaction Flow
 

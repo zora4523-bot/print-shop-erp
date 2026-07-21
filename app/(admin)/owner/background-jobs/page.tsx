@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
@@ -45,7 +46,12 @@ export default async function BackgroundJobsPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+      <div
+        className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="后台任务列表"
+        tabIndex={0}
+      >
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
             <tr>
@@ -105,7 +111,7 @@ function JobAction({ action, jobId, label }: { action: (formData: FormData) => P
   return (
     <form action={action}>
       <input type="hidden" name="jobId" value={jobId} />
-      <button className="rounded-md border px-2 py-1 text-xs hover:bg-muted" type="submit">{label}</button>
+      <Button variant="outline" size="xs" type="submit">{label}</Button>
     </form>
   );
 }

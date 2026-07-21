@@ -410,6 +410,7 @@ const validCraft = {
   name: '专版单色平烫',
   code: 'FLAT_FOIL_SINGLE',
   isOutsource: 'false',
+  defaultWorkerType: WorkerType.MACHINE,
   defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
@@ -460,7 +461,12 @@ describe('createCraftSchema', () => {
   describe('defaultMachineType', () => {
     it('accepts null / empty string (outsource with no machine)', () => {
       for (const v of ['', null, undefined]) {
-        const r = createCraftSchema.safeParse({ ...validCraft, defaultMachineType: v });
+        const r = createCraftSchema.safeParse({
+          ...validCraft,
+          isOutsource: 'true',
+          defaultWorkerType: '',
+          defaultMachineType: v,
+        });
         expect(r.success).toBe(true);
         if (r.success) expect(r.data.defaultMachineType).toBeNull();
       }

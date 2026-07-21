@@ -78,7 +78,7 @@ describe('listChannelsWithRefCount', () => {
       {
         id: 'c2',
         channelKey: 'owner',
-        channelName: '老板群',
+        channelName: '管理员群',
         webhookUrl: 'https://qy/2',
         isActive: true,
         createdAt: new Date(),
@@ -386,7 +386,7 @@ describe('updateRuleWithGuard', () => {
     ).rejects.toBeInstanceOf(TooManyChannelsForPrivateEventError);
   });
 
-  it('CS_PERIOD_ENDING + channelIds.length = 1 → 允许（仅老板群一条）', async () => {
+  it('CS_PERIOD_ENDING + channelIds.length = 1 → 允许（仅管理员群一条）', async () => {
     txMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'CS_PERIOD_ENDING',
       channelIds: [],

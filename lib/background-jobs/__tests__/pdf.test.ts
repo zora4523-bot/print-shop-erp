@@ -34,7 +34,7 @@ describe('durable order PDF jobs', () => {
     await expect(
       enqueueOrderPdfJob({
         orderId: 'order-1',
-        actor: { id: 'user-1', role: Role.OWNER },
+        actor: { id: 'user-1', role: Role.ADMIN },
         baseUrl: 'https://erp.example.com',
       }),
     ).resolves.toBe('job-pdf');
@@ -45,7 +45,7 @@ describe('durable order PDF jobs', () => {
         queue: 'HEAVY',
         payload: {
           orderId: 'order-1',
-          actor: { id: 'user-1', role: Role.OWNER },
+          actor: { id: 'user-1', role: Role.ADMIN },
           baseUrl: 'https://erp.example.com',
         },
       }),
@@ -57,7 +57,7 @@ describe('durable order PDF jobs', () => {
       type: 'ORDER_PDF',
       payload: {
         orderId: 'order-1',
-        actor: { id: 'user-1', role: Role.OWNER },
+        actor: { id: 'user-1', role: Role.ADMIN },
       },
       status: BackgroundJobStatus.SUCCEEDED,
       result: { artifactName: 'job-pdf.pdf' },
@@ -76,7 +76,7 @@ describe('durable order PDF jobs', () => {
       type: 'ORDER_PDF',
       payload: {
         orderId: 'order-1',
-        actor: { id: 'other-user', role: Role.OWNER },
+        actor: { id: 'other-user', role: Role.ADMIN },
       },
       status: BackgroundJobStatus.SUCCEEDED,
       result: { artifactName: 'other.pdf' },

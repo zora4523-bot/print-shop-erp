@@ -118,7 +118,12 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
         </div>
       </form>
 
-      <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+      <div
+        className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        role="region"
+        aria-label="物料库存列表"
+        tabIndex={0}
+      >
         <table className="w-full min-w-[1080px] text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>

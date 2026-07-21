@@ -236,7 +236,7 @@ describe('submitOrderAction', () => {
 });
 
 describe('cancelOrderAction', () => {
-  it("first-line requirePermission('order:cancel') — cancellation is OWNER-only", async () => {
+  it("first-line requirePermission('order:cancel') — cancellation is ADMIN-only", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });

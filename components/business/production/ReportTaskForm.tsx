@@ -11,9 +11,10 @@ import type { TaskMutationResult } from '@/actions/production.types';
 type Props = {
   taskId: string;
   plannedQty: number;
+  isPiecework: boolean;
 };
 
-export function ReportTaskForm({ taskId, plannedQty }: Props) {
+export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
   const bound = reportTaskAction.bind(null, taskId);
   const [state, formAction] = useActionState<TaskMutationResult | null, FormData>(
     bound,
@@ -60,7 +61,9 @@ export function ReportTaskForm({ taskId, plannedQty }: Props) {
 
       <p className="worker-wrap-anywhere text-xs text-muted-foreground">
         计划数量 {plannedQty.toLocaleString()}。合格 + 不良 + 返工 合计需
-        &gt; 0；计件金额按&ldquo;合计压片 × 单价&rdquo;算。
+        &gt; 0；{isPiecework
+          ? '计件金额按机台薪资规则计算。'
+          : '本任务只记录完工数量，工资按考勤时薪结算。'}
       </p>
 
       {state?.status === 'error' ? (

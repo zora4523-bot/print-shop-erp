@@ -46,7 +46,7 @@ if (!env.AUTH_TRUST_HOST || env.AUTH_TRUST_HOST !== 'true') {
 if (isProd && env.NOTIFICATION_MOCK_MODE === 'true') {
   errors.push(
     'NOTIFICATION_MOCK_MODE="true" 且 NODE_ENV=production —— 企业微信推送会被静默 mock，' +
-      '老板以为在推实际一条不发。生产应留空（按 NODE_ENV 自动真发）。',
+      '管理员以为在推实际一条不发。生产应留空（按 NODE_ENV 自动真发）。',
   );
 }
 if (isProd && env.CDR_BUNDLE_MOCK_MODE === 'true') {

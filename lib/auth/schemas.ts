@@ -97,7 +97,7 @@ export const changePasswordSchema = z
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
 // ============================================================
-// Owner-side account management (SPEC §2 + §9.1)
+// Administrator-side account management (SPEC §2 + §9.1)
 // ============================================================
 
 // Username is used both as a login handle and appears in logs / UI. Keep it
@@ -278,6 +278,56 @@ const optionalMachineTypeField = z
   .union([z.nativeEnum(MachineType), z.literal(''), z.null(), z.undefined()])
   .transform((v) => (v === '' || v === undefined ? null : v));
 
+const optionalProductionWorkerTypeField = z
+  .union([z.nativeEnum(WorkerType), z.literal(''), z.null(), z.undefined()])
+  .transform((v) => (v === '' || v === undefined ? null : v));
+
+function validateCraftAssignment(
+  data: {
+    isOutsource: boolean;
+    defaultWorkerType: WorkerType | null;
+    defaultMachineType: MachineType | null;
+  },
+  ctx: z.RefinementCtx,
+) {
+  // Outsource crafts never create ProductionTask rows. The lib layer
+  // normalises stale form values to null when the operator ticks 外协工艺.
+  if (data.isOutsource) return;
+
+  if (!data.defaultWorkerType) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultWorkerType'],
+      message: '自产工艺必须选择接单岗位',
+    });
+    return;
+  }
+  if (data.defaultWorkerType === WorkerType.COOK) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultWorkerType'],
+      message: '厨师不能作为生产工艺的接单岗位',
+    });
+  }
+  if (data.defaultWorkerType === WorkerType.MACHINE && !data.defaultMachineType) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultMachineType'],
+      message: '开机工艺必须选择机型',
+    });
+  }
+  if (
+    data.defaultWorkerType !== WorkerType.MACHINE &&
+    data.defaultMachineType
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultMachineType'],
+      message: '非开机岗位不应设置机型',
+    });
+  }
+}
+
 // FormData always hands us strings; accept the string form too and coerce.
 // Min is 1 (not 0) so an untouched create form — where the default-empty
 // input coerces to 0 — fails validation rather than accidentally sorting
@@ -292,9 +342,10 @@ export const createCraftSchema = z.object({
   name: craftNameField,
   code: optionalCraftCodeField,
   isOutsource: formBoolean,
+  defaultWorkerType: optionalProductionWorkerTypeField,
   defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
-});
+}).superRefine(validateCraftAssignment);
 
 export type CreateCraftInput = z.infer<typeof createCraftSchema>;
 
@@ -302,9 +353,10 @@ export const updateCraftSchema = z.object({
   name: craftNameField,
   code: craftCodeField,
   isOutsource: formBoolean,
+  defaultWorkerType: optionalProductionWorkerTypeField,
   defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
-});
+}).superRefine(validateCraftAssignment);
 
 export type UpdateCraftInput = z.infer<typeof updateCraftSchema>;
 
@@ -1261,10 +1313,19 @@ export const scheduleOrderSchema = z.object({
     // the empty array so scheduleOrder can still transition Order to
     // SCHEDULING (lib enforces the real invariant: every expected
     // non-outsource pair must be covered).
-    .max(200, '单次排产不超过 200 个任务'),
+    // createOrder allows 50 items × 10 crafts; accept the same ceiling.
+    .max(500, '单次排产不超过 500 个任务'),
 });
 
 export type ScheduleOrderInput = z.infer<typeof scheduleOrderSchema>;
+
+export const reassignProductionTaskSchema = z.object({
+  workerId: safeId('师傅 id'),
+});
+
+export type ReassignProductionTaskInput = z.infer<
+  typeof reassignProductionTaskSchema
+>;
 
 // ─────────────────────────────────────────────────────────────────────
 // Worker task report (SPEC §3.3)
@@ -1646,7 +1707,7 @@ const channelNameField = z
 
 // 企业微信 webhook URL 的官方格式：
 //   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<uuid>
-// 严格 origin 检查：避免老板把任意 URL 粘进来踩 SSRF / 误投递。
+// 严格 origin 检查：避免管理员把任意 URL 粘进来踩 SSRF / 误投递。
 // HTTPS 强制——HTTP 在 prod 会被 reject 但本地 mock URL 也走 https://...
 // 所以不放宽。query 参数允许任意（key、可能的扩展字段）。
 const channelWebhookUrlField = z

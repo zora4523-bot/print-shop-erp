@@ -511,6 +511,25 @@
 
 ---
 
+## 2026-07-19：OWNER 与 FOREMAN 合并为唯一 ADMIN 管理员角色
+
+- **决策**：权限模型只保留一个后台管理角色 `ADMIN`，拥有原 `OWNER` 与 `FOREMAN` 权限的并集；销售、客服、师傅角色保持不变。
+- **理由**：当前工厂由同一批管理人员同时承担经营管理与生产管理职责，继续区分 OWNER / FOREMAN 会增加账号选择、授权解释和菜单切换成本，却没有形成真实的职责隔离。
+- **迁移**：数据库迁移把 `User.role`、`Order.submitterRole`、`BusinessAuditLog.actorRole` 中的 OWNER / FOREMAN 原子转换为 ADMIN，并把早期 seed 写入的精确默认姓名“老板/车间主管”改为“管理员”。Auth.js JWT 回调继续识别旧会话中的历史角色与默认姓名，避免已登录用户在 30 天会话窗口内失去权限或继续看到旧称呼；真实姓名和“王老板”等昵称不改写。
+- **兼容**：`/owner/*` 与 `/foreman/*` URL 暂时保留，避免书签、二维码和已有链接失效；侧边栏统一展示经营、生产和运维入口，不再出现两个管理身份。账号安全不变量改为“系统至少保留 1 位活跃管理员”。
+- **相关文档**：`prisma/migrations/20260719190000_merge_owner_foreman_into_admin/`、`prisma/migrations/20260719193000_normalize_legacy_admin_display_names/`、`lib/auth/config.edge.ts`、`lib/auth/permissions-dict.ts`、`lib/navigation/admin-modules.ts`。
+
+---
+
+## 2026-07-19：新工单号采用 GD-YYMMDD-XXX，历史编号原样保留
+
+- **决策**：新建工单号从 `YYYYMMDD-XXXX` 调整为 `GD-YYMMDD-XXX`，例如 `GD-260719-001`。`GD` 表示“工单”，中间是上海业务日期，末尾是当日三位流水号。
+- **理由**：新格式保持年份和日期信息，同时用类型前缀与分段符提升辨识度，员工在电话、微信群和纸质单据中更容易口头复述、查找与核对。当前工厂日单量远低于 999；达到上限时系统明确拒绝继续发号，不静默扩位。
+- **兼容与并发**：历史 `YYYYMMDD-XXXX` 和其它既有编号不更新，避免打印件、账单、薪资明细、CDR 目录及外部引用失效。新流水继续在创建工单事务内按上海业务日获取 PostgreSQL advisory lock，同日并发创建不会重号；新旧格式使用不同前缀，不会相互占用流水。
+- **相关文档**：`lib/order/order-number.ts`、`prisma/migrations/20260719200000_update_order_number_format/`、`tests/e2e/order-create.spec.ts`。
+
+---
+
 ## 2026-07-17：终态任务允许重入队，worker 资源限制必须落在真实 PID
 
 - **决策**：唯一 `dedupeKey` 对 PENDING/RUNNING/SUCCEEDED 继续保持幂等；命中 DEAD/CANCELLED 时重启同一账本行并追加 retry budget，保留原 attempt 审计。CDR 的取消、最终失败和租约耗尽同步更新 DesignBundle。PM2 worker 不再执行会 spawn 子进程的 `tsx` CLI，改为 `node --import tsx scripts/background-worker.ts`；生产环境变量由入口先用 `@next/env` 加载，再动态 import Prisma/业务模块。

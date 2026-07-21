@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test';
 import {
   login,
   ADMIN_USERNAME,
-  ADMIN_PASSWORD,
+  E2E_PASSWORD,
+  E2E_USERS,
   getUserIdByUsername,
   seedPrintableOrder,
 } from '../e2e/_helpers';
@@ -48,8 +49,8 @@ test.describe('OrderPrintLayout 截图回归', () => {
 
       await login(page, {
         from: `/print/orders/${orderId}`,
-        username: ADMIN_USERNAME,
-        password: ADMIN_PASSWORD,
+        username: E2E_USERS.owner!.username,
+        password: E2E_PASSWORD,
       });
       await expect(page).toHaveURL(`/print/orders/${orderId}`);
 
