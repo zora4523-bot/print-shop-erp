@@ -21,7 +21,17 @@ limit_req_zone $binary_remote_addr zone=erp_heavy:10m rate=10r/m;
 server {
     listen 80;
     server_name erp.example.com;          # ← 改成你的域名
-    return 301 https://$host$request_uri;
+
+    # Certbot webroot 续期必须在 HTTP 下直接读到挑战文件。
+    # 不要把 return 301 写在 server 层，否则会在 location 匹配前就跳转。
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 # ── HTTPS 主服务 ──

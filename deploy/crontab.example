@@ -1,0 +1,21 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CRON_TZ=Asia/Shanghai
+MAILTO=""
+APP_PUBLIC_URL=https://erp.example.com
+CRON_SECRET_FILE=/root/.print-shop-erp-cron-secret
+
+# 师傅日薪结算（每日 00:30）
+30 0 * * * /usr/local/sbin/print-shop-erp-cron daily-salary
+# 客服周期结算扫描（每日 01:00）
+0 1 * * * /usr/local/sbin/print-shop-erp-cron cs-settle
+# 客服周期 7 天预警（每日 08:00）
+0 8 * * * /usr/local/sbin/print-shop-erp-cron cs-period-ending
+# 外协超期推送（每日 08:10）
+10 8 * * * /usr/local/sbin/print-shop-erp-cron outsource-overdue
+# 承诺交期逾期推送（每日 08:20）
+20 8 * * * /usr/local/sbin/print-shop-erp-cron order-overdue
+# 时薪工月结（每月 1 号 00:00）
+0 0 1 * * /usr/local/sbin/print-shop-erp-cron hourly-payroll
+# 销售应收账单生成（每月 1 号 00:40）
+40 0 1 * * /usr/local/sbin/print-shop-erp-cron generate-bills

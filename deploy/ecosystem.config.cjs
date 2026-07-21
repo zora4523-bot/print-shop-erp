@@ -11,7 +11,7 @@ const lowMemoryHost =
 const memory = lowMemoryHost
   ? {
       web: { restart: '512M', heap: 384 },
-      light: { restart: '256M', heap: 192 },
+      light: { restart: '384M', heap: 256 },
       heavy: { restart: '640M', heap: 448 },
     }
   : {
@@ -32,6 +32,14 @@ const common = {
   env: {
     NODE_ENV: 'production',
     BACKGROUND_JOBS_MODE: 'durable',
+    // Node only reads this CA bundle at process startup. Keeping it in the
+    // PM2 environment makes PostgreSQL `sslmode=verify-full` survive reloads
+    // and machine reboots; loading it from Next's .env would be too late.
+    NODE_EXTRA_CA_CERTS:
+      process.env.NODE_EXTRA_CA_CERTS ??
+      '/usr/local/share/ca-certificates/pigsty-print-shop.crt',
+    PUPPETEER_EXECUTABLE_PATH:
+      process.env.PUPPETEER_EXECUTABLE_PATH ?? '/usr/bin/chromium',
   },
 };
 

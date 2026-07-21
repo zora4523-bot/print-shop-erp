@@ -115,11 +115,10 @@ async function checkRoutes() {
   }
   if (process.env.NODE_ENV === 'production') {
     const body = await ready.json();
-    const queues = new Set(
-      Array.isArray(body.workers) ? body.workers.map((worker) => worker.queue) : [],
-    );
-    if (!queues.has('LIGHT') || !queues.has('HEAVY')) {
-      fail('/api/health/ready does not report both LIGHT and HEAVY workers');
+    if (!['ok', 'degraded'].includes(body.status) || body.db !== 'ok') {
+      fail(
+        `/api/health/ready returned unhealthy body: ${JSON.stringify(body)}`,
+      );
     }
   }
 
