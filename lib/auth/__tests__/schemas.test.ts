@@ -26,6 +26,7 @@ import {
   createPurchaseOrderSchema,
   createPurchaseReceiptSchema,
   updateProductSchema,
+  createOrderSchema,
 } from '../schemas';
 
 describe('loginSchema', () => {
@@ -975,5 +976,69 @@ describe('materialStockTransactionSchema', () => {
         reasonType: 'PRODUCTION_USE',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('createOrderSchema foil colors', () => {
+  const order = {
+    customerRef: null,
+    receiverName: null,
+    receiverPhone: null,
+    receiverAddress: null,
+    expressCode: null,
+    packageRequirement: null,
+    remark: null,
+    promisedDate: null,
+    isUrgent: false,
+    items: [
+      {
+        name: '多色烫金款',
+        productId: null,
+        specification: '大号',
+        paperType: '艳红珠光纸',
+        quantity: 1000,
+        crafts: ['craft-1'],
+        foilColors: ['哑金', '红金', ' 古铜金 '],
+        isDoubleSided: false,
+        isDoubleColor: false,
+        unitPrice: null,
+        suggestedPrice: null,
+        remark: null,
+      },
+    ],
+  };
+
+  it('accepts and trims up to five preset or custom colors', () => {
+    const result = createOrderSchema.safeParse(order);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.items[0]?.foilColors).toEqual([
+        '哑金',
+        '红金',
+        '古铜金',
+      ]);
+    }
+  });
+
+  it('defaults an omitted color array to empty for compatibility', () => {
+    const item = { ...order.items[0] };
+    delete (item as Partial<typeof item>).foilColors;
+    const result = createOrderSchema.safeParse({ ...order, items: [item] });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.items[0]?.foilColors).toEqual([]);
+  });
+
+  it('rejects duplicate colors, more than five colors, and no-color mixtures', () => {
+    for (const foilColors of [
+      ['哑金', '哑金'],
+      ['1', '2', '3', '4', '5', '6'],
+      ['无颜色（纯彩印）', '哑金'],
+    ]) {
+      const result = createOrderSchema.safeParse({
+        ...order,
+        items: [{ ...order.items[0], foilColors }],
+      });
+      expect(result.success, foilColors.join(',')).toBe(false);
+    }
   });
 });

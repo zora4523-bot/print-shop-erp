@@ -41,15 +41,31 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
       return false;
     };
 
-    if (document.documentElement.scrollWidth > viewportWidth + 1) {
-      issues.push(
-        `root-horizontal-overflow:${document.documentElement.scrollWidth}>${viewportWidth}`,
-      );
-    }
-
     const elements = [
       ...document.querySelectorAll<HTMLElement>('body *'),
     ].filter(isVisible);
+    if (document.documentElement.scrollWidth > viewportWidth + 1) {
+      const candidates = elements
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            element,
+            right: Math.max(rect.right, rect.left + element.scrollWidth),
+          };
+        })
+        .filter(({ right }) => right > viewportWidth + 1)
+        .sort((a, b) => b.right - a.right)
+        .slice(0, 3)
+        .map(
+          ({ element, right }) =>
+            `${describe(element)}@${right.toFixed(1)}`,
+        )
+        .join(',');
+      issues.push(
+        `root-horizontal-overflow:${document.documentElement.scrollWidth}>${viewportWidth}${candidates ? `:${candidates}` : ''}`,
+      );
+    }
+
     for (const element of elements) {
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);

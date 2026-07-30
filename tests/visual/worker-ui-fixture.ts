@@ -87,11 +87,11 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "createdById", status,
-           "isUrgent", "customerRef", "packageRequirement", remark, "promisedDate",
+           "isUrgent", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
            "submittedAt", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", $3, 'IN_PRODUCTION'::"OrderStatus",
-           TRUE, $4, $5, $6, DATE '2099-12-31',
+           TRUE, $4, $5, $6, $7, DATE '2099-12-31',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
          )`,
@@ -100,6 +100,7 @@ export async function seedWorkerUiFixture(
           fixture.orderNo,
           salesId,
           '超长客户代号ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证中英混排不裁切',
+          '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '包装要求：请将每一万个分组装箱并标注ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '工单备注：这是用于响应式裁切回归的超长中文文本与UnbrokenToken0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
         ],
@@ -108,10 +109,13 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "OrderItem" (
            id, "orderId", sequence, name, specification, "paperType", quantity,
-           crafts, "isDoubleSided", "isDoubleColor", remark, "createdAt", "updatedAt"
+           crafts, "foilColors", "isDoubleSided", "isDoubleColor", remark,
+           "createdAt", "updatedAt"
          ) VALUES
-           ($1, $3, 1, $4, $5, $6, 1234567, ARRAY[$7]::text[], TRUE, TRUE, $8, NOW(), NOW()),
-           ($2, $3, 2, $9, $5, $6, 987654, ARRAY[$7]::text[], FALSE, FALSE, $8, NOW(), NOW())`,
+           ($1, $3, 1, $4, $5, $6, 1234567, ARRAY[$7]::text[],
+            ARRAY['哑金', '红金', '潘通 871C']::text[], TRUE, TRUE, $8, NOW(), NOW()),
+           ($2, $3, 2, $9, $5, $6, 987654, ARRAY[$7]::text[],
+            ARRAY['无颜色（纯彩印）']::text[], FALSE, FALSE, $8, NOW(), NOW())`,
         [
           fixture.orderItemActiveId,
           fixture.orderItemCompletedId,
@@ -122,6 +126,23 @@ export async function seedWorkerUiFixture(
           craft.rows[0].id,
           '款式备注包含连续文本ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789防止隐式裁切',
           '已完工款式用于验证工单与工资明细的长文本布局',
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO "OrderItemDesign" (
+           id, "orderItemId", "fileType", "fileUrl", "fileName",
+           "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+         ) VALUES (
+           $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
+           1024, $3, $5, TIMESTAMP '2026-07-19 08:30:00'
+         )`,
+        [
+          `${fixture.orderItemActiveId}-design`,
+          fixture.orderItemActiveId,
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          '生产设计图超长文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789最终确认版.png',
+          salesId,
         ],
       );
 

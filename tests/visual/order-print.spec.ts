@@ -82,4 +82,53 @@ test.describe('OrderPrintLayout 截图回归', () => {
       );
     });
   }
+
+  test('完整工单上下文与红底关键备注稳定', async ({ page }) => {
+    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const {
+      orderId,
+      customName,
+      itemRemark,
+      foilColors,
+    } = await seedPrintableOrder({
+      submitterId: adminId,
+      designCount: 1,
+      variant: 'rich-context',
+    });
+
+    await login(page, {
+      from: `/print/orders/${orderId}`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await expect(page).toHaveURL(`/print/orders/${orderId}`);
+
+    await expect(page.locator('.order-custom-name')).toHaveText(customName!);
+    await expect(
+      page.locator('.item-info dd').filter({
+        hasText: foilColors.join('、'),
+      }),
+    ).toBeVisible();
+    const highlightedRemark = page.locator('.item-remark-text');
+    await expect(highlightedRemark).toHaveText(itemRemark!);
+    await expect(highlightedRemark).toHaveCSS('color', 'rgb(192, 0, 0)');
+    await expect(highlightedRemark).toHaveCSS(
+      'background-color',
+      'rgb(255, 230, 230)',
+    );
+    await expect(page.locator('.print-container')).toHaveCSS(
+      'print-color-adjust',
+      'exact',
+    );
+
+    await expect(page.locator('.print-container')).toHaveScreenshot(
+      'order-print-rich-context.png',
+      {
+        mask: [
+          page.locator('.print-footer'),
+          page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
+        ],
+      },
+    );
+  });
 });

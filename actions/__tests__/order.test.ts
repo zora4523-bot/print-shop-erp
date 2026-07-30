@@ -90,7 +90,7 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
         paperType: null,
         quantity: 1000,
         crafts: ['craft-1'],
-        foilColor: null,
+        foilColors: [],
         isDoubleSided: false,
         isDoubleColor: false,
         unitPrice: '0.5',
@@ -157,6 +157,32 @@ describe('createOrderAction', () => {
     }
   });
 
+  it('trims a custom name and rejects names longer than 100 characters', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.createOrder.mockResolvedValue({
+      id: 'order-new',
+      orderNo: '20260423-0001',
+      itemIds: ['item-1'],
+    });
+
+    await createOrderAction(
+      null,
+      baseOrderInput({ customName: '  王总中秋礼盒首批  ' }),
+    );
+    expect(orderMock.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ customName: '王总中秋礼盒首批' }),
+      salesActor,
+    );
+
+    orderMock.createOrder.mockClear();
+    const invalid = await createOrderAction(
+      null,
+      baseOrderInput({ customName: '名'.repeat(101) }),
+    );
+    expect(invalid.status).toBe('invalid');
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
   it('maps OrderInvariantError → error status', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.createOrder.mockRejectedValueOnce(
@@ -169,21 +195,34 @@ describe('createOrderAction', () => {
     }
   });
 
-  it('revalidates + redirects to the new order detail page on success', async () => {
+  it('revalidates and returns ordered item ids for post-create design uploads', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
-    orderMock.createOrder.mockResolvedValue({ id: 'order-new', orderNo: '20260423-0001' });
+    orderMock.createOrder.mockResolvedValue({
+      id: 'order-new',
+      orderNo: '20260423-0001',
+      itemIds: ['item-1'],
+    });
 
-    await expect(createOrderAction(null, baseOrderInput())).rejects.toThrow(/NEXT_REDIRECT/);
+    const result = await createOrderAction(null, baseOrderInput());
 
+    expect(result).toEqual({
+      status: 'success',
+      orderId: 'order-new',
+      itemIds: ['item-1'],
+    });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
-    expect(redirectMock).toHaveBeenCalledWith('/orders/order-new');
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it('passes the actor through to lib.createOrder (submitter + createdBy attribution)', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
-    orderMock.createOrder.mockResolvedValue({ id: 'order-new', orderNo: '20260423-0001' });
+    orderMock.createOrder.mockResolvedValue({
+      id: 'order-new',
+      orderNo: '20260423-0001',
+      itemIds: ['item-1'],
+    });
 
-    await expect(createOrderAction(null, baseOrderInput())).rejects.toThrow(/NEXT_REDIRECT/);
+    await createOrderAction(null, baseOrderInput());
     expect(orderMock.createOrder).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ id: 'sales-1', role: Role.SALES }),

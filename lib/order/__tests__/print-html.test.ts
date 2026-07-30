@@ -31,7 +31,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
         specification: '9cm × 17cm',
         paperType: '珠光纸',
         quantity: 5000,
-        foilColor: null,
+        foilColors: [],
         isDoubleSided: true,
         isDoubleColor: false,
         craftNames: ['烫金', '压纹'],
@@ -94,6 +94,20 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('烫金');
     expect(html).toContain('起鼓');
     expect(html).toMatch(/烫金[^<]*、[^<]*起鼓/);
+  });
+
+  it('prints every selected foil color', async () => {
+    const html = await buildPrintHtml(
+      fixtureOrder({
+        items: [
+          {
+            ...fixtureOrder().items[0]!,
+            foilColors: ['哑金', '红金', '古铜金'],
+          },
+        ],
+      }),
+    );
+    expect(html).toMatch(/哑金[^<]*、[^<]*红金[^<]*、[^<]*古铜金/);
   });
 
   it('shows "无设计图" when the item has none', async () => {

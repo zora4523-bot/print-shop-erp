@@ -13,6 +13,8 @@ import type {
 import type { MachineType } from '@/generated/prisma/enums';
 import { WorkerType } from '@/generated/prisma/enums';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 
 type Props = {
   view: SchedulingView;
@@ -49,11 +51,13 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
       itemSequence: number;
       itemName: string;
       itemQuantity: number;
+      itemFoilColors: string[];
       craftId: string;
       craftName: string;
       isOutsource: boolean;
       recommendedMachine: MachineType | null;
       requiredWorkerType: WorkerType | null;
+      itemRemark: string | null;
     }> = [];
     for (const item of view.items) {
       for (const craft of item.crafts) {
@@ -62,11 +66,13 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
           itemSequence: item.sequence,
           itemName: item.name,
           itemQuantity: item.quantity,
+          itemFoilColors: item.foilColors,
           craftId: craft.id,
           craftName: craft.name,
           isOutsource: craft.isOutsource,
           requiredWorkerType: craft.defaultWorkerType,
           recommendedMachine: craft.defaultMachineType,
+          itemRemark: item.remark,
         });
       }
     }
@@ -128,6 +134,16 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                   <div className="text-xs text-muted-foreground">
                     数量 {r.itemQuantity}
                   </div>
+                  {r.itemFoilColors.length > 0 ? (
+                    <div className="text-xs text-muted-foreground">
+                      烫金色：{formatFoilColors(r.itemFoilColors)}
+                    </div>
+                  ) : null}
+                  {r.itemRemark ? (
+                    <HighlightedRemark className="mt-1 text-xs">
+                      {r.itemRemark}
+                    </HighlightedRemark>
+                  ) : null}
                 </td>
                 <td className="px-3 py-2">{r.craftName}</td>
                 <td className="px-3 py-2">

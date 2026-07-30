@@ -152,20 +152,26 @@ async function seedAdmin() {
 async function seedCrafts() {
   const crafts = [
     // 自产工艺
-    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 10 },
+    { name: '局部烫金', code: 'FLAT_FOIL_PARTIAL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 10 },
     { name: '专版单色平烫', code: 'FLAT_FOIL_SINGLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 20 },
     { name: '专版双色平烫', code: 'FLAT_FOIL_DOUBLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 21 },
+    { name: '专版三色平烫', code: 'FLAT_FOIL_TRIPLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 22 },
     { name: '浮雕', code: 'EMBOSS', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 30 },
     { name: '激凸', code: 'BUMP', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 31 },
     { name: '粘封', code: 'GLUING', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.GLUE, sortOrder: 40 },
     { name: '打包/入袋', code: 'PACKING', isOutsource: false, defaultWorkerType: WorkerType.PACKER, defaultMachineType: null, sortOrder: 50 },
-    { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 51 },
 
     // 外协工艺
-    { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 60 },
-    { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 61 },
+    { name: '铜版纸纯彩印', code: 'COATED_COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 60 },
+    { name: '铜版纸彩印+烫金', code: 'COATED_COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: null, defaultMachineType: MachineType.WINDMILL, sortOrder: 61 },
     { name: '冰白彩印（纯印刷）', code: 'COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 70 },
     { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: null, defaultMachineType: MachineType.WINDMILL, sortOrder: 71 },
+
+    // 低频工艺：录单页固定归到末尾分组
+    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900 },
+    { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 901 },
+    { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 902 },
+    { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 903 },
   ];
 
   for (const craft of crafts) {

@@ -36,6 +36,7 @@ export function OrdersTable({
       <TableHeader>
         <TableRow>
           <TableHead>工单号</TableHead>
+          <TableHead>工单名称</TableHead>
           <TableHead>客户</TableHead>
           <TableHead>收货人</TableHead>
           <TableHead className="text-right">金额</TableHead>
@@ -52,6 +53,11 @@ export function OrdersTable({
         {orders.map((o) => (
           <TableRow key={o.id}>
             <TableCell className="font-sans tabular-nums text-xs">{o.orderNo}</TableCell>
+            <TableCell className="max-w-56">
+              <span className="block truncate font-medium" title={o.customName ?? undefined}>
+                {o.customName ?? '—'}
+              </span>
+            </TableCell>
             <TableCell>{o.customerRef ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">{o.receiverName ?? '—'}</TableCell>
             <TableCell className="text-right font-sans tabular-nums text-xs">

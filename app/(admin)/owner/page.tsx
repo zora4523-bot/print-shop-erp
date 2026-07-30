@@ -264,7 +264,12 @@ async function DashboardChartsSection() {
 
 function DashboardChartsLoading() {
   return (
-    <div aria-busy="true" aria-label="正在加载统计图表" className="space-y-4">
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="正在加载统计图表"
+      className="space-y-4"
+    >
       <div className="h-[23rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />

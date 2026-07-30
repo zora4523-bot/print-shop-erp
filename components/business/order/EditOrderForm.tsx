@@ -16,6 +16,7 @@ import type { OrderMutationResult } from '@/actions/order.types';
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
 export type EditOrderInitialValues = {
+  customName: string | null;
   customerRef: string | null;
   receiverName: string | null;
   receiverPhone: string | null;
@@ -34,7 +35,11 @@ type Props = {
   initial: EditOrderInitialValues;
 };
 
-const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set(['customerRef', 'isUrgent']);
+const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
+  'customName',
+  'customerRef',
+  'isUrgent',
+]);
 
 export function EditOrderForm({ orderId, fieldset, initial }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
@@ -59,7 +64,15 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field
+            name="customName"
+            label="工单名称"
+            full
+            disabled={FULL_ONLY_FIELDS.has('customName') && isShippingOnly}
+            initial={initial.customName}
+            errors={fieldErrors(state, 'customName')}
+          />
           <Field
             name="customerRef"
             label="客户代号"
@@ -177,7 +190,7 @@ function Field({
   type?: string;
 }) {
   return (
-    <div className={full ? 'col-span-2' : undefined}>
+    <div className={full ? 'sm:col-span-2' : undefined}>
       <Label htmlFor={name} className="text-sm text-muted-foreground">
         {label}
       </Label>

@@ -35,7 +35,7 @@ export type PrintOrderItem = {
   specification?: string | null;
   paperType?: string | null;
   quantity: number;
-  foilColor?: string | null;
+  foilColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
   craftNames: string[];
@@ -47,6 +47,7 @@ export type PrintOrderItem = {
 export type PrintOrder = {
   id: string;
   orderNo: string;
+  customName?: string | null;
   isUrgent: boolean;
   promisedDate?: Date | null;
   customerRef?: string | null;

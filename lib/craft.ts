@@ -37,7 +37,11 @@ export type CraftSummary = Pick<
 export type CraftOrderOption = Pick<
   Craft,
   'id' | 'name' | 'isOutsource'
->;
+> & {
+  isLowFrequency: boolean;
+};
+
+const LOW_FREQUENCY_SORT_ORDER = 900;
 
 const SUMMARY_SELECT = {
   id: true,
@@ -86,11 +90,20 @@ export async function listCraftsPage(opts: {
 export async function listActiveCraftOrderOptions(): Promise<
   CraftOrderOption[]
 > {
-  return db.craft.findMany({
+  const rows = await db.craft.findMany({
     where: { isActive: true },
-    select: { id: true, name: true, isOutsource: true },
+    select: {
+      id: true,
+      name: true,
+      isOutsource: true,
+      sortOrder: true,
+    },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
   });
+  return rows.map(({ sortOrder, ...craft }) => ({
+    ...craft,
+    isLowFrequency: sortOrder >= LOW_FREQUENCY_SORT_ORDER,
+  }));
 }
 
 export async function getCraftSummary(id: string): Promise<CraftSummary | null> {

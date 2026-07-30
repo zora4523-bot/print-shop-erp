@@ -85,7 +85,7 @@ function baseItem(over: Partial<Record<string, unknown>> = {}) {
     paperType: null,
     quantity: 1000,
     crafts: ['craft-1'],
-    foilColor: null,
+    foilColors: [],
     isDoubleSided: false,
     isDoubleColor: false,
     unitPrice: '0.5000',
@@ -119,10 +119,20 @@ beforeEach(() => {
   dbMock.craft.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
     where.id.in.map((id) => ({ id })),
   );
-  dbMock.order.create.mockImplementation(async ({ data }: { data: { orderNo: string } }) => ({
-    id: 'order-created',
-    orderNo: data.orderNo,
-  }));
+  dbMock.order.create.mockImplementation(
+    async ({
+      data,
+    }: {
+      data: { orderNo: string; items: { create: Array<unknown> } };
+    }) => ({
+      id: 'order-created',
+      orderNo: data.orderNo,
+      items: data.items.create.map((_, index) => ({
+        id: `item-${index + 1}`,
+        sequence: index + 1,
+      })),
+    }),
+  );
 });
 
 describe('createOrder', () => {
@@ -191,6 +201,31 @@ describe('createOrder', () => {
     expect(createArg.data.status).toBe(OrderStatus.DRAFT);
     expect(createArg.data.logs.create[0].action).toBe('CREATE');
     expect(createArg.data.logs.create[0].operatorId).toBe('sales-1');
+  });
+
+  it('stores the custom name and returns item ids in sequence order', async () => {
+    const result = await createOrder(
+      {
+        customName: '王总中秋礼盒首批',
+        customerRef: null,
+        receiverName: null,
+        receiverPhone: null,
+        receiverAddress: null,
+        expressCode: null,
+        packageRequirement: null,
+        remark: null,
+        promisedDate: null,
+        isUrgent: false,
+        items: [baseItem(), baseItem({ name: '内盒' })],
+      },
+      salesActor,
+      new Date('2026-04-23T09:00:00+08:00'),
+    );
+
+    expect(dbMock.order.create.mock.calls[0][0].data.customName).toBe(
+      '王总中秋礼盒首批',
+    );
+    expect(result.itemIds).toEqual(['item-1', 'item-2']);
   });
 
   it('refuses when a referenced craft id does not exist or is inactive', async () => {
@@ -972,6 +1007,7 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
         {
           OR: [
             { orderNo: { contains: '苹果福', mode: 'insensitive' } },
+            { customName: { contains: '苹果福', mode: 'insensitive' } },
             { customerRef: { contains: '苹果福', mode: 'insensitive' } },
             { receiverName: { contains: '苹果福', mode: 'insensitive' } },
             { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
@@ -996,7 +1032,8 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
     const base = {
       status: OrderStatus.DRAFT,
       promisedDate: null,
-        isUrgent: false,
+      isUrgent: false,
+      customName: null,
       customerRef: null,
       receiverName: null,
       receiverPhone: null,

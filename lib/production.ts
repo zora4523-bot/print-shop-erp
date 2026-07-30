@@ -5,6 +5,7 @@ import {
   MachineType,
   OutsourceStatus,
   WorkerType,
+  DesignFileType,
 } from '../generated/prisma/enums';
 import { db } from './db';
 import { transitionOrder } from './order/status-machine';
@@ -1082,7 +1083,12 @@ export type WorkerTaskListRow = {
     quantity: number;
   };
   craft: { name: string };
-  order: { id: string; orderNo: string; isUrgent: boolean };
+  order: {
+    id: string;
+    orderNo: string;
+    customName: string | null;
+    isUrgent: boolean;
+  };
 };
 
 // A worker's open tasks — PENDING + IN_PROGRESS. Sorted: urgent
@@ -1110,7 +1116,12 @@ export async function listWorkerTasks(
           isDoubleColor: true,
           quantity: true,
           order: {
-            select: { id: true, orderNo: true, isUrgent: true },
+            select: {
+              id: true,
+              orderNo: true,
+              customName: true,
+              isUrgent: true,
+            },
           },
         },
       },
@@ -1139,6 +1150,7 @@ export async function listWorkerTasks(
     order: {
       id: r.orderItem.order.id,
       orderNo: r.orderItem.order.orderNo,
+      customName: r.orderItem.order.customName,
       isUrgent: r.orderItem.order.isUrgent,
     },
   }));
@@ -1175,12 +1187,24 @@ export async function getWorkerTaskDetail(
           quantity: true,
           specification: true,
           paperType: true,
+          foilColors: true,
+          remark: true,
           isDoubleSided: true,
           isDoubleColor: true,
+          designs: {
+            where: { fileType: DesignFileType.IMAGE },
+            orderBy: { uploadedAt: 'asc' },
+            select: {
+              id: true,
+              fileName: true,
+              fileUrl: true,
+            },
+          },
           order: {
             select: {
               id: true,
               orderNo: true,
+              customName: true,
               isUrgent: true,
               customerRef: true,
             },
@@ -1211,6 +1235,7 @@ export async function listPendingSchedulingOrders() {
     select: {
       id: true,
       orderNo: true,
+      customName: true,
       isUrgent: true,
       customerRef: true,
       promisedDate: true,
@@ -1246,6 +1271,8 @@ export type SchedulingViewItem = {
   quantity: number;
   specification: string | null;
   paperType: string | null;
+  foilColors: string[];
+  remark: string | null;
   crafts: SchedulingViewCraft[];
 };
 
@@ -1261,6 +1288,7 @@ export type SchedulingViewCandidate = {
 export type SchedulingView = {
   orderId: string;
   orderNo: string;
+  customName: string | null;
   isUrgent: boolean;
   customerRef: string | null;
   submitterDisplayName: string;
@@ -1327,6 +1355,7 @@ export async function getSchedulingView(
     select: {
       id: true,
       orderNo: true,
+      customName: true,
       isUrgent: true,
       customerRef: true,
       submitter: { select: { displayName: true } },
@@ -1339,6 +1368,8 @@ export async function getSchedulingView(
           quantity: true,
           specification: true,
           paperType: true,
+          foilColors: true,
+          remark: true,
           crafts: true,
         },
       },
@@ -1368,6 +1399,7 @@ export async function getSchedulingView(
   return {
     orderId: order.id,
     orderNo: order.orderNo,
+    customName: order.customName,
     isUrgent: order.isUrgent,
     customerRef: order.customerRef,
     submitterDisplayName: order.submitter.displayName,
@@ -1378,6 +1410,8 @@ export async function getSchedulingView(
       quantity: item.quantity,
       specification: item.specification,
       paperType: item.paperType,
+      foilColors: item.foilColors,
+      remark: item.remark,
       crafts: item.crafts
         .map((cid) => craftById.get(cid))
         .filter((c): c is SchedulingViewCraft => typeof c !== 'undefined'),

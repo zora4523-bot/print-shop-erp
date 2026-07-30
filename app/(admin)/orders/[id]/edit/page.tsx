@@ -42,6 +42,7 @@ export default async function EditOrderPage({ params }: PageProps) {
         orderId={order.id}
         fieldset={fieldset}
         initial={{
+          customName: order.customName,
           customerRef: order.customerRef,
           receiverName: order.receiverName,
           receiverPhone: order.receiverPhone,

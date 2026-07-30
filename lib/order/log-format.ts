@@ -4,6 +4,7 @@
 
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
+  customName: '工单名称',
   customerRef: '客户代号',
   receiverName: '收货人',
   receiverPhone: '收货电话',

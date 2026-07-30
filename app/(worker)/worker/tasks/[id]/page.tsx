@@ -6,6 +6,10 @@ import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { BeginTaskButton } from '@/components/business/production/BeginTaskButton';
 import { ReportTaskForm } from '@/components/business/production/ReportTaskForm';
+import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
+import { signDesignReadUrl } from '@/lib/oss/read-url';
+import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -41,6 +45,11 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         <h1 className="worker-wrap-anywhere text-lg font-semibold">
           #{task.orderItem.sequence} · {task.orderItem.name}
         </h1>
+        {task.orderItem.order.customName ? (
+          <p className="worker-wrap-anywhere text-sm font-semibold">
+            {task.orderItem.order.customName}
+          </p>
+        ) : null}
         <p className="worker-wrap-anywhere text-xs text-muted-foreground">
           客户代号：{task.orderItem.order.customerRef ?? '—'} · 工艺：
           {task.craft.name}
@@ -50,12 +59,29 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         </p>
       </header>
 
+      {task.orderItem.remark ? (
+        <HighlightedRemark className="worker-wrap-anywhere">
+          {task.orderItem.remark}
+        </HighlightedRemark>
+      ) : null}
+
+      <DesignImageGallery
+        images={task.orderItem.designs.map((design) => ({
+          ...design,
+          fileUrl: signDesignReadUrl(design.fileUrl),
+        }))}
+      />
+
       <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
         <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
         <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
           <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
           <Row label="规格" value={task.orderItem.specification ?? '—'} />
           <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
+          <Row
+            label="烫金色"
+            value={formatFoilColors(task.orderItem.foilColors)}
+          />
           <Row
             label="双面 / 双色"
             value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}

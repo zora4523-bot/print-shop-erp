@@ -37,6 +37,8 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
 import { getPendingTaskReassignmentView } from '@/lib/production';
 import { ReassignTaskForm } from '@/components/business/production/ReassignTaskForm';
+import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -116,6 +118,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </Badge>
             ) : null}
           </h1>
+          {order.customName ? (
+            <p className="admin-wrap-anywhere mt-1 text-base font-semibold text-foreground">
+              {order.customName}
+            </p>
+          ) : null}
           <p className="admin-wrap-anywhere text-sm text-muted-foreground">
             提交人：{order.submitter.displayName}（{roleLabel(order.submitter.role)}）
             · 创建于 {formatDateTimeShanghai(order.createdAt)}
@@ -162,6 +169,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">基本信息</h2>
         <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+          <Row label="工单名称" value={order.customName} full />
           <Row label="客户代号" value={order.customerRef} />
           <Row label="收货人" value={order.receiverName} />
           <Row label="收货电话" value={order.receiverPhone} />
@@ -201,7 +209,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               <dl className="mt-2 grid min-w-0 grid-cols-1 gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
                 <Row label="规格" value={item.specification} />
                 <Row label="纸张" value={item.paperType} />
-                <Row label="烫金色" value={item.foilColor} />
+                <Row label="烫金色" value={formatFoilColors(item.foilColors)} />
                 <Row
                   label="双面 / 双色"
                   value={`${item.isDoubleSided ? '双面' : '单面'} · ${item.isDoubleColor ? '双色' : '单色'}`}
@@ -211,8 +219,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   value={item.crafts.length ? item.crafts.join('、') : '—'}
                   full
                 />
-                {item.remark ? <Row label="款式备注" value={item.remark} full /> : null}
               </dl>
+              {item.remark ? (
+                <HighlightedRemark
+                  className="admin-wrap-anywhere mt-3"
+                >
+                  {item.remark}
+                </HighlightedRemark>
+              ) : null}
               <DesignUploadPanel
                 orderId={order.id}
                 orderItemId={item.id}

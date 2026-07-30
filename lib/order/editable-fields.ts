@@ -18,6 +18,7 @@ export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY' | 'NONE';
 // tuple (not a Set) so tests can assert the exact set + the action
 // layer can map directly to Zod schema keys.
 export const FULL_EDITABLE_FIELDS = [
+  'customName',
   'customerRef',
   'receiverName',
   'receiverPhone',

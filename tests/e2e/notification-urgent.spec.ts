@@ -39,11 +39,7 @@ test.describe('notification urgent wire — golden path', () => {
     await page.locator('input[name="customerRef"]').fill(orderRef);
     await page.locator('input[name="items.0.name"]').fill(itemName);
     await page.locator('input[name="items.0.quantity"]').fill('1000');
-    await page
-      .locator('label')
-      .filter({ hasText: '现货加烫' })
-      .locator('input[type="checkbox"]')
-      .check();
+    await page.getByRole('button', { name: '现货加烫' }).click();
     // 急单复选框 (CreateOrderForm name="isUrgent")
     await page.locator('input[name="isUrgent"]').check();
     await page.getByRole('button', { name: /创建工单/ }).click();

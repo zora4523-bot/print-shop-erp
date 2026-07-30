@@ -44,11 +44,7 @@ test.describe('生产流程 — golden path', () => {
       await page.locator('input[name="items.0.quantity"]').fill('1000');
       // &ldquo;现货加烫&rdquo; 是 seed 里 defaultMachineType=HAND_PRESS 的工艺，
       // 和我们的 e2e-worker-hand 师傅匹配 → 排产能选到。
-      await page
-        .locator('label')
-        .filter({ hasText: '现货加烫' })
-        .locator('input[type="checkbox"]')
-        .check();
+      await page.getByRole('button', { name: '现货加烫' }).click();
       await page.getByRole('button', { name: /创建工单/ }).click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
         timeout: 10_000,

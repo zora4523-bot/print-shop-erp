@@ -248,7 +248,7 @@ specification          规格
 paperType              纸张
 quantity               数量 ★
 crafts                 工艺ID数组 ★
-foilColor              烫金颜色
+foilColors             烫金颜色数组（最多 5 色；无颜色与其他颜色互斥）
 isDoubleSided          是否双面 ★（影响开机仔计件）
 isDoubleColor          是否双色 ★（影响开机仔和风车机计件）
 unitPrice              单价（手填）

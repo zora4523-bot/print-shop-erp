@@ -45,6 +45,7 @@ export function DeferredDashboardCharts(props: DashboardChartsContentProps) {
 function DashboardChartsPlaceholder() {
   return (
     <div
+      role="status"
       aria-busy="true"
       aria-label="图表正在加载"
       className="space-y-4"

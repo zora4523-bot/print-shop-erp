@@ -58,6 +58,11 @@ export default async function WorkerOrdersPage() {
                     <p className="worker-wrap-anywhere mt-2 text-sm">
                       客户代号：{order.customerRef ?? '—'}
                     </p>
+                    {order.customName ? (
+                      <p className="worker-wrap-anywhere mt-1 text-sm font-semibold">
+                        {order.customName}
+                      </p>
+                    ) : null}
                     <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
                       我的任务 {order.completedTaskCount}/{order.taskCount} 已完成
                       {order.promisedDate

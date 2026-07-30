@@ -65,6 +65,7 @@ type AdminRoute = {
   name: string;
   path: string;
   readyHeading: string | RegExp;
+  prepareGateState?: (page: Page) => Promise<void>;
 };
 
 async function checkRoutes(
@@ -101,6 +102,7 @@ async function checkRoutes(
       } else {
         await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
       }
+      await route.prepareGateState?.(page);
       await page.evaluate(async () => {
         await Promise.all(
           document
@@ -129,7 +131,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       path: `/orders/${data.orderId}`,
       readyHeading: /^GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789/,
     },
-    { name: 'order-new', path: '/orders/new', readyHeading: '新建工单' },
+    {
+      name: 'order-new',
+      path: '/orders/new',
+      readyHeading: '新建工单',
+      prepareGateState: prepareOrderCreationComponentState,
+    },
     { name: 'scheduling', path: '/foreman/scheduling', readyHeading: '待排产' },
     { name: 'inventory', path: '/foreman/materials', readyHeading: '物料库存' },
     { name: 'outsource', path: '/foreman/outsource', readyHeading: '外协单' },
@@ -150,6 +157,72 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
 
 const salesRoutes: readonly AdminRoute[] = [
   { name: 'sales-orders', path: '/orders', readyHeading: '工单' },
-  { name: 'sales-order-new', path: '/orders/new', readyHeading: '新建工单' },
+  {
+    name: 'sales-order-new',
+    path: '/orders/new',
+    readyHeading: '新建工单',
+    prepareGateState: prepareOrderCreationComponentState,
+  },
   { name: 'sales-bills', path: '/sales/bills', readyHeading: '我的应收账单' },
 ];
+
+async function prepareOrderCreationComponentState(page: Page) {
+  await page
+    .getByRole('button', {
+      name: '非标定制（自定义尺寸）',
+      exact: true,
+    })
+    .click();
+  await page
+    .getByLabel('自定义尺寸 / 规格', { exact: true })
+    .fill('超长非标尺寸 123.45 × 678.90 mm / 横向折叠');
+
+  await page
+    .getByRole('button', { name: '其他纸张（自定义）', exact: true })
+    .click();
+  await page
+    .getByLabel('自定义纸张', { exact: true })
+    .fill('客户指定超长纸张名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+
+  await page.getByRole('button', { name: '哑金', exact: true }).click();
+  await page.getByRole('button', { name: '红金', exact: true }).click();
+  await page
+    .getByRole('button', { name: '添加其他色', exact: true })
+    .click();
+  await page
+    .getByLabel('自定义烫金色 / 色号', { exact: true })
+    .fill('潘通 871C');
+  await page
+    .getByRole('button', { name: '添加颜色', exact: true })
+    .click();
+
+  await page.getByLabel('款式 1 选择设计图', { exact: true }).setInputFiles({
+    name: '超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
+
+  await expect(
+    page.getByRole('button', {
+      name: '非标定制（自定义尺寸）',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', {
+      name: '其他纸张（自定义）',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText('已选 3 色：哑金、红金、潘通 871C')).toBeVisible();
+  await expect(
+    page.getByAltText(
+      '待上传设计图：超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
+    ),
+  ).toBeVisible();
+}

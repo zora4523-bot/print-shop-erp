@@ -104,7 +104,7 @@ export async function getOrderForPrint(
     specification: item.specification,
     paperType: item.paperType,
     quantity: item.quantity,
-    foilColor: item.foilColor,
+    foilColors: item.foilColors,
     isDoubleSided: item.isDoubleSided,
     isDoubleColor: item.isDoubleColor,
     // Drop unresolvable IDs silently rather than rendering a raw cuid
@@ -143,6 +143,7 @@ export async function getOrderForPrint(
   return {
     id: order.id,
     orderNo: order.orderNo,
+    customName: order.customName,
     isUrgent: order.isUrgent,
     promisedDate: order.promisedDate,
     customerRef: order.customerRef,

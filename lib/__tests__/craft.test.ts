@@ -92,18 +92,48 @@ describe('listCraftsPage', () => {
 });
 
 describe('listActiveCraftOrderOptions', () => {
-  it('selects only active fields required by the order form', async () => {
+  it('selects active crafts in master-data order and marks the low-frequency tail', async () => {
     dbMock.craft.findMany.mockResolvedValue([
-      { id: 'craft-1', name: '现货加烫', isOutsource: false },
+      {
+        id: 'craft-1',
+        name: '局部烫金',
+        isOutsource: false,
+        sortOrder: 10,
+      },
+      {
+        id: 'craft-2',
+        name: '现货加烫',
+        isOutsource: false,
+        sortOrder: 900,
+      },
     ]);
 
-    await listActiveCraftOrderOptions();
+    const result = await listActiveCraftOrderOptions();
 
     expect(dbMock.craft.findMany).toHaveBeenCalledWith({
       where: { isActive: true },
-      select: { id: true, name: true, isOutsource: true },
+      select: {
+        id: true,
+        name: true,
+        isOutsource: true,
+        sortOrder: true,
+      },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     });
+    expect(result).toEqual([
+      {
+        id: 'craft-1',
+        name: '局部烫金',
+        isOutsource: false,
+        isLowFrequency: false,
+      },
+      {
+        id: 'craft-2',
+        name: '现货加烫',
+        isOutsource: false,
+        isLowFrequency: true,
+      },
+    ]);
   });
 });
 

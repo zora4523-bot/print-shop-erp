@@ -7,6 +7,10 @@ import { orderStatusZh } from '@/lib/order/log-format';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
+import { signDesignReadUrl } from '@/lib/oss/read-url';
+import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -34,6 +38,11 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
           ) : null}
         </div>
         <h1 className="text-lg font-semibold">我的工单任务</h1>
+        {order.customName ? (
+          <p className="worker-wrap-anywhere text-sm font-semibold">
+            {order.customName}
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           客户代号：{order.customerRef ?? '—'}
           {order.promisedDate ? ` · 交期 ${formatDateShanghai(order.promisedDate)}` : ''}
@@ -65,14 +74,21 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               {item.specification ?? '未填规格'} ·{' '}
               {item.paperType ?? '未填纸张'} · 数量{' '}
               {item.quantity.toLocaleString()} ·{' '}
+              烫金色 {formatFoilColors(item.foilColors, '未填')} ·{' '}
               {item.isDoubleSided ? '双面' : '单面'} ·{' '}
               {item.isDoubleColor ? '双色' : '单色'}
             </p>
             {item.remark ? (
-              <p className="worker-wrap-anywhere mt-2 text-xs">
-                款式备注：{item.remark}
-              </p>
+              <HighlightedRemark className="worker-wrap-anywhere mt-3">
+                {item.remark}
+              </HighlightedRemark>
             ) : null}
+            <DesignImageGallery
+              images={item.designs.map((design) => ({
+                ...design,
+                fileUrl: signDesignReadUrl(design.fileUrl),
+              }))}
+            />
             <ul className="mt-3 divide-y border-t">
               {item.tasks.map((task) => (
                 <li key={task.id} className="py-3 text-sm">

@@ -38,6 +38,9 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
             </Badge>
           ) : null}
         </h1>
+        {view.customName ? (
+          <p className="font-semibold text-foreground">{view.customName}</p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           客户代号：{view.customerRef ?? '—'} · 提交人：{view.submitterDisplayName}
         </p>

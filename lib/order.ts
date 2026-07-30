@@ -42,7 +42,11 @@ export class OrderInvariantError extends Error {
 type OrderTxClient = {
   $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
-    create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string; orderNo: string }>;
+    create: (args: { data: unknown; select?: unknown }) => Promise<{
+      id: string;
+      orderNo: string;
+      items: Array<{ id: string; sequence: number }>;
+    }>;
     findFirst: (args: {
       where: unknown;
       orderBy?: unknown;
@@ -86,6 +90,7 @@ function sumTotals(subtotals: string[]): string {
 export type CreatedOrderSummary = {
   id: string;
   orderNo: string;
+  itemIds: string[];
 };
 
 // The transaction path:
@@ -180,6 +185,7 @@ export async function createOrder(
         customerPartyId: input.customerPartyId ?? null,
         status: OrderStatus.DRAFT,
         isUrgent: input.isUrgent,
+        customName: input.customName ?? null,
         customerRef: input.customerRef,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
@@ -198,7 +204,7 @@ export async function createOrder(
             paperType: it.paperType ?? null,
             quantity: it.quantity,
             crafts: it.crafts,
-            foilColor: it.foilColor ?? null,
+            foilColors: it.foilColors,
             isDoubleSided: it.isDoubleSided,
             isDoubleColor: it.isDoubleColor,
             unitPrice: it.unitPrice ?? '0',
@@ -217,10 +223,21 @@ export async function createOrder(
           ],
         },
       },
-      select: { id: true, orderNo: true },
+      select: {
+        id: true,
+        orderNo: true,
+        items: {
+          select: { id: true, sequence: true },
+          orderBy: { sequence: 'asc' },
+        },
+      },
     });
 
-    return created;
+    return {
+      id: created.id,
+      orderNo: created.orderNo,
+      itemIds: created.items.map((item) => item.id),
+    };
   });
 }
 
@@ -629,6 +646,7 @@ type EditTxClient = {
           id: string;
           status: OrderStatus;
           submitterId: string;
+          customName: string | null;
           customerRef: string | null;
           receiverName: string | null;
           receiverPhone: string | null;
@@ -655,6 +673,7 @@ type EditTxClient = {
 type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
+  customName: string | null;
   customerRef: string | null;
   receiverName: string | null;
   receiverPhone: string | null;
@@ -746,6 +765,7 @@ export async function updateOrderFields(
         id: true,
         status: true,
         submitterId: true,
+        customName: true,
         customerRef: true,
         receiverName: true,
         receiverPhone: true,
@@ -834,6 +854,7 @@ export async function setOrderUrgent(
 export type OrderListRow = {
   id: string;
   orderNo: string;
+  customName: string | null;
   status: OrderStatus;
   isUrgent: boolean;
   customerRef: string | null;
@@ -861,6 +882,7 @@ function orderSearchFilter(q?: string | null): Prisma.OrderWhereInput | undefine
   return {
     OR: [
       { orderNo: { contains: query, mode: 'insensitive' } },
+      { customName: { contains: query, mode: 'insensitive' } },
       { customerRef: { contains: query, mode: 'insensitive' } },
       { receiverName: { contains: query, mode: 'insensitive' } },
       { receiverPhone: { contains: query, mode: 'insensitive' } },
@@ -884,6 +906,7 @@ export async function listOrders(
     select: {
       id: true,
       orderNo: true,
+      customName: true,
       status: true,
       isUrgent: true,
       customerRef: true,
@@ -924,6 +947,7 @@ export async function listOrders(
   return sortBySearchRelevance(withPiecework, query, (row) => ({
     fields: [
       row.orderNo,
+      row.customName,
       row.customerRef,
       row.receiverName,
       row.receiverPhone,

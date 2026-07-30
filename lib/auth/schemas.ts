@@ -13,6 +13,10 @@ import {
   WorkerType,
   MachineType,
 } from '../../generated/prisma/enums';
+import {
+  MAX_ORDER_ITEM_FOIL_COLORS,
+  NO_FOIL_COLOR,
+} from '../order/foil-colors';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -1158,6 +1162,30 @@ const craftIdSchema = z
   .min(1, '工艺 id 不能为空')
   .max(32, '工艺 id 过长');
 
+const orderItemFoilColorsField = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1, '烫金颜色不能为空')
+      .max(32, '烫金颜色过长（最多 32 个字符）'),
+  )
+  .max(
+    MAX_ORDER_ITEM_FOIL_COLORS,
+    `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
+  )
+  .superRefine((colors, ctx) => {
+    if (new Set(colors).size !== colors.length) {
+      ctx.addIssue({ code: 'custom', message: '烫金颜色不能重复' });
+    }
+    if (colors.includes(NO_FOIL_COLOR) && colors.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `“${NO_FOIL_COLOR}”不能与其他颜色同时选择`,
+      });
+    }
+  });
+
 const orderItemSchema = z.object({
   name: z.string().trim().min(1, '请填写款式名').max(64, '款式名过长（最多 64 个字符）'),
   productId: optionalTrimmedText('产品 id', 32),
@@ -1168,7 +1196,7 @@ const orderItemSchema = z.object({
     .array(craftIdSchema)
     .min(1, '至少选择一项工艺')
     .max(10, '单款式工艺不超过 10 项'),
-  foilColor: optionalTrimmedText('烫金颜色', 32),
+  foilColors: orderItemFoilColorsField.default([]),
   isDoubleSided: formBoolean,
   isDoubleColor: formBoolean,
   unitPrice: moneyOptionalField,
@@ -1208,6 +1236,7 @@ const optionalDateFieldPartial = z.preprocess((v) => {
 
 export const createOrderSchema = z.object({
   customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
+  customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户代号', 64),
   receiverName: optionalTrimmedText('收货人', 64),
   receiverPhone: optionalTrimmedText('收货电话', 32),
@@ -1253,6 +1282,7 @@ export type ShipOrderInput = z.infer<typeof shipOrderSchema>;
 // → don't change; empty string → clear to null; present value → update.
 // optionalFormBoolean already handles the undefined case for isUrgent.
 export const updateEditableOrderSchema = z.object({
+  customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户代号', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
   receiverPhone: optionalTrimmedText('收货电话', 32).optional(),

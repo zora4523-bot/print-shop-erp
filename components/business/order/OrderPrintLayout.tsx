@@ -11,6 +11,7 @@ import type {
   PrintOrder,
   PrintOrderItem,
 } from './OrderPrintLayout.types';
+import { formatFoilColors } from '@/lib/order/foil-colors';
 
 // Shared print layout for both browser print and server-rendered PDF.
 // Pure render of a PrintOrder view-model — no data fetching, no
@@ -51,6 +52,9 @@ export function OrderPrintLayout({
             <div className="factory-name">{factoryName}</div>
             <h1 className="order-title">工 单</h1>
             <div className="order-no">{order.orderNo}</div>
+            {order.customName && (
+              <div className="order-custom-name">{order.customName}</div>
+            )}
           </div>
           <div
             // QR SVG pre-rendered server-side via the `qrcode` package.
@@ -129,7 +133,7 @@ function OrderItemBlock({ item }: { item: PrintOrderItem }) {
             <dt>数量：</dt>
             <dd>{item.quantity}</dd>
             <dt>烫金色：</dt>
-            <dd>{item.foilColor ?? '-'}</dd>
+            <dd>{formatFoilColors(item.foilColors, '-')}</dd>
             <dt>双面：</dt>
             <dd>{item.isDoubleSided ? '是' : '否'}</dd>
             <dt>双色：</dt>
@@ -137,7 +141,12 @@ function OrderItemBlock({ item }: { item: PrintOrderItem }) {
             <dt>工艺：</dt>
             <dd>{item.craftNames.length > 0 ? item.craftNames.join('、') : '-'}</dd>
           </dl>
-          {item.remark && <div className="item-remark">备注：{item.remark}</div>}
+          {item.remark && (
+            <div className="item-remark">
+              <span className="item-remark-label">款式备注：</span>
+              <span className="item-remark-text">{item.remark}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -237,6 +246,8 @@ const PRINT_CSS = `
       "Microsoft YaHei", Arial, sans-serif;
     color: #000;
     line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .urgent-banner {
     background: #dc2626;
@@ -258,6 +269,11 @@ const PRINT_CSS = `
   .factory-name { font-size: 12px; color: #666; }
   .order-title { font-size: 24px; margin: 4px 0; }
   .order-no { font-size: 16px; font-weight: bold; }
+  .order-custom-name {
+    margin-top: 2px;
+    font-size: 14px;
+    font-weight: bold;
+  }
   .order-meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -319,7 +335,22 @@ const PRINT_CSS = `
   }
   .item-info dt { font-weight: 600; }
   .item-info dd { margin: 0; }
-  .item-remark { margin-top: 6px; font-size: 12px; color: #666; }
+  .item-remark {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #000;
+  }
+  .item-remark-label {
+    color: #333;
+  }
+  .item-remark-text {
+    padding: 1px 3px;
+    font-weight: bold;
+    color: #c00000;
+    background: #ffe6e6;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
   .task-table {
     width: 100%;
     border-collapse: collapse;

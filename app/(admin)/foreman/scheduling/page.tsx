@@ -40,6 +40,7 @@ export default async function SchedulingListPage() {
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
+                <th className="px-4 py-2 text-left">工单名称</th>
                 <th className="px-4 py-2 text-left">客户代号</th>
                 <th className="px-4 py-2 text-left">提交人</th>
                 <th className="px-4 py-2 text-left">提交时间</th>
@@ -55,11 +56,18 @@ export default async function SchedulingListPage() {
                   <tr key={o.id}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-sans tabular-nums">{o.orderNo}</span>
+                        <span className="font-sans tabular-nums text-foreground">
+                          {o.orderNo}
+                        </span>
                         {o.isUrgent ? (
                           <Badge variant="destructive">急单</Badge>
                         ) : null}
                       </div>
+                    </td>
+                    <td className="max-w-56 px-4 py-3 font-medium">
+                      <span className="block truncate" title={o.customName ?? undefined}>
+                        {o.customName ?? '—'}
+                      </span>
                     </td>
                     <td className="px-4 py-3">{o.customerRef ?? '—'}</td>
                     <td className="px-4 py-3">

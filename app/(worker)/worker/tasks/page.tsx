@@ -59,6 +59,11 @@ export default async function WorkerTasksPage() {
                     <div className="worker-wrap-anywhere text-sm font-medium">
                       #{t.item.sequence} · {t.item.name}
                     </div>
+                    {t.order.customName ? (
+                      <div className="worker-wrap-anywhere text-xs font-medium text-foreground">
+                        {t.order.customName}
+                      </div>
+                    ) : null}
                     <div className="worker-wrap-anywhere text-xs text-muted-foreground">
                       {t.craft.name}
                       {t.machineType

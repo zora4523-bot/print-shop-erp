@@ -197,6 +197,7 @@ model Order {
   status               OrderStatus @default(DRAFT)
   requiresOutsource    Boolean     @default(false) // 排产时快照：工单含外协工艺
   isUrgent             Boolean     @default(false)
+  customName           String? // 录单人自定义的工单识别名称
   customerRef          String? // 客户代号，如"苹果福"
   receiverName         String?
   receiverPhone        String?
@@ -251,7 +252,7 @@ model OrderItem {
   paperType      String?
   quantity       Int
   crafts         String[] // 工艺ID数组
-  foilColor      String?
+  foilColors     String[] @default([])
   isDoubleSided  Boolean  @default(false)
   isDoubleColor  Boolean  @default(false)
   unitPrice      Decimal  @default(0) @db.Decimal(10, 4)

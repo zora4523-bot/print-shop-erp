@@ -3,11 +3,11 @@
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { deleteOrderItemDesignAction } from '@/actions/design-upload';
 import {
-  signDesignUploadAction,
-  recordDesignUploadAction,
-  deleteOrderItemDesignAction,
-} from '@/actions/design-upload';
+  prepareDesignFile,
+  uploadOrderItemDesignFile,
+} from './design-upload-client';
 
 // 款式级设计图管理（A06 延伸）。上传三步：
 //   1. signDesignUploadAction → 预签 PUT URL（服务端校验类型/大小/路径）
@@ -33,14 +33,6 @@ type Props = {
   canEdit: boolean;
 };
 
-const EXT_TO_TYPE: Record<string, { fileType: 'IMAGE' | 'CDR'; mime: string }> = {
-  jpg: { fileType: 'IMAGE', mime: 'image/jpeg' },
-  jpeg: { fileType: 'IMAGE', mime: 'image/jpeg' },
-  png: { fileType: 'IMAGE', mime: 'image/png' },
-  webp: { fileType: 'IMAGE', mime: 'image/webp' },
-  cdr: { fileType: 'CDR', mime: 'application/octet-stream' },
-};
-
 function formatSize(size: string): string {
   const n = Number(size);
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -57,71 +49,49 @@ export function DesignUploadPanel({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{
+    tone: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [deleting, startDelete] = useTransition();
 
-  async function handleFile(file: File) {
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    const mapped = EXT_TO_TYPE[ext];
-    if (!mapped) {
-      setMessage('仅支持 jpg / jpeg / png / webp / cdr 文件');
-      // 不清 value 的话，再次选同一个文件不会触发 onChange
-      if (inputRef.current) inputRef.current.value = '';
-      return;
-    }
+  async function handleFiles(files: Iterable<File>) {
+    const candidates = Array.from(files);
+    if (candidates.length === 0) return;
     setBusy(true);
     setMessage(null);
-    try {
-      const signed = await signDesignUploadAction({
+    const failures: string[] = [];
+    let uploaded = 0;
+
+    for (const file of candidates) {
+      const prepared = prepareDesignFile(file);
+      if (!prepared.ok) {
+        failures.push(`${file.name || '剪贴板图片'}：${prepared.message}`);
+        continue;
+      }
+      const result = await uploadOrderItemDesignFile({
         orderId,
         orderItemId,
-        fileType: mapped.fileType,
-        fileName: file.name,
-        fileSize: file.size,
-        // 浏览器对 .cdr 常给空 mime；统一用映射值，与预签 URL 绑定的
-        // Content-Type 保持一致（不一致 OSS 会 403）。
-        mimeType: mapped.mime,
+        prepared: prepared.value,
       });
-      if (signed.status === 'not-configured') {
-        setMessage(signed.message);
-        return;
+      if (result.ok) {
+        uploaded += 1;
+      } else {
+        failures.push(`${prepared.value.file.name}：${result.message}`);
       }
-      if (signed.status === 'invalid') {
-        setMessage(Object.values(signed.fieldErrors).flat().join('；'));
-        return;
-      }
-      if (signed.status === 'error') {
-        setMessage(signed.message);
-        return;
-      }
-      const putResp = await fetch(signed.putUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': mapped.mime },
-        body: file,
-      });
-      if (!putResp.ok) {
-        setMessage(`上传失败（OSS ${putResp.status}），请重试`);
-        return;
-      }
-      // fileSize 不传——服务端以 OSS HEAD 的 Content-Length 为准
-      const recorded = await recordDesignUploadAction({
-        orderId,
-        orderItemId,
-        objectKey: signed.objectKey,
-        fileType: mapped.fileType,
-        fileName: file.name,
-      });
-      if (!recorded.ok) {
-        setMessage(recorded.message);
-        return;
-      }
-      router.refresh();
-    } catch {
-      setMessage('上传过程中断（网络错误），请重试');
-    } finally {
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
+
+    setBusy(false);
+    if (inputRef.current) inputRef.current.value = '';
+    if (failures.length > 0) {
+      setMessage({
+        tone: 'error',
+        text: `${uploaded > 0 ? `已上传 ${uploaded} 个；` : ''}${failures.join('；')}`,
+      });
+    } else {
+      setMessage({ tone: 'success', text: `已上传 ${uploaded} 个设计文件` });
+    }
+    if (uploaded > 0) router.refresh();
   }
 
   function handleDelete(designId: string) {
@@ -129,7 +99,7 @@ export function DesignUploadPanel({
     startDelete(async () => {
       const r = await deleteOrderItemDesignAction({ designId });
       if (!r.ok) {
-        setMessage(r.message);
+        setMessage({ tone: 'error', text: r.message });
         return;
       }
       router.refresh();
@@ -138,7 +108,7 @@ export function DesignUploadPanel({
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">
           设计图（{designs.length}）
         </span>
@@ -148,10 +118,10 @@ export function DesignUploadPanel({
               ref={inputRef}
               type="file"
               accept=".jpg,.jpeg,.png,.webp,.cdr"
+              multiple
               className="hidden"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleFile(file);
+                void handleFiles(Array.from(e.target.files ?? []));
               }}
             />
             <Button
@@ -161,11 +131,50 @@ export function DesignUploadPanel({
               disabled={busy}
               onClick={() => inputRef.current?.click()}
             >
-              {busy ? '上传中…' : '上传设计图'}
+              {busy ? '上传中…' : '选择设计文件'}
             </Button>
           </div>
         ) : null}
       </div>
+      {canEdit ? (
+        <div
+          tabIndex={busy ? -1 : 0}
+          role="button"
+          aria-disabled={busy}
+          aria-label="粘贴或拖入设计图"
+          className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-4 text-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          onPaste={(event) => {
+            if (busy) return;
+            const files = Array.from(event.clipboardData.files).filter((file) =>
+              file.type.startsWith('image/'),
+            );
+            if (files.length === 0) return;
+            event.preventDefault();
+            void handleFiles(files);
+          }}
+          onDragOver={(event) => {
+            if (!busy) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (busy) return;
+            event.preventDefault();
+            void handleFiles(Array.from(event.dataTransfer.files));
+          }}
+          onKeyDown={(event) => {
+            if (!busy && (event.key === 'Enter' || event.key === ' ')) {
+              event.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
+        >
+          <p className="text-xs font-medium text-foreground">
+            可直接粘贴截图或拖入设计文件
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            JPG / PNG / WEBP 图片，或 CDR 源文件
+          </p>
+        </div>
+      ) : null}
       {designs.length > 0 ? (
         <ul className="flex flex-wrap gap-3">
           {designs.map((d) => (
@@ -211,7 +220,18 @@ export function DesignUploadPanel({
           暂无设计图{canEdit ? '，可上传 JPG/PNG/WEBP 图片或 CDR 源文件' : ''}
         </p>
       )}
-      {message ? <p className="text-xs text-destructive">{message}</p> : null}
+      {message ? (
+        <p
+          role={message.tone === 'success' ? 'status' : 'alert'}
+          className={
+            message.tone === 'success'
+              ? 'text-xs text-primary'
+              : 'text-xs text-destructive'
+          }
+        >
+          {message.text}
+        </p>
+      ) : null}
     </div>
   );
 }

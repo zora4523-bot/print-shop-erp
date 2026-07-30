@@ -83,6 +83,9 @@ describe('worker order visibility', () => {
     expect(detailQuery.select.items.select.tasks.where).toEqual({
       workerId: 'worker-a',
     });
+    expect(detailQuery.select.items.select.designs.where).toEqual({
+      fileType: 'IMAGE',
+    });
   });
 });
 

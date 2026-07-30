@@ -26,7 +26,7 @@ export default async function SalaryIndexPage() {
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold">生产师傅计件工资</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="今日记录"
             value={`${s.dailyToday.count} 条`}
@@ -60,7 +60,7 @@ export default async function SalaryIndexPage() {
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold">客服周期 / 提成</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="活跃周期"
             value={`${s.csActivePeriods} 个`}
@@ -97,7 +97,7 @@ export default async function SalaryIndexPage() {
         <h2 className="text-base font-semibold">
           时薪工月结（打包 / 清废 / 厨师）
         </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label={`${s.currentMonth} 记录`}
             value={`${s.hourlyCurrentMonth.count} 条`}

@@ -1,5 +1,10 @@
 import Decimal from 'decimal.js';
-import { Role, TaskStatus, WorkerType } from '../generated/prisma/client';
+import {
+  DesignFileType,
+  Role,
+  TaskStatus,
+  WorkerType,
+} from '../generated/prisma/client';
 import { db } from './db';
 
 export type WorkerActor = { id: string; role: Role };
@@ -37,6 +42,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
     select: {
       id: true,
       orderNo: true,
+      customName: true,
       status: true,
       isUrgent: true,
       customerRef: true,
@@ -65,6 +71,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
     return {
       id: order.id,
       orderNo: order.orderNo,
+      customName: order.customName,
       status: order.status,
       isUrgent: order.isUrgent,
       customerRef: order.customerRef,
@@ -98,6 +105,7 @@ export async function getWorkerOrderDetail(
     select: {
       id: true,
       orderNo: true,
+      customName: true,
       status: true,
       isUrgent: true,
       customerRef: true,
@@ -114,10 +122,20 @@ export async function getWorkerOrderDetail(
           name: true,
           specification: true,
           paperType: true,
+          foilColors: true,
           quantity: true,
           isDoubleSided: true,
           isDoubleColor: true,
           remark: true,
+          designs: {
+            where: { fileType: DesignFileType.IMAGE },
+            orderBy: { uploadedAt: 'asc' },
+            select: {
+              id: true,
+              fileName: true,
+              fileUrl: true,
+            },
+          },
           tasks: {
             where: { workerId: actor.id },
             orderBy: { createdAt: 'asc' },

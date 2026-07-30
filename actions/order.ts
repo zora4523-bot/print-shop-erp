@@ -21,7 +21,10 @@ import {
   OrderInvariantError,
   InvalidOrderTransitionError,
 } from '@/lib/order';
-import type { OrderMutationResult } from './order.types';
+import type {
+  CreateOrderMutationResult,
+  OrderMutationResult,
+} from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
@@ -29,9 +32,9 @@ import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 // (Slice B) will hand this function a structured payload via a
 // progressively-enhanced form + JSON body or a bound call.
 export async function createOrderAction(
-  _prev: OrderMutationResult | null,
+  _prev: CreateOrderMutationResult | null,
   raw: unknown,
-): Promise<OrderMutationResult> {
+): Promise<CreateOrderMutationResult> {
   const actor = await requirePermission('order:create');
 
   const parsed = createOrderSchema.safeParse(raw);
@@ -39,10 +42,9 @@ export async function createOrderAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  let createdId: string;
+  let created: Awaited<ReturnType<typeof createOrder>>;
   try {
-    const created = await createOrder(parsed.data, actor);
-    createdId = created.id;
+    created = await createOrder(parsed.data, actor);
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -51,7 +53,11 @@ export async function createOrderAction(
   }
 
   revalidatePath('/orders');
-  redirect(`/orders/${createdId}`);
+  return {
+    status: 'success',
+    orderId: created.id,
+    itemIds: created.itemIds,
+  };
 }
 
 export async function submitOrderAction(
@@ -186,6 +192,7 @@ export async function updateOrderAction(
 
   const raw: Record<string, unknown> = {};
   for (const key of [
+    'customName',
     'customerRef',
     'receiverName',
     'receiverPhone',

@@ -59,7 +59,12 @@ describe('editable-field lists (SPEC §3.6 — 仅改收货信息/备注)', () =
     // customer code or flip urgent mid-production, which SPEC §3.6
     // explicitly forbids.
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customerRef');
+    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customName');
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('isUrgent');
+  });
+
+  it('allows the custom name while a draft is fully editable', () => {
+    expect(FULL_EDITABLE_FIELDS as readonly string[]).toContain('customName');
   });
 
   it('editableFieldsForStatus returns the bucket contents', () => {

@@ -175,12 +175,39 @@ const PLACEHOLDER_PNG_DATA_URL =
 export async function seedPrintableOrder(opts: {
   submitterId: string;
   designCount: number;
-}): Promise<{ orderId: string; orderNo: string; orderItemId: string }> {
-  // Deterministic per (designCount). Same id across runs → same QR
-  // SVG, same screenshot bytes. CASCADE FKs on Order → OrderItem and
-  // OrderItem → OrderItemDesign clean up children automatically.
-  const orderId = `e2e-vr-${opts.designCount}`;
-  const orderNo = `E2E-VR-${opts.designCount}`;
+  variant?: 'default' | 'rich-context';
+}): Promise<{
+  orderId: string;
+  orderNo: string;
+  orderItemId: string;
+  customName: string | null;
+  itemRemark: string | null;
+  foilColors: string[];
+}> {
+  const variant = opts.variant ?? 'default';
+  const richContext = variant === 'rich-context';
+  const customName = richContext
+    ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
+    : null;
+  const itemRemark = richContext
+    ? '关键备注：正面品牌标志必须使用红金，背面祝福语使用哑金，潘通 871C 仅用于边框；严格按最终设计稿方向生产，不可镜像、不可漏烫。LONG-CRITICAL-NOTE-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789'
+    : null;
+  const foilColors = richContext
+    ? ['哑金', '红金', '潘通 871C']
+    : ['金色'];
+
+  // Deterministic per (variant, designCount). Existing default IDs stay
+  // unchanged so the original six bucket baselines do not churn. The
+  // same ID across runs also keeps the QR SVG and screenshot bytes stable.
+  // CASCADE FKs on Order → OrderItem and OrderItem → OrderItemDesign
+  // clean up children automatically.
+  const idStem = richContext
+    ? `e2e-vr-rich-${opts.designCount}`
+    : `e2e-vr-${opts.designCount}`;
+  const orderId = idStem;
+  const orderNo = richContext
+    ? `E2E-VR-RICH-${opts.designCount}`
+    : `E2E-VR-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
   await withDb(async (db) => {
@@ -190,12 +217,14 @@ export async function seedPrintableOrder(opts: {
       `
       INSERT INTO "Order" (
         id, "orderNo", "submitterId", "submitterRole", "createdById",
-        status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
+        status, "isUrgent", "customerRef", "customName", "receiverName",
+        "receiverPhone",
         "totalAmount", "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, $3, 'ADMIN'::"Role", $3,
         'DRAFT'::"OrderStatus", FALSE,
         'VR-CUSTOMER',
+        $4,
         'VR 收件人',
         '13800138000',
         0,
@@ -204,22 +233,22 @@ export async function seedPrintableOrder(opts: {
         TIMESTAMP '2026-01-01 00:00:00'
       )
       `,
-      [orderId, orderNo, opts.submitterId],
+      [orderId, orderNo, opts.submitterId, customName],
     );
 
     await db.query(
       `
       INSERT INTO "OrderItem" (
         id, "orderId", sequence, name, specification, "paperType",
-        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
-        crafts, "createdAt", "updatedAt"
+        quantity, "foilColors", "isDoubleSided", "isDoubleColor",
+        crafts, remark, "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, 1, 'VR 款式', '9cm × 17cm', '珠光纸',
-        5000, '金色', TRUE, FALSE,
-        ARRAY[]::text[], NOW(), NOW()
+        5000, $3::text[], TRUE, FALSE,
+        ARRAY[]::text[], $4, NOW(), NOW()
       )
       `,
-      [orderItemId, orderId],
+      [orderItemId, orderId, foilColors, itemRemark],
     );
 
     for (let i = 0; i < opts.designCount; i++) {
@@ -245,7 +274,14 @@ export async function seedPrintableOrder(opts: {
     }
   });
 
-  return { orderId, orderNo, orderItemId };
+  return {
+    orderId,
+    orderNo,
+    orderItemId,
+    customName,
+    itemRemark,
+    foilColors,
+  };
 }
 
 // Wipes ALL SalaryPeriods + CommissionRecords for an e2e-* user.
@@ -1451,11 +1487,11 @@ export async function seedCdrOrder(opts: {
       `
       INSERT INTO "OrderItem" (
         id, "orderId", sequence, name, "specification", "paperType",
-        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
+        quantity, "foilColors", "isDoubleSided", "isDoubleColor",
         crafts, "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, 1, 'CDR 测试款', '9cm', '珠光纸',
-        5000, '金色', FALSE, FALSE,
+        5000, ARRAY['金色']::text[], FALSE, FALSE,
         ARRAY[]::text[], NOW(), NOW()
       )
       `,
