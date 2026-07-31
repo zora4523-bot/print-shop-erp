@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  OrderChangeRequestStatus,
+  OrderCostCategory,
+  OrderKind,
   OrderStatus,
   OutsourceStatus,
+  ShipmentStatus,
   Role,
 } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
@@ -12,6 +16,7 @@ import {
   isTerminalOrderStatus,
 } from '@/lib/order/status-machine';
 import {
+  canEditOrderSfCollect,
   editableFieldsetForStatus,
   isOrderEditable,
 } from '@/lib/order/editable-fields';
@@ -28,6 +33,7 @@ import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
 import { ShipOrderForm } from '@/components/business/order/ShipOrderForm';
 import { FinishOrderButton } from '@/components/business/order/FinishOrderButton';
 import { UrgentToggleForm } from '@/components/business/order/UrgentToggleForm';
+import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggleForm';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
 import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
@@ -39,6 +45,14 @@ import { getPendingTaskReassignmentView } from '@/lib/production';
 import { ReassignTaskForm } from '@/components/business/production/ReassignTaskForm';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import {
+  getReworkCraftOptions,
+} from '@/lib/order/rework';
+import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
+import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
+import { OrderChangeReviewForm } from '@/components/business/order/OrderChangeReviewForm';
+import { OrderCostEntryForm } from '@/components/business/bill/OrderCostEntryForm';
+import { formatReceiverInfo } from '@/lib/order/receiver-info';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -52,7 +66,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();
-  const [materialEstimate, pieceworkSummary, reassignmentView] = await Promise.all([
+  const canCreateRework =
+    user.role === Role.ADMIN &&
+    (order.status === OrderStatus.SHIPPED ||
+      order.status === OrderStatus.FINISHED);
+  const [
+    materialEstimate,
+    pieceworkSummary,
+    reassignmentView,
+    reworkCraftOptions,
+  ] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
     user.role === Role.ADMIN
       ? getOrderPieceworkSummary(order.id)
@@ -60,6 +83,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     user.role === Role.ADMIN
       ? getPendingTaskReassignmentView(order.id)
       : Promise.resolve({ tasks: [] }),
+    canCreateRework
+      ? getReworkCraftOptions(order.items.flatMap((item) => item.crafts))
+      : Promise.resolve([]),
   ]);
 
   const canSubmit =
@@ -92,6 +118,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  const canToggleSfCollect =
+    canEditOrderSfCollect(order.status) &&
+    (order.submitterId === user.id || user.role === Role.ADMIN);
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
   // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
@@ -103,6 +132,26 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canCreateOutsource =
     (user.role === Role.ADMIN) &&
     canAttachOutsource(order.status);
+  const assignedWorkerNames = [
+    ...new Set(
+      order.items.flatMap((item) =>
+        item.tasks.flatMap((task) =>
+          task.worker ? [task.worker.displayName] : [],
+        ),
+      ),
+    ),
+  ];
+  const pendingChangeRequest = order.changeRequests.find(
+    (request) => request.status === OrderChangeRequestStatus.PENDING,
+  );
+  const canRequestChange =
+    (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) &&
+    order.submitterId === user.id &&
+    (order.status === OrderStatus.DRAFT ||
+      order.status === OrderStatus.SUBMITTED ||
+      order.status === OrderStatus.SCHEDULING ||
+      order.status === OrderStatus.IN_PRODUCTION) &&
+    !pendingChangeRequest;
 
   return (
     <div className="space-y-6">
@@ -116,6 +165,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
               <Badge variant="destructive">
                 急单
               </Badge>
+            ) : null}
+            {order.isSfCollect ? (
+              <Badge
+                variant="outline"
+                className="border-warning/50 bg-warning/10 text-warning-foreground"
+              >
+                顺丰到付 · 自行预约
+              </Badge>
+            ) : null}
+            {order.shipments.length > 1 ? (
+              <Badge variant="outline">多地址 ×{order.shipments.length}</Badge>
+            ) : null}
+            {order.kind === OrderKind.REWORK ? (
+              <Badge variant="outline">重做单</Badge>
             ) : null}
           </h1>
           {order.customName ? (
@@ -140,6 +203,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
           ) : null}
           {canToggleUrgent ? (
             <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
+          ) : null}
+          {canToggleSfCollect ? (
+            <SfCollectToggleForm
+              orderId={order.id}
+              currentValue={order.isSfCollect}
+            />
           ) : null}
           {canCreateOutsource ? (
             <Link
@@ -170,11 +239,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <h2 className="text-base font-semibold">基本信息</h2>
         <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Row label="工单名称" value={order.customName} full />
-          <Row label="客户代号" value={order.customerRef} />
-          <Row label="收货人" value={order.receiverName} />
-          <Row label="收货电话" value={order.receiverPhone} />
+          <Row
+            label="提交人"
+            value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
+          />
+          <Row
+            label="师傅"
+            value={assignedWorkerNames.length ? assignedWorkerNames.join('、') : '未派工'}
+          />
+          <Row label="客户名称/简称" value={order.customerRef} />
           <Row label="快递代码" value={order.expressCode} />
-          <Row label="收货地址" value={order.receiverAddress} full />
+          <Row
+            label="配送方式"
+            value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
+          />
+          <Row label="收货信息" value={formatReceiverInfo(order)} full />
           <Row label="包装要求" value={order.packageRequirement} full />
           <Row label="备注" value={order.remark} full />
           <div>
@@ -189,9 +268,108 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
             </dd>
           </div>
-          <Row label="总额" value={String(order.totalAmount)} tabular />
+          <Row
+            label={order.isSfCollect ? '工单总额（不含物流费）' : '工单总额'}
+            value={String(order.totalAmount)}
+            tabular
+          />
         </dl>
       </section>
+
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">
+            发货地址（{order.shipments.length}）
+          </h2>
+          {order.shipments.length > 1 ? (
+            <Badge variant="outline">多地址发货</Badge>
+          ) : null}
+        </div>
+        <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+          {order.shipments.map((shipment) => (
+            <li
+              key={shipment.id}
+              className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">地址 {shipment.sequence}</span>
+                <Badge
+                  variant={
+                    shipment.status === ShipmentStatus.SHIPPED
+                      ? 'secondary'
+                      : 'outline'
+                  }
+                >
+                  {shipment.status === ShipmentStatus.SHIPPED
+                    ? '已发货'
+                    : '待发货'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-muted-foreground">
+                {formatReceiverInfo(shipment, '未填写收货信息')}
+              </p>
+              {shipment.expressCode ? (
+                <p className="text-muted-foreground">
+                  快递代码：{shipment.expressCode}
+                </p>
+              ) : null}
+              {shipment.trackingNo ? (
+                <p className="font-sans tabular-nums">
+                  运单号：{shipment.trackingNo}
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs text-muted-foreground">
+                {shipment.lines
+                  .map(
+                    (line) =>
+                      `#${line.orderItem.sequence} ${line.orderItem.name} × ${line.quantity}`,
+                  )
+                  .join('；') || '尚未分配款式数量'}
+              </p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {order.sourceOrder || order.reworkOrders.length > 0 ? (
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold">重做关联</h2>
+          {order.sourceOrder ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">原工单</span>
+              <Link
+                href={`/orders/${order.sourceOrder.id}`}
+                className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
+              >
+                {order.sourceOrder.orderNo}
+              </Link>
+              <OrderStatusBadge status={order.sourceOrder.status} />
+            </div>
+          ) : null}
+          {order.reworkOrders.length > 0 ? (
+            <ul className="space-y-2">
+              {order.reworkOrders.map((rework) => (
+                <li
+                  key={rework.id}
+                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+                >
+                  <Badge variant="outline">重做单</Badge>
+                  <Link
+                    href={`/orders/${rework.id}`}
+                    className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
+                  >
+                    {rework.orderNo}
+                  </Link>
+                  <span className="admin-wrap-anywhere text-muted-foreground">
+                    {rework.customName}
+                  </span>
+                  <OrderStatusBadge status={rework.status} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h2 className="text-base font-semibold">款式（{order.items.length}）</h2>
@@ -217,6 +395,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <Row
                   label="工艺"
                   value={item.crafts.length ? item.crafts.join('、') : '—'}
+                  full
+                />
+                <Row
+                  label="师傅"
+                  value={
+                    item.tasks.length
+                      ? item.tasks
+                          .map(
+                            (task) =>
+                              `${task.craft.name}：${task.worker?.displayName ?? '未派工'}`,
+                          )
+                          .join('；')
+                      : '未派工'
+                  }
                   full
                 />
               </dl>
@@ -249,6 +441,91 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </ol>
       </section>
 
+      {canRequestChange ? (
+        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-base font-semibold">申请修改工单</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              管理员批准后，款式、待生产任务和各端显示才会统一更新。
+            </p>
+          </div>
+          <OrderChangeRequestForm
+            orderId={order.id}
+            items={order.items.map((item) => ({
+              id: item.id,
+              sequence: item.sequence,
+              name: item.name,
+              quantity: item.quantity,
+              specification: item.specification,
+              foilColors: item.foilColors,
+            }))}
+          />
+        </section>
+      ) : null}
+
+      {order.changeRequests.length > 0 ? (
+        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">工单修改申请</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                当前工单版本：第 {order.revision} 版
+              </p>
+            </div>
+            {pendingChangeRequest ? (
+              <Badge variant="outline">有待审核申请</Badge>
+            ) : null}
+          </div>
+          <ol className="space-y-3">
+            {order.changeRequests.map((request) => (
+              <li key={request.id} className="min-w-0 rounded-lg border p-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                  <Badge
+                    variant={
+                      request.status === OrderChangeRequestStatus.REJECTED
+                        ? 'destructive'
+                        : request.status === OrderChangeRequestStatus.APPROVED
+                          ? 'secondary'
+                          : 'outline'
+                    }
+                  >
+                    {changeRequestStatusLabel(request.status)}
+                  </Badge>
+                  <span className="font-medium">
+                    {request.requester.displayName}
+                  </span>
+                  <span className="text-muted-foreground">
+                    基于第 {request.baseRevision} 版 ·{' '}
+                    {formatDateTimeShanghai(request.createdAt)}
+                  </span>
+                </div>
+                <p className="admin-wrap-anywhere mt-2 text-sm">
+                  原因：{request.reason}
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                  {describeOrderChanges(request.proposedChanges).map(
+                    (description, index) => (
+                      <li key={`${request.id}-${index}`}>{description}</li>
+                    ),
+                  )}
+                </ul>
+                {request.reviewRemark ? (
+                  <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                    审核备注：{request.reviewRemark}
+                  </p>
+                ) : null}
+                {user.role === Role.ADMIN &&
+                request.status === OrderChangeRequestStatus.PENDING ? (
+                  <div className="mt-3 border-t pt-3">
+                    <OrderChangeReviewForm requestId={request.id} />
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
       {reassignmentView.tasks.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
@@ -274,6 +551,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   taskId={task.id}
                   orderId={order.id}
                   currentWorkerId={task.currentWorkerId}
+                  craftId={task.craftId}
                   eligibleWorkers={task.eligibleWorkers}
                 />
               </li>
@@ -321,6 +599,73 @@ export default async function OrderDetailPage({ params }: PageProps) {
               ))}
             </ul>
           )}
+        </section>
+      ) : null}
+
+      {user.role === Role.ADMIN ? (
+        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-base font-semibold">成本补录与调整</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              计件工资和外协金额会在账单中自动汇总；这里补录材料、物流重量费用、伙食费、电费等自定义成本。
+            </p>
+          </div>
+          {order.costEntries.length > 0 ? (
+            <div
+              className="overflow-x-auto"
+              role="region"
+              aria-label="工单成本明细"
+              tabIndex={0}
+            >
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="border-b text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-2 py-2 text-left">类型</th>
+                    <th className="px-2 py-2 text-left">名称</th>
+                    <th className="px-2 py-2 text-left">数量/单价</th>
+                    <th className="px-2 py-2 text-right">金额</th>
+                    <th className="px-2 py-2 text-left">记录人</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {order.costEntries.map((entry) => (
+                    <tr key={entry.id}>
+                      <td className="px-2 py-2">
+                        {ORDER_COST_LABELS[entry.category]}
+                      </td>
+                      <td className="admin-wrap-anywhere px-2 py-2">
+                        {entry.description}
+                        {entry.remark ? (
+                          <p className="text-xs text-muted-foreground">
+                            {entry.remark}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-muted-foreground">
+                        {entry.quantity
+                          ? `${String(entry.quantity)} ${entry.unit ?? ''}`
+                          : '—'}
+                        {entry.unitPrice
+                          ? ` × ¥ ${String(entry.unitPrice)}`
+                          : ''}
+                      </td>
+                      <td className="px-2 py-2 text-right font-sans tabular-nums">
+                        ¥ {String(entry.amount)}
+                      </td>
+                      <td className="px-2 py-2 text-xs">
+                        {entry.createdBy.displayName}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">暂无人工补录成本。</p>
+          )}
+          <div className="border-t pt-4">
+            <OrderCostEntryForm orderId={order.id} />
+          </div>
         </section>
       ) : null}
 
@@ -376,7 +721,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
             所有任务已完工，工单进入 COMPLETED；标记发货后状态切到
             SHIPPED，可填运单号备查。
           </p>
-          <ShipOrderForm orderId={order.id} />
+          <ShipOrderForm
+            orderId={order.id}
+            shipments={order.shipments.map((shipment) => ({
+              id: shipment.id,
+              sequence: shipment.sequence,
+              receiverName: shipment.receiverName,
+              receiverAddress: shipment.receiverAddress,
+              trackingNo: shipment.trackingNo,
+              weightKg: shipment.weightKg ? String(shipment.weightKg) : null,
+            }))}
+          />
         </section>
       ) : null}
 
@@ -405,6 +760,30 @@ export default async function OrderDetailPage({ params }: PageProps) {
             工单不再活跃，但仍参与月度账单生成。
           </p>
           <FinishOrderButton orderId={order.id} />
+        </section>
+      ) : null}
+
+      {canCreateRework ? (
+        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-base font-semibold">发起重做排单</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              适用于质量问题或物流损毁。系统会创建关联的新工单进入待排产；
+              原工单状态、应收账单和历史工资保持不变。
+            </p>
+          </div>
+          <ReworkOrderForm
+            sourceOrderId={order.id}
+            items={order.items.map((item) => ({
+              id: item.id,
+              sequence: item.sequence,
+              name: item.name,
+              quantity: item.quantity,
+              crafts: reworkCraftOptions.filter((craft) =>
+                item.crafts.includes(craft.id),
+              ),
+            }))}
+          />
         </section>
       ) : null}
 
@@ -451,3 +830,54 @@ function Row({
     </div>
   );
 }
+
+function changeRequestStatusLabel(status: OrderChangeRequestStatus): string {
+  return {
+    [OrderChangeRequestStatus.PENDING]: '待审核',
+    [OrderChangeRequestStatus.APPROVED]: '已批准',
+    [OrderChangeRequestStatus.REJECTED]: '已拒绝',
+    [OrderChangeRequestStatus.CANCELLED]: '已撤销',
+    [OrderChangeRequestStatus.STALE]: '版本已过期',
+  }[status];
+}
+
+function describeOrderChanges(value: unknown): string[] {
+  const items = (value as { items?: unknown[] } | null)?.items;
+  if (!Array.isArray(items)) return ['申请数据无法显示'];
+  return items.map((raw) => {
+    const change = raw as {
+      operation?: string;
+      itemId?: string;
+      templateItemId?: string;
+      name?: string;
+      quantity?: number;
+      specification?: string | null;
+      foilColors?: string[];
+    };
+    const fields = [
+      change.name ? `名称“${change.name}”` : null,
+      change.quantity ? `数量 ${change.quantity}` : null,
+      change.specification !== undefined
+        ? `规格“${change.specification || '空'}”`
+        : null,
+      change.foilColors
+        ? `烫金色 ${change.foilColors.join('、') || '无颜色'}`
+        : null,
+    ].filter(Boolean);
+    return change.operation === 'ADD'
+      ? `新增款式（参考 ${change.templateItemId ?? '未知款式'}）：${fields.join('，')}`
+      : `修改款式 ${change.itemId ?? '未知款式'}：${fields.join('，')}`;
+  });
+}
+
+const ORDER_COST_LABELS: Record<OrderCostCategory, string> = {
+  [OrderCostCategory.MATERIAL]: '材料',
+  [OrderCostCategory.PIECEWORK]: '计件',
+  [OrderCostCategory.SETUP]: '上板/装板',
+  [OrderCostCategory.OUTSOURCE]: '外协',
+  [OrderCostCategory.SHIPPING]: '物流',
+  [OrderCostCategory.MEAL]: '伙食费',
+  [OrderCostCategory.ELECTRICITY]: '电费',
+  [OrderCostCategory.CUSTOM]: '其他',
+  [OrderCostCategory.ADJUSTMENT]: '调整',
+};

@@ -4,6 +4,19 @@ import { E2E_USERS } from '../e2e/global-setup';
 export type WorkerUiFixture = {
   orderId: string;
   orderNo: string;
+  schedulingOrderId: string;
+  schedulingOrderNo: string;
+  schedulingOrderTwoId: string;
+  schedulingOrderTwoNo: string;
+  mixedSchedulingOrderId: string;
+  mixedSchedulingOrderNo: string;
+  overrideSchedulingOrderId: string;
+  overrideSchedulingOrderNo: string;
+  schedulingItemOneId: string;
+  schedulingItemTwoId: string;
+  schedulingItemThreeId: string;
+  mixedSchedulingItemId: string;
+  overrideSchedulingItemId: string;
   orderItemActiveId: string;
   orderItemCompletedId: string;
   activeTaskId: string;
@@ -31,6 +44,19 @@ function fixtureFor(namespace: string): WorkerUiFixture {
   return {
     orderId: `${prefix}-order`,
     orderNo: `GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789-${suffix.toUpperCase()}`,
+    schedulingOrderId: `${prefix}-scheduling-order`,
+    schedulingOrderNo: `GD-260719-BULK-SCHEDULING-${suffix.toUpperCase()}`,
+    schedulingOrderTwoId: `${prefix}-scheduling-order-2`,
+    schedulingOrderTwoNo: `GD-260719-BULK-SCHEDULING-SECOND-${suffix.toUpperCase()}`,
+    mixedSchedulingOrderId: `${prefix}-scheduling-order-mixed`,
+    mixedSchedulingOrderNo: `GD-260719-BULK-SCHEDULING-MIXED-${suffix.toUpperCase()}`,
+    overrideSchedulingOrderId: `${prefix}-scheduling-order-override`,
+    overrideSchedulingOrderNo: `GD-260719-BULK-SCHEDULING-OVERRIDE-${suffix.toUpperCase()}`,
+    schedulingItemOneId: `${prefix}-scheduling-item-1`,
+    schedulingItemTwoId: `${prefix}-scheduling-item-2`,
+    schedulingItemThreeId: `${prefix}-scheduling-item-3`,
+    mixedSchedulingItemId: `${prefix}-scheduling-item-mixed`,
+    overrideSchedulingItemId: `${prefix}-scheduling-item-override`,
     orderItemActiveId: `${prefix}-item-active`,
     orderItemCompletedId: `${prefix}-item-completed`,
     activeTaskId: `${prefix}-task-active`,
@@ -61,7 +87,12 @@ export async function seedWorkerUiFixture(
     try {
       const users = await db.query<{ id: string; username: string }>(
         `SELECT id, username FROM "User" WHERE username = ANY($1::text[])`,
-        [[E2E_USERS.workerHandPress!.username, E2E_USERS.owner!.username, E2E_USERS.sales!.username]],
+        [[
+          E2E_USERS.workerHandPress!.username,
+          E2E_USERS.workerWindmill!.username,
+          E2E_USERS.owner!.username,
+          E2E_USERS.sales!.username,
+        ]],
       );
       const userId = (username: string) => {
         const user = users.rows.find((row) => row.username === username);
@@ -74,24 +105,52 @@ export async function seedWorkerUiFixture(
 
       const craft = await db.query<{ id: string; name: string }>(
         `SELECT id, name FROM "Craft"
-         WHERE "isActive" = TRUE AND "isOutsource" = FALSE
-         ORDER BY CASE WHEN "defaultWorkerType" = 'MACHINE'::"WorkerType" THEN 0 ELSE 1 END,
-                  "sortOrder", name
+         WHERE "isActive" = TRUE
+           AND "isOutsource" = FALSE
+           AND "defaultWorkerType" = 'MACHINE'::"WorkerType"
+           AND "defaultMachineType" = 'HAND_PRESS'::"MachineType"
+         ORDER BY "sortOrder", name
          LIMIT 1`,
       );
       if (!craft.rows[0]) throw new Error('Worker UI E2E requires at least one active in-house craft');
+      const windmillCraft = await db.query<{ id: string; name: string }>(
+        `SELECT id, name FROM "Craft"
+         WHERE "isActive" = TRUE
+           AND "isOutsource" = FALSE
+           AND "defaultWorkerType" = 'MACHINE'::"WorkerType"
+           AND "defaultMachineType" = 'WINDMILL'::"MachineType"
+         ORDER BY "sortOrder", name
+         LIMIT 1`,
+      );
+      if (!windmillCraft.rows[0]) {
+        throw new Error(
+          'Worker UI E2E requires at least one active WINDMILL craft',
+        );
+      }
 
       await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.schedulingOrderId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.schedulingOrderTwoId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.mixedSchedulingOrderId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.overrideSchedulingOrderId,
+      ]);
 
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "createdById", status,
-           "isUrgent", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
+           "isUrgent", "isSfCollect", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
            "submittedAt", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", $3, 'IN_PRODUCTION'::"OrderStatus",
-           TRUE, $4, $5, $6, $7, DATE '2099-12-31',
+           TRUE, TRUE, $4, $5, $6, $7, DATE '2099-12-31',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
          )`,
@@ -103,6 +162,79 @@ export async function seedWorkerUiFixture(
           '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '包装要求：请将每一万个分组装箱并标注ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
           '工单备注：这是用于响应式裁切回归的超长中文文本与UnbrokenToken0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           status, "customerRef", "customName", "submittedAt",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $3,
+           'SUBMITTED'::"OrderStatus", '混合机型批量排产客户',
+           '手动烫金与风车机分步排产测试',
+           TIMESTAMP '2026-07-19 08:10:00',
+           TIMESTAMP '2026-07-19 08:10:00',
+           TIMESTAMP '2026-07-19 08:10:00'
+         )`,
+        [
+          fixture.mixedSchedulingOrderId,
+          fixture.mixedSchedulingOrderNo,
+          salesId,
+        ],
+      );
+      await db.query(
+        `INSERT INTO "OrderItem" (
+           id, "orderId", sequence, name, specification, "paperType",
+           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           remark, "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 1, '混合机型分步派工款式', '大号', '艳红珠光纸',
+           2600, ARRAY[$3, $4]::text[], ARRAY['哑金', '红金']::text[],
+           FALSE, TRUE, '先手动烫金再走风车机', NOW(), NOW()
+         )`,
+        [
+          fixture.mixedSchedulingItemId,
+          fixture.mixedSchedulingOrderId,
+          craft.rows[0].id,
+          windmillCraft.rows[0].id,
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           status, "customerRef", "customName", "submittedAt",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $3,
+           'SUBMITTED'::"OrderStatus", '非推荐派工测试客户',
+           '管理员最终派工原因测试',
+           TIMESTAMP '2026-07-19 08:15:00',
+           TIMESTAMP '2026-07-19 08:15:00',
+           TIMESTAMP '2026-07-19 08:15:00'
+         )`,
+        [
+          fixture.overrideSchedulingOrderId,
+          fixture.overrideSchedulingOrderNo,
+          salesId,
+        ],
+      );
+      await db.query(
+        `INSERT INTO "OrderItem" (
+           id, "orderId", sequence, name, specification, "paperType",
+           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           remark, "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 1, '非推荐派工款式', '大号', '艳红珠光纸',
+           1800, ARRAY[$3]::text[], ARRAY['哑金']::text[], FALSE, FALSE,
+           '必须填写管理员派工原因', NOW(), NOW()
+         )`,
+        [
+          fixture.overrideSchedulingItemId,
+          fixture.overrideSchedulingOrderId,
+          craft.rows[0].id,
         ],
       );
 
@@ -128,6 +260,76 @@ export async function seedWorkerUiFixture(
           '已完工款式用于验证工单与工资明细的长文本布局',
         ],
       );
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           status, "customerRef", "customName", "submittedAt",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $3,
+           'SUBMITTED'::"OrderStatus", '第二批量排产客户',
+           '第二张跨工单批量排产测试',
+           TIMESTAMP '2026-07-19 08:05:00',
+           TIMESTAMP '2026-07-19 08:05:00',
+           TIMESTAMP '2026-07-19 08:05:00'
+         )`,
+        [
+          fixture.schedulingOrderTwoId,
+          fixture.schedulingOrderTwoNo,
+          salesId,
+        ],
+      );
+      await db.query(
+        `INSERT INTO "OrderItem" (
+           id, "orderId", sequence, name, specification, "paperType",
+           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           remark, "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 1, '跨工单批量派工款式', '方形', '暗红珠光纸',
+           3000, ARRAY[$3]::text[], ARRAY['浅金']::text[], FALSE, FALSE,
+           '第二张工单关键备注', NOW(), NOW()
+         )`,
+        [
+          fixture.schedulingItemThreeId,
+          fixture.schedulingOrderTwoId,
+          craft.rows[0].id,
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           status, "customerRef", "customName", "submittedAt",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'SALES'::"Role", $3,
+           'SUBMITTED'::"OrderStatus", '批量排产客户',
+           '批量排产响应式与无障碍测试',
+           TIMESTAMP '2026-07-19 08:00:00',
+           TIMESTAMP '2026-07-19 08:00:00',
+           TIMESTAMP '2026-07-19 08:00:00'
+         )`,
+        [fixture.schedulingOrderId, fixture.schedulingOrderNo, salesId],
+      );
+      await db.query(
+        `INSERT INTO "OrderItem" (
+           id, "orderId", sequence, name, specification, "paperType",
+           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           remark, "createdAt", "updatedAt"
+         ) VALUES
+           ($1, $3, 1, '批量派工款式一', '大号', '艳红珠光纸',
+            1000, ARRAY[$4]::text[], ARRAY['哑金']::text[], FALSE, FALSE,
+            '批量派工关键备注一', NOW(), NOW()),
+           ($2, $3, 2, '批量派工款式二', '中号', '艳红珠光纸',
+            2000, ARRAY[$4]::text[], ARRAY['红金']::text[], FALSE, FALSE,
+            '批量派工关键备注二', NOW(), NOW())`,
+        [
+          fixture.schedulingItemOneId,
+          fixture.schedulingItemTwoId,
+          fixture.schedulingOrderId,
+          craft.rows[0].id,
+        ],
+      );
 
       await db.query(
         `INSERT INTO "OrderItemDesign" (
@@ -143,6 +345,32 @@ export async function seedWorkerUiFixture(
           'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
           '生产设计图超长文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789最终确认版.png',
           salesId,
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO "OrderShipment" (
+           id, "orderId", sequence, "receiverName", "receiverPhone",
+           "receiverAddress", "expressCode", status, "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 1, '响应式测试收货人', '13800138000',
+           '佛山市超长测试地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+           'SF', 'PLANNED'::"ShipmentStatus", NOW(), NOW()
+         )`,
+        [`${fixture.orderId}-shipment`, fixture.orderId],
+      );
+      await db.query(
+        `INSERT INTO "OrderShipmentLine" (
+           id, "shipmentId", "orderItemId", quantity
+         ) VALUES
+           ($1, $3, $4, 1234567),
+           ($2, $3, $5, 987654)`,
+        [
+          `${fixture.orderId}-shipment-line-1`,
+          `${fixture.orderId}-shipment-line-2`,
+          `${fixture.orderId}-shipment`,
+          fixture.orderItemActiveId,
+          fixture.orderItemCompletedId,
         ],
       );
 
@@ -247,6 +475,18 @@ export async function cleanupWorkerUiFixture(
     await db.query('BEGIN');
     try {
       await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.schedulingOrderId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.schedulingOrderTwoId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.mixedSchedulingOrderId,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        fixture.overrideSchedulingOrderId,
+      ]);
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
       await db.query('COMMIT');
     } catch (error) {

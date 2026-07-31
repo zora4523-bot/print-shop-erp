@@ -6,6 +6,8 @@ import { getWorkerSalaryDetail } from '@/lib/worker-portal';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import Decimal from 'decimal.js';
+import { getAttendanceSummaries } from '@/lib/attendance';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -20,6 +22,18 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   const { id } = await params;
   const salary = await getWorkerSalaryDetail(id, { id: user.id, role: user.role });
   if (!salary) notFound();
+  const attendanceEnd = new Date(salary.date);
+  attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);
+  const attendance =
+    (
+      await getAttendanceSummaries([user.id], {
+        start: salary.date,
+        end: attendanceEnd,
+      })
+    ).get(user.id) ?? { workUnits: '0', leaveUnits: '0' };
+  const exceedsBase = new Decimal(
+    salary.totalPieceworkAmount as Decimal.Value,
+  ).gte(new Decimal(salary.baseSalary as Decimal.Value));
 
   return (
     <div className="min-w-0 space-y-5">
@@ -33,6 +47,11 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           ) : (
             <Badge variant="outline">未发</Badge>
           )}
+          <Badge variant={exceedsBase ? 'secondary' : 'outline'}>
+            {exceedsBase ? '计件已超底薪' : '按底薪补足'}
+          </Badge>
+          <Badge variant="outline">上班 {attendance.workUnits} 天</Badge>
+          <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           {MACHINE_TYPE_LABELS[salary.machineType]} ·
@@ -46,6 +65,11 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
         <Money label="人工调整" value={salary.adjustmentAmount} />
         <Money label="实发工资" value={salary.actualSalary} strong />
       </section>
+      {!exceedsBase ? (
+        <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+          当日计件工资未达到每日底薪，因此本日工资按底薪计算，再叠加人工调整。
+        </p>
+      ) : null}
 
       {salary.adjustments.length > 0 ? (
         <section className="rounded-xl border bg-card p-4 shadow-sm">

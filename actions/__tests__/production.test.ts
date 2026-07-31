@@ -5,6 +5,7 @@ import { UnauthorizedError } from '../../lib/auth/errors';
 const {
   permissionsMock,
   productionMock,
+  productionBatchMock,
   revalidatePathMock,
   MockSchedulingError,
   MockReportError,
@@ -18,6 +19,9 @@ const {
     beginTask: vi.fn(),
     reportTask: vi.fn(),
     reassignProductionTask: vi.fn(),
+  },
+  productionBatchMock: {
+    scheduleOrdersToWorker: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   MockSchedulingError: class extends Error {
@@ -68,6 +72,9 @@ vi.mock('@/lib/production', () => ({
   ReportError: MockReportError,
   InvalidTaskTransitionError: MockInvalidTaskTransitionError,
 }));
+vi.mock('@/lib/production/batch-scheduling', () => ({
+  scheduleOrdersToWorker: productionBatchMock.scheduleOrdersToWorker,
+}));
 vi.mock('@/lib/order', () => ({
   OrderInvariantError: MockOrderInvariantError,
   InvalidOrderTransitionError: MockInvalidOrderTransitionError,
@@ -76,6 +83,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
 import {
   scheduleOrderAction,
+  batchScheduleOrdersAction,
   beginTaskAction,
   reportTaskAction,
   reassignProductionTaskAction,
@@ -111,6 +119,7 @@ beforeEach(() => {
   productionMock.beginTask.mockReset();
   productionMock.reportTask.mockReset();
   productionMock.reassignProductionTask.mockReset();
+  productionBatchMock.scheduleOrdersToWorker.mockReset();
   revalidatePathMock.mockReset();
 });
 
@@ -216,6 +225,98 @@ describe('scheduleOrderAction', () => {
   });
 });
 
+describe('batchScheduleOrdersAction', () => {
+  const payload = {
+    orderIds: ['order-1', 'order-2'],
+    workerId: 'worker-1',
+  };
+
+  it("first-line requirePermission('order:schedule') and maps a stale session", async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录或登录状态已失效，请重新登录'),
+    );
+    await expect(batchScheduleOrdersAction(payload)).resolves.toEqual({
+      status: 'unauthorized',
+      message: '未登录或登录状态已失效，请重新登录',
+    });
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
+      'order:schedule',
+    );
+    expect(productionBatchMock.scheduleOrdersToWorker).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate ids before the domain command', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    const result = await batchScheduleOrdersAction({
+      orderIds: ['order-1', 'order-1'],
+      workerId: 'worker-1',
+    });
+    expect(result.status).toBe('invalid');
+    expect(productionBatchMock.scheduleOrdersToWorker).not.toHaveBeenCalled();
+  });
+
+  it('returns partial results and revalidates only successful orders', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    productionBatchMock.scheduleOrdersToWorker.mockResolvedValue({
+      assigned: [
+        {
+          orderId: 'order-1',
+          orderNo: 'GD-001',
+          tasksCreated: 2,
+          remainingTaskCount: 1,
+          fullyScheduled: false,
+        },
+      ],
+      failed: [
+        {
+          orderId: 'order-2',
+          orderNo: 'GD-002',
+          message: '状态已变化',
+        },
+      ],
+    });
+
+    const result = await batchScheduleOrdersAction(payload);
+    expect(result.status).toBe('partial');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/scheduling');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).not.toHaveBeenCalledWith('/orders/order-2');
+    expect(productionBatchMock.scheduleOrdersToWorker).toHaveBeenCalledWith(
+      payload,
+      foremanActor,
+    );
+  });
+
+  it('maps a batch with no successful order to a readable error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    productionBatchMock.scheduleOrdersToWorker.mockResolvedValue({
+      assigned: [],
+      failed: [
+        {
+          orderId: 'order-1',
+          orderNo: 'GD-001',
+          message: '师傅岗位不匹配',
+        },
+      ],
+    });
+    await expect(batchScheduleOrdersAction(payload)).resolves.toEqual({
+      status: 'error',
+      message: '师傅岗位不匹配',
+    });
+  });
+
+  it('maps a worker validation SchedulingError to error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    productionBatchMock.scheduleOrdersToWorker.mockRejectedValue(
+      new MockSchedulingError('师傅已停用'),
+    );
+    await expect(batchScheduleOrdersAction(payload)).resolves.toEqual({
+      status: 'error',
+      message: '师傅已停用',
+    });
+  });
+});
+
 describe('beginTaskAction', () => {
   it("first-line requirePermission('task:report')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
@@ -280,6 +381,7 @@ describe('reassignProductionTaskAction', () => {
       'task-1',
       'worker-2',
       foremanActor,
+      '',
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');

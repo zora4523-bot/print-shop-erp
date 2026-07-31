@@ -131,4 +131,58 @@ test.describe('OrderPrintLayout 截图回归', () => {
       },
     );
   });
+
+  test('三款完整上下文保持在一张 A4 内', async ({ page }) => {
+    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const { orderId, customName, itemRemark, foilColors } =
+      await seedPrintableOrder({
+        submitterId: adminId,
+        designCount: 1,
+        variant: 'three-items',
+      });
+
+    await login(page, {
+      from: `/print/orders/${orderId}`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await expect(page).toHaveURL(`/print/orders/${orderId}`);
+    await expect(page.locator('.order-item')).toHaveCount(3);
+    await expect(page.locator('.order-custom-name')).toHaveText(customName!);
+    await expect(page.locator('.item-remark-text')).toHaveCount(3);
+    await expect(page.getByText('多地址 ×2', { exact: false }).first()).toBeVisible();
+    await expect(page.locator('.item-remark-text').first()).toHaveText(
+      itemRemark!,
+    );
+    await expect(
+      page.locator('.item-info dd').filter({
+        hasText: foilColors.join('、'),
+      }),
+    ).toHaveCount(3);
+
+    await expect(page.locator('.print-container')).toHaveScreenshot(
+      'order-print-three-items.png',
+      {
+        mask: [
+          page.locator('.print-footer'),
+          page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
+        ],
+      },
+    );
+
+    await page.emulateMedia({ media: 'print' });
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '10mm',
+        right: '10mm',
+        bottom: '10mm',
+        left: '10mm',
+      },
+    });
+    const pageObjects =
+      pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? [];
+    expect(pageObjects, '三款工单必须只生成一张 PDF 页面').toHaveLength(1);
+  });
 });

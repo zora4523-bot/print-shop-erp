@@ -1,14 +1,18 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import type { NextAuthRequest } from 'next-auth';
 import { UnauthorizedError } from '@/lib/auth/errors';
-import { requirePermission } from '@/lib/auth/permissions';
+import { auth } from '@/lib/auth/config';
+import { requireSessionPermission } from '@/lib/auth/permissions';
 import { listInventoryCountMaterials } from '@/lib/inventory-count';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export async function handleInventoryCountMaterialsGet(
+  request: NextAuthRequest,
+) {
   try {
-    await requirePermission('material:manage');
+    await requireSessionPermission('material:manage', request.auth);
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: err.message }, { status: 401 });
@@ -22,3 +26,5 @@ export async function GET(request: NextRequest) {
   const materials = await listInventoryCountMaterials({ q, limit });
   return NextResponse.json({ materials });
 }
+
+export const GET = auth(handleInventoryCountMaterialsGet);

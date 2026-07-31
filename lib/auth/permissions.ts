@@ -1,5 +1,6 @@
 import { Role } from '../../generated/prisma/client';
-import { getSession } from './session';
+import type { Session } from 'next-auth';
+import { requireSession, requireVerifiedSession } from './session';
 import { UnauthorizedError } from './errors';
 import { PERMISSIONS, type Permission } from './permissions-dict';
 
@@ -17,20 +18,32 @@ export { PERMISSIONS, type Permission };
  *
  * 使用：每个 Server Action 的第一行都应走这个入口（CLAUDE.md §4.6）。
  */
-export async function requirePermission(permission: Permission) {
-  const session = await getSession();
-  if (!session) {
-    throw new UnauthorizedError('未登录');
-  }
-
+function assertPermission(permission: Permission, role: Role) {
   const allowed = PERMISSIONS[permission] as readonly Role[] | undefined;
   if (!allowed) {
     throw new Error(`未定义的权限：${permission}`);
   }
 
-  if (!allowed.includes(session.user.role)) {
-    throw new UnauthorizedError(`当前角色 ${session.user.role} 无 ${permission} 权限`);
+  if (!allowed.includes(role)) {
+    throw new UnauthorizedError(`当前角色 ${role} 无 ${permission} 权限`);
   }
+}
+
+export async function requirePermission(permission: Permission) {
+  const session = await requireSession();
+  assertPermission(permission, session.user.role);
+
+  return session.user;
+}
+
+// Route Handlers receive this session from NextAuth's `auth(handler)` wrapper,
+// then verify the current database account without calling headers() again.
+export async function requireSessionPermission(
+  permission: Permission,
+  authSession: Session | null,
+) {
+  const session = await requireVerifiedSession(authSession);
+  assertPermission(permission, session.user.role);
 
   return session.user;
 }

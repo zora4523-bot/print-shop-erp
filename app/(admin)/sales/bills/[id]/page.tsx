@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBillDetail } from '@/lib/bill';
-import { BillStatus } from '@/generated/prisma/enums';
+import { BillStatus, Role } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -30,6 +30,15 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
   const paidPercent = total.isZero()
     ? 0
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
+  const billMonthStart = new Date(`${bill.period}-01T00:00:00+08:00`);
+  const csPeriod = bill.salesUser.salaryPeriods.find(
+    (period) =>
+      period.periodStart <= billMonthStart && period.periodEnd >= billMonthStart,
+  );
+  const csCommission = csPeriod?.commissions[0];
+  const csRate = csCommission
+    ? new Decimal(csCommission.tierRate as Decimal.Value)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -71,6 +80,28 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         </div>
       </section>
 
+      {bill.salesUser.role === Role.CUSTOMER_SERVICE ? (
+        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold">销售额与提成</h2>
+          <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Row label="本账单销售额" value={`¥ ${total.toFixed(2)}`} tabular />
+            <Row
+              label="周期结算比例"
+              value={csRate ? `${csRate.times(100).toFixed(2)}%` : '待周期结算'}
+              tabular
+            />
+            <Row
+              label="本账单按最终比例归属提成"
+              value={csRate ? `¥ ${total.times(csRate).toFixed(2)}` : '待周期结算'}
+              tabular
+            />
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">
+            提成按工单销售额计入客服周期，不按收款金额或收款次数重复计算。
+          </p>
+        </section>
+      ) : null}
+
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
@@ -87,6 +118,37 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
           </p>
         </section>
       ) : null}
+
+      <section className="rounded-xl border bg-card shadow-sm">
+        <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
+          结款明细（{bill.payments.length}）
+        </h2>
+        {bill.payments.length === 0 ? (
+          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
+            暂无收款流水。
+          </p>
+        ) : (
+          <ol className="divide-y">
+            {bill.payments.map((payment) => (
+              <li
+                key={payment.id}
+                className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[160px_100px_1fr_auto] sm:px-6"
+              >
+                <span className="font-sans tabular-nums">
+                  {formatDateTimeShanghai(payment.paidAt)}
+                </span>
+                <span>{payment.paymentMethod ?? '未填方式'}</span>
+                <span className="admin-wrap-anywhere text-muted-foreground">
+                  {payment.remark || payment.referenceNo || '—'}
+                </span>
+                <span className="font-sans font-medium tabular-nums">
+                  ¥ {String(payment.amount)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section className="rounded-xl border bg-card shadow-sm">
         <h2 className="border-b px-6 py-3 text-base font-semibold">
@@ -107,7 +169,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
-                <th className="px-4 py-2 text-left">客户</th>
+                <th className="px-4 py-2 text-left">客户名称/简称</th>
                 <th className="px-4 py-2 text-left">完工时间</th>
                 <th className="px-4 py-2 text-center">工单状态</th>
                 <th className="px-4 py-2 text-right">金额</th>

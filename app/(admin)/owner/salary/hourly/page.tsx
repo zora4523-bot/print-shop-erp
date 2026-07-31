@@ -14,6 +14,10 @@ import {
   PageHeader,
   StatCard as UiStatCard,
 } from '@/components/ui-business';
+import {
+  getAttendanceSummaries,
+  parseShanghaiMonth,
+} from '@/lib/attendance';
 
 export const metadata = { title: '时薪工月结' };
 
@@ -46,6 +50,11 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
     workerId: sp.workerId,
     isPaid,
   });
+  const monthRange = parseShanghaiMonth(selectedMonth);
+  const attendanceSummaries = await getAttendanceSummaries(
+    rows.map((row) => row.workerId),
+    monthRange,
+  );
 
   const totalSalary = rows
     .reduce(
@@ -120,6 +129,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                 <th className="px-4 py-2 text-left">类型</th>
                 <th className="px-4 py-2 text-right">正常工时</th>
                 <th className="px-4 py-2 text-right">加班 / 代班</th>
+                <th className="px-4 py-2 text-right">上班 / 请假</th>
                 <th className="px-4 py-2 text-right">底薪</th>
                 <th className="px-4 py-2 text-right">加班费 / 代班费</th>
                 <th className="px-4 py-2 text-right">实发</th>
@@ -131,6 +141,10 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
               {rows.map((r) => {
                 const wt = r.worker.workerType as WorkerType | null;
                 const isCook = wt === WorkerType.COOK;
+                const attendance = attendanceSummaries.get(r.workerId) ?? {
+                  workUnits: '0',
+                  leaveUnits: '0',
+                };
                 return (
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
@@ -145,6 +159,9 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {isCook
                         ? `${String(r.totalSpareHours)} (代班)`
                         : `${String(r.totalOtHours)} (加班)`}
+                    </td>
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
+                      {attendance.workUnits} / {attendance.leaveUnits} 天
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums">
                       {String(r.baseSalary)}

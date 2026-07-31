@@ -26,3 +26,8 @@ export type RecordBillPaymentResult =
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
+
+export type OrderCostMutationResult =
+  | { status: 'success'; costEntryId: string }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };

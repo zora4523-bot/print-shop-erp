@@ -21,6 +21,8 @@ const WINDMILL_RULE: MachineSalaryRule = {
   boardRate: '0',
   smallOrderThreshold: 1000,
   smallOrderFlatPrice: '20',
+  smallOrderInclusive: true,
+  largeOrderSetupFee: '10',
   multiplierFactors: ['DOUBLE_COLOR'],
 };
 
@@ -137,8 +139,8 @@ describe('calcMachinePiecework — WINDMILL (风车机)', () => {
       WINDMILL_RULE,
     );
     expect(r.multiplier).toBe(1);
-    // 5000 × 0.01 = 50
-    eq(r.amount, '50');
+    // 5000 × 0.01 + 10 元装板费 = 60
+    eq(r.amount, '60');
   });
 
   it('applies double-color (only factor in its multiplierFactors list)', () => {
@@ -148,23 +150,38 @@ describe('calcMachinePiecework — WINDMILL (风车机)', () => {
     );
     // multiplier: ignore DOUBLE_SIDED, ×2 for DOUBLE_COLOR
     expect(r.multiplier).toBe(2);
-    // 10000 × 0.01 = 100 (no board component, boardRate is 0)
-    eq(r.amount, '100');
+    // 10000 × 0.01 + 10 元装板费 = 110。装板费不跟双色翻倍。
+    eq(r.amount, '110');
   });
 
-  it('small order triggers the 20 yuan flat price', () => {
+  it('1000 个及以下均走 20 元固定上板费', () => {
     eq(calcMachinePiecework(task({ quantity: 500 }), WINDMILL_RULE), '20');
+    const boundary = calcMachinePieceworkBreakdown(
+      task({ quantity: 1000 }),
+      WINDMILL_RULE,
+    );
+    expect(boundary.smallOrder).toBe(true);
+    eq(boundary.amount, '20');
   });
 
-  it('SPEC §7.2 row-by-row reproduction (李四某日)', () => {
+  it('1001 个切换到每个 0.01 元 + 装板 10 元', () => {
+    const r = calcMachinePieceworkBreakdown(
+      task({ quantity: 1001 }),
+      WINDMILL_RULE,
+    );
+    expect(r.smallOrder).toBe(false);
+    eq(r.amount, '20.01');
+  });
+
+  it('按现行风车机规则汇总一天的任务', () => {
     eq(calcMachinePiecework(task({ quantity: 500 }), WINDMILL_RULE), '20');
-    eq(calcMachinePiecework(task({ quantity: 5000 }), WINDMILL_RULE), '50');
+    eq(calcMachinePiecework(task({ quantity: 5000 }), WINDMILL_RULE), '60');
     eq(
       calcMachinePiecework(
         task({ quantity: 8000, isDoubleColor: true }),
         WINDMILL_RULE,
       ),
-      '160',
+      '170',
     );
   });
 });
@@ -220,8 +237,8 @@ describe('calcMachineDailySalary', () => {
       calcMachineDailySalary(['12', '61', '52', '76'], '100'),
       '201',
     );
-    // 风车: SPEC §7.2 李四 — 20+50+160=230, base=120 → 230
-    eq(calcMachineDailySalary(['20', '50', '160'], '120'), '230');
+    // 风车现行规则：20+60+170=250，超过 120 元底薪
+    eq(calcMachineDailySalary(['20', '60', '170'], '120'), '250');
   });
 
   it('floors to the daily base when piecework total is below it', () => {

@@ -7,12 +7,24 @@ import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui-business';
+import { parseStrictYmd } from '@/lib/auth/schemas';
+import { Button } from '@/components/ui/button';
 
 export const metadata = { title: '我的计件工资' };
 
-export default async function WorkerSalaryPage() {
+type PageProps = {
+  searchParams: Promise<{ from?: string; to?: string }>;
+};
+
+export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   const user = await requirePermission('salary:view:self');
-  const salaries = await listWorkerSalaries({ id: user.id, role: user.role });
+  const sp = await searchParams;
+  const from = sp.from ? parseStrictYmd(sp.from) : null;
+  const to = sp.to ? parseStrictYmd(sp.to) : null;
+  const salaries = await listWorkerSalaries(
+    { id: user.id, role: user.role },
+    { from: from ?? undefined, to: to ?? undefined },
+  );
   const total = salaries.reduce(
     (sum, salary) => sum.plus(new Decimal(salary.actualSalary as Decimal.Value)),
     new Decimal(0),
@@ -48,6 +60,38 @@ export default async function WorkerSalaryPage() {
         </div>
       </section>
 
+      <form className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-xs text-muted-foreground">开始日期</span>
+          <input
+            type="date"
+            name="from"
+            defaultValue={from ? sp.from : ''}
+            className="min-h-11 w-full rounded-md border bg-background px-3"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs text-muted-foreground">结束日期</span>
+          <input
+            type="date"
+            name="to"
+            defaultValue={to ? sp.to : ''}
+            className="min-h-11 w-full rounded-md border bg-background px-3"
+          />
+        </label>
+        <div className="flex flex-wrap gap-2 min-[360px]:col-span-2">
+          <Button type="submit" className="min-h-11">
+            查询日期
+          </Button>
+          <Link
+            href="/worker/salary"
+            className="inline-flex min-h-11 items-center px-3 text-sm underline"
+          >
+            清除
+          </Link>
+        </div>
+      </form>
+
       {salaries.length === 0 ? (
         <EmptyState
           icon={WalletCards}
@@ -71,6 +115,15 @@ export default async function WorkerSalaryPage() {
                       ) : (
                         <Badge variant="outline">未发</Badge>
                       )}
+                      {new Decimal(
+                        salary.totalPieceworkAmount as Decimal.Value,
+                      ).gte(
+                        new Decimal(salary.baseSalary as Decimal.Value),
+                      ) ? (
+                        <Badge variant="secondary">计件已超底薪</Badge>
+                      ) : (
+                        <Badge variant="outline">按底薪补足</Badge>
+                      )}
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
                       {MACHINE_TYPE_LABELS[salary.machineType]} ·{' '}
@@ -82,6 +135,13 @@ export default async function WorkerSalaryPage() {
                       {Number(salary.adjustmentAmount) > 0 ? '+' : ''}
                       {String(salary.adjustmentAmount)}
                     </p>
+                    {new Decimal(
+                      salary.totalPieceworkAmount as Decimal.Value,
+                    ).lt(new Decimal(salary.baseSalary as Decimal.Value)) ? (
+                      <p className="worker-wrap-anywhere mt-1 text-xs text-warning-foreground">
+                        原因：当日计件未达到保底，按每日底薪计算。
+                      </p>
+                    ) : null}
                   </div>
                   <div className="ml-auto shrink-0 text-right">
                     <p className="text-xs text-muted-foreground">实发</p>

@@ -84,6 +84,18 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'purchase:manage',
   },
   {
+    id: 'owner.orderChanges',
+    label: '工单修改申请',
+    routeBase: '/owner/order-changes',
+    iconName: 'FileText',
+    breadcrumbLabel: '工单修改申请',
+    menuSection: 'workflow',
+    status: 'implemented',
+    menuOrder: 27,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'order:change:review',
+  },
+  {
     id: 'owner.bills',
     label: '账单',
     routeBase: '/owner/bills',

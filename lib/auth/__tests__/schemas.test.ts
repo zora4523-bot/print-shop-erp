@@ -27,6 +27,10 @@ import {
   createPurchaseReceiptSchema,
   updateProductSchema,
   createOrderSchema,
+  createReworkOrderSchema,
+  batchScheduleOrdersSchema,
+  updateEditableOrderSchema,
+  setOrderSfCollectSchema,
 } from '../schemas';
 
 describe('loginSchema', () => {
@@ -312,8 +316,42 @@ describe('createUserSchema', () => {
         role: Role.WORKER,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
+        machineCapabilities: [MachineType.HAND_PRESS],
       });
       expect(r.success).toBe(true);
+    });
+
+    it('accepts multiple machine capabilities when they include the primary machine', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.MACHINE,
+        machineType: MachineType.HAND_PRESS,
+        machineCapabilities: [
+          MachineType.HAND_PRESS,
+          MachineType.WINDMILL,
+        ],
+        craftCapabilities: ['craft-foil', 'craft-color-foil'],
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('rejects machine capabilities that omit the primary machine', () => {
+      const r = createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.WORKER,
+        workerType: WorkerType.MACHINE,
+        machineType: MachineType.HAND_PRESS,
+        machineCapabilities: [MachineType.WINDMILL],
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        expect(
+          r.error.issues.find(
+            (issue) => issue.path[0] === 'machineCapabilities',
+          )?.message,
+        ).toMatch(/包含主机型/);
+      }
     });
 
     it('accepts WORKER + PACKER without machineType', () => {
@@ -990,6 +1028,7 @@ describe('createOrderSchema foil colors', () => {
     remark: null,
     promisedDate: null,
     isUrgent: false,
+    isSfCollect: false,
     items: [
       {
         name: '多色烫金款',
@@ -1028,6 +1067,107 @@ describe('createOrderSchema foil colors', () => {
     if (result.success) expect(result.data.items[0]?.foilColors).toEqual([]);
   });
 
+  it('accepts a multi-address quantity split and keeps the primary remainder', () => {
+    const result = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        { ...order.items[0], quantity: 1000 },
+        { ...order.items[0], name: '第二款', quantity: 500 },
+      ],
+      additionalShipments: [
+        {
+          receiverName: '分地址客户',
+          receiverPhone: '13900000000',
+          receiverAddress: '广州分地址',
+          expressCode: 'SF',
+          itemQuantities: [300, 100],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects empty, over-allocated, or all-quantity extra addresses', () => {
+    const empty = createOrderSchema.safeParse({
+      ...order,
+      additionalShipments: [
+        {
+          receiverName: '空分配',
+          receiverPhone: null,
+          receiverAddress: null,
+          expressCode: null,
+          itemQuantities: [0],
+        },
+      ],
+    });
+    expect(empty.success).toBe(false);
+
+    const overAllocated = createOrderSchema.safeParse({
+      ...order,
+      additionalShipments: [
+        {
+          receiverName: '超额分配',
+          receiverPhone: null,
+          receiverAddress: null,
+          expressCode: null,
+          itemQuantities: [1001],
+        },
+      ],
+    });
+    expect(overAllocated.success).toBe(false);
+
+    const noPrimaryRemainder = createOrderSchema.safeParse({
+      ...order,
+      additionalShipments: [
+        {
+          receiverName: '全部分走',
+          receiverPhone: null,
+          receiverAddress: null,
+          expressCode: null,
+          itemQuantities: [1000],
+        },
+      ],
+    });
+    expect(noPrimaryRemainder.success).toBe(false);
+
+    const mismatchedItemCount = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        { ...order.items[0], quantity: 1000 },
+        { ...order.items[0], name: '第二款', quantity: 500 },
+      ],
+      additionalShipments: [
+        {
+          receiverName: '少一项分配',
+          receiverPhone: null,
+          receiverAddress: '广州分地址',
+          expressCode: null,
+          itemQuantities: [100],
+        },
+      ],
+    });
+    expect(mismatchedItemCount.success).toBe(false);
+  });
+
+  it('normalizes 顺丰到付 checkbox values and preserves partial updates', () => {
+    const checked = createOrderSchema.safeParse({
+      ...order,
+      isSfCollect: 'on',
+    });
+    expect(checked.success).toBe(true);
+    if (checked.success) expect(checked.data.isSfCollect).toBe(true);
+
+    const omitted = updateEditableOrderSchema.parse({ remark: '保持其他字段' });
+    expect('isSfCollect' in omitted).toBe(false);
+    expect(setOrderSfCollectSchema.parse({ isSfCollect: 'false' })).toEqual({
+      isSfCollect: false,
+    });
+    expect(
+      setOrderSfCollectSchema.safeParse({}).success,
+      '独立切换必须携带明确目标值',
+    ).toBe(false);
+  });
+
   it('rejects duplicate colors, more than five colors, and no-color mixtures', () => {
     for (const foilColors of [
       ['哑金', '哑金'],
@@ -1039,6 +1179,59 @@ describe('createOrderSchema foil colors', () => {
         items: [{ ...order.items[0], foilColors }],
       });
       expect(result.success, foilColors.join(',')).toBe(false);
+    }
+  });
+});
+
+describe('createReworkOrderSchema', () => {
+  const input = {
+    sourceOrderId: 'source-1',
+    cause: 'QUALITY',
+    reason: '烫金位置偏移',
+    items: [
+      {
+        sourceOrderItemId: 'item-1',
+        quantity: 100,
+        craftIds: ['craft-1'],
+      },
+    ],
+  };
+
+  it('rejects duplicate crafts for the same rework item', () => {
+    const result = createReworkOrderSchema.safeParse({
+      ...input,
+      items: [{ ...input.items[0], craftIds: ['craft-1', 'craft-1'] }],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('batchScheduleOrdersSchema', () => {
+  it('accepts unique order ids and one worker id', () => {
+    expect(
+      batchScheduleOrdersSchema.parse({
+        orderIds: ['order-1', 'order-2'],
+        workerId: 'worker-1',
+      }),
+    ).toEqual({
+      orderIds: ['order-1', 'order-2'],
+      workerId: 'worker-1',
+    });
+  });
+
+  it('rejects empty, duplicate, oversized and unsafe order selections', () => {
+    for (const orderIds of [
+      [],
+      ['order-1', 'order-1'],
+      Array.from({ length: 31 }, (_, index) => `order-${index}`),
+      ['../order-1'],
+    ]) {
+      expect(
+        batchScheduleOrdersSchema.safeParse({
+          orderIds,
+          workerId: 'worker-1',
+        }).success,
+      ).toBe(false);
     }
   });
 });

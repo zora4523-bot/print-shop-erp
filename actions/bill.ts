@@ -5,11 +5,13 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   generateBillsSchema,
   recordBillPaymentSchema,
+  createOrderCostEntrySchema,
 } from '@/lib/auth/schemas';
 import {
   generateBillsForPeriod,
   issueBill,
   recordPayment,
+  addOrderCostEntry,
   BillError,
   InvalidBillTransitionError,
 } from '@/lib/bill';
@@ -17,6 +19,7 @@ import type {
   BillMutationResult,
   GenerateBillsResult,
   RecordBillPaymentResult,
+  OrderCostMutationResult,
 } from './bill.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
@@ -99,6 +102,10 @@ export async function recordBillPaymentAction(
 
   const parsed = recordBillPaymentSchema.safeParse({
     amount: formData.get('amount'),
+    paidAt: formData.get('paidAt'),
+    paymentMethod: formData.get('paymentMethod'),
+    referenceNo: formData.get('referenceNo'),
+    remark: formData.get('remark'),
   });
   if (!parsed.success) {
     return {
@@ -108,7 +115,24 @@ export async function recordBillPaymentAction(
   }
 
   try {
-    const r = await recordPayment(billId, parsed.data.amount, actor);
+    const hasLedgerDetails =
+      formData.has('paidAt') ||
+      formData.has('paymentMethod') ||
+      formData.has('referenceNo') ||
+      formData.has('remark');
+    const r = hasLedgerDetails
+      ? await recordPayment(
+          billId,
+          parsed.data.amount,
+          actor,
+          parsed.data.paidAt,
+          {
+            paymentMethod: parsed.data.paymentMethod,
+            referenceNo: parsed.data.referenceNo,
+            remark: parsed.data.remark,
+          },
+        )
+      : await recordPayment(billId, parsed.data.amount, actor);
     revalidatePath('/owner/bills');
     revalidatePath(`/owner/bills/${billId}`);
     return {
@@ -122,5 +146,38 @@ export async function recordBillPaymentAction(
     const mapped = mapBillError(err);
     if (mapped) return mapped;
     throw err;
+  }
+}
+
+export async function createOrderCostEntryAction(
+  _prev: OrderCostMutationResult | null,
+  formData: FormData,
+): Promise<OrderCostMutationResult> {
+  const actor = await requirePermission('bill:view:all');
+  const parsed = createOrderCostEntrySchema.safeParse({
+    orderId: formData.get('orderId'),
+    category: formData.get('category'),
+    description: formData.get('description'),
+    quantity: formData.get('quantity'),
+    unit: formData.get('unit'),
+    unitPrice: formData.get('unitPrice'),
+    amount: formData.get('amount'),
+    remark: formData.get('remark'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const entry = await addOrderCostEntry(parsed.data, actor);
+    revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath('/owner/bills');
+    return { status: 'success', costEntryId: entry.id };
+  } catch (error) {
+    const mapped = mapBillError(error);
+    if (mapped) return mapped;
+    throw error;
   }
 }

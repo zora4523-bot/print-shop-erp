@@ -25,6 +25,8 @@ export const workerMachineRuleInputSchema = z
     smallOrderThreshold: z
       .union([z.literal(''), z.string().trim().regex(/^\d{1,9}$/, '请输入正整数')]),
     smallOrderFlatPrice: moneyString,
+    smallOrderInclusive: z.boolean().default(false),
+    largeOrderSetupFee: moneyString.default('0'),
     multiplierFactors: z.array(
       z.enum(['DOUBLE_SIDED', 'DOUBLE_COLOR']),
     ),
@@ -55,6 +57,8 @@ export const workerMachineRuleInputSchema = z
           ? null
           : Number(input.smallOrderThreshold),
       smallOrderFlatPrice: input.smallOrderFlatPrice,
+      smallOrderInclusive: input.smallOrderInclusive,
+      largeOrderSetupFee: input.largeOrderSetupFee,
       multiplierFactors: input.multiplierFactors,
     } satisfies MachineRuleWithBase,
   }));
@@ -92,6 +96,7 @@ export async function listPieceworkRuleManagementData(now = new Date()) {
         displayName: true,
         username: true,
         machineType: true,
+        machineCapabilities: true,
       },
     }),
     db.salaryRule.findMany({
@@ -162,6 +167,7 @@ export async function createWorkerMachineSalaryRule(input: {
         role: true,
         workerType: true,
         machineType: true,
+        machineCapabilities: true,
         isActive: true,
       },
     });
@@ -171,9 +177,15 @@ export async function createWorkerMachineSalaryRule(input: {
     if (
       worker.role !== Role.WORKER ||
       worker.workerType !== WorkerType.MACHINE ||
-      worker.machineType !== input.machineType
+      !(
+        (worker.machineCapabilities?.length ?? 0) > 0
+          ? worker.machineCapabilities
+          : worker.machineType
+            ? [worker.machineType]
+            : []
+      ).includes(input.machineType)
     ) {
-      throw new PieceworkRuleError('只能为师傅当前配置的机型设置计件规则');
+      throw new PieceworkRuleError('只能为师傅已登记的机器能力设置计件规则');
     }
 
     const duplicate = await tx.workerMachineSalaryRule.findUnique({

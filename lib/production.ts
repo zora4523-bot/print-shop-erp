@@ -1,5 +1,6 @@
 import {
   OrderStatus,
+  OrderKind,
   Role,
   TaskStatus,
   MachineType,
@@ -7,6 +8,7 @@ import {
   WorkerType,
   DesignFileType,
 } from '../generated/prisma/enums';
+import { Prisma } from '../generated/prisma/client';
 import { db } from './db';
 import { transitionOrder } from './order/status-machine';
 import {
@@ -83,6 +85,7 @@ type ScheduleTxClient = {
         isOutsource: boolean;
         defaultWorkerType: WorkerType | null;
         defaultMachineType: MachineType | null;
+        inHouseMachineTypes: MachineType[];
       }>
     >;
   };
@@ -97,6 +100,8 @@ type ScheduleTxClient = {
         isActive: boolean;
         workerType: WorkerType | null;
         machineType: MachineType | null;
+        machineCapabilities?: MachineType[];
+        craftCapabilities?: Array<{ craftId: string }>;
       }>
     >;
   };
@@ -104,10 +109,23 @@ type ScheduleTxClient = {
     createMany: (args: {
       data: unknown[];
     }) => Promise<{ count: number }>;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select?: unknown;
+    }) => Promise<{ id: string }>;
     findMany: (args: {
       where: unknown;
       select?: unknown;
-    }) => Promise<Array<{ id: string; status: TaskStatus }>>;
+    }) => Promise<
+      Array<{
+        id: string;
+        orderItemId: string;
+        craftId: string;
+        workerId: string | null;
+        status: TaskStatus;
+      }>
+    >;
   };
   outsourceOrder: {
     findMany: (args: {
@@ -196,6 +214,7 @@ export async function scheduleOrder(
         isOutsource: true,
         defaultWorkerType: true,
         defaultMachineType: true,
+        inHouseMachineTypes: true,
       },
     });
     const craftById = new Map(crafts.map((c) => [c.id, c]));
@@ -213,7 +232,7 @@ export async function scheduleOrder(
       // foreman has to either change the craft on the order (edit
       // flow) or the owner has to re-enable the craft.
       if (!c.isActive) throw new SchedulingError(`工艺已停用：${cid}`);
-      if (!c.isOutsource) {
+      if (!c.isOutsource || (c.inHouseMachineTypes?.length ?? 0) > 0) {
         assertCraftAssignmentConfigured(c);
       }
     }
@@ -230,9 +249,10 @@ export async function scheduleOrder(
         const c = craftById.get(cid)!;
         if (c.isOutsource) {
           skippedOutsourceCrafts += 1;
-          continue;
         }
-        expectedKeys.add(`${item.id}:${cid}`);
+        if (!c.isOutsource || (c.inHouseMachineTypes?.length ?? 0) > 0) {
+          expectedKeys.add(`${item.id}:${cid}`);
+        }
       }
     }
 
@@ -251,6 +271,31 @@ export async function scheduleOrder(
       }
     }
 
+    const existingTasks = await txClient.productionTask.findMany({
+      where: { orderItemId: { in: order.items.map((item) => item.id) } },
+      select: {
+        id: true,
+        orderItemId: true,
+        craftId: true,
+        workerId: true,
+        status: true,
+      },
+    });
+    const existingTaskByKey = new Map(
+      existingTasks.map((task) => [
+        `${task.orderItemId}:${task.craftId}`,
+        task,
+      ]),
+    );
+    for (const task of existingTasks) {
+      const key = `${task.orderItemId}:${task.craftId}`;
+      if (!expectedKeys.has(key) || task.status !== TaskStatus.PENDING) {
+        throw new SchedulingError(
+          '工单包含异常或已经开始的生产任务，请刷新后单独检查',
+        );
+      }
+    }
+
     // Walk the input assignments:
     //   - Each must be a non-outsource pair the order actually needs.
     //   - No duplicates (same orderItemId+craftId twice).
@@ -263,7 +308,7 @@ export async function scheduleOrder(
         // Either a pair the order doesn't need OR an outsource craft
         // the caller shouldn't have assigned.
         throw new SchedulingError(
-          `款式 ${a.orderItemId} 没有需要排产的工艺 ${a.craftId}（或该工艺为外协）`,
+          `款式 ${a.orderItemId} 没有需要内部排产的工艺 ${a.craftId}（纯外协工艺不派师傅）`,
         );
       }
       if (seenKeys.has(key)) {
@@ -291,6 +336,8 @@ export async function scheduleOrder(
         isActive: true,
         workerType: true,
         machineType: true,
+        machineCapabilities: true,
+        craftCapabilities: { select: { craftId: true } },
       },
     });
     const workerById = new Map(workers.map((w) => [w.id, w]));
@@ -303,16 +350,30 @@ export async function scheduleOrder(
       if (!w.isActive) throw new SchedulingError(`师傅已停用：${wid}`);
     }
     for (const assignment of input.assignments) {
-      assertWorkerCompatible(
+      assertWorkerAssignable(
         craftById.get(assignment.craftId)!,
         workerById.get(assignment.workerId)!,
+        assignment.overrideReason ?? '',
       );
     }
 
     // createMany is a single round trip — we assemble the full list
     // here rather than looping create() so a 50-item order doesn't
     // fan out to 50 round trips.
-    const taskRows = input.assignments.map((a) => {
+    const assignmentByKey = new Map(
+      input.assignments.map((assignment) => [
+        `${assignment.orderItemId}:${assignment.craftId}`,
+        assignment,
+      ]),
+    );
+    const taskRows = input.assignments
+      .filter(
+        (assignment) =>
+          !existingTaskByKey.has(
+            `${assignment.orderItemId}:${assignment.craftId}`,
+          ),
+      )
+      .map((a) => {
       const craft = craftById.get(a.craftId)!;
       return {
         orderItemId: a.orderItemId,
@@ -322,12 +383,35 @@ export async function scheduleOrder(
         // Snapshot the machine type at assign time. If we change
         // craft.defaultMachineType later, in-flight tasks keep their
         // original type — same principle as salaryRuleSnapshot.
-        machineType: craft.defaultMachineType,
+        machineType: getWorkerAssignmentEligibility(
+          craft,
+          workerById.get(a.workerId)!,
+        ).machineType,
         status: TaskStatus.PENDING,
         plannedQty: itemQuantityById.get(a.orderItemId)!,
       };
-    });
-    const inserted = await txClient.productionTask.createMany({ data: taskRows });
+      });
+    const inserted =
+      taskRows.length > 0
+        ? await txClient.productionTask.createMany({ data: taskRows })
+        : { count: 0 };
+    for (const [key, task] of existingTaskByKey) {
+      const assignment = assignmentByKey.get(key)!;
+      const craft = craftById.get(assignment.craftId)!;
+      await txClient.productionTask.update({
+        where: { id: task.id },
+        data: {
+          workerId: assignment.workerId,
+          workerType: craft.defaultWorkerType,
+          machineType: getWorkerAssignmentEligibility(
+            craft,
+            workerById.get(assignment.workerId)!,
+          ).machineType,
+          plannedQty: itemQuantityById.get(assignment.orderItemId)!,
+        },
+        select: { id: true },
+      });
+    }
 
     // Transition + log. Order goes to SCHEDULING now; the first worker
     // to start a task will be responsible for pushing it to
@@ -341,6 +425,23 @@ export async function scheduleOrder(
       },
       select: { id: true, status: true },
     });
+    const assignmentOverrides = input.assignments.flatMap((assignment) => {
+      const eligibility = getWorkerAssignmentEligibility(
+        craftById.get(assignment.craftId)!,
+        workerById.get(assignment.workerId)!,
+      );
+      return eligibility.recommended
+        ? []
+        : [
+            {
+              orderItemId: assignment.orderItemId,
+              craftId: assignment.craftId,
+              workerId: assignment.workerId,
+              machineType: eligibility.machineType,
+              reason: assignment.overrideReason?.trim() ?? '',
+            },
+          ];
+    });
     await txClient.orderLog.create({
       data: {
         orderId: order.id,
@@ -348,9 +449,16 @@ export async function scheduleOrder(
         action: 'STATUS_CHANGE',
         changedFields: {
           status: { before: order.status, after: OrderStatus.SCHEDULING },
+          ...(assignmentOverrides.length > 0
+            ? { assignmentOverrides }
+            : {}),
         },
-        remark: `排产：派工 ${inserted.count} 个任务${
+        remark: `排产：确认 ${expectedKeys.size} 个任务${
           skippedOutsourceCrafts > 0 ? `（外协工艺 ${skippedOutsourceCrafts} 项另行处理）` : ''
+        }${
+          assignmentOverrides.length > 0
+            ? `；非推荐派工 ${assignmentOverrides.length} 项（原因已记录）`
+            : ''
         }`,
       },
     });
@@ -368,7 +476,7 @@ export async function scheduleOrder(
     return {
       orderId: updated.id,
       status: orderCompleted ? OrderStatus.COMPLETED : updated.status,
-      tasksCreated: inserted.count,
+      tasksCreated: expectedKeys.size,
       skippedOutsourceCrafts,
       orderCompleted,
     };
@@ -410,12 +518,23 @@ type AssignmentCraft = {
   isOutsource: boolean;
   defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
+  inHouseMachineTypes?: MachineType[];
 };
 
 type AssignmentWorker = {
   id: string;
   workerType: WorkerType | null;
   machineType: MachineType | null;
+  machineCapabilities?: MachineType[];
+  craftCapabilities?: Array<{ craftId: string }>;
+  craftCapabilityIds?: string[];
+};
+
+export type WorkerAssignmentEligibility = {
+  eligible: boolean;
+  recommended: boolean;
+  machineType: MachineType | null;
+  reason: string | null;
 };
 
 function assertCraftAssignmentConfigured(craft: AssignmentCraft): void {
@@ -429,7 +548,8 @@ function assertCraftAssignmentConfigured(craft: AssignmentCraft): void {
   }
   if (
     craft.defaultWorkerType === WorkerType.MACHINE &&
-    !craft.defaultMachineType
+    !craft.defaultMachineType &&
+    (craft.inHouseMachineTypes?.length ?? 0) === 0
   ) {
     throw new SchedulingError(
       `工艺 ${craft.id} 是开机工艺但未配置机型`,
@@ -437,24 +557,98 @@ function assertCraftAssignmentConfigured(craft: AssignmentCraft): void {
   }
 }
 
-function assertWorkerCompatible(
+function assertWorkerAssignable(
   craft: AssignmentCraft,
   worker: AssignmentWorker,
+  overrideReason = '',
 ): void {
   assertCraftAssignmentConfigured(craft);
-  if (worker.workerType !== craft.defaultWorkerType) {
+  const eligibility = getWorkerAssignmentEligibility(craft, worker);
+  if (!eligibility.eligible) {
     throw new SchedulingError(
-      `师傅 ${worker.id} 的岗位与工艺 ${craft.id} 不匹配`,
+      eligibility.reason ??
+        `师傅 ${worker.id} 不能承接工艺 ${craft.id}`,
     );
   }
+  if (!eligibility.recommended && overrideReason.trim().length === 0) {
+    throw new SchedulingError(
+      `师傅 ${worker.id} 未登记工艺 ${craft.id} 的熟练能力；如仍需分配，请填写非推荐派工原因`,
+    );
+  }
+}
+
+export function isWorkerCompatible(
+  craft: AssignmentCraft,
+  worker: AssignmentWorker,
+): boolean {
+  return getWorkerAssignmentEligibility(craft, worker).eligible;
+}
+
+export function getWorkerAssignmentEligibility(
+  craft: AssignmentCraft,
+  worker: AssignmentWorker,
+): WorkerAssignmentEligibility {
   if (
-    craft.defaultWorkerType === WorkerType.MACHINE &&
-    worker.machineType !== craft.defaultMachineType
+    !craft.defaultWorkerType ||
+    craft.defaultWorkerType === WorkerType.COOK
   ) {
-    throw new SchedulingError(
-      `师傅 ${worker.id} 的机型与工艺 ${craft.id} 不匹配`,
-    );
+    return {
+      eligible: false,
+      recommended: false,
+      machineType: null,
+      reason: `工艺 ${craft.id} 未配置可接单岗位`,
+    };
   }
+  if (worker.workerType !== craft.defaultWorkerType) {
+    return {
+      eligible: false,
+      recommended: false,
+      machineType: null,
+      reason: `师傅 ${worker.id} 的岗位与工艺 ${craft.id} 不匹配`,
+    };
+  }
+  let resolvedMachineType: MachineType | null = null;
+  if (craft.defaultWorkerType === WorkerType.MACHINE) {
+    const allowedMachines =
+      (craft.inHouseMachineTypes?.length ?? 0) > 0
+        ? craft.inHouseMachineTypes!
+        : craft.defaultMachineType
+          ? [craft.defaultMachineType]
+          : [];
+    const workerMachines =
+      (worker.machineCapabilities?.length ?? 0) > 0
+        ? worker.machineCapabilities!
+        : worker.machineType
+          ? [worker.machineType]
+          : [];
+    resolvedMachineType =
+      worker.machineType && allowedMachines.includes(worker.machineType)
+        ? worker.machineType
+        : (allowedMachines.find((machine) =>
+            workerMachines.includes(machine),
+          ) ?? null);
+    if (!resolvedMachineType) {
+      return {
+        eligible: false,
+        recommended: false,
+        machineType: null,
+        reason: `师傅 ${worker.id} 的机器能力与工艺 ${craft.id} 不匹配`,
+      };
+    }
+  }
+  const capabilityIds =
+    worker.craftCapabilityIds ??
+    worker.craftCapabilities?.map((capability) => capability.craftId);
+  return {
+    eligible: true,
+    // Optional means a legacy/test shape that predates capability records.
+    // Real scheduling queries always provide the relation, including [].
+    recommended: capabilityIds
+      ? capabilityIds.includes(craft.id)
+      : true,
+    machineType: resolvedMachineType,
+    reason: null,
+  };
 }
 
 export { SchedulingError as ProductionSchedulingError };
@@ -518,6 +712,7 @@ export async function reassignProductionTask(
   taskId: string,
   workerId: string,
   actor: { id: string; role: Role },
+  overrideReason = '',
 ): Promise<ReassignProductionTaskResult> {
   if (actor.role !== Role.ADMIN) {
     throw new ReportError('只有管理员可以改派生产任务');
@@ -546,6 +741,7 @@ export async function reassignProductionTask(
             isOutsource: true,
             defaultWorkerType: true,
             defaultMachineType: true,
+            inHouseMachineTypes: true,
           },
         },
       },
@@ -564,6 +760,8 @@ export async function reassignProductionTask(
         isActive: true,
         workerType: true,
         machineType: true,
+        machineCapabilities: true,
+        craftCapabilities: { select: { craftId: true } },
       },
     });
     if (!worker || worker.role !== Role.WORKER) {
@@ -571,7 +769,7 @@ export async function reassignProductionTask(
     }
     if (!worker.isActive) throw new ReportError('目标师傅已停用');
     try {
-      assertWorkerCompatible(task.craft, worker);
+      assertWorkerAssignable(task.craft, worker, overrideReason);
     } catch (error) {
       if (error instanceof SchedulingError) throw new ReportError(error.message);
       throw error;
@@ -585,7 +783,8 @@ export async function reassignProductionTask(
       data: {
         workerId,
         workerType: task.craft.defaultWorkerType,
-        machineType: task.craft.defaultMachineType,
+        machineType: getWorkerAssignmentEligibility(task.craft, worker)
+          .machineType,
       },
       select: { id: true, workerId: true, status: true },
     });
@@ -597,8 +796,21 @@ export async function reassignProductionTask(
         changedFields: {
           workerId: { before: task.workerId, after: workerId },
           taskId: { before: task.id, after: task.id },
+          ...(!getWorkerAssignmentEligibility(task.craft, worker).recommended
+            ? {
+                assignmentOverride: {
+                  craftId: task.craft.id,
+                  workerId,
+                  reason: overrideReason.trim(),
+                },
+              }
+            : {}),
         },
-        remark: `改派：${task.orderItem.name} (#${task.orderItem.sequence}) → ${worker.displayName}`,
+        remark: `改派：${task.orderItem.name} (#${task.orderItem.sequence}) → ${worker.displayName}${
+          getWorkerAssignmentEligibility(task.craft, worker).recommended
+            ? ''
+            : `；非推荐派工原因：${overrideReason.trim()}`
+        }`,
       },
     });
     return {
@@ -802,6 +1014,11 @@ export async function beginTask(
     // (terminal); this surfaces a clear business message instead.
     if (task.status === TaskStatus.CANCELLED) {
       throw new ReportError('该任务已随工单取消，不能开工');
+    }
+    if (task.orderItem.order.status === OrderStatus.SUBMITTED) {
+      throw new ReportError(
+        '工单还有工艺未完成排产，全部派工后才能开始生产',
+      );
     }
 
     // Idempotent: same worker restarting their own already-started
@@ -1064,6 +1281,313 @@ export async function reportTask(
   return result;
 }
 
+function normalizedBatchTaskIds(taskIds: string[]): string[] {
+  const normalized = [...new Set(taskIds)];
+  if (normalized.length === 0) throw new ReportError('请至少选择一个任务');
+  if (normalized.length > 50) throw new ReportError('单次最多处理 50 个任务');
+  return normalized.sort();
+}
+
+/**
+ * Starts several tasks in one transaction. Order advisory locks are acquired in
+ * stable order before any task write, so cancel/individual pickup cannot leave
+ * a partially-started selection.
+ */
+export async function beginTasks(
+  taskIds: string[],
+  actor: { id: string; role: Role },
+  now: Date = new Date(),
+): Promise<{ taskIds: string[] }> {
+  const ids = normalizedBatchTaskIds(taskIds);
+  return db.$transaction(async (tx) => {
+    const tasks = await tx.productionTask.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        workerId: true,
+        workerType: true,
+        machineType: true,
+        orderItem: {
+          select: {
+            name: true,
+            sequence: true,
+            orderId: true,
+            order: { select: { id: true, status: true } },
+          },
+        },
+      },
+    });
+    if (tasks.length !== ids.length) throw new ReportError('选择中包含不存在的任务');
+    const orderIds = [
+      ...new Set(tasks.map((task) => task.orderItem.orderId)),
+    ].sort();
+    for (const orderId of orderIds) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+        orderId,
+      )}))`;
+    }
+
+    const freshTasks = await tx.productionTask.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        workerId: true,
+        workerType: true,
+        machineType: true,
+        orderItem: {
+          select: {
+            name: true,
+            sequence: true,
+            orderId: true,
+            order: { select: { id: true, status: true } },
+          },
+        },
+      },
+    });
+    const worker = await tx.user.findUnique({
+      where: { id: actor.id },
+      select: {
+        id: true,
+        role: true,
+        isActive: true,
+        workerType: true,
+        machineType: true,
+      },
+    });
+    if (!worker || worker.role !== Role.WORKER || !worker.isActive) {
+      throw new ReportError('当前师傅账号不可用');
+    }
+
+    for (const task of freshTasks) {
+      if (actor.role !== Role.ADMIN && task.workerId !== actor.id) {
+        throw new ReportError('只能开始分配给自己的任务');
+      }
+      if (task.status === TaskStatus.CANCELLED) {
+        throw new ReportError('选择中包含已取消任务');
+      }
+      if (
+        task.status !== TaskStatus.PENDING &&
+        task.status !== TaskStatus.IN_PROGRESS
+      ) {
+        throw new ReportError('选择中包含不能开始的任务');
+      }
+      if (task.orderItem.order.status === OrderStatus.SUBMITTED) {
+        throw new ReportError(
+          '选择中有工单尚未完成全部排产，暂时不能开始生产',
+        );
+      }
+      const taskWorkerType =
+        task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+      if (
+        worker.workerType !== taskWorkerType ||
+        (taskWorkerType === WorkerType.MACHINE &&
+          worker.machineType !== task.machineType)
+      ) {
+        throw new ReportError('选择中有任务与当前岗位或机型不匹配');
+      }
+    }
+
+    await tx.productionTask.updateMany({
+      where: { id: { in: ids }, status: TaskStatus.PENDING },
+      data: { status: TaskStatus.IN_PROGRESS, startedAt: now },
+    });
+    for (const orderId of orderIds) {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { status: true },
+      });
+      if (order?.status !== OrderStatus.SCHEDULING) continue;
+      transitionOrder(order.status, OrderStatus.IN_PRODUCTION);
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.IN_PRODUCTION },
+      });
+      const firstTask = freshTasks.find(
+        (task) => task.orderItem.orderId === orderId,
+      );
+      await tx.orderLog.create({
+        data: {
+          orderId,
+          operatorId: actor.id,
+          action: 'STATUS_CHANGE',
+          changedFields: {
+            status: {
+              before: OrderStatus.SCHEDULING,
+              after: OrderStatus.IN_PRODUCTION,
+            },
+          },
+          remark: firstTask
+            ? `批量开始生产：${firstTask.orderItem.name} 等`
+            : '批量开始生产',
+        },
+      });
+    }
+    return { taskIds: ids };
+  });
+}
+
+/**
+ * Reports selected in-progress tasks at their planned quantity. Salary
+ * snapshots and all task/order cascades commit together; one invalid task rolls
+ * the whole selection back.
+ */
+export async function reportTasks(
+  taskIds: string[],
+  actor: { id: string; role: Role },
+  now: Date = new Date(),
+): Promise<{ taskIds: string[]; completedOrderIds: string[] }> {
+  const ids = normalizedBatchTaskIds(taskIds);
+  const result = await db.$transaction(async (tx) => {
+    const locatorRows = await tx.productionTask.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, orderItem: { select: { orderId: true } } },
+    });
+    if (locatorRows.length !== ids.length) {
+      throw new ReportError('选择中包含不存在的任务');
+    }
+    for (const taskId of ids) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${taskLockKey(
+        taskId,
+      )}))`;
+    }
+    const orderIds = [
+      ...new Set(locatorRows.map((row) => row.orderItem.orderId)),
+    ].sort();
+    for (const orderId of orderIds) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+        orderId,
+      )}))`;
+    }
+
+    const tasks = await tx.productionTask.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        workerId: true,
+        workerType: true,
+        machineType: true,
+        plannedQty: true,
+        orderItem: {
+          select: {
+            orderId: true,
+            name: true,
+            isDoubleSided: true,
+            isDoubleColor: true,
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    for (const task of tasks) {
+      if (actor.role !== Role.ADMIN && task.workerId !== actor.id) {
+        throw new ReportError('只能报工分配给自己的任务');
+      }
+      if (task.status !== TaskStatus.IN_PROGRESS) {
+        throw new ReportError(`任务“${task.orderItem.name}”尚未开始或已报工`);
+      }
+    }
+
+    for (const task of tasks) {
+      const taskWorkerType =
+        task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+      let boardCount = 0;
+      let pressCount = 0;
+      let pieceworkAmount = '0.00';
+      let salaryRuleSnapshot: Prisma.InputJsonValue;
+      if (taskWorkerType === WorkerType.MACHINE) {
+        if (!task.machineType) {
+          throw new ReportError('开机任务缺少机型快照，请联系管理员改派');
+        }
+        const rule = await getActiveMachineRule(
+          task.machineType,
+          now,
+          task.workerId ?? undefined,
+        );
+        if (!rule) {
+          throw new ReportError(
+            `无当前生效的 ${task.machineType} 薪资规则，请联系管理员补规则`,
+          );
+        }
+        const breakdown = calcMachinePieceworkBreakdown(
+          {
+            quantity: task.plannedQty,
+            itemCount: 1,
+            isDoubleSided: task.orderItem.isDoubleSided,
+            isDoubleColor: task.orderItem.isDoubleColor,
+          },
+          rule,
+        );
+        boardCount = breakdown.boardCount;
+        pressCount = breakdown.pressCount;
+        pieceworkAmount = breakdown.amount.toFixed(2);
+        salaryRuleSnapshot = rule as unknown as Prisma.InputJsonValue;
+      } else if (
+        taskWorkerType === WorkerType.PACKER ||
+        taskWorkerType === WorkerType.CLEANER
+      ) {
+        salaryRuleSnapshot = {
+          payrollMode: 'HOURLY',
+          workerType: taskWorkerType,
+        };
+      } else {
+        throw new ReportError('任务缺少有效的生产岗位快照，请联系管理员改派');
+      }
+      await tx.productionTask.update({
+        where: { id: task.id },
+        data: {
+          status: TaskStatus.COMPLETED,
+          completedQty: task.plannedQty,
+          defectQty: 0,
+          reworkQty: 0,
+          boardCount,
+          pressCount,
+          pieceworkAmount,
+          salaryRuleSnapshot,
+          completedAt: now,
+        },
+      });
+    }
+
+    const completedOrderIds: string[] = [];
+    for (const orderId of orderIds) {
+      if (
+        await maybeCompleteProductionOrder(
+          tx as unknown as ProductionCompletionTx,
+          orderId,
+          actor.id,
+          now,
+        )
+      ) {
+        completedOrderIds.push(orderId);
+      }
+    }
+    return { taskIds: ids, completedOrderIds };
+  });
+
+  if (result.completedOrderIds.length > 0) {
+    const orders = await db.order.findMany({
+      where: { id: { in: result.completedOrderIds } },
+      select: { id: true, orderNo: true, customerRef: true },
+    });
+    for (const order of orders) {
+      await dispatchNotification(
+        'ORDER_COMPLETED',
+        {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          customerRef: order.customerRef,
+        },
+        { dedupeKey: `notification:ORDER_COMPLETED:${order.id}` },
+      );
+    }
+  }
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Worker-side read helpers
 // ─────────────────────────────────────────────────────────────────────
@@ -1088,6 +1612,7 @@ export type WorkerTaskListRow = {
     orderNo: string;
     customName: string | null;
     isUrgent: boolean;
+    submitterName: string;
   };
 };
 
@@ -1100,6 +1625,9 @@ export async function listWorkerTasks(
     where: {
       workerId,
       status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
+      orderItem: {
+        order: { status: { not: OrderStatus.SUBMITTED } },
+      },
     },
     select: {
       id: true,
@@ -1120,7 +1648,10 @@ export async function listWorkerTasks(
               id: true,
               orderNo: true,
               customName: true,
+              status: true,
               isUrgent: true,
+              createdAt: true,
+              submitter: { select: { displayName: true } },
             },
           },
         },
@@ -1129,6 +1660,7 @@ export async function listWorkerTasks(
     },
     orderBy: [
       { orderItem: { order: { isUrgent: 'desc' } } },
+      { orderItem: { order: { createdAt: 'asc' } } },
       { createdAt: 'asc' },
     ],
   });
@@ -1152,6 +1684,7 @@ export async function listWorkerTasks(
       orderNo: r.orderItem.order.orderNo,
       customName: r.orderItem.order.customName,
       isUrgent: r.orderItem.order.isUrgent,
+      submitterName: r.orderItem.order.submitter.displayName,
     },
   }));
 }
@@ -1207,6 +1740,8 @@ export async function getWorkerTaskDetail(
               customName: true,
               isUrgent: true,
               customerRef: true,
+              status: true,
+              submitter: { select: { displayName: true } },
             },
           },
         },
@@ -1217,6 +1752,12 @@ export async function getWorkerTaskDetail(
   if (!row) return null;
   const globalOverride = actor.role === Role.ADMIN;
   if (!globalOverride && row.workerId !== actor.id) return null;
+  if (
+    !globalOverride &&
+    row.orderItem.order.status === OrderStatus.SUBMITTED
+  ) {
+    return null;
+  }
   return row;
 }
 
@@ -1229,20 +1770,82 @@ export { InvalidTaskTransitionError };
 // All SUBMITTED orders awaiting scheduling. Foremen see everything
 // (no scope filter) — matches `order:schedule` permission's "no
 // ownership" posture.
-export async function listPendingSchedulingOrders() {
-  return db.order.findMany({
+export type PendingSchedulingCraftSummary = {
+  id: string;
+  name: string;
+  count: number;
+  assignedCount: number;
+  isOutsource: boolean;
+  isHybrid: boolean;
+};
+
+type PendingSchedulingCraftDefinition = Omit<
+  SchedulingViewCraft,
+  'assignedWorkerId'
+> & {
+  isActive: boolean;
+};
+
+export type PendingSchedulingOrderView = {
+  id: string;
+  orderNo: string;
+  customName: string | null;
+  kind: OrderKind;
+  sourceOrder: { orderNo: string } | null;
+  isUrgent: boolean;
+  customerRef: string | null;
+  promisedDate: Date | null;
+  submittedAt: Date | null;
+  createdAt: Date;
+  submitter: { displayName: string; role: Role };
+  itemCount: number;
+  totalQuantity: number;
+  internalTaskCount: number;
+  assignedTaskCount: number;
+  remainingTaskCount: number;
+  craftSummaries: PendingSchedulingCraftSummary[];
+  compatibleWorkerIds: string[];
+  compatibleTaskCounts: Record<string, number>;
+  recommendedTaskCounts: Record<string, number>;
+  overrideTaskCounts: Record<string, number>;
+  batchBlockReason: string | null;
+};
+
+export type PendingSchedulingBoard = {
+  orders: PendingSchedulingOrderView[];
+  workers: SchedulingViewCandidate[];
+};
+
+export async function getPendingSchedulingBoard(): Promise<PendingSchedulingBoard> {
+  const orders = await db.order.findMany({
     where: { status: OrderStatus.SUBMITTED, items: { some: {} } },
     select: {
       id: true,
       orderNo: true,
       customName: true,
+      kind: true,
+      sourceOrder: { select: { orderNo: true } },
       isUrgent: true,
       customerRef: true,
       promisedDate: true,
       submittedAt: true,
       createdAt: true,
       items: {
-        select: { id: true, crafts: true },
+        select: {
+          id: true,
+          quantity: true,
+          crafts: true,
+          tasks: {
+            select: {
+              craftId: true,
+              status: true,
+            },
+          },
+        },
+      },
+      outsourceOrders: {
+        where: { status: { not: OutsourceStatus.CANCELLED } },
+        select: { id: true },
       },
       submitter: {
         select: { displayName: true, role: true },
@@ -1254,6 +1857,186 @@ export async function listPendingSchedulingOrders() {
       { submittedAt: 'asc' },
     ],
   });
+
+  const craftIds = new Set<string>();
+  for (const order of orders) {
+    for (const item of order.items) {
+      for (const craftId of item.crafts) craftIds.add(craftId);
+    }
+  }
+  const craftPromise: Promise<PendingSchedulingCraftDefinition[]> =
+    craftIds.size === 0
+      ? Promise.resolve([])
+      : db.craft.findMany({
+          where: { id: { in: [...craftIds] } },
+          select: {
+            id: true,
+            name: true,
+            isActive: true,
+            isOutsource: true,
+            defaultWorkerType: true,
+            defaultMachineType: true,
+            inHouseMachineTypes: true,
+          },
+        });
+  const [crafts, workers] = await Promise.all([
+    craftPromise,
+    listActiveWorkerCandidates(),
+  ]);
+  const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
+
+  return {
+    workers,
+    orders: orders.map((order) => {
+      const craftCountById = new Map<string, number>();
+      const assignedCraftCountById = new Map<string, number>();
+      const internalPairs: Array<{
+        key: string;
+        craft: PendingSchedulingCraftDefinition;
+      }> = [];
+      const existingTaskKeys = new Set<string>();
+      let hasOutsource = false;
+      let hasMissingCraft = false;
+      let hasInactiveCraft = false;
+      let hasInvalidTask = false;
+
+      for (const item of order.items) {
+        for (const task of item.tasks) {
+          if (task.status !== TaskStatus.PENDING) hasInvalidTask = true;
+          const key = `${item.id}:${task.craftId}`;
+          existingTaskKeys.add(key);
+          assignedCraftCountById.set(
+            task.craftId,
+            (assignedCraftCountById.get(task.craftId) ?? 0) + 1,
+          );
+        }
+        for (const craftId of item.crafts) {
+          craftCountById.set(
+            craftId,
+            (craftCountById.get(craftId) ?? 0) + 1,
+          );
+          const craft = craftById.get(craftId);
+          if (!craft) {
+            hasMissingCraft = true;
+            continue;
+          }
+          if (!craft.isActive) hasInactiveCraft = true;
+          if (craft.isOutsource) hasOutsource = true;
+          if (!craft.isOutsource || craft.inHouseMachineTypes.length > 0) {
+            internalPairs.push({
+              key: `${item.id}:${craftId}`,
+              craft,
+            });
+          }
+        }
+      }
+      const internalPairKeys = new Set(
+        internalPairs.map((pair) => pair.key),
+      );
+      if (
+        [...existingTaskKeys].some((key) => !internalPairKeys.has(key))
+      ) {
+        hasInvalidTask = true;
+      }
+      const remainingPairs = internalPairs.filter(
+        (pair) => !existingTaskKeys.has(pair.key),
+      );
+
+      let batchBlockReason: string | null = null;
+      if (hasMissingCraft) {
+        batchBlockReason = '包含已删除或缺失的工艺';
+      } else if (hasInactiveCraft) {
+        batchBlockReason = '包含已停用工艺';
+      } else if (hasInvalidTask) {
+        batchBlockReason = '包含已经开始或状态异常的任务，请单独检查';
+      } else if (internalPairs.length === 0) {
+        batchBlockReason = '仅外协工单，请单独确认排产';
+      } else if (hasOutsource && order.outsourceOrders.length === 0) {
+        batchBlockReason = '请先创建外协单';
+      } else if (remainingPairs.length === 0) {
+        batchBlockReason = '内部工艺已全部分配，请刷新状态';
+      }
+
+      const compatibleTaskCounts = Object.fromEntries(
+        workers.map((worker) => [
+          worker.id,
+          remainingPairs.filter((pair) =>
+            isWorkerCompatible(pair.craft, worker),
+          ).length,
+        ]),
+      );
+      const recommendedTaskCounts = Object.fromEntries(
+        workers.map((worker) => [
+          worker.id,
+          remainingPairs.filter(
+            (pair) =>
+              getWorkerAssignmentEligibility(pair.craft, worker).recommended,
+          ).length,
+        ]),
+      );
+      const overrideTaskCounts = Object.fromEntries(
+        workers.map((worker) => [
+          worker.id,
+          Math.max(
+            0,
+            compatibleTaskCounts[worker.id] -
+              recommendedTaskCounts[worker.id],
+          ),
+        ]),
+      );
+      const compatibleWorkerIds =
+        batchBlockReason === null
+          ? workers
+              .filter((worker) => compatibleTaskCounts[worker.id] > 0)
+              .map((worker) => worker.id)
+          : [];
+      if (batchBlockReason === null && compatibleWorkerIds.length === 0) {
+        batchBlockReason = '剩余工艺没有匹配的师傅';
+      }
+
+      return {
+        id: order.id,
+        orderNo: order.orderNo,
+        customName: order.customName,
+        kind: order.kind,
+        sourceOrder: order.sourceOrder,
+        isUrgent: order.isUrgent,
+        customerRef: order.customerRef,
+        promisedDate: order.promisedDate,
+        submittedAt: order.submittedAt,
+        createdAt: order.createdAt,
+        submitter: order.submitter,
+        itemCount: order.items.length,
+        totalQuantity: order.items.reduce(
+          (sum, item) => sum + item.quantity,
+          0,
+        ),
+        internalTaskCount: internalPairs.length,
+        assignedTaskCount: internalPairs.length - remainingPairs.length,
+        remainingTaskCount: remainingPairs.length,
+        craftSummaries: [...craftCountById.entries()].map(
+          ([craftId, count]) => {
+            const craft = craftById.get(craftId);
+            return {
+              id: craftId,
+              name: craft?.name ?? '未知工艺',
+              count,
+              assignedCount: assignedCraftCountById.get(craftId) ?? 0,
+              isOutsource: craft?.isOutsource ?? false,
+              isHybrid:
+                Boolean(craft?.isOutsource) &&
+                (craft?.inHouseMachineTypes.length ?? 0) > 0,
+            };
+          },
+        ),
+        compatibleWorkerIds,
+        compatibleTaskCounts,
+        recommendedTaskCounts,
+        overrideTaskCounts,
+        batchBlockReason,
+      };
+    }),
+  };
 }
 
 export type SchedulingViewCraft = {
@@ -1262,6 +2045,8 @@ export type SchedulingViewCraft = {
   isOutsource: boolean;
   defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
+  inHouseMachineTypes: MachineType[];
+  assignedWorkerId: string | null;
 };
 
 export type SchedulingViewItem = {
@@ -1281,6 +2066,8 @@ export type SchedulingViewCandidate = {
   displayName: string;
   workerType: WorkerType | null;
   machineType: MachineType | null;
+  machineCapabilities: MachineType[];
+  craftCapabilityIds: string[];
   pendingTaskCount: number;
   inProgressTaskCount: number;
 };
@@ -1304,6 +2091,8 @@ async function listActiveWorkerCandidates(): Promise<SchedulingViewCandidate[]> 
       displayName: true,
       workerType: true,
       machineType: true,
+      machineCapabilities: true,
+      craftCapabilities: { select: { craftId: true } },
     },
     orderBy: { displayName: 'asc' },
   });
@@ -1332,8 +2121,17 @@ async function listActiveWorkerCandidates(): Promise<SchedulingViewCandidate[]> 
     }
     loadByWorker.set(row.workerId, current);
   }
-  return workers.map((worker) => ({
+  return workers.map(({ craftCapabilities, ...worker }) => ({
     ...worker,
+    machineCapabilities:
+      worker.machineCapabilities?.length > 0
+        ? worker.machineCapabilities
+        : worker.machineType
+          ? [worker.machineType]
+          : [],
+    craftCapabilityIds: (craftCapabilities ?? []).map(
+      (capability) => capability.craftId,
+    ),
     ...(loadByWorker.get(worker.id) ?? {
       pendingTaskCount: 0,
       inProgressTaskCount: 0,
@@ -1371,6 +2169,10 @@ export async function getSchedulingView(
           foilColors: true,
           remark: true,
           crafts: true,
+          tasks: {
+            where: { status: TaskStatus.PENDING },
+            select: { craftId: true, workerId: true },
+          },
         },
       },
     },
@@ -1390,6 +2192,7 @@ export async function getSchedulingView(
             isOutsource: true,
             defaultWorkerType: true,
             defaultMachineType: true,
+            inHouseMachineTypes: true,
           },
         });
   const craftById = new Map(crafts.map((c) => [c.id, c]));
@@ -1403,19 +2206,36 @@ export async function getSchedulingView(
     isUrgent: order.isUrgent,
     customerRef: order.customerRef,
     submitterDisplayName: order.submitter.displayName,
-    items: order.items.map((item) => ({
-      id: item.id,
-      sequence: item.sequence,
-      name: item.name,
-      quantity: item.quantity,
-      specification: item.specification,
-      paperType: item.paperType,
-      foilColors: item.foilColors,
-      remark: item.remark,
-      crafts: item.crafts
-        .map((cid) => craftById.get(cid))
-        .filter((c): c is SchedulingViewCraft => typeof c !== 'undefined'),
-    })),
+    items: order.items.map((item) => {
+      const assignedWorkerByCraft = new Map(
+        item.tasks.map((task) => [task.craftId, task.workerId]),
+      );
+      return {
+        id: item.id,
+        sequence: item.sequence,
+        name: item.name,
+        quantity: item.quantity,
+        specification: item.specification,
+        paperType: item.paperType,
+        foilColors: item.foilColors,
+        remark: item.remark,
+        crafts: item.crafts
+          .map((cid) => {
+            const craft = craftById.get(cid);
+            return craft
+              ? {
+                  ...craft,
+                  assignedWorkerId:
+                    assignedWorkerByCraft.get(cid) ?? null,
+                }
+              : undefined;
+          })
+          .filter(
+            (craft): craft is SchedulingViewCraft =>
+              typeof craft !== 'undefined',
+          ),
+      };
+    }),
     workers,
   };
 }
@@ -1426,6 +2246,7 @@ export type ReassignmentView = {
     itemName: string;
     itemSequence: number;
     craftName: string;
+    craftId: string;
     currentWorkerId: string | null;
     currentWorkerName: string | null;
     eligibleWorkers: SchedulingViewCandidate[];
@@ -1448,8 +2269,10 @@ export async function getPendingTaskReassignmentView(
         craft: {
           select: {
             name: true,
+            id: true,
             defaultWorkerType: true,
             defaultMachineType: true,
+            inHouseMachineTypes: true,
           },
         },
         worker: { select: { displayName: true } },
@@ -1468,13 +2291,20 @@ export async function getPendingTaskReassignmentView(
       itemName: task.orderItem.name,
       itemSequence: task.orderItem.sequence,
       craftName: task.craft.name,
+      craftId: task.craft.id,
       currentWorkerId: task.workerId,
       currentWorkerName: task.worker?.displayName ?? null,
-      eligibleWorkers: workers.filter(
-        (worker) =>
-          worker.workerType === task.craft.defaultWorkerType &&
-          (task.craft.defaultWorkerType !== WorkerType.MACHINE ||
-            worker.machineType === task.craft.defaultMachineType),
+      eligibleWorkers: workers.filter((worker) =>
+        isWorkerCompatible(
+          {
+            id: task.craft.id,
+            isOutsource: false,
+            defaultWorkerType: task.craft.defaultWorkerType,
+            defaultMachineType: task.craft.defaultMachineType,
+            inHouseMachineTypes: task.craft.inHouseMachineTypes,
+          },
+          worker,
+        ),
       ),
     })),
   };

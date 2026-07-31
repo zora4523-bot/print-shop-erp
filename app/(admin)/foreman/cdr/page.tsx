@@ -20,7 +20,7 @@ type SearchParams = Promise<{ from?: string; to?: string }>;
 
 // SPEC §3.5：CDR 汇总下载 = 管理员按日期窗口勾工单 → 生成 24h 短链
 // → 复制给外协模具厂。本页不显示 admin 工单详情链接（外协方不需要）；
-// 只显示工单号 + 客户代号 + CDR 文件数。
+// 只显示工单号 + 客户名称/简称 + CDR 文件数。
 //
 // `from` / `to` URL query：foreman 输入起 / 止日期（YYYY-MM-DD），
 // 缺省 = 今天，提交后 server fetches eligible orders。

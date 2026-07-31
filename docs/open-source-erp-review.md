@@ -128,9 +128,10 @@ Suggested models:
 
 Integration:
 
-- Orders keep current customer and receiver snapshots.
-- New orders can select a `Party`, then copy default contact/address into the
-  order fields.
+- Orders keep customer and receiver snapshots entered directly on the order.
+- The sales-order form does not depend on `Party`; the retained optional
+  relation only preserves historical links. Supplier selection remains active
+  for purchasing.
 - Search uses the existing fuzzy search direction with `pg_trgm`, `pg_bigm`, and
   `pg_pinyin` readiness checks.
 

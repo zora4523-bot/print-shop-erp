@@ -5,7 +5,7 @@
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
   customName: '工单名称',
-  customerRef: '客户代号',
+  customerRef: '客户名称/简称',
   receiverName: '收货人',
   receiverPhone: '收货电话',
   receiverAddress: '收货地址',
@@ -14,6 +14,7 @@ const FIELD_LABELS: Record<string, string> = {
   remark: '工单备注',
   promisedDate: '承诺交期',
   isUrgent: '急单',
+  isSfCollect: '顺丰到付',
   // Status changes land in the same log table under action='STATUS_CHANGE'
   status: '状态',
   // Created-by / submitted-by meta

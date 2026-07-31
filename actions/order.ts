@@ -5,10 +5,14 @@ import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   createOrderSchema,
+  createReworkOrderSchema,
   cancelOrderSchema,
   shipOrderSchema,
   updateEditableOrderSchema,
   setOrderUrgentSchema,
+  setOrderSfCollectSchema,
+  createOrderChangeRequestSchema,
+  reviewOrderChangeRequestSchema,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
@@ -18,12 +22,25 @@ import {
   finishOrder,
   updateOrderFields,
   setOrderUrgent,
+  setOrderSfCollect,
   OrderInvariantError,
   InvalidOrderTransitionError,
 } from '@/lib/order';
+import {
+  createReworkOrder,
+  ReworkOrderError,
+} from '@/lib/order/rework';
+import {
+  createOrderChangeRequest,
+  OrderChangeRequestError,
+  reviewOrderChangeRequest,
+} from '@/lib/order/change-request';
 import type {
+  CreateOrderChangeRequestMutationResult,
   CreateOrderMutationResult,
+  CreateReworkOrderMutationResult,
   OrderMutationResult,
+  ReviewOrderChangeRequestMutationResult,
 } from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
@@ -58,6 +75,35 @@ export async function createOrderAction(
     orderId: created.id,
     itemIds: created.itemIds,
   };
+}
+
+export async function createReworkOrderAction(
+  _prev: CreateReworkOrderMutationResult | null,
+  raw: unknown,
+): Promise<CreateReworkOrderMutationResult> {
+  const actor = await requirePermission('order:schedule');
+
+  const parsed = createReworkOrderSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const created = await createReworkOrder(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath('/foreman/scheduling');
+    revalidatePath(`/orders/${parsed.data.sourceOrderId}`);
+    revalidatePath(`/orders/${created.id}`);
+    return { status: 'success', orderId: created.id };
+  } catch (error) {
+    if (error instanceof ReworkOrderError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
 }
 
 export async function submitOrderAction(
@@ -132,15 +178,36 @@ export async function shipOrderAction(
 ): Promise<OrderMutationResult> {
   const actor = await requirePermission('order:ship');
 
+  const shipmentIds = formData.getAll('shipmentId');
+  const shipmentTrackingNos = formData.getAll('shipmentTrackingNo');
+  const shipmentWeights = formData.getAll('shipmentWeightKg');
+  const hasValidWeightShape =
+    shipmentWeights.length === 0 || shipmentWeights.length === shipmentIds.length;
+  const shipments =
+    shipmentIds.length === shipmentTrackingNos.length &&
+    hasValidWeightShape
+      ? shipmentIds.map((shipmentId, index) => ({
+          shipmentId,
+          trackingNo: shipmentTrackingNos[index],
+          ...(shipmentWeights.length > 0
+            ? { weightKg: shipmentWeights[index] }
+            : {}),
+        }))
+      : [{ shipmentId: null, trackingNo: null, weightKg: null }];
   const parsed = shipOrderSchema.safeParse({
     trackingNo: formData.get('trackingNo'),
+    shipments,
   });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    await shipOrder(orderId, actor, parsed.data.trackingNo);
+    await shipOrder(
+      orderId,
+      actor,
+      parsed.data.shipments.length > 0 ? parsed.data : parsed.data.trackingNo,
+    );
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -202,6 +269,7 @@ export async function updateOrderAction(
     'remark',
     'promisedDate',
     'isUrgent',
+    'isSfCollect',
   ] as const) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
@@ -263,4 +331,90 @@ export async function setOrderUrgentAction(
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
   return { status: 'success' };
+}
+
+// 独立维护顺丰到付标识：允许在普通字段冻结后继续补录，但底层仍会
+// 拒绝 FINISHED / CANCELLED 终态，并记录完整变更日志。
+export async function setOrderSfCollectAction(
+  orderId: string,
+  _prev: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:create');
+
+  const parsed = setOrderSfCollectSchema.safeParse({
+    isSfCollect: formData.get('isSfCollect'),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+  }
+
+  try {
+    await setOrderSfCollect(orderId, parsed.data.isSfCollect, actor);
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  return { status: 'success' };
+}
+
+export async function createOrderChangeRequestAction(
+  _prev: CreateOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<CreateOrderChangeRequestMutationResult> {
+  const actor = await requirePermission('order:change:request');
+  const parsed = createOrderChangeRequestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const request = await createOrderChangeRequest(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath('/owner/order-changes');
+    return { status: 'success', requestId: request.id };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function reviewOrderChangeRequestAction(
+  _prev: ReviewOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<ReviewOrderChangeRequestMutationResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = reviewOrderChangeRequestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const request = await reviewOrderChangeRequest(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${request.orderId}`);
+    revalidatePath('/owner/order-changes');
+    revalidatePath('/worker/tasks');
+    revalidatePath('/worker/orders');
+    return { status: 'success', requestStatus: request.status };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
 }

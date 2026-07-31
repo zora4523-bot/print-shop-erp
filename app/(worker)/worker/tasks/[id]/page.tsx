@@ -51,11 +51,12 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           </p>
         ) : null}
         <p className="worker-wrap-anywhere text-xs text-muted-foreground">
-          客户代号：{task.orderItem.order.customerRef ?? '—'} · 工艺：
+          客户名称/简称：{task.orderItem.order.customerRef ?? '—'} · 工艺：
           {task.craft.name}
           {task.machineType
             ? ` · ${MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType}`
             : ''}
+          {' · '}接单人：{task.orderItem.order.submitter.displayName}
         </p>
       </header>
 

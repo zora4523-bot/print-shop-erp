@@ -40,7 +40,7 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="新建客户/供应商"
-        subtitle="编码用于搜索和工单客户代号；联系人和默认地址会在新建工单时自动带入快照字段。"
+        subtitle="编码用于往来单位搜索；联系人和默认地址用于客户/供应商资料维护。"
         actions={
           <Link
             href={backHref}

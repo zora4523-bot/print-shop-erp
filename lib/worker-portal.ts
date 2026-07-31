@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import {
   DesignFileType,
+  OrderStatus,
   Role,
   TaskStatus,
   WorkerType,
@@ -26,6 +27,7 @@ function requireWorkerActor(actor: WorkerActor): void {
 // 等于当前登录用户。列表与详情复用同一形状，避免页面层漏加归属条件。
 function ownOrderWhere(workerId: string) {
   return {
+    status: { not: OrderStatus.SUBMITTED },
     items: {
       some: {
         tasks: { some: { workerId } },
@@ -38,7 +40,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
   requireWorkerActor(actor);
   const orders = await db.order.findMany({
     where: ownOrderWhere(actor.id),
-    orderBy: [{ isUrgent: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ isUrgent: 'desc' }, { createdAt: 'asc' }],
     select: {
       id: true,
       orderNo: true,
@@ -48,6 +50,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
       customerRef: true,
       promisedDate: true,
       createdAt: true,
+      submitter: { select: { displayName: true } },
       items: {
         where: { tasks: { some: { workerId: actor.id } } },
         select: {
@@ -77,6 +80,7 @@ export async function listWorkerOrders(actor: WorkerActor) {
       customerRef: order.customerRef,
       promisedDate: order.promisedDate,
       createdAt: order.createdAt,
+      submitterName: order.submitter?.displayName ?? '未记录',
       taskCount: tasks.length,
       completedTaskCount: tasks.filter(
         (task) => task.status === TaskStatus.COMPLETED,
@@ -113,6 +117,7 @@ export async function getWorkerOrderDetail(
       packageRequirement: true,
       remark: true,
       createdAt: true,
+      submitter: { select: { displayName: true } },
       items: {
         where: { tasks: { some: { workerId: actor.id } } },
         orderBy: { sequence: 'asc' },
@@ -162,10 +167,22 @@ export async function getWorkerOrderDetail(
   });
 }
 
-export async function listWorkerSalaries(actor: WorkerActor) {
+export async function listWorkerSalaries(
+  actor: WorkerActor,
+  filters?: { from?: Date; to?: Date },
+) {
   requireWorkerActor(actor);
   return db.dailyWorkerSalary.findMany({
-    where: { workerId: actor.id },
+    where: {
+      workerId: actor.id,
+      date:
+        filters?.from || filters?.to
+          ? {
+              gte: filters.from,
+              lte: filters.to,
+            }
+          : undefined,
+    },
     orderBy: { date: 'desc' },
     select: {
       id: true,

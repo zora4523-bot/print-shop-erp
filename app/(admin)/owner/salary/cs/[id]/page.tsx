@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCsPeriodDetail } from '@/lib/salary/cs';
-import { SalaryPeriodStatus } from '@/generated/prisma/enums';
+import {
+  CsSalesEntryType,
+  SalaryPeriodStatus,
+} from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { MarkCsPaidForm } from '@/components/business/salary/MarkCsPaidForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import { getAttendanceSummaries } from '@/lib/attendance';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -22,6 +26,14 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
   const { id } = await params;
   const period = await getCsPeriodDetail(id);
   if (!period) notFound();
+  const attendanceSummary =
+    (
+      await getAttendanceSummaries([period.csUserId], {
+        start: period.periodStart,
+        end: period.periodEnd,
+        inclusiveEnd: true,
+      })
+    ).get(period.csUserId) ?? { workUnits: '0', leaveUnits: '0' };
 
   const now = new Date();
   const ready =
@@ -70,7 +82,60 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             tabular
           />
           <Row label="结算时间" value={formatDateTimeShanghai(period.settledAt)} />
+          <Row
+            label="实际上班天数"
+            value={`${attendanceSummary.workUnits} 天`}
+            tabular
+          />
+          <Row
+            label="请假天数"
+            value={`${attendanceSummary.leaveUnits} 天`}
+            tabular
+          />
         </dl>
+      </section>
+
+      <section className="rounded-xl border bg-card shadow-sm">
+        <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
+          销售额流水（{period.salesEntries.length}）
+        </h2>
+        {period.salesEntries.length === 0 ? (
+          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
+            暂无逐单销售额流水；旧周期可能只有期初/累计汇总。
+          </p>
+        ) : (
+          <ol className="divide-y text-sm">
+            {period.salesEntries.map((entry) => (
+              <li
+                key={entry.id}
+                className="grid min-w-0 gap-2 px-4 py-3 sm:grid-cols-[160px_120px_1fr_auto] sm:px-6"
+              >
+                <span className="font-sans tabular-nums">
+                  {formatDateTimeShanghai(entry.createdAt)}
+                </span>
+                <span>{CS_SALES_ENTRY_LABELS[entry.type]}</span>
+                <span className="admin-wrap-anywhere">
+                  {entry.order ? (
+                    <Link
+                      href={`/orders/${entry.order.id}`}
+                      className="font-sans text-primary underline"
+                    >
+                      {entry.order.orderNo}
+                    </Link>
+                  ) : (
+                    entry.remark ?? '手工调整'
+                  )}
+                  {entry.orderRevision
+                    ? ` · 第 ${entry.orderRevision} 版`
+                    : ''}
+                </span>
+                <span className="font-sans font-medium tabular-nums">
+                  {Number(entry.amount) > 0 ? '+' : ''}¥ {String(entry.amount)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       {period.status === SalaryPeriodStatus.IN_PROGRESS ? (
@@ -154,6 +219,13 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
     </div>
   );
 }
+
+const CS_SALES_ENTRY_LABELS: Record<CsSalesEntryType, string> = {
+  [CsSalesEntryType.ORDER_SUBMITTED]: '工单提交',
+  [CsSalesEntryType.ORDER_CHANGED]: '工单变更',
+  [CsSalesEntryType.ORDER_CANCELLED]: '工单取消',
+  [CsSalesEntryType.MANUAL_ADJUSTMENT]: '手工调整',
+};
 
 function Row({
   label,

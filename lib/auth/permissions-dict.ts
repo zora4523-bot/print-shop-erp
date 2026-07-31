@@ -20,6 +20,8 @@ export const PERMISSIONS = {
   'order:ship':                 [Role.ADMIN],
   'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
   'order:cancel':               [Role.ADMIN],
+  'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE],
+  'order:change:review':        [Role.ADMIN],
 
   // 生产任务
   'task:assign':                [Role.ADMIN],

@@ -63,6 +63,10 @@ function normalizeFormInput(formData: FormData) {
     const v = formData.get(k);
     return typeof v === 'string' ? v : undefined;
   };
+  const getAll = (k: string) =>
+    formData
+      .getAll(k)
+      .filter((value): value is string => typeof value === 'string');
   return {
     username: get('username'),
     displayName: get('displayName'),
@@ -70,8 +74,13 @@ function normalizeFormInput(formData: FormData) {
     role: get('role'),
     workerType: get('workerType') || null,
     machineType: get('machineType') || null,
+    machineCapabilities: getAll('machineCapabilities'),
+    craftCapabilities: getAll('craftCapabilities'),
     password: get('password'),
     isActive: get('isActive'),
+    employmentType: get('employmentType') || null,
+    employmentStartDate: get('employmentStartDate') || null,
+    employmentEndDate: get('employmentEndDate') || null,
   };
 }
 

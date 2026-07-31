@@ -294,7 +294,7 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     ),
   },
   {
-    header: '客户',
+    header: '客户名称/简称',
     cell: (r) => r.customerRef ?? '—',
   },
   {
@@ -328,7 +328,7 @@ const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
     ),
   },
   {
-    header: '客户',
+    header: '客户名称/简称',
     cell: (r) => r.customerRef ?? '—',
   },
   {

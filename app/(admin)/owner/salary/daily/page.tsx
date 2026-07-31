@@ -19,6 +19,7 @@ import {
   PageHeader,
   StatCard as UiStatCard,
 } from '@/components/ui-business';
+import { getAttendanceSummaries } from '@/lib/attendance';
 
 export const metadata = { title: '计件工资' };
 
@@ -62,6 +63,13 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     }),
     listMachineWorkersForSalary(),
   ]);
+  const attendanceStart = parseStrictYmd(selectedDate)!;
+  const attendanceEnd = new Date(attendanceStart);
+  attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);
+  const attendanceSummaries = await getAttendanceSummaries(
+    rows.map((row) => row.workerId),
+    { start: attendanceStart, end: attendanceEnd },
+  );
 
   // Aggregate in Decimal — rows are Prisma Decimal, and JS float
   // addition can drift by cents when summing 50+ rows.
@@ -160,6 +168,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                 <th className="px-4 py-2 text-right">调整</th>
                 <th className="px-4 py-2 text-right">实发</th>
                 <th className="px-4 py-2 text-center">任务 / 工单</th>
+                <th className="px-4 py-2 text-center">上班 / 请假</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2"></th>
               </tr>
@@ -191,12 +200,25 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
                     {r.taskCount} / {r.orderCount}
                   </td>
+                  <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
+                    {attendanceSummaries.get(r.workerId)?.workUnits ?? '0'} /{' '}
+                    {attendanceSummaries.get(r.workerId)?.leaveUnits ?? '0'} 天
+                  </td>
                   <td className="px-4 py-3 text-center">
-                    {r.isPaid ? (
-                      <Badge>已发</Badge>
-                    ) : (
-                      <Badge variant="outline">未发</Badge>
-                    )}
+                    <div className="flex flex-col items-center gap-1">
+                      {r.isPaid ? (
+                        <Badge>已发</Badge>
+                      ) : (
+                        <Badge variant="outline">未发</Badge>
+                      )}
+                      {new Decimal(
+                        r.totalPieceworkAmount as unknown as string,
+                      ).gte(new Decimal(r.baseSalary as unknown as string)) ? (
+                        <Badge variant="secondary">计件已超底薪</Badge>
+                      ) : (
+                        <Badge variant="outline">按底薪补足</Badge>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">

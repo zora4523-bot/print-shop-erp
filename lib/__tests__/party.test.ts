@@ -50,7 +50,6 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   createParty,
   formatPartyAddress,
-  listCustomerPartyOptions,
   listParties,
   listPartiesPage,
   listSupplierPartyOptions,
@@ -201,30 +200,6 @@ describe('listPartiesPage', () => {
     expect(dbMock.party.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
     );
-  });
-});
-
-describe('listCustomerPartyOptions', () => {
-  it('only asks for active CUSTOMER/BOTH rows and maps defaults for order form', async () => {
-    dbMock.party.findMany.mockResolvedValue([makeParty()]);
-
-    const options = await listCustomerPartyOptions();
-
-    expect(dbMock.party.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          isActive: true,
-          OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
-        },
-      }),
-    );
-    expect(options[0]).toMatchObject({
-      code: 'CUST_001',
-      contactName: '王小姐',
-      receiverName: '王小姐',
-      receiverPhone: '13800000000',
-      receiverAddress: '广东广州番禺市桥街道 1 号',
-    });
   });
 });
 

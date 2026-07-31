@@ -25,12 +25,19 @@ export type MachineSalaryRule = {
   pieceRate: string | number;
   // 板数单价（元/板）— 风车 / 黏封通常为 0
   boardRate: string | number;
-  // 小单保护阈值：quantity 严格小于此值时，不算板/下数，走 flat price。
+  // 小单保护阈值：默认 quantity 严格小于此值时走 flat price；
+  // smallOrderInclusive=true 时阈值本身也纳入小单。
   // null 表示该机型无小单保护（例如黏封机）。
   smallOrderThreshold: number | null;
   // 小单 flat price — 只有在触发小单保护时才使用。
   // May be null when smallOrderThreshold is null (no small-order mode).
   smallOrderFlatPrice: string | number | null;
+  // true means the threshold itself is included (e.g. 风车机 <= 1000).
+  // Missing/false preserves historical rules that used strict "<".
+  smallOrderInclusive?: boolean;
+  // One-time setup fee per item when the task is above the small-order
+  // threshold. It is deliberately not multiplied by double-color/side.
+  largeOrderSetupFee?: string | number;
   multiplierFactors: readonly MachineMultiplierFactor[];
 };
 
@@ -66,13 +73,14 @@ export function calcMachinePieceworkBreakdown(
   const pieceRate = new Decimal(rule.pieceRate);
   const boardRate = new Decimal(rule.boardRate);
 
-  // Small-order protection: quantity strictly below threshold → pay
-  // the flat price, skip board/press counts. `null` threshold opts out
-  // of the protection entirely (e.g. glue machine, which the SPEC
-  // marks with "—" in §5.2 params table).
+  // Small-order protection pays the flat price and skips board/press
+  // counts. The boundary is strict by default; rules may opt into an
+  // inclusive threshold. `null` opts out entirely (e.g. glue machine).
   if (
     rule.smallOrderThreshold !== null &&
-    task.quantity < rule.smallOrderThreshold
+    (task.quantity < rule.smallOrderThreshold ||
+      (rule.smallOrderInclusive === true &&
+        task.quantity === rule.smallOrderThreshold))
   ) {
     return {
       smallOrder: true,
@@ -98,7 +106,10 @@ export function calcMachinePieceworkBreakdown(
   const pressCount = task.quantity * multiplier;
   const amount = boardRate
     .times(boardCount)
-    .plus(pieceRate.times(pressCount));
+    .plus(pieceRate.times(pressCount))
+    .plus(
+      new Decimal(rule.largeOrderSetupFee ?? 0).times(task.itemCount),
+    );
   return {
     smallOrder: false,
     multiplier,

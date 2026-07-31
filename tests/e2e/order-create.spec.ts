@@ -82,7 +82,7 @@ test.describe('创建工单 — golden path', () => {
     await expectNoNextErrorOverlay(page);
 
     // 详情页显示了我们刚填的 customerRef 和款式名 —— 工单确实落库了。
-    // 等到 dd 元素带 customerRef 出现（Row 组件结构 <dt>客户代号</dt><dd>...</dd>）。
+    // 等到 dd 元素带 customerRef 出现（Row 组件结构 <dt>客户名称/简称</dt><dd>...</dd>）。
     await expect(
       page.locator('dd', { hasText: customerRef }),
     ).toBeVisible({ timeout: 10_000 });

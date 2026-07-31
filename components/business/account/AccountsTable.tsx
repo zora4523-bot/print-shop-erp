@@ -20,8 +20,19 @@ import {
 function workerDetail(a: AccountSummary): string {
   if (a.role !== Role.WORKER) return '—';
   const wt = workerTypeLabel(a.workerType);
-  const mt = machineTypeLabel(a.machineType);
-  return mt ? `${wt} · ${mt}` : wt || '—';
+  const machines =
+    (a.machineCapabilities?.length ?? 0) > 0
+      ? a.machineCapabilities.map((machine) => machineTypeLabel(machine))
+      : a.machineType
+        ? [machineTypeLabel(a.machineType)]
+        : [];
+  const capabilityText =
+    (a.craftCapabilities?.length ?? 0) > 0
+      ? ` · ${a.craftCapabilities.length} 项熟练工艺`
+      : '';
+  return machines.length > 0
+    ? `${wt} · ${machines.join(' / ')}${capabilityText}`
+    : `${wt || '—'}${capabilityText}`;
 }
 
 export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
@@ -38,7 +49,7 @@ export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
           <TableHead>用户名</TableHead>
           <TableHead>姓名</TableHead>
           <TableHead>角色</TableHead>
-          <TableHead>岗位 / 机器</TableHead>
+          <TableHead>岗位 / 机器 / 熟练工艺</TableHead>
           <TableHead>电话</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>创建于</TableHead>

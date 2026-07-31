@@ -55,7 +55,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
           <Input
             name="q"
             defaultValue={q}
-            placeholder="搜索工单号、工单名称、客户、收货人、电话、快递号"
+            placeholder="搜索工单号、工单名称、客户、收货人、提交人、师傅、快递号"
             className="pl-8"
           />
         </div>

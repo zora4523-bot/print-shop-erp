@@ -43,6 +43,12 @@ enum MachineType {
   GLUE // 黏封机
 }
 
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  TEMPORARY
+}
+
 enum PartyType {
   CUSTOMER
   SUPPLIER
@@ -50,40 +56,50 @@ enum PartyType {
 }
 
 model User {
-  id          String       @id @default(cuid())
-  username    String       @unique @db.Citext
-  password    String // bcrypt哈希
-  role        Role
-  workerType  WorkerType? // 仅 role=WORKER 时有值
-  machineType MachineType? // 仅 workerType=MACHINE 时有值
-  displayName String
-  phone       String?
-  avatar      String?
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id                  String          @id @default(cuid())
+  username            String          @unique @db.Citext
+  password            String // bcrypt哈希
+  role                Role
+  workerType          WorkerType? // 仅 role=WORKER 时有值
+  machineType         MachineType? // 仅 workerType=MACHINE 时有值；主机型/默认机型
+  machineCapabilities MachineType[]   @default([]) // 开机师傅实际可操作的全部机型
+  displayName         String
+  phone               String?
+  avatar              String?
+  isActive            Boolean         @default(true)
+  employmentType      EmploymentType?
+  employmentStartDate DateTime?       @db.Date
+  employmentEndDate   DateTime?       @db.Date
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   // 关系
-  submittedOrders     Order[]                     @relation("OrderSubmitter")
-  createdOrders       Order[]                     @relation("OrderCreator")
-  assignedTasks       ProductionTask[]
-  orderLogs           OrderLog[]
-  salaryPeriods       SalaryPeriod[]
-  csCommissions       CustomerServiceCommission[]
-  dailyWorkerSalaries DailyWorkerSalary[]
-  hourlyPayrolls      HourlyWorkerPayroll[]
-  attendanceRecords   Attendance[]                @relation("AttendanceWorker")
-  attendanceCreated   Attendance[]                @relation("AttendanceCreator")
-  bills               Bill[]
-  designBundles       DesignBundle[]
-  materialTxs         MaterialTransaction[]
-  purchaseReceipts    PurchaseReceipt[]
-  stockTransfers      StockTransfer[]
-  inventoryCounts     InventoryCount[]
-  businessAuditLogs   BusinessAuditLog[]
-  workerSalaryRules   WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleWorker")
-  createdSalaryRules  WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleCreator")
-  salaryAdjustments   SalaryAdjustment[]          @relation("SalaryAdjustmentCreator")
+  submittedOrders       Order[]                     @relation("OrderSubmitter")
+  createdOrders         Order[]                     @relation("OrderCreator")
+  assignedTasks         ProductionTask[]
+  orderLogs             OrderLog[]
+  salaryPeriods         SalaryPeriod[]
+  csCommissions         CustomerServiceCommission[]
+  dailyWorkerSalaries   DailyWorkerSalary[]
+  hourlyPayrolls        HourlyWorkerPayroll[]
+  attendanceRecords     Attendance[]                @relation("AttendanceWorker")
+  attendanceCreated     Attendance[]                @relation("AttendanceCreator")
+  bills                 Bill[]
+  designBundles         DesignBundle[]
+  materialTxs           MaterialTransaction[]
+  purchaseReceipts      PurchaseReceipt[]
+  stockTransfers        StockTransfer[]
+  inventoryCounts       InventoryCount[]
+  businessAuditLogs     BusinessAuditLog[]
+  workerSalaryRules     WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleWorker")
+  craftCapabilities     WorkerCraftCapability[]
+  createdSalaryRules    WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleCreator")
+  salaryAdjustments     SalaryAdjustment[]          @relation("SalaryAdjustmentCreator")
+  requestedOrderChanges OrderChangeRequest[]        @relation("OrderChangeRequester")
+  reviewedOrderChanges  OrderChangeRequest[]        @relation("OrderChangeReviewer")
+  recordedBillPayments  BillPayment[]               @relation("BillPaymentRecorder")
+  createdOrderCosts     OrderCostEntry[]            @relation("OrderCostCreator")
+  csSalesEntries        CsSalesEntry[]
 
   @@index([role])
   @@index([workerType])
@@ -187,25 +203,56 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum OrderKind {
+  NORMAL
+  REWORK
+}
+
+enum OrderBillingMode {
+  CHARGE
+  NO_CHARGE
+}
+
+enum OrderChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  STALE
+}
+
+enum ReworkCause {
+  QUALITY
+  LOGISTICS_DAMAGE
+  OTHER
+}
+
 model Order {
-  id                   String      @id @default(cuid())
-  orderNo              String      @unique // GD-YYMMDD-XXX; historical formats remain valid
+  id                   String           @id @default(cuid())
+  orderNo              String           @unique // GD-YYMMDD-XXX; historical formats remain valid
   submitterId          String
   submitterRole        Role // 冗余：SALES 或 CUSTOMER_SERVICE
   createdById          String // 代下单场景
   customerPartyId      String?
-  status               OrderStatus @default(DRAFT)
-  requiresOutsource    Boolean     @default(false) // 排产时快照：工单含外协工艺
-  isUrgent             Boolean     @default(false)
+  status               OrderStatus      @default(DRAFT)
+  kind                 OrderKind        @default(NORMAL)
+  billingMode          OrderBillingMode @default(CHARGE)
+  sourceOrderId        String?
+  reworkCause          ReworkCause?
+  reworkReason         String?
+  requiresOutsource    Boolean          @default(false) // 排产时快照：工单含外协工艺
+  isUrgent             Boolean          @default(false)
   customName           String? // 录单人自定义的工单识别名称
-  customerRef          String? // 客户代号，如"苹果福"
+  customerRef          String? // 客户名称/简称，如"苹果福"
   receiverName         String?
   receiverPhone        String?
   receiverAddress      String?
   expressCode          String? // 快递代码/菜鸟码
+  isSfCollect          Boolean          @default(false) // 顺丰到付：自行预约，物流费不计入工单金额
   packageRequirement   String?
   remark               String?
-  totalAmount          Decimal     @default(0) @db.Decimal(12, 2)
+  totalAmount          Decimal          @default(0) @db.Decimal(12, 2)
+  revision             Int              @default(1)
   promisedDate         DateTime? // 承诺交期（对客户）；逾期预警扫描用
   trackingNo           String? // 快递单号
   searchPinyin         String?
@@ -215,19 +262,28 @@ model Order {
   completedAt          DateTime?
   shippedAt            DateTime?
   finishedAt           DateTime?
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
-  submitter       User             @relation("OrderSubmitter", fields: [submitterId], references: [id])
-  createdBy       User             @relation("OrderCreator", fields: [createdById], references: [id])
-  customerParty   Party?           @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
+  submitter       User                 @relation("OrderSubmitter", fields: [submitterId], references: [id])
+  createdBy       User                 @relation("OrderCreator", fields: [createdById], references: [id])
+  customerParty   Party?               @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
+  sourceOrder     Order?               @relation("OrderReworkLineage", fields: [sourceOrderId], references: [id], onDelete: SetNull)
+  reworkOrders    Order[]              @relation("OrderReworkLineage")
   items           OrderItem[]
+  shipments       OrderShipment[]
   outsourceOrders OutsourceOrder[]
   logs            OrderLog[]
   billItems       BillItem[]
+  changeRequests  OrderChangeRequest[]
+  costEntries     OrderCostEntry[]
+  csSalesEntries  CsSalesEntry[]
 
   @@index([submitterId])
   @@index([customerPartyId])
+  @@index([sourceOrderId])
+  @@index([kind])
+  @@index([billingMode])
   @@index([status])
   @@index([createdAt])
   @@index([isUrgent])
@@ -262,12 +318,77 @@ model OrderItem {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  order   Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product?          @relation(fields: [productId], references: [id])
-  designs OrderItemDesign[]
-  tasks   ProductionTask[]
+  order         Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product       Product?            @relation(fields: [productId], references: [id])
+  designs       OrderItemDesign[]
+  tasks         ProductionTask[]
+  shipmentLines OrderShipmentLine[]
 
   @@index([orderId])
+}
+
+model OrderChangeRequest {
+  id              String                   @id @default(cuid())
+  orderId         String
+  requesterId     String
+  baseRevision    Int
+  status          OrderChangeRequestStatus @default(PENDING)
+  reason          String
+  beforeSnapshot  Json
+  proposedChanges Json
+  reviewedById    String?
+  reviewRemark    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  requester  User  @relation("OrderChangeRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  reviewedBy User? @relation("OrderChangeReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([orderId, status, createdAt])
+  @@index([requesterId, createdAt])
+  @@index([status, createdAt])
+}
+
+enum ShipmentStatus {
+  PLANNED
+  SHIPPED
+}
+
+model OrderShipment {
+  id              String         @id @default(cuid())
+  orderId         String
+  sequence        Int
+  receiverName    String?
+  receiverPhone   String?
+  receiverAddress String?
+  expressCode     String?
+  trackingNo      String?
+  weightKg        Decimal?       @db.Decimal(10, 3)
+  status          ShipmentStatus @default(PLANNED)
+  shippedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  order Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lines OrderShipmentLine[]
+
+  @@unique([orderId, sequence])
+  @@index([orderId, status])
+}
+
+model OrderShipmentLine {
+  id          String @id @default(cuid())
+  shipmentId  String
+  orderItemId String
+  quantity    Int
+
+  shipment  OrderShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  orderItem OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, orderItemId])
+  @@index([orderItemId])
 }
 
 enum DesignFileType {
@@ -348,7 +469,7 @@ model ProductionTask {
   orderItemId        String
   craftId            String
   workerId           String?
-  workerType         WorkerType?  // 派工时快照，防止账号后续改岗破坏历史任务
+  workerType         WorkerType? // 派工时快照，防止账号后续改岗破坏历史任务
   machineType        MachineType? // 派单时快照
   status             TaskStatus   @default(PENDING)
   plannedQty         Int
@@ -370,10 +491,10 @@ model ProductionTask {
   worker          User?                  @relation(fields: [workerId], references: [id])
   dailySalaryItem DailyWorkerSalaryItem?
 
+  @@unique([orderItemId, craftId])
   @@index([workerId])
   @@index([status])
   @@index([completedAt])
-  @@unique([orderItemId, craftId])
 }
 
 // ============================================================
@@ -443,20 +564,36 @@ model DesignBundle {
 // ============================================================
 
 model Craft {
-  id                 String       @id @default(cuid())
-  name               String       @unique
-  code               String       @unique
-  isOutsource        Boolean      @default(false)
-  defaultWorkerType  WorkerType?  // 自产工艺的接单岗位；外协工艺为 null
-  defaultMachineType MachineType? // 默认机器
-  sortOrder          Int          @default(0)
-  isActive           Boolean      @default(true)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  id                  String        @id @default(cuid())
+  name                String        @unique
+  code                String        @unique
+  isOutsource         Boolean       @default(false)
+  defaultWorkerType   WorkerType? // 自产工艺的接单岗位；外协工艺为 null
+  defaultMachineType  MachineType? // 默认机器
+  inHouseMachineTypes MachineType[] @default([]) // 混合工艺回厂生产可选机型
+  sortOrder           Int           @default(0)
+  isActive            Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
-  tasks ProductionTask[]
+  tasks          ProductionTask[]
+  capableWorkers WorkerCraftCapability[]
 
   @@index([isActive])
+}
+
+// 师傅的工艺熟练项。设备/岗位决定“能不能派”，本表决定“是否推荐”；
+// 管理员可越过推荐项派工，但必须留下原因。
+model WorkerCraftCapability {
+  workerId  String
+  craftId   String
+  createdAt DateTime @default(now())
+
+  worker User  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  craft  Craft @relation(fields: [craftId], references: [id], onDelete: Cascade)
+
+  @@id([workerId, craftId])
+  @@index([craftId])
 }
 
 // ============================================================
@@ -1039,12 +1176,41 @@ model SalaryPeriod {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  csUser      User                        @relation(fields: [csUserId], references: [id])
-  commissions CustomerServiceCommission[]
+  csUser       User                        @relation(fields: [csUserId], references: [id])
+  commissions  CustomerServiceCommission[]
+  salesEntries CsSalesEntry[]
 
   @@index([csUserId])
   @@index([status])
   @@index([periodEnd])
+}
+
+enum CsSalesEntryType {
+  ORDER_SUBMITTED
+  ORDER_CHANGED
+  ORDER_CANCELLED
+  MANUAL_ADJUSTMENT
+}
+
+model CsSalesEntry {
+  id             String           @id @default(cuid())
+  eventKey       String           @unique
+  csUserId       String
+  salaryPeriodId String
+  orderId        String?
+  orderRevision  Int?
+  type           CsSalesEntryType
+  amount         Decimal          @db.Decimal(12, 2)
+  remark         String?
+  createdAt      DateTime         @default(now())
+
+  csUser       User         @relation(fields: [csUserId], references: [id], onDelete: Restrict)
+  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
+  order        Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([csUserId, createdAt])
+  @@index([salaryPeriodId, createdAt])
+  @@index([orderId])
 }
 
 // 客服提成记录
@@ -1119,6 +1285,9 @@ model Attendance {
   normalHours Decimal  @default(0) @db.Decimal(6, 2)
   otHours     Decimal  @default(0) @db.Decimal(6, 2)
   spareHours  Decimal  @default(0) @db.Decimal(6, 2) // COOK 专用
+  workUnits   Decimal  @default(1) @db.Decimal(2, 1)
+  leaveUnits  Decimal  @default(0) @db.Decimal(2, 1)
+  leaveType   String?
   remark      String?
   createdById String
   createdAt   DateTime @default(now())
@@ -1143,6 +1312,18 @@ enum BillStatus {
   FULLY_PAID
 }
 
+enum OrderCostCategory {
+  MATERIAL
+  PIECEWORK
+  SETUP
+  OUTSOURCE
+  SHIPPING
+  MEAL
+  ELECTRICITY
+  CUSTOM
+  ADJUSTMENT
+}
+
 model Bill {
   id          String     @id @default(cuid())
   salesUserId String
@@ -1156,8 +1337,9 @@ model Bill {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  salesUser User       @relation(fields: [salesUserId], references: [id])
+  salesUser User          @relation(fields: [salesUserId], references: [id])
   items     BillItem[]
+  payments  BillPayment[]
 
   @@unique([salesUserId, period])
   @@index([status])
@@ -1165,6 +1347,24 @@ model Bill {
   // composite (salesUserId, period) unique key can't serve a
   // period-only predicate (PG needs leading column). Codex round 98 P2.
   @@index([period])
+}
+
+model BillPayment {
+  id            String   @id @default(cuid())
+  billId        String
+  amount        Decimal  @db.Decimal(12, 2)
+  paidAt        DateTime
+  paymentMethod String?
+  referenceNo   String?
+  remark        String?
+  recordedById  String
+  createdAt     DateTime @default(now())
+
+  bill       Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
+  recordedBy User @relation("BillPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([billId, paidAt])
+  @@index([recordedById, createdAt])
 }
 
 model BillItem {
@@ -1182,6 +1382,29 @@ model BillItem {
   // closes most of the race, but this is the DB-level last-line guard.
   @@unique([billId, orderId])
   @@index([billId])
+}
+
+model OrderCostEntry {
+  id          String            @id @default(cuid())
+  orderId     String
+  category    OrderCostCategory
+  description String
+  quantity    Decimal?          @db.Decimal(12, 3)
+  unit        String?
+  unitPrice   Decimal?          @db.Decimal(12, 4)
+  amount      Decimal           @db.Decimal(12, 2)
+  sourceType  String?
+  sourceId    String?
+  remark      String?
+  createdById String
+  createdAt   DateTime          @default(now())
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy User  @relation("OrderCostCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([orderId, category, createdAt])
+  @@index([sourceType, sourceId])
+  @@index([createdById, createdAt])
 }
 
 // ============================================================

@@ -27,11 +27,12 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(25);
+    expect(items).toHaveLength(26);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
       '采购单',
+      '工单修改申请',
       '排产',
       '外协',
       '车间用料',
@@ -62,6 +63,9 @@ describe('getAdminMenuItems', () => {
     const purchases = items.find((i) => i.label === '采购单');
     expect(purchases?.href).toBe('/owner/purchases');
     expect(purchases?.requiredPermission).toBe('purchase:manage');
+    const orderChanges = items.find((i) => i.label === '工单修改申请');
+    expect(orderChanges?.href).toBe('/owner/order-changes');
+    expect(orderChanges?.requiredPermission).toBe('order:change:review');
     const parties = items.find((i) => i.label === '客户/供应商');
     expect(parties?.href).toBe('/owner/parties');
     expect(parties?.requiredPermission).toBe('party:manage');

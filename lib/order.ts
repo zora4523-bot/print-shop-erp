@@ -1,10 +1,13 @@
 import Decimal from 'decimal.js';
 import {
+  CsSalesEntryType,
+  OrderBillingMode,
+  OrderKind,
   OrderStatus,
   OutsourceStatus,
-  PartyType,
   Prisma,
   Role,
+  ShipmentStatus,
   TaskStatus,
 } from '../generated/prisma/client';
 import { db } from './db';
@@ -16,6 +19,7 @@ import {
 import { transitionProductionTask } from './production/status-machine';
 import type {
   CreateOrderInput,
+  ShipOrderInput,
   UpdateEditableOrderInput,
   UpdateShippingOrderInput,
 } from './auth/schemas';
@@ -24,11 +28,13 @@ import { orderCascadeLockKey } from './order/locks';
 import {
   FULL_EDITABLE_FIELDS,
   SHIPPING_EDITABLE_FIELDS,
+  canEditOrderSfCollect,
   editableFieldsetForStatus,
 } from './order/editable-fields';
 import { dispatchNotification } from './notification/dispatch';
 import { formatMoneyPlain } from './dashboard/format';
 import { sortBySearchRelevance } from './search-ranking';
+import { recordCsSalesEntryInTx } from './salary/cs-sales';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -65,11 +71,14 @@ type OrderTxClient = {
       select?: unknown;
     }) => Promise<Array<{ id: string; isActive: boolean }>>;
   };
-  party: {
-    findUnique: (args: {
-      where: { id: string };
-      select?: unknown;
-    }) => Promise<{ id: string; type: PartyType; isActive: boolean } | null>;
+  orderShipment: {
+    create: (args: {
+      data: unknown;
+      select: { id: true };
+    }) => Promise<{ id: string }>;
+  };
+  orderShipmentLine: {
+    createMany: (args: { data: unknown[] }) => Promise<{ count: number }>;
   };
 };
 
@@ -93,6 +102,13 @@ export type CreatedOrderSummary = {
   itemIds: string[];
 };
 
+// Keep the library boundary compatible with callers that predate the
+// multi-address form. The action schema always supplies an array, while
+// direct domain callers may omit it and get the same single-address behavior.
+type CreateOrderCommand = Omit<CreateOrderInput, 'additionalShipments'> & {
+  additionalShipments?: CreateOrderInput['additionalShipments'];
+};
+
 // The transaction path:
 //   1. advisory-lock the per-day order-seq (inside nextOrderNumber)
 //   2. verify every referenced Craft exists + is active
@@ -100,10 +116,12 @@ export type CreatedOrderSummary = {
 //   4. compute subtotals + totalAmount in Decimal.js
 //   5. nested-create Order + items + initial OrderLog("CREATE") in one call
 export async function createOrder(
-  input: CreateOrderInput,
+  input: CreateOrderCommand,
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
+  const additionalShipments = input.additionalShipments ?? [];
+
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as OrderTxClient;
 
@@ -122,22 +140,6 @@ export async function createOrder(
       throw new OrderInvariantError(
         `工艺不存在或已停用：${missing.join(', ')}`,
       );
-    }
-
-    if (input.customerPartyId) {
-      const party = await txClient.party.findUnique({
-        where: { id: input.customerPartyId },
-        select: { id: true, type: true, isActive: true },
-      });
-      if (!party) {
-        throw new OrderInvariantError(`客户主数据不存在：${input.customerPartyId}`);
-      }
-      if (!party.isActive) {
-        throw new OrderInvariantError(`客户主数据已停用：${input.customerPartyId}`);
-      }
-      if (party.type === PartyType.SUPPLIER) {
-        throw new OrderInvariantError(`供应商不能作为工单客户：${input.customerPartyId}`);
-      }
     }
 
     // (3) product FK check — one batch findMany over the distinct ids
@@ -182,9 +184,11 @@ export async function createOrder(
         submitterId: actor.id,
         submitterRole: actor.role,
         createdById: actor.id,
-        customerPartyId: input.customerPartyId ?? null,
         status: OrderStatus.DRAFT,
+        kind: OrderKind.NORMAL,
+        billingMode: OrderBillingMode.CHARGE,
         isUrgent: input.isUrgent,
+        isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
         customerRef: input.customerRef,
         receiverName: input.receiverName,
@@ -218,7 +222,11 @@ export async function createOrder(
             {
               operatorId: actor.id,
               action: 'CREATE',
-              remark: input.isUrgent ? '创建急单' : '创建工单',
+              remark: `${input.isUrgent ? '创建急单' : '创建工单'}${
+                additionalShipments.length > 0
+                  ? `（${additionalShipments.length + 1} 个收货地址）`
+                  : ''
+              }`,
             },
           ],
         },
@@ -232,6 +240,55 @@ export async function createOrder(
         },
       },
     });
+
+    const itemBySequence = new Map(
+      created.items.map((item) => [item.sequence, item.id]),
+    );
+    const primaryQuantities = input.items.map((item, itemIndex) => {
+      const extraQuantity = additionalShipments.reduce(
+        (sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0),
+        0,
+      );
+      return item.quantity - extraQuantity;
+    });
+    const shipmentInputs = [
+      {
+        receiverName: input.receiverName,
+        receiverPhone: input.receiverPhone,
+        receiverAddress: input.receiverAddress,
+        expressCode: input.expressCode,
+        itemQuantities: primaryQuantities,
+      },
+      ...additionalShipments,
+    ];
+
+    for (const [shipmentIndex, shipment] of shipmentInputs.entries()) {
+      const createdShipment = await txClient.orderShipment.create({
+        data: {
+          orderId: created.id,
+          sequence: shipmentIndex + 1,
+          receiverName: shipment.receiverName,
+          receiverPhone: shipment.receiverPhone,
+          receiverAddress: shipment.receiverAddress,
+          expressCode: shipment.expressCode,
+          status: ShipmentStatus.PLANNED,
+        },
+        select: { id: true },
+      });
+      const lines = shipment.itemQuantities.flatMap((quantity, itemIndex) => {
+        if (quantity <= 0) return [];
+        const orderItemId = itemBySequence.get(itemIndex + 1);
+        if (!orderItemId) {
+          throw new OrderInvariantError(
+            `创建发货分配时找不到款式 ${itemIndex + 1}`,
+          );
+        }
+        return [{ shipmentId: createdShipment.id, orderItemId, quantity }];
+      });
+      if (lines.length > 0) {
+        await txClient.orderShipmentLine.createMany({ data: lines });
+      }
+    }
 
     return {
       id: created.id,
@@ -288,6 +345,18 @@ type CascadeTxClient = {
       where: unknown;
       select?: unknown;
     }) => Promise<Array<{ id: string }>>;
+  };
+  orderShipment: {
+    findMany: (args: {
+      where: { orderId: string };
+      select: { id: true; sequence: true };
+      orderBy: { sequence: 'asc' };
+    }) => Promise<Array<{ id: string; sequence: number }>>;
+    update: (args: {
+      where: { id: string };
+      data: unknown;
+      select: { id: true };
+    }) => Promise<{ id: string }>;
   };
   orderLog: {
     create: (args: { data: unknown }) => Promise<unknown>;
@@ -402,6 +471,34 @@ export async function submitOrder(
       const globalOverride = actor.role === Role.ADMIN;
       if (!globalOverride && order.submitterId !== actor.id) {
         throw new OrderInvariantError('只能提交自己创建的工单');
+      }
+    },
+    cascade: async (tx, lockedOrderId) => {
+      const prismaTx = tx as unknown as Prisma.TransactionClient;
+      const submittedOrder = await prismaTx.order.findUnique({
+        where: { id: lockedOrderId },
+        select: {
+          submitterId: true,
+          submitterRole: true,
+          billingMode: true,
+          totalAmount: true,
+          revision: true,
+        },
+      });
+      if (
+        submittedOrder?.submitterRole === Role.CUSTOMER_SERVICE &&
+        submittedOrder.billingMode === OrderBillingMode.CHARGE
+      ) {
+        await recordCsSalesEntryInTx(prismaTx, {
+          eventKey: `order:${lockedOrderId}:revision:${submittedOrder.revision}:submit`,
+          csUserId: submittedOrder.submitterId,
+          orderId: lockedOrderId,
+          orderRevision: submittedOrder.revision,
+          type: CsSalesEntryType.ORDER_SUBMITTED,
+          amount: submittedOrder.totalAmount,
+          occurredAt: now,
+          remark: '客服工单提交计入销售额',
+        });
       }
     },
   });
@@ -544,6 +641,32 @@ export async function cancelOrder(
           },
         });
       }
+      const prismaTx = tx as unknown as Prisma.TransactionClient;
+      const cancelledOrder = await prismaTx.order.findUnique({
+        where: { id },
+        select: {
+          submitterId: true,
+          submitterRole: true,
+          billingMode: true,
+          totalAmount: true,
+          revision: true,
+        },
+      });
+      if (
+        cancelledOrder?.submitterRole === Role.CUSTOMER_SERVICE &&
+        cancelledOrder.billingMode === OrderBillingMode.CHARGE
+      ) {
+        await recordCsSalesEntryInTx(prismaTx, {
+          eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
+          csUserId: cancelledOrder.submitterId,
+          orderId: id,
+          orderRevision: cancelledOrder.revision,
+          type: CsSalesEntryType.ORDER_CANCELLED,
+          amount: new Decimal(cancelledOrder.totalAmount).negated(),
+          occurredAt: now,
+          remark: reason ? `取消工单：${reason}` : '取消工单冲减销售额',
+        });
+      }
     },
   });
 }
@@ -555,22 +678,44 @@ export async function cancelOrder(
 export async function shipOrder(
   orderId: string,
   actor: { id: string; role: Role },
-  trackingNo: string | null,
+  trackingInput: string | null | ShipOrderInput,
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
+  const requestedShipments =
+    typeof trackingInput === 'object' && trackingInput !== null
+      ? trackingInput.shipments.map((shipment) => ({
+          shipmentId: shipment.shipmentId.trim(),
+          trackingNo: shipment.trackingNo?.trim() || null,
+          weightKg: shipment.weightKg,
+        }))
+      : [];
+  const legacyTrackingInput =
+    typeof trackingInput === 'object' && trackingInput !== null
+      ? trackingInput.trackingNo
+      : trackingInput;
   // Treat both null AND whitespace-only as &ldquo;no tracking number&rdquo;:
   // `'   '.trim()` is `''`, not null, so a naive `?? null` would
   // happily write an empty string to Order.trackingNo.
-  const trimmed = trackingNo?.trim() ?? '';
+  const trimmed = legacyTrackingInput?.trim() ?? '';
   const tracking = trimmed.length > 0 ? trimmed : null;
+  const primaryTracking =
+    requestedShipments.length > 0
+      ? requestedShipments[0]?.trackingNo ?? null
+      : tracking;
   const result = await transitionWithLog(
     orderId,
     OrderStatus.SHIPPED,
     actor,
     {
-      remark: tracking ? `发货：${tracking}` : '标记发货',
+      remark:
+        requestedShipments.length > 1
+          ? `多地址发货：${requestedShipments.length} 个地址`
+          : primaryTracking
+            ? `发货：${primaryTracking}`
+            : '标记发货',
       now,
-      extraData: tracking !== null ? { trackingNo: tracking } : undefined,
+      extraData:
+        primaryTracking !== null ? { trackingNo: primaryTracking } : undefined,
       cascade: async (tx, id) => {
         const liveOutsource = await tx.outsourceOrder.findMany({
           where: {
@@ -585,6 +730,58 @@ export async function shipOrder(
           throw new OrderInvariantError(
             '该工单仍有已发送或进行中的外协单，收货或取消后才能发货',
           );
+        }
+        if (requestedShipments.length > 0) {
+          const storedShipments = await tx.orderShipment.findMany({
+            where: { orderId: id },
+            select: { id: true, sequence: true },
+            orderBy: { sequence: 'asc' },
+          });
+          const requestedIds = requestedShipments.map(
+            (shipment) => shipment.shipmentId,
+          );
+          if (new Set(requestedIds).size !== requestedIds.length) {
+            throw new OrderInvariantError('发货地址重复，请刷新页面后重试');
+          }
+          if (
+            storedShipments.length !== requestedShipments.length ||
+            storedShipments.some(
+              (shipment, index) =>
+                requestedIds[index] !== shipment.id,
+            )
+          ) {
+            throw new OrderInvariantError(
+              '发货地址已变化，请刷新工单后重新填写运单号',
+            );
+          }
+          const trackingByShipmentId = new Map(
+            requestedShipments.map((shipment) => [
+              shipment.shipmentId,
+              shipment.trackingNo,
+            ]),
+          );
+          const weightByShipmentId = new Map(
+            requestedShipments.map((shipment) => [
+              shipment.shipmentId,
+              shipment.weightKg,
+            ]),
+          );
+          for (const shipment of storedShipments) {
+            await tx.orderShipment.update({
+              where: { id: shipment.id },
+              data: {
+                trackingNo: trackingByShipmentId.get(shipment.id) ?? null,
+                ...(weightByShipmentId.get(shipment.id) !== undefined
+                  ? {
+                      weightKg: weightByShipmentId.get(shipment.id) ?? null,
+                    }
+                  : {}),
+                status: ShipmentStatus.SHIPPED,
+                shippedAt: now,
+              },
+              select: { id: true },
+            });
+          }
         }
       },
     },
@@ -605,7 +802,7 @@ export async function shipOrder(
       {
         orderId: payload.id,
         orderNo: payload.orderNo,
-        trackingNo: tracking ?? '未填',
+        trackingNo: primaryTracking ?? '未填',
       },
       { dedupeKey: `notification:ORDER_SHIPPED:${payload.id}` },
     );
@@ -637,6 +834,7 @@ export async function finishOrder(
 // Tx surface for the edit path. Kept separate from create/transition so
 // the types don't drift when those grow new needs.
 type EditTxClient = {
+  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
   order: {
     findFirst: (args: {
       where: unknown;
@@ -656,6 +854,7 @@ type EditTxClient = {
           remark: string | null;
           promisedDate: Date | null;
           isUrgent: boolean;
+          isSfCollect: boolean;
         }
       | null
     >;
@@ -664,6 +863,17 @@ type EditTxClient = {
       data: unknown;
       select?: unknown;
     }) => Promise<{ id: string; status: OrderStatus }>;
+  };
+  orderShipment: {
+    updateMany: (args: {
+      where: { orderId: string; sequence: number };
+      data: {
+        receiverName?: string | null;
+        receiverPhone?: string | null;
+        receiverAddress?: string | null;
+        expressCode?: string | null;
+      };
+    }) => Promise<{ count: number }>;
   };
   orderLog: {
     create: (args: { data: unknown }) => Promise<unknown>;
@@ -683,6 +893,7 @@ type EditableOrderSnapshot = {
   remark: string | null;
   promisedDate: Date | null;
   isUrgent: boolean;
+  isSfCollect: boolean;
 };
 
 // Zod `optionalTrimmedText` collapses blank → undefined in the parsed
@@ -756,6 +967,9 @@ export async function updateOrderFields(
 ): Promise<UpdateOrderResult> {
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as EditTxClient;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      orderId,
+    )}))`;
 
     const order = await txClient.order.findFirst({
       // Scope filter + id gives us "can this actor see this order?" in
@@ -775,6 +989,7 @@ export async function updateOrderFields(
         remark: true,
         promisedDate: true,
         isUrgent: true,
+        isSfCollect: true,
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
@@ -818,6 +1033,18 @@ export async function updateOrderFields(
       select: { id: true, status: true },
     });
 
+    const primaryShipmentChanges = Object.fromEntries(
+      ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
+        .filter((field) => field in changes)
+        .map((field) => [field, nextFields[field] as string | null]),
+    );
+    if (Object.keys(primaryShipmentChanges).length > 0) {
+      await txClient.orderShipment.updateMany({
+        where: { orderId, sequence: 1 },
+        data: primaryShipmentChanges,
+      });
+    }
+
     await txClient.orderLog.create({
       data: {
         orderId,
@@ -847,6 +1074,85 @@ export async function setOrderUrgent(
   return updateOrderFields(orderId, { isUrgent } as UpdateEditableOrderInput, actor);
 }
 
+// 顺丰到付是可后补的履约标识。它不参与 totalAmount 计算，也不重新
+// 开放已冻结的其他字段；独立事务允许管理员在 COMPLETED / SHIPPED
+// 阶段纠正，同时仍保留权限、所有权、串行化和修改日志。
+export async function setOrderSfCollect(
+  orderId: string,
+  isSfCollect: boolean,
+  actor: { id: string; role: Role },
+): Promise<UpdateOrderResult> {
+  return db.$transaction(async (tx) => {
+    const txClient = tx as unknown as EditTxClient;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      orderId,
+    )}))`;
+
+    const order = await txClient.order.findFirst({
+      where: { id: orderId, ...getOrderScopeFilter(actor) },
+      select: {
+        id: true,
+        status: true,
+        submitterId: true,
+        customName: true,
+        customerRef: true,
+        receiverName: true,
+        receiverPhone: true,
+        receiverAddress: true,
+        expressCode: true,
+        packageRequirement: true,
+        remark: true,
+        promisedDate: true,
+        isUrgent: true,
+        isSfCollect: true,
+      },
+    });
+    if (!order) throw new OrderInvariantError('工单不存在或无权访问');
+
+    const globalOverride = actor.role === Role.ADMIN;
+    if (!globalOverride && order.submitterId !== actor.id) {
+      throw new OrderInvariantError('只能修改自己创建的工单');
+    }
+    if (!canEditOrderSfCollect(order.status)) {
+      throw new OrderInvariantError('已完成或已取消的工单不能修改顺丰到付标识');
+    }
+    if (order.isSfCollect === isSfCollect) {
+      return {
+        id: order.id,
+        status: order.status,
+        changed: false,
+        changedFields: [],
+      };
+    }
+
+    const updated = await txClient.order.update({
+      where: { id: orderId },
+      data: { isSfCollect },
+      select: { id: true, status: true },
+    });
+    await txClient.orderLog.create({
+      data: {
+        orderId,
+        operatorId: actor.id,
+        action: 'UPDATE',
+        changedFields: {
+          isSfCollect: { before: order.isSfCollect, after: isSfCollect },
+        },
+        remark: isSfCollect
+          ? '标记顺丰到付（自行预约）'
+          : '取消顺丰到付',
+      },
+    });
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      changed: true,
+      changedFields: ['isSfCollect'],
+    };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Read helpers — scoped by role (SPEC §2.2 permission matrix)
 // ─────────────────────────────────────────────────────────────────────
@@ -856,16 +1162,23 @@ export type OrderListRow = {
   orderNo: string;
   customName: string | null;
   status: OrderStatus;
+  kind: OrderKind;
+  sourceOrderNo: string | null;
   isUrgent: boolean;
+  isSfCollect: boolean;
+  shipmentCount: number;
   customerRef: string | null;
   receiverName: string | null;
   receiverPhone: string | null;
+  receiverAddress: string | null;
   trackingNo: string | null;
   expressCode: string | null;
   searchPinyin: string | null;
   searchPinyinInitials: string | null;
   totalAmount: unknown; // Prisma Decimal — UI layer formats
   submitterId: string;
+  submitterName: string;
+  workerNames: string[];
   createdAt: Date;
   updatedAt: Date;
   pieceworkCost: string | null;
@@ -886,8 +1199,28 @@ function orderSearchFilter(q?: string | null): Prisma.OrderWhereInput | undefine
       { customerRef: { contains: query, mode: 'insensitive' } },
       { receiverName: { contains: query, mode: 'insensitive' } },
       { receiverPhone: { contains: query, mode: 'insensitive' } },
+      { receiverAddress: { contains: query, mode: 'insensitive' } },
       { trackingNo: { contains: query, mode: 'insensitive' } },
       { expressCode: { contains: query, mode: 'insensitive' } },
+      {
+        submitter: {
+          displayName: { contains: query, mode: 'insensitive' },
+        },
+      },
+      {
+        items: {
+          some: {
+            tasks: {
+              some: {
+                status: { not: TaskStatus.CANCELLED },
+                worker: {
+                  displayName: { contains: query, mode: 'insensitive' },
+                },
+              },
+            },
+          },
+        },
+      },
       { searchPinyin: { contains: query, mode: 'insensitive' } },
       { searchPinyinInitials: { contains: query, mode: 'insensitive' } },
     ],
@@ -908,21 +1241,51 @@ export async function listOrders(
       orderNo: true,
       customName: true,
       status: true,
+      kind: true,
       isUrgent: true,
+      isSfCollect: true,
       customerRef: true,
       receiverName: true,
       receiverPhone: true,
+      receiverAddress: true,
       trackingNo: true,
       expressCode: true,
       searchPinyin: true,
       searchPinyinInitials: true,
       totalAmount: true,
       submitterId: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { orderNo: true } },
+      _count: { select: { shipments: true } },
       createdAt: true,
       updatedAt: true,
     },
     orderBy: [{ isUrgent: 'desc' }, { createdAt: 'desc' }],
   });
+
+  // 师傅名称批量查一次，避免列表逐行 N+1；同时不把每张工单的完整
+  // items/tasks 树塞进主查询，历史数据增长时列表载荷仍保持轻量。
+  const workerNamesByOrder = new Map<string, Set<string>>();
+  if (rows.length > 0) {
+    const assignments = await db.productionTask.findMany({
+      where: {
+        orderItem: { orderId: { in: rows.map((row) => row.id) } },
+        workerId: { not: null },
+        status: { not: TaskStatus.CANCELLED },
+      },
+      select: {
+        orderItem: { select: { orderId: true } },
+        worker: { select: { displayName: true } },
+      },
+    });
+    for (const assignment of assignments) {
+      if (!assignment.worker) continue;
+      const names =
+        workerNamesByOrder.get(assignment.orderItem.orderId) ?? new Set<string>();
+      names.add(assignment.worker.displayName);
+      workerNamesByOrder.set(assignment.orderItem.orderId, names);
+    }
+  }
 
   const pieceworkByOrder = new Map<string, string>();
   if (user.role === Role.ADMIN && rows.length > 0) {
@@ -938,11 +1301,20 @@ export async function listOrders(
       );
     }
   }
-  const withPiecework = rows.map((row) => ({
-    ...row,
-    pieceworkCost:
-      user.role === Role.ADMIN ? pieceworkByOrder.get(row.id) ?? '0.00' : null,
-  }));
+  const withPiecework = rows.map((row) => {
+    const { submitter, sourceOrder, _count, ...orderFields } = row;
+    return {
+      ...orderFields,
+      sourceOrderNo: sourceOrder?.orderNo ?? null,
+      shipmentCount: _count?.shipments ?? 0,
+      submitterName: submitter.displayName,
+      workerNames: [...(workerNamesByOrder.get(row.id) ?? [])].sort((a, b) =>
+        a.localeCompare(b, 'zh-CN'),
+      ),
+      pieceworkCost:
+        user.role === Role.ADMIN ? pieceworkByOrder.get(row.id) ?? '0.00' : null,
+    };
+  });
 
   return sortBySearchRelevance(withPiecework, query, (row) => ({
     fields: [
@@ -951,8 +1323,11 @@ export async function listOrders(
       row.customerRef,
       row.receiverName,
       row.receiverPhone,
+      row.receiverAddress,
       row.trackingNo,
       row.expressCode,
+      row.submitterName,
+      ...row.workerNames,
     ],
     pinyinFields: [row.searchPinyin, row.searchPinyinInitials],
   }));
@@ -971,6 +1346,14 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
         orderBy: { sequence: 'asc' },
         include: {
           designs: true,
+          tasks: {
+            select: {
+              id: true,
+              status: true,
+              craft: { select: { id: true, name: true } },
+              worker: { select: { id: true, displayName: true } },
+            },
+          },
           product: {
             select: {
               id: true,
@@ -992,8 +1375,40 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
         select: { id: true, status: true },
         orderBy: { createdAt: 'desc' },
       },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          lines: {
+            orderBy: { orderItem: { sequence: 'asc' } },
+            include: {
+              orderItem: { select: { id: true, sequence: true, name: true } },
+            },
+          },
+        },
+      },
+      sourceOrder: {
+        select: { id: true, orderNo: true, customName: true, status: true },
+      },
+      reworkOrders: {
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, orderNo: true, customName: true, status: true },
+      },
       submitter: {
         select: { id: true, displayName: true, username: true, role: true },
+      },
+      changeRequests: {
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: {
+          requester: { select: { displayName: true, role: true } },
+          reviewedBy: { select: { displayName: true } },
+        },
+      },
+      costEntries: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          createdBy: { select: { displayName: true } },
+        },
       },
     },
   });

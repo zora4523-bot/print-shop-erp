@@ -14,6 +14,8 @@ type RuleDefaults = {
   boardRate: string;
   smallOrderThreshold: string;
   smallOrderFlatPrice: string;
+  smallOrderInclusive: boolean;
+  largeOrderSetupFee: string;
   multiplierFactors: string[];
 };
 
@@ -27,14 +29,17 @@ export function WorkerMachineRuleForm({
     displayName: string;
     username: string;
     machineType: MachineType;
+    optionKey: string;
   }>;
   defaultsByMachine: Partial<Record<MachineType, RuleDefaults>>;
   defaultEffectiveFrom: string;
 }) {
-  const [selectedWorkerId, setSelectedWorkerId] = useState(workers[0]?.id ?? '');
+  const [selectedOptionKey, setSelectedOptionKey] = useState(
+    workers[0]?.optionKey ?? '',
+  );
   const selectedWorker = useMemo(
-    () => workers.find((worker) => worker.id === selectedWorkerId),
-    [selectedWorkerId, workers],
+    () => workers.find((worker) => worker.optionKey === selectedOptionKey),
+    [selectedOptionKey, workers],
   );
   const machineType = selectedWorker?.machineType;
   const defaults = machineType ? defaultsByMachine[machineType] : undefined;
@@ -57,17 +62,19 @@ export function WorkerMachineRuleForm({
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="师傅">
           <select
-            name="workerId"
-            value={selectedWorkerId}
-            onChange={(event) => setSelectedWorkerId(event.target.value)}
+            value={selectedOptionKey}
+            onChange={(event) => setSelectedOptionKey(event.target.value)}
+            aria-label="师傅与机型"
             className="h-9 w-full rounded-md border bg-background px-3 text-sm"
           >
             {workers.map((worker) => (
-              <option key={worker.id} value={worker.id}>
-                {worker.displayName}（{worker.username}）
+              <option key={worker.optionKey} value={worker.optionKey}>
+                {worker.displayName}（{worker.username} ·{' '}
+                {MACHINE_TYPE_LABELS[worker.machineType]}）
               </option>
             ))}
           </select>
+          <input type="hidden" name="workerId" value={selectedWorker.id} />
         </Field>
         <Field label="机型">
           <Input value={MACHINE_TYPE_LABELS[machineType]} readOnly />
@@ -120,6 +127,14 @@ export function WorkerMachineRuleForm({
             required
           />
         </Field>
+        <Field label="大单一次性装板费（元）">
+          <Input
+            name="largeOrderSetupFee"
+            inputMode="decimal"
+            defaultValue={defaults?.largeOrderSetupFee ?? '0'}
+            required
+          />
+        </Field>
         <Field label="备注">
           <Input name="remark" placeholder="例如：2026 年个人议价" maxLength={200} />
         </Field>
@@ -134,6 +149,15 @@ export function WorkerMachineRuleForm({
             defaultChecked={defaults?.multiplierFactors.includes('DOUBLE_SIDED')}
           />
           双面 ×2
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="smallOrderInclusive"
+            value="true"
+            defaultChecked={defaults?.smallOrderInclusive ?? false}
+          />
+          小单阈值包含等于（≤）
         </label>
         <label className="flex items-center gap-2">
           <input

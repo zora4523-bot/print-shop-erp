@@ -334,7 +334,7 @@
 ## 2026-06-28：拼音搜索优先用 `pg_pinyin` 生成列，不引入 `pg_search`
 
 - **决策**：PR-6 为 `Order`、`Product` 和 `Material` 增加 `searchPinyin` 全拼列和 `searchPinyinInitials` 简拼列，并用 `pg_trgm` GIN 索引加速。Pigsty `pg_pinyin` 可用时，这两列是 `public.pinyin_char_romanize(...)` 驱动的 generated column；非 Pigsty 本地库缺少扩展包时，migration 退化为普通可空列以保持 schema 可部署。应用层仍保留一个 `q` 输入框，查询条件在原中文字段之外追加拼音列 `contains q`。
-- **理由**：Pigsty 的 `pg_pinyin` 文档给出了 generated column + trigram search 和 word tokenization + `pg_search` 两条路线。本项目当前搜索目标是工单号、客户代号、收货人、商品名、物料名这类短文本；先用生成列能覆盖中文/拼音输入，同时不引入 BM25、tokenizer、排序权重和额外扩展依赖。
+- **理由**：Pigsty 的 `pg_pinyin` 文档给出了 generated column + trigram search 和 word tokenization + `pg_search` 两条路线。本项目当前搜索目标是工单号、客户名称/简称、收货信息、商品名、物料名这类短文本；先用生成列能覆盖中文/拼音输入，同时不引入 BM25、tokenizer、排序权重和额外扩展依赖。
 - **影响**：生产 Pigsty 数据库必须安装 `pg_pinyin` 才算拼音搜索 ready；本地非 Pigsty PostgreSQL 仍可跑完 migration，但 `/owner/pigsty` 和 `app_ops.search_index_readiness` 会把缺失 `pg_pinyin` 报告为 blocker。后续如果搜索需要“精确优先、相似度排序、权重排序”，再单独引入排序表达式或评估 `pg_search`。
 - **相关文档**：`prisma/migrations/20260628004000_pinyin_search/migration.sql`、`lib/order.ts`、`lib/product.ts`、`lib/material-inventory.ts`、Pigsty `pg_pinyin` 文档。
 
@@ -536,3 +536,62 @@
 - **理由**：终态 key 永久占位会让人工重跑静默空转；CDR 业务状态不能与权威任务账本永久分裂。`tsx` CLI 的包装 PID 让 V8 heap 上限和 PM2 memory restart 都监控错进程，无法兑现 Web/LIGHT/HEAVY 的资源隔离。
 - **影响**：同一 cron scope 在成功后仍不会重复执行，但死信/取消后再次触发可恢复；worker OOM 由真实 heap 上限和 PM2 阈值约束。`dispatchNotification` 在 durable 入队失败时记录脱敏错误并 best-effort 降级，保持业务提交后永不抛。
 - **相关文档**：`lib/background-jobs/repository.ts`、`lib/background-jobs/worker.ts`、`lib/notification/dispatch.ts`、`scripts/background-worker.ts`、`deploy/ecosystem.config.cjs`。
+
+---
+
+## 2026-07-30：顺丰到付统一自行预约，物流费不进入工单金额
+
+- **决策**：`Order.isSfCollect` 作为唯一顺丰到付标识。勾选即表示“顺丰到付、内部自行预约”，不再拆分第二个“自行预约”字段；工单 `totalAmount` 仍只汇总款式小计，不增加物流费用。管理端列表和详情同时展示提交人与生产任务实际分配的师傅。
+- **后期更正**：顺丰到付属于履约信息，DRAFT 至 IN_PRODUCTION 可随普通收货字段编辑；COMPLETED / SHIPPED 可通过详情页独立按钮补录或取消。FINISHED / CANCELLED 保持终态不可变。所有变更写入 `OrderLog`。
+- **理由**：同一业务事实不应由两个布尔字段组合表达；独立后期更正入口既满足临发货时补录，又不重新开放已冻结的款式、金额和生产数据。
+- **相关文档**：`prisma/schema.prisma`、`lib/order.ts`、`components/business/order/SfCollectToggleForm.tsx`、SPEC §3.1 / §3.4 / §3.6。
+
+---
+
+## 2026-07-31：多地址用发货子表，售后重做用免计费关联工单
+
+- **多地址**：保留 `Order.receiver* / trackingNo` 作为主地址兼容快照，新增 `OrderShipment + OrderShipmentLine` 记录每个地址及款式数量。创建时校验数量守恒；编辑主地址同步第 1 条 shipment；发货时必须提交与数据库顺序完全一致的全部地址，并在同一 order-cascade 锁事务内更新，防漏发、串单和旧页面覆盖。
+- **重做**：不回退已发货/已完成原单，也不篡改原应收或历史工资；新建 `kind=REWORK`、`billingMode=NO_CHARGE` 的关联子工单，复制所选款式/设计证据后直接进入 `SUBMITTED`，继续走现有排产、报工与计件链。客户账单查询只收 `billingMode=CHARGE`。
+- **批量派工**：复用原有“一张工单完整派工后单事务确认”的领域命令；界面增加工艺行多选与共同兼容师傅筛选，只批量填充草稿，不拆成多个部分提交，避免半排产。
+- **打印**：A4 边距由 15mm 收紧到 10mm；恰好 3 个款式时启用物理尺寸更小的紧凑样式。Chromium fixture 同时填满自定义名称、长红色关键备注和多色烫金，并以 PDF page object 断言只生成 1 页。
+- **相关文档**：SPEC §3.1 / §3.2 / §3.4 / §3.4.1 / §3.6 / §E，migration `20260731090000_order_shipments_and_rework`。
+
+---
+
+## 2026-07-31：工单修改走审核版本流，业绩、收款、成本使用独立流水
+
+- **工单修改**：销售/客服不得直接覆盖已经提交的生产数据，而是创建带 `baseRevision` 的 `OrderChangeRequest`。管理员审核时在 order advisory lock 内重读版本；版本不一致转为 `STALE`，数量变更遇已开工/完工任务直接拒绝。批准后原子更新款式、地址数量、待生产任务和金额，并递增 `Order.revision`，所有端口读取同一权威状态。
+- **混合工艺**：彩印+烫金可同时 `isOutsource=true` 并配置 `inHouseMachineTypes=[HAND_PRESS,WINDMILL]`。排产必须生成外协记录，同时把回厂烫金分给兼容师傅，避免用“外协或厂内”单选丢掉第二段生产。
+- **财务账本**：客服提成口径改为工单销售额；提交、批准修改、取消分别追加 `CsSalesEntry` 正向/调整/冲销流水。每次客户结款只追加 `BillPayment`，不再重复增加客服销售额。材料、物流、伙食、电费、外协、上板装板和其他成本追加 `OrderCostEntry`；已入账记录不覆盖，错误用正负调整项纠正。
+- **薪资与考勤**：风车机默认规则为 1000 个及以下 ¥20，1000 个以上按 `数量 × ¥0.01 + ¥10/款`；个人机型规则可覆盖默认规则且报工时继续快照。全体在职正式员工的上班/请假按 0.5 天记录，师傅工资页按日期展示“计件已超底薪/按底薪补足”。
+- **理由**：生产数据需要审批、并发和审计边界；销售额、现金回款与成本是三个不同事实，不能互相代替；薪资必须可追溯到报工当时规则。
+- **相关文档**：migration `20260731160000_order_changes_finance_and_attendance`、SPEC §3.2 / §3.6–§3.10 / §5.2。
+
+---
+
+## 2026-07-31：跨工单批量排产按兼容工艺分步派工
+
+- **决策**：待排产列表先选择师傅，再从最多 30 张工单中批量创建该师傅能够承接的**剩余内部工艺任务**。混合机型工单可先派手动烫金、再派风车机；不再要求单个师傅整单兼容。本决策替代同日早先的“单师傅整单兼容”限制。
+- **草稿边界**：分步创建的 `ProductionTask(PENDING)` 在全部内部工艺分配完毕前属于排产草稿，Order 保持 `SUBMITTED`。师傅列表、工单和任务详情均排除这类草稿，`beginTask/beginTasks` 也在领域层拒绝开工；最后一个任务分配完成后，持有同一 order advisory lock 原子切换 `SCHEDULING`，此时任务才对师傅开放。
+- **兼容与纠正**：批量命令只从数据库推导所选师傅兼容且尚未分配的款式×工艺对；唯一键避免重复任务。单工单排产页预填已暂存师傅，可补齐或改派后一次确认。纯外协、缺外协单、停用/缺失工艺仍硬阻断。
+- **事务边界**：每张工单独立事务，跨工单批次允许部分成功；并发状态变化逐单返回，已成功分配不因另一张失败而回滚。
+- **理由**：真实工单会同时经过手动烫金与风车机，整单兼容限制导致无法批量操作；直接把半排产任务暴露给车间又会破坏状态机。把 PENDING 任务定义为受 Order 状态门控的排产草稿，兼顾分步效率与“全部派工后才能生产”的安全不变量。
+- **相关文档**：`lib/production/batch-scheduling.ts`、`components/business/production/PendingSchedulingBoard.tsx`、SPEC §3.2。
+
+---
+
+## 2026-07-31：JWT 只作乐观会话提示，授权使用数据库当前账号
+
+- **决策**：Auth.js JWT 继续保存 30 天以减少工厂现场重复登录，但 `getSession / requireSession / requirePermission` 在服务端使用前必须按 `user.id` 查询数据库，确认账号仍存在且启用，并以数据库当前用户名、显示名、角色、工种和机型覆盖 JWT 旧声明。
+- **理由**：删除或停用账号后，旧 JWT 仍能通过只看 token 角色的权限入口；本次在批量排产写 `OrderLog.operatorId` 时才由外键拒绝，导致事务虽回滚但页面进入 500 错误边界。Next.js 16 本地认证指南也区分 Proxy/JWT 的乐观检查与数据源附近的安全检查。
+- **影响**：删除、停用和角色调整在下一次服务端请求立即生效；嵌套布局与页面通过 React `cache` 在同一请求复用一次 token 解码和一次用户主键查询。批量排产对失效会话返回显式 `unauthorized` 状态与重新登录入口，不再吞掉整页。
+- **相关文档**：`lib/auth/session.ts`、`lib/auth/permissions.ts`、`actions/production.ts`、`tests/e2e/batch-scheduling.spec.ts`。
+
+---
+
+## 2026-07-31：管理员最终派工，多设备是硬能力，熟练工艺只作推荐
+
+- **决策**：师傅继续保留单一岗位类型，但开机师傅可登记主机型与多个 `machineCapabilities`；`WorkerCraftCapability` 记录熟练工艺。排产优先推荐熟练师傅，管理员可把工艺分给岗位/设备硬条件匹配的其他师傅，但必须填写原因；停用账号、岗位不匹配、缺必要设备和纯外协仍硬阻断。
+- **理由**：把每个师傅伪装成“能做所有工艺”会掩盖设备与安全边界，而单一主机型又无法表达现实中的临时支援。硬能力与推荐能力分层，既让管理员保留最终调度权，又能阻止物理上不可能的派工并保留可追责记录。
+- **影响**：单工单、跨工单批量排产和未开工任务改派统一使用同一资格判断；非推荐原因写入 `OrderLog`。派工把实际匹配机型快照到 `ProductionTask.machineType`，个人计件规则可针对师傅登记的每种机型配置，报工按任务实际机型取规则。
+- **相关文档**：SPEC §2.1 / §3.2 / §5.2 / §6.1、migration `20260731210000_worker_capabilities_and_assignment_override`、`lib/production.ts`、`lib/account.ts`、`lib/salary/piecework-admin.ts`。

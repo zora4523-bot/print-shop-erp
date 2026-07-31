@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import {
   useForm,
   useFieldArray,
+  useWatch,
   Controller,
   type SubmitHandler,
 } from 'react-hook-form';
@@ -16,7 +17,6 @@ import { useRouter } from 'next/navigation';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import { createOrderAction } from '@/actions/order';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
-import type { CustomerPartyOption } from '@/lib/party';
 import {
   PendingDesignImages,
   type PendingDesignImage,
@@ -45,7 +45,6 @@ export type ProductOption = {
 type Props = {
   crafts: CraftOption[];
   products: ProductOption[];
-  customerParties: CustomerPartyOption[];
 };
 
 const BLANK_ITEM: CreateOrderInput['items'][number] = {
@@ -63,7 +62,7 @@ const BLANK_ITEM: CreateOrderInput['items'][number] = {
   remark: null,
 };
 
-export function OrderForm({ crafts, products, customerParties }: Props) {
+export function OrderForm({ crafts, products }: Props) {
   const router = useRouter();
   const form = useForm<CreateOrderInput>({
     // zodResolver's generics don't fully compose with preprocess-bearing
@@ -75,7 +74,6 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
     defaultValues: {
       customName: null,
       customerRef: null,
-      customerPartyId: null,
       receiverName: null,
       receiverPhone: null,
       receiverAddress: null,
@@ -84,6 +82,8 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
       remark: null,
       promisedDate: null,
       isUrgent: false,
+      isSfCollect: false,
+      additionalShipments: [],
       items: [{ ...BLANK_ITEM }],
     },
   });
@@ -93,11 +93,14 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
     handleSubmit,
     formState: { errors },
     setValue,
+    getValues,
   } = form;
   const itemsArray = useFieldArray({ control, name: 'items' });
-  const partySelectRegistration = register('customerPartyId', {
-    setValueAs: (v) => (v === '' ? null : v),
+  const shipmentsArray = useFieldArray({
+    control,
+    name: 'additionalShipments',
   });
+  const watchedItems = useWatch({ control, name: 'items' });
   const commonCrafts = crafts.filter((craft) => !craft.isLowFrequency);
   const lowFrequencyCrafts = crafts.filter((craft) => craft.isLowFrequency);
 
@@ -215,38 +218,33 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
   }
 
   function removeItem(index: number, fieldId: string) {
+    const shipments = getValues('additionalShipments');
+    setValue(
+      'additionalShipments',
+      shipments.map((shipment) => ({
+        ...shipment,
+        itemQuantities: shipment.itemQuantities.filter(
+          (_, itemIndex) => itemIndex !== index,
+        ),
+      })),
+      { shouldDirty: true },
+    );
     itemsArray.remove(index);
     updatePendingDesigns(fieldId, []);
   }
 
-  const applyCustomerParty = (partyId: string) => {
-    const selected = customerParties.find((party) => party.id === partyId);
-    if (!selected) {
-      setValue('customerPartyId', null, { shouldDirty: true });
-      return;
-    }
-
-    setValue('customerPartyId', selected.id, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    setValue('customerRef', selected.code, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    setValue('receiverName', selected.receiverName ?? selected.contactName, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    setValue('receiverPhone', selected.receiverPhone ?? selected.contactPhone, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-    setValue('receiverAddress', selected.receiverAddress, {
-      shouldDirty: true,
-      shouldValidate: true,
-    });
-  };
+  function addItem() {
+    const shipments = getValues('additionalShipments');
+    setValue(
+      'additionalShipments',
+      shipments.map((shipment) => ({
+        ...shipment,
+        itemQuantities: [...shipment.itemQuantities, 0],
+      })),
+      { shouldDirty: true },
+    );
+    itemsArray.append({ ...BLANK_ITEM });
+  }
 
   // Zod produces dotted paths like `items.0.quantity` on the action side
   // (actions/order.ts collectFieldErrors). Those don't apply here because
@@ -262,36 +260,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
   return (
     <form onSubmit={handleSubmit(onValid)} className="space-y-6" noValidate>
       <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">基本信息</h2>
-
-        <div className="space-y-1">
-          <Label htmlFor="customerPartyId">客户主数据（选填）</Label>
-          <select
-            id="customerPartyId"
-            className={selectClass}
-            aria-invalid={Boolean(errors.customerPartyId?.message)}
-            aria-describedby={
-              errors.customerPartyId?.message ? 'customerPartyId-error' : undefined
-            }
-            {...partySelectRegistration}
-            onChange={(event) => {
-              partySelectRegistration.onChange(event);
-              applyCustomerParty(event.target.value);
-            }}
-          >
-            <option value="">— 不关联 —</option>
-            {customerParties.map((party) => (
-              <option key={party.id} value={party.id}>
-                {party.code} · {party.shortName ?? party.name}
-              </option>
-            ))}
-          </select>
-          {errors.customerPartyId?.message ? (
-            <p id="customerPartyId-error" role="alert" className="text-xs text-destructive">
-              {errors.customerPartyId.message}
-            </p>
-          ) : null}
-        </div>
+        <h2 className="text-base font-semibold">基本信息与收货信息</h2>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField
@@ -302,7 +271,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
             error={errors.customName?.message}
           />
           <TextField
-            label="客户代号"
+            label="客户名称/简称（选填）"
             registration={register('customerRef')}
             error={errors.customerRef?.message}
           />
@@ -311,23 +280,14 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
             registration={register('expressCode')}
             error={errors.expressCode?.message}
           />
-          <TextField
-            label="收货人"
-            registration={register('receiverName')}
-            error={errors.receiverName?.message}
-          />
-          <TextField
-            label="收货电话"
-            registration={register('receiverPhone')}
-            error={errors.receiverPhone?.message}
-          />
         </div>
 
         <TextareaField
-          label="收货地址"
+          label="收货信息"
+          hint="请在一处填写收货人、联系电话和完整地址"
           registration={register('receiverAddress')}
           error={errors.receiverAddress?.message}
-          rows={2}
+          rows={3}
         />
         <TextareaField
           label="包装要求"
@@ -351,14 +311,30 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
           />
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            {...register('isUrgent')}
-            className="h-4 w-4 rounded border-input"
-          />
-          <span>急单（提交后会推送至排产群）</span>
-        </label>
+        <fieldset className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+          <legend className="px-1 text-sm font-medium">工单标记</legend>
+          <label className="flex min-w-0 items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              {...register('isUrgent')}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
+            />
+            <span>急单（提交后会推送至排产群）</span>
+          </label>
+          <label className="flex min-w-0 items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              {...register('isSfCollect')}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
+            />
+            <span>
+              顺丰到付
+              <span className="block text-xs text-muted-foreground">
+                自行预约；物流费不计入工单金额
+              </span>
+            </span>
+          </label>
+        </fieldset>
       </section>
 
       <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -368,7 +344,7 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
             type="button"
             variant="outline"
             disabled={submitting || uploading || Boolean(createdDraft)}
-            onClick={() => itemsArray.append({ ...BLANK_ITEM })}
+            onClick={addItem}
           >
             添加款式
           </Button>
@@ -611,6 +587,135 @@ export function OrderForm({ crafts, products, customerParties }: Props) {
         </ol>
       </section>
 
+      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">
+              多地址发货
+              {shipmentsArray.fields.length > 0
+                ? `（共 ${shipmentsArray.fields.length + 1} 个地址）`
+                : ''}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              主地址承接未分配数量；这里只填写额外地址及各款式分配数量。
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              submitting ||
+              uploading ||
+              Boolean(createdDraft) ||
+              shipmentsArray.fields.length >= 9
+            }
+            onClick={() =>
+              shipmentsArray.append({
+                receiverName: null,
+                receiverPhone: null,
+                receiverAddress: '',
+                expressCode: null,
+                itemQuantities: itemsArray.fields.map(() => 0),
+              })
+            }
+          >
+            增加收货地址
+          </Button>
+        </div>
+
+        {shipmentsArray.fields.length === 0 ? (
+          <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            当前为单地址工单。增加地址后，工单列表、详情和打印页会显示“多地址”标识。
+          </p>
+        ) : (
+          <ol className="space-y-4">
+            {shipmentsArray.fields.map((shipment, shipmentIndex) => (
+              <li
+                key={shipment.id}
+                className="min-w-0 space-y-3 rounded-lg border p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-medium">
+                    额外地址 {shipmentIndex + 1}
+                  </h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submitting || uploading || Boolean(createdDraft)}
+                    onClick={() => shipmentsArray.remove(shipmentIndex)}
+                  >
+                    删除地址
+                  </Button>
+                </div>
+                <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                  <TextField
+                    label="快递代码"
+                    registration={register(
+                      `additionalShipments.${shipmentIndex}.expressCode`,
+                    )}
+                    error={
+                      errors.additionalShipments?.[shipmentIndex]?.expressCode
+                        ?.message
+                    }
+                  />
+                </div>
+                <TextareaField
+                  label="收货信息"
+                  hint="请在一处填写收货人、联系电话和完整地址"
+                  required
+                  registration={register(
+                    `additionalShipments.${shipmentIndex}.receiverAddress`,
+                  )}
+                  error={
+                    errors.additionalShipments?.[shipmentIndex]?.receiverAddress
+                      ?.message
+                  }
+                  rows={2}
+                />
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">款式分配数量</legend>
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                    {itemsArray.fields.map((itemField, itemIndex) => (
+                      <TextField
+                        key={itemField.id}
+                        label={`#${itemIndex + 1} ${
+                          watchedItems[itemIndex]?.name || '未命名款式'
+                        }`}
+                        type="number"
+                        min={0}
+                        step={1}
+                        registration={register(
+                          `additionalShipments.${shipmentIndex}.itemQuantities.${itemIndex}`,
+                          { valueAsNumber: true },
+                        )}
+                        error={
+                          errors.additionalShipments?.[shipmentIndex]
+                            ?.itemQuantities?.[itemIndex]?.message
+                        }
+                      />
+                    ))}
+                  </div>
+                  {errors.additionalShipments?.[shipmentIndex]?.itemQuantities
+                    ?.message ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {
+                        errors.additionalShipments[shipmentIndex].itemQuantities
+                          .message
+                      }
+                    </p>
+                  ) : null}
+                </fieldset>
+              </li>
+            ))}
+          </ol>
+        )}
+        {errors.additionalShipments?.message ? (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.additionalShipments.message}
+          </p>
+        ) : null}
+      </section>
+
       {serverGeneralError ? (
         <p role="alert" className="text-sm text-destructive">
           {serverGeneralError}
@@ -802,6 +907,7 @@ function TextField({
 function TextareaField({
   label,
   hint,
+  required,
   tone = 'default',
   rows = 2,
   error,
@@ -809,6 +915,7 @@ function TextareaField({
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   tone?: 'default' | 'destructive';
   rows?: number;
   error?: string | undefined;
@@ -821,10 +928,14 @@ function TextareaField({
     <div
       className="min-w-0 space-y-1"
     >
-      <Label htmlFor={fieldId}>{label}</Label>
+      <Label htmlFor={fieldId}>
+        {label}
+        {required ? <span className="text-destructive"> *</span> : null}
+      </Label>
       <textarea
         id={fieldId}
         rows={rows}
+        required={required}
         className={
           destructive
             ? 'flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-semibold text-destructive shadow-xs caret-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'

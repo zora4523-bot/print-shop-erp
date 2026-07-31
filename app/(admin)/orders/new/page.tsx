@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import { Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
-import { listCustomerPartyOptions } from '@/lib/party';
 import { listActiveProductOrderOptions } from '@/lib/product';
 import { OrderForm } from '@/components/business/order/OrderForm';
 
@@ -18,10 +17,9 @@ export default async function NewOrderPage() {
     user.role === Role.ADMIN;
   if (!canCreate) redirect('/orders');
 
-  const [crafts, products, customerParties] = await Promise.all([
+  const [crafts, products] = await Promise.all([
     listActiveCraftOrderOptions(),
     listActiveProductOrderOptions(),
-    listCustomerPartyOptions(),
   ]);
 
   return (
@@ -33,11 +31,7 @@ export default async function NewOrderPage() {
           &ldquo;提交工单&rdquo; 进入排产流程。
         </p>
       </div>
-      <OrderForm
-        crafts={crafts}
-        products={products}
-        customerParties={customerParties}
-      />
+      <OrderForm crafts={crafts} products={products} />
     </div>
   );
 }

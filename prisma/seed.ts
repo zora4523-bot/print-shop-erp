@@ -163,9 +163,9 @@ async function seedCrafts() {
 
     // 外协工艺
     { name: '铜版纸纯彩印', code: 'COATED_COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 60 },
-    { name: '铜版纸彩印+烫金', code: 'COATED_COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: null, defaultMachineType: MachineType.WINDMILL, sortOrder: 61 },
+    { name: '铜版纸彩印+烫金', code: 'COATED_COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, inHouseMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL], sortOrder: 61 },
     { name: '冰白彩印（纯印刷）', code: 'COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 70 },
-    { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: null, defaultMachineType: MachineType.WINDMILL, sortOrder: 71 },
+    { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, inHouseMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL], sortOrder: 71 },
 
     // 低频工艺：录单页固定归到末尾分组
     { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900 },
@@ -248,9 +248,11 @@ async function seedSalaryRules() {
         boardRate: 0,
         smallOrderThreshold: 1000,
         smallOrderFlatPrice: 20,
+        smallOrderInclusive: true,
+        largeOrderSetupFee: 10,
         multiplierFactors: ['DOUBLE_COLOR'],
       },
-      remark: '风车机师傅计件规则（无装板费，只按双色乘倍）',
+      remark: '风车机师傅计件规则（1000 个及以下 20 元；以上每个 0.01 元 + 装板 10 元）',
     },
     {
       ruleType: 'WORKER_MACHINE' as const,

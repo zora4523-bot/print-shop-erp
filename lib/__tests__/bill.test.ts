@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   BillStatus,
+  OrderBillingMode,
   OrderStatus,
   Role,
 } from '../../generated/prisma/client';
@@ -15,6 +16,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     billItem: { createMany: vi.fn() },
+    billPayment: { create: vi.fn() },
     salaryPeriod: {
       findFirst: vi.fn(),
       update: vi.fn(),
@@ -49,6 +51,7 @@ beforeEach(() => {
   dbMock.bill.create.mockReset();
   dbMock.bill.update.mockReset();
   dbMock.billItem.createMany.mockReset().mockResolvedValue({ count: 0 });
+  dbMock.billPayment.create.mockReset().mockResolvedValue({ id: 'payment-1' });
   dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
   dbMock.salaryPeriod.update.mockReset();
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
@@ -94,6 +97,7 @@ describe('generateBillsForPeriod', () => {
     await generateBillsForPeriod('2026-05', ownerActor);
     const where = dbMock.order.findMany.mock.calls[0][0].where;
     expect(where.status).toBe(OrderStatus.FINISHED);
+    expect(where.billingMode).toBe(OrderBillingMode.CHARGE);
     expect((where.finishedAt.gte as Date).toISOString()).toBe(
       '2026-05-01T00:00:00.000Z',
     );
@@ -280,6 +284,17 @@ describe('recordPayment', () => {
     expect(data.paidAmount).toBe('400.00');
     // paidAt stays null for PARTIAL_PAID (inherits existing)
     expect(data.paidAt).toBeNull();
+    expect(dbMock.billPayment.create).toHaveBeenCalledWith({
+      data: {
+        billId: 'bill-1',
+        amount: '400.00',
+        paidAt: expect.any(Date),
+        paymentMethod: null,
+        referenceNo: null,
+        remark: null,
+        recordedById: 'owner-1',
+      },
+    });
   });
 
   it('second partial payment: PARTIAL_PAID → PARTIAL_PAID (累加)', async () => {
@@ -339,7 +354,7 @@ describe('recordPayment', () => {
     expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
   });
 
-  it('CUSTOMER_SERVICE account: wires accumulateCsSales with delta (not total)', async () => {
+  it('CUSTOMER_SERVICE payments do not change commission sales', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
       billFixture({
         salesUserRole: Role.CUSTOMER_SERVICE,
@@ -347,55 +362,46 @@ describe('recordPayment', () => {
       }),
     );
     dbMock.bill.update.mockResolvedValue({});
-    // accumulateCsSales finds an active period → returns accumulated
-    dbMock.salaryPeriod.findFirst.mockResolvedValue({
-      id: 'period-1',
-      totalSales: '5000.00',
-    });
-    dbMock.salaryPeriod.update.mockResolvedValue({
-      id: 'period-1',
-      totalSales: '5400.00',
-    });
     const r = await recordPayment('bill-1', 400, ownerActor);
-    expect(r.csAccumulated).toBe(true);
-    // accumulateCsSales is called with delta=400 (this payment), not
-    // newPaidAmount=500. The update to SalaryPeriod.totalSales uses
-    // Prisma `increment` which we pin:
-    const updateArg = dbMock.salaryPeriod.update.mock.calls[0][0];
-    expect(updateArg.data.totalSales).toEqual({ increment: '400.00' });
-  });
-
-  it('CUSTOMER_SERVICE with no active period: csAccumulated = false, no throw', async () => {
-    dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
-    );
-    dbMock.bill.update.mockResolvedValue({});
-    // No active period at `now`
-    dbMock.salaryPeriod.findFirst.mockResolvedValue(null);
-    const r = await recordPayment('bill-1', 500, ownerActor);
     expect(r.csAccumulated).toBe(false);
+    expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.salaryPeriod.update).not.toHaveBeenCalled();
   });
 
-  it('CS accumulation shares the bill tx (Codex round 52 / P1 — no independent commit)', async () => {
-    // If accumulateCsSales were opening its own $transaction, we'd
-    // see a SECOND $transaction call. With the tx threaded through,
-    // there's only ONE (the bill tx).
+  it('stores payment method, reference number, remark and injected paidAt', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
       billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
     );
     dbMock.bill.update.mockResolvedValue({});
-    dbMock.salaryPeriod.findFirst.mockResolvedValue({
-      id: 'period-1',
-      totalSales: '0',
+    const paidAt = new Date('2026-06-08T02:30:00Z');
+    const r = await recordPayment('bill-1', 500, ownerActor, paidAt, {
+      paymentMethod: ' 银行转账 ',
+      referenceNo: ' TX-20260608 ',
+      remark: ' 首付款 ',
     });
-    dbMock.salaryPeriod.update.mockResolvedValue({
-      id: 'period-1',
-      totalSales: '500.00',
+    expect(r.csAccumulated).toBe(false);
+    expect(dbMock.billPayment.create).toHaveBeenCalledWith({
+      data: {
+        billId: 'bill-1',
+        amount: '500.00',
+        paidAt,
+        paymentMethod: '银行转账',
+        referenceNo: 'TX-20260608',
+        remark: '首付款',
+        recordedById: 'owner-1',
+      },
     });
+  });
+
+  it('payment ledger and bill balance share one transaction', async () => {
+    dbMock.bill.findUnique.mockResolvedValue(
+      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
+    );
+    dbMock.bill.update.mockResolvedValue({});
     await recordPayment('bill-1', 500, ownerActor);
-    // Exactly one $transaction — the outer bill tx. CS accumulation
-    // reused it instead of opening a new one.
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.bill.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.billPayment.create).toHaveBeenCalledTimes(1);
   });
 });
 

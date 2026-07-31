@@ -1,11 +1,15 @@
 import Decimal from 'decimal.js';
-import { Role, WorkerType } from '../generated/prisma/enums';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+} from '../generated/prisma/enums';
 import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
 
-// 时薪工考勤 (PACKER / CLEANER / COOK) — MVP 管理员每日录入三个小时
-// 数字。请假 = 没有行（删除或不录即可）。WORK_HOURS 规则仅用于录入
-// UI 的"全勤"快速填 hint，不在后端再做任何时段派生。
+// 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天），
+// 时薪工额外记录正常、加班与厨师空闲打包工时。WORK_HOURS 规则仅用于
+// 录入 UI 的“全勤”快捷值，不在后端派生考勤。
 
 export class AttendanceError extends Error {
   constructor(message: string) {
@@ -29,6 +33,15 @@ export type HourlyWorkerOption = {
   username: string;
 };
 
+export type AttendanceEmployeeOption = {
+  id: string;
+  displayName: string;
+  role: Role;
+  workerType: WorkerType | null;
+  employmentType: EmploymentType;
+  username: string;
+};
+
 // Active hourly workers (PACKER / CLEANER / COOK) for the attendance
 // page's worker picker. Kept in lib/ so the page never touches Prisma
 // directly (CLAUDE.md §3). The `in` filter guarantees a non-null
@@ -47,6 +60,28 @@ export async function listActiveHourlyWorkers(): Promise<HourlyWorkerOption[]> {
   return rows as HourlyWorkerOption[];
 }
 
+export async function listActiveAttendanceEmployees(): Promise<
+  AttendanceEmployeeOption[]
+> {
+  const rows = await db.user.findMany({
+    where: {
+      isActive: true,
+      role: { not: Role.ADMIN },
+      employmentType: { not: null },
+    },
+    orderBy: [{ role: 'asc' }, { displayName: 'asc' }],
+    select: {
+      id: true,
+      displayName: true,
+      role: true,
+      workerType: true,
+      employmentType: true,
+      username: true,
+    },
+  });
+  return rows as AttendanceEmployeeOption[];
+}
+
 export type RecordAttendanceInput = {
   normalHours: string | number | Decimal;
   otHours: string | number | Decimal;
@@ -54,6 +89,9 @@ export type RecordAttendanceInput = {
   // send the same shape for every worker type.
   spareHours?: string | number | Decimal;
   remark?: string | null;
+  workUnits?: string | number | Decimal;
+  leaveUnits?: string | number | Decimal;
+  leaveType?: string | null;
 };
 
 export type AttendanceRow = {
@@ -64,8 +102,13 @@ export type AttendanceRow = {
   otHours: string;
   spareHours: string;
   remark: string | null;
+  workUnits: string;
+  leaveUnits: string;
+  leaveType: string | null;
   workerDisplayName: string;
-  workerType: WorkerType;
+  workerType: WorkerType | null;
+  workerRole: Role;
+  employmentType: EmploymentType;
 };
 
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
@@ -96,17 +139,13 @@ export async function recordAttendance(
       workerType: true,
       isActive: true,
       displayName: true,
+      employmentType: true,
     },
   });
   if (!worker) throw new AttendanceError('工人不存在');
   if (!worker.isActive) throw new AttendanceError('工人已停用');
-  if (worker.role !== Role.WORKER) {
-    throw new AttendanceError('不是工人（role != WORKER）');
-  }
-  if (!worker.workerType || !isHourlyWorkerType(worker.workerType)) {
-    throw new AttendanceError(
-      '仅时薪工（打包 / 清废 / 厨师）可录入考勤；机器师傅走计件报工',
-    );
+  if (worker.role === Role.ADMIN || worker.employmentType === null) {
+    throw new AttendanceError('该账号不是可录考勤的在职员工');
   }
 
   const normal = dec(input.normalHours);
@@ -134,6 +173,15 @@ export async function recordAttendance(
   // PACKER / CLEANER rows.
   const effectiveSpare =
     worker.workerType === WorkerType.COOK ? spare : new Decimal(0);
+  const workUnits = dec(input.workUnits ?? 1);
+  const leaveUnits = dec(input.leaveUnits ?? 0);
+  if (
+    ![0, 0.5, 1].includes(workUnits.toNumber()) ||
+    ![0, 0.5, 1].includes(leaveUnits.toNumber()) ||
+    workUnits.plus(leaveUnits).gt(1)
+  ) {
+    throw new AttendanceError('上班和请假只支持半天单位，合计不能超过 1 天');
+  }
 
   const saved = await db.attendance.upsert({
     where: { workerId_date: { workerId, date: dateCol } },
@@ -143,6 +191,9 @@ export async function recordAttendance(
       normalHours: normal.toFixed(2),
       otHours: ot.toFixed(2),
       spareHours: effectiveSpare.toFixed(2),
+      workUnits: workUnits.toFixed(1),
+      leaveUnits: leaveUnits.toFixed(1),
+      leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
       createdById: actor.id,
     },
@@ -150,6 +201,9 @@ export async function recordAttendance(
       normalHours: normal.toFixed(2),
       otHours: ot.toFixed(2),
       spareHours: effectiveSpare.toFixed(2),
+      workUnits: workUnits.toFixed(1),
+      leaveUnits: leaveUnits.toFixed(1),
+      leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
       // Deliberately don't overwrite createdById on re-entry; the
       // original recorder stays the auditable actor.
@@ -161,6 +215,9 @@ export async function recordAttendance(
       normalHours: true,
       otHours: true,
       spareHours: true,
+      workUnits: true,
+      leaveUnits: true,
+      leaveType: true,
       remark: true,
     },
   });
@@ -172,15 +229,18 @@ export async function recordAttendance(
     normalHours: String(saved.normalHours),
     otHours: String(saved.otHours),
     spareHours: String(saved.spareHours),
+    workUnits: String(saved.workUnits),
+    leaveUnits: String(saved.leaveUnits),
+    leaveType: saved.leaveType,
     remark: saved.remark,
     workerDisplayName: worker.displayName,
     workerType: worker.workerType,
+    workerRole: worker.role,
+    employmentType: worker.employmentType ?? EmploymentType.FULL_TIME,
   };
 }
 
-// Remove an attendance row — models a leave day (请假). MVP keeps the
-// "no row = absent" convention, so deleting is the way to record a
-// previously-entered day as leave.
+// Remove an attendance row — used to correct an accidentally recorded day.
 export async function removeAttendance(
   workerId: string,
   date: string,
@@ -226,9 +286,17 @@ export async function listMonthlyAttendance(
       normalHours: true,
       otHours: true,
       spareHours: true,
+      workUnits: true,
+      leaveUnits: true,
+      leaveType: true,
       remark: true,
       worker: {
-        select: { displayName: true, workerType: true },
+        select: {
+          displayName: true,
+          workerType: true,
+          role: true,
+          employmentType: true,
+        },
       },
     },
   });
@@ -239,10 +307,42 @@ export async function listMonthlyAttendance(
     normalHours: String(r.normalHours),
     otHours: String(r.otHours),
     spareHours: String(r.spareHours),
+    workUnits: String(r.workUnits),
+    leaveUnits: String(r.leaveUnits),
+    leaveType: r.leaveType,
     remark: r.remark,
     workerDisplayName: r.worker.displayName,
-    workerType: r.worker.workerType as WorkerType,
+    workerType: r.worker.workerType,
+    workerRole: r.worker.role,
+    employmentType: r.worker.employmentType as EmploymentType,
   }));
+}
+
+export async function getAttendanceSummaries(
+  userIds: string[],
+  range: { start: Date; end: Date; inclusiveEnd?: boolean },
+): Promise<Map<string, { workUnits: string; leaveUnits: string }>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db.attendance.groupBy({
+    by: ['workerId'],
+    where: {
+      workerId: { in: [...new Set(userIds)] },
+      date: {
+        gte: range.start,
+        ...(range.inclusiveEnd ? { lte: range.end } : { lt: range.end }),
+      },
+    },
+    _sum: { workUnits: true, leaveUnits: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      row.workerId,
+      {
+        workUnits: String(row._sum.workUnits ?? 0),
+        leaveUnits: String(row._sum.leaveUnits ?? 0),
+      },
+    ]),
+  );
 }
 
 // Month-range helper. SPEC §5.4 operates on calendar months in the
@@ -265,12 +365,6 @@ export function parseShanghaiMonth(
   const start = new Date(Date.UTC(year, mo - 1, 1));
   const end = new Date(Date.UTC(year, mo, 1)); // first day of next month
   return { start, end };
-}
-
-function isHourlyWorkerType(
-  type: WorkerType,
-): type is (typeof HOURLY_WORKER_TYPES)[number] {
-  return (HOURLY_WORKER_TYPES as readonly WorkerType[]).includes(type);
 }
 
 function dec(v: string | number | Decimal): Decimal {

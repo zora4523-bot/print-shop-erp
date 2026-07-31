@@ -9,6 +9,7 @@ import {
   Role,
   WorkerType,
   MachineType,
+  EmploymentType,
 } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,7 @@ import {
   WORKER_TYPE_LABELS,
   MACHINE_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
+import type { WorkerCapabilityCraft } from '@/lib/account';
 
 type EditInitial = {
   username: string;
@@ -27,7 +29,12 @@ type EditInitial = {
   role: Role;
   workerType: WorkerType | null;
   machineType: MachineType | null;
+  machineCapabilities: MachineType[];
+  craftCapabilities: Array<{ craftId: string }>;
   isActive: boolean;
+  employmentType: EmploymentType | null;
+  employmentStartDate: Date | null;
+  employmentEndDate: Date | null;
 };
 
 type Props =
@@ -37,6 +44,7 @@ type Props =
         prev: AccountMutationResult | null,
         fd: FormData,
       ) => Promise<AccountMutationResult>;
+      capabilityCrafts: WorkerCapabilityCraft[];
     }
   | {
       mode: 'edit';
@@ -45,6 +53,7 @@ type Props =
         fd: FormData,
       ) => Promise<AccountMutationResult>;
       initial: EditInitial;
+      capabilityCrafts: WorkerCapabilityCraft[];
     };
 
 // Simple native <select> styled to match shadcn Input — keeps the bundle
@@ -72,6 +81,12 @@ const MACHINE_TYPE_OPTIONS = [
   MachineType.GLUE,
 ] as const;
 
+const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {
+  [EmploymentType.FULL_TIME]: '正式员工',
+  [EmploymentType.PART_TIME]: '兼职',
+  [EmploymentType.TEMPORARY]: '临时工',
+};
+
 export function AccountForm(props: Props) {
   const [state, formAction, pending] = useActionState<AccountMutationResult | null, FormData>(
     props.action,
@@ -85,6 +100,29 @@ export function AccountForm(props: Props) {
   const [machineType, setMachineType] = useState<MachineType | ''>(
     initial?.machineType ?? '',
   );
+  const [machineCapabilities, setMachineCapabilities] = useState<
+    Set<MachineType>
+  >(
+    () =>
+      new Set(
+        initial?.machineCapabilities.length
+          ? initial.machineCapabilities
+          : initial?.machineType
+            ? [initial.machineType]
+            : [],
+      ),
+  );
+  const [craftCapabilities, setCraftCapabilities] = useState<Set<string>>(
+    () =>
+      new Set(
+        initial?.craftCapabilities.map((capability) => capability.craftId) ??
+          [],
+      ),
+  );
+  const [employmentType, setEmploymentType] = useState<EmploymentType | ''>(
+    initial?.employmentType ??
+      (initial?.role === Role.ADMIN ? '' : EmploymentType.FULL_TIME),
+  );
 
   // Cascade cleanup happens inline in the onChange handlers (not in a
   // useEffect) so we don't trip react-hooks/set-state-in-effect and so the
@@ -94,12 +132,58 @@ export function AccountForm(props: Props) {
     if (next !== Role.WORKER) {
       setWorkerType('');
       setMachineType('');
+      setMachineCapabilities(new Set());
+      setCraftCapabilities(new Set());
     }
+    if (next === Role.ADMIN) setEmploymentType('');
+    else if (!employmentType) setEmploymentType(EmploymentType.FULL_TIME);
   }
   function onWorkerTypeChange(next: WorkerType | '') {
     setWorkerType(next);
-    if (next !== WorkerType.MACHINE) setMachineType('');
+    setCraftCapabilities(new Set());
+    if (next !== WorkerType.MACHINE) {
+      setMachineType('');
+      setMachineCapabilities(new Set());
+    }
   }
+  function onPrimaryMachineChange(next: MachineType | '') {
+    setMachineType(next);
+    if (!next) return;
+    setMachineCapabilities((current) => new Set([...current, next]));
+  }
+  function toggleMachineCapability(machine: MachineType) {
+    if (machine === machineType) return;
+    setMachineCapabilities((current) => {
+      const next = new Set(current);
+      if (next.has(machine)) next.delete(machine);
+      else next.add(machine);
+      setCraftCapabilities((selected) =>
+        new Set(
+          [...selected].filter((craftId) => {
+            const craft = props.capabilityCrafts.find(
+              (candidate) => candidate.id === craftId,
+            );
+            return craft
+              ? craftMatchesWorker(craft, workerType, next)
+              : false;
+          }),
+        ),
+      );
+      return next;
+    });
+  }
+  function toggleCraftCapability(craftId: string) {
+    setCraftCapabilities((current) => {
+      const next = new Set(current);
+      if (next.has(craftId)) next.delete(craftId);
+      else next.add(craftId);
+      return next;
+    });
+  }
+
+  const eligibleCapabilityCrafts = props.capabilityCrafts.filter((craft) =>
+    craftMatchesWorker(craft, workerType, machineCapabilities),
+  );
 
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
@@ -195,13 +279,15 @@ export function AccountForm(props: Props) {
 
       {role === Role.WORKER && workerType === WorkerType.MACHINE ? (
         <div className="space-y-2">
-          <Label htmlFor="machineType">机器类型</Label>
+          <Label htmlFor="machineType">主机型</Label>
           <select
             id="machineType"
             name="machineType"
             className={selectClass}
             value={machineType}
-            onChange={(e) => setMachineType(e.target.value as MachineType | '')}
+            onChange={(e) =>
+              onPrimaryMachineChange(e.target.value as MachineType | '')
+            }
             disabled={pending}
           >
             <option value="">— 请选择 —</option>
@@ -214,6 +300,145 @@ export function AccountForm(props: Props) {
           {errs.machineType?.[0] ? (
             <p className="text-sm text-destructive">{errs.machineType[0]}</p>
           ) : null}
+          <p className="text-xs text-muted-foreground">
+            默认优先使用主机型；实际派工会按工艺与可操作机器的交集锁定计薪机型。
+          </p>
+        </div>
+      ) : null}
+
+      {role === Role.WORKER && workerType === WorkerType.MACHINE ? (
+        <fieldset className="space-y-2 rounded-lg border p-3">
+          <legend className="px-1 text-sm font-medium">可操作机器</legend>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {MACHINE_TYPE_OPTIONS.map((machine) => (
+              <label
+                key={machine}
+                className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                {machine === machineType ? (
+                  <input
+                    type="hidden"
+                    name="machineCapabilities"
+                    value={machine}
+                  />
+                ) : null}
+                <input
+                  type="checkbox"
+                  name={
+                    machine === machineType
+                      ? undefined
+                      : 'machineCapabilities'
+                  }
+                  value={machine}
+                  checked={machineCapabilities.has(machine)}
+                  disabled={pending || machine === machineType}
+                  onChange={() => toggleMachineCapability(machine)}
+                  className="size-4"
+                />
+                <span>
+                  {MACHINE_TYPE_LABELS[machine]}
+                  {machine === machineType ? '（主机型）' : ''}
+                </span>
+              </label>
+            ))}
+          </div>
+          {errs.machineCapabilities?.[0] ? (
+            <p className="text-sm text-destructive">
+              {errs.machineCapabilities[0]}
+            </p>
+          ) : null}
+        </fieldset>
+      ) : null}
+
+      {role === Role.WORKER && workerType ? (
+        <fieldset className="space-y-2 rounded-lg border p-3">
+          <legend className="px-1 text-sm font-medium">熟练工艺（推荐项）</legend>
+          <p className="text-xs text-muted-foreground">
+            勾选后排产时优先推荐。管理员仍可把设备和岗位匹配的其他工艺派给该师傅，但必须填写原因。
+          </p>
+          {eligibleCapabilityCrafts.length > 0 ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {eligibleCapabilityCrafts.map((craft) => (
+                <label
+                  key={craft.id}
+                  className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    name="craftCapabilities"
+                    value={craft.id}
+                    checked={craftCapabilities.has(craft.id)}
+                    disabled={pending}
+                    onChange={() => toggleCraftCapability(craft.id)}
+                    className="size-4"
+                  />
+                  <span className="break-words">{craft.name}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-warning-foreground">
+              当前岗位或机器能力没有可配置的内部工艺。
+            </p>
+          )}
+          {errs.craftCapabilities?.[0] ? (
+            <p className="text-sm text-destructive">
+              {errs.craftCapabilities[0]}
+            </p>
+          ) : null}
+        </fieldset>
+      ) : null}
+
+      {role !== Role.ADMIN ? (
+        <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="space-y-2">
+            <Label htmlFor="employmentType">用工类型</Label>
+            <select
+              id="employmentType"
+              name="employmentType"
+              className={selectClass}
+              value={employmentType}
+              onChange={(event) =>
+                setEmploymentType(event.target.value as EmploymentType)
+              }
+              disabled={pending}
+            >
+              {Object.entries(EMPLOYMENT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            {errs.employmentType?.[0] ? (
+              <p className="text-sm text-destructive">
+                {errs.employmentType[0]}
+              </p>
+            ) : null}
+          </div>
+          <TextField
+            id="employmentStartDate"
+            label="入职日期"
+            type="date"
+            disabled={pending}
+            error={errs.employmentStartDate?.[0]}
+            defaultValue={
+              initial?.employmentStartDate
+                ? initial.employmentStartDate.toISOString().slice(0, 10)
+                : new Date().toISOString().slice(0, 10)
+            }
+          />
+          <TextField
+            id="employmentEndDate"
+            label="离职日期（选填）"
+            type="date"
+            disabled={pending}
+            error={errs.employmentEndDate?.[0]}
+            defaultValue={
+              initial?.employmentEndDate
+                ? initial.employmentEndDate.toISOString().slice(0, 10)
+                : ''
+            }
+          />
         </div>
       ) : null}
 
@@ -238,6 +463,28 @@ export function AccountForm(props: Props) {
       </div>
     </form>
   );
+}
+
+function craftMatchesWorker(
+  craft: WorkerCapabilityCraft,
+  workerType: WorkerType | '',
+  machineCapabilities: Set<MachineType>,
+): boolean {
+  if (
+    !workerType ||
+    craft.defaultWorkerType !== workerType ||
+    (craft.isOutsource && craft.inHouseMachineTypes.length === 0)
+  ) {
+    return false;
+  }
+  if (workerType !== WorkerType.MACHINE) return true;
+  const allowedMachines =
+    craft.inHouseMachineTypes.length > 0
+      ? craft.inHouseMachineTypes
+      : craft.defaultMachineType
+        ? [craft.defaultMachineType]
+        : [];
+  return allowedMachines.some((machine) => machineCapabilities.has(machine));
 }
 
 function TextField({

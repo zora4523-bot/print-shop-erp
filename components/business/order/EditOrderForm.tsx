@@ -10,16 +10,14 @@ import type { OrderMutationResult } from '@/actions/order.types';
 
 // E-lean edit form. Single status-agnostic component; the `fieldset`
 // prop controls which fields are enabled. No RHF (no array), no Zod on
-// the client — FormData + server-side validation is enough for a
-// 7-field form, and a plain form gives zero-JS fallback for free.
+// the client — FormData + server-side validation is enough here, and
+// a plain form gives zero-JS fallback for free.
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
 export type EditOrderInitialValues = {
   customName: string | null;
   customerRef: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
   receiverAddress: string | null;
   expressCode: string | null;
   packageRequirement: string | null;
@@ -27,6 +25,7 @@ export type EditOrderInitialValues = {
   // YYYY-MM-DD（页面层从 Date 转好）
   promisedDate: string | null;
   isUrgent: boolean;
+  isSfCollect: boolean;
 };
 
 type Props = {
@@ -75,22 +74,10 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
           />
           <Field
             name="customerRef"
-            label="客户代号"
+            label="客户名称/简称（选填）"
             disabled={FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly}
             initial={initial.customerRef}
             errors={fieldErrors(state, 'customerRef')}
-          />
-          <Field
-            name="receiverName"
-            label="收货人"
-            initial={initial.receiverName}
-            errors={fieldErrors(state, 'receiverName')}
-          />
-          <Field
-            name="receiverPhone"
-            label="收货电话"
-            initial={initial.receiverPhone}
-            errors={fieldErrors(state, 'receiverPhone')}
           />
           <Field
             name="expressCode"
@@ -100,8 +87,9 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
           />
           <Field
             name="receiverAddress"
-            label="收货地址"
+            label="收货信息"
             full
+            multiline
             initial={initial.receiverAddress}
             errors={fieldErrors(state, 'receiverAddress')}
           />
@@ -130,7 +118,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             />
           )}
           {!isShippingOnly && (
-            <div className="col-span-2 flex items-center gap-2">
+            <div className="sm:col-span-2 flex items-center gap-2">
               <input
                 id="isUrgent"
                 name="isUrgent"
@@ -141,8 +129,27 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
               <Label htmlFor="isUrgent" className="text-sm">
                 标记为急单
               </Label>
+              <input type="hidden" name="isUrgent" value="false" />
             </div>
           )}
+          <div className="sm:col-span-2 rounded-lg border p-3">
+            <div className="flex items-start gap-2">
+              <input
+                id="isSfCollect"
+                name="isSfCollect"
+                type="checkbox"
+                defaultChecked={initial.isSfCollect}
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <Label htmlFor="isSfCollect" className="text-sm">
+                顺丰到付
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  全部自行预约；物流费不计入工单金额
+                </span>
+              </Label>
+              <input type="hidden" name="isSfCollect" value="false" />
+            </div>
+          </div>
         </div>
       </section>
 

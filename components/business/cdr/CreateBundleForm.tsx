@@ -107,7 +107,7 @@ export function CreateBundleForm({
                   />
                 </th>
                 <th className="px-3 py-2 text-left">工单号</th>
-                <th className="px-3 py-2 text-left">客户</th>
+                <th className="px-3 py-2 text-left">客户名称/简称</th>
                 <th className="px-3 py-2 text-right">CDR 数</th>
                 <th className="px-3 py-2 text-left">提交时间</th>
                 <th className="px-3 py-2"></th>

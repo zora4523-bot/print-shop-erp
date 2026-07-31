@@ -124,4 +124,33 @@ describe('createWorkerMachineSalaryRule', () => {
       }),
     );
   });
+
+  it('allows a personal rule for a registered non-primary machine capability', async () => {
+    txMock.$executeRaw.mockResolvedValue(undefined);
+    txMock.user.findUnique.mockResolvedValue({
+      role: Role.WORKER,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      machineCapabilities: [
+        MachineType.HAND_PRESS,
+        MachineType.WINDMILL,
+      ],
+      isActive: true,
+    });
+    txMock.workerMachineSalaryRule.findUnique.mockResolvedValue(null);
+    txMock.workerMachineSalaryRule.findFirst.mockResolvedValue(null);
+    txMock.workerMachineSalaryRule.updateMany.mockResolvedValue({ count: 0 });
+    txMock.workerMachineSalaryRule.create.mockResolvedValue({ id: 'rule-wind' });
+
+    await expect(
+      createWorkerMachineSalaryRule({
+        workerId: 'worker-1',
+        machineType: MachineType.WINDMILL,
+        effectiveFrom: new Date('2026-07-20T01:30:00Z'),
+        remark: '风车机支援价',
+        ruleValue: workerMachineRuleInputSchema.parse(validInput()).ruleValue,
+        createdById: 'owner-1',
+      }),
+    ).resolves.toEqual({ id: 'rule-wind' });
+  });
 });

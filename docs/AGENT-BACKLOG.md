@@ -412,6 +412,9 @@ Never auto-merge. Never apply production database operations from this backlog.
     phone, and address into existing snapshot fields.
   - Added permission/menu/breadcrumb wiring and unit tests for schemas,
     navigation, actions, party business logic, and order party validation.
+- Follow-up (2026-07-31): removed the low-usage customer-party selector from
+  sales-order creation. Orders now use their snapshot fields directly;
+  historical links and purchasing supplier selection remain intact.
 
 ## A17 - Purchase Orders And Purchase Receipts
 

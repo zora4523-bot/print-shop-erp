@@ -56,7 +56,7 @@ export default async function WorkerOrdersPage() {
                       ) : null}
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-sm">
-                      客户代号：{order.customerRef ?? '—'}
+                      客户名称/简称：{order.customerRef ?? '—'}
                     </p>
                     {order.customName ? (
                       <p className="worker-wrap-anywhere mt-1 text-sm font-semibold">
@@ -68,6 +68,9 @@ export default async function WorkerOrdersPage() {
                       {order.promisedDate
                         ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
                         : ''}
+                    </p>
+                    <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                      接单人：{order.submitterName}
                     </p>
                   </div>
                   <div className="ml-auto shrink-0 text-right">

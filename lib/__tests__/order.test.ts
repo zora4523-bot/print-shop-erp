@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderStatus, PartyType, Role, TaskStatus } from '../../generated/prisma/client';
+import { OrderStatus, Role, TaskStatus } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -12,12 +12,18 @@ const { dbMock } = vi.hoisted(() => {
     };
     craft: { findMany: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
-    party: { findUnique: ReturnType<typeof vi.fn> };
     productionTask: {
       findMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
     outsourceOrder: { findMany: ReturnType<typeof vi.fn> };
+    orderShipment: {
+      create: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+    };
+    orderShipmentLine: { createMany: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -31,9 +37,15 @@ const { dbMock } = vi.hoisted(() => {
     },
     craft: { findMany: vi.fn() },
     product: { findMany: vi.fn() },
-    party: { findUnique: vi.fn() },
     productionTask: { findMany: vi.fn(), update: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
+    orderShipment: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    orderShipmentLine: { createMany: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
@@ -69,6 +81,7 @@ import {
   getOrderDetail,
   updateOrderFields,
   setOrderUrgent,
+  setOrderSfCollect,
   OrderInvariantError,
 } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
@@ -99,12 +112,20 @@ beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
   dbMock.craft.findMany.mockReset();
   dbMock.product.findMany.mockReset();
-  dbMock.party.findUnique.mockReset();
   // Default: order has no production tasks (cancelOrder cascade reads []).
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionTask.update.mockReset().mockResolvedValue({});
   // Default: order has no in-flight outsource orders.
   dbMock.outsourceOrder.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderShipment.create
+    .mockReset()
+    .mockResolvedValue({ id: 'shipment-1' });
+  dbMock.orderShipment.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderShipment.update.mockReset().mockResolvedValue({ id: 'shipment-1' });
+  dbMock.orderShipment.updateMany.mockReset().mockResolvedValue({ count: 1 });
+  dbMock.orderShipmentLine.createMany
+    .mockReset()
+    .mockResolvedValue({ count: 1 });
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
@@ -148,6 +169,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
         items: [baseItem()],
       },
       salesActor,
@@ -172,6 +194,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
         items: [baseItem()],
       },
       salesActor,
@@ -192,6 +215,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
         items: [baseItem()],
       },
       salesActor,
@@ -216,6 +240,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
         items: [baseItem(), baseItem({ name: '内盒' })],
       },
       salesActor,
@@ -226,6 +251,78 @@ describe('createOrder', () => {
       '王总中秋礼盒首批',
     );
     expect(result.itemIds).toEqual(['item-1', 'item-2']);
+  });
+
+  it('creates one shipment per address and preserves the quantity allocation', async () => {
+    dbMock.orderShipment.create
+      .mockResolvedValueOnce({ id: 'shipment-primary' })
+      .mockResolvedValueOnce({ id: 'shipment-extra' });
+
+    await createOrder(
+      {
+        customerRef: null,
+        receiverName: '主地址收货人',
+        receiverPhone: '13800000000',
+        receiverAddress: '佛山主地址',
+        expressCode: 'SF',
+        packageRequirement: null,
+        remark: null,
+        promisedDate: null,
+        isUrgent: false,
+        isSfCollect: true,
+        items: [
+          baseItem({ name: 'A 款', quantity: 1000 }),
+          baseItem({ name: 'B 款', quantity: 500 }),
+        ],
+        additionalShipments: [
+          {
+            receiverName: '分地址收货人',
+            receiverPhone: '13900000000',
+            receiverAddress: '广州分地址',
+            expressCode: 'SF',
+            itemQuantities: [300, 100],
+          },
+        ],
+      },
+      salesActor,
+      new Date('2026-04-23T09:00:00+08:00'),
+    );
+
+    expect(dbMock.orderShipment.create).toHaveBeenCalledTimes(2);
+    expect(dbMock.orderShipment.create.mock.calls[0]![0].data).toMatchObject({
+      orderId: 'order-created',
+      sequence: 1,
+      receiverName: '主地址收货人',
+    });
+    expect(dbMock.orderShipment.create.mock.calls[1]![0].data).toMatchObject({
+      orderId: 'order-created',
+      sequence: 2,
+      receiverName: '分地址收货人',
+    });
+    expect(dbMock.orderShipmentLine.createMany.mock.calls[0]![0].data).toEqual([
+      {
+        shipmentId: 'shipment-primary',
+        orderItemId: 'item-1',
+        quantity: 700,
+      },
+      {
+        shipmentId: 'shipment-primary',
+        orderItemId: 'item-2',
+        quantity: 400,
+      },
+    ]);
+    expect(dbMock.orderShipmentLine.createMany.mock.calls[1]![0].data).toEqual([
+      {
+        shipmentId: 'shipment-extra',
+        orderItemId: 'item-1',
+        quantity: 300,
+      },
+      {
+        shipmentId: 'shipment-extra',
+        orderItemId: 'item-2',
+        quantity: 100,
+      },
+    ]);
   });
 
   it('refuses when a referenced craft id does not exist or is inactive', async () => {
@@ -242,6 +339,7 @@ describe('createOrder', () => {
           remark: null,
           promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
           items: [baseItem({ crafts: ['does-not-exist'] })],
         },
         salesActor,
@@ -265,6 +363,7 @@ describe('createOrder', () => {
           remark: null,
           promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
           items: [baseItem({ productId: 'p1' })],
         },
         salesActor,
@@ -273,92 +372,7 @@ describe('createOrder', () => {
     ).rejects.toThrowError(/产品已停用/);
   });
 
-  it('stores an optional active customer party link while keeping snapshots', async () => {
-    dbMock.party.findUnique.mockResolvedValueOnce({
-      id: 'party1',
-      type: PartyType.CUSTOMER,
-      isActive: true,
-    });
-    await createOrder(
-      {
-        customerPartyId: 'party1',
-        customerRef: 'CUST_001',
-        receiverName: '王小姐',
-        receiverPhone: '13800000000',
-        receiverAddress: '广州番禺',
-        expressCode: null,
-        packageRequirement: null,
-        remark: null,
-        promisedDate: null,
-        isUrgent: false,
-        items: [baseItem()],
-      },
-      salesActor,
-      new Date('2026-04-23T09:00:00+08:00'),
-    );
-    const createArg = dbMock.order.create.mock.calls[0][0];
-    expect(createArg.data.customerPartyId).toBe('party1');
-    expect(createArg.data.customerRef).toBe('CUST_001');
-    expect(createArg.data.receiverName).toBe('王小姐');
-  });
-
-  it('refuses inactive customer party links', async () => {
-    dbMock.party.findUnique.mockResolvedValueOnce({
-      id: 'party1',
-      type: PartyType.CUSTOMER,
-      isActive: false,
-    });
-    await expect(
-      createOrder(
-        {
-          customerPartyId: 'party1',
-          customerRef: 'CUST_001',
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: null,
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-        isUrgent: false,
-          items: [baseItem()],
-        },
-        salesActor,
-        new Date('2026-04-23T09:00:00+08:00'),
-      ),
-    ).rejects.toThrowError(/客户主数据已停用/);
-    expect(dbMock.order.create).not.toHaveBeenCalled();
-  });
-
-  it('refuses supplier-only party links for sales orders', async () => {
-    dbMock.party.findUnique.mockResolvedValueOnce({
-      id: 'supplier1',
-      type: PartyType.SUPPLIER,
-      isActive: true,
-    });
-    await expect(
-      createOrder(
-        {
-          customerPartyId: 'supplier1',
-          customerRef: 'SUP_001',
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: null,
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-        isUrgent: false,
-          items: [baseItem()],
-        },
-        salesActor,
-        new Date('2026-04-23T09:00:00+08:00'),
-      ),
-    ).rejects.toThrowError(/供应商不能作为工单客户/);
-    expect(dbMock.order.create).not.toHaveBeenCalled();
-  });
-
-  it('computes subtotal + totalAmount with Decimal math (no JS float rounding)', async () => {
+  it('顺丰到付只汇总款式金额，不把物流费计入 totalAmount', async () => {
     await createOrder(
       {
         customerRef: null,
@@ -370,6 +384,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: true,
         items: [
           baseItem({ quantity: 3, unitPrice: '0.1' }),
           baseItem({ name: 'B', quantity: 2, unitPrice: '0.2' }),
@@ -385,6 +400,7 @@ describe('createOrder', () => {
     expect(createArg.data.items.create[1].subtotal).toBe('0.40');
     // total 0.70
     expect(createArg.data.totalAmount).toBe('0.70');
+    expect(createArg.data.isSfCollect).toBe(true);
   });
 
   it('treats a null unitPrice as 0 for the subtotal', async () => {
@@ -399,6 +415,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: false,
+        isSfCollect: false,
         items: [baseItem({ quantity: 500, unitPrice: null })],
       },
       salesActor,
@@ -420,6 +437,7 @@ describe('createOrder', () => {
         remark: null,
         promisedDate: null,
         isUrgent: true,
+        isSfCollect: false,
         items: [baseItem()],
       },
       salesActor,
@@ -757,6 +775,92 @@ describe('cancelOrder', () => {
 });
 
 describe('shipOrder', () => {
+  it('ships every stored address atomically with its own tracking number', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+      orderNo: 'O-1',
+    });
+    dbMock.orderShipment.findMany.mockResolvedValue([
+      { id: 'shipment-1', sequence: 1 },
+      { id: 'shipment-2', sequence: 2 },
+    ]);
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+    });
+
+    const clock = new Date('2026-04-25T12:00:00Z');
+    await shipOrder(
+      'o1',
+      ownerActor,
+      {
+        trackingNo: null,
+        shipments: [
+          { shipmentId: 'shipment-1', trackingNo: ' SF001 ' },
+          { shipmentId: 'shipment-2', trackingNo: 'SF002' },
+        ],
+      },
+      clock,
+    );
+
+    expect(dbMock.orderShipment.update.mock.calls.map((call) => call[0])).toEqual([
+      {
+        where: { id: 'shipment-1' },
+        data: {
+          trackingNo: 'SF001',
+          status: 'SHIPPED',
+          shippedAt: clock,
+        },
+        select: { id: true },
+      },
+      {
+        where: { id: 'shipment-2' },
+        data: {
+          trackingNo: 'SF002',
+          status: 'SHIPPED',
+          shippedAt: clock,
+        },
+        select: { id: true },
+      },
+    ]);
+    expect(dbMock.order.update.mock.calls[0]![0].data.trackingNo).toBe('SF001');
+    expect(dbMock.orderLog.create.mock.calls[0]![0].data.remark).toBe(
+      '多地址发货：2 个地址',
+    );
+  });
+
+  it('rejects a stale or incomplete multi-address shipment list', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.COMPLETED,
+      submitterId: 'sales-1',
+    });
+    dbMock.orderShipment.findMany.mockResolvedValue([
+      { id: 'shipment-1', sequence: 1 },
+      { id: 'shipment-2', sequence: 2 },
+    ]);
+
+    await expect(
+      shipOrder('o1', ownerActor, {
+        trackingNo: null,
+        shipments: [{ shipmentId: 'shipment-1', trackingNo: 'SF001' }],
+      }),
+    ).rejects.toThrow(/发货地址已变化/);
+    await expect(
+      shipOrder('o1', ownerActor, {
+        trackingNo: null,
+        shipments: [
+          { shipmentId: 'shipment-2', trackingNo: 'SF002' },
+          { shipmentId: 'shipment-1', trackingNo: 'SF001' },
+        ],
+      }),
+    ).rejects.toThrow(/发货地址已变化/);
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
   it('COMPLETED → SHIPPED, stamps shippedAt + trackingNo from arg', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
@@ -1011,8 +1115,31 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
             { customerRef: { contains: '苹果福', mode: 'insensitive' } },
             { receiverName: { contains: '苹果福', mode: 'insensitive' } },
             { receiverPhone: { contains: '苹果福', mode: 'insensitive' } },
+            { receiverAddress: { contains: '苹果福', mode: 'insensitive' } },
             { trackingNo: { contains: '苹果福', mode: 'insensitive' } },
             { expressCode: { contains: '苹果福', mode: 'insensitive' } },
+            {
+              submitter: {
+                displayName: { contains: '苹果福', mode: 'insensitive' },
+              },
+            },
+            {
+              items: {
+                some: {
+                  tasks: {
+                    some: {
+                      status: { not: TaskStatus.CANCELLED },
+                      worker: {
+                        displayName: {
+                          contains: '苹果福',
+                          mode: 'insensitive',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
             { searchPinyin: { contains: '苹果福', mode: 'insensitive' } },
             { searchPinyinInitials: { contains: '苹果福', mode: 'insensitive' } },
           ],
@@ -1033,16 +1160,19 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
       status: OrderStatus.DRAFT,
       promisedDate: null,
       isUrgent: false,
+      isSfCollect: false,
       customName: null,
       customerRef: null,
       receiverName: null,
       receiverPhone: null,
+      receiverAddress: null,
       trackingNo: null,
       expressCode: null,
       searchPinyin: null,
       searchPinyinInitials: null,
       totalAmount: '0.00',
       submitterId: 'sales-1',
+      submitter: { displayName: '销售小王' },
       createdAt: new Date('2026-06-28T00:00:00Z'),
       updatedAt: new Date('2026-06-28T00:00:00Z'),
     };
@@ -1051,10 +1181,26 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
       { ...base, id: 'exact', orderNo: '苹果福' },
       { ...base, id: 'prefix', orderNo: '苹果福-加急' },
     ]);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      {
+        orderItem: { orderId: 'exact' },
+        worker: { displayName: '张师傅' },
+      },
+      {
+        orderItem: { orderId: 'exact' },
+        worker: { displayName: '张师傅' },
+      },
+      {
+        orderItem: { orderId: 'exact' },
+        worker: { displayName: '李师傅' },
+      },
+    ]);
 
     const rows = await listOrders(salesActor, { q: '苹果福' });
 
     expect(rows.map((row) => row.id)).toEqual(['exact', 'prefix', 'contains']);
+    expect(rows[0]?.submitterName).toBe('销售小王');
+    expect(rows[0]?.workerNames).toEqual(['李师傅', '张师傅']);
   });
 
   it('getOrderDetail enforces the scope filter by id (SALES cannot peek at others)', async () => {
@@ -1072,6 +1218,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       id: 'order-1',
       status: OrderStatus.DRAFT,
       submitterId: 'sales-1',
+      customName: null,
       customerRef: '苹果福',
       receiverName: '张三',
       receiverPhone: '13800000000',
@@ -1080,7 +1227,8 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       packageRequirement: null,
       remark: null,
       promisedDate: null,
-        isUrgent: false,
+      isUrgent: false,
+      isSfCollect: false,
       ...overrides,
     };
   }
@@ -1156,6 +1304,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
         // changing them once production starts.
         customerRef: '攻击者改',
         isUrgent: true,
+        isSfCollect: true,
         receiverName: '新收货人',
         remark: '新备注',
       } as never,
@@ -1164,6 +1313,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
     expect(data).not.toHaveProperty('customerRef');
     expect(data).not.toHaveProperty('isUrgent');
+    expect(data.isSfCollect).toBe(true);
     expect(data.receiverName).toBe('新收货人');
     expect(data.remark).toBe('新备注');
   });
@@ -1193,6 +1343,23 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       before: '13800000000',
       after: null,
     });
+    expect(dbMock.orderShipment.updateMany).toHaveBeenCalledWith({
+      where: { orderId: 'order-1', sequence: 1 },
+      data: {
+        receiverName: '新',
+        receiverPhone: null,
+      },
+    });
+  });
+
+  it('does not touch the shipment snapshot when only non-address fields change', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot({ remark: null }));
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.DRAFT,
+    });
+    await updateOrderFields('order-1', { remark: '只改备注' }, salesActor);
+    expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
   });
 
   it('no-op edit (same values re-submitted) skips UPDATE and log entry', async () => {
@@ -1270,7 +1437,9 @@ describe('setOrderUrgent — quick toggle', () => {
       expressCode: null,
       packageRequirement: null,
       remark: null,
+      promisedDate: null,
       isUrgent,
+      isSfCollect: false,
     };
   }
 
@@ -1302,5 +1471,74 @@ describe('setOrderUrgent — quick toggle', () => {
     const result = await setOrderUrgent('order-1', true, ownerActor);
     expect(result.changed).toBe(false);
     expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('setOrderSfCollect — 后期履约标识', () => {
+  function sfSnapshot(
+    status: OrderStatus,
+    isSfCollect = false,
+    submitterId = 'sales-1',
+  ) {
+    return {
+      id: 'order-1',
+      status,
+      submitterId,
+      customName: null,
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      packageRequirement: null,
+      remark: null,
+      promisedDate: null,
+      isUrgent: false,
+      isSfCollect,
+    };
+  }
+
+  it.each([OrderStatus.COMPLETED, OrderStatus.SHIPPED])(
+    '允许在 %s 后期补录并记录日志',
+    async (status) => {
+      dbMock.order.findFirst.mockResolvedValue(sfSnapshot(status));
+      dbMock.order.update.mockResolvedValue({ id: 'order-1', status });
+
+      const result = await setOrderSfCollect('order-1', true, ownerActor);
+
+      expect(result.changedFields).toEqual(['isSfCollect']);
+      expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(dbMock.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isSfCollect: true } }),
+      );
+      expect(dbMock.orderLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'UPDATE',
+          changedFields: {
+            isSfCollect: { before: false, after: true },
+          },
+        }),
+      });
+    },
+  );
+
+  it.each([OrderStatus.FINISHED, OrderStatus.CANCELLED])(
+    '拒绝修改终态 %s',
+    async (status) => {
+      dbMock.order.findFirst.mockResolvedValue(sfSnapshot(status));
+      await expect(
+        setOrderSfCollect('order-1', true, ownerActor),
+      ).rejects.toThrow(/不能修改顺丰到付标识/);
+      expect(dbMock.order.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('非管理员只能修改自己提交的工单', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(OrderStatus.SHIPPED, false, 'sales-other'),
+    );
+    await expect(
+      setOrderSfCollect('order-1', true, salesActor),
+    ).rejects.toThrow(/只能修改自己创建的工单/);
   });
 });

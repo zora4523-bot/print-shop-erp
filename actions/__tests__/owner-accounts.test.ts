@@ -200,6 +200,7 @@ describe('createUserAction', () => {
           role: Role.WORKER,
           workerType: WorkerType.MACHINE,
           machineType: MachineType.WINDMILL,
+          machineCapabilities: MachineType.WINDMILL,
           password: 'plain-pass-1',
           phone: '',
         }),

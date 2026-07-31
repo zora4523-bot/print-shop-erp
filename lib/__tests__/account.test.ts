@@ -11,6 +11,7 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
     };
+    craft: { findMany: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
@@ -21,6 +22,7 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       count: vi.fn(),
     },
+    craft: { findMany: vi.fn() },
     // $executeRaw is only used to acquire the advisory lock; no return value.
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     // $transaction runs the callback with the same mock as tx so every
@@ -55,6 +57,7 @@ const makeUser = (over: Partial<{
   role: Role;
   workerType: WorkerType | null;
   machineType: MachineType | null;
+  machineCapabilities: MachineType[];
   isActive: boolean;
 }> = {}) => ({
   id: 'user-1',
@@ -64,6 +67,8 @@ const makeUser = (over: Partial<{
   role: Role.SALES,
   workerType: null,
   machineType: null,
+  machineCapabilities: [],
+  craftCapabilities: [],
   isActive: true,
   createdAt: new Date('2026-04-22T00:00:00Z'),
   updatedAt: new Date('2026-04-22T00:00:00Z'),
@@ -72,6 +77,7 @@ const makeUser = (over: Partial<{
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.user)) fn.mockReset();
+  dbMock.craft.findMany.mockReset().mockResolvedValue([]);
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -143,6 +149,56 @@ describe('createUser', () => {
     expect(data.role).toBe(Role.WORKER);
     expect(data.workerType).toBe(WorkerType.MACHINE);
     expect(data.machineType).toBe(MachineType.WINDMILL);
+  });
+
+  it('stores multiple machine capabilities and validated craft capabilities atomically', async () => {
+    dbMock.craft.findMany.mockResolvedValue([
+      {
+        id: 'craft-foil',
+        name: '烫金',
+        isActive: true,
+        isOutsource: false,
+        defaultWorkerType: WorkerType.MACHINE,
+        defaultMachineType: MachineType.WINDMILL,
+        inHouseMachineTypes: [],
+      },
+    ]);
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ role: Role.WORKER }),
+    );
+
+    await createUser({
+      username: 'multi',
+      password: 'plaintext-9chars',
+      displayName: '多能师傅',
+      role: Role.WORKER,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      machineCapabilities: [
+        MachineType.HAND_PRESS,
+        MachineType.WINDMILL,
+      ],
+      craftCapabilities: ['craft-foil'],
+    });
+
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['craft-foil'] } },
+      }),
+    );
+    expect(dbMock.user.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({
+        machineType: MachineType.HAND_PRESS,
+        machineCapabilities: [
+          MachineType.HAND_PRESS,
+          MachineType.WINDMILL,
+        ],
+        craftCapabilities: {
+          create: [{ craftId: 'craft-foil' }],
+        },
+      }),
+    );
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('drops machineType when workerType is not MACHINE', async () => {

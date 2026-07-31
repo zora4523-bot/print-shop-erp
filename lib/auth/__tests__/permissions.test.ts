@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Role } from '../../../generated/prisma/client';
 
 vi.mock('@/lib/auth/session', () => ({
-  getSession: vi.fn(),
+  requireSession: vi.fn(),
 }));
 
 import {
@@ -12,10 +12,10 @@ import {
   getOrderScopeFilter,
   type Permission,
 } from '../permissions';
-import { getSession } from '@/lib/auth/session';
+import { requireSession } from '@/lib/auth/session';
 import { UnauthorizedError } from '../errors';
 
-const mockedGetSession = vi.mocked(getSession);
+const mockedRequireSession = vi.mocked(requireSession);
 
 type SessionUser = Parameters<typeof requireOwnership>[1];
 
@@ -45,6 +45,8 @@ describe('PERMISSIONS map', () => {
       'order:ship',
       'order:mark-urgent',
       'order:cancel',
+      'order:change:request',
+      'order:change:review',
       'task:assign',
       'task:report',
       'outsource:manage',
@@ -88,6 +90,7 @@ describe('PERMISSIONS map', () => {
   it('administrator-only permissions are exactly [ADMIN]', () => {
     const adminOnly: Permission[] = [
       'order:cancel',
+      'order:change:review',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
@@ -117,11 +120,11 @@ describe('PERMISSIONS map', () => {
 
 describe('requirePermission', () => {
   beforeEach(() => {
-    mockedGetSession.mockReset();
+    mockedRequireSession.mockReset();
   });
 
   it('throws UnauthorizedError when no session', async () => {
-    mockedGetSession.mockResolvedValue(null);
+    mockedRequireSession.mockRejectedValue(new UnauthorizedError('未登录'));
     await expect(requirePermission('order:create')).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
@@ -136,7 +139,7 @@ describe('requirePermission', () => {
     [Role.ADMIN, 'salary:rule:manage'],
     [Role.ADMIN, 'report:production'],
   ] as const)('role %s is allowed for %s', async (role, perm) => {
-    mockedGetSession.mockResolvedValue(session(role));
+    mockedRequireSession.mockResolvedValue(session(role));
     const user = await requirePermission(perm);
     expect(user.role).toBe(role);
   });
@@ -148,19 +151,19 @@ describe('requirePermission', () => {
     [Role.WORKER, 'order:view:all'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
-    mockedGetSession.mockResolvedValue(session(role));
+    mockedRequireSession.mockResolvedValue(session(role));
     await expect(requirePermission(perm)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
   it('throws a plain Error (not Unauthorized) when permission key is unknown', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.ADMIN));
+    mockedRequireSession.mockResolvedValue(session(Role.ADMIN));
     // Bypass the compile-time guard to simulate a runtime bug.
     const badKey = 'does:not:exist' as Permission;
     await expect(requirePermission(badKey)).rejects.toThrow(/未定义的权限/);
   });
 
   it('returned user has id, role, username, displayName', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.ADMIN, 'owner-42'));
+    mockedRequireSession.mockResolvedValue(session(Role.ADMIN, 'owner-42'));
     const user = await requirePermission('account:manage');
     expect(user.id).toBe('owner-42');
     expect(user.username).toBe('test');

@@ -1,20 +1,21 @@
 import Link from 'next/link';
 import { Users } from 'lucide-react';
-import { WorkerType } from '@/generated/prisma/enums';
+import { EmploymentType, WorkerType } from '@/generated/prisma/enums';
 import {
-  listActiveHourlyWorkers,
+  listActiveAttendanceEmployees,
   listMonthlyAttendance,
   parseShanghaiMonth,
 } from '@/lib/attendance';
 import { getActiveWorkHours } from '@/lib/salary/rules';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { roleLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 
-export const metadata = { title: '时薪工考勤' };
+export const metadata = { title: '员工考勤' };
 
 type PageProps = {
   searchParams: Promise<{
@@ -78,7 +79,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
     sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();
 
   // Selected worker drives the calendar view. Default: first hourly worker.
-  const hourlyWorkers = await listActiveHourlyWorkers();
+  const hourlyWorkers = await listActiveAttendanceEmployees();
 
   const selectedWorkerId = sp.workerId ?? hourlyWorkers[0]?.id ?? null;
   const selectedWorker = selectedWorkerId
@@ -100,15 +101,22 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
   );
 
   const dates = monthDates(selectedMonth);
+  const workedDays = attendance.reduce(
+    (total, row) => total + Number(row.workUnits),
+    0,
+  );
+  const leaveDays = attendance.reduce(
+    (total, row) => total + Number(row.leaveUnits),
+    0,
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="时薪工考勤"
+        title="员工考勤"
         subtitle={
           <>
-            PACKER / CLEANER / COOK 每日录入工时。未录 = 请假。月底
-            &ldquo;时薪工月结&rdquo; 按此汇总计算工资。
+            全体在职员工按半天单位记录实际上班和请假；时薪岗位同时录入工时，供月底工资结算。
             {workHours ? (
               <>
                 {' · '}当前工时段:{' '}
@@ -137,14 +145,14 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
       {!selectedWorker ? (
         <EmptyState
           icon={Users}
-          title="没有活跃的时薪工"
+          title="没有可录考勤的在职员工"
           description={
             <>
               先在
               <Link href="/owner/accounts" className="mx-1 underline">
                 账号管理
               </Link>
-              里创建或启用 PACKER / CLEANER / COOK。
+              里创建或启用员工，并设置用工类型。
             </>
           }
         />
@@ -154,18 +162,29 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
             <div className="text-sm font-semibold">
               {selectedWorker.displayName}
               <span className="ml-2 text-xs text-muted-foreground">
-                ({WORKER_TYPE_LABELS[selectedWorker.workerType as WorkerType]} ·{' '}
+                ({roleLabel(selectedWorker.role)}
+                {selectedWorker.workerType
+                  ? ` · ${WORKER_TYPE_LABELS[selectedWorker.workerType]}`
+                  : ''}
+                {' · '}
                 {selectedWorker.username})
               </span>
             </div>
-            <div className="mt-3 grid grid-cols-7 gap-2 text-xs">
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge variant="secondary">实际上班 {workedDays} 天</Badge>
+              <Badge variant="outline">请假 {leaveDays} 天</Badge>
+              <Badge variant="outline">
+                {EMPLOYMENT_LABELS[selectedWorker.employmentType]}
+              </Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7">
               {dates.map((d) => {
                 const att = attendanceByDate.get(d);
                 const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
                 return (
                   <details
                     key={d}
-                    className={`rounded-md border p-2 text-xs ${
+                    className={`min-w-0 rounded-md border p-2 text-xs open:col-span-full ${
                       att ? 'bg-muted/40' : 'bg-background'
                     }`}
                   >
@@ -178,7 +197,17 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                       </div>
                       {att ? (
                         <div className="mt-1 font-sans tabular-nums text-[10px] leading-tight">
-                          N {String(att.normalHours)}
+                          上班 {String(att.workUnits)} 天
+                          {Number(att.leaveUnits) > 0 ? (
+                            <>
+                              <br />请假 {String(att.leaveUnits)} 天
+                            </>
+                          ) : null}
+                          {Number(att.normalHours) > 0 ? (
+                            <>
+                              <br />N {String(att.normalHours)}
+                            </>
+                          ) : null}
                           {Number(att.otHours) > 0 ? (
                             <>
                               <br />O {String(att.otHours)}
@@ -199,7 +228,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                     <AttendanceRecordDialog
                       workerId={selectedWorker.id}
                       workerName={selectedWorker.displayName}
-                      workerType={selectedWorker.workerType as WorkerType}
+                      workerType={selectedWorker.workerType}
                       date={d}
                       existing={
                         att
@@ -207,12 +236,20 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                               normalHours: String(att.normalHours),
                               otHours: String(att.otHours),
                               spareHours: String(att.spareHours),
+                              workUnits: String(att.workUnits),
+                              leaveUnits: String(att.leaveUnits),
+                              leaveType: att.leaveType,
                               remark: att.remark,
                             }
                           : undefined
                       }
                       quickFill={
-                        fullDayNormal !== null && workHours
+                        selectedWorker.workerType &&
+                        (selectedWorker.workerType === WorkerType.PACKER ||
+                          selectedWorker.workerType === WorkerType.CLEANER ||
+                          selectedWorker.workerType === WorkerType.COOK) &&
+                        fullDayNormal !== null &&
+                        workHours
                           ? {
                               normalHours: fullDayNormal,
                               otStartHour: workHours.otStart,
@@ -241,15 +278,23 @@ function FilterBar({
   workers: Array<{
     id: string;
     displayName: string;
-    workerType: WorkerType;
+    workerType: WorkerType | null;
+    role: Parameters<typeof roleLabel>[0];
+    employmentType: EmploymentType;
     username: string;
   }>;
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">月份</label>
+        <label
+          htmlFor="attendance-month"
+          className="text-xs text-muted-foreground"
+        >
+          月份
+        </label>
         <input
+          id="attendance-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
@@ -257,8 +302,14 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">工人</label>
+        <label
+          htmlFor="attendance-worker"
+          className="text-xs text-muted-foreground"
+        >
+          员工
+        </label>
         <select
+          id="attendance-worker"
           name="workerId"
           defaultValue={selectedWorkerId ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -266,7 +317,11 @@ function FilterBar({
           {workers.map((w) => (
             <option key={w.id} value={w.id}>
               {w.displayName}（
-              {WORKER_TYPE_LABELS[w.workerType] ?? w.workerType}）
+              {roleLabel(w.role)}
+              {w.workerType
+                ? ` · ${WORKER_TYPE_LABELS[w.workerType] ?? w.workerType}`
+                : ''}
+              ）
             </option>
           ))}
         </select>
@@ -277,3 +332,9 @@ function FilterBar({
     </form>
   );
 }
+
+const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {
+  [EmploymentType.FULL_TIME]: '正式员工',
+  [EmploymentType.PART_TIME]: '兼职',
+  [EmploymentType.TEMPORARY]: '临时工',
+};

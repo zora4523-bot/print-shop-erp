@@ -64,18 +64,6 @@ export type PartySummary = Pick<
   defaultAddress: PartyAddressSummary | null;
 };
 
-export type CustomerPartyOption = {
-  id: string;
-  code: string;
-  name: string;
-  shortName: string | null;
-  contactName: string | null;
-  contactPhone: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
-  receiverAddress: string | null;
-};
-
 export type SupplierPartyOption = {
   id: string;
   code: string;
@@ -286,34 +274,6 @@ export async function getPartySummary(
 ): Promise<PartySummary | null> {
   const row = await db.party.findUnique({ where: { id }, select: PARTY_SELECT });
   return row ? normalizePartyRow(row) : null;
-}
-
-export async function listCustomerPartyOptions(): Promise<CustomerPartyOption[]> {
-  const rows = await db.party.findMany({
-    where: {
-      isActive: true,
-      OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
-    },
-    select: PARTY_SELECT,
-    orderBy: [{ code: 'asc' }, { name: 'asc' }],
-  });
-
-  return rows.map((row) => {
-    const party = normalizePartyRow(row);
-    return {
-      id: party.id,
-      code: party.code,
-      name: party.name,
-      shortName: party.shortName,
-      contactName: party.primaryContact?.name ?? null,
-      contactPhone: party.primaryContact?.phone ?? null,
-      receiverName:
-        party.defaultAddress?.receiverName ?? party.primaryContact?.name ?? null,
-      receiverPhone:
-        party.defaultAddress?.receiverPhone ?? party.primaryContact?.phone ?? null,
-      receiverAddress: formatPartyAddress(party.defaultAddress),
-    };
-  });
 }
 
 export async function listSupplierPartyOptions(): Promise<SupplierPartyOption[]> {

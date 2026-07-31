@@ -44,8 +44,6 @@ export default async function EditOrderPage({ params }: PageProps) {
         initial={{
           customName: order.customName,
           customerRef: order.customerRef,
-          receiverName: order.receiverName,
-          receiverPhone: order.receiverPhone,
           receiverAddress: order.receiverAddress,
           expressCode: order.expressCode,
           packageRequirement: order.packageRequirement,
@@ -54,6 +52,7 @@ export default async function EditOrderPage({ params }: PageProps) {
             ? order.promisedDate.toISOString().slice(0, 10)
             : null,
           isUrgent: order.isUrgent,
+          isSfCollect: order.isSfCollect,
         }}
       />
     </div>

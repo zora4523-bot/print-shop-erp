@@ -47,7 +47,7 @@
 
 对当前项目最自然的落点：
 
-- `Order` / `OrderItem`：工单搜索、客户代号、收货人、电话、快递号。
+- `Order` / `OrderItem`：工单搜索、客户名称/简称、收货信息、快递号。
 - `Product` / `PriceTier` / `PriceAdjustment`：商品搜索、编码、动态属性、价格有效期约束。
 - `Material` / `MaterialTransaction`：物料搜索、库存看板、流水分区。
 - `OrderLog` / `NotificationLog` / future `AuditLog`：日志增长后的分区与审计。
@@ -66,7 +66,7 @@
 | S2 | `pg_jsonschema` | JSONB 结构校验 | `PriceAdjustment.triggerCondition`、future product attributes | hand-written SQL migration |
 | S2 | `btree_gist` | 区间排他约束 | `PriceTier` 有效期、数量档防重叠 | hand-written SQL migration |
 | S2 | `ltree` | 多级分类树 | `ProductCategoryNode` 分类路径 | schema/migration 单独 PR |
-| S2 | `pg_pinyin` | 拼音搜索 | 商品名、物料名、客户代号、收货人 | generated column + search index |
+| S2 | `pg_pinyin` | 拼音搜索 | 商品名、物料名、客户名称/简称、收货信息 | generated column + search index |
 | S3 | `pg_ivm` | 增量物化视图 | 库存看板、分类库存金额、今日入库/出库 | Pigsty 配置 + hand-written SQL |
 | S3 | `pg_partman` | 分区维护 | `MaterialTransaction`、`OrderLog`、`NotificationLog` | Pigsty 配置 + hand-written SQL |
 | S3 | `anon` | 数据脱敏 | 测试库/演示库脱敏手机号、地址、薪资 | Pigsty/ops 脚本 |
@@ -185,7 +185,7 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 
 范围：
 
-- 为商品名、物料名、客户代号、收货人生成拼音列。
+- 为商品名、物料名、客户名称/简称、收货信息生成拼音列。
 - 与 `pg_trgm`/`pg_bigm` 搜索 helper 合并。
 - UI 不增加复杂控件，仍用同一个 `q` 输入框。
 - 暂不引入 `pg_search`；先用 Pigsty 文档推荐的 generated column + trigram 方案，降低部署和查询复杂度。

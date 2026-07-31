@@ -8,6 +8,7 @@ import type {
   PrintDesign,
   PrintOrder,
   PrintOrderItem,
+  PrintShipment,
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
 
@@ -48,6 +49,18 @@ export async function getOrderForPrint(
     include: {
       submitter: {
         select: { displayName: true, role: true },
+      },
+      sourceOrder: { select: { orderNo: true } },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          lines: {
+            orderBy: { orderItem: { sequence: 'asc' } },
+            include: {
+              orderItem: { select: { sequence: true, name: true } },
+            },
+          },
+        },
       },
       items: {
         orderBy: { sequence: 'asc' },
@@ -139,12 +152,29 @@ export async function getOrderForPrint(
       }),
     ),
   }));
+  const printShipments: PrintShipment[] = order.shipments.map((shipment) => ({
+    id: shipment.id,
+    sequence: shipment.sequence,
+    receiverName: shipment.receiverName,
+    receiverPhone: shipment.receiverPhone,
+    receiverAddress: shipment.receiverAddress,
+    expressCode: shipment.expressCode,
+    trackingNo: shipment.trackingNo,
+    lines: shipment.lines.map((line) => ({
+      orderItemSequence: line.orderItem.sequence,
+      orderItemName: line.orderItem.name,
+      quantity: line.quantity,
+    })),
+  }));
 
   return {
     id: order.id,
     orderNo: order.orderNo,
     customName: order.customName,
+    kind: order.kind,
+    sourceOrderNo: order.sourceOrder?.orderNo ?? null,
     isUrgent: order.isUrgent,
+    isSfCollect: order.isSfCollect,
     promisedDate: order.promisedDate,
     customerRef: order.customerRef,
     receiverName: order.receiverName,
@@ -158,6 +188,7 @@ export async function getOrderForPrint(
     submitterDisplayName: order.submitter.displayName,
     submitterRoleLabel: roleLabel(order.submitter.role),
     items: printItems,
+    shipments: printShipments,
     orderQrSvg,
   };
 }

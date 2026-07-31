@@ -37,6 +37,8 @@ export default async function PieceworkRulesPage() {
     boardRate: string;
     smallOrderThreshold: string;
     smallOrderFlatPrice: string;
+    smallOrderInclusive: boolean;
+    largeOrderSetupFee: string;
     multiplierFactors: string[];
   }>> = {};
   for (const global of data.globalRules) {
@@ -47,11 +49,25 @@ export default async function PieceworkRulesPage() {
       boardRate: String(value.boardRate),
       smallOrderThreshold: value.smallOrderThreshold === null ? '' : String(value.smallOrderThreshold),
       smallOrderFlatPrice: String(value.smallOrderFlatPrice ?? 0),
+      smallOrderInclusive: value.smallOrderInclusive ?? false,
+      largeOrderSetupFee: String(value.largeOrderSetupFee ?? 0),
       multiplierFactors: [...value.multiplierFactors],
     };
   }
 
-  const workers = data.workers.flatMap((worker) => worker.machineType ? [{ ...worker, machineType: worker.machineType }] : []);
+  const workers = data.workers.flatMap((worker) => {
+    const machines =
+      worker.machineCapabilities.length > 0
+        ? worker.machineCapabilities
+        : worker.machineType
+          ? [worker.machineType]
+          : [];
+    return machines.map((machineType) => ({
+      ...worker,
+      machineType,
+      optionKey: `${worker.id}:${machineType}`,
+    }));
+  });
 
   return (
     <div className="space-y-6">
@@ -87,8 +103,9 @@ export default async function PieceworkRulesPage() {
                   <RuleRow label="每日保底" value={`¥ ${rule.dailyBase}`} />
                   <RuleRow label="每下" value={`¥ ${rule.pieceRate}`} />
                   <RuleRow label="每板" value={`¥ ${rule.boardRate}`} />
-                  <RuleRow label="小单阈值" value={rule.smallOrderThreshold === null ? '不启用' : `< ${rule.smallOrderThreshold}`} />
+                  <RuleRow label="小单阈值" value={rule.smallOrderThreshold === null ? '不启用' : `${rule.smallOrderInclusive ? '≤' : '<'} ${rule.smallOrderThreshold}`} />
                   <RuleRow label="小单固定" value={rule.smallOrderThreshold === null ? '—' : `¥ ${rule.smallOrderFlatPrice ?? 0}`} />
+                  <RuleRow label="大单装板费" value={`¥ ${rule.largeOrderSetupFee ?? 0}`} />
                   <RuleRow label="倍率" value={formatMultipliers(rule.multiplierFactors)} />
                 </dl>
               </div>

@@ -12,13 +12,14 @@ import type {
   PrintOrderItem,
 } from './OrderPrintLayout.types';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { formatReceiverInfo } from '@/lib/order/receiver-info';
 
 // Shared print layout for both browser print and server-rendered PDF.
 // Pure render of a PrintOrder view-model — no data fetching, no
 // side-effects. Page layer is responsible for mapping DB rows into this
 // shape (craft IDs → names, role enum → Chinese label, etc).
 //
-// SPEC §E: A4 portrait, 15mm margin, no prices / no money, per-item
+// SPEC §E: A4 portrait, 10mm margin, no prices / no money, per-item
 // page-break-inside avoid, urgent banner, per-task QR code at 15mm,
 // order QR code at the page header.
 
@@ -40,7 +41,17 @@ export function OrderPrintLayout({
     <>
       <style>{PRINT_CSS}</style>
 
-      <div className="print-container">
+      <div
+        className={`print-container ${
+          order.items.length === 3 ? 'compact-3' : ''
+        }`}
+      >
+        {order.kind === 'REWORK' ? (
+          <div className="rework-banner">
+            重 做 单
+            {order.sourceOrderNo ? ` · 原单 ${order.sourceOrderNo}` : ''}
+          </div>
+        ) : null}
         {order.isUrgent && (
           <div className="urgent-banner">
             急 单 · 请优先处理
@@ -68,11 +79,18 @@ export function OrderPrintLayout({
 
         <div className="order-meta">
           <div>下单日期：{formatShanghaiDate(order.submittedAt ?? order.createdAt)}</div>
-          <div>客户代号：{order.customerRef ?? '-'}</div>
+          <div>客户名称/简称：{order.customerRef ?? '-'}</div>
           <div>
             提交人：{order.submitterDisplayName}（{order.submitterRoleLabel}）
           </div>
           <div>急单：{order.isUrgent ? '【是】' : '否'}</div>
+          <div>
+            配送：
+            {order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
+            {order.shipments.length > 1
+              ? ` · 多地址 ×${order.shipments.length}`
+              : ''}
+          </div>
           <div>
             承诺交期：
             {order.promisedDate ? formatShanghaiDate(order.promisedDate) : '-'}
@@ -96,16 +114,49 @@ export function OrderPrintLayout({
               {order.remark}
             </div>
           )}
-          {(order.receiverName || order.receiverPhone || order.receiverAddress) && (
-            <div style={{ marginTop: 8 }}>
-              <strong>收货信息：</strong>
-              <div>
-                {order.receiverName ?? '-'} {order.receiverPhone ?? ''}
-              </div>
-              {order.receiverAddress && <div>{order.receiverAddress}</div>}
-              {order.expressCode && <div>快递代码：{order.expressCode}</div>}
+          {order.shipments.length > 0 ? (
+            <div className="shipment-list">
+              <strong>
+                收货信息
+                {order.shipments.length > 1
+                  ? `（多地址 ×${order.shipments.length}）`
+                  : ''}
+                ：
+              </strong>
+              {order.shipments.map((shipment) => (
+                <div key={shipment.id} className="shipment-row">
+                  <span>
+                    地址 {shipment.sequence}：{formatReceiverInfo(shipment, '-')}
+                  </span>
+                  {shipment.expressCode ? (
+                    <span> · 快递代码 {shipment.expressCode}</span>
+                  ) : null}
+                  {shipment.trackingNo ? (
+                    <span> · 运单号 {shipment.trackingNo}</span>
+                  ) : null}
+                  {shipment.lines.length > 0 ? (
+                    <span>
+                      {' '}
+                      ·{' '}
+                      {shipment.lines
+                        .map(
+                          (line) =>
+                            `#${line.orderItemSequence} ${line.orderItemName} ×${line.quantity}`,
+                        )
+                        .join('；')}
+                    </span>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          )}
+          ) : order.receiverName ||
+            order.receiverPhone ||
+            order.receiverAddress ? (
+            <div className="shipment-list">
+              <strong>收货信息：</strong>
+              <div>{formatReceiverInfo(order, '-')}</div>
+            </div>
+          ) : null}
         </div>
 
         <div className="print-footer">打印时间：{formatShanghaiDateTime(printedAt)}</div>
@@ -233,7 +284,7 @@ function shortId(id: string): string {
 const PRINT_CSS = `
   @page {
     size: A4 portrait;
-    margin: 15mm;
+    margin: 10mm;
   }
   @media print {
     body { margin: 0; padding: 0; }
@@ -257,6 +308,16 @@ const PRINT_CSS = `
     font-weight: bold;
     font-size: 18px;
     margin-bottom: 10px;
+  }
+  .rework-banner {
+    border: 2px solid #b45309;
+    background: #fffbeb;
+    color: #92400e;
+    padding: 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 8px;
   }
   .order-header {
     display: flex;
@@ -368,6 +429,98 @@ const PRINT_CSS = `
     padding-top: 10px;
     font-size: 13px;
   }
+  .shipment-list { margin-top: 8px; }
+  .shipment-row {
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
+  .compact-3 {
+    line-height: 1.25;
+  }
+  .compact-3 .rework-banner,
+  .compact-3 .urgent-banner {
+    padding: 3px;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .compact-3 .order-header {
+    padding-bottom: 4px;
+    margin-bottom: 5px;
+  }
+  .compact-3 .factory-name { font-size: 9px; }
+  .compact-3 .order-title {
+    display: inline;
+    margin: 0 5px 0 0;
+    font-size: 16px;
+  }
+  .compact-3 .order-no {
+    display: inline;
+    font-size: 12px;
+  }
+  .compact-3 .order-custom-name {
+    margin-top: 1px;
+    font-size: 11px;
+  }
+  .compact-3 .order-header svg {
+    width: 18mm;
+    height: 18mm;
+  }
+  .compact-3 .order-meta {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2px 8px;
+    margin-bottom: 5px;
+    font-size: 9px;
+  }
+  .compact-3 .order-item {
+    margin-bottom: 5px;
+    padding: 4px;
+  }
+  .compact-3 .item-header {
+    padding-bottom: 2px;
+    margin-bottom: 3px;
+    font-size: 11px;
+  }
+  .compact-3 .item-body { gap: 5px; }
+  .compact-3 .design-grid {
+    gap: 1mm;
+    padding: 1mm;
+  }
+  .compact-3 .design-grid.count-1      { grid-template-columns: 34mm; }
+  .compact-3 .design-grid.count-2      { grid-template-columns: 25mm 25mm; }
+  .compact-3 .design-grid.count-3-4    { grid-template-columns: 20mm 20mm; }
+  .compact-3 .design-grid.count-5-6    { grid-template-columns: 17mm 17mm 17mm; }
+  .compact-3 .design-grid.count-7-9    { grid-template-columns: 15mm 15mm 15mm; }
+  .compact-3 .design-grid.count-many   { grid-template-columns: 13mm 13mm 13mm; }
+  .compact-3 .design-empty {
+    width: 34mm;
+    font-size: 9px;
+  }
+  .compact-3 .item-info { font-size: 9px; }
+  .compact-3 .item-info dl {
+    gap: 1px 4px;
+  }
+  .compact-3 .item-remark {
+    margin-top: 3px;
+    font-size: 9px;
+  }
+  .compact-3 .task-table {
+    margin-top: 3px;
+    font-size: 8px;
+  }
+  .compact-3 .task-table th,
+  .compact-3 .task-table td {
+    padding: 1px 3px;
+  }
+  .compact-3 .task-table svg {
+    width: 15mm;
+    height: 15mm;
+  }
+  .compact-3 .order-footer {
+    margin-top: 5px;
+    padding-top: 4px;
+    font-size: 9px;
+  }
+  .compact-3 .shipment-list { margin-top: 3px; }
   .print-footer {
     position: fixed;
     bottom: 5mm;

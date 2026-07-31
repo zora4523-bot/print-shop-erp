@@ -1,12 +1,13 @@
 import Decimal from 'decimal.js';
 import {
   BillStatus,
+  OrderCostCategory,
+  OrderBillingMode,
   OrderStatus,
   Role,
 } from '../generated/prisma/enums';
 import { db } from './db';
 import { parseShanghaiMonth } from './attendance';
-import { accumulateCsSales } from './salary/cs';
 import {
   transitionBill,
   InvalidBillTransitionError,
@@ -18,8 +19,8 @@ import {
 // 列表是他们在该月 `finishedAt` 的 Order。月度自动生成对应上月。
 //
 // 付款规则：累加式 paidAmount；当累计 = totalAmount 切 FULLY_PAID。
-// mark-paid 流程对 CUSTOMER_SERVICE 提交的账单会调用
-// `accumulateCsSales` 给对应客服周期累计业绩。
+// 客服业绩按工单提交/批准变更时的销售额记入独立流水；收款只更新应收，
+// 绝不重复计入提成。
 //
 // Finance-of-record bedrock: FULLY_PAID 是终态，不允许倒退 / 覆盖。
 // 写入路径全部 tx + per-bill advisory lock 防并发付款 race（和
@@ -74,6 +75,7 @@ export async function generateBillsForPeriod(
   const orders = await db.order.findMany({
     where: {
       status: OrderStatus.FINISHED,
+      billingMode: OrderBillingMode.CHARGE,
       finishedAt: { gte: start, lt: end },
     },
     select: {
@@ -247,20 +249,22 @@ export type RecordPaymentResult = {
   newPaidAmount: string;
   totalAmount: string;
   status: BillStatus;
-  csAccumulated: boolean; // 是否触发了客服业绩累计
+  csAccumulated: false; // 兼容旧 action 响应；收款不再累计客服业绩
 };
 
 // Owner records a payment of `amount` against the bill. Amount must
 // be > 0 and new paidAmount must not exceed totalAmount. When the
-// bill's salesUserId is CUSTOMER_SERVICE, `accumulateCsSales` gets
-// called with `amount` (not newTotal — delta semantics).
 export async function recordPayment(
   billId: string,
   amount: string | number | Decimal,
   _actor: { id: string; role: Role },
   now: Date = new Date(),
+  details?: {
+    paymentMethod?: string | null;
+    referenceNo?: string | null;
+    remark?: string | null;
+  },
 ): Promise<RecordPaymentResult> {
-  void _actor;
   const deltaDec = new Decimal(amount as Decimal.Value);
   if (!deltaDec.isFinite() || deltaDec.lte(0)) {
     throw new BillError('付款金额必须大于 0');
@@ -326,24 +330,17 @@ export async function recordPayment(
         paidAt: targetStatus === BillStatus.FULLY_PAID ? now : bill.paidAt ?? null,
       },
     });
-
-    // CS 业绩累计：仅当 salesUser 是 CUSTOMER_SERVICE 才触发。
-    // SALES 的账单不累计（SALES 不走客服周期 / 提成系统）。
-    //
-    // Pass our tx into accumulateCsSales so the CS-period write
-    // shares atomicity with the bill update .
-    // Prisma 的 $transaction 不是真嵌套；不传 tx 会开独立事务，bill
-    // 外层 rollback 时 CS 已经 commit 了。传 tx 后两者同生共死。
-    let csAccumulated = false;
-    if (bill.salesUser.role === Role.CUSTOMER_SERVICE) {
-      const r = await accumulateCsSales(
-        bill.salesUserId,
-        deltaDec.toFixed(2),
-        now,
-        tx as unknown as Parameters<typeof accumulateCsSales>[3],
-      );
-      csAccumulated = r !== null;
-    }
+    await tx.billPayment.create({
+      data: {
+        billId,
+        amount: deltaDec.toFixed(2),
+        paidAt: now,
+        paymentMethod: details?.paymentMethod?.trim() || null,
+        referenceNo: details?.referenceNo?.trim() || null,
+        remark: details?.remark?.trim() || null,
+        recordedById: _actor.id,
+      },
+    });
 
     return {
       billId,
@@ -351,7 +348,7 @@ export async function recordPayment(
       newPaidAmount: next.toFixed(2),
       totalAmount: total.toFixed(2),
       status: targetStatus,
-      csAccumulated,
+      csAccumulated: false,
     };
   });
 }
@@ -404,7 +401,37 @@ export async function getBillDetail(id: string) {
       remark: true,
       createdAt: true,
       updatedAt: true,
-      salesUser: { select: { id: true, displayName: true, role: true } },
+      salesUser: {
+        select: {
+          id: true,
+          displayName: true,
+          role: true,
+          salaryPeriods: {
+            orderBy: { periodStart: 'desc' },
+            take: 12,
+            select: {
+              id: true,
+              periodStart: true,
+              periodEnd: true,
+              totalSales: true,
+              status: true,
+              commissions: {
+                select: {
+                  tierRate: true,
+                  commissionAmount: true,
+                  totalSales: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      payments: {
+        orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+        include: {
+          recordedBy: { select: { displayName: true } },
+        },
+      },
       items: {
         orderBy: { createdAt: 'asc' },
         select: {
@@ -417,10 +444,93 @@ export async function getBillDetail(id: string) {
               customerRef: true,
               finishedAt: true,
               status: true,
+              shipments: {
+                orderBy: { sequence: 'asc' },
+                select: { sequence: true, weightKg: true },
+              },
+              costEntries: {
+                orderBy: { createdAt: 'asc' },
+                include: {
+                  createdBy: { select: { displayName: true } },
+                },
+              },
+              items: {
+                select: {
+                  tasks: {
+                    where: { status: 'COMPLETED' },
+                    select: { pieceworkAmount: true },
+                  },
+                },
+              },
+              outsourceOrders: {
+                where: { status: { not: 'CANCELLED' } },
+                select: { amount: true },
+              },
+              reworkOrders: {
+                select: {
+                  id: true,
+                  orderNo: true,
+                  items: {
+                    select: {
+                      tasks: {
+                        where: { status: 'COMPLETED' },
+                        select: { pieceworkAmount: true },
+                      },
+                    },
+                  },
+                  outsourceOrders: {
+                    where: { status: { not: 'CANCELLED' } },
+                    select: { amount: true },
+                  },
+                  costEntries: {
+                    select: { amount: true },
+                  },
+                },
+              },
             },
           },
         },
       },
+    },
+  });
+}
+
+export async function addOrderCostEntry(
+  input: {
+    orderId: string;
+    category: OrderCostCategory;
+    description: string;
+    quantity?: string | null;
+    unit?: string | null;
+    unitPrice?: string | null;
+    amount: string;
+    remark?: string | null;
+  },
+  actor: { id: string; role: Role },
+) {
+  if (actor.role !== Role.ADMIN) {
+    throw new BillError('只有管理员可以补录成本');
+  }
+  const amount = new Decimal(input.amount);
+  if (!amount.isFinite() || amount.isZero()) {
+    throw new BillError('成本金额不能为 0');
+  }
+  const order = await db.order.findUnique({
+    where: { id: input.orderId },
+    select: { id: true },
+  });
+  if (!order) throw new BillError('工单不存在');
+  return db.orderCostEntry.create({
+    data: {
+      orderId: input.orderId,
+      category: input.category,
+      description: input.description,
+      quantity: input.quantity || null,
+      unit: input.unit?.trim() || null,
+      unitPrice: input.unitPrice || null,
+      amount: amount.toFixed(2),
+      remark: input.remark?.trim() || null,
+      createdById: actor.id,
     },
   });
 }

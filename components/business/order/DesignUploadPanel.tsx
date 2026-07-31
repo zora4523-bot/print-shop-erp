@@ -54,6 +54,8 @@ export function DesignUploadPanel({
     text: string;
   } | null>(null);
   const [deleting, startDelete] = useTransition();
+  const imageDesigns = designs.filter((design) => design.fileType === 'IMAGE');
+  const cdrDesigns = designs.filter((design) => design.fileType === 'CDR');
 
   async function handleFiles(files: Iterable<File>) {
     const candidates = Array.from(files);
@@ -110,7 +112,7 @@ export function DesignUploadPanel({
     <div className="mt-3 space-y-2 border-t pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          设计图（{designs.length}）
+          设计文件（{designs.length}）
         </span>
         {canEdit ? (
           <div className="flex items-center gap-2">
@@ -176,45 +178,116 @@ export function DesignUploadPanel({
         </div>
       ) : null}
       {designs.length > 0 ? (
-        <ul className="flex flex-wrap gap-3">
-          {designs.map((d) => (
-            <li
-              key={d.id}
-              className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs"
-            >
-              {d.fileType === 'IMAGE' ? (
-                // 预签/公网 URL 域名不固定，next/image 需要 remotePatterns
-                // 白名单；缩略图用原生 img 即可。
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={d.fileUrl}
-                  alt={d.fileName}
-                  className="h-10 w-10 rounded object-cover"
-                />
-              ) : (
-                <span className="flex h-10 w-10 items-center justify-center rounded bg-muted font-mono text-[10px]">
-                  CDR
-                </span>
-              )}
-              <span className="max-w-40 truncate" title={d.fileName}>
-                {d.fileName}
-              </span>
-              <span className="text-muted-foreground">{formatSize(d.fileSize)}</span>
-              {canEdit ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  disabled={deleting}
-                  onClick={() => handleDelete(d.id)}
-                >
-                  删除
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-4">
+          {imageDesigns.length > 0 ? (
+            <section aria-labelledby={`design-preview-${orderItemId}`}>
+              <p
+                id={`design-preview-${orderItemId}`}
+                className="mb-2 text-xs font-medium text-foreground"
+              >
+                效果图预览（{imageDesigns.length}）
+              </p>
+              <ul className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {imageDesigns.map((design) => (
+                  <li
+                    key={design.id}
+                    className="min-w-0 overflow-hidden rounded-lg border bg-card"
+                  >
+                    <a
+                      href={design.fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`查看原图：${design.fileName}`}
+                      className="group block bg-muted/30 p-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      <span className="flex h-72 items-center justify-center overflow-hidden rounded-md sm:h-96">
+                        {/* 预签/公网 URL 域名不固定，next/image 需要穷举
+                            remotePatterns；直接使用原地址也避免代理重复下载。 */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={design.fileUrl}
+                          alt={design.fileName}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-contain transition-transform group-hover:scale-[1.01]"
+                        />
+                      </span>
+                    </a>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-3 py-2 text-xs">
+                      <span
+                        className="admin-wrap-anywhere min-w-0 flex-1 font-medium"
+                        title={design.fileName}
+                      >
+                        {design.fileName}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatSize(design.fileSize)}
+                      </span>
+                      <span className="shrink-0 text-primary">
+                        点击图片查看原图
+                      </span>
+                      {canEdit ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={deleting}
+                          onClick={() => handleDelete(design.id)}
+                        >
+                          删除
+                        </Button>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {cdrDesigns.length > 0 ? (
+            <section aria-labelledby={`cdr-files-${orderItemId}`}>
+              <p
+                id={`cdr-files-${orderItemId}`}
+                className="mb-2 text-xs font-medium text-foreground"
+              >
+                CDR 源文件（{cdrDesigns.length}）
+              </p>
+              <ul className="flex flex-wrap gap-3">
+                {cdrDesigns.map((design) => (
+                  <li
+                    key={design.id}
+                    className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-xs"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted font-mono text-[10px]">
+                      CDR
+                    </span>
+                    <span
+                      className="admin-wrap-anywhere min-w-0"
+                      title={design.fileName}
+                    >
+                      {design.fileName}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {formatSize(design.fileSize)}
+                    </span>
+                    {canEdit ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={deleting}
+                        onClick={() => handleDelete(design.id)}
+                      >
+                        删除
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </div>
       ) : (
         <p className="text-xs text-muted-foreground">
           暂无设计图{canEdit ? '，可上传 JPG/PNG/WEBP 图片或 CDR 源文件' : ''}

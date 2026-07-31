@@ -149,16 +149,11 @@ test.describe('automation smoke', () => {
 
     await page.goto('/orders/new');
     await expect(page.getByRole('heading', { name: '新建工单' })).toBeVisible();
-    // The heading is present in the server-rendered HTML before OrderForm's
-    // client event handlers have necessarily hydrated. Waiting for network
-    // idle keeps selectOption from racing hydration and being reset to the
-    // server-rendered placeholder value.
-    await page.waitForLoadState('networkidle');
-    await page.locator('select[name="customerPartyId"]').selectOption(fixture.partyId);
-    await expect(page.locator('input[name="customerRef"]')).toHaveValue(fixture.partyCode);
-    await expect(page.locator('input[name="receiverName"]')).toHaveValue(fixture.partyContactName);
-    await expect(page.locator('input[name="receiverPhone"]')).toHaveValue(fixture.partyContactPhone);
-    await expect(page.locator('textarea[name="receiverAddress"]')).toHaveValue(fixture.partyAddress);
+    await expect(page.getByLabel('客户主数据（选填）')).toHaveCount(0);
+    await expect(page.locator('input[name="customerRef"]')).toBeVisible();
+    await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
+    await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
+    await expect(page.getByLabel('收货信息')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders?q=${fixture.orderNo}`);

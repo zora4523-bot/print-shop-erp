@@ -175,7 +175,7 @@ const PLACEHOLDER_PNG_DATA_URL =
 export async function seedPrintableOrder(opts: {
   submitterId: string;
   designCount: number;
-  variant?: 'default' | 'rich-context';
+  variant?: 'default' | 'rich-context' | 'three-items';
 }): Promise<{
   orderId: string;
   orderNo: string;
@@ -185,7 +185,9 @@ export async function seedPrintableOrder(opts: {
   foilColors: string[];
 }> {
   const variant = opts.variant ?? 'default';
-  const richContext = variant === 'rich-context';
+  const richContext =
+    variant === 'rich-context' || variant === 'three-items';
+  const itemCount = variant === 'three-items' ? 3 : 1;
   const customName = richContext
     ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
     : null;
@@ -201,13 +203,19 @@ export async function seedPrintableOrder(opts: {
   // same ID across runs also keeps the QR SVG and screenshot bytes stable.
   // CASCADE FKs on Order → OrderItem and OrderItem → OrderItemDesign
   // clean up children automatically.
-  const idStem = richContext
-    ? `e2e-vr-rich-${opts.designCount}`
-    : `e2e-vr-${opts.designCount}`;
+  const idStem =
+    variant === 'three-items'
+      ? `e2e-vr-three-items-${opts.designCount}`
+      : richContext
+        ? `e2e-vr-rich-${opts.designCount}`
+        : `e2e-vr-${opts.designCount}`;
   const orderId = idStem;
-  const orderNo = richContext
-    ? `E2E-VR-RICH-${opts.designCount}`
-    : `E2E-VR-${opts.designCount}`;
+  const orderNo =
+    variant === 'three-items'
+      ? `E2E-VR-THREE-${opts.designCount}`
+      : richContext
+        ? `E2E-VR-RICH-${opts.designCount}`
+        : `E2E-VR-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
   await withDb(async (db) => {
@@ -218,7 +226,7 @@ export async function seedPrintableOrder(opts: {
       INSERT INTO "Order" (
         id, "orderNo", "submitterId", "submitterRole", "createdById",
         status, "isUrgent", "customerRef", "customName", "receiverName",
-        "receiverPhone",
+        "receiverPhone", "receiverAddress", "isSfCollect",
         "totalAmount", "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, $3, 'ADMIN'::"Role", $3,
@@ -227,50 +235,114 @@ export async function seedPrintableOrder(opts: {
         $4,
         'VR 收件人',
         '13800138000',
+        $5,
+        $6,
         0,
         TIMESTAMP '2026-01-01 00:00:00',
         TIMESTAMP '2026-01-01 00:00:00',
         TIMESTAMP '2026-01-01 00:00:00'
       )
       `,
-      [orderId, orderNo, opts.submitterId, customName],
+      [
+        orderId,
+        orderNo,
+        opts.submitterId,
+        customName,
+        variant === 'three-items' ? '佛山市测试主地址 88 号' : null,
+        variant === 'three-items',
+      ],
     );
 
-    await db.query(
-      `
-      INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, specification, "paperType",
-        quantity, "foilColors", "isDoubleSided", "isDoubleColor",
-        crafts, remark, "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, 1, 'VR 款式', '9cm × 17cm', '珠光纸',
-        5000, $3::text[], TRUE, FALSE,
-        ARRAY[]::text[], $4, NOW(), NOW()
-      )
-      `,
-      [orderItemId, orderId, foilColors, itemRemark],
-    );
-
-    for (let i = 0; i < opts.designCount; i++) {
+    for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+      const currentOrderItemId =
+        itemCount === 1 ? orderItemId : `${orderItemId}-${itemIndex + 1}`;
       await db.query(
         `
-        INSERT INTO "OrderItemDesign" (
-          id, "orderItemId", "fileType", "fileUrl", "fileName",
-          "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+        INSERT INTO "OrderItem" (
+          id, "orderId", sequence, name, specification, "paperType",
+          quantity, "foilColors", "isDoubleSided", "isDoubleColor",
+          crafts, remark, "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
-          1024, $3, $5,
-          TIMESTAMP '2026-01-01 00:00:00'
+          $1, $2, $3, $4, '9cm × 17cm', $8,
+          $5, $6::text[], TRUE, $9,
+          ARRAY[]::text[], $7, NOW(), NOW()
         )
         `,
         [
-          `${orderItemId}-design-${i}`,
-          orderItemId,
-          PLACEHOLDER_PNG_DATA_URL,
-          `design-${i + 1}.png`,
-          opts.submitterId,
+          currentOrderItemId,
+          orderId,
+          itemIndex + 1,
+          itemCount === 1 ? 'VR 款式' : `VR 款式 ${itemIndex + 1}`,
+          5000 + itemIndex * 1000,
+          foilColors,
+          itemRemark,
+          itemCount === 3 ? '艳红珠光纸' : '珠光纸',
+          itemCount === 3,
         ],
       );
+
+      for (let designIndex = 0; designIndex < opts.designCount; designIndex++) {
+        await db.query(
+          `
+          INSERT INTO "OrderItemDesign" (
+            id, "orderItemId", "fileType", "fileUrl", "fileName",
+            "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+          ) VALUES (
+            $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
+            1024, $3, $5,
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          `,
+          [
+            `${currentOrderItemId}-design-${designIndex}`,
+            currentOrderItemId,
+            PLACEHOLDER_PNG_DATA_URL,
+            itemCount === 1
+              ? `design-${designIndex + 1}.png`
+              : `design-${itemIndex + 1}-${designIndex + 1}.png`,
+            opts.submitterId,
+          ],
+        );
+      }
+    }
+
+    if (variant === 'three-items') {
+      const primaryShipmentId = `${orderId}-shipment-1`;
+      const secondaryShipmentId = `${orderId}-shipment-2`;
+      await db.query(
+        `
+        INSERT INTO "OrderShipment" (
+          id, "orderId", sequence, "receiverName", "receiverPhone",
+          "receiverAddress", "expressCode", status, "createdAt", "updatedAt"
+        ) VALUES
+          ($1, $3, 1, 'VR 主地址收件人', '13800138000',
+           '佛山市测试主地址 88 号', 'SF', 'PLANNED'::"ShipmentStatus", NOW(), NOW()),
+          ($2, $3, 2, 'VR 分地址收件人', '13900139000',
+           '广州市测试分地址 99 号', 'SF', 'PLANNED'::"ShipmentStatus", NOW(), NOW())
+        `,
+        [primaryShipmentId, secondaryShipmentId, orderId],
+      );
+      for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        const currentOrderItemId = `${orderItemId}-${itemIndex + 1}`;
+        const totalQuantity = 5000 + itemIndex * 1000;
+        await db.query(
+          `
+          INSERT INTO "OrderShipmentLine" (
+            id, "shipmentId", "orderItemId", quantity
+          ) VALUES
+            ($1, $3, $5, $6),
+            ($2, $4, $5, 100)
+          `,
+          [
+            `${orderId}-shipment-line-primary-${itemIndex + 1}`,
+            `${orderId}-shipment-line-secondary-${itemIndex + 1}`,
+            primaryShipmentId,
+            secondaryShipmentId,
+            currentOrderItemId,
+            totalQuantity - 100,
+          ],
+        );
+      }
     }
   });
 

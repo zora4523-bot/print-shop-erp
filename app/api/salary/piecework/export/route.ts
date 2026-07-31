@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requirePermission } from '@/lib/auth/permissions';
+import type { NextAuthRequest } from 'next-auth';
+import { auth } from '@/lib/auth/config';
+import { requireSessionPermission } from '@/lib/auth/permissions';
 import { UnauthorizedError } from '@/lib/auth/errors';
 import {
   buildPieceworkWorkbook,
@@ -10,9 +12,9 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function handlePieceworkExportGet(request: NextAuthRequest) {
   try {
-    await requirePermission('salary:view:all');
+    await requireSessionPermission('salary:view:all', request.auth);
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
@@ -44,3 +46,5 @@ export async function GET(request: Request) {
     throw error;
   }
 }
+
+export const GET = auth(handlePieceworkExportGet);

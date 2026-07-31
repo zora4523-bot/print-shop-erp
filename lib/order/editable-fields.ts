@@ -28,6 +28,7 @@ export const FULL_EDITABLE_FIELDS = [
   'remark',
   'promisedDate',
   'isUrgent',
+  'isSfCollect',
 ] as const;
 
 export const SHIPPING_EDITABLE_FIELDS = [
@@ -37,6 +38,7 @@ export const SHIPPING_EDITABLE_FIELDS = [
   'expressCode',
   'packageRequirement',
   'remark',
+  'isSfCollect',
 ] as const;
 
 export type FullEditableField = (typeof FULL_EDITABLE_FIELDS)[number];
@@ -73,4 +75,10 @@ export function editableFieldsForStatus(
 
 export function isOrderEditable(status: OrderStatus): boolean {
   return editableFieldsetForStatus(status) !== 'NONE';
+}
+
+// 顺丰到付只影响履约方式，不改变款式、金额或生产数据，因此允许在
+// 完工 / 发货后补录或纠正；FINISHED 与 CANCELLED 仍保持终态不可变。
+export function canEditOrderSfCollect(status: OrderStatus): boolean {
+  return status !== OrderStatus.FINISHED && status !== OrderStatus.CANCELLED;
 }

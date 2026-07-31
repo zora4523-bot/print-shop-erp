@@ -176,6 +176,8 @@ export async function createWorkerMachineSalaryRuleAction(
     boardRate: formData.get('boardRate'),
     smallOrderThreshold: formData.get('smallOrderThreshold'),
     smallOrderFlatPrice: formData.get('smallOrderFlatPrice'),
+    smallOrderInclusive: formData.get('smallOrderInclusive') === 'true',
+    largeOrderSetupFee: formData.get('largeOrderSetupFee'),
     multiplierFactors: formData.getAll('multiplierFactors'),
     effectiveFrom: formData.get('effectiveFrom'),
     remark: formData.get('remark'),

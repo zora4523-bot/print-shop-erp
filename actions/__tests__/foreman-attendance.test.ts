@@ -113,7 +113,31 @@ describe('recordAttendanceAction', () => {
       normalHours: 8,
       otHours: 2.5,
       spareHours: 0, // empty string → 0
+      workUnits: 1,
+      leaveUnits: 0,
+      leaveType: undefined,
       remark: '加班到 20:30',
+    });
+  });
+
+  it('supports half-day work plus half-day leave', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    attendanceMock.recordAttendance.mockResolvedValue({});
+    const r = await recordAttendanceAction(null, {
+      workerId: 'w-1',
+      date: '2026-05-01',
+      normalHours: '4',
+      otHours: '0',
+      spareHours: '0',
+      workUnits: '0.5',
+      leaveUnits: '0.5',
+      leaveType: '事假',
+    });
+    expect(r.status).toBe('success');
+    expect(attendanceMock.recordAttendance.mock.calls[0][2]).toMatchObject({
+      workUnits: 0.5,
+      leaveUnits: 0.5,
+      leaveType: '事假',
     });
   });
 
@@ -141,10 +165,10 @@ describe('recordAttendanceAction', () => {
     expect(r.status).toBe('invalid');
   });
 
-  it('maps AttendanceError → error (e.g. MACHINE worker rejected)', async () => {
+  it('maps AttendanceError → error (e.g. account is not an employee)', async () => {
     permissionsMock.requirePermission.mockResolvedValue(foremanActor);
     attendanceMock.recordAttendance.mockRejectedValueOnce(
-      new MockAttendanceError('仅时薪工（打包 / 清废 / 厨师）可录入考勤'),
+      new MockAttendanceError('该账号不是可录考勤的在职员工'),
     );
     const r = await recordAttendanceAction(null, {
       workerId: 'w-1',
@@ -154,7 +178,7 @@ describe('recordAttendanceAction', () => {
       spareHours: '0',
     });
     expect(r.status).toBe('error');
-    if (r.status === 'error') expect(r.message).toMatch(/仅时薪工/);
+    if (r.status === 'error') expect(r.message).toMatch(/在职员工/);
   });
 
   it('revalidates /foreman/attendance on success', async () => {

@@ -44,8 +44,9 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          客户代号：{order.customerRef ?? '—'}
+          客户名称/简称：{order.customerRef ?? '—'}
           {order.promisedDate ? ` · 交期 ${formatDateShanghai(order.promisedDate)}` : ''}
+          {' · '}接单人：{order.submitter.displayName}
         </p>
       </header>
 

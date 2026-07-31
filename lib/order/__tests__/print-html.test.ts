@@ -10,7 +10,10 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
   return {
     id: 'order_abc',
     orderNo: '20260423-0001',
+    kind: 'NORMAL',
+    sourceOrderNo: null,
     isUrgent: false,
+    isSfCollect: false,
     customerRef: '苹果福',
     receiverName: '张三',
     receiverPhone: '13800000000',
@@ -23,6 +26,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     submitterDisplayName: '小王',
     submitterRoleLabel: '销售',
     orderQrSvg: STUB_QR_SVG,
+    shipments: [],
     items: [
       {
         id: 'item_1',
@@ -108,6 +112,59 @@ describe('buildPrintHtml', () => {
       }),
     );
     expect(html).toMatch(/哑金[^<]*、[^<]*红金[^<]*、[^<]*古铜金/);
+  });
+
+  it('prints rework lineage, SF collect, and every shipment allocation', async () => {
+    const html = await buildPrintHtml(
+      fixtureOrder({
+        kind: 'REWORK',
+        sourceOrderNo: 'GD-260730-001',
+        isSfCollect: true,
+        shipments: [
+          {
+            id: 'shipment-1',
+            sequence: 1,
+            receiverName: '主地址客户',
+            receiverPhone: '13800000000',
+            receiverAddress: '佛山主地址',
+            expressCode: 'SF',
+            trackingNo: null,
+            lines: [
+              {
+                orderItemSequence: 1,
+                orderItemName: '红包款式 A',
+                quantity: 4000,
+              },
+            ],
+          },
+          {
+            id: 'shipment-2',
+            sequence: 2,
+            receiverName: '分地址客户',
+            receiverPhone: '13900000000',
+            receiverAddress: '广州分地址',
+            expressCode: 'SF',
+            trackingNo: 'SF002',
+            lines: [
+              {
+                orderItemSequence: 1,
+                orderItemName: '红包款式 A',
+                quantity: 1000,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain('重 做 单');
+    expect(html).toContain('原单 GD-260730-001');
+    expect(html).toContain('顺丰到付（自行预约）');
+    expect(html).toContain('多地址 ×2');
+    expect(html).toContain('佛山主地址');
+    expect(html).toContain('广州分地址');
+    expect(html).toContain('SF002');
+    expect(html).toContain('#1 红包款式 A ×1000');
   });
 
   it('shows "无设计图" when the item has none', async () => {

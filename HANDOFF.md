@@ -8,31 +8,37 @@
 
 ## 当前任务
 
-**生产硬化审查修复完成** ✅（2026-07-17）：`ebe2300` 的 durable 任务与资源隔离实现已完成上线前纠偏。
+**工单变更、生产、薪资、财务闭环与多能力派工完成** ✅（2026-07-31）。
 
-- PostgreSQL 持久化任务账本：`FOR UPDATE SKIP LOCKED`、租约/心跳、有界退避重试、死信、幂等 key、逐次审计。
-- 7 个 cron 和企微通知进 LIGHT 队列；CDR 压缩与 Puppeteer PDF 进 HEAVY 队列。
-- PM2 拆为 Web/LIGHT/HEAVY 三进程；worker 用 `node --import tsx` 在 PM2 管理的同一 PID 内运行，V8 heap 上限和 `max_memory_restart` 现在覆盖真实工作进程；重启带指数退避。
-- durable 入队失败不会把已 commit 的业务操作重新表现为 500；DEAD/CANCELLED dedupe scope 可重新入队，CDR 取消/死信/租约耗尽会同步 FAILED，未知任务走标准失败流程。
-- 7 个 cron + 通知 + CDR + PDF 的生产分支已有显式测试；PDF 排队超时改为可见的自动重试页面，并校验 job 与用户/工单绑定。
-- `/api/health/live`、`/api/health/ready`、worker Sentry、ADMIN 后台任务看板/重试/取消已落地。
-- pgBackRest 只读验收 `pnpm check:backup`；SLO/RPO/RTO/恢复演练见 `docs/production-slo-and-recovery.md`。
-- migration `20260717090000_background_jobs` 未改；94 测试文件 / 1353 测试、typecheck、lint、Prisma validate、production build 全绿。worker 生产入口已用真实 Node 命令验证 heap 参数与退出语义。
+- 多地址：`OrderShipment / OrderShipmentLine` 保存地址与款式分配，历史工单回填为单地址；主地址兼容快照保留并与编辑同步，发货要求完整、顺序一致的地址集合后原子确认。
+- 售后重做：SHIPPED / FINISHED 原单可创建 `REWORK + NO_CHARGE` 子工单；复制所选款式和设计证据后进入待排产，原单状态/应收/工资不回退，重做生产仍正常计件。
+- 管理端：列表/详情展示提交人、实际师傅、顺丰到付、多地址、原单/重做关联；顺丰到付可后期独立更正。
+- 排产：单工单工艺行可多选；待排产列表先选师傅，再从最多 30 张工单批量分配其兼容工艺。混合机型可分步派给不同师傅并显示已排/待排；草稿任务在全部派完前不向师傅开放，最后一项完成后原子进入 SCHEDULING。
+- 打印：A4 边距 10mm，3 款启用紧凑布局；长名称、长红色备注、多色烫金 fixture 的 Chromium 截图和 PDF 单页断言通过。
+- 工单变更：销售/客服创建带版本的修改申请，管理员批准后原子更新所有端口；版本冲突和已开工数量变更硬阻断。
+- 混合工艺：彩印+烫金同时生成外协与厂内任务，回厂阶段可排风车机/机仔师傅。
+- 师傅端：急单优先后按工单创建日期排序；支持多选一键开工/完工，任务详情展示设计图与接单人。
+- 薪资/考勤：风车机新阶梯与账号级规则覆盖落地；工资可按日期查超底薪原因；全体正式员工考勤支持 0.5 天。
+- 财务：客服销售额、客户结款、工单成本分别记不可覆盖流水；账单展示每次结款、提成、成本和毛利，售后重做成本归回原账单。
+- 认证：JWT 只作会话提示，页面与 Server Action 使用前按用户主键实时校验账号存在、启用状态和当前角色；账号在排产页打开后失效会返回重新登录入口，事务不落任务、不进入整页错误边界。
+- 多能力派工：开机师傅账号配置“主机型 + 多设备能力 + 熟练工艺”；排产与改派分为推荐、可分配但需说明、硬阻断。非推荐原因写 `OrderLog`，实际设备写 `ProductionTask.machineType`，个人计件规则可覆盖每一种登记设备。
+- 本地已执行 migrations 至 `20260731210000_worker_capabilities_and_assignment_override`；回填核对为 3 位开机师傅、19 条推荐能力、0 位空设备能力师傅。
+- 本轮最终验证：113 测试文件 / 1527 测试、typecheck、lint、Prisma validate、生产 build、4 项真实批量排产 E2E 全绿；375px 明/暗及 1280px 管理端全路由通过溢出探测与 axe 门禁。开发服务器运行在 `http://localhost:3000`。
 
 ## 下一步具体指令（给下次 AI）
 
-1. 生产激活只执行外部运维步骤：真实 `.env`、Pigsty 的两个 pgBackRest repo + WAL、OSS 版本化/跨区复制、PM2/Nginx。未获得生产主机与凭证时不能代替执行。
+1. 上生产前先备份，再执行 `pnpm prisma migrate deploy`；履约 migration 会回填 shipment/line，最新能力 migration 会把历史主机型写入多设备能力，并把原可分配的师傅/工艺组合回填为推荐项。
 2. 上线门禁：`pnpm check:env` → migrate/build → `pm2 startOrReload deploy/ecosystem.config.cjs` → `/api/health/ready` → `pnpm check:backup`。
-3. 多机扩容前，PDF 产物必须迁到共享对象存储；当前单机 PM2 基线用 `/var/tmp/print-shop-erp/pdf`。
-4. 原架构报告 A1–A6 与 A05/A07/A20/A21 业务待办仍保留，见 `docs/架构体检报告-2026-07-09.md` / `docs/AGENT-BACKLOG.md`。
-5. 提交前只选择本次生产硬化修复文件；当前工作区还包含另一批业务编码/UI/视觉基线改动，禁止混成一个大 commit。
+3. 重点人工验收：先在账号管理给一位师傅增加第二种设备与熟练工艺；待排产验证推荐排序、搜索与在制数。再取消某个熟练工艺，确认管理员仍可分配但必须填写原因，并在工单日志核对原因与任务实际机型。随后验混合机型分步派工、销售修改申请、师傅批量报工、分次结款、多地址、售后重做和三款打印。
+4. 多机扩容前，PDF 产物必须迁到共享对象存储；当前单机 PM2 基线用 `/var/tmp/print-shop-erp/pdf`。
+5. 原架构报告与 A07/A20/A21 业务待办仍保留，见 `docs/架构体检报告-2026-07-09.md` / `docs/AGENT-BACKLOG.md`。
 
 ## 卡住的问题
 
 - 本机没有 pgBackRest 且未配 `PGBACKREST_STANZA`；`pnpm check:backup` 会正确失败并阻断上线，不伪造生产备份绿灯。
-- 视觉基线 6 张 png（承诺交期 + QR URL 化引起）仍待业主看截图确认后以 `[visual-regression]` commit 提交。
+- 新增三款 A4 视觉基线已生成；既有 7 张打印基线未重写。
 - `pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
-- A05/A07/A20/A21 等业务输入（backlog Needs 小节）。
+- A07/A20/A21 等业务输入（backlog Needs 小节）。
 - 后台任务账本尚无自动保留清理策略；上线后按实际增长率决定 SUCCEEDED/CANCELLED/DEAD 的保留窗口，并单独设计清理任务。
 
 ## 历史（追加式时间线）
@@ -70,3 +76,8 @@
 - 2026-07-17：生产硬化上线前纠偏：修复 worker 资源限制落在 tsx 包装进程、durable 通知可抛、终态 dedupe 永久占位、CDR 永久 PENDING、未知任务不进 fail、部署 env/重启配置和 PDF 排队体验；补齐生产分支测试，1353 单测 / lint / typecheck / Prisma validate / build 全绿。
 - 2026-07-19：后台角色收敛：OWNER / FOREMAN 数据与权限统一迁移为 ADMIN，管理员菜单合并经营、生产、财务、字典和运维入口；保留 `/owner/*`、`/foreman/*` 旧 URL，旧 JWT 与早期默认姓名自动归一化。迁移已在本地库执行并确认 3 个管理账号全部为 ADMIN，后台不再展示“老板/车间主管”；1397 单测 / 3 项登录 E2E / lint / typecheck / Prisma validate / build / 页面实测全绿。
 - 2026-07-19：新工单号改为 `GD-YYMMDD-XXX`（例 `GD-260719-001`），保留历史编号；上海业务日 advisory lock 与严格三位流水校验继续生效。配置迁移已执行，真实新建工单 E2E 与工单列表页面验证通过。
+- 2026-07-31：管理端履约与售后增强：多地址发货/分地址运单、顺丰到付后期更正、免计费关联重做、批量派工与三款 A4 单页打印落地。本地迁移和真实 Chromium 打印验收通过；109 文件 / 1479 单测全绿。
+- 2026-07-31：工单变更、生产、薪资与财务闭环：版本化修改申请、彩印+烫金混合排产、师傅批量开工/完工、风车机新阶梯与账号规则、日期底薪对比、全员半天考勤、客服销售额/结款/成本分账落地；111 文件 / 1496 单测、36 项跨设备 UI、8 项打印视觉/PDF、生产 build 全绿。
+- 2026-07-31：待排产列表升级为按兼容工艺分步批量排产：先选师傅再跨工单勾选，混合机型可分两次派给不同师傅；PENDING 草稿由 Order 状态双重门控，全部派完才进入生产。真实同机型批量与混合机型两阶段 E2E 均通过。
+- 2026-07-31：修复删除/停用账号的长效 JWT 仍可进入排产动作并在 OrderLog 外键处 500；统一数据库实时会话校验，排产动作提供重新登录恢复态，真实失效会话 E2E 验证零任务落库。
+- 2026-07-31：多能力师傅与管理员最终派工落地：账号支持主机型/多设备/熟练工艺，单单/批量/改派统一推荐与硬资格，非推荐派工强制原因并审计；任务按实际设备计薪，个人规则覆盖全部登记机型。1527 单测、4 项真实排产 E2E、375px 明暗与 1280px 管理端 UI 门禁、生产 build 全绿。

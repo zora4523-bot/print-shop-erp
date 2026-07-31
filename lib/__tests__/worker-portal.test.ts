@@ -32,11 +32,13 @@ describe('worker order visibility', () => {
       {
         id: 'order-1',
         orderNo: '20260719-0001',
+        customName: null,
         status: OrderStatus.IN_PRODUCTION,
         isUrgent: false,
         customerRef: null,
         promisedDate: null,
         createdAt: new Date(),
+        submitter: { displayName: '销售 A' },
         items: [
           {
             id: 'item-1',
@@ -51,6 +53,7 @@ describe('worker order visibility', () => {
     const result = await listWorkerOrders(worker);
     const query = dbMock.order.findMany.mock.calls[0][0];
     expect(query.where).toEqual({
+      status: { not: OrderStatus.SUBMITTED },
       items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
     });
     expect(query.select.items.where).toEqual({
@@ -72,6 +75,7 @@ describe('worker order visibility', () => {
       expect.objectContaining({
         where: {
           id: 'order-other',
+          status: { not: OrderStatus.SUBMITTED },
           items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
         },
       }),
