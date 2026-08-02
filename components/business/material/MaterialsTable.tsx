@@ -115,7 +115,7 @@ export function MaterialsTable({
             direction={direction}
           />
           <TableHead className="text-right">安全库存</TableHead>
-          <TableHead className="text-right">平均成本</TableHead>
+          <TableHead className="text-right">参考平均成本</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>

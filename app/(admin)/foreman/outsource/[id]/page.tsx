@@ -1,11 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { randomUUID } from 'node:crypto';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import { Badge } from '@/components/ui/badge';
 import { OutsourceActions } from '@/components/business/outsource/OutsourceActions';
-import { formatDateShanghai } from '@/lib/format/dates';
+import { OutsourceAmountForm } from '@/components/business/outsource/OutsourceAmountForm';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -100,6 +102,50 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           {row.remark ? <Row label="备注" value={row.remark} full /> : null}
         </dl>
       </section>
+
+      {row.status === OutsourceStatus.CANCELLED ? null : (
+        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+          <div>
+            <h2 className="text-base font-semibold">外协金额确认</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              可在回货后补录最终金额；后续更正会保留原金额、新金额、原因和操作人。
+            </p>
+          </div>
+          <OutsourceAmountForm
+            id={row.id}
+            currentAmount={row.amount === null ? null : String(row.amount)}
+            initialIdempotencyKey={randomUUID()}
+          />
+        </section>
+      )}
+
+      {row.amountChanges.length > 0 ? (
+        <section className="rounded-xl border bg-card shadow-sm">
+          <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
+            金额变更记录（{row.amountChanges.length}）
+          </h2>
+          <ol className="divide-y text-sm">
+            {row.amountChanges.map((change) => (
+              <li
+                key={change.id}
+                className="grid min-w-0 gap-2 px-4 py-3 sm:grid-cols-[180px_180px_minmax(0,1fr)] sm:px-6"
+              >
+                <span className="font-sans tabular-nums">
+                  {change.previousAmount === null
+                    ? '未录入'
+                    : `¥ ${String(change.previousAmount)}`}{' '}
+                  → ¥ {String(change.newAmount)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {change.changedBy.displayName} ·{' '}
+                  {formatDateTimeShanghai(change.createdAt)}
+                </span>
+                <span className="admin-wrap-anywhere">{change.reason}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       {canReceive || canCancel ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">

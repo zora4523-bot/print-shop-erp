@@ -308,7 +308,19 @@ npx puppeteer browsers install chrome
 
 如果不想下载 Puppeteer 自己的浏览器，想用系统 Chrome，设置 `PUPPETEER_SKIP_DOWNLOAD=true` + `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`（MVP 没做这个分支，需要时再说）。
 
-### 7. 上线 smoke checklist
+### 7. 日常更新与数据库迁移边界
+
+首次部署完成后，统一从项目根目录运行：
+
+```bash
+./deploy/update.sh
+```
+
+脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
+
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 验证必须迁移到当前尾部 `20260802113000_hourly_payroll_reconciliation`，并跑 worker 视觉 fixture 验证其依赖列；完整命令和故障处理见 `docs/部署指南.md` §14。
+
+### 8. 上线 smoke checklist
 
 按顺序跑一遍：
 - [ ] `pnpm prisma migrate deploy`（生产 migration）

@@ -31,9 +31,9 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
         end: attendanceEnd,
       })
     ).get(user.id) ?? { workUnits: '0', leaveUnits: '0' };
-  const exceedsBase = new Decimal(
+  const pieceworkVsBase = new Decimal(
     salary.totalPieceworkAmount as Decimal.Value,
-  ).gte(new Decimal(salary.baseSalary as Decimal.Value));
+  ).cmp(new Decimal(salary.baseSalary as Decimal.Value));
 
   return (
     <div className="min-w-0 space-y-5">
@@ -47,8 +47,12 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           ) : (
             <Badge variant="outline">未发</Badge>
           )}
-          <Badge variant={exceedsBase ? 'secondary' : 'outline'}>
-            {exceedsBase ? '计件已超底薪' : '按底薪补足'}
+          <Badge variant={pieceworkVsBase > 0 ? 'secondary' : 'outline'}>
+            {pieceworkVsBase > 0
+              ? '计件高于保底'
+              : pieceworkVsBase === 0
+                ? '计件等于保底'
+                : '按保底补足'}
           </Badge>
           <Badge variant="outline">上班 {attendance.workUnits} 天</Badge>
           <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
@@ -65,7 +69,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
         <Money label="人工调整" value={salary.adjustmentAmount} />
         <Money label="实发工资" value={salary.actualSalary} strong />
       </section>
-      {!exceedsBase ? (
+      {pieceworkVsBase < 0 ? (
         <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
           当日计件工资未达到每日底薪，因此本日工资按底薪计算，再叠加人工调整。
         </p>

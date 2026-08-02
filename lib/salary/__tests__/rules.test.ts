@@ -64,6 +64,29 @@ describe('getActiveMachineRule — personal override priority', () => {
       getActiveMachineRule(MachineType.HAND_PRESS, new Date(), 'worker-1'),
     ).resolves.toEqual(globalRule);
   });
+
+  it('uses the supplied transaction client for personal and global reads', async () => {
+    const txClient = {
+      workerMachineSalaryRule: { findFirst: vi.fn().mockResolvedValue(null) },
+      salaryRule: {
+        findFirst: vi.fn().mockResolvedValue({ ruleValue: globalRule }),
+      },
+    };
+    const now = new Date('2026-07-19T03:00:00Z');
+
+    await expect(
+      getActiveMachineRule(
+        MachineType.HAND_PRESS,
+        now,
+        'worker-1',
+        txClient,
+      ),
+    ).resolves.toEqual(globalRule);
+    expect(txClient.workerMachineSalaryRule.findFirst).toHaveBeenCalled();
+    expect(txClient.salaryRule.findFirst).toHaveBeenCalled();
+    expect(dbMock.workerMachineSalaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 function mockRule(byKey: Record<string, unknown>) {

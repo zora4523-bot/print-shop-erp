@@ -8,12 +8,14 @@ import {
 import { canAttachOutsource } from './order/status-machine';
 import { orderCascadeLockKey } from './order/locks';
 import { dispatchNotification } from './notification/dispatch';
+import { writeAuditLogInTx, type AuditActor } from './audit-log';
 import {
   maybeCompleteProductionOrder,
   type ProductionCompletionTx,
 } from './production-completion';
 import type {
   CreateOutsourceInput,
+  ConfirmOutsourceAmountInput,
   MarkOutsourceReceivedInput,
 } from './auth/schemas';
 
@@ -26,19 +28,49 @@ export class OutsourceError extends Error {
 
 export type CreatedOutsource = { id: string };
 
-// Simple non-transactional create — one INSERT. We verify the order
-// exists and keep orderItemIds as a plain string[] (no FK relation
-// table). Prisma already rejects a missing orderId FK, so we don't
-// redundantly findFirst; the error maps cleanly to { status: 'error' }.
-//
-// Actor is taken but not used today — kept in the signature for
-// forward-compat when we start writing an audit log for
-// outsource-order mutations.
-// Same lock namespace as transitionWithLog + scheduleOrder + worker
-// cascade。
-// races against shipOrder / cancelOrder; folding both into one tx
-// behind the per-order lock makes "order is still attachable" an
-// atomic decision.
+const OUTSOURCE_AMOUNT_MAX = new Decimal('9999999999.99');
+
+function storableOutsourceAmount(
+  value: Decimal.Value | null | undefined,
+  label: string,
+): string | null {
+  if (value === null || value === undefined) return null;
+  let amount: Decimal;
+  try {
+    amount = new Decimal(value);
+  } catch {
+    throw new OutsourceError(`${label}格式不合法`);
+  }
+  if (
+    !amount.isFinite() ||
+    amount.isNegative() ||
+    amount.decimalPlaces() > 2 ||
+    amount.gt(OUTSOURCE_AMOUNT_MAX)
+  ) {
+    throw new OutsourceError(`${label}必须是非负数，最多 10 位整数和 2 位小数`);
+  }
+  return amount.toFixed(2);
+}
+
+function sameOptionalDate(
+  actual: Date | null,
+  expected: Date | null | undefined,
+): boolean {
+  return actual?.getTime() === expected?.getTime();
+}
+
+function sameStringArray(actual: string[], expected: string[]): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
+}
+
+// Creation joins the shared per-order lock used by schedule/ship/cancel and a
+// request-key lock. The locked replay check happens before today's order-state
+// gate, so a lost response can still recover the original result after the
+// order advances. Actor identity is part of exact-payload equality and the
+// first successful write records an audit row in the same transaction.
 
 type OutsourceTxClient = {
   $executeRaw: (
@@ -52,15 +84,31 @@ type OutsourceTxClient = {
     }) => Promise<{ status: OrderStatus } | null>;
   };
   outsourceOrder: {
+    findUnique: (args: {
+      where: { idempotencyKey: string };
+      select?: unknown;
+    }) => Promise<{
+      id: string;
+      orderId: string | null;
+      orderItemIds: string[];
+      supplierName: string;
+      supplierContact: string | null;
+      craftDescription: string | null;
+      specialRequirement: string | null;
+      totalQty: number | null;
+      expectedDate: Date | null;
+      amount: Decimal.Value | null;
+      remark: string | null;
+      createdById: string | null;
+    } | null>;
     create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
   };
 };
 
 export async function createOutsourceOrder(
   input: CreateOutsourceInput,
-  actor: { id: string; role: Role },
+  actor: AuditActor,
 ): Promise<CreatedOutsource> {
-  void actor;
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as OutsourceTxClient;
     // Per-order advisory lock makes the "order is attachable?" check
@@ -69,6 +117,48 @@ export async function createOutsourceOrder(
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.orderId,
     )}))`;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:outsource-create:${input.idempotencyKey}`}))`;
+
+    const amount = storableOutsourceAmount(input.amount, '外协金额');
+    const replay = await txClient.outsourceOrder.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: {
+        id: true,
+        orderId: true,
+        orderItemIds: true,
+        supplierName: true,
+        supplierContact: true,
+        craftDescription: true,
+        specialRequirement: true,
+        totalQty: true,
+        expectedDate: true,
+        amount: true,
+        remark: true,
+        createdById: true,
+      },
+    });
+    if (replay) {
+      const exactPayload =
+        replay.orderId === input.orderId &&
+        replay.createdById === actor.id &&
+        sameStringArray(replay.orderItemIds, input.orderItemIds) &&
+        replay.supplierName === input.supplierName &&
+        replay.supplierContact === (input.supplierContact ?? null) &&
+        replay.craftDescription === (input.craftDescription ?? null) &&
+        replay.specialRequirement === (input.specialRequirement ?? null) &&
+        replay.totalQty === (input.totalQty ?? null) &&
+        sameOptionalDate(replay.expectedDate, input.expectedDate) &&
+        (replay.amount === null
+          ? amount === null
+          : amount !== null && new Decimal(replay.amount).eq(amount)) &&
+        replay.remark === (input.remark ?? null);
+      if (!exactPayload) {
+        throw new OutsourceError(
+          '外协创建请求标识已被其他内容使用，请刷新后重试',
+        );
+      }
+      return { id: replay.id };
+    }
 
     const order = await txClient.order.findUnique({
       where: { id: input.orderId },
@@ -83,24 +173,138 @@ export async function createOutsourceOrder(
 
     const row = await txClient.outsourceOrder.create({
       data: {
+        idempotencyKey: input.idempotencyKey,
         orderId: input.orderId,
+        createdById: actor.id,
         orderItemIds: input.orderItemIds,
         supplierName: input.supplierName,
-        supplierContact: input.supplierContact,
-        craftDescription: input.craftDescription,
-        specialRequirement: input.specialRequirement,
+        supplierContact: input.supplierContact ?? null,
+        craftDescription: input.craftDescription ?? null,
+        specialRequirement: input.specialRequirement ?? null,
         totalQty: input.totalQty ?? null,
         expectedDate: input.expectedDate ?? null,
-        amount:
-          input.amount === null || input.amount === undefined
-            ? null
-            : new Decimal(input.amount).toFixed(2),
-        remark: input.remark,
+        amount,
+        remark: input.remark ?? null,
         status: OutsourceStatus.SENT,
       },
       select: { id: true },
     });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'CREATE',
+      entityType: 'OutsourceOrder',
+      entityId: row.id,
+      after: {
+        orderId: input.orderId,
+        orderItemIds: input.orderItemIds,
+        supplierName: input.supplierName,
+        craftDescription: input.craftDescription ?? null,
+        totalQty: input.totalQty ?? null,
+        expectedDate: input.expectedDate ?? null,
+        amount,
+        status: OutsourceStatus.SENT,
+      },
+      requestMetadata: {
+        source: 'foreman-outsource.createOutsourceAction',
+        route: '/foreman/outsource/new',
+      },
+    });
     return row;
+  });
+}
+
+export type ConfirmedOutsourceAmount = {
+  id: string;
+  orderId: string | null;
+  status: OutsourceStatus;
+  amount: string;
+};
+
+export async function confirmOutsourceAmount(
+  id: string,
+  input: ConfirmOutsourceAmountInput,
+  actor: AuditActor,
+): Promise<ConfirmedOutsourceAmount> {
+  const amount = storableOutsourceAmount(input.amount, '外协金额');
+  if (amount === null) throw new OutsourceError('请填写外协金额');
+
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:outsource:${id}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:outsource-amount:${input.idempotencyKey}`}))`;
+
+    const replay = await tx.outsourceAmountChange.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: {
+        outsourceOrderId: true,
+        newAmount: true,
+        reason: true,
+        changedById: true,
+        outsourceOrder: {
+          select: { id: true, orderId: true, status: true },
+        },
+      },
+    });
+    if (replay) {
+      if (
+        replay.outsourceOrderId !== id ||
+        replay.changedById !== actor.id ||
+        !new Decimal(replay.newAmount).eq(amount) ||
+        replay.reason !== input.reason
+      ) {
+        throw new OutsourceError(
+          '外协金额请求标识已被其他内容使用，请刷新后重试',
+        );
+      }
+      return {
+        id: replay.outsourceOrder.id,
+        orderId: replay.outsourceOrder.orderId,
+        status: replay.outsourceOrder.status,
+        amount: new Decimal(replay.newAmount).toFixed(2),
+      };
+    }
+
+    const row = await tx.outsourceOrder.findUnique({
+      where: { id },
+      select: { id: true, orderId: true, status: true, amount: true },
+    });
+    if (!row) throw new OutsourceError('外协单不存在');
+    if (row.status === OutsourceStatus.CANCELLED) {
+      throw new OutsourceError('已取消的外协单不能确认成本金额');
+    }
+    if (row.amount !== null && new Decimal(row.amount).eq(amount)) {
+      throw new OutsourceError('外协金额未发生变化');
+    }
+
+    const change = await tx.outsourceAmountChange.create({
+      data: {
+        idempotencyKey: input.idempotencyKey,
+        outsourceOrderId: id,
+        previousAmount:
+          row.amount === null ? null : new Decimal(row.amount).toFixed(2),
+        newAmount: amount,
+        reason: input.reason,
+        changedById: actor.id,
+      },
+      select: { id: true },
+    });
+    await tx.outsourceOrder.update({
+      where: { id },
+      data: { amount },
+    });
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: row.amount === null ? 'CONFIRM_AMOUNT' : 'UPDATE_AMOUNT',
+      entityType: 'OutsourceOrder',
+      entityId: id,
+      before: { amount: row.amount === null ? null : String(row.amount) },
+      after: { amount, amountChangeId: change.id, reason: input.reason },
+      requestMetadata: {
+        source: 'foreman-outsource.confirmOutsourceAmountAction',
+        route: `/foreman/outsource/${id}`,
+      },
+    });
+
+    return { id, orderId: row.orderId, status: row.status, amount };
   });
 }
 
@@ -337,6 +541,17 @@ export async function getOutsourceOrderDetail(id: string) {
       remark: true,
       createdAt: true,
       updatedAt: true,
+      amountChanges: {
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          previousAmount: true,
+          newAmount: true,
+          reason: true,
+          createdAt: true,
+          changedBy: { select: { displayName: true } },
+        },
+      },
       order: { select: { id: true, orderNo: true, isUrgent: true } },
     },
   });

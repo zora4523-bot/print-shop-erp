@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderStatus, Role, TaskStatus } from '../../generated/prisma/client';
+import {
+  OrderCostCategory,
+  OrderStatus,
+  Role,
+  TaskStatus,
+} from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -25,6 +30,7 @@ const { dbMock } = vi.hoisted(() => {
     };
     orderShipmentLine: { createMany: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
+    orderCostEntry: { aggregate: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
@@ -47,6 +53,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     orderShipmentLine: { createMany: vi.fn() },
     orderLog: { create: vi.fn() },
+    orderCostEntry: { aggregate: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
@@ -69,6 +76,23 @@ const { notifyMock } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: notifyMock,
+}));
+const {
+  assertCsOrderSalesLedgerReconciledMock,
+  recordCsSalesEntryMock,
+  MockCsSalesLedgerError,
+} = vi.hoisted(() => ({
+  assertCsOrderSalesLedgerReconciledMock: vi.fn<
+    (...args: unknown[]) => Promise<void>
+  >(),
+  recordCsSalesEntryMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  MockCsSalesLedgerError: class extends Error {},
+}));
+vi.mock('@/lib/salary/cs-sales', () => ({
+  assertCsOrderSalesLedgerReconciledInTx:
+    assertCsOrderSalesLedgerReconciledMock,
+  recordCsSalesEntryInTx: recordCsSalesEntryMock,
+  CsSalesLedgerError: MockCsSalesLedgerError,
 }));
 
 import {
@@ -127,12 +151,19 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ count: 1 });
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
+  dbMock.orderCostEntry.aggregate.mockReset().mockResolvedValue({
+    _sum: { amount: null },
+  });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
   });
   notifyMock.mockReset().mockResolvedValue(undefined);
+  assertCsOrderSalesLedgerReconciledMock
+    .mockReset()
+    .mockResolvedValue(undefined);
+  recordCsSalesEntryMock.mockReset().mockResolvedValue(null);
 
   // Default: no existing orders for today (fresh serial), every craft
   // exists + is active, no productId references.
@@ -772,6 +803,93 @@ describe('cancelOrder', () => {
     const remarks = dbMock.orderLog.create.mock.calls.map((c) => c[0].data.remark);
     expect(remarks).toEqual(['取消工单']);
   });
+
+  it('does not subtract CS sales when cancelling a draft that was never accrued', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      submitterId: 'cs-1',
+      submitterRole: Role.CUSTOMER_SERVICE,
+      billingMode: 'CHARGE',
+      totalAmount: '5000.00',
+      revision: 1,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    await cancelOrder('o1', ownerActor, '放弃草稿');
+
+    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
+  });
+
+  it('subtracts the exact current amount when cancelling an accrued CS order', async () => {
+    const clock = new Date('2026-08-02T03:04:00.000Z');
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SUBMITTED,
+      submitterId: 'cs-1',
+      submitterRole: Role.CUSTOMER_SERVICE,
+      billingMode: 'CHARGE',
+      totalAmount: '5000.25',
+      revision: 3,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    await cancelOrder('o1', ownerActor, '客户取消', clock);
+
+    expect(assertCsOrderSalesLedgerReconciledMock).toHaveBeenCalledWith(
+      dbMock,
+      'o1',
+      '5000.25',
+    );
+    expect(recordCsSalesEntryMock).toHaveBeenCalledTimes(1);
+    expect(recordCsSalesEntryMock).toHaveBeenCalledWith(
+      dbMock,
+      {
+        eventKey: 'order:o1:revision:3:cancel',
+        csUserId: 'cs-1',
+        orderId: 'o1',
+        orderRevision: 3,
+        type: 'ORDER_CANCELLED',
+        amount: expect.objectContaining({}),
+        occurredAt: clock,
+        remark: '取消工单：客户取消',
+      },
+    );
+    const ledgerInput = recordCsSalesEntryMock.mock.calls[0]?.[1] as {
+      amount: { toFixed: (places: number) => string };
+    };
+    expect(ledgerInput.amount.toFixed(2)).toBe('-5000.25');
+  });
+
+  it('rolls back cancellation when legacy CS sales cannot be reconciled', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SUBMITTED,
+      submitterId: 'cs-1',
+      submitterRole: Role.CUSTOMER_SERVICE,
+      billingMode: 'CHARGE',
+      totalAmount: '5000.25',
+      revision: 3,
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.CANCELLED,
+    });
+    assertCsOrderSalesLedgerReconciledMock.mockRejectedValue(
+      new MockCsSalesLedgerError('历史财务校准后再操作'),
+    );
+
+    await expect(
+      cancelOrder('o1', ownerActor, '客户取消'),
+    ).rejects.toThrow(/历史财务校准/);
+    expect(recordCsSalesEntryMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('shipOrder', () => {
@@ -1288,6 +1406,26 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     expect(data.remark).toBe('新备注');
   });
 
+  it('checks shipping cost after the order lock before an edit enables SF collect', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot());
+    dbMock.orderCostEntry.aggregate.mockResolvedValue({
+      _sum: { amount: '12.00' },
+    });
+
+    await expect(
+      updateOrderFields('order-1', { isSfCollect: true }, salesActor),
+    ).rejects.toThrow(/已有物流成本流水.*财务核对/);
+
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.order.findFirst.mock.invocationCallOrder[0]!,
+    );
+    expect(dbMock.order.findFirst.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.orderCostEntry.aggregate.mock.invocationCallOrder[0]!,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
   it('SHIPPING_ONLY fieldset: customerRef and isUrgent are dropped even if submitted', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ status: OrderStatus.IN_PRODUCTION }),
@@ -1508,6 +1646,13 @@ describe('setOrderSfCollect — 后期履约标识', () => {
 
       expect(result.changedFields).toEqual(['isSfCollect']);
       expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(dbMock.orderCostEntry.aggregate).toHaveBeenCalledWith({
+        where: {
+          orderId: 'order-1',
+          category: OrderCostCategory.SHIPPING,
+        },
+        _sum: { amount: true },
+      });
       expect(dbMock.order.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { isSfCollect: true } }),
       );
@@ -1521,6 +1666,57 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       });
     },
   );
+
+  it('refuses to enable SF collect when immutable shipping rows have a non-zero net amount', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(OrderStatus.COMPLETED),
+    );
+    dbMock.orderCostEntry.aggregate.mockResolvedValue({
+      _sum: { amount: '18.50' },
+    });
+
+    await expect(
+      setOrderSfCollect('order-1', true, ownerActor),
+    ).rejects.toThrow(/已有物流成本流水.*财务核对/);
+
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.orderCostEntry.aggregate.mock.invocationCallOrder[0]!,
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('allows enabling SF collect when historical shipping rows net to zero', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(OrderStatus.SHIPPED),
+    );
+    dbMock.orderCostEntry.aggregate.mockResolvedValue({
+      _sum: { amount: '0.00' },
+    });
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SHIPPED,
+    });
+
+    await expect(
+      setOrderSfCollect('order-1', true, ownerActor),
+    ).resolves.toMatchObject({ changed: true });
+  });
+
+  it('does not query shipping costs when disabling SF collect', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(OrderStatus.SHIPPED, true),
+    );
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SHIPPED,
+    });
+
+    await expect(
+      setOrderSfCollect('order-1', false, ownerActor),
+    ).resolves.toMatchObject({ changed: true });
+    expect(dbMock.orderCostEntry.aggregate).not.toHaveBeenCalled();
+  });
 
   it.each([OrderStatus.FINISHED, OrderStatus.CANCELLED])(
     '拒绝修改终态 %s',

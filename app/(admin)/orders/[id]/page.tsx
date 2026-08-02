@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import {
   OrderChangeRequestStatus,
@@ -68,6 +69,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   if (!order) notFound();
   const canCreateRework =
     user.role === Role.ADMIN &&
+    order.kind !== OrderKind.REWORK &&
     (order.status === OrderStatus.SHIPPED ||
       order.status === OrderStatus.FINISHED);
   const [
@@ -607,7 +609,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <div>
             <h2 className="text-base font-semibold">成本补录与调整</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              计件工资和外协金额会在账单中自动汇总；这里补录材料、物流重量费用、伙食费、电费等自定义成本。
+              计件工资和外协金额会在账单中自动汇总；这里补录材料、{order.isSfCollect ? '' : '物流重量费用、'}伙食费、电费等自定义成本。
             </p>
           </div>
           {order.costEntries.length > 0 ? (
@@ -664,7 +666,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <p className="text-sm text-muted-foreground">暂无人工补录成本。</p>
           )}
           <div className="border-t pt-4">
-            <OrderCostEntryForm orderId={order.id} />
+            <OrderCostEntryForm
+              orderId={order.id}
+              initialIdempotencyKey={randomUUID()}
+              isSfCollect={order.isSfCollect}
+            />
           </div>
         </section>
       ) : null}

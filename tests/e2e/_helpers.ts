@@ -72,8 +72,8 @@ export async function resetBillsForUser(userId: string): Promise<void> {
           'created by globalSetup.ts).',
       );
     }
-    // Step 1: clear all BillItems for this user's bills
-    //   (BillItem → Bill is RESTRICT, must go first).
+    // Step 1: clear append-only payments and BillItems for this user's bills
+    //   (both reference Bill and must go first).
     // Step 2: clear all Bills for this user (full wipe — e2e-* user
     //   is test-only; round 80 contract).
     // Step 3: clear FINISHED orders for this user.
@@ -87,6 +87,12 @@ export async function resetBillsForUser(userId: string): Promise<void> {
     // broad. Order children cascade automatically (OrderItem +
     // OrderLog ON DELETE CASCADE, ProductionTask + OrderItemDesign
     // via OrderItem, OutsourceOrder.orderId → SET NULL).
+    await db.query(
+      `DELETE FROM "BillPayment" WHERE "billId" IN (
+         SELECT id FROM "Bill" WHERE "salesUserId" = $1
+       )`,
+      [userId],
+    );
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT id FROM "Bill" WHERE "salesUserId" = $1
@@ -361,8 +367,8 @@ export async function seedPrintableOrder(opts: {
 // empty period (totalSales=0). Same e2e-* guard as resetBillsForUser
 // so this can never wipe a real CS user's salary state.
 //
-// CustomerServiceCommission has a RESTRICT FK to SalaryPeriod, so we
-// drop commissions first, then periods.
+// The append-only sales/payroll ledgers and CustomerServiceCommission all
+// reference SalaryPeriod, so dependent facts must be removed first.
 export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
   await withDb(async (db) => {
     const r = await db.query<{ username: string }>(
@@ -378,6 +384,15 @@ export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
         `resetCsSalaryStateForUser refuses to wipe non-E2E user "${username}".`,
       );
     }
+    await db.query(
+      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+       )`,
+      [userId],
+    );
+    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+      userId,
+    ]);
     await db.query(
       `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
       [userId],
@@ -581,11 +596,18 @@ export async function seedDashboardSnapshot(opts: {
 
   return withDb(async (db) => {
     // Step 1: wipe Slice A + B fixtures.
-    // Bills first (BillItem → Bill RESTRICT), then Orders, then Slice
+    // Bills first (BillPayment/BillItem → Bill), then Orders, then Slice
     // B aux state. OutsourceOrder.orderId → ON DELETE SET NULL so a
     // wide Order delete leaves orphaned OutsourceOrder rows pointing
     // at no order — those would still surface in 超期外协 list. Wipe
     // them by id-prefix instead.
+    await db.query(
+      `DELETE FROM "BillPayment" WHERE "billId" IN (
+         SELECT b.id FROM "Bill" b
+         JOIN "User" u ON u.id = b."salesUserId"
+         WHERE u.username LIKE 'e2e-%'
+       )`,
+    );
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT b.id FROM "Bill" b
@@ -626,6 +648,15 @@ export async function seedDashboardSnapshot(opts: {
     // Slice B: nuke prior CS commission + period rows for the cs user.
     // Same RESTRICT order as resetCsSalaryStateForUser.
     if (opts.csUserId) {
+      await db.query(
+        `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+           SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+         )`,
+        [opts.csUserId],
+      );
+      await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+        opts.csUserId,
+      ]);
       await db.query(
         `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
         [opts.csUserId],
@@ -1752,6 +1783,15 @@ export async function seedEndingPeriodForCron(opts: {
 }): Promise<{ periodId: string }> {
   return withDb(async (db) => {
     // Same wipe-by-user pattern as resetCsSalaryStateForUser
+    await db.query(
+      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+       )`,
+      [opts.csUserId],
+    );
+    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+      opts.csUserId,
+    ]);
     await db.query(
       `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
       [opts.csUserId],

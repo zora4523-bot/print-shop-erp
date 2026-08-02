@@ -1052,6 +1052,32 @@ describe('beginTask', () => {
     expect(dbMock.productionTask.update).not.toHaveBeenCalled();
   });
 
+  it('allows pickup on a registered secondary machine capability', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({ machineType: MachineType.WINDMILL }),
+    );
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'worker-1',
+      role: Role.WORKER,
+      isActive: true,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      machineCapabilities: [MachineType.HAND_PRESS, MachineType.WINDMILL],
+    });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.IN_PROGRESS,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+    });
+
+    await expect(beginTask('task-1', workerActor)).resolves.toMatchObject({
+      status: TaskStatus.IN_PROGRESS,
+    });
+  });
+
   it('serializes the task write on the per-ORDER cascade lock — the same key cancelOrder holds (A1 race guard)', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(fixtureTask());
     dbMock.productionTask.update.mockResolvedValue({
@@ -1359,6 +1385,30 @@ describe('beginTasks', () => {
     ).rejects.toThrow(/尚未完成全部排产/);
     expect(dbMock.productionTask.updateMany).not.toHaveBeenCalled();
   });
+
+  it('batch-starts tasks assigned on a registered secondary machine capability', async () => {
+    const task = {
+      ...batchTask('task-1'),
+      machineType: MachineType.WINDMILL,
+    };
+    dbMock.productionTask.findMany.mockResolvedValue([task]);
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'worker-1',
+      role: Role.WORKER,
+      isActive: true,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      machineCapabilities: [MachineType.HAND_PRESS, MachineType.WINDMILL],
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      status: OrderStatus.SCHEDULING,
+    });
+
+    await expect(beginTasks(['task-1'], workerActor)).resolves.toEqual({
+      taskIds: ['task-1'],
+    });
+    expect(dbMock.productionTask.updateMany).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('worker task visibility', () => {
@@ -1498,6 +1548,9 @@ describe('reportTask', () => {
       boardRate: 5,
       multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
     });
+    expect(dbMock.$executeRaw.mock.calls.map((call) => call[1])).toContain(
+      'print-shop-erp:piecework-rule:worker-1:HAND_PRESS',
+    );
   });
 
   it('applies double-sided / double-color multipliers at report time', async () => {
@@ -1538,6 +1591,33 @@ describe('reportTask', () => {
     expect(update.data.boardCount).toBe(4);
     expect(update.data.pressCount).toBe(8000);
     expect(update.data.pieceworkAmount).toBe('76.00');
+  });
+
+  it('rejects a legacy rule whose computed amount exceeds Decimal(10,2)', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+        isDoubleSided: true,
+        isDoubleColor: true,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({
+      ruleValue: { ...HAND_PRESS_RULE, pieceRate: 1, boardRate: 0 },
+    });
+
+    await expect(
+      reportTask(
+        'task-1',
+        {
+          completedQty: 10_000_000,
+          defectQty: 10_000_000,
+          reworkQty: 10_000_000,
+        },
+        workerActor,
+      ),
+    ).rejects.toThrow(/99,999,999\.99/);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
   });
 
   it('cascades Order IN_PRODUCTION → COMPLETED when this is the last active task', async () => {

@@ -74,32 +74,35 @@ model User {
   updatedAt           DateTime        @updatedAt
 
   // 关系
-  submittedOrders       Order[]                     @relation("OrderSubmitter")
-  createdOrders         Order[]                     @relation("OrderCreator")
-  assignedTasks         ProductionTask[]
-  orderLogs             OrderLog[]
-  salaryPeriods         SalaryPeriod[]
-  csCommissions         CustomerServiceCommission[]
-  dailyWorkerSalaries   DailyWorkerSalary[]
-  hourlyPayrolls        HourlyWorkerPayroll[]
-  attendanceRecords     Attendance[]                @relation("AttendanceWorker")
-  attendanceCreated     Attendance[]                @relation("AttendanceCreator")
-  bills                 Bill[]
-  designBundles         DesignBundle[]
-  materialTxs           MaterialTransaction[]
-  purchaseReceipts      PurchaseReceipt[]
-  stockTransfers        StockTransfer[]
-  inventoryCounts       InventoryCount[]
-  businessAuditLogs     BusinessAuditLog[]
-  workerSalaryRules     WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleWorker")
-  craftCapabilities     WorkerCraftCapability[]
-  createdSalaryRules    WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleCreator")
-  salaryAdjustments     SalaryAdjustment[]          @relation("SalaryAdjustmentCreator")
-  requestedOrderChanges OrderChangeRequest[]        @relation("OrderChangeRequester")
-  reviewedOrderChanges  OrderChangeRequest[]        @relation("OrderChangeReviewer")
-  recordedBillPayments  BillPayment[]               @relation("BillPaymentRecorder")
-  createdOrderCosts     OrderCostEntry[]            @relation("OrderCostCreator")
-  csSalesEntries        CsSalesEntry[]
+  submittedOrders           Order[]                     @relation("OrderSubmitter")
+  createdOrders             Order[]                     @relation("OrderCreator")
+  assignedTasks             ProductionTask[]
+  orderLogs                 OrderLog[]
+  salaryPeriods             SalaryPeriod[]
+  csCommissions             CustomerServiceCommission[]
+  dailyWorkerSalaries       DailyWorkerSalary[]
+  hourlyPayrolls            HourlyWorkerPayroll[]
+  attendanceRecords         Attendance[]                @relation("AttendanceWorker")
+  attendanceCreated         Attendance[]                @relation("AttendanceCreator")
+  bills                     Bill[]
+  designBundles             DesignBundle[]
+  materialTxs               MaterialTransaction[]
+  purchaseReceipts          PurchaseReceipt[]
+  stockTransfers            StockTransfer[]
+  inventoryCounts           InventoryCount[]
+  businessAuditLogs         BusinessAuditLog[]
+  workerSalaryRules         WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleWorker")
+  craftCapabilities         WorkerCraftCapability[]
+  createdSalaryRules        WorkerMachineSalaryRule[]   @relation("WorkerMachineSalaryRuleCreator")
+  salaryAdjustments         SalaryAdjustment[]          @relation("SalaryAdjustmentCreator")
+  requestedOrderChanges     OrderChangeRequest[]        @relation("OrderChangeRequester")
+  reviewedOrderChanges      OrderChangeRequest[]        @relation("OrderChangeReviewer")
+  recordedBillPayments      BillPayment[]               @relation("BillPaymentRecorder")
+  recordedCsPayrollPayments CsPayrollPayment[]          @relation("CsPayrollPaymentRecorder")
+  createdOrderCosts         OrderCostEntry[]            @relation("OrderCostCreator")
+  createdOutsourceOrders    OutsourceOrder[]            @relation("OutsourceOrderCreator")
+  outsourceAmountChanges    OutsourceAmountChange[]     @relation("OutsourceAmountChanger")
+  csSalesEntries            CsSalesEntry[]
 
   @@index([role])
   @@index([workerType])
@@ -510,7 +513,9 @@ enum OutsourceStatus {
 
 model OutsourceOrder {
   id                 String          @id @default(cuid())
+  idempotencyKey     String          @unique
   orderId            String?
+  createdById        String?
   orderItemIds       String[] // 关联款式
   supplierName       String
   supplierContact    String?
@@ -525,11 +530,31 @@ model OutsourceOrder {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  order Order? @relation(fields: [orderId], references: [id])
+  order         Order?                  @relation(fields: [orderId], references: [id])
+  createdBy     User?                   @relation("OutsourceOrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  amountChanges OutsourceAmountChange[]
 
   @@index([orderId])
+  @@index([createdById])
   @@index([status])
   @@index([expectedDate])
+}
+
+model OutsourceAmountChange {
+  id               String   @id @default(cuid())
+  idempotencyKey   String   @unique
+  outsourceOrderId String
+  previousAmount   Decimal? @db.Decimal(12, 2)
+  newAmount        Decimal  @db.Decimal(12, 2)
+  reason           String
+  changedById      String
+  createdAt        DateTime @default(now())
+
+  outsourceOrder OutsourceOrder @relation(fields: [outsourceOrderId], references: [id], onDelete: Restrict)
+  changedBy      User           @relation("OutsourceAmountChanger", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([outsourceOrderId, createdAt])
+  @@index([changedById, createdAt])
 }
 
 // ============================================================
@@ -1141,13 +1166,14 @@ model DailyWorkerSalaryItem {
 // 奖金、扣款和修正采用追加式账目，不覆盖原始任务计件。amount 使用有符号
 // 金额：奖金为正、扣款为负、修正可正可负。
 model SalaryAdjustment {
-  id            String               @id @default(cuid())
-  dailySalaryId String
-  type          SalaryAdjustmentType
-  amount        Decimal              @db.Decimal(10, 2)
-  reason        String
-  createdById   String
-  createdAt     DateTime             @default(now())
+  id             String               @id @default(cuid())
+  idempotencyKey String               @unique
+  dailySalaryId  String
+  type           SalaryAdjustmentType
+  amount         Decimal              @db.Decimal(10, 2)
+  reason         String
+  createdById    String
+  createdAt      DateTime             @default(now())
 
   dailySalary DailyWorkerSalary @relation(fields: [dailySalaryId], references: [id], onDelete: Cascade)
   createdBy   User              @relation("SalaryAdjustmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -1176,9 +1202,10 @@ model SalaryPeriod {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  csUser       User                        @relation(fields: [csUserId], references: [id])
-  commissions  CustomerServiceCommission[]
-  salesEntries CsSalesEntry[]
+  csUser          User                        @relation(fields: [csUserId], references: [id])
+  commissions     CustomerServiceCommission[]
+  salesEntries    CsSalesEntry[]
+  payrollPayments CsPayrollPayment[]
 
   @@index([csUserId])
   @@index([status])
@@ -1201,6 +1228,7 @@ model CsSalesEntry {
   orderRevision  Int?
   type           CsSalesEntryType
   amount         Decimal          @db.Decimal(12, 2)
+  occurredAt     DateTime
   remark         String?
   createdAt      DateTime         @default(now())
 
@@ -1211,6 +1239,7 @@ model CsSalesEntry {
   @@index([csUserId, createdAt])
   @@index([salaryPeriodId, createdAt])
   @@index([orderId])
+  @@index([occurredAt])
 }
 
 // 客服提成记录
@@ -1240,6 +1269,29 @@ model CustomerServiceCommission {
 
   @@index([csUserId])
   @@index([settledAt])
+}
+
+// 客服工资发放流水。底薪可在四个月周期进行中按月发放；提成只能在周期
+// 结算、金额锁定后发放。CustomerServiceCommission.paidBase / paidCommission
+// 是便于查询的累计快照，本表才是不可覆盖的财务事实。
+model CsPayrollPayment {
+  id               String   @id @default(cuid())
+  idempotencyKey   String   @unique
+  salaryPeriodId   String
+  baseAmount       Decimal  @default(0) @db.Decimal(12, 2)
+  commissionAmount Decimal  @default(0) @db.Decimal(12, 2)
+  paidAt           DateTime
+  paymentMethod    String?
+  referenceNo      String?
+  remark           String?
+  recordedById     String
+  createdAt        DateTime @default(now())
+
+  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
+  recordedBy   User         @relation("CsPayrollPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([salaryPeriodId, paidAt])
+  @@index([recordedById, createdAt])
 }
 
 // 时薪工月度工资
@@ -1325,17 +1377,18 @@ enum OrderCostCategory {
 }
 
 model Bill {
-  id          String     @id @default(cuid())
-  salesUserId String
-  period      String // YYYY-MM
-  totalAmount Decimal    @db.Decimal(12, 2)
-  paidAmount  Decimal    @default(0) @db.Decimal(12, 2)
-  status      BillStatus @default(DRAFT)
-  issuedAt    DateTime?
-  paidAt      DateTime?
-  remark      String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  salesUserId   String
+  period        String // YYYY-MM
+  openingAmount Decimal    @default(0) @db.Decimal(12, 2) // 流水启用前的期初/历史账面差额
+  totalAmount   Decimal    @db.Decimal(12, 2)
+  paidAmount    Decimal    @default(0) @db.Decimal(12, 2)
+  status        BillStatus @default(DRAFT)
+  issuedAt      DateTime?
+  paidAt        DateTime?
+  remark        String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   salesUser User          @relation(fields: [salesUserId], references: [id])
   items     BillItem[]
@@ -1350,15 +1403,16 @@ model Bill {
 }
 
 model BillPayment {
-  id            String   @id @default(cuid())
-  billId        String
-  amount        Decimal  @db.Decimal(12, 2)
-  paidAt        DateTime
-  paymentMethod String?
-  referenceNo   String?
-  remark        String?
-  recordedById  String
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  idempotencyKey String   @unique
+  billId         String
+  amount         Decimal  @db.Decimal(12, 2)
+  paidAt         DateTime
+  paymentMethod  String?
+  referenceNo    String?
+  remark         String?
+  recordedById   String
+  createdAt      DateTime @default(now())
 
   bill       Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
   recordedBy User @relation("BillPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
@@ -1385,19 +1439,20 @@ model BillItem {
 }
 
 model OrderCostEntry {
-  id          String            @id @default(cuid())
-  orderId     String
-  category    OrderCostCategory
-  description String
-  quantity    Decimal?          @db.Decimal(12, 3)
-  unit        String?
-  unitPrice   Decimal?          @db.Decimal(12, 4)
-  amount      Decimal           @db.Decimal(12, 2)
-  sourceType  String?
-  sourceId    String?
-  remark      String?
-  createdById String
-  createdAt   DateTime          @default(now())
+  id             String            @id @default(cuid())
+  idempotencyKey String            @unique
+  orderId        String
+  category       OrderCostCategory
+  description    String
+  quantity       Decimal?          @db.Decimal(12, 3)
+  unit           String?
+  unitPrice      Decimal?          @db.Decimal(12, 4)
+  amount         Decimal           @db.Decimal(12, 2)
+  sourceType     String?
+  sourceId       String?
+  remark         String?
+  createdById    String
+  createdAt      DateTime          @default(now())
 
   order     Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
   createdBy User  @relation("OrderCostCreator", fields: [createdById], references: [id], onDelete: Restrict)

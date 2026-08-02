@@ -67,6 +67,11 @@ export async function createReworkOrder(
       },
     });
     if (!source) throw new ReworkOrderError('原工单不存在');
+    if (source.kind === OrderKind.REWORK) {
+      throw new ReworkOrderError(
+        '重做工单不能再次发起重做，请返回原工单创建新的重做单',
+      );
+    }
     if (
       source.status !== OrderStatus.SHIPPED &&
       source.status !== OrderStatus.FINISHED

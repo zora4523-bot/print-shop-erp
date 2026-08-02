@@ -37,10 +37,22 @@ describe('getSalaryIndexSummary', () => {
         { actualSalary: '400.00' },
         { actualSalary: '184.00' },
       ]);
-    // CS unpaid: 2 commissions totaling 82000
+    // Settled CS periods only: remaining = (base due - base paid) +
+    // (commission due - commission paid), rather than the original
+    // totalIncome snapshot. IN_PROGRESS future base is not accrued here.
     dbMock.customerServiceCommission.findMany.mockResolvedValue([
-      { totalIncome: '41000.00' },
-      { totalIncome: '41000.00' },
+      {
+        monthlyBaseTotal: '8000.00',
+        commissionAmount: '33000.00',
+        paidBase: '6000.00',
+        paidCommission: '10000.00',
+      },
+      {
+        monthlyBaseTotal: '8000.00',
+        commissionAmount: '33000.00',
+        paidBase: '8000.00',
+        paidCommission: '30000.00',
+      },
     ]);
     // Ready: 1 period; active: 3 periods
     dbMock.salaryPeriod.count
@@ -72,7 +84,16 @@ describe('getSalaryIndexSummary', () => {
     expect(s.dailyUnpaidAllTime.actualTotal).toBe('1234.56');
 
     expect(s.csUnpaid.count).toBe(2);
-    expect(s.csUnpaid.totalIncome).toBe('82000.00');
+    expect(s.csUnpaid.totalIncome).toBe('28000.00');
+    expect(dbMock.customerServiceCommission.findMany).toHaveBeenCalledWith({
+      where: { isFullyPaid: false },
+      select: {
+        monthlyBaseTotal: true,
+        commissionAmount: true,
+        paidBase: true,
+        paidCommission: true,
+      },
+    });
     expect(s.csReadyToSettle).toBe(1);
     expect(s.csActivePeriods).toBe(3);
 
@@ -111,6 +132,19 @@ describe('getSalaryIndexSummary', () => {
     expect(where.date).toBeInstanceOf(Date);
     expect((where.date as Date).getUTCHours()).toBe(0);
     expect((where.date as Date).getUTCMinutes()).toBe(0);
+  });
+
+  it('does not mark an inclusive periodEnd due during its final Shanghai day', async () => {
+    dbMock.dailyWorkerSalary.findMany.mockResolvedValue([]);
+    dbMock.customerServiceCommission.findMany.mockResolvedValue([]);
+    dbMock.salaryPeriod.count.mockResolvedValue(0);
+
+    await getSalaryIndexSummary(new Date('2026-04-30T15:59:59.999Z'));
+
+    const dueWhere = dbMock.salaryPeriod.count.mock.calls[0][0].where;
+    expect(dueWhere.periodEnd.lt.toISOString()).toBe(
+      '2026-04-30T00:00:00.000Z',
+    );
   });
 
   it('sums with Decimal to avoid float drift', async () => {

@@ -22,7 +22,7 @@ export type SalaryIndexSummary = {
     count: number;
     actualTotal: string;
   };
-  // 客服提成（未发放合计）
+  // 已结算客服周期（剩余底薪 + 提成未发放合计）
   csUnpaid: {
     count: number;
     totalIncome: string;
@@ -44,23 +44,23 @@ export type SalaryIndexSummary = {
   };
 };
 
-function todayShanghai(): string {
+function todayShanghai(now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(now);
 }
 
-function currentShanghaiMonth(): string {
-  return todayShanghai().slice(0, 7);
+function currentShanghaiMonth(now: Date = new Date()): string {
+  return todayShanghai(now).slice(0, 7);
 }
 
 export async function getSalaryIndexSummary(
   now: Date = new Date(),
 ): Promise<SalaryIndexSummary> {
-  const today = todayShanghai();
+  const today = todayShanghai(now);
   const { start: todayStart } = shanghaiDayRange(today);
   // `@db.Date` column: stored as UTC midnight, same convention as
   // shanghaiDayRange entry side.
@@ -73,7 +73,7 @@ export async function getSalaryIndexSummary(
   );
   void todayStart; // kept for future if we want completed-at windowing
 
-  const month = currentShanghaiMonth();
+  const month = currentShanghaiMonth(now);
   const [
     dailyTodayRows,
     dailyUnpaidRows,
@@ -93,12 +93,20 @@ export async function getSalaryIndexSummary(
     }),
     db.customerServiceCommission.findMany({
       where: { isFullyPaid: false },
-      select: { totalIncome: true },
+      select: {
+        monthlyBaseTotal: true,
+        commissionAmount: true,
+        paidBase: true,
+        paidCommission: true,
+      },
     }),
     db.salaryPeriod.count({
       where: {
         status: SalaryPeriodStatus.IN_PROGRESS,
-        periodEnd: { lt: now },
+        // SalaryPeriod.periodEnd is an inclusive PostgreSQL DATE. It becomes
+        // due only when the Shanghai calendar has advanced to the next day;
+        // comparing it with a timestamp would mark it due during its final day.
+        periodEnd: { lt: todayDateCol },
       },
     }),
     db.salaryPeriod.count({
@@ -121,7 +129,13 @@ export async function getSalaryIndexSummary(
   const dailyUnpaidAll = sumDecimal(
     dailyUnpaidRows.map((r) => r.actualSalary),
   );
-  const csUnpaidTotal = sumDecimal(csUnpaidRows.map((r) => r.totalIncome));
+  const csUnpaidTotal = csUnpaidRows.reduce(
+    (sum, row) =>
+      sum
+        .plus(new Decimal(row.monthlyBaseTotal).minus(row.paidBase))
+        .plus(new Decimal(row.commissionAmount).minus(row.paidCommission)),
+    new Decimal(0),
+  );
 
   const hourlyMonthTotal = sumDecimal(
     hourlyMonthRows.map((r) => r.totalSalary),

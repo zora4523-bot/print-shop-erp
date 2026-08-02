@@ -101,6 +101,7 @@ export async function recordBillPaymentAction(
   const actor = await requirePermission('bill:mark-paid');
 
   const parsed = recordBillPaymentSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
     amount: formData.get('amount'),
     paidAt: formData.get('paidAt'),
     paymentMethod: formData.get('paymentMethod'),
@@ -115,24 +116,18 @@ export async function recordBillPaymentAction(
   }
 
   try {
-    const hasLedgerDetails =
-      formData.has('paidAt') ||
-      formData.has('paymentMethod') ||
-      formData.has('referenceNo') ||
-      formData.has('remark');
-    const r = hasLedgerDetails
-      ? await recordPayment(
-          billId,
-          parsed.data.amount,
-          actor,
-          parsed.data.paidAt,
-          {
-            paymentMethod: parsed.data.paymentMethod,
-            referenceNo: parsed.data.referenceNo,
-            remark: parsed.data.remark,
-          },
-        )
-      : await recordPayment(billId, parsed.data.amount, actor);
+    const r = await recordPayment(
+      billId,
+      parsed.data.amount,
+      actor,
+      parsed.data.paidAt,
+      {
+        idempotencyKey: parsed.data.idempotencyKey,
+        paymentMethod: parsed.data.paymentMethod,
+        referenceNo: parsed.data.referenceNo,
+        remark: parsed.data.remark,
+      },
+    );
     revalidatePath('/owner/bills');
     revalidatePath(`/owner/bills/${billId}`);
     return {
@@ -155,6 +150,7 @@ export async function createOrderCostEntryAction(
 ): Promise<OrderCostMutationResult> {
   const actor = await requirePermission('bill:view:all');
   const parsed = createOrderCostEntrySchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
     orderId: formData.get('orderId'),
     category: formData.get('category'),
     description: formData.get('description'),

@@ -19,7 +19,8 @@ export function SettleCsPeriodButton({ periodId }: { periodId: string }) {
       </Button>
       {state?.status === 'success' ? (
         <p className="text-xs text-muted-foreground">
-          已结算 · 业绩 {state.totalSales} × 档位 {state.tierRate} = 提成 ¥
+          已结算 · 业绩 {state.totalSales} × 档位{' '}
+          {(Number(state.tierRate) * 100).toFixed(2)}% = 提成 ¥
           {state.commissionAmount} · 周期总收入 ¥ {state.totalIncome}
           {state.nextPeriodId ? ' · 下一周期已开启' : ''}
         </p>

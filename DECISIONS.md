@@ -24,7 +24,9 @@
 
 ---
 
-## 2026-04-22：工单不含价格字段，价格只在账单/报价系统体现
+## 2026-04-22：工单不含价格字段，价格只在账单/报价系统体现（已取代）
+
+> **已被 2026-07-31“工单修改走审核版本流，业绩、收款、成本使用独立流水”取代。** 现行工单保存 `totalAmount`；客服业绩由工单提交/批准变更/取消事件记账，客户付款不改业绩。以下保留为历史背景，不再是当前规范。
 
 - **决策**：`Order` / `OrderItem` 表**不存**最终成交价；`OrderItem.suggestedPrice` 仅作为系统建议价展示，不参与账单计算。最终金额由销售/客服**手填进账单**，客服业绩按手填金额累计。
 - **理由**：业主明确"尊重实际成交价"——红包印刷有大量临时议价、老客户折扣、人情单等场景，强制系统算价会失真。把"工单"和"价格"解耦，工单专注生产流转，账单/报价独立模块负责金额。
@@ -169,7 +171,9 @@
 
 ---
 
-## 2026-04-24：客服业绩流的并发序列化 — 锁 CS user 不锁 period
+## 2026-04-24：客服业绩流的并发序列化 — 锁 CS user 不锁 period（部分取代）
+
+> **锁粒度决策仍有效，“账单付款累加业绩”已被 2026-07-31 事件账本决策取代。** 现在 `recordCsSalesEntryInTx`、周期结算和客服工资发放共用 CS user advisory lock；`BillPayment` 不参与客服业绩。
 
 - **决策**：`accumulateCsSales`（每笔账单付款累加业绩）和 `settleCsPeriod`（周期结算）之间的并发正确性通过 `pg_advisory_xact_lock(hashtext('print-shop-erp:cs-user:<csUserId>'))` 序列化——锁**以客服 id 为键**，不是 period id。
 - **理由**：per-period 锁解不了"找 period → 拿锁"之间的竞争：accumulate 必须先查当前 IN_PROGRESS period 才能拿到 period id 去加锁，而两次读之间 settle 可能已经把这个 period 切到 SETTLED，accumulate 拿到锁后仍会向已 SETTLED 的 period 累加 totalSales，导致 `SalaryPeriod.totalSales != CustomerServiceCommission.totalSales`（Codex rounds 45 P0 → 46 P0）。锁 CS user 让两个流程都能在读 period **之前**拿到锁，critical section 内 period 状态是稳定的。
@@ -241,7 +245,9 @@
 
 ---
 
-## 2026-04-25：应收账单 mark-paid 与 CS 累计共享同一个事务（tx threading）
+## 2026-04-25：应收账单 mark-paid 与 CS 累计共享同一个事务（tx threading，已取代）
+
+> **已被 2026-07-31 事件账本决策取代。** 客服业绩现在与工单提交/批准变更/取消共享事务；客户收款只原子追加 `BillPayment` 并更新应收快照，不调用业绩累计。以下保留为历史背景。
 
 - **决策**：`lib/salary/cs.ts accumulateCsSales(csUserId, amount, at, tx?)` 接受可选第 4 参数 tx。当账单 `recordPayment` 在自己的 `db.$transaction` 里调用时，传入 tx 让 CS 业绩累计的 `SalaryPeriod.totalSales += delta` 与 bill.paidAmount 的写入 **共享原子性**——一起 commit 一起 rollback。standalone 调用（未来可能的其他入口）不传 tx，自己开事务。
 - **理由**：Codex round 52 / P1 指出 Prisma 的 `$transaction` 不是真的嵌套——`recordPayment` 外层 tx 里再 `await accumulateCsSales(...)`，内部会再开一个独立事务。内部先 commit，如果外层后续 rollback（比如 Decimal.js 精度断言失败 / 写 OrderLog 失败），`SalaryPeriod.totalSales` 已经涨了 delta，但 `bill.paidAmount` 回到旧值——payroll ledger 跑到 billing ledger 前面，提成多算。
@@ -250,20 +256,22 @@
 
 ---
 
-## 2026-04-25：应收账单 paid-ledger 语义 — FULLY_PAID 终态，退款开新负数账单
+## 2026-04-25：应收账单 paid-ledger 语义 — FULLY_PAID 终态（部分取代）
+
+> **负数账单部分已被 2026-08-02 财务账本决策取代。** `FULLY_PAID` 仍为终态；现行系统禁止负数账单，退款/贷项功能尚未实现。以下保留为历史背景。
 
 - **决策**：`Bill.status` 状态机里 `FULLY_PAID` 是终态，不允许回退到 `PARTIAL_PAID` / `ISSUED`。如果业务发生退款 / 冲账，正确做法是 owner 新建一条负数金额的 Bill 做冲账记录（不改已结清的原单）。自反迁移（自我 → 自我）也一律拒绝；例外是 `PARTIAL_PAID → PARTIAL_PAID`（续收部分款），lib 层主动在状态未变时**跳过**状态机调用。
-- **理由**：finance-of-record bedrock（DECISIONS 2026-04-24 薪资铁律）同样适用于账单。一旦打标 FULLY_PAID，关联的 CS 业绩已累计进 `SalaryPeriod.totalSales`、甚至可能已在月底 settle 成 `CustomerServiceCommission`——回退账单状态会让历史金额不可信。续收的场景下金额在变但状态不变，是合理的 no-transition；状态机保留&ldquo;自反即 bug&rdquo;的严格性用来抓 re-issue / re-pay 误用。
+- **理由**：finance-of-record bedrock（DECISIONS 2026-04-24 薪资铁律）同样适用于账单。一旦打标 FULLY_PAID，付款流水与应收快照已成为财务事实，回退账单状态会让历史金额不可信。客户付款不改变客服业绩。续收的场景下金额在变但状态不变，是合理的 no-transition；状态机保留&ldquo;自反即 bug&rdquo;的严格性用来抓 re-issue / re-pay 误用。
 - **影响**：`lib/bill/status-machine.ts BILL_TRANSITIONS` 不含任何 self-loop；`lib/bill.ts recordPayment` 显式 `if (targetStatus !== bill.status) transitionBill(...)` 跳过续收的 self-transition。UI 在 detail 页要隐藏 `FULLY_PAID` 单的&ldquo;录入付款&rdquo;按钮（Slice B 落地）。未来 P1 加退款功能时，新加 `ADJUSTED` 或 `CREDITED` 状态、或者保持双账单模式。
 - **相关文档**：`lib/bill/status-machine.ts`、`lib/bill.ts recordPayment`、Codex round 52。
 
 ---
 
-## 2026-04-26：老板 Dashboard 业绩 / 排行 / 分布按 `Order.submittedAt` 计入
+## 2026-04-26：老板 Dashboard 排行 / 分布按 `Order.submittedAt`，客服周期读事件账本（已修订）
 
-- **决策**：老板 Dashboard 上一切&ldquo;销售/客服业绩&rdquo;视角的统计——本月销售排行（Slice C）、产品线分布（Slice C）、即将结算客服周期的预测金额（Slice B）——业绩归属时间统一按 `Order.submittedAt`（工单提交时刻）。**不**按 `Order.finishedAt`（资金最终落账）。&ldquo;待发货&rdquo;关注列表则继续按 `Order.completedAt`（生产完工时刻）排序，因为它问的是&ldquo;什么时候能发&rdquo;不是&ldquo;什么时候算业绩&rdquo;。
-- **理由**：业主明确倾向。`submittedAt` 是销售/客服真正出力气的时刻，给业绩反馈最即时；`finishedAt` 在长账期客户上要等 2-3 个月才出数，dashboard 看不到&ldquo;这个月谁拼了&rdquo;。代价是退单/取消会让历史业绩&ldquo;掉&rdquo;（CANCELLED 工单不计），但当前 SPEC 退单极少且 dashboard 只看&ldquo;趋势&rdquo;，不是结算证据。结算证据走 Bill / `accumulateCsSales`（独立链路，对应 DECISIONS 2026-04-25 应收账单 paid-ledger 语义）。
-- **影响**：`lib/dashboard/owner-watchlist.ts` 的 `getEndingPeriods` 用 `submittedAt` 计算 totalSales 预测；Slice C 的 `getSalesRanking` / `getCategoryDistribution` 都按 `submittedAt` 月聚合，不与 `finishedAt`-based 客服真实提成（`SalaryPeriod.totalSales`）混用。Dashboard 数字可能会和 `/owner/salary/cs` 同期数字不一致——文案要点出&ldquo;本月销售排行（按提交时间）&rdquo;让 owner 不混淆两条链路。
+- **决策**：本月销售排行与产品线分布按 `Order.submittedAt` 聚合，不按 `finishedAt` 或客户付款时间。即将结算客服周期的预测直接读 `SalaryPeriod.totalSales + initialSales`，其结算证据是 `CsSalesEntry`，不在 Dashboard 重算。&ldquo;待发货&rdquo;关注列表继续按 `Order.completedAt` 排序。
+- **理由**：`submittedAt` 能即时反映当月开单趋势；客服工资结算则必须可对账，因此由提交正数、批准变更差额和取消负数组成的事件账本提供证据。客户付款是应收事实，不是业绩归属时点。
+- **影响**：`lib/dashboard/owner-watchlist.ts` 的 `getEndingPeriods` 使用已对账的周期累计；`getSalesRanking` / `getCategoryDistribution` 继续按 `submittedAt` 月聚合。两者服务不同视角，页面文案必须明示时间口径。
 - **相关文档**：`lib/dashboard/owner-watchlist.ts`、`lib/dashboard/owner-charts.ts`（Slice C）、`SPEC v1.2 §6 销售业绩看板`。
 
 ---
@@ -563,7 +571,7 @@
 - **工单修改**：销售/客服不得直接覆盖已经提交的生产数据，而是创建带 `baseRevision` 的 `OrderChangeRequest`。管理员审核时在 order advisory lock 内重读版本；版本不一致转为 `STALE`，数量变更遇已开工/完工任务直接拒绝。批准后原子更新款式、地址数量、待生产任务和金额，并递增 `Order.revision`，所有端口读取同一权威状态。
 - **混合工艺**：彩印+烫金可同时 `isOutsource=true` 并配置 `inHouseMachineTypes=[HAND_PRESS,WINDMILL]`。排产必须生成外协记录，同时把回厂烫金分给兼容师傅，避免用“外协或厂内”单选丢掉第二段生产。
 - **财务账本**：客服提成口径改为工单销售额；提交、批准修改、取消分别追加 `CsSalesEntry` 正向/调整/冲销流水。每次客户结款只追加 `BillPayment`，不再重复增加客服销售额。材料、物流、伙食、电费、外协、上板装板和其他成本追加 `OrderCostEntry`；已入账记录不覆盖，错误用正负调整项纠正。
-- **薪资与考勤**：风车机默认规则为 1000 个及以下 ¥20，1000 个以上按 `数量 × ¥0.01 + ¥10/款`；个人机型规则可覆盖默认规则且报工时继续快照。全体在职正式员工的上班/请假按 0.5 天记录，师傅工资页按日期展示“计件已超底薪/按底薪补足”。
+- **薪资与考勤**：风车机默认规则为 1000 个及以下 ¥20，1000 个以上按 `数量 × ¥0.01 + ¥10/款`；个人机型规则可覆盖默认规则且报工时继续快照。全体在职正式员工的上班/请假按 0.5 天记录，师傅工资页按日期区分“计件高于保底 / 计件等于保底 / 按保底补足”。
 - **理由**：生产数据需要审批、并发和审计边界；销售额、现金回款与成本是三个不同事实，不能互相代替；薪资必须可追溯到报工当时规则。
 - **相关文档**：migration `20260731160000_order_changes_finance_and_attendance`、SPEC §3.2 / §3.6–§3.10 / §5.2。
 
@@ -595,3 +603,34 @@
 - **理由**：把每个师傅伪装成“能做所有工艺”会掩盖设备与安全边界，而单一主机型又无法表达现实中的临时支援。硬能力与推荐能力分层，既让管理员保留最终调度权，又能阻止物理上不可能的派工并保留可追责记录。
 - **影响**：单工单、跨工单批量排产和未开工任务改派统一使用同一资格判断；非推荐原因写入 `OrderLog`。派工把实际匹配机型快照到 `ProductionTask.machineType`，个人计件规则可针对师傅登记的每种机型配置，报工按任务实际机型取规则。
 - **相关文档**：SPEC §2.1 / §3.2 / §5.2 / §6.1、migration `20260731210000_worker_capabilities_and_assignment_override`、`lib/production.ts`、`lib/account.ts`、`lib/salary/piecework-admin.ts`。
+
+---
+
+## 2026-08-02：重做归属与跨机型日保底口径
+
+- **重做归属**：禁止从 `REWORK` 工单再发起嵌套重做；后续质量或物流售后必须回到最初的原工单新建另一张免计费重做单。这保证原单的直接重做关系就是完整成本边界，避免账单只汇总一层时遗漏嵌套成本。
+- **日保底**：师傅同日完工多种机型任务时，计件金额仍使用每个任务完工时的实际机型规则快照；当日保底取“实际完工机型的生效 `dailyBase` 最大值”。只有当日没有完工任务时，才回退到账号主机型的保底。
+- **快照**：`DailyWorkerSalary.salaryRuleSnapshot` 保留最高保底规则的原有顶层字段，并增加 `dailyBasePolicy / baseMachineType / workedMachineTypes / machineRules`，可重放保底选择原因。
+- **旧规则兼容**：补偿 migration 只为风车机个人规则缺失的 `smallOrderInclusive=true` 与 `largeOrderSetupFee=10` 补默认，已显式设定的个人值保留不覆盖。
+- **相关文档**：`lib/order/rework.ts`、`lib/salary/daily.ts`、migration `20260802093000_salary_and_rework_integrity`、SPEC §3.4.1 / §5.2。
+
+---
+
+## 2026-08-02：客服业绩、客户付款与工资发放是三本独立账
+
+- **业绩归属**：收费客服工单提交时追加 `CsSalesEntry(ORDER_SUBMITTED)`；批准金额变更时追加新旧差额；取消时追加全额负数。事件键幂等，流水与 `SalaryPeriod.totalSales` 在同一事务更新。没有覆盖业务日期的进行中周期时，工单操作必须整体失败，不得静默漏记。
+- **应收与工资**：客户付款只追加 `BillPayment` 并更新 `Bill.paidAmount`，绝不修改客服业绩。客服底薪/提成发放另外追加 `CsPayrollPayment`：底薪可在周期内分次发，提成只能在结算后发，已入账流水不覆盖。
+- **账单不变量**：`Bill.totalAmount = openingAmount + 当前收费工单金额 + 追加调整项`；草稿重算不得吞掉历史已保存调整。账单总额必须大于等于零，已收不得超过总额；当前不提供退款/贷项工作流，也不以负数账单伪装冲账。所有付款和成本请求使用幂等键且相同键必须匹配完整业务载荷。
+- **周期边界**：创建在职客服账号时按当前规则自动建立周期。`periodEnd` 是包含式的上海自然日；定时结算只处理 `periodEnd < 今天`，即结束日的次日才结算。提成档位按 `totalSales + initialSales` 计算，结算后为仍在职的客服无缝建立下一周期。
+- **取代关系**：本决策连同 2026-07-31 财务账本决策，取代 2026-04-22 的“账单手填金额计客服业绩”和 2026-04-24/25 的“收款累加业绩”。旧决策仅作历史背景，不再指导实现。
+- **相关文档**：SPEC §3.7 / §5.3 / §7.3、`lib/salary/cs-sales.ts`、`lib/salary/cs.ts`、`lib/order.ts`、`lib/order/change-request.ts`、`lib/bill.ts`。
+
+---
+
+## 2026-08-02：金额分项必须对平，外协金额使用可追溯事实账本
+
+- **分币口径**：时薪工资先把普通/底薪、加班和空闲打包各分项四舍五入到分，再从已舍入分项求总额，保证页面、导出和数据库恒有“分项之和 = 总额”。前向 migration 自动修正未发放旧记录；已发放不一致记录必须人工确认，迁移主动中止。
+- **外协成本**：外协创建请求使用 UUID 幂等键和完整载荷比对；金额可在报价未知时留空，确定后通过 `OutsourceAmountChange` 追加确认/更正事实，并与 `OutsourceOrder.amount` 快照和业务审计同事务更新。网络重试返回原结果，同键不同内容拒绝。
+- **批处理可靠性**：日薪、时薪和账单批次只把明确业务错误归入 `errors[]`；数据库、网络或程序异常携已提交进度重新抛出，让 durable job 重试，禁止把部分漏算标记为成功。
+- **历史可解释性**：账单提成归属是跨周期估算，实际发放以客服工资流水为准；迁移前累计收款无法恢复精确日期时明确显示“历史期初 · 时间未知”。旧客服工单在逐单业绩流水未与当前金额对平时，修改/取消整体阻断，等待财务校准，绝不猜测负冲。
+- **相关文档**：migrations `20260802110000` / `20260802113000`、`lib/outsource.ts`、`lib/salary/hourly-payroll.ts`、`lib/cron/tasks.ts`、`lib/bill/cs-attribution.ts`。

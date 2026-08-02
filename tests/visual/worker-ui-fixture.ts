@@ -445,14 +445,15 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "SalaryAdjustment" (
-           id, "dailySalaryId", type, amount, reason, "createdById", "createdAt"
+           id, "dailySalaryId", "idempotencyKey", type, amount, reason, "createdById", "createdAt"
          ) VALUES (
-           $1, $2, 'BONUS'::"SalaryAdjustmentType", 123.45,
-           $3, $4, TIMESTAMP '2026-07-19 20:00:00'
+           $1, $2, $3, 'BONUS'::"SalaryAdjustmentType", 123.45,
+           $4, $5, TIMESTAMP '2026-07-19 20:00:00'
          )`,
         [
           fixture.adjustmentId,
           fixture.salaryId,
+          `visual-salary-adjustment:${fixture.adjustmentId}`,
           '超长奖金原因ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证明细列不会被裁切',
           adminId,
         ],

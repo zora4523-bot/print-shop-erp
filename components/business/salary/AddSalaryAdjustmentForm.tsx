@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState, useCallback, useRef, useState } from 'react';
 import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { addDailySalaryAdjustmentAction } from '@/actions/owner-salary';
 import type { SalaryMutationResult } from '@/actions/owner-salary.types';
@@ -10,28 +10,47 @@ import { Input } from '@/components/ui/input';
 export function AddSalaryAdjustmentForm({
   dailySalaryId,
   disabled,
+  initialIdempotencyKey,
 }: {
   dailySalaryId: string;
   disabled: boolean;
+  initialIdempotencyKey: string;
 }) {
-  const bound = addDailySalaryAdjustmentAction.bind(null, dailySalaryId);
-  const [state, action] = useActionState<SalaryMutationResult | null, FormData>(
-    bound,
-    null,
+  const formRef = useRef<HTMLFormElement>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
+  const submitAdjustment = useCallback(
+    async (previous: SalaryMutationResult | null, formData: FormData) => {
+      const result = await addDailySalaryAdjustmentAction(
+        dailySalaryId,
+        previous,
+        formData,
+      );
+      if (result.status === 'success') {
+        formRef.current?.reset();
+        setIdempotencyKey(window.crypto.randomUUID());
+      }
+      return result;
+    },
+    [dailySalaryId],
   );
-  const [pending, startTransition] = useTransition();
+  const [state, action, pending] = useActionState<
+    SalaryMutationResult | null,
+    FormData
+  >(submitAdjustment, null);
 
   return (
     <form
-      action={(formData) => startTransition(() => action(formData))}
+      ref={formRef}
+      action={action}
       className="grid gap-3 sm:grid-cols-[150px_150px_1fr_auto] sm:items-end"
     >
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <label className="space-y-1 text-xs">
         <span className="text-muted-foreground">类型</span>
         <select
           name="type"
           className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          disabled={disabled}
+          disabled={disabled || pending}
           defaultValue={SalaryAdjustmentType.BONUS}
         >
           <option value={SalaryAdjustmentType.BONUS}>奖金（加）</option>
@@ -45,7 +64,7 @@ export function AddSalaryAdjustmentForm({
           name="amount"
           inputMode="decimal"
           placeholder="例如 20 或 -5"
-          disabled={disabled}
+          disabled={disabled || pending}
           required
         />
       </label>
@@ -54,7 +73,7 @@ export function AddSalaryAdjustmentForm({
         <Input
           name="reason"
           placeholder="例如：急单奖励 / 质量扣款"
-          disabled={disabled}
+          disabled={disabled || pending}
           required
           maxLength={200}
         />

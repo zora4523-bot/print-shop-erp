@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState, useCallback, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { recordBillPaymentAction } from '@/actions/bill';
@@ -9,22 +9,36 @@ import type { RecordBillPaymentResult } from '@/actions/bill.types';
 type Props = {
   billId: string;
   remainingAmount: string;
+  initialIdempotencyKey: string;
 };
 
-export function RecordPaymentForm({ billId, remainingAmount }: Props) {
-  const bound = recordBillPaymentAction.bind(null, billId);
-  const [state, action] = useActionState<RecordBillPaymentResult | null, FormData>(
-    bound,
-    null,
+export function RecordPaymentForm({
+  billId,
+  remainingAmount,
+  initialIdempotencyKey,
+}: Props) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
+  const submitPayment = useCallback(
+    async (previous: RecordBillPaymentResult | null, formData: FormData) => {
+      const result = await recordBillPaymentAction(billId, previous, formData);
+      if (result.status === 'success') {
+        formRef.current?.reset();
+        setIdempotencyKey(window.crypto.randomUUID());
+      }
+      return result;
+    },
+    [billId],
   );
-  const [pending, startTransition] = useTransition();
+  const [state, action, pending] = useActionState<
+    RecordBillPaymentResult | null,
+    FormData
+  >(submitPayment, null);
   const defaultPaidAt = shanghaiDateTimeLocal(new Date());
 
   return (
-    <form
-      action={(fd) => startTransition(() => action(fd))}
-      className="space-y-2"
-    >
+    <form ref={formRef} action={action} className="space-y-2">
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span>本次收款金额</span>

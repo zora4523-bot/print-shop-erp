@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { randomUUID } from 'node:crypto';
 import { getOrderForOutsourceForm } from '@/lib/outsource';
 import { CreateOutsourceForm } from '@/components/business/outsource/CreateOutsourceForm';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -35,6 +36,7 @@ export default async function NewOutsourcePage({ searchParams }: PageProps) {
         orderId={order.id}
         orderNo={order.orderNo}
         items={order.items}
+        initialIdempotencyKey={randomUUID()}
       />
     </div>
   );

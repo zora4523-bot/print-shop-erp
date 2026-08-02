@@ -15,16 +15,28 @@ import type { CsTiersConfig } from './cs-commission';
 export type MachineRuleWithBase = MachineSalaryRule & { dailyBase: string | number };
 
 // 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
-// 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。
+// 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。直接复用
+// Prisma delegate 的函数类型，避免用 unknown 重写参数后破坏函数参数逆变兼容性。
 export type SalaryRuleClient = {
-  salaryRule: {
-    findFirst: (args: {
-      where: unknown;
-      orderBy?: unknown;
-      select?: unknown;
-    }) => Promise<{ ruleValue: unknown } | null>;
-  };
+  salaryRule: Pick<typeof db.salaryRule, 'findFirst'>;
 };
+
+export type MachineRuleClient = SalaryRuleClient & {
+  workerMachineSalaryRule: Pick<
+    typeof db.workerMachineSalaryRule,
+    'findFirst'
+  >;
+};
+
+// Shared by personal-rule writes and every finance-of-record read. Taking the
+// same transaction-scoped advisory lock guarantees a report/daily snapshot
+// sees either the complete old version or the complete new version.
+export function machineRuleLockKey(
+  workerId: string,
+  machineType: string,
+): string {
+  return `print-shop-erp:piecework-rule:${workerId}:${machineType}`;
+}
 
 // 版本化规则"当前生效"查询的**唯一实现**（此前同形 findFirst 复制
 // 6 处：machine/cs/hourly/cook + cs.ts 的 tx 版）。语义：effectiveFrom
@@ -55,9 +67,10 @@ export async function getActiveMachineRule(
   machineType: string,
   now: Date = new Date(),
   workerId?: string,
+  client: MachineRuleClient = db as unknown as MachineRuleClient,
 ): Promise<MachineRuleWithBase | null> {
   if (workerId) {
-    const workerRule = await db.workerMachineSalaryRule.findFirst({
+    const workerRule = await client.workerMachineSalaryRule.findFirst({
       where: {
         workerId,
         machineType: machineType as MachineType,
@@ -75,6 +88,7 @@ export async function getActiveMachineRule(
     SalaryRuleType.WORKER_MACHINE,
     machineType,
     now,
+    client,
   );
 }
 

@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import {
   MachineType,
   Role,
+  SalaryAdjustmentType,
   WorkerType,
 } from '../../../generated/prisma/client';
 
@@ -24,6 +25,12 @@ const { dbMock } = vi.hoisted(() => {
       deleteMany: vi.fn(),
       createMany: vi.fn(),
     },
+    salaryAdjustment: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      aggregate: vi.fn(),
+    },
+    businessAuditLog: { create: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
@@ -38,8 +45,11 @@ import {
   aggregateTasks,
   shanghaiDayRange,
   computeDailyWorkerSalary,
+  computeDailyForAllMachineWorkers,
   listDailyWorkerSalaries,
   markDailySalaryPaid,
+  addDailySalaryAdjustment,
+  DailyBatchUnexpectedError,
   DailySalaryError,
 } from '../daily';
 
@@ -52,10 +62,26 @@ const HAND_PRESS_RULE = {
   multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
 };
 
-function dailyTask(pieceworkAmount: string, orderId: string, id = `${orderId}-${pieceworkAmount}`) {
+const WINDMILL_RULE = {
+  dailyBase: 120,
+  pieceRate: 0.01,
+  boardRate: 0,
+  smallOrderThreshold: 1000,
+  smallOrderFlatPrice: 20,
+  smallOrderInclusive: true,
+  largeOrderSetupFee: 10,
+  multiplierFactors: ['DOUBLE_COLOR'],
+};
+
+function dailyTask(
+  pieceworkAmount: string,
+  orderId: string,
+  id = `${orderId}-${pieceworkAmount}`,
+  machineType: MachineType = MachineType.HAND_PRESS,
+) {
   return {
     id,
-    machineType: MachineType.HAND_PRESS,
+    machineType,
     completedQty: 100,
     defectQty: 0,
     reworkQty: 0,
@@ -145,6 +171,8 @@ describe('computeDailyWorkerSalary', () => {
     dbMock.dailyWorkerSalary.update.mockReset();
     dbMock.dailyWorkerSalaryItem.deleteMany.mockReset().mockResolvedValue({ count: 0 });
     dbMock.dailyWorkerSalaryItem.createMany.mockReset().mockResolvedValue({ count: 0 });
+    dbMock.salaryAdjustment.create.mockReset();
+    dbMock.salaryAdjustment.aggregate.mockReset();
     dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -171,6 +199,7 @@ describe('computeDailyWorkerSalary', () => {
 
   it('refuses when the machine worker has no active rule (loud, not silent zero)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
     dbMock.salaryRule.findFirst.mockResolvedValue(null);
     await expect(
       computeDailyWorkerSalary('worker-1', '2026-04-23'),
@@ -200,6 +229,158 @@ describe('computeDailyWorkerSalary', () => {
     expect(r.totalPieceworkAmount).toBe('0.00');
     expect(r.actualSalary).toBe('100.00');
     expect(r.taskCount).toBe(0);
+  });
+
+  it('uses the highest dailyBase among machine types actually worked that day', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('30.00', 'o1'),
+      dailyTask('40.00', 'o2', 'windmill-task', MachineType.WINDMILL),
+    ]);
+    dbMock.salaryRule.findFirst.mockImplementation(async (args) => ({
+      ruleValue:
+        args.where.ruleKey === MachineType.WINDMILL
+          ? WINDMILL_RULE
+          : HAND_PRESS_RULE,
+    }));
+
+    const r = await computeDailyWorkerSalary('worker-1', '2026-04-23');
+
+    expect(r.machineType).toBe(MachineType.WINDMILL);
+    expect(r.baseSalary).toBe('120.00');
+    expect(r.totalPieceworkAmount).toBe('70.00');
+    expect(r.actualSalary).toBe('120.00');
+    const create = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0].create;
+    expect(create.salaryRuleSnapshot).toMatchObject({
+      dailyBasePolicy: 'MAX_WORKED_MACHINE_TYPES',
+      baseMachineType: MachineType.WINDMILL,
+      workedMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL],
+      machineRules: {
+        HAND_PRESS: expect.objectContaining({ dailyBase: 100 }),
+        WINDMILL: expect.objectContaining({ dailyBase: 120 }),
+      },
+    });
+    expect(dbMock.$executeRaw.mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining([
+        'print-shop-erp:piecework-rule:worker-1:HAND_PRESS',
+        'print-shop-erp:piecework-rule:worker-1:WINDMILL',
+      ]),
+    );
+  });
+
+  it('applies a personal rule independently for a worked non-primary machine', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('30.00', 'o1'),
+      dailyTask('40.00', 'o2', 'windmill-task', MachineType.WINDMILL),
+    ]);
+    dbMock.workerMachineSalaryRule.findFirst.mockImplementation(async (args) =>
+      args.where.machineType === MachineType.WINDMILL
+        ? { ruleValue: { ...WINDMILL_RULE, dailyBase: 180 } }
+        : null,
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({
+      ruleValue: HAND_PRESS_RULE,
+    });
+
+    const result = await computeDailyWorkerSalary(
+      'worker-1',
+      '2026-04-23',
+    );
+
+    expect(result.machineType).toBe(MachineType.WINDMILL);
+    expect(result.baseSalary).toBe('180.00');
+  });
+
+  it('uses the matching machine rule when rebuilding a missing task snapshot', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      {
+        ...dailyTask(
+          '40.00',
+          'o2',
+          'windmill-task',
+          MachineType.WINDMILL,
+        ),
+        salaryRuleSnapshot: null,
+      },
+    ]);
+    dbMock.salaryRule.findFirst.mockImplementation(async (args) => ({
+      ruleValue:
+        args.where.ruleKey === MachineType.WINDMILL
+          ? WINDMILL_RULE
+          : HAND_PRESS_RULE,
+    }));
+
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+
+    const data = dbMock.dailyWorkerSalaryItem.createMany.mock.calls[0][0].data;
+    expect(data[0]).toMatchObject({
+      machineType: MachineType.WINDMILL,
+      salaryRuleSnapshot: expect.objectContaining({
+        pieceRate: 0.01,
+        largeOrderSetupFee: 10,
+      }),
+    });
+  });
+
+  it('rejects a task sum that exceeds the daily Decimal(10,2) column', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('50000000.00', 'o1'),
+      dailyTask('50000000.00', 'o2'),
+    ]);
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/当日计件合计.*99,999,999\.99/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized dailyBase from a legacy rule with a clear error', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.salaryRule.findFirst.mockResolvedValue({
+      ruleValue: { ...HAND_PRESS_RULE, dailyBase: '100000000' },
+    });
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/HAND_PRESS 每日保底.*99,999,999\.99/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
+  });
+
+  it('uses the account primary machine only when the day has no completed task', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+
+    await computeDailyWorkerSalary('worker-1', '2026-04-23');
+
+    const create = dbMock.dailyWorkerSalary.upsert.mock.calls[0][0].create;
+    expect(create.machineType).toBe(MachineType.HAND_PRESS);
+    expect(create.salaryRuleSnapshot).toMatchObject({
+      dailyBasePolicy: 'PRIMARY_MACHINE_FALLBACK',
+      baseMachineType: MachineType.HAND_PRESS,
+      workedMachineTypes: [MachineType.HAND_PRESS],
+    });
+  });
+
+  it('fails loudly when any machine actually worked has no active rule', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('30.00', 'o1'),
+      dailyTask('40.00', 'o2', 'windmill-task', MachineType.WINDMILL),
+    ]);
+    dbMock.salaryRule.findFirst.mockImplementation(async (args) =>
+      args.where.ruleKey === MachineType.WINDMILL
+        ? null
+        : { ruleValue: HAND_PRESS_RULE },
+    );
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/WINDMILL.*薪资规则/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
   });
 
   it('upserts with Shanghai-midnight date column + snapshots rule value', async () => {
@@ -302,6 +483,22 @@ describe('computeDailyWorkerSalary', () => {
     expect(dbMock.dailyWorkerSalary.upsert).toHaveBeenCalled();
   });
 
+  it('rejects recompute when existing deductions would make the new gross negative', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.dailyWorkerSalary.findUnique.mockResolvedValue({
+      id: 'ds-existing',
+      isPaid: false,
+      actualSalary: '50.00',
+      adjustmentAmount: '-250.00',
+    });
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/工资小于 0.*纠正调整流水/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
+  });
+
   it('allows first-time compute when no row exists yet (findUnique null)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture);
     dbMock.productionTask.findMany.mockResolvedValue([
@@ -310,6 +507,117 @@ describe('computeDailyWorkerSalary', () => {
     dbMock.dailyWorkerSalary.findUnique.mockResolvedValue(null);
     await computeDailyWorkerSalary('worker-1', '2026-04-23');
     expect(dbMock.dailyWorkerSalary.upsert).toHaveBeenCalled();
+  });
+
+  it('rejects fractional-cent task or base values instead of silently rounding payroll', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('40.001', 'o1'),
+    ]);
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/小数最多 2 位/);
+
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.workerMachineSalaryRule.findFirst.mockResolvedValue({
+      ruleValue: { ...HAND_PRESS_RULE, dailyBase: '100.001' },
+    });
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/小数最多 2 位/);
+  });
+});
+
+describe('computeDailyForAllMachineWorkers', () => {
+  const workerFixture = {
+    id: 'worker-1',
+    role: Role.WORKER,
+    workerType: WorkerType.MACHINE,
+    machineType: MachineType.HAND_PRESS,
+    isActive: true,
+  };
+
+  beforeEach(() => {
+    dbMock.user.findMany.mockReset().mockResolvedValue([]);
+    dbMock.user.findUnique.mockReset().mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+    dbMock.salaryRule.findFirst
+      .mockReset()
+      .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({ id: 'ds-1' });
+    dbMock.dailyWorkerSalaryItem.deleteMany
+      .mockReset()
+      .mockResolvedValue({ count: 0 });
+    dbMock.dailyWorkerSalaryItem.createMany
+      .mockReset()
+      .mockResolvedValue({ count: 0 });
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') {
+        return await (fn as (tx: unknown) => unknown)(dbMock);
+      }
+      return fn;
+    });
+  });
+
+  it('continues past known per-worker business errors', async () => {
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'missing' }]);
+    dbMock.user.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === 'missing' ? null : workerFixture,
+    );
+
+    const result = await computeDailyForAllMachineWorkers('2026-04-23');
+
+    expect(result.settled.map((row) => row.workerId)).toEqual(['w1']);
+    expect(result.errors).toEqual([
+      expect.objectContaining({ workerId: 'missing' }),
+    ]);
+  });
+
+  it('rethrows an unexpected worker failure with committed partial results', async () => {
+    const databaseFailure = new Error('connection lost');
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]);
+    dbMock.user.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === 'w2') throw databaseFailure;
+        return workerFixture;
+      },
+    );
+
+    let caught: unknown;
+    try {
+      await computeDailyForAllMachineWorkers('2026-04-23');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DailyBatchUnexpectedError);
+    const unexpected = caught as DailyBatchUnexpectedError;
+    expect(unexpected.partialResult.settled.map((row) => row.workerId)).toEqual([
+      'w1',
+    ]);
+    expect(unexpected.partialResult.errors).toEqual([]);
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
+
+  it('wraps a worker-scan failure with an empty partial result', async () => {
+    const databaseFailure = new Error('scan unavailable');
+    dbMock.user.findMany.mockRejectedValue(databaseFailure);
+
+    let caught: unknown;
+    try {
+      await computeDailyForAllMachineWorkers('2026-04-23');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DailyBatchUnexpectedError);
+    const unexpected = caught as DailyBatchUnexpectedError;
+    expect(unexpected.partialResult).toEqual({ settled: [], errors: [] });
+    expect(unexpected.cause).toBe(databaseFailure);
   });
 });
 
@@ -345,6 +653,176 @@ describe('listDailyWorkerSalaries', () => {
     await listDailyWorkerSalaries({});
     const where = dbMock.dailyWorkerSalary.findMany.mock.calls[0][0].where;
     expect(where).toEqual({});
+  });
+});
+
+describe('addDailySalaryAdjustment', () => {
+  const adjustmentInput = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000001',
+    dailySalaryId: 'ds-1',
+    type: SalaryAdjustmentType.BONUS,
+    amount: '1.00',
+    reason: '测试奖金',
+    actor: {
+      id: 'owner-1',
+      role: Role.ADMIN,
+      username: 'owner',
+      displayName: '管理员',
+    },
+  };
+
+  beforeEach(() => {
+    dbMock.salaryAdjustment.findUnique.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({
+        workerId: 'worker-1',
+        date: new Date('2026-04-23T00:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'ds-1',
+        isPaid: false,
+        baseSalary: '100.00',
+        totalPieceworkAmount: '80.00',
+      });
+    dbMock.salaryAdjustment.create.mockReset().mockResolvedValue({
+      id: 'adjustment-1',
+      amount: '1.00',
+    });
+    dbMock.salaryAdjustment.aggregate.mockReset().mockResolvedValue({
+      _sum: { amount: '1.00' },
+    });
+    dbMock.dailyWorkerSalary.update.mockReset().mockResolvedValue({ id: 'ds-1' });
+    dbMock.businessAuditLog.create.mockReset().mockResolvedValue({ id: 'audit-1' });
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') {
+        return await (fn as (tx: unknown) => unknown)(dbMock);
+      }
+      return fn;
+    });
+  });
+
+  it('rejects an adjustment whose gross total would overflow Decimal(10,2)', async () => {
+    dbMock.dailyWorkerSalary.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({
+        workerId: 'worker-1',
+        date: new Date('2026-04-23T00:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'ds-1',
+        isPaid: false,
+        baseSalary: '99999999.99',
+        totalPieceworkAmount: '0.00',
+      });
+
+    await expect(addDailySalaryAdjustment(adjustmentInput)).rejects.toThrow(
+      /调整后实发金额.*99,999,999\.99/,
+    );
+    expect(dbMock.dailyWorkerSalary.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy adjustment aggregate that no longer fits the column', async () => {
+    dbMock.salaryAdjustment.aggregate.mockResolvedValue({
+      _sum: { amount: '100000000.00' },
+    });
+
+    await expect(addDailySalaryAdjustment(adjustmentInput)).rejects.toThrow(
+      /人工调整合计.*99,999,999\.99/,
+    );
+    expect(dbMock.dailyWorkerSalary.update).not.toHaveBeenCalled();
+  });
+
+  it('stores a valid adjustment and recomputes the signed total', async () => {
+    await expect(addDailySalaryAdjustment(adjustmentInput)).resolves.toEqual({
+      id: 'adjustment-1',
+      amount: '1.00',
+      adjustmentAmount: '1.00',
+      actualSalary: '101.00',
+    });
+    expect(dbMock.dailyWorkerSalary.update).toHaveBeenCalledWith({
+      where: { id: 'ds-1' },
+      data: {
+        adjustmentAmount: '1.00',
+        actualSalary: '101.00',
+      },
+    });
+    expect(dbMock.salaryAdjustment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          idempotencyKey: adjustmentInput.idempotencyKey,
+        }),
+      }),
+    );
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          entityType: 'SalaryAdjustment',
+          entityId: 'adjustment-1',
+          actorId: 'owner-1',
+        }),
+      }),
+    );
+  });
+
+  it('fails the enclosing transaction when adjustment audit evidence cannot be written', async () => {
+    dbMock.businessAuditLog.create.mockRejectedValueOnce(
+      new Error('audit insert failed'),
+    );
+
+    await expect(addDailySalaryAdjustment(adjustmentInput)).rejects.toThrow(
+      'audit insert failed',
+    );
+    expect(dbMock.salaryAdjustment.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.dailyWorkerSalary.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays the same adjustment request without creating another ledger row', async () => {
+    dbMock.salaryAdjustment.findUnique.mockResolvedValue({
+      id: 'adjustment-1',
+      idempotencyKey: adjustmentInput.idempotencyKey,
+      dailySalaryId: 'ds-1',
+      type: SalaryAdjustmentType.BONUS,
+      amount: '1.00',
+      reason: '测试奖金',
+      createdById: 'owner-1',
+      dailySalary: {
+        adjustmentAmount: '6.00',
+        actualSalary: '106.00',
+      },
+    });
+
+    await expect(addDailySalaryAdjustment(adjustmentInput)).resolves.toEqual({
+      id: 'adjustment-1',
+      amount: '1.00',
+      adjustmentAmount: '6.00',
+      actualSalary: '106.00',
+    });
+    expect(dbMock.salaryAdjustment.create).not.toHaveBeenCalled();
+    expect(dbMock.dailyWorkerSalary.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects reuse of an adjustment request key with different money', async () => {
+    dbMock.salaryAdjustment.findUnique.mockResolvedValue({
+      id: 'adjustment-1',
+      idempotencyKey: adjustmentInput.idempotencyKey,
+      dailySalaryId: 'ds-1',
+      type: SalaryAdjustmentType.BONUS,
+      amount: '2.00',
+      reason: '测试奖金',
+      createdById: 'owner-1',
+      dailySalary: {
+        adjustmentAmount: '2.00',
+        actualSalary: '102.00',
+      },
+    });
+
+    await expect(addDailySalaryAdjustment(adjustmentInput)).rejects.toThrow(
+      /请求标识已被其他记录使用/,
+    );
+    expect(dbMock.salaryAdjustment.create).not.toHaveBeenCalled();
   });
 });
 

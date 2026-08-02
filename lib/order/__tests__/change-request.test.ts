@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderStatus,
   Role,
@@ -35,6 +36,7 @@ const { dbMock } = vi.hoisted(() => {
     },
     orderLog: { create: vi.fn() },
     csSalesEntry: {
+      aggregate: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
     },
@@ -102,6 +104,9 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
     },
     order: {
       id: 'order-1',
+      submitterId: 'sales-1',
+      submitterRole: Role.SALES,
+      billingMode: OrderBillingMode.CHARGE,
       revision: 2,
       status: OrderStatus.IN_PRODUCTION,
       totalAmount: '1000.00',
@@ -157,6 +162,9 @@ beforeEach(() => {
     }
   }
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+  dbMock.csSalesEntry.aggregate.mockResolvedValue({
+    _sum: { amount: '1000.00' },
+  });
   dbMock.$transaction.mockReset().mockImplementation(
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
@@ -308,5 +316,205 @@ describe('reviewOrderChangeRequest', () => {
       data: { revision: 3, totalAmount: '1000.00' },
     });
     expect(dbMock.orderLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('attributes an approved amount change to the order submitter snapshot even if the requester role changed', async () => {
+    const request = baseReviewRequest({
+      requester: {
+        id: 'cs-original',
+        displayName: '原客服',
+        role: Role.SALES,
+      },
+      order: {
+        ...baseReviewRequest().order,
+        submitterId: 'cs-original',
+        submitterRole: Role.CUSTOMER_SERVICE,
+        billingMode: OrderBillingMode.CHARGE,
+      },
+      proposedChanges: { items: updateInput.items },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1200.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+    dbMock.csSalesEntry.findUnique.mockResolvedValue(null);
+    dbMock.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'period-1',
+      totalSales: '1000.00',
+      initialSales: '0.00',
+    });
+    dbMock.csSalesEntry.create.mockResolvedValue({ id: 'sales-entry-1' });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.csSalesEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        csUserId: 'cs-original',
+        amount: '200.00',
+        type: 'ORDER_CHANGED',
+      }),
+      select: { id: true },
+    });
+  });
+
+  it('blocks a legacy CS order change when order-level sales history cannot be reconciled', async () => {
+    const request = baseReviewRequest({
+      order: {
+        ...baseReviewRequest().order,
+        submitterId: 'cs-original',
+        submitterRole: Role.CUSTOMER_SERVICE,
+        billingMode: OrderBillingMode.CHARGE,
+      },
+      proposedChanges: { items: updateInput.items },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1200.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+    dbMock.csSalesEntry.aggregate.mockResolvedValue({
+      _sum: { amount: null },
+    });
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/未与当前金额对平.*历史财务校准/);
+    expect(dbMock.csSalesEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('does not credit a sales-owned order when its requester later becomes customer service', async () => {
+    const request = baseReviewRequest({
+      requester: {
+        id: 'sales-1',
+        displayName: '原销售',
+        role: Role.CUSTOMER_SERVICE,
+      },
+      order: {
+        ...baseReviewRequest().order,
+        submitterId: 'sales-1',
+        submitterRole: Role.SALES,
+        billingMode: OrderBillingMode.CHARGE,
+      },
+      proposedChanges: { items: updateInput.items },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1200.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.csSalesEntry.create).not.toHaveBeenCalled();
+    expect(dbMock.salaryPeriod.update).not.toHaveBeenCalled();
+  });
+
+  it('does not credit a draft change before the order submission records the full sale', async () => {
+    const request = baseReviewRequest({
+      requester: {
+        id: 'cs-1',
+        displayName: '客服',
+        role: Role.CUSTOMER_SERVICE,
+      },
+      order: {
+        ...baseReviewRequest().order,
+        status: OrderStatus.DRAFT,
+        submitterId: 'cs-1',
+        submitterRole: Role.CUSTOMER_SERVICE,
+        billingMode: OrderBillingMode.CHARGE,
+      },
+      proposedChanges: { items: updateInput.items },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1200.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.csSalesEntry.create).not.toHaveBeenCalled();
+    expect(dbMock.salaryPeriod.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an item subtotal that would overflow Decimal(12,2)', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            ...updateInput.items[0],
+            quantity: 9_999_999,
+          },
+        ],
+      },
+      order: {
+        ...baseReviewRequest().order,
+        items: [
+          {
+            ...baseReviewRequest().order.items[0],
+            unitPrice: '2000.00',
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/款式.*金额超过可保存上限/);
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a combined order total that would overflow Decimal(12,2)', async () => {
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(baseReviewRequest());
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '6000000000.00' },
+      { subtotal: '6000000000.00' },
+    ]);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/工单总额超过可保存上限/);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 });

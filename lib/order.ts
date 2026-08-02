@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import {
   CsSalesEntryType,
   OrderBillingMode,
+  OrderCostCategory,
   OrderKind,
   OrderStatus,
   OutsourceStatus,
@@ -34,7 +35,11 @@ import {
 import { dispatchNotification } from './notification/dispatch';
 import { formatMoneyPlain } from './dashboard/format';
 import { sortBySearchRelevance } from './search-ranking';
-import { recordCsSalesEntryInTx } from './salary/cs-sales';
+import {
+  assertCsOrderSalesLedgerReconciledInTx,
+  CsSalesLedgerError,
+  recordCsSalesEntryInTx,
+} from './salary/cs-sales';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -489,16 +494,23 @@ export async function submitOrder(
         submittedOrder?.submitterRole === Role.CUSTOMER_SERVICE &&
         submittedOrder.billingMode === OrderBillingMode.CHARGE
       ) {
-        await recordCsSalesEntryInTx(prismaTx, {
-          eventKey: `order:${lockedOrderId}:revision:${submittedOrder.revision}:submit`,
-          csUserId: submittedOrder.submitterId,
-          orderId: lockedOrderId,
-          orderRevision: submittedOrder.revision,
-          type: CsSalesEntryType.ORDER_SUBMITTED,
-          amount: submittedOrder.totalAmount,
-          occurredAt: now,
-          remark: '客服工单提交计入销售额',
-        });
+        try {
+          await recordCsSalesEntryInTx(prismaTx, {
+            eventKey: `order:${lockedOrderId}:revision:${submittedOrder.revision}:submit`,
+            csUserId: submittedOrder.submitterId,
+            orderId: lockedOrderId,
+            orderRevision: submittedOrder.revision,
+            type: CsSalesEntryType.ORDER_SUBMITTED,
+            amount: submittedOrder.totalAmount,
+            occurredAt: now,
+            remark: '客服工单提交计入销售额',
+          });
+        } catch (error) {
+          if (error instanceof CsSalesLedgerError) {
+            throw new OrderInvariantError(error.message);
+          }
+          throw error;
+        }
       }
     },
   });
@@ -648,24 +660,42 @@ export async function cancelOrder(
           submitterId: true,
           submitterRole: true,
           billingMode: true,
+          status: true,
           totalAmount: true,
           revision: true,
         },
       });
       if (
         cancelledOrder?.submitterRole === Role.CUSTOMER_SERVICE &&
-        cancelledOrder.billingMode === OrderBillingMode.CHARGE
+        cancelledOrder.billingMode === OrderBillingMode.CHARGE &&
+        // A DRAFT has never emitted ORDER_SUBMITTED, so there is no positive
+        // sales event to reverse. Using the pre-transition status here avoids
+        // creating a phantom negative balance when an abandoned draft is
+        // cancelled.
+        cancelledOrder.status !== OrderStatus.DRAFT
       ) {
-        await recordCsSalesEntryInTx(prismaTx, {
-          eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
-          csUserId: cancelledOrder.submitterId,
-          orderId: id,
-          orderRevision: cancelledOrder.revision,
-          type: CsSalesEntryType.ORDER_CANCELLED,
-          amount: new Decimal(cancelledOrder.totalAmount).negated(),
-          occurredAt: now,
-          remark: reason ? `取消工单：${reason}` : '取消工单冲减销售额',
-        });
+        try {
+          await assertCsOrderSalesLedgerReconciledInTx(
+            prismaTx,
+            id,
+            cancelledOrder.totalAmount,
+          );
+          await recordCsSalesEntryInTx(prismaTx, {
+            eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
+            csUserId: cancelledOrder.submitterId,
+            orderId: id,
+            orderRevision: cancelledOrder.revision,
+            type: CsSalesEntryType.ORDER_CANCELLED,
+            amount: new Decimal(cancelledOrder.totalAmount).negated(),
+            occurredAt: now,
+            remark: reason ? `取消工单：${reason}` : '取消工单冲减销售额',
+          });
+        } catch (error) {
+          if (error instanceof CsSalesLedgerError) {
+            throw new OrderInvariantError(error.message);
+          }
+          throw error;
+        }
       }
     },
   });
@@ -878,6 +908,12 @@ type EditTxClient = {
   orderLog: {
     create: (args: { data: unknown }) => Promise<unknown>;
   };
+  orderCostEntry: {
+    aggregate: (args: {
+      where: { orderId: string; category: OrderCostCategory };
+      _sum: { amount: true };
+    }) => Promise<{ _sum: { amount: Decimal.Value | null } }>;
+  };
 };
 
 type EditableOrderFieldValue = string | boolean | Date | null;
@@ -895,6 +931,22 @@ type EditableOrderSnapshot = {
   isUrgent: boolean;
   isSfCollect: boolean;
 };
+
+async function assertNoShippingCostBeforeSfCollect(
+  txClient: EditTxClient,
+  orderId: string,
+): Promise<void> {
+  const shippingCost = await txClient.orderCostEntry.aggregate({
+    where: { orderId, category: OrderCostCategory.SHIPPING },
+    _sum: { amount: true },
+  });
+  const netShippingCost = new Decimal(shippingCost._sum.amount ?? 0);
+  if (!netShippingCost.isZero()) {
+    throw new OrderInvariantError(
+      '工单已有物流成本流水，需保持非到付并由财务核对',
+    );
+  }
+}
 
 // Zod `optionalTrimmedText` collapses blank → undefined in the parsed
 // output; normalize that to explicit null so diffing and persistence
@@ -1027,6 +1079,10 @@ export async function updateOrderFields(
       };
     }
 
+    if (changes.isSfCollect?.after === true) {
+      await assertNoShippingCostBeforeSfCollect(txClient, orderId);
+    }
+
     const updated = await txClient.order.update({
       where: { id: orderId },
       data: nextFields,
@@ -1123,6 +1179,10 @@ export async function setOrderSfCollect(
         changed: false,
         changedFields: [],
       };
+    }
+
+    if (isSfCollect) {
+      await assertNoShippingCostBeforeSfCollect(txClient, orderId);
     }
 
     const updated = await txClient.order.update({

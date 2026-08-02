@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import Decimal from 'decimal.js';
 import {
   MachineType,
   Role,
@@ -8,28 +9,69 @@ import {
   type Prisma,
 } from '../../generated/prisma/client';
 import { db } from '../db';
-import type { MachineRuleWithBase } from './rules';
+import {
+  machineRuleLockKey,
+  type MachineRuleWithBase,
+} from './rules';
 
 const moneyString = z
   .string()
   .trim()
   .regex(/^\d{1,7}(?:\.\d{1,4})?$/, '请输入非负数字，最多 4 位小数');
 
+const storedMoneyString = z
+  .string()
+  .trim()
+  .regex(/^\d{1,7}(?:\.\d{1,2})?$/, '请输入非负金额，最多 2 位小数');
+
+const MAX_REPORT_COUNT_PER_FIELD = 10_000_000;
+const REPORT_COUNT_FIELD_COUNT = 3;
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function parseShanghaiLocalDateTime(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  calendar.setUTCHours(hour, minute, 0, 0);
+  if (
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day ||
+    calendar.getUTCHours() !== hour ||
+    calendar.getUTCMinutes() !== minute
+  ) {
+    return null;
+  }
+  return new Date(calendar.getTime() - SHANGHAI_OFFSET_MS);
+}
+
 export const workerMachineRuleInputSchema = z
   .object({
     workerId: z.string().trim().min(1, '请选择师傅'),
     machineType: z.nativeEnum(MachineType),
-    dailyBase: moneyString,
+    dailyBase: storedMoneyString,
     pieceRate: moneyString,
     boardRate: moneyString,
     smallOrderThreshold: z
       .union([z.literal(''), z.string().trim().regex(/^\d{1,9}$/, '请输入正整数')]),
-    smallOrderFlatPrice: moneyString,
+    smallOrderFlatPrice: storedMoneyString,
     smallOrderInclusive: z.boolean().default(false),
-    largeOrderSetupFee: moneyString.default('0'),
-    multiplierFactors: z.array(
-      z.enum(['DOUBLE_SIDED', 'DOUBLE_COLOR']),
-    ),
+    largeOrderSetupFee: storedMoneyString.default('0'),
+    multiplierFactors: z
+      .array(z.enum(['DOUBLE_SIDED', 'DOUBLE_COLOR']))
+      .max(2, '倍率因子最多 2 项')
+      .refine(
+        (factors) => new Set(factors).size === factors.length,
+        '倍率因子不能重复',
+      ),
     effectiveFrom: z
       .string()
       .trim()
@@ -37,11 +79,49 @@ export const workerMachineRuleInputSchema = z
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
         '请选择完整的生效日期和时间',
       )
-      .transform((value) => new Date(`${value}:00+08:00`))
-      .refine((value) => !Number.isNaN(value.getTime()), {
-        message: '生效时间不合法',
+      .transform((value, ctx) => {
+        const parsed = parseShanghaiLocalDateTime(value);
+        if (!parsed) {
+          ctx.addIssue({ code: 'custom', message: '生效时间不合法' });
+          return z.NEVER;
+        }
+        return parsed;
       }),
     remark: z.string().trim().max(200, '备注最多 200 字').optional(),
+  })
+  .superRefine((input, ctx) => {
+    // ProductionTask.pieceworkAmount and DailyWorkerSalary amounts are
+    // Decimal(10,2). A report accepts completed + defect + rework independently,
+    // so the real worst case is 3 × 10,000,000 presses, not OrderItem.quantity.
+    // Include every configured ×2 factor plus the one-board/setup terms.
+    const maxStoredAmount = new Decimal('99999999.99');
+    const multiplier = new Decimal(2).pow(
+      new Set(input.multiplierFactors).size,
+    );
+    const maxTaskAmount = new Decimal(input.pieceRate)
+      .times(MAX_REPORT_COUNT_PER_FIELD * REPORT_COUNT_FIELD_COUNT)
+      .times(multiplier)
+      .plus(new Decimal(input.boardRate).times(multiplier))
+      .plus(new Decimal(input.largeOrderSetupFee));
+    for (const [path, value] of [
+      ['dailyBase', input.dailyBase],
+      ['smallOrderFlatPrice', input.smallOrderFlatPrice],
+    ] as const) {
+      if (new Decimal(value).gt(maxStoredAmount)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [path],
+          message: '金额超过工资字段可保存上限 99,999,999.99 元',
+        });
+      }
+    }
+    if (maxTaskAmount.toDecimalPlaces(2).gt(maxStoredAmount)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pieceRate'],
+        message: '该规则在最大工单数量和倍率下会使计件金额溢出，请降低单价',
+      });
+    }
   })
   .transform((input) => ({
     workerId: input.workerId,
@@ -64,6 +144,7 @@ export const workerMachineRuleInputSchema = z
   }));
 
 export const salaryAdjustmentInputSchema = z.object({
+  idempotencyKey: z.string().uuid('调整请求标识不合法'),
   dailySalaryId: z.string().trim().min(1, '日薪记录不能为空'),
   type: z.nativeEnum(SalaryAdjustmentType),
   amount: z
@@ -159,7 +240,10 @@ export async function createWorkerMachineSalaryRule(input: {
   createdById: string;
 }) {
   return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:piecework-rule:${input.workerId}:${input.machineType}`}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${machineRuleLockKey(
+      input.workerId,
+      input.machineType,
+    )}))`;
 
     const worker = await tx.user.findUnique({
       where: { id: input.workerId },

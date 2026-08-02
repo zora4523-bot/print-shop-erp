@@ -36,6 +36,8 @@ export function StartCsPeriodForm({ csUsers }: Props) {
           csUserId: String(fd.get('csUserId') ?? ''),
           periodStart: String(fd.get('periodStart') ?? ''),
           durationMonths: fd.get('durationMonths') || undefined,
+          baseMonthsAlreadyPaid:
+            fd.get('baseMonthsAlreadyPaid') || undefined,
           initialSales: fd.get('initialSales') || undefined,
           monthlyBase: fd.get('monthlyBase') || undefined,
         };
@@ -133,6 +135,29 @@ export function StartCsPeriodForm({ csUsers }: Props) {
           {errs(state, 'initialSales').length > 0 ? (
             <p className="mt-1 text-xs text-destructive">
               {errs(state, 'initialSales')[0]}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="col-span-2">
+          <Label className="text-xs text-muted-foreground">
+            已发底薪月数 — 历史导入用，新客服留空
+          </Label>
+          <Input
+            type="number"
+            name="baseMonthsAlreadyPaid"
+            inputMode="numeric"
+            min={0}
+            max={24}
+            placeholder="0"
+            className="mt-1"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            系统会按“月底薪 × 已发月数”生成一条期初工资发放流水。
+          </p>
+          {errs(state, 'baseMonthsAlreadyPaid').length > 0 ? (
+            <p className="mt-1 text-xs text-destructive">
+              {errs(state, 'baseMonthsAlreadyPaid')[0]}
             </p>
           ) : null}
         </div>

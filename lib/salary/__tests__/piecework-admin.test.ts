@@ -27,6 +27,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   createWorkerMachineSalaryRule,
+  salaryAdjustmentInputSchema,
   workerMachineRuleInputSchema,
 } from '../piecework-admin';
 
@@ -65,6 +66,21 @@ describe('workerMachineRuleInputSchema', () => {
     ).toBe(false);
   });
 
+  it('rejects an invalid calendar date instead of rolling it into March', () => {
+    const result = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      effectiveFrom: '2026-02-31T09:30',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ message: '生效时间不合法' }),
+        ]),
+      );
+    }
+  });
+
   it('supports no small-order threshold but rejects negative rates', () => {
     const noThreshold = workerMachineRuleInputSchema.parse({
       ...validInput(),
@@ -75,6 +91,92 @@ describe('workerMachineRuleInputSchema', () => {
       workerMachineRuleInputSchema.safeParse({
         ...validInput(),
         pieceRate: '-0.01',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a rate that can overflow Decimal(10,2) on the largest task', () => {
+    const result = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      pieceRate: '3',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['pieceRate'],
+            message: expect.stringContaining('溢出'),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('uses completed + defect + rework as the rule-bound worst case', () => {
+    const unsafe = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      pieceRate: '1',
+      boardRate: '0',
+      largeOrderSetupFee: '0',
+    });
+    expect(unsafe.success).toBe(false);
+
+    const safe = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      pieceRate: '0.8',
+      boardRate: '0',
+      largeOrderSetupFee: '0',
+    });
+    expect(safe.success).toBe(true);
+  });
+
+  it('rejects duplicate multiplier factors', () => {
+    expect(
+      workerMachineRuleInputSchema.safeParse({
+        ...validInput(),
+        multiplierFactors: ['DOUBLE_COLOR', 'DOUBLE_COLOR'],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps fixed salary amounts at cents while allowing four-decimal unit rates', () => {
+    expect(
+      workerMachineRuleInputSchema.safeParse({
+        ...validInput(),
+        dailyBase: '120.001',
+      }).success,
+    ).toBe(false);
+    expect(
+      workerMachineRuleInputSchema.safeParse({
+        ...validInput(),
+        smallOrderFlatPrice: '20.001',
+      }).success,
+    ).toBe(false);
+    expect(
+      workerMachineRuleInputSchema.safeParse({
+        ...validInput(),
+        pieceRate: '0.0085',
+        boardRate: '5.1234',
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe('salaryAdjustmentInputSchema', () => {
+  it('requires a UUID request key for retry-safe money writes', () => {
+    const valid = {
+      idempotencyKey: '00000000-0000-4000-8000-000000000001',
+      dailySalaryId: 'salary-1',
+      type: 'BONUS',
+      amount: '20.00',
+      reason: '急单奖励',
+    };
+    expect(salaryAdjustmentInputSchema.safeParse(valid).success).toBe(true);
+    expect(
+      salaryAdjustmentInputSchema.safeParse({
+        ...valid,
+        idempotencyKey: 'not-a-uuid',
       }).success,
     ).toBe(false);
   });
@@ -105,6 +207,9 @@ describe('createWorkerMachineSalaryRule', () => {
     });
 
     expect(txMock.$executeRaw).toHaveBeenCalled();
+    expect(txMock.$executeRaw.mock.calls[0][1]).toBe(
+      'print-shop-erp:piecework-rule:worker-1:HAND_PRESS',
+    );
     expect(txMock.workerMachineSalaryRule.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
         workerId: 'worker-1',

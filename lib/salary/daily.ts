@@ -6,12 +6,17 @@ import {
   WorkerType,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
+import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { parseStrictYmd } from '../auth/schemas';
 import {
   calcMachineDailySalary,
   type MachineSalaryRule,
 } from './machine-piecework';
-import { getActiveMachineRule, type MachineRuleWithBase } from './rules';
+import {
+  getActiveMachineRule,
+  machineRuleLockKey,
+  type MachineRuleWithBase,
+} from './rules';
 
 // Asia/Shanghai is the business timezone (UTC+8, no DST). A calendar
 // date for salary purposes means a 24-hour window starting at Shanghai
@@ -19,12 +24,41 @@ import { getActiveMachineRule, type MachineRuleWithBase } from './rules';
 // that range ourselves rather than relying on `toLocaleDateString`
 // quirks.
 const SHANGHAI_OFFSET_HOURS = 8;
+const DECIMAL_10_2_MAX = new Decimal('99999999.99');
 
 export class DailySalaryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DailySalaryError';
   }
+}
+
+function storableSalaryAmount(
+  value: Decimal.Value,
+  label: string,
+  options: { allowNegative?: boolean } = {},
+): Decimal {
+  let amount: Decimal;
+  try {
+    amount = new Decimal(value);
+  } catch {
+    throw new DailySalaryError(`${label}不是有效金额`);
+  }
+  if (!amount.isFinite()) {
+    throw new DailySalaryError(`${label}不是有效金额`);
+  }
+  if (!options.allowNegative && amount.isNegative()) {
+    throw new DailySalaryError(`${label}不能小于 0`);
+  }
+  if (amount.decimalPlaces() > 2) {
+    throw new DailySalaryError(`${label}小数最多 2 位，不能静默舍入`);
+  }
+  if (amount.toDecimalPlaces(2).abs().gt(DECIMAL_10_2_MAX)) {
+    throw new DailySalaryError(
+      `${label}超过系统可保存上限 99,999,999.99 元`,
+    );
+  }
+  return amount;
 }
 
 // Takes a YYYY-MM-DD calendar date string (as stored in the Prisma
@@ -143,14 +177,7 @@ export async function computeDailyWorkerSalary(
   // Hoist the narrowed machineType into a non-null local — TS loses
   // flow narrowing across the $transaction arrow body's closure (same
   // pattern as computeHourlyPayroll).
-  const machineType: MachineType = worker.machineType;
-
-  const rule = await getActiveMachineRule(machineType, ruleAt, workerId);
-  if (!rule) {
-    throw new DailySalaryError(
-      `无当前生效的 ${machineType} 薪资规则`,
-    );
-  }
+  const primaryMachineType: MachineType = worker.machineType;
 
   // Store the `@db.Date` column as UTC midnight for the Shanghai
   // calendar date. parseStrictYmd already returned this value inside
@@ -217,18 +244,114 @@ export async function computeDailyWorkerSalary(
       },
     });
 
+    for (const task of tasks) {
+      storableSalaryAmount(
+        task.pieceworkAmount as Decimal.Value,
+        `任务 ${task.id} 计件金额`,
+      );
+    }
+
     const { totalPieceworkAmount, taskCount, orderCount, detail } =
       aggregateTasks(tasks);
+    storableSalaryAmount(totalPieceworkAmount, '当日计件合计');
 
-    const baseSalary = new Decimal((rule as MachineRuleWithBase).dailyBase);
+    // A worker may operate more than one registered machine in a day. Task
+    // piecework is already frozen from each task's own machine-rule snapshot;
+    // the daily floor is the highest active dailyBase among the machine types
+    // actually worked. With no completed task, retain the historical behavior
+    // and fall back to the account's primary machine.
+    const workedMachineTypes = tasks.length
+      ? [
+          ...new Set(
+            tasks.map((task) => task.machineType ?? primaryMachineType),
+          ),
+        ].sort((left, right) => {
+          if (left === right) return 0;
+          if (left === primaryMachineType) return -1;
+          if (right === primaryMachineType) return 1;
+          return left.localeCompare(right);
+        })
+      : [primaryMachineType];
+    for (const workedMachineType of workedMachineTypes) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${machineRuleLockKey(
+        workerId,
+        workedMachineType,
+      )}))`;
+    }
+    const resolvedRules: Array<{
+      machineType: MachineType;
+      rule: MachineRuleWithBase | null;
+    }> = [];
+    for (const workedMachineType of workedMachineTypes) {
+      resolvedRules.push({
+        machineType: workedMachineType,
+        rule: await getActiveMachineRule(
+          workedMachineType,
+          ruleAt,
+          workerId,
+          tx,
+        ),
+      });
+    }
+    const missingRule = resolvedRules.find(({ rule }) => !rule);
+    if (missingRule) {
+      throw new DailySalaryError(
+        `无当前生效的 ${missingRule.machineType} 薪资规则`,
+      );
+    }
+    const rules = resolvedRules as Array<{
+      machineType: MachineType;
+      rule: MachineRuleWithBase;
+    }>;
+    const rulesWithBase = rules.map((entry) => ({
+      ...entry,
+      dailyBase: storableSalaryAmount(
+        entry.rule.dailyBase as Decimal.Value,
+        `${entry.machineType} 每日保底`,
+      ),
+    }));
+    const baseRule = rulesWithBase.reduce((highest, candidate) =>
+      candidate.dailyBase.gt(highest.dailyBase)
+        ? candidate
+        : highest,
+    );
+    const machineType = baseRule.machineType;
+    const rule = baseRule.rule;
+    const baseSalary = baseRule.dailyBase;
+    const ruleByMachine = new Map(
+      rules.map((entry) => [entry.machineType, entry.rule]),
+    );
+    const salaryRuleSnapshot = {
+      ...rule,
+      dailyBasePolicy:
+        tasks.length > 0
+          ? 'MAX_WORKED_MACHINE_TYPES'
+          : 'PRIMARY_MACHINE_FALLBACK',
+      baseMachineType: machineType,
+      workedMachineTypes,
+      machineRules: Object.fromEntries(
+        rules.map((entry) => [entry.machineType, entry.rule]),
+      ),
+    };
     const grossSalary = calcMachineDailySalary(
       tasks.map((t) => new Decimal(t.pieceworkAmount as Decimal.Value)),
       baseSalary,
     );
-    const adjustmentAmount = new Decimal(
+    const adjustmentAmount = storableSalaryAmount(
       existing?.adjustmentAmount as Decimal.Value ?? 0,
+      '人工调整合计',
+      { allowNegative: true },
     );
-    const actualSalary = Decimal.max(0, grossSalary.plus(adjustmentAmount));
+    const adjustedSalary = grossSalary.plus(adjustmentAmount);
+    if (adjustedSalary.isNegative()) {
+      throw new DailySalaryError(
+        '重算后的工资小于 0，请先追加一条纠正调整流水再重算',
+      );
+    }
+    const actualSalary = storableSalaryAmount(
+      adjustedSalary,
+      '当日实发金额',
+    );
 
     const dailySalary = await tx.dailyWorkerSalary.upsert({
       where: { workerId_date: { workerId, date: dateCol } },
@@ -242,7 +365,7 @@ export async function computeDailyWorkerSalary(
         taskCount,
         orderCount,
         calculationDetail: detail,
-        salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
+        salaryRuleSnapshot: JSON.parse(JSON.stringify(salaryRuleSnapshot)),
       },
       update: {
         // isPaid / paidAt stay whatever they already are; finance
@@ -256,7 +379,7 @@ export async function computeDailyWorkerSalary(
         taskCount,
         orderCount,
         calculationDetail: detail,
-        salaryRuleSnapshot: JSON.parse(JSON.stringify(rule)),
+        salaryRuleSnapshot: JSON.parse(JSON.stringify(salaryRuleSnapshot)),
       },
       select: { id: true },
     });
@@ -278,7 +401,7 @@ export async function computeDailyWorkerSalary(
           orderItemName: task.orderItem.name,
           craftId: task.craft.id,
           craftName: task.craft.name,
-          machineType: task.machineType ?? machineType,
+          machineType: task.machineType ?? primaryMachineType,
           completedQty: task.completedQty,
           defectQty: task.defectQty,
           reworkQty: task.reworkQty,
@@ -286,7 +409,13 @@ export async function computeDailyWorkerSalary(
           pressCount: task.pressCount,
           pieceworkAmount: String(task.pieceworkAmount),
           salaryRuleSnapshot: JSON.parse(
-            JSON.stringify(task.salaryRuleSnapshot ?? rule),
+            JSON.stringify(
+              task.salaryRuleSnapshot ??
+                ruleByMachine.get(
+                  task.machineType ?? primaryMachineType,
+                ) ??
+                rule,
+            ),
           ),
           completedAt: task.completedAt!,
         })),
@@ -314,6 +443,20 @@ export type BatchDailyResult = {
   errors: Array<{ workerId: string; message: string }>;
 };
 
+// Earlier workers may already be committed when a later database or
+// programming failure interrupts the batch. Keep those results attached to
+// the error so the cron layer can report safe counts, then rethrow for the
+// durable worker to retry the unfinished tail.
+export class DailyBatchUnexpectedError extends Error {
+  readonly partialResult: BatchDailyResult;
+
+  constructor(message: string, partialResult: BatchDailyResult, cause: unknown) {
+    super(message, { cause });
+    this.name = 'DailyBatchUnexpectedError';
+    this.partialResult = partialResult;
+  }
+}
+
 // Per-worker try/catch so one bad worker (paid row, missing rule,
 // etc.) doesn't abort the whole batch — matches the hourly + cs
 // batch patterns (rounds 45, 48). Also closes a cron-log leak path:
@@ -324,25 +467,39 @@ export async function computeDailyForAllMachineWorkers(
   date: string,
   now?: Date,
 ): Promise<BatchDailyResult> {
-  const workers = await db.user.findMany({
-    where: {
-      role: Role.WORKER,
-      workerType: WorkerType.MACHINE,
-      isActive: true,
-      machineType: { not: null },
-    },
-    select: { id: true },
-  });
   const settled: DailyWorkerSalaryResult[] = [];
   const errors: Array<{ workerId: string; message: string }> = [];
+  let workers: Array<{ id: string }>;
+  try {
+    workers = await db.user.findMany({
+      where: {
+        role: Role.WORKER,
+        workerType: WorkerType.MACHINE,
+        isActive: true,
+        machineType: { not: null },
+      },
+      select: { id: true },
+    });
+  } catch (cause) {
+    throw new DailyBatchUnexpectedError(
+      '日薪批量扫描失败',
+      { settled, errors },
+      cause,
+    );
+  }
   for (const w of workers) {
     try {
       settled.push(await computeDailyWorkerSalary(w.id, date, now));
     } catch (err) {
-      errors.push({
-        workerId: w.id,
-        message: err instanceof Error ? err.message : String(err),
-      });
+      if (err instanceof DailySalaryError) {
+        errors.push({ workerId: w.id, message: err.message });
+        continue;
+      }
+      throw new DailyBatchUnexpectedError(
+        `师傅 ${w.id} 日薪计算发生系统错误`,
+        { settled, errors },
+        err,
+      );
     }
   }
   return { settled, errors };
@@ -469,13 +626,19 @@ export async function getOrderPieceworkSummary(orderId: string) {
 }
 
 export async function addDailySalaryAdjustment(input: {
+  idempotencyKey: string;
   dailySalaryId: string;
   type: SalaryAdjustmentType;
   amount: string;
   reason: string;
-  createdById: string;
+  actor: AuditActor;
 }) {
-  const rawAmount = new Decimal(input.amount);
+  let rawAmount: Decimal;
+  try {
+    rawAmount = new Decimal(input.amount);
+  } catch {
+    throw new DailySalaryError('调整金额必须是非零数字');
+  }
   if (!rawAmount.isFinite() || rawAmount.isZero()) {
     throw new DailySalaryError('调整金额必须是非零数字');
   }
@@ -485,8 +648,52 @@ export async function addDailySalaryAdjustment(input: {
       : input.type === SalaryAdjustmentType.DEDUCTION
         ? rawAmount.abs().negated()
         : rawAmount;
+  storableSalaryAmount(signedAmount, '调整金额', {
+    allowNegative: true,
+  });
+  const idempotencyKey = input.idempotencyKey.trim();
+  if (!idempotencyKey) {
+    throw new DailySalaryError('调整请求标识不能为空');
+  }
+  const reason = input.reason.trim();
 
   return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:salary-adjustment-request:${idempotencyKey}`}))`;
+    const replay = await tx.salaryAdjustment.findUnique({
+      where: { idempotencyKey },
+      select: {
+        id: true,
+        idempotencyKey: true,
+        dailySalaryId: true,
+        type: true,
+        amount: true,
+        reason: true,
+        createdById: true,
+        dailySalary: {
+          select: { adjustmentAmount: true, actualSalary: true },
+        },
+      },
+    });
+    if (replay) {
+      if (
+        replay.dailySalaryId !== input.dailySalaryId ||
+        replay.type !== input.type ||
+        !new Decimal(replay.amount as Decimal.Value).eq(signedAmount) ||
+        replay.reason !== reason ||
+        replay.createdById !== input.actor.id
+      ) {
+        throw new DailySalaryError(
+          '调整请求标识已被其他记录使用，请刷新后重试',
+        );
+      }
+      return {
+        id: replay.id,
+        amount: String(replay.amount),
+        adjustmentAmount: String(replay.dailySalary.adjustmentAmount),
+        actualSalary: String(replay.dailySalary.actualSalary),
+      };
+    }
+
     const initial = await tx.dailyWorkerSalary.findUnique({
       where: { id: input.dailySalaryId },
       select: { workerId: true, date: true },
@@ -514,11 +721,12 @@ export async function addDailySalaryAdjustment(input: {
 
     const adjustment = await tx.salaryAdjustment.create({
       data: {
+        idempotencyKey,
         dailySalaryId: salary.id,
         type: input.type,
         amount: signedAmount.toFixed(2),
-        reason: input.reason.trim(),
-        createdById: input.createdById,
+        reason,
+        createdById: input.actor.id,
       },
       select: { id: true, amount: true },
     });
@@ -526,22 +734,49 @@ export async function addDailySalaryAdjustment(input: {
       where: { dailySalaryId: salary.id },
       _sum: { amount: true },
     });
-    const adjustmentAmount = new Decimal(
+    const adjustmentAmount = storableSalaryAmount(
       aggregate._sum.amount as Decimal.Value ?? 0,
+      '人工调整合计',
+      { allowNegative: true },
     );
     const gross = Decimal.max(
-      new Decimal(salary.baseSalary as Decimal.Value),
-      new Decimal(salary.totalPieceworkAmount as Decimal.Value),
+      storableSalaryAmount(
+        salary.baseSalary as Decimal.Value,
+        '每日保底',
+      ),
+      storableSalaryAmount(
+        salary.totalPieceworkAmount as Decimal.Value,
+        '当日计件合计',
+      ),
     );
     const actualSalary = gross.plus(adjustmentAmount);
     if (actualSalary.isNegative()) {
       throw new DailySalaryError('调整后实发金额不能小于 0');
     }
+    storableSalaryAmount(actualSalary, '调整后实发金额');
     await tx.dailyWorkerSalary.update({
       where: { id: salary.id },
       data: {
         adjustmentAmount: adjustmentAmount.toFixed(2),
         actualSalary: actualSalary.toFixed(2),
+      },
+    });
+    await writeAuditLogInTx(tx, {
+      actor: input.actor,
+      action: 'CREATE',
+      entityType: 'SalaryAdjustment',
+      entityId: adjustment.id,
+      after: {
+        idempotencyKey,
+        dailySalaryId: input.dailySalaryId,
+        type: input.type,
+        amount: input.amount,
+        reason,
+        signedAmount: String(adjustment.amount),
+      },
+      requestMetadata: {
+        source: 'owner-salary.addDailySalaryAdjustmentAction',
+        route: `/owner/salary/daily/${input.dailySalaryId}`,
       },
     });
     return {

@@ -149,13 +149,18 @@ function nullableJson(value: Prisma.InputJsonValue | null) {
   return value === null ? Prisma.JsonNull : value;
 }
 
-export async function writeAuditLog(input: AuditLogInput) {
+type AuditLogClient = Pick<Prisma.TransactionClient, 'businessAuditLog'>;
+
+async function writeAuditLogWithClient(
+  client: AuditLogClient,
+  input: AuditLogInput,
+) {
   const before = sanitizeAuditPayload(input.before);
   const after = sanitizeAuditPayload(input.after);
   const diff = buildAuditDiff(input.before, input.after);
   const requestMetadata = sanitizeAuditPayload(input.requestMetadata ?? null);
 
-  return db.businessAuditLog.create({
+  return client.businessAuditLog.create({
     data: {
       actorId: input.actor?.id ?? null,
       actorRole: input.actor?.role ?? null,
@@ -185,4 +190,17 @@ export async function writeAuditLog(input: AuditLogInput) {
       createdAt: true,
     },
   });
+}
+
+export async function writeAuditLog(input: AuditLogInput) {
+  return writeAuditLogWithClient(db, input);
+}
+
+// Money ledgers call this overload from their own transaction so the business
+// mutation and its audit evidence cannot commit independently.
+export async function writeAuditLogInTx(
+  tx: Prisma.TransactionClient,
+  input: AuditLogInput,
+) {
+  return writeAuditLogWithClient(tx, input);
 }

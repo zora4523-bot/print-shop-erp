@@ -59,6 +59,7 @@ const ownerActor = {
 
 const fd = (data: Record<string, string>): FormData => {
   const f = new FormData();
+  f.set('idempotencyKey', '00000000-0000-4000-8000-000000000001');
   for (const [k, v] of Object.entries(data)) f.set(k, v);
   return f;
 };
@@ -226,6 +227,10 @@ describe('recordBillPaymentAction', () => {
       'b1',
       '1000',
       expect.objectContaining({ id: 'owner-1', role: Role.ADMIN }),
+      expect.any(Date),
+      expect.objectContaining({
+        idempotencyKey: '00000000-0000-4000-8000-000000000001',
+      }),
     );
   });
 

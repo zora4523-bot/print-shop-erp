@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import {
   CsSalesEntryType,
+  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderStatus,
   Prisma,
@@ -12,7 +13,11 @@ import type {
   ReviewOrderChangeRequestInput,
 } from '../auth/schemas';
 import { db } from '../db';
-import { recordCsSalesEntryInTx } from '../salary/cs-sales';
+import {
+  assertCsOrderSalesLedgerReconciledInTx,
+  CsSalesLedgerError,
+  recordCsSalesEntryInTx,
+} from '../salary/cs-sales';
 import { orderCascadeLockKey } from './locks';
 
 const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
@@ -21,6 +26,7 @@ const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.SCHEDULING,
   OrderStatus.IN_PRODUCTION,
 ];
+const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 
 export class OrderChangeRequestError extends Error {
   constructor(message: string) {
@@ -143,10 +149,31 @@ function readProposedChanges(value: Prisma.JsonValue): ProposedItemChange[] {
   return parsed.items;
 }
 
+function storableOrderSubtotal(
+  unitPrice: Prisma.Decimal,
+  quantity: number,
+  itemName: string,
+): string {
+  const subtotal = new Decimal(unitPrice).times(quantity).toDecimalPlaces(2);
+  if (!subtotal.isFinite() || subtotal.isNegative() || subtotal.gt(DECIMAL_12_2_MAX)) {
+    throw new OrderChangeRequestError(
+      `款式“${itemName}”金额超过可保存上限 9,999,999,999.99 元`,
+    );
+  }
+  return subtotal.toFixed(2);
+}
+
 function orderTotal(items: Array<{ subtotal: Prisma.Decimal }>): string {
-  return items
-    .reduce((total, item) => total.plus(item.subtotal), new Decimal(0))
-    .toFixed(2);
+  const total = items.reduce(
+    (sum, item) => sum.plus(item.subtotal),
+    new Decimal(0),
+  );
+  if (!total.isFinite() || total.isNegative() || total.gt(DECIMAL_12_2_MAX)) {
+    throw new OrderChangeRequestError(
+      '工单总额超过可保存上限 9,999,999,999.99 元',
+    );
+  }
+  return total.toFixed(2);
 }
 
 /**
@@ -303,7 +330,7 @@ export async function reviewOrderChangeRequest(
             quantity: change.quantity,
             specification: change.specification,
             foilColors: change.foilColors,
-            subtotal: new Decimal(item.unitPrice).mul(quantity).toFixed(2),
+            subtotal: storableOrderSubtotal(item.unitPrice, quantity, item.name),
           },
         });
         continue;
@@ -325,7 +352,11 @@ export async function reviewOrderChangeRequest(
           isDoubleSided: template.isDoubleSided,
           isDoubleColor: template.isDoubleColor,
           unitPrice: template.unitPrice,
-          subtotal: new Decimal(template.unitPrice).mul(change.quantity).toFixed(2),
+          subtotal: storableOrderSubtotal(
+            template.unitPrice,
+            change.quantity,
+            change.name,
+          ),
           suggestedPrice: template.suggestedPrice,
           remark: template.remark,
         },
@@ -398,17 +429,33 @@ export async function reviewOrderChangeRequest(
       },
     });
 
-    if (request.requester.role === Role.CUSTOMER_SERVICE) {
-      await recordCsSalesEntryInTx(tx, {
-        eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
-        csUserId: request.requester.id,
-        orderId: request.order.id,
-        orderRevision: nextRevision,
-        type: CsSalesEntryType.ORDER_CHANGED,
-        amount: salesDelta,
-        occurredAt: reviewedAt,
-        remark: `工单修改申请 ${request.id} 审核通过`,
-      });
+    if (
+      request.order.submitterRole === Role.CUSTOMER_SERVICE &&
+      request.order.billingMode === OrderBillingMode.CHARGE &&
+      request.order.status !== OrderStatus.DRAFT
+    ) {
+      try {
+        await assertCsOrderSalesLedgerReconciledInTx(
+          tx,
+          request.order.id,
+          request.order.totalAmount,
+        );
+        await recordCsSalesEntryInTx(tx, {
+          eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
+          csUserId: request.order.submitterId,
+          orderId: request.order.id,
+          orderRevision: nextRevision,
+          type: CsSalesEntryType.ORDER_CHANGED,
+          amount: salesDelta,
+          occurredAt: reviewedAt,
+          remark: `工单修改申请 ${request.id} 审核通过`,
+        });
+      } catch (error) {
+        if (error instanceof CsSalesLedgerError) {
+          throw new OrderChangeRequestError(error.message);
+        }
+        throw error;
+      }
     }
     return reviewed;
   });

@@ -22,7 +22,10 @@ import type {
 } from './auth/schemas';
 import { orderCascadeLockKey } from './order/locks';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
-import { getActiveMachineRule } from './salary/rules';
+import {
+  getActiveMachineRule,
+  machineRuleLockKey,
+} from './salary/rules';
 import { dispatchNotification } from './notification/dispatch';
 import {
   maybeCompleteProductionOrder,
@@ -530,6 +533,20 @@ type AssignmentWorker = {
   craftCapabilityIds?: string[];
 };
 
+function workerCanOperateMachine(
+  worker: Pick<AssignmentWorker, 'machineType' | 'machineCapabilities'>,
+  machineType: MachineType | null,
+): boolean {
+  if (!machineType) return false;
+  const capabilities =
+    (worker.machineCapabilities?.length ?? 0) > 0
+      ? worker.machineCapabilities!
+      : worker.machineType
+        ? [worker.machineType]
+        : [];
+  return capabilities.includes(machineType);
+}
+
 export type WorkerAssignmentEligibility = {
   eligible: boolean;
   recommended: boolean;
@@ -665,6 +682,37 @@ export class ReportError extends Error {
     super(message);
     this.name = 'ReportError';
   }
+}
+
+const DECIMAL_10_2_MAX = '99999999.99';
+
+type PieceworkTaskInput = Parameters<
+  typeof calcMachinePieceworkBreakdown
+>[0];
+type PieceworkRuleInput = Parameters<
+  typeof calcMachinePieceworkBreakdown
+>[1];
+
+function calculateStorablePiecework(
+  task: PieceworkTaskInput,
+  rule: PieceworkRuleInput,
+): ReturnType<typeof calcMachinePieceworkBreakdown> {
+  let breakdown: ReturnType<typeof calcMachinePieceworkBreakdown>;
+  try {
+    breakdown = calcMachinePieceworkBreakdown(task, rule);
+  } catch {
+    throw new ReportError('计件规则格式非法，请联系管理员修正规则');
+  }
+  if (
+    !breakdown.amount.isFinite() ||
+    breakdown.amount.isNegative() ||
+    breakdown.amount.toDecimalPlaces(2).gt(DECIMAL_10_2_MAX)
+  ) {
+    throw new ReportError(
+      '计件金额超过系统可保存上限 99,999,999.99 元，请核对报工数量或调整计件规则',
+    );
+  }
+  return breakdown;
 }
 
 type ReassignTxClient = {
@@ -990,6 +1038,7 @@ export async function beginTask(
             isActive: true,
             workerType: true,
             machineType: true,
+            machineCapabilities: true,
           },
         })
       : null;
@@ -1001,7 +1050,7 @@ export async function beginTask(
       !assignedWorker.isActive ||
       assignedWorker.workerType !== taskWorkerType ||
       (taskWorkerType === WorkerType.MACHINE &&
-        assignedWorker.machineType !== task.machineType)
+        !workerCanOperateMachine(assignedWorker, task.machineType))
     ) {
       throw new ReportError(
         '任务与当前师傅的岗位或机型不匹配，请联系管理员改派',
@@ -1158,6 +1207,15 @@ export async function reportTask(
 
     transitionProductionTask(task.status, TaskStatus.COMPLETED);
 
+    // Keep the same task → order → salary-rule lock order as the batch
+    // report path. Besides avoiding a lock-order cycle, holding the order lock
+    // through the task write makes the later completion cascade a single
+    // serialized operation.
+    const { order } = task.orderItem;
+    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+      order.id,
+    )}))`;
+
     const taskWorkerType =
       task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
     let boardCount = 0;
@@ -1169,10 +1227,17 @@ export async function reportTask(
       if (!task.machineType) {
         throw new ReportError('开机任务缺少机型快照，请联系管理员改派');
       }
+      if (task.workerId) {
+        await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${machineRuleLockKey(
+          task.workerId,
+          task.machineType,
+        )}))`;
+      }
       const rule = await getActiveMachineRule(
         task.machineType,
         now,
         task.workerId ?? undefined,
+        tx,
       );
       if (!rule) {
         throw new ReportError(
@@ -1181,7 +1246,7 @@ export async function reportTask(
       }
       const totalPressed =
         input.completedQty + input.defectQty + input.reworkQty;
-      const breakdown = calcMachinePieceworkBreakdown(
+      const breakdown = calculateStorablePiecework(
         {
           quantity: totalPressed,
           itemCount: 1,
@@ -1224,14 +1289,8 @@ export async function reportTask(
       select: { id: true, status: true },
     });
 
-    // Cascade-to-COMPLETED gate: all non-CANCELLED tasks for this
-    // order must be COMPLETED. Acquire cascade lock and re-read the
-    // sibling statuses inside the lock.
-    const { order } = task.orderItem;
-    await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-      order.id,
-    )}))`;
-
+    // Cascade-to-COMPLETED gate: all non-CANCELLED tasks for this order must
+    // be COMPLETED. The order lock has been held since before the task write.
     const orderCompleted = await maybeCompleteProductionOrder(
       txClient as unknown as ProductionCompletionTx,
       order.id,
@@ -1354,6 +1413,7 @@ export async function beginTasks(
         isActive: true,
         workerType: true,
         machineType: true,
+        machineCapabilities: true,
       },
     });
     if (!worker || worker.role !== Role.WORKER || !worker.isActive) {
@@ -1383,7 +1443,7 @@ export async function beginTasks(
       if (
         worker.workerType !== taskWorkerType ||
         (taskWorkerType === WorkerType.MACHINE &&
-          worker.machineType !== task.machineType)
+          !workerCanOperateMachine(worker, task.machineType))
       ) {
         throw new ReportError('选择中有任务与当前岗位或机型不匹配');
       }
@@ -1491,6 +1551,19 @@ export async function reportTasks(
       }
     }
 
+    const machineRuleLocks = [
+      ...new Set(
+        tasks.flatMap((task) =>
+          task.workerId && task.machineType
+            ? [machineRuleLockKey(task.workerId, task.machineType)]
+            : [],
+        ),
+      ),
+    ].sort();
+    for (const lockKey of machineRuleLocks) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    }
+
     for (const task of tasks) {
       const taskWorkerType =
         task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
@@ -1506,13 +1579,14 @@ export async function reportTasks(
           task.machineType,
           now,
           task.workerId ?? undefined,
+          tx,
         );
         if (!rule) {
           throw new ReportError(
             `无当前生效的 ${task.machineType} 薪资规则，请联系管理员补规则`,
           );
         }
-        const breakdown = calcMachinePieceworkBreakdown(
+        const breakdown = calculateStorablePiecework(
           {
             quantity: task.plannedQty,
             itemCount: 1,

@@ -15,6 +15,7 @@ import {
   buildAuditDiff,
   sanitizeAuditPayload,
   writeAuditLog,
+  writeAuditLogInTx,
 } from '../audit-log';
 
 beforeEach(() => {
@@ -128,5 +129,21 @@ describe('writeAuditLog', () => {
         createdAt: true,
       },
     });
+  });
+
+  it('can write through the caller transaction client', async () => {
+    const tx = {
+      businessAuditLog: { create: vi.fn().mockResolvedValue({ id: 'audit2' }) },
+    };
+
+    await writeAuditLogInTx(tx as never, {
+      actor: null,
+      action: 'CREATE',
+      entityType: 'SalaryAdjustment',
+      entityId: 'adjustment-1',
+    });
+
+    expect(tx.businessAuditLog.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 });

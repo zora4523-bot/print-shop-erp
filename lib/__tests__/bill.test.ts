@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   BillStatus,
+  OrderCostCategory,
   OrderBillingMode,
   OrderStatus,
   Role,
@@ -8,7 +9,7 @@ import {
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
-    order: { findMany: vi.fn() },
+    order: { findMany: vi.fn(), findUnique: vi.fn() },
     bill: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -16,7 +17,8 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     billItem: { createMany: vi.fn() },
-    billPayment: { create: vi.fn() },
+    billPayment: { findUnique: vi.fn(), create: vi.fn() },
+    orderCostEntry: { findUnique: vi.fn(), create: vi.fn() },
     salaryPeriod: {
       findFirst: vi.fn(),
       update: vi.fn(),
@@ -37,7 +39,9 @@ import {
   recordPayment,
   listBills,
   getBillDetail,
+  addOrderCostEntry,
   BillError,
+  BillGenerationUnexpectedError,
   InvalidBillTransitionError,
 } from '../bill';
 
@@ -46,12 +50,19 @@ const salesActor = { id: 'sales-1', role: Role.SALES };
 
 beforeEach(() => {
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
+  dbMock.order.findUnique.mockReset().mockResolvedValue({
+    id: 'order-1',
+    isSfCollect: false,
+  });
   dbMock.bill.findUnique.mockReset();
   dbMock.bill.findMany.mockReset().mockResolvedValue([]);
   dbMock.bill.create.mockReset();
   dbMock.bill.update.mockReset();
   dbMock.billItem.createMany.mockReset().mockResolvedValue({ count: 0 });
   dbMock.billPayment.create.mockReset().mockResolvedValue({ id: 'payment-1' });
+  dbMock.billPayment.findUnique.mockReset().mockResolvedValue(null);
+  dbMock.orderCostEntry.findUnique.mockReset().mockResolvedValue(null);
+  dbMock.orderCostEntry.create.mockReset().mockResolvedValue({ id: 'cost-1' });
   dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
   dbMock.salaryPeriod.update.mockReset();
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
@@ -99,10 +110,10 @@ describe('generateBillsForPeriod', () => {
     expect(where.status).toBe(OrderStatus.FINISHED);
     expect(where.billingMode).toBe(OrderBillingMode.CHARGE);
     expect((where.finishedAt.gte as Date).toISOString()).toBe(
-      '2026-05-01T00:00:00.000Z',
+      '2026-04-30T16:00:00.000Z',
     );
     expect((where.finishedAt.lt as Date).toISOString()).toBe(
-      '2026-06-01T00:00:00.000Z',
+      '2026-05-31T16:00:00.000Z',
     );
   });
 
@@ -114,7 +125,8 @@ describe('generateBillsForPeriod', () => {
     dbMock.bill.findUnique.mockResolvedValue({
       id: 'bill-1',
       status: BillStatus.DRAFT,
-      items: [{ orderId: 'o1' }], // o1 already on the bill
+      openingAmount: '0.00',
+      items: [{ orderId: 'o1', orderAmount: '1000.00' }], // o1 already on the bill
     });
     dbMock.bill.update.mockResolvedValue({ id: 'bill-1' });
     const r = await generateBillsForPeriod('2026-05', ownerActor);
@@ -135,6 +147,7 @@ describe('generateBillsForPeriod', () => {
     dbMock.bill.findUnique.mockResolvedValue({
       id: 'bill-1',
       status: BillStatus.ISSUED,
+      openingAmount: '0.00',
       items: [],
     });
     const r = await generateBillsForPeriod('2026-05', ownerActor);
@@ -142,6 +155,65 @@ describe('generateBillsForPeriod', () => {
     expect(r.errors).toHaveLength(1);
     expect(r.errors[0].salesUserId).toBe('sales-a');
     expect(r.errors[0].message).toMatch(/ISSUED/);
+  });
+
+  it('recomputes a draft from persisted bill items plus newly appended items', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      { id: 'o2-new', submitterId: 'sales-a', totalAmount: '500.00' },
+    ]);
+    dbMock.bill.findUnique.mockResolvedValue({
+      id: 'bill-1',
+      status: BillStatus.DRAFT,
+      openingAmount: '25.00',
+      items: [{ orderId: 'historical-o1', orderAmount: '1000.00' }],
+    });
+    dbMock.bill.update.mockResolvedValue({ id: 'bill-1' });
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated[0].totalAmount).toBe('1525.00');
+    expect(dbMock.bill.update).toHaveBeenCalledWith({
+      where: { id: 'bill-1' },
+      data: { totalAmount: '1525.00' },
+      select: { id: true },
+    });
+  });
+
+  it('refuses a negative or overflowing draft total before updating finance state', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+    ]);
+    dbMock.bill.findUnique.mockResolvedValue({
+      id: 'bill-1',
+      status: BillStatus.DRAFT,
+      openingAmount: '-2000.00',
+      items: [],
+    });
+
+    const negative = await generateBillsForPeriod('2026-05', ownerActor);
+    expect(negative.generated).toEqual([]);
+    expect(negative.errors[0]?.message).toMatch(/不能为负数/);
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'o-max',
+        submitterId: 'sales-a',
+        totalAmount: '9999999999.99',
+      },
+    ]);
+    dbMock.bill.findUnique.mockResolvedValue({
+      id: 'bill-1',
+      status: BillStatus.DRAFT,
+      openingAmount: '0.01',
+      items: [],
+    });
+
+    const overflow = await generateBillsForPeriod('2026-05', ownerActor);
+    expect(overflow.generated).toEqual([]);
+    expect(overflow.errors[0]?.message).toMatch(/超过可保存上限/);
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+    expect(dbMock.billItem.createMany).not.toHaveBeenCalled();
   });
 
   it('empty month: no orders → generated=[] errors=[]', async () => {
@@ -165,9 +237,75 @@ describe('generateBillsForPeriod', () => {
       /print-shop-erp:bill-gen:sales-a:2026-05/,
     );
   });
+
+  it('rethrows an unexpected group failure with committed partial results', async () => {
+    const databaseFailure = new Error('transaction connection lost');
+    dbMock.order.findMany.mockResolvedValue([
+      { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
+      { id: 'o2', submitterId: 'sales-b', totalAmount: '500.00' },
+    ]);
+    dbMock.bill.findUnique.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) => {
+        const identity = where.salesUserId_period as
+          | { salesUserId: string }
+          | undefined;
+        if (identity?.salesUserId === 'sales-b') throw databaseFailure;
+        return null;
+      },
+    );
+    dbMock.bill.create.mockImplementation(
+      async ({ data }: { data: { salesUserId: string } }) => ({
+        id: `bill-${data.salesUserId}`,
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await generateBillsForPeriod('2026-05', ownerActor);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BillGenerationUnexpectedError);
+    const unexpected = caught as BillGenerationUnexpectedError;
+    expect(unexpected.partialResult.generated).toEqual([
+      expect.objectContaining({ salesUserId: 'sales-a' }),
+    ]);
+    expect(unexpected.partialResult.errors).toEqual([]);
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
+
+  it('wraps an order-scan failure with an empty partial result', async () => {
+    const databaseFailure = new Error('scan unavailable');
+    dbMock.order.findMany.mockRejectedValue(databaseFailure);
+
+    let caught: unknown;
+    try {
+      await generateBillsForPeriod('2026-05', ownerActor);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BillGenerationUnexpectedError);
+    const unexpected = caught as BillGenerationUnexpectedError;
+    expect(unexpected.partialResult).toEqual({
+      period: '2026-05',
+      generated: [],
+      errors: [],
+    });
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
 });
 
 describe('issueBill', () => {
+  const draftBill = {
+    id: 'bill-1',
+    salesUserId: 'sales-1',
+    period: '2026-05',
+    totalAmount: '1000.00',
+    status: BillStatus.DRAFT,
+  };
+
   it('throws when bill is missing', async () => {
     dbMock.bill.findUnique.mockResolvedValue(null);
     await expect(issueBill('ghost', ownerActor)).rejects.toBeInstanceOf(
@@ -176,10 +314,7 @@ describe('issueBill', () => {
   });
 
   it('transitions DRAFT → ISSUED and stamps issuedAt', async () => {
-    dbMock.bill.findUnique.mockResolvedValue({
-      id: 'bill-1',
-      status: BillStatus.DRAFT,
-    });
+    dbMock.bill.findUnique.mockResolvedValue(draftBill);
     dbMock.bill.update.mockResolvedValue({
       id: 'bill-1',
       status: BillStatus.ISSUED,
@@ -194,7 +329,7 @@ describe('issueBill', () => {
 
   it('refuses to re-issue an ISSUED bill', async () => {
     dbMock.bill.findUnique.mockResolvedValue({
-      id: 'bill-1',
+      ...draftBill,
       status: BillStatus.ISSUED,
     });
     await expect(issueBill('bill-1', ownerActor)).rejects.toBeInstanceOf(
@@ -203,15 +338,30 @@ describe('issueBill', () => {
   });
 
   it('takes the per-bill advisory lock', async () => {
-    dbMock.bill.findUnique.mockResolvedValue({
-      id: 'bill-1',
-      status: BillStatus.DRAFT,
-    });
+    dbMock.bill.findUnique.mockResolvedValue(draftBill);
     dbMock.bill.update.mockResolvedValue({ id: 'bill-1', status: BillStatus.ISSUED });
     await issueBill('bill-1', ownerActor);
-    const sql = (dbMock.$executeRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
-    expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(dbMock.$executeRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
+    const lockValues = dbMock.$executeRaw.mock.calls.map((call) => call[1]);
+    expect(lockValues).toEqual([
+      'print-shop-erp:bill-gen:sales-1:2026-05',
+      'print-shop-erp:bill:bill-1',
+    ]);
+  });
+
+  it('rejects empty or negative bills and non-admin callers', async () => {
+    dbMock.bill.findUnique.mockResolvedValue({
+      ...draftBill,
+      totalAmount: '0.00',
+    });
+    await expect(issueBill('bill-1', ownerActor)).rejects.toThrow(/空账单/);
+
+    dbMock.bill.findUnique.mockResolvedValue({
+      ...draftBill,
+      totalAmount: '-1.00',
+    });
+    await expect(issueBill('bill-1', ownerActor)).rejects.toThrow(/不能为负数/);
+
+    await expect(issueBill('bill-1', salesActor)).rejects.toThrow(/只有管理员/);
   });
 });
 
@@ -221,6 +371,7 @@ describe('recordPayment', () => {
     totalAmount: string;
     paidAmount: string;
     paidAt: Date | null;
+    paymentDates: Date[];
     salesUserRole: Role;
   }> = {}) {
     return {
@@ -230,6 +381,7 @@ describe('recordPayment', () => {
       totalAmount: overrides.totalAmount ?? '1000.00',
       paidAmount: overrides.paidAmount ?? '0.00',
       paidAt: overrides.paidAt ?? null,
+      payments: (overrides.paymentDates ?? []).map((paidAt) => ({ paidAt })),
       salesUser: { role: overrides.salesUserRole ?? Role.SALES },
     };
   }
@@ -242,6 +394,19 @@ describe('recordPayment', () => {
     await expect(
       recordPayment('bill-1', -100, ownerActor),
     ).rejects.toThrow(/必须大于 0/);
+  });
+
+  it('rejects fractional cents, invalid decimals and Decimal(12,2) overflow', async () => {
+    await expect(
+      recordPayment('bill-1', '0.001', ownerActor),
+    ).rejects.toThrow(/小数最多 2 位/);
+    await expect(
+      recordPayment('bill-1', 'not-money', ownerActor),
+    ).rejects.toThrow(/格式不合法/);
+    await expect(
+      recordPayment('bill-1', '10000000000.00', ownerActor),
+    ).rejects.toThrow(/超过可保存上限/);
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects when bill is DRAFT (must issue first)', async () => {
@@ -286,6 +451,7 @@ describe('recordPayment', () => {
     expect(data.paidAt).toBeNull();
     expect(dbMock.billPayment.create).toHaveBeenCalledWith({
       data: {
+        idempotencyKey: expect.any(String),
         billId: 'bill-1',
         amount: '400.00',
         paidAt: expect.any(Date),
@@ -326,6 +492,30 @@ describe('recordPayment', () => {
     expect(data.paidAt).toBe(now);
   });
 
+  it('keeps the latest receipt time when a backdated final payment closes the bill', async () => {
+    const laterPartialPayment = new Date('2026-08-02T04:00:00Z');
+    const backdatedFinalPayment = new Date('2026-08-01T04:00:00Z');
+    dbMock.bill.findUnique.mockResolvedValue(
+      billFixture({
+        status: BillStatus.PARTIAL_PAID,
+        paidAmount: '400.00',
+        paymentDates: [laterPartialPayment],
+      }),
+    );
+    dbMock.bill.update.mockResolvedValue({});
+
+    await recordPayment(
+      'bill-1',
+      600,
+      ownerActor,
+      backdatedFinalPayment,
+    );
+
+    expect(dbMock.bill.update.mock.calls[0][0].data.paidAt).toBe(
+      laterPartialPayment,
+    );
+  });
+
   it('one-shot full payment: ISSUED → FULLY_PAID directly', async () => {
     dbMock.bill.findUnique.mockResolvedValue(billFixture());
     dbMock.bill.update.mockResolvedValue({});
@@ -338,9 +528,9 @@ describe('recordPayment', () => {
     dbMock.bill.findUnique.mockResolvedValue(billFixture());
     dbMock.bill.update.mockResolvedValue({});
     await recordPayment('bill-1', 100, ownerActor);
-    const sql = (dbMock.$executeRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
-    expect(sql).toMatch(/pg_advisory_xact_lock/);
-    expect(dbMock.$executeRaw.mock.calls[0][1]).toMatch(/print-shop-erp:bill:bill-1/);
+    const lockValues = dbMock.$executeRaw.mock.calls.map((call) => call[1]);
+    expect(lockValues[0]).toMatch(/print-shop-erp:payment-request:/);
+    expect(lockValues[1]).toBe('print-shop-erp:bill:bill-1');
   });
 
   it('SALES account: does NOT call accumulateCsSales', async () => {
@@ -382,6 +572,7 @@ describe('recordPayment', () => {
     expect(r.csAccumulated).toBe(false);
     expect(dbMock.billPayment.create).toHaveBeenCalledWith({
       data: {
+        idempotencyKey: expect.any(String),
         billId: 'bill-1',
         amount: '500.00',
         paidAt,
@@ -402,6 +593,358 @@ describe('recordPayment', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     expect(dbMock.bill.update).toHaveBeenCalledTimes(1);
     expect(dbMock.billPayment.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays the same idempotency key without applying the payment twice', async () => {
+    const paidAt = new Date('2026-06-08T02:30:00Z');
+    dbMock.billPayment.findUnique.mockResolvedValue({
+      billId: 'bill-1',
+      amount: '400.00',
+      paidAt,
+      paymentMethod: null,
+      referenceNo: null,
+      remark: null,
+      recordedById: 'owner-1',
+      bill: {
+        paidAmount: '400.00',
+        totalAmount: '1000.00',
+        status: BillStatus.PARTIAL_PAID,
+      },
+    });
+    const result = await recordPayment(
+      'bill-1',
+      '400.00',
+      ownerActor,
+      paidAt,
+      { idempotencyKey: '00000000-0000-4000-8000-000000000001' },
+    );
+
+    expect(result.newPaidAmount).toBe('400.00');
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+    expect(dbMock.billPayment.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an idempotency replay when any audit payload field changed', async () => {
+    const originalPaidAt = new Date('2026-06-08T02:30:00Z');
+    dbMock.billPayment.findUnique.mockResolvedValue({
+      billId: 'bill-1',
+      amount: '400.00',
+      paidAt: originalPaidAt,
+      paymentMethod: '银行',
+      referenceNo: 'TX-1',
+      remark: '首款',
+      recordedById: 'owner-1',
+      bill: {
+        paidAmount: '400.00',
+        totalAmount: '1000.00',
+        status: BillStatus.PARTIAL_PAID,
+      },
+    });
+    const idempotencyKey = '00000000-0000-4000-8000-000000000001';
+    const cases = [
+      {
+        paidAt: new Date('2026-06-08T02:31:00Z'),
+        details: { paymentMethod: '银行', referenceNo: 'TX-1', remark: '首款' },
+      },
+      {
+        paidAt: originalPaidAt,
+        details: { paymentMethod: '微信', referenceNo: 'TX-1', remark: '首款' },
+      },
+      {
+        paidAt: originalPaidAt,
+        details: { paymentMethod: '银行', referenceNo: 'TX-2', remark: '首款' },
+      },
+      {
+        paidAt: originalPaidAt,
+        details: { paymentMethod: '银行', referenceNo: 'TX-1', remark: '尾款' },
+      },
+    ];
+
+    for (const testCase of cases) {
+      await expect(
+        recordPayment('bill-1', '400.00', ownerActor, testCase.paidAt, {
+          idempotencyKey,
+          ...testCase.details,
+        }),
+      ).rejects.toThrow(/请求标识已被其他付款使用/);
+    }
+    expect(dbMock.bill.update).not.toHaveBeenCalled();
+    expect(dbMock.billPayment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('addOrderCostEntry', () => {
+  const baseInput = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000002',
+    orderId: 'order-1',
+    category: OrderCostCategory.MATERIAL,
+    description: '纸张',
+    quantity: '2.000',
+    unitPrice: '12.5000',
+    amount: '25.00',
+  };
+
+  it('takes request then order lock before the fresh fulfillment read', async () => {
+    await expect(addOrderCostEntry(baseInput, ownerActor)).resolves.toEqual({
+      id: 'cost-1',
+    });
+
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(dbMock.$executeRaw.mock.calls[0]?.[1]).toBe(
+      'print-shop-erp:cost-request:00000000-0000-4000-8000-000000000002',
+    );
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:order-cascade:order-1',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      dbMock.order.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(dbMock.order.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      dbMock.orderCostEntry.create.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('fresh-reads after a contended order lock and rejects a newly marked SF collect order', async () => {
+    let releaseOrderLock!: () => void;
+    let signalOrderLockReached!: () => void;
+    const orderLockReached = new Promise<void>((resolve) => {
+      signalOrderLockReached = resolve;
+    });
+    const orderLockReleased = new Promise<void>((resolve) => {
+      releaseOrderLock = resolve;
+    });
+    dbMock.$executeRaw
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        signalOrderLockReached();
+        await orderLockReleased;
+      });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      isSfCollect: true,
+    });
+
+    const pending = addOrderCostEntry(
+      { ...baseInput, category: OrderCostCategory.SHIPPING },
+      ownerActor,
+    );
+    await orderLockReached;
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
+    releaseOrderLock();
+
+    await expect(pending).rejects.toThrow(/顺丰到付.*不能录入物流费/);
+    expect(dbMock.orderCostEntry.findUnique).toHaveBeenCalledTimes(1);
+    expect(dbMock.orderCostEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('replays an existing shipping write even if the order is now SF collect', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      isSfCollect: true,
+    });
+    dbMock.orderCostEntry.findUnique.mockResolvedValue({
+      id: 'cost-existing',
+      orderId: 'order-1',
+      amount: '25.00',
+      category: OrderCostCategory.SHIPPING,
+      description: '物流费',
+      quantity: null,
+      unit: null,
+      unitPrice: null,
+      remark: null,
+      createdById: 'owner-1',
+    });
+
+    await expect(
+      addOrderCostEntry(
+        {
+          ...baseInput,
+          category: OrderCostCategory.SHIPPING,
+          description: '物流费',
+          quantity: null,
+          unitPrice: null,
+        },
+        ownerActor,
+      ),
+    ).resolves.toMatchObject({ id: 'cost-existing' });
+    expect(dbMock.orderCostEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('reports a mismatched replay key before applying the current SF restriction', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      isSfCollect: true,
+    });
+    dbMock.orderCostEntry.findUnique.mockResolvedValue({
+      id: 'cost-existing',
+      orderId: 'order-1',
+      amount: '30.00',
+      category: OrderCostCategory.SHIPPING,
+      description: '物流费',
+      quantity: null,
+      unit: null,
+      unitPrice: null,
+      remark: null,
+      createdById: 'owner-1',
+    });
+
+    await expect(
+      addOrderCostEntry(
+        {
+          ...baseInput,
+          category: OrderCostCategory.SHIPPING,
+          description: '物流费',
+          quantity: null,
+          unitPrice: null,
+        },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/请求标识已被其他记录使用/);
+    expect(dbMock.orderCostEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('allows non-shipping manual costs on an SF collect order', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      isSfCollect: true,
+    });
+
+    await expect(addOrderCostEntry(baseInput, ownerActor)).resolves.toEqual({
+      id: 'cost-1',
+    });
+  });
+
+  it('rejects automatic cost categories and mismatched multiplication', async () => {
+    await expect(
+      addOrderCostEntry(
+        { ...baseInput, category: OrderCostCategory.PIECEWORK },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/自动汇总/);
+    await expect(
+      addOrderCostEntry({ ...baseInput, amount: '24.99' }, ownerActor),
+    ).rejects.toThrow(/数量 × 单价/);
+  });
+
+  it('rejects values that would be rounded or overflow database decimals', async () => {
+    await expect(
+      addOrderCostEntry({ ...baseInput, amount: '25.001' }, ownerActor),
+    ).rejects.toThrow(/成本金额小数最多 2 位/);
+    await expect(
+      addOrderCostEntry(
+        {
+          ...baseInput,
+          quantity: null,
+          unitPrice: null,
+          amount: '10000000000.00',
+        },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/成本金额超过可保存上限/);
+    await expect(
+      addOrderCostEntry(
+        { ...baseInput, quantity: '1.0001', unitPrice: null },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/成本数量小数最多 3 位/);
+    await expect(
+      addOrderCostEntry(
+        { ...baseInput, quantity: '1000000000', unitPrice: null },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/成本数量超过可保存上限/);
+    await expect(
+      addOrderCostEntry(
+        { ...baseInput, quantity: null, unitPrice: '1.00001' },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/成本单价小数最多 4 位/);
+    await expect(
+      addOrderCostEntry(
+        { ...baseInput, quantity: null, unitPrice: '100000000' },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/成本单价超过可保存上限/);
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows a precise signed adjustment but never a rounded-to-zero entry', async () => {
+    await expect(
+      addOrderCostEntry(
+        {
+          ...baseInput,
+          category: OrderCostCategory.ADJUSTMENT,
+          quantity: null,
+          unitPrice: null,
+          amount: '-1.25',
+        },
+        ownerActor,
+      ),
+    ).resolves.toEqual({ id: 'cost-1' });
+    await expect(
+      addOrderCostEntry(
+        {
+          ...baseInput,
+          category: OrderCostCategory.ADJUSTMENT,
+          quantity: null,
+          unitPrice: null,
+          amount: '0.001',
+        },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/小数最多 2 位/);
+  });
+
+  it('replays a stable request key without inserting twice', async () => {
+    dbMock.orderCostEntry.findUnique.mockResolvedValue({
+      id: 'cost-existing',
+      orderId: 'order-1',
+      amount: '25.00',
+      category: OrderCostCategory.MATERIAL,
+      description: '纸张',
+      quantity: '2.000',
+      unit: null,
+      unitPrice: '12.5000',
+      remark: null,
+      createdById: 'owner-1',
+    });
+    const result = await addOrderCostEntry(baseInput, ownerActor);
+    expect(result.id).toBe('cost-existing');
+    expect(dbMock.orderCostEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cost replay when any descriptive payload field changed', async () => {
+    dbMock.orderCostEntry.findUnique.mockResolvedValue({
+      id: 'cost-existing',
+      orderId: 'order-1',
+      amount: '25.00',
+      category: OrderCostCategory.MATERIAL,
+      description: '纸张',
+      quantity: '2.000',
+      unit: '张',
+      unitPrice: '12.5000',
+      remark: '原始',
+      createdById: 'owner-1',
+    });
+    const cases = [
+      { ...baseInput, description: '特种纸', unit: '张', remark: '原始' },
+      {
+        ...baseInput,
+        quantity: '1.000',
+        unitPrice: '25.0000',
+        unit: '张',
+        remark: '原始',
+      },
+      { ...baseInput, unit: '公斤', remark: '原始' },
+      { ...baseInput, unit: '张', remark: '修改后' },
+    ];
+
+    for (const input of cases) {
+      await expect(addOrderCostEntry(input, ownerActor)).rejects.toThrow(
+        /请求标识已被其他记录使用/,
+      );
+    }
+    expect(dbMock.orderCostEntry.create).not.toHaveBeenCalled();
   });
 });
 
@@ -439,13 +982,35 @@ describe('getBillDetail', () => {
     expect(r).toBeNull();
   });
 
-  it('includes items + order meta', async () => {
+  it('includes auditable cost details for original and rework orders', async () => {
     dbMock.bill.findUnique.mockResolvedValue({
       id: 'bill-1',
       items: [{ id: 'item-1', orderId: 'o1', orderAmount: '500.00', order: { orderNo: '20260501-0001' } }],
     });
     const r = await getBillDetail('bill-1');
     expect(r).toBeTruthy();
+    const query = dbMock.bill.findUnique.mock.calls[0][0];
+    const orderSelect = query.select.items.select.order.select;
+    expect(orderSelect.id).toBe(true);
+    expect(orderSelect.submitterRole).toBe(true);
+    expect(orderSelect.costEntries.include.createdBy).toEqual({
+      select: { displayName: true },
+    });
+    expect(orderSelect.reworkOrders.select.costEntries).toEqual({
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        category: true,
+        description: true,
+        quantity: true,
+        unit: true,
+        unitPrice: true,
+        amount: true,
+        remark: true,
+        createdAt: true,
+        createdBy: { select: { displayName: true } },
+      },
+    });
     void salesActor; // reference to avoid unused import
   });
 });

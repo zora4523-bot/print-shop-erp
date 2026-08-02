@@ -7,7 +7,7 @@ import {
   recomputeDailySalarySchema,
   markDailySalaryPaidSchema,
   startCsPeriodSchema,
-  markCsCommissionPaidSchema,
+  recordCsPayrollPaymentSchema,
   recomputeHourlyPayrollSchema,
   markHourlyPayrollPaidSchema,
 } from '@/lib/auth/schemas';
@@ -29,7 +29,7 @@ import {
   startCsPeriod,
   settleCsPeriod,
   settleReadyCsPeriods,
-  markCsCommissionPaid,
+  recordCsPayrollPayment,
   CsPeriodError,
   InvalidCsPeriodTransitionError,
 } from '@/lib/salary/cs';
@@ -47,6 +47,7 @@ import type {
   SettleReadyCsResult,
   RecomputeHourlyResult,
   PieceworkRuleMutationResult,
+  CsPayrollPaymentResult,
 } from './owner-salary.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
@@ -124,6 +125,7 @@ export async function addDailySalaryAdjustmentAction(
 ): Promise<SalaryMutationResult> {
   const actor = await requirePermission('salary:rule:manage');
   const parsed = salaryAdjustmentInputSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
     dailySalaryId,
     type: formData.get('type'),
     amount: formData.get('amount'),
@@ -137,20 +139,9 @@ export async function addDailySalaryAdjustmentAction(
   }
 
   try {
-    const created = await addDailySalaryAdjustment({
+    await addDailySalaryAdjustment({
       ...parsed.data,
-      createdById: actor.id,
-    });
-    await writeAuditLog({
       actor,
-      action: 'CREATE',
-      entityType: 'SalaryAdjustment',
-      entityId: created.id,
-      after: { ...parsed.data, signedAmount: created.amount },
-      requestMetadata: {
-        source: 'owner-salary.addDailySalaryAdjustmentAction',
-        route: `/owner/salary/daily/${dailySalaryId}`,
-      },
     });
   } catch (err) {
     if (err instanceof DailySalaryError) {
@@ -238,7 +229,7 @@ export async function startCsPeriodAction(
   _prev: StartCsPeriodResult | null,
   raw: unknown,
 ): Promise<StartCsPeriodResult> {
-  await requirePermission('salary:rule:manage');
+  const actor = await requirePermission('salary:rule:manage');
 
   const parsed = startCsPeriodSchema.safeParse(raw);
   if (!parsed.success) {
@@ -246,7 +237,7 @@ export async function startCsPeriodAction(
   }
 
   try {
-    const created = await startCsPeriod(parsed.data);
+    const created = await startCsPeriod(parsed.data, new Date(), actor);
     revalidatePath('/owner/salary/cs');
     redirect(`/owner/salary/cs/${created.id}`);
   } catch (err) {
@@ -310,29 +301,45 @@ export async function settleReadyCsPeriodsAction(): Promise<SettleReadyCsResult>
   }
 }
 
-export async function markCsCommissionPaidAction(
-  id: string,
-  _prev: SalaryMutationResult | null,
+export async function recordCsPayrollPaymentAction(
+  salaryPeriodId: string,
+  _prev: CsPayrollPaymentResult | null,
   formData: FormData,
-): Promise<SalaryMutationResult> {
-  await requirePermission('salary:view:all');
+): Promise<CsPayrollPaymentResult> {
+  const actor = await requirePermission('salary:view:all');
 
-  const parsed = markCsCommissionPaidSchema.safeParse({
-    isPaid: formData.get('isPaid'),
+  const parsed = recordCsPayrollPaymentSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
+    baseAmount: formData.get('baseAmount'),
+    commissionAmount: formData.get('commissionAmount'),
+    paidAt: formData.get('paidAt'),
+    paymentMethod: formData.get('paymentMethod'),
+    referenceNo: formData.get('referenceNo'),
+    remark: formData.get('remark'),
   });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    await markCsCommissionPaid(id, parsed.data.isPaid);
+    const payment = await recordCsPayrollPayment(
+      salaryPeriodId,
+      parsed.data,
+      actor,
+    );
+    revalidatePath('/owner/salary/cs');
+    revalidatePath(`/owner/salary/cs/${salaryPeriodId}`);
+    return {
+      status: 'success',
+      paidBase: payment.paidBase,
+      paidCommission: payment.paidCommission,
+      isFullyPaid: payment.isFullyPaid,
+    };
   } catch (err) {
     const mapped = mapCsError(err);
     if (mapped) return mapped;
     throw err;
   }
-  revalidatePath('/owner/salary/cs');
-  return { status: 'success' };
 }
 
 // ─────────────────────────────────────────────────────────────────────

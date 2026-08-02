@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -34,7 +35,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
-        subtitle="逐项核对报工数量、工单、工艺、规则快照和人工调整。已发放后整条记录锁定。"
+        subtitle="逐项核对报工数量、工单、工艺、规则快照和人工调整。上班/请假天数不自动扣减计件保底；已发放后整条记录锁定。"
         actions={
           <div className="flex gap-2">
             <Link
@@ -54,7 +55,10 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <Summary label="机型" value={MACHINE_TYPE_LABELS[salary.machineType]} />
+        <Summary
+          label="保底机型"
+          value={MACHINE_TYPE_LABELS[salary.machineType]}
+        />
         <Summary label="计件合计" value={`¥ ${salary.totalPieceworkAmount}`} />
         <Summary label="每日保底" value={`¥ ${salary.baseSalary}`} />
         <Summary label="人工调整" value={`¥ ${salary.adjustmentAmount}`} />
@@ -76,6 +80,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         <AddSalaryAdjustmentForm
           dailySalaryId={salary.id}
           disabled={salary.isPaid}
+          initialIdempotencyKey={randomUUID()}
         />
         {salary.adjustments.length > 0 ? (
           <ul className="mt-4 divide-y border-t text-sm">
@@ -161,9 +166,10 @@ function formatRuleSnapshot(snapshot: unknown): string {
   ];
   if (rule.smallOrderThreshold !== null && rule.smallOrderThreshold !== undefined) {
     parts.push(
-      `小单 <${rule.smallOrderThreshold} = ¥${rule.smallOrderFlatPrice ?? 0}`,
+      `小单 ${rule.smallOrderInclusive ? '≤' : '<'} ${rule.smallOrderThreshold} = ¥${rule.smallOrderFlatPrice ?? 0}`,
     );
   }
+  parts.push(`大单装板 ¥${rule.largeOrderSetupFee ?? 0}`);
   return parts.join(' · ');
 }
 

@@ -345,9 +345,10 @@ export async function getAttendanceSummaries(
   );
 }
 
-// Month-range helper. SPEC §5.4 operates on calendar months in the
-// Shanghai timezone; UTC-midnight on the 1st of the month matches the
-// @db.Date column's stored format, so we reuse that convention.
+// Month-range helper for Prisma `@db.Date` columns. A database DATE has no
+// timezone; Prisma represents it as UTC midnight, so this deliberately returns
+// UTC-midnight calendar dates. Do not use this range for timestamp columns such
+// as Order.finishedAt -- use parseShanghaiMonthInstantRange below instead.
 export function parseShanghaiMonth(
   month: string,
 ): { start: Date; end: Date } {
@@ -365,6 +366,25 @@ export function parseShanghaiMonth(
   const start = new Date(Date.UTC(year, mo - 1, 1));
   const end = new Date(Date.UTC(year, mo, 1)); // first day of next month
   return { start, end };
+}
+
+/**
+ * Returns the UTC instant range spanning one Asia/Shanghai calendar month.
+ *
+ * Example: May 2026 in Shanghai is
+ * [2026-04-30T16:00:00Z, 2026-05-31T16:00:00Z). This is the range timestamp
+ * columns must use; applying the @db.Date range above would lose the first
+ * eight local hours and include eight hours from the next month.
+ */
+export function parseShanghaiMonthInstantRange(
+  month: string,
+): { start: Date; end: Date } {
+  const dateRange = parseShanghaiMonth(month);
+  const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
+  return {
+    start: new Date(dateRange.start.getTime() - shanghaiOffsetMs),
+    end: new Date(dateRange.end.getTime() - shanghaiOffsetMs),
+  };
 }
 
 function dec(v: string | number | Decimal): Decimal {

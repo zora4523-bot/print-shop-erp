@@ -1359,6 +1359,39 @@ const orderItemSchema = z.object({
 
 export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
+// OrderItem.subtotal and Order.totalAmount are Decimal(12,2): at most
+// 9,999,999,999.99 yuan. lib/order.ts persists each line as
+// Decimal(quantity * unitPrice).toFixed(2), whose default rounding mode is
+// ROUND_HALF_UP. Keep the boundary check exact without passing through an
+// IEEE-754 number: unit prices have four decimal places, so converting them
+// to ten-thousandths and dividing the product by 100 yields cents.
+const DECIMAL_12_2_MAX_CENTS = BigInt('999999999999');
+const TEN_THOUSANDTHS_PER_CENT = BigInt(100);
+
+function decimalStringToScaledInteger(value: string, scale: number): bigint {
+  const negative = value.startsWith('-');
+  const unsigned = negative ? value.slice(1) : value;
+  const [integerPart = '0', decimalPart = ''] = unsigned.split('.');
+  const scaled = BigInt(
+    `${integerPart}${decimalPart.padEnd(scale, '0').slice(0, scale)}`,
+  );
+  return negative ? -scaled : scaled;
+}
+
+function orderItemSubtotalCents(
+  quantity: number,
+  unitPrice: string | null,
+): bigint {
+  const priceTenThousandths = decimalStringToScaledInteger(
+    unitPrice ?? '0',
+    4,
+  );
+  const unrounded = priceTenThousandths * BigInt(quantity);
+  return (
+    unrounded + TEN_THOUSANDTHS_PER_CENT / BigInt(2)
+  ) / TEN_THOUSANDTHS_PER_CENT;
+}
+
 const shipmentSplitQuantityField = z.preprocess(
   (value) => {
     if (typeof value === 'number') return value;
@@ -1437,6 +1470,29 @@ export const createOrderSchema = z
       .max(50, '单工单款式不超过 50 项'),
   })
   .superRefine((input, ctx) => {
+    let orderTotalCents = BigInt(0);
+    for (const [itemIndex, item] of input.items.entries()) {
+      const subtotalCents = orderItemSubtotalCents(
+        item.quantity,
+        item.unitPrice,
+      );
+      orderTotalCents += subtotalCents;
+      if (subtotalCents > DECIMAL_12_2_MAX_CENTS) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', itemIndex, 'unitPrice'],
+          message: '款式小计过大（数量 × 单价不能超过 9,999,999,999.99 元）',
+        });
+      }
+    }
+    if (orderTotalCents > DECIMAL_12_2_MAX_CENTS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['items'],
+        message: '工单总金额过大（不能超过 9,999,999,999.99 元）',
+      });
+    }
+
     for (const [shipmentIndex, shipment] of input.additionalShipments.entries()) {
       if (shipment.itemQuantities.length !== input.items.length) {
         ctx.addIssue({
@@ -1865,7 +1921,29 @@ export function parseStrictYmd(s: string): Date | null {
   return date;
 }
 
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// Strict parser for HTML `<input type="datetime-local">` values. Appending a
+// timezone suffix and calling `new Date()` is not enough: JavaScript silently
+// normalizes impossible dates such as 2026-02-31 into March. Validate the
+// calendar portion first, then convert the valid Shanghai wall time to UTC.
+export function parseStrictShanghaiDateTimeLocal(value: string): Date | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const date = parseStrictYmd(match[1]);
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  if (!date || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return new Date(
+    date.getTime() + hour * 60 * 60 * 1000 + minute * 60 * 1000 -
+      SHANGHAI_OFFSET_MS,
+  );
+}
+
 export const createOutsourceSchema = z.object({
+  idempotencyKey: z.string().uuid('外协创建请求标识格式非法'),
   orderId: safeId('工单 id'),
   orderItemIds: z
     .array(safeId('款式 id'))
@@ -1886,6 +1964,34 @@ export const createOutsourceSchema = z.object({
 });
 
 export type CreateOutsourceInput = z.infer<typeof createOutsourceSchema>;
+
+const confirmedOutsourceAmountField = z.preprocess(
+  (value) => {
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value.trim();
+    return value;
+  },
+  z
+    .string()
+    .regex(
+      /^\d{1,10}(?:\.\d{1,2})?$/,
+      '外协金额格式不合法（最多 10 位整数、2 位小数）',
+    ),
+);
+
+export const confirmOutsourceAmountSchema = z.object({
+  idempotencyKey: z.string().uuid('外协金额请求标识格式非法'),
+  amount: confirmedOutsourceAmountField,
+  reason: z
+    .string()
+    .trim()
+    .min(1, '请填写金额确认/更正原因')
+    .max(200, '金额确认/更正原因过长（最多 200 个字符）'),
+});
+
+export type ConfirmOutsourceAmountInput = z.infer<
+  typeof confirmOutsourceAmountSchema
+>;
 
 export const markOutsourceReceivedSchema = z.object({
   actualDate: optionalDateField,
@@ -1952,54 +2058,164 @@ const ymdField = (label: string) =>
       }
     });
 
-const nonNegativeDecimal = z.preprocess(
-  (v) => {
-    if (v === undefined || v === null || v === '') return undefined;
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string') {
-      const t = v.trim();
-      if (t === '') return undefined;
-      if (!/^\d{1,10}(\.\d{1,2})?$/.test(t)) return Number.NaN;
-      return t;
-    }
-    return Number.NaN;
-  },
-  z
-    .union([z.string(), z.number()])
-    .optional()
-    .transform((v) =>
-      v === undefined || v === '' ? undefined : String(v),
-    ),
-);
+const shanghaiDateTimeField = (label: string) =>
+  z.preprocess(
+    (value) =>
+      value === null || value === undefined || value === ''
+        ? new Date()
+        : value,
+    z.union([
+      z.date(),
+      z
+        .string()
+        .trim()
+        .transform((value, ctx) => {
+          const parsed = parseStrictShanghaiDateTimeLocal(value);
+          if (!parsed) {
+            ctx.addIssue({
+              code: 'custom',
+              message: `请选择合法的完整${label}`,
+            });
+            return z.NEVER;
+          }
+          return parsed;
+        }),
+    ]),
+  ).refine((value) => !Number.isNaN(value.getTime()), `${label}不合法`);
 
-export const startCsPeriodSchema = z.object({
-  csUserId: safeId('客服 id'),
-  periodStart: ymdField('周期起始日期'),
-  durationMonths: z.preprocess(
-    (v) => {
-      if (v === undefined || v === null || v === '') return undefined;
-      if (typeof v === 'number') return v;
-      if (typeof v === 'string') {
-        const t = v.trim();
-        if (t === '') return undefined;
-        if (!/^\d+$/.test(t)) return Number.NaN;
-        return Number.parseInt(t, 10);
+const optionalNonNegativeDecimal = (
+  label: string,
+  integerDigits: number,
+) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === '') {
+        return undefined;
+      }
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? String(value) : value;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed === '' ? undefined : trimmed;
+      }
+      return value;
+    },
+    z
+      .string({ message: `${label}格式不合法` })
+      .regex(
+        new RegExp(`^\\d{1,${integerDigits}}(?:\\.\\d{1,2})?$`),
+        `${label}必须为非负数（整数部分最多 ${integerDigits} 位、小数最多 2 位）`,
+      )
+      .optional(),
+  );
+
+const optionalWholeNumber = (label: string, min: number, max: number) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === '') return undefined;
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed === '') return undefined;
+        if (!/^\d+$/.test(trimmed)) return Number.NaN;
+        return Number.parseInt(trimmed, 10);
       }
       return Number.NaN;
     },
-    z.number().int('周期月数必须是整数').min(1, '周期月数必须 ≥ 1').max(24, '周期月数超出合理范围').optional(),
-  ),
-  initialSales: nonNegativeDecimal,
-  monthlyBase: nonNegativeDecimal,
-});
+    z
+      .number()
+      .int(`${label}必须是整数`)
+      .min(min, `${label}必须 ≥ ${min}`)
+      .max(max, `${label}超出合理范围`)
+      .optional(),
+  );
+
+export const startCsPeriodSchema = z
+  .object({
+    csUserId: safeId('客服 id'),
+    periodStart: ymdField('周期起始日期'),
+    durationMonths: optionalWholeNumber('周期月数', 1, 24),
+    baseMonthsAlreadyPaid: optionalWholeNumber('已发底薪月数', 0, 24),
+    // SalaryPeriod.initialSales is Decimal(12,2), while monthlyBase is
+    // Decimal(10,2). Their integer precision is therefore 10 and 8 digits.
+    initialSales: optionalNonNegativeDecimal('期初业绩', 10),
+    monthlyBase: optionalNonNegativeDecimal('月基本工资', 8),
+  })
+  .superRefine((input, ctx) => {
+    if (
+      input.durationMonths !== undefined &&
+      input.baseMonthsAlreadyPaid !== undefined &&
+      input.baseMonthsAlreadyPaid > input.durationMonths
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['baseMonthsAlreadyPaid'],
+        message: '已发底薪月数不能超过周期月数',
+      });
+    }
+    if (
+      input.durationMonths !== undefined &&
+      input.monthlyBase !== undefined &&
+      decimalStringToScaledInteger(input.monthlyBase, 2) *
+        BigInt(input.durationMonths) >
+        BigInt('9999999999')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['monthlyBase'],
+        message: '月底薪 × 周期月数超过可保存上限 99,999,999.99 元',
+      });
+    }
+  });
 
 export type StartCsPeriodInput = z.infer<typeof startCsPeriodSchema>;
 
-export const markCsCommissionPaidSchema = z.object({
-  isPaid: formBoolean,
-});
+const csPayrollAmountField = (label: string) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined || value === null || value === '') return '0';
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? String(value) : value;
+      }
+      return typeof value === 'string' ? value.trim() || '0' : value;
+    },
+    z
+      .string({ message: `${label}格式不合法` })
+      .regex(
+        /^\d{1,10}(?:\.\d{1,2})?$/,
+        `${label}必须为非负金额（整数最多 10 位、小数最多 2 位）`,
+      ),
+  );
 
-export type MarkCsCommissionPaidInput = z.infer<typeof markCsCommissionPaidSchema>;
+export const recordCsPayrollPaymentSchema = z
+  .object({
+    idempotencyKey: z.string().uuid('工资发放请求标识格式非法'),
+    baseAmount: csPayrollAmountField('底薪金额'),
+    commissionAmount: csPayrollAmountField('提成金额'),
+    paidAt: shanghaiDateTimeField('发放时间'),
+    paymentMethod: optionalTrimmedText('发放方式', 32),
+    referenceNo: optionalTrimmedText('流水号', 64),
+    remark: optionalTrimmedText('发放备注', 200),
+  })
+  .superRefine((input, ctx) => {
+    const baseCents = decimalStringToScaledInteger(input.baseAmount, 2);
+    const commissionCents = decimalStringToScaledInteger(
+      input.commissionAmount,
+      2,
+    );
+    if (baseCents + commissionCents === BigInt(0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['baseAmount'],
+        message: '本次发放的底薪或提成至少填写一项',
+      });
+    }
+  });
+
+export type RecordCsPayrollPaymentInput = z.infer<
+  typeof recordCsPayrollPaymentSchema
+>;
 
 // ─────────────────────────────────────────────────────────────────────
 // 时薪工考勤 + 月结 (P0 #5 Slice C)
@@ -2135,21 +2351,9 @@ const billPaymentField = z.preprocess(
 );
 
 export const recordBillPaymentSchema = z.object({
+  idempotencyKey: z.string().uuid('付款请求标识格式非法'),
   amount: billPaymentField,
-  paidAt: z.preprocess(
-    (value) =>
-      value === null || value === undefined || value === ''
-        ? new Date()
-        : value,
-    z.union([
-      z.date(),
-      z
-        .string()
-        .trim()
-        .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, '请选择完整收款时间')
-        .transform((value) => new Date(`${value}:00+08:00`)),
-    ]),
-  ).refine((value) => !Number.isNaN(value.getTime()), '收款时间不合法'),
+  paidAt: shanghaiDateTimeField('收款时间'),
   paymentMethod: optionalTrimmedText('收款方式', 32),
   referenceNo: optionalTrimmedText('流水号', 64),
   remark: optionalTrimmedText('付款备注', 200),
@@ -2157,13 +2361,17 @@ export const recordBillPaymentSchema = z.object({
 
 export type RecordBillPaymentInput = z.infer<typeof recordBillPaymentSchema>;
 
-const optionalCostNumber = (label: string, decimals: number) =>
+const optionalCostNumber = (
+  label: string,
+  integerDigits: number,
+  decimals: number,
+) =>
   z.preprocess(
     (value) =>
       value === null || value === undefined || value === ''
         ? null
         : typeof value === 'string'
-          ? value.trim()
+          ? value.trim() || null
           : value,
     z
       .union([
@@ -2171,26 +2379,80 @@ const optionalCostNumber = (label: string, decimals: number) =>
         z
           .string()
           .regex(
-            new RegExp(`^\\d{1,10}(?:\\.\\d{1,${decimals}})?$`),
-            `${label}格式不合法`,
+            new RegExp(
+              `^\\d{1,${integerDigits}}(?:\\.\\d{1,${decimals}})?$`,
+            ),
+            `${label}格式不合法（整数部分最多 ${integerDigits} 位、小数最多 ${decimals} 位）`,
           ),
       ]),
   );
 
-export const createOrderCostEntrySchema = z.object({
-  orderId: z.string().trim().regex(/^[A-Za-z0-9_-]+$/, '工单 id 格式非法'),
-  category: z.nativeEnum(OrderCostCategory),
-  description: z.string().trim().min(1, '请填写成本名称').max(100),
-  quantity: optionalCostNumber('数量', 3),
-  unit: optionalTrimmedText('单位', 20),
-  unitPrice: optionalCostNumber('单价', 4),
-  amount: z
-    .string()
-    .trim()
-    .regex(/^-?\d{1,10}(?:\.\d{1,2})?$/, '金额格式不合法')
-    .refine((value) => Number(value) !== 0, '金额不能为 0'),
-  remark: optionalTrimmedText('成本备注', 200),
-});
+const AUTOMATIC_ORDER_COST_CATEGORIES = new Set<OrderCostCategory>([
+  OrderCostCategory.PIECEWORK,
+  OrderCostCategory.OUTSOURCE,
+]);
+const COST_PRODUCT_SCALE_TO_CENTS = BigInt(100_000);
+
+export const createOrderCostEntrySchema = z
+  .object({
+    idempotencyKey: z.string().uuid('成本请求标识格式非法'),
+    orderId: z.string().trim().regex(/^[A-Za-z0-9_-]+$/, '工单 id 格式非法'),
+    category: z.nativeEnum(OrderCostCategory),
+    description: z.string().trim().min(1, '请填写成本名称').max(100),
+    // Decimal(12,3) has nine integer digits; Decimal(12,4) has eight.
+    quantity: optionalCostNumber('数量', 9, 3),
+    unit: optionalTrimmedText('单位', 20),
+    unitPrice: optionalCostNumber('单价', 8, 4),
+    amount: z
+      .string()
+      .trim()
+      .regex(/^-?\d{1,10}(?:\.\d{1,2})?$/, '金额格式不合法')
+      .refine((value) => Number(value) !== 0, '金额不能为 0'),
+    remark: optionalTrimmedText('成本备注', 200),
+  })
+  .superRefine((input, ctx) => {
+    if (AUTOMATIC_ORDER_COST_CATEGORIES.has(input.category)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['category'],
+        message: '计件和外协成本由生产、外协流水自动计入，不能手工重复录入',
+      });
+    }
+
+    if (
+      input.category !== OrderCostCategory.ADJUSTMENT &&
+      input.amount.startsWith('-')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['amount'],
+        message: '普通成本金额必须大于 0；负数请使用“成本调整”',
+      });
+    }
+
+    if (input.quantity !== null && input.unitPrice !== null) {
+      const quantityThousandths = decimalStringToScaledInteger(
+        input.quantity,
+        3,
+      );
+      const unitPriceTenThousandths = decimalStringToScaledInteger(
+        input.unitPrice,
+        4,
+      );
+      const product = quantityThousandths * unitPriceTenThousandths;
+      const expectedCents =
+        (product + COST_PRODUCT_SCALE_TO_CENTS / BigInt(2)) /
+        COST_PRODUCT_SCALE_TO_CENTS;
+      const amountCents = decimalStringToScaledInteger(input.amount, 2);
+      if (amountCents !== expectedCents) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['amount'],
+          message: '金额必须等于数量 × 单价（按两位小数四舍五入）',
+        });
+      }
+    }
+  });
 
 export type CreateOrderCostEntryInput = z.infer<
   typeof createOrderCostEntrySchema

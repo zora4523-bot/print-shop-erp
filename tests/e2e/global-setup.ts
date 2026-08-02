@@ -77,9 +77,9 @@ export const E2E_USERS: Record<string, E2EUser> = {
     workerType: 'PACKER',
     machineType: null,
   },
-  // CUSTOMER_SERVICE user — needed for CS accumulate E2E (the
-  // recordPayment → accumulateCsSales path only fires when the
-  // bill's salesUser.role === CUSTOMER_SERVICE).
+  // CUSTOMER_SERVICE user — needed for the CS event-ledger E2E. Charged
+  // order submission credits sales; later BillPayment rows must not credit it
+  // again.
   customerService: {
     username: 'e2e-cs',
     displayName: 'E2E 客服',

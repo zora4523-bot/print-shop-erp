@@ -6,7 +6,46 @@ import {
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 
-import { buildPieceworkWorkbook } from '../piecework-xlsx';
+import {
+  buildPieceworkWorkbook,
+  machineRuleAuditValues,
+} from '../piecework-xlsx';
+
+describe('machineRuleAuditValues', () => {
+  it('exports the inclusive threshold and large-order setup fee explicitly', () => {
+    expect(
+      machineRuleAuditValues({
+        dailyBase: 120,
+        pieceRate: 0.01,
+        boardRate: 0,
+        smallOrderThreshold: 1000,
+        smallOrderInclusive: true,
+        smallOrderFlatPrice: 20,
+        largeOrderSetupFee: 10,
+        multiplierFactors: ['DOUBLE_COLOR'],
+      }),
+    ).toEqual({
+      dailyBase: 120,
+      pieceRate: 0.01,
+      boardRate: 0,
+      smallOrderThreshold: 1000,
+      smallOrderInclusive: '是（≤）',
+      smallOrderFlatPrice: 20,
+      largeOrderSetupFee: 10,
+      multiplierFactors: 'DOUBLE_COLOR',
+    });
+  });
+
+  it('exports a strict threshold distinctly and leaves absent thresholds blank', () => {
+    expect(
+      machineRuleAuditValues({
+        smallOrderThreshold: 1000,
+        smallOrderInclusive: false,
+      }).smallOrderInclusive,
+    ).toBe('否（<）');
+    expect(machineRuleAuditValues({}).smallOrderInclusive).toBe('');
+  });
+});
 
 describe('buildPieceworkWorkbook', () => {
   it('creates a valid OOXML zip with summary, task detail and adjustment sheets', async () => {

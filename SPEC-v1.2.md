@@ -198,6 +198,7 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
     └─ 师傅生产任务与计件工资仍按正常规则记录
 → 原工单状态、历史应收、历史工资保持不变
 → 原单与重做单互相展示关联编号和状态
+→ 重做单不能继续派生嵌套重做；再次售后必须回到原单新建，保证所有重做成本都可由原单一层汇总
 ```
 
 ### 3.5 CDR汇总下载
@@ -234,17 +235,20 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 ### 3.7 客服周期结算
 
 ```
-客服开户 → 系统创建 SalaryPeriod（start=本月，end=4月后）
-→ 每次该客服提交工单 → 追加销售额流水并累加 period.totalSales
+客服开户 → 系统按当前规则自动创建 SalaryPeriod（start=本月，end=周期最后一天）
+→ 每次该客服提交收费工单 → 追加 CsSalesEntry 正数流水并累加 period.totalSales
 → 管理员批准工单修改 → 按新旧金额差额追加调整流水
 → 工单取消 → 追加负数冲销流水
 → 账单收款只写付款流水，不重复增加客服销售额
-→ 周期结束当日（定时任务）:
+→ 如业务日期没有可用的 IN_PROGRESS 周期，工单操作与业绩写入整体回滚
+→ 周期结束日的次日（上海自然日，定时任务）:
     ├─ 查 SalaryRule 找档位
-    ├─ 计算提成 = totalSales × tierRate
+    ├─ 计算提成 = (totalSales + initialSales) × tierRate
     ├─ 生成 CustomerServiceCommission 记录
     ├─ 周期 status: IN_PROGRESS → SETTLED
     └─ 自动开启下一个周期
+→ 底薪可在周期内按月/分次发放；提成只能在 SETTLED 后发放
+→ 每次工资发放追加 CsPayrollPayment，不覆盖历史流水
 → 企业微信推送管理员和客服
 ```
 
@@ -257,8 +261,8 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
     ├─ 生成 DailyWorkerSalary:
     │    actualSalary = max(汇总计件, 保底)
     └─ 企业微信推送车间群（可选）
-→ 师傅端可按日期范围查询；每天明确显示“计件已超底薪”或
-  “按底薪补足”及原因
+→ 师傅端可按日期范围查询；每天明确显示“计件高于保底”、
+  “计件等于保底”或“按保底补足”，低于保底时同时显示原因
 ```
 
 ### 3.9 时薪工月结
@@ -407,7 +411,13 @@ def calc_daily_salary(worker, date):
     """计算单日师傅日薪"""
     tasks = get_completed_tasks(worker, date)
     total_piecework = sum(t.pieceworkAmount for t in tasks)
-    base = worker.machine_rule.dailyBase
+    worked_machines = unique(t.machineType for t in tasks)
+    if worked_machines:
+        # 同日跨机型支援时取实际生产机型中最高的日保底
+        base = max(active_rule(m).dailyBase for m in worked_machines)
+    else:
+        # 当日无任务时才回退账号主机型
+        base = active_rule(worker.primaryMachineType).dailyBase
     return max(total_piecework, base)
 ```
 
@@ -430,7 +440,8 @@ def calc_daily_salary(worker, date):
 ```python
 def calc_cs_commission(period, tiers, mode="FLAT"):
     """计算客服周期提成"""
-    total = period.totalSales
+    # totalSales 由 CsSalesEntry 对账；initialSales 是历史导入的期初额
+    total = period.totalSales + period.initialSales
     
     # 查档位（从高到低）
     applicable_tier = None
@@ -600,8 +611,9 @@ def calc_hourly_payroll(worker, month):
 - 提成：550000 × 0.06 = **33000元**
 - 4月底薪合计：2000 × 4 = 8000元
 - 周期总收入：**41000元**
-- 前3月已发：6000元
-- 第4月发：2000（底薪）+ 33000（提成）= **35000元**
+- 前3月已发：3 条底薪发放流水，合计 6000元
+- 第4月结算后发：2000（底薪）+ 33000（提成）= **35000元**，追加第4条工资发放流水
+- 上述工资发放与客户账单回款无关；客户回款不改变 55 万的业绩合计
 
 ### 7.4 打包工月工资示例
 

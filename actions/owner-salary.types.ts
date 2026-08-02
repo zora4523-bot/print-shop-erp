@@ -3,6 +3,16 @@ export type SalaryMutationResult =
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 
+export type CsPayrollPaymentResult =
+  | {
+      status: 'success';
+      paidBase: string;
+      paidCommission: string;
+      isFullyPaid: boolean;
+    }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
 export type PieceworkRuleMutationResult =
   | { status: 'success'; ruleId: string }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }

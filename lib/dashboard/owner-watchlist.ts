@@ -237,11 +237,11 @@ export type EndingPeriodRow = {
  * `calcCsCommission`，得到 commission；底薪合计 = monthlyBase ×
  * durationMonths；预测总收入 = 底薪 + commission。
  *
- * 业绩口径（DECISIONS 2026-04-26 业绩按 submittedAt）：dashboard 视角
- * 的&ldquo;预测&rdquo;就是按当前 SalaryPeriod.totalSales（已由 accumulateCsSales
- * 累加，触发于账单 mark-paid）。这里**不**重新按 submittedAt 算业绩
- * —— totalSales 已经是 ledger of record。dashboard 上&ldquo;按 submittedAt&rdquo;
- * 适用的是 Slice C 的销售排行 / 产品分布，不是这个周期预测。
+ * 业绩口径：周期预测直接读 SalaryPeriod.totalSales + initialSales。
+ * totalSales 的权威来源是 CsSalesEntry 事件账本（客服提交工单记正数、
+ * 批准变更记差额、取消记负数）；initialSales 只表示历史期初导入。
+ * 客户付款 BillPayment 只影响应收，不改变客服业绩。Dashboard Slice C 的
+ * 销售排行 / 产品分布仍按 Order.submittedAt 聚合，不在此重算周期账本。
  */
 export async function getEndingPeriods(
   now: Date = new Date(),

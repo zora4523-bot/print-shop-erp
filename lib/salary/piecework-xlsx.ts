@@ -136,17 +136,38 @@ function dateTimeShanghai(date: Date): string {
   }).format(date);
 }
 
+export function machineRuleAuditValues(snapshot: unknown) {
+  const rule = snapshot as Partial<MachineRuleWithBase>;
+  return {
+    dailyBase: numericCell(rule.dailyBase),
+    pieceRate: numericCell(rule.pieceRate),
+    boardRate: numericCell(rule.boardRate),
+    smallOrderThreshold: rule.smallOrderThreshold ?? '',
+    smallOrderInclusive:
+      rule.smallOrderThreshold === null ||
+      rule.smallOrderThreshold === undefined
+        ? ''
+        : rule.smallOrderInclusive
+          ? '是（≤）'
+          : '否（<）',
+    smallOrderFlatPrice: numericCell(rule.smallOrderFlatPrice),
+    largeOrderSetupFee: numericCell(rule.largeOrderSetupFee ?? 0),
+    multiplierFactors: (rule.multiplierFactors ?? []).join(','),
+  };
+}
+
 export async function buildPieceworkWorkbook(
   salaries: Awaited<ReturnType<typeof loadPieceworkExportData>>,
 ): Promise<Buffer> {
   const summaryRows: CellValue[][] = [[
-    '日期', '师傅', '账号', '机型', '任务数', '工单数', '计件合计',
+    '日期', '师傅', '账号', '保底机型', '任务数', '工单数', '计件合计',
     '每日保底', '人工调整', '实发金额', '发放状态', '发放时间',
   ]];
   const detailRows: CellValue[][] = [[
     '日期', '师傅', '工单号', '款式', '工艺', '机型', '良品数', '次品数',
     '返工数', '板数', '下数', '每日保底', '每下单价', '每板单价',
-    '小单阈值', '小单固定金额', '倍率', '计件金额', '完工时间', '任务ID',
+    '小单阈值', '阈值含等于', '小单固定金额', '大单装板费', '倍率',
+    '计件金额', '完工时间', '任务ID',
   ]];
   const adjustmentRows: CellValue[][] = [[
     '日期', '师傅', '类型', '金额', '原因', '操作人', '操作时间',
@@ -168,7 +189,7 @@ export async function buildPieceworkWorkbook(
       salary.paidAt ? dateTimeShanghai(salary.paidAt) : '',
     ]);
     for (const item of salary.items) {
-      const snapshot = item.salaryRuleSnapshot as Partial<MachineRuleWithBase>;
+      const rule = machineRuleAuditValues(item.salaryRuleSnapshot);
       detailRows.push([
         dateYmd(salary.date),
         salary.worker.displayName,
@@ -181,12 +202,14 @@ export async function buildPieceworkWorkbook(
         item.reworkQty,
         item.boardCount,
         item.pressCount,
-        numericCell(snapshot.dailyBase),
-        numericCell(snapshot.pieceRate),
-        numericCell(snapshot.boardRate),
-        snapshot.smallOrderThreshold ?? '',
-        numericCell(snapshot.smallOrderFlatPrice),
-        (snapshot.multiplierFactors ?? []).join(','),
+        rule.dailyBase,
+        rule.pieceRate,
+        rule.boardRate,
+        rule.smallOrderThreshold,
+        rule.smallOrderInclusive,
+        rule.smallOrderFlatPrice,
+        rule.largeOrderSetupFee,
+        rule.multiplierFactors,
         Number(item.pieceworkAmount),
         dateTimeShanghai(item.completedAt),
         item.productionTaskId,

@@ -95,6 +95,27 @@ describe('calcCsCommission (SPEC §5.3 FLAT mode)', () => {
     const r = calcCsCommission(550000, SEED_TIERS);
     expect(SEED_TIERS.tiers[r.tierIndex!]?.rate).toBe(0.06);
   });
+
+  it('rejects empty, duplicate, or out-of-range tiers instead of computing ambiguous pay', () => {
+    expect(() =>
+      calcCsCommission(100000, { mode: 'FLAT', tiers: [] }),
+    ).toThrow(/不能为空/);
+    expect(() =>
+      calcCsCommission(100000, {
+        mode: 'FLAT',
+        tiers: [
+          { minSales: 100000, rate: 0.01 },
+          { minSales: '100000.00', rate: 0.02 },
+        ],
+      }),
+    ).toThrow(/不能重复/);
+    expect(() =>
+      calcCsCommission(100000, {
+        mode: 'FLAT',
+        tiers: [{ minSales: 100000, rate: 1.0001 }],
+      }),
+    ).toThrow(/0% 到 100%/);
+  });
 });
 
 describe('calcCsMonthlyBaseTotal / calcCsTotalIncome', () => {

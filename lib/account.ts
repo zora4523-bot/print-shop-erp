@@ -1,12 +1,22 @@
 import bcrypt from 'bcryptjs';
+import Decimal from 'decimal.js';
 import {
   Role,
+  SalaryPeriodStatus,
+  SalaryRuleType,
   WorkerType,
   type Craft,
   type MachineType,
   type User,
 } from '../generated/prisma/client';
 import { db } from './db';
+import { todayShanghai } from './dashboard/shanghai-clock';
+import { computePeriodEnd } from './salary/cs';
+import { csUserLockKey } from './salary/cs-lock';
+import {
+  getActiveRuleValue,
+  type SalaryRuleClient,
+} from './salary/rules';
 
 // Thrown when a mutation would break a system invariant (not an auth issue
 // per se — the caller has permission, but the operation itself is refused).
@@ -43,11 +53,120 @@ type TxClient = {
       select?: unknown;
     }) => Promise<WorkerCapabilityCraft[]>;
   };
+  salaryRule: SalaryRuleClient['salaryRule'];
+  salaryPeriod: {
+    findFirst: (args: { where: unknown; select?: unknown }) => Promise<{
+      id: string;
+      periodStart: Date;
+      periodEnd: Date;
+      status: SalaryPeriodStatus;
+    } | null>;
+    create: (args: { data: unknown }) => Promise<unknown>;
+  };
 };
 
 async function acquireAdminInvariantLock(tx: TxClient): Promise<void> {
   // hashtext(text) → int4, the argument form pg_advisory_xact_lock expects.
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ADMIN_INVARIANT_LOCK_KEY}))`;
+}
+
+async function ensureInitialCsPeriodInTx(
+  tx: TxClient,
+  csUserId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+    csUserId,
+  )}))`;
+
+  const month = todayShanghai(now).slice(0, 7);
+  const currentDateParts = todayShanghai(now).split('-').map(Number);
+  const currentDate = new Date(
+    Date.UTC(currentDateParts[0], currentDateParts[1] - 1, currentDateParts[2]),
+  );
+  const [year, monthNumber] = month.split('-').map(Number);
+  const periodStart = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const [baseRule, lengthRule] = await Promise.all([
+    getActiveRuleValue<{ monthlyBase: number | string }>(
+      SalaryRuleType.CS_COMMISSION,
+      'CS_BASE_SALARY',
+      now,
+      tx,
+    ),
+    getActiveRuleValue<{ months: number }>(
+      SalaryRuleType.CS_COMMISSION,
+      'CS_PERIOD_LENGTH',
+      now,
+      tx,
+    ),
+  ]);
+  if (!baseRule || !lengthRule) {
+    throw new AccountInvariantError(
+      '缺少当前生效的客服底薪或周期规则，无法创建客服账号',
+    );
+  }
+  const monthlyBase = new Decimal(baseRule.monthlyBase);
+  if (
+    !monthlyBase.isFinite() ||
+    monthlyBase.isNegative() ||
+    monthlyBase.decimalPlaces() > 2 ||
+    monthlyBase.gt('99999999.99')
+  ) {
+    throw new AccountInvariantError('当前客服底薪规则金额非法');
+  }
+  if (
+    !Number.isSafeInteger(lengthRule.months) ||
+    lengthRule.months < 1 ||
+    lengthRule.months > 24
+  ) {
+    throw new AccountInvariantError('当前客服周期月数规则必须是 1 到 24 的整数');
+  }
+  if (monthlyBase.times(lengthRule.months).gt('99999999.99')) {
+    throw new AccountInvariantError('当前客服底薪 × 周期月数超过可保存上限');
+  }
+  const periodEnd = computePeriodEnd(periodStart, lengthRule.months);
+  const overlap = await tx.salaryPeriod.findFirst({
+    where: {
+      csUserId,
+      OR: [
+        { status: SalaryPeriodStatus.IN_PROGRESS },
+        {
+          periodStart: { lte: periodEnd },
+          periodEnd: { gte: periodStart },
+        },
+      ],
+    },
+    select: { id: true, periodStart: true, periodEnd: true, status: true },
+  });
+  if (overlap) {
+    if (overlap.status === SalaryPeriodStatus.IN_PROGRESS) {
+      if (
+        overlap.periodStart.getTime() <= currentDate.getTime() &&
+        overlap.periodEnd.getTime() >= currentDate.getTime()
+      ) {
+        return;
+      }
+      throw new AccountInvariantError(
+        '客服已有进行中工资周期，但未覆盖今天；请先结算或修正该周期',
+      );
+    }
+    throw new AccountInvariantError(
+      '客服当前月份已有重叠的历史工资周期，请先在客服周期页面核对后再调整账号',
+    );
+  }
+
+  await tx.salaryPeriod.create({
+    data: {
+      csUserId,
+      periodStart,
+      periodEnd,
+      durationMonths: lengthRule.months,
+      totalSales: '0.00',
+      initialSales: '0.00',
+      monthlyBase: monthlyBase.toFixed(2),
+      status: SalaryPeriodStatus.IN_PROGRESS,
+    },
+  });
 }
 
 export type AccountSummary = Pick<
@@ -222,7 +341,7 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
           : [],
       craftIds: capabilityCraftIds,
     });
-    return txClient.user.create({
+    const created = await txClient.user.create({
       data: {
         username: data.username,
         password: hashed,
@@ -252,6 +371,10 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
       },
       select: SUMMARY_SELECT,
     });
+    if (data.role === Role.CUSTOMER_SERVICE) {
+      await ensureInitialCsPeriodInTx(txClient, created.id);
+    }
+    return created;
   });
 }
 
@@ -294,6 +417,20 @@ export async function updateUser(
     // target.isActive when `next.isActive` is omitted, preserving the
     // guard.
     await assertNotStrandingSystemInTx(txClient, target, { role: data.role });
+    // Settlement decides whether to create a successor period from the user's
+    // latest role/active state while holding this same lock. Serialize role
+    // transitions involving CUSTOMER_SERVICE before updating the row, or a
+    // concurrent settlement could read the old role and create an unintended
+    // next salary period after the account has been reassigned.
+    if (
+      roleChanging &&
+      (target.role === Role.CUSTOMER_SERVICE ||
+        data.role === Role.CUSTOMER_SERVICE)
+    ) {
+      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+        id,
+      )}))`;
+    }
     const capabilityCraftIds =
       data.role === Role.WORKER ? (data.craftCapabilities ?? []) : [];
     const machineCapabilities =
@@ -308,7 +445,7 @@ export async function updateUser(
       craftIds: capabilityCraftIds,
     });
 
-    return txClient.user.update({
+    const updated = await txClient.user.update({
       where: { id },
       data: {
         displayName: data.displayName,
@@ -332,6 +469,14 @@ export async function updateUser(
       },
       select: SUMMARY_SELECT,
     });
+    if (
+      roleChanging &&
+      data.role === Role.CUSTOMER_SERVICE &&
+      updated.isActive
+    ) {
+      await ensureInitialCsPeriodInTx(txClient, updated.id);
+    }
+    return updated;
   });
 }
 
@@ -417,11 +562,23 @@ export async function setUserActive(
       await assertNotStrandingSystemInTx(txClient, target, { isActive: false });
     }
 
-    return txClient.user.update({
+    // See updateUser: active-state changes participate in the same CS-user
+    // critical section as settlement and automatic successor creation.
+    if (target.role === Role.CUSTOMER_SERVICE) {
+      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+        id,
+      )}))`;
+    }
+
+    const updated = await txClient.user.update({
       where: { id },
       data: { isActive },
       select: SUMMARY_SELECT,
     });
+    if (isActive && target.role === Role.CUSTOMER_SERVICE) {
+      await ensureInitialCsPeriodInTx(txClient, updated.id);
+    }
+    return updated;
   });
 }
 

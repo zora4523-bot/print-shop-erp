@@ -29,6 +29,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   computeHourlyPayroll,
   computeHourlyForAllInMonth,
+  HourlyBatchUnexpectedError,
   listHourlyPayrolls,
   markHourlyPayrollPaid,
 } from '../hourly-aggregate';
@@ -166,6 +167,31 @@ describe('computeHourlyPayroll — PACKER', () => {
     expect(r.otMultiplier).toBe('1.00');
     // 8×11 + 2×11×1.0 = 88+22 = 110
     expect(r.totalSalary).toBe('110.00');
+  });
+
+  it('persists a total equal to the sum of independently rounded components', async () => {
+    setupAllRules({
+      ...PACKER_RULES,
+      PACKER_HOURLY: { hourlyRate: 11.11 },
+    });
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '0.5',
+        otHours: '0.5',
+        spareHours: '0',
+      },
+    ]);
+
+    const r = await computeHourlyPayroll('worker-1', '2026-05');
+    const data = dbMock.hourlyWorkerPayroll.upsert.mock.calls[0][0].create;
+
+    expect(r.baseSalary).toBe('5.56');
+    expect(r.otSalary).toBe('5.56');
+    expect(r.totalSalary).toBe('11.12');
+    expect(data.baseSalary).toBe('5.56');
+    expect(data.otSalary).toBe('5.56');
+    expect(data.totalSalary).toBe('11.12');
   });
 
   it('snapshots full rule context including WORK_HOURS + OT multiplier', async () => {
@@ -373,6 +399,50 @@ describe('computeHourlyForAllInMonth', () => {
       WorkerType.CLEANER,
       WorkerType.COOK,
     ]);
+  });
+
+  it('rethrows an unexpected worker failure with committed partial results', async () => {
+    const databaseFailure = new Error('connection lost');
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]);
+    dbMock.user.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === 'w2') throw databaseFailure;
+        return workerFixture({ workerType: WorkerType.PACKER });
+      },
+    );
+    setupAllRules();
+
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth('2026-05');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HourlyBatchUnexpectedError);
+    const unexpected = caught as HourlyBatchUnexpectedError;
+    expect(unexpected.partialResult.settled.map((row) => row.workerId)).toEqual([
+      'w1',
+    ]);
+    expect(unexpected.partialResult.errors).toEqual([]);
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
+
+  it('wraps a worker-scan failure with an empty partial result', async () => {
+    const databaseFailure = new Error('scan unavailable');
+    dbMock.user.findMany.mockRejectedValue(databaseFailure);
+
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth('2026-05');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HourlyBatchUnexpectedError);
+    const unexpected = caught as HourlyBatchUnexpectedError;
+    expect(unexpected.partialResult).toEqual({ settled: [], errors: [] });
+    expect(unexpected.cause).toBe(databaseFailure);
   });
 });
 

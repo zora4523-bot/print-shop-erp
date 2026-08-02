@@ -115,14 +115,11 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
                       ) : (
                         <Badge variant="outline">未发</Badge>
                       )}
-                      {new Decimal(
-                        salary.totalPieceworkAmount as Decimal.Value,
-                      ).gte(
+                      {salaryFloorBadge(
+                        new Decimal(
+                          salary.totalPieceworkAmount as Decimal.Value,
+                        ),
                         new Decimal(salary.baseSalary as Decimal.Value),
-                      ) ? (
-                        <Badge variant="secondary">计件已超底薪</Badge>
-                      ) : (
-                        <Badge variant="outline">按底薪补足</Badge>
                       )}
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
@@ -157,4 +154,14 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
       )}
     </div>
   );
+}
+
+function salaryFloorBadge(piecework: Decimal, base: Decimal) {
+  if (piecework.gt(base)) {
+    return <Badge variant="secondary">计件高于保底</Badge>;
+  }
+  if (piecework.eq(base)) {
+    return <Badge variant="outline">计件等于保底</Badge>;
+  }
+  return <Badge variant="outline">按保底补足</Badge>;
 }

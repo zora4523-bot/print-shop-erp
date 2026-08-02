@@ -1,13 +1,10 @@
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Decimal from 'decimal.js';
+import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBillDetail } from '@/lib/bill';
-import {
-  BillStatus,
-  OrderCostCategory,
-  Role,
-} from '@/generated/prisma/enums';
+import { BillStatus } from '@/generated/prisma/enums';
 import {
   BILL_STATUS_LABELS,
   ROLE_LABELS,
@@ -17,6 +14,13 @@ import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import {
+  calculateCsBillAttribution,
+  hasCustomerServiceAttribution,
+} from '@/lib/bill/cs-attribution';
+import { calculateOrderCostBreakdown } from '@/lib/bill/costing';
+import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
+import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -34,6 +38,9 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
   if (!bill) notFound();
 
   const total = new Decimal(bill.totalAmount as unknown as Decimal.Value);
+  const openingAmount = new Decimal(
+    bill.openingAmount as unknown as Decimal.Value,
+  );
   const paid = new Decimal(bill.paidAmount as unknown as Decimal.Value);
   const remaining = total.minus(paid);
   // 进度条百分比：防 total=0 的除零。total=0 意味着 DRAFT 账单无订单，
@@ -42,50 +49,10 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
     ? 0
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
   const costingRows = bill.items.map((item) => {
-    const piecework = item.order.items
-      .flatMap((orderItem) => orderItem.tasks)
-      .reduce(
-        (sum, task) =>
-          sum.plus(new Decimal(task.pieceworkAmount as Decimal.Value)),
-        new Decimal(0),
-      );
-    const outsource = item.order.outsourceOrders.reduce(
-      (sum, entry) =>
-        sum.plus(new Decimal((entry.amount ?? 0) as Decimal.Value)),
-      new Decimal(0),
-    );
-    const manual = item.order.costEntries.reduce(
-      (sum, entry) =>
-        sum.plus(new Decimal(entry.amount as Decimal.Value)),
-      new Decimal(0),
-    );
-    const rework = item.order.reworkOrders.reduce((orderSum, reworkOrder) => {
-      const pieceworkCost = reworkOrder.items
-        .flatMap((orderItem) => orderItem.tasks)
-        .reduce(
-          (sum, task) =>
-            sum.plus(new Decimal(task.pieceworkAmount as Decimal.Value)),
-          new Decimal(0),
-        );
-      const outsourceCost = reworkOrder.outsourceOrders.reduce(
-        (sum, entry) =>
-          sum.plus(new Decimal((entry.amount ?? 0) as Decimal.Value)),
-        new Decimal(0),
-      );
-      const manualCost = reworkOrder.costEntries.reduce(
-        (sum, entry) =>
-          sum.plus(new Decimal(entry.amount as Decimal.Value)),
-        new Decimal(0),
-      );
-      return orderSum.plus(pieceworkCost).plus(outsourceCost).plus(manualCost);
-    }, new Decimal(0));
+    const costs = calculateOrderCostBreakdown(item.order);
     return {
       ...item,
-      piecework,
-      outsource,
-      manual,
-      rework,
-      totalCost: piecework.plus(outsource).plus(manual).plus(rework),
+      ...costs,
     };
   });
   const totalCost = costingRows.reduce(
@@ -93,16 +60,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
     new Decimal(0),
   );
   const grossProfit = total.minus(totalCost);
-  const billMonthStart = new Date(`${bill.period}-01T00:00:00+08:00`);
-  const csPeriod = bill.salesUser.salaryPeriods.find(
-    (period) =>
-      period.periodStart <= billMonthStart && period.periodEnd >= billMonthStart,
-  );
-  const csCommission = csPeriod?.commissions[0];
-  const csRate = csCommission
-    ? new Decimal(csCommission.tierRate as Decimal.Value)
-    : null;
-  const attributedCommission = csRate ? total.times(csRate) : null;
+  const csAttribution = calculateCsBillAttribution(bill.items);
+  const isCsAttributedBill = hasCustomerServiceAttribution(bill.items);
+  const settledRateLabel = csAttribution.settledRates.length
+    ? csAttribution.settledRates
+        .map((rate) => `${new Decimal(rate).times(100).toFixed(2)}%`)
+        .join('、')
+    : '待周期结算';
 
   return (
     <div className="space-y-6">
@@ -113,7 +77,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           </h1>
           <p className="text-sm text-muted-foreground">
             周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}
-            {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
+            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
             {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
             {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
@@ -153,8 +117,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             计件和外协从生产记录自动汇总；材料、物流、伙食、电费等来自工单成本流水。
           </p>
         </div>
-        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-4">
           <Row label="销售额" value={`¥ ${total.toFixed(2)}`} tabular />
+          <Row
+            label="历史期初/手工差额"
+            value={`¥ ${openingAmount.toFixed(2)}`}
+            tabular
+          />
           <Row label="成本合计" value={`¥ ${totalCost.toFixed(2)}`} tabular />
           <Row
             label="毛利"
@@ -163,29 +132,54 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             highlight={grossProfit.isNegative()}
           />
         </dl>
-        {bill.salesUser.role === Role.CUSTOMER_SERVICE ? (
+        {openingAmount.isZero() ? null : (
+          <p className="text-xs text-muted-foreground">
+            该金额用于解释逐单账单启用前的历史账面差额；总额 = 此差额 + 工单明细。
+          </p>
+        )}
+        {isCsAttributedBill ? (
           <dl className="grid grid-cols-1 gap-3 rounded-lg bg-muted/40 p-3 text-sm sm:grid-cols-3">
             <Row
-              label="客服周期销售额"
+              label="本账单业绩流水"
               value={
-                csPeriod ? `¥ ${String(csPeriod.totalSales)}` : '未匹配到客服周期'
+                csAttribution.entryCount > 0
+                  ? `¥ ${csAttribution.ledgerSales.toFixed(2)}`
+                  : '无逐单历史流水'
               }
               tabular
             />
             <Row
-              label="结算提成比例"
-              value={csRate ? `${csRate.times(100).toFixed(2)}%` : '待周期结算'}
+              label="实际命中周期比例"
+              value={settledRateLabel}
               tabular
             />
             <Row
-              label="本账单按最终比例归属提成"
+              label="已结算提成估算"
               value={
-                attributedCommission
-                  ? `¥ ${attributedCommission.toFixed(2)}`
+                csAttribution.settledRates.length
+                  ? `¥ ${csAttribution.attributedCommission.toFixed(2)}`
                   : '待周期结算'
               }
               tabular
             />
+            {csAttribution.settledRates.length ? (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                按本账单工单的业绩流水与其所属客服周期最终费率估算；分币尾差及实际发放
+                以客服周期工资记录为准。
+              </p>
+            ) : null}
+            {csAttribution.pendingSales.isZero() ? null : (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                其中 ¥ {csAttribution.pendingSales.toFixed(2)} 尚在进行中的客服周期，
+                待该周期结算后才能确定提成比例。
+              </p>
+            )}
+            {csAttribution.entryCount === 0 ? (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                该账单来自逐单业绩流水启用前；历史累计只保留在客服周期期初校准中，
+                系统不会用账单月份猜测一个提成比例。
+              </p>
+            ) : null}
           </dl>
         ) : null}
       </section>
@@ -212,13 +206,14 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           <p className="text-xs text-muted-foreground">
             累加式记账；累计 = 总额自动切 FULLY_PAID 终态（不可回退）。最多可录
             入 <span className="font-sans tabular-nums">¥ {remaining.toFixed(2)}</span>。
-            {bill.salesUser.role === Role.CUSTOMER_SERVICE
+            {isCsAttributedBill
               ? ' 该账单归属客服；客服销售额已在工单提交时记入，收款不会重复计算提成。'
               : ''}
           </p>
           <RecordPaymentForm
             billId={bill.id}
             remainingAmount={remaining.toFixed(2)}
+            initialIdempotencyKey={randomUUID()}
           />
         </section>
       ) : null}
@@ -227,10 +222,10 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
             ✓ 已结清。
-            {bill.salesUser.role === Role.CUSTOMER_SERVICE
+            {isCsAttributedBill
               ? ' 客服提成基于销售额流水，不基于本账单收款次数。'
               : ''}
-            如有退款 / 折扣，请另开负数金额的月账单，不可回退此账单状态。
+            如有退款 / 折扣，请先由财务核对原工单和已收流水；已结清账单不可直接回退或改成负数。
           </p>
         </section>
       ) : null}
@@ -251,7 +246,9 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                 className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[160px_120px_1fr_auto] sm:px-6"
               >
                 <span className="font-sans tabular-nums">
-                  {formatDateTimeShanghai(payment.paidAt)}
+                  {isLegacyOpeningBillPayment(payment)
+                    ? '历史期初 · 时间未知'
+                    : formatDateTimeShanghai(payment.paidAt)}
                 </span>
                 <span>{payment.paymentMethod ?? '未填方式'}</span>
                 <span className="admin-wrap-anywhere text-muted-foreground">
@@ -345,47 +342,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         )}
       </section>
 
-      <section className="rounded-xl border bg-card shadow-sm">
-        <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
-          自定义成本流水
-        </h2>
-        {costingRows.every((row) => row.order.costEntries.length === 0) ? (
-          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
-            暂无材料、物流、伙食、电费等补录成本。
-          </p>
-        ) : (
-          <ul className="divide-y text-sm">
-            {costingRows.flatMap((row) =>
-              row.order.costEntries.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="grid min-w-0 gap-2 px-4 py-3 sm:grid-cols-[120px_100px_1fr_auto] sm:px-6"
-                >
-                  <Link
-                    href={`/orders/${row.orderId}`}
-                    className="font-sans tabular-nums text-primary underline"
-                  >
-                    {row.order.orderNo}
-                  </Link>
-                  <span>{COST_LABELS[entry.category]}</span>
-                  <span className="admin-wrap-anywhere">
-                    {entry.description}
-                    {entry.quantity
-                      ? ` · ${String(entry.quantity)} ${entry.unit ?? ''}`
-                      : ''}
-                    {entry.unitPrice
-                      ? ` × ¥ ${String(entry.unitPrice)}`
-                      : ''}
-                  </span>
-                  <span className="font-sans tabular-nums">
-                    ¥ {String(entry.amount)}
-                  </span>
-                </li>
-              )),
-            )}
-          </ul>
-        )}
-      </section>
+      <BillCostEntryList items={bill.items} />
 
       {bill.remark ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
@@ -405,18 +362,6 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
     </div>
   );
 }
-
-const COST_LABELS: Record<OrderCostCategory, string> = {
-  [OrderCostCategory.MATERIAL]: '材料',
-  [OrderCostCategory.PIECEWORK]: '计件',
-  [OrderCostCategory.SETUP]: '装板',
-  [OrderCostCategory.OUTSOURCE]: '外协',
-  [OrderCostCategory.SHIPPING]: '物流',
-  [OrderCostCategory.MEAL]: '伙食',
-  [OrderCostCategory.ELECTRICITY]: '电费',
-  [OrderCostCategory.CUSTOM]: '其他',
-  [OrderCostCategory.ADJUSTMENT]: '调整',
-};
 
 function Row({
   label,

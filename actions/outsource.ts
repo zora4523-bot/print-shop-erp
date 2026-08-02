@@ -1,23 +1,29 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
+  confirmOutsourceAmountSchema,
   createOutsourceSchema,
   markOutsourceReceivedSchema,
 } from '@/lib/auth/schemas';
 import {
+  confirmOutsourceAmount,
   createOutsourceOrder,
   markOutsourceReceived,
   cancelOutsourceOrder,
   OutsourceError,
   InvalidOutsourceTransitionError,
 } from '@/lib/outsource';
-import type { OutsourceMutationResult } from './outsource.types';
+import type {
+  OutsourceAmountMutationResult,
+  OutsourceMutationResult,
+} from './outsource.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
-function mapOutsourceError(err: unknown): OutsourceMutationResult | null {
+function mapOutsourceError(
+  err: unknown,
+): { status: 'error'; message: string } | null {
   if (err instanceof OutsourceError) {
     return { status: 'error', message: err.message };
   }
@@ -50,7 +56,39 @@ export async function createOutsourceAction(
   }
 
   revalidatePath('/foreman/outsource');
-  redirect(`/foreman/outsource/${createdId}`);
+  revalidatePath(`/orders/${parsed.data.orderId}`);
+  return { status: 'success', id: createdId };
+}
+
+export async function confirmOutsourceAmountAction(
+  id: string,
+  _prev: OutsourceAmountMutationResult | null,
+  formData: FormData,
+): Promise<OutsourceAmountMutationResult> {
+  const actor = await requirePermission('outsource:manage');
+  const parsed = confirmOutsourceAmountSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
+    amount: formData.get('amount'),
+    reason: formData.get('reason'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const result = await confirmOutsourceAmount(id, parsed.data, actor);
+    revalidatePath('/foreman/outsource');
+    revalidatePath(`/foreman/outsource/${id}`);
+    if (result.orderId) revalidatePath(`/orders/${result.orderId}`);
+    return { status: 'success', id, amount: result.amount };
+  } catch (err) {
+    const mapped = mapOutsourceError(err);
+    if (mapped) return mapped;
+    throw err;
+  }
 }
 
 export async function markOutsourceReceivedAction(

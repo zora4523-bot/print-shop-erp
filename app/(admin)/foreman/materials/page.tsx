@@ -47,7 +47,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
     <div className="space-y-6">
       <PageHeader
         title="物料库存"
-        subtitle="查看安全库存、当日出入库、累计出入库和库存金额。"
+        subtitle="查看安全库存、当日出入库、累计出入库和按手工参考成本估算的库存金额。"
         actions={
           <Link href="/foreman/materials/new" className={buttonVariants()}>
             新建物料
@@ -74,7 +74,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
           value={money(dashboard.totals.stockValue)}
           icon={PackageCheck}
           tone="primary"
-          hint="按 currentStock × averageCost"
+          hint="库存 × 手工参考平均成本（采购不会自动改价）"
         />
         <StatCard
           label="今日入库"

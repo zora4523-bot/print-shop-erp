@@ -91,7 +91,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="计件工资"
-        subtitle="按上海日历天汇总已完工任务，逐项关联工单；工资取计件合计与当日保底较高者，再加人工调整。"
+        subtitle="按上海日历天汇总已完工任务；工资取计件合计与实际工作机型最高保底的较高者，再加人工调整。上班/请假天数仅作考勤展示，不自动扣减计件保底。"
         actions={
           <div className="flex gap-2">
             <Link
@@ -162,7 +162,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">日期</th>
                 <th className="px-4 py-2 text-left">师傅</th>
-                <th className="px-4 py-2 text-left">机型</th>
+                <th className="px-4 py-2 text-left">保底机型</th>
                 <th className="px-4 py-2 text-right">计件合计</th>
                 <th className="px-4 py-2 text-right">保底</th>
                 <th className="px-4 py-2 text-right">调整</th>
@@ -211,12 +211,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                       ) : (
                         <Badge variant="outline">未发</Badge>
                       )}
-                      {new Decimal(
-                        r.totalPieceworkAmount as unknown as string,
-                      ).gte(new Decimal(r.baseSalary as unknown as string)) ? (
-                        <Badge variant="secondary">计件已超底薪</Badge>
-                      ) : (
-                        <Badge variant="outline">按底薪补足</Badge>
+                      {salaryFloorBadge(
+                        new Decimal(
+                          r.totalPieceworkAmount as unknown as string,
+                        ),
+                        new Decimal(r.baseSalary as unknown as string),
                       )}
                     </div>
                   </td>
@@ -239,6 +238,16 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       )}
     </div>
   );
+}
+
+function salaryFloorBadge(piecework: Decimal, base: Decimal) {
+  if (piecework.gt(base)) {
+    return <Badge variant="secondary">计件高于保底</Badge>;
+  }
+  if (piecework.eq(base)) {
+    return <Badge variant="outline">计件等于保底</Badge>;
+  }
+  return <Badge variant="outline">按保底补足</Badge>;
 }
 
 function FilterBar({

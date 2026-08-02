@@ -324,6 +324,19 @@ export type BatchHourlyResult = {
   errors: Array<{ workerId: string; message: string }>;
 };
 
+// Preserve already committed payroll rows when an unexpected failure stops a
+// later worker. The cron runner reports only safe counts and rethrows this
+// error so the durable job is retried instead of being marked successful.
+export class HourlyBatchUnexpectedError extends Error {
+  readonly partialResult: BatchHourlyResult;
+
+  constructor(message: string, partialResult: BatchHourlyResult, cause: unknown) {
+    super(message, { cause });
+    this.name = 'HourlyBatchUnexpectedError';
+    this.partialResult = partialResult;
+  }
+}
+
 export async function computeHourlyForAllInMonth(
   month: string,
   now: Date = new Date(),
@@ -332,27 +345,41 @@ export async function computeHourlyForAllInMonth(
   // single-worker signature.
   parseShanghaiMonth(month);
 
-  const workers = await db.user.findMany({
-    where: {
-      role: Role.WORKER,
-      isActive: true,
-      workerType: {
-        in: [WorkerType.PACKER, WorkerType.CLEANER, WorkerType.COOK],
-      },
-    },
-    select: { id: true },
-  });
-
   const settled: ComputeHourlyPayrollResult[] = [];
   const errors: Array<{ workerId: string; message: string }> = [];
+  let workers: Array<{ id: string }>;
+  try {
+    workers = await db.user.findMany({
+      where: {
+        role: Role.WORKER,
+        isActive: true,
+        workerType: {
+          in: [WorkerType.PACKER, WorkerType.CLEANER, WorkerType.COOK],
+        },
+      },
+      select: { id: true },
+    });
+  } catch (cause) {
+    throw new HourlyBatchUnexpectedError(
+      '时薪批量扫描失败',
+      { settled, errors },
+      cause,
+    );
+  }
+
   for (const w of workers) {
     try {
       settled.push(await computeHourlyPayroll(w.id, month, now));
     } catch (err) {
-      errors.push({
-        workerId: w.id,
-        message: err instanceof Error ? err.message : String(err),
-      });
+      if (err instanceof HourlyAggregateError) {
+        errors.push({ workerId: w.id, message: err.message });
+        continue;
+      }
+      throw new HourlyBatchUnexpectedError(
+        `师傅 ${w.id} 时薪计算发生系统错误`,
+        { settled, errors },
+        err,
+      );
     }
   }
   return { settled, errors };

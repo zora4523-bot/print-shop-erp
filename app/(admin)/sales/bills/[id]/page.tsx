@@ -3,11 +3,17 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getBillDetail } from '@/lib/bill';
-import { BillStatus, Role } from '@/generated/prisma/enums';
+import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import {
+  calculateCsBillAttribution,
+  hasCustomerServiceAttribution,
+} from '@/lib/bill/cs-attribution';
+import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
+import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -25,20 +31,21 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
   if (!bill || bill.salesUserId !== user.id) notFound();
 
   const total = new Decimal(bill.totalAmount as unknown as Decimal.Value);
+  const openingAmount = new Decimal(
+    bill.openingAmount as unknown as Decimal.Value,
+  );
   const paid = new Decimal(bill.paidAmount as unknown as Decimal.Value);
   const remaining = total.minus(paid);
   const paidPercent = total.isZero()
     ? 0
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
-  const billMonthStart = new Date(`${bill.period}-01T00:00:00+08:00`);
-  const csPeriod = bill.salesUser.salaryPeriods.find(
-    (period) =>
-      period.periodStart <= billMonthStart && period.periodEnd >= billMonthStart,
-  );
-  const csCommission = csPeriod?.commissions[0];
-  const csRate = csCommission
-    ? new Decimal(csCommission.tierRate as Decimal.Value)
-    : null;
+  const csAttribution = calculateCsBillAttribution(bill.items);
+  const isCsAttributedBill = hasCustomerServiceAttribution(bill.items);
+  const settledRateLabel = csAttribution.settledRates.length
+    ? csAttribution.settledRates
+        .map((rate) => `${new Decimal(rate).times(100).toFixed(2)}%`)
+        .join('、')
+    : '待周期结算';
 
   return (
     <div className="space-y-6">
@@ -80,24 +87,54 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         </div>
       </section>
 
-      {bill.salesUser.role === Role.CUSTOMER_SERVICE ? (
+      {openingAmount.isZero() ? null : (
+        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold">历史期初/手工差额</h2>
+          <p className="mt-2 text-muted-foreground">
+            ¥ {openingAmount.toFixed(2)}；该金额用于解释逐单账单启用前的历史账面差额。
+          </p>
+        </section>
+      )}
+
+      {isCsAttributedBill ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
           <h2 className="text-base font-semibold">销售额与提成</h2>
           <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Row label="本账单销售额" value={`¥ ${total.toFixed(2)}`} tabular />
             <Row
-              label="周期结算比例"
-              value={csRate ? `${csRate.times(100).toFixed(2)}%` : '待周期结算'}
+              label="本账单业绩流水"
+              value={
+                csAttribution.entryCount > 0
+                  ? `¥ ${csAttribution.ledgerSales.toFixed(2)}`
+                  : '无逐单历史流水'
+              }
               tabular
             />
             <Row
-              label="本账单按最终比例归属提成"
-              value={csRate ? `¥ ${total.times(csRate).toFixed(2)}` : '待周期结算'}
+              label="实际命中周期比例"
+              value={settledRateLabel}
+              tabular
+            />
+            <Row
+              label="已结算提成估算"
+              value={
+                csAttribution.settledRates.length
+                  ? `¥ ${csAttribution.attributedCommission.toFixed(2)}`
+                  : '待周期结算'
+              }
               tabular
             />
           </dl>
           <p className="mt-3 text-xs text-muted-foreground">
             提成按工单销售额计入客服周期，不按收款金额或收款次数重复计算。
+            {csAttribution.settledRates.length
+              ? ' 本账单提成按业绩流水与所属周期最终费率估算；分币尾差及实际发放以客服周期工资记录为准。'
+              : ''}
+            {csAttribution.pendingSales.isZero()
+              ? ''
+              : ` 尚有 ¥ ${csAttribution.pendingSales.toFixed(2)} 等待周期结算。`}
+            {csAttribution.entryCount === 0
+              ? ' 本账单来自逐单业绩流水启用前，系统不会按账单月份猜测历史比例。'
+              : ''}
           </p>
         </section>
       ) : null}
@@ -113,8 +150,8 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.FULLY_PAID ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            ✓ 已结清。如有退款 / 折扣，由管理员另开负数月账单处理；该账单状态
-            不会回退。
+            ✓ 已结清。如有退款 / 折扣，请联系管理员由财务线下核对原工单和已收流水；
+            系统不支持以负数账单冲账，该账单状态也不会回退。
           </p>
         </section>
       ) : null}
@@ -135,7 +172,9 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                 className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[160px_100px_1fr_auto] sm:px-6"
               >
                 <span className="font-sans tabular-nums">
-                  {formatDateTimeShanghai(payment.paidAt)}
+                  {isLegacyOpeningBillPayment(payment)
+                    ? '历史期初 · 时间未知'
+                    : formatDateTimeShanghai(payment.paidAt)}
                 </span>
                 <span>{payment.paymentMethod ?? '未填方式'}</span>
                 <span className="admin-wrap-anywhere text-muted-foreground">
@@ -198,6 +237,8 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
           </div>
         )}
       </section>
+
+      <BillCostEntryList items={bill.items} />
 
       {bill.remark ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">

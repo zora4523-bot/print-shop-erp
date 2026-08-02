@@ -24,6 +24,7 @@ import {
   removeAttendance,
   listMonthlyAttendance,
   parseShanghaiMonth,
+  parseShanghaiMonthInstantRange,
   AttendanceError,
 } from '../attendance';
 
@@ -72,16 +73,28 @@ beforeEach(() => {
 });
 
 describe('parseShanghaiMonth', () => {
-  it('returns UTC midnight [first, first-of-next) for valid YYYY-MM', () => {
+  it('returns UTC-midnight DATE values for valid YYYY-MM', () => {
     const { start, end } = parseShanghaiMonth('2026-05');
     expect(start.toISOString()).toBe('2026-05-01T00:00:00.000Z');
     expect(end.toISOString()).toBe('2026-06-01T00:00:00.000Z');
+  });
+
+  it('returns the real UTC instant range for a Shanghai calendar month', () => {
+    const { start, end } = parseShanghaiMonthInstantRange('2026-05');
+    expect(start.toISOString()).toBe('2026-04-30T16:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-05-31T16:00:00.000Z');
   });
 
   it('handles year boundary (Dec → next Jan)', () => {
     const { start, end } = parseShanghaiMonth('2026-12');
     expect(start.toISOString()).toBe('2026-12-01T00:00:00.000Z');
     expect(end.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('handles instant-range year boundary (Dec → next Jan)', () => {
+    const { start, end } = parseShanghaiMonthInstantRange('2026-12');
+    expect(start.toISOString()).toBe('2026-11-30T16:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-12-31T16:00:00.000Z');
   });
 
   it('rejects bad format', () => {

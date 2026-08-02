@@ -156,8 +156,8 @@ export function MaterialForm(props: Props) {
 
       <TextField
         id="averageCost"
-        label="平均成本（选填）"
-        hint="Decimal(10,4)，用于库存金额估算。"
+        label="参考平均成本（手工维护，选填）"
+        hint="Decimal(10,4)，仅用于库存金额估算；采购入库不会自动改写。"
         disabled={pending}
         error={errs.averageCost?.[0]}
         defaultValue={initial?.averageCost != null ? String(initial.averageCost) : ''}

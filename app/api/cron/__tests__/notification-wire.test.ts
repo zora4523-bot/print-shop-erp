@@ -10,6 +10,8 @@ const {
   getEndingPeriodsMock,
   dbMock,
   dispatchMock,
+  MockDailyBatchUnexpectedError,
+  MockCsBatchUnexpectedError,
 } = vi.hoisted(() => ({
   computeDailyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -20,11 +22,29 @@ const {
     user: { findMany: vi.fn() },
   },
   dispatchMock: vi.fn<(...args: unknown[]) => void>(),
+  MockDailyBatchUnexpectedError: class extends Error {
+    partialResult: unknown;
+    constructor(partialResult: unknown) {
+      super('unexpected daily batch failure');
+      this.partialResult = partialResult;
+    }
+  },
+  MockCsBatchUnexpectedError: class extends Error {
+    partialResult: unknown;
+    constructor(partialResult: unknown) {
+      super('unexpected batch failure');
+      this.partialResult = partialResult;
+    }
+  },
 }));
 vi.mock('@/lib/salary/daily', () => ({
   computeDailyForAllMachineWorkers: computeDailyMock,
+  DailyBatchUnexpectedError: MockDailyBatchUnexpectedError,
 }));
-vi.mock('@/lib/salary/cs', () => ({ settleReadyCsPeriods: settleReadyCsMock }));
+vi.mock('@/lib/salary/cs', () => ({
+  settleReadyCsPeriods: settleReadyCsMock,
+  CsBatchUnexpectedError: MockCsBatchUnexpectedError,
+}));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
   getOverdueOutsourcing: getOverdueOutsourcingMock,
   getEndingPeriods: getEndingPeriodsMock,
@@ -138,6 +158,36 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
     const payload = dispatchMock.mock.calls[0]![1] as { totalAmount: string };
     expect(payload.totalAmount).toBe('0.60');
   });
+
+  it('partial batch failure logs counts, withholds an incomplete aggregate notification, and retries', async () => {
+    computeDailyMock.mockRejectedValue(
+      new MockDailyBatchUnexpectedError({
+        settled: [
+          {
+            workerId: 'w1',
+            date: '2026-04-27',
+            actualSalary: '120.50',
+          },
+        ],
+        errors: [{ workerId: 'w-known', message: 'known business error' }],
+      }),
+    );
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    const response = await dailySalaryPost(
+      authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      '[cron:daily-salary] unexpected failure after partial progress:',
+      { committedCount: 1, businessErrorCount: 1 },
+    );
+    consoleError.mockRestore();
+  });
 });
 
 // ─── /api/cron/cs-settle wire (CS_PERIOD_SETTLED, per-period) ───
@@ -233,6 +283,78 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
     expect(dispatchMock).toHaveBeenCalledTimes(1);
     const payload = dispatchMock.mock.calls[0]![1] as { csName: string };
     expect(payload.csName).toBe('ghost-user');
+  });
+
+  it('partial batch failure still queues notifications for committed periods before retrying', async () => {
+    const settled = [
+      {
+        commissionId: 'c1',
+        periodId: 'p1',
+        csUserId: 'u1',
+        totalSales: '300000.00',
+        tierRate: '0.03',
+        commissionAmount: '9000.00',
+        monthlyBaseTotal: '20000.00',
+        totalIncome: '29000.00',
+        nextPeriodId: 'p1-next',
+      },
+    ];
+    settleReadyCsMock.mockRejectedValue(
+      new MockCsBatchUnexpectedError({ settled, errors: [] }),
+    );
+    dbMock.user.findMany.mockResolvedValue([
+      { id: 'u1', displayName: 'CS 张' },
+    ]);
+
+    const response = await csSettlePost(
+      authedReq('http://x/api/cron/cs-settle'),
+    );
+
+    expect(response.status).toBe(500);
+    expect(dispatchMock).toHaveBeenCalledWith(
+      'CS_PERIOD_SETTLED',
+      expect.objectContaining({ csName: 'CS 张' }),
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
+    );
+  });
+
+  it('partial failure plus user lookup failure still notifies by user id and preserves retry', async () => {
+    const settled = [
+      {
+        commissionId: 'c1',
+        periodId: 'p1',
+        csUserId: 'u1',
+        totalSales: '300000.00',
+        tierRate: '0.03',
+        commissionAmount: '9000.00',
+        monthlyBaseTotal: '20000.00',
+        totalIncome: '29000.00',
+        nextPeriodId: 'p1-next',
+      },
+    ];
+    settleReadyCsMock.mockRejectedValue(
+      new MockCsBatchUnexpectedError({ settled, errors: [] }),
+    );
+    dbMock.user.findMany.mockRejectedValue(new Error('database unavailable'));
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    const response = await csSettlePost(
+      authedReq('http://x/api/cron/cs-settle'),
+    );
+
+    expect(response.status).toBe(500);
+    expect(dispatchMock).toHaveBeenCalledWith(
+      'CS_PERIOD_SETTLED',
+      expect.objectContaining({ csName: 'u1' }),
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:p1' },
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      '[cs-settle] user display-name lookup failed; using user ids:',
+      'Error',
+    );
+    consoleError.mockRestore();
   });
 });
 

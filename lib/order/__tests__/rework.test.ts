@@ -42,6 +42,7 @@ const ownerActor = { id: 'owner-1', role: Role.ADMIN };
 const sourceOrder = {
   id: 'source-1',
   orderNo: 'GD-260730-001',
+  kind: OrderKind.NORMAL,
   status: OrderStatus.SHIPPED,
   customerPartyId: 'customer-1',
   isUrgent: true,
@@ -221,6 +222,19 @@ describe('createReworkOrder', () => {
     await expect(
       createReworkOrder(validInput, ownerActor),
     ).rejects.toBeInstanceOf(ReworkOrderError);
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects nested rework and directs the owner back to the original order', async () => {
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      ...sourceOrder,
+      kind: OrderKind.REWORK,
+    });
+
+    await expect(
+      createReworkOrder(validInput, ownerActor),
+    ).rejects.toThrow(/返回原工单/);
+    expect(dbMock.craft.findMany).not.toHaveBeenCalled();
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 

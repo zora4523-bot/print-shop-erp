@@ -178,7 +178,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">周期</th>
                 <th className="px-4 py-2 text-left">销售 / 客服</th>
-                <th className="px-4 py-2 text-left">角色</th>
+                <th className="px-4 py-2 text-left">当前角色</th>
                 <th className="px-4 py-2 text-right">总额</th>
                 <th className="px-4 py-2 text-right">已收</th>
                 <th className="px-4 py-2 text-center">状态</th>

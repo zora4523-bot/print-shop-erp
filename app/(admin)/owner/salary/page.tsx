@@ -76,11 +76,11 @@ export default async function SalaryIndexPage() {
             hint="periodEnd 已过"
           />
           <StatCard
-            label="未发提成合计"
+            label="已结算周期剩余未发"
             value={`¥${s.csUnpaid.totalIncome}`}
             icon={CalendarClock}
             tone="primary"
-            hint={`${s.csUnpaid.count} 条`}
+            hint={`${s.csUnpaid.count} 个已结算但未全额发放周期（剩余底薪 + 提成）`}
           />
         </div>
         <div>

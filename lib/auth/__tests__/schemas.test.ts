@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   MachineType,
+  OrderCostCategory,
   PartyType,
   Role,
   WorkerType,
@@ -28,10 +29,76 @@ import {
   updateProductSchema,
   createOrderSchema,
   createReworkOrderSchema,
+  createOutsourceSchema,
+  confirmOutsourceAmountSchema,
   batchScheduleOrdersSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
+  startCsPeriodSchema,
+  recordCsPayrollPaymentSchema,
+  recordBillPaymentSchema,
+  createOrderCostEntrySchema,
 } from '../schemas';
+
+describe('outsource mutation schemas', () => {
+  const requestKey = '00000000-0000-4000-8000-000000000001';
+  const createPayload = {
+    idempotencyKey: requestKey,
+    orderId: 'order-1',
+    orderItemIds: ['item-1'],
+    supplierName: '外协厂',
+    supplierContact: null,
+    craftDescription: null,
+    specialRequirement: null,
+    totalQty: null,
+    expectedDate: null,
+    amount: null,
+    remark: null,
+  };
+
+  it('requires a UUID for retry-safe outsource creation', () => {
+    expect(createOutsourceSchema.safeParse(createPayload).success).toBe(true);
+    expect(
+      createOutsourceSchema.safeParse({
+        ...createPayload,
+        idempotencyKey: 'not-a-uuid',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('validates confirmed outsource money and its audit reason', () => {
+    expect(
+      confirmOutsourceAmountSchema.safeParse({
+        idempotencyKey: requestKey,
+        amount: '0.00',
+        reason: '免费重做',
+      }).success,
+    ).toBe(true);
+    expect(
+      confirmOutsourceAmountSchema.safeParse({
+        idempotencyKey: requestKey,
+        amount: '9999999999.99',
+        reason: '最终对账',
+      }).success,
+    ).toBe(true);
+    for (const amount of ['', '-1', '10000000000.00', '1.001']) {
+      expect(
+        confirmOutsourceAmountSchema.safeParse({
+          idempotencyKey: requestKey,
+          amount,
+          reason: '最终对账',
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      confirmOutsourceAmountSchema.safeParse({
+        idempotencyKey: requestKey,
+        amount: '10.00',
+        reason: ' ',
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('loginSchema', () => {
   it('accepts a valid pair', () => {
@@ -1180,6 +1247,314 @@ describe('createOrderSchema foil colors', () => {
       });
       expect(result.success, foilColors.join(',')).toBe(false);
     }
+  });
+
+  it('rejects a rounded item subtotal above Decimal(12,2)', () => {
+    const withinRange = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        {
+          ...order.items[0],
+          quantity: 9_999_999,
+          unitPrice: '1000',
+        },
+      ],
+    });
+    expect(withinRange.success).toBe(true);
+
+    const overflow = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        {
+          ...order.items[0],
+          quantity: 9_999_999,
+          unitPrice: '1000.0001',
+        },
+      ],
+    });
+    expect(overflow.success).toBe(false);
+    if (!overflow.success) {
+      expect(overflow.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['items', 0, 'unitPrice'],
+            message: expect.stringContaining('款式小计过大'),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('rejects an order total above Decimal(12,2) even when each item fits', () => {
+    const result = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        {
+          ...order.items[0],
+          quantity: 5_000_000,
+          unitPrice: '1000',
+        },
+        {
+          ...order.items[0],
+          name: '第二款',
+          quantity: 5_000_000,
+          unitPrice: '1000',
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['items'],
+            message: expect.stringContaining('工单总金额过大'),
+          }),
+        ]),
+      );
+      expect(
+        result.error.issues.some((issue) =>
+          issue.message.includes('款式小计过大'),
+        ),
+      ).toBe(false);
+    }
+  });
+});
+
+describe('finance decimal boundaries', () => {
+  it('keeps CS monthly base within Decimal(10,2)', () => {
+    const base = {
+      csUserId: 'cs-1',
+      periodStart: '2026-08-01',
+      durationMonths: 1,
+      initialSales: '9999999999.99',
+    };
+
+    expect(
+      startCsPeriodSchema.safeParse({
+        ...base,
+        monthlyBase: '99999999.99',
+      }).success,
+    ).toBe(true);
+    expect(
+      startCsPeriodSchema.safeParse({
+        ...base,
+        monthlyBase: '100000000.00',
+      }).success,
+    ).toBe(false);
+    expect(
+      startCsPeriodSchema.safeParse({
+        ...base,
+        durationMonths: 4,
+        monthlyBase: '99999999.99',
+      }).success,
+    ).toBe(false);
+    expect(
+      startCsPeriodSchema.safeParse({
+        ...base,
+        monthlyBase: -1,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('createOrderCostEntrySchema', () => {
+  const base = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000001',
+    orderId: 'order-1',
+    category: OrderCostCategory.MATERIAL,
+    description: '补录纸张',
+    quantity: null,
+    unit: null,
+    unitPrice: null,
+    amount: '1.00',
+    remark: null,
+  };
+
+  it('matches Decimal(12,3) quantity and Decimal(12,4) unit-price bounds', () => {
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        quantity: '999999999.999',
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        quantity: '1000000000.000',
+      }).success,
+    ).toBe(false);
+
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        unitPrice: '99999999.9999',
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        unitPrice: '100000000.0000',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects automatic cost categories at the manual entry boundary', () => {
+    for (const category of [
+      OrderCostCategory.PIECEWORK,
+      OrderCostCategory.OUTSOURCE,
+    ]) {
+      expect(
+        createOrderCostEntrySchema.safeParse({ ...base, category }).success,
+        category,
+      ).toBe(false);
+    }
+  });
+
+  it('allows negative amounts only for explicit adjustments', () => {
+    expect(
+      createOrderCostEntrySchema.safeParse({ ...base, amount: '-1.00' })
+        .success,
+    ).toBe(false);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        category: OrderCostCategory.ADJUSTMENT,
+        amount: '-1.00',
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        category: OrderCostCategory.ADJUSTMENT,
+        amount: '1.00',
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        category: OrderCostCategory.ADJUSTMENT,
+        amount: '0.00',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires amount to equal quantity times unit price after cent rounding', () => {
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        quantity: '12.345',
+        unitPrice: '1.2345',
+        amount: '15.24',
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        quantity: '12.345',
+        unitPrice: '1.2345',
+        amount: '15.23',
+      }).success,
+    ).toBe(false);
+    expect(
+      createOrderCostEntrySchema.safeParse({
+        ...base,
+        quantity: '1',
+        unitPrice: '0.005',
+        amount: '0.01',
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe('recordCsPayrollPaymentSchema', () => {
+  const base = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000003',
+    paidAt: '2026-05-01T10:30',
+    paymentMethod: null,
+    referenceNo: null,
+    remark: null,
+  };
+
+  it('accepts separate bottom-salary and commission amounts', () => {
+    const result = recordCsPayrollPaymentSchema.safeParse({
+      ...base,
+      baseAmount: '2000.00',
+      commissionAmount: '33000.00',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.paidAt.toISOString()).toBe(
+        '2026-05-01T02:30:00.000Z',
+      );
+    }
+  });
+
+  it('rejects zero total, negative values, overflow, and invalid request keys', () => {
+    for (const input of [
+      { ...base, baseAmount: '', commissionAmount: '' },
+      { ...base, baseAmount: '-1', commissionAmount: '0' },
+      { ...base, baseAmount: '10000000000.00', commissionAmount: '0' },
+      {
+        ...base,
+        idempotencyKey: 'not-a-uuid',
+        baseAmount: '1',
+        commissionAmount: '0',
+      },
+    ]) {
+      expect(recordCsPayrollPaymentSchema.safeParse(input).success).toBe(false);
+    }
+  });
+
+  it('rejects impossible Shanghai calendar dates instead of rolling them forward', () => {
+    for (const paidAt of [
+      '2026-02-31T10:30',
+      '2026-04-31T10:30',
+      '2026-05-01T24:00',
+      '2026-05-01T10:60',
+    ]) {
+      expect(
+        recordCsPayrollPaymentSchema.safeParse({
+          ...base,
+          paidAt,
+          baseAmount: '1.00',
+          commissionAmount: '0',
+        }).success,
+        paidAt,
+      ).toBe(false);
+    }
+  });
+});
+
+describe('recordBillPaymentSchema', () => {
+  const base = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000004',
+    amount: '1.00',
+    paymentMethod: null,
+    referenceNo: null,
+    remark: null,
+  };
+
+  it('parses a valid datetime-local value as Shanghai wall time', () => {
+    const result = recordBillPaymentSchema.safeParse({
+      ...base,
+      paidAt: '2026-05-01T10:30',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.paidAt.toISOString()).toBe(
+        '2026-05-01T02:30:00.000Z',
+      );
+    }
+  });
+
+  it('rejects an impossible Shanghai collection date', () => {
+    expect(
+      recordBillPaymentSchema.safeParse({
+        ...base,
+        paidAt: '2026-02-31T10:30',
+      }).success,
+    ).toBe(false);
   });
 });
 
