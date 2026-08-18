@@ -31,7 +31,7 @@ UI：Tailwind CSS + shadcn/ui
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
 可观测性：OpenTelemetry（instrumentation.ts） + Sentry（错误监控）
 PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chromium）
-二维码：qrcode.react（前端）/ qrcode（服务端）
+二维码：qrcode（**仅服务端**，预渲染 SVG 字符串注入；见 lib/order/qr.ts）
 部署：阿里云 ECS + PM2（web + light worker + heavy worker）+ Nginx
 文件存储：阿里云 OSS（直传方案，签发 STS token 由前端直接上传）
 包管理：pnpm
@@ -592,6 +592,15 @@ pnpm test:e2e -- tests/e2e/order-create.spec.ts   # 单个 spec
 pnpm test:e2e:install                # 首次装 chromium
 pnpm test:admin-ui / pnpm test:worker-ui          # 只跑响应式门禁
 pnpm test:visual:update              # 更新截图基线（改动须写进 commit message，见 §8.4）
+
+# ⚠️ 不要给 tests/visual 或 tests/e2e 加 --workers！
+#    playwright.config.ts 里的 `workers: 1` + `fullyParallel: false` 是为
+#    「所有 spec 共用同一个开发库」刻意设的（配置里就有这行注释）。加并发
+#    后 tests/e2e/_helpers.ts 的 login() 会随机 `waitForURL` 超时——实测
+#    --workers=4 下 56 个用例里 16 个失败，其中 15 个是这种登录竞争，看起来
+#    像业务代码坏了，实际只是跑法不对。串行同一份代码是 55/56。
+#    唯一已知安全的例外是 package.json 里 test:admin-ui / test:worker-ui
+#    自带的 --workers=4：它们只跑单个 spec，不和别的 spec 抢库。
 
 pnpm db:migrate              # prisma migrate dev
 pnpm db:seed                 # prisma db seed（tsx prisma/seed.ts）
