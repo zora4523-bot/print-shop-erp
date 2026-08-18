@@ -215,7 +215,7 @@ export function CreateOutsourceForm({
       </section>
 
       {state?.status === 'error' ? (
-        <p className="text-sm text-destructive" aria-live="polite">
+        <p role="alert" className="text-sm text-destructive" aria-live="polite">
           {state.message}
         </p>
       ) : null}

@@ -43,7 +43,7 @@ export function UrgentToggleForm({ orderId, currentValue }: Props) {
             : '标记为急单'}
       </Button>
       {state?.status === 'error' && (
-        <span className="text-xs text-destructive">{state.message}</span>
+        <span role="alert" className="text-xs text-destructive">{state.message}</span>
       )}
     </form>
   );

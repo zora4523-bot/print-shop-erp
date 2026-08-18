@@ -55,7 +55,7 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
         </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
         <p className="text-xs text-destructive">

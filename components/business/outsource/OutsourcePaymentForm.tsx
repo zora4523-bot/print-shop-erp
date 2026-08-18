@@ -134,7 +134,7 @@ export function OutsourcePaymentForm({
         </p>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive" role="alert">
+        <p role="alert" className="text-xs text-destructive">
           {state.message}
         </p>
       ) : null}

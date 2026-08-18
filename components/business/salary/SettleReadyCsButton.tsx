@@ -35,7 +35,7 @@ export function SettleReadyCsButton() {
         </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <span className="text-xs text-destructive">{state.message}</span>
+        <span role="alert" className="text-xs text-destructive">{state.message}</span>
       ) : null}
     </div>
   );

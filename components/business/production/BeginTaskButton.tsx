@@ -29,7 +29,7 @@ export function BeginTaskButton({ taskId }: Props) {
         {pending ? '开始中…' : '开始生产'}
       </Button>
       {state?.status === 'error' ? (
-        <p aria-live="polite" className="mt-2 text-sm text-destructive">
+        <p role="alert" className="mt-2 text-sm text-destructive">
           {state.message}
         </p>
       ) : null}

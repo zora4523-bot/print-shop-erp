@@ -437,7 +437,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
       ) : null}
 
       {state?.status === 'error' ? (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p role="alert" className="text-sm text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
         <div role="alert" className="text-sm text-destructive">

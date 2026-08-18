@@ -183,7 +183,7 @@ export function WorkerMachineRuleForm({
         </p>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
         <p className="text-xs text-success-foreground">规则版本已生效。</p>

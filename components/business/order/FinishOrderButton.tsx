@@ -19,7 +19,7 @@ export function FinishOrderButton({ orderId }: { orderId: string }) {
         {pending ? '处理中…' : '确认完工'}
       </Button>
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
     </form>
   );

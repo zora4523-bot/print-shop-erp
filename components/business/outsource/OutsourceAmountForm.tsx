@@ -98,7 +98,7 @@ export function OutsourceAmountForm({
         </p>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive" aria-live="polite">
+        <p role="alert" className="text-xs text-destructive" aria-live="polite">
           {state.message}
         </p>
       ) : null}

@@ -39,7 +39,7 @@ export function MarkPaidForm({ id, currentPaid, returnTo }: Props) {
             : '标记已发'}
       </Button>
       {state?.status === 'error' ? (
-        <span className="ml-2 text-xs text-destructive">{state.message}</span>
+        <span role="alert" className="ml-2 text-xs text-destructive">{state.message}</span>
       ) : null}
     </form>
   );

@@ -170,7 +170,7 @@ export function StartCsPeriodForm({ csUsers }: Props) {
       </div>
 
       {state?.status === 'error' ? (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p role="alert" className="text-sm text-destructive">{state.message}</p>
       ) : null}
 
       <div className="flex items-center gap-3">

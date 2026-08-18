@@ -131,7 +131,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
       </section>
 
       {state?.status === 'error' && (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p role="alert" className="text-sm text-destructive">{state.message}</p>
       )}
 
       <div className="flex items-center gap-3">

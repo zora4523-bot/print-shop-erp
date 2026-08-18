@@ -68,7 +68,7 @@ export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
       </p>
 
       {state?.status === 'error' ? (
-        <p aria-live="polite" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {state.message}
         </p>
       ) : null}

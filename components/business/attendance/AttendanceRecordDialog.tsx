@@ -201,7 +201,7 @@ export function AttendanceRecordDialog({
       </label>
 
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
         <ul className="text-xs text-destructive space-y-1">

@@ -169,7 +169,7 @@ export function CreateBundleForm({
           {isPending ? '生成中…' : '生成下载包'}
         </Button>
         {state?.status === 'error' ? (
-          <p className="text-sm text-destructive">{state.message}</p>
+          <p role="alert" className="text-sm text-destructive">{state.message}</p>
         ) : null}
         {state?.status === 'invalid' ? (
           <p className="text-sm text-destructive">
