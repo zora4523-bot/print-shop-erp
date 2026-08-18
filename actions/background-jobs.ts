@@ -6,21 +6,38 @@ import {
   cancelPendingBackgroundJob,
   retryDeadBackgroundJob,
 } from '@/lib/background-jobs/repository';
+import type { BackgroundJobMutationResult } from './background-jobs.types';
 
 const JOBS_PATH = '/owner/background-jobs';
 
-export async function retryBackgroundJobAction(formData: FormData): Promise<void> {
+export async function retryBackgroundJobAction(
+  _prev: BackgroundJobMutationResult | null,
+  formData: FormData,
+): Promise<BackgroundJobMutationResult> {
   await requirePermission('ops:jobs:manage');
   const jobId = readJobId(formData);
-  await retryDeadBackgroundJob(jobId);
+  const done = await retryDeadBackgroundJob(jobId);
   revalidatePath(JOBS_PATH);
+  // false = 任务已不在 DEAD 态（别人先处理了 / worker 自己重试了）。
+  // 静默 no-op 会让运维以为点成功了。
+  if (!done) {
+    return { status: 'error', message: '任务状态已变化，请刷新后重试' };
+  }
+  return { status: 'success', message: '已重新入队' };
 }
 
-export async function cancelBackgroundJobAction(formData: FormData): Promise<void> {
+export async function cancelBackgroundJobAction(
+  _prev: BackgroundJobMutationResult | null,
+  formData: FormData,
+): Promise<BackgroundJobMutationResult> {
   await requirePermission('ops:jobs:manage');
   const jobId = readJobId(formData);
-  await cancelPendingBackgroundJob(jobId);
+  const done = await cancelPendingBackgroundJob(jobId);
   revalidatePath(JOBS_PATH);
+  if (!done) {
+    return { status: 'error', message: '任务已开始执行或已结束，无法取消' };
+  }
+  return { status: 'success', message: '已取消' };
 }
 
 function readJobId(formData: FormData): string {

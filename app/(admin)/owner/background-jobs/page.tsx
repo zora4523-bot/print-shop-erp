@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { BackgroundJobActionButton } from '@/components/business/admin/BackgroundJobActionButton';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
@@ -115,7 +116,7 @@ function JobOperation({ job }: {
   }
   if (operation === 'RETRY') {
     return (
-      <JobAction
+      <BackgroundJobActionButton
         action={retryBackgroundJobAction}
         jobId={job.id}
         label="重试"
@@ -124,7 +125,7 @@ function JobOperation({ job }: {
   }
   if (operation === 'CANCEL') {
     return (
-      <JobAction
+      <BackgroundJobActionButton
         action={cancelBackgroundJobAction}
         jobId={job.id}
         label="取消"
@@ -152,11 +153,3 @@ function JobStatus({ status }: { status: BackgroundJobStatus }) {
   return <Badge variant={variant}>{status}</Badge>;
 }
 
-function JobAction({ action, jobId, label }: { action: (formData: FormData) => Promise<void>; jobId: string; label: string }) {
-  return (
-    <form action={action}>
-      <input type="hidden" name="jobId" value={jobId} />
-      <Button variant="outline" size="xs" type="submit">{label}</Button>
-    </form>
-  );
-}
