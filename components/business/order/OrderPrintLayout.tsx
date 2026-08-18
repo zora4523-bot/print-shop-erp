@@ -41,11 +41,41 @@ export function OrderPrintLayout({
     <>
       <style>{PRINT_CSS}</style>
 
-      <div
-        className={`print-container ${
-          order.items.length === 3 ? 'compact-3' : ''
-        }`}
-      >
+      {/* 表格外壳：thead / tfoot 是浏览器**原生**的「每页重复」机制，
+          浏览器打印和 Puppeteer PDF 两条路径行为一致，而且会为页眉页脚
+          预留空间。此前页脚用 position: fixed，Chrome 每页重画它却不占
+          位，实测 168 个组合里 125 个（74%）压在正文墨迹上。
+          业主 2026-08-18 决策：放弃「三款一页」，改显式分页 + 每页重复
+          表头。 */}
+      <table className="print-sheet">
+        <thead>
+          <tr>
+            <td>
+              <div className="running-header">
+                <span className="running-header-no">{order.orderNo}</span>
+                <span className="running-header-name">
+                  {order.customName ?? order.customerRef ?? ''}
+                </span>
+                {order.isUrgent ? (
+                  <span className="running-header-urgent">急单</span>
+                ) : null}
+              </div>
+            </td>
+          </tr>
+        </thead>
+        <tfoot>
+          <tr>
+            <td>
+              <div className="print-footer">
+                打印时间：{formatShanghaiDateTime(printedAt)}
+              </div>
+            </td>
+          </tr>
+        </tfoot>
+        <tbody>
+          <tr>
+            <td>
+      <div className="print-container">
         {order.kind === 'REWORK' ? (
           <div className="rework-banner">
             重 做 单
@@ -159,8 +189,11 @@ export function OrderPrintLayout({
           ) : null}
         </div>
 
-        <div className="print-footer">打印时间：{formatShanghaiDateTime(printedAt)}</div>
       </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </>
   );
 }
@@ -286,13 +319,74 @@ const PRINT_CSS = `
     size: A4 portrait;
     margin: 10mm;
   }
+  /* 打印视图按定义是纸张模拟，不跟随界面主题。根 layout 的主题脚本会在
+     hydration 前把 .dark 打到 <html> 上，globals.css 的 body 于是变成
+     深色背景，而 PRINT_CSS 只设了 color:#000 —— 结果管理员开着暗色主题
+     点「打印」，预览是黑底黑字，整页看不见。
+     这份 style 只在打印路由注入（OrderPrintLayout 的两个消费者都是打印
+     路径），所以裸 body 选择器的作用域是安全的。 */
+  html:has(.print-sheet), html:has(.print-sheet) body {
+    background: #fff;
+    color: #000;
+    color-scheme: light;
+  }
+
+  /* 两条渲染路径（浏览器 window.print() 与 PDF 的 buildPrintHtml doc
+     shell）之前 box-sizing 不一致，设计图在 PDF 侧比网页宽 2px 并溢出
+     网格格子。reset 放在这里，两条路径共用同一份规则。 */
+  .print-sheet, .print-sheet *, .print-sheet *::before, .print-sheet *::after {
+    box-sizing: border-box;
+  }
+  .print-sheet img, .print-sheet svg { display: block; }
+
+  /* 运行页眉 / 页脚：thead、tfoot 由浏览器在每个打印页重复并预留空间。 */
+  .print-sheet {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .print-sheet > thead > tr > td,
+  .print-sheet > tfoot > tr > td,
+  .print-sheet > tbody > tr > td {
+    padding: 0;
+  }
+  .running-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    border-bottom: 1px solid #999;
+    padding-bottom: 3px;
+    margin-bottom: 6px;
+    font-size: 10px;
+    color: #444;
+  }
+  .running-header-no { font-weight: bold; color: #000; }
+  .running-header-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .running-header-urgent { color: #dc2626; font-weight: bold; }
+
   @media print {
     body { margin: 0; padding: 0; }
     .no-print { display: none !important; }
-    .order-item { page-break-inside: avoid; }
+    /* 不要对整个 .order-item 用 avoid：款式本身高于一页时，浏览器无处
+       可断，会塌陷成「非单调页数 + 近乎空白页」。只保护真正不可切的
+       子块，让高款式正常跨页。 */
+    .item-header { break-after: avoid; page-break-after: avoid; }
+    .task-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .design-grid figure { break-inside: avoid; page-break-inside: avoid; }
     .page-break { page-break-before: always; }
+    /* 首页不需要重复页眉——它下面紧跟着完整的工单抬头。 */
+    .print-sheet > thead { display: table-header-group; }
+    .print-sheet > tfoot { display: table-footer-group; }
   }
   .print-container {
+    /* 打印视图按定义是纸张模拟，不该跟随界面主题。此前暗色模式下
+       /print/orders/{id} 是黑底黑字（PRINT_CSS 只设了 color:#000，
+       没设 background），整页看不见。 */
+    background: #fff;
     font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC",
       "Microsoft YaHei", Arial, sans-serif;
     color: #000;
@@ -434,98 +528,15 @@ const PRINT_CSS = `
     margin-top: 2px;
     overflow-wrap: anywhere;
   }
-  .compact-3 {
-    line-height: 1.25;
-  }
-  .compact-3 .rework-banner,
-  .compact-3 .urgent-banner {
-    padding: 3px;
-    font-size: 13px;
-    margin-bottom: 4px;
-  }
-  .compact-3 .order-header {
-    padding-bottom: 4px;
-    margin-bottom: 5px;
-  }
-  .compact-3 .factory-name { font-size: 9px; }
-  .compact-3 .order-title {
-    display: inline;
-    margin: 0 5px 0 0;
-    font-size: 16px;
-  }
-  .compact-3 .order-no {
-    display: inline;
-    font-size: 12px;
-  }
-  .compact-3 .order-custom-name {
-    margin-top: 1px;
-    font-size: 11px;
-  }
-  .compact-3 .order-header svg {
-    width: 18mm;
-    height: 18mm;
-  }
-  .compact-3 .order-meta {
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 2px 8px;
-    margin-bottom: 5px;
-    font-size: 9px;
-  }
-  .compact-3 .order-item {
-    margin-bottom: 5px;
-    padding: 4px;
-  }
-  .compact-3 .item-header {
-    padding-bottom: 2px;
-    margin-bottom: 3px;
-    font-size: 11px;
-  }
-  .compact-3 .item-body { gap: 5px; }
-  .compact-3 .design-grid {
-    gap: 1mm;
-    padding: 1mm;
-  }
-  .compact-3 .design-grid.count-1      { grid-template-columns: 34mm; }
-  .compact-3 .design-grid.count-2      { grid-template-columns: 25mm 25mm; }
-  .compact-3 .design-grid.count-3-4    { grid-template-columns: 20mm 20mm; }
-  .compact-3 .design-grid.count-5-6    { grid-template-columns: 17mm 17mm 17mm; }
-  .compact-3 .design-grid.count-7-9    { grid-template-columns: 15mm 15mm 15mm; }
-  .compact-3 .design-grid.count-many   { grid-template-columns: 13mm 13mm 13mm; }
-  .compact-3 .design-empty {
-    width: 34mm;
-    font-size: 9px;
-  }
-  .compact-3 .item-info { font-size: 9px; }
-  .compact-3 .item-info dl {
-    gap: 1px 4px;
-  }
-  .compact-3 .item-remark {
-    margin-top: 3px;
-    font-size: 9px;
-  }
-  .compact-3 .task-table {
-    margin-top: 3px;
-    font-size: 8px;
-  }
-  .compact-3 .task-table th,
-  .compact-3 .task-table td {
-    padding: 1px 3px;
-  }
-  .compact-3 .task-table svg {
-    width: 15mm;
-    height: 15mm;
-  }
-  .compact-3 .order-footer {
-    margin-top: 5px;
-    padding-top: 4px;
-    font-size: 9px;
-  }
-  .compact-3 .shipment-list { margin-top: 3px; }
+  /* compact-3 已移除：它把三款工单的字号压小以塞进一张 A4，
+     而工单一旦排产仍然放不下。业主 2026-08-18 决策改为显式分页 +
+     每页重复表头，车间拿到的字号因此恢复正常大小。 */
+  /* 不再用 position: fixed —— 它每页重画却不占位，会压住正文。现在
+     由 tfoot 承载，浏览器自动每页重复并预留空间。 */
   .print-footer {
-    position: fixed;
-    bottom: 5mm;
-    left: 0;
-    right: 0;
+    border-top: 1px solid #ccc;
+    margin-top: 6px;
+    padding-top: 3px;
     text-align: center;
     font-size: 10px;
     color: #666;

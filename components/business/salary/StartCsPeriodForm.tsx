@@ -47,9 +47,10 @@ export function StartCsPeriodForm({ csUsers }: Props) {
     >
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label className="text-xs text-muted-foreground">客服 *</Label>
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-user">客服 *</Label>
           <select
             name="csUserId"
+            id="cs-user"
             className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
             defaultValue=""
             disabled={pending || missingCsUsers}
@@ -74,8 +75,9 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </div>
 
         <div>
-          <Label className="text-xs text-muted-foreground">周期起始日期 *</Label>
-          <Input type="date" name="periodStart" className="mt-1" />
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-period-start">周期起始日期 *</Label>
+          <Input type="date" name="periodStart"
+            id="cs-period-start" className="mt-1" />
           {errs(state, 'periodStart').length > 0 ? (
             <p className="mt-1 text-xs text-destructive">
               {errs(state, 'periodStart')[0]}
@@ -84,12 +86,13 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </div>
 
         <div>
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-duration-months">
             周期月数（留空 = 按当前规则）
           </Label>
           <Input
             type="number"
             name="durationMonths"
+            id="cs-duration-months"
             inputMode="numeric"
             min={1}
             max={24}
@@ -104,12 +107,13 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </div>
 
         <div>
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-monthly-base">
             月底薪 (元)（留空 = 按当前规则）
           </Label>
           <Input
             type="text"
             name="monthlyBase"
+            id="cs-monthly-base"
             inputMode="decimal"
             placeholder="2000"
             className="mt-1"
@@ -122,12 +126,13 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </div>
 
         <div className="col-span-2">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-initial-sales">
             期初业绩 (元) — 历史导入用，新客服留空
           </Label>
           <Input
             type="text"
             name="initialSales"
+            id="cs-initial-sales"
             inputMode="decimal"
             placeholder="0"
             className="mt-1"
@@ -140,10 +145,11 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </div>
 
         <div className="col-span-2">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-xs text-muted-foreground" htmlFor="cs-base-months-paid">
             已发底薪月数 — 历史导入用，新客服留空
           </Label>
           <Input
+            id="cs-base-months-paid"
             type="number"
             name="baseMonthsAlreadyPaid"
             inputMode="numeric"

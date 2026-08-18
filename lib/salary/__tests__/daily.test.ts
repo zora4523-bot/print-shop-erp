@@ -81,6 +81,7 @@ function dailyTask(
 ) {
   return {
     id,
+    workerType: WorkerType.MACHINE,
     machineType,
     completedQty: 100,
     defectQty: 0,
@@ -160,7 +161,7 @@ describe('computeDailyWorkerSalary', () => {
   beforeEach(() => {
     dbMock.user.findUnique.mockReset();
     dbMock.user.findMany.mockReset();
-    dbMock.productionTask.findMany.mockReset();
+    dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
     dbMock.salaryRule.findFirst
       .mockReset()
       .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
@@ -195,6 +196,55 @@ describe('computeDailyWorkerSalary', () => {
     await expect(
       computeDailyWorkerSalary('worker-1', '2026-04-23'),
     ).rejects.toThrow(/仅 WorkerType\.MACHINE/);
+  });
+
+  it.each([
+    [
+      '改岗',
+      {
+        ...workerFixture,
+        role: Role.SALES,
+        workerType: null,
+        machineType: null,
+        isActive: true,
+      },
+    ],
+    [
+      '改工种',
+      {
+        ...workerFixture,
+        workerType: WorkerType.PACKER,
+        machineType: null,
+        isActive: true,
+      },
+    ],
+    ['停用', { ...workerFixture, isActive: false }],
+  ])('uses frozen completed tasks after the worker is %s', async (_label, currentWorker) => {
+    dbMock.user.findUnique.mockResolvedValue(currentWorker);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('120.00', 'historical-order'),
+    ]);
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).resolves.toMatchObject({
+      workerId: 'worker-1',
+      totalPieceworkAmount: '120.00',
+      actualSalary: '120.00',
+    });
+  });
+
+  it('fails closed when a completed task lacks its worker-type snapshot', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { ...dailyTask('120.00', 'legacy-order'), workerType: null },
+    ]);
+
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23'),
+    ).rejects.toThrow(/缺少完工时工种或机型快照/);
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
   });
 
   it('refuses when the machine worker has no active rule (loud, not silent zero)', async () => {
@@ -577,6 +627,35 @@ describe('computeDailyForAllMachineWorkers', () => {
     ]);
   });
 
+  it('batch includes a deactivated worker who has a frozen completed task that day', async () => {
+    dbMock.user.findMany.mockResolvedValue([{ id: 'historical-worker' }]);
+    dbMock.user.findUnique.mockResolvedValue({
+      ...workerFixture,
+      id: 'historical-worker',
+      isActive: false,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      dailyTask('120.00', 'historical-order'),
+    ]);
+
+    const result = await computeDailyForAllMachineWorkers('2026-04-23');
+
+    expect(result.settled).toHaveLength(1);
+    expect(result.settled[0]).toMatchObject({
+      workerId: 'historical-worker',
+      actualSalary: '120.00',
+    });
+    const where = dbMock.user.findMany.mock.calls[0][0].where;
+    expect(where.OR[1].assignedTasks.some).toMatchObject({
+      status: 'COMPLETED',
+      completedAt: { gte: expect.any(Date), lt: expect.any(Date) },
+    });
+    expect(where.OR[1].assignedTasks.some.OR).toEqual([
+      { workerType: WorkerType.MACHINE },
+      { workerType: null, machineType: { not: null } },
+    ]);
+  });
+
   it('rethrows an unexpected worker failure with committed partial results', async () => {
     const databaseFailure = new Error('connection lost');
     dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]);
@@ -837,6 +916,9 @@ describe('markDailySalaryPaid', () => {
     dbMock.dailyWorkerSalary.update.mockReset().mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+      // markDailySalaryPaid 现在把师傅名一起带回去，供调用方渲染
+      // 「已标记 XXX 为已发放」的回执——发钱操作不能只吐 id。
+      worker: { displayName: '张师傅' },
     });
     dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
     dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {

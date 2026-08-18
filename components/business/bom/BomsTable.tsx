@@ -38,7 +38,7 @@ export function BomsTable({
   }
 
   return (
-    <Table>
+    <Table label="BOM 列表">
       <TableHeader>
         <TableRow>
           <TableHead>BOM</TableHead>

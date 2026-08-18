@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
   OrderKind,
+  OrderSettlementType,
   OrderStatus,
   ReworkCause,
   Role,
@@ -66,7 +67,7 @@ const sourceOrder = {
       foilColors: ['哑金', '红金'],
       isDoubleSided: false,
       isDoubleColor: true,
-      suggestedPrice: null,
+      suggestedSubtotal: null,
       remark: '正面文字不能偏',
       designs: [
         {
@@ -156,6 +157,7 @@ describe('createReworkOrder', () => {
       status: OrderStatus.SUBMITTED,
       kind: OrderKind.REWORK,
       billingMode: OrderBillingMode.NO_CHARGE,
+      settlementType: OrderSettlementType.NO_CHARGE,
       sourceOrderId: 'source-1',
       reworkCause: ReworkCause.QUALITY,
       totalAmount: '0.00',
@@ -166,7 +168,10 @@ describe('createReworkOrder', () => {
       quantity: 120,
       crafts: ['craft-foil'],
       unitPrice: '0',
+      fixedFee: '0',
       subtotal: '0',
+      suggestedSubtotal: null,
+      priceOverrideReason: '免费重做，不计加工费',
     });
     expect(data.items.create[0].designs.create).toEqual([
       expect.objectContaining({

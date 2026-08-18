@@ -12,6 +12,7 @@ export const TONES = [
   'warning',
   'info',
   'success',
+  'danger',
   'neutral',
 ] as const;
 
@@ -25,6 +26,7 @@ export const TONE_ICON_BOX: Record<Tone, string> = {
   warning: 'bg-warning/10 text-warning',
   info: 'bg-info/10 text-info',
   success: 'bg-success/10 text-success',
+  danger: 'bg-destructive/10 text-destructive',
   neutral: 'bg-muted text-muted-foreground',
 };
 
@@ -34,7 +36,21 @@ export const TONE_BADGE_SOFT: Record<Tone, string> = {
   warning: 'bg-warning/10 text-warning-foreground border-warning/30',
   info: 'bg-info/10 text-info-foreground border-info/30',
   success: 'bg-success/10 text-success-foreground border-success/30',
+  // 「已取消 / 失败」这类**非正常终态**专用。之前只能退回 neutral，
+  // 结果和「草稿」「已完成」同色，用户分不出正常结束和被取消。
+  danger: 'bg-destructive/10 text-destructive border-destructive/30',
   neutral: 'bg-muted text-foreground border-border',
+};
+
+// 实心圆点：StatusBadge 的“进行中”指示点。之前是组件里一串五层三元，
+// 加第六个 tone 时必然漏改，抽成 map 让 Record<Tone,…> 强制穷尽。
+export const TONE_DOT: Record<Tone, string> = {
+  primary: 'bg-primary',
+  warning: 'bg-warning',
+  info: 'bg-info',
+  success: 'bg-success',
+  danger: 'bg-destructive',
+  neutral: 'bg-muted-foreground',
 };
 
 // 文本前景（无背景，纯文字色）：状态文字 / 趋势上下行箭头共用。
@@ -43,5 +59,6 @@ export const TONE_TEXT: Record<Tone, string> = {
   warning: 'text-warning',
   info: 'text-info',
   success: 'text-success',
+  danger: 'text-destructive',
   neutral: 'text-muted-foreground',
 };

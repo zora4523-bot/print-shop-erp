@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role } from '../../../generated/prisma/client';
+import { OrderStatus, Role } from '../../../generated/prisma/client';
 
 vi.mock('@/lib/auth/session', () => ({
   requireSession: vi.fn(),
@@ -41,6 +41,7 @@ describe('PERMISSIONS map', () => {
       'order:update:post-schedule',
       'order:view:all',
       'order:view:self',
+      'order:export:all',
       'order:schedule',
       'order:ship',
       'order:mark-urgent',
@@ -91,6 +92,7 @@ describe('PERMISSIONS map', () => {
     const adminOnly: Permission[] = [
       'order:cancel',
       'order:change:review',
+      'order:export:all',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
@@ -116,6 +118,10 @@ describe('PERMISSIONS map', () => {
   it('worker-only permission task:report is [WORKER]', () => {
     expect(PERMISSIONS['task:report']).toEqual([Role.WORKER]);
   });
+
+  it('external-sales self billing is SALES-only', () => {
+    expect(PERMISSIONS['bill:view:self']).toEqual([Role.SALES]);
+  });
 });
 
 describe('requirePermission', () => {
@@ -133,6 +139,8 @@ describe('requirePermission', () => {
     [Role.CUSTOMER_SERVICE, 'order:create'],
     [Role.ADMIN, 'order:create'],
     [Role.ADMIN, 'account:manage'],
+    [Role.ADMIN, 'order:export:all'],
+    [Role.SALES, 'bill:view:self'],
     [Role.WORKER, 'task:report'],
     [Role.WORKER, 'order:view:self'],
     [Role.WORKER, 'salary:view:self'],
@@ -149,6 +157,8 @@ describe('requirePermission', () => {
     [Role.SALES, 'account:manage'],
     [Role.CUSTOMER_SERVICE, 'salary:rule:manage'],
     [Role.WORKER, 'order:view:all'],
+    [Role.SALES, 'order:export:all'],
+    [Role.CUSTOMER_SERVICE, 'bill:view:self'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
     mockedRequireSession.mockResolvedValue(session(role));
@@ -218,8 +228,9 @@ describe('getOrderScopeFilter', () => {
     });
   });
 
-  it('WORKER sees orders whose items have a task assigned to them', () => {
+  it('WORKER sees assigned orders only after they leave the scheduling-draft state', () => {
     expect(getOrderScopeFilter({ id: 'w1', role: Role.WORKER })).toEqual({
+      status: { not: OrderStatus.SUBMITTED },
       items: { some: { tasks: { some: { workerId: 'w1' } } } },
     });
   });

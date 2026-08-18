@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { Role } from '../../generated/prisma/enums';
+import { OrderSettlementType } from '../../generated/prisma/enums';
 
 type CsSalesEntryForAttribution = {
   amount: Decimal.Value;
@@ -10,7 +10,7 @@ type CsSalesEntryForAttribution = {
 
 type BillItemForAttribution = {
   order: {
-    submitterRole?: Role;
+    settlementType?: OrderSettlementType;
     csSalesEntries: CsSalesEntryForAttribution[];
   };
 };
@@ -25,16 +25,16 @@ export type CsBillAttribution = {
 };
 
 /**
- * A bill belongs to the CS sales flow based on immutable order history, not
- * the account's current role. The ledger fallback also keeps migrated rows
- * visible if a historical snapshot is incomplete.
+ * A bill belongs to the internal-sales flow based on its immutable commercial
+ * settlement path, not an account role. The ledger fallback keeps migrated
+ * rows visible if a historical snapshot is incomplete.
  */
 export function hasCustomerServiceAttribution(
   items: BillItemForAttribution[],
 ): boolean {
   return items.some(
     (item) =>
-      item.order.submitterRole === Role.CUSTOMER_SERVICE ||
+      item.order.settlementType === OrderSettlementType.INTERNAL_SALES ||
       item.order.csSalesEntries.length > 0,
   );
 }

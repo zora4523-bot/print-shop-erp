@@ -10,7 +10,9 @@ export default async function ChangePasswordPage() {
   await requireSession();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40 p-4">
+    // main + touch-viewport：这条路由同样在 (admin)/(worker) 壳之外，
+    // 既没有地标也拿不到 44px 触控兜底。见 app/(auth)/login/layout.tsx。
+    <main className="touch-viewport min-h-screen flex items-center justify-center bg-muted/40 p-4">
       <div className="w-full max-w-sm rounded-xl border bg-card p-8 shadow-sm space-y-6">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">修改密码</h1>
@@ -23,6 +25,6 @@ export default async function ChangePasswordPage() {
           </Link>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

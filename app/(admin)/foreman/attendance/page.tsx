@@ -196,7 +196,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                         </span>
                       </div>
                       {att ? (
-                        <div className="mt-1 font-sans tabular-nums text-[10px] leading-tight">
+                        <div className="mt-1 font-sans tabular-nums text-xs leading-tight">
                           上班 {String(att.workUnits)} 天
                           {Number(att.leaveUnits) > 0 ? (
                             <>
@@ -220,7 +220,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                           ) : null}
                         </div>
                       ) : (
-                        <Badge variant="outline" className="mt-1 text-[10px]">
+                        <Badge variant="outline" className="mt-1 text-xs">
                           未录
                         </Badge>
                       )}

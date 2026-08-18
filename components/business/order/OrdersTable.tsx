@@ -1,6 +1,11 @@
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
-import type { OrderListRow } from '@/lib/order';
+import type {
+  OrderListQuery,
+  OrderListRow,
+  OrderListSortKey,
+} from '@/lib/order/list-query';
+import type { TableHrefParams } from '@/lib/admin/table';
 import {
   Table,
   TableBody,
@@ -15,13 +20,20 @@ import { OrderStatusBadge } from './OrderStatusBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { OrderKind } from '@/generated/prisma/enums';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
+import { AdminSortLink } from '@/components/business/admin/AdminDataTable';
 
 export function OrdersTable({
   orders,
+  showCommercialAmounts = true,
   showPieceworkCost = false,
+  query,
+  queryParams,
 }: {
   orders: OrderListRow[];
+  showCommercialAmounts?: boolean;
   showPieceworkCost?: boolean;
+  query: OrderListQuery;
+  queryParams: TableHrefParams;
 }) {
   if (orders.length === 0) {
     return (
@@ -34,22 +46,55 @@ export function OrdersTable({
   }
 
   return (
-    <Table>
+    <Table label="工单列表">
       <TableHeader>
         <TableRow>
-          <TableHead>工单号</TableHead>
+          <TableHead aria-sort={ariaSort(query, 'orderNo')}>
+            <AdminSortLink
+              basePath="/orders"
+              field="orderNo"
+              label="工单号"
+              currentSort={query.sort}
+              currentDirection={query.dir}
+              queryParams={queryParams}
+            />
+          </TableHead>
           <TableHead>工单名称</TableHead>
           <TableHead>客户名称/简称</TableHead>
           <TableHead>收货信息</TableHead>
           <TableHead>提交人</TableHead>
           <TableHead>师傅</TableHead>
-          <TableHead className="text-right">金额</TableHead>
+          {showCommercialAmounts ? (
+            <TableHead
+              className="text-right"
+              aria-sort={ariaSort(query, 'totalAmount')}
+            >
+              <AdminSortLink
+                basePath="/orders"
+                field="totalAmount"
+                label="金额"
+                currentSort={query.sort}
+                currentDirection={query.dir}
+                queryParams={queryParams}
+                className="justify-end"
+              />
+            </TableHead>
+          ) : null}
           {showPieceworkCost ? (
             <TableHead className="text-right">计件成本</TableHead>
           ) : null}
           <TableHead>状态</TableHead>
           <TableHead>标记</TableHead>
-          <TableHead>创建于</TableHead>
+          <TableHead aria-sort={ariaSort(query, 'createdAt')}>
+            <AdminSortLink
+              basePath="/orders"
+              field="createdAt"
+              label="创建日期"
+              currentSort={query.sort}
+              currentDirection={query.dir}
+              queryParams={queryParams}
+            />
+          </TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -89,9 +134,11 @@ export function OrdersTable({
                 {o.workerNames.length ? o.workerNames.join('、') : '未派工'}
               </span>
             </TableCell>
-            <TableCell className="text-right font-sans tabular-nums text-xs">
-              {String(o.totalAmount)}
-            </TableCell>
+            {showCommercialAmounts ? (
+              <TableCell className="text-right font-sans tabular-nums text-xs">
+                {String(o.totalAmount)}
+              </TableCell>
+            ) : null}
             {showPieceworkCost ? (
               <TableCell className="text-right font-sans tabular-nums text-xs">
                 ¥ {o.pieceworkCost ?? '0.00'}
@@ -140,4 +187,12 @@ export function OrdersTable({
       </TableBody>
     </Table>
   );
+}
+
+function ariaSort(
+  query: OrderListQuery,
+  field: OrderListSortKey,
+): 'ascending' | 'descending' | 'none' {
+  if (query.sort !== field) return 'none';
+  return query.dir === 'asc' ? 'ascending' : 'descending';
 }

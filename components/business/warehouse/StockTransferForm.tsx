@@ -159,7 +159,7 @@ export function StockTransferForm({
         </p>
       ) : null}
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p role="status" className="text-sm text-success">✓ {success}</p> : null}
+      {success ? <p role="status" className="text-sm text-success-foreground">✓ {success}</p> : null}
       <Button type="submit" disabled={pending || prerequisitesMissing}>
         {pending ? '调拨中…' : '确认调拨'}
       </Button>

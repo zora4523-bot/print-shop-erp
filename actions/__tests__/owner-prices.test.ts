@@ -73,7 +73,8 @@ const validAdjustment = {
   name: '烫金加价',
   adjustmentType: 'PER_SHEET',
   amount: '0.0300',
-  triggerCondition: '{"craft":"foil"}',
+  triggerCondition:
+    '{"craftIds":["craft-foil"],"craftMode":"ANY","unitsPerSheet":500}',
 };
 
 const fd = (data: Record<string, string>) => {
@@ -119,8 +120,8 @@ describe('createPriceTierAction', () => {
       productId: 'prod1',
       minQty: 1000,
       unitPrice: '0.1200',
-      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
-      effectiveTo: new Date('2026-06-01T00:00:00.000Z'),
+      effectiveFrom: new Date('2025-12-31T16:00:00.000Z'),
+      effectiveTo: new Date('2026-05-31T16:00:00.000Z'),
     });
     expect(redirectMock).toHaveBeenCalledWith('/owner/prices/tiers/tier1');
   });
@@ -215,9 +216,75 @@ describe('createPriceAdjustmentAction', () => {
       name: '烫金加价',
       adjustmentType: AdjustmentType.PER_SHEET,
       amount: '0.0300',
-      triggerCondition: { craft: 'foil' },
+      triggerCondition: {
+        craftIds: ['craft-foil'],
+        craftMode: 'ANY',
+        unitsPerSheet: 500,
+      },
     });
     expect(redirectMock).toHaveBeenCalledWith('/owner/prices/adjustments/adj1');
+  });
+
+  it.each([
+    ['{"craft":"foil","unitsPerSheet":500}', '未知字段：craft'],
+    ['{"craftIds":"craft-foil","unitsPerSheet":500}', 'craftIds必须是'],
+    ['{"craftMode":"ALL","unitsPerSheet":500}', 'craftMode 必须与 craftIds'],
+    ['{"minQty":2000,"maxQty":1000,"unitsPerSheet":500}', 'minQty 不能大于 maxQty'],
+    ['{"perFoilColor":1,"unitsPerSheet":500}', 'perFoilColor必须是布尔值'],
+    ['{}', '按张计价必须提供正整数 unitsPerSheet'],
+    ['{"unitsPerSheet":0}', 'unitsPerSheet必须是正整数'],
+  ])(
+    'rejects triggerCondition outside the quote contract: %s',
+    async (triggerCondition, expectedMessage) => {
+      permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+      const result = await createPriceAdjustmentAction(
+        null,
+        fd({ ...validAdjustment, triggerCondition }),
+      );
+
+      expect(result.status).toBe('invalid');
+      if (result.status === 'invalid') {
+        expect(result.fieldErrors.triggerCondition?.join('\n')).toContain(
+          expectedMessage,
+        );
+      }
+      expect(priceMock.createPriceAdjustment).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts every supported trigger key with the quote-engine value types', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    priceMock.createPriceAdjustment.mockResolvedValue({ id: 'adj-all-fields' });
+    const triggerCondition = {
+      productIds: ['product-1'],
+      craftIds: ['craft-foil', 'craft-glue'],
+      craftMode: 'ALL',
+      specifications: ['大号'],
+      paperTypes: ['艳红珠光纸'],
+      foilColors: ['哑金'],
+      isDoubleSided: true,
+      isDoubleColor: false,
+      minQty: 1000,
+      maxQty: 5000,
+      settlementTypes: ['EXTERNAL_SALES'],
+      unitsPerSheet: 4,
+      perFoilColor: true,
+    };
+
+    await expect(
+      createPriceAdjustmentAction(
+        null,
+        fd({
+          ...validAdjustment,
+          triggerCondition: JSON.stringify(triggerCondition),
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(priceMock.createPriceAdjustment).toHaveBeenCalledWith(
+      expect.objectContaining({ triggerCondition }),
+    );
   });
 
   it('maps database JSON object constraint to triggerCondition field error', async () => {
@@ -242,6 +309,22 @@ describe('createPriceAdjustmentAction', () => {
 });
 
 describe('updatePriceAdjustmentAction', () => {
+  it('rejects an unknown trigger key before calling the update layer', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+    const result = await updatePriceAdjustmentAction(
+      'adj1',
+      null,
+      fd({
+        ...validAdjustment,
+        triggerCondition: '{"futureField":true,"unitsPerSheet":500}',
+      }),
+    );
+
+    expect(result.status).toBe('invalid');
+    expect(priceMock.updatePriceAdjustment).not.toHaveBeenCalled();
+  });
+
   it('does not forward isActive through basic edit', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     priceMock.updatePriceAdjustment.mockResolvedValue({ id: 'adj1' });

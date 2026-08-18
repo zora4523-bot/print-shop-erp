@@ -13,6 +13,7 @@ const {
   outsourceMock: {
     createOutsourceOrder: vi.fn(),
     confirmOutsourceAmount: vi.fn(),
+    recordOutsourcePayment: vi.fn(),
     markOutsourceReceived: vi.fn(),
     cancelOutsourceOrder: vi.fn(),
   },
@@ -44,6 +45,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 import {
   confirmOutsourceAmountAction,
   createOutsourceAction,
+  recordOutsourcePaymentAction,
 } from '../outsource';
 
 const actor = {
@@ -73,6 +75,7 @@ beforeEach(() => {
   permissionsMock.requirePermission.mockReset().mockResolvedValue(actor);
   outsourceMock.createOutsourceOrder.mockReset();
   outsourceMock.confirmOutsourceAmount.mockReset();
+  outsourceMock.recordOutsourcePayment.mockReset();
   outsourceMock.markOutsourceReceived.mockReset();
   outsourceMock.cancelOutsourceOrder.mockReset();
   revalidatePathMock.mockReset();
@@ -163,5 +166,108 @@ describe('confirmOutsourceAmountAction', () => {
       status: 'error',
       message: '外协金额请求标识已被其他内容使用',
     });
+  });
+});
+
+describe('recordOutsourcePaymentAction', () => {
+  const formData = () => {
+    const data = new FormData();
+    data.set('idempotencyKey', requestKey);
+    data.set('amount', '320.50');
+    data.set('paidAt', '2026-08-07T12:30');
+    data.set('method', ' 银行转账 ');
+    data.set('reference', ' PAY-001 ');
+    data.set('remark', ' 首付款 ');
+    return data;
+  };
+
+  it('authenticates before validating or recording a payment', async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+    await expect(
+      recordOutsourcePaymentAction('outsource-1', null, formData()),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
+      'outsource:manage',
+    );
+    expect(outsourceMock.recordOutsourcePayment).not.toHaveBeenCalled();
+  });
+
+  it('parses Shanghai wall time, records the independent payment, and revalidates views', async () => {
+    outsourceMock.recordOutsourcePayment.mockResolvedValue({
+      paymentId: 'payment-1',
+      outsourceOrderId: 'outsource-1',
+      totalAmount: '1000.00',
+      newPaidAmount: '320.50',
+      remainingAmount: '679.50',
+      isFullyPaid: false,
+    });
+
+    await expect(
+      recordOutsourcePaymentAction('outsource-1', null, formData()),
+    ).resolves.toEqual({
+      status: 'success',
+      paymentId: 'payment-1',
+      totalAmount: '1000.00',
+      newPaidAmount: '320.50',
+      remainingAmount: '679.50',
+      isFullyPaid: false,
+    });
+    expect(outsourceMock.recordOutsourcePayment).toHaveBeenCalledWith(
+      'outsource-1',
+      {
+        idempotencyKey: requestKey,
+        amount: '320.50',
+        paidAt: new Date('2026-08-07T04:30:00.000Z'),
+        method: '银行转账',
+        reference: 'PAY-001',
+        remark: '首付款',
+      },
+      actor,
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/outsource');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/foreman/outsource/outsource-1',
+    );
+  });
+
+  it.each([
+    ['bad request key', 'idempotencyKey', 'not-a-uuid'],
+    ['zero', 'amount', '0'],
+    ['negative', 'amount', '-1'],
+    ['overprecision', 'amount', '1.001'],
+    ['bad date', 'paidAt', '2026-02-30T12:30'],
+  ])('returns invalid for %s without writing', async (_name, field, value) => {
+    const data = formData();
+    data.set(field, value);
+    const result = await recordOutsourcePaymentAction(
+      'outsource-1',
+      null,
+      data,
+    );
+    expect(result.status).toBe('invalid');
+    expect(outsourceMock.recordOutsourcePayment).not.toHaveBeenCalled();
+  });
+
+  it('keeps payment ledger conflicts user-visible', async () => {
+    outsourceMock.recordOutsourcePayment.mockRejectedValue(
+      new MockOutsourceError('付款金额超出未付余额'),
+    );
+    await expect(
+      recordOutsourcePaymentAction('outsource-1', null, formData()),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '付款金额超出未付余额',
+    });
+  });
+
+  it('rethrows unknown failures', async () => {
+    outsourceMock.recordOutsourcePayment.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+    await expect(
+      recordOutsourcePaymentAction('outsource-1', null, formData()),
+    ).rejects.toThrow('database unavailable');
   });
 });

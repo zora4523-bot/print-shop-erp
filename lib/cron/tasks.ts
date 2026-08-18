@@ -15,6 +15,8 @@ import {
 import { formatDateShanghai } from '../format/dates';
 import { dispatchNotification } from '../notification/dispatch';
 import { orderStatusZh } from '../order/log-format';
+import { cleanupExpiredOrderExports } from '../order/export';
+import { scrubTerminalOrderExportFilters } from '../order/export-retention';
 import {
   CsBatchUnexpectedError,
   settleReadyCsPeriods,
@@ -260,4 +262,15 @@ export async function runOrderOverdueTask(runDate: string) {
     );
   }
   return { status: 'ok' as const, overdueCount: rows.length };
+}
+
+export async function runOrderExportCleanupTask(runDate: string) {
+  const scrubbedFilterCount = await scrubTerminalOrderExportFilters();
+  const expiredCount = await cleanupExpiredOrderExports();
+  return {
+    status: 'ok' as const,
+    runDate,
+    expiredCount,
+    scrubbedFilterCount,
+  };
 }

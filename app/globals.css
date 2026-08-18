@@ -11,8 +11,11 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
     "Noto Sans CJK SC", "Noto Sans SC", Arial, sans-serif;
+  /* 末尾补 CJK 回退：本仓有若干处用 font-mono 渲染中文（推送模板、
+     计价预览），而等宽字体多数不含汉字字形。 */
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo,
-    Consolas, monospace;
+    Consolas, "Sarasa Mono SC", "Noto Sans Mono CJK SC", "PingFang SC",
+    "Microsoft YaHei", monospace;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -28,6 +31,7 @@
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
   --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -98,6 +102,9 @@
   --chart-4: oklch(0.679 0.118 346.3);
   --chart-5: oklch(0.735 0.117 236.2);
   --chart-6: oklch(0.621 0.17 47.5);
+  /* 第 7 色：Okabe–Ito 的黄。产品线分类有 7 个枚举值，只有 6 色时
+     BYO_MATERIAL 与 UNCATEGORIZED 会撞成同一个扇区颜色。 */
+  --chart-7: oklch(0.86 0.15 100);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -142,6 +149,7 @@
   --chart-4: oklch(0.74 0.118 346.3);
   --chart-5: oklch(0.8 0.117 236.2);
   --chart-6: oklch(0.69 0.17 47.5);
+  --chart-7: oklch(0.88 0.15 100);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -267,9 +275,20 @@
     }
   }
 
-  .admin-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])) {
+  /* 44px 触控目标兜底。
+     注意：这条规则**不是**组件自带的，控件本身是 h-8（32px）。凡是没被
+     下面这些容器罩住的路由，触控目标就不合规——曾经 /login 与
+     /account/password 就落在外面（它们不在 (admin)/(worker) 壳里）。
+     所以这里用一个可复用的 .touch-viewport 类，任何独立页面外壳都能挂。 */
+  .admin-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])),
+  .touch-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])) {
     min-width: 2.75rem;
     min-height: 2.75rem;
+  }
+
+  .touch-viewport a[href] {
+    display: inline-flex;
+    align-items: center;
   }
 
   .admin-viewport a[href] {

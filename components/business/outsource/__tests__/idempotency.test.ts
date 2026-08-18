@@ -28,7 +28,11 @@ describe('outsource form idempotency keys', () => {
   });
 
   it('wires the stable key into both hidden form fields', () => {
-    for (const file of ['CreateOutsourceForm.tsx', 'OutsourceAmountForm.tsx']) {
+    for (const file of [
+      'CreateOutsourceForm.tsx',
+      'OutsourceAmountForm.tsx',
+      'OutsourcePaymentForm.tsx',
+    ]) {
       const source = readFileSync(
         path.join(process.cwd(), 'components', 'business', 'outsource', file),
         'utf8',
@@ -38,5 +42,23 @@ describe('outsource form idempotency keys', () => {
       );
       expect(source).toContain('nextOutsourceIdempotencyKey(');
     }
+  });
+
+  it('shows selected quantity as a derived read-only value', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'outsource',
+        'CreateOutsourceForm.tsx',
+      ),
+      'utf8',
+    );
+    expect(source).toContain('已选款式合计');
+    expect(source).toContain('<output aria-live="polite"');
+    expect(source).toContain('totalQty: chosenTotalQty');
+    expect(source).not.toContain('label="总数量"');
+    expect(source).not.toContain('setTotalQty');
   });
 });

@@ -125,7 +125,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">月份</th>
-                <th className="px-4 py-2 text-left">工人</th>
+                <th className="px-4 py-2 text-left">师傅</th>
                 <th className="px-4 py-2 text-left">类型</th>
                 <th className="px-4 py-2 text-right">正常工时</th>
                 <th className="px-4 py-2 text-right">加班 / 代班</th>
@@ -139,7 +139,10 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
             </thead>
             <tbody className="divide-y">
               {rows.map((r) => {
-                const wt = r.worker.workerType as WorkerType | null;
+                // Render the immutable payroll snapshot, never the employee's
+                // current account type. A later transfer must not relabel a
+                // historical PACKER row as COOK and swap overtime for spare pay.
+                const wt = r.payrollWorkerType;
                 const isCook = wt === WorkerType.COOK;
                 const attendance = attendanceSummaries.get(r.workerId) ?? {
                   workUnits: '0',
@@ -205,8 +208,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">月份</label>
+        <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
         <input
+          id="hourly-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
@@ -214,8 +218,9 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="hourly-paid" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="hourly-paid"
           name="paid"
           defaultValue={paid ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -226,8 +231,9 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">工人 id (可选)</label>
+        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅 id（选填）</label>
         <input
+          id="hourly-workerId"
           type="text"
           name="workerId"
           defaultValue={workerId ?? ''}

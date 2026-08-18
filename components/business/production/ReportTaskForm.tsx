@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,12 +15,16 @@ type Props = {
 };
 
 export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
+  // `bind` on a Server Action keeps the $$FORM_ACTION marker, so React can
+  // emit the native form action + hidden $ACTION_ID at SSR time. Passing
+  // `formAction` straight to <form action> (rather than wrapping it in an
+  // arrow) is what preserves the zero-JS submit path — 车间弱网/hydration
+  // 失败时师傅仍能报工。See DECISIONS.md 2026-08-17.
   const bound = reportTaskAction.bind(null, taskId);
-  const [state, formAction] = useActionState<TaskMutationResult | null, FormData>(
-    bound,
-    null,
-  );
-  const [pending, startTransition] = useTransition();
+  const [state, formAction, pending] = useActionState<
+    TaskMutationResult | null,
+    FormData
+  >(bound, null);
   const router = useRouter();
 
   // On success, kick the router to refresh server state — the task
@@ -33,10 +37,7 @@ export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
   }
 
   return (
-    <form
-      action={(fd) => startTransition(() => formAction(fd))}
-      className="space-y-4"
-    >
+    <form action={formAction} className="space-y-4">
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField
           name="completedQty"

@@ -186,7 +186,7 @@ export function WorkerMachineRuleForm({
         <p className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
-        <p className="text-xs text-success">规则版本已生效。</p>
+        <p className="text-xs text-success-foreground">规则版本已生效。</p>
       ) : null}
     </form>
   );

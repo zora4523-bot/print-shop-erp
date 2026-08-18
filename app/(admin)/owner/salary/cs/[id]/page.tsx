@@ -213,7 +213,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             initialIdempotencyKey={randomUUID()}
           />
         ) : (
-          <p className="text-sm text-success">
+          <p className="text-sm text-success-foreground">
             {commission ? '本周期底薪与提成已全部发放。' : '本周期底薪已全部发放。'}
           </p>
         )}

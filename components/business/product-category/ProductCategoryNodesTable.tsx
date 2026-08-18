@@ -20,7 +20,7 @@ export function ProductCategoryNodesTable({
   nodes: ProductCategoryNodeSummary[];
 }) {
   return (
-    <Table>
+    <Table label="产品分类树">
       <TableHeader>
         <TableRow>
           <TableHead>分类名</TableHead>

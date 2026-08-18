@@ -38,9 +38,10 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar';
-import type {
-  AdminMenuGroup,
-  IconName,
+import {
+  getActiveAdminMenuHref,
+  type AdminMenuGroup,
+  type IconName,
 } from '@/lib/navigation/admin-menu';
 
 // IconName → Lucide 组件映射。新增 IconName 时同时改这里。
@@ -71,26 +72,6 @@ type AppSidebarProps = {
   roleBadge: string;
 };
 
-// Active state must be UNIQUE per sidebar render — otherwise a child
-// route highlights both the child item and any ancestor (e.g.
-// /orders/new lights up both "创建工单" and "我的工单"). The fix is
-// "longest matching href wins": collect every candidate href that
-// could be active for the current pathname, pick the longest, then
-// only the item whose href equals that gets `active=true`.
-function pickActiveHref(
-  pathname: string,
-  candidates: readonly string[],
-): string | null {
-  let best: string | null = null;
-  for (const href of candidates) {
-    if (href === '#' || href === '/') continue; // root/placeholder never wins
-    const matches = pathname === href || pathname.startsWith(href + '/');
-    if (!matches) continue;
-    if (best === null || href.length > best.length) best = href;
-  }
-  return best;
-}
-
 export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
@@ -98,9 +79,9 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   // Link auto-prefetch floods the server with authenticated RSC requests.
   // Enable prefetch only for the latest link that shows real user intent.
   const [intentHref, setIntentHref] = useState<string | null>(null);
-  // Flatten all hrefs once per render; pick the single best match.
-  const allHrefs = menuGroups.flatMap((g) => g.items.map((i) => i.href));
-  const activeHref = pickActiveHref(pathname, allHrefs);
+  // 最长路径匹配只返回一个 href，避免父子入口同时高亮。
+  const allItems = menuGroups.flatMap((group) => group.items);
+  const activeHref = getActiveAdminMenuHref(pathname, allItems);
 
   return (
     <Sidebar collapsible="icon">
@@ -114,7 +95,10 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
           </span>
         </div>
       </SidebarHeader>
-      <SidebarContent>
+      {/* nav 地标：侧边栏是后台的主导航，但 SidebarContent 渲染的是
+          裸 div，整个 (admin) 外壳因此没有 navigation 地标——而师傅端
+          有。aria-label 是必要的：同页还有面包屑和快捷入口两个 nav。 */}
+      <SidebarContent aria-label="后台主导航" role="navigation">
         {menuGroups.map((group, idx) => (
           <SidebarGroup key={group.label ?? `group-${idx}`}>
             {group.label ? (

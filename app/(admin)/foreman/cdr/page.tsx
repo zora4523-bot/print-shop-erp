@@ -177,8 +177,11 @@ function FilterBar({ from, to }: { from: string; to: string }) {
       action="/foreman/cdr"
     >
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">起始日期</label>
+        <label htmlFor="cdr-from" className="text-xs text-muted-foreground">
+          起始日期
+        </label>
         <input
+          id="cdr-from"
           type="date"
           name="from"
           defaultValue={from}
@@ -186,8 +189,11 @@ function FilterBar({ from, to }: { from: string; to: string }) {
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">终止日期</label>
+        <label htmlFor="cdr-to" className="text-xs text-muted-foreground">
+          终止日期
+        </label>
         <input
+          id="cdr-to"
           type="date"
           name="to"
           defaultValue={to}

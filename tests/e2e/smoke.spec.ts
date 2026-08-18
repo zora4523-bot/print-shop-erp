@@ -54,7 +54,7 @@ test.describe('automation smoke', () => {
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/prices');
-    await expect(page.getByRole('heading', { name: '价格字典' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '报价管理' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '价格阶梯' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '加价规则' })).toBeVisible();
     await expectNoNextErrorOverlay(page);

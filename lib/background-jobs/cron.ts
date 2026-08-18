@@ -5,6 +5,7 @@ import {
   runDailySalaryTask,
   runGenerateBillsTask,
   runHourlyPayrollTask,
+  runOrderExportCleanupTask,
   runOrderOverdueTask,
   runOutsourceOverdueTask,
 } from '../cron/tasks';
@@ -23,6 +24,7 @@ const CRON_TYPES: ReadonlySet<string> = new Set([
   BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
   BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING,
   BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE,
+  BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP,
 ]);
 
 export async function enqueueCronJob(input: {
@@ -61,6 +63,8 @@ export async function handleCronJob(
       return runCsPeriodEndingTask(requiredString(payload.runDate));
     case BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE:
       return runOrderOverdueTask(requiredString(payload.runDate));
+    case BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP:
+      return runOrderExportCleanupTask(requiredString(payload.runDate));
     default:
       throw new InvalidCronJobPayloadError();
   }

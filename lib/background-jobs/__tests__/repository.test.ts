@@ -13,6 +13,7 @@ const { dbMock } = vi.hoisted(() => ({
       update: vi.fn(),
     },
     designBundle: { updateMany: vi.fn() },
+    orderExport: { updateMany: vi.fn() },
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -44,9 +45,12 @@ beforeEach(() => {
     dbMock.backgroundJob,
     dbMock.backgroundJobAttempt,
     dbMock.designBundle,
+    dbMock.orderExport,
   ]) {
     for (const fn of Object.values(group)) fn.mockReset();
   }
+  dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+  dbMock.orderExport.updateMany.mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
   dbMock.$queryRaw.mockReset().mockResolvedValue([]);
   dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
@@ -177,7 +181,30 @@ describe('claim and lease lifecycle', () => {
       }),
     ).resolves.toEqual(claimed);
 
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(4);
+    const exportReconciliationSql = (
+      dbMock.$executeRaw.mock.calls[3]![0] as TemplateStringsArray
+    ).join('?');
+    expect(exportReconciliationSql).toContain(
+      'UPDATE "OrderExport" AS order_export',
+    );
+    expect(exportReconciliationSql).toContain(
+      'order_export."status" = \'PENDING\'::"OrderExportStatus"',
+    );
+    expect(exportReconciliationSql).toContain(
+      '"filters" = jsonb_build_object(',
+    );
+    expect(exportReconciliationSql).toContain(
+      "WHEN order_export.\"filters\"->>'scope' = 'all' THEN 'all'",
+    );
+    expect(exportReconciliationSql).toContain("ELSE 'filtered'");
+    expect(exportReconciliationSql).not.toContain('filterHash');
+    expect(exportReconciliationSql).not.toContain("- 'params'");
+    expect(exportReconciliationSql).toContain(
+      'job."status" = \'DEAD\'::"BackgroundJobStatus"',
+    );
+    expect(exportReconciliationSql).toContain("job.\"type\" = 'ORDER_EXPORT'");
+    expect(exportReconciliationSql).toContain('WorkerLeaseExpired');
     expect(dbMock.backgroundJobAttempt.create).toHaveBeenCalledWith({
       data: {
         jobId: claimed.id,
@@ -308,6 +335,101 @@ describe('terminal CDR state', () => {
       where: { backgroundJobId: 'job-cdr' },
       data: { status: 'PENDING', lastErrorCode: null },
     });
+  });
+});
+
+describe('terminal order export state', () => {
+  const claimed: ClaimedBackgroundJob = {
+    id: 'job-export',
+    type: 'ORDER_EXPORT',
+    queue: BackgroundJobQueue.HEAVY,
+    dedupeKey: 'order-export:export-1',
+    payload: { exportId: 'export-1' },
+    attempts: 3,
+    maxAttempts: 3,
+    workerId: 'worker-1',
+    claimedAt: new Date('2026-08-07T08:00:00Z'),
+  };
+
+  it('marks the export FAILED only after attempts are exhausted', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+    dbMock.orderExport.updateMany.mockResolvedValue({ count: 1 });
+
+    await failBackgroundJob(
+      claimed,
+      Object.assign(new Error('private details'), { name: 'OrderExportError' }),
+      new Date('2026-08-07T08:01:00Z'),
+    );
+
+    expect(dbMock.orderExport.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: {
+        backgroundJobId: 'job-export',
+        status: 'PENDING',
+      },
+      data: { status: 'FAILED', lastErrorCode: 'OrderExportError' },
+    });
+    const scrubCall = dbMock.$executeRaw.mock.calls.at(-1);
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).toContain(
+      '"filters" = jsonb_build_object(',
+    );
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).not.toContain(
+      'filterHash',
+    );
+    expect(scrubCall?.[1]).toBe('job-export');
+  });
+
+  it('keeps the export PENDING while the job remains retryable', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      { ...claimed, attempts: 1 },
+      Object.assign(new Error('private details'), { name: 'TemporaryError' }),
+      new Date('2026-08-07T08:01:00Z'),
+    );
+
+    expect(dbMock.orderExport.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('operator cancellation marks a pending export FAILED', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+    dbMock.orderExport.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(cancelPendingBackgroundJob('job-export')).resolves.toBe(true);
+    expect(dbMock.orderExport.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { backgroundJobId: 'job-export', status: 'PENDING' },
+      data: { status: 'FAILED', lastErrorCode: 'CancelledByOperator' },
+    });
+    const scrubCall = dbMock.$executeRaw.mock.calls.at(-1);
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).toContain(
+      '"filters" = jsonb_build_object(',
+    );
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).not.toContain(
+      'filterHash',
+    );
+    expect(scrubCall?.[1]).toBe('job-export');
+  });
+
+  it('rejects manual retry after terminal export filters have been scrubbed', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'ORDER_EXPORT',
+      attempts: 3,
+      maxAttempts: 3,
+    });
+    await expect(retryDeadBackgroundJob('job-export')).resolves.toBe(false);
+    expect(dbMock.backgroundJob.update).not.toHaveBeenCalled();
+    expect(dbMock.orderExport.updateMany).not.toHaveBeenCalled();
+    const scrubCall = dbMock.$executeRaw.mock.calls.at(-1);
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).toContain(
+      '"filters" = jsonb_build_object(',
+    );
+    expect((scrubCall?.[0] as TemplateStringsArray).join('?')).not.toContain(
+      'filterHash',
+    );
+    expect(scrubCall?.[1]).toBe('job-export');
   });
 });
 

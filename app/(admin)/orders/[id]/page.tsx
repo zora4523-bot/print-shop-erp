@@ -5,6 +5,7 @@ import {
   OrderChangeRequestStatus,
   OrderCostCategory,
   OrderKind,
+  OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
   ShipmentStatus,
@@ -54,6 +55,10 @@ import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeR
 import { OrderChangeReviewForm } from '@/components/business/order/OrderChangeReviewForm';
 import { OrderCostEntryForm } from '@/components/business/bill/OrderCostEntryForm';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
+import { formatMoney } from '@/lib/dashboard/format';
+import { formatUnitPrice } from '@/lib/format/unit-price';
+import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
+import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -67,6 +72,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();
+  const canViewCommercialAmounts = user.role !== Role.WORKER;
   const canCreateRework =
     user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
@@ -120,9 +126,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
+  const isExternalSalesOrder =
+    'settlementType' in order &&
+    order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const isFinalizedExternalShipment =
+    order.status === OrderStatus.SHIPPED &&
+    isExternalSalesOrder;
   const canToggleSfCollect =
     canEditOrderSfCollect(order.status) &&
-    (order.submitterId === user.id || user.role === Role.ADMIN);
+    (order.submitterId === user.id || user.role === Role.ADMIN) &&
+    (!isFinalizedExternalShipment || user.role === Role.ADMIN);
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
   // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
@@ -154,6 +167,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
       order.status === OrderStatus.SCHEDULING ||
       order.status === OrderStatus.IN_PRODUCTION) &&
     !pendingChangeRequest;
+  const customerChargeByShipmentAndCategory = new Map(
+    order.customerCharges.flatMap((charge) =>
+      charge.shipment
+        ? [[`${charge.shipment.id}:${String(charge.category.code)}`, charge] as const]
+        : [],
+    ),
+  );
 
   return (
     <div className="space-y-6">
@@ -210,6 +230,19 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <SfCollectToggleForm
               orderId={order.id}
               currentValue={order.isSfCollect}
+              status={order.status}
+              isExternalSales={isExternalSalesOrder}
+              shipments={order.shipments.map((shipment) => ({
+                id: shipment.id,
+                sequence: shipment.sequence,
+                destinationProvince: shipment.destinationProvince,
+                weightKg:
+                  shipment.weightKg?.toString() ??
+                  shipment.quotedWeightKg?.toString() ??
+                  null,
+                shippingFee: null,
+                customerChargeOverrideReason: null,
+              }))}
             />
           ) : null}
           {canCreateOutsource ? (
@@ -250,6 +283,16 @@ export default async function OrderDetailPage({ params }: PageProps) {
             value={assignedWorkerNames.length ? assignedWorkerNames.join('、') : '未派工'}
           />
           <Row label="客户名称/简称" value={order.customerRef} />
+          {canViewCommercialAmounts && 'settlementType' in order ? (
+            <Row
+              label="结算路径"
+              value={
+                ORDER_SETTLEMENT_LABELS[
+                  order.settlementType as OrderSettlementType
+                ]
+              }
+            />
+          ) : null}
           <Row label="快递代码" value={order.expressCode} />
           <Row
             label="配送方式"
@@ -270,13 +313,107 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
             </dd>
           </div>
-          <Row
-            label={order.isSfCollect ? '工单总额（不含物流费）' : '工单总额'}
-            value={String(order.totalAmount)}
-            tabular
-          />
+          {canViewCommercialAmounts &&
+          'processingAmount' in order &&
+          'totalAmount' in order ? (
+            <>
+              <Row
+                label="加工费小计"
+                value={String(order.processingAmount)}
+                tabular
+              />
+              <Row
+                label={
+                  order.isSfCollect
+                    ? '对客应收总额（不含快递费，含耗材费）'
+                    : '对客应收总额'
+                }
+                value={String(order.totalAmount)}
+                tabular
+              />
+            </>
+          ) : null}
         </dl>
       </section>
+
+      {canViewCommercialAmounts && order.customerCharges.length > 0 ? (
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-base font-semibold">对客快递与打包耗材费</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              这些是外部销售应付工厂的收费，不计入工厂内部成本；多地址按每票分别保存。
+            </p>
+          </div>
+          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            {order.customerCharges.map((charge) => (
+              <li
+                key={charge.id}
+                className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">
+                      地址 {charge.shipment?.sequence ?? '—'} ·{' '}
+                      {charge.category.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {charge.description}
+                    </p>
+                  </div>
+                  <Badge
+                    variant={
+                      charge.status === 'FINAL' ? 'secondary' : 'outline'
+                    }
+                  >
+                    {charge.status === 'FINAL'
+                      ? '已确认'
+                      : charge.status === 'WAIVED'
+                        ? '已免收'
+                        : '创建时估算'}
+                  </Badge>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <div>
+                    <dt className="text-muted-foreground">实际收费</dt>
+                    <dd className="font-sans font-medium tabular-nums">
+                      {formatMoney(charge.amount)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">报价表建议</dt>
+                    <dd className="font-sans tabular-nums">
+                      {charge.suggestedAmount === null
+                        ? '人工确认'
+                        : formatMoney(charge.suggestedAmount)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">计费数量</dt>
+                    <dd>
+                      {charge.quantity === null
+                        ? '—'
+                        : `${String(charge.quantity)} ${charge.unit ?? ''}`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">规则版本</dt>
+                    <dd>
+                      {charge.priceBook
+                        ? `报价第 ${charge.priceBook.version} 版`
+                        : '人工收费'}
+                    </dd>
+                  </div>
+                </dl>
+                {charge.overrideReason ? (
+                  <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground">
+                    调整说明：{charge.overrideReason}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -313,6 +450,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
               {shipment.expressCode ? (
                 <p className="text-muted-foreground">
                   快递代码：{shipment.expressCode}
+                </p>
+              ) : null}
+              {shipment.destinationProvince ? (
+                <p className="text-muted-foreground">
+                  计费省份：{shipment.destinationProvince}
+                </p>
+              ) : null}
+              {shipment.quotedWeightKg ? (
+                <p className="font-sans tabular-nums text-muted-foreground">
+                  创建时计费重量：{String(shipment.quotedWeightKg)} kg
+                </p>
+              ) : null}
+              {shipment.weightKg ? (
+                <p className="font-sans tabular-nums text-muted-foreground">
+                  发货计费重量：{String(shipment.weightKg)} kg
                 </p>
               ) : null}
               {shipment.trackingNo ? (
@@ -378,29 +530,88 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <ol className="space-y-3">
           {order.items.map((item) => (
             <li key={item.id} className="min-w-0 rounded-lg border p-4 text-sm">
-              <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                <div className="admin-wrap-anywhere min-w-0 font-medium">
-                  #{item.sequence} · {item.name}
-                </div>
-                <div className="admin-wrap-anywhere font-sans tabular-nums text-xs text-muted-foreground sm:shrink-0 sm:text-right">
-                  {item.quantity} × {String(item.unitPrice)} = {String(item.subtotal)}
-                </div>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <h3 className="admin-wrap-anywhere min-w-0 font-medium">
+                  <span className="text-muted-foreground">#{item.sequence}</span>
+                  {' · '}
+                  {item.name}
+                </h3>
+                <dl className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-1 text-xs sm:shrink-0 sm:justify-end sm:text-right">
+                  <div className="min-w-0">
+                    <dt className="text-muted-foreground">数量</dt>
+                    <dd className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                      {formatQuantity(item.quantity)}
+                    </dd>
+                  </div>
+                  {canViewCommercialAmounts &&
+                  'unitPrice' in item &&
+                  'fixedFee' in item &&
+                  'subtotal' in item ? (
+                    <>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">单价</dt>
+                        <dd className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                          {formatUnitPrice(String(item.unitPrice))}
+                        </dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">一次性费用</dt>
+                        <dd className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                          {formatMoney(String(item.fixedFee))}
+                        </dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">小计</dt>
+                        <dd className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                          {formatMoney(String(item.subtotal))}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
+                </dl>
               </div>
-              <dl className="mt-2 grid min-w-0 grid-cols-1 gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+              <dl className="mt-3 grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                 <Row label="规格" value={item.specification} />
                 <Row label="纸张" value={item.paperType} />
-                <Row label="烫金色" value={formatFoilColors(item.foilColors)} />
                 <Row
-                  label="双面 / 双色"
-                  value={`${item.isDoubleSided ? '双面' : '单面'} · ${item.isDoubleColor ? '双色' : '单色'}`}
-                />
-                <Row
-                  label="工艺"
-                  value={item.crafts.length ? item.crafts.join('、') : '—'}
+                  label="烫金色"
+                  value={formatFoilColors(item.foilColors)}
                   full
                 />
                 <Row
-                  label="师傅"
+                  label="印刷面"
+                  value={item.isDoubleSided ? '双面' : '单面'}
+                />
+                <Row
+                  label="印刷色数"
+                  value={item.isDoubleColor ? '双色' : '单色'}
+                />
+                <Row
+                  label="工艺"
+                  value={item.craftNames.length ? item.craftNames.join('、') : '—'}
+                  full
+                />
+                {canViewCommercialAmounts &&
+                'suggestedSubtotal' in item &&
+                'priceOverrideReason' in item ? (
+                  <>
+                    <Row
+                      label="系统建议小计"
+                      value={
+                        item.suggestedSubtotal
+                          ? formatMoney(String(item.suggestedSubtotal))
+                          : '未形成完整建议价'
+                      }
+                    />
+                    <Row
+                      label="人工改价说明"
+                      value={String(item.priceOverrideReason ?? '')}
+                      full
+                    />
+                  </>
+                ) : null}
+                <Row
+                  label="生产安排"
                   value={
                     item.tasks.length
                       ? item.tasks
@@ -409,11 +620,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
                               `${task.craft.name}：${task.worker?.displayName ?? '未派工'}`,
                           )
                           .join('；')
-                      : '未派工'
+                      : '尚未排产'
                   }
                   full
                 />
               </dl>
+              {canViewCommercialAmounts && 'pricingSnapshot' in item ? (
+                <PricingSnapshotBreakdown
+                  pricingSnapshot={item.pricingSnapshot}
+                  title="收费项目明细"
+                  className="mt-4"
+                />
+              ) : null}
               {item.remark ? (
                 <HighlightedRemark
                   className="admin-wrap-anywhere mt-3"
@@ -465,7 +683,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {order.changeRequests.length > 0 ? (
+      {user.role !== Role.WORKER && order.changeRequests.length > 0 ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -494,7 +712,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {changeRequestStatusLabel(request.status)}
                   </Badge>
                   <span className="font-medium">
-                    {request.requester.displayName}
+                    {'requester' in request
+                      ? (request.requester as { displayName: string }).displayName
+                      : '—'}
                   </span>
                   <span className="text-muted-foreground">
                     基于第 {request.baseRevision} 版 ·{' '}
@@ -655,7 +875,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
                         ¥ {String(entry.amount)}
                       </td>
                       <td className="px-2 py-2 text-xs">
-                        {entry.createdBy.displayName}
+                        {'createdBy' in entry
+                          ? (entry.createdBy as { displayName: string }).displayName
+                          : '—'}
                       </td>
                     </tr>
                   ))}
@@ -682,7 +904,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
         ) : (
           <ul className="divide-y text-sm">
             {order.logs.slice(0, 10).map((log) => {
-              const changes = formatOrderLogChanges(log.changedFields);
+              const changes = formatOrderLogChanges(
+                canViewCommercialAmounts && 'changedFields' in log
+                  ? log.changedFields
+                  : undefined,
+              );
               return (
                 <li key={log.id} className="py-3 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -693,8 +919,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     <span className="text-muted-foreground">
                       · {log.operator.displayName}（{roleLabel(log.operator.role)}）
                     </span>
-                    {log.remark ? (
-                      <span className="text-muted-foreground">· {log.remark}</span>
+                    {canViewCommercialAmounts &&
+                    'remark' in log &&
+                    log.remark ? (
+                      <span className="text-muted-foreground">· {String(log.remark)}</span>
                     ) : null}
                   </div>
                   {changes.length > 0 && (
@@ -736,7 +964,29 @@ export default async function OrderDetailPage({ params }: PageProps) {
               receiverAddress: shipment.receiverAddress,
               trackingNo: shipment.trackingNo,
               weightKg: shipment.weightKg ? String(shipment.weightKg) : null,
+              destinationProvince: shipment.destinationProvince,
+              shippingFee:
+                customerChargeByShipmentAndCategory.get(
+                  `${shipment.id}:SHIPPING_FEE`,
+                )?.amount?.toString() ?? null,
+              packingMaterialFee:
+                customerChargeByShipmentAndCategory.get(
+                  `${shipment.id}:PACKING_MATERIAL`,
+                )?.amount?.toString() ?? null,
+              customerChargeOverrideReason:
+                customerChargeByShipmentAndCategory.get(
+                  `${shipment.id}:SHIPPING_FEE`,
+                )?.overrideReason ??
+                customerChargeByShipmentAndCategory.get(
+                  `${shipment.id}:PACKING_MATERIAL`,
+                )?.overrideReason ??
+                null,
             }))}
+            isExternalSales={
+              'settlementType' in order &&
+              order.settlementType === OrderSettlementType.EXTERNAL_SALES
+            }
+            isSfCollect={order.isSfCollect}
           />
         </section>
       ) : null}
@@ -835,6 +1085,14 @@ function Row({
       </dd>
     </div>
   );
+}
+
+const QUANTITY_FORMATTER = new Intl.NumberFormat('zh-CN', {
+  maximumFractionDigits: 0,
+});
+
+function formatQuantity(value: number): string {
+  return QUANTITY_FORMATTER.format(value);
 }
 
 function changeRequestStatusLabel(status: OrderChangeRequestStatus): string {

@@ -22,7 +22,7 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
   }
 
   return (
-    <Table>
+    <Table label="产品字典列表">
       <TableHeader>
         <TableRow>
           <TableHead>编码</TableHead>
@@ -30,7 +30,7 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
           <TableHead>产品名</TableHead>
           <TableHead>规格</TableHead>
           <TableHead>纸张</TableHead>
-          <TableHead className="text-right">单价</TableHead>
+          <TableHead className="text-right">内部/直单基础单价</TableHead>
           <TableHead className="text-right">起订量</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>

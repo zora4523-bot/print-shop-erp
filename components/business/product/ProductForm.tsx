@@ -159,8 +159,8 @@ export function ProductForm(props: Props) {
 
       <TextField
         id="baseUnitPrice"
-        label="建议单价（选填）"
-        hint="Decimal(10,4)：整数部分 ≤ 6 位，小数 ≤ 4 位。录单时作为建议价参考，不强制。"
+        label="内部销售/工厂直单基础单价（选填）"
+        hint="最多 6 位整数、4 位小数。仅在内部销售或工厂直单没有适用阶梯价时使用；外部销售不读取此价格。"
         type="text"
         disabled={pending}
         error={errs.baseUnitPrice?.[0]}
@@ -170,7 +170,7 @@ export function ProductForm(props: Props) {
       <TextField
         id="minOrderQty"
         label="最小起订量（选填）"
-        hint="正整数；空表示不限。"
+        hint="正整数；空表示不限。低于起订量时不自动报价，特殊单需手工填价并说明原因。"
         type="number"
         min={1}
         step={1}
@@ -185,7 +185,7 @@ export function ProductForm(props: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
         </p>
       ) : null}

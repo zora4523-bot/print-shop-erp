@@ -68,9 +68,13 @@ describe('editable-field lists (SPEC §3.6 — 仅改收货信息/备注)', () =
     expect(FULL_EDITABLE_FIELDS as readonly string[]).toContain('customName');
   });
 
-  it('allows 顺丰到付 in both normal edit fieldsets', () => {
-    expect(FULL_EDITABLE_FIELDS as readonly string[]).toContain('isSfCollect');
-    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).toContain('isSfCollect');
+  it('keeps 顺丰到付 out of generic fieldsets so its dedicated command can recalculate charges', () => {
+    expect(FULL_EDITABLE_FIELDS as readonly string[]).not.toContain(
+      'isSfCollect',
+    );
+    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain(
+      'isSfCollect',
+    );
   });
 
   it('editableFieldsForStatus returns the bucket contents', () => {

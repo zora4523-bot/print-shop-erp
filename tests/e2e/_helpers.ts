@@ -134,12 +134,18 @@ export async function seedFinishedOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "totalAmount",
         "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, $4::"Role", $3,
+        $1, $2, $3, $4::"Role",
+        CASE $4::"Role"
+          WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+          WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+          WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
+        END,
+        $3,
         'FINISHED'::"OrderStatus", FALSE, $5, $6,
         $7, $7, $7, $7, $7,
         NOW(), NOW()
@@ -230,12 +236,12 @@ export async function seedPrintableOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "customName", "receiverName",
         "receiverPhone", "receiverAddress", "isSfCollect",
         "totalAmount", "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'ADMIN'::"Role", $3,
+        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
         'DRAFT'::"OrderStatus", FALSE,
         'VR-CUSTOMER',
         $4,
@@ -589,9 +595,6 @@ export async function seedDashboardSnapshot(opts: {
   const overdueExpectedDate = new Date(todayStartUtc.getTime() - 3 * dayMs);
   // For SalaryPeriod (@db.Date), PG reads back UTC 00:00 of the stored
   // date. We pass `'YYYY-MM-DD'` strings; date-add via JS Date.UTC.
-  const csPeriodStartUtcMidnight = new Date(
-    Date.UTC(yyyy!, mm! - 1, dd! - 90),
-  );
   const csPeriodEndUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
 
   return withDb(async (db) => {
@@ -681,11 +684,11 @@ export async function seedDashboardSnapshot(opts: {
       await db.query(
         `
         INSERT INTO "Order" (
-          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
           status, "isUrgent", "totalAmount",
           "submittedAt", "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $3, 'SALES'::"Role", $3,
+          $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
           'SUBMITTED'::"OrderStatus", $4, 0,
           $5, $5, $5
         )
@@ -708,12 +711,12 @@ export async function seedDashboardSnapshot(opts: {
       await db.query(
         `
         INSERT INTO "Order" (
-          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
           status, "isUrgent", "totalAmount",
           "submittedAt", "scheduledAt", "completedAt",
           "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $3, 'SALES'::"Role", $3,
+          $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
           'COMPLETED'::"OrderStatus", FALSE, 0,
           $4, $4, $4,
           $4, $4
@@ -733,12 +736,12 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "totalAmount",
         "submittedAt", "scheduledAt", "completedAt", "shippedAt",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", $2,
+        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $2,
         'SHIPPED'::"OrderStatus", FALSE, 0,
         $3, $3, $3, $3,
         $3, $3
@@ -767,6 +770,18 @@ export async function seedDashboardSnapshot(opts: {
       `,
       [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],
     );
+    // A material/issued bill must have a provenance row.  Besides matching
+    // the production ledger, this lets settlement migrations prove that the
+    // receivable belongs to an external-sales order without guessing from the
+    // account's current role.
+    await db.query(
+      `
+      INSERT INTO "BillItem" (
+        id, "billId", "orderId", "orderAmount", "createdAt"
+      ) VALUES ($1, $2, $3, $4, NOW())
+      `,
+      [`${billId}-item`, billId, completedOrderIds[0], monthlyTotal],
+    );
 
     // Step 4 (Slice B): seed one overdue outsource order linked to the
     // first completed order, so 超期外协 list has one row with a real
@@ -776,10 +791,10 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "OutsourceOrder" (
-        id, "orderId", "supplierName", "expectedDate",
+        id, "idempotencyKey", "orderId", "orderItemIds", "supplierName", "expectedDate",
         status, "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 'E2E 阿福外协',
+        $1, $1 || ':fixture', $2, ARRAY[]::text[], 'E2E 阿福外协',
         $3, 'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
       )
       `,
@@ -796,19 +811,43 @@ export async function seedDashboardSnapshot(opts: {
       csPeriodId = `e2e-dash-csp-${randomBytes(4).toString('hex')}`;
       await db.query(
         `
+        WITH target AS (
+          SELECT $3::date AS period_end
+        ), candidate AS (
+          SELECT
+            (
+              target.period_end + interval '1 day'
+              - make_interval(months => months.value)
+            )::date AS period_start,
+            months.value AS duration_months
+          FROM target
+          CROSS JOIN generate_series(1, 24) AS months(value)
+          WHERE (
+            (
+              target.period_end + interval '1 day'
+              - make_interval(months => months.value)
+            )::date
+            + make_interval(months => months.value)
+            - interval '1 day'
+          )::date = target.period_end
+          ORDER BY ABS(months.value - 4), months.value
+          LIMIT 1
+        )
         INSERT INTO "SalaryPeriod" (
           id, "csUserId", "periodStart", "periodEnd",
           "durationMonths", "totalSales", "initialSales", "monthlyBase",
           status, "createdAt", "updatedAt"
-        ) VALUES (
-          $1, $2, $3, $4, 4, 300000, 0, 5000,
-          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
         )
+        SELECT
+          $1, $2, candidate.period_start, target.period_end,
+          candidate.duration_months, 300000, 0, 5000,
+          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
+        FROM target
+        CROSS JOIN candidate
         `,
         [
           csPeriodId,
           opts.csUserId,
-          csPeriodStartUtcMidnight.toISOString().slice(0, 10),
           csPeriodEndUtcMidnight.toISOString().slice(0, 10),
         ],
       );
@@ -855,12 +894,12 @@ export async function seedDashboardSnapshot(opts: {
           await db.query(
             `
             INSERT INTO "Order" (
-              id, "orderNo", "submitterId", "submitterRole", "createdById",
+              id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
               status, "isUrgent", "totalAmount",
               "submittedAt", "scheduledAt", "completedAt",
               "createdAt", "updatedAt"
             ) VALUES (
-              $1, $2, $3, 'SALES'::"Role", $3,
+              $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
               'COMPLETED'::"OrderStatus", FALSE, 0,
               $4, $4, $4,
               $4, $4
@@ -977,11 +1016,17 @@ export async function seedDashboardSnapshot(opts: {
         await db.query(
           `
           INSERT INTO "Order" (
-            id, "orderNo", "submitterId", "submitterRole", "createdById",
+            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
             status, "isUrgent", "totalAmount",
             "submittedAt", "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, $3, $4::"Role", $3,
+            $1, $2, $3, $4::"Role",
+            CASE $4::"Role"
+              WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+              WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+              WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
+            END,
+            $3,
             'SUBMITTED'::"OrderStatus", FALSE, $5,
             $6, $6, $6
           )
@@ -1339,12 +1384,12 @@ export async function seedSearchSmokeFixtures(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
         "receiverAddress", "expressCode", "trackingNo", "createdAt",
         "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'ADMIN'::"Role", $3,
+        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
         'DRAFT'::"OrderStatus", true, $4, 'Codex E2E 收货人',
         '13900001111', 'E2E 测试地址', 'SF-CODX-E2E',
         'SF123456789E2E', NOW(), NOW()
@@ -1575,11 +1620,11 @@ export async function seedCdrOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "totalAmount",
         "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'SALES'::"Role", $3,
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
         'SUBMITTED'::"OrderStatus", FALSE, 0,
         $4, $4, $4
       )
@@ -1728,11 +1773,11 @@ export async function seedOrderOverdueForCron(): Promise<{
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "totalAmount", "promisedDate",
         "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'SALES'::"Role", $3,
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
         'IN_PRODUCTION'::"OrderStatus", false, 'E2E交期客户', 100, $4,
         NOW(), NOW(), NOW()
       )
@@ -1761,10 +1806,10 @@ export async function seedOverdueOutsourceForCron(): Promise<{
     await db.query(
       `
       INSERT INTO "OutsourceOrder" (
-        id, "supplierName", "expectedDate",
+        id, "idempotencyKey", "orderItemIds", "supplierName", "expectedDate",
         status, "createdAt", "updatedAt"
       ) VALUES (
-        $1, 'E2E cron 阿福外协', $2,
+        $1, $1 || ':fixture', ARRAY[]::text[], 'E2E cron 阿福外协', $2,
         'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
       )
       `,

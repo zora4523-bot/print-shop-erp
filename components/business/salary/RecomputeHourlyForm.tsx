@@ -29,6 +29,7 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
         <Input
           type="month"
           name="month"
+          aria-label="重算月份"
           defaultValue={defaultMonth}
           className="max-w-[180px]"
         />
@@ -43,10 +44,12 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
         </p>
       ) : null}
       {state?.status === 'success' && state.errors.length > 0 ? (
-        <ul className="text-xs text-destructive space-y-1">
+        // role="alert"：汇总行是 role="status"，读屏器只会念到「已处理 N
+        // 位 · M 个失败」，念不到具体是谁失败了。
+        <ul role="alert" className="text-xs text-destructive space-y-1">
           {state.errors.map((e) => (
             <li key={e.workerId}>
-              {e.workerId}: {e.message}
+              {e.workerName}：{e.message}
             </li>
           ))}
         </ul>

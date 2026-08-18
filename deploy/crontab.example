@@ -15,6 +15,8 @@ CRON_SECRET_FILE=/root/.print-shop-erp-cron-secret
 10 8 * * * /usr/local/sbin/print-shop-erp-cron outsource-overdue
 # 承诺交期逾期推送（每日 08:20）
 20 8 * * * /usr/local/sbin/print-shop-erp-cron order-overdue
+# 工单导出过期产物与筛选隐私清理（每日 02:15）
+15 2 * * * /usr/local/sbin/print-shop-erp-cron order-export-cleanup
 # 时薪工月结（每月 1 号 00:00）
 0 0 1 * * /usr/local/sbin/print-shop-erp-cron hourly-payroll
 # 销售应收账单生成（每月 1 号 00:40）

@@ -2,6 +2,8 @@ import { Client } from 'pg';
 import { E2E_USERS } from '../e2e/global-setup';
 
 export type WorkerUiFixture = {
+  craftId: string;
+  craftName: string;
   orderId: string;
   orderNo: string;
   schedulingOrderId: string;
@@ -42,6 +44,8 @@ function fixtureFor(namespace: string): WorkerUiFixture {
     .slice(0, 10);
   const prefix = `e2e-worker-ui-${suffix}`;
   return {
+    craftId: '',
+    craftName: '',
     orderId: `${prefix}-order`,
     orderNo: `GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789-${suffix.toUpperCase()}`,
     schedulingOrderId: `${prefix}-scheduling-order`,
@@ -113,6 +117,8 @@ export async function seedWorkerUiFixture(
          LIMIT 1`,
       );
       if (!craft.rows[0]) throw new Error('Worker UI E2E requires at least one active in-house craft');
+      fixture.craftId = craft.rows[0].id;
+      fixture.craftName = craft.rows[0].name;
       const windmillCraft = await db.query<{ id: string; name: string }>(
         `SELECT id, name FROM "Craft"
          WHERE "isActive" = TRUE
@@ -145,13 +151,13 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "Order" (
-           id, "orderNo", "submitterId", "submitterRole", "createdById", status,
+           id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById", status,
            "isUrgent", "isSfCollect", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
-           "submittedAt", "scheduledAt", "createdAt", "updatedAt"
+           "totalAmount", "submittedAt", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'SALES'::"Role", $3, 'IN_PRODUCTION'::"OrderStatus",
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3, 'IN_PRODUCTION'::"OrderStatus",
            TRUE, TRUE, $4, $5, $6, $7, DATE '2099-12-31',
-           TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
+           646172.57, TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
          )`,
         [
@@ -167,11 +173,11 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "Order" (
-           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
            status, "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'SALES'::"Role", $3,
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", '混合机型批量排产客户',
            '手动烫金与风车机分步排产测试',
            TIMESTAMP '2026-07-19 08:10:00',
@@ -204,11 +210,11 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "Order" (
-           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
            status, "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'SALES'::"Role", $3,
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", '非推荐派工测试客户',
            '管理员最终派工原因测试',
            TIMESTAMP '2026-07-19 08:15:00',
@@ -241,12 +247,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "OrderItem" (
            id, "orderId", sequence, name, specification, "paperType", quantity,
-           crafts, "foilColors", "isDoubleSided", "isDoubleColor", remark,
+           "unitPrice", subtotal, crafts, "foilColors", "isDoubleSided", "isDoubleColor", remark,
            "createdAt", "updatedAt"
          ) VALUES
-           ($1, $3, 1, $4, $5, $6, 1234567, ARRAY[$7]::text[],
+           ($1, $3, 1, $4, $5, $6, 1234567, 0.1234, 152345.57, ARRAY[$7]::text[],
             ARRAY['哑金', '红金', '潘通 871C']::text[], TRUE, TRUE, $8, NOW(), NOW()),
-           ($2, $3, 2, $9, $5, $6, 987654, ARRAY[$7]::text[],
+           ($2, $3, 2, $9, $5, $6, 987654, 0.5000, 493827.00, ARRAY[$7]::text[],
             ARRAY['无颜色（纯彩印）']::text[], FALSE, FALSE, $8, NOW(), NOW())`,
         [
           fixture.orderItemActiveId,
@@ -262,11 +268,11 @@ export async function seedWorkerUiFixture(
       );
       await db.query(
         `INSERT INTO "Order" (
-           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
            status, "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'SALES'::"Role", $3,
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", '第二批量排产客户',
            '第二张跨工单批量排产测试',
            TIMESTAMP '2026-07-19 08:05:00',
@@ -298,11 +304,11 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "Order" (
-           id, "orderNo", "submitterId", "submitterRole", "createdById",
+           id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
            status, "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, $3, 'SALES'::"Role", $3,
+           $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
            'SUBMITTED'::"OrderStatus", '批量排产客户',
            '批量排产响应式与无障碍测试',
            TIMESTAMP '2026-07-19 08:00:00',

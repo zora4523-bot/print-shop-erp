@@ -21,7 +21,7 @@ export default async function NewPriceTierPage() {
         subtitle="同一产品、同一起订量不能创建重叠有效期。"
         actions={
           <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
-            返回价格字典
+            返回报价管理
           </Link>
         }
       />

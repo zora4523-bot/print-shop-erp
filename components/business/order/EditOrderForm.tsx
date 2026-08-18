@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState } from 'react';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +25,6 @@ export type EditOrderInitialValues = {
   // YYYY-MM-DD（页面层从 Date 转好）
   promisedDate: string | null;
   isUrgent: boolean;
-  isSfCollect: boolean;
 };
 
 type Props = {
@@ -42,19 +41,15 @@ const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
 
 export function EditOrderForm({ orderId, fieldset, initial }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
-  const [state, formAction] = useActionState<OrderMutationResult | null, FormData>(
-    boundAction,
-    null,
-  );
-  const [pending, startTransition] = useTransition();
+  const [state, formAction, pending] = useActionState<
+    OrderMutationResult | null,
+    FormData
+  >(boundAction, null);
 
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
 
   return (
-    <form
-      action={(formData) => startTransition(() => formAction(formData))}
-      className="space-y-6"
-    >
+    <form action={formAction} className="space-y-6">
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           工单已进入排产 / 生产，仅可修改收货信息与备注（SPEC §3.6）。
@@ -132,24 +127,6 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
               <input type="hidden" name="isUrgent" value="false" />
             </div>
           )}
-          <div className="sm:col-span-2 rounded-lg border p-3">
-            <div className="flex items-start gap-2">
-              <input
-                id="isSfCollect"
-                name="isSfCollect"
-                type="checkbox"
-                defaultChecked={initial.isSfCollect}
-                className="mt-0.5 h-4 w-4 shrink-0"
-              />
-              <Label htmlFor="isSfCollect" className="text-sm">
-                顺丰到付
-                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                  全部自行预约；物流费不计入工单金额
-                </span>
-              </Label>
-              <input type="hidden" name="isSfCollect" value="false" />
-            </div>
-          </div>
         </div>
       </section>
 

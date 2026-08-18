@@ -6,12 +6,22 @@ import { PageHeader, StatusBadge } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';
 import { getPriceAdjustmentSummary } from '@/lib/price';
+import { listProductOptions } from '@/lib/product';
+import { listCrafts } from '@/lib/craft';
 
 type PageProps = { params: Promise<{ id: string }> };
 
 function conditionInput(value: unknown): string {
   if (value === null || value === undefined) return '';
   return JSON.stringify(value, null, 2);
+}
+
+function conditionStringIds(value: unknown, key: string): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const candidate = (value as Record<string, unknown>)[key];
+  return Array.isArray(candidate)
+    ? candidate.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 export async function generateMetadata({ params }: PageProps) {
@@ -27,6 +37,18 @@ export default async function EditPriceAdjustmentPage({ params }: PageProps) {
   const { id } = await params;
   const adjustment = await getPriceAdjustmentSummary(id);
   if (!adjustment) notFound();
+
+  const currentProductIds = conditionStringIds(
+    adjustment.triggerCondition,
+    'productIds',
+  );
+  const currentCraftIds = new Set(
+    conditionStringIds(adjustment.triggerCondition, 'craftIds'),
+  );
+  const [products, crafts] = await Promise.all([
+    listProductOptions({ includeInactiveIds: currentProductIds }),
+    listCrafts(),
+  ]);
 
   const boundUpdate = updatePriceAdjustmentAction.bind(null, id);
   const formInitial = {
@@ -55,6 +77,16 @@ export default async function EditPriceAdjustmentPage({ params }: PageProps) {
           mode="edit"
           action={boundUpdate}
           initial={formInitial}
+          products={products.map((product) => ({
+            id: product.id,
+            label: `${product.code ? `${product.code} · ` : ''}${product.name}${product.isActive ? '' : '（已停用）'}`,
+          }))}
+          crafts={crafts
+            .filter((craft) => craft.isActive || currentCraftIds.has(craft.id))
+            .map((craft) => ({
+              id: craft.id,
+              label: `${craft.code ? `${craft.code} · ` : ''}${craft.name}${craft.isActive ? '' : '（已停用）'}`,
+            }))}
         />
       </section>
 

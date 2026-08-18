@@ -53,6 +53,7 @@ deployment and the owner has approved the seed behavior.
 Required before `prisma migrate deploy`:
 
 ```bash
+NODE_ENV=production pnpm check:env
 pnpm prisma validate
 pnpm prisma migrate status
 pnpm tsc --noEmit --pretty false
@@ -65,33 +66,49 @@ For production route checks, point the script to a deployed staging or
 post-deploy production URL and keep seed disabled:
 
 ```bash
+CI=true \
 NODE_ENV=production \
 NOTIFICATION_MOCK_MODE=false \
-DEPLOY_SMOKE_BASE_URL=https://erp.example.com \
-pnpm deploy:smoke --require-base-url
+BACKGROUND_JOBS_MODE=durable \
+ORDER_EXPORT_ARTIFACT_DIR=/var/tmp/print-shop-erp/order-exports \
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn \
+pnpm deploy:smoke --skip-build --require-base-url
 ```
 
-The script uses an invalid cron token on purpose. A healthy production cron
-endpoint should return `401`; if `CRON_SECRET` is missing it returns `503`.
-Both responses prove the endpoint did not execute the job.
+`CI=true` is required by the current smoke script on the root-run production
+host so Chromium receives `--no-sandbox` and `--disable-setuid-sandbox`.
+`PUPPETEER_EXECUTABLE_PATH` is also explicit because the script does not load
+the PM2 ecosystem environment. `--skip-build` only avoids rebuilding after the
+full preflight above has already passed.
+
+The script uses an invalid cron token on purpose. A configured production cron
+endpoint must return `401`. A `503` also proves the job did not execute, but it
+means `CRON_SECRET` is missing and the production release gate has failed.
 
 ## PDF Browser
 
-PDF generation uses Puppeteer-managed Chrome. Install during image build or
-server provisioning:
+Production PDF generation uses the Debian system Chromium selected by PM2:
+
+```bash
+sudo apt-get install -y chromium fonts-noto-cjk
+test -x /usr/bin/chromium
+CI=true PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+  pnpm deploy:smoke --skip-build
+```
+
+Local development and CI may use Puppeteer-managed Chrome instead:
 
 ```bash
 npx puppeteer browsers install chrome
 ```
 
-Smoke check:
-
-```bash
-pnpm deploy:smoke --skip-build --require-base-url
-```
-
-If Puppeteer cannot launch Chrome, PDF download routes can fail with
-`Could not find Chrome`.
+The browser-launch smoke is necessary but not sufficient: production acceptance
+must also generate a non-empty PDF with `page.pdf()` and inspect one downloaded
+order containing Chinese text and a real OSS design image. On 2026-08-02,
+`/usr/bin/chromium` generated a 37,646-byte Chinese test PDF in production.
+Use the in-memory `page.pdf()` command in `docs/部署指南.md` §13 until
+`scripts/deploy-smoke.mjs` performs that assertion itself.
 
 ## Notification Mode
 
@@ -134,6 +151,18 @@ Expected:
 - `503` when `CRON_SECRET` is missing.
 - Never `200` for an invalid token.
 
+After deployment, trigger the daily export-retention job once and confirm the
+returned job reaches `SUCCEEDED` on `/owner/background-jobs`:
+
+```bash
+curl -i -X POST "$APP_PUBLIC_URL/api/cron/order-export-cleanup" \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+The HTTP response is `202 queued`; the eventual result contains counts only.
+Any filesystem permission failure must leave the job retryable/DEAD instead of
+being reported as a successful cleanup.
+
 After Pigsty `pg_cron` activation, copy `schedule_sql` only from ready rows:
 
 ```sql
@@ -161,6 +190,19 @@ Before high-risk migrations:
 - Record the stanza name, backup label, and target restore time.
 
 Do not add pgBackRest credentials to `.env`, CI variables for this app, or git.
+
+Current production deviation recorded on 2026-08-02: backup
+`20260802-193420F` and continuous WAL are healthy, but only repo1 exists and
+full retention is 2. Keep `BACKUP_REQUIRED_REPOS=2`; using `1` may diagnose the
+existing repository but must not be reported as passing the production baseline.
+
+## Current Release Source
+
+Production runs `aa42ba0` from local branch
+`codex/complex-client-data-layer-poc`. As of 2026-08-03, local `main` is still
+`245be5c` and the development repository has no Git remote. Do not run a default
+`git pull` or deploy `main` until the merge and remote recovery strategy is
+explicitly resolved.
 
 ## App Readiness SQL
 

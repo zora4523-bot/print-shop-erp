@@ -124,11 +124,11 @@ export async function getSalesRanking(
       // （工艺免费试做 / 退单冲账等场景），但放进&ldquo;销售排行&rdquo;里只会
       // 噪音，让&ldquo;Top 10&rdquo;失去信号。同时也兜住 dev DB 脏数据 / E2E
       // fixture 的 0 元 SUBMITTED 工单不污染排行视觉。
-      totalAmount: { gt: 0 },
+      processingAmount: { gt: 0 },
     },
-    _sum: { totalAmount: true },
+    _sum: { processingAmount: true },
     _count: { _all: true },
-    orderBy: { _sum: { totalAmount: 'desc' } },
+    orderBy: { _sum: { processingAmount: 'desc' } },
     take: 10,
   });
 
@@ -144,7 +144,7 @@ export async function getSalesRanking(
   return grouped.flatMap((g) => {
     const u = byId.get(g.submitterId);
     if (!u) return [];
-    const sum = g._sum.totalAmount;
+    const sum = g._sum.processingAmount;
     // groupBy 后 sum 极少为 0（已经在 where 里过滤），但 _sum 可能在
     // 极端 NULL 行下回 null —— 兜底排掉，避免一行 ¥0.00 上榜。
     const sumDec = new Decimal((sum ?? 0) as unknown as Decimal.Value);

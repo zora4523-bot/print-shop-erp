@@ -154,6 +154,28 @@ export async function beginTaskAction(
   return { status: 'success', taskId };
 }
 
+// Form-shaped wrapper over beginTaskAction. React only emits the native
+// form action + hidden $ACTION_ID when the function handed to
+// useActionState is itself a Server Action reference of (prevState,
+// formData) shape — a client-side `async () => boundAction()` closure has
+// no $$FORM_ACTION and silently drops the zero-JS submit path.
+//
+// taskId rides in a hidden field rather than a `.bind` closure, mirroring
+// setOrderUrgentAction: the value is server-rendered, so it stays correct
+// with or without hydration. Trusting it is safe because beginTaskAction
+// re-checks permission and lib/production enforces that the task belongs
+// to the calling worker. See DECISIONS.md 2026-08-17.
+export async function beginTaskFormAction(
+  _prev: TaskMutationResult | null,
+  formData: FormData,
+): Promise<TaskMutationResult> {
+  const taskId = formData.get('taskId');
+  if (typeof taskId !== 'string' || taskId === '') {
+    return { status: 'error', message: '任务参数缺失，请刷新后重试' };
+  }
+  return beginTaskAction(taskId);
+}
+
 export async function reassignProductionTaskAction(
   taskId: string,
   orderId: string,

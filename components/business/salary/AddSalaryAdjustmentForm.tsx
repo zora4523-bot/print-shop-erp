@@ -95,7 +95,7 @@ export function AddSalaryAdjustmentForm({
         <p className="text-xs text-destructive sm:col-span-4">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
-        <p className="text-xs text-success sm:col-span-4">调整已记账。</p>
+        <p className="text-xs text-success-foreground sm:col-span-4">调整已记账。</p>
       ) : null}
     </form>
   );

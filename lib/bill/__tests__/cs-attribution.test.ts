@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Role } from '../../../generated/prisma/enums';
+import { OrderSettlementType } from '../../../generated/prisma/enums';
 import {
   calculateCsBillAttribution,
   hasCustomerServiceAttribution,
@@ -67,12 +67,12 @@ describe('calculateCsBillAttribution', () => {
 });
 
 describe('hasCustomerServiceAttribution', () => {
-  it('uses the immutable submitter role after the account changes role', () => {
+  it('uses the immutable internal-sales settlement path', () => {
     expect(
       hasCustomerServiceAttribution([
         {
           order: {
-            submitterRole: Role.CUSTOMER_SERVICE,
+            settlementType: OrderSettlementType.INTERNAL_SALES,
             csSalesEntries: [],
           },
         },
@@ -80,12 +80,12 @@ describe('hasCustomerServiceAttribution', () => {
     ).toBe(true);
   });
 
-  it('does not turn an old sales bill into a CS bill from the current account role', () => {
+  it('does not turn an external-sales receivable into internal commission', () => {
     expect(
       hasCustomerServiceAttribution([
         {
           order: {
-            submitterRole: Role.SALES,
+            settlementType: OrderSettlementType.EXTERNAL_SALES,
             csSalesEntries: [],
           },
         },
@@ -98,7 +98,7 @@ describe('hasCustomerServiceAttribution', () => {
       hasCustomerServiceAttribution([
         {
           order: {
-            submitterRole: Role.SALES,
+            settlementType: OrderSettlementType.EXTERNAL_SALES,
             csSalesEntries: [
               {
                 amount: '1.00',

@@ -82,8 +82,10 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库存出入库</h2>
+        {/* 不要给这个表单加含 currentStock 的 key：提交成功后库存必变，
+            key 跟着变会重挂载组件，把 useActionState 里的成功提示一起
+            丢掉。表单字段的重置改由组件内部在 success 后 reset()。 */}
         <StockTransactionForm
-          key={`${material.id}-${decimal(material.currentStock)}`}
           action={boundTransaction}
           unit={material.unit}
           locationOptions={locationOptions}

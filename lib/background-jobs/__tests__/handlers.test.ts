@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../cdr', () => ({ handleCdrBundleJob: vi.fn() }));
 vi.mock('../cron', () => ({ handleCronJob: vi.fn() }));
 vi.mock('../notification', () => ({ handleNotificationJob: vi.fn() }));
+vi.mock('../order-export', () => ({ handleOrderExportJob: vi.fn() }));
 vi.mock('../pdf', () => ({ handleOrderPdfJob: vi.fn() }));
 
 import { backgroundJobHandlers } from '../handlers';

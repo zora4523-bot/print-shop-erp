@@ -47,6 +47,9 @@ export function CreateBundleForm({
     };
   }, [router, state]);
 
+  const allSelected = allIds.length > 0 && selected.size === allIds.length;
+  const someSelected = selected.size > 0 && !allSelected;
+
   function toggleAll() {
     if (selected.size === allIds.length) {
       setSelected(new Set());
@@ -99,10 +102,16 @@ export function CreateBundleForm({
                 <th className="px-3 py-2 text-left">
                   <input
                     type="checkbox"
-                    aria-label="全选 / 反选"
-                    checked={
-                      selected.size === allIds.length && allIds.length > 0
-                    }
+                    // toggleAll 的语义是全选/全清，不是反选。
+                    aria-label="全选 / 全不选"
+                    // 部分选中时置原生 indeterminate：读屏器据此播报
+                    // “mixed”，视觉上浏览器也画横线而不是空框。只用 DOM
+                    // 属性、不额外写 aria-checked——原生 checkbox 上手写
+                    // aria-checked 会和原生状态打架。
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected;
+                    }}
+                    checked={allSelected}
                     onChange={toggleAll}
                   />
                 </th>
@@ -123,6 +132,7 @@ export function CreateBundleForm({
                         type="checkbox"
                         name="orderIds"
                         value={o.id}
+                        aria-label={`选择工单 ${o.orderNo}`}
                         checked={checked}
                         onChange={() => toggleOne(o.id)}
                       />

@@ -3,6 +3,8 @@ import { AdjustmentType, Prisma } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
     product: { findUnique: vi.fn() },
     priceTier: {
       findMany: vi.fn(),
@@ -35,6 +37,12 @@ import {
 } from '../price';
 
 beforeEach(() => {
+  dbMock.$executeRaw.mockReset().mockResolvedValue(0);
+  dbMock.$transaction
+    .mockReset()
+    .mockImplementation(
+      async (callback: (tx: typeof dbMock) => Promise<unknown>) => callback(dbMock),
+    );
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
   for (const fn of Object.values(dbMock.priceTier)) fn.mockReset();
   for (const fn of Object.values(dbMock.priceAdjustment)) fn.mockReset();
@@ -124,6 +132,39 @@ describe('listPriceTiers', () => {
 });
 
 describe('price tier mutations', () => {
+  it('takes the exclusive snapshot lock in the same transaction as the mutation', async () => {
+    const txMock = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      product: { findUnique: vi.fn().mockResolvedValue({ id: 'prod1' }) },
+      priceTier: { create: vi.fn().mockResolvedValue(makeTier()) },
+    };
+    dbMock.$transaction.mockImplementationOnce(
+      async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+    );
+
+    await createPriceTier({
+      productId: 'prod1',
+      minQty: 1000,
+      unitPrice: '0.1200',
+      effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+      effectiveTo: null,
+    });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.product.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.priceTier.create).not.toHaveBeenCalled();
+    expect(txMock.product.findUnique).toHaveBeenCalledTimes(1);
+    expect(txMock.priceTier.create).toHaveBeenCalledTimes(1);
+    const sql = (txMock.$executeRaw.mock.calls[0]?.[0] as TemplateStringsArray).join(
+      '?',
+    );
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(sql).not.toContain('pg_advisory_xact_lock_shared');
+    expect(txMock.priceTier.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+      txMock.$executeRaw.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('requires an existing product before create', async () => {
     dbMock.product.findUnique.mockResolvedValue(null);
     await expect(

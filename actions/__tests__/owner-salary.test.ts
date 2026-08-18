@@ -275,8 +275,13 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'on' }));
+    // 成功后 action 走 redirect（把确认信息提升到页面级），测试里的
+    // redirect mock 会抛 NEXT_REDIRECT，所以这里断言抛出而不是返回值。
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(salaryMock.markDailySalaryPaid).toHaveBeenCalledWith('ds-1', true);
   });
 
@@ -285,9 +290,50 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: false,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({}));
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({})),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(salaryMock.markDailySalaryPaid).toHaveBeenCalledWith('ds-1', false);
+  });
+
+  it('returnTo 被限制在 /owner/salary/daily 前缀内（防开放重定向）', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.markDailySalaryPaid.mockResolvedValue({
+      id: 'ds-1',
+      isPaid: true,
+      workerName: '张师傅',
+    });
+    // returnTo 是客户端提交的 hidden field，必须当不可信输入处理。
+    await expect(
+      setDailySalaryPaidAction(
+        'ds-1',
+        null,
+        fd({ isPaid: 'true', returnTo: 'https://evil.example.com/steal' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT:\/owner\/salary\/daily\?marked=/);
+  });
+
+  it('合法 returnTo 保留用户当前筛选', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.markDailySalaryPaid.mockResolvedValue({
+      id: 'ds-1',
+      isPaid: true,
+      workerName: '张师傅',
+    });
+    await expect(
+      setDailySalaryPaidAction(
+        'ds-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: '/owner/salary/daily?date=2026-04-23&paid=unpaid',
+        }),
+      ),
+    ).rejects.toThrow(
+      /NEXT_REDIRECT:\/owner\/salary\/daily\?date=2026-04-23&paid=unpaid&marked=/,
+    );
   });
 
   it('revalidates the list on success', async () => {
@@ -295,8 +341,11 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' }));
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/daily');
   });
 });

@@ -6,6 +6,7 @@ import {
   type ProductCategoryNode,
 } from '../generated/prisma/client';
 import { db } from './db';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import { sortBySearchRelevance } from './search-ranking';
 
 export class PriceDictionaryInvariantError extends Error {
@@ -162,8 +163,11 @@ export async function getPriceAdjustmentSummary(
   });
 }
 
-async function requireProduct(productId: string): Promise<void> {
-  const product = await db.product.findUnique({
+async function requireProduct(
+  client: Prisma.TransactionClient,
+  productId: string,
+): Promise<void> {
+  const product = await client.product.findUnique({
     where: { id: productId },
     select: { id: true },
   });
@@ -185,16 +189,19 @@ export type UpdatePriceTierData = CreatePriceTierData;
 export async function createPriceTier(
   data: CreatePriceTierData,
 ): Promise<PriceTierSummary> {
-  await requireProduct(data.productId);
-  return db.priceTier.create({
-    data: {
-      productId: data.productId,
-      minQty: data.minQty,
-      unitPrice: data.unitPrice,
-      effectiveFrom: data.effectiveFrom,
-      effectiveTo: data.effectiveTo,
-    },
-    select: PRICE_TIER_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    await requireProduct(tx, data.productId);
+    return tx.priceTier.create({
+      data: {
+        productId: data.productId,
+        minQty: data.minQty,
+        unitPrice: data.unitPrice,
+        effectiveFrom: data.effectiveFrom,
+        effectiveTo: data.effectiveTo,
+      },
+      select: PRICE_TIER_SELECT,
+    });
   });
 }
 
@@ -202,24 +209,27 @@ export async function updatePriceTier(
   id: string,
   data: UpdatePriceTierData,
 ): Promise<PriceTierSummary> {
-  const existing = await db.priceTier.findUnique({
-    where: { id },
-    select: { id: true },
-  });
-  if (!existing) {
-    throw new PriceDictionaryInvariantError('价格阶梯不存在');
-  }
-  await requireProduct(data.productId);
-  return db.priceTier.update({
-    where: { id },
-    data: {
-      productId: data.productId,
-      minQty: data.minQty,
-      unitPrice: data.unitPrice,
-      effectiveFrom: data.effectiveFrom,
-      effectiveTo: data.effectiveTo,
-    },
-    select: PRICE_TIER_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const existing = await tx.priceTier.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new PriceDictionaryInvariantError('价格阶梯不存在');
+    }
+    await requireProduct(tx, data.productId);
+    return tx.priceTier.update({
+      where: { id },
+      data: {
+        productId: data.productId,
+        minQty: data.minQty,
+        unitPrice: data.unitPrice,
+        effectiveFrom: data.effectiveFrom,
+        effectiveTo: data.effectiveTo,
+      },
+      select: PRICE_TIER_SELECT,
+    });
   });
 }
 
@@ -241,15 +251,18 @@ function jsonObjectOrDbNull(
 export async function createPriceAdjustment(
   data: CreatePriceAdjustmentData,
 ): Promise<PriceAdjustmentSummary> {
-  return db.priceAdjustment.create({
-    data: {
-      name: data.name,
-      adjustmentType: data.adjustmentType,
-      amount: data.amount,
-      triggerCondition: jsonObjectOrDbNull(data.triggerCondition),
-      isActive: true,
-    },
-    select: PRICE_ADJUSTMENT_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    return tx.priceAdjustment.create({
+      data: {
+        name: data.name,
+        adjustmentType: data.adjustmentType,
+        amount: data.amount,
+        triggerCondition: jsonObjectOrDbNull(data.triggerCondition),
+        isActive: true,
+      },
+      select: PRICE_ADJUSTMENT_SELECT,
+    });
   });
 }
 
@@ -257,22 +270,25 @@ export async function updatePriceAdjustment(
   id: string,
   data: UpdatePriceAdjustmentData,
 ): Promise<PriceAdjustmentSummary> {
-  const existing = await db.priceAdjustment.findUnique({
-    where: { id },
-    select: { id: true },
-  });
-  if (!existing) {
-    throw new PriceDictionaryInvariantError('加价规则不存在');
-  }
-  return db.priceAdjustment.update({
-    where: { id },
-    data: {
-      name: data.name,
-      adjustmentType: data.adjustmentType,
-      amount: data.amount,
-      triggerCondition: jsonObjectOrDbNull(data.triggerCondition),
-    },
-    select: PRICE_ADJUSTMENT_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const existing = await tx.priceAdjustment.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new PriceDictionaryInvariantError('加价规则不存在');
+    }
+    return tx.priceAdjustment.update({
+      where: { id },
+      data: {
+        name: data.name,
+        adjustmentType: data.adjustmentType,
+        amount: data.amount,
+        triggerCondition: jsonObjectOrDbNull(data.triggerCondition),
+      },
+      select: PRICE_ADJUSTMENT_SELECT,
+    });
   });
 }
 
@@ -280,17 +296,20 @@ export async function setPriceAdjustmentActive(
   id: string,
   isActive: boolean,
 ): Promise<PriceAdjustmentSummary> {
-  const existing = await db.priceAdjustment.findUnique({
-    where: { id },
-    select: PRICE_ADJUSTMENT_SELECT,
-  });
-  if (!existing) {
-    throw new PriceDictionaryInvariantError('加价规则不存在');
-  }
-  if (existing.isActive === isActive) return existing;
-  return db.priceAdjustment.update({
-    where: { id },
-    data: { isActive },
-    select: PRICE_ADJUSTMENT_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const existing = await tx.priceAdjustment.findUnique({
+      where: { id },
+      select: PRICE_ADJUSTMENT_SELECT,
+    });
+    if (!existing) {
+      throw new PriceDictionaryInvariantError('加价规则不存在');
+    }
+    if (existing.isActive === isActive) return existing;
+    return tx.priceAdjustment.update({
+      where: { id },
+      data: { isActive },
+      select: PRICE_ADJUSTMENT_SELECT,
+    });
   });
 }

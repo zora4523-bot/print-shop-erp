@@ -52,9 +52,16 @@ export default async function ProductsListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="产品字典"
-        subtitle="管理产品清单（SPEC §4.1 / 附录 C）。单价作为录单时的建议价参考，不参与账单计算。停用只影响新录工单。"
+        subtitle="管理产品、规格和纸张等基础信息。基础单价仅供内部销售和工厂直单使用；外部销售必须使用独立、版本化的报价管理。停用只影响新录工单。"
         actions={
           <>
+            <Link
+              href="/owner/prices/external-sales/items"
+              prefetch={false}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              外部销售报价管理
+            </Link>
             <Link
               href="/owner/product-categories"
               prefetch={false}

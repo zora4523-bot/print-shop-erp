@@ -110,6 +110,7 @@ pnpm dev
    - 销售/客服：创建工单、多款式、双面双色、工艺多选
    - 上传JPG设计图 + CDR源文件（OSS）
    - 工单列表、详情、修改（按状态限制）
+   - 服务端稳定分页、逐项筛选、管理员异步多表 XLSX 导出
    - 状态机严格落地
 
 4. **生产流程**（1周）
@@ -186,7 +187,7 @@ pnpm dev
 - [ ] 所有Server Action有权限检查
 - [ ] 所有金额字段用Decimal或integer
 - [ ] 所有薪资记录有快照
-- [ ] 数据库有每日备份脚本
+- [ ] Pigsty/pgBackRest 每日 full、连续 WAL、两份 repository 与恢复演练通过只读门禁
 
 ---
 
@@ -205,7 +206,9 @@ pnpm dev
 
 ## 🚢 上线运维（P0 部署清单）
 
-P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.example` 列了所有变量，cron endpoints 都有 shared-secret 闸口，instrumentation.ts 是 SENTRY_DSN-gated 的 graceful no-op），运维只需要把环境变量喂进去即可。
+截至 2026-08-02，`aa42ba0` 已运行在 <https://bag.sshapi.cn>，生产数据库为 45 / 45 migrations。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
+
+> 当前已确认 Web、LIGHT worker、HEAVY worker、ready 和系统 Chromium PDF 正常；仍需补异地备份 repo2、30 天保留与恢复演练、`SENTRY_DSN / APP_VERSION`，并将 1.6 GiB 应用机升级到至少 4 GiB。生产只有 repo1 不能算备份基线通过。
 
 ### 1. 必填环境变量（`.env`）
 
@@ -214,10 +217,11 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
-| `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR 进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
+| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 8 个 `/api/cron/*` 全部 503 |
+| `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
+| `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
-| `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | **留空**（按 NODE_ENV：生产真发、dev mock）。**切勿设 `"true"`**——否则推送静默 mock，急单 3 秒推送验收项形同虚设 |
+| `NOTIFICATION_MOCK_MODE` | 企业微信推送真发开关 | 生产显式设 `"false"`，使 env 检查、smoke 与真实运行口径一致。留空在 `NODE_ENV=production` 下实际也是真发，但发布门禁会拒绝这种含糊配置；切勿设 `"true"` |
 | `CDR_BUNDLE_MOCK_MODE` | CDR 打包真跑开关 | 留空（按 NODE_ENV）。生产设 `"true"` 会让 CDR 汇总下载返回 mock 占位 URL |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` | seed.ts 创建 / 重置 ADMIN | 详见文件顶注释 |
 
@@ -230,7 +234,7 @@ P0 完成后上线前需要补齐的运维项。代码本身已就绪（`.env.ex
 
 ### 2. Cron 切换：`Bearer` → `pg_cron`
 
-P0 + P1 #2 期间 7 个 cron endpoints 用 shared-secret + 外部 cron 调用：
+P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret + 外部 cron 调用：
 
 ```bash
 # 每日 24:00 师傅日薪（P1 #2 起：完成后推 DAILY_WORKER_SALARY 到车间群）
@@ -260,11 +264,15 @@ curl -X POST https://host/api/cron/cs-period-ending \
 # 2026-07-07 新增：每日扫承诺交期已过仍未发货的工单 → ORDER_OVERDUE 推送到管理群
 curl -X POST https://host/api/cron/order-overdue \
   -H "Authorization: Bearer $CRON_SECRET"
+
+# 每日分批删除过期工单导出产物，终态只保留粗粒度 scope
+curl -X POST https://host/api/cron/order-export-cleanup \
+  -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
 
-**7 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**8 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgBackRest）
 
@@ -275,13 +283,15 @@ Pigsty 自带 pgBackRest，**不要**在应用里自己实现备份。生产基�
 - 每日在 Pigsty 节点跑 `PGBACKREST_STANZA=<stanza> pnpm check:backup`。
 - 每月恢复演练，RPO ≤ 5 分钟、RTO ≤ 60 分钟。
 
+2026-08-02 发布前 full backup `20260802-193420F` 和连续 WAL 已验证，但生产当前只有 repo1、full retention 为 2 份。默认 `BACKUP_REQUIRED_REPOS=2` 的门禁仍应失败；这是待整改偏差，不能为了显示绿色把基线改成 1。
+
 详见 `docs/production-slo-and-recovery.md`。
 
 ### 4. Sentry 接入
 
-`instrumentation.ts` 已经写好；只要 `SENTRY_DSN` 喂进去就工作。建议：
+`instrumentation.ts` 已经写好；只要 `SENTRY_DSN` 喂进去就工作。**截至 2026-08-02 生产仍未配置 Sentry，当前主要依赖 PM2/Next 日志，尚未达到下面的监控目标。** 建议：
 - Sentry 项目 → Settings → Client Keys 拿 DSN
-- `tracesSampleRate` 当前是 0.2（pre-launch 看清楚问题用）；流量起来后调到 0.05 ~ 0.1
+- `tracesSampleRate` 当前是 0.2；观察到稳定流量后调到 0.05 ~ 0.1
 - `sendDefaultPii: false`（不要把 cookies / IP 默认上报）已硬编码——薪资 / 客户 ref 都算敏感，单点 `Sentry.setExtra` 显式带上下文
 
 ### 5. OSS（设计图直传）
@@ -296,17 +306,21 @@ Pigsty 自带 pgBackRest，**不要**在应用里自己实现备份。生产基�
 
 `OSS_ENDPOINT` 一般留空（按 region 派生）；只有 VPC 内访问 / 特殊端口才需要。
 
-### 6. Puppeteer Chrome 安装
+### 6. Chromium 与中文字体
 
-PDF 生成用 Puppeteer 自带的 Chromium（不复用系统 Chrome）。pnpm 默认会跳过 puppeteer 的 postinstall，所以需要**手动**触发：
+Debian 生产机固定使用系统 `/usr/bin/chromium`，PM2 通过 `PUPPETEER_EXECUTABLE_PATH` 同时传给 Web 和 HEAVY worker；Puppeteer-managed Chrome 只用于本地和 CI。
 
 ```bash
-npx puppeteer browsers install chrome
+sudo apt-get update
+sudo apt-get install -y chromium fonts-noto-cjk
+test -x /usr/bin/chromium
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium /usr/bin/chromium --version
+fc-list :lang=zh | head
 ```
 
-下载到 `~/.cache/puppeteer/`，约 200MB。CI / 生产部署里要把这一步显式写进 build 脚本。第一次点 PDF 下载报 `Could not find Chrome` 即此问题。
+生产 smoke 必须显式传 `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` 和 `CI=true`，使浏览器以与真实渲染相同的 no-sandbox 参数启动。当前 `deploy-smoke` 只验证启动，不调用 `page.pdf()`；还要另跑部署指南 §13 的内存 PDF 命令。2026-08-02 已用该运行时生成 37,646 字节中文 PDF；只检查 HTTP 200 或 Puppeteer 缓存不算 PDF 验收。
 
-如果不想下载 Puppeteer 自己的浏览器，想用系统 Chrome，设置 `PUPPETEER_SKIP_DOWNLOAD=true` + `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`（MVP 没做这个分支，需要时再说）。
+本地/CI 若没有系统 Chromium，可运行 `npx puppeteer browsers install chrome` 安装 Puppeteer-managed Chrome。完整生产命令见 `docs/部署指南.md` §7 / §13。
 
 ### 7. 日常更新与数据库迁移边界
 
@@ -316,23 +330,26 @@ npx puppeteer browsers install chrome
 ./deploy/update.sh
 ```
 
+> **当前发布源例外（2026-08-03）**：生产 `aa42ba0` 来自本地 `codex/complex-client-data-layer-poc`，而本地 `main` 仍为 `245be5c`，仓库也没有 Git remote。配置远端并明确合并策略前，不能依赖脚本中的默认 `git pull`，更不能从旧 `main` 发版。
+
 脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
 
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 验证必须迁移到当前尾部 `20260802113000_hourly_payroll_reconciliation`，并跑 worker 视觉 fixture 验证其依赖列；完整命令和故障处理见 `docs/部署指南.md` §14。
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。当前工作区的 Fresh DB 验证必须完整应用 **71 项 migration** 到尾部 `20260807184000_pricing_compatibility_fence`，并检查无效并发索引为 0；完整命令、视觉 fixture 和故障处理见 `docs/部署指南.md` §14。这是本地发布候选口径，不表示生产已从 `aa42ba0` / 45 项 migration 升级。
 
 ### 8. 上线 smoke checklist
 
 按顺序跑一遍：
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
-- [ ] `pnpm prisma db seed`（首次创建 admin / 工艺字典 / 薪资规则）
-- [ ] `npx puppeteer browsers install chrome`（PDF 生成依赖）
+- [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
+- [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
+- [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
 - [ ] 管理员登录 `/owner/accounts` 改默认密码
 - [ ] 销售 / 客服 / 师傅各创一个测试账号
 - [ ] 跑通 工单创建 → 排产 → 报工 → 完工 一条链
 - [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
-- [ ] 故意挂掉一个 Server Action（临时改个抛错），确认 Sentry 收到事件后还原
+- [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
 - [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 启用 9 条 rule + 用&ldquo;测试&rdquo;按钮验证 webhook 通**（DECISIONS 2026-04-27 / P1 #2）。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online

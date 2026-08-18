@@ -93,7 +93,7 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
       readyHeading: '我的工单任务',
       assertGateState: assertProductionContext,
     },
-    { name: 'salary', path: '/worker/salary', readyHeading: '我的计件工资' },
+    { name: 'salary', path: '/worker/salary', readyHeading: '我的工资' },
     {
       name: 'salary-detail',
       path: `/worker/salary/${data.salaryId}`,

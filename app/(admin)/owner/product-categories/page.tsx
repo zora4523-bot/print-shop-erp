@@ -20,7 +20,7 @@ export default async function ProductCategoriesPage() {
     <div className="space-y-6">
       <PageHeader
         title="产品分类"
-        subtitle="维护产品分类树；旧分类快照继续用于历史报表和订单统计。"
+        subtitle="维护产品分类树；旧分类快照继续用于历史报表和工单统计。"
         actions={
           <Link href="/owner/product-categories/new" className={buttonVariants()}>
             新建分类

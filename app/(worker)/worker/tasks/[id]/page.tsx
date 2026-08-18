@@ -67,6 +67,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
       ) : null}
 
       <DesignImageGallery
+        headingLevel={2}
         images={task.orderItem.designs.map((design) => ({
           ...design,
           fileUrl: signDesignReadUrl(design.fileUrl),

@@ -163,21 +163,6 @@ export async function computeDailyWorkerSalary(
     },
   });
   if (!worker) throw new DailySalaryError('师傅不存在');
-  if (worker.role !== Role.WORKER) {
-    throw new DailySalaryError('不是师傅（role != WORKER）');
-  }
-  if (worker.workerType !== WorkerType.MACHINE) {
-    throw new DailySalaryError(
-      '不是开机师傅（仅 WorkerType.MACHINE 走日薪汇总）',
-    );
-  }
-  if (!worker.machineType) {
-    throw new DailySalaryError('师傅未配置机型');
-  }
-  // Hoist the narrowed machineType into a non-null local — TS loses
-  // flow narrowing across the $transaction arrow body's closure (same
-  // pattern as computeHourlyPayroll).
-  const primaryMachineType: MachineType = worker.machineType;
 
   // Store the `@db.Date` column as UTC midnight for the Shanghai
   // calendar date. parseStrictYmd already returned this value inside
@@ -220,9 +205,14 @@ export async function computeDailyWorkerSalary(
         workerId,
         status: 'COMPLETED',
         completedAt: { gte: start, lt: end },
+        OR: [
+          { workerType: WorkerType.MACHINE },
+          { workerType: null, machineType: { not: null } },
+        ],
       },
       select: {
         id: true,
+        workerType: true,
         machineType: true,
         completedQty: true,
         defectQty: true,
@@ -244,6 +234,41 @@ export async function computeDailyWorkerSalary(
       },
     });
 
+    // A completed task is an immutable payroll fact. Current account role,
+    // worker type and active state control future assignment only; they must
+    // not erase already-earned wages after an admin changes the account.
+    // Legacy tasks without both identity snapshots are ambiguous, so fail
+    // closed instead of guessing from the mutable User row.
+    for (const task of tasks) {
+      if (
+        task.workerType !== WorkerType.MACHINE ||
+        task.machineType === null
+      ) {
+        throw new DailySalaryError(
+          `任务 ${task.id} 缺少完工时工种或机型快照，不能安全汇总工资`,
+        );
+      }
+    }
+
+    if (tasks.length === 0) {
+      if (worker.role !== Role.WORKER) {
+        throw new DailySalaryError('不是师傅（role != WORKER）');
+      }
+      if (worker.workerType !== WorkerType.MACHINE) {
+        throw new DailySalaryError(
+          '不是开机师傅（仅 WorkerType.MACHINE 走日薪汇总）',
+        );
+      }
+      if (!worker.isActive) {
+        throw new DailySalaryError('师傅已停用且当日没有已完成计件任务');
+      }
+      if (!worker.machineType) {
+        throw new DailySalaryError('师傅未配置机型');
+      }
+    }
+    const primaryMachineType: MachineType =
+      tasks[0]?.machineType ?? worker.machineType!;
+
     for (const task of tasks) {
       storableSalaryAmount(
         task.pieceworkAmount as Decimal.Value,
@@ -263,7 +288,7 @@ export async function computeDailyWorkerSalary(
     const workedMachineTypes = tasks.length
       ? [
           ...new Set(
-            tasks.map((task) => task.machineType ?? primaryMachineType),
+            tasks.map((task) => task.machineType!),
           ),
         ].sort((left, right) => {
           if (left === right) return 0;
@@ -401,7 +426,7 @@ export async function computeDailyWorkerSalary(
           orderItemName: task.orderItem.name,
           craftId: task.craft.id,
           craftName: task.craft.name,
-          machineType: task.machineType ?? primaryMachineType,
+          machineType: task.machineType!,
           completedQty: task.completedQty,
           defectQty: task.defectQty,
           reworkQty: task.reworkQty,
@@ -410,10 +435,8 @@ export async function computeDailyWorkerSalary(
           pieceworkAmount: String(task.pieceworkAmount),
           salaryRuleSnapshot: JSON.parse(
             JSON.stringify(
-              task.salaryRuleSnapshot ??
-                ruleByMachine.get(
-                  task.machineType ?? primaryMachineType,
-                ) ??
+                task.salaryRuleSnapshot ??
+                ruleByMachine.get(task.machineType!) ??
                 rule,
             ),
           ),
@@ -440,7 +463,7 @@ export async function computeDailyWorkerSalary(
 // owner's "recompute" button. Returns per-worker results for display.
 export type BatchDailyResult = {
   settled: DailyWorkerSalaryResult[];
-  errors: Array<{ workerId: string; message: string }>;
+  errors: Array<{ workerId: string; workerName: string; message: string }>;
 };
 
 // Earlier workers may already be committed when a later database or
@@ -467,18 +490,41 @@ export async function computeDailyForAllMachineWorkers(
   date: string,
   now?: Date,
 ): Promise<BatchDailyResult> {
+  const { start, end } = shanghaiDayRange(date);
   const settled: DailyWorkerSalaryResult[] = [];
-  const errors: Array<{ workerId: string; message: string }> = [];
-  let workers: Array<{ id: string }>;
+  const errors: Array<{ workerId: string; workerName: string; message: string }> = [];
+  let workers: Array<{ id: string; displayName: string }>;
   try {
     workers = await db.user.findMany({
       where: {
-        role: Role.WORKER,
-        workerType: WorkerType.MACHINE,
-        isActive: true,
-        machineType: { not: null },
+        OR: [
+          {
+            role: Role.WORKER,
+            workerType: WorkerType.MACHINE,
+            isActive: true,
+            machineType: { not: null },
+          },
+          {
+            assignedTasks: {
+              some: {
+                status: 'COMPLETED',
+                completedAt: { gte: start, lt: end },
+                OR: [
+                  { workerType: WorkerType.MACHINE },
+                  // Legacy machine tasks may predate workerType while still
+                  // carrying their machine snapshot. Include them so the
+                  // single-worker path emits an explicit reconciliation error.
+                  {
+                    workerType: null,
+                    machineType: { not: null },
+                  },
+                ],
+              },
+            },
+          },
+        ],
       },
-      select: { id: true },
+      select: { id: true, displayName: true },
     });
   } catch (cause) {
     throw new DailyBatchUnexpectedError(
@@ -492,7 +538,11 @@ export async function computeDailyForAllMachineWorkers(
       settled.push(await computeDailyWorkerSalary(w.id, date, now));
     } catch (err) {
       if (err instanceof DailySalaryError) {
-        errors.push({ workerId: w.id, message: err.message });
+        errors.push({
+          workerId: w.id,
+          workerName: w.displayName,
+          message: err.message,
+        });
         continue;
       }
       throw new DailyBatchUnexpectedError(
@@ -792,7 +842,7 @@ export async function markDailySalaryPaid(
   id: string,
   isPaid: boolean,
   now: Date = new Date(),
-): Promise<{ id: string; isPaid: boolean }> {
+): Promise<{ id: string; isPaid: boolean; workerName: string }> {
   // Same advisory lock as computeDailyWorkerSalary so a mark-paid
   // landing mid-recompute blocks until the recompute's tx commits —
   // no more paid-row amount overwrite. Lock key needs (workerId, date),
@@ -816,9 +866,19 @@ export async function markDailySalaryPaid(
         isPaid,
         paidAt: isPaid ? now : null,
       },
-      select: { id: true, isPaid: true },
+      // workerName 供调用方渲染「已标记 XXX 为已发放」的确认条——
+      // 发钱操作必须有可读的回执，不能只吐 id。
+      select: {
+        id: true,
+        isPaid: true,
+        worker: { select: { displayName: true } },
+      },
     });
-    return updated;
+    return {
+      id: updated.id,
+      isPaid: updated.isPaid,
+      workerName: updated.worker.displayName,
+    };
   });
 }
 

@@ -169,7 +169,7 @@ export default async function OwnerDashboardPage() {
           href="/owner/products"
           icon={PackageOpen}
           label="产品库"
-          description="规格、建议单价"
+          description="规格、基础价与起订量"
           tone="info"
         />
         <ActionShortcut

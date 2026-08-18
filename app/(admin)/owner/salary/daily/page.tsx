@@ -27,7 +27,13 @@ export const metadata = { title: '计件工资' };
 // Shanghai calendar date; `paid` accepts "paid" | "unpaid" | anything
 // else (show all).
 type PageProps = {
-  searchParams: Promise<{ date?: string; paid?: string; workerId?: string }>;
+  searchParams: Promise<{
+    date?: string;
+    paid?: string;
+    workerId?: string;
+    marked?: string;
+    markedPaid?: string;
+  }>;
 };
 
 function todayShanghai(): string {
@@ -54,6 +60,18 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     sp.date && parseStrictYmd(sp.date) ? sp.date : todayShanghai();
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
+
+  // 标记已发/撤销后 action 会 redirect 回这个 URL 并附上确认信息。
+  // 只保留筛选参数，不要把上一次的 marked 带进去，否则确认条会一直挂着。
+  const filterQuery = new URLSearchParams();
+  if (sp.date) filterQuery.set('date', sp.date);
+  if (sp.paid) filterQuery.set('paid', sp.paid);
+  if (sp.workerId) filterQuery.set('workerId', sp.workerId);
+  const returnTo = filterQuery.size
+    ? `/owner/salary/daily?${filterQuery.toString()}`
+    : '/owner/salary/daily';
+  const markedName = sp.marked?.trim();
+  const markedPaid = sp.markedPaid === '1';
 
   const [rows, workers] = await Promise.all([
     listDailyWorkerSalaries({
@@ -89,6 +107,21 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 发钱操作的回执。「仅未发」筛选下被标记的那一行会立刻从列表消失，
+          此前用户点完什么反馈都没有——这是最需要确认的一步。 */}
+      {markedName ? (
+        <p
+          role="status"
+          className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success-foreground"
+        >
+          已{markedPaid ? '标记' : '撤销'}
+          <strong className="mx-1">{markedName}</strong>
+          的日薪{markedPaid ? '为已发放' : '发放'}。
+          <Link href={returnTo} className="ml-2 underline underline-offset-2">
+            关闭
+          </Link>
+        </p>
+      ) : null}
       <PageHeader
         title="计件工资"
         subtitle="按上海日历天汇总已完工任务；工资取计件合计与实际工作机型最高保底的较高者，再加人工调整。上班/请假天数仅作考勤展示，不自动扣减计件保底。"
@@ -227,7 +260,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                       >
                         核对明细
                       </Link>
-                      <MarkPaidForm id={r.id} currentPaid={r.isPaid} />
+                      <MarkPaidForm
+                        id={r.id}
+                        currentPaid={r.isPaid}
+                        returnTo={returnTo}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -267,8 +304,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">日期</label>
+        <label htmlFor="daily-date" className="text-xs text-muted-foreground">日期</label>
         <input
+          id="daily-date"
           type="date"
           name="date"
           defaultValue={selectedDate}
@@ -276,8 +314,9 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="daily-paid" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="daily-paid"
           name="paid"
           defaultValue={paid ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -288,8 +327,9 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">师傅</label>
+        <label htmlFor="daily-workerId" className="text-xs text-muted-foreground">师傅</label>
         <select
+          id="daily-workerId"
           name="workerId"
           defaultValue={workerId ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"

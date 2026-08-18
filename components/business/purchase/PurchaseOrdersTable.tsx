@@ -71,7 +71,7 @@ export function PurchaseOrdersTable({
   direction = 'asc',
 }: Props) {
   return (
-    <Table>
+    <Table label="采购单列表">
       <TableHeader>
         <TableRow>
           <SortHead

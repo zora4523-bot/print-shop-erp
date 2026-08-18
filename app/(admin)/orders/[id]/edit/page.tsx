@@ -52,7 +52,6 @@ export default async function EditOrderPage({ params }: PageProps) {
             ? order.promisedDate.toISOString().slice(0, 10)
             : null,
           isUrgent: order.isUrgent,
-          isSfCollect: order.isSfCollect,
         }}
       />
     </div>

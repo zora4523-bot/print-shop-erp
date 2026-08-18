@@ -13,12 +13,21 @@
 | 重任务开始延迟 | 95% < 15 分钟 | `/owner/background-jobs` 与 ready 端点 |
 | 死信响应 | 工作时间 30 分钟内 | Sentry + ready 端点 `deadLast24h` 告警 |
 
+## 当前生产偏差（2026-08-02）
+
+- <https://bag.sshapi.cn> 已运行 `aa42ba0`，45 / 45 migrations，Web、LIGHT、HEAVY 与 ready 正常。
+- pgBackRest full `20260802-193420F` 和连续 WAL 正常，但仅有 repo1、full retention 为 2；因此“两 repo + 30 天”仍未达标，默认备份门禁应失败。
+- `SENTRY_DSN` 尚未配置，当前只能依赖 PM2/Next 日志和 ready；“Sentry + ready”死信响应目标尚未完整生效。
+- 应用机为 1.6 GiB RAM + 4 GiB swap，自动使用低内存 PM2 档；生产构建曾因换页耗时约 10.9 分钟。至少 4 GiB RAM 仍是整改目标。
+- PDF 固定使用 `/usr/bin/chromium`，已实测生成 37,646 字节中文 PDF；真实 OSS 设计图打印仍需人工验收。
+
 ## 备份策略
 
 - 每日完整备份，保留 30 天。
 - 至少两个独立 repository：Pigsty 节点本地一份，异地对象存储一份。
 - 连续 WAL 归档同时写入两个 repository，以支持 PITR。
 - OSS `design/` 原稿开启版本化与跨区域复制；`bundles/` 为可再生成产物，可用生命周期规则清理。
+- 工单 XLSX 是可再生成的私有临时产物，不纳入备份；单机基线存在 `ORDER_EXPORT_ARTIFACT_DIR`。READY 产物生成完成后 24 小时过期；无账本 orphan 为避免误删刚落盘但事务结果尚不确定的文件，留出最多约 48 小时安全窗口后回收。`/api/cron/order-export-cleanup` 每次按 100 行一批、最多处理 500 行，剩余行由下一次调度继续；终态筛选收据只保留 scope，不保留参数或可枚举的确定性哈希。多机部署前必须迁往私有对象存储并保留本人授权与下载审计。
 - 备份凭证不进入应用 `.env`、CI 或 Git，由 Pigsty 主机管理。
 
 每日由监控节点执行只读验收：
@@ -44,8 +53,8 @@ pnpm check:backup
 
 - `/api/health/live`：只判断 Node 进程存活，不用于业务就绪。
 - `/api/health/ready`：验证 DB、LIGHT/HEAVY worker 心跳、积压、死信与超时 RUNNING 任务。
-- Sentry：Web 未捕获错误和 worker 错误都上报，以 `APP_VERSION` 区分发布。
-- PM2：Web 768 MiB，LIGHT 384 MiB，HEAVY 1280 MiB；HEAVY 并发固定为 1。
+- Sentry：目标是 Web 未捕获错误和 worker 错误都上报，以 `APP_VERSION` 区分发布；当前生产尚未配置，不能把该告警链视为已启用。
+- PM2：≥3 GiB 主机使用 Web 768 / LIGHT 384 / HEAVY 1280 MiB restart 上限；<3 GiB 主机自动使用 Web 512 / LIGHT 384 / HEAVY 640 MiB 低内存档（V8 heap 分别 384 / 256 / 448 MiB）。HEAVY 并发固定为 1，低内存档是带 swap 的临时方案。
 - PostgreSQL：用 Pigsty 自带监控 + `pg_stat_statements`，不在应用主机重复搭建 Prometheus/Grafana/ELK。
 
 ## 发布门禁
@@ -53,12 +62,16 @@ pnpm check:backup
 只有以下项全部通过才可切流量：
 
 ```bash
-pnpm check:env
+NODE_ENV=production pnpm check:env
 pnpm prisma migrate status
 pnpm typecheck
 pnpm lint
-pnpm test -- --run
+pnpm exec vitest run
 pnpm build
 curl -fsS https://erp.example.com/api/health/ready
-pnpm check:backup
+PGBACKREST_STANZA=<stanza> BACKUP_REQUIRED_REPOS=2 pnpm check:backup
 ```
+
+当前生产在 repo2、30 天保留、恢复演练和 Sentry 项上仍未满足本基线；文档记录
+真实偏差不等于豁免门禁。补齐前的每次发布都必须明确风险、保留迁移前 full
+backup，并由负责人确认继续发布。

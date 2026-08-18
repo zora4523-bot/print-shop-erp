@@ -5,7 +5,7 @@ import {
   WorkerType,
 } from '../../../generated/prisma/client';
 
-const { dbMock, txMock } = vi.hoisted(() => {
+const { dbMock, txMock, auditMock } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     user: { findUnique: vi.fn() },
@@ -18,12 +18,16 @@ const { dbMock, txMock } = vi.hoisted(() => {
   };
   return {
     txMock: tx,
+    auditMock: { writeAuditLogInTx: vi.fn() },
     dbMock: {
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     },
   };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/audit-log', () => ({
+  writeAuditLogInTx: auditMock.writeAuditLogInTx,
+}));
 
 import {
   createWorkerMachineSalaryRule,
@@ -93,6 +97,24 @@ describe('workerMachineRuleInputSchema', () => {
         pieceRate: '-0.01',
       }).success,
     ).toBe(false);
+  });
+
+  it('rejects zero as a small-order threshold', () => {
+    const result = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      smallOrderThreshold: '0',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['smallOrderThreshold'],
+            message: '请输入正整数',
+          }),
+        ]),
+      );
+    }
   });
 
   it('rejects a rate that can overflow Decimal(10,2) on the largest task', () => {
@@ -203,7 +225,12 @@ describe('createWorkerMachineSalaryRule', () => {
       effectiveFrom,
       remark: '个人议价',
       ruleValue: workerMachineRuleInputSchema.parse(validInput()).ruleValue,
-      createdById: 'owner-1',
+      actor: {
+        id: 'owner-1',
+        role: Role.ADMIN,
+        username: 'owner',
+        displayName: '管理员',
+      },
     });
 
     expect(txMock.$executeRaw).toHaveBeenCalled();
@@ -226,6 +253,15 @@ describe('createWorkerMachineSalaryRule', () => {
           effectiveTo: null,
           createdById: 'owner-1',
         }),
+      }),
+    );
+    expect(auditMock.writeAuditLogInTx).toHaveBeenCalledWith(
+      txMock,
+      expect.objectContaining({
+        actor: expect.objectContaining({ id: 'owner-1' }),
+        action: 'CREATE',
+        entityType: 'WorkerMachineSalaryRule',
+        entityId: 'rule-2',
       }),
     );
   });
@@ -254,7 +290,12 @@ describe('createWorkerMachineSalaryRule', () => {
         effectiveFrom: new Date('2026-07-20T01:30:00Z'),
         remark: '风车机支援价',
         ruleValue: workerMachineRuleInputSchema.parse(validInput()).ruleValue,
-        createdById: 'owner-1',
+        actor: {
+          id: 'owner-1',
+          role: Role.ADMIN,
+          username: 'owner',
+          displayName: '管理员',
+        },
       }),
     ).resolves.toEqual({ id: 'rule-wind' });
   });

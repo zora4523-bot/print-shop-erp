@@ -140,7 +140,7 @@ export function OrderCostEntryForm({
         {pending ? '保存中…' : '新增成本明细'}
       </Button>
       {state?.status === 'success' ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           成本明细已记录。
         </p>
       ) : null}

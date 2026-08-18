@@ -1,9 +1,20 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { SalaryAdjustmentType } from '@/generated/prisma/enums';
+import {
+  Role,
+  SalaryAdjustmentType,
+  WorkerType,
+} from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
-import { getWorkerSalaryDetail } from '@/lib/worker-portal';
-import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
+import {
+  getWorkerHourlyPayrollDetail,
+  getWorkerSalaryDetail,
+  type WorkerSalaryActor,
+} from '@/lib/worker-portal';
+import {
+  MACHINE_TYPE_LABELS,
+  WORKER_TYPE_LABELS,
+} from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import Decimal from 'decimal.js';
@@ -19,8 +30,21 @@ const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
 
 export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   const user = await requirePermission('salary:view:self');
+  if (user.role !== Role.WORKER || !user.workerType) notFound();
   const { id } = await params;
-  const salary = await getWorkerSalaryDetail(id, { id: user.id, role: user.role });
+  const actor: WorkerSalaryActor = {
+    id: user.id,
+    role: user.role,
+    workerType: user.workerType,
+  };
+
+  if (user.workerType !== WorkerType.MACHINE) {
+    const payroll = await getWorkerHourlyPayrollDetail(id, actor);
+    if (!payroll) notFound();
+    return <HourlySalaryDetail payroll={payroll} />;
+  }
+
+  const salary = await getWorkerSalaryDetail(id, actor);
   if (!salary) notFound();
   const attendanceEnd = new Date(salary.date);
   attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);
@@ -139,6 +163,145 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           ) : null}
         </ul>
       </section>
+    </div>
+  );
+}
+
+type HourlySalaryDetailData = NonNullable<
+  Awaited<ReturnType<typeof getWorkerHourlyPayrollDetail>>
+>;
+
+function HourlySalaryDetail({
+  payroll,
+}: {
+  payroll: HourlySalaryDetailData;
+}) {
+  const workerType = payroll.payrollWorkerType;
+  const isCook = workerType === WorkerType.COOK;
+  const dailyDetails = parseHourlyDailyDetails(payroll.dailyDetail);
+
+  return (
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
+            {payroll.month} 工资明细
+          </h1>
+          {payroll.isPaid ? (
+            <Badge variant="secondary">已发</Badge>
+          ) : (
+            <Badge variant="outline">未发</Badge>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'} ·
+          只展示当前账号自己的月结记录
+        </p>
+        {payroll.isPaid && payroll.paidAt ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            发放时间：{formatDateTimeShanghai(payroll.paidAt)}
+          </p>
+        ) : null}
+      </header>
+
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
+        <Metric label="正常工时" value={`${String(payroll.totalWorkHours)} 小时`} />
+        <Metric
+          label={isCook ? '代班工时' : '加班工时'}
+          value={`${String(
+            isCook ? payroll.totalSpareHours : payroll.totalOtHours,
+          )} 小时`}
+        />
+        <Metric
+          label={isCook ? '代班时薪' : '正常时薪'}
+          value={`¥ ${String(payroll.hourlyRate)} / 小时`}
+        />
+        {isCook ? null : (
+          <Metric
+            label="加班倍率"
+            value={`${String(payroll.otMultiplier)} 倍`}
+          />
+        )}
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
+        <Money
+          label={isCook ? '月薪' : '正常工时工资'}
+          value={payroll.baseSalary}
+        />
+        <Money
+          label={isCook ? '代班工资' : '加班工资'}
+          value={isCook ? payroll.spareSalary : payroll.otSalary}
+        />
+        <Money label="实发工资" value={payroll.totalSalary} strong />
+      </section>
+
+      <section className="rounded-xl border bg-card p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">每日工时（{dailyDetails.length}）</h2>
+        {dailyDetails.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            该月没有每日工时明细。
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y text-sm">
+            {dailyDetails.map((detail) => (
+              <li key={detail.date} className="py-3">
+                <p className="font-sans tabular-nums font-medium">
+                  {detail.date}
+                </p>
+                <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                  正常 {detail.normalHours} 小时 ·{' '}
+                  {isCook
+                    ? `代班 ${detail.spareHours} 小时`
+                    : `加班 ${detail.otHours} 小时`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <Link
+        href="/worker/salary"
+        className="inline-flex min-h-11 items-center text-sm underline decoration-primary"
+      >
+        返回我的工资
+      </Link>
+    </div>
+  );
+}
+
+type HourlyDailyDetail = {
+  date: string;
+  normalHours: string;
+  otHours: string;
+  spareHours: string;
+};
+
+function parseHourlyDailyDetails(value: unknown): HourlyDailyDetail[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const row = entry as Record<string, unknown>;
+    if (typeof row.date !== 'string') return [];
+    return [
+      {
+        date: row.date,
+        normalHours: String(row.normalHours ?? '0'),
+        otHours: String(row.otHours ?? '0'),
+        spareHours: String(row.spareHours ?? '0'),
+      },
+    ];
+  });
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="worker-wrap-anywhere mt-1 font-sans tabular-nums font-medium">
+        {value}
+      </p>
     </div>
   );
 }

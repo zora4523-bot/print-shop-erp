@@ -132,7 +132,7 @@ test.describe('OrderPrintLayout 截图回归', () => {
     );
   });
 
-  test('三款完整上下文保持在一张 A4 内', async ({ page }) => {
+  test('三款完整上下文分页正常且每页重复表头', async ({ page }) => {
     const adminId = await getUserIdByUsername(ADMIN_USERNAME);
     const { orderId, customName, itemRemark, foilColors } =
       await seedPrintableOrder({
@@ -183,6 +183,27 @@ test.describe('OrderPrintLayout 截图回归', () => {
     });
     const pageObjects =
       pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? [];
-    expect(pageObjects, '三款工单必须只生成一张 PDF 页面').toHaveLength(1);
+    // 业主 2026-08-18 决策：放弃「三款必须一页」。硬压一页的 compact-3
+    // 只在恰好 3 款时生效，而工单一旦排产仍然放不下——那条断言给的是
+    // 假的安全感。现在的契约是「正常分页 + 每页重复表头」，所以这里
+    // 只断言页数合理（≥1 且不炸裂），页眉重复由下面的 DOM 断言保证。
+    expect(pageObjects.length).toBeGreaterThanOrEqual(1);
+    expect(
+      pageObjects.length,
+      '三款工单不应该分出异常多的页面（分页塌陷的典型症状）',
+    ).toBeLessThanOrEqual(4);
+
+    // 每页重复表头的机制是 <thead>：浏览器原生在每个打印页重复它，并
+    // 预留空间。断言结构存在，避免有人把它改回 position: fixed。
+    await expect(page.locator('.print-sheet > thead .running-header-no')).toHaveText(
+      /^E2E-VR-THREE-/,
+    );
+    await expect(page.locator('.print-sheet > tfoot .print-footer')).toHaveCount(1);
+    const footerPosition = await page
+      .locator('.print-footer')
+      .evaluate((el) => getComputedStyle(el).position);
+    expect(footerPosition, '页脚不能再用 fixed —— 它每页重画却不占位，会压住正文').not.toBe(
+      'fixed',
+    );
   });
 });

@@ -7,8 +7,13 @@ import {
   WorkerType,
 } from '../generated/prisma/client';
 import { db } from './db';
+import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
 
 export type WorkerActor = { id: string; role: Role };
+
+export type WorkerSalaryActor = WorkerActor & {
+  workerType: WorkerType | null;
+};
 
 export class WorkerPortalError extends Error {
   constructor(message: string) {
@@ -20,6 +25,24 @@ export class WorkerPortalError extends Error {
 function requireWorkerActor(actor: WorkerActor): void {
   if (actor.role !== Role.WORKER) {
     throw new WorkerPortalError('仅师傅账号可访问个人工作台');
+  }
+}
+
+function requireMachineSalaryActor(actor: WorkerSalaryActor): void {
+  requireWorkerActor(actor);
+  if (actor.workerType !== WorkerType.MACHINE) {
+    throw new WorkerPortalError('仅开机师傅可访问计件日薪');
+  }
+}
+
+function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
+  requireWorkerActor(actor);
+  if (
+    actor.workerType !== WorkerType.PACKER &&
+    actor.workerType !== WorkerType.CLEANER &&
+    actor.workerType !== WorkerType.COOK
+  ) {
+    throw new WorkerPortalError('仅打包、清废或厨师账号可访问时薪月结');
   }
 }
 
@@ -168,10 +191,10 @@ export async function getWorkerOrderDetail(
 }
 
 export async function listWorkerSalaries(
-  actor: WorkerActor,
+  actor: WorkerSalaryActor,
   filters?: { from?: Date; to?: Date },
 ) {
-  requireWorkerActor(actor);
+  requireMachineSalaryActor(actor);
   return db.dailyWorkerSalary.findMany({
     where: {
       workerId: actor.id,
@@ -202,9 +225,9 @@ export async function listWorkerSalaries(
 
 export async function getWorkerSalaryDetail(
   salaryId: string,
-  actor: WorkerActor,
+  actor: WorkerSalaryActor,
 ) {
-  requireWorkerActor(actor);
+  requireMachineSalaryActor(actor);
   return db.dailyWorkerSalary.findFirst({
     // The workerId predicate is deliberately in the database query rather
     // than checked after reading, so another worker's salary never enters
@@ -226,4 +249,83 @@ export async function getWorkerSalaryDetail(
       },
     },
   });
+}
+
+export async function listWorkerHourlyPayrolls(
+  actor: WorkerSalaryActor,
+  filters?: { fromMonth?: string; toMonth?: string },
+) {
+  requireHourlySalaryActor(actor);
+  const monthFilter =
+    filters?.fromMonth || filters?.toMonth
+      ? {
+          gte: filters.fromMonth,
+          lte: filters.toMonth,
+        }
+      : undefined;
+
+  const rows = await db.hourlyWorkerPayroll.findMany({
+    where: {
+      workerId: actor.id,
+      month: monthFilter,
+    },
+    orderBy: { month: 'desc' },
+    select: {
+      id: true,
+      month: true,
+      totalWorkHours: true,
+      totalOtHours: true,
+      totalSpareHours: true,
+      hourlyRate: true,
+      otMultiplier: true,
+      baseSalary: true,
+      otSalary: true,
+      spareSalary: true,
+      totalSalary: true,
+      salaryRuleSnapshot: true,
+      isPaid: true,
+      paidAt: true,
+    },
+  });
+  return rows.map((row) => ({
+    ...row,
+    payrollWorkerType: getHourlyPayrollWorkerType(row.salaryRuleSnapshot),
+  }));
+}
+
+export async function getWorkerHourlyPayrollDetail(
+  payrollId: string,
+  actor: WorkerSalaryActor,
+) {
+  requireHourlySalaryActor(actor);
+  const row = await db.hourlyWorkerPayroll.findFirst({
+    // Keep ownership in the database predicate. A guessed payroll id from
+    // another worker must be indistinguishable from a missing record.
+    where: { id: payrollId, workerId: actor.id },
+    select: {
+      id: true,
+      month: true,
+      totalWorkHours: true,
+      totalOtHours: true,
+      totalSpareHours: true,
+      hourlyRate: true,
+      otMultiplier: true,
+      baseSalary: true,
+      otSalary: true,
+      spareSalary: true,
+      totalSalary: true,
+      dailyDetail: true,
+      salaryRuleSnapshot: true,
+      isPaid: true,
+      paidAt: true,
+    },
+  });
+  return row
+    ? {
+        ...row,
+        payrollWorkerType: getHourlyPayrollWorkerType(
+          row.salaryRuleSnapshot,
+        ),
+      }
+    : null;
 }

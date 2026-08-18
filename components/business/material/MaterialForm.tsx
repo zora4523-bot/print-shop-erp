@@ -169,7 +169,7 @@ export function MaterialForm(props: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
         </p>
       ) : null}

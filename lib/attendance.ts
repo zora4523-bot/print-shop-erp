@@ -106,6 +106,8 @@ export type AttendanceRow = {
   leaveUnits: string;
   leaveType: string | null;
   workerDisplayName: string;
+  // Immutable identity captured when the row was first recorded. Payroll
+  // must not follow the mutable User.role / User.workerType fields.
   workerType: WorkerType | null;
   workerRole: Role;
   employmentType: EmploymentType;
@@ -147,6 +149,19 @@ export async function recordAttendance(
   if (worker.role === Role.ADMIN || worker.employmentType === null) {
     throw new AttendanceError('该账号不是可录考勤的在职员工');
   }
+  const existingIdentity = await db.attendance.findUnique({
+    where: { workerId_date: { workerId, date: dateCol } },
+    select: { roleSnapshot: true, workerTypeSnapshot: true },
+  });
+  const roleSnapshot = existingIdentity?.roleSnapshot ?? worker.role;
+  const workerTypeSnapshot = existingIdentity
+    ? existingIdentity.workerTypeSnapshot
+    : worker.role === Role.WORKER
+      ? worker.workerType
+      : null;
+  if (roleSnapshot === Role.WORKER && workerTypeSnapshot === null) {
+    throw new AttendanceError('师傅账号未配置工种，不能录入考勤');
+  }
 
   const normal = dec(input.normalHours);
   const ot = dec(input.otHours);
@@ -172,7 +187,7 @@ export async function recordAttendance(
   // one — keeps the foreman's form shape uniform without polluting
   // PACKER / CLEANER rows.
   const effectiveSpare =
-    worker.workerType === WorkerType.COOK ? spare : new Decimal(0);
+    workerTypeSnapshot === WorkerType.COOK ? spare : new Decimal(0);
   const workUnits = dec(input.workUnits ?? 1);
   const leaveUnits = dec(input.leaveUnits ?? 0);
   if (
@@ -195,6 +210,9 @@ export async function recordAttendance(
       leaveUnits: leaveUnits.toFixed(1),
       leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
+      roleSnapshot,
+      workerTypeSnapshot,
+      identitySnapshotVerified: true,
       createdById: actor.id,
     },
     update: {
@@ -205,8 +223,10 @@ export async function recordAttendance(
       leaveUnits: leaveUnits.toFixed(1),
       leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
-      // Deliberately don't overwrite createdById on re-entry; the
-      // original recorder stays the auditable actor.
+      // Deliberately don't overwrite createdById, identity snapshots or their
+      // verification marker on re-entry; both the original recorder and
+      // historical payroll classification stay auditable after an account
+      // change.
     },
     select: {
       id: true,
@@ -219,6 +239,8 @@ export async function recordAttendance(
       leaveUnits: true,
       leaveType: true,
       remark: true,
+      roleSnapshot: true,
+      workerTypeSnapshot: true,
     },
   });
 
@@ -234,8 +256,8 @@ export async function recordAttendance(
     leaveType: saved.leaveType,
     remark: saved.remark,
     workerDisplayName: worker.displayName,
-    workerType: worker.workerType,
-    workerRole: worker.role,
+    workerType: saved.workerTypeSnapshot,
+    workerRole: saved.roleSnapshot,
     employmentType: worker.employmentType ?? EmploymentType.FULL_TIME,
   };
 }
@@ -290,11 +312,11 @@ export async function listMonthlyAttendance(
       leaveUnits: true,
       leaveType: true,
       remark: true,
+      roleSnapshot: true,
+      workerTypeSnapshot: true,
       worker: {
         select: {
           displayName: true,
-          workerType: true,
-          role: true,
           employmentType: true,
         },
       },
@@ -312,8 +334,8 @@ export async function listMonthlyAttendance(
     leaveType: r.leaveType,
     remark: r.remark,
     workerDisplayName: r.worker.displayName,
-    workerType: r.worker.workerType,
-    workerRole: r.worker.role,
+    workerType: r.workerTypeSnapshot,
+    workerRole: r.roleSnapshot,
     employmentType: r.worker.employmentType as EmploymentType,
   }));
 }

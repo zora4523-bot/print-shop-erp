@@ -6,6 +6,7 @@ import { PERMISSIONS } from '../../auth/permissions-dict';
 import { ADMIN_MODULES } from '../admin-modules';
 import {
   ADMIN_ROLE_BADGE,
+  getActiveAdminMenuHref,
   getAdminQuickLinks,
   getAdminMenuItems,
   type AdminMenuItem,
@@ -27,7 +28,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(26);
+    expect(items).toHaveLength(29);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -40,13 +41,16 @@ describe('getAdminMenuItems', () => {
       '账单',
       '薪资总览',
       '计件工资',
+      '开机师傅计件规则',
+      '员工工资规则',
       '客服周期',
       '时薪工月结',
       '客户/供应商',
       '工艺字典',
       '产品字典',
       '产品分类',
-      '价格字典',
+      '外部销售收费',
+      '内部报价（低频）',
       'BOM/用料',
       '物料',
       '仓库/库位',
@@ -88,12 +92,32 @@ describe('getAdminMenuItems', () => {
     const productCategories = items.find((i) => i.label === '产品分类');
     expect(productCategories?.href).toBe('/owner/product-categories');
     expect(productCategories?.requiredPermission).toBe('dict:product:manage');
-    const prices = items.find((i) => i.label === '价格字典');
+    const externalSalesCharges = items.find(
+      (i) => i.label === '外部销售收费',
+    );
+    expect(externalSalesCharges?.href).toBe(
+      '/owner/prices/external-sales/items',
+    );
+    expect(externalSalesCharges?.activeRouteBase).toBe(
+      '/owner/prices/external-sales',
+    );
+    expect(externalSalesCharges?.requiredPermission).toBe(
+      'dict:price:manage',
+    );
+    expect(externalSalesCharges?.breadcrumbLabel).toBe('外部销售收费');
+    const prices = items.find((i) => i.label === '内部报价（低频）');
     expect(prices?.href).toBe('/owner/prices');
     expect(prices?.requiredPermission).toBe('dict:price:manage');
+    expect(prices?.breadcrumbLabel).toBe('内部报价');
     const boms = items.find((i) => i.label === 'BOM/用料');
     expect(boms?.href).toBe('/owner/boms');
     expect(boms?.requiredPermission).toBe('bom:manage');
+    const pieceworkRules = items.find((i) => i.label === '开机师傅计件规则');
+    expect(pieceworkRules?.href).toBe('/owner/salary/piecework-rules');
+    expect(pieceworkRules?.requiredPermission).toBe('salary:rule:manage');
+    const salaryRules = items.find((i) => i.label === '员工工资规则');
+    expect(salaryRules?.href).toBe('/owner/salary/rules');
+    expect(salaryRules?.requiredPermission).toBe('salary:rule:manage');
   });
 
   it('ADMIN 同时拥有原经营端与生产端入口，且路由不重复', () => {
@@ -124,6 +148,26 @@ describe('getAdminMenuItems', () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
+  it('外部销售所有子路由唯一高亮收费入口', () => {
+    const items = flatten(getAdminMenuItems({ role: Role.ADMIN }));
+
+    expect(
+      getActiveAdminMenuHref(
+        '/owner/prices/external-sales/items/rule-1',
+        items,
+      ),
+    ).toBe('/owner/prices/external-sales/items');
+    expect(
+      getActiveAdminMenuHref(
+        '/owner/prices/external-sales/versions',
+        items,
+      ),
+    ).toBe('/owner/prices/external-sales/items');
+    expect(getActiveAdminMenuHref('/owner/prices', items)).toBe(
+      '/owner/prices',
+    );
+  });
+
   it('SALES 菜单不含管理员/主管独占项', () => {
     const labels = flatten(getAdminMenuItems({ role: Role.SALES })).map(
       (i) => i.label,
@@ -131,12 +175,22 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('账号管理');
     expect(labels).not.toContain('工艺字典');
     expect(labels).not.toContain('产品字典');
+    expect(labels).not.toContain('外部销售收费');
+    expect(labels).not.toContain('内部报价（低频）');
     expect(labels).not.toContain('排产');
     expect(labels).not.toContain('外协');
     expect(labels).toContain('我的 Dashboard');
     expect(labels).toContain('创建工单');
     expect(labels).toContain('我的工单');
     expect(labels).toContain('我的账单');
+    const quote = flatten(getAdminMenuItems({ role: Role.SALES })).find(
+      (item) => item.label === '报价查询',
+    );
+    expect(quote).toMatchObject({
+      href: '/sales/quote',
+      status: 'implemented',
+      requiredPermission: 'order:create',
+    });
   });
 
   it('CUSTOMER_SERVICE 看到自己专属的"我的业绩 / 我的工资单"', () => {
@@ -149,6 +203,12 @@ describe('getAdminMenuItems', () => {
     expect(labels).toContain('我的工资单');
     // CS 不出现"我的账单"（账单只属销售）
     expect(labels).not.toContain('我的账单');
+    expect(labels).not.toContain('外部销售收费');
+    expect(labels).not.toContain('内部报价（低频）');
+    const quote = flatten(
+      getAdminMenuItems({ role: Role.CUSTOMER_SERVICE }),
+    ).find((item) => item.label === '报价查询');
+    expect(quote).toMatchObject({ href: '#', status: 'placeholder' });
   });
 
   it('WORKER 返回空（师傅走独立 (worker) 壳，不应进 (admin)）', () => {

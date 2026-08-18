@@ -1,9 +1,16 @@
 import { redirect } from 'next/navigation';
-import { Role } from '../../../../generated/prisma/enums';
+import {
+  OrderSettlementType,
+  Role,
+} from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
 import { listActiveProductOrderOptions } from '@/lib/product';
 import { OrderForm } from '@/components/business/order/OrderForm';
+import {
+  ORDER_SETTLEMENT_LABELS,
+  settlementTypeForOrderCreator,
+} from '@/lib/order/settlement';
 
 export const metadata = {
   title: '新建工单 · 红包印刷 ERP',
@@ -21,6 +28,7 @@ export default async function NewOrderPage() {
     listActiveCraftOrderOptions(),
     listActiveProductOrderOptions(),
   ]);
+  const settlementType = settlementTypeForOrderCreator(user.role);
 
   return (
     <div className="space-y-4">
@@ -31,7 +39,16 @@ export default async function NewOrderPage() {
           &ldquo;提交工单&rdquo; 进入排产流程。
         </p>
       </div>
-      <OrderForm crafts={crafts} products={products} />
+      <OrderForm
+        crafts={crafts}
+        products={products}
+        settlementLabel={
+          ORDER_SETTLEMENT_LABELS[settlementType]
+        }
+        usesExternalSalesPricing={
+          settlementType === OrderSettlementType.EXTERNAL_SALES
+        }
+      />
     </div>
   );
 }

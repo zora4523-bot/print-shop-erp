@@ -125,7 +125,7 @@ export function CsPayrollPaymentForm({
         </p>
       ) : null}
       {state?.status === 'success' ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           已记录发放；累计底薪 ¥ {state.paidBase}，累计提成 ¥{' '}
           {state.paidCommission}。
         </p>

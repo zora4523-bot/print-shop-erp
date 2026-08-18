@@ -1,0 +1,1 @@
+export const MAX_ORDER_ITEMS_PER_ORDER = 50;

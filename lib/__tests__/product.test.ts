@@ -3,6 +3,8 @@ import { ProductCategory } from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
     businessCodeSequence: {
       upsert: vi.fn(),
     },
@@ -42,6 +44,12 @@ import {
 } from '../product';
 
 beforeEach(() => {
+  dbMock.$executeRaw.mockReset().mockResolvedValue(0);
+  dbMock.$transaction
+    .mockReset()
+    .mockImplementation(
+      async (callback: (tx: typeof dbMock) => Promise<unknown>) => callback(dbMock),
+    );
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
   for (const fn of Object.values(dbMock.productCategoryNode)) fn.mockReset();
@@ -177,6 +185,8 @@ describe('listActiveProductOrderOptions', () => {
         id: 'p1',
         name: '专版红包',
         category: ProductCategory.CUSTOM_FLAT_FOIL,
+        specification: '中号',
+        paperType: '艳红珠光纸',
       },
     ]);
 
@@ -184,7 +194,13 @@ describe('listActiveProductOrderOptions', () => {
 
     expect(dbMock.product.findMany).toHaveBeenCalledWith({
       where: { isActive: true },
-      select: { id: true, name: true, category: true },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        specification: true,
+        paperType: true,
+      },
       orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     });
   });
@@ -372,6 +388,42 @@ describe('product category node management', () => {
 });
 
 describe('createProduct', () => {
+  it('takes the exclusive price snapshot lock in the product mutation transaction', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
+    const txMock = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      productCategoryNode: {
+        findUnique: vi.fn().mockResolvedValue(makeCategoryNode()),
+      },
+      product: { create: vi.fn().mockResolvedValue(makeProduct()) },
+    };
+    dbMock.$transaction.mockImplementationOnce(
+      async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+    );
+
+    await createProduct({
+      code: 'HB001',
+      categoryNodeId: 'cat_custom_flat_foil',
+      name: '空白红包',
+      specification: null,
+      paperType: null,
+      baseUnitPrice: '0.1200',
+    });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.productCategoryNode.findUnique).toHaveBeenCalledTimes(1);
+    expect(dbMock.product.create).not.toHaveBeenCalled();
+    expect(txMock.product.create).toHaveBeenCalledTimes(1);
+    const sql = (txMock.$executeRaw.mock.calls[0]?.[0] as TemplateStringsArray).join(
+      '?',
+    );
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(sql).not.toContain('pg_advisory_xact_lock_shared');
+    expect(txMock.product.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+      txMock.$executeRaw.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('forces isActive=true and passes Decimal-compatible string through', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.product.create.mockResolvedValue(makeProduct());

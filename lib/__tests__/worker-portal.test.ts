@@ -1,29 +1,48 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderStatus, Role, TaskStatus } from '../../generated/prisma/client';
+import {
+  OrderStatus,
+  Role,
+  TaskStatus,
+  WorkerType,
+} from '../../generated/prisma/client';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     order: { findMany: vi.fn(), findFirst: vi.fn() },
     dailyWorkerSalary: { findMany: vi.fn(), findFirst: vi.fn() },
+    hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   getWorkerOrderDetail,
+  getWorkerHourlyPayrollDetail,
   getWorkerSalaryDetail,
+  listWorkerHourlyPayrolls,
   listWorkerOrders,
   listWorkerSalaries,
   WorkerPortalError,
 } from '../worker-portal';
 
-const worker = { id: 'worker-a', role: Role.WORKER };
+const worker = {
+  id: 'worker-a',
+  role: Role.WORKER,
+  workerType: WorkerType.MACHINE,
+};
+const packer = {
+  id: 'packer-a',
+  role: Role.WORKER,
+  workerType: WorkerType.PACKER,
+};
 
 beforeEach(() => {
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
   dbMock.dailyWorkerSalary.findMany.mockReset().mockResolvedValue([]);
   dbMock.dailyWorkerSalary.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
+  dbMock.hourlyWorkerPayroll.findFirst.mockReset().mockResolvedValue(null);
 });
 
 describe('worker order visibility', () => {
@@ -94,7 +113,7 @@ describe('worker order visibility', () => {
 });
 
 describe('worker salary visibility', () => {
-  it('lists only the current worker salaries', async () => {
+  it('lists daily salaries only for the current machine worker', async () => {
     await listWorkerSalaries(worker);
     expect(dbMock.dailyWorkerSalary.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { workerId: 'worker-a' } }),
@@ -110,10 +129,95 @@ describe('worker salary visibility', () => {
     );
   });
 
+  it.each([
+    WorkerType.PACKER,
+    WorkerType.CLEANER,
+    WorkerType.COOK,
+  ])('lists only the current %s worker monthly payrolls', async (workerType) => {
+    await listWorkerHourlyPayrolls(
+      { id: 'hourly-a', role: Role.WORKER, workerType },
+      { fromMonth: '2026-01', toMonth: '2026-06' },
+    );
+
+    expect(dbMock.hourlyWorkerPayroll.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          workerId: 'hourly-a',
+          month: { gte: '2026-01', lte: '2026-06' },
+        },
+      }),
+    );
+  });
+
+  it('puts workerId in the hourly payroll detail database predicate', async () => {
+    await expect(
+      getWorkerHourlyPayrollDetail('payroll-other', packer),
+    ).resolves.toBeNull();
+    expect(dbMock.hourlyWorkerPayroll.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'payroll-other', workerId: 'packer-a' },
+      }),
+    );
+  });
+
+  it('uses each owned payroll snapshot for historical worker-type display', async () => {
+    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([
+      {
+        id: 'payroll-1',
+        salaryRuleSnapshot: { workerType: WorkerType.PACKER },
+      },
+    ]);
+    dbMock.hourlyWorkerPayroll.findFirst.mockResolvedValue({
+      id: 'payroll-1',
+      salaryRuleSnapshot: { workerType: WorkerType.PACKER },
+    });
+    const currentCook = { ...packer, workerType: WorkerType.COOK };
+
+    const list = await listWorkerHourlyPayrolls(currentCook);
+    const detail = await getWorkerHourlyPayrollDetail(
+      'payroll-1',
+      currentCook,
+    );
+
+    expect(list[0].payrollWorkerType).toBe(WorkerType.PACKER);
+    expect(detail?.payrollWorkerType).toBe(WorkerType.PACKER);
+    expect(
+      dbMock.hourlyWorkerPayroll.findMany.mock.calls[0][0].select
+        .salaryRuleSnapshot,
+    ).toBe(true);
+    expect(
+      dbMock.hourlyWorkerPayroll.findFirst.mock.calls[0][0].select
+        .salaryRuleSnapshot,
+    ).toBe(true);
+  });
+
+  it('keeps machine and hourly salary stores separated by worker type', async () => {
+    await expect(listWorkerSalaries(packer)).rejects.toBeInstanceOf(
+      WorkerPortalError,
+    );
+    await expect(listWorkerHourlyPayrolls(worker)).rejects.toBeInstanceOf(
+      WorkerPortalError,
+    );
+    expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
+  });
+
   it('rejects non-worker actors before querying any personal data', async () => {
     await expect(
-      listWorkerSalaries({ id: 'owner-1', role: Role.ADMIN }),
+      listWorkerSalaries({
+        id: 'owner-1',
+        role: Role.ADMIN,
+        workerType: null,
+      }),
+    ).rejects.toBeInstanceOf(WorkerPortalError);
+    await expect(
+      listWorkerHourlyPayrolls({
+        id: 'cs-1',
+        role: Role.CUSTOMER_SERVICE,
+        workerType: null,
+      }),
     ).rejects.toBeInstanceOf(WorkerPortalError);
     expect(dbMock.dailyWorkerSalary.findMany).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.findMany).not.toHaveBeenCalled();
   });
 });

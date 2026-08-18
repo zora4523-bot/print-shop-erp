@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role, WorkerType, MachineType, Prisma } from '../../generated/prisma/client';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+  MachineType,
+  Prisma,
+} from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -201,6 +207,7 @@ describe('createUserAction', () => {
           workerType: WorkerType.MACHINE,
           machineType: MachineType.WINDMILL,
           machineCapabilities: MachineType.WINDMILL,
+          employmentType: EmploymentType.FULL_TIME,
           password: 'plain-pass-1',
           phone: '',
         }),

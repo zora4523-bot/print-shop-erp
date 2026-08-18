@@ -36,6 +36,7 @@ export type AdminModuleMetadata = {
   id: string;
   label: string;
   routeBase: string;
+  activeRouteBase?: string;
   iconName: IconName;
   breadcrumbLabel: string;
   menuSection: AdminMenuSection;
@@ -132,6 +133,30 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'salary:view:all',
   },
   {
+    id: 'owner.salary.piecework-rules',
+    label: '开机师傅计件规则',
+    routeBase: '/owner/salary/piecework-rules',
+    iconName: 'Calculator',
+    breadcrumbLabel: '计件规则',
+    menuSection: 'finance',
+    status: 'implemented',
+    menuOrder: 55,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'salary:rule:manage',
+  },
+  {
+    id: 'owner.salary.rules',
+    label: '员工工资规则',
+    routeBase: '/owner/salary/rules',
+    iconName: 'Calculator',
+    breadcrumbLabel: '员工工资规则',
+    menuSection: 'finance',
+    status: 'implemented',
+    menuOrder: 57,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'salary:rule:manage',
+  },
+  {
     id: 'owner.salary.cs',
     label: '客服周期',
     routeBase: '/owner/salary/cs',
@@ -204,11 +229,24 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'dict:product:manage',
   },
   {
+    id: 'owner.prices.external-sales.items',
+    label: '外部销售收费',
+    routeBase: '/owner/prices/external-sales/items',
+    activeRouteBase: '/owner/prices/external-sales',
+    iconName: 'FileText',
+    breadcrumbLabel: '外部销售收费',
+    menuSection: 'dictionary',
+    status: 'implemented',
+    menuOrder: 105,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'dict:price:manage',
+  },
+  {
     id: 'owner.prices',
-    label: '价格字典',
+    label: '内部报价（低频）',
     routeBase: '/owner/prices',
     iconName: 'FileText',
-    breadcrumbLabel: '价格字典',
+    breadcrumbLabel: '内部报价',
     menuSection: 'dictionary',
     status: 'implemented',
     menuOrder: 110,
@@ -410,11 +448,11 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   {
     id: 'sales.quote',
     label: '报价查询',
-    routeBase: '#',
+    routeBase: '/sales/quote',
     iconName: 'FileText',
     breadcrumbLabel: '报价查询',
     menuSection: 'workflow',
-    status: 'placeholder',
+    status: 'implemented',
     menuOrder: 50,
     menuRoles: [Role.SALES],
     requiredPermission: 'order:create',

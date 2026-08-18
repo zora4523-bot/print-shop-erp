@@ -3,6 +3,7 @@ import {
   BillStatus,
   OrderCostCategory,
   OrderBillingMode,
+  OrderSettlementType,
   OrderStatus,
   Role,
 } from '../../generated/prisma/client';
@@ -38,7 +39,8 @@ import {
   issueBill,
   recordPayment,
   listBills,
-  getBillDetail,
+  getAdminBillDetail,
+  getSalesBillDetail,
   addOrderCostEntry,
   BillError,
   BillGenerationUnexpectedError,
@@ -79,11 +81,11 @@ describe('generateBillsForPeriod', () => {
     ).rejects.toThrow(/月份格式非法/);
   });
 
-  it('groups FINISHED orders by submitter and creates one Bill per group', async () => {
+  it('groups external-sales FINISHED orders by submitter and creates one Bill per group', async () => {
     dbMock.order.findMany.mockResolvedValue([
       { id: 'o1', submitterId: 'sales-a', totalAmount: '1000.00' },
       { id: 'o2', submitterId: 'sales-a', totalAmount: '2500.00' },
-      { id: 'o3', submitterId: 'cs-b', totalAmount: '800.00' },
+      { id: 'o3', submitterId: 'sales-b', totalAmount: '800.00' },
     ]);
     dbMock.bill.findUnique.mockResolvedValue(null);
     let createdCount = 0;
@@ -101,20 +103,118 @@ describe('generateBillsForPeriod', () => {
     expect(bySubmitter['sales-a'].totalAmount).toBe('3500.00'); // 1000 + 2500
     expect(bySubmitter['sales-a'].orderCount).toBe(2);
     expect(bySubmitter['sales-a'].isNew).toBe(true);
-    expect(bySubmitter['cs-b'].totalAmount).toBe('800.00');
+    expect(bySubmitter['sales-b'].totalAmount).toBe('800.00');
   });
 
-  it('queries FINISHED orders with Shanghai [start, end) range', async () => {
+  it('queries only external-sales FINISHED charge orders with Shanghai [start, end) range', async () => {
     await generateBillsForPeriod('2026-05', ownerActor);
     const where = dbMock.order.findMany.mock.calls[0][0].where;
     expect(where.status).toBe(OrderStatus.FINISHED);
     expect(where.billingMode).toBe(OrderBillingMode.CHARGE);
+    expect(where.settlementType).toBe(OrderSettlementType.EXTERNAL_SALES);
+    expect(where).not.toHaveProperty('submitterRole');
     expect((where.finishedAt.gte as Date).toISOString()).toBe(
       '2026-04-30T16:00:00.000Z',
     );
     expect((where.finishedAt.lt as Date).toISOString()).toBe(
       '2026-05-31T16:00:00.000Z',
     );
+  });
+
+  it('uses the locked settlement type instead of submitter role for receivables', async () => {
+    const candidates = [
+      {
+        id: 'sales-order',
+        submitterId: 'sales-a',
+        submitterRole: Role.SALES,
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        totalAmount: '1200.00',
+      },
+      {
+        id: 'internal-sales-order',
+        submitterId: 'cs-a',
+        submitterRole: Role.CUSTOMER_SERVICE,
+        settlementType: OrderSettlementType.INTERNAL_SALES,
+        totalAmount: '800.00',
+      },
+      {
+        id: 'admin-order',
+        submitterId: 'admin-a',
+        submitterRole: Role.ADMIN,
+        settlementType: OrderSettlementType.FACTORY_DIRECT,
+        totalAmount: '500.00',
+      },
+    ];
+    dbMock.order.findMany.mockImplementation(
+      async ({
+        where,
+        select,
+      }: {
+        where: {
+          settlementType?: OrderSettlementType;
+          submitterRole?: Role;
+        };
+        select: Record<string, boolean>;
+      }) => {
+        expect(where.settlementType).toBe(OrderSettlementType.EXTERNAL_SALES);
+        expect(where).not.toHaveProperty('submitterRole');
+        expect(select).toEqual({
+          id: true,
+          submitterId: true,
+          totalAmount: true,
+        });
+        return candidates
+          .filter((order) => order.settlementType === where.settlementType)
+          .map(({ id, submitterId, totalAmount }) => ({
+            id,
+            submitterId,
+            totalAmount,
+          }));
+      },
+    );
+    dbMock.bill.findUnique.mockResolvedValue(null);
+    dbMock.bill.create.mockResolvedValue({ id: 'bill-sales-a' });
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated).toEqual([
+      {
+        billId: 'bill-sales-a',
+        salesUserId: 'sales-a',
+        totalAmount: '1200.00',
+        orderCount: 1,
+        isNew: true,
+      },
+    ]);
+    expect(dbMock.bill.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.bill.create.mock.calls[0][0].data.salesUserId).toBe('sales-a');
+  });
+
+  it('does not infer external settlement from a mutable SALES role', async () => {
+    const roleOnlyOrder = {
+      id: 'role-only-sales-order',
+      submitterId: 'sales-a',
+      submitterRole: Role.SALES,
+      settlementType: OrderSettlementType.INTERNAL_SALES,
+      totalAmount: '999.00',
+    };
+    dbMock.order.findMany.mockImplementation(
+      async ({ where }: { where: { settlementType?: OrderSettlementType } }) => {
+        expect(where.settlementType).toBe(OrderSettlementType.EXTERNAL_SALES);
+        return [roleOnlyOrder]
+          .filter((order) => order.settlementType === where.settlementType)
+          .map(({ id, submitterId, totalAmount }) => ({
+            id,
+            submitterId,
+            totalAmount,
+          }));
+      },
+    );
+
+    const result = await generateBillsForPeriod('2026-05', ownerActor);
+
+    expect(result.generated).toEqual([]);
+    expect(dbMock.bill.create).not.toHaveBeenCalled();
   });
 
   it('re-run on existing DRAFT: appends only NEW orders, leaves paid state untouched', async () => {
@@ -975,10 +1075,10 @@ describe('listBills', () => {
   });
 });
 
-describe('getBillDetail', () => {
+describe('bill detail read models', () => {
   it('returns null when bill is missing', async () => {
     dbMock.bill.findUnique.mockResolvedValue(null);
-    const r = await getBillDetail('ghost');
+    const r = await getAdminBillDetail('ghost');
     expect(r).toBeNull();
   });
 
@@ -987,12 +1087,12 @@ describe('getBillDetail', () => {
       id: 'bill-1',
       items: [{ id: 'item-1', orderId: 'o1', orderAmount: '500.00', order: { orderNo: '20260501-0001' } }],
     });
-    const r = await getBillDetail('bill-1');
+    const r = await getAdminBillDetail('bill-1');
     expect(r).toBeTruthy();
     const query = dbMock.bill.findUnique.mock.calls[0][0];
     const orderSelect = query.select.items.select.order.select;
     expect(orderSelect.id).toBe(true);
-    expect(orderSelect.submitterRole).toBe(true);
+    expect(orderSelect.settlementType).toBe(true);
     expect(orderSelect.costEntries.include.createdBy).toEqual({
       select: { displayName: true },
     });
@@ -1012,5 +1112,78 @@ describe('getBillDetail', () => {
       },
     });
     void salesActor; // reference to avoid unused import
+  });
+
+  it('scopes the external-sales query before reading and returns only receivable fields', async () => {
+    dbMock.bill.findUnique.mockResolvedValue({
+      id: 'bill-1',
+      salesUserId: 'sales-1',
+      items: [],
+      payments: [],
+    });
+
+    await getSalesBillDetail('bill-1', 'sales-1');
+
+    const query = dbMock.bill.findUnique.mock.calls[0][0];
+    expect(query.where).toEqual({ id: 'bill-1', salesUserId: 'sales-1' });
+    expect(query.select).not.toHaveProperty('salesUser');
+    expect(query.select).not.toHaveProperty('createdAt');
+    expect(query.select).not.toHaveProperty('updatedAt');
+
+    expect(query.select.payments.select).toEqual({
+      id: true,
+      amount: true,
+      paidAt: true,
+      paymentMethod: true,
+      referenceNo: true,
+      remark: true,
+      idempotencyKey: true,
+    });
+    expect(query.select.payments).not.toHaveProperty('include');
+    expect(query.select.payments.select).not.toHaveProperty('recordedBy');
+
+    expect(query.select.items.where).toEqual({
+      order: {
+        submitterId: 'sales-1',
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+      },
+    });
+    expect(query.select.items.select.order.select).toEqual({
+      id: true,
+      orderNo: true,
+      customerRef: true,
+      processingAmount: true,
+      finishedAt: true,
+      status: true,
+      customerCharges: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          amount: true,
+          status: true,
+          category: { select: { code: true, name: true } },
+          shipment: { select: { sequence: true } },
+        },
+      },
+      items: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          sequence: true,
+          name: true,
+          pricingSnapshot: true,
+        },
+      },
+    });
+    for (const internalField of [
+      'costEntries',
+      'outsourceOrders',
+      'reworkOrders',
+      'csSalesEntries',
+      'shipments',
+    ]) {
+      expect(query.select.items.select.order.select).not.toHaveProperty(
+        internalField,
+      );
+    }
   });
 });

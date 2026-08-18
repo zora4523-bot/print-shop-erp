@@ -4,6 +4,7 @@ import {
   BillStatus,
   OrderCostCategory,
   OrderBillingMode,
+  OrderSettlementType,
   OrderStatus,
   Role,
 } from '../generated/prisma/enums';
@@ -15,14 +16,13 @@ import {
   InvalidBillTransitionError,
 } from './bill/status-machine';
 
-// 销售应收账单 MVP (SPEC §3.1 / §4.1 / §9.1)
+// 外部销售对客应收账单（加工费 + 快递/耗材等对客收费）
 //
-// 生成规则：按 Shanghai 日历月汇总，每位销售 / 客服一条 Bill，item
-// 列表是他们在该月 `finishedAt` 的 Order。月度自动生成对应上月。
+// 生成规则：按 Shanghai 日历月汇总，每位外部销售一条 Bill，item
+// 列表是其在该月 `finishedAt` 的收费工单。月度自动生成对应上月。
 //
 // 付款规则：累加式 paidAmount；当累计 = totalAmount 切 FULLY_PAID。
-// 客服业绩按工单提交/批准变更时的销售额记入独立流水；收款只更新应收，
-// 绝不重复计入提成。
+// 内部员工提成与外部销售应收是两套结算账本，Bill 只记后者。
 //
 // Finance-of-record bedrock: FULLY_PAID 是终态，不允许倒退 / 覆盖。
 // 写入路径全部 tx + per-bill advisory lock 防并发付款 race（和
@@ -121,7 +121,7 @@ function assertBillAmountFits(value: Decimal): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 生成：月初扫描上月 FINISHED 订单 → 每位销售 / 客服一条账单
+// 生成：月初扫描上月外部销售的 FINISHED 收费工单 → 每人一条账单
 // ─────────────────────────────────────────────────────────────────────
 
 export type BillGenerationResult = {
@@ -154,7 +154,7 @@ export class BillGenerationUnexpectedError extends Error {
   }
 }
 
-// 核心：扫上月 FINISHED 订单按 submitterId 分组，每组 upsert 一条
+// 核心：扫上月外部销售 FINISHED 收费工单，按 submitterId 分组，每组 upsert 一条
 // DRAFT Bill。重跑该月（中途又有订单 FINISHED）会把新订单加到同一条
 // Bill 的 items 里，paidAmount 和 status 不动。
 export async function generateBillsForPeriod(
@@ -167,13 +167,15 @@ export async function generateBillsForPeriod(
   const generated: BillGenerationResult['generated'] = [];
   const errors: BillGenerationResult['errors'] = [];
 
-  // 查当月所有 FINISHED 订单
+  // 只用工单创建时锁定的 settlementType 识别外部销售应收。
+  // Role 只负责权限，不参与资金方向判定，避免账号调岗导致历史结算漂移。
   let orders: Array<{ id: string; submitterId: string; totalAmount: unknown }>;
   try {
     orders = await db.order.findMany({
       where: {
         status: OrderStatus.FINISHED,
         billingMode: OrderBillingMode.CHARGE,
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
         finishedAt: { gte: start, lt: end },
       },
       select: {
@@ -212,7 +214,7 @@ export async function generateBillsForPeriod(
         continue;
       }
       throw new BillGenerationUnexpectedError(
-        `销售 ${submitterId} 的 ${period} 月账单生成发生系统错误`,
+        `外部销售 ${submitterId} 的 ${period} 月对客应收账单生成发生系统错误`,
         { period, generated, errors },
         err,
       );
@@ -419,7 +421,7 @@ export type RecordPaymentResult = {
   newPaidAmount: string;
   totalAmount: string;
   status: BillStatus;
-  csAccumulated: false; // 兼容旧 action 响应；收款不再累计客服业绩
+  csAccumulated: false; // 兼容旧 action 响应；外部销售收款不触发员工提成流水
 };
 
 // Owner records a payment of `amount` against the bill. Amount must
@@ -654,7 +656,12 @@ export async function listBills(filter: {
   });
 }
 
-export async function getBillDetail(id: string) {
+/**
+ * Full finance-of-record view. Callers must enforce `bill:view:all` before
+ * invoking this read because it intentionally includes internal production,
+ * outsource, rework and manual-cost evidence.
+ */
+export async function getAdminBillDetail(id: string) {
   return db.bill.findUnique({
     where: { id },
     select: {
@@ -693,8 +700,9 @@ export async function getBillDetail(id: string) {
             select: {
               id: true,
               orderNo: true,
-              submitterRole: true,
+              settlementType: true,
               customerRef: true,
+              processingAmount: true,
               finishedAt: true,
               status: true,
               csSalesEntries: {
@@ -713,6 +721,15 @@ export async function getBillDetail(id: string) {
               shipments: {
                 orderBy: { sequence: 'asc' },
                 select: { sequence: true, weightKg: true },
+              },
+              customerCharges: {
+                orderBy: { createdAt: 'asc' },
+                select: {
+                  amount: true,
+                  status: true,
+                  category: { select: { code: true, name: true } },
+                  shipment: { select: { sequence: true } },
+                },
               },
               costEntries: {
                 orderBy: { createdAt: 'asc' },
@@ -763,6 +780,87 @@ export async function getBillDetail(id: string) {
                       createdBy: { select: { displayName: true } },
                     },
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Least-privilege external-sales view.
+ *
+ * Ownership is part of the database predicate (not a post-query check), and
+ * the projection deliberately excludes every internal cost/commission source
+ * and the employee who recorded a payment. Bill items are independently
+ * constrained to the same external salesperson so a historically-corrupted
+ * BillItem cannot disclose another account's order.
+ */
+export async function getSalesBillDetail(id: string, salesUserId: string) {
+  return db.bill.findUnique({
+    where: { id, salesUserId },
+    select: {
+      id: true,
+      salesUserId: true,
+      period: true,
+      openingAmount: true,
+      totalAmount: true,
+      paidAmount: true,
+      status: true,
+      issuedAt: true,
+      paidAt: true,
+      remark: true,
+      payments: {
+        orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          amount: true,
+          paidAt: true,
+          paymentMethod: true,
+          referenceNo: true,
+          remark: true,
+          idempotencyKey: true,
+        },
+      },
+      items: {
+        where: {
+          order: {
+            submitterId: salesUserId,
+            settlementType: OrderSettlementType.EXTERNAL_SALES,
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          orderId: true,
+          orderAmount: true,
+          order: {
+            select: {
+              id: true,
+              orderNo: true,
+              customerRef: true,
+              processingAmount: true,
+              finishedAt: true,
+              status: true,
+              customerCharges: {
+                orderBy: { createdAt: 'asc' },
+                select: {
+                  amount: true,
+                  status: true,
+                  category: { select: { code: true, name: true } },
+                  shipment: { select: { sequence: true } },
+                },
+              },
+              items: {
+                orderBy: { sequence: 'asc' },
+                select: {
+                  id: true,
+                  sequence: true,
+                  name: true,
+                  pricingSnapshot: true,
                 },
               },
             },

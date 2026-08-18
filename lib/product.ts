@@ -12,6 +12,7 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { resolveBusinessCode } from './business-code';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import { sortBySearchRelevance } from './search-ranking';
 
 export class ProductInvariantError extends Error {
@@ -58,7 +59,7 @@ export type ProductOption = Pick<
 
 export type ProductOrderOption = Pick<
   Product,
-  'id' | 'name' | 'category'
+  'id' | 'name' | 'category' | 'specification' | 'paperType'
 >;
 
 export type ProductCategoryNodeSummary = Pick<
@@ -205,7 +206,13 @@ export async function listActiveProductOrderOptions(): Promise<
 > {
   return db.product.findMany({
     where: { isActive: true },
-    select: { id: true, name: true, category: true },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      specification: true,
+      paperType: true,
+    },
     orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
   });
 }
@@ -319,9 +326,10 @@ export async function getProductCategoryNodeSummary(
 }
 
 async function requireActiveCategoryNode(
+  client: Prisma.TransactionClient,
   categoryNodeId: string,
 ): Promise<Pick<ProductCategoryNode, 'id' | 'legacyCategory'>> {
-  const node = await db.productCategoryNode.findUnique({
+  const node = await client.productCategoryNode.findUnique({
     where: { id: categoryNodeId },
     select: { id: true, legacyCategory: true, isActive: true },
   });
@@ -429,21 +437,28 @@ export type CreateProductData = {
 };
 
 export async function createProduct(data: CreateProductData): Promise<ProductSummary> {
-  const categoryNode = await requireActiveCategoryNode(data.categoryNodeId);
+  // Preserve the invariant/error order before consuming an automatic business
+  // code.  The category is checked again under the price snapshot write lock
+  // below so a concurrent category change cannot slip into the insert.
+  await requireActiveCategoryNode(db, data.categoryNodeId);
   const code = await resolveBusinessCode('PRODUCT', data.code);
-  return db.product.create({
-    data: {
-      code,
-      category: categoryNode.legacyCategory,
-      categoryNodeId: categoryNode.id,
-      name: data.name,
-      specification: data.specification,
-      paperType: data.paperType,
-      baseUnitPrice: data.baseUnitPrice,
-      minOrderQty: data.minOrderQty ?? null,
-      isActive: true,
-    },
-    select: SUMMARY_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const categoryNode = await requireActiveCategoryNode(tx, data.categoryNodeId);
+    return tx.product.create({
+      data: {
+        code,
+        category: categoryNode.legacyCategory,
+        categoryNodeId: categoryNode.id,
+        name: data.name,
+        specification: data.specification,
+        paperType: data.paperType,
+        baseUnitPrice: data.baseUnitPrice,
+        minOrderQty: data.minOrderQty ?? null,
+        isActive: true,
+      },
+      select: SUMMARY_SELECT,
+    });
   });
 }
 
@@ -463,26 +478,29 @@ export async function updateProduct(
   id: string,
   data: UpdateProductData,
 ): Promise<ProductSummary> {
-  const target = await getProductSummary(id);
-  if (!target) throw new ProductInvariantError('目标产品不存在');
-  const categoryNode =
-    data.categoryNodeId === target.categoryNodeId
-      ? { id: target.categoryNodeId, legacyCategory: target.category }
-      : await requireActiveCategoryNode(data.categoryNodeId);
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
+    if (!target) throw new ProductInvariantError('目标产品不存在');
+    const categoryNode =
+      data.categoryNodeId === target.categoryNodeId
+        ? { id: target.categoryNodeId, legacyCategory: target.category }
+        : await requireActiveCategoryNode(tx, data.categoryNodeId);
 
-  return db.product.update({
-    where: { id },
-    data: {
-      code: data.code,
-      category: categoryNode.legacyCategory,
-      categoryNodeId: categoryNode.id,
-      name: data.name,
-      specification: data.specification,
-      paperType: data.paperType,
-      baseUnitPrice: data.baseUnitPrice,
-      minOrderQty: data.minOrderQty ?? null,
-    },
-    select: SUMMARY_SELECT,
+    return tx.product.update({
+      where: { id },
+      data: {
+        code: data.code,
+        category: categoryNode.legacyCategory,
+        categoryNodeId: categoryNode.id,
+        name: data.name,
+        specification: data.specification,
+        paperType: data.paperType,
+        baseUnitPrice: data.baseUnitPrice,
+        minOrderQty: data.minOrderQty ?? null,
+      },
+      select: SUMMARY_SELECT,
+    });
   });
 }
 
@@ -490,13 +508,16 @@ export async function setProductActive(
   id: string,
   isActive: boolean,
 ): Promise<ProductSummary> {
-  const target = await getProductSummary(id);
-  if (!target) throw new ProductInvariantError('目标产品不存在');
-  if (target.isActive === isActive) return target;
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
+    if (!target) throw new ProductInvariantError('目标产品不存在');
+    if (target.isActive === isActive) return target;
 
-  return db.product.update({
-    where: { id },
-    data: { isActive },
-    select: SUMMARY_SELECT,
+    return tx.product.update({
+      where: { id },
+      data: { isActive },
+      select: SUMMARY_SELECT,
+    });
   });
 }

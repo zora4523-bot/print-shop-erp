@@ -82,6 +82,11 @@ describe('admin navigation prefetch policy', () => {
 
     expect(header).toContain('prefetch={false}');
     expect(breadcrumb).toContain('prefetch={false}');
+    expect(breadcrumb).toContain("prices: '价格管理'");
+    expect(breadcrumb).toContain("'external-sales': '外部销售收费'");
+    expect(breadcrumb).toContain("items: '收费项目'");
+    expect(breadcrumb).toContain("versions: '发布中心'");
+    expect(breadcrumb).toContain("quote: '报价查询'");
   });
 });
 

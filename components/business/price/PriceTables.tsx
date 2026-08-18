@@ -28,14 +28,15 @@ function date(value: Date | null): string {
 }
 
 function condition(value: PriceAdjustmentSummary['triggerCondition']): string {
-  if (value === null || value === undefined) return '—';
-  const text = JSON.stringify(value);
-  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+  if (value === null || value === undefined) return '不限';
+  if (typeof value !== 'object' || Array.isArray(value)) return '需要重新设置';
+  const count = Object.keys(value).length;
+  return count === 0 ? '不限' : `已设置 ${count} 项条件`;
 }
 
 export function PriceTiersTable({ tiers }: { tiers: PriceTierSummary[] }) {
   return (
-    <Table>
+    <Table label="产品价格阶梯">
       <TableHeader>
         <TableRow>
           <TableHead>产品</TableHead>
@@ -94,10 +95,10 @@ export function PriceAdjustmentsTable({
   adjustments: PriceAdjustmentSummary[];
 }) {
   return (
-    <Table>
+    <Table label="价格加价规则">
       <TableHeader>
         <TableRow>
-          <TableHead>规则名称</TableHead>
+          <TableHead>收费项目</TableHead>
           <TableHead>类型</TableHead>
           <TableHead className="text-right">金额</TableHead>
           <TableHead>触发条件</TableHead>
@@ -118,7 +119,7 @@ export function PriceAdjustmentsTable({
             <TableCell className="text-right font-sans tabular-nums text-xs">
               {decimal(adjustment.amount)}
             </TableCell>
-            <TableCell className="max-w-md truncate font-mono text-xs text-muted-foreground">
+            <TableCell className="max-w-md text-sm text-muted-foreground">
               {condition(adjustment.triggerCondition)}
             </TableCell>
             <TableCell>

@@ -1,4 +1,4 @@
-import qrcode from 'qrcode';
+import { buildQrSvg } from './qr';
 import { db } from '../db';
 import { Role } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
@@ -12,25 +12,11 @@ import type {
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
 
-// QR SVG pre-render. Layout consumes plain SVG strings via
-// dangerouslySetInnerHTML to dodge the qrcode.react / two-Reacts bug
-// when the PDF route's renderToStaticMarkup dynamically imports
-// react-dom/server (which loads its own React vs the bundled one and
-// breaks hooks). margin=1 keeps the quiet zone tight; errorCorrection
-// 'M' is the SPEC default (handles ~15% damage which prints can take).
-async function buildQrSvg(value: string, size: number): Promise<string> {
-  return qrcode.toString(value, {
-    type: 'svg',
-    errorCorrectionLevel: 'M',
-    width: size,
-    margin: 1,
-  });
-}
-
 // Loads the narrow shape the print layout needs. Scope filter mirrors
 // getOrderDetail so SALES / CUSTOMER_SERVICE only print their own,
-// ADMIN sees everything, WORKER (future) only what they have a
-// task on. Returns null when the actor can't see the order — the page
+// ADMIN sees everything. WORKER sees only assigned orders that have left
+// the SUBMITTED scheduling-draft state. Returns null when the actor can't
+// see the order — the page
 // maps that to notFound() so there's no "this order exists but you
 // can't print it" disclosure.
 export async function getOrderForPrint(

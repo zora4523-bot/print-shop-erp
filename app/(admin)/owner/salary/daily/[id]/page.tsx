@@ -5,6 +5,7 @@ import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getDailyWorkerSalaryDetail } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { formatMoney } from '@/lib/format/money';
 import {
   formatDateShanghai,
   formatDateTimeShanghai,
@@ -67,7 +68,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
           <p className="text-xs text-muted-foreground">状态</p>
           <div className="mt-2 flex items-center justify-between gap-2">
             {salary.isPaid ? <Badge>已发</Badge> : <Badge variant="outline">未发</Badge>}
-            <MarkPaidForm id={salary.id} currentPaid={salary.isPaid} />
+            <MarkPaidForm returnTo="/owner/salary/daily" id={salary.id} currentPaid={salary.isPaid} />
           </div>
         </div>
       </section>
@@ -87,7 +88,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             {salary.adjustments.map((entry) => (
               <li key={entry.id} className="grid gap-2 py-3 sm:grid-cols-[100px_100px_1fr_220px]">
                 <span>{ADJUSTMENT_LABELS[entry.type]}</span>
-                <span className={Number(entry.amount) < 0 ? 'font-sans tabular-nums text-destructive' : 'font-sans tabular-nums text-success'}>
+                <span className={Number(entry.amount) < 0 ? 'font-sans tabular-nums text-destructive' : 'font-sans tabular-nums text-success-foreground'}>
                   {Number(entry.amount) > 0 ? '+' : ''}{String(entry.amount)}
                 </span>
                 <span>{entry.reason}</span>
@@ -107,6 +108,11 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             金额来自任务完工时锁定的规则，后续改价不会篡改历史。
           </p>
         </div>
+        {salary.items.length === 0 ? (
+          <p className="px-5 pb-5 text-sm text-muted-foreground">
+            当日没有完工的计件任务，本行按保底发放。
+          </p>
+        ) : (
         <div
           className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           role="region"
@@ -146,13 +152,14 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatRuleSnapshot(item.salaryRuleSnapshot)}
                   </td>
-                  <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">¥ {String(item.pieceworkAmount)}</td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">{formatMoney(item.pieceworkAmount)}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeShanghai(item.completedAt)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
       </section>
     </div>
   );

@@ -46,7 +46,6 @@ export function CreateOutsourceForm({
   const [supplierContact, setSupplierContact] = useState('');
   const [craftDescription, setCraftDescription] = useState('');
   const [specialRequirement, setSpecialRequirement] = useState('');
-  const [totalQty, setTotalQty] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
@@ -81,6 +80,14 @@ export function CreateOutsourceForm({
         .map((it) => it.id),
     [items, selected],
   );
+  const chosenTotalQty = useMemo(
+    () =>
+      items.reduce(
+        (sum, item) => sum + (selected[item.id] ? item.quantity : 0),
+        0,
+      ),
+    [items, selected],
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,7 +99,9 @@ export function CreateOutsourceForm({
       supplierContact: supplierContact || null,
       craftDescription: craftDescription || null,
       specialRequirement: specialRequirement || null,
-      totalQty: totalQty === '' ? null : totalQty,
+      // The server always derives and verifies this value from the selected
+      // order items. It is sent only as a stale-page/tamper guard.
+      totalQty: chosenTotalQty,
       expectedDate: expectedDate || null,
       amount: amount === '' ? null : amount,
       remark: remark || null,
@@ -138,6 +147,15 @@ export function CreateOutsourceForm({
             {fieldErrors(state, 'orderItemIds')[0]}
           </p>
         ) : null}
+        <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">已选款式合计：</span>{' '}
+          <output aria-live="polite" className="font-medium tabular-nums">
+            {chosenTotalQty.toLocaleString()} 个
+          </output>
+          <span className="ml-2 text-xs text-muted-foreground">
+            （由系统根据所选款式计算，不可手工修改）
+          </span>
+        </div>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
@@ -170,14 +188,7 @@ export function CreateOutsourceForm({
             full
           />
           <Field
-            label="总数量"
-            value={totalQty}
-            onChange={setTotalQty}
-            errors={fieldErrors(state, 'totalQty')}
-            inputMode="numeric"
-          />
-          <Field
-            label="金额 (元)"
+            label="供应商应付金额（人工确认，元）"
             value={amount}
             onChange={setAmount}
             errors={fieldErrors(state, 'amount')}
@@ -198,6 +209,9 @@ export function CreateOutsourceForm({
             full
           />
         </div>
+        <p className="text-xs text-muted-foreground">
+          供应商应付按外协报价或合同人工确认，不套用客户报价、员工计件工资或销售提成规则；金额未知时可留空，回货后再补录。
+        </p>
       </section>
 
       {state?.status === 'error' ? (

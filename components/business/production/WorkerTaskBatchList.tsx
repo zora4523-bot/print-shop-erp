@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Minus } from 'lucide-react';
 import { beginTasksAction, reportTasksAction } from '@/actions/production';
 import type { BatchTaskMutationResult } from '@/actions/production.types';
 import {
@@ -38,10 +38,15 @@ type TaskRow = {
 
 function BatchCheckbox({
   checked,
+  indeterminate = false,
   onChange,
   label,
 }: {
   checked: boolean;
+  // 只用于表头「全选」：部分选中时置原生 indeterminate，读屏器据此
+  // 播报 “mixed”。不额外写 aria-checked——原生 checkbox 上手写会和
+  // 原生状态打架。
+  indeterminate?: boolean;
   onChange: () => void;
   label?: string;
 }) {
@@ -49,6 +54,9 @@ function BatchCheckbox({
     <span className="relative flex size-11 shrink-0 items-center justify-center">
       <input
         type="checkbox"
+        ref={(el) => {
+          if (el) el.indeterminate = indeterminate;
+        }}
         checked={checked}
         onChange={onChange}
         aria-label={label}
@@ -56,9 +64,13 @@ function BatchCheckbox({
       />
       <span
         aria-hidden="true"
-        className="pointer-events-none flex size-5 items-center justify-center rounded border border-input bg-background text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-checked:border-primary peer-checked:bg-primary"
+        className="pointer-events-none flex size-5 items-center justify-center rounded border border-input bg-background text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-checked:border-primary peer-checked:bg-primary peer-indeterminate:border-primary peer-indeterminate:bg-primary"
       >
-        <Check className={checked ? 'size-4' : 'size-4 opacity-0'} />
+        {indeterminate ? (
+          <Minus className="size-4" />
+        ) : (
+          <Check className={checked ? 'size-4' : 'size-4 opacity-0'} />
+        )}
       </span>
     </span>
   );
@@ -89,7 +101,9 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
         .map((task) => task.id),
     [selected, tasks],
   );
-  const allSelected = selected.size === tasks.length;
+  // tasks.length > 0 是必要的：空列表时 0 === 0 会让表头框显示已勾选。
+  const allSelected = tasks.length > 0 && selected.size === tasks.length;
+  const someSelected = selected.size > 0 && !allSelected;
 
   function toggle(taskId: string) {
     setSelected((current) => {
@@ -135,6 +149,7 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
           <label className="flex min-h-11 cursor-pointer items-center gap-1 pr-2 text-sm">
             <BatchCheckbox
               checked={allSelected}
+              indeterminate={someSelected}
               onChange={() =>
                 setSelected(
                   allSelected
@@ -171,7 +186,7 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
             role={state?.status === 'success' ? 'status' : 'alert'}
             className={
               state?.status === 'success'
-                ? 'text-sm text-success'
+                ? 'text-sm text-success-foreground'
                 : 'text-sm text-destructive'
             }
           >

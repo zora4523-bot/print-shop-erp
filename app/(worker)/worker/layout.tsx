@@ -45,7 +45,7 @@ export default async function WorkerLayout({
               我的工单
             </Link>
             <Link href="/worker/salary" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
-              我的计件工资
+              我的工资
             </Link>
           </nav>
         </div>

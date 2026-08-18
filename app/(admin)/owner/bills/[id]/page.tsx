@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getBillDetail } from '@/lib/bill';
+import { getAdminBillDetail } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import {
   BILL_STATUS_LABELS,
@@ -34,7 +34,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('bill:view:all');
   const { id } = await params;
-  const bill = await getBillDetail(id);
+  const bill = await getAdminBillDetail(id);
   if (!bill) notFound();
 
   const total = new Decimal(bill.totalAmount as unknown as Decimal.Value);
@@ -50,13 +50,23 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
   const costingRows = bill.items.map((item) => {
     const costs = calculateOrderCostBreakdown(item.order);
+    const customerChargeAmount = (categoryCode: string) =>
+      item.order.customerCharges
+        .filter((charge) => String(charge.category.code) === categoryCode)
+        .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
     return {
       ...item,
       ...costs,
+      shippingReceivable: customerChargeAmount('SHIPPING_FEE'),
+      packingReceivable: customerChargeAmount('PACKING_MATERIAL'),
     };
   });
   const totalCost = costingRows.reduce(
     (sum, item) => sum.plus(item.totalCost),
+    new Decimal(0),
+  );
+  const processingRevenue = costingRows.reduce(
+    (sum, item) => sum.plus(item.order.processingAmount),
     new Decimal(0),
   );
   const grossProfit = total.minus(totalCost);
@@ -70,9 +80,9 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold">
             账单 · {bill.salesUser.displayName}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -86,8 +96,8 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
-        <div className="grid grid-cols-3 gap-4">
-          <Row label="总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Row label="应收总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
           <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} tabular />
           <Row
             label="未收"
@@ -117,8 +127,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             计件和外协从生产记录自动汇总；材料、物流、伙食、电费等来自工单成本流水。
           </p>
         </div>
-        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-4">
-          <Row label="销售额" value={`¥ ${total.toFixed(2)}`} tabular />
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+          <Row label="对客应收" value={`¥ ${total.toFixed(2)}`} tabular />
+          <Row
+            label="加工销售额"
+            value={`¥ ${processingRevenue.toFixed(2)}`}
+            tabular
+          />
           <Row
             label="历史期初/手工差额"
             value={`¥ ${openingAmount.toFixed(2)}`}
@@ -190,7 +205,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           <p className="text-xs text-muted-foreground">
             发单后进入 ISSUED，可接受付款。状态单向，不可回退到 DRAFT。发单
             前请先在列表页&ldquo;生成 / 追加月账单&rdquo;把截至目前所有完工
-            订单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
+            工单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
             {BILL_STATUS_LABELS[BillStatus.PARTIAL_PAID]} /
             {BILL_STATUS_LABELS[BillStatus.FULLY_PAID]} 的账单不再由生成流程
             自动追加新工单。
@@ -285,19 +300,22 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             aria-label="账单工单明细"
             tabIndex={0}
           >
-          <table className="w-full min-w-[1200px] text-sm">
+          <table className="w-full min-w-[1480px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 text-left">工单号</th>
-                <th className="px-4 py-2 text-left">客户名称/简称</th>
-                <th className="px-4 py-2 text-left">完工时间</th>
-                <th className="px-4 py-2 text-center">工单状态</th>
-                <th className="px-4 py-2 text-right">金额</th>
-                <th className="px-4 py-2 text-right">计件</th>
-                <th className="px-4 py-2 text-right">外协</th>
-                <th className="px-4 py-2 text-right">补录成本</th>
-                <th className="px-4 py-2 text-right">售后重做</th>
-                <th className="px-4 py-2 text-right">毛利</th>
+                <th scope="col" className="px-4 py-2 text-left">工单号</th>
+                <th scope="col" className="px-4 py-2 text-left">客户名称/简称</th>
+                <th scope="col" className="px-4 py-2 text-left">完工时间</th>
+                <th scope="col" className="px-4 py-2 text-center">工单状态</th>
+                <th scope="col" className="px-4 py-2 text-right">加工费</th>
+                <th scope="col" className="px-4 py-2 text-right">对客快递</th>
+                <th scope="col" className="px-4 py-2 text-right">对客耗材</th>
+                <th scope="col" className="px-4 py-2 text-right">应收合计</th>
+                <th scope="col" className="px-4 py-2 text-right">计件</th>
+                <th scope="col" className="px-4 py-2 text-right">外协</th>
+                <th scope="col" className="px-4 py-2 text-right">补录成本</th>
+                <th scope="col" className="px-4 py-2 text-right">售后重做</th>
+                <th scope="col" className="px-4 py-2 text-right">毛利</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -314,6 +332,15 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                     <OrderStatusBadge status={it.order.status} />
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {String(it.order.processingAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.shippingReceivable.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.packingReceivable.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
                     ¥ {String(it.orderAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">

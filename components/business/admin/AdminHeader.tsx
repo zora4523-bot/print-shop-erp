@@ -14,6 +14,7 @@ import type { AdminMenuItem } from '@/lib/navigation/admin-menu';
 //   - 主题/品牌色 token 化后只改这里一处
 //
 // 设计：sticky top-0，背景 card 而不是 background，与 sidebar 形成层次感。
+// 保持不透明，避免滚动后底层急单/选中色混入并降低面包屑对比度。
 
 export type AdminHeaderProps = {
   displayName: string;
@@ -31,7 +32,7 @@ export function AdminHeader({
   return (
     <header
       data-slot="admin-header"
-      className="admin-safe-inline admin-safe-top sticky top-0 z-10 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card/90 py-1 backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-3"
+      className="admin-safe-inline admin-safe-top sticky top-0 z-10 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card py-1 sm:gap-3"
     >
       <SidebarTrigger className="size-11 shrink-0" />
       <div className="min-w-0 flex-1">

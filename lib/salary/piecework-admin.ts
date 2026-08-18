@@ -9,6 +9,7 @@ import {
   type Prisma,
 } from '../../generated/prisma/client';
 import { db } from '../db';
+import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import {
   machineRuleLockKey,
   type MachineRuleWithBase,
@@ -61,7 +62,10 @@ export const workerMachineRuleInputSchema = z
     pieceRate: moneyString,
     boardRate: moneyString,
     smallOrderThreshold: z
-      .union([z.literal(''), z.string().trim().regex(/^\d{1,9}$/, '请输入正整数')]),
+      .union([
+        z.literal(''),
+        z.string().trim().regex(/^[1-9]\d{0,8}$/, '请输入正整数'),
+      ]),
     smallOrderFlatPrice: storedMoneyString,
     smallOrderInclusive: z.boolean().default(false),
     largeOrderSetupFee: storedMoneyString.default('0'),
@@ -237,7 +241,7 @@ export async function createWorkerMachineSalaryRule(input: {
   effectiveFrom: Date;
   remark: string | null;
   ruleValue: MachineRuleWithBase;
-  createdById: string;
+  actor: AuditActor;
 }) {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${machineRuleLockKey(
@@ -308,7 +312,7 @@ export async function createWorkerMachineSalaryRule(input: {
       data: { effectiveTo: input.effectiveFrom },
     });
 
-    return tx.workerMachineSalaryRule.create({
+    const created = await tx.workerMachineSalaryRule.create({
       data: {
         workerId: input.workerId,
         machineType: input.machineType,
@@ -316,7 +320,7 @@ export async function createWorkerMachineSalaryRule(input: {
         effectiveFrom: input.effectiveFrom,
         effectiveTo: nextRule?.effectiveFrom ?? null,
         remark: input.remark,
-        createdById: input.createdById,
+        createdById: input.actor.id,
       },
       select: {
         id: true,
@@ -328,5 +332,17 @@ export async function createWorkerMachineSalaryRule(input: {
         remark: true,
       },
     });
+    await writeAuditLogInTx(tx, {
+      actor: input.actor,
+      action: 'CREATE',
+      entityType: 'WorkerMachineSalaryRule',
+      entityId: created.id,
+      after: created,
+      requestMetadata: {
+        source: 'owner-salary.createWorkerMachineSalaryRuleAction',
+        route: '/owner/salary/piecework-rules',
+      },
+    });
+    return created;
   });
 }

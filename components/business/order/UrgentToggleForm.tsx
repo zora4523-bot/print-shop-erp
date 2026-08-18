@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { setOrderUrgentAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
@@ -16,24 +16,19 @@ type Props = {
 
 export function UrgentToggleForm({ orderId, currentValue }: Props) {
   const bound = setOrderUrgentAction.bind(null, orderId);
-  const [state, action] = useActionState<OrderMutationResult | null, FormData>(
-    bound,
-    null,
-  );
-  const [pending, startTransition] = useTransition();
+  const [state, action, pending] = useActionState<
+    OrderMutationResult | null,
+    FormData
+  >(bound, null);
   const target = !currentValue;
 
   return (
-    <form
-      action={(formData) => {
-        // Strip client state: always send the target boolean computed
-        // from server-rendered currentValue, not whatever the browser
-        // picks up from the hidden field default.
-        formData.set('isUrgent', String(target));
-        startTransition(() => action(formData));
-      }}
-      className="flex items-center gap-2"
-    >
+    // `action={action}` (no arrow wrapper) keeps the native form action +
+    // hidden $ACTION_ID in the SSR output, which is what actions/order.ts's
+    // "zero-JS plain form" comment is describing. The target boolean rides
+    // in the hidden field below — it is computed from the server-rendered
+    // currentValue, so it stays correct with or without hydration.
+    <form action={action} className="flex items-center gap-2">
       <input type="hidden" name="isUrgent" value={String(target)} />
       <Button
         type="submit"

@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   'order:update:post-schedule': [Role.ADMIN],
   'order:view:all':             [Role.ADMIN],
   'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
+  'order:export:all':           [Role.ADMIN],
   'order:schedule':             [Role.ADMIN],
   'order:ship':                 [Role.ADMIN],
   'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
@@ -46,7 +47,7 @@ export const PERMISSIONS = {
 
   // 账单
   'bill:view:all':              [Role.ADMIN],
-  'bill:view:self':             [Role.SALES, Role.CUSTOMER_SERVICE],
+  'bill:view:self':             [Role.SALES],
   'bill:mark-paid':             [Role.ADMIN],
 
   // 薪资

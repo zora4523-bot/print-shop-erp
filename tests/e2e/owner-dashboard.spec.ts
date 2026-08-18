@@ -172,6 +172,12 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
     //
     // 这里做&ldquo;render-without-crash&rdquo;断言：3 个 chart card 可见 + 各自
     // 的 recharts SVG 已经 paint（ResponsiveContainer 没 stuck 在 0 高）。
+    // 图表是 IntersectionObserver 延迟加载；先把容器滚入视口，测试才与
+    // 真实用户查看图表时的触发条件一致。不能直接等待 card，否则页面停在
+    // 顶部时组件按设计只会保留 placeholder。
+    await page
+      .locator('[data-slot="dashboard-charts-deferred"]')
+      .scrollIntoViewIfNeeded();
     const trendCard = page.locator(
       '[data-slot="dashboard-chart-trend-card"]',
     );

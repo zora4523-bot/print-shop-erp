@@ -121,7 +121,9 @@ export function AccountForm(props: Props) {
   );
   const [employmentType, setEmploymentType] = useState<EmploymentType | ''>(
     initial?.employmentType ??
-      (initial?.role === Role.ADMIN ? '' : EmploymentType.FULL_TIME),
+      (initial?.role === Role.CUSTOMER_SERVICE || initial?.role === Role.WORKER
+        ? EmploymentType.FULL_TIME
+        : ''),
   );
 
   // Cascade cleanup happens inline in the onChange handlers (not in a
@@ -135,8 +137,11 @@ export function AccountForm(props: Props) {
       setMachineCapabilities(new Set());
       setCraftCapabilities(new Set());
     }
-    if (next === Role.ADMIN) setEmploymentType('');
-    else if (!employmentType) setEmploymentType(EmploymentType.FULL_TIME);
+    if (next === Role.CUSTOMER_SERVICE || next === Role.WORKER) {
+      if (!employmentType) setEmploymentType(EmploymentType.FULL_TIME);
+    } else {
+      setEmploymentType('');
+    }
   }
   function onWorkerTypeChange(next: WorkerType | '') {
     setWorkerType(next);
@@ -389,7 +394,7 @@ export function AccountForm(props: Props) {
         </fieldset>
       ) : null}
 
-      {role !== Role.ADMIN ? (
+      {role === Role.CUSTOMER_SERVICE || role === Role.WORKER ? (
         <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="employmentType">用工类型</Label>
@@ -448,7 +453,7 @@ export function AccountForm(props: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
         </p>
       ) : null}

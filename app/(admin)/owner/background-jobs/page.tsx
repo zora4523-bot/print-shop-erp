@@ -1,9 +1,11 @@
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { getBackgroundJobHealth } from '@/lib/background-jobs/health';
+import { backgroundJobOperatorAction } from '@/lib/background-jobs/operator-action';
 import {
   cancelBackgroundJobAction,
   retryBackgroundJobAction,
@@ -25,7 +27,7 @@ export default async function BackgroundJobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="后台任务"
-        subtitle="通知、定时结算和 CDR 打包的持久化账本。失败任务可人工重试。"
+        subtitle="通知、定时结算和文件生成的持久化账本。普通失败任务可重试；导出失败请回工单列表重新发起。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -65,6 +67,17 @@ export default async function BackgroundJobsPage() {
             </tr>
           </thead>
           <tbody className="divide-y">
+            {/* 全仓唯一一个零数据时只渲染表头的列表——其余列表页都有空态。 */}
+            {jobs.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-3 py-8 text-center text-sm text-muted-foreground"
+                >
+                  暂无后台任务。通知、定时结算与文件生成的任务会落在这里。
+                </td>
+              </tr>
+            ) : null}
             {jobs.map((job) => (
               <tr key={job.id}>
                 <td className="px-3 py-2 text-xs">{formatDateTimeShanghai(job.createdAt)}</td>
@@ -74,11 +87,7 @@ export default async function BackgroundJobsPage() {
                 <td className="px-3 py-2 text-right font-mono text-xs">{job.attempts}/{job.maxAttempts}</td>
                 <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{job.lastErrorCode ?? '—'}</td>
                 <td className="px-3 py-2 text-right">
-                  {job.status === BackgroundJobStatus.DEAD ? (
-                    <JobAction action={retryBackgroundJobAction} jobId={job.id} label="重试" />
-                  ) : job.status === BackgroundJobStatus.PENDING ? (
-                    <JobAction action={cancelBackgroundJobAction} jobId={job.id} label="取消" />
-                  ) : '—'}
+                  <JobOperation job={job} />
                 </td>
               </tr>
             ))}
@@ -87,6 +96,42 @@ export default async function BackgroundJobsPage() {
       </div>
     </div>
   );
+}
+
+function JobOperation({ job }: {
+  job: { id: string; type: string; status: BackgroundJobStatus };
+}) {
+  const operation = backgroundJobOperatorAction(job);
+  if (operation === 'REQUEST_NEW_EXPORT') {
+    return (
+      <Link
+        href="/orders"
+        className={buttonVariants({ variant: 'outline', size: 'xs' })}
+        aria-label="请在工单列表重新导出"
+      >
+        重新导出
+      </Link>
+    );
+  }
+  if (operation === 'RETRY') {
+    return (
+      <JobAction
+        action={retryBackgroundJobAction}
+        jobId={job.id}
+        label="重试"
+      />
+    );
+  }
+  if (operation === 'CANCEL') {
+    return (
+      <JobAction
+        action={cancelBackgroundJobAction}
+        jobId={job.id}
+        label="取消"
+      />
+    );
+  }
+  return '—';
 }
 
 function Metric({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {

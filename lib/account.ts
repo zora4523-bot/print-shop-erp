@@ -14,6 +14,7 @@ import { todayShanghai } from './dashboard/shanghai-clock';
 import { computePeriodEnd } from './salary/cs';
 import { csUserLockKey } from './salary/cs-lock';
 import {
+  acquireSalaryRuleSnapshotReadLock,
   getActiveRuleValue,
   type SalaryRuleClient,
 } from './salary/rules';
@@ -86,6 +87,7 @@ async function ensureInitialCsPeriodInTx(
   );
   const [year, monthNumber] = month.split('-').map(Number);
   const periodStart = new Date(Date.UTC(year, monthNumber - 1, 1));
+  await acquireSalaryRuleSnapshotReadLock(tx);
   const [baseRule, lengthRule] = await Promise.all([
     getActiveRuleValue<{ monthlyBase: number | string }>(
       SalaryRuleType.CS_COMMISSION,
@@ -365,9 +367,17 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
         },
         isActive: true,
         employmentType:
-          data.role === Role.ADMIN ? null : (data.employmentType ?? null),
-        employmentStartDate: data.employmentStartDate ?? null,
-        employmentEndDate: data.employmentEndDate ?? null,
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentType ?? null)
+            : null,
+        employmentStartDate:
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentStartDate ?? null)
+            : null,
+        employmentEndDate:
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentEndDate ?? null)
+            : null,
       },
       select: SUMMARY_SELECT,
     });
@@ -463,9 +473,17 @@ export async function updateUser(
           create: capabilityCraftIds.map((craftId) => ({ craftId })),
         },
         employmentType:
-          data.role === Role.ADMIN ? null : (data.employmentType ?? null),
-        employmentStartDate: data.employmentStartDate ?? null,
-        employmentEndDate: data.employmentEndDate ?? null,
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentType ?? null)
+            : null,
+        employmentStartDate:
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentStartDate ?? null)
+            : null,
+        employmentEndDate:
+          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+            ? (data.employmentEndDate ?? null)
+            : null,
       },
       select: SUMMARY_SELECT,
     });

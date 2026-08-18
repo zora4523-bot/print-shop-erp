@@ -1,13 +1,9 @@
 import Decimal from 'decimal.js';
 
-// Money formatter for the owner dashboard. Renders 千分位 + 2-decimal +
-// `¥ ` prefix, e.g. `1234567.89` → `¥ 1,234,567.89`.
-//
-// Scoped to dashboard intentionally: existing pages (/owner/bills,
-// /owner/salary/daily, …) use `¥ ${decimal.toFixed(2)}` without 千分位
-// and the user explicitly asked for 千分位 only on the dashboard. Keep
-// this file out of the salary / bill modules so a wider rollout has to
-// be a deliberate change, not an accidental import.
+// Shared business-money formatter. Renders 千分位 + 2-decimal + `¥ `
+// prefix, e.g. `1234567.89` → `¥ 1,234,567.89`. Use this for user-facing
+// totals; fields whose schema intentionally keeps finer precision (such as
+// OrderItem.unitPrice Decimal(10, 4)) retain their own dedicated formatter.
 //
 // Accepts Decimal | string | number — Prisma money columns surface as
 // Decimal at the lib boundary; callers that already converted via

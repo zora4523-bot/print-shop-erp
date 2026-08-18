@@ -1,11 +1,13 @@
 import {
   BackgroundJobAttemptStatus,
   BackgroundJobStatus,
+  OrderExportStatus,
   Prisma,
   type BackgroundJob,
   type BackgroundJobQueue,
 } from '../../generated/prisma/client';
 import { db } from '../db';
+import { scrubOrderExportFiltersForBackgroundJob } from '../order/export-retention';
 import type {
   BackgroundJobResult,
   ClaimedBackgroundJob,
@@ -170,6 +172,28 @@ export async function claimNextBackgroundJob(input: {
          AND job."type" = 'CDR_BUNDLE'
     `;
 
+    // Export handlers deliberately leave retryable failures PENDING. When a
+    // worker disappears on its final attempt, reconcile the user-facing
+    // export ledger from the authoritative background-job terminal state.
+    await tx.$executeRaw`
+      UPDATE "OrderExport" AS order_export
+         SET "status" = 'FAILED'::"OrderExportStatus",
+             "lastErrorCode" = COALESCE(job."lastErrorCode", 'WorkerLeaseExpired'),
+             "filters" = jsonb_build_object(
+               'scope',
+               CASE
+                 WHEN order_export."filters"->>'scope' = 'all' THEN 'all'
+                 ELSE 'filtered'
+               END
+             ),
+             "updatedAt" = ${now}
+        FROM "BackgroundJob" AS job
+       WHERE order_export."backgroundJobId" = job."id"
+         AND order_export."status" = 'PENDING'::"OrderExportStatus"
+         AND job."status" = 'DEAD'::"BackgroundJobStatus"
+         AND job."type" = 'ORDER_EXPORT'
+    `;
+
     const rows = await tx.$queryRaw<ClaimedRow[]>`
       WITH candidate AS (
         SELECT "id"
@@ -323,6 +347,22 @@ export async function failBackgroundJob(
       });
     }
 
+    if (exhausted && job.type === 'ORDER_EXPORT') {
+      const failed = await tx.orderExport.updateMany({
+        where: {
+          backgroundJobId: job.id,
+          status: OrderExportStatus.PENDING,
+        },
+        data: {
+          status: OrderExportStatus.FAILED,
+          lastErrorCode: errorCode,
+        },
+      });
+      if (failed.count > 0) {
+        await scrubOrderExportFiltersForBackgroundJob(job.id, tx);
+      }
+    }
+
     await tx.backgroundJobAttempt.update({
       where: {
         jobId_attempt: { jobId: job.id, attempt: job.attempts },
@@ -374,6 +414,13 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       select: { status: true, type: true, attempts: true, maxAttempts: true },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
+    // Terminal export rows no longer retain their raw filter params. Reusing
+    // the old job would therefore be both invalid and misleading; the admin
+    // must request a fresh export from the order list with current filters.
+    if (job.type === 'ORDER_EXPORT') {
+      await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
+      return false;
+    }
     await tx.backgroundJob.update({
       where: { id: jobId },
       data: {
@@ -412,6 +459,19 @@ export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean
       where: { backgroundJobId: jobId, status: 'PENDING' },
       data: { status: 'FAILED', lastErrorCode: 'CancelledByOperator' },
     });
+    const failedExports = await tx.orderExport.updateMany({
+      where: {
+        backgroundJobId: jobId,
+        status: OrderExportStatus.PENDING,
+      },
+      data: {
+        status: OrderExportStatus.FAILED,
+        lastErrorCode: 'CancelledByOperator',
+      },
+    });
+    if (failedExports.count > 0) {
+      await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
+    }
     return true;
   });
 }

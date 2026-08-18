@@ -8,12 +8,14 @@ import {
   type HourlyPayrollRules,
 } from './hourly-payroll';
 import {
+  acquireSalaryRuleSnapshotReadLock,
   getActiveCleanerHourlyRate,
   getActiveCookMonthlyBase,
   getActiveCookSpareHourlyRate,
   getActiveOtMultiplier,
   getActivePackerHourlyRate,
   getActiveWorkHours,
+  type WorkHoursConfig,
 } from './rules';
 
 // 时薪工月结 — 把 Attendance 的月度汇总 + active SalaryRule 组合起来
@@ -43,8 +45,75 @@ export type ComputeHourlyPayrollResult = {
   totalSalary: string;
 };
 
+type HourlyRuleBundle = Readonly<{
+  packerRate: number | null;
+  cleanerRate: number | null;
+  cookMonthly: number | null;
+  cookSpareRate: number | null;
+  otMultiplier: number | null;
+  workHours: WorkHoursConfig | null;
+}>;
+
+async function readHourlyRuleBundle(
+  now: Date,
+  client: Parameters<typeof getActivePackerHourlyRate>[1],
+): Promise<HourlyRuleBundle> {
+  const [
+    packerRate,
+    cleanerRate,
+    cookMonthly,
+    cookSpareRate,
+    otMultiplier,
+    workHours,
+  ] = await Promise.all([
+    getActivePackerHourlyRate(now, client),
+    getActiveCleanerHourlyRate(now, client),
+    getActiveCookMonthlyBase(now, client),
+    getActiveCookSpareHourlyRate(now, client),
+    getActiveOtMultiplier(now, client),
+    getActiveWorkHours(now, client),
+  ]);
+  return {
+    packerRate,
+    cleanerRate,
+    cookMonthly,
+    cookSpareRate,
+    otMultiplier,
+    workHours,
+  };
+}
+
+// A batch must not re-resolve rules between workers: the admin may publish a
+// backdated version after worker A commits and before worker B starts. Read one
+// coherent value bundle under the shared writer-exclusion lock, then pass that
+// immutable bundle to every independent worker transaction.
+async function loadHourlyRuleBundle(now: Date): Promise<HourlyRuleBundle> {
+  return db.$transaction(async (tx) => {
+    await acquireSalaryRuleSnapshotReadLock(tx);
+    return readHourlyRuleBundle(now, tx);
+  });
+}
+
 function dec(v: unknown): Decimal {
   return new Decimal(v as Decimal.Value);
+}
+
+const HOURLY_WORKER_TYPES = [
+  WorkerType.PACKER,
+  WorkerType.CLEANER,
+  WorkerType.COOK,
+] as const;
+
+function isHourlyWorkerType(value: unknown): value is WorkerType {
+  return (HOURLY_WORKER_TYPES as readonly unknown[]).includes(value);
+}
+
+export function getHourlyPayrollWorkerType(snapshot: unknown): WorkerType | null {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return null;
+  }
+  const value = (snapshot as Record<string, unknown>).workerType;
+  return isHourlyWorkerType(value) ? value : null;
 }
 
 // Per-(worker, month) advisory lock. Closes two races :
@@ -66,6 +135,7 @@ export async function computeHourlyPayroll(
   workerId: string,
   month: string,
   now: Date = new Date(),
+  pinnedRuleBundle?: HourlyRuleBundle,
 ): Promise<ComputeHourlyPayrollResult> {
   const { start, end } = parseShanghaiMonth(month);
 
@@ -80,21 +150,6 @@ export async function computeHourlyPayroll(
     },
   });
   if (!worker) throw new HourlyAggregateError('工人不存在');
-  if (worker.role !== Role.WORKER) {
-    throw new HourlyAggregateError('不是工人（role != WORKER）');
-  }
-  if (
-    worker.workerType !== WorkerType.PACKER &&
-    worker.workerType !== WorkerType.CLEANER &&
-    worker.workerType !== WorkerType.COOK
-  ) {
-    throw new HourlyAggregateError(
-      '仅时薪工（打包 / 清废 / 厨师）走月结；机器师傅是日薪，请看 /owner/salary/daily',
-    );
-  }
-  // Hoist the narrowed type into a non-null local — TS loses flow
-  // narrowing across the $transaction arrow body's closure boundary.
-  const workerType: WorkerType = worker.workerType;
 
   // Everything past here runs in ONE transaction under the per-
   // (worker, month) advisory lock so the paid-row guard and the
@@ -131,45 +186,83 @@ export async function computeHourlyPayroll(
         normalHours: true,
         otHours: true,
         spareHours: true,
+        roleSnapshot: true,
+        workerTypeSnapshot: true,
       },
       orderBy: { date: 'asc' },
     });
 
-    const totalNormal = rows.reduce(
+    const historicalRows = rows.filter(
+      (row) =>
+        row.roleSnapshot === Role.WORKER &&
+        isHourlyWorkerType(row.workerTypeSnapshot),
+    );
+    const historicalTypes = [
+      ...new Set(historicalRows.map((row) => row.workerTypeSnapshot)),
+    ];
+    if (historicalTypes.length > 1) {
+      throw new HourlyAggregateError(
+        `同一月份存在多个历史时薪工种（${historicalTypes.join('、')}），请先拆分或核对考勤后再结算`,
+      );
+    }
+
+    // Historical attendance owns historical payroll. Current identity is only
+    // a fallback for an active hourly worker with no recorded hourly fact, so
+    // existing zero-hour / COOK monthly-base behavior remains intact.
+    let workerType: WorkerType;
+    if (historicalTypes.length === 1) {
+      workerType = historicalTypes[0]!;
+    } else if (
+      worker.role === Role.WORKER &&
+      worker.isActive &&
+      isHourlyWorkerType(worker.workerType)
+    ) {
+      workerType = worker.workerType;
+    } else {
+      if (worker.role !== Role.WORKER) {
+        throw new HourlyAggregateError('不是工人（role != WORKER）');
+      }
+      if (!isHourlyWorkerType(worker.workerType)) {
+        throw new HourlyAggregateError(
+          '仅时薪工（打包 / 清废 / 厨师）走月结；机器师傅是日薪，请看 /owner/salary/daily',
+        );
+      }
+      throw new HourlyAggregateError(
+        '工人已停用且本月没有历史时薪考勤',
+      );
+    }
+
+    const payrollRows = historicalRows.filter(
+      (row) => row.workerTypeSnapshot === workerType,
+    );
+
+    const totalNormal = payrollRows.reduce(
       (acc, r) => acc.plus(dec(r.normalHours)),
       new Decimal(0),
     );
-    const totalOt = rows.reduce(
+    const totalOt = payrollRows.reduce(
       (acc, r) => acc.plus(dec(r.otHours)),
       new Decimal(0),
     );
-    const totalSpare = rows.reduce(
+    const totalSpare = payrollRows.reduce(
       (acc, r) => acc.plus(dec(r.spareHours)),
       new Decimal(0),
     );
 
-    // Resolve rules AT `now` — batches pin one timestamp so every
-    // worker in that month's settlement snapshots against the same
-    // rule version . Rule reads still go via
-    // global `db` rather than `tx`; that's safe because rule edits
-    // mint new rows (they don't delete / mutate the row we read)
-    // and the advisory lock means no concurrent writer to OUR payroll
-    // row exists while we compute.
-    const [
+    // Standalone recomputes resolve all rule rows coherently inside this
+    // transaction. Batch callers pass one already-frozen bundle so workers A
+    // and B cannot straddle an admin rule edit between their transactions.
+    if (!pinnedRuleBundle) {
+      await acquireSalaryRuleSnapshotReadLock(tx);
+    }
+    const {
       packerRate,
       cleanerRate,
       cookMonthly,
       cookSpareRate,
       otMultiplier,
       workHours,
-    ] = await Promise.all([
-      getActivePackerHourlyRate(now),
-      getActiveCleanerHourlyRate(now),
-      getActiveCookMonthlyBase(now),
-      getActiveCookSpareHourlyRate(now),
-      getActiveOtMultiplier(now),
-      getActiveWorkHours(now),
-    ]);
+    } = pinnedRuleBundle ?? (await readHourlyRuleBundle(now, tx));
 
     let rules: HourlyPayrollRules;
     let hourlyRateForSchema: Decimal; // DB column baseline — non-COOK uses
@@ -249,7 +342,7 @@ export async function computeHourlyPayroll(
     const effectiveOtMultiplier = otMultiplier ?? 1;
 
     // dailyDetail is a per-day breakdown for the UI drill-down.
-    const dailyDetail = rows.map((r) => ({
+    const dailyDetail = payrollRows.map((r) => ({
       date: r.date.toISOString().slice(0, 10),
       normalHours: String(r.normalHours),
       otHours: String(r.otHours),
@@ -321,7 +414,7 @@ export async function computeHourlyPayroll(
 // (matches round 45's settleReadyCsPeriods pattern).
 export type BatchHourlyResult = {
   settled: ComputeHourlyPayrollResult[];
-  errors: Array<{ workerId: string; message: string }>;
+  errors: Array<{ workerId: string; workerName: string; message: string }>;
 };
 
 // Preserve already committed payroll rows when an unexpected failure stops a
@@ -343,21 +436,32 @@ export async function computeHourlyForAllInMonth(
 ): Promise<BatchHourlyResult> {
   // Bounds-check month before fanout so the early bail matches the
   // single-worker signature.
-  parseShanghaiMonth(month);
+  const { start, end } = parseShanghaiMonth(month);
 
   const settled: ComputeHourlyPayrollResult[] = [];
-  const errors: Array<{ workerId: string; message: string }> = [];
-  let workers: Array<{ id: string }>;
+  const errors: Array<{ workerId: string; workerName: string; message: string }> = [];
+  let workers: Array<{ id: string; displayName: string }>;
   try {
     workers = await db.user.findMany({
       where: {
-        role: Role.WORKER,
-        isActive: true,
-        workerType: {
-          in: [WorkerType.PACKER, WorkerType.CLEANER, WorkerType.COOK],
-        },
+        OR: [
+          {
+            role: Role.WORKER,
+            isActive: true,
+            workerType: { in: [...HOURLY_WORKER_TYPES] },
+          },
+          {
+            attendanceRecords: {
+              some: {
+                date: { gte: start, lt: end },
+                roleSnapshot: Role.WORKER,
+                workerTypeSnapshot: { in: [...HOURLY_WORKER_TYPES] },
+              },
+            },
+          },
+        ],
       },
-      select: { id: true },
+      select: { id: true, displayName: true },
     });
   } catch (cause) {
     throw new HourlyBatchUnexpectedError(
@@ -367,12 +471,31 @@ export async function computeHourlyForAllInMonth(
     );
   }
 
+  if (workers.length === 0) return { settled, errors };
+
+  let pinnedRuleBundle: HourlyRuleBundle;
+  try {
+    pinnedRuleBundle = await loadHourlyRuleBundle(now);
+  } catch (cause) {
+    throw new HourlyBatchUnexpectedError(
+      '时薪规则快照读取失败',
+      { settled, errors },
+      cause,
+    );
+  }
+
   for (const w of workers) {
     try {
-      settled.push(await computeHourlyPayroll(w.id, month, now));
+      settled.push(
+        await computeHourlyPayroll(w.id, month, now, pinnedRuleBundle),
+      );
     } catch (err) {
       if (err instanceof HourlyAggregateError) {
-        errors.push({ workerId: w.id, message: err.message });
+        errors.push({
+          workerId: w.id,
+          workerName: w.displayName,
+          message: err.message,
+        });
         continue;
       }
       throw new HourlyBatchUnexpectedError(
@@ -399,7 +522,7 @@ export async function listHourlyPayrolls(filter: {
     // validates date early .
     parseShanghaiMonth(filter.month);
   }
-  return db.hourlyWorkerPayroll.findMany({
+  const rows = await db.hourlyWorkerPayroll.findMany({
     where: {
       ...(filter.month ? { month: filter.month } : {}),
       ...(filter.workerId ? { workerId: filter.workerId } : {}),
@@ -421,9 +544,14 @@ export async function listHourlyPayrolls(filter: {
       totalSalary: true,
       isPaid: true,
       paidAt: true,
-      worker: { select: { displayName: true, workerType: true } },
+      salaryRuleSnapshot: true,
+      worker: { select: { displayName: true } },
     },
   });
+  return rows.map((row) => ({
+    ...row,
+    payrollWorkerType: getHourlyPayrollWorkerType(row.salaryRuleSnapshot),
+  }));
 }
 
 export async function markHourlyPayrollPaid(

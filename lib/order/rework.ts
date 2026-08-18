@@ -1,6 +1,7 @@
 import {
   OrderBillingMode,
   OrderKind,
+  OrderSettlementType,
   OrderStatus,
   Role,
   ShipmentStatus,
@@ -125,6 +126,7 @@ export async function createReworkOrder(
         status: OrderStatus.SUBMITTED,
         kind: OrderKind.REWORK,
         billingMode: OrderBillingMode.NO_CHARGE,
+        settlementType: OrderSettlementType.NO_CHARGE,
         sourceOrderId: source.id,
         reworkCause: input.cause,
         reworkReason: input.reason,
@@ -139,6 +141,7 @@ export async function createReworkOrder(
         packageRequirement: source.packageRequirement,
         remark: `原单 ${source.orderNo}；重做原因：${input.reason}`,
         promisedDate: null,
+        processingAmount: '0.00',
         totalAmount: '0.00',
         submittedAt: now,
         items: {
@@ -158,8 +161,16 @@ export async function createReworkOrder(
               isDoubleSided: sourceItem.isDoubleSided,
               isDoubleColor: sourceItem.isDoubleColor,
               unitPrice: '0',
+              fixedFee: '0',
               subtotal: '0',
-              suggestedPrice: sourceItem.suggestedPrice,
+              suggestedSubtotal: null,
+              pricingSnapshot: {
+                version: 1,
+                source: 'FREE_REWORK',
+                sourceOrderId: source.id,
+                sourceOrderItemId: sourceItem.id,
+              },
+              priceOverrideReason: '免费重做，不计加工费',
               remark: sourceItem.remark,
               designs: {
                 create: sourceItem.designs.map((design) => ({

@@ -12,6 +12,7 @@ import {
   setOrderUrgentSchema,
   setOrderSfCollectSchema,
   createOrderChangeRequestSchema,
+  previewOrderChangeRequestPricingSchema,
   reviewOrderChangeRequestSchema,
 } from '@/lib/auth/schemas';
 import {
@@ -33,6 +34,7 @@ import {
 import {
   createOrderChangeRequest,
   OrderChangeRequestError,
+  previewOrderChangeRequestPricing,
   reviewOrderChangeRequest,
 } from '@/lib/order/change-request';
 import type {
@@ -40,6 +42,7 @@ import type {
   CreateOrderMutationResult,
   CreateReworkOrderMutationResult,
   OrderMutationResult,
+  PreviewOrderChangeRequestPricingResult,
   ReviewOrderChangeRequestMutationResult,
 } from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
@@ -181,19 +184,54 @@ export async function shipOrderAction(
   const shipmentIds = formData.getAll('shipmentId');
   const shipmentTrackingNos = formData.getAll('shipmentTrackingNo');
   const shipmentWeights = formData.getAll('shipmentWeightKg');
+  const shipmentProvinces = formData.getAll('shipmentDestinationProvince');
+  const shipmentShippingFees = formData.getAll('shipmentShippingFee');
+  const shipmentPackingFees = formData.getAll('shipmentPackingMaterialFee');
+  const shipmentChargeReasons = formData.getAll('shipmentChargeOverrideReason');
+  const hasMatchingOptionalShape = (values: FormDataEntryValue[]) =>
+    values.length === 0 || values.length === shipmentIds.length;
   const hasValidWeightShape =
     shipmentWeights.length === 0 || shipmentWeights.length === shipmentIds.length;
   const shipments =
     shipmentIds.length === shipmentTrackingNos.length &&
-    hasValidWeightShape
+    hasValidWeightShape &&
+    hasMatchingOptionalShape(shipmentProvinces) &&
+    hasMatchingOptionalShape(shipmentShippingFees) &&
+    hasMatchingOptionalShape(shipmentPackingFees) &&
+    hasMatchingOptionalShape(shipmentChargeReasons)
       ? shipmentIds.map((shipmentId, index) => ({
           shipmentId,
           trackingNo: shipmentTrackingNos[index],
           ...(shipmentWeights.length > 0
             ? { weightKg: shipmentWeights[index] }
             : {}),
+          ...(shipmentProvinces.length > 0
+            ? { destinationProvince: shipmentProvinces[index] }
+            : {}),
+          ...(shipmentShippingFees.length > 0
+            ? { shippingFee: shipmentShippingFees[index] }
+            : {}),
+          ...(shipmentPackingFees.length > 0
+            ? { packingMaterialFee: shipmentPackingFees[index] }
+            : {}),
+          ...(shipmentChargeReasons.length > 0
+            ? {
+                customerChargeOverrideReason:
+                  shipmentChargeReasons[index],
+              }
+            : {}),
         }))
-      : [{ shipmentId: null, trackingNo: null, weightKg: null }];
+      : [
+          {
+            shipmentId: null,
+            trackingNo: null,
+            weightKg: null,
+            destinationProvince: null,
+            shippingFee: null,
+            packingMaterialFee: null,
+            customerChargeOverrideReason: null,
+          },
+        ];
   const parsed = shipOrderSchema.safeParse({
     trackingNo: formData.get('trackingNo'),
     shipments,
@@ -342,15 +380,45 @@ export async function setOrderSfCollectAction(
 ): Promise<OrderMutationResult> {
   const actor = await requirePermission('order:create');
 
+  const shipmentIds = formData.getAll('sfShipmentId');
+  const shipmentProvinces = formData.getAll('sfShipmentDestinationProvince');
+  const shipmentWeights = formData.getAll('sfShipmentWeightKg');
+  const shipmentShippingFees = formData.getAll('sfShipmentShippingFee');
+  const shipmentChargeReasons = formData.getAll('sfShipmentChargeOverrideReason');
+  const shipmentFieldCounts = [
+    shipmentProvinces.length,
+    shipmentWeights.length,
+    shipmentShippingFees.length,
+    shipmentChargeReasons.length,
+  ];
+  if (shipmentFieldCounts.some((count) => count !== shipmentIds.length)) {
+    return {
+      status: 'invalid',
+      fieldErrors: { shipments: ['发货收费字段数量不一致'] },
+    };
+  }
+
   const parsed = setOrderSfCollectSchema.safeParse({
     isSfCollect: formData.get('isSfCollect'),
+    shipments: shipmentIds.map((shipmentId, index) => ({
+      shipmentId,
+      destinationProvince: shipmentProvinces[index],
+      weightKg: shipmentWeights[index],
+      shippingFee: shipmentShippingFees[index],
+      customerChargeOverrideReason: shipmentChargeReasons[index],
+    })),
   });
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    await setOrderSfCollect(orderId, parsed.data.isSfCollect, actor);
+    await setOrderSfCollect(
+      orderId,
+      parsed.data.isSfCollect,
+      actor,
+      parsed.data.shipments,
+    );
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -411,6 +479,33 @@ export async function reviewOrderChangeRequestAction(
     revalidatePath('/worker/tasks');
     revalidatePath('/worker/orders');
     return { status: 'success', requestStatus: request.status };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function previewOrderChangeRequestPricingAction(
+  _prev: PreviewOrderChangeRequestPricingResult | null,
+  raw: unknown,
+): Promise<PreviewOrderChangeRequestPricingResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = previewOrderChangeRequestPricingSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const preview = await previewOrderChangeRequestPricing(
+      parsed.data.requestId,
+      actor,
+    );
+    return { status: 'success', preview };
   } catch (error) {
     if (error instanceof OrderChangeRequestError) {
       return { status: 'error', message: error.message };

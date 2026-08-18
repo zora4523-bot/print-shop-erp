@@ -91,9 +91,9 @@ export function StatCard({
             className={cn(
               'mt-1 inline-flex items-center gap-1 text-xs',
               dTone === 'success'
-                ? 'text-success'
+                ? 'text-success-foreground'
                 : dTone === 'warning'
-                  ? 'text-warning'
+                  ? 'text-warning-foreground'
                   : 'text-muted-foreground',
             )}
           >

@@ -35,7 +35,7 @@ export function CancelPurchaseReceiptButton({
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ {success}
         </p>
       ) : null}

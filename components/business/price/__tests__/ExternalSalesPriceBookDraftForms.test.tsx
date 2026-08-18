@@ -1,0 +1,568 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  CustomerPriceBookPurpose,
+  CustomerPriceCalculationType,
+  CustomerPriceRuleKind,
+} from '@/generated/prisma/enums';
+import type {
+  CustomerPriceRuleDraftEditorDto,
+} from '@/lib/price/customer-price-book-admin';
+
+const {
+  actionStateMock,
+  createActionMock,
+  discardActionMock,
+  effectMock,
+  publishActionMock,
+  refreshMock,
+  replaceMock,
+  updateActionMock,
+} = vi.hoisted(() => ({
+  actionStateMock: vi.fn(),
+  createActionMock: vi.fn(),
+  discardActionMock: vi.fn(),
+  effectMock: vi.fn(),
+  publishActionMock: vi.fn(),
+  refreshMock: vi.fn(),
+  replaceMock: vi.fn(),
+  updateActionMock: vi.fn(),
+}));
+
+vi.mock('react', async () => {
+  const actual = await vi.importActual<typeof import('react')>('react');
+  return {
+    ...actual,
+    useActionState: actionStateMock,
+    useEffect: effectMock,
+  };
+});
+
+vi.mock('@/actions/customer-price-books', () => ({
+  createCustomerPriceBookDraftAction: createActionMock,
+  discardCustomerPriceBookDraftAction: discardActionMock,
+  publishCustomerPriceBookDraftAction: publishActionMock,
+  updateCustomerPriceRuleDraftAction: updateActionMock,
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: refreshMock, replace: replaceMock }),
+}));
+
+import {
+  createDraftFromForm,
+  CreateCustomerPriceBookDraftForm,
+  customerPriceRuleInputFromFormData,
+  CustomerPriceBookDraftRuleForm,
+  discardDraftFromForm,
+  publishDraftFromForm,
+  updateDraftRuleFromForm,
+} from '../ExternalSalesPriceBookDraftForms';
+
+const categories = [
+  { id: 'processing-category', name: '彩印加工' },
+];
+
+function rule(
+  overrides: Partial<CustomerPriceRuleDraftEditorDto['rule']> = {},
+): CustomerPriceRuleDraftEditorDto['rule'] {
+  return {
+    id: 'rule-1',
+    name: '彩印 100 个',
+    categoryId: 'processing-category',
+    categoryName: '彩印加工',
+    productId: 'product-1',
+    kind: CustomerPriceRuleKind.BASE,
+    calculationType: CustomerPriceCalculationType.FIXED_AMOUNT,
+    unitsPerSheet: null,
+    amount: '130',
+    includedUnits: null,
+    incrementUnits: null,
+    incrementAmount: null,
+    minQty: 100,
+    maxQty: 100,
+    blocksAutomaticQuote: false,
+    isActive: true,
+    editorMode: 'PROCESSING',
+    shippingScopeLabel: null,
+    updatedAt: '2026-08-09T00:30:00.000Z',
+    ...overrides,
+  };
+}
+
+function ruleContext(
+  purpose: CustomerPriceBookPurpose,
+): CustomerPriceRuleDraftEditorDto['context'] {
+  return {
+    id: 'draft-1',
+    purpose,
+    categories: purpose === CustomerPriceBookPurpose.PROCESSING ? categories : [],
+    products:
+      purpose === CustomerPriceBookPurpose.PROCESSING
+        ? [{ id: 'product-1', name: '彩印红包' }]
+        : [],
+  };
+}
+
+beforeEach(() => {
+  actionStateMock.mockReset();
+  createActionMock.mockReset();
+  discardActionMock.mockReset();
+  effectMock.mockReset();
+  effectMock.mockImplementation(() => undefined);
+  publishActionMock.mockReset();
+  refreshMock.mockReset();
+  replaceMock.mockReset();
+  updateActionMock.mockReset();
+  const success = { status: 'success', priceBookId: 'draft-1' };
+  createActionMock.mockResolvedValue(success);
+  discardActionMock.mockResolvedValue(success);
+  publishActionMock.mockResolvedValue(success);
+  updateActionMock.mockResolvedValue({ ...success, ruleId: 'rule-1' });
+  actionStateMock.mockImplementation(
+    (action: (state: unknown, payload: FormData) => unknown, initial: unknown) => [
+      initial,
+      action,
+      false,
+    ],
+  );
+});
+
+describe('customer price-book draft form bindings', () => {
+  it('submits visible business fields and drops injected technical metadata', () => {
+    const formData = new FormData();
+    for (const [name, value] of Object.entries({
+      priceBookId: 'draft-1',
+      ruleId: 'rule-1',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      name: '新规则名',
+      categoryId: 'category-1',
+      productId: 'product-1',
+      kind: CustomerPriceRuleKind.ADD_ON,
+      calculationType: CustomerPriceCalculationType.PER_PIECE,
+      unitsPerSheet: '8',
+      amount: '0.2500',
+      includedUnits: '1',
+      incrementUnits: '0.5',
+      incrementAmount: '3.5',
+      minQty: '100',
+      maxQty: '500',
+      triggerCondition: '{"foilColorCount":2}',
+      exclusiveGroup: 'FOIL',
+      priority: '80',
+      note: '测试备注',
+      blocksAutomaticQuote: 'true',
+      isActive: 'true',
+    })) {
+      formData.set(name, value);
+    }
+
+    expect(customerPriceRuleInputFromFormData(formData)).toEqual({
+      priceBookId: 'draft-1',
+      ruleId: 'rule-1',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      name: '新规则名',
+      categoryId: 'category-1',
+      productId: 'product-1',
+      kind: CustomerPriceRuleKind.ADD_ON,
+      calculationType: CustomerPriceCalculationType.PER_PIECE,
+      unitsPerSheet: 8,
+      amount: '0.2500',
+      includedUnits: '1',
+      incrementUnits: '0.5',
+      incrementAmount: '3.5',
+      minQty: 100,
+      maxQty: 500,
+      blocksAutomaticQuote: true,
+      isActive: true,
+    });
+  });
+
+  it('binds create, save, publish and discard to their dedicated actions', async () => {
+    const createData = new FormData();
+    createData.set('purpose', CustomerPriceBookPurpose.PROCESSING);
+    createData.set('changeReason', '原材料调价');
+    await createDraftFromForm(null, createData);
+
+    const updateData = new FormData();
+    for (const [name, value] of Object.entries({
+      priceBookId: 'draft-1',
+      ruleId: 'rule-1',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      name: '彩印 100 个',
+      categoryId: 'category-1',
+      productId: '',
+      kind: CustomerPriceRuleKind.REFERENCE,
+      calculationType: '',
+      unitsPerSheet: '',
+      amount: '',
+      includedUnits: '',
+      incrementUnits: '',
+      incrementAmount: '',
+      minQty: '',
+      maxQty: '',
+    })) {
+      updateData.set(name, value);
+    }
+    await updateDraftRuleFromForm(null, updateData);
+
+    const publishData = new FormData();
+    publishData.set('priceBookId', 'draft-1');
+    publishData.set('expectedDraftUpdatedAt', '2026-08-09T00:30:00.000Z');
+    publishData.set('effectiveFrom', '2026-09-01T08:00');
+    await publishDraftFromForm(null, publishData);
+
+    const discardData = new FormData();
+    discardData.set('priceBookId', 'draft-1');
+    discardData.set('expectedDraftUpdatedAt', '2026-08-09T00:30:00.000Z');
+    await discardDraftFromForm(null, discardData);
+
+    expect(createActionMock).toHaveBeenCalledWith({
+      purpose: CustomerPriceBookPurpose.PROCESSING,
+      changeReason: '原材料调价',
+    });
+    expect(updateActionMock).toHaveBeenCalledTimes(1);
+    expect(publishActionMock).toHaveBeenCalledWith({
+      priceBookId: 'draft-1',
+      expectedDraftUpdatedAt: '2026-08-09T00:30:00.000Z',
+      effectiveFrom: '2026-09-01T08:00',
+    });
+    expect(discardActionMock).toHaveBeenCalledWith({
+      priceBookId: 'draft-1',
+      expectedDraftUpdatedAt: '2026-08-09T00:30:00.000Z',
+    });
+  });
+});
+
+describe('CreateCustomerPriceBookDraftForm', () => {
+  it('明确说明复制和版本隔离，并将调价原因标为必填', () => {
+    const html = renderToStaticMarkup(
+      <CreateCustomerPriceBookDraftForm
+        purpose={CustomerPriceBookPurpose.PROCESSING}
+      />,
+    );
+
+    expect(html).toContain('从当前生效价目开始调整');
+    expect(html).toContain('草稿发布前不会影响当前报价');
+    expect(html).toContain('历史工单的原结算金额也不会改变');
+    expect(html).toContain('调价原因（必填）');
+    expect(html).toContain('复制当前价目并开始调价');
+
+    const textarea = html.match(
+      /<textarea[^>]*name="changeReason"[^>]*>/,
+    )?.[0];
+    expect(textarea).toContain('required=""');
+    expect(textarea).toContain('aria-required="true"');
+    expect(textarea).toContain('aria-invalid="false"');
+    expect(textarea).toContain(
+      'aria-describedby="changeReason-PROCESSING-hint"',
+    );
+  });
+
+  it('将服务端字段错误关联到调价原因并用 alert 播报', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: { changeReason: ['请填写至少 2 个字符的调价原因'] },
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CreateCustomerPriceBookDraftForm
+        purpose={CustomerPriceBookPurpose.PROCESSING}
+      />,
+    );
+    const textarea = html.match(
+      /<textarea[^>]*name="changeReason"[^>]*>/,
+    )?.[0];
+
+    expect(textarea).toContain('aria-invalid="true"');
+    expect(textarea).toContain(
+      'aria-describedby="changeReason-PROCESSING-hint changeReason-PROCESSING-error"',
+    );
+    expect(html).toContain('id="changeReason-PROCESSING-error"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('请填写至少 2 个字符的调价原因');
+  });
+
+  it('并发创建已产生草稿时提供相邻的刷新恢复操作', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'error',
+        message: '该用途已有草稿版本，请刷新后继续编辑',
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CreateCustomerPriceBookDraftForm
+        purpose={CustomerPriceBookPurpose.PROCESSING}
+      />,
+    );
+
+    expect(html).toMatch(
+      /<p role="alert"[^>]*>该用途已有草稿版本，请刷新后继续编辑<\/p>/,
+    );
+    expect(html).toContain('刷新最新内容');
+    expect(html).not.toMatch(/<div role="alert"[^>]*>/);
+  });
+});
+
+describe('CustomerPriceBookDraftRuleForm', () => {
+  it('shows only processing business fields and removes imported implementation metadata', () => {
+    const selectedRule = rule({ name: '空封现货基础价（A4:C4）' });
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={selectedRule}
+      />,
+    );
+
+    expect(html).toContain('收费项目名称');
+    expect(html).toContain('value="空封现货基础价"');
+    expect(html).toContain('收费类目');
+    expect(html).toContain('彩印加工');
+    expect(html).toContain('每张含几个');
+    expect(html).toContain('name="unitsPerSheet"');
+    expect(html).not.toContain('>快递费</option>');
+    expect(html).not.toContain('>打包耗材</option>');
+    expect(html).not.toContain('物流首重/续重');
+    expect(html).not.toContain('高级条件与审计信息');
+    expect(html).not.toContain('规则代码');
+    expect(html).not.toContain('RULE-CODE-1');
+    expect(html).not.toContain('SHA-256');
+    expect(html).not.toContain('触发条件（JSON）');
+    expect(html).not.toContain('互斥组');
+    expect(html).not.toContain('>优先级<');
+    expect(html).not.toContain('>规则说明<');
+    expect(html).not.toContain('name="triggerCondition"');
+    expect(html).not.toContain('name="exclusiveGroup"');
+    expect(html).not.toContain('name="priority"');
+    expect(html).not.toContain('name="note"');
+    expect(html).toContain('min-h-11');
+    expect(html).toContain('opacity-0');
+    expect(html).toContain('size-5');
+    expect(html).toContain(
+      'name="expectedUpdatedAt" value="2026-08-09T00:30:00.000Z"',
+    );
+    expect(html).toContain('正在编辑调价草稿');
+    expect(html).toContain('发布前不会改变当前报价或历史工单金额');
+    expect(html).toContain('sticky bottom-0');
+    expect(html).toContain('保存到调价草稿');
+  });
+
+  it('shows the safe sheet-capacity field without exposing matcher JSON', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          calculationType: CustomerPriceCalculationType.PER_SHEET,
+          unitsPerSheet: 4,
+        })}
+      />,
+    );
+    const input = html.match(
+      /<input[^>]*name="unitsPerSheet"[^>]*>/,
+    )?.[0];
+
+    expect(input).toContain('type="number"');
+    expect(input).toContain('value="4"');
+    expect(input).toContain('min="1"');
+    expect(input).toContain('step="1"');
+    expect(html).toContain('选择“按张”计价时必填');
+    expect(html).not.toContain('name="triggerCondition"');
+  });
+
+  it('将编辑错误关联到对应字段并保留业务化编辑器', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: {
+          amount: ['金额必须是非负数字，最多 4 位小数'],
+          unitsPerSheet: ['按张计价必须填写每张含几个'],
+          maxQty: ['最大数量不能小于最小数量'],
+        },
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          calculationType: CustomerPriceCalculationType.PER_SHEET,
+        })}
+      />,
+    );
+    const amountInput = html.match(
+      /<input[^>]*name="amount"[^>]*>/,
+    )?.[0];
+    const maxQtyInput = html.match(
+      /<input[^>]*name="maxQty"[^>]*>/,
+    )?.[0];
+    const unitsPerSheetInput = html.match(
+      /<input[^>]*name="unitsPerSheet"[^>]*>/,
+    )?.[0];
+
+    expect(amountInput).toContain('aria-invalid="true"');
+    expect(amountInput).toContain(
+      'aria-describedby="price-rule-rule-1-amount-error"',
+    );
+    expect(maxQtyInput).toContain('aria-invalid="true"');
+    expect(unitsPerSheetInput).toContain('aria-invalid="true"');
+    expect(unitsPerSheetInput).toContain(
+      'aria-describedby="price-rule-rule-1-unitsPerSheet-hint price-rule-rule-1-unitsPerSheet-error"',
+    );
+    expect(html).toContain('id="price-rule-rule-1-amount-error"');
+    expect(html).toContain('id="price-rule-rule-1-unitsPerSheet-error"');
+    expect(html).toContain('id="price-rule-rule-1-maxQty-error"');
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain('触发条件（JSON）');
+    expect(html).not.toContain('SHA-256');
+  });
+
+  it('并发修改冲突时提供刷新恢复入口且不移除版本锁', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'error',
+        message: '该规则已被其他管理员修改，请刷新后重试',
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+      />,
+    );
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('刷新最新内容');
+    expect(html).toContain('刷新后请核对其他管理员的修改');
+    expect(html).toContain(
+      'name="expectedUpdatedAt" value="2026-08-09T00:30:00.000Z"',
+    );
+  });
+
+  it('保存成功后通过 status 播报草稿状态', () => {
+    actionStateMock.mockImplementation((action) => [
+      { status: 'success', priceBookId: 'draft-1', ruleId: 'rule-1' },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+      />,
+    );
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain('已保存到调价草稿。');
+  });
+
+  it('保存成功后跳到不受旧筛选条件影响的详情地址', () => {
+    actionStateMock.mockImplementation((action) => [
+      { status: 'success', priceBookId: 'draft-1', ruleId: 'rule-1' },
+      action,
+      false,
+    ]);
+    effectMock.mockImplementation((effect: () => void) => effect());
+    const successHref =
+      '/owner/prices/external-sales/items?purpose=processing&item=rule-1#selected-charge-detail';
+
+    renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+        successHref={successHref}
+      />,
+    );
+
+    expect(replaceMock).toHaveBeenCalledWith(successHref);
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it('does not show shipping weight fields for a packing-material rule', () => {
+    const packingRule = rule({
+      categoryId: 'packing-category',
+      categoryName: '打包耗材',
+      productId: null,
+      kind: CustomerPriceRuleKind.REFERENCE,
+      blocksAutomaticQuote: true,
+      editorMode: 'PACKAGING',
+    });
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.LOGISTICS)}
+        rule={packingRule}
+      />,
+    );
+
+    expect(html).toContain('打包耗材');
+    expect(html).toContain('最小数量');
+    expect(html).toContain('最大数量');
+    expect(html).toContain('金额（元）');
+    expect(html).toContain('启用此规则');
+    expect(html).not.toContain('物流首重/续重');
+    expect(html).not.toContain('>适用产品<');
+    expect(html).not.toContain('>规则类型<');
+    expect(html).not.toContain('>计价方式<');
+    expect(html).not.toContain('阻断自动报价');
+    expect(html).not.toContain('>触发条件（JSON）<');
+    expect(html).not.toContain('>互斥组<');
+    expect(html).not.toContain('>优先级<');
+    expect(html).not.toContain('name="kind"');
+    expect(html).not.toContain('name="blocksAutomaticQuote"');
+    expect(html).not.toContain('name="unitsPerSheet"');
+    expect(html).not.toContain('name="triggerCondition"');
+  });
+
+  it('shows first-weight and increment fields only for shipping rules', () => {
+    const shippingRule = rule({
+      categoryId: 'shipping-category',
+      categoryName: '快递费',
+      productId: null,
+      kind: CustomerPriceRuleKind.ADD_ON,
+      amount: '2.8',
+      includedUnits: '1',
+      incrementUnits: '1',
+      incrementAmount: '1.5',
+      editorMode: 'SHIPPING',
+      shippingScopeLabel: '中通 · 广东',
+    });
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.LOGISTICS)}
+        rule={shippingRule}
+      />,
+    );
+
+    expect(html).toContain('物流首重/续重');
+    expect(html).toContain('首重单位（kg）');
+    expect(html).toContain('续重单位（kg）');
+    expect(html).toContain('续重金额（元）');
+    expect(html).toContain('适用地区');
+    expect(html).toContain('中通 · 广东');
+    expect(html).toContain('启用此规则');
+    expect(html).not.toContain('>适用产品<');
+    expect(html).not.toContain('>最小数量<');
+    expect(html).not.toContain('>最大数量<');
+    expect(html).not.toContain('>规则类型<');
+    expect(html).not.toContain('>计价方式<');
+    expect(html).not.toContain('name="unitsPerSheet"');
+    expect(html).not.toContain('阻断自动报价');
+    expect(html).not.toContain('>互斥组<');
+    expect(html).not.toContain('>优先级<');
+    expect(html).not.toContain('JSON');
+    expect(html).not.toContain('RULE-CODE-1');
+    expect(html).not.toContain('SHA-256');
+  });
+});

@@ -288,7 +288,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
           </div>
           {actionErrors.items?.[0] ? <p className="mt-2 text-sm text-destructive">{actionErrors.items[0]}</p> : null}
           {actionError ? <p className="mt-2 text-sm text-destructive">{actionError}</p> : null}
-          {success ? <p className="mt-2 text-sm text-success">✓ {success}</p> : null}
+          {success ? <p className="mt-2 text-sm text-success-foreground">✓ {success}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">
             未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
           </p>

@@ -17,7 +17,7 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
   }
 
   return (
-    <Table>
+    <Table label="工艺字典列表">
       <TableHeader>
         <TableRow>
           <TableHead className="w-24">排序</TableHead>

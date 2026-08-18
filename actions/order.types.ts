@@ -1,3 +1,5 @@
+import type { OrderChangePricingPreview } from '@/lib/order/change-request';
+
 export type OrderMutationResult =
   | { status: 'success' }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
@@ -20,5 +22,10 @@ export type CreateOrderChangeRequestMutationResult =
 
 export type ReviewOrderChangeRequestMutationResult =
   | { status: 'success'; requestStatus: string }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type PreviewOrderChangeRequestPricingResult =
+  | { status: 'success'; preview: OrderChangePricingPreview }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

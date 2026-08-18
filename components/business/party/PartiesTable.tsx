@@ -67,7 +67,7 @@ export function PartiesTable({
   direction = 'asc',
 }: Props) {
   return (
-    <Table>
+    <Table label="往来单位列表">
       <TableHeader>
         <TableRow>
           <SortHead

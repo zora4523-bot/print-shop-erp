@@ -21,6 +21,39 @@ export type SalaryRuleClient = {
   salaryRule: Pick<typeof db.salaryRule, 'findFirst'>;
 };
 
+export type SalaryRuleSnapshotLockClient = {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+};
+
+const SALARY_RULE_SNAPSHOT_LOCK_KEY =
+  'print-shop-erp:salary-rules:snapshot';
+
+export function salaryRuleLockKey(
+  ruleType: SalaryRuleType,
+  ruleKey: string,
+): string {
+  return `print-shop-erp:salary-rule:${ruleType}:${ruleKey}`;
+}
+
+// Finance calculations read several independently versioned rows. A shared
+// advisory lock lets payroll readers run concurrently while excluding the
+// admin writer, so one immutable snapshot cannot mix rows from before and
+// after the same rule edit under PostgreSQL READ COMMITTED.
+export async function acquireSalaryRuleSnapshotReadLock(
+  client: SalaryRuleSnapshotLockClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
+}
+
+export async function acquireSalaryRuleSnapshotWriteLock(
+  client: SalaryRuleSnapshotLockClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
+}
+
 export type MachineRuleClient = SalaryRuleClient & {
   workerMachineSalaryRule: Pick<
     typeof db.workerMachineSalaryRule,
@@ -153,26 +186,36 @@ export async function getActiveCsTiers(
 async function getActiveHourlyRule<T>(
   ruleKey: string,
   now: Date,
+  client: SalaryRuleClient,
 ): Promise<T | null> {
-  return getActiveRuleValue<T>(SalaryRuleType.WORKER_HOURLY, ruleKey, now);
+  return getActiveRuleValue<T>(
+    SalaryRuleType.WORKER_HOURLY,
+    ruleKey,
+    now,
+    client,
+  );
 }
 
 export async function getActivePackerHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'PACKER_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
 
 export async function getActiveCleanerHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'CLEANER_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
@@ -182,20 +225,24 @@ export async function getActiveCleanerHourlyRate(
 // key 让管理员可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
 export async function getActiveCookSpareHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'COOK_SPARE_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
 
 export async function getActiveOtMultiplier(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ multiplier: number }>(
     'OT_MULTIPLIER',
     now,
+    client,
   );
   return v?.multiplier ?? null;
 }
@@ -212,18 +259,21 @@ export type WorkHoursConfig = {
 // 快速填 hint；严格要求从 SalaryRule 读（注意事项 5），不得硬编码。
 export async function getActiveWorkHours(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<WorkHoursConfig | null> {
-  return getActiveHourlyRule<WorkHoursConfig>('WORK_HOURS', now);
+  return getActiveHourlyRule<WorkHoursConfig>('WORK_HOURS', now, client);
 }
 
 // COOK_SALARY / COOK_MONTHLY — separate ruleType from WORKER_HOURLY.
 export async function getActiveCookMonthlyBase(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveRuleValue<{ monthlyBase: number }>(
     SalaryRuleType.COOK_SALARY,
     'COOK_MONTHLY',
     now,
+    client,
   );
   return v?.monthlyBase ?? null;
 }

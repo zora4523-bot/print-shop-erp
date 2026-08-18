@@ -105,7 +105,7 @@ export function PriceTierForm(props: Props) {
         <TextField
           id="unitPrice"
           label="单价"
-          hint="Decimal(10,4)。"
+          hint="最多 6 位整数、4 位小数。"
           required
           disabled={pending}
           error={errs.unitPrice?.[0]}
@@ -139,7 +139,7 @@ export function PriceTierForm(props: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
         </p>
       ) : null}
@@ -149,7 +149,7 @@ export function PriceTierForm(props: Props) {
           {pending ? '提交中…' : props.mode === 'create' ? '创建价格阶梯' : '保存修改'}
         </Button>
         <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
-          返回价格字典
+          返回报价管理
         </Link>
       </div>
     </form>

@@ -28,6 +28,7 @@ export const E2E_PASSWORD = 'e2e-test-password-1234';
 type Role = 'ADMIN' | 'SALES' | 'CUSTOMER_SERVICE' | 'WORKER';
 type WorkerType = 'MACHINE' | 'PACKER' | 'CLEANER' | 'COOK';
 type MachineType = 'HAND_PRESS' | 'WINDMILL' | 'GLUE';
+type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'TEMPORARY';
 
 type E2EUser = {
   username: string;
@@ -35,6 +36,7 @@ type E2EUser = {
   role: Role;
   workerType?: WorkerType | null;
   machineType?: MachineType | null;
+  employmentType?: EmploymentType | null;
 };
 
 export const E2E_USERS: Record<string, E2EUser> = {
@@ -76,6 +78,7 @@ export const E2E_USERS: Record<string, E2EUser> = {
     role: 'WORKER',
     workerType: 'PACKER',
     machineType: null,
+    employmentType: 'FULL_TIME',
   },
   // CUSTOMER_SERVICE user — needed for the CS event-ledger E2E. Charged
   // order submission credits sales; later BillPayment rows must not credit it
@@ -108,7 +111,7 @@ export default async function globalSetup(): Promise<void> {
         `
         INSERT INTO "User" (
           id, username, "displayName", password,
-          role, "workerType", "machineType", "machineCapabilities", "isActive",
+          role, "workerType", "machineType", "machineCapabilities", "employmentType", "isActive",
           "createdAt", "updatedAt"
         ) VALUES (
           $1, $2, $3, $4, $5::"Role", $6::"WorkerType", $7::"MachineType",
@@ -116,7 +119,7 @@ export default async function globalSetup(): Promise<void> {
             WHEN $7::"MachineType" IS NULL THEN ARRAY[]::"MachineType"[]
             ELSE ARRAY[$7::"MachineType"]::"MachineType"[]
           END,
-          TRUE, NOW(), NOW()
+          $8::"EmploymentType", TRUE, NOW(), NOW()
         )
         ON CONFLICT (username) DO UPDATE SET
           "displayName" = EXCLUDED."displayName",
@@ -125,6 +128,7 @@ export default async function globalSetup(): Promise<void> {
           "workerType" = EXCLUDED."workerType",
           "machineType" = EXCLUDED."machineType",
           "machineCapabilities" = EXCLUDED."machineCapabilities",
+          "employmentType" = EXCLUDED."employmentType",
           "isActive" = TRUE,
           "updatedAt" = NOW()
         `,
@@ -136,6 +140,7 @@ export default async function globalSetup(): Promise<void> {
           u.role,
           u.workerType ?? null,
           u.machineType ?? null,
+          u.employmentType ?? null,
         ],
       );
     }

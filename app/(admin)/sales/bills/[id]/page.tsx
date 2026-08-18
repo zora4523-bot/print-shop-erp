@@ -2,18 +2,17 @@ import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getBillDetail } from '@/lib/bill';
+import { getSalesBillDetail } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
-import {
-  calculateCsBillAttribution,
-  hasCustomerServiceAttribution,
-} from '@/lib/bill/cs-attribution';
-import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
+import {
+  parsePricingSnapshotComponents,
+  PricingSnapshotBreakdown,
+} from '@/components/business/price/PricingSnapshotBreakdown';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -25,10 +24,10 @@ export async function generateMetadata({ params }: PageProps) {
 export default async function SalesBillDetailPage({ params }: PageProps) {
   const user = await requirePermission('bill:view:self');
   const { id } = await params;
-  const bill = await getBillDetail(id);
-  // 资源所有权双闸：404 而非 403 —— 不要泄露&ldquo;这个 id 存在但你没权看&rdquo;
-  // 的信息（避免侧信道枚举）。
-  if (!bill || bill.salesUserId !== user.id) notFound();
+  // 所有权和最小投影都在数据库查询中执行：不先读入别人账单，
+  // 也不读入内部计件、外协、重做、补录成本或录入人。
+  const bill = await getSalesBillDetail(id, user.id);
+  if (!bill) notFound();
 
   const total = new Decimal(bill.totalAmount as unknown as Decimal.Value);
   const openingAmount = new Decimal(
@@ -39,19 +38,36 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
   const paidPercent = total.isZero()
     ? 0
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
-  const csAttribution = calculateCsBillAttribution(bill.items);
-  const isCsAttributedBill = hasCustomerServiceAttribution(bill.items);
-  const settledRateLabel = csAttribution.settledRates.length
-    ? csAttribution.settledRates
-        .map((rate) => `${new Decimal(rate).times(100).toFixed(2)}%`)
-        .join('、')
-    : '待周期结算';
+  const quotedOrderItems = bill.items.flatMap((billItem) =>
+    billItem.order.items.flatMap((orderItem) =>
+      parsePricingSnapshotComponents(orderItem.pricingSnapshot).length > 0
+        ? [{ billItem, orderItem }]
+        : [],
+    ),
+  );
+  const orderRows = bill.items.map((item) => {
+    const chargeAmount = (categoryCode: string) =>
+      item.order.customerCharges
+        .filter((charge) => String(charge.category.code) === categoryCode)
+        .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+    const shipping = chargeAmount('SHIPPING_FEE');
+    const packing = chargeAmount('PACKING_MATERIAL');
+    const otherCharges = item.order.customerCharges
+      .filter(
+        (charge) =>
+          !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+            String(charge.category.code),
+          ),
+      )
+      .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+    return { ...item, shipping, packing, otherCharges };
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold">
             账单 · {bill.period}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -63,11 +79,11 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
-        <div className="grid grid-cols-3 gap-4">
-          <Row label="总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
-          <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} tabular />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Row label="应付总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
+          <Row label="已支付" value={`¥ ${String(bill.paidAmount)}`} tabular />
           <Row
-            label="未收"
+            label="待支付"
             value={`¥ ${remaining.toFixed(2)}`}
             tabular
             highlight={remaining.gt(0)}
@@ -75,7 +91,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         </div>
         <div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>收款进度</span>
+            <span>支付进度</span>
             <span className="font-sans tabular-nums">{paidPercent.toFixed(1)}%</span>
           </div>
           <div className="mt-1 h-2 rounded-full bg-muted">
@@ -96,53 +112,10 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         </section>
       )}
 
-      {isCsAttributedBill ? (
-        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
-          <h2 className="text-base font-semibold">销售额与提成</h2>
-          <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Row
-              label="本账单业绩流水"
-              value={
-                csAttribution.entryCount > 0
-                  ? `¥ ${csAttribution.ledgerSales.toFixed(2)}`
-                  : '无逐单历史流水'
-              }
-              tabular
-            />
-            <Row
-              label="实际命中周期比例"
-              value={settledRateLabel}
-              tabular
-            />
-            <Row
-              label="已结算提成估算"
-              value={
-                csAttribution.settledRates.length
-                  ? `¥ ${csAttribution.attributedCommission.toFixed(2)}`
-                  : '待周期结算'
-              }
-              tabular
-            />
-          </dl>
-          <p className="mt-3 text-xs text-muted-foreground">
-            提成按工单销售额计入客服周期，不按收款金额或收款次数重复计算。
-            {csAttribution.settledRates.length
-              ? ' 本账单提成按业绩流水与所属周期最终费率估算；分币尾差及实际发放以客服周期工资记录为准。'
-              : ''}
-            {csAttribution.pendingSales.isZero()
-              ? ''
-              : ` 尚有 ¥ ${csAttribution.pendingSales.toFixed(2)} 等待周期结算。`}
-            {csAttribution.entryCount === 0
-              ? ' 本账单来自逐单业绩流水启用前，系统不会按账单月份猜测历史比例。'
-              : ''}
-          </p>
-        </section>
-      ) : null}
-
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            该账单仍是草稿，管理员尚未发单。发单后会变为 ISSUED 并支持收款。
+            该账单仍是草稿，管理员尚未出账。出账后才会进入待支付状态。
           </p>
         </section>
       ) : null}
@@ -150,7 +123,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.FULLY_PAID ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            ✓ 已结清。如有退款 / 折扣，请联系管理员由财务线下核对原工单和已收流水；
+            ✓ 已结清。如有退款 / 折扣，请联系管理员由财务线下核对原工单和已支付流水；
             系统不支持以负数账单冲账，该账单状态也不会回退。
           </p>
         </section>
@@ -158,11 +131,11 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card shadow-sm">
         <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
-          结款明细（{bill.payments.length}）
+          支付明细（{bill.payments.length}）
         </h2>
         {bill.payments.length === 0 ? (
           <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
-            暂无收款流水。
+            暂无支付流水。
           </p>
         ) : (
           <ol className="divide-y">
@@ -204,18 +177,22 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
             aria-label="账单工单明细"
             tabIndex={0}
           >
-          <table className="w-full min-w-[680px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 text-left">工单号</th>
-                <th className="px-4 py-2 text-left">客户名称/简称</th>
-                <th className="px-4 py-2 text-left">完工时间</th>
-                <th className="px-4 py-2 text-center">工单状态</th>
-                <th className="px-4 py-2 text-right">金额</th>
+                <th scope="col" className="px-4 py-2 text-left">工单号</th>
+                <th scope="col" className="px-4 py-2 text-left">客户名称/简称</th>
+                <th scope="col" className="px-4 py-2 text-left">完工时间</th>
+                <th scope="col" className="px-4 py-2 text-center">工单状态</th>
+                <th scope="col" className="px-4 py-2 text-right">加工费</th>
+                <th scope="col" className="px-4 py-2 text-right">快递费</th>
+                <th scope="col" className="px-4 py-2 text-right">打包耗材</th>
+                <th scope="col" className="px-4 py-2 text-right">其他收费</th>
+                <th scope="col" className="px-4 py-2 text-right">应付合计</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {bill.items.map((it) => (
+              {orderRows.map((it) => (
                 <tr key={it.id}>
                   <td className="px-4 py-3 font-sans tabular-nums text-xs">
                     {it.order.orderNo}
@@ -228,6 +205,18 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     <OrderStatusBadge status={it.order.status} />
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {String(it.order.processingAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.shipping.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.packing.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.otherCharges.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
                     ¥ {String(it.orderAmount)}
                   </td>
                 </tr>
@@ -238,7 +227,41 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         )}
       </section>
 
-      <BillCostEntryList items={bill.items} />
+      {quotedOrderItems.length > 0 ? (
+        <section className="min-w-0 rounded-xl border bg-card shadow-sm">
+          <div className="border-b px-4 py-3 sm:px-6">
+            <h2 className="text-base font-semibold">加工费计价依据</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              同时展示系统建议与实际成交小计；发生人工调整时，以实际成交金额为账单依据。
+            </p>
+          </div>
+          <ol className="min-w-0 divide-y">
+            {quotedOrderItems.map(({ billItem, orderItem }) => (
+              <li
+                key={`${billItem.id}:${orderItem.id}`}
+                className="min-w-0 px-4 py-4 sm:px-6"
+              >
+                <h3 className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+                  <Link
+                    href={`/orders/${billItem.order.id}`}
+                    className="admin-wrap-anywhere font-sans font-medium tabular-nums text-primary underline"
+                  >
+                    {billItem.order.orderNo}
+                  </Link>
+                  <span className="admin-wrap-anywhere font-medium">
+                    #{orderItem.sequence} · {orderItem.name}
+                  </span>
+                </h3>
+                <PricingSnapshotBreakdown
+                  pricingSnapshot={orderItem.pricingSnapshot}
+                  title="加工费分项"
+                  className="mt-3"
+                />
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       {bill.remark ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">

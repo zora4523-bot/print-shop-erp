@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// 7 个 /api/cron/* 路由共用的 Bearer 认证守卫（此前逐字重复 7 份）。
+// 8 个 /api/cron/* 路由共用的 Bearer 认证守卫。
 //
 // 契约（与原样板逐字节一致，勿改响应形状——外部调度器可能解析）：
 //   - CRON_SECRET 未配置 → 503（部署漏配时快速失败，防端点裸奔）

@@ -23,6 +23,7 @@ vi.mock('@/lib/cron/tasks', () => ({
   runDailySalaryTask: vi.fn(),
   runGenerateBillsTask: vi.fn(),
   runHourlyPayrollTask: vi.fn(),
+  runOrderExportCleanupTask: vi.fn(),
   runOrderOverdueTask: vi.fn(),
   runOutsourceOverdueTask: vi.fn(),
 }));
@@ -36,6 +37,7 @@ import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as generateBillsPost } from '../generate-bills/route';
 import { POST as hourlyPayrollPost } from '../hourly-payroll/route';
+import { POST as orderExportCleanupPost } from '../order-export-cleanup/route';
 import { POST as orderOverduePost } from '../order-overdue/route';
 import { POST as outsourceOverduePost } from '../outsource-overdue/route';
 
@@ -132,6 +134,16 @@ describe('cron durable wires', () => {
       path: '/api/cron/order-overdue',
       expected: {
         type: BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE,
+        scope: '2026-07-17',
+        payload: { runDate: '2026-07-17' },
+      },
+    },
+    {
+      name: 'order export cleanup',
+      post: orderExportCleanupPost,
+      path: '/api/cron/order-export-cleanup',
+      expected: {
+        type: BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP,
         scope: '2026-07-17',
         payload: { runDate: '2026-07-17' },
       },

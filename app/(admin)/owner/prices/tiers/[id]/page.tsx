@@ -5,12 +5,12 @@ import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getPriceTierSummary } from '@/lib/price';
 import { listProductOptions } from '@/lib/product';
+import { formatDateInputShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
 
 function dateInput(value: Date | null): string {
-  if (!value) return '';
-  return value.toISOString().slice(0, 10);
+  return formatDateInputShanghai(value);
 }
 
 export async function generateMetadata({ params }: PageProps) {

@@ -12,7 +12,7 @@
  */
 // @next/env 是 CommonJS，纯 .mjs 里用默认导入解构（具名导入 Node 会报错）。
 import nextEnv from '@next/env';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,7 +26,7 @@ const warnings = [];
 const REQUIRED = [
   ['DATABASE_URL', '数据库连不上，应用起不来'],
   ['AUTH_SECRET', '会话签名密钥缺失，Auth.js 拒启'],
-  ['CRON_SECRET', '7 个定时任务全部返回 503'],
+  ['CRON_SECRET', '8 个定时任务全部返回 503'],
 ];
 
 for (const [key, why] of REQUIRED) {
@@ -59,6 +59,17 @@ if (isProd && env.BACKGROUND_JOBS_MODE === 'inline') {
   errors.push(
     'BACKGROUND_JOBS_MODE="inline" 且 NODE_ENV=production —— 通知/cron/CDR 会回到 Web 进程执行，丢失持久化、重试和资源隔离保障。',
   );
+}
+
+for (const key of ['PDF_ARTIFACT_DIR', 'ORDER_EXPORT_ARTIFACT_DIR']) {
+  const value = env[key]?.trim();
+  if (value && !isAbsolute(value)) {
+    errors.push(`${key} 必须是绝对路径 —— Web 与 HEAVY worker 需要访问同一个产物目录。`);
+  } else if (isProd && !value) {
+    warnings.push(
+      `${key} 未显式配置 —— 将回退到系统临时目录；单机可用，但重启清理或多机部署会使待下载产物丢失。`,
+    );
+  }
 }
 
 // —— 审计陷阱 2：APP_PUBLIC_URL 空 → 二维码/短链跟随请求头，易成死链 ——

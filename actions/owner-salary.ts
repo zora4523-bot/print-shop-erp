@@ -24,7 +24,6 @@ import {
   salaryAdjustmentInputSchema,
   workerMachineRuleInputSchema,
 } from '@/lib/salary/piecework-admin';
-import { writeAuditLog } from '@/lib/audit-log';
 import {
   startCsPeriod,
   settleCsPeriod,
@@ -113,9 +112,24 @@ export async function setDailySalaryPaidAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  await markDailySalaryPaid(id, parsed.data.isPaid);
+  const marked = await markDailySalaryPaid(id, parsed.data.isPaid);
   revalidatePath('/owner/salary/daily');
-  return { status: 'success' };
+
+  // 「仅未发」筛选下标记已发后，这一行会直接从列表消失，承载 success
+  // 状态的组件跟着卸载——发钱操作最需要确认的一步反而完全没有反馈。
+  // 用 redirect 把确认信息提升到页面级：保留用户当前的筛选，附带刚
+  // 处理的师傅名字，由页面渲染一条确认条。
+  const back = formData.get('returnTo');
+  // returnTo 来自客户端，必须限定前缀，避免变成开放重定向。
+  const safeBack =
+    typeof back === 'string' && back.startsWith('/owner/salary/daily')
+      ? back
+      : '/owner/salary/daily';
+  const sep = safeBack.includes('?') ? '&' : '?';
+  redirect(
+    `${safeBack}${sep}marked=${encodeURIComponent(marked.workerName)}` +
+      `&markedPaid=${parsed.data.isPaid ? '1' : '0'}`,
+  );
 }
 
 export async function addDailySalaryAdjustmentAction(
@@ -183,18 +197,7 @@ export async function createWorkerMachineSalaryRuleAction(
   try {
     const created = await createWorkerMachineSalaryRule({
       ...parsed.data,
-      createdById: actor.id,
-    });
-    await writeAuditLog({
       actor,
-      action: 'CREATE',
-      entityType: 'WorkerMachineSalaryRule',
-      entityId: created.id,
-      after: created,
-      requestMetadata: {
-        source: 'owner-salary.createWorkerMachineSalaryRuleAction',
-        route: '/owner/salary/piecework-rules',
-      },
     });
     revalidatePath('/owner/salary/piecework-rules');
     return { status: 'success', ruleId: created.id };

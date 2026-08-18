@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  EmploymentType,
   MachineType,
   OrderCostCategory,
   PartyType,
@@ -28,9 +29,11 @@ import {
   createPurchaseReceiptSchema,
   updateProductSchema,
   createOrderSchema,
+  shipOrderSchema,
   createReworkOrderSchema,
   createOutsourceSchema,
   confirmOutsourceAmountSchema,
+  recordOutsourcePaymentSchema,
   batchScheduleOrdersSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
@@ -38,7 +41,33 @@ import {
   recordCsPayrollPaymentSchema,
   recordBillPaymentSchema,
   createOrderCostEntrySchema,
+  createOrderChangeRequestSchema,
 } from '../schemas';
+
+describe('order change request schemas', () => {
+  it('rejects duplicate UPDATE entries for one item to avoid approval-order ambiguity', () => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      reason: '客户修改数量和规格',
+      items: [
+        { operation: 'UPDATE', itemId: 'item-1', quantity: 1200 },
+        { operation: 'UPDATE', itemId: 'item-1', specification: '大号' },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['items', 1, 'itemId'],
+            message: '同一款式不能重复提交修改',
+          }),
+        ]),
+      );
+    }
+  });
+});
 
 describe('outsource mutation schemas', () => {
   const requestKey = '00000000-0000-4000-8000-000000000001';
@@ -64,6 +93,34 @@ describe('outsource mutation schemas', () => {
         idempotencyKey: 'not-a-uuid',
       }).success,
     ).toBe(false);
+  });
+
+  it('rejects selecting the same order item more than once', () => {
+    const result = createOutsourceSchema.safeParse({
+      ...createPayload,
+      orderItemIds: ['item-1', 'item-1'],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['orderItemIds'],
+            message: '不能重复选择同一款式',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('accepts the derived total for multiple maximum-sized styles', () => {
+    expect(
+      createOutsourceSchema.safeParse({
+        ...createPayload,
+        orderItemIds: ['item-1', 'item-2'],
+        totalQty: 19_999_998,
+      }).success,
+    ).toBe(true);
   });
 
   it('validates confirmed outsource money and its audit reason', () => {
@@ -97,6 +154,101 @@ describe('outsource mutation schemas', () => {
         reason: ' ',
       }).success,
     ).toBe(false);
+  });
+
+  it('parses a positive external payment and Shanghai wall time exactly', () => {
+    const parsed = recordOutsourcePaymentSchema.parse({
+      idempotencyKey: requestKey,
+      amount: '0.01',
+      paidAt: '2026-08-07T12:30',
+      method: ' 银行转账 ',
+      reference: '',
+      remark: ' 首付款 ',
+    });
+    expect(parsed).toEqual({
+      idempotencyKey: requestKey,
+      amount: '0.01',
+      paidAt: new Date('2026-08-07T04:30:00.000Z'),
+      method: '银行转账',
+      reference: null,
+      remark: '首付款',
+    });
+  });
+
+  it('enforces exact positive Decimal(12,2) payment bounds', () => {
+    expect(
+      recordOutsourcePaymentSchema.safeParse({
+        idempotencyKey: requestKey,
+        amount: '9999999999.99',
+        paidAt: '2026-08-07T12:30',
+        method: '',
+        reference: '',
+        remark: '',
+      }).success,
+    ).toBe(true);
+    for (const amount of ['0', '0.00', '-1', '1.001', '10000000000.00', 'abc']) {
+      expect(
+        recordOutsourcePaymentSchema.safeParse({
+          idempotencyKey: requestKey,
+          amount,
+          paidAt: '2026-08-07T12:30',
+          method: '',
+          reference: '',
+          remark: '',
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('rejects invalid payment keys, calendar dates, incomplete times, and timezone suffixes', () => {
+    for (const [field, value] of [
+      ['idempotencyKey', 'not-a-uuid'],
+      ['paidAt', '2026-02-30T12:30'],
+      ['paidAt', '2026-08-07T12'],
+      ['paidAt', '2026-08-07T12:30Z'],
+    ] as const) {
+      expect(
+        recordOutsourcePaymentSchema.safeParse({
+          idempotencyKey: requestKey,
+          amount: '1.00',
+          paidAt: '2026-08-07T12:30',
+          method: '',
+          reference: '',
+          remark: '',
+          [field]: value,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('accepts a valid leap-day payment date and enforces optional text limits', () => {
+    expect(
+      recordOutsourcePaymentSchema.safeParse({
+        idempotencyKey: requestKey,
+        amount: '1.00',
+        paidAt: '2028-02-29T23:59',
+        method: 'm'.repeat(32),
+        reference: 'r'.repeat(64),
+        remark: 'x'.repeat(200),
+      }).success,
+    ).toBe(true);
+    for (const [field, value] of [
+      ['method', 'm'.repeat(33)],
+      ['reference', 'r'.repeat(65)],
+      ['remark', 'x'.repeat(201)],
+    ] as const) {
+      expect(
+        recordOutsourcePaymentSchema.safeParse({
+          idempotencyKey: requestKey,
+          amount: '1.00',
+          paidAt: '2028-02-29T23:59',
+          method: '',
+          reference: '',
+          remark: '',
+          [field]: value,
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 
@@ -354,6 +506,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: null,
       });
       expect(r.success).toBe(false);
@@ -367,6 +520,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: null,
       });
@@ -381,6 +535,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
         machineCapabilities: [MachineType.HAND_PRESS],
@@ -392,6 +547,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
         machineCapabilities: [
@@ -407,6 +563,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
         machineCapabilities: [MachineType.WINDMILL],
@@ -425,6 +582,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.PACKER,
         machineType: null,
       });
@@ -435,6 +593,7 @@ describe('createUserSchema', () => {
       const r = createUserSchema.safeParse({
         ...validCreate,
         role: Role.WORKER,
+        employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.PACKER,
         machineType: MachineType.WINDMILL,
       });
@@ -464,6 +623,32 @@ describe('createUserSchema', () => {
     const long = 'a'.repeat(73);
     const r = createUserSchema.safeParse({ ...validCreate, password: long });
     expect(r.success).toBe(false);
+  });
+
+  it('keeps external sales out of employee payroll semantics', () => {
+    expect(createUserSchema.safeParse(validCreate).success).toBe(true);
+    const invalid = createUserSchema.safeParse({
+      ...validCreate,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: '2026-08-01',
+    });
+    expect(invalid.success).toBe(false);
+  });
+
+  it('requires employment type for internal customer service', () => {
+    expect(
+      createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.CUSTOMER_SERVICE,
+      }).success,
+    ).toBe(false);
+    expect(
+      createUserSchema.safeParse({
+        ...validCreate,
+        role: Role.CUSTOMER_SERVICE,
+        employmentType: EmploymentType.FULL_TIME,
+      }).success,
+    ).toBe(true);
   });
 });
 
@@ -1108,7 +1293,7 @@ describe('createOrderSchema foil colors', () => {
         isDoubleSided: false,
         isDoubleColor: false,
         unitPrice: null,
-        suggestedPrice: null,
+        suggestedSubtotal: null,
         remark: null,
       },
     ],
@@ -1228,11 +1413,66 @@ describe('createOrderSchema foil colors', () => {
     expect('isSfCollect' in omitted).toBe(false);
     expect(setOrderSfCollectSchema.parse({ isSfCollect: 'false' })).toEqual({
       isSfCollect: false,
+      shipments: [],
     });
     expect(
       setOrderSfCollectSchema.safeParse({}).success,
       '独立切换必须携带明确目标值',
     ).toBe(false);
+  });
+
+  it('校验已发货顺丰取消时的逐票快递费更正', () => {
+    const valid = setOrderSfCollectSchema.parse({
+      isSfCollect: 'false',
+      shipments: [
+        {
+          shipmentId: 'shipment-1',
+          destinationProvince: '浙江',
+          weightKg: '12.500',
+          shippingFee: '',
+          customerChargeOverrideReason: '',
+        },
+      ],
+    });
+    expect(valid.shipments).toEqual([
+      {
+        shipmentId: 'shipment-1',
+        destinationProvince: '浙江',
+        weightKg: '12.500',
+        shippingFee: null,
+        customerChargeOverrideReason: null,
+      },
+    ]);
+
+    const duplicate = setOrderSfCollectSchema.safeParse({
+      isSfCollect: false,
+      shipments: [
+        {
+          shipmentId: 'shipment-1',
+          destinationProvince: '浙江',
+          weightKg: '1',
+        },
+        {
+          shipmentId: 'shipment-1',
+          destinationProvince: '广东',
+          weightKg: '2',
+        },
+      ],
+    });
+    expect(duplicate.success).toBe(false);
+
+    for (const shipment of [
+      { shipmentId: 'shipment-1', weightKg: '0' },
+      { shipmentId: 'shipment-1', weightKg: '1.0000' },
+      { shipmentId: 'shipment-1', weightKg: '1', shippingFee: '1.001' },
+    ]) {
+      expect(
+        setOrderSfCollectSchema.safeParse({
+          isSfCollect: false,
+          shipments: [shipment],
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it('rejects duplicate colors, more than five colors, and no-color mixtures', () => {
@@ -1285,6 +1525,72 @@ describe('createOrderSchema foil colors', () => {
     }
   });
 
+  it('includes the once-per-item fixed fee in the exact subtotal limit', () => {
+    const result = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        {
+          ...order.items[0],
+          quantity: 9_999_999,
+          unitPrice: '1000',
+          fixedFee: '1000',
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['items', 0, 'unitPrice'],
+            message: expect.stringContaining('一次性费用'),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('keeps once-per-item money at the same two-decimal precision as its database columns', () => {
+    const valid = createOrderSchema.safeParse({
+      ...order,
+      items: [
+        {
+          ...order.items[0],
+          fixedFee: '9999999999.99',
+          suggestedSubtotal: '9999999999.99',
+          unitPrice: '0',
+        },
+      ],
+    });
+    expect(valid.success).toBe(true);
+
+    for (const [field, value] of [
+      ['fixedFee', '0.001'],
+      ['suggestedSubtotal', '0.001'],
+      ['fixedFee', '10000000000.00'],
+    ] as const) {
+      const result = createOrderSchema.safeParse({
+        ...order,
+        items: [
+          {
+            ...order.items[0],
+            unitPrice: '0',
+            [field]: value,
+          },
+        ],
+      });
+      expect(result.success, `${field}=${value}`).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: ['items', 0, field] }),
+          ]),
+        );
+      }
+    }
+  });
+
   it('rejects an order total above Decimal(12,2) even when each item fits', () => {
     const result = createOrderSchema.safeParse({
       ...order,
@@ -1317,6 +1623,93 @@ describe('createOrderSchema foil colors', () => {
           issue.message.includes('款式小计过大'),
         ),
       ).toBe(false);
+    }
+  });
+});
+
+describe('external-sales shipment charge schemas', () => {
+  it('normalizes omitted charge fields and rejects a non-zero SF collect shipping fee', () => {
+    const base = {
+      customerRef: null,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      packageRequirement: null,
+      remark: null,
+      promisedDate: null,
+      isUrgent: false,
+      isSfCollect: false,
+      items: [
+        {
+          name: '测试款',
+          productId: null,
+          specification: null,
+          paperType: null,
+          quantity: 500,
+          crafts: ['craft-1'],
+          foilColors: [],
+          isDoubleSided: false,
+          isDoubleColor: false,
+          unitPrice: '0.1000',
+          fixedFee: '0',
+          suggestedSubtotal: null,
+          priceOverrideReason: '测试人工报价',
+          remark: null,
+        },
+      ],
+    };
+    const normalized = createOrderSchema.parse(base);
+    expect(normalized).toMatchObject({
+      destinationProvince: null,
+      quotedWeightKg: null,
+      shippingFee: null,
+      packingMaterialFee: null,
+      customerChargeOverrideReason: null,
+    });
+
+    const sfWithShipping = createOrderSchema.safeParse({
+      ...base,
+      isSfCollect: true,
+      shippingFee: '2.80',
+      packingMaterialFee: '1.00',
+    });
+    expect(sfWithShipping.success).toBe(false);
+    if (!sfWithShipping.success) {
+      expect(sfWithShipping.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['shippingFee'],
+            message: '顺丰到付由客户自行预约，快递费必须为 0',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('accepts positive billed weights but rejects the legacy zero sentinel at ship time', () => {
+    const input = (weightKg: string) => ({
+      trackingNo: null,
+      shipments: [
+        {
+          shipmentId: 'shipment-1',
+          trackingNo: null,
+          weightKg,
+        },
+      ],
+    });
+    expect(shipOrderSchema.safeParse(input('0.5')).success).toBe(true);
+    const zero = shipOrderSchema.safeParse(input('0'));
+    expect(zero.success).toBe(false);
+    if (!zero.success) {
+      expect(zero.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['shipments', 0, 'weightKg'],
+            message: '快递重量必须大于 0',
+          }),
+        ]),
+      );
     }
   });
 });

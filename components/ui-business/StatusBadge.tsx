@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { TONE_BADGE_SOFT, type Tone } from './_tones';
+import { TONE_BADGE_SOFT, TONE_DOT, type Tone } from './_tones';
 
 // 状态徽章——工单 / 任务 / 账单等状态的通用视觉。截图里的&ldquo;生产中&rdquo;
 // &ldquo;待审核&rdquo;&ldquo;已完成&rdquo;&ldquo;已发货&rdquo;&ldquo;已取消&rdquo;就是它。
@@ -39,18 +39,7 @@ export function StatusBadge({
       {dot ? (
         <span
           aria-hidden
-          className={cn(
-            'size-1.5 rounded-full',
-            tone === 'primary'
-              ? 'bg-primary'
-              : tone === 'warning'
-                ? 'bg-warning'
-                : tone === 'info'
-                  ? 'bg-info'
-                  : tone === 'success'
-                    ? 'bg-success'
-                    : 'bg-muted-foreground',
-          )}
+          className={cn('size-1.5 rounded-full', TONE_DOT[tone])}
         />
       ) : null}
       {children}
@@ -77,7 +66,11 @@ export const ORDER_STATUS_TO_BADGE: Record<
   COMPLETED: { tone: 'success', label: '已完工' },
   SHIPPED: { tone: 'success', label: '已发货' },
   FINISHED: { tone: 'neutral', label: '已完成' },
-  CANCELLED: { tone: 'neutral', label: '已取消' },
+  // danger 而非 neutral：之前和 DRAFT / FINISHED 同为灰徽章，用户
+  // 分不出「正常结束」与「被取消」。FINISHED 保持 neutral，这样
+  // COMPLETED/SHIPPED(success) → FINISHED(neutral) → CANCELLED(danger)
+  // 三档仍互不相同。
+  CANCELLED: { tone: 'danger', label: '已取消' },
 };
 
 // 销售应收账单状态 → tone/label。lib/auth/role-labels:BILL_STATUS_LABELS

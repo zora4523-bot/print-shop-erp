@@ -15,6 +15,7 @@ export type { IconName } from './admin-modules';
 export type AdminMenuItem = {
   label: string;
   href: string;
+  activeRouteBase?: string;
   iconName: IconName;
   breadcrumbLabel: string;
   status: AdminModuleStatus;
@@ -58,6 +59,7 @@ function toMenuItem(
   return {
     label: module.label,
     href: module.routeBase,
+    activeRouteBase: module.activeRouteBase,
     iconName: module.iconName,
     breadcrumbLabel: module.breadcrumbLabel,
     status: module.status,
@@ -94,6 +96,32 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
   return groups;
 }
 
+/**
+ * 返回当前 pathname 应唯一高亮的菜单 href。
+ *
+ * `activeRouteBase` 可以把多个同属一个业务模块的页面归到同一入口，
+ * 但点击仍跳转到 `href`。有多个匹配时使用最长路径，避免父子入口同时高亮。
+ */
+export function getActiveAdminMenuHref(
+  pathname: string,
+  items: readonly Pick<AdminMenuItem, 'href' | 'activeRouteBase'>[],
+): string | null {
+  let bestHref: string | null = null;
+  let bestMatchLength = -1;
+
+  for (const item of items) {
+    const matchBase = item.activeRouteBase ?? item.href;
+    if (matchBase === '#' || matchBase === '/') continue;
+    const matches =
+      pathname === matchBase || pathname.startsWith(`${matchBase}/`);
+    if (!matches || matchBase.length <= bestMatchLength) continue;
+    bestHref = item.href;
+    bestMatchLength = matchBase.length;
+  }
+
+  return bestHref;
+}
+
 export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
   const preferredByRole: Partial<Record<Role, readonly string[]>> = {
     [Role.ADMIN]: [
@@ -116,7 +144,7 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
 // Role-specific 标题，渲染在 sidebar 顶部 / 顶部条 role badge。
 export const ADMIN_ROLE_BADGE: Record<Role, string> = {
   [Role.ADMIN]: '管理员后台',
-  [Role.SALES]: '销售',
+  [Role.SALES]: '外部销售',
   [Role.CUSTOMER_SERVICE]: '客服',
   [Role.WORKER]: '师傅',
 };

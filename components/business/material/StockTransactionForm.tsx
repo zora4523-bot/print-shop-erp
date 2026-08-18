@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,12 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success' ? state.message ?? '库存已更新' : null;
+  // 外层不再用 key 强制重挂载（那会连成功提示一起清掉），改成成功后
+  // 只 reset 原生表单字段，useActionState 的 state 得以保留并渲染。
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (state?.status === 'success') formRef.current?.reset();
+  }, [state]);
   const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
   const [reasonType, setReasonType] = useState<'PRODUCTION_USE' | 'RETURN' | 'OTHER'>('RETURN');
   const reasonOptions = TX_REASON_OPTIONS.filter((option) =>
@@ -37,7 +43,7 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   );
 
   return (
-    <form action={formAction} className="space-y-4" noValidate>
+    <form ref={formRef} action={formAction} className="space-y-4" noValidate>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="direction">方向</Label>
@@ -143,7 +149,7 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ {success}
         </p>
       ) : null}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import bcrypt from 'bcryptjs';
 import {
+  EmploymentType,
   Role,
   WorkerType,
   MachineType,
@@ -158,6 +159,25 @@ describe('createUser', () => {
     const data = dbMock.user.create.mock.calls[0][0].data;
     expect(data.workerType).toBeNull();
     expect(data.machineType).toBeNull();
+  });
+
+  it('never persists employee fields for an external sales account', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.SALES }));
+    await createUser({
+      username: 'external-sales',
+      password: 'plaintext-9chars',
+      displayName: '外部销售',
+      role: Role.SALES,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-08-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-08-02T00:00:00.000Z'),
+    });
+
+    expect(dbMock.user.create.mock.calls[0]![0].data).toMatchObject({
+      employmentType: null,
+      employmentStartDate: null,
+      employmentEndDate: null,
+    });
   });
 
   it('keeps workerType / machineType for WORKER + MACHINE', async () => {

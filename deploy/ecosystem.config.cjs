@@ -32,6 +32,10 @@ const common = {
   env: {
     NODE_ENV: 'production',
     BACKGROUND_JOBS_MODE: 'durable',
+    // 业务口径全是上海时区（lib/format/dates.ts、lib/dashboard/
+    // shanghai-clock.ts）。显式钉住进程时区，避免任何漏走统一格式化
+    // 的地方（如曾经的采购收货时间）跟着机器时区漂。
+    TZ: process.env.TZ ?? 'Asia/Shanghai',
     // Node only reads this CA bundle at process startup. Keeping it in the
     // PM2 environment makes PostgreSQL `sslmode=verify-full` survive reloads
     // and machine reboots; loading it from Next's .env would be too late.

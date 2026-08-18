@@ -14,6 +14,7 @@ import {
   type CsTiersConfig,
 } from './cs-commission';
 import {
+  acquireSalaryRuleSnapshotReadLock,
   getActiveRuleValue,
   type SalaryRuleClient,
 } from './rules';
@@ -214,6 +215,8 @@ export async function startCsPeriod(
     if (!csUser.isActive) {
       throw new CsPeriodError('客服账号已停用，不能新建工资周期');
     }
+
+    await acquireSalaryRuleSnapshotReadLock(tx);
 
     // Resolve both active rules inside this transaction after taking the user
     // lock. A concurrent rule edit can no longer produce a period whose base
@@ -451,8 +454,10 @@ export async function settleCsPeriod(
     const shouldStartNextPeriod =
       csUser.role === Role.CUSTOMER_SERVICE && csUser.isActive;
 
-    // Rule reads go through the tx  so a
-    // concurrent rule edit can't have us observe mixed versions.
+    await acquireSalaryRuleSnapshotReadLock(txc);
+
+    // Rule reads go through the tx while holding a shared snapshot lock, so
+    // a concurrent admin edit cannot make this settlement mix rule versions.
     const tiers = await getActiveRuleValue<CsTiersConfig>(
       SalaryRuleType.CS_COMMISSION,
       'CS_TIERS',

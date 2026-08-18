@@ -16,7 +16,7 @@ import {
   TableScrollArea,
 } from '@/components/ui-business';
 
-export const metadata = { title: '我的应收账单' };
+export const metadata = { title: '我的对客应付账单' };
 
 type PageProps = {
   searchParams: Promise<{ status?: string; period?: string }>;
@@ -37,7 +37,7 @@ function isBillStatus(s: string | undefined): s is BillStatus {
 }
 
 export default async function SalesBillsPage({ searchParams }: PageProps) {
-  // 权限闸：layout 已挡过非 SALES / CUSTOMER_SERVICE，这里再锁一次
+  // 权限闸：layout 已挡过非外部 SALES，这里再锁一次
   // bill:view:self（同时确认了用户身份用于 self 过滤）。CLAUDE.md §4.6
   // 双保险。
   const user = await requirePermission('bill:view:self');
@@ -78,24 +78,24 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="我的应收账单"
-        subtitle="月度账单由管理员生成 / 发单 / 录入付款，这里只读展示你的进度。"
+        title="我的对客应付账单"
+        subtitle="这里展示外部销售工单应付工厂的加工费、快递费、打包耗材费及其他对客收费。管理员负责出账并登记付款，销售端只读查看结算进度。"
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatCard
-          label="未结清"
+          label="待支付"
           value={`¥ ${unpaidTotal}`}
           icon={Wallet}
           tone="warning"
-          hint="ISSUED + PARTIAL_PAID 的余额合计"
+          hint="已出账与部分支付账单的待支付余额"
         />
         <StatCard
           label="已结清"
           value={`¥ ${fullyPaidTotal}`}
           icon={CheckCircle2}
           tone="success"
-          hint="FULLY_PAID 总额累计"
+          hint="已结清账单总额累计"
         />
       </div>
 
@@ -109,7 +109,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
         />
       ) : (
         <TableScrollArea
-          label="我的应收账单列表"
+          label="我的对客应付账单列表"
           className="rounded-xl border bg-card shadow-sm"
         >
           <table className="w-full text-sm">
@@ -117,7 +117,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">周期</th>
                 <th className="px-4 py-2 text-right">总额</th>
-                <th className="px-4 py-2 text-right">已收</th>
+                <th className="px-4 py-2 text-right">已支付</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2 text-left">发单时间</th>
                 <th className="px-4 py-2 text-left">结清时间</th>

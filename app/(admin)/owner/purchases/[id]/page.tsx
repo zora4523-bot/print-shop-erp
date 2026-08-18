@@ -15,6 +15,9 @@ import {
   PURCHASE_RECEIPT_STATUS_LABELS,
 } from '@/lib/purchase';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
+// 之前这里直接 receivedAt.toLocaleString('zh-CN')，走的是服务器本地
+// 时区——而部署里没有设 TZ，收货时间会随机器时区漂。
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -149,7 +152,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                   <div>
                     <div className="font-sans tabular-nums text-sm">{receipt.receiptNo}</div>
                     <div className="text-xs text-muted-foreground">
-                      {receipt.receivedAt.toLocaleString('zh-CN')}
+                      {formatDateTimeShanghai(receipt.receivedAt)}
                     </div>
                   </div>
                   <Badge variant={receipt.status === PurchaseReceiptStatus.POSTED ? 'outline' : 'secondary'}>

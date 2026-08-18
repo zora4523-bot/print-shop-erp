@@ -28,6 +28,13 @@ const SHANGHAI_DATETIME = new Intl.DateTimeFormat('zh-CN', {
   hour12: false,
 });
 
+const SHANGHAI_DATE_INPUT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
 /** YYYY/MM/DD（Asia/Shanghai）。null/undefined → fallback。 */
 export function formatDateShanghai(
   d: Date | null | undefined,
@@ -44,4 +51,13 @@ export function formatDateTimeShanghai(
 ): string {
   if (!d) return fallback;
   return SHANGHAI_DATETIME.format(d);
+}
+
+/** YYYY-MM-DD（Asia/Shanghai），用于 HTML date input。 */
+export function formatDateInputShanghai(
+  d: Date | null | undefined,
+  fallback = '',
+): string {
+  if (!d) return fallback;
+  return SHANGHAI_DATE_INPUT.format(d);
 }

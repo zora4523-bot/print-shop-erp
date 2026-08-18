@@ -4,7 +4,7 @@ set -eu
 
 endpoint=${1:-}
 case "$endpoint" in
-  daily-salary|cs-settle|cs-period-ending|outsource-overdue|order-overdue|hourly-payroll|generate-bills)
+  daily-salary|cs-settle|cs-period-ending|outsource-overdue|order-overdue|order-export-cleanup|hourly-payroll|generate-bills)
     ;;
   *)
     echo "unsupported cron endpoint: $endpoint" >&2

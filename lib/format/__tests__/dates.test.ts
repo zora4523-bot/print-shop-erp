@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { formatDateShanghai, formatDateTimeShanghai } from '../dates';
+import {
+  formatDateInputShanghai,
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '../dates';
 
 // UTC 2026-07-08 20:30 = 上海 2026-07-09 04:30 —— 跨日样本，
 // 锁定"按上海时区而非服务器本地/UTC"的口径。
@@ -24,5 +28,12 @@ describe('formatDateTimeShanghai', () => {
 
   it('null → 占位符', () => {
     expect(formatDateTimeShanghai(null)).toBe('—');
+  });
+});
+
+describe('formatDateInputShanghai', () => {
+  it('returns the Shanghai calendar date for an HTML date input', () => {
+    expect(formatDateInputShanghai(CROSS_DAY)).toBe('2026-07-09');
+    expect(formatDateInputShanghai(null)).toBe('');
   });
 });

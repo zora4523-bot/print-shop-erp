@@ -9,6 +9,7 @@ import {
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findUnique: vi.fn(), update: vi.fn() },
+    orderItem: { findMany: vi.fn() },
     productionTask: { findMany: vi.fn() },
     orderLog: { create: vi.fn() },
     outsourceOrder: {
@@ -18,6 +19,10 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
     },
     outsourceAmountChange: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
+    outsourcePayment: {
       findUnique: vi.fn(),
       create: vi.fn(),
     },
@@ -42,6 +47,7 @@ vi.mock('@/lib/notification/dispatch', () => ({
 import {
   createOutsourceOrder,
   confirmOutsourceAmount,
+  recordOutsourcePayment,
   markOutsourceReceived,
   cancelOutsourceOrder,
   getOutsourceOrderDetail,
@@ -61,6 +67,9 @@ beforeEach(() => {
     status: OrderStatus.IN_PRODUCTION,
   });
   dbMock.order.update.mockReset().mockResolvedValue({});
+  dbMock.orderItem.findMany.mockReset().mockResolvedValue([
+    { id: 'item-1', orderId: 'order-1', quantity: 5000 },
+  ]);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.outsourceOrder.findUnique.mockReset().mockResolvedValue(null);
@@ -69,6 +78,10 @@ beforeEach(() => {
   dbMock.outsourceOrder.update.mockReset();
   dbMock.outsourceAmountChange.findUnique.mockReset().mockResolvedValue(null);
   dbMock.outsourceAmountChange.create.mockReset();
+  dbMock.outsourcePayment.findUnique.mockReset().mockResolvedValue(null);
+  dbMock.outsourcePayment.create
+    .mockReset()
+    .mockResolvedValue({ id: 'payment-1' });
   dbMock.businessAuditLog.create.mockReset().mockResolvedValue({ id: 'audit-1' });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
@@ -105,6 +118,7 @@ describe('createOutsourceOrder', () => {
       orderItemIds: string[];
       idempotencyKey: string;
       createdById: string;
+      totalQty: number;
     };
     expect(data.status).toBe(OutsourceStatus.SENT);
     expect(data.amount).toBe('500.00');
@@ -112,7 +126,73 @@ describe('createOutsourceOrder', () => {
     expect(data.supplierName).toBe('东方印刷厂');
     expect(data.idempotencyKey).toBe(baseInput.idempotencyKey);
     expect(data.createdById).toBe(foremanActor.id);
+    expect(data.totalQty).toBe(5000);
     expect(dbMock.businessAuditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives total quantity from every selected item and stores canonical item order', async () => {
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-2', orderId: 'order-1', quantity: 1250 },
+      { id: 'item-1', orderId: 'order-1', quantity: 5000 },
+    ]);
+    dbMock.outsourceOrder.create.mockResolvedValue({ id: 'outsource-1' });
+
+    await createOutsourceOrder(
+      {
+        ...baseInput,
+        orderItemIds: ['item-2', 'item-1'],
+        totalQty: 6250,
+      },
+      foremanActor,
+    );
+
+    expect(dbMock.outsourceOrder.create.mock.calls[0][0].data).toMatchObject({
+      orderItemIds: ['item-1', 'item-2'],
+      totalQty: 6250,
+    });
+    expect(dbMock.businessAuditLog.create.mock.calls[0][0].data.after).toMatchObject({
+      orderItemIds: ['item-1', 'item-2'],
+      totalQty: 6250,
+    });
+  });
+
+  it('rejects a duplicate item even when called without the action schema', async () => {
+    await expect(
+      createOutsourceOrder(
+        { ...baseInput, orderItemIds: ['item-1', 'item-1'], totalQty: 10000 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/不能重复选择/);
+    expect(dbMock.orderItem.findMany).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a selected item that no longer exists', async () => {
+    dbMock.orderItem.findMany.mockResolvedValue([]);
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/不存在或已被删除/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an item belonging to another order', async () => {
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-1', orderId: 'order-other', quantity: 5000 },
+    ]);
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/不属于当前工单/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a client total that differs from the selected item quantities', async () => {
+    await expect(
+      createOutsourceOrder(
+        { ...baseInput, totalQty: 4999 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/必须等于所选款式合计 5000/);
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
   });
 
   it('persists null amount when input is null', async () => {
@@ -203,6 +283,40 @@ describe('createOutsourceOrder', () => {
     expect(dbMock.order.findUnique).not.toHaveBeenCalled();
     expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('replays after canonicalizing item order and deriving a legacy null total', async () => {
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-2', orderId: 'order-1', quantity: 1250 },
+      { id: 'item-1', orderId: 'order-1', quantity: 5000 },
+    ]);
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-existing',
+      orderId: baseInput.orderId,
+      orderItemIds: ['item-2', 'item-1'],
+      supplierName: baseInput.supplierName,
+      supplierContact: baseInput.supplierContact,
+      craftDescription: baseInput.craftDescription,
+      specialRequirement: baseInput.specialRequirement,
+      totalQty: null,
+      expectedDate: baseInput.expectedDate,
+      amount: '500.00',
+      remark: baseInput.remark,
+      createdById: foremanActor.id,
+    });
+
+    await expect(
+      createOutsourceOrder(
+        {
+          ...baseInput,
+          orderItemIds: ['item-1', 'item-2'],
+          totalQty: 6250,
+        },
+        foremanActor,
+      ),
+    ).resolves.toEqual({ id: 'outsource-existing' });
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
   });
 
   it('rejects same-key creation when payload or actor differs', async () => {
@@ -335,6 +449,332 @@ describe('confirmOutsourceAmount', () => {
       'UPDATE_AMOUNT',
     );
   });
+
+  it('does not allow a correction below payments already recorded', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      orderId: 'order-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: '680.50',
+      payments: [{ amount: '500.00' }, { amount: '180.50' }],
+    });
+
+    await expect(
+      confirmOutsourceAmount(
+        'outsource-1',
+        { ...input, amount: '680.49' },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/不能低于已付款 680\.50/);
+    expect(dbMock.outsourceAmountChange.create).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('recordOutsourcePayment', () => {
+  const paymentInput = {
+    idempotencyKey: '00000000-0000-4000-8000-000000000003',
+    amount: '0.20',
+    paidAt: new Date('2026-08-07T04:30:00.000Z'),
+    method: ' 银行转账 ',
+    reference: ' PAY-001 ',
+    remark: ' 尾款 ',
+  };
+
+  it('rejects non-admin callers before opening a transaction', async () => {
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, {
+        id: 'sales-1',
+        username: 'sales',
+        displayName: '外部销售',
+        role: Role.SALES,
+      }),
+    ).rejects.toThrow(/只有管理员/);
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['0', '-1', '0.001', '10000000000.00', 'not-money'])(
+    'rejects unstorable payment amount %s before opening a transaction',
+    async (amount) => {
+      await expect(
+        recordOutsourcePayment(
+          'outsource-1',
+          { ...paymentInput, amount },
+          foremanActor,
+        ),
+      ).rejects.toBeInstanceOf(OutsourceError);
+      expect(dbMock.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    OutsourceStatus.SENT,
+    OutsourceStatus.IN_PROGRESS,
+    OutsourceStatus.CANCELLED,
+  ])('only permits payment after receipt, not in %s', async (status) => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status,
+      amount: '0.30',
+      payments: [],
+    });
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).rejects.toThrow(/只有已回货/);
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a confirmed payable amount', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: null,
+      payments: [],
+    });
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).rejects.toThrow(/请先确认外协应付金额/);
+  });
+
+  it('rejects a missing outsource order', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue(null);
+    await expect(
+      recordOutsourcePayment('missing', paymentInput, foremanActor),
+    ).rejects.toThrow(/外协单不存在/);
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+  });
+
+  it('adds Decimal amounts exactly, takes deterministic locks, and records only the payment ledger', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: '0.30',
+      payments: [{ amount: '0.10' }],
+    });
+
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).resolves.toEqual({
+      paymentId: 'payment-1',
+      outsourceOrderId: 'outsource-1',
+      totalAmount: '0.30',
+      newPaidAmount: '0.30',
+      remainingAmount: '0.00',
+      isFullyPaid: true,
+    });
+    expect(dbMock.$executeRaw.mock.calls[0]![1]).toBe(
+      `print-shop-erp:outsource-payment-request:${paymentInput.idempotencyKey}`,
+    );
+    expect(dbMock.$executeRaw.mock.calls[1]![1]).toBe(
+      'print-shop-erp:outsource:outsource-1',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      dbMock.outsourcePayment.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(dbMock.outsourcePayment.create).toHaveBeenCalledWith({
+      data: {
+        idempotencyKey: paymentInput.idempotencyKey,
+        outsourceOrderId: 'outsource-1',
+        amount: '0.20',
+        paidAt: paymentInput.paidAt,
+        method: '银行转账',
+        reference: 'PAY-001',
+        remark: '尾款',
+        recordedById: foremanActor.id,
+      },
+      select: { id: true },
+    });
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledTimes(1);
+    const auditData = dbMock.businessAuditLog.create.mock.calls[0][0].data;
+    expect(auditData).toMatchObject({
+      actorId: foremanActor.id,
+      action: 'RECORD_PAYMENT',
+      entityType: 'OutsourcePayment',
+      entityId: 'payment-1',
+      requestMetadata: {
+        source: 'foreman-outsource.recordOutsourcePaymentAction',
+        route: '/foreman/outsource/outsource-1',
+      },
+    });
+    expect(auditData.after).toEqual({
+      paymentId: 'payment-1',
+      outsourceOrderId: 'outsource-1',
+      amount: '0.20',
+      paidAt: paymentInput.paidAt.toISOString(),
+      totalAmount: '0.30',
+      newPaidAmount: '0.30',
+      remainingAmount: '0.00',
+    });
+  });
+
+  it('awaits the audit write inside the payment transaction', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: '0.30',
+      payments: [{ amount: '0.10' }],
+    });
+    dbMock.businessAuditLog.create.mockRejectedValue(
+      new Error('audit unavailable'),
+    );
+
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).rejects.toThrow('audit unavailable');
+    expect(dbMock.outsourcePayment.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports partial payment and returns the remaining payable', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: '100.00',
+      payments: [{ amount: '20.00' }],
+    });
+    await expect(
+      recordOutsourcePayment(
+        'outsource-1',
+        { ...paymentInput, amount: '30.00' },
+        foremanActor,
+      ),
+    ).resolves.toMatchObject({
+      newPaidAmount: '50.00',
+      remainingAmount: '50.00',
+      isFullyPaid: false,
+    });
+  });
+
+  it('rejects a payment that exceeds the remaining payable', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+      amount: '100.00',
+      payments: [{ amount: '60.00' }],
+    });
+    await expect(
+      recordOutsourcePayment(
+        'outsource-1',
+        { ...paymentInput, amount: '40.01' },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/超出未付余额/);
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['payments exceed payable', '100.00', [{ amount: '100.01' }]],
+    ['payment is non-positive', '100.00', [{ amount: '0.00' }]],
+    ['payment has excess precision', '100.00', [{ amount: '0.001' }]],
+  ] as const)(
+    'blocks writes when the stored ledger is inconsistent: %s',
+    async (_label, totalAmount, payments) => {
+      dbMock.outsourceOrder.findUnique.mockResolvedValue({
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        amount: totalAmount,
+        payments,
+      });
+      await expect(
+        recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+      ).rejects.toThrow(/对账/);
+      expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns an exact same-key replay without inserting twice', async () => {
+    dbMock.outsourcePayment.findUnique.mockResolvedValue({
+      id: 'payment-existing',
+      outsourceOrderId: 'outsource-1',
+      amount: '0.20',
+      paidAt: paymentInput.paidAt,
+      method: '银行转账',
+      reference: 'PAY-001',
+      remark: '尾款',
+      recordedById: foremanActor.id,
+      outsourceOrder: {
+        amount: '0.50',
+        payments: [
+          { amount: '0.10' },
+          { amount: '0.20' },
+          { amount: '0.05' },
+        ],
+      },
+    });
+
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).resolves.toEqual({
+      paymentId: 'payment-existing',
+      outsourceOrderId: 'outsource-1',
+      totalAmount: '0.50',
+      newPaidAmount: '0.35',
+      remainingAmount: '0.15',
+      isFullyPaid: false,
+    });
+    expect(dbMock.outsourceOrder.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('validates the current payable and cumulative ledger during replay', async () => {
+    dbMock.outsourcePayment.findUnique.mockResolvedValue({
+      id: 'payment-existing',
+      outsourceOrderId: 'outsource-1',
+      amount: '0.20',
+      paidAt: paymentInput.paidAt,
+      method: '银行转账',
+      reference: 'PAY-001',
+      remark: '尾款',
+      recordedById: foremanActor.id,
+      outsourceOrder: {
+        amount: '-0.01',
+        payments: [{ amount: '0.20' }],
+      },
+    });
+
+    await expect(
+      recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+    ).rejects.toThrow(/外协应付金额异常，请先对账/);
+    expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+  });
+
+  const replayMismatchCases = [
+    ['target', { outsourceOrderId: 'outsource-other' }],
+    ['actor', { recordedById: 'admin-other' }],
+    ['amount', { amount: '0.21' }],
+    ['time', { paidAt: new Date('2026-08-07T04:31:00.000Z') }],
+    ['method', { method: '现金' }],
+    ['reference', { reference: 'PAY-002' }],
+    ['remark', { remark: '首付款' }],
+  ] as const;
+
+  it.each(replayMismatchCases)(
+    'rejects same-key replay when %s differs',
+    async (_label, difference) => {
+      dbMock.outsourcePayment.findUnique.mockResolvedValue({
+        id: 'payment-existing',
+        outsourceOrderId: 'outsource-1',
+        amount: '0.20',
+        paidAt: paymentInput.paidAt,
+        method: '银行转账',
+        reference: 'PAY-001',
+        remark: '尾款',
+        recordedById: foremanActor.id,
+        outsourceOrder: {
+          amount: '0.30',
+          payments: [{ amount: '0.20' }],
+        },
+        ...difference,
+      });
+
+      await expect(
+        recordOutsourcePayment('outsource-1', paymentInput, foremanActor),
+      ).rejects.toThrow(/付款请求标识已被其他付款使用/);
+      expect(dbMock.outsourcePayment.create).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('markOutsourceReceived', () => {
@@ -568,7 +1008,7 @@ describe('cancelOutsourceOrder', () => {
 });
 
 describe('getOutsourceOrderDetail', () => {
-  it('includes the append-only amount history and operator', async () => {
+  it('includes append-only amount and payment histories with operators', async () => {
     dbMock.outsourceOrder.findUnique.mockResolvedValue({ id: 'outsource-1' });
     await getOutsourceOrderDetail('outsource-1');
     const query = dbMock.outsourceOrder.findUnique.mock.calls[0][0];
@@ -581,6 +1021,19 @@ describe('getOutsourceOrderDetail', () => {
         reason: true,
         createdAt: true,
         changedBy: { select: { displayName: true } },
+      },
+    });
+    expect(query.select.payments).toEqual({
+      orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        amount: true,
+        paidAt: true,
+        method: true,
+        reference: true,
+        remark: true,
+        createdAt: true,
+        recordedBy: { select: { displayName: true } },
       },
     });
   });

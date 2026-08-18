@@ -76,7 +76,7 @@ export function MaterialsTable({
   direction = 'asc',
 }: Props) {
   return (
-    <Table>
+    <Table label="物料库存列表">
       <TableHeader>
         <TableRow>
           <SortHead

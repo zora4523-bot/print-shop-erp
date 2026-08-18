@@ -59,8 +59,20 @@ export default defineConfig({
       testIgnore: [
         '**/worker-responsive.spec.ts',
         '**/admin-responsive.spec.ts',
+        // Has its own project below with JS turned off; running it here
+        // too would just re-test the hydrated path.
+        '**/no-js.spec.ts',
       ],
       use: { ...devices['Desktop Chrome'] },
+    },
+    // Zero-JS fallback gate (DECISIONS.md 2026-08-17). Only the three
+    // paths whose failure mode is "user can't recover" are covered:
+    // login / logout / change-password. Everything else keeps zero-JS
+    // submit as a default coding preference, not an asserted contract.
+    {
+      name: 'no-js',
+      testMatch: '**/no-js.spec.ts',
+      use: { ...devices['Desktop Chrome'], javaScriptEnabled: false },
     },
     ...workerViewportProjects.map(({ name, width, height }) => ({
       name,

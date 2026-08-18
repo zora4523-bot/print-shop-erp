@@ -1,37 +1,56 @@
+import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
-import { Search } from 'lucide-react';
 import { Role } from '../../../generated/prisma/enums';
 import { buttonVariants } from '@/components/ui/button';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { requireSession } from '@/lib/auth/session';
-import { listOrders } from '@/lib/order';
+import {
+  getOrderListFilterOptions,
+  listOrdersPage,
+  parseOrderListQuery,
+  sanitizeOrderListQueryForActor,
+  serializeOrderListQuery,
+  type OrderListSearchParams,
+} from '@/lib/order/list-query';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
+import { OrderListFilters } from '@/components/business/order/OrderListFilters';
+import { OrderExportControls } from '@/components/business/order/OrderExportControls';
 import { OrdersTable } from '@/components/business/order/OrdersTable';
 import { PageHeader } from '@/components/ui-business';
+import {
+  listRecentOrderExports,
+  orderExportParamsFromQuery,
+} from '@/lib/order/export';
 
 export const metadata = {
   title: '工单列表 · 红包印刷 ERP',
 };
 
 type PageProps = {
-  searchParams: Promise<{ q?: string | string[] }>;
+  searchParams: Promise<OrderListSearchParams>;
 };
-
-function firstParam(v: string | string[] | undefined): string {
-  if (Array.isArray(v)) return v[0] ?? '';
-  return v ?? '';
-}
 
 export default async function OrdersListPage({ searchParams }: PageProps) {
   const sp = await searchParams;
-  const q = firstParam(sp.q).trim();
+  const parsed = parseOrderListQuery(sp);
   const { user } = await requireSession();
   const canCreate =
     user.role === Role.SALES ||
     user.role === Role.CUSTOMER_SERVICE ||
     user.role === Role.ADMIN;
+  const actor = { id: user.id, role: user.role };
+  const query = sanitizeOrderListQueryForActor(actor, parsed.query);
+  const showCommercialAmounts = user.role !== Role.WORKER;
 
-  const orders = await listOrders({ id: user.id, role: user.role }, { q });
+  const [orderPage, filterOptions, recentExports] = await Promise.all([
+    listOrdersPage(actor, query),
+    getOrderListFilterOptions(actor),
+    user.role === Role.ADMIN
+      ? listRecentOrderExports(user.id)
+      : Promise.resolve([]),
+  ]);
+  const displayedQuery = { ...query, page: orderPage.page };
+  const queryParams = serializeOrderListQuery(displayedQuery);
+  const exportParams = orderExportParamsFromQuery(displayedQuery);
 
   return (
     <div className="space-y-6">
@@ -46,33 +65,50 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
           ) : null
         }
       />
-      <form
-        action="/orders"
-        className="flex max-w-2xl flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
-      >
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
-          <Input
-            name="q"
-            defaultValue={q}
-            placeholder="搜索工单号、工单名称、客户、收货人、提交人、师傅、快递号"
-            className="pl-8"
+      <OrderListFilters
+        query={displayedQuery}
+        options={filterOptions}
+        issues={parsed.issues}
+        total={orderPage.total}
+        showCommercialAmounts={showCommercialAmounts}
+        exportControls={
+          user.role === Role.ADMIN ? (
+            <OrderExportControls
+              params={exportParams}
+              filteredTotal={orderPage.total}
+              hasFilters={Object.keys(exportParams).length > 0}
+              filteredRequestKey={randomUUID()}
+              allRequestKey={randomUUID()}
+              recent={recentExports.map((item) => ({
+                ...item,
+                createdAt: item.createdAt.toISOString(),
+                completedAt: item.completedAt?.toISOString() ?? null,
+                expiresAt: item.expiresAt.toISOString(),
+              }))}
+            />
+          ) : null
+        }
+      />
+      <div className="min-w-0 rounded-xl border bg-card shadow-sm">
+        <div className="min-w-0 p-0 sm:p-4">
+          <OrdersTable
+            orders={orderPage.rows}
+            showCommercialAmounts={showCommercialAmounts}
+            showPieceworkCost={user.role === Role.ADMIN}
+            query={displayedQuery}
+            queryParams={queryParams}
           />
         </div>
-        <div className="flex gap-2">
-          <Button type="submit">搜索</Button>
-          {q ? (
-            <Link href="/orders" className={buttonVariants({ variant: 'outline' })}>
-              清空
-            </Link>
-          ) : null}
+        <div className="border-t px-4 py-3">
+          <AdminPagination
+            basePath="/orders"
+            page={orderPage.page}
+            pageCount={orderPage.pageCount}
+            total={orderPage.total}
+            pageSize={orderPage.pageSize}
+            queryParams={queryParams}
+          />
         </div>
-      </form>
-      <div className="rounded-xl border bg-card p-4 shadow-sm">
-        <OrdersTable
-          orders={orders}
-          showPieceworkCost={user.role === Role.ADMIN}
-        />
       </div>
     </div>
   );

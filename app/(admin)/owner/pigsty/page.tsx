@@ -79,7 +79,7 @@ function ErrorPanel({ title, error }: { title: string; error: string }) {
   return (
     <div className="rounded-lg border border-warning/30 bg-warning/5 p-4">
       <div className="flex items-start gap-3">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
         <div className="min-w-0">
           <h2 className="text-sm font-medium">{title}</h2>
           <p className="mt-1 break-words font-mono text-xs text-muted-foreground">

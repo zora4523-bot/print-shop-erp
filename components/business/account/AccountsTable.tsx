@@ -43,7 +43,7 @@ export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
   }
 
   return (
-    <Table>
+    <Table label="账号列表">
       <TableHeader>
         <TableRow>
           <TableHead>用户名</TableHead>

@@ -114,20 +114,20 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="销售应收账单"
-        subtitle="月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位一条账单，管理员发单后记录付款。"
+        subtitle="月初按 Asia/Shanghai 日历月归集上月已结束的外部销售工单；加工、快递、耗材等对客收费进入同一张应收账单，管理员发单后记录付款。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          重跑选中月份会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
+          重跑选中月份会把新完工工单追加到已有 DRAFT 账单。该月账单一旦发单
           （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程对该条账单会报错，
           不再向其追加任何工单。含义是：凡是在发单那一刻没被归集进 BillItems
           的&ldquo;该月 finishedAt&rdquo;工单——无论是发单前已 FINISHED 但业主没再
           点一次&ldquo;生成 / 追加&rdquo;来拉取，还是发单后才 FINISHED——之后都不会被任何
           月份的生成流程抓到，需业主线下单独处理。因此发单前务必确认：
           (1) 所选周期内所有待入账工单都已 FINISHED，(2) 再点一次&ldquo;生成 /
-          追加&rdquo;把最新 FINISHED 订单拉入 DRAFT。
+          追加&rdquo;把最新 FINISHED 工单拉入 DRAFT。
         </p>
       </section>
 
