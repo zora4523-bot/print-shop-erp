@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DESIGN_GRID_WARN_THRESHOLD } from '@/components/business/order/design-grid';
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import {
@@ -71,6 +72,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
+  // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
+  // 不是整单累加。
+  const maxDesignsPerItem = Math.max(
+    0,
+    ...(order?.items ?? []).map((item) => item.designs.length),
+  );
   if (!order) notFound();
   const canViewCommercialAmounts = user.role !== Role.WORKER;
   const canCreateRework =
@@ -261,6 +268,14 @@ export default async function OrderDetailPage({ params }: PageProps) {
           >
             打印
           </Link>
+          {maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD ? (
+            // 这条提示原来写在 /print 页里且带 .no-print，而那个页面
+            // autoprint=1 会立刻弹打印对话框并自行关闭——等于永远没人
+            // 看得到。放在打印按钮旁，用户才有机会在点之前读到。
+            <span className="text-xs text-warning-foreground">
+              有款式含 {maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度
+            </span>
+          ) : null}
           <Link
             href={`/api/orders/${order.id}/pdf`}
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -810,7 +825,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   <span className="admin-wrap-anywhere min-w-0">
                     {item.orderItemName} · {item.craftName}
                   </span>
-                  <span className="font-sans tabular-nums sm:text-right">¥ {String(item.pieceworkAmount)}</span>
+                  <span className="font-sans tabular-nums sm:text-right">{formatMoney(item.pieceworkAmount)}</span>
                   <Link
                     href={`/owner/salary/daily/${item.dailySalaryId}`}
                     className="text-xs text-primary underline sm:justify-end sm:text-right"
@@ -872,7 +887,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                           : ''}
                       </td>
                       <td className="px-2 py-2 text-right font-sans tabular-nums">
-                        ¥ {String(entry.amount)}
+                        {formatMoney(entry.amount)}
                       </td>
                       <td className="px-2 py-2 text-xs">
                         {'createdBy' in entry

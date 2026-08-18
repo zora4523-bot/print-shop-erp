@@ -1,7 +1,4 @@
-import {
-  DESIGN_GRID_WARN_THRESHOLD,
-  pickDesignGridClass,
-} from './design-grid';
+import { pickDesignGridClass } from './design-grid';
 import {
   formatDateShanghai,
   formatDateTimeShanghai,
@@ -289,11 +286,6 @@ function DesignGrid({ designs }: { designs: PrintDesign[] }) {
           />
         ))}
       </div>
-      {printable.length >= DESIGN_GRID_WARN_THRESHOLD && (
-        <div className="no-print design-many-warn">
-          设计图较多（{printable.length} 张），建议分款式打印以保证清晰度
-        </div>
-      )}
     </div>
   );
 }
