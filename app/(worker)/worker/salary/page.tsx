@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui-business';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { Button } from '@/components/ui/button';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
 
 type PageProps = {
@@ -115,8 +116,7 @@ async function PieceworkSalaryContent({
                       项任务 / {salary.orderCount} 个工单
                     </p>
                     <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                      计件 ¥{String(salary.totalPieceworkAmount)} · 保底 ¥
-                      {String(salary.baseSalary)} · 调整{' '}
+                      计件 {formatMoney(salary.totalPieceworkAmount)} · 保底 {formatMoney(salary.baseSalary)} · 调整{' '}
                       {Number(salary.adjustmentAmount) > 0 ? '+' : ''}
                       {String(salary.adjustmentAmount)}
                     </p>
@@ -307,12 +307,14 @@ function PaidBadge({ isPaid }: { isPaid: boolean }) {
   );
 }
 
-function SalaryAmount({ value }: { value: unknown }) {
+// value 是 Prisma 的金额 Decimal；之前写 unknown 是因为直接 String()
+// 渲染，换成 formatMoney 后需要真实类型。
+function SalaryAmount({ value }: { value: Decimal.Value }) {
   return (
     <div className="ml-auto shrink-0 text-right">
       <p className="text-xs text-muted-foreground">实发</p>
       <p className="font-sans tabular-nums text-lg font-semibold text-foreground">
-        ¥ {String(value)}
+        {formatMoney(value)}
       </p>
     </div>
   );

@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import Decimal from 'decimal.js';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
@@ -147,7 +148,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="font-sans tabular-nums font-medium">
-                    ¥ {String(item.pieceworkAmount)}
+                    {formatMoney(item.pieceworkAmount)}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {formatDateTimeShanghai(item.completedAt)}
@@ -312,7 +313,9 @@ function Money({
   strong = false,
 }: {
   label: string;
-  value: unknown;
+  // Prisma 的金额列在这一层是 Decimal；之前写 unknown 是因为直接
+  // String() 渲染，换成 formatMoney 后需要真实类型才能保证格式化正确。
+  value: Decimal.Value;
   strong?: boolean;
 }) {
   return (
@@ -323,7 +326,7 @@ function Money({
           strong ? 'text-lg font-semibold text-foreground' : 'font-medium'
         }`}
       >
-        ¥ {String(value)}
+        {formatMoney(value)}
       </p>
     </div>
   );

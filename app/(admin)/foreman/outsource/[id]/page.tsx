@@ -12,6 +12,7 @@ import { OutsourcePaymentForm } from '@/components/business/outsource/OutsourceP
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 const STATUS_LABELS: Record<OutsourceStatus, string> = {
@@ -148,7 +149,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
                   {change.previousAmount === null
                     ? '未录入'
                     : `¥ ${String(change.previousAmount)}`}{' '}
-                  → ¥ {String(change.newAmount)}
+                  → {formatMoney(change.newAmount)}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {change.changedBy.displayName} ·{' '}

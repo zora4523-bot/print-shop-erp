@@ -5,7 +5,7 @@ import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getDailyWorkerSalaryDetail } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { formatMoney } from '@/lib/format/money';
+import { formatMoney } from '@/lib/dashboard/format';
 import {
   formatDateShanghai,
   formatDateTimeShanghai,

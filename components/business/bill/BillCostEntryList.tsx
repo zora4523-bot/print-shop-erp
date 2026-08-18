@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { listOrderCostEntryDetails } from '@/lib/bill/costing';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type CostOrder = Parameters<typeof listOrderCostEntryDetails>[0];
 
 export function BillCostEntryList({
@@ -80,7 +81,7 @@ export function BillCostEntryList({
                   </p>
                 </div>
                 <span className="font-sans tabular-nums">
-                  ¥ {String(row.entry.amount)}
+                  {formatMoney(row.entry.amount)}
                 </span>
               </li>
             ))}

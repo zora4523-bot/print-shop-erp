@@ -21,6 +21,7 @@ import {
 } from '@/components/ui-business';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '计件工资' };
 
 // URL filters travel as plain query params. `date` defaults to today's
@@ -228,7 +229,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                     {String(r.adjustmentAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                    ¥ {String(r.actualSalary)}
+                    {formatMoney(r.actualSalary)}
                   </td>
                   <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
                     {r.taskCount} / {r.orderCount}

@@ -14,6 +14,7 @@ import {
   PricingSnapshotBreakdown,
 } from '@/components/business/price/PricingSnapshotBreakdown';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -154,7 +155,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                   {payment.remark || payment.referenceNo || '—'}
                 </span>
                 <span className="font-sans font-medium tabular-nums">
-                  ¥ {String(payment.amount)}
+                  {formatMoney(payment.amount)}
                 </span>
               </li>
             ))}
@@ -205,7 +206,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     <OrderStatusBadge status={it.order.status} />
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(it.order.processingAmount)}
+                    {formatMoney(it.order.processingAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {it.shipping.toFixed(2)}
@@ -217,7 +218,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     ¥ {it.otherCharges.toFixed(2)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
-                    ¥ {String(it.orderAmount)}
+                    {formatMoney(it.orderAmount)}
                   </td>
                 </tr>
               ))}

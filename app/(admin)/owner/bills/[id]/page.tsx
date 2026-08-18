@@ -22,6 +22,7 @@ import { calculateOrderCostBreakdown } from '@/lib/bill/costing';
 import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -274,7 +275,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                   {!payment.referenceNo && !payment.remark ? '—' : ''}
                 </span>
                 <span className="font-sans font-medium tabular-nums">
-                  ¥ {String(payment.amount)}
+                  {formatMoney(payment.amount)}
                 </span>
                 <span className="text-xs text-muted-foreground sm:col-span-4">
                   记录人：{payment.recordedBy.displayName}
@@ -332,7 +333,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                     <OrderStatusBadge status={it.order.status} />
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(it.order.processingAmount)}
+                    {formatMoney(it.order.processingAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {it.shippingReceivable.toFixed(2)}
@@ -341,7 +342,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
                     ¥ {it.packingReceivable.toFixed(2)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
-                    ¥ {String(it.orderAmount)}
+                    {formatMoney(it.orderAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     ¥ {it.piecework.toFixed(2)}

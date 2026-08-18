@@ -20,6 +20,7 @@ import {
   TableScrollArea,
 } from '@/components/ui-business';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '销售应收账单' };
 
 type PageProps = {
@@ -195,10 +196,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
                     {ROLE_LABELS[r.salesUser.role] ?? r.salesUser.role}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(r.totalAmount)}
+                    {formatMoney(r.totalAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(r.paidAmount)}
+                    {formatMoney(r.paidAmount)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <BillStatusBadge status={r.status} />

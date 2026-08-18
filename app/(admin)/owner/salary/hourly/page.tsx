@@ -19,6 +19,7 @@ import {
   parseShanghaiMonth,
 } from '@/lib/attendance';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
 
 type PageProps = {
@@ -173,7 +174,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {isCook ? String(r.spareSalary) : String(r.otSalary)}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                      ¥ {String(r.totalSalary)}
+                      {formatMoney(r.totalSalary)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {r.isPaid ? (

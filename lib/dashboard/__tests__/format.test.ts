@@ -42,4 +42,27 @@ describe('formatMoney', () => {
   it('Decimal.js 实例直接传入', () => {
     expect(formatMoney(new Decimal('5000.5'))).toBe('¥ 5,000.50');
   });
+  // 这条是这个 formatter 存在的核心理由，之前没被钉住：
+  // String(Decimal) 不保留尾随零，5000.00 会渲染成 "5000"、5000.50 成
+  // "5000.5"，而金额列多是 text-right + tabular-nums——小数位数不一致
+  // 时小数点排不齐，老板扫账容易看错数量级。
+  it('保留尾随零，让同列小数点能对齐', () => {
+    expect(formatMoney(new Decimal('5000.00'))).toBe('¥ 5,000.00');
+    expect(formatMoney(new Decimal('5000.50'))).toBe('¥ 5,000.50');
+    expect(formatMoney(new Decimal('4999.99'))).toBe('¥ 4,999.99');
+    const rendered = [
+      formatMoney('5000'),
+      formatMoney('5000.5'),
+      formatMoney('4999.99'),
+    ];
+    // 三个值的小数部分长度必须一致，否则右对齐时对不齐
+    const fractionLengths = new Set(
+      rendered.map((v) => v.split('.')[1]?.length),
+    );
+    expect(fractionLengths.size).toBe(1);
+  });
+
+  it('不经过 IEEE-754 丢精度', () => {
+    expect(formatMoney(new Decimal('0.1').plus('0.2'))).toBe('¥ 0.30');
+  });
 });

@@ -14,6 +14,7 @@ import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -237,7 +238,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                     {formatDateTimeShanghai(payment.paidAt)}
                   </span>
                   <span className="admin-wrap-anywhere text-muted-foreground">
-                    底薪 ¥ {String(payment.baseAmount)} · 提成 ¥{' '}
+                    底薪 {formatMoney(payment.baseAmount)} · 提成 ¥{' '}
                     {String(payment.commissionAmount)}
                     {payment.paymentMethod ? ` · ${payment.paymentMethod}` : ''}
                     {payment.referenceNo ? ` · 流水号 ${payment.referenceNo}` : ''}
@@ -292,19 +293,19 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                       .toFixed(2)}%
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(c.commissionAmount)}
+                    {formatMoney(c.commissionAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
-                    ¥ {String(c.monthlyBaseTotal)}
+                    {formatMoney(c.monthlyBaseTotal)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                    ¥ {String(c.totalIncome)}
+                    {formatMoney(c.totalIncome)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(c.paidBase)}
+                    {formatMoney(c.paidBase)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {String(c.paidCommission)}
+                    {formatMoney(c.paidCommission)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {c.isFullyPaid ? (

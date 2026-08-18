@@ -12,6 +12,7 @@ import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
 export default async function WorkerOrderDetailPage({ params }: PageProps) {
@@ -113,7 +114,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                         <>
                           <p className="text-xs text-muted-foreground">计件金额</p>
                           <p className="font-sans tabular-nums font-medium">
-                            ¥ {String(task.pieceworkAmount)}
+                            {formatMoney(task.pieceworkAmount)}
                           </p>
                         </>
                       ) : (
