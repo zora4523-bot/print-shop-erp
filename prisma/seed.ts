@@ -22,6 +22,11 @@ import {
 } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
+import {
+  RETIRED_SETTING_KEYS,
+  SETTING_DEFINITIONS,
+  SETTING_KEYS,
+} from '../lib/settings/definitions';
 
 // Prisma 7 要求显式指定 adapter
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -443,21 +448,32 @@ async function seedNotificationEvents() {
 // 5. 系统配置
 // ============================================================
 async function seedSettings() {
-  const settings = [
-    { key: 'factory_name', value: { name: '佛山红包印刷厂' }, remark: '工厂名称（可改）' },
-    { key: 'order_no_prefix', value: { format: 'GD-YYMMDD-XXX' }, remark: '工单号格式' },
-    { key: 'cdr_link_expire_hours', value: { hours: 24 }, remark: 'CDR下载链接有效期' },
-    { key: 'outsource_overdue_days', value: { days: 1 }, remark: '外协超期阈值（超过预计日N天报警）' },
-  ];
-
-  for (const s of settings) {
-    await db.setting.upsert({
-      where: { key: s.key },
-      update: { value: s.value, remark: s.remark },
-      create: { key: s.key, value: s.value, remark: s.remark },
+  // key / 默认值 / remark 都来自 lib/settings/definitions —— 那里同时是读取侧
+  // 和后台设置页的唯一定义处。此前这份清单是手写的，和代码里的常量各写各的，
+  // 结果 seed 的 '佛山红包印刷厂' 和打印组件默认的 '红包印刷厂' 长期对不上，
+  // 而且谁都没发现，因为根本没有代码读这张表。
+  //
+  // 只 create、不 update：业主改过的值不能被下一次 seed 冲掉。这张表从来是
+  // 配置而不是字典，覆盖写等于把人家的设置改回默认。
+  let created = 0;
+  for (const key of SETTING_KEYS) {
+    const definition = SETTING_DEFINITIONS[key];
+    const result = await db.setting.createMany({
+      data: [{ key, value: definition.fallback, remark: definition.remark }],
+      skipDuplicates: true,
     });
+    created += result.count;
   }
-  console.log(`  ✓ 系统配置 ${settings.length} 条`);
+
+  // 退役的 key：留着会让翻库的人以为还能配。见 definitions.ts 的
+  // RETIRED_SETTING_KEYS 注释。
+  const { count: removed } = await db.setting.deleteMany({
+    where: { key: { in: [...RETIRED_SETTING_KEYS] } },
+  });
+
+  console.log(
+    `  ✓ 系统配置 ${SETTING_KEYS.length} 项（新建 ${created}，保留已有 ${SETTING_KEYS.length - created}，清理退役 ${removed}）`,
+  );
 }
 
 main()

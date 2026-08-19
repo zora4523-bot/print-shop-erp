@@ -2,6 +2,7 @@ import { PassThrough } from 'node:stream';
 import { ZipArchive } from 'archiver';
 import { readOssConfig } from '../oss/config';
 import { createOssClient } from '../oss/client';
+import { SETTING_DEFINITIONS } from '../settings/definitions';
 
 // CDR 汇总下载（SPEC §3.6）的"打包到 OSS"步骤。
 //
@@ -41,8 +42,14 @@ export class CdrZipError extends Error {
   }
 }
 
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-const SIGNED_URL_EXPIRES_SECONDS = 24 * 60 * 60;
+const MS_PER_HOUR = 60 * 60 * 1000;
+const SECONDS_PER_HOUR = 60 * 60;
+
+// 兜底时长。这个模块是 OSS 适配层，**不读库**——阈值由调用方
+// （lib/cdr/bundle.ts，本来就在事务里）从 Setting 取好传进来，
+// 这样 zip.ts 的测试不需要 DATABASE_URL。默认值和 lib/settings 的
+// fallback 是同一个来源，避免又出现两份对不上的常量。
+const DEFAULT_EXPIRE_HOURS = SETTING_DEFINITIONS.cdr_link_expire_hours.fallback.hours;
 
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CDR_BUNDLE_MOCK_MODE === 'true') return true;
@@ -85,6 +92,7 @@ async function generateRealZip(
   input: ZipUploadInput,
   nowFn: () => Date,
   env: NodeJS.ProcessEnv,
+  expireHours: number,
 ): Promise<ZipUploadResult> {
   const cfgResult = readOssConfig(env);
   if (!cfgResult.configured) {
@@ -160,18 +168,18 @@ async function generateRealZip(
   if (!putResult.ok) throw putResult.err;
   if (archiveError) throw archiveError;
 
-  // 预签 24h GET URL。**上传完成后**取当前时间——URL 的 24h 从签发
-  // 起算，DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务
-  // 白白缩短外协的下载窗口。
+  // 预签 GET URL。**上传完成后**取当前时间——URL 的寿命从签发起算，
+  // DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务白白缩短
+  // 外协的下载窗口。两处都用同一个 expireHours，不能各写各的。
   const signedAt = nowFn();
   const zipFileUrl = client.signatureUrl(zipObjectKey, {
-    expires: SIGNED_URL_EXPIRES_SECONDS,
+    expires: expireHours * SECONDS_PER_HOUR,
     method: 'GET',
   });
 
   return {
     zipFileUrl,
-    expiresAt: new Date(signedAt.getTime() + TWENTY_FOUR_HOURS_MS),
+    expiresAt: new Date(signedAt.getTime() + expireHours * MS_PER_HOUR),
     isMock: false,
   };
 }
@@ -182,14 +190,23 @@ async function generateRealZip(
  */
 export async function uploadBundleZip(
   input: ZipUploadInput,
-  opts: { mockMode?: boolean; now?: Date; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    mockMode?: boolean;
+    now?: Date;
+    env?: NodeJS.ProcessEnv;
+    // 由调用方从 Setting 的 cdr_link_expire_hours 读好传入；省略走兜底。
+    expireHours?: number;
+  } = {},
 ): Promise<ZipUploadResult> {
+  const expireHours = opts.expireHours ?? DEFAULT_EXPIRE_HOURS;
   const mock = opts.mockMode ?? isMockMode(opts.env ?? process.env);
   if (mock) {
     const now = opts.now ?? new Date();
     return {
       zipFileUrl: `mock://bundle/${input.bundleId}.zip`,
-      expiresAt: new Date(now.getTime() + TWENTY_FOUR_HOURS_MS),
+      // mock 路径也用同一个时长，否则本地/测试环境算出来的过期时间和
+      // 生产不一致，过期相关的逻辑就没法在 mock 下验证。
+      expiresAt: new Date(now.getTime() + expireHours * MS_PER_HOUR),
       isMock: true,
     };
   }
@@ -199,5 +216,6 @@ export async function uploadBundleZip(
     input,
     () => opts.now ?? new Date(),
     opts.env ?? process.env,
+    expireHours,
   );
 }

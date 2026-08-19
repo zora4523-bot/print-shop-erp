@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { uploadBundleZip, type ZipUploadResult } from './zip';
+import { getSetting } from '../settings';
 import { parseStrictYmd } from '../auth/schemas';
 import {
   BackgroundJobQueue,
@@ -210,6 +211,7 @@ export async function createBundle(
   actor: { id: string },
 ): Promise<CreateBundleResult> {
   const collected = await collectBundle(input);
+  const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
 
   // 先创建 DesignBundle 拿 id（即作为 token / object key 的一部分）。
   // zipFileUrl + downloadUrl + expiresAt 占位，下面 ZIP 步骤后 update。
@@ -224,22 +226,26 @@ export async function createBundle(
       designIds: collected.designIds,
       zipFileUrl: '',
       downloadUrl: '',
-      // tentative expiry——下面 OSS 步骤会覆写。
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      // tentative expiry——下面 OSS 步骤会覆写。用同一个阈值，免得打包
+      // 失败留下的占位行带着一个和配置无关的过期时间。
+      expiresAt: new Date(Date.now() + expireHours * 60 * 60 * 1000),
     },
     select: { id: true },
   });
 
   let upload: ZipUploadResult;
   try {
-    upload = await uploadBundleZip({
-      files: collected.files.map(({ orderNo, fileName, fileUrl }) => ({
-        orderNo,
-        fileName,
-        fileUrl,
-      })),
-      bundleId: bundle.id,
-    });
+    upload = await uploadBundleZip(
+      {
+        files: collected.files.map(({ orderNo, fileName, fileUrl }) => ({
+          orderNo,
+          fileName,
+          fileUrl,
+        })),
+        bundleId: bundle.id,
+      },
+      { expireHours },
+    );
   } catch (err) {
     // OSS 打包失败（凭证 403 / 网络 / 对象缺失）：删掉占位 row 让 UI
     // 看到清晰失败状态，并把原因翻译成 CdrBundleError 给表单展示。
@@ -363,14 +369,18 @@ export async function processQueuedBundle(bundleId: string): Promise<{
     throw new CdrBundleError('CDR 设计文件已变更，请重新生成下载包');
   }
 
-  const upload = await uploadBundleZip({
-    bundleId,
-    files: designs.map((design) => ({
-      orderNo: design.orderItem.order.orderNo,
-      fileName: design.fileName,
-      fileUrl: design.fileUrl,
-    })),
-  });
+  const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
+  const upload = await uploadBundleZip(
+    {
+      bundleId,
+      files: designs.map((design) => ({
+        orderNo: design.orderItem.order.orderNo,
+        fileName: design.fileName,
+        fileUrl: design.fileUrl,
+      })),
+    },
+    { expireHours },
+  );
   await db.designBundle.update({
     where: { id: bundleId },
     data: {

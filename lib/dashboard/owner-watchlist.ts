@@ -13,6 +13,7 @@ import {
 } from '../order/promised-date';
 import { calcCsCommission } from '../salary/cs-commission';
 import { getActiveCsTiers } from '../salary/rules';
+import { getSetting } from '../settings';
 import { shanghaiDayBoundary, todayShanghai } from './shanghai-clock';
 
 // Owner dashboard watchlists — 3 read-only lists that surface things
@@ -89,7 +90,7 @@ export async function getPendingShipments(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 超期外协 — expectedDate < 今日 0:00 (Shanghai) 且仍未收
+// 超期外协 — 逾期天数 >= outsource_overdue_days 且仍未收
 // ─────────────────────────────────────────────────────────────────────
 
 export type OverdueOutsourceRow = {
@@ -102,24 +103,33 @@ export type OverdueOutsourceRow = {
 };
 
 /**
- * 超期外协：状态在 SENT / IN_PROGRESS（未收），expectedDate < 今日
- * Shanghai 0:00（不含今日）。`expectedDate = null` 不算（用户没填的
- * 单不发噪音）。RECEIVED / CANCELLED 已闭环，不算。
+ * 超期外协：状态在 SENT / IN_PROGRESS（未收），且逾期天数 >= 阈值。
+ * `expectedDate = null` 不算（用户没填的单不发噪音）。
+ * RECEIVED / CANCELLED 已闭环，不算。
+ *
+ * 阈值取自 Setting 的 `outsource_overdue_days`（默认 1）。之前这里写死的
+ * `expectedDate < todayStart` 恰好等价于阈值 = 1，也就是说 seed 里那行配置
+ * 从来只是碰巧和代码一致，改它没有任何效果。
  *
  * `daysOverdue` 在 JS 侧算（schema 没存）：Math.floor((today - expected)
- * / 1day)。expected = today 不出现在结果里（半开区间），所以最少
- * 1 天。
+ * / 1day)。阈值为 N 时，结果里最小的 daysOverdue 就是 N。
  */
 export async function getOverdueOutsourcing(
   now: Date = new Date(),
 ): Promise<OverdueOutsourceRow[]> {
   const today = todayShanghai(now);
   const { start: todayStart } = shanghaiDayBoundary(today);
+  const { days: overdueDays } = await getSetting('outsource_overdue_days');
+
+  // daysOverdue >= N  ⟺  expectedDate <= todayStart - N 天
+  //                   ⟺  expectedDate <  todayStart - (N-1) 天（日期是整天）
+  // N = 1 时退化成原来的 expectedDate < todayStart。
+  const cutoff = new Date(todayStart.getTime() - (overdueDays - 1) * MS_PER_DAY);
 
   const raw = await db.outsourceOrder.findMany({
     where: {
       status: { in: [OutsourceStatus.SENT, OutsourceStatus.IN_PROGRESS] },
-      expectedDate: { lt: todayStart },
+      expectedDate: { lt: cutoff },
       NOT: { expectedDate: null },
     },
     orderBy: { expectedDate: 'asc' },

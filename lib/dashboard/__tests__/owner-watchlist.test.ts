@@ -5,6 +5,8 @@ const { dbMock, getActiveCsTiersMock } = vi.hoisted(() => {
     order: { findMany: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
     salaryPeriod: { findMany: vi.fn() },
+    // 超期阈值现在从 Setting 读（outsource_overdue_days）
+    setting: { findUnique: vi.fn() },
   };
   return {
     dbMock: mock,
@@ -27,6 +29,10 @@ beforeEach(() => {
   dbMock.order.findMany.mockReset();
   dbMock.outsourceOrder.findMany.mockReset();
   dbMock.salaryPeriod.findMany.mockReset();
+  dbMock.setting.findUnique.mockReset();
+  // 默认「没有配置行」→ resolveSetting 退回内置默认 1 天，也就是这些用例
+  // 原本断言的行为。需要别的阈值的用例自己覆盖。
+  dbMock.setting.findUnique.mockResolvedValue(null);
   getActiveCsTiersMock.mockReset();
 });
 
@@ -149,6 +155,32 @@ describe('getOverdueOutsourcing', () => {
     );
     expect(args.where.NOT).toEqual({ expectedDate: null });
     expect(args.orderBy).toEqual({ expectedDate: 'asc' });
+  });
+
+  it('阈值来自 Setting：配 3 天时截止点往前挪 2 天', async () => {
+    // 这条是「Setting 表只写不读」的回归门禁：之前这里写死
+    // expectedDate < todayStart，seed 里那行 outsource_overdue_days
+    // 改成什么都没有效果。
+    dbMock.setting.findUnique.mockResolvedValue({ value: { days: 3 } });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([]);
+    await getOverdueOutsourcing(new Date('2026-04-26T08:00:00Z'));
+
+    const args = dbMock.outsourceOrder.findMany.mock.calls[0][0];
+    // 阈值 1 天时是 2026-04-25T16:00Z；3 天则再往前两天
+    expect((args.where.expectedDate.lt as Date).toISOString()).toBe(
+      '2026-04-23T16:00:00.000Z',
+    );
+  });
+
+  it('阈值非法时退回 1 天而不是把看板打挂', async () => {
+    dbMock.setting.findUnique.mockResolvedValue({ value: { days: 0 } });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([]);
+    await getOverdueOutsourcing(new Date('2026-04-26T08:00:00Z'));
+
+    const args = dbMock.outsourceOrder.findMany.mock.calls[0][0];
+    expect((args.where.expectedDate.lt as Date).toISOString()).toBe(
+      '2026-04-25T16:00:00.000Z',
+    );
   });
 
   it('daysOverdue 计算：3 天前预计 → 3 天超期', async () => {

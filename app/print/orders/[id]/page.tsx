@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/auth/session';
 import { getOrderForPrint } from '@/lib/order/print-view';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
+import { getSetting } from '@/lib/settings';
 import { OrderPrintLayout } from '@/components/business/order/OrderPrintLayout';
 import { AutoPrint } from '@/components/business/order/AutoPrint';
 
@@ -23,6 +24,7 @@ export default async function OrderPrintViewPage({
   const { id } = await params;
   const sp = await searchParams;
   const baseUrl = await derivePublicBaseUrl();
+  const factory = await getSetting('factory_name');
   const order = await getOrderForPrint(
     id,
     { id: user.id, role: user.role },
@@ -43,7 +45,7 @@ export default async function OrderPrintViewPage({
 
   return (
     <>
-      <OrderPrintLayout order={order} />
+      <OrderPrintLayout order={order} factoryName={factory.name} />
       <AutoPrint enabled={autoprint} />
     </>
   );

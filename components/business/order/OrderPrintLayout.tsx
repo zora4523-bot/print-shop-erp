@@ -22,7 +22,12 @@ import { formatReceiverInfo } from '@/lib/order/receiver-info';
 
 interface Props {
   order: PrintOrder;
-  factoryName?: string;
+  // 必填，不给默认值。这里原本是 `factoryName = '红包印刷厂'`，而三个渲染
+  // 入口（打印页 / PDF 路由 / PDF background job）一个都没传过——业主在
+  // Setting 表里改厂名永远不生效，而且那个默认值和 seed 里的
+  // '佛山红包印刷厂' 早就对不上了，没人发现。设成必填，下一个渲染入口忘了
+  // 传就是编译错误。取值见 lib/settings。
+  factoryName: string;
   // Injected for determinism — tests / PDF renders can pin the footer
   // timestamp instead of capturing wall-clock at render time.
   renderedAt?: Date;
@@ -30,7 +35,7 @@ interface Props {
 
 export function OrderPrintLayout({
   order,
-  factoryName = '红包印刷厂',
+  factoryName,
   renderedAt,
 }: Props) {
   const printedAt = renderedAt ?? new Date();

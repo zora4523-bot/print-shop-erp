@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth/session';
 import { getOrderForPrint } from '@/lib/order/print-view';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { buildPrintHtml } from '@/lib/order/print-html';
+import { getSetting } from '@/lib/settings';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import {
@@ -85,7 +86,8 @@ export async function GET(_req: Request, ctx: Params) {
     }
   } else {
     try {
-      const html = await buildPrintHtml(order);
+      const factory = await getSetting('factory_name');
+      const html = await buildPrintHtml(order, { factoryName: factory.name });
       pdf = await renderHtmlToPdf({ html });
     } catch (err) {
       // Most likely cause here is Chromium not yet installed on the

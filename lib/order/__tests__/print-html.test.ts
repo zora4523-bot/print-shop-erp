@@ -6,6 +6,21 @@ import type { PrintOrder } from '../../../components/business/order/OrderPrintLa
 // only that the layout consumes whatever string the view-model gives.
 const STUB_QR_SVG = '<svg data-stub-qr="1"></svg>';
 
+// 厂名现在是必填参数（见 OrderPrintLayout 的 Props 注释）。绝大多数用例不
+// 关心它，走这个 helper 保持调用点只写 order 一个变量；专门验证厂名的用例
+// 在下面直接调 buildPrintHtml。
+const TEST_FACTORY_NAME = '佛山红包印刷厂';
+
+function renderPrintHtml(
+  order: PrintOrder,
+  options: { renderedAt?: Date; factoryName?: string } = {},
+): Promise<string> {
+  return buildPrintHtml(order, {
+    factoryName: TEST_FACTORY_NAME,
+    ...options,
+  });
+}
+
 function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
   return {
     id: 'order_abc',
@@ -50,7 +65,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
 
 describe('buildPrintHtml', () => {
   it('wraps the layout in a complete html document with charset + title', async () => {
-    const html = await buildPrintHtml(fixtureOrder());
+    const html = await renderPrintHtml(fixtureOrder());
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toMatch(/<html lang="zh-CN">/);
     expect(html).toMatch(/<meta charset="utf-8"/);
@@ -58,8 +73,18 @@ describe('buildPrintHtml', () => {
     expect(html).toMatch(/<\/html>\s*$/);
   });
 
+  it('prints the factory name it is given', async () => {
+    // 这条断言此前不存在，所以「三个渲染入口都没传 factoryName、组件默默用
+    // 默认值」一直没被发现。参数化验证，避免又写死一个字面量。
+    const html = await buildPrintHtml(fixtureOrder(), {
+      factoryName: '示例印刷厂',
+    });
+    expect(html).toContain('示例印刷厂');
+    expect(html).not.toContain('红包印刷厂');
+  });
+
   it('renders the order number + submitter in the body', async () => {
-    const html = await buildPrintHtml(fixtureOrder());
+    const html = await renderPrintHtml(fixtureOrder());
     expect(html).toContain('20260423-0001');
     expect(html).toContain('小王');
     expect(html).toContain('销售');
@@ -69,11 +94,11 @@ describe('buildPrintHtml', () => {
     // Every order has "急单：否" in the metadata row AND the
     // .urgent-banner CSS rule in the inline <style> block, so the
     // discriminator is the rendered banner div (class + unique copy).
-    const calm = await buildPrintHtml(fixtureOrder());
+    const calm = await renderPrintHtml(fixtureOrder());
     expect(calm).not.toMatch(/<div class="urgent-banner">/);
     expect(calm).toContain('急单：否');
 
-    const urgent = await buildPrintHtml(fixtureOrder({ isUrgent: true }));
+    const urgent = await renderPrintHtml(fixtureOrder({ isUrgent: true }));
     expect(urgent).toMatch(/<div class="urgent-banner">[^<]*急\s*单[^<]*请优先处理/);
     expect(urgent).toContain('急单：【是】');
   });
@@ -82,13 +107,13 @@ describe('buildPrintHtml', () => {
     // orderNo is cuid-shaped in practice, but we still harden the
     // title injection path — a future custom orderNo shouldn't be able
     // to slip a </title><script> through the PDF pipeline.
-    const html = await buildPrintHtml(fixtureOrder({ orderNo: '<script>x</script>' }));
+    const html = await renderPrintHtml(fixtureOrder({ orderNo: '<script>x</script>' }));
     expect(html).toContain('<title>工单 &lt;script&gt;x&lt;/script&gt;</title>');
     expect(html).not.toContain('<title>工单 <script>');
   });
 
   it('renders craft names, not raw IDs', async () => {
-    const html = await buildPrintHtml(
+    const html = await renderPrintHtml(
       fixtureOrder({
         items: [
           { ...fixtureOrder().items[0]!, craftNames: ['烫金', '起鼓'] },
@@ -101,7 +126,7 @@ describe('buildPrintHtml', () => {
   });
 
   it('prints every selected foil color', async () => {
-    const html = await buildPrintHtml(
+    const html = await renderPrintHtml(
       fixtureOrder({
         items: [
           {
@@ -115,7 +140,7 @@ describe('buildPrintHtml', () => {
   });
 
   it('prints rework lineage, SF collect, and every shipment allocation', async () => {
-    const html = await buildPrintHtml(
+    const html = await renderPrintHtml(
       fixtureOrder({
         kind: 'REWORK',
         sourceOrderNo: 'GD-260730-001',
@@ -168,17 +193,17 @@ describe('buildPrintHtml', () => {
   });
 
   it('shows "无设计图" when the item has none', async () => {
-    const html = await buildPrintHtml(fixtureOrder());
+    const html = await renderPrintHtml(fixtureOrder());
     expect(html).toContain('（无设计图）');
   });
 
   it('omits the task table when the item has no tasks', async () => {
-    const html = await buildPrintHtml(fixtureOrder());
+    const html = await renderPrintHtml(fixtureOrder());
     expect(html).not.toContain('任务号');
   });
 
   it('renders the task table once tasks exist', async () => {
-    const html = await buildPrintHtml(
+    const html = await renderPrintHtml(
       fixtureOrder({
         items: [
           {
