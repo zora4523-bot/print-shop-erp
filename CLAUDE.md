@@ -26,7 +26,7 @@ UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
 状态：Server Components 优先，必要时用 useState
 测试：
-  - 单元测试：Vitest（node 环境，`vitest.config.ts`；181 个测试文件）
+  - 单元测试：Vitest（node 环境，`vitest.config.ts`；184 个测试文件 / 2440 项）
   - 渲染/交互断言：Playwright（`tests/e2e`）+ 截图与响应式门禁（`tests/visual`）
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
 可观测性：OpenTelemetry（instrumentation.ts） + Sentry（错误监控）
@@ -249,6 +249,15 @@ export async function createOrder(data: OrderInput) {
 
 **禁止**：在 `components/` 或 `app/` 的 JSX 中做权限判断来显示/隐藏按钮。正确做法是在 Server Component 里预先判断权限、传给 Client Component 一个 boolean 属性。
 
+**三类例外**（实测 99 个 Server Action 中恰好 3 个，全部合理，不要"修复"它们）：
+
+1. **鉴权入口本身**：`actions/auth.ts` 的 `signInWithCredentials` —— 登录前定义上没有 session。
+2. **自助操作**：`actions/account.ts` 的 `changeMyPassword` / `signOutAction` —— 只作用于调用者
+   自己，用 `lib/auth/session.ts` 的 `requireSession()` 而不是权限字典。权限字典里没有也不该有
+   `account:self` 这类 key（这三条正是 §15.8 单列的零 JS 硬约束路径）。
+3. **纯签名适配层**：如 `actions/production.ts` 的 `beginTaskFormAction`，函数体只是
+   `return beginTaskAction(taskId)`，真闸口在被调方。这类必须在注释里写明闸口在哪。
+
 ### 4.7 金额处理
 
 **所有金额使用 Prisma Decimal 或 integer (分为单位)**，禁止用 float/number。
@@ -278,7 +287,10 @@ amount: 12.34     // JS float 精度问题
 - 文件名：kebab-case（`machine-piecework.ts`）
 - 组件文件：PascalCase（`OrderList.tsx`）
 - React组件：PascalCase
-- 函数：camelCase，动词开头（`calcPiecework`、`transitionOrder`）
+- 函数：camelCase。**执行动作的**用动词开头（`calcPiecework`、`transitionOrder`、`settleCsPeriod`）；
+  **纯 getter / 派生值**可以用名词短语，仓库已有三个成建制的族，跟随即可：
+  `<x>Label`（`roleLabel`、`billStatusLabel`…）、`<x>LockKey`（`salaryRuleLockKey`…）、
+  上海时钟（`todayShanghai`、`currentShanghaiMonth`…）
 - 常量：SCREAMING_SNAKE_CASE
 - 类型：PascalCase，接口不加`I`前缀
 
@@ -349,7 +361,27 @@ await notify('ORDER_SUBMITTED', { orderId: order.id });
 
 ### 7.2 推送事件枚举
 
-所有事件类型定义在 `lib/notification/events.ts`，禁止用字符串字面量。
+事件类型的**权威定义**在 `lib/notification/events.ts` 的 `NOTIFICATION_EVENTS`。
+
+**调用时直接写字符串字面量是推荐写法**，不要改成 `NOTIFICATION_EVENTS.ORDER_SUBMITTED`：
+
+```typescript
+// ✅ 推荐
+await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName });
+```
+
+两个理由，都不是风格问题：
+
+1. **字面量已经受类型约束**。`dispatchNotification<E extends NotificationEvent>(event: E,
+   payload: NotificationPayloadFor<E>)` —— 事件名既被字典收窄，又是驱动 payload 逐事件推断
+   的泛型实参。写错事件名或漏写 payload 字段，`tsc` 当场报错（实测：传
+   `'NOT_A_REAL_EVENT'` → `TS2345: not assignable to parameter of type 'NotificationEvent'`）。
+2. **字面量在改事件名时更安全**。这些 value 是 `NotificationRule` / `NotificationLog.eventType`
+   的数据库行值。改 `NOTIFICATION_EVENTS.X` 的 **value** 时，字面量写法会让全部调用点 tsc 报错、
+   逼你写 migration；用常量引用反而全绿，线上事件名静默漂移、旧规则失配。
+
+`NOTIFICATION_EVENTS` 常量用在**遍历/白名单**场景（admin 配置页、background-jobs 的类型校验），
+不用在调用点。
 
 ---
 
@@ -375,8 +407,12 @@ await notify('ORDER_SUBMITTED', { orderId: order.id });
 Mode**。组件层的验证分两处落地：
 
 - **纯逻辑部分用 Vitest**：Zod schema 校验、报工数量约束、打印布局的网格计算、导航菜单与权限
-  相关的可见性推导 —— 抽成纯函数放 `lib/`，在 node 环境测（`components/**/__tests__/` 里的测试
-  也是这一类，测的是逻辑不是 DOM）。
+  相关的可见性推导 —— 抽成纯函数放 `lib/`，在 node 环境测。
+- **SSR markup 断言也用 Vitest**（第三种形态，20 个测试文件在用）：`renderToStaticMarkup` +
+  `vi.mock('react')` 注入 `useActionState` 状态，断言渲染出的 HTML。用于**Playwright 结构上够
+  不到**的场景 —— 典型是逐字段错误的 aria 连线：错误 DOM 只在提交失败后存在，而 `tests/visual`
+  的 axe 门禁断言的是页面加载态，那条路径它一次都走不到。
+  见 `components/business/order/__tests__/EditOrderForm.aria.test.tsx`。
 - **真实渲染用 Playwright**：`tests/visual/` 在真实 Chromium 下跑截图、响应式裁切/溢出/触控目标
   与 axe 无障碍门禁（6 视口 × 明暗模式）。
 
@@ -746,5 +782,5 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 ---
 
 **本文档版本**：1.2
-**最后更新**：2026-08-17
+**最后更新**：2026-08-19
 **维护者**：业主 + Claude Code / Codex
