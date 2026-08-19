@@ -56,7 +56,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">物料清单</h2>
         {bom.items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无物料行。</p>
+          <p className="text-sm text-muted-foreground">暂无物料行</p>
         ) : (
           <div
             className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

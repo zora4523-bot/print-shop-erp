@@ -204,7 +204,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               {fetchPending && rows.length === 0 ? (
                 <EmptyRow text="正在读取库存..." />
               ) : rows.length === 0 ? (
-                <EmptyRow text="暂无匹配物料。" />
+                <EmptyRow text="暂无匹配物料" />
               ) : (
                 rows.flatMap((row) => {
                   if (row.locations.length === 0) {

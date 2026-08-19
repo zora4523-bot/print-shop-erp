@@ -79,7 +79,7 @@ export default async function OwnerWarehousesPage() {
               <th className="px-3 py-2">采购单</th><th className="px-3 py-2">供应商</th><th className="px-3 py-2">物料</th><th className="px-3 py-2 text-right">订购</th><th className="px-3 py-2 text-right">已收</th><th className="px-3 py-2 text-right">待收</th><th className="px-3 py-2">预计日期</th>
             </tr></thead>
             <tbody>
-              {dashboard.pendingReceipts.length === 0 ? <EmptyRow columns={7} text="暂无待收货明细。" /> : dashboard.pendingReceipts.map((item) => (
+              {dashboard.pendingReceipts.length === 0 ? <EmptyRow columns={7} text="暂无待收货明细" /> : dashboard.pendingReceipts.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">
                   <td className="px-3 py-2"><Link className="font-sans tabular-nums text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><Badge variant="outline">{PURCHASE_ORDER_STATUS_LABELS[item.purchaseOrder.status]}</Badge></div></td>
                   <td className="px-3 py-2">{item.purchaseOrder.supplierName}</td>
@@ -115,7 +115,7 @@ export default async function OwnerWarehousesPage() {
           <table className="w-full text-sm">
             <thead><tr className="border-b text-left text-muted-foreground"><th className="px-3 py-2">仓库 / 库位</th><th className="px-3 py-2">物料</th><th className="px-3 py-2 text-right">库存</th></tr></thead>
             <tbody>
-              {dashboard.locationStocks.length === 0 ? <EmptyRow columns={3} text="暂无库位库存记录。" /> : dashboard.locationStocks.map((stock) => (
+              {dashboard.locationStocks.length === 0 ? <EmptyRow columns={3} text="暂无库位库存记录" /> : dashboard.locationStocks.map((stock) => (
                 <tr key={`${stock.materialId}:${stock.locationId}`} className="border-b last:border-0">
                   <td className="px-3 py-2"><div>{stock.warehouse.name} / {stock.location.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.warehouse.code} / {stock.location.code}</div></td>
                   <td className="px-3 py-2"><div>{stock.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.material.code}</div></td>
@@ -133,7 +133,7 @@ export default async function OwnerWarehousesPage() {
           <table className="w-full text-sm">
             <thead><tr className="border-b text-left text-muted-foreground"><th className="px-3 py-2">时间</th><th className="px-3 py-2">物料</th><th className="px-3 py-2">类型</th><th className="px-3 py-2">库位</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2">操作人</th></tr></thead>
             <tbody>
-              {dashboard.recentTransactions.length === 0 ? <EmptyRow columns={6} text="暂无库存流水。" /> : dashboard.recentTransactions.map((transaction) => (
+              {dashboard.recentTransactions.length === 0 ? <EmptyRow columns={6} text="暂无库存流水" /> : dashboard.recentTransactions.map((transaction) => (
                 <tr key={transaction.id} className="border-b last:border-0">
                   <td className="px-3 py-2 whitespace-nowrap">{formatDateTimeShanghai(transaction.occurredAt)}</td>
                   <td className="px-3 py-2"><div>{transaction.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{transaction.material.code}</div></td>
@@ -151,7 +151,7 @@ export default async function OwnerWarehousesPage() {
       <section className="grid gap-6 xl:grid-cols-2">
         <DocumentList
           title="最近调拨单"
-          empty="暂无调拨单。"
+          empty="暂无调拨单"
           rows={recentTransfers.map((transfer) => ({
             id: transfer.id,
             number: transfer.transferNo,
@@ -162,7 +162,7 @@ export default async function OwnerWarehousesPage() {
         />
         <DocumentList
           title="最近盘点单"
-          empty="暂无盘点单。"
+          empty="暂无盘点单"
           rows={recentCounts.map((count) => ({
             id: count.id,
             number: count.countNo,

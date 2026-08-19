@@ -50,7 +50,7 @@ export function WorkerMachineRuleForm({
   const [pending, startTransition] = useTransition();
 
   if (!selectedWorker || !machineType) {
-    return <p className="text-sm text-muted-foreground">暂无启用中的开机师傅。</p>;
+    return <p className="text-sm text-muted-foreground">暂无启用中的开机师傅</p>;
   }
 
   return (

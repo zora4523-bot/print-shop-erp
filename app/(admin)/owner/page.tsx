@@ -195,7 +195,7 @@ export default async function OwnerDashboardPage() {
           description="完工但未发货 · 急单优先"
           rows={pendingShipments.rows}
           rowKey={(r) => r.id}
-          emptyText="暂无待发货工单 — 所有完工单已发货。"
+          emptyText="暂无待发货工单 — 所有完工单已发货"
           columns={pendingShipmentColumns}
           footer={
             // 没做 /orders?status=COMPLETED 过滤入口（orders index 不读
@@ -213,7 +213,7 @@ export default async function OwnerDashboardPage() {
           description="预计交付日已过仍未收"
           rows={overdueOutsourcing}
           rowKey={(r) => r.id}
-          emptyText="暂无超期外协。"
+          emptyText="暂无超期外协"
           columns={overdueOutsourceColumns}
         />
 
@@ -223,7 +223,7 @@ export default async function OwnerDashboardPage() {
           description="承诺交期已逾期或 3 天内到期 · 未发货工单"
           rows={dueOrders}
           rowKey={(r) => r.id}
-          emptyText="暂无交期风险工单。"
+          emptyText="暂无交期风险工单"
           columns={dueOrderColumns}
         />
       </div>

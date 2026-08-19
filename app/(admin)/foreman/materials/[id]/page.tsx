@@ -95,7 +95,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库位库存</h2>
         {locationStocks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无库位库存记录。</p>
+          <p className="text-sm text-muted-foreground">暂无库位库存记录</p>
         ) : (
           <div
             className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

@@ -141,7 +141,7 @@ export function CreateBundleForm({
                       {o.orderNo}
                     </td>
                     <td className="px-3 py-2">{o.customerRef ?? '—'}</td>
-                    <td className="px-3 py-2 text-right">{o.cdrCount}</td>
+                    <td className="px-3 py-2 text-right font-sans tabular-nums">{o.cdrCount}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {formatDateTimeShanghai(new Date(o.submittedAt))}
                     </td>

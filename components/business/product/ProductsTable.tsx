@@ -49,7 +49,7 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
             <TableCell className="text-right font-sans tabular-nums text-xs">
               {formatPrice(p.baseUnitPrice)}
             </TableCell>
-            <TableCell className="text-right text-muted-foreground">
+            <TableCell className="text-right font-sans tabular-nums text-muted-foreground">
               {p.minOrderQty ?? '—'}
             </TableCell>
             <TableCell>

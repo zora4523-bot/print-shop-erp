@@ -34,7 +34,7 @@ export function BomsTable({
   categoryLabelById: Record<string, string>;
 }) {
   if (boms.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无 BOM。</p>;
+    return <p className="text-sm text-muted-foreground">暂无 BOM</p>;
   }
 
   return (
@@ -63,7 +63,7 @@ export function BomsTable({
             <TableCell className="text-right font-sans tabular-nums text-xs">
               {bom.baseQuantity}
             </TableCell>
-            <TableCell className="text-right">{bom._count.items}</TableCell>
+            <TableCell className="text-right font-sans tabular-nums">{bom._count.items}</TableCell>
             <TableCell>
               <Badge variant={bom.isActive ? 'outline' : 'secondary'}>
                 {bom.isActive ? '启用' : '停用'}

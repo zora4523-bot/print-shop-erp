@@ -143,7 +143,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">收货记录</h2>
         {order.receipts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无收货记录。</p>
+          <p className="text-sm text-muted-foreground">暂无收货记录</p>
         ) : (
           <div className="space-y-4">
             {order.receipts.map((receipt) => (

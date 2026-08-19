@@ -813,7 +813,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             </strong>
           </div>
           {pieceworkSummary.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无已汇总计件明细。</p>
+            <p className="text-sm text-muted-foreground">暂无已汇总计件明细</p>
           ) : (
             <ul className="divide-y text-sm">
               {pieceworkSummary.items.map((item) => (
@@ -900,7 +900,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
               </table>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">暂无人工补录成本。</p>
+            <p className="text-sm text-muted-foreground">暂无人工补录成本</p>
           )}
           <div className="border-t pt-4">
             <OrderCostEntryForm

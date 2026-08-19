@@ -469,7 +469,7 @@ function StepsPanel({
           ))}
         </ol>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">暂无推荐步骤。</p>
+        <p className="mt-2 text-xs text-muted-foreground">暂无推荐步骤</p>
       )}
     </div>
   );

@@ -121,8 +121,8 @@ export default async function ForemanCdrPage({
                           new Date(b.dateRangeTo.getTime() - 1),
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">{b.orderCount}</td>
-                      <td className="px-4 py-3 text-right">{b.fileCount}</td>
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">{b.orderCount}</td>
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">{b.fileCount}</td>
                       <td className="px-4 py-3">
                         {b.status === DesignBundleStatus.PENDING ? (
                           <Badge variant="outline">排队生成中</Badge>
@@ -147,7 +147,7 @@ export default async function ForemanCdrPage({
                       <td className="px-4 py-3 text-xs">
                         {formatDateTimeShanghai(b.expiresAt)}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">
                         {b.downloadCount}
                       </td>
                       <td className="px-4 py-3 text-xs">{b.createdByName}</td>
