@@ -20,7 +20,8 @@ export type IconName =
   | 'Sparkles'
   | 'Bell'
   | 'FileArchive'
-  | 'Database';
+  | 'Database'
+  | 'Settings';
 
 export type AdminModuleStatus = 'implemented' | 'placeholder';
 
@@ -312,6 +313,18 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 140,
     menuRoles: [Role.ADMIN],
     requiredPermission: 'notification:config',
+  },
+  {
+    id: 'owner.settings',
+    label: '系统设置',
+    routeBase: '/owner/settings',
+    iconName: 'Settings',
+    breadcrumbLabel: '系统设置',
+    menuSection: 'operations',
+    status: 'implemented',
+    menuOrder: 135,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'setting:manage',
   },
   {
     id: 'owner.pigsty',

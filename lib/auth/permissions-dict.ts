@@ -67,6 +67,7 @@ export const PERMISSIONS = {
   'notification:config':        [Role.ADMIN],
 
   // 运维
+  'setting:manage':             [Role.ADMIN],
   'ops:pigsty:view':            [Role.ADMIN],
   'ops:jobs:manage':            [Role.ADMIN],
 

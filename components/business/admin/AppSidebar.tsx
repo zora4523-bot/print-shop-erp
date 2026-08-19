@@ -19,6 +19,7 @@ import {
   LoaderCircle,
   PackageOpen,
   PlusCircle,
+  Settings,
   Sparkles,
   TrendingUp,
   Users,
@@ -65,6 +66,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   Bell,
   FileArchive,
   Database,
+  Settings,
 };
 
 type AppSidebarProps = {

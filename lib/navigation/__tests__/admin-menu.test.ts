@@ -28,7 +28,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(29);
+    expect(items).toHaveLength(30);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -55,6 +55,7 @@ describe('getAdminMenuItems', () => {
       '物料',
       '仓库/库位',
       '用户管理',
+      '系统设置',
       '推送配置',
       '后台任务',
       'Pigsty 运维',

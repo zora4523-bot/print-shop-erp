@@ -265,6 +265,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     },
     { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库作业台' },
     { name: 'pigsty', path: '/owner/pigsty', readyHeading: 'Pigsty 运维' },
+    { name: 'settings', path: '/owner/settings', readyHeading: '系统设置' },
     {
       name: 'not-found',
       path: '/orders/e2e-admin-ui-missing',
