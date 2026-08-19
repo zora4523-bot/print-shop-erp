@@ -257,3 +257,33 @@ describe('calcMachineDailySalary', () => {
     );
   });
 });
+
+describe('小单保护的规则完整性（§15.5：绝不 fallback 到 0）', () => {
+  it('设了阈值却没有小单一口价 → 抛错，不按 0 结算', () => {
+    const broken: MachineSalaryRule = {
+      ...HAND_PRESS_RULE,
+      smallOrderThreshold: 1000,
+      smallOrderFlatPrice: null,
+    };
+    expect(() =>
+      calcMachinePiecework(
+        { quantity: 500, itemCount: 1, isDoubleSided: false, isDoubleColor: false },
+        broken,
+      ),
+    ).toThrow('小单保护规则不完整');
+  });
+
+  it('无小单保护（阈值为 null）时不受影响，走正常计件', () => {
+    const noSmallOrder: MachineSalaryRule = {
+      ...HAND_PRESS_RULE,
+      smallOrderThreshold: null,
+      smallOrderFlatPrice: null,
+    };
+    // 注意用 Breakdown 版本：calcMachinePiecework 只返回 Decimal 金额
+    const r = calcMachinePieceworkBreakdown(
+      { quantity: 500, itemCount: 1, isDoubleSided: false, isDoubleColor: false },
+      noSmallOrder,
+    );
+    expect(r.smallOrder).toBe(false);
+  });
+});

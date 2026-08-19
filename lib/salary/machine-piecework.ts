@@ -82,12 +82,21 @@ export function calcMachinePieceworkBreakdown(
       (rule.smallOrderInclusive === true &&
         task.quantity === rule.smallOrderThreshold))
   ) {
+    // 类型上 threshold 与 flatPrice 是两个独立的可空字段，但业务不变量是
+    // 「有阈值就必须有 flat price」（见上面 smallOrderFlatPrice 的注释）。
+    // 之前这里是 `?? 0`——配置漏了 flat price 时小单静默按 0 结算，正是
+    // CLAUDE.md §15.5 列为头号事故的那种失败。拒绝继续，不猜。
+    if (rule.smallOrderFlatPrice === null || rule.smallOrderFlatPrice === undefined) {
+      throw new Error(
+        '小单保护规则不完整：设置了小单阈值但没有小单一口价，拒绝按 0 结算',
+      );
+    }
     return {
       smallOrder: true,
       multiplier: 1,
       boardCount: 0,
       pressCount: 0,
-      amount: new Decimal(rule.smallOrderFlatPrice ?? 0),
+      amount: new Decimal(rule.smallOrderFlatPrice),
     };
   }
 

@@ -131,3 +131,32 @@ describe('calcCsMonthlyBaseTotal / calcCsTotalIncome', () => {
     eq(baseTotal, '6001.50');
   });
 });
+
+describe('守卫路径（§4.3 要求 100% 覆盖；这些是"拒绝继续"而不是静默算错的闸口）', () => {
+  it('业绩金额非有限数 → 抛错，不产出提成', () => {
+    expect(() => calcCsCommission(new Decimal(NaN), SEED_TIERS)).toThrow(
+      '客服业绩金额非法',
+    );
+    expect(() => calcCsCommission(new Decimal(Infinity), SEED_TIERS)).toThrow(
+      '客服业绩金额非法',
+    );
+  });
+
+  it('档位门槛非法（负数 / 非有限 / 超两位小数）→ 抛错', () => {
+    const negative: CsTiersConfig = {
+      mode: 'FLAT',
+      tiers: [{ minSales: '-1', rate: '0.01' }],
+    };
+    expect(() => calcCsCommission(new Decimal(100000), negative)).toThrow(
+      '客服提成档位的业绩门槛非法',
+    );
+
+    const tooPrecise: CsTiersConfig = {
+      mode: 'FLAT',
+      tiers: [{ minSales: '100000.123', rate: '0.01' }],
+    };
+    expect(() => calcCsCommission(new Decimal(100000), tooPrecise)).toThrow(
+      '客服提成档位的业绩门槛非法',
+    );
+  });
+});
