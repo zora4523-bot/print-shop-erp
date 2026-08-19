@@ -111,8 +111,11 @@ export type OverdueOutsourceRow = {
  * `expectedDate < todayStart` 恰好等价于阈值 = 1，也就是说 seed 里那行配置
  * 从来只是碰巧和代码一致，改它没有任何效果。
  *
- * `daysOverdue` 在 JS 侧算（schema 没存）：Math.floor((today - expected)
- * / 1day)。阈值为 N 时，结果里最小的 daysOverdue 就是 N。
+ * `daysOverdue` 在 JS 侧算（schema 没存），走 promisedDaysLeft 的**日历日**
+ * 口径。不能直接用 todayStart 减 expectedDate：前者是上海日界（UTC 零点 −8h），
+ * 后者由 parseStrictYmd 存成「该日历日的 UTC 零点」，两个锚点差 8 小时，
+ * Math.floor 之后恒少 1 天——看板会把逾期 1 天的单显示成「超期 0 天」。
+ * 阈值为 N 时，结果里最小的 daysOverdue 就是 N。
  */
 export async function getOverdueOutsourcing(
   now: Date = new Date(),
@@ -142,16 +145,21 @@ export async function getOverdueOutsourcing(
     },
   });
 
-  return raw.map((r) => ({
-    id: r.id,
-    supplierName: r.supplierName,
-    expectedDate: r.expectedDate as Date,
-    status: r.status,
-    orderNo: r.order?.orderNo ?? null,
-    daysOverdue: Math.floor(
-      (todayStart.getTime() - (r.expectedDate as Date).getTime()) / MS_PER_DAY,
-    ),
-  }));
+  return raw.map((r) => {
+    // promisedDaysLeft 返回「还剩几天」（逾期为负），取反即逾期天数。复用它
+    // 而不是自己再减一遍，是因为它已经把两边归一到日历日了。
+    // 单独判 0 是为了不让 -0 漏出去：取反 0 得到的是 -0，页面上看不出来，
+    // 但 Object.is(-0, 0) 是 false，断言和快照会莫名其妙地不等。
+    const daysLeft = promisedDaysLeft(r.expectedDate as Date, now);
+    return {
+      id: r.id,
+      supplierName: r.supplierName,
+      expectedDate: r.expectedDate as Date,
+      status: r.status,
+      orderNo: r.order?.orderNo ?? null,
+      daysOverdue: daysLeft === 0 ? 0 : -daysLeft,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────

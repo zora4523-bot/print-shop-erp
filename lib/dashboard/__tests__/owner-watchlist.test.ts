@@ -184,13 +184,16 @@ describe('getOverdueOutsourcing', () => {
   });
 
   it('daysOverdue 计算：3 天前预计 → 3 天超期', async () => {
-    // todayStart = UTC 2026-04-25T16:00 = Shanghai 2026-04-26T00:00
-    // expectedDate = Shanghai 2026-04-23T00:00 = UTC 2026-04-22T16:00
+    // 上海今天 2026-04-26。expectedDate 用**生产真实入库形状**：
+    // createOutsourceSchema → optionalDateField → parseStrictYmd 存的是
+    // 「该日历日的 UTC 零点」（lib/auth/schemas.ts:2213），不是上海零点。
+    // 这里原本写 2026-04-22T16:00:00Z（上海零点表示法），是一种写入路径
+    // 永远不会产生的形态，所以 daysOverdue 少算 1 天的缺陷一直测不出来。
     dbMock.outsourceOrder.findMany.mockResolvedValue([
       {
         id: 'os1',
         supplierName: '阿福外协',
-        expectedDate: new Date('2026-04-22T16:00:00Z'),
+        expectedDate: new Date('2026-04-23T00:00:00Z'),
         status: 'IN_PROGRESS',
         order: { orderNo: 'O-1' },
       },
@@ -207,7 +210,7 @@ describe('getOverdueOutsourcing', () => {
       {
         id: 'os1',
         supplierName: '独立外协',
-        expectedDate: new Date('2026-04-22T16:00:00Z'),
+        expectedDate: new Date('2026-04-23T00:00:00Z'),
         status: 'SENT',
         order: null,
       },
@@ -219,18 +222,37 @@ describe('getOverdueOutsourcing', () => {
   // 边界：expected = today 不应被 PRISMA 过滤掉（lt 半开），所以这里
   // mock 不会返回它；但若 mock 真返回 todayStart，daysOverdue=0，UI 应
   // 该不渲染（业务上"今日预计今日没收"还不算"超期"）。
-  it('expected = todayStart → daysOverdue=0（边界）', async () => {
+  it('expected = 今天 → daysOverdue=0（边界）', async () => {
     dbMock.outsourceOrder.findMany.mockResolvedValue([
       {
         id: 'os1',
         supplierName: '阿福外协',
-        expectedDate: new Date('2026-04-25T16:00:00Z'), // exactly todayStart
+        // 上海今天 2026-04-26 的入库形状
+        expectedDate: new Date('2026-04-26T00:00:00Z'),
         status: 'SENT',
         order: { orderNo: 'O-1' },
       },
     ]);
     const r = await getOverdueOutsourcing(new Date('2026-04-26T08:00:00Z'));
     expect(r[0]!.daysOverdue).toBe(0);
+  });
+
+  it('逾期天数按日历日算，不受上海日界与 UTC 零点的 8 小时错位影响', async () => {
+    // 回归门禁：daysOverdue 曾经用 todayStart（上海日界 = UTC 零点 −8h）
+    // 直接减 expectedDate（UTC 零点），Math.floor 后恒少 1 天——逾期 1 天
+    // 的单在看板上显示成「超期 0 天」，OUTSOURCE_OVERDUE 推送也发 0。
+    dbMock.outsourceOrder.findMany.mockResolvedValue(
+      ['2026-04-25', '2026-04-24', '2026-04-23', '2026-04-22'].map((ymd, i) => ({
+        id: `os${i}`,
+        supplierName: '阿福外协',
+        expectedDate: new Date(`${ymd}T00:00:00Z`),
+        status: 'SENT',
+        order: null,
+      })),
+    );
+    const r = await getOverdueOutsourcing(new Date('2026-04-26T08:00:00Z'));
+    // 上海今天 2026-04-26，所以依次是逾期 1/2/3/4 天
+    expect(r.map((x) => x.daysOverdue)).toEqual([1, 2, 3, 4]);
   });
 });
 
