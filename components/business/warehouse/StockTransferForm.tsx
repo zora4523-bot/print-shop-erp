@@ -82,6 +82,7 @@ export function StockTransferForm({
           <select
             id="transfer-material"
             name="materialId"
+            {...fieldA11y("transfer-material", errors.materialId?.[0])}
             className={selectClass}
             value={materialId}
             onChange={(event) => setMaterialId(event.target.value)}
@@ -99,6 +100,7 @@ export function StockTransferForm({
           <select
             id="transfer-source"
             name="sourceLocationId"
+            {...fieldA11y("transfer-source", errors.sourceLocationId?.[0])}
             className={selectClass}
             value={sourceLocationId}
             onChange={(event) => setSourceLocationId(event.target.value)}
@@ -121,6 +123,7 @@ export function StockTransferForm({
           <select
             id="transfer-destination"
             name="destinationLocationId"
+            {...fieldA11y("transfer-destination", errors.destinationLocationId?.[0])}
             className={selectClass}
             value={destinationLocationId}
             onChange={(event) => setDestinationLocationId(event.target.value)}
@@ -146,10 +149,10 @@ export function StockTransferForm({
           label={`调拨数量${selectedMaterial ? `（${selectedMaterial.unit}）` : ''}`}
           error={errors.quantity?.[0]}
         >
-          <Input id="transfer-quantity" name="quantity" inputMode="decimal" disabled={pending} />
+          <Input id="transfer-quantity" name="quantity" {...fieldA11y("transfer-quantity", errors.quantity?.[0])} inputMode="decimal" disabled={pending} />
         </Field>
         <Field id="transfer-remark" label="备注（选填）" error={errors.remark?.[0]}>
-          <Input id="transfer-remark" name="remark" disabled={pending} />
+          <Input id="transfer-remark" name="remark" {...fieldA11y("transfer-remark", errors.remark?.[0])} disabled={pending} />
         </Field>
       </div>
 
@@ -167,6 +170,16 @@ export function StockTransferForm({
   );
 }
 
+// 与 components/business/price/ExternalSalesPriceBookDraftForms.tsx 的
+// fieldA11y 同形状：把「控件 ↔ 错误文案」的程序化关联收成一处，避免在
+// 每个调用点重复写两条 aria。
+function fieldA11y(id: string, error?: string) {
+  return {
+    'aria-invalid': Boolean(error),
+    'aria-describedby': error ? `${id}-error` : undefined,
+  } as const;
+}
+
 function Field({
   id,
   label,
@@ -182,7 +195,13 @@ function Field({
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       {children}
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {/* 逐字段错误不用 role="alert"：靠 aria-describedby 与控件关联，
+          聚焦时读屏器自然读出。标 alert 会在每次校验时抢播报。 */}
+      {error ? (
+        <p id={`${id}-error`} className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

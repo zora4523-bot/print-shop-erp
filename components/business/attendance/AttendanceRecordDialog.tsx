@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useTransition } from 'react';
+import { useActionState, useId, useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -260,6 +260,10 @@ function NumberField({
   onChange: (v: string) => void;
   errors: string[];
 }) {
+  // useId 而不是按 label 派生 id：label 是中文，拿来做 id 既不稳定也不
+  // 合法；useId 在 SSR/CSR 两侧一致，不会引起 hydration 不匹配。
+  const errorId = `${useId()}-error`;
+  const hasError = errors.length > 0;
   return (
     <label className="block">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -272,10 +276,14 @@ function NumberField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="0"
-        className={`mt-1 ${errors.length > 0 ? 'border-destructive' : ''}`}
+        aria-invalid={hasError}
+        aria-describedby={hasError ? errorId : undefined}
+        className={`mt-1 ${hasError ? 'border-destructive' : ''}`}
       />
-      {errors.length > 0 ? (
-        <p className="mt-1 text-xs text-destructive">{errors[0]}</p>
+      {hasError ? (
+        <p id={errorId} className="mt-1 text-xs text-destructive">
+          {errors[0]}
+        </p>
       ) : null}
     </label>
   );

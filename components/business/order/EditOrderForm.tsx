@@ -173,6 +173,8 @@ function Field({
   disabled?: boolean;
   type?: string;
 }) {
+  const hasError = errors.length > 0;
+  const errorId = `${name}-error`;
   return (
     <div className={full ? 'sm:col-span-2' : undefined}>
       <Label htmlFor={name} className="text-sm text-muted-foreground">
@@ -184,6 +186,8 @@ function Field({
           name={name}
           disabled={disabled}
           defaultValue={initial ?? ''}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? errorId : undefined}
           className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
           rows={3}
         />
@@ -194,11 +198,18 @@ function Field({
           type={type}
           disabled={disabled}
           defaultValue={initial ?? ''}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? errorId : undefined}
           className="mt-1"
         />
       )}
-      {errors.length > 0 && (
-        <p className="mt-1 text-xs text-destructive">{errors[0]}</p>
+      {hasError && (
+        // 不用 role="alert"：逐字段错误靠 aria-describedby 与控件关联，
+        // 用户聚焦到该字段时读屏器自然读出来。标 alert 会在每次校验时
+        // 抢播报。
+        <p id={errorId} className="mt-1 text-xs text-destructive">
+          {errors[0]}
+        </p>
       )}
     </div>
   );

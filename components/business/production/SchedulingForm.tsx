@@ -357,6 +357,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                         }));
                       }}
                       invalid={err.length > 0}
+                      errorId={`worker-${key}-error`}
                     />
                   )}
                   {requiresInternalAssignment && candidates.length === 0 ? (
@@ -403,7 +404,12 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                     </div>
                   ) : null}
                   {err.length > 0 ? (
-                    <p className="mt-1 text-xs text-destructive">{err[0]}</p>
+                    <p
+                      id={`worker-${key}-error`}
+                      className="mt-1 text-xs text-destructive"
+                    >
+                      {err[0]}
+                    </p>
                   ) : null}
                 </td>
               </tr>
@@ -525,6 +531,7 @@ function WorkerSelect({
   value,
   onChange,
   invalid,
+  errorId,
 }: {
   workers: SchedulingViewCandidate[];
   craftId: string;
@@ -534,6 +541,9 @@ function WorkerSelect({
   value: string;
   onChange: (workerId: string) => void;
   invalid: boolean;
+  // 逐行错误文案的 id：invalid 此前只改边框颜色，读屏器完全感知不到
+  // 这一行有问题，也读不到原因。
+  errorId?: string;
 }) {
   const [search, setSearch] = useState('');
   // Sort by "recommended machine match first, then everyone else" so
@@ -576,6 +586,8 @@ function WorkerSelect({
         aria-label={label}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-invalid={invalid}
+        aria-describedby={invalid && errorId ? errorId : undefined}
         className={`w-full rounded-md border bg-background px-3 py-2 text-sm ${
           invalid ? 'border-destructive' : ''
         }`}
