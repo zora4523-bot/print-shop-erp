@@ -7,7 +7,7 @@ import {
   ReworkCause,
   Role,
   ShipmentStatus,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 const { dbMock, notifyMock } = vi.hoisted(() => {
   const mock = {

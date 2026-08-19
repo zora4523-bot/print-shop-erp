@@ -2,7 +2,7 @@ import type {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
-} from '../generated/prisma/client';
+} from '../generated/prisma/enums';
 
 export type CreateCustomerPriceBookDraftActionInput = {
   purpose: CustomerPriceBookPurpose;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CsSalesEntryType } from '../../../generated/prisma/client';
+import { CsSalesEntryType } from '../../../generated/prisma/enums';
 import {
   assertCsOrderSalesLedgerReconciledInTx,
   CsSalesLedgerError,

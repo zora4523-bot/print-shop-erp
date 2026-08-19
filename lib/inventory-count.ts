@@ -1,4 +1,4 @@
-import { MaterialCategory } from '../generated/prisma/client';
+import { MaterialCategory } from '../generated/prisma/enums';
 import { db } from './db';
 
 export type InventoryCountLocationRow = {

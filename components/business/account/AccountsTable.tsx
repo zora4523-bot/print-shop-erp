@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Role } from '../../../generated/prisma/client';
+import { Role } from '../../../generated/prisma/enums';
 import type { AccountSummary } from '@/lib/account';
 import {
   Table,

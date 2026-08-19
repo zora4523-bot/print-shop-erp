@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   MaterialCategory,
   TxDirection,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 
 const { dbMock, txMock } = vi.hoisted(() => {
   const tx = {

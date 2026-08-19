@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { Role } from '../generated/prisma/client';
+import { Role } from '../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 
 // `/` is a role dispatcher — `(admin)/(foreman)/(worker)/(sales)`

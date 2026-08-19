@@ -3,7 +3,7 @@ import {
   OrderStatus,
   ReworkCause,
   Role,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {

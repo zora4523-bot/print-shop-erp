@@ -4,7 +4,7 @@ import {
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
   TxDirection,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 
 const { dbMock, txMock, numberMock } = vi.hoisted(() => {
   const tx = {

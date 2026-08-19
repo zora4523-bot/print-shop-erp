@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MaterialCategory } from '../../generated/prisma/client';
+import { MaterialCategory } from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {

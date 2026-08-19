@@ -5,7 +5,7 @@ import {
   TaskStatus,
   type MachineType,
   type WorkerType,
-} from '@/generated/prisma/client';
+} from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
 import {
   getWorkerAssignmentEligibility,

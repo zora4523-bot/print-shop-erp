@@ -1,4 +1,4 @@
-import { OrderStatus, Role } from '../../generated/prisma/client';
+import { OrderStatus, Role } from '../../generated/prisma/enums';
 
 // Pure helper — no session / auth dependencies — so it can be imported
 // from anywhere (tests included) without dragging next-auth's server

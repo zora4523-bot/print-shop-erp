@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderStatus, Role } from '../../../generated/prisma/client';
+import { OrderStatus, Role } from '../../../generated/prisma/enums';
 
 vi.mock('@/lib/auth/session', () => ({
   requireSession: vi.fn(),

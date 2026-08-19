@@ -1,7 +1,7 @@
 import {
   BackgroundJobQueue,
   BackgroundJobStatus,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 import { db } from '../db';
 
 export type BackgroundJobHealth = {

@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from 'next-auth';
 import { Role } from '../../generated/prisma/enums';
-import type { WorkerType, MachineType } from '../../generated/prisma/client';
+import type { WorkerType, MachineType } from '../../generated/prisma/enums';
 
 type LegacyAdminRole = 'OWNER' | 'FOREMAN';
 

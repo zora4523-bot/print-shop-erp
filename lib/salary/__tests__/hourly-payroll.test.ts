@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import Decimal from 'decimal.js';
-import { WorkerType } from '../../../generated/prisma/client';
+import { WorkerType } from '../../../generated/prisma/enums';
 import {
   calcHourlyPayroll,
   HourlyPayrollError,

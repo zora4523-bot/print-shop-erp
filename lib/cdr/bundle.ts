@@ -4,7 +4,7 @@ import { parseStrictYmd } from '../auth/schemas';
 import {
   BackgroundJobQueue,
   DesignBundleStatus,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 import { enqueueBackgroundJob } from '../background-jobs/repository';
 import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
 

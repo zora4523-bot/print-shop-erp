@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   MachineType,
   SalaryAdjustmentType,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TxDirection } from '../../generated/prisma/client';
+import { TxDirection } from '../../generated/prisma/enums';
 
 const { dbMock, txMock, movementMock, numberMock } = vi.hoisted(() => {
   const tx = {

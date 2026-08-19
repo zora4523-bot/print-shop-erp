@@ -3,7 +3,7 @@ import {
   MachineType,
   Role,
   WorkerType,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 const { dbMock, txMock, auditMock } = vi.hoisted(() => {
   const tx = {

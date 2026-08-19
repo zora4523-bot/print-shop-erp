@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   Role,
   SalaryPeriodStatus,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {

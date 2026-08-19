@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Role } from '../../generated/prisma/client';
+import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const { permissionMock, ruleAdminMock, revalidateMock } = vi.hoisted(() => ({

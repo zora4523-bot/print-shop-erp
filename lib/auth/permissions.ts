@@ -1,4 +1,4 @@
-import { Role } from '../../generated/prisma/client';
+import { Role } from '../../generated/prisma/enums';
 import type { Session } from 'next-auth';
 import { requireSession, requireVerifiedSession } from './session';
 import { UnauthorizedError } from './errors';

@@ -49,6 +49,8 @@ const eslintConfig = defineConfig([
     "generated/**",
     // Skeleton files preserved for onboarding; moved into place by P0 features.
     "_reference/**",
+    // Vitest coverage report output (gitignored, but eslint would still lint it).
+    "coverage/**",
   ]),
 ]);
 

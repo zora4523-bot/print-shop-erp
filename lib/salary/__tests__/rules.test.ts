@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MachineType, SalaryRuleType } from '../../../generated/prisma/client';
+import { MachineType, SalaryRuleType } from '../../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {

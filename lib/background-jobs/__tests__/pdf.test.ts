@@ -15,7 +15,7 @@ vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: vi.fn() }));
 vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: vi.fn() }));
 vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: vi.fn() }));
 
-import { BackgroundJobStatus, Role } from '../../../generated/prisma/client';
+import { BackgroundJobStatus, Role } from '../../../generated/prisma/enums';
 import { enqueueOrderPdfJob, waitForOrderPdfJob } from '../pdf';
 
 beforeEach(() => {

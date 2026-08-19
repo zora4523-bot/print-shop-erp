@@ -3,7 +3,7 @@ import {
   EmploymentType,
   Role,
   WorkerType,
-} from '../../generated/prisma/client';
+} from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {

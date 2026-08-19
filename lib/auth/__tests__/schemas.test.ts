@@ -6,7 +6,7 @@ import {
   PartyType,
   Role,
   WorkerType,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 import {
   loginSchema,
   changePasswordSchema,

@@ -1,4 +1,4 @@
-import type { BackgroundJobQueue } from '../../generated/prisma/client';
+import type { BackgroundJobQueue } from '../../generated/prisma/enums';
 import { db } from '../db';
 
 export async function startWorkerHeartbeat(input: {

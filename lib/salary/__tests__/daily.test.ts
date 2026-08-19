@@ -5,7 +5,7 @@ import {
   Role,
   SalaryAdjustmentType,
   WorkerType,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 // Mock db before importing the module under test. lib/salary/daily.ts
 // calls db.user.findUnique, db.productionTask.findMany, etc.
