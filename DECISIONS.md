@@ -782,3 +782,25 @@
 - **理由**：§4.3 原先要求 `lib/salary/*`、`lib/notification/*` 全量 100%，但 `@vitest/coverage-v8` 从未安装，`pnpm vitest run --coverage`（§14 列出的命令）直接报 `MISSING DEPENDENCY`——这条硬指标**从未被机器校验过**，这正是它能长期漂到 salary 89% / notification 92% 的原因。实测 20 个未覆盖函数全是读路径与管理 CRUD（`listActiveCsUsers`、`getCsPeriodDetail`、notification 的 CRUD 读），而算钱的核心反而覆盖最好。对 UI 查询函数强求 100% 只会催生占位测试，不如把 100% 用在算错就发错钱的地方。
 - **影响**：为达标补了 5 条守卫路径测试（客服业绩非有限数、档位门槛非法、小单规则不完整），8 个目标文件现已全部 100%。**顺带修了一处 §15.5 违反**：`machine-piecework.ts` 原本在小单一口价缺失时走 `?? 0`，即配置漏填就按 0 结算小单；类型上 `smallOrderThreshold` 与 `smallOrderFlatPrice` 是两个独立可空字段，该状态可达。已改为抛错拒绝继续（与厨师那条例外不同：小单一口价不是可选职责，缺失就是配置错误）。门禁有效性已验证：把阈值指向未达标文件时 `exit 1` 并逐项报错。
 - **相关文档**：`vitest.config.ts` coverage 段、`package.json` devDependencies、`lib/salary/machine-piecework.ts`、`lib/salary/__tests__/{machine-piecework,cs-commission}.test.ts`、CLAUDE.md §4.3 / §14
+
+---
+
+## 2026-08-19：Setting 表接线，`order_no_prefix` 退役
+
+- **决策**：把 `Setting` 表从「只写不读」改成真正驱动行为的配置源。
+  - 新增 `lib/settings/`：`definitions.ts` 是 key / 校验 / 默认值 / 表单渲染方式的**唯一定义处**（纯数据，零副作用，比照 `lib/auth/permissions-dict.ts`），`index.ts` 负责读写。
+  - `factory_name`、`outsource_overdue_days`、`cdr_link_expire_hours` 三项接到各自消费点；新增 `/owner/settings` 编辑页 + `setting:manage` 权限。
+  - `order_no_prefix` **退役**，seed 会删掉这一行。
+  - `prisma/seed.ts` 改为从 `SETTING_DEFINITIONS` 取默认值，且**只 create 不 update**——业主改过的值不能被下一次 seed 冲掉。
+  - 配置读取校验失败时**退回内置默认值**，不抛错。
+- **理由**：
+  - 这张表从建表起就只有 `prisma/seed.ts` 一个写入方、零个读取方，四个 key 全部在别处有硬编码副本。最直观的后果是**打印视图的厂名永远印默认值**——`OrderPrintLayout` 的 `factoryName` 是默认参数，而三个渲染入口（打印页 / PDF 路由 / PDF background job）一个都没传过；连 seed 的 `佛山红包印刷厂` 和组件默认的 `红包印刷厂` 都对不上，也没人发现。
+  - `outsource_overdue_days` 原先写死的 `expectedDate < todayStart` 恰好等价于阈值 1，纯属巧合；`cdr_link_expire_hours` 的 24 小时在三处各写死一份（占位行、预签 URL、mock 路径）。
+  - **`order_no_prefix` 不该接**：它存的是格式串 `GD-YYMMDD-XXX`，而序号位宽是代码常量。放开它有真实危险——`parseSerial` 要求尾段位数恰为 `SEQ_PAD`，业主把 3 位改成 4 位会让**当天余下的开单全部抛错**；最大序号查询又靠字典序，位宽可变会让 `-1000` 排在 `-999` 前面。决定性理由是 `lib/daily-document-number.ts` 里 `PO`/`PR`/`ST`/`IC` 四个兄弟单号前缀全是代码常量：五个单号里四个写死、一个可配，比五个都写死更糟。
+  - **兜底策略与 §15.5 相反是刻意的**：§15.5「没有生效规则就拒绝继续」管的是薪资和报价，静默按 0 结算会直接算错钱。这三项都不碰金额，印错厂名、阈值回到 1 天都是一眼可见且随时可改的；反过来，让一行手工改坏的配置把开单、打印、每日推送同时打挂才是真正的事故。写入侧走同一份 schema 且是严格的，正常路径上非法值进不来。
+- **影响**：
+  - `OrderPrintLayout` 的 `factoryName` 改为**必填 prop**，`buildPrintHtml` 的 options 同理——下一个渲染入口忘了传就是编译错误，而不是又一次静默用默认值。
+  - `lib/cdr/zip.ts` 保持不读库（它是 OSS 适配层），有效期由 `lib/cdr/bundle.ts` 读好传入。
+  - 新增门禁三处：打印厂名透传、外协阈值消费、CDR 有效期消费，均已验证「改回硬编码就红」。
+  - `Setting` 表的既有行不受影响（seed 不再覆盖写）；升级已有库只需跑一次 `pnpm db:seed` 清掉退役 key，不跑也不影响功能。
+- **相关文档**：CLAUDE.md §4.7 / §15.5、`docs/规范合规审查-2026-08-19.md` §二「Setting 表」。
