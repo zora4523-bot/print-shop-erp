@@ -755,3 +755,30 @@
 - **理由**：① 选定的三条失败后用户无法自救——进不去系统、清不掉 session；其余后台 CRUD 的失败模式是「慢网下点了没反应，再点一次就好」。② 实测 92 个 `<form>` 中 19 处（18 个文件）早已被 `action={(fd) => startTransition(...)}` 静默破坏，其中 `EditOrderForm.tsx` 的注释与破坏**在同一次提交里同时诞生**，四个月无人发现——说明无门禁的约束不是约束。③ SPEC 自身在三处**强制要求 JS**：§H.1 强制浏览器直传 OSS（且 React 明确不支持 progressive form 传 File/Blob）、§E.1 打印视图自动弹窗、§0 浏览器端计算建议价；SPEC 对网络质量与设备档次则一字未提。④ 71 个 `useActionState` 文件里只有 2 个属于师傅端，97% 的成本花在办公室 PC 用户身上，成本收益倒挂。
 - **影响**：本次同步修复师傅端两处真实破坏（`ReportTaskForm`、`BeginTaskButton`，后者需新增 form 形状的 `beginTaskFormAction` 包装，因为客户端 `async () => boundAction()` 闭包没有 `$$FORM_ACTION`），以及两处「注释与自身代码矛盾」的位置（`EditOrderForm`、`UrgentToggleForm`）。**未修复且明确接受现状**：`OrderForm`（建单，RHF + `onSubmit`，且受 §H.1 直传约束在架构上无法零 JS）、`WorkerTaskBatchList`（一键开工/完工是纯 `onClick` 多选，改造需重设计交互，另行评估）、以及其余 15 处后台表单。`components/business/order/OrderForm.tsx` 用 react-hook-form 是 `38e4ef6` 里业主拍板过的（`Owner decision: react-hook-form is the form layer`），本决策不推翻它。
 - **相关文档**：`tests/e2e/no-js.spec.ts`、`playwright.config.ts`（`no-js` project）、`CLAUDE.md §15.8`、`components/business/production/ReportTaskForm.tsx`、`components/business/production/BeginTaskButton.tsx`、`actions/production.ts`（`beginTaskFormAction`）、`components/business/order/EditOrderForm.tsx`、`components/business/order/UrgentToggleForm.tsx`
+
+---
+
+## 2026-08-19：厨师空闲打包时薪缺失时按 0 计，是 §15.5 的唯一显式例外
+
+- **决策**：维持 `lib/salary/hourly-aggregate.ts` 的 `spareHourlyRate: cookSpareRate ?? 0`。同一 if/else 里 PACKER_HOURLY、CLEANER_HOURLY、COOK_MONTHLY 三个分支继续 `throw`，只有厨师的**空闲打包**时薪走 0。
+- **理由**：空闲打包对厨师是可选职责，没配 `COOK_SPARE_HOURLY` 更可能表示「这个厨师不打包」，而不是「配置漏了」。改成 throw 会让已有未配该规则的厨师**整月月结直接失败**，用一个更响的故障替换一个语义正确的 0。该行为并非疏忽：`lib/salary/__tests__/hourly-payroll.test.ts:186` 有一条名为 `COOK without spare rate: sparePay = 0 even with spare hours` 的用例，传 20 小时空闲工时并断言 `sparePay === '0'`，即当前行为是被测试固定的设计。
+- **影响**：CLAUDE.md §15.5 补写这条例外，代码现场也加了注释说明「为什么和另外三个分支不同」——此前它看起来就是一处待修的 bug，合规审查确实把它报成了违反。**不改行为、不改测试**。若将来要收紧，正确做法是先在规则表层面加「厨师是否承担空闲打包」的显式开关，而不是让缺失配置去 throw。
+- **相关文档**：`lib/salary/hourly-aggregate.ts:296,301`、`lib/salary/hourly-payroll.ts:87-88`、`lib/salary/__tests__/hourly-payroll.test.ts:186`、CLAUDE.md §15.5
+
+---
+
+## 2026-08-19：批量任务状态流转以 SQL where 子句表达守卫，是 §4.5 的显式例外
+
+- **决策**：`lib/production.ts` 的 `beginTasks` / `reportTasks` 保留 `updateMany({ where: { status: <前置状态> }, data: { status: <后置状态> } })` 的写法，不改为逐行调用 `transitionProductionTask`。单条路径（`beginTask` / `reportTask`）不适用本例外，仍须走状态机。
+- **理由**：`updateMany` 无法逐行校验，改走状态机意味着先查出每行当前状态再逐条转换，丢掉单条 SQL 的原子批量更新——批量开工/完工是师傅端的高频操作（`WorkerTaskBatchList` 的两个按钮），事务形状变化的回归风险大于收益。守卫并未缺失：`where` 子句在 SQL 层表达了与状态机转换表相同的前置条件，复核确认当前没有任何非法转换可达。
+- **影响**：CLAUDE.md §4.5 补写例外并写明代价——**没有编译期保障**，改这两处时必须自己维持 `where` 子句与转换表一致。同时改掉 `lib/production/status-machine.ts` 里那句「every TaskStatus write must flow through this function」——它是绝对化的、与代码事实矛盾的声明，比违反文档更糟。
+- **相关文档**：`lib/production.ts:1355,1452,1496,1613`、`lib/production/status-machine.ts:34`、`actions/production.ts:255,281`、`components/business/production/WorkerTaskBatchList.tsx:166,175`、CLAUDE.md §4.5
+
+---
+
+## 2026-08-19：覆盖率 100% 收窄到算钱纯函数与状态机，并第一次真正配上门禁
+
+- **决策**：引入 `@vitest/coverage-v8`（devDependency，版本跟随 vitest 的 `^4.1.5`），在 `vitest.config.ts` 配 `coverage.thresholds`：`machine-piecework.ts`、`cs-commission.ts`、`hourly-payroll.ts` 与 `lib/**/status-machine.ts` 要求 100%；`lib/**` 其余部分按当前实测水位设阈值（statements 83 / branches 75 / functions 88 / lines 85），只防倒退。
+- **理由**：§4.3 原先要求 `lib/salary/*`、`lib/notification/*` 全量 100%，但 `@vitest/coverage-v8` 从未安装，`pnpm vitest run --coverage`（§14 列出的命令）直接报 `MISSING DEPENDENCY`——这条硬指标**从未被机器校验过**，这正是它能长期漂到 salary 89% / notification 92% 的原因。实测 20 个未覆盖函数全是读路径与管理 CRUD（`listActiveCsUsers`、`getCsPeriodDetail`、notification 的 CRUD 读），而算钱的核心反而覆盖最好。对 UI 查询函数强求 100% 只会催生占位测试，不如把 100% 用在算错就发错钱的地方。
+- **影响**：为达标补了 5 条守卫路径测试（客服业绩非有限数、档位门槛非法、小单规则不完整），8 个目标文件现已全部 100%。**顺带修了一处 §15.5 违反**：`machine-piecework.ts` 原本在小单一口价缺失时走 `?? 0`，即配置漏填就按 0 结算小单；类型上 `smallOrderThreshold` 与 `smallOrderFlatPrice` 是两个独立可空字段，该状态可达。已改为抛错拒绝继续（与厨师那条例外不同：小单一口价不是可选职责，缺失就是配置错误）。门禁有效性已验证：把阈值指向未达标文件时 `exit 1` 并逐项报错。
+- **相关文档**：`vitest.config.ts` coverage 段、`package.json` devDependencies、`lib/salary/machine-piecework.ts`、`lib/salary/__tests__/{machine-piecework,cs-commission}.test.ts`、CLAUDE.md §4.3 / §14

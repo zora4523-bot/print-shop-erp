@@ -157,11 +157,17 @@ import type { Prisma } from '../../generated/prisma/client';
 
 ### 4.3 业务逻辑必须有测试
 
-特别是以下模块，**单元测试覆盖率必须100%**：
+**100% 覆盖是有门禁的硬指标**，范围限定在「算错就是发错钱 / 绕过状态流转」的纯函数
+（业主 2026-08-19 拍板；阈值配在 `vitest.config.ts` 的 `coverage.thresholds`，
+`pnpm vitest run --coverage` 不达标即 exit 1）：
 
-- `lib/salary/*`：所有薪资算法
-- `lib/order/status-machine.ts`：工单状态流转
-- `lib/notification/*`：推送逻辑
+- `lib/salary/machine-piecework.ts`：机台计件
+- `lib/salary/cs-commission.ts`：客服提成
+- `lib/salary/hourly-payroll.ts`：时薪月结
+- `lib/**/status-machine.ts`：全部状态机（order / production / bill / outsource / cs）
+
+`lib/**` 的其余部分（多为读路径与管理 CRUD）设**当前水位**阈值，只防倒退、不强求 100%。
+水位随实测调整，抬高可以、调低要说明理由。
 
 **测试必须覆盖边界case**：
 - 小单（<1000）、超大单
@@ -202,6 +208,11 @@ await db.productionTask.update({
 ### 4.5 状态机硬约束
 
 工单/任务/周期的状态流转必须通过**状态机函数**，禁止裸写`status: 'XXX'`。
+
+**批量路径是显式例外**（业主 2026-08-19 拍板）：`lib/production.ts` 的 `beginTasks` /
+`reportTasks` 用 `where: { status: <前置状态> }` 在 SQL 层表达同一个守卫，换取单条语句的
+原子批量更新——逐行调用状态机会迫使先查后写、丢掉原子性。代价是没有编译期保障，改这两处时
+必须自己维持 `where` 子句与转换表一致。单条路径（`beginTask` / `reportTask`）不适用本例外。
 
 ```typescript
 // lib/order/status-machine.ts
@@ -734,6 +745,11 @@ export async function createProductAction(
   `lib/salary/rules.ts` 与 `lib/price/rule-snapshot-lock.ts`。**新增读取规则的结算路径必须把
   事务 client（`tx`）传进去，用同一把锁**，不要用全局 `db` 读。
 - 没有生效规则时**拒绝继续**，绝不 fallback 到 0 —— 静默按 0 发工资/报价是本项目的头号事故。
+  **唯一显式例外**：厨师的空闲打包时薪（`lib/salary/hourly-aggregate.ts` 的
+  `cookSpareRate ?? 0`）。空闲打包对厨师是可选职责，没配 `COOK_SPARE_HOURLY` 更可能表示
+  「这个厨师不打包」而非配置遗漏，所以按 0 计空闲工资而不是让整个月结失败。同一 if/else 里
+  PACKER / CLEANER / COOK_MONTHLY 三个分支**仍然全部 throw**。业主 2026-08-19 拍板，行为由
+  `lib/salary/__tests__/hourly-payroll.test.ts:186` 锁定 —— 别当 bug 修掉。
 
 ### 15.6 设计系统门禁（eslint 会 fail）
 

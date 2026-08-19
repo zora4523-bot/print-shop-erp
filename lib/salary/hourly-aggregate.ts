@@ -293,6 +293,12 @@ export async function computeHourlyPayroll(
       }
       rules = {
         monthlyBase: cookMonthly,
+        // `?? 0` 在这里是**有意的**，与上面三个分支的 throw 不同 ——
+        // 空闲打包对厨师是可选职责，没配 COOK_SPARE_HOURLY 更可能表示
+        // 「这个厨师不打包」而不是「配置漏了」，所以按 0 计空闲工资而不是
+        // 让整个月结失败。这是 CLAUDE.md §15.5「绝不 fallback 到 0」的
+        // 唯一显式例外（业主 2026-08-19 拍板，见 DECISIONS.md），行为由
+        // lib/salary/__tests__/hourly-payroll.test.ts:186 锁定。
         spareHourlyRate: cookSpareRate ?? 0,
         otMultiplier: otMultiplier ?? 1,
       };
