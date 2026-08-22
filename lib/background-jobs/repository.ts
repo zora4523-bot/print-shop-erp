@@ -16,7 +16,9 @@ import type {
 import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
 
-type EnqueueClient = Pick<Prisma.TransactionClient, 'backgroundJob'>;
+// 带上 `$queryRaw` 是为了让复活分支能用**同一个** client 去取库时钟：
+// 调用方传的是事务时，时钟也必须来自那个事务，否则又变成两个时间源。
+type EnqueueClient = Pick<Prisma.TransactionClient, 'backgroundJob' | '$queryRaw'>;
 
 export type EnqueueBackgroundJobResult = {
   job: BackgroundJob;
@@ -82,7 +84,13 @@ export async function enqueueBackgroundJob(
           payload: input.payload,
           priority: input.priority ?? 100,
           maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
-          availableAt: input.availableAt ?? new Date(),
+          // 库时钟，不是 new Date()：这一行写下的 availableAt 之后要被
+          // claimNextBackgroundJob 拿 `availableAt <= now()` 比较（同文件
+          // 的 SQL）。用 Node 时钟写、用库时钟读，就是本模块专门要消除的
+          // 两套时间源——web 机快 5 分钟时，本该立刻执行的 re-arm 会白等
+          // 5 分钟。failBackgroundJob / retryDeadBackgroundJob 早已切到
+          // databaseNow，唯独这条 DEAD/CANCELLED 复活路径漏了。
+          availableAt: input.availableAt ?? (await databaseNow(client)),
           result: Prisma.JsonNull,
           status: BackgroundJobStatus.PENDING,
           finishedAt: null,

@@ -148,11 +148,42 @@ describe('enqueueBackgroundJob', () => {
             status: BackgroundJobStatus.PENDING,
             maxAttempts: 8,
             lastErrorCode: null,
+            // 复活的 availableAt 必须是**库时钟**。用 Node 的 new Date()
+            // 写、用 claim 的 `availableAt <= now()` 读，两套时间源在多机
+            // 部署下会让本该立刻执行的重试白等一个时钟偏差。
+            availableAt: DB_NOW,
           }),
         }),
       );
     },
   );
+
+  it('复活时显式传入的 availableAt 优先于库时钟', async () => {
+    const at = new Date('2026-09-01T00:00:00.000Z');
+    dbMock.backgroundJob.create.mockRejectedValue(duplicateError());
+    dbMock.backgroundJob.findUnique
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: BackgroundJobStatus.DEAD,
+        attempts: 4,
+        maxAttempts: 4,
+      })
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: BackgroundJobStatus.PENDING,
+        attempts: 4,
+        maxAttempts: 8,
+      });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await enqueueBackgroundJob({ ...input(), availableAt: at });
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ availableAt: at }),
+      }),
+    );
+  });
 });
 
 describe('claim and lease lifecycle', () => {
