@@ -1,16 +1,22 @@
 import { notFound, redirect } from 'next/navigation';
-import { requireSession } from '@/lib/auth/session';
+import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
+import { getOrderTitleRef } from '@/lib/page-title/refs';
+import { orderEditTitle } from '@/lib/page-title/titles';
 import {
   editableFieldsetForStatus,
 } from '@/lib/order/editable-fields';
 import { EditOrderForm } from '@/components/business/order/EditOrderForm';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `编辑工单 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session) return { title: '编辑工单' };
+  const ref = await getOrderTitleRef(id, session.user.id, session.user.role);
+  return { title: orderEditTitle(ref?.orderNo ?? null) };
 }
 
 export default async function EditOrderPage({ params }: PageProps) {
@@ -29,6 +35,9 @@ export default async function EditOrderPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={order.orderNo} />
       <div>
         <h1 className="text-xl font-semibold">
           编辑工单 <span className="font-sans tabular-nums">{order.orderNo}</span>

@@ -6,7 +6,12 @@ import { getSalesBillDetail } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
 import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getSalesBillTitleRef } from '@/lib/page-title/refs';
+import { salesBillTitle } from '@/lib/page-title/titles';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 import {
@@ -19,7 +24,14 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `账单 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session || !hasPermission('bill:view:self', session.user.role)) {
+    return { title: '账单' };
+  }
+  // 所有权同样写进 where（与 getSalesBillDetail 一致），别人的账期
+  // 不会出现在标签页上。
+  const ref = await getSalesBillTitleRef(id, session.user.id);
+  return { title: salesBillTitle(ref?.period ?? null) };
 }
 
 export default async function SalesBillDetailPage({ params }: PageProps) {
@@ -66,6 +78,9 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={bill.period} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold">

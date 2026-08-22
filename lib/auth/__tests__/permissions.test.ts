@@ -12,6 +12,7 @@ import {
   getOrderScopeFilter,
   type Permission,
 } from '../permissions';
+import { hasPermission } from '../permissions-dict';
 import { requireSession } from '@/lib/auth/session';
 import { UnauthorizedError } from '../errors';
 
@@ -181,6 +182,34 @@ describe('requirePermission', () => {
     expect(user.username).toBe('test');
     expect(user.displayName).toBe('测试');
     expect(user.role).toBe(Role.ADMIN);
+  });
+});
+
+describe('hasPermission', () => {
+  // 纯谓词版，只给「需要软判断、不能抛」的场景用 —— 目前是各详情页的
+  // generateMetadata（流式 metadata 下抛异常未必还能干净落到 error.tsx）。
+  // 它和 requirePermission 读的是同一张 PERMISSIONS 字典，所以标签页标题
+  // 的可见性永远跟着权限规则走，不会各写一份。
+  it('ADMIN 有 bill:view:all', () => {
+    expect(hasPermission('bill:view:all', Role.ADMIN)).toBe(true);
+  });
+
+  it('SALES 没有 bill:view:all（直连 /owner/bills/<id> 时标题不能泄露账期+姓名）', () => {
+    expect(hasPermission('bill:view:all', Role.SALES)).toBe(false);
+  });
+
+  it('SALES 有 bill:view:self', () => {
+    expect(hasPermission('bill:view:self', Role.SALES)).toBe(true);
+  });
+
+  it('和 requirePermission 用的是同一张字典', () => {
+    for (const [permission, roles] of Object.entries(PERMISSIONS)) {
+      for (const role of Object.values(Role)) {
+        expect(hasPermission(permission as Permission, role)).toBe(
+          (roles as readonly Role[]).includes(role),
+        );
+      }
+    }
   });
 });
 

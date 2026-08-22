@@ -29,9 +29,15 @@ const {
 
 vi.mock('@/lib/auth/session', () => ({
   requireSession: requireSessionMock,
+  getSession: vi.fn(),
 }));
 vi.mock('@/lib/order', () => ({
   getOrderDetail: getOrderDetailMock,
+}));
+// 标题取数模块直连 Prisma；不 mock 的话 import 链会拉起 lib/db，
+// 在没有 DATABASE_URL 的 node 测试环境里模块加载即抛。
+vi.mock('@/lib/page-title/refs', () => ({
+  getOrderTitleRef: vi.fn(),
 }));
 vi.mock('@/lib/bom', () => ({
   estimateMaterialUsageForOrderItems: estimateMaterialUsageMock,
@@ -236,6 +242,63 @@ describe('order detail commercial visibility', () => {
   });
 });
 
+// 「暂不能完工」横幅。放在这个文件是因为它已经把 OrderDetailPage 的
+// 二十来个依赖都 mock 齐了；单开文件要整段复制。
+describe('order detail — 暂不能完工横幅', () => {
+  const inProductionWithGap = () => ({
+    ...orderFixture(),
+    status: OrderStatus.IN_PRODUCTION,
+    uncoveredOutsourceItems: [{ id: 'item-9', sequence: 2, name: '烫金款' }],
+  });
+
+  it('ADMIN 在生产中工单上看到缺口款式与补单入口', async () => {
+    // 这条守的是「JSX 是不是死分支」：字段从 getOrderDetail 一路传到页面，
+    // 中间任何一层丢掉它，tsc 都不会报（数组恒有 .length）。
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue(inProductionWithGap());
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('暂不能完工');
+    expect(html).toContain('烫金款');
+    expect(html).toContain('/foreman/outsource/new?orderId=order-1');
+  });
+
+  it('缺口为空时不出现横幅', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: OrderStatus.IN_PRODUCTION,
+      uncoveredOutsourceItems: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).not.toContain('暂不能完工');
+  });
+
+  it('非 ADMIN 看不到横幅（只有他们能建外协单）', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'sales-1', role: Role.SALES },
+    });
+    getOrderDetailMock.mockResolvedValue(inProductionWithGap());
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).not.toContain('暂不能完工');
+  });
+});
+
 function orderFixture() {
   const createdAt = new Date('2026-08-07T08:00:00.000Z');
   return {
@@ -321,6 +384,10 @@ function orderFixture() {
     sourceOrder: null,
     reworkOrders: [],
     outsourceOrders: [],
+    // getOrderDetail 现在总会返回这个字段（款式级外协覆盖缺口，
+    // 详情页「暂不能完工」横幅的数据源）。这张单是 FINISHED，
+    // 横幅本来也只在 SCHEDULING / IN_PRODUCTION 才渲染。
+    uncoveredOutsourceItems: [],
     changeRequests: [
       {
         id: 'change-1',

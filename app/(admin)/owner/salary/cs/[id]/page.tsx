@@ -8,10 +8,15 @@ import {
   SalaryPeriodStatus,
 } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { CsPayrollPaymentForm } from '@/components/business/salary/CsPayrollPaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getCsPeriodTitleRef } from '@/lib/page-title/refs';
+import { csPeriodTitle } from '@/lib/page-title/titles';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
 import { formatMoney } from '@/lib/dashboard/format';
@@ -19,7 +24,18 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `客服周期 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session || !hasPermission('salary:view:all', session.user.role)) {
+    return { title: '客服周期' };
+  }
+  const ref = await getCsPeriodTitleRef(id);
+  return {
+    title: csPeriodTitle(
+      ref
+        ? { csUserName: ref.csUser.displayName, periodStart: ref.periodStart }
+        : null,
+    ),
+  };
 }
 
 export default async function CsPeriodDetailPage({ params }: PageProps) {
@@ -66,6 +82,9 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={period.csUser.displayName} />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-semibold">

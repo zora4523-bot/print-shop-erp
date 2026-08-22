@@ -12,8 +12,10 @@ import {
   ShipmentStatus,
   Role,
 } from '../../../../generated/prisma/enums';
-import { requireSession } from '@/lib/auth/session';
+import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
+import { getOrderTitleRef } from '@/lib/page-title/refs';
+import { orderDetailTitle } from '@/lib/page-title/titles';
 import {
   canAttachOutsource,
   isTerminalOrderStatus,
@@ -30,6 +32,7 @@ import {
 } from '@/lib/order/log-format';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
@@ -65,7 +68,13 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `工单 · ${id.slice(0, 8)}` };
+  // 用 getSession() 而不是 requireSession()：流式 metadata 下首屏可能
+  // 已经冲出去了，这里抛异常未必还能正常落到 error.tsx。真闸口在下面的
+  // 页面组件（requireSession + getOrderDetail 的 scope 过滤）。
+  const session = await getSession();
+  if (!session) return { title: '工单' };
+  const ref = await getOrderTitleRef(id, session.user.id, session.user.role);
+  return { title: orderDetailTitle(ref?.orderNo ?? null) };
 }
 
 export default async function OrderDetailPage({ params }: PageProps) {
@@ -184,6 +193,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的 order，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={order.orderNo} />
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
@@ -1003,6 +1015,38 @@ export default async function OrderDetailPage({ params }: PageProps) {
             }
             isSfCollect={order.isSfCollect}
           />
+        </section>
+      ) : null}
+
+      {/* 「暂不能完工」常驻横幅：数据源 getOrderDetail.uncoveredOutsourceItems，
+          与 lib/production-completion.ts 的闸口共用 outsourceCoverageApplies +
+          findUncoveredOutsourceItems，页面提示与实际能否完工不会打架。
+          仅 ADMIN 可见——只有他们能建外协单。 */}
+      {user.role === Role.ADMIN &&
+      (order.status === OrderStatus.SCHEDULING ||
+        order.status === OrderStatus.IN_PRODUCTION) &&
+      order.uncoveredOutsourceItems.length > 0 ? (
+        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+          <h2 className="text-base font-semibold">暂不能完工</h2>
+          <p className="text-sm text-muted-foreground">
+            以下款式含外协工艺，但还没有任何未取消的外协单覆盖。内部任务
+            全部报完工后，系统也不会把工单转完工——请先补外协单：
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            {order.uncoveredOutsourceItems.map((item) => (
+              <li key={item.id}>
+                款式 {item.sequence}：{item.name}
+              </li>
+            ))}
+          </ul>
+          {canCreateOutsource ? (
+            <Link
+              href={`/foreman/outsource/new?orderId=${order.id}`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              创建外协单
+            </Link>
+          ) : null}
         </section>
       ) : null}
 

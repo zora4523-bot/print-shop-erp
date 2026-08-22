@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/business/admin/AppSidebar';
 import { AdminHeader } from '@/components/business/admin/AdminHeader';
+import { BreadcrumbEntityProvider } from '@/components/business/admin/breadcrumb-entity';
 import {
   getAdminMenuItems,
   getAdminQuickLinks,
@@ -56,15 +57,20 @@ export default async function AdminShellLayout({
       </a>
       <AppSidebar menuGroups={menuGroups} roleBadge={roleBadge} />
       <SidebarInset id="admin-main" tabIndex={-1} className="min-w-0">
-        <AdminHeader
-          displayName={user.displayName}
-          roleLabel={roleBadge}
-          environmentLabel={environmentLabel}
-          quickLinks={quickLinks}
-        />
-        <div className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
-          {children}
-        </div>
+        {/* Provider 只提供 context、不渲染 DOM 节点，SidebarInset 的
+            flex 布局不受影响。header 消费、children 生产，两边必须在
+            同一个 Provider 下。 */}
+        <BreadcrumbEntityProvider>
+          <AdminHeader
+            displayName={user.displayName}
+            roleLabel={roleBadge}
+            environmentLabel={environmentLabel}
+            quickLinks={quickLinks}
+          />
+          <div className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
+            {children}
+          </div>
+        </BreadcrumbEntityProvider>
       </SidebarInset>
     </SidebarProvider>
   );

@@ -6,11 +6,16 @@ import { OutsourceStatus } from '@/generated/prisma/enums';
 import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OutsourceActions } from '@/components/business/outsource/OutsourceActions';
 import { OutsourceAmountForm } from '@/components/business/outsource/OutsourceAmountForm';
 import { OutsourcePaymentForm } from '@/components/business/outsource/OutsourcePaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getOutsourceTitleRef } from '@/lib/page-title/refs';
+import { outsourceTitle } from '@/lib/page-title/titles';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
@@ -24,7 +29,21 @@ const STATUS_LABELS: Record<OutsourceStatus, string> = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `外协单 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session || !hasPermission('outsource:manage', session.user.role)) {
+    return { title: '外协单' };
+  }
+  const ref = await getOutsourceTitleRef(id);
+  return {
+    title: outsourceTitle(
+      ref
+        ? {
+            supplierName: ref.supplierName,
+            orderNo: ref.order?.orderNo ?? null,
+          }
+        : null,
+    ),
+  };
 }
 
 export default async function OutsourceDetailPage({ params }: PageProps) {
@@ -52,6 +71,9 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={row.supplierName} />
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="admin-wrap-anywhere text-xl font-semibold">

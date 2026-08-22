@@ -10,10 +10,15 @@ import {
   ROLE_LABELS,
 } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getAdminBillTitleRef } from '@/lib/page-title/refs';
+import { adminBillTitle } from '@/lib/page-title/titles';
 import {
   calculateCsBillAttribution,
   hasCustomerServiceAttribution,
@@ -27,7 +32,20 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `账单 · ${id.slice(0, 8)}` };
+  // 这张表没有行级 scope，唯一闸口就是权限。metadata 不抛错（流式
+  // metadata 下抛不干净），无权时回落到模块名，不透露实体是否存在。
+  const session = await getSession();
+  if (!session || !hasPermission('bill:view:all', session.user.role)) {
+    return { title: '账单' };
+  }
+  const ref = await getAdminBillTitleRef(id);
+  return {
+    title: adminBillTitle(
+      ref
+        ? { period: ref.period, salesUserName: ref.salesUser.displayName }
+        : null,
+    ),
+  };
 }
 
 export default async function OwnerBillDetailPage({ params }: PageProps) {
@@ -81,6 +99,9 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={`${bill.period} ${bill.salesUser.displayName}`} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold">
