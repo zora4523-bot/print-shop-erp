@@ -70,7 +70,6 @@ vi.mock('@/lib/db', () => ({
   db: { user: { findMany: vi.fn() } },
 }));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
-  getDueOrders: vi.fn(),
   getEndingPeriods: vi.fn(),
   getOverdueOutsourcing: vi.fn(),
 }));

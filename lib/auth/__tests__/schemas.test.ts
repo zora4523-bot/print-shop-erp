@@ -1217,13 +1217,34 @@ describe('warehouse operation schemas', () => {
       idempotencyKey,
       remark: '',
       items: [
-        { materialId: 'mat_1', locationId: 'loc_a', countedQuantity: '0' },
+        {
+          materialId: 'mat_1',
+          locationId: 'loc_a',
+          bookQuantity: '3.00',
+          countedQuantity: '0',
+        },
       ],
     };
     expect(postInventoryCountSchema.safeParse(valid).success).toBe(true);
     expect(
       postInventoryCountSchema.safeParse({ ...valid, items: [] }).success,
     ).toBe(false);
+  });
+
+  it('缺账面数快照时 fail closed，且消息是中文', () => {
+    // 旧版页面（部署窗口里还开着的浏览器）提交上来就是这个形状。zod v4 缺字段
+    // 走 invalid_type 分支，.regex() 的消息不触发——所以字段本身带了 error 参数。
+    const result = postInventoryCountSchema.safeParse({
+      idempotencyKey,
+      remark: '',
+      items: [
+        { materialId: 'mat_1', locationId: 'loc_a', countedQuantity: '8.00' },
+      ],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe(
+      '缺少账面数快照，请刷新页面后重新盘点',
+    );
   });
 });
 

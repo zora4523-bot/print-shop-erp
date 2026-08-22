@@ -45,6 +45,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 import {
   confirmOutsourceAmountAction,
   createOutsourceAction,
+  markOutsourceReceivedAction,
   recordOutsourcePaymentAction,
 } from '../outsource';
 
@@ -269,5 +270,70 @@ describe('recordOutsourcePaymentAction', () => {
     await expect(
       recordOutsourcePaymentAction('outsource-1', null, formData()),
     ).rejects.toThrow('database unavailable');
+  });
+});
+
+describe('markOutsourceReceivedAction', () => {
+  // ⚠️ 这个文件把整个 @/lib/outsource vi.mock 掉了，所以这里只能证明
+  // 「action 层拿到 pendingOutsourceItems 之后拼得对」。真正证明缺口
+  // 能从 lib 层穿出来的是 lib/__tests__/outsource.test.ts 里的
+  // 「回传覆盖缺口」——那条不能省。
+  function receiveFormData() {
+    const data = new FormData();
+    data.set('actualDate', '');
+    return data;
+  }
+
+  it('款式覆盖不全时返回带 notice 的 success（不是 error —— 收货事务已经提交）', async () => {
+    outsourceMock.markOutsourceReceived.mockResolvedValue({
+      id: 'outsource-1',
+      status: 'RECEIVED',
+      orderCompleted: false,
+      orderId: 'order-1',
+      pendingOutsourceItems: [
+        { id: 'item-2', sequence: 2, name: '款式二' },
+        { id: 'item-3', sequence: 3, name: '款式三' },
+      ],
+    });
+
+    const result = await markOutsourceReceivedAction(
+      'outsource-1',
+      null,
+      receiveFormData(),
+    );
+
+    expect(result.status).toBe('success');
+    const notice =
+      result.status === 'success' ? result.notice : undefined;
+    expect(notice).toContain('款式 2「款式二」');
+    expect(notice).toContain('款式 3「款式三」');
+    expect(notice).toContain('工单尚未完工');
+  });
+
+  it('没有缺口时返回不带 notice 的 success', async () => {
+    outsourceMock.markOutsourceReceived.mockResolvedValue({
+      id: 'outsource-1',
+      status: 'RECEIVED',
+      orderCompleted: true,
+      orderId: 'order-1',
+      pendingOutsourceItems: [],
+    });
+
+    await expect(
+      markOutsourceReceivedAction('outsource-1', null, receiveFormData()),
+    ).resolves.toEqual({ status: 'success', id: 'outsource-1' });
+  });
+
+  it('lib 返回值里没有 pendingOutsourceItems 字段时也不炸（?? [] 兜底）', async () => {
+    outsourceMock.markOutsourceReceived.mockResolvedValue({
+      id: 'outsource-1',
+      status: 'RECEIVED',
+      orderCompleted: true,
+      orderId: 'order-1',
+    });
+
+    await expect(
+      markOutsourceReceivedAction('outsource-1', null, receiveFormData()),
+    ).resolves.toEqual({ status: 'success', id: 'outsource-1' });
   });
 });

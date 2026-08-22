@@ -40,6 +40,32 @@ export function currentShanghaiMonth(now: Date = new Date()): string {
   return todayShanghai(now).slice(0, 7);
 }
 
+// YYYY-MM-DD 与 YYYY-MM 都是零填充定宽，所以字符串 `>` 就是日历比较 ——
+// 不用再 parse 回 Date、也不用二次推导时区。调用方必须先做过格式校验
+// （parseStrictYmd / isStrictYmd / Zod 字段），这两个谓词只回答
+// 「它是不是晚于上海的墙上时钟」。
+//
+// 为什么薪资路径需要它：还没开始的一天 / 一个月，按定义没有任何已完工
+// 任务或考勤，结算它只会冻结出一条凭空的 dailyBase / monthlyBase 行 ——
+// 而这行还能被标记已发，等真实工作发生后重算又被 paid guard 挡住，只能
+// 人工撤销。所以在源头拒绝，而不是写完再补救。
+
+/** `date`（YYYY-MM-DD）是否晚于上海日历的今天。 */
+export function isFutureShanghaiDate(
+  date: string,
+  now: Date = new Date(),
+): boolean {
+  return date > todayShanghai(now);
+}
+
+/** `month`（YYYY-MM）是否晚于上海日历的本月。 */
+export function isFutureShanghaiMonth(
+  month: string,
+  now: Date = new Date(),
+): boolean {
+  return month > currentShanghaiMonth(now);
+}
+
 /**
  * Returns `[start, end)` UTC instants spanning the Shanghai calendar
  * day for the given YYYY-MM-DD string.

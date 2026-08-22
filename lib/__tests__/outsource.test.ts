@@ -10,6 +10,7 @@ const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findUnique: vi.fn(), update: vi.fn() },
     orderItem: { findMany: vi.fn() },
+    craft: { findMany: vi.fn() },
     productionTask: { findMany: vi.fn() },
     orderLog: { create: vi.fn() },
     outsourceOrder: {
@@ -67,9 +68,21 @@ beforeEach(() => {
     status: OrderStatus.IN_PRODUCTION,
   });
   dbMock.order.update.mockReset().mockResolvedValue({});
+  // sequence / name / crafts 是完工闸口的款式级覆盖校验要读的字段，
+  // 缺了会在 item.crafts.some 上炸——mock 缺什么测试当场报错，是特性。
   dbMock.orderItem.findMany.mockReset().mockResolvedValue([
-    { id: 'item-1', orderId: 'order-1', quantity: 5000 },
+    {
+      id: 'item-1',
+      orderId: 'order-1',
+      quantity: 5000,
+      sequence: 1,
+      name: '款式一',
+      crafts: ['craft-uv'],
+    },
   ]);
+  dbMock.craft.findMany
+    .mockReset()
+    .mockResolvedValue([{ id: 'craft-uv', isOutsource: true }]);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.outsourceOrder.findUnique.mockReset().mockResolvedValue(null);
@@ -838,7 +851,11 @@ describe('markOutsourceReceived', () => {
       status: OutsourceStatus.RECEIVED,
     });
     dbMock.outsourceOrder.findMany.mockResolvedValue([
-      { id: 'outsource-1', status: OutsourceStatus.RECEIVED },
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+      },
     ]);
     dbMock.productionTask.findMany.mockResolvedValue([]);
     dbMock.order.findUnique
@@ -869,6 +886,105 @@ describe('markOutsourceReceived', () => {
       expect.objectContaining({ orderId: 'order-1', orderNo: 'O-OUT' }),
       { dedupeKey: 'notification:ORDER_COMPLETED:order-1' },
     );
+  });
+
+  it('回传覆盖缺口：收下最后一张外协单但款式二没人管 → pendingOutsourceItems 穿过外层 return', async () => {
+    // ⚠️ 这条用例守的是 markOutsourceReceived 的**外层** return（事务外那个
+    // 逐字段重建对象的）。漏掉一行 pendingOutsourceItems，字段会被原地丢弃、
+    // action 层的 notice 恒为 undefined，而它是可选字段，tsc 不报、
+    // actions/__tests__/outsource.test.ts 也发现不了（那边把整个 lib 层
+    // vi.mock 掉了）。所以断言必须打在 lib 函数的返回值本身上。
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      orderId: 'order-1',
+      status: OutsourceStatus.SENT,
+    });
+    dbMock.outsourceOrder.update.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+      },
+    ]);
+    dbMock.orderItem.findMany.mockResolvedValue([
+      {
+        id: 'item-1',
+        orderId: 'order-1',
+        sequence: 1,
+        name: '款式一',
+        crafts: ['craft-uv'],
+      },
+      {
+        id: 'item-2',
+        orderId: 'order-1',
+        sequence: 2,
+        name: '款式二',
+        crafts: ['craft-uv'],
+      },
+    ]);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SCHEDULING,
+      requiresOutsource: true,
+    });
+
+    const result = await markOutsourceReceived(
+      'outsource-1',
+      { actualDate: null },
+      foremanActor,
+    );
+
+    expect(result.orderCompleted).toBe(false);
+    expect(result.pendingOutsourceItems).toEqual([
+      { id: 'item-2', sequence: 2, name: '款式二' },
+    ]);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('覆盖完整时 pendingOutsourceItems 为空数组（不误报 notice）', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-1',
+      orderId: 'order-1',
+      status: OutsourceStatus.SENT,
+    });
+    dbMock.outsourceOrder.update.mockResolvedValue({
+      id: 'outsource-1',
+      status: OutsourceStatus.RECEIVED,
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+      },
+    ]);
+    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        status: OrderStatus.SCHEDULING,
+        requiresOutsource: true,
+      })
+      .mockResolvedValueOnce({
+        id: 'order-1',
+        orderNo: 'O-OUT',
+        customerRef: null,
+      });
+
+    const result = await markOutsourceReceived(
+      'outsource-1',
+      { actualDate: null },
+      foremanActor,
+    );
+
+    expect(result.orderCompleted).toBe(true);
+    expect(result.pendingOutsourceItems).toEqual([]);
   });
 
   it('does not complete a mixed order while an internal task is unfinished', async () => {

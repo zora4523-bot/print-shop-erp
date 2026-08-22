@@ -46,7 +46,10 @@ function isExpectedNoScope(err: unknown): boolean {
 export async function dispatchNotification<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
-  options: { dedupeKey?: string } = {},
+  // spreadIndex：批量扇出时传循环下标，durable 模式据此把 availableAt 摊开，
+  // 避免整批同时打向企业微信被限流（见 background-jobs/notification.ts 的
+  // FANOUT_SPACING_MS）。inline 模式忽略它 —— dev/test 本来就不真发。
+  options: { dedupeKey?: string; spreadIndex?: number } = {},
 ): Promise<void> {
   if (backgroundJobsMode() === 'durable') {
     // Lazy import keeps the inline test/dev path free of lib/db side effects.

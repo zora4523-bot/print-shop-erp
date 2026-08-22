@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock collaborators before importing dispatch.
 const { notifyMock, afterMock, modeMock, enqueueNotificationJobMock } = vi.hoisted(() => ({
-  notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined),
+  notifyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => undefined),
   afterMock: vi.fn<(cb: () => unknown) => void>(),
   modeMock: vi.fn<() => 'inline' | 'durable'>(() => 'inline'),
   enqueueNotificationJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -133,6 +133,27 @@ describe('dispatchNotification', () => {
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
+  it('spreadIndex 原样透传给入队（批量扇出的限流节流）', async () => {
+    modeMock.mockReturnValue('durable');
+    await dispatchNotification(
+      'ORDER_OVERDUE',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        customerRef: '客户',
+        promisedDate: '2026-08-20',
+        daysOverdue: 2,
+        status: '生产中',
+      },
+      { dedupeKey: 'notification:ORDER_OVERDUE:2026-08-21:o1', spreadIndex: 7 },
+    );
+    expect(enqueueNotificationJobMock).toHaveBeenCalledWith(
+      'ORDER_OVERDUE',
+      expect.objectContaining({ orderId: 'o1' }),
+      { dedupeKey: 'notification:ORDER_OVERDUE:2026-08-21:o1', spreadIndex: 7 },
+    );
+  });
+
   it('durable 入队失败仍永不抛，并降级 best-effort notify', async () => {
     modeMock.mockReturnValue('durable');
     enqueueNotificationJobMock.mockRejectedValue(
@@ -160,6 +181,66 @@ describe('dispatchNotification', () => {
     expect(errorSpy.mock.calls.flat().join(' ')).not.toContain(
       'connection string',
     );
+    errorSpy.mockRestore();
+  });
+});
+
+// notify 现在返回 NotifyOutcome（含 retryable），只有 handleNotificationJob
+// 会据此抛异常。这一组把「同步调用点不会被带崩」钉死：dispatch 的三条路径
+// 都忽略返回值，`void notify(...)` 更不能变成 unhandled rejection —— Node 24
+// 默认 --unhandled-rejections=throw，那等于让一次企业微信抖动打死 web 进程。
+describe('dispatchNotification · notify 返回可重试 outcome 时不带崩同步路径', () => {
+  const retryableOutcome = {
+    event: 'ORDER_COMPLETED',
+    attempted: 1,
+    delivered: 0,
+    skipped: 0,
+    failed: 1,
+    retryable: true,
+    unlogged: 0,
+    errorCodes: ['http 500'],
+  };
+
+  beforeEach(() => {
+    notifyMock.mockResolvedValue(retryableOutcome);
+  });
+
+  const payload = {
+    orderId: 'o1',
+    orderNo: 'O-1',
+    customerRef: null,
+  } as const;
+
+  it('inline after() 回调：dispatch 不抛，回调本身也 resolve', async () => {
+    await expect(
+      dispatchNotification('ORDER_COMPLETED', payload),
+    ).resolves.toBeUndefined();
+    const cb = afterMock.mock.calls[0]![0] as () => unknown;
+    await expect(Promise.resolve(cb())).resolves.toMatchObject({
+      retryable: true,
+    });
+  });
+
+  it('after() 无 request scope 的 void 降级：不抛', async () => {
+    afterMock.mockImplementation(() => {
+      throw new Error('after() cannot be called outside of a request scope');
+    });
+    await expect(
+      dispatchNotification('ORDER_COMPLETED', payload),
+    ).resolves.toBeUndefined();
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('durable 入队失败后的 void 降级：不抛', async () => {
+    modeMock.mockReturnValue('durable');
+    enqueueNotificationJobMock.mockRejectedValue(new Error('db down'));
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    await expect(
+      dispatchNotification('ORDER_COMPLETED', payload),
+    ).resolves.toBeUndefined();
+    expect(notifyMock).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
   });
 });

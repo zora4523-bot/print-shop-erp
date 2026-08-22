@@ -15,6 +15,7 @@
 | **PIGSTY-EXTENSIONS.md** | Pigsty 扩展适配与开发计划 | 开发 / 运维 |
 | **docs/pigsty-production-activation-runbook.md** | Pigsty 生产扩展启用 runbook | 运维 / Owner |
 | **docs/deployment-smoke-checklist.md** | 部署前 smoke 与备份检查清单 | 开发 / 运维 |
+| **docs/上线前置操作清单.md** | 当前发布批次的部署前排查、单向门与人工验证 | 运维 / Owner |
 | **docs/AGENT-BACKLOG.md** | Agent 自动化开发任务队列 | 开发 / Codex routines |
 | **docs/规范合规审查-2026-08-19.md** | CLAUDE.md 规范合规审查快照（含 19 条待处理） | 开发 |
 | **docs/AGENT-ROUTINES.md** | Agent 自动 prompt / draft PR 执行协议 | 开发 / Codex routines |
@@ -235,41 +236,53 @@ pnpm dev
 
 ### 2. Cron 切换：`Bearer` → `pg_cron`
 
-P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret + 外部 cron 调用：
+P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret + 外部 cron 调用。
+
+> **密钥不进命令行参数**：`-H "Authorization: Bearer $CRON_SECRET"` 会把展开后的明文密钥写进
+> 进程 argv 和 shell history——同机任何用户一句 `ps -efww | grep Bearer` 就能读走完整
+> `CRON_SECRET`。下面统一用 `--header @-` 从 stdin 喂头（curl >= 7.55，2017 年引入；
+> Ubuntu 22.04 / Debian 12 / Alibaba Cloud Linux 3 自带的 curl 都满足）。
+> 生产不要手抄这些命令，直接用 `deploy/run-cron.sh`，它已经是这个写法。
 
 ```bash
 # 每日 24:00 师傅日薪（P1 #2 起：完成后推 DAILY_WORKER_SALARY 到车间群）
-curl -X POST https://host/api/cron/daily-salary \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/daily-salary
 
 # 月初 00:00 时薪工月结
-curl -X POST https://host/api/cron/hourly-payroll \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/hourly-payroll
 
 # 每日扫描已到期客服周期（P1 #2 起：每条结算推 CS_PERIOD_SETTLED 到管理员群+客服）
-curl -X POST https://host/api/cron/cs-settle \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/cs-settle
 
 # 月初 00:30 销售应收账单
-curl -X POST https://host/api/cron/generate-bills \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/generate-bills
 
 # P1 #2 新增：每日扫超期外协 → OUTSOURCE_OVERDUE 推送到管理群
-curl -X POST https://host/api/cron/outsource-overdue \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/outsource-overdue
 
 # P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到管理员群
-curl -X POST https://host/api/cron/cs-period-ending \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/cs-period-ending
 
 # 2026-07-07 新增：每日扫承诺交期已过仍未发货的工单 → ORDER_OVERDUE 推送到管理群
-curl -X POST https://host/api/cron/order-overdue \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/order-overdue
 
 # 每日分批删除过期工单导出产物，终态只保留粗粒度 scope
-curl -X POST https://host/api/cron/order-export-cleanup \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -X POST --header @- https://host/api/cron/order-export-cleanup
 ```
+
+**手工带 body 重跑日薪 / 月结时会多一个 400**（2026-08-21 起）：`daily-salary` 的
+`body.date` 严格晚于上海日历今天、`hourly-payroll` 的 `body.month` 严格晚于上海本月时，
+直接返回 `400 { "error": "future date: <date>" }` / `{ "error": "future month: <month>" }`，
+不入队。crontab 里不带 body 的默认调用算的是「昨天 / 上月」，永远不会命中这个分支；
+`202 queued` / `200` / `401` / `503` 的既有形状一律不变。
 
 上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
 
@@ -335,12 +348,14 @@ fc-list :lang=zh | head
 
 脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
 
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。当前工作区的 Fresh DB 验证必须完整应用 **71 项 migration** 到尾部 `20260807184000_pricing_compatibility_fence`，并检查无效并发索引为 0；完整命令、视觉 fixture 和故障处理见 `docs/部署指南.md` §14。这是本地发布候选口径，不表示生产已从 `aa42ba0` / 45 项 migration 升级。
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。当前工作区的 Fresh DB 验证必须完整应用 **77 项 migration** 到尾部 `20260821120100_notification_log_delivery_key_unique`，并检查无效并发索引为 0（2026-08-21 顺带订正此前已漂掉的 3 项：原文的 71 / `pricing_compatibility_fence` 早在那一轮之前就落后于仓库实际的 74 项）；完整命令、视觉 fixture 和故障处理见 `docs/部署指南.md` §14。其中 `20260821120100_notification_log_delivery_key_unique` 的唯一索引是**通知重试的正确性依赖**（INVALID 索引不能当 `ON CONFLICT` 的 arbiter），迁移后必须单独验收 `indisvalid`，SQL 见 `docs/上线前置操作清单.md` §二。这是本地发布候选口径，不表示生产已从 `aa42ba0` / 45 项 migration 升级。
 
 ### 8. 上线 smoke checklist
 
-按顺序跑一遍：
+按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
+- [ ] `docs/上线前置操作清单.md` §一的两段只读 SQL 已跑，外协覆盖存量缺口清零（否则不要上闸口那一步）
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
+- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（`docs/上线前置操作清单.md` §二）
 - [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
 - [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
@@ -355,4 +370,5 @@ fc-list :lang=zh | head
 - [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
 - [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
+- [ ] `/api/health/jobs` 返回 200（有死信 / 卡死 RUNNING / worker 缺失会 503）；把它接进外部监控，否则「死信 30 分钟响应」这条 SLO 不生效
 - [ ] `pnpm check:backup` 通过，确认两个 repo 的 full + WAL

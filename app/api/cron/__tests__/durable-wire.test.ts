@@ -165,3 +165,36 @@ describe('cron durable wires', () => {
     });
   }
 });
+
+// 薪资两条 cron 新增了一个 400 分支（既有 202/401/503 的形状不变）。真闸口
+// 在 lib/salary/*，路由这层只是入队前的提前失败：durable 模式下一个未来
+// 日期会变成一条注定烧满 maxAttempts=4 次的 BackgroundJob。
+//
+// 日期写死 2099，不用相对真实时钟推算 —— 免得这条断言随墙上时钟漂移。
+// 谓词来自 @/lib/dashboard/shanghai-clock（本文件没有 mock 它），所以上面
+// 那份 @/lib/cron/schedule 的 mock 工厂不需要跟着加导出。
+describe('salary cron wires refuse future-dated scopes before enqueuing', () => {
+  it('daily-salary answers 400 and does not enqueue', async () => {
+    const response = await dailySalaryPost(
+      request('/api/cron/daily-salary', { date: '2099-01-01' }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/future date/),
+    });
+    expect(enqueueCronJobMock).not.toHaveBeenCalled();
+  });
+
+  it('hourly-payroll answers 400 and does not enqueue', async () => {
+    const response = await hourlyPayrollPost(
+      request('/api/cron/hourly-payroll', { month: '2099-01' }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/future month/),
+    });
+    expect(enqueueCronJobMock).not.toHaveBeenCalled();
+  });
+});

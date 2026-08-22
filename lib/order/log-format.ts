@@ -19,6 +19,10 @@ const FIELD_LABELS: Record<string, string> = {
   status: '状态',
   // Created-by / submitted-by meta
   trackingNo: '快递单号',
+  // 超计划报工（action='TASK_OVER_REPORT'）落在同一张表里
+  completedQty: '合格数',
+  defectQty: '不良数',
+  reworkQty: '返工数',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -104,6 +108,10 @@ const ACTION_LABELS: Record<string, string> = {
   UPDATE: '编辑',
   STATUS_CHANGE: '状态变更',
   DELETE: '删除',
+  // lib/production.ts 写这两个 action；此前它们没有标签，时间线上直接
+  // 显示英文枚举串。
+  TASK_REASSIGN: '任务改派',
+  TASK_OVER_REPORT: '超计划报工',
 };
 
 export function actionLabel(action: string): string {

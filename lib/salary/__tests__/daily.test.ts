@@ -1014,6 +1014,90 @@ describe('computeDailyWorkerSalary — advisory lock + now pinning (mirrors hour
   });
 });
 
+describe('future-dated settlement guard (上海日历)', () => {
+  const workerFixture = {
+    id: 'worker-1',
+    role: Role.WORKER,
+    workerType: WorkerType.MACHINE,
+    machineType: MachineType.HAND_PRESS,
+    isActive: true,
+  };
+
+  beforeEach(() => {
+    dbMock.user.findMany.mockReset().mockResolvedValue([]);
+    dbMock.user.findUnique.mockReset().mockResolvedValue(workerFixture);
+    dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+    dbMock.salaryRule.findFirst
+      .mockReset()
+      .mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.findUnique.mockReset().mockResolvedValue(null);
+    dbMock.dailyWorkerSalary.upsert.mockReset().mockResolvedValue({ id: 'ds-1' });
+    dbMock.dailyWorkerSalaryItem.deleteMany
+      .mockReset()
+      .mockResolvedValue({ count: 0 });
+    dbMock.dailyWorkerSalaryItem.createMany
+      .mockReset()
+      .mockResolvedValue({ count: 0 });
+    dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
+    dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
+      if (typeof fn === 'function') {
+        return await (fn as (tx: unknown) => unknown)(dbMock);
+      }
+      return fn;
+    });
+  });
+
+  it('single path refuses a future date before touching the database', async () => {
+    // 未来的一天没有任何已完工任务，tasks.length === 0 分支会照 dailyBase
+    // 写出一条正式行 —— 所以守卫必须在任何库访问之前生效。
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-24', new Date('2026-04-23T10:00:00Z')),
+    ).rejects.toThrow(DailySalaryError);
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-24', new Date('2026-04-23T10:00:00Z')),
+    ).rejects.toThrow(/未来日期/);
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.dailyWorkerSalary.upsert).not.toHaveBeenCalled();
+  });
+
+  it('still allows the current day (口径：只拒严格未来，别改成 >=)', async () => {
+    // 业主手工重算的典型场景就是「今天有人补报工了，重算今天」。
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-23', new Date('2026-04-23T10:00:00Z')),
+    ).resolves.toBeDefined();
+    expect(dbMock.dailyWorkerSalary.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('judges "future" on the Shanghai calendar, not UTC', async () => {
+    // UTC 2026-04-23T15:59:59Z = Shanghai 04-23 23:59:59 → 04-24 仍是未来
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-24', new Date('2026-04-23T15:59:59Z')),
+    ).rejects.toThrow(/未来日期/);
+    // UTC 2026-04-23T16:00:00Z = Shanghai 04-24 00:00 → 04-24 已是当天
+    await expect(
+      computeDailyWorkerSalary('worker-1', '2026-04-24', new Date('2026-04-23T16:00:00Z')),
+    ).resolves.toBeDefined();
+  });
+
+  it('batch aborts wholesale instead of reporting a per-worker error', async () => {
+    // 日期错是整批的输入错，不是某个师傅的业务错 —— 逐人捕获会返回
+    // status:'success' + errorCount = 全员数，UI 上看着像「部分失败」。
+    let caught: unknown;
+    try {
+      await computeDailyForAllMachineWorkers(
+        '2026-04-24',
+        new Date('2026-04-23T10:00:00Z'),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DailySalaryError);
+    expect((caught as Error).message).toMatch(/未来日期/);
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
+  });
+});
+
 // sanity check: the pure path still lines up with lib/salary/machine-piecework
 // since computeDailyWorkerSalary delegates to calcMachineDailySalary.
 describe('parity with calcMachineDailySalary', () => {

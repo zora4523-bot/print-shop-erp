@@ -46,10 +46,18 @@ function formWith(overrides: Record<string, string> = {}): FormData {
     factory_name: '佛山红包印刷厂',
     cdr_link_expire_hours: '24',
     outsource_overdue_days: '1',
+    report_qty_max_multiple: '3',
   };
   for (const key of SETTING_KEYS) {
     const value = overrides[key] ?? valid[key];
-    if (value !== undefined) fd.set(key, value);
+    // 新增 SETTING_KEY 却忘了给 fixture 值时，要在这里当场炸掉而不是
+    // 少发一个字段。updateSettingsAction 把缺字段一律当成「表单被改过」
+    // 报 invalid，静默跳过会让本文件里**每一条**用例都变成在测缺字段路径，
+    // 而报错信息只会说「表单字段缺失」，一眼看不出是 fixture 漏了。
+    if (value === undefined) {
+      throw new Error(`formWith 缺少 ${key} 的合法值，请在 valid 里补上`);
+    }
+    fd.set(key, value);
   }
   return fd;
 }
@@ -77,6 +85,7 @@ describe('updateSettingsAction', () => {
         factory_name: { name: '佛山红包印刷厂' },
         cdr_link_expire_hours: { hours: 24 },
         outsource_overdue_days: { days: 1 },
+        report_qty_max_multiple: { multiple: 3 },
       },
       ACTOR,
     );

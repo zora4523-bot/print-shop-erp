@@ -20,9 +20,12 @@ import {
   getOverdueOutsourcing,
   getDueOrders,
   getPendingShipments,
+  getRecentOverReports,
+  OVER_REPORT_WINDOW_DAYS,
   type EndingPeriodRow,
   type DueOrderRow,
   type OverdueOutsourceRow,
+  type OverReportRow,
   type PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
 import {
@@ -44,13 +47,15 @@ import { DeferredDashboardCharts } from '@/components/business/dashboard/Deferre
 import { Badge } from '@/components/ui/badge';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
+import { PROMISE_ALERT_STATUSES } from '@/lib/order/promised-date';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '管理员 Dashboard' };
 
 // /owner is the ADMIN landing page. Layered build (P1 #1):
 //   - Slice A: 4 KPI cards
-//   - Slice B: 3 watchlist tables
+//   - Slice B: 4 watchlist tables（含「超计划报工」——超报的知情通道，
+//     见 lib/dashboard/owner-watchlist.ts 的 getRecentOverReports）
 //   - Slice C: 3 charts — 30 天产量 / 销售业绩 Top10 / 产品分布
 //
 // Permission: `report:all` is ADMIN-only; matches the (admin)/owner
@@ -68,6 +73,7 @@ export default async function OwnerDashboardPage() {
     pendingShipments,
     overdueOutsourcing,
     dueOrders,
+    overReports,
     endingPeriods,
   ] = await Promise.all([
     getTodayOrderStats(),
@@ -75,6 +81,7 @@ export default async function OwnerDashboardPage() {
     getPendingShipments(),
     getOverdueOutsourcing(),
     getDueOrders(),
+    getRecentOverReports(),
     getEndingPeriods(),
   ]);
 
@@ -86,6 +93,18 @@ export default async function OwnerDashboardPage() {
       : completedDiff < 0
         ? `较昨日 ${completedDiff}`
         : '与昨日持平';
+
+  // 交期预警只渲染前 N 条，footer 的「查看全部」把同一个窗口交给工单
+  // 列表页：status = 未发货五态、promisedTo = 窗口右界日历日、按交期正
+  // 序。窗口右界由 getDueOrders 一起返回，页面不自己算日期，否则链接
+  // 筛出来的和上面列出来的会悄悄不是一批。
+  // （列表页的 status 支持逗号分隔，见 lib/order/list-query.ts valuesOf。）
+  const dueOrdersHref = `/orders?${new URLSearchParams({
+    status: PROMISE_ALERT_STATUSES.join(','),
+    promisedTo: dueOrders.promisedThroughYmd,
+    sort: 'promisedDate',
+    dir: 'asc',
+  })}`;
 
   return (
     <div className="space-y-6">
@@ -221,10 +240,63 @@ export default async function OwnerDashboardPage() {
           slot="dashboard-watchlist-due-orders"
           title="交期预警"
           description="承诺交期已逾期或 3 天内到期 · 未发货工单"
-          rows={dueOrders}
+          rows={dueOrders.rows}
           rowKey={(r) => r.id}
           emptyText="暂无交期风险工单"
           columns={dueOrderColumns}
+          footer={
+            // 截断必须说出来，并且给得出总数：这张表的窗口没有下界，
+            // 积压多少正是业主要看的信号。链接与上表同窗口（见
+            // dueOrdersHref）。
+            dueOrders.total > dueOrders.rows.length ? (
+              <span>
+                共{' '}
+                <span className="font-sans tabular-nums">
+                  {dueOrders.total}
+                </span>{' '}
+                条 · 仅显示交期最紧的前{' '}
+                <span className="font-sans tabular-nums">
+                  {dueOrders.rows.length}
+                </span>{' '}
+                条 ·{' '}
+                <Link
+                  href={dueOrdersHref}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  查看全部 →
+                </Link>
+              </span>
+            ) : null
+          }
+        />
+
+        <WatchlistTable
+          slot="dashboard-watchlist-over-reports"
+          title="超计划报工"
+          description={`近 ${OVER_REPORT_WINDOW_DAYS} 天 · 师傅勾确认后超出计划数完工`}
+          rows={overReports.rows}
+          rowKey={(r) => r.id}
+          emptyText={`近 ${OVER_REPORT_WINDOW_DAYS} 天没有超计划报工。`}
+          columns={overReportColumns}
+          footer={
+            // 这张表是超报的唯一知情通道：批准权在师傅自己手上（勾一下就
+            // 过），而计件按合计数全额付。总数必须给全，不能只显示前 10 条
+            // 就当没别的了。空窗口不渲染 footer —— emptyText 已经把话说完，
+            // 再补一句「共 0 条」只是噪音。
+            overReports.total > 0 ? (
+              <span>
+                共{' '}
+                <span className="font-sans tabular-nums">
+                  {overReports.total}
+                </span>{' '}
+                条（{overReports.sinceYmd} 起）
+                {overReports.total > overReports.rows.length
+                  ? ` · 仅显示最近 ${overReports.rows.length} 条`
+                  : ''}
+                。明细在工单时间线里，点工单号进去看。
+              </span>
+            ) : null
+          }
         />
       </div>
 
@@ -402,6 +474,40 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
       align: 'center',
     },
   ];
+
+const overReportColumns: readonly WatchlistColumn<OverReportRow>[] = [
+  {
+    header: '工单号',
+    cell: (r) => (
+      <Link
+        href={`/orders/${r.orderId}`}
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
+      >
+        {r.orderNo}
+      </Link>
+    ),
+  },
+  {
+    header: '报工人',
+    cell: (r) => r.operatorDisplayName,
+  },
+  {
+    // remark 的格式由 lib/production.ts 的 overReportRemark 决定，
+    // 形如「款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200
+    // （合格 6000 / 不良 100 / 返工 100），报工人 …，已勾选确认」。
+    // 这里原样显示——比再解析一遍诚实，也不会因为格式微调就显示成空白。
+    header: '明细',
+    cell: (r) => (
+      <span className="text-xs text-muted-foreground">{r.remark ?? '—'}</span>
+    ),
+  },
+  {
+    header: '时间',
+    cell: (r) => formatDateTimeShanghai(r.createdAt),
+    align: 'right',
+    className: 'font-sans tabular-nums text-xs',
+  },
+];
 
 const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   {

@@ -30,7 +30,14 @@ body_file=$(mktemp)
 error_file=$(mktemp)
 trap 'rm -f "$body_file" "$error_file"' EXIT HUP INT TERM
 
+# Authorization 头绝不能进 curl 的命令行参数：同机任何用户一句
+# `ps -efww | grep Bearer` 就能读走完整 CRON_SECRET。改用 `--header @-`
+# （curl >= 7.55）从标准输入读一行头——printf 是 POSIX sh 内建命令，密钥
+# 只经过管道，既不进 argv 也不落盘，因此不需要额外的临时文件和 chmod。
+# 上面的 `tr -d '\r\n'` 顺带保证了这里只会喂进一行，不会被密钥里的换行
+# 注入出第二个头。
 if ! status=$(
+  printf '%s\n' "Authorization: Bearer $secret" |
   curl --silent --show-error \
     --retry 3 \
     --retry-all-errors \
@@ -40,7 +47,7 @@ if ! status=$(
     --output "$body_file" \
     --write-out '%{http_code}' \
     --request POST \
-    --header "Authorization: Bearer $secret" \
+    --header @- \
     "${APP_PUBLIC_URL%/}/api/cron/$endpoint" \
     2>"$error_file"
 ); then

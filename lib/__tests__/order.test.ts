@@ -2351,7 +2351,7 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
           in: ['craft-retired', 'craft-active', 'craft-missing'],
         },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, isOutsource: true },
     });
     expect(result?.items).toEqual([
       {
@@ -2365,6 +2365,61 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
         craftNames: ['现行工艺', '历史工艺'],
       },
     ]);
+    // 这张 mock 没有 requiresOutsource（undefined）→ outsourceCoverageApplies
+    // 为 false → 覆盖计算整段跳过，字段恒为空数组。横幅与闸口共用这个谓词，
+    // 所以这行也是「未排产/非外协工单不出现横幅」的回归。
+    expect(result?.uncoveredOutsourceItems).toEqual([]);
+  });
+
+  it('getOrderDetail 列出未被外协单覆盖的款式（详情页「暂不能完工」横幅的数据源）', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-uncovered',
+      requiresOutsource: true,
+      outsourceOrders: [
+        // 已取消的那张不算覆盖，哪怕它写着 item-2。
+        { id: 'os-cancelled', status: 'CANCELLED', orderItemIds: ['item-2'] },
+        { id: 'os-live', status: 'RECEIVED', orderItemIds: ['item-1'] },
+      ],
+      items: [
+        { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-uv'] },
+        { id: 'item-2', sequence: 2, name: '款式二', crafts: ['craft-uv'] },
+        { id: 'item-3', sequence: 3, name: '款式三', crafts: ['craft-foil'] },
+      ],
+    });
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      { id: 'craft-uv', name: '局部UV', isOutsource: true },
+      { id: 'craft-foil', name: '烫金', isOutsource: false },
+    ]);
+
+    const result = await getOrderDetail('order-uncovered', ownerActor);
+
+    expect(result?.uncoveredOutsourceItems).toEqual([
+      { id: 'item-2', sequence: 2, name: '款式二' },
+    ]);
+    // 仍然只有一条 craft 查询：名称解析与覆盖判定复用同一份字典。
+    expect(dbMock.craft.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('getOrderDetail 对 requiresOutsource=false 的工单不算覆盖缺口（与闸口同一谓词）', async () => {
+    // 反向漂移回归：craft 后来被翻成外协、但工单排产时的快照是 false，
+    // 闸口不会拦，横幅也必须闭嘴——否则主管补出来的外协单是一笔凭空应付。
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-snapshot-false',
+      requiresOutsource: false,
+      outsourceOrders: [],
+      items: [
+        { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-uv'] },
+      ],
+    });
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      { id: 'craft-uv', name: '局部UV', isOutsource: true },
+    ]);
+
+    const result = await getOrderDetail('order-snapshot-false', ownerActor);
+
+    expect(result?.uncoveredOutsourceItems).toEqual([]);
+    // 名称解析没有被一起跳过。
+    expect(result?.items[0]?.craftNames).toEqual(['局部UV']);
   });
 
   it('getOrderDetail adds empty craftNames without querying Craft for empty items', async () => {

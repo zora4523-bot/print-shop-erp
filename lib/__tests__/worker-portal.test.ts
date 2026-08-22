@@ -8,7 +8,7 @@ import {
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
-    order: { findMany: vi.fn(), findFirst: vi.fn() },
+    order: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     dailyWorkerSalary: { findMany: vi.fn(), findFirst: vi.fn() },
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
@@ -22,6 +22,7 @@ import {
   listWorkerHourlyPayrolls,
   listWorkerOrders,
   listWorkerSalaries,
+  WORKER_ORDER_PAGE_SIZE,
   WorkerPortalError,
 } from '../worker-portal';
 
@@ -39,6 +40,7 @@ const packer = {
 beforeEach(() => {
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.order.count.mockReset().mockResolvedValue(0);
   dbMock.dailyWorkerSalary.findMany.mockReset().mockResolvedValue([]);
   dbMock.dailyWorkerSalary.findFirst.mockReset().mockResolvedValue(null);
   dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
@@ -69,6 +71,8 @@ describe('worker order visibility', () => {
       },
     ]);
 
+    dbMock.order.count.mockResolvedValue(1);
+
     const result = await listWorkerOrders(worker);
     const query = dbMock.order.findMany.mock.calls[0][0];
     expect(query.where).toEqual({
@@ -81,7 +85,7 @@ describe('worker order visibility', () => {
     expect(query.select.items.select.tasks.where).toEqual({
       workerId: 'worker-a',
     });
-    expect(result[0]).toMatchObject({
+    expect(result.rows[0]).toMatchObject({
       taskCount: 1,
       completedTaskCount: 1,
       pieceworkAmount: '12.00',
@@ -109,6 +113,72 @@ describe('worker order visibility', () => {
     expect(detailQuery.select.items.select.designs.where).toEqual({
       fileType: 'IMAGE',
     });
+  });
+});
+
+describe('worker order list pagination', () => {
+  it('bounds the first page instead of streaming the whole history', async () => {
+    dbMock.order.count.mockResolvedValue(500);
+
+    const result = await listWorkerOrders(worker);
+    const query = dbMock.order.findMany.mock.calls[0][0];
+
+    expect(query.take).toBe(WORKER_ORDER_PAGE_SIZE);
+    expect(query.skip).toBe(0);
+    expect(result.total).toBe(500);
+    expect(result.page).toBe(1);
+    expect(result.pageCount).toBe(500 / WORKER_ORDER_PAGE_SIZE);
+  });
+
+  it('puts the newest orders first with a stable id tiebreaker', async () => {
+    await listWorkerOrders(worker);
+
+    expect(dbMock.order.findMany.mock.calls[0][0].orderBy).toEqual([
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]);
+  });
+
+  it('counts with exactly the same ownership predicate as the row query', async () => {
+    await listWorkerOrders(worker);
+
+    const rowWhere = dbMock.order.findMany.mock.calls[0][0].where;
+    expect(dbMock.order.count).toHaveBeenCalledWith({ where: rowWhere });
+    expect(rowWhere).toEqual({
+      status: { not: OrderStatus.SUBMITTED },
+      items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
+    });
+  });
+
+  it('skips to the requested page', async () => {
+    dbMock.order.count.mockResolvedValue(500);
+
+    const result = await listWorkerOrders(worker, { page: 3 });
+
+    expect(dbMock.order.findMany.mock.calls[0][0].skip).toBe(
+      WORKER_ORDER_PAGE_SIZE * 2,
+    );
+    expect(result.page).toBe(3);
+  });
+
+  it('clamps a hand-typed out-of-range page to the last page', async () => {
+    dbMock.order.count.mockResolvedValue(WORKER_ORDER_PAGE_SIZE + 5);
+
+    const result = await listWorkerOrders(worker, { page: 999 });
+
+    expect(result.page).toBe(2);
+    expect(result.pageCount).toBe(2);
+    expect(dbMock.order.findMany.mock.calls[0][0].skip).toBe(
+      WORKER_ORDER_PAGE_SIZE,
+    );
+  });
+
+  it('rejects non-worker actors before counting or reading orders', async () => {
+    await expect(
+      listWorkerOrders({ id: 'owner-1', role: Role.ADMIN }),
+    ).rejects.toBeInstanceOf(WorkerPortalError);
+    expect(dbMock.order.count).not.toHaveBeenCalled();
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
   });
 });
 

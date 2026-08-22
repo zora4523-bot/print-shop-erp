@@ -31,4 +31,14 @@ describe('cron deployment configuration', () => {
     );
     expect(scheduled.sort()).toEqual([...EXPECTED_ENDPOINTS].sort());
   });
+
+  it('从不把 Bearer 头放进 curl 的命令行参数', async () => {
+    const runner = await readFile(resolve('deploy/run-cron.sh'), 'utf8');
+
+    // 命令行参数对同机所有用户可见（ps -efww / /proc/PID/cmdline），
+    // 密钥只能从 stdin 喂给 curl。
+    expect(runner).not.toMatch(/--header\s+["']?Authorization/);
+    expect(runner).toContain('--header @-');
+    expect(runner).toMatch(/printf '%s\\n' "Authorization: Bearer \$secret"/);
+  });
 });

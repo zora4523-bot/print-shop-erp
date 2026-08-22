@@ -74,26 +74,40 @@ export async function getSalaryIndexSummary(
   void todayStart; // kept for future if we want completed-at windowing
 
   const month = currentShanghaiMonth(now);
+  // Every total below is computed by PostgreSQL. The old shape pulled
+  // whole unpaid ledgers into Node just to reduce them, which grows
+  // without bound as unpaid rows accumulate.
   const [
-    dailyTodayRows,
-    dailyUnpaidRows,
-    csUnpaidRows,
+    dailyTodayGroups,
+    dailyUnpaidAgg,
+    csUnpaidAgg,
     csReadyCount,
     csActiveCount,
-    hourlyMonthRows,
-    hourlyUnpaidRows,
+    hourlyMonthGroups,
+    hourlyUnpaidAgg,
   ] = await Promise.all([
-    db.dailyWorkerSalary.findMany({
+    // One scan of today's rows, split into the paid / unpaid buckets the
+    // card needs. At most two groups come back.
+    db.dailyWorkerSalary.groupBy({
+      by: ['isPaid'],
       where: { date: todayDateCol },
-      select: { actualSalary: true, isPaid: true },
+      _count: { _all: true },
+      _sum: { actualSalary: true },
     }),
-    db.dailyWorkerSalary.findMany({
+    db.dailyWorkerSalary.aggregate({
       where: { isPaid: false },
-      select: { actualSalary: true },
+      _count: { _all: true },
+      _sum: { actualSalary: true },
     }),
-    db.customerServiceCommission.findMany({
+    // The card wants SUM(base - paidBase + commission - paidCommission).
+    // Summation is linear, so the per-row combination is identical to
+    // combining the four column sums, and each column sum is exact
+    // numeric arithmetic in PostgreSQL. No per-row clamping exists on
+    // this path, so nothing blocks the pushdown.
+    db.customerServiceCommission.aggregate({
       where: { isFullyPaid: false },
-      select: {
+      _count: { _all: true },
+      _sum: {
         monthlyBaseTotal: true,
         commissionAmount: true,
         paidBase: true,
@@ -112,77 +126,84 @@ export async function getSalaryIndexSummary(
     db.salaryPeriod.count({
       where: { status: SalaryPeriodStatus.IN_PROGRESS },
     }),
-    db.hourlyWorkerPayroll.findMany({
+    db.hourlyWorkerPayroll.groupBy({
+      by: ['isPaid'],
       where: { month },
-      select: { totalSalary: true, isPaid: true },
+      _count: { _all: true },
+      _sum: { totalSalary: true },
     }),
-    db.hourlyWorkerPayroll.findMany({
+    db.hourlyWorkerPayroll.aggregate({
       where: { isPaid: false },
-      select: { totalSalary: true },
+      _count: { _all: true },
+      _sum: { totalSalary: true },
     }),
   ]);
 
-  const dailyTodayTotal = sumDecimal(dailyTodayRows.map((r) => r.actualSalary));
-  const dailyTodayUnpaid = sumDecimal(
-    dailyTodayRows.filter((r) => !r.isPaid).map((r) => r.actualSalary),
+  const dailyToday = foldPaidGroups(
+    dailyTodayGroups,
+    (group) => group._sum.actualSalary,
   );
-  const dailyUnpaidAll = sumDecimal(
-    dailyUnpaidRows.map((r) => r.actualSalary),
+  const hourlyMonth = foldPaidGroups(
+    hourlyMonthGroups,
+    (group) => group._sum.totalSalary,
   );
-  const csUnpaidTotal = csUnpaidRows.reduce(
-    (sum, row) =>
-      sum
-        .plus(new Decimal(row.monthlyBaseTotal).minus(row.paidBase))
-        .plus(new Decimal(row.commissionAmount).minus(row.paidCommission)),
-    new Decimal(0),
-  );
-
-  const hourlyMonthTotal = sumDecimal(
-    hourlyMonthRows.map((r) => r.totalSalary),
-  );
-  const hourlyMonthUnpaid = sumDecimal(
-    hourlyMonthRows.filter((r) => !r.isPaid).map((r) => r.totalSalary),
-  );
-  const hourlyUnpaidTotal = sumDecimal(
-    hourlyUnpaidRows.map((r) => r.totalSalary),
-  );
+  const csUnpaidTotal = decimalFromSum(csUnpaidAgg._sum.monthlyBaseTotal)
+    .minus(decimalFromSum(csUnpaidAgg._sum.paidBase))
+    .plus(decimalFromSum(csUnpaidAgg._sum.commissionAmount))
+    .minus(decimalFromSum(csUnpaidAgg._sum.paidCommission));
 
   return {
     today,
     currentMonth: month,
     dailyToday: {
-      count: dailyTodayRows.length,
-      actualTotal: dailyTodayTotal.toFixed(2),
-      unpaidTotal: dailyTodayUnpaid.toFixed(2),
+      count: dailyToday.count,
+      actualTotal: dailyToday.total.toFixed(2),
+      unpaidTotal: dailyToday.unpaid.toFixed(2),
     },
     dailyUnpaidAllTime: {
-      count: dailyUnpaidRows.length,
-      actualTotal: dailyUnpaidAll.toFixed(2),
+      count: dailyUnpaidAgg._count._all,
+      actualTotal: decimalFromSum(dailyUnpaidAgg._sum.actualSalary).toFixed(2),
     },
     csUnpaid: {
-      count: csUnpaidRows.length,
+      count: csUnpaidAgg._count._all,
       totalIncome: csUnpaidTotal.toFixed(2),
     },
     csReadyToSettle: csReadyCount,
     csActivePeriods: csActiveCount,
     hourlyCurrentMonth: {
-      count: hourlyMonthRows.length,
-      totalSalary: hourlyMonthTotal.toFixed(2),
-      unpaidTotal: hourlyMonthUnpaid.toFixed(2),
+      count: hourlyMonth.count,
+      totalSalary: hourlyMonth.total.toFixed(2),
+      unpaidTotal: hourlyMonth.unpaid.toFixed(2),
     },
     hourlyUnpaidAllTime: {
-      count: hourlyUnpaidRows.length,
-      totalSalary: hourlyUnpaidTotal.toFixed(2),
+      count: hourlyUnpaidAgg._count._all,
+      totalSalary: decimalFromSum(hourlyUnpaidAgg._sum.totalSalary).toFixed(2),
     },
   };
 }
 
-// Prisma Decimal is opaque to TS (declared as `unknown` on our raw
-// query surface); we funnel through Decimal.js to keep sub-cent
-// precision through the sum.
-function sumDecimal(values: readonly unknown[]): Decimal {
-  return values.reduce<Decimal>(
-    (acc, v) => acc.plus(new Decimal(v as Decimal.Value)),
-    new Decimal(0),
-  );
+// Collapse the `by: ['isPaid']` buckets into the three numbers the card
+// shows. At most two rows, so this stays O(1) regardless of table size.
+function foldPaidGroups<T extends { isPaid: boolean; _count: { _all: number } }>(
+  groups: readonly T[],
+  amountOf: (group: T) => unknown,
+): { count: number; total: Decimal; unpaid: Decimal } {
+  let count = 0;
+  let total = new Decimal(0);
+  let unpaid = new Decimal(0);
+  for (const group of groups) {
+    const amount = decimalFromSum(amountOf(group));
+    count += group._count._all;
+    total = total.plus(amount);
+    if (!group.isPaid) unpaid = unpaid.plus(amount);
+  }
+  return { count, total, unpaid };
+}
+
+// SUM over a Decimal column comes back as a Prisma Decimal, or null when
+// the filter matched no rows. Prisma Decimal is opaque to TS here, so we
+// go through its decimal string: never Number(), never a float.
+function decimalFromSum(value: unknown): Decimal {
+  if (value === null || value === undefined) return new Decimal(0);
+  return new Decimal(String(value));
 }

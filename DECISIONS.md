@@ -804,3 +804,165 @@
   - 新增门禁三处：打印厂名透传、外协阈值消费、CDR 有效期消费，均已验证「改回硬编码就红」。
   - `Setting` 表的既有行不受影响（seed 不再覆盖写）；升级已有库只需跑一次 `pnpm db:seed` 清掉退役 key，不跑也不影响功能。
 - **相关文档**：CLAUDE.md §4.7 / §15.5、`docs/规范合规审查-2026-08-19.md` §二「Setting 表」。
+
+---
+
+## 2026-08-21：登录限流挂在 `location = /login`，并按请求方法豁免 GET
+
+- **决策**：防登录爆破的 `limit_req zone=erp_auth` 挂在 `deploy/nginx.conf.example` 的 `location = /login` 上；`erp_auth` 桶的 key 不再是裸 `$binary_remote_addr`，而是 `map $request_method $erp_auth_limit_key` 的产物——只有 POST 产生非空 key，GET 求值为空字符串因而不计数。`/api/auth/callback/credentials` 的块保留，作为纵深防御共用同一个桶。
+- **理由**：本项目登录走 Server Action，浏览器 POST 的是 `/login` 本身，**根本不会**访问 `/api/auth/callback/credentials`（`signIn` 是进程内调用）。此前文档与配置注释都宣称「登录端点已限流」，是一条完整的假事实：真正的爆破路径一直裸奔。而 nginx 的 `limit_req` 不区分方法，直接挂 `location = /login` 会连渲染登录页的 GET 一起限流——未登录用户来回点几下就被自己的登录页 429 挡在门外，比不限流更糟；nginx 官方语义里 key 为空即不计数，`map` 正是干净的表达方式。
+- **影响**：`map` 与 `limit_req_zone` 必须都在 `http {}` 层，改完务必 `sudo nginx -t`（重复 include 同名 zone 会直接报错）。**删掉那条 `map` 就等于把 GET 也拖进限流**，这是本条最容易被后人「简化」掉的地方。`docs/部署指南.md` §9 的「三个关键点」已改为四条并写明成因。将来在 ECS 前加阿里云 SLB / CDN 时，`$binary_remote_addr` 会变成 SLB 的 IP、全站共用一个桶，必须先用 `set_real_ip_from` + `real_ip_header X-Forwarded-For` 还原真实客户端 IP。仍待业主拍板：厂区 NAT 出口 IP 是否需要 `geo` 白名单、429 是否配 `error_page` 给友好提示、应用层是否另立项做账号级失败锁定（现状 grep 确认完全没有）。
+- **相关文档**：`deploy/nginx.conf.example`、`docs/部署指南.md` §9、`lib/auth/config.ts`、`app/(auth)/login/`
+
+---
+
+## 2026-08-21：`hasPermission` 只允许用于 `generateMetadata` 这类不能抛错的软判断
+
+- **决策**：`lib/auth/permissions-dict.ts` 新增纯谓词 `hasPermission()`（不抛错、不查库、只对角色-权限映射求值）。它**只**用于 `generateMetadata` 这类「不能抛错的软判断」，永远不作为唯一授权闸口；真闸口仍是页面组件的 `requirePermission` 与 `lib/` 里的 scope 过滤。
+- **理由**：流式 metadata 会先把首屏冲出去、metadata 解析完再追加，此时在 `generateMetadata` 里抛异常未必还能干净落到 `error.tsx`。所以标题查询走 `getSession()` + `hasPermission()` 而不是 `requirePermission()`。这不是绕过 §4.6：权限谓词本身仍在权限字典里，规则只有一处。
+- **影响**：本次把 9 个详情页的 `generateMetadata` 从 `id.slice()` 改成查真实业务编号，其中 `owner/bills`、`owner/salary/cs`、`foreman/outsource`、`foreman/scheduling` 四页的 lib 读取是全局无 scope 的——**若只换查询不过一次 `hasPermission`，SALES 直连 `/owner/bills/<id>` 会被页面挡住，但标签页标题已经把账期和销售姓名漏出去了**，所以这不只是可用性修复。另外四页（orders / print / worker-tasks / sales-bills）靠 `where` 里的 scope 过滤兜底（`getOrderScopeFilter` / 新增的 `getWorkerTaskScopeFilter` / `salesUserId`）。新增 `lib/auth/task-scope.ts`（与 `lib/auth/order-scope.ts` 同构的纯 where 片段），`getWorkerTaskDetail` 随之从 `findUnique` + 事后过滤重构成 `findFirst` + `where`。下次合规审计看到 `app/**` 里出现 `hasPermission` 时，请对照本条，不要当作 §4.6 违规「修掉」。
+- **相关文档**：`lib/auth/permissions-dict.ts`、`lib/auth/task-scope.ts`、`lib/page-title/refs.ts`、CLAUDE.md §4.6 / §15.2
+
+---
+
+## 2026-08-21：死信告警走独立的 `/api/health/jobs`，刻意不动 `/ready` 的状态码
+
+- **决策**：新增匿名端点 `/api/health/jobs`：有死信、超时 RUNNING、worker 心跳缺失或版本不一致时返回 503；只有会自愈的积压时返回 200 `degraded`。`/api/health/ready` 的状态码语义**不变**（仍只由 DB 连通 + worker 心跳决定），只在响应体附加 `jobs` 计数（`pending` / `running` / `staleRunning` / `deadLast24h`）。
+- **理由**：`deploy/update.sh` 用 ready 判定发布成败，非 200 会让 Web / LIGHT / HEAVY 三个进程保持停止。死信通常是**上一版留下的历史事实**，让它进 ready 的状态码等于「有死信就不许发布」。但 `docs/production-slo-and-recovery.md` 一直把死信响应目标的验收方式写成「ready 端点 `deadLast24h` 告警」，而 ready 从不因死信非 200——这条 SLO 的验收方式在代码里根本不成立。两难的正解是拆端点，不是改 ready。
+- **影响**：SLO 文档的验收方式改为「外部监控每 1 分钟请求 `/api/health/jobs`，非 200 即告警（连续 2 次失败再通知）」，并明确注明**接进监控之前该 SLO 不生效**——代码只是把信号暴露出来了，没有任何东西会自动去拉它；把「描述假事实」换成「承诺一条不存在的监控」性质更糟。去抖必须放在监控侧：HEAVY 队列并发固定 1、`runLane` 只在 claim 时扫租约，唯一 lane 跑长任务期间一条崩溃遗留的 RUNNING 会持续计入 `staleRunning`，探针会稳定 503 一段时间，**不要为此把代码阈值调松**。`scripts/deploy-smoke.mjs` 会拉一次该端点，但只打 WARNING、**非致命**，不是发布门禁。端点匿名（跟随 `proxy.ts` 对 `api/health` 的整体排除），只回计数与告警码，不回 worker 明细 / 任务 id / 类型 / 错误信息。
+- **相关文档**：`app/api/health/jobs/route.ts`、`app/api/health/ready/route.ts`、`lib/background-jobs/health.ts`、`scripts/deploy-smoke.mjs`、`docs/production-slo-and-recovery.md`、`docs/部署指南.md` §14
+
+---
+
+## 2026-08-21：cron 密钥不进 curl 的命令行参数
+
+- **决策**：`deploy/run-cron.sh` 及所有文档示例一律改用 `printf '%s\n' "Authorization: Bearer $secret" | curl … --header @-` 从 stdin 喂 Authorization 头，不再写 `-H "Authorization: Bearer $CRON_SECRET"`。`lib/__tests__/cron-deployment-config.test.ts` 增加源码级门禁挡住回退（shell 脚本没有别的自动化验证手段）。同时 `lib/cron-auth.ts` 的比较换成 HMAC 摘要 + `timingSafeEqual` 的恒定时间比较。
+- **理由**：`-H` 的密钥在 shell 展开后进入进程 argv，同机任何用户一句 `ps -efww | grep Bearer` 就能读走完整 `CRON_SECRET`，并且会落进 shell history。`--header @-` 让密钥只经过管道，既不进 argv 也不落盘，因此不需要临时文件和 chmod；脚本里既有的 `tr -d '\r\n'` 顺带保证只会喂进一行，密钥里的换行注入不出第二个头。
+- **影响**：**新增部署环境要求 `curl >= 7.55`**（`--header @-` 是 2017 年 curl 7.55.0 引入的）。Ubuntu 22.04（7.81）/ Debian 12（7.88）/ Alibaba Cloud Linux 3（7.76）都满足；万一更老，curl 会把 `@-` 当字面头名发出去 → 服务端 401 → 脚本走 HTTP 401 分支 `exit 1` 并写 syslog，是**响的失败**不是静默失败。README §🚢 的 8 段示例、`docs/deployment-smoke-checklist.md`、`docs/部署指南.md` §10 / §13 已同步；smoke checklist 里字面量 `Bearer invalid` 的 401 反例**刻意不改**（不含真实密钥）。`lib/ops-readiness.ts` 生成的 `manualCurl` 展示文本仍带 `-H`，**刻意未改**：它是 SQL 里拼给运维看的字符串，pg_cron 走 `net.http_post` 不经 shell，不构成 ps 泄漏。DECISIONS 2026-04-24「Cron 端点统一 shared-secret Bearer」的影响一节里也有 `curl -H "Authorization: Bearer $CRON_SECRET"` 写法，按追加式规范不回改旧条目，以本条为准。
+- **相关文档**：`deploy/run-cron.sh`、`lib/cron-auth.ts`、`lib/__tests__/cron-auth.test.ts`、`lib/__tests__/cron-deployment-config.test.ts`、README.md §🚢2、`docs/部署指南.md` §10
+
+---
+
+## 2026-08-21：薪资结算只拒绝「严格未来」的日期与月份
+
+- **决策**：`/api/cron/daily-salary` 在 `body.date` 严格晚于上海日历今天时返回 `400 {"error": "future date: <date>"}`；`/api/cron/hourly-payroll` 在 `body.month` 严格晚于上海本月时返回 `400 {"error": "future month: <month>"}`。**当天与当月仍可结算。** 谓词唯一实现在 `lib/dashboard/shanghai-clock.ts` 的 `isFutureShanghaiDate` / `isFutureShanghaiMonth`，闸口在 `lib/salary/daily.ts` 的 `assertNotFutureSalaryDate` 与 `lib/salary/hourly-aggregate.ts` 的 `assertNotFutureSalaryMonth`。
+- **理由**：cron 凌晨跑的是昨天，业主手工重算的典型场景恰恰是「今天有人补报工了，重算今天」；`lib/salary/__tests__/daily.test.ts` 也有一条「注入 `now` = 当天、算当天」的用例把这个规则钉住了。把边界设成 `>=` 会同时打掉正常用法。
+- **影响**：原有 `202 queued` / `200` / `401` / `500` / `503` 的响应形状一律不变，crontab 里不带 body 的默认调用（`yesterdayShanghai()` / `previousShanghaiMonth()`）**永远不会**命中新分支——只有人工带 body 重跑才可能踩到。路由的 400 只挡 HTTP 入口：若有人直接往 `BackgroundJob` 表插一条 `payload.date` 是未来日期的 `CRON_DAILY_SALARY`，worker 会命中 lib 层守卫抛错、按 `maxAttempts=4` 重试后落 FAILED——安全（不会写出工资），但会在告警里留 4 次噪音，已评估为可接受，不额外加入队校验。**当天/当月仍有两块残余风险待业主拍板**（见 HANDOFF「卡住的问题」）：上午重算当天会给还没报工的师傅写出只有 `dailyBase` 的正式行；月中重算月结会让 COOK 的 `monthlyBasePay`（整月 flat、不按天折算）立刻发满一个月。
+- **相关文档**：`lib/dashboard/shanghai-clock.ts`、`lib/salary/daily.ts`、`lib/salary/hourly-aggregate.ts`、`app/api/cron/{daily-salary,hourly-payroll}/route.ts`、`docs/部署指南.md` §10
+
+---
+
+## 2026-08-21：交期看板与逾期推送刻意用两个查询，推送 fan-out 上限 200 是工程阀不是业务阈值
+
+- **决策**：① 看板 `getDueOrders` 与推送 `scanOverdueOrders` 保持两个独立查询，不合并。② `/api/cron/order-overdue` 响应体**新增** `truncated` 字段（只加不减、不改名）。③ 每日逾期推送新增 fan-out 安全阀 `ORDER_OVERDUE_NOTIFY_CAP = 200`（`lib/order/overdue-scan.ts`）。逾期边界由 `lib/order/promised-date` 的新函数 `overdueCutoff()` 统一给出。
+- **理由**：看板要的是「首屏能看完的前 N 条（逾期 + 3 天内到期）」，推送要的是「今天该催的每一单（仅逾期）」，边界要求相反；共用一个查询时看板要替推送背整个预警窗口的全表扫描、推送要替看板背 due-soon 的行再在 JS 里 filter。上限 200 是**工程上限不是业务阈值**：企业微信机器人有每分钟条数限制，几百条会被限流并刷爆 durable 队列。
+- **影响**：**如果长期天天撞到 200，正确应对是回去回答两个业务口径问题（草稿单要不要预警、逾期多少天后停推），而不是把 200 调大** —— 这句话专门写在这里，免得下一个 agent 顺手调参。`deploy/crontab` 的 curl 只看 HTTP 状态码、`tests/e2e/notification-cron.spec.ts` 只断言 status 与 `overdueCount`，都不受 `truncated` 影响；若别处（监控脚本）对响应体做过 strict 校验需同步。已知残留风险：`db.order.count` 仍是 O(N)（只是不再把 N 行搬进 RSC payload）；「查看全部」链接与看板窗口的等价性依赖 `promisedDate` 存 UTC 零点——列表页 `promisedTo` 展开成 `lt: 次日 UTC 零点`，看板 horizon 是 `lt: 次日上海日界`，中间差 8 小时，应用层写入一律走 `parseStrictYmd` 落不进这 8 小时，只有直接写库的 fixture（`tests/e2e/_helpers.ts` 的 `seedOrderOverdueForCron`）造得出。
+- **相关文档**：`lib/order/overdue-scan.ts`、`lib/order/promised-date.ts`、`lib/dashboard/`、`app/api/cron/order-overdue/route.ts`
+
+---
+
+## 2026-08-21：`/worker/orders` 改为 `createdAt desc` 分页，不再急单置顶
+
+- **决策**：师傅端「我的工单」排序口径从「急单置顶 + `createdAt asc`」改为「`createdAt desc` + `id desc`」，并分页；`listWorkerOrders` 返回值由 `T[]` 变为 `PaginatedResult<T>`（`rows` / `total` / `page` / `pageSize` / `pageCount`），复用 `lib/admin/table.ts` 的 `paginationWindow` + `paginatedResult` 契约。每页条数常量 `WORKER_ORDER_PAGE_SIZE = 20`，与 `ORDER_LIST_DEFAULT_PAGE_SIZE` 对齐。急单仍以红色徽标呈现。
+- **理由**：该页是**含已完成历史的归档查询视图**，真正的待办队列是 `/worker/tasks`（`listWorkerTasks` 仍按急单分组、旧单在前，且被 PENDING / IN_PROGRESS 天然收窄）。若继续以 `isUrgent` 为第一排序键，老员工的历史急单会永久霸占第一页，等于没修这条无界查询。
+- **影响**：`listWorkerOrders` 全仓唯一调用点就是该页面，页面只用 `orders.length` 和 `orders.map`，无 `orders[0]` / `slice` / 位置语义依赖。`WORKER_ORDER_PAGE_SIZE` 是**我们自定的阈值、SPEC 无依据**，业主想调只改这一个常量。两项待业主拍板见 HANDOFF「卡住的问题」。**同一类无界查询 `listWorkerSalaries` 本次未改，且不能照抄本补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 是从整个数组 reduce 出「累计工资 / 尚未发放」的，直接分页会把这两个金额静默变成「本页合计」——给师傅看错自己的工资总额比慢更糟，正确修法是行分页 + 用 `db.dailyWorkerSalary.aggregate` 单独算 total/unpaid。`listWorkerHourlyPayrolls` **确认不需要分页**：`@@unique([workerId, month])` 决定每人每月最多一行，十年也只有 120 行，结构上有界，且它同样有「总额从列表 reduce」的耦合，更不该为了统一而分页。
+- **相关文档**：`lib/worker-portal.ts`、`app/(worker)/worker/orders/page.tsx`、`lib/admin/table.ts`、`lib/production.ts`（`listWorkerTasks`）
+
+---
+
+## 2026-08-21：background-jobs 模块的时间戳一律来自数据库时钟
+
+- **决策**：`lib/background-jobs/` 的租约判定与心跳时间戳一律用数据库时钟（`clock_timestamp()` / `now()`），不用 Node 进程的 `new Date()`。`heartbeatBackgroundJob` 因此从类型化 `updateMany` 改成 `$executeRaw`。
+- **理由**：web 与两个 worker 是独立进程、将来可能是独立主机，用各自的挂钟去判「租约有没有过期」等于把时钟漂移变成正确性问题——偏快的 worker 会抢走别人还持着的任务。库时钟是唯一所有参与方都同意的时间源。
+- **影响**：raw SQL 会绕过 Prisma 的 `@updatedAt`，所以 `heartbeatBackgroundJob` 的语句里**显式写了 `"updatedAt" = clock_timestamp()`；日后有人再动这条 SQL，删掉那行会让线上 `BackgroundJob.updatedAt` 停止推进**。唯一已知例外是 Prisma 托管的 `@updatedAt`——`enqueue` / `complete` / `fail` / `cancel` / `retry` 这些类型化写入的 `updatedAt` 仍由客户端用 Node 时钟盖戳；已确认全仓从不读它做任何判定（只出现在 3 条 raw SET 里），彻底修需要去掉 `@updatedAt` + 加 DB 触发器（一次 migration + 全模型行为变更），本补丁刻意不做。本补丁改的是「谁说了算」而非数据格式，**新旧 worker 可以混跑滚动发布**，混跑期间新 worker 的租约判定只会更保守。两条已知遗留（危害低于本缺陷，另开 backlog）：`enqueueBackgroundJob` 的 DEAD/CANCELLED 复活路径仍是 `input.availableAt ?? new Date()`（要改须把 `EnqueueClient` 从 `Pick<TransactionClient,'backgroundJob'>` 拓宽到含 `$queryRaw`，会波及 `lib/order/export.ts` 与 `lib/cdr/bundle.ts` 的测试 mock）；`assessBackgroundJobHealth` 仍是同步纯函数、用 web 进程时钟算积压时长（它只产出 `light/heavy-backlog-old` 两个 warning，而 `available` 只由 worker-missing / version-mismatch 决定，后两者已锚到库时钟）。**审查提醒**：`databaseNow()` 与所有 `now()` 都必须在主库执行；目前 `lib/db.ts` 只有单一 `DATABASE_URL`，将来若把只读查询路由到 Pigsty 只读副本，`getBackgroundJobHealth` 这条纯读路径要重新审。
+- **相关文档**：`lib/background-jobs/`、`lib/db.ts`、`docs/production-slo-and-recovery.md`
+
+---
+
+## 2026-08-21：`React.cache()` 的 key 逐参数比对，包装函数的签名必须只收 primitive
+
+- **决策**：`lib/page-title/refs.ts` 里所有被 `cache()` 包装的查询，签名一律只收 primitive 参数。
+- **理由**：`React.cache()` 的 key 是**逐参数比对**——primitive 走 `Map`，对象/函数走 `WeakMap` 引用相等。把现成的 `getOrderDetail(id, { id, role })` 直接包一层 `cache` 是**无效的**：两个调用点各造一个对象字面量，缓存永远 miss、库照打两次，而且没有任何报错，看起来像生效了。
+- **影响**：`products` / `boms` 两页的重复查询靠这条约定用 `cache()` 真正收敛。这条注释已写在 `refs.ts` 文件头，但仍记进本文件，以免后人为了「统一签名」把 primitive 参数改回 options 对象、静默把优化删掉。同批还立了另一条可断言的不变量：`lib/order/export.ts` 的 11 个工作表 generator 一律用显式 `select`、**禁止 `include`**，由 `lib/order/__tests__/export.test.ts` 的回归闸看守——`pricingSnapshot` / `salaryRuleSnapshot` / `beforeSnapshot` / `proposedChanges` 四个大 JSON 从不导出，用 `include` 会把整表拉回来。
+- **相关文档**：`lib/page-title/refs.ts`、`lib/order/export.ts`、`lib/order/__tests__/export.test.ts`
+
+---
+
+## 2026-08-21：`revalidatePath` 已经会刷新客户端 RSC 缓存，6 处 `router.refresh()` 是冗余（口径待业主确认）
+
+- **决策**：**先只订正认知，不清代码**（口径 B）。本次新写的按钮一律不再补 `router.refresh()`；已有的 6 处保留原样，待业主在 A/B/C 之间拍板后再统一处理。
+- **理由**：仓库里存在一条被写进注释的**错误认知**——`components/business/notification/DeleteChannelButton.tsx:55-57` 写着「`revalidatePath` alone 不刷 client RSC 缓存（直调 server action 没经过 Form 自动 refresh）」。核过 Next 16 源码，这句不成立：`revalidatePath` 会置 `pathWasRevalidated`、action-handler 下发 `x-action-revalidated`、client 的 server-action-reducer 把 `freshnessPolicy` 提成 `RefreshAll` 并对当前 URL 重新取数，**与调用形式无关**（`<form action>` / `useActionState` dispatch / 直接 `await` 都一样）；`node_modules/next/dist/docs` 的 `revalidatePath.md` 也明写 Server Functions 会「Updates the UI immediately (if viewing the affected path)」。据此，在 action 已 `revalidatePath` 的前提下再补 `router.refresh()`，等于同页连打两次全路由 refetch。
+- **影响**：涉及 6 处 —— `DeleteChannelButton`、`TestChannelButton`、`PendingSchedulingBoard`、`WorkerTaskBatchList`、`OrderChangeReviewForm`、`ReassignTaskForm`。可选口径：(A) 清冗余 refresh + 订正注释 /(B) 只订正注释 /(C) 反而照抄 refresh。**在业主拍板前，不要拿那条注释当依据给新代码补 `router.refresh()`。** 同批产出还包括 `OrderForm` 的 `TextField` 必填语义修复（`required` / `aria-required` 透传 + 红星 `aria-hidden`）、`TextareaField` 语义对齐、`AttendanceRecordDialog` 补 `role="status"` 保存回执，以及 2 个 SSR markup 测试文件共 7 个用例。顺带发现但**刻意未动**：`OrderForm` 的逐字段错误挂了 `role="alert"`，与 `29334e0` 就 `EditOrderForm` 拍板的「逐字段错误不给 `role="alert"`，避免每次校验抢播报」相冲突（`OrderForm` 是 RHF `mode: 'onBlur'`，每次失焦重算都会重新播报，正是那条决策要避免的场景）——属独立一致性问题，另开 backlog。
+- **相关文档**：`components/business/notification/DeleteChannelButton.tsx`、`node_modules/next/dist/docs/.../revalidatePath.md`、CLAUDE.md §15.3
+
+---
+
+## 2026-08-21：`reportTasks` 已改为「任务 advisory 锁 + 逐条 update」，2026-08-19 那条例外只剩 `beginTasks`
+
+- **决策**：记录一条**文档订正**，不是新的行为决策。`lib/production.ts` 的 `reportTasks` 现在的实现是：先对选中的每个 taskId 取 `pg_advisory_xact_lock`，再取 order cascade 锁，然后读状态、在 JS 里逐条校验（`status !== IN_PROGRESS` 直接 `throw ReportError`），最后逐条 `tx.productionTask.update()`。它**不再**是 2026-08-19 条目描述的 `updateMany({ where: { status } })`。`beginTasks` 仍然是原来的 `updateMany({ where: { id: { in: ids }, status: PENDING } })`，那条例外对它继续成立。
+- **理由**：报工路径必须为每条任务读薪资规则、算计件、写 `salaryRuleSnapshot`（§4.4 铁律），本来就无法用单条 `updateMany` 表达；改成先取任务锁再读写之后，「先读后写」在锁内是安全的，比原描述的 SQL 守卫更稳，只是没有编译期保障这一点没变。
+- **影响**：CLAUDE.md §4.5 与 DECISIONS 2026-08-19「批量任务状态流转以 SQL where 子句表达守卫」两处的措辞都还停在旧实现上。**按追加式规范不回改 2026-08-19 那条，以本条为准**；CLAUDE.md §4.5 的同步由业主决定是否落笔（本轮文档 agent 按纪律未改 CLAUDE.md）。建议改法：把「`beginTasks` / `reportTasks` 用 `where: { status }`」收窄成只讲 `beginTasks`，`reportTasks` 另写一句「逐任务 advisory 锁内先读后写，守卫在 JS 层，同样没有编译期保障」。
+- **相关文档**：`lib/production.ts`（`beginTasks` / `reportTasks`）、`lib/production/status-machine.ts`、CLAUDE.md §4.5、DECISIONS 2026-08-19
+
+---
+
+## 2026-08-21：`/owner/salary` 未发聚合下推数据库，前提是这条路径上没有逐行 clamp
+
+- **决策**：`/owner/salary` 的「未发」汇总由数据库聚合给出：日薪走 `count` + `_sum`，客服「剩余未发」拆成四列 `_sum` 再在应用层组合，不再把行拉回内存 reduce。同时新增 migration `20260821090000_salary_unpaid_summary_indexes`，用 `CREATE INDEX CONCURRENTLY` 建三条索引（`DailyWorkerSalary_isPaid_date_idx`、`HourlyWorkerPayroll_isPaid_month_idx`、`CustomerServiceCommission_isFullyPaid_settledAt_idx`）。
+- **理由**：本次修复没有引入新阈值、新窗口、新降级分支，SPEC 口径完全未动（`dailyToday.count` 含已发未发全部行、`csUnpaid` 只算已结算周期的剩余底薪+提成、`periodEnd` 最后一天不算到期）。
+- **影响**：**客服「剩余未发」之所以能拆成四列 `_sum` 再组合，前提是这条路径上没有逐行 clamp / 取正**；将来若要加「单个周期不能算负数」的规则，这个下推必须回退成 `groupBy` 逐周期算。新迁移无数据校验、无 fail-fast 分支，纯加速；但 CONCURRENTLY 中途失败会留下 INVALID 索引需手工 `DROP` 重建，正好被发布前既有的「无效并发索引为 0」检查覆盖，不需要新增流程。顺带订正一处长期漂移的口径：README 与部署指南都钉着「71 项 migration / 尾项 `20260807184000_pricing_compatibility_fence`」，**在本次改动之前它就已经落后 3 项**（仓库实际 74 项、尾项 `20260808100000_external_sales_logistics_charges`）；加上本次 1 项，正确说法是 **75 项 migration、尾项 `20260821090000_salary_unpaid_summary_indexes`**。
+- **相关文档**：`lib/salary/`、`app/(admin)/owner/salary/`、`prisma/migrations/20260821090000_salary_unpaid_summary_indexes/`、README.md §🚢7、`docs/部署指南.md` §14
+
+---
+
+## 2026-08-21：单条报工数量守卫判据用 `>=`，超报照付但必须配「超计划报工」看板
+
+- **决策**：师傅单条报工时，`合格 + 不良 + 返工` 的合计 **达到** `计划数 × N` 一律硬拒（不可确认、不可绕过）；N 由新 `Setting` 键 `report_qty_max_multiple` 配置，默认 3、可配范围收在 1–10。合计超过计划数但未达上限时，由师傅自己勾选「确认超出计划数」通过，并在 `ProductionTask.remark` 与 `OrderLog(action='TASK_OVER_REPORT')` 两处留痕。**计件金额仍按实际合计数全额付**（业主拍板，算钱链路一个字都没改）。批量「一键完工」按计划数报，不受此项影响。
+- **理由**：判据必须是 `>=` 而不是 `>`。守卫唯一真正要挡的场景是「多打一个零」——计划 P 打成 10P；严格大于时只要 N = 10，`10P > 10P` 为假，这一次都挡不住，守卫等于白装。同理默认值取 3 而不是 10，`field.max` 收到 10 而不是 100：允许配到 100 等于把守卫关掉。下限 1 是严格模式（limit = 计划数，任何超报硬拒，确认分支自然失效），保留它是给业主一个「先收紧再放开」的开关。数量框刻意**不设 `max`**：原生约束校验在关掉 JS 时也生效，手机上只弹一个原生气泡且极易滚出视野，那条精心写的「已达到 N 倍上限」中文提示就永远看不到——上限判定只留在服务端。
+- **影响**：**批准权落在被发钱的人自己手上**，所以这条决策有两半，缺一不可：守卫 + 老板看板的「超计划报工」表。二者是一个决策的两半，**不能只留守卫、砍掉看板**——砍掉看板等于让师傅可以自助批准加薪且无人知情。看板数据源就是 `OrderLog where action='TASK_OVER_REPORT'`（近 7 天），刻意不新增推送事件（那要同步改 `lib/notification/events.ts` 与 `prisma/seed.ts` 的默认模板，成本明显更高）。`ProductionTask.remark` 由此从「全仓无写入方的死列」变成有唯一写入方，格式 `[超计划报工] YYYY-MM-DD 计划 N / 合计 M（合格 a / 不良 b / 返工 c），报工人 <id>，已勾选确认`，多次写入以 `\n` 追加；看板「明细」列原样渲染这个字符串，**格式改动要当成对外契约看**。`OrderLog.action` 新增 `'TASK_OVER_REPORT'`（`action` 是 String，无 DDL），`lib/order/log-format.ts` 同时顺手补上既有缺口 `TASK_REASSIGN`（`lib/production.ts` 一直在写它却没有中文标签）以及 `FIELD_LABELS` 的 `completedQty` / `defectQty` / `reworkQty`。`Setting` 表由此有 4 个键，`report_qty_max_multiple` 是唯一 money-adjacent 的那个（守着会算出计件金额的路径），但 `resolveSetting` 的「校验不过退回 fallback」对它仍然安全：它不参与任何金额计算、只是一个上界，退回 3 只会更严。上线成本：超报确认要多一次提交往返（零 JS 下是整页 POST + 重渲染），弱网车间的师傅会感知到这个延迟，**这是拍板方案的固有成本，不是实现缺陷**。
+- **相关文档**：`lib/settings/definitions.ts`、`lib/production.ts`（`reportTask`）、`lib/order/log-format.ts`、`lib/dashboard/owner-watchlist.ts`、`app/(admin)/owner/page.tsx`、`components/business/production/ReportTaskForm.tsx`、SPEC-v1.2.md §3.3、CLAUDE.md §4.4 / §15.8
+
+---
+
+## 2026-08-21：工单完工闸口收紧为款式级外协覆盖，粒度残留缺口显式接受
+
+- **决策**：完工闸口由「有外协单且全部 `RECEIVED`」改为「每个含外协工艺的款式都被至少一张本工单未取消的外协单覆盖」。判定粒度是**款式**，不是「款式 × 外协工艺」。不改表，复用 `OrderItem.crafts` 与 `OutsourceOrder.orderItemIds`。同时新增导出谓词 `outsourceCoverageApplies(order)`（判 `requiresOutsource === true`），**闸口与工单详情页横幅必须共用它**。
+- **理由**：原闸口完全不看覆盖了哪些款式——三款式工单只给其中一款发了外协单并收货，工单照样完工发货，属于会真出货错的漏洞。谓词必须共用：`requiresOutsource` 是排产那一刻的快照且无重算路径（`scheduleOrder` 对已排产工单必抛 `InvalidOrderTransitionError`），而 `updateCraft` 可以把 `isOutsource` 从 false 翻成 true；不共用就会出现「页面说不能完工、闸口其实照样完工」的反向漂移，主管照提示补出来的外协单会带 `amount`，变成一笔凭空的外协应付。
+- **影响**：`ProductionCompletionTx` 新增 `orderItem` / `craft` 两个 model 的窄接口，返回值由 `boolean` 改为 `ProductionCompletionOutcome{completed, blockedBy, uncoveredItems}`；五个调用点改取 `.completed`（`lib/production.ts` 三处 + `lib/outsource.ts` 两处）。**`lib/production.ts` 的 `reportTasks` 批量那处原本写成 `if (await maybeComplete...)`，改成对象之后 tsc 一个字都不报、工单会被无条件判为完工**，已改成显式取 `.completed` 并在注释里写明。`markOutsourceReceived` 有两个 return，事务外那个逐字段重建对象，`pendingOutsourceItems` 必须两处都带（可选字段，tsc 不报，只有 lib 层用例守得住）。新增查询只在「内部任务全完 + 外协全部收货」这一刻跑，报工路径成本不变；非外协工单一条新查询都不跑。**已知残留缺口：同一款式两道外协工艺、只发一道时仍放行**——业主已接受。**别当 bug 修**：堵口需要给 `OutsourceOrder` 加 `craftIds`（改表），而历史外协单的 `craftDescription` 是自由文本无法回填，强行升级会把在产工单集体卡死。这条已在 `lib/outsource/coverage.ts` 顶部注释 + `lib/outsource/__tests__/coverage.test.ts` 的「【残留缺口回归锁定】」用例 + 本条决策三处写明；将来任何人想改成按工艺判定，先看本条的影响一节。**上线必须分两步**：2a（零行为变更的读路径 + 详情页横幅）先上，让主管照横幅把存量缺口补完；2b（闸口收紧）是「部署当天可能一批在产工单突然完不了工」的那一步，上线前必须先跑 `docs/上线前置操作清单.md` 的两段只读 SQL，并把查询 1 列出的存量缺口全部补完。
+- **相关文档**：`lib/outsource/coverage.ts`、`lib/production-completion.ts`、`lib/production.ts`、`lib/outsource.ts`、`app/(admin)/orders/[id]/page.tsx`、`docs/上线前置操作清单.md`、SPEC-v1.2.md 外协章节、CLAUDE.md §4.5
+
+---
+
+## 2026-08-21：盘点并发守卫用「逐行钉住的账面回声 CAS」，时间戳基线方案整体否决
+
+- **决策**：库存盘点的并发守卫采用**逐行账面回声 CAS**——页面把「录入这一格时操作员看到的账面数」钉在该行上一并回传，服务端在行锁之后与库内余额比对，不等就判该行冲突。业主原意（别人动过就拒绝）完整保留，只是换了机制。冲突行**剔除后继续过账余下的行**（部分过账），一条都不剩时才整单回滚。零 schema 变更、零 migration、零新 `Setting`。
+- **理由**：被否决的是「整页共用一个基线时刻」这个设计，而不是守卫本身——原方案的 4 条 blocking/major **全部源自那一个设计**：(1) 分批盘点时基线被整页推进，已数未录的行漏检；(2) 快照过期抛的是普通 invariant error，降级后不带 `staleKeys`/`checkedAt`，客户端无从恢复，只能 F5，而 `counts` 是纯 `useState`、全部蒸发，是**不可恢复的死路**；(3) 成功后的新基线来自未 await、可能失败的 fetch，且上一轮自己写的 `INVENTORY_COUNT` 流水 `createdAt` 必然晚于旧基线 → 自噬；(4) 账面数取自最近一次 fetch 而基线刻意不跟 fetch 走，点一次「刷新/搜索」两者就分叉、CAS 恒等成立。而账面回声只要把账面数钉在**录入那一刻**，就不需要任何基线时间戳、不依赖客户端诚实、也不依赖后续 fetch，能捕获所有「改变了余额」的变动。部分过账则解决「一行冲突整单驳回，忙碌库位永远盘不完」——原设计下 99 行合格数据陪葬且没有 override。
+- **影响**：**唯一残留缺口是净额为零的往返**（先出 20 再进 20，余额回到原值）：CAS 检测不到，而时间戳基线能。堵这个口需要逐行 `snapshotAt` + `MaterialTransaction` 复合索引 + ledger scan（定稿 §3b），已拆出单独设计评审，**本批不做**。代码注释里已写「别把这条当 bug 顺手改成时间戳基线」，本条决策是它的背书。**部分过账语义需业主点头**：一次提交现在可能只过账一部分行，`InventoryCount` 单据上只有被接受的那些，冲突行原样退回要求重数；风险评估为低（盘点行本来就是逐 (物料, 库位) 独立的），但要确认。**部署瞬间有一个刻意的 fail-closed**：浏览器里开着旧版盘点页的操作员，提交会因缺 `bookQuantity` 被判 invalid，提示「缺少账面数快照，请刷新页面后重新盘点」；刷新即可，但已录入的数据会丢（`counts` 是纯 `useState`），建议低峰期发布或先口头通知盘点岗。
+- **相关文档**：`lib/inventory-count-posting.ts`、`lib/inventory-count-entries.ts`、`lib/auth/schemas.ts`（`postInventoryCountSchema`）、`actions/owner-inventory.ts`、`components/business/material/InventoryCountClient.tsx`、`docs/上线前置操作清单.md`
+
+---
+
+## 2026-08-21：OSS 直传重放加固本批不做，已知风险显式接受
+
+- **决策**：「临时 key + 服务端 copy」方案（前端只拿 `upload-tmp/` 前缀的预签 PUT，服务端 HEAD 量真实字节后 copy 到 `design/`，正式 key 只由服务端派生）**本批不实施**。保持现有缓解：STS session policy 收窄到单个 objectKey + 15 分钟过期。
+- **理由**：业主决定本批先上四条修复里风险收益更清楚的三条。这一条的前置动作全在阿里云控制台（RAM 前缀权限 + 生命周期规则），且顺序不能反——RAM/生命周期没先生效就上代码 = 全员上传失败，不适合和其它修复挤在同一个发布窗口。
+- **影响**：**这是已知接受的风险**，不是「已修复」：在 15 分钟预签窗口内，拿到 URL 的浏览器仍可以覆写自己刚登记的对象（申报小文件通过大小校验、登记后再换成大文件）。窗口已经从 1 小时压到 15 分钟，但没有关掉。将来真去实施时，有两个**必踩的 blocking 陷阱**，写在这里免得下次重新踩一遍：(1) **ali-oss 的 `copyObject` 对 headers 只加前缀、不删原键**（`lib/common/object/copyObject.js:20-23` 遍历 `options.headers` 逐个补 `x-oss-copy-source-` 前缀副本），所以裸写 `If-Match` 会让线路上同时出现裸 `If-Match`，被 OSS 当成对**目标对象**的条件写求值，而目标 key 每次新铸 uuid、必然不存在 → **copy 恒 412**；正确写法是直接传 `'x-oss-copy-source-if-match'`。而 `If-Match` 本身不是可选项——摘掉它等于把「申报小文件、copy 前换大文件」这条路留着。(2) **etag 缺失被当成成功会写出悬空指针**：ali-oss 的 `successStatuses = [200, 304]`，客户端只看状态码、**从不检查 200 响应体是不是 `<Error>`**，这两种情况下 `data.ETag` 都是 undefined；写成 `if (copiedEtag && copiedEtag !== sourceEtag)` 会短路跳过、事务照常提交，`fileUrl` 指向不存在的对象 → 详情页图裂 + `lib/cdr/zip.ts` 的 `getStream` NoSuchKey 把整个 HEAVY 打包任务打挂。判据必须是**严格相等**（简单 copy + metadata-directive COPY 下目标 etag 恒等于源 etag；这也是不能换 `multipartUploadCopy` 的理由——分片拷贝的 ETag 带 `-N` 后缀，永远不等于源）。另记一条与之配套的红线：**`design/` 前缀永远不能挂生命周期规则**，它是业务数据，将来有人为了清孤儿顺手挂上去就是删设计图。
+- **相关文档**：`lib/oss/sign.ts`、`lib/order-design.ts`、`docs/上线前置操作清单.md`（「未来实施时的前置项」一节）、`docs/部署指南.md` §6
+
+---
+
+## 2026-08-21：通知投递失败改为可重试并进死信，幂等靠 `NotificationLog.deliveryKey`
+
+- **决策**：durable 路径的通知投递失败不再是终局。`NotificationLog` 新增 `deliveryKey`（取 `BackgroundJob.dedupeKey`，同一条逻辑投递在多次 attempt 之间稳定不变）与 `@@unique([deliveryKey, channelId])`，worker 开跑前先查这次投递已 `SUCCESS` 的 channel 并跳过，写日志走 `upsert` 就地翻转状态而不是层层堆 FAILED 行。**瞬时失败写 `RETRYING`**（而不是 `FAILED`），重试耗尽才落 `FAILED`；**永久性投递失败仍让 `BackgroundJob` 判 `SUCCEEDED`**。
+- **理由**：CLAUDE.md §15.4 禁止的是「把漏算的批次标成成功」，而 channel 关停 / webhook key 失效属于**已判定终局的投递**——重试 5 次结果一样，只会灌满 ops 无法处置的死信队列。这类失败的通报渠道是 `NotificationLog(FAILED)` + 首页 24h 告警条 + ops 页错误码列（现已能显示 `job.result` 的 `failed` / `errorCodes`），不是死信探针。
+- **影响**：**直接改变业主天天在看的 `/owner` 首页「24 小时推送失败」告警条计数**：瞬时抖动不再点红，重试成功还会把历史 `FAILED` 行就地翻成 `SUCCESS`。上线前应当告知业主，别让人以为数据丢了。`/api/health/jobs` 的 `jobs` 对象新增 `deadNotificationLast24h`（只加不减），且**通知类死信只让该端点返回 200 `degraded`、不再 503**，新告警码是 `dead-notification-jobs-last-24h`；`/api/health/ready` 的状态码语义完全不变。相应地 `docs/production-slo-and-recovery.md` 的「死信 30 分钟响应」采样点现在只覆盖非通知类死信（`dead-jobs-last-24h`），通知投递失败的采样点改为 `/owner/notifications` 的 `NotificationLog(status=FAILED)` 与首页告警条。**将来若给 `NotificationLog` 加保留期/清理任务，必须排除「所属 `BackgroundJob` 仍在 `PENDING`/`RUNNING`」的行**——`deliveryKey` 行是幂等凭证，删早了会导致重试对已收到消息的群重复推送。两个新 migration：`20260821120000_notification_log_delivery_key`（纯加列，可空无默认，历史行留 NULL、老路径行为不变）与 `20260821120100_notification_log_delivery_key_unique`（`CREATE UNIQUE INDEX CONCURRENTLY`，**先 DROP 再建、刻意不写 `IF NOT EXISTS`**）。**这条索引是正确性依赖，不是「失败只是少个优化」**：CONCURRENTLY 中途失败会留下 `indisvalid=false` 的 INVALID 索引，而 PostgreSQL 不会拿 INVALID 索引当 `ON CONFLICT` 的 arbiter，`notify` 的 upsert 会每次进 catch、幂等凭证全丢、重试对所有群重复推送——部署后必须人工验收（SQL 见 `docs/上线前置操作清单.md`）。**已知缺口**：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，`notify` 不会再跑，那一轮写下的 `RETRYING` 行永远翻不成 `FAILED`，而 `countRecentFailures` 只数 `FAILED` —— 这条真正丢掉的推送会在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法是在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`；本次没做是因为该文件正被并发 agent 做数据库时钟重构。
+- **相关文档**：`lib/notification/notify.ts`、`lib/notification/webhook.ts`、`lib/background-jobs/notification.ts`、`lib/background-jobs/health.ts`、`app/api/health/jobs/route.ts`、`prisma/migrations/20260821120000_*`、`prisma/migrations/20260821120100_*`、`docs/production-slo-and-recovery.md`、CLAUDE.md §7 / §15.4
+
+---
+
+## 2026-08-21：批量通知扇出按 `index × 3500ms` 摊开，是限额工程阀不是业务阈值
+
+- **决策**：一次 cron 触发的批量通知（典型是逾期工单扫描）按序号把 `availableAt` 摊开，间隔 3500 ms ≈ 17 条/分钟。
+- **理由**：企业微信群机器人有 20 条/分钟的限额。不摊开就会在限额上撞墙，撞出来的失败全部变成重试、把死信队列灌满，而这些失败没有任何一条是业务问题。摊开让出队速率天然低于限额，留了一点余量给同一个群的其它事件。
+- **影响**：**200 张逾期单的最后一条会比 cron 触发晚约 12 分钟到达**，这是刻意的取舍。这个数是限额推出来的工程阀，不是业务阈值——将来若换推送渠道或渠道放宽限额，改这一个常量即可，不要当成「业主定的提醒节奏」。与既有的 `ORDER_OVERDUE_NOTIFY_CAP = 200` fan-out 上限是两件事：上限决定推几条，摊开决定推多快。
+- **相关文档**：`lib/background-jobs/notification.ts`、DECISIONS 2026-08-21「交期看板与逾期推送刻意用两个查询」

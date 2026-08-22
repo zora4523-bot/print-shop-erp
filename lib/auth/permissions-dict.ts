@@ -80,3 +80,14 @@ export const PERMISSIONS = {
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
+
+/**
+ * 纯谓词版权限判断。授权入口仍然是 permissions.ts 的 requirePermission()
+ * （§4.6）；这个函数只给「需要软判断、不能抛」的场景用 —— 目前是各详情页
+ * 的 generateMetadata：它决定标签页标题显示实体名还是模块名，绝不能成为
+ * 唯一闸口，也绝不能抛错（流式 metadata 下首屏可能已经冲出去了）。
+ */
+export function hasPermission(permission: Permission, role: Role): boolean {
+  const allowed = PERMISSIONS[permission] as readonly Role[] | undefined;
+  return Boolean(allowed?.includes(role));
+}

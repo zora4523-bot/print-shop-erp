@@ -8,9 +8,12 @@ import type { RecomputeHourlyResult } from '@/actions/owner-salary.types';
 
 type Props = {
   defaultMonth: string;
+  // 上海日历的本月。纯浏览器层提示，真闸口在 lib/salary/hourly-aggregate.ts
+  // 的 assertNotFutureSalaryMonth。
+  maxMonth: string;
 };
 
-export function RecomputeHourlyForm({ defaultMonth }: Props) {
+export function RecomputeHourlyForm({ defaultMonth, maxMonth }: Props) {
   const [state, action] = useActionState<RecomputeHourlyResult | null, unknown>(
     recomputeHourlyPayrollAction,
     null,
@@ -31,6 +34,7 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
           name="month"
           aria-label="重算月份"
           defaultValue={defaultMonth}
+          max={maxMonth}
           className="max-w-[180px]"
         />
         <Button type="submit" disabled={pending}>

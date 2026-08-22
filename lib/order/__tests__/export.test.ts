@@ -5,7 +5,9 @@ import {
   BackgroundJobAttemptStatus,
   BackgroundJobQueue,
   BackgroundJobStatus,
+  MachineType,
   OrderBillingMode,
+  OrderChangeRequestStatus,
   OrderExportStatus,
   OrderKind,
   OrderSettlementType,
@@ -13,6 +15,8 @@ import {
   Prisma,
   ProductCategory,
   Role,
+  TaskStatus,
+  WorkerType,
 } from '../../../generated/prisma/client';
 
 const {
@@ -519,9 +523,10 @@ describe('processQueuedOrderExport', () => {
       '设计文件',
       '账单关联',
     ];
+    const singleRowSheets = new Set(['工单', '款式', '生产任务', '修改申请']);
     const rowCounts = Object.fromEntries(sheetNames.map((name) => [
       name,
-      name === '工单' || name === '款式' ? 1 : name === '操作记录' ? 2 : 0,
+      singleRowSheets.has(name) ? 1 : name === '操作记录' ? 2 : 0,
     ]));
     const consumed = new Map<string, XlsxRow[]>();
     const order = {
@@ -585,20 +590,56 @@ describe('processQueuedOrderExport', () => {
       remark: '红色高亮',
       createdAt: NOW,
     };
+    const task = {
+      orderItem: { orderId: 'order-1', sequence: 1, name: '款式 A' },
+      craft: { name: '铜版纸彩印+烫金' },
+      worker: { displayName: '师傅甲' },
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      status: TaskStatus.COMPLETED,
+      plannedQty: 1000,
+      boardCount: 4,
+      pressCount: 2000,
+      completedQty: 980,
+      defectQty: 15,
+      reworkQty: 5,
+      pieceworkAmount: new Prisma.Decimal('40.00'),
+      startedAt: NOW,
+      completedAt: NOW,
+      remark: '首件已确认',
+    };
+    const changeRequest = {
+      orderId: 'order-1',
+      baseRevision: 1,
+      status: OrderChangeRequestStatus.APPROVED,
+      reason: '客户改数量',
+      requester: { displayName: '销售甲' },
+      reviewedBy: { displayName: '管理员' },
+      reviewRemark: '同意',
+      reviewedAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
 
     dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow());
+    // 两个调用点现在都用 select：清单查询只取 {id, orderNo}，
+    // 工单表查询带 customName，据此区分。
     dbMock.order.findMany.mockImplementation(
-      async (args: { select?: unknown }) =>
-        args.select
-          ? [{ id: 'order-1', orderNo: 'GD-260807-001' }]
-          : [order],
+      async (args: { select?: Record<string, unknown> }) =>
+        args.select?.customName
+          ? [order]
+          : [{ id: 'order-1', orderNo: 'GD-260807-001' }],
     );
     dbMock.craft.findMany.mockResolvedValue([
       { id: 'craft-1', name: '铜版纸彩印+烫金' },
     ]);
+    // 款式表查询带 product 关联；外协表借道的款式标签查询只取 {id, sequence, name}。
     dbMock.orderItem.findMany.mockImplementation(
-      async (args: { include?: unknown }) => (args.include ? [item] : []),
+      async (args: { select?: Record<string, unknown> }) =>
+        args.select?.product ? [item] : [],
     );
+    dbMock.productionTask.findMany.mockResolvedValue([task]);
+    dbMock.orderChangeRequest.findMany.mockResolvedValue([changeRequest]);
     dbMock.orderLog.findMany.mockResolvedValue([
       {
         id: 'log-1',
@@ -700,6 +741,48 @@ describe('processQueuedOrderExport', () => {
       xlsxDecimal('150.00'),
       '客户协议价',
     ]);
+    // 逐格锁死：select 少取一列，对应格会变 undefined，这里当场红。
+    expect(consumed.get('生产任务')?.[1]).toEqual([
+      'GD-260807-001', 1, '款式 A', '铜版纸彩印+烫金', '师傅甲', '开机师傅', '开机仔',
+      '已完工', 1000, 4, 2000, 980, 15, 5, xlsxDecimal('40.00'),
+      '2026/08/07 16:00', '2026/08/07 16:00', '首件已确认',
+    ]);
+    expect(consumed.get('修改申请')?.[1]).toEqual([
+      'GD-260807-001', 1, '已同意', '客户改数量', '销售甲', '2026/08/07 16:00',
+      '管理员', '同意', '2026/08/07 16:00', '2026/08/07 16:00',
+    ]);
+    // 工作表查询一律显式 select：任何一处退回 include 都会把
+    // pricingSnapshot / salaryRuleSnapshot / beforeSnapshot 整列拖回来。
+    const sheetQueries = [
+      dbMock.order.findMany,
+      dbMock.orderItem.findMany,
+      dbMock.productionTask.findMany,
+      dbMock.orderShipment.findMany,
+      dbMock.orderShipmentLine.findMany,
+      dbMock.outsourceOrder.findMany,
+      dbMock.orderCostEntry.findMany,
+      dbMock.orderChangeRequest.findMany,
+      dbMock.orderLog.findMany,
+      dbMock.orderItemDesign.findMany,
+      dbMock.billItem.findMany,
+    ] as unknown as { mock: { calls: [Record<string, unknown>][] } }[];
+    const sheetQueryArgs = sheetQueries.flatMap((query) =>
+      query.mock.calls.map(([args]) => args),
+    );
+    expect(sheetQueryArgs.length).toBeGreaterThanOrEqual(sheetQueries.length);
+    for (const args of sheetQueryArgs) {
+      expect(args).not.toHaveProperty('include');
+      expect(args).toHaveProperty('select');
+    }
+    const itemSelect = sheetQueries[1].mock.calls
+      .map(([args]) => args.select as Record<string, unknown>)
+      .find((select) => select.product);
+    expect(itemSelect).not.toHaveProperty('pricingSnapshot');
+    expect(sheetQueries[2].mock.calls[0]?.[0].select)
+      .not.toHaveProperty('salaryRuleSnapshot');
+    const changeSelect = sheetQueries[7].mock.calls[0]?.[0].select as Record<string, unknown>;
+    expect(changeSelect).not.toHaveProperty('beforeSnapshot');
+    expect(changeSelect).not.toHaveProperty('proposedChanges');
     expect(consumed.get('操作记录')).toEqual([
       ['工单号', '操作', '变更字段', '变更前', '变更后', '操作人', '备注', '操作时间'],
       [

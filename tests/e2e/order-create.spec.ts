@@ -99,5 +99,10 @@ test.describe('创建工单 — golden path', () => {
     await expect(highlightedRemark).toBeVisible();
     await expect(highlightedRemark).toHaveClass(/bg-destructive/);
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
+
+    // 标签页标题里是工单号，不是 id 前 8 位。这是唯一能验证
+    // generateMetadata 在真实 Next 运行时里真的查到了 orderNo 的地方 ——
+    // 单测跑不到 metadata 那条路径。
+    await expect(page).toHaveTitle(/^GD-\d{6}-\d{3} · 工单$/);
   });
 });

@@ -147,7 +147,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeDailyForm defaultDate={selectedDate} />
+        <RecomputeDailyForm defaultDate={selectedDate} maxDate={todayShanghai()} />
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

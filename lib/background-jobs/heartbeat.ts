@@ -8,32 +8,33 @@ export async function startWorkerHeartbeat(input: {
   intervalMs?: number;
   onError?: (error: unknown) => void;
 }): Promise<() => Promise<void>> {
-  const startedAt = new Date();
+  // lastSeenAt 由 web 进程（lib/background-jobs/health.ts）拿 45 秒窗口读回。
+  // 用本 worker 的 Node 时钟盖戳，两台机器一漂就把活着的 worker 判成 missing。
+  // clock_timestamp() 是这条语句的真实瞬间，「还活着」对每个读者含义相同。
+  // 必须走 raw：类型化 upsert 只能送 JS Date。
   const beat = async () => {
-    const now = new Date();
-    await db.backgroundWorkerHeartbeat.upsert({
-      where: { workerId: input.workerId },
-      create: {
-        workerId: input.workerId,
-        queue: input.queue,
-        version: input.version,
-        startedAt,
-        lastSeenAt: now,
-      },
-      update: {
-        queue: input.queue,
-        version: input.version,
-        lastSeenAt: now,
-      },
-    });
+    await db.$executeRaw`
+      INSERT INTO "BackgroundWorkerHeartbeat"
+             ("workerId", "queue", "version", "startedAt", "lastSeenAt")
+      VALUES (
+        ${input.workerId},
+        ${input.queue}::"BackgroundJobQueue",
+        ${input.version},
+        clock_timestamp(),
+        clock_timestamp()
+      )
+      ON CONFLICT ("workerId") DO UPDATE
+         SET "queue" = EXCLUDED."queue",
+             "version" = EXCLUDED."version",
+             "lastSeenAt" = EXCLUDED."lastSeenAt"
+    `;
   };
 
   await beat();
-  await db.backgroundWorkerHeartbeat.deleteMany({
-    where: {
-      lastSeenAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000) },
-    },
-  });
+  await db.$executeRaw`
+    DELETE FROM "BackgroundWorkerHeartbeat"
+     WHERE "lastSeenAt" < clock_timestamp() - interval '7 days'
+  `;
 
   const intervalMs = Math.max(5_000, input.intervalMs ?? 15_000);
   const timer = setInterval(() => {

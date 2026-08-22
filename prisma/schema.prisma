@@ -1372,6 +1372,10 @@ model DailyWorkerSalary {
 
   @@unique([workerId, date])
   @@index([date])
+  // 薪资总览的「累计未发」只按 isPaid 过滤，没有日期上界；isPaid 必须打
+  // 头才能被用上。date 放第二列：/owner/salary/daily 的未发筛选正好是
+  // isPaid=? + date desc，同一棵索引可以顺带服务。
+  @@index([isPaid, date])
 }
 
 // 不可变的计件任务账本。日薪重算时从 ProductionTask 重建；标记发放后
@@ -1511,6 +1515,9 @@ model CustomerServiceCommission {
 
   @@index([csUserId])
   @@index([settledAt])
+  // 总览的「已结算周期剩余未发」按 isFullyPaid 全表聚合。settledAt 作
+  // 第二列，让「未发且最近结算优先」不必再建一棵索引。
+  @@index([isFullyPaid, settledAt])
 }
 
 // 客服工资发放流水。底薪可在四个月周期进行中按月发放；提成只能在周期
@@ -1565,6 +1572,9 @@ model HourlyWorkerPayroll {
 
   @@unique([workerId, month])
   @@index([month])
+  // 同 DailyWorkerSalary：总览的「累计未发」按 isPaid 全表过滤，
+  // listHourlyPayrolls 的未发筛选是 isPaid=? + month desc。
+  @@index([isPaid, month])
 }
 
 // 时薪工考勤（PACKER / CLEANER / COOK）
@@ -1746,6 +1756,16 @@ model NotificationLog {
   id             String             @id @default(cuid())
   eventType      String
   channelId      String
+  // 一次「逻辑投递」的稳定标识 = BackgroundJob.dedupeKey，跨 job attempt 不变。
+  // durable worker 重试前用 (deliveryKey, status=SUCCESS) 查出已经推成功的
+  // channel 并跳过 —— fan-out 部分成功时不重复打扰已收到消息的群
+  // （CLAUDE.md §15.4「携带部分进度」在通知侧的落地）。写入也走
+  // upsert(deliveryKey, channelId)，重试成功时把 RETRYING/FAILED 行就地翻成
+  // SUCCESS，owner 的 24h 失败告警条因此会自愈。
+  //
+  // 可空：inline/dev 路径与 owner 的「测试发送」不带 key。PG 唯一索引默认
+  // NULLS DISTINCT，任意多条 NULL 行互不冲突，所以存量数据与老路径零影响。
+  deliveryKey    String?
   messageContent String
   status         NotificationStatus
   errorMessage   String?
@@ -1756,6 +1776,7 @@ model NotificationLog {
 
   channel NotificationChannel @relation(fields: [channelId], references: [id])
 
+  @@unique([deliveryKey, channelId])
   @@index([eventType])
   @@index([status])
   @@index([createdAt])

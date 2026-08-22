@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/ui-business';
@@ -29,16 +30,22 @@ async function targetLabel(
   return '—';
 }
 
+// 见 owner/products/[id] 里的同名注释：generateMetadata 与页面组件各查
+// 一次，React cache() 收敛成一次。刻意包在页面模块而不是 lib/bom.ts ——
+// setBomActive() 是「先 getBomDetail 再写」，在 lib 层包会引入同请求内
+// 读到陈旧值的隐患。
+const loadBom = cache(getBomDetail);
+
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  const bom = await getBomDetail(id);
+  const bom = await loadBom(id);
   return { title: bom ? `${bom.name} · BOM/用料` : 'BOM 不存在' };
 }
 
 export default async function OwnerBomDetailPage({ params }: PageProps) {
   await requirePermission('bom:manage');
   const { id } = await params;
-  const bom = await getBomDetail(id);
+  const bom = await loadBom(id);
   if (!bom) notFound();
 
   return (

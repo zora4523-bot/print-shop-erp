@@ -146,9 +146,18 @@ export async function markOutsourceReceivedAction(
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
+  let notice: string | undefined;
   try {
     const result = await markOutsourceReceived(id, parsed.data, actor);
     if (result.orderId) revalidatePath(`/orders/${result.orderId}`);
+    // 收了货、工单却没转完工，唯一「看外协单列表看不出来」的原因就是款式
+    // 覆盖不全。这一刻不说，主管只会看到一个静默不动的工单。
+    const pending = result.pendingOutsourceItems ?? [];
+    if (pending.length > 0) {
+      notice = `工单尚未完工：${pending
+        .map((item) => `款式 ${item.sequence}「${item.name}」`)
+        .join('、')}含外协工艺但还没有对应的外协单，补单并收货后工单才会自动完工。`;
+    }
   } catch (err) {
     const mapped = mapOutsourceError(err);
     if (mapped) return mapped;
@@ -156,7 +165,7 @@ export async function markOutsourceReceivedAction(
   }
   revalidatePath('/foreman/outsource');
   revalidatePath(`/foreman/outsource/${id}`);
-  return { status: 'success', id };
+  return notice ? { status: 'success', id, notice } : { status: 'success', id };
 }
 
 export async function cancelOutsourceAction(

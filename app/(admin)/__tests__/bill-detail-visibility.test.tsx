@@ -23,6 +23,14 @@ vi.mock('@/lib/bill', () => ({
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: requirePermissionMock,
 }));
+vi.mock('@/lib/auth/session', () => ({
+  getSession: vi.fn(),
+}));
+// 标题取数模块直连 Prisma —— 见 order-detail 测试里的同名注释。
+vi.mock('@/lib/page-title/refs', () => ({
+  getAdminBillTitleRef: vi.fn(),
+  getSalesBillTitleRef: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {

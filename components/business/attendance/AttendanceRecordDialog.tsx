@@ -200,6 +200,24 @@ export function AttendanceRecordDialog({
         />
       </label>
 
+      {/* 保存成功此前没有任何回执：按钮从「保存中…」变回「保存」就完了。
+
+          注意这里**不需要** router.refresh()。Server Action 里的
+          revalidatePath('/foreman/attendance') 会让服务端在 action 响应上
+          带回 x-action-revalidated 头，客户端 server-action-reducer 据此把
+          freshnessPolicy 提成 RefreshAll、对当前 URL 重新取数（见
+          next/dist/client/components/router-reducer/reducers/
+          server-action-reducer.js 与 next/dist/server/web/spec-extension/
+          revalidate.js），所以上方的汇总徽章和日卡片是会跟着变的。
+
+          真正缺的是「回执」：那次刷新对读屏器不产生任何播报，视觉上变化
+          也离按钮很远，容易被当成没存上而重复录入。补一条 role="status"
+          （polite），和下面 error 的 role="alert" 是同一套机制的两半。 */}
+      {state?.status === 'success' ? (
+        <p role="status" className="text-xs text-success-foreground">
+          已保存 {date} 的考勤
+        </p>
+      ) : null}
       {state?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}

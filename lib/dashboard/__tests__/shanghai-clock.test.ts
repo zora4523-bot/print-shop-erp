@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   currentShanghaiMonth,
+  isFutureShanghaiDate,
+  isFutureShanghaiMonth,
   shanghaiDayBoundary,
   todayShanghai,
 } from '../shanghai-clock';
@@ -47,6 +49,67 @@ describe('currentShanghaiMonth', () => {
     // Shanghai 2026-05-01 00:00 已是 5 月
     expect(currentShanghaiMonth(new Date('2026-04-30T16:00:00Z'))).toBe(
       '2026-05',
+    );
+  });
+});
+
+describe('isFutureShanghaiDate', () => {
+  it('当天不是未来、次日是未来（Shanghai 23:59:59 仍算当天）', () => {
+    // UTC 2026-04-26T15:59:59Z = Shanghai 2026-04-26 23:59:59
+    const now = new Date('2026-04-26T15:59:59Z');
+    expect(isFutureShanghaiDate('2026-04-26', now)).toBe(false);
+    expect(isFutureShanghaiDate('2026-04-27', now)).toBe(true);
+  });
+
+  it('按上海日历翻页，不是 UTC：UTC 16:00 之后次日已成为「今天」', () => {
+    // UTC 2026-04-26T16:00:00Z = Shanghai 2026-04-27 00:00。UTC 实现
+    // 会把 2026-04-27 判成未来 —— 这条就是钉死时区口径的用例。
+    const now = new Date('2026-04-26T16:00:00Z');
+    expect(isFutureShanghaiDate('2026-04-27', now)).toBe(false);
+  });
+
+  it('过去的日期永远不是未来', () => {
+    expect(isFutureShanghaiDate('2026-04-25', new Date('2026-04-26T15:59:59Z'))).toBe(
+      false,
+    );
+  });
+
+  it('跨年边界', () => {
+    // Shanghai 2027-01-01 00:00
+    expect(isFutureShanghaiDate('2027-01-01', new Date('2026-12-31T16:00:00Z'))).toBe(
+      false,
+    );
+    // Shanghai 2026-12-31 23:59 —— 元旦还没到
+    expect(isFutureShanghaiDate('2027-01-01', new Date('2026-12-31T15:59:00Z'))).toBe(
+      true,
+    );
+  });
+});
+
+describe('isFutureShanghaiMonth', () => {
+  it('当月不是未来、下月是未来（Shanghai 4-30 23:59 仍在 4 月）', () => {
+    const now = new Date('2026-04-30T15:59:00Z');
+    expect(isFutureShanghaiMonth('2026-04', now)).toBe(false);
+    expect(isFutureShanghaiMonth('2026-05', now)).toBe(true);
+  });
+
+  it('按上海日历翻月：UTC 4-30T16:00 之后 5 月已是当月', () => {
+    const now = new Date('2026-04-30T16:00:00Z');
+    expect(isFutureShanghaiMonth('2026-05', now)).toBe(false);
+  });
+
+  it('过去的月份永远不是未来', () => {
+    expect(isFutureShanghaiMonth('2026-03', new Date('2026-04-30T15:59:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('跨年边界', () => {
+    expect(isFutureShanghaiMonth('2027-01', new Date('2026-12-31T16:00:00Z'))).toBe(
+      false,
+    );
+    expect(isFutureShanghaiMonth('2027-01', new Date('2026-12-31T15:59:00Z'))).toBe(
+      true,
     );
   });
 });

@@ -4,7 +4,9 @@ const { dbMock } = vi.hoisted(() => {
   const mock = {
     notificationRule: { findUnique: vi.fn() },
     notificationChannel: { findMany: vi.fn() },
-    notificationLog: { create: vi.fn() },
+    // findMany / upsert 只在传了 deliveryKey（durable job 路径）时用到；
+    // 不传 deliveryKey 的同步路径仍然走 create，行为逐字未变。
+    notificationLog: { create: vi.fn(), findMany: vi.fn(), upsert: vi.fn() },
   };
   return { dbMock: mock };
 });
@@ -17,6 +19,8 @@ beforeEach(() => {
   dbMock.notificationRule.findUnique.mockReset();
   dbMock.notificationChannel.findMany.mockReset();
   dbMock.notificationLog.create.mockReset().mockResolvedValue({});
+  dbMock.notificationLog.findMany.mockReset().mockResolvedValue([]);
+  dbMock.notificationLog.upsert.mockReset().mockResolvedValue({});
 });
 
 describe('isMockMode', () => {
@@ -474,7 +478,7 @@ describe('notify', () => {
         },
         { webhookSender: failSender, mockMode: false },
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ delivered: 0, failed: 1, retryable: false });
 
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;
     expect(data.status).toBe('FAILED');
@@ -519,7 +523,8 @@ describe('notify', () => {
         totalAmount: '0',
         urgentMark: '',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ retryable: true, errorCodes: ['Error'] });
+    // 基础设施故障必须标成可重试，否则 job 又会像改动前那样静默 SUCCEEDED。
     expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
@@ -552,7 +557,7 @@ describe('notify', () => {
         },
         { webhookSender: okSender, mockMode: false },
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ delivered: 1, unlogged: 1, retryable: false });
     errSpy.mockRestore();
   });
 
@@ -615,5 +620,243 @@ describe('notify', () => {
     );
     const data = dbMock.notificationLog.create.mock.calls[0][0].data;
     expect(data.messageContent).toBe('工单 O-99 由 李四 提交');
+  });
+});
+
+// ── durable job 路径（传 deliveryKey）──────────────────────────────────
+//
+// notify 的公开契约仍然是**永不抛**；它只把「值不值得重试」放进返回值，
+// 由 handleNotificationJob 决定抛不抛。这一组用例锁的就是这条边界，以及
+// 「重试不重复打扰已经收到消息的群」。
+describe('notify · deliveryKey（durable 重试）', () => {
+  const submitted = {
+    orderId: 'o1',
+    orderNo: 'O-1',
+    submitterName: '张三',
+    customerRef: null,
+    totalAmount: '0',
+    urgentMark: '',
+  } as const;
+
+  function twoChannels() {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c1', 'c2'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
+    ]);
+  }
+
+  it('部分成功 + 可重试失败 → outcome.retryable=true，失败方写 RETRYING', async () => {
+    twoChannels();
+    const sender: WebhookSender = vi.fn(async (url: string) =>
+      url.endsWith('/1')
+        ? { ok: true, retries: 0 }
+        : { ok: false, retries: 2, errorMessage: 'http 500', retryable: true },
+    );
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+    });
+
+    expect(outcome).toMatchObject({
+      attempted: 2,
+      delivered: 1,
+      skipped: 0,
+      failed: 1,
+      retryable: true,
+      unlogged: 0,
+      errorCodes: ['http 500'],
+    });
+    // 带 deliveryKey 一律走 upsert，绝不再 create 新行
+    expect(dbMock.notificationLog.create).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.upsert).toHaveBeenCalledTimes(2);
+    const first = dbMock.notificationLog.upsert.mock.calls[0][0];
+    const second = dbMock.notificationLog.upsert.mock.calls[1][0];
+    expect(first.where.deliveryKey_channelId).toEqual({
+      deliveryKey: 'dk-1',
+      channelId: 'c1',
+    });
+    expect(second.where.deliveryKey_channelId).toEqual({
+      deliveryKey: 'dk-1',
+      channelId: 'c2',
+    });
+    expect(first.create.status).toBe('SUCCESS');
+    expect(first.create.deliveryKey).toBe('dk-1');
+    // 还有 attempt 可用 → RETRYING，别去点亮 owner 的 24h 失败告警条
+    expect(second.create.status).toBe('RETRYING');
+  });
+
+  it('重试时跳过上一次已经推成功的 channel（核心防回归）', async () => {
+    twoChannels();
+    dbMock.notificationLog.findMany.mockResolvedValue([{ channelId: 'c1' }]);
+    const sender: WebhookSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+    });
+
+    expect(dbMock.notificationLog.findMany).toHaveBeenCalledWith({
+      where: { deliveryKey: 'dk-1', status: 'SUCCESS' },
+      select: { channelId: true },
+    });
+    // c1 已送达 → 一次都不再打扰
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(sender).toHaveBeenCalledWith('https://qy/2', expect.any(String));
+    expect(outcome).toMatchObject({
+      attempted: 1,
+      delivered: 1,
+      skipped: 1,
+      failed: 0,
+      retryable: false,
+    });
+    expect(dbMock.notificationLog.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('永久性失败（key 失效 / channel 关停）不重试，落 FAILED', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_SUBMITTED',
+      channelIds: ['c1', 'c2'],
+      messageTemplate: 'x',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
+      { id: 'c2', webhookUrl: 'https://qy/2', isActive: false },
+    ]);
+    const sender: WebhookSender = vi.fn(async () => ({
+      ok: false,
+      retries: 0,
+      errorMessage: 'wecom errcode=93000',
+      retryable: false,
+    }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+    });
+
+    expect(outcome).toMatchObject({ failed: 2, retryable: false });
+    expect(outcome.errorCodes).toEqual([
+      'wecom errcode=93000',
+      'channel inactive',
+    ]);
+    const statuses = dbMock.notificationLog.upsert.mock.calls.map(
+      (c) => c[0].create.status,
+    );
+    // 不是 RETRYING —— 重试 5 次结果一样，不能白耗 attempts 变死信
+    expect(statuses).toEqual(['FAILED', 'FAILED']);
+  });
+
+  it('finalAttempt=true → 可重试失败也落 FAILED，但 outcome 仍标 retryable', async () => {
+    twoChannels();
+    const sender: WebhookSender = vi.fn(async () => ({
+      ok: false,
+      retries: 2,
+      errorMessage: 'http 500',
+      retryable: true,
+    }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+      finalAttempt: true,
+    });
+
+    // 最后一次之后没人会再重试了，必须让 24h 告警条看得到终局失败
+    const statuses = dbMock.notificationLog.upsert.mock.calls.map(
+      (c) => c[0].create.status,
+    );
+    expect(statuses).toEqual(['FAILED', 'FAILED']);
+    // 但 handler 仍要抛，交给 failBackgroundJob 判 DEAD
+    expect(outcome.retryable).toBe(true);
+  });
+
+  it('mock 模式即使带 deliveryKey 也永远不触发重试', async () => {
+    twoChannels();
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      mockMode: true,
+      deliveryKey: 'dk-1',
+    });
+    expect(outcome).toMatchObject({ delivered: 2, failed: 0, retryable: false });
+    const created = dbMock.notificationLog.upsert.mock.calls[0][0].create;
+    expect(created.status).toBe('SUCCESS');
+    expect(created.errorMessage).toBe('MOCK');
+  });
+
+  it('送达但 upsert 写失败 → 不抛，unlogged 计数（at-least-once 的已知边界）', async () => {
+    const errSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    twoChannels();
+    dbMock.notificationLog.upsert.mockRejectedValue(new Error('deadlock'));
+    const sender: WebhookSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+    });
+
+    // 幂等凭证没写下 → 下一轮会重复推，但至少被显式计数，ops 能对上号
+    expect(outcome).toMatchObject({ delivered: 2, unlogged: 2, retryable: false });
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it('查已送达 channel 的那条 findMany 炸掉 → 标 retryable，不盲发', async () => {
+    const errSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    twoChannels();
+    dbMock.notificationLog.findMany.mockRejectedValue(new Error('conn lost'));
+    const sender: WebhookSender = vi.fn(async () => ({ ok: true, retries: 0 }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+      deliveryKey: 'dk-1',
+    });
+
+    // 不知道谁已经收到过就绝不发：一条都不发，交给下一轮
+    expect(sender).not.toHaveBeenCalled();
+    expect(outcome.retryable).toBe(true);
+    errSpy.mockRestore();
+  });
+
+  it('不传 deliveryKey → 零行为变化：走 create、不查 findMany、可重试失败也写 FAILED', async () => {
+    twoChannels();
+    const sender: WebhookSender = vi.fn(async () => ({
+      ok: false,
+      retries: 2,
+      errorMessage: 'http 500',
+      retryable: true,
+    }));
+
+    const outcome = await notify('ORDER_SUBMITTED', submitted, {
+      webhookSender: sender,
+      mockMode: false,
+    });
+
+    expect(dbMock.notificationLog.findMany).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.upsert).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(2);
+    const statuses = dbMock.notificationLog.create.mock.calls.map(
+      (c) => c[0].data.status,
+    );
+    // 同步路径没人会重试它 → RETRYING 会永远挂着，只能写 FAILED
+    expect(statuses).toEqual(['FAILED', 'FAILED']);
+    // outcome 仍标 retryable，但同步调用点根本不看返回值
+    expect(outcome.retryable).toBe(true);
   });
 });

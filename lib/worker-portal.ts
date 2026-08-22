@@ -6,8 +6,13 @@ import {
   TaskStatus,
   WorkerType,
 } from '../generated/prisma/enums';
+import { paginatedResult, paginationWindow } from './admin/table';
 import { db } from './db';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
+
+// 师傅端 H5 一屏能承受的卡片数。取值与 lib/order/list-query.ts 的
+// ORDER_LIST_DEFAULT_PAGE_SIZE 一致，两端口径对齐。
+export const WORKER_ORDER_PAGE_SIZE = 20;
 
 export type WorkerActor = { id: string; role: Role };
 
@@ -59,11 +64,31 @@ function ownOrderWhere(workerId: string) {
   } as const;
 }
 
-export async function listWorkerOrders(actor: WorkerActor) {
+export async function listWorkerOrders(
+  actor: WorkerActor,
+  options?: { page?: number },
+) {
   requireWorkerActor(actor);
+  // 计数与取行必须共用同一个 where，否则页码会指向不存在的行。
+  const where = ownOrderWhere(actor.id);
+  const total = await db.order.count({ where });
+  const window = paginationWindow(
+    total,
+    options?.page ?? 1,
+    WORKER_ORDER_PAGE_SIZE,
+  );
+
   const orders = await db.order.findMany({
-    where: ownOrderWhere(actor.id),
-    orderBy: [{ isUrgent: 'desc' }, { createdAt: 'asc' }],
+    where,
+    // 最新的工单排最前。这个页面是归档/查询视图，不是待办队列——待办队列
+    // 是 /worker/tasks（listWorkerTasks 仍按急单分组、旧单在前，且天然被
+    // PENDING/IN_PROGRESS 收窄）。急单在这里只作为徽标呈现：如果继续把
+    // isUrgent 当第一排序键，老员工的历史急单会长期霸占第一页，今天的新单
+    // 反而翻不到。id 是稳定 tiebreaker，既保证翻页不重不漏，也命中 Order
+    // 上已有的 @@index([createdAt(sort: Desc), id(sort: Desc)])。
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: window.skip,
+    take: window.take,
     select: {
       id: true,
       orderNo: true,
@@ -92,34 +117,38 @@ export async function listWorkerOrders(actor: WorkerActor) {
     },
   });
 
-  return orders.map((order) => {
-    const tasks = order.items.flatMap((item) => item.tasks);
-    return {
-      id: order.id,
-      orderNo: order.orderNo,
-      customName: order.customName,
-      status: order.status,
-      isUrgent: order.isUrgent,
-      customerRef: order.customerRef,
-      promisedDate: order.promisedDate,
-      createdAt: order.createdAt,
-      submitterName: order.submitter?.displayName ?? '未记录',
-      taskCount: tasks.length,
-      completedTaskCount: tasks.filter(
-        (task) => task.status === TaskStatus.COMPLETED,
-      ).length,
-      pieceworkAmount: tasks
-        .reduce(
-          (sum, task) =>
-            sum.plus(new Decimal(task.pieceworkAmount as Decimal.Value)),
-          new Decimal(0),
-        )
-        .toFixed(2),
-      hasPieceworkTasks: tasks.some(
-        (task) => task.workerType === WorkerType.MACHINE,
-      ),
-    };
-  });
+  return paginatedResult(
+    orders.map((order) => {
+      const tasks = order.items.flatMap((item) => item.tasks);
+      return {
+        id: order.id,
+        orderNo: order.orderNo,
+        customName: order.customName,
+        status: order.status,
+        isUrgent: order.isUrgent,
+        customerRef: order.customerRef,
+        promisedDate: order.promisedDate,
+        createdAt: order.createdAt,
+        submitterName: order.submitter?.displayName ?? '未记录',
+        taskCount: tasks.length,
+        completedTaskCount: tasks.filter(
+          (task) => task.status === TaskStatus.COMPLETED,
+        ).length,
+        pieceworkAmount: tasks
+          .reduce(
+            (sum, task) =>
+              sum.plus(new Decimal(task.pieceworkAmount as Decimal.Value)),
+            new Decimal(0),
+          )
+          .toFixed(2),
+        hasPieceworkTasks: tasks.some(
+          (task) => task.workerType === WorkerType.MACHINE,
+        ),
+      };
+    }),
+    total,
+    window,
+  );
 }
 
 export async function getWorkerOrderDetail(

@@ -13,6 +13,7 @@ import type {
   ClaimedBackgroundJob,
   EnqueueBackgroundJobInput,
 } from './types';
+import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
 
 type EnqueueClient = Pick<Prisma.TransactionClient, 'backgroundJob'>;
@@ -110,28 +111,36 @@ type ClaimedRow = {
   payload: Prisma.JsonValue;
   attempts: number;
   maxAttempts: number;
+  claimedAt: Date;
 };
 
 export async function claimNextBackgroundJob(input: {
   queue: BackgroundJobQueue;
   workerId: string;
   leaseMs: number;
-  now?: Date;
 }): Promise<ClaimedBackgroundJob | null> {
-  const now = input.now ?? new Date();
-  const leaseCutoff = new Date(now.getTime() - input.leaseMs);
+  // 下面每一个瞬间都来自数据库，绝不来自本 worker 的 Node 时钟。两台机器上的
+  // worker 会拿各自的 new Date() 去比对方写下的 heartbeatAt —— 时钟快的那台
+  // 会把对方还在跑的租约判成过期并重新 claim，同一个导出/通知执行两次。
+  //
+  // 这里用 now()（= transaction_timestamp）而不是 clock_timestamp()：整个事务
+  // 一个固定瞬间，下面 4 条清扫语句和最后的 claim 必须对同一个瞬间达成一致。
+  // clock_timestamp() 会随语句间的往返前进，于是租约可能在「清扫 attempt 之后、
+  // claim 之前」过期 —— 旧 attempt 行永远停在 RUNNING，新 attempt 行却已插进来。
+  // 代价是 now() 略早于真实时间（事务开始时刻），这只会让清扫更保守，是安全方向。
+  const leaseCutoff = Prisma.sql`(now() - (${input.leaseMs}::int * interval '1 millisecond'))`;
 
   return db.$transaction(async (tx) => {
     // Close the attempt left behind by a worker that stopped heartbeating.
     await tx.$executeRaw`
       UPDATE "BackgroundJobAttempt" AS attempt
          SET "status" = 'ABANDONED'::"BackgroundJobAttemptStatus",
-             "finishedAt" = ${now},
+             "finishedAt" = now(),
              "durationMs" = LEAST(
                2147483647,
                GREATEST(
                  0,
-                 FLOOR(EXTRACT(EPOCH FROM (${now} - attempt."startedAt")) * 1000)
+                 FLOOR(EXTRACT(EPOCH FROM (now() - attempt."startedAt")) * 1000)
                )
              )::integer
         FROM "BackgroundJob" AS job
@@ -147,12 +156,12 @@ export async function claimNextBackgroundJob(input: {
     await tx.$executeRaw`
       UPDATE "BackgroundJob"
          SET "status" = 'DEAD'::"BackgroundJobStatus",
-             "finishedAt" = ${now},
+             "finishedAt" = now(),
              "lockedBy" = NULL,
              "lockedAt" = NULL,
              "heartbeatAt" = NULL,
              "lastErrorCode" = COALESCE("lastErrorCode", 'WorkerLeaseExpired'),
-             "updatedAt" = ${now}
+             "updatedAt" = now()
        WHERE "status" = 'RUNNING'::"BackgroundJobStatus"
          AND "attempts" >= "maxAttempts"
          AND COALESCE("heartbeatAt", "lockedAt") < ${leaseCutoff}
@@ -186,7 +195,7 @@ export async function claimNextBackgroundJob(input: {
                  ELSE 'filtered'
                END
              ),
-             "updatedAt" = ${now}
+             "updatedAt" = now()
         FROM "BackgroundJob" AS job
        WHERE order_export."backgroundJobId" = job."id"
          AND order_export."status" = 'PENDING'::"OrderExportStatus"
@@ -203,7 +212,7 @@ export async function claimNextBackgroundJob(input: {
            AND (
              (
                "status" = 'PENDING'::"BackgroundJobStatus"
-               AND "availableAt" <= ${now}
+               AND "availableAt" <= now()
              )
              OR (
                "status" = 'RUNNING'::"BackgroundJobStatus"
@@ -218,16 +227,17 @@ export async function claimNextBackgroundJob(input: {
          SET "status" = 'RUNNING'::"BackgroundJobStatus",
              "attempts" = job."attempts" + 1,
              "lockedBy" = ${input.workerId},
-             "lockedAt" = ${now},
-             "heartbeatAt" = ${now},
-             "startedAt" = COALESCE(job."startedAt", ${now}),
+             "lockedAt" = now(),
+             "heartbeatAt" = now(),
+             "startedAt" = COALESCE(job."startedAt", now()),
              "finishedAt" = NULL,
              "lastErrorCode" = NULL,
-             "updatedAt" = ${now}
+             "updatedAt" = now()
         FROM candidate
        WHERE job."id" = candidate."id"
       RETURNING job."id", job."type", job."queue", job."dedupeKey",
-                job."payload", job."attempts", job."maxAttempts"
+                job."payload", job."attempts", job."maxAttempts",
+                now() AS "claimedAt"
     `;
 
     const row = rows[0];
@@ -239,40 +249,52 @@ export async function claimNextBackgroundJob(input: {
         attempt: row.attempts,
         workerId: input.workerId,
         status: BackgroundJobAttemptStatus.RUNNING,
-        startedAt: now,
+        // 与上面 UPDATE 的 lockedAt 同一个 now()，逐字节相等。
+        startedAt: row.claimedAt,
       },
     });
 
     return {
       ...row,
       workerId: input.workerId,
-      claimedAt: now,
     };
   });
 }
 
+/**
+ * 心跳只有一句话要说：「此刻我还活着」。这里用 clock_timestamp() 而不是
+ * now()：单语句下二者等价，但如果将来这句被裹进某个更大的事务，now() 会
+ * 悄悄盖上事务开始时刻的戳、低估租约剩余时间，clock_timestamp() 两种情形
+ * 下都对。改 raw 是必需的 —— 类型化 updateMany 只能送一个 JS Date。
+ */
 export async function heartbeatBackgroundJob(
   job: ClaimedBackgroundJob,
-  now: Date = new Date(),
 ): Promise<void> {
-  const updated = await db.backgroundJob.updateMany({
-    where: {
-      id: job.id,
-      status: BackgroundJobStatus.RUNNING,
-      lockedBy: job.workerId,
-      attempts: job.attempts,
-    },
-    data: { heartbeatAt: now },
-  });
-  if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
+  // raw 绕过 Prisma 的 @updatedAt，必须自己写，否则心跳不再推进 updatedAt。
+  const updated = await db.$executeRaw`
+    UPDATE "BackgroundJob"
+       SET "heartbeatAt" = clock_timestamp(),
+           "updatedAt" = clock_timestamp()
+     WHERE "id" = ${job.id}
+       AND "status" = 'RUNNING'::"BackgroundJobStatus"
+       AND "lockedBy" = ${job.workerId}
+       AND "attempts" = ${job.attempts}
+  `;
+  if (updated !== 1) throw new BackgroundJobLeaseLostError(job.id);
 }
 
 export async function completeBackgroundJob(
   job: ClaimedBackgroundJob,
   result?: BackgroundJobResult,
-  now: Date = new Date(),
+  /**
+   * 仅供测试注入时钟。生产必须留空，让时间戳来自数据库 —— 跨机器可比。
+   * 注意这里刻意不是 `= new Date()`：默认值一旦是 Node 时钟，忘记传就等于
+   * 悄悄退回本缺陷。
+   */
+  now?: Date,
 ): Promise<void> {
   await db.$transaction(async (tx) => {
+    const at = now ?? (await databaseNow(tx));
     const updated = await tx.backgroundJob.updateMany({
       where: {
         id: job.id,
@@ -283,7 +305,7 @@ export async function completeBackgroundJob(
       data: {
         status: BackgroundJobStatus.SUCCEEDED,
         result: result ?? Prisma.JsonNull,
-        finishedAt: now,
+        finishedAt: at,
         lockedBy: null,
         lockedAt: null,
         heartbeatAt: null,
@@ -298,8 +320,9 @@ export async function completeBackgroundJob(
       },
       data: {
         status: BackgroundJobAttemptStatus.SUCCEEDED,
-        finishedAt: now,
-        durationMs: durationMs(job.claimedAt, now),
+        finishedAt: at,
+        // job.claimedAt 现在也是库时钟（claim 的 RETURNING now()），两端同源。
+        durationMs: durationMs(job.claimedAt, at),
       },
     });
   });
@@ -308,12 +331,16 @@ export async function completeBackgroundJob(
 export async function failBackgroundJob(
   job: ClaimedBackgroundJob,
   error: unknown,
-  now: Date = new Date(),
+  /** 仅供测试注入时钟；生产留空，见 completeBackgroundJob。 */
+  now?: Date,
 ): Promise<void> {
   const errorCode = backgroundJobErrorCode(error);
   const exhausted = job.attempts >= job.maxAttempts;
 
   await db.$transaction(async (tx) => {
+    // availableAt 之后要被 claim 拿 `availableAt <= now()` 比较，所以退避
+    // 的锚点必须是库时钟；偏移量本身是常数，在 JS 里加没有问题。
+    const at = now ?? (await databaseNow(tx));
     const updated = await tx.backgroundJob.updateMany({
       where: {
         id: job.id,
@@ -326,9 +353,9 @@ export async function failBackgroundJob(
           ? BackgroundJobStatus.DEAD
           : BackgroundJobStatus.PENDING,
         availableAt: exhausted
-          ? now
-          : new Date(now.getTime() + retryDelayMs(job.attempts)),
-        finishedAt: exhausted ? now : null,
+          ? at
+          : new Date(at.getTime() + retryDelayMs(job.attempts)),
+        finishedAt: exhausted ? at : null,
         lockedBy: null,
         lockedAt: null,
         heartbeatAt: null,
@@ -370,8 +397,8 @@ export async function failBackgroundJob(
       data: {
         status: BackgroundJobAttemptStatus.FAILED,
         errorCode,
-        finishedAt: now,
-        durationMs: durationMs(job.claimedAt, now),
+        finishedAt: at,
+        durationMs: durationMs(job.claimedAt, at),
       },
     });
   });
@@ -397,6 +424,10 @@ export async function listBackgroundJobs(limit = 100) {
       startedAt: true,
       finishedAt: true,
       lastErrorCode: true,
+      // 成功但「一条也没送出去」的任务（通知的永久性投递失败）只在 result
+      // 里留证据：completeBackgroundJob 在成功路径会把 lastErrorCode 置 null，
+      // 光看状态列它就是一行绿色的 SUCCEEDED。ops 页据此渲染错误码列。
+      result: true,
       createdAt: true,
       attemptLogs: {
         orderBy: { attempt: 'desc' },
@@ -421,12 +452,15 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
       return false;
     }
+    // 「立刻可跑」必须用库时钟表达：web 进程的 new Date() 快了就把重试
+    // 推迟到未来，慢了则无所谓 —— 两种都不该由 web 的时钟说了算。
+    const at = await databaseNow(tx);
     await tx.backgroundJob.update({
       where: { id: jobId },
       data: {
         status: BackgroundJobStatus.PENDING,
         maxAttempts: Math.max(job.maxAttempts, job.attempts + 3),
-        availableAt: new Date(),
+        availableAt: at,
         finishedAt: null,
         lastErrorCode: null,
       },
@@ -443,11 +477,12 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
 
 export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean> {
   return db.$transaction(async (tx) => {
+    const at = await databaseNow(tx);
     const updated = await tx.backgroundJob.updateMany({
       where: { id: jobId, status: BackgroundJobStatus.PENDING },
       data: {
         status: BackgroundJobStatus.CANCELLED,
-        finishedAt: new Date(),
+        finishedAt: at,
         lockedBy: null,
         lockedAt: null,
         heartbeatAt: null,

@@ -3,6 +3,7 @@
 import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -51,6 +52,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   account: '账户',
   password: '修改密码',
   new: '新建',
+  edit: '编辑',
   count: '盘点',
 };
 
@@ -63,12 +65,27 @@ const LAYOUT_ONLY_PATHS = new Set<string>([
   '/sales',
 ]);
 
-function labelFor(segment: string): string {
-  return SEGMENT_LABELS[segment] ?? segment;
+// cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读
+// 标签，把 25 位随机串印在面包屑上等于什么都没说。
+const ID_SEGMENT =
+  /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+// 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
+export function resolveSegmentLabel(
+  segment: string,
+  entityLabel: string | null,
+): string {
+  const known = SEGMENT_LABELS[segment];
+  if (known) return known;
+  if (ID_SEGMENT.test(segment)) return entityLabel ?? '详情';
+  return segment;
 }
 
 export function AdminBreadcrumb() {
   const pathname = usePathname();
+  // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
+  // 这里不发任何请求。
+  const entityLabel = useBreadcrumbEntityLabel();
   const segments = pathname.split('/').filter(Boolean);
 
   if (segments.length === 0) {
@@ -100,7 +117,9 @@ export function AdminBreadcrumb() {
               <BreadcrumbItem>
                 {isLast ? (
                   // Real terminal — semantically "current page".
-                  <BreadcrumbPage>{labelFor(seg)}</BreadcrumbPage>
+                  <BreadcrumbPage>
+                    {resolveSegmentLabel(seg, entityLabel)}
+                  </BreadcrumbPage>
                 ) : isLinkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
@@ -108,7 +127,7 @@ export function AdminBreadcrumb() {
                   <BreadcrumbLink
                     render={<Link href={href} prefetch={false} />}
                   >
-                    {labelFor(seg)}
+                    {resolveSegmentLabel(seg, entityLabel)}
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the
@@ -117,7 +136,7 @@ export function AdminBreadcrumb() {
                   // and screen readers would announce two "current"s
                   // on a single breadcrumb .
                   <span className="text-muted-foreground">
-                    {labelFor(seg)}
+                    {resolveSegmentLabel(seg, entityLabel)}
                   </span>
                 )}
               </BreadcrumbItem>

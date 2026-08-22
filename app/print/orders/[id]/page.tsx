@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
-import { requireSession } from '@/lib/auth/session';
+import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderForPrint } from '@/lib/order/print-view';
+import { getOrderTitleRef } from '@/lib/page-title/refs';
+import { orderPrintTitle } from '@/lib/page-title/titles';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { getSetting } from '@/lib/settings';
 import { OrderPrintLayout } from '@/components/business/order/OrderPrintLayout';
@@ -13,7 +15,12 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `工单打印 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session) return { title: '工单打印' };
+  // 与 getOrderForPrint 同一把 scope（都走 getOrderScopeFilter）：
+  // WORKER 看不到 SUBMITTED 排产草稿，标题也不能把工单号漏出去。
+  const ref = await getOrderTitleRef(id, session.user.id, session.user.role);
+  return { title: orderPrintTitle(ref?.orderNo ?? null) };
 }
 
 export default async function OrderPrintViewPage({

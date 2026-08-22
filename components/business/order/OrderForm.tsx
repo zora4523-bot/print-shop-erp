@@ -1766,6 +1766,20 @@ function TextField({
 }: {
   label: string;
   hint?: string;
+  /**
+   * 画红星 **并且** 把 required 透传给控件。两件事必须一起做：
+   * 之前只画星不透传，读屏器把「款式名」「数量」念成普通选填输入框。
+   *
+   * 和 <form noValidate> 不冲突：noValidate 关掉的是 HTML 表单提交算法里
+   * 的 "interactively validate the constraints" 那一步（也就是原生气泡），
+   * 不是 required 属性本身的语义。加上 required 之后仍然：
+   *   - 提交时不弹任何原生气泡，错误照旧来自服务端 Zod / RHF resolver；
+   *   - required 进无障碍树，读屏器念「必填」；
+   *   - :required / :invalid 伪类开始匹配 —— 本仓库 globals.css 与
+   *     components/** 里没有任何样式钩这两个伪类，所以零视觉影响。
+   * 同一组合（noValidate + required 透传）在 CraftForm / ProductForm /
+   * PartyForm / PriceTierForm / AccountForm 等 15 份后台表单里已经在跑。
+   */
   required?: boolean;
   error?: string | undefined;
   registration: Registration;
@@ -1780,13 +1794,22 @@ function TextField({
     <div className={`min-w-0 space-y-1${full ? ' sm:col-span-2' : ''}`}>
       <Label htmlFor={fieldId}>
         {label}
-        {required ? <span className="text-destructive"> *</span> : null}
+        {/* 星号只是给看得见的人的视觉记号，必填语义由下面的 required /
+            aria-required 承担，所以这里 aria-hidden，免得读屏器把标签念成
+            「款式名 星号」。写法对齐同文件的 ShipmentCustomerChargeFields。 */}
+        {required ? (
+          <span aria-hidden="true" className="text-destructive">
+            {' *'}
+          </span>
+        ) : null}
       </Label>
       <Input
         id={fieldId}
         type={type}
         min={min}
         step={step}
+        required={required}
+        aria-required={required ? true : undefined}
         aria-invalid={Boolean(error)}
         aria-describedby={error || hint ? messageId : undefined}
         {...registration}
@@ -1830,12 +1853,18 @@ function TextareaField({
     >
       <Label htmlFor={fieldId}>
         {label}
-        {required ? <span className="text-destructive"> *</span> : null}
+        {/* 同 TextField：星号不进无障碍名，必填由 required 表达。 */}
+        {required ? (
+          <span aria-hidden="true" className="text-destructive">
+            {' *'}
+          </span>
+        ) : null}
       </Label>
       <textarea
         id={fieldId}
         rows={rows}
         required={required}
+        aria-required={required ? true : undefined}
         className={
           destructive
             ? 'flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-semibold text-destructive shadow-xs caret-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'

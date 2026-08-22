@@ -231,6 +231,19 @@ describe('recomputeDailySalaryAction', () => {
     if (r.status === 'error') expect(r.message).toMatch(/机型/);
   });
 
+  it('maps a batch-path DailySalaryError → error (future-date guard aborts wholesale)', async () => {
+    // 未来日期的守卫落在 lib 层的批量入口上，会整批抛错而不是返回
+    // { settled: [], errors: [...] } —— action 必须把它映射成
+    // { status: 'error' }，而不是让它冒泡成 500。
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.computeDailyForAllMachineWorkers.mockRejectedValueOnce(
+      new MockDailySalaryError('不能结算未来日期（2026-04-24，上海日历）：该日尚未开始'),
+    );
+    const r = await recomputeDailySalaryAction(null, { date: '2026-04-23' });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toMatch(/未来日期/);
+  });
+
   it('revalidates /owner/salary/daily on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
@@ -738,6 +751,17 @@ describe('recomputeHourlyPayrollAction', () => {
       workerId: 'worker-1',
     });
     expect(r.status).toBe('error');
+  });
+
+  it('maps a batch-path HourlyAggregateError → error (future-month guard aborts wholesale)', async () => {
+    // 同 daily 那条：月份错是整批的输入错，lib 层整批抛 HourlyAggregateError。
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.computeHourlyForAllInMonth.mockRejectedValueOnce(
+      new MockHourlyAggregateError('不能结算未来月份（2026-07，上海日历）：该月尚未开始'),
+    );
+    const r = await recomputeHourlyPayrollAction(null, { month: '2026-05' });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toMatch(/未来月份/);
   });
 
   it('revalidates /owner/salary/hourly on success', async () => {

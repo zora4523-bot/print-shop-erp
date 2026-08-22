@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { Role, WorkerType } from '../../generated/prisma/enums';
 import { db } from '../db';
 import { parseShanghaiMonth } from '../attendance';
+import { isFutureShanghaiMonth } from '../dashboard/shanghai-clock';
 import {
   calcHourlyPayroll,
   HourlyPayrollError,
@@ -127,6 +128,26 @@ function hourlyLockKey(workerId: string, month: string): string {
   return `print-shop-erp:hourly:${workerId}:${month}`;
 }
 
+// 与 lib/salary/daily.ts 的 assertNotFutureSalaryDate 同构、同理由：守卫必须
+// 落在 lib/，因为 owner action、/api/cron/hourly-payroll 的 inline 分支、
+// durable worker 三条写路径都只经过本文件这两个函数。
+//
+// 未来月份的考勤必然为空，而 COOK 分支的 monthlyBasePay 是**整月 flat**
+// （见 lib/salary/hourly-payroll.ts 的 COOK 分支，不按天折算），所以一次
+// 误操作直接写出一整月厨师月固定工资。
+//
+// 口径：只拒绝**严格未来**，当月允许（见 assertNotFutureSalaryDate 的口径
+// 说明；当月是否也该拒，见本次改动附带的业主待拍板项）。
+function assertNotFutureSalaryMonth(month: string, now: Date): void {
+  if (isFutureShanghaiMonth(month, now)) {
+    throw new HourlyAggregateError(
+      `不能结算未来月份（${month}，上海日历）：该月尚未开始，` +
+        `考勤必然为空，写出的只会是一条凭空的月固定工资，` +
+        `且一旦被标记已发就只能人工撤销。请等该月结束后再结算。`,
+    );
+  }
+}
+
 // Monthly computation for a single hourly worker. @@unique([workerId,
 // month]) → upsert. Called per-worker from the cron batch and from
 // the owner's "重算" button. `now` pins both the rule-resolution
@@ -138,6 +159,10 @@ export async function computeHourlyPayroll(
   pinnedRuleBundle?: HourlyRuleBundle,
 ): Promise<ComputeHourlyPayrollResult> {
   const { start, end } = parseShanghaiMonth(month);
+  // `now` 在这个函数里同时是规则解析时点和 paidAt 时钟，这里直接复用它当
+  // 墙上时钟：批量调用方传的是整批钉住的那一个 now，单独重算走默认的
+  // new Date()。
+  assertNotFutureSalaryMonth(month, now);
 
   const worker = await db.user.findUnique({
     where: { id: workerId },
@@ -443,6 +468,9 @@ export async function computeHourlyForAllInMonth(
   // Bounds-check month before fanout so the early bail matches the
   // single-worker signature.
   const { start, end } = parseShanghaiMonth(month);
+  // 同 computeDailyForAllMachineWorkers：月份错是整批的输入错，不该被逐人
+  // 捕获成 errors[] 而让调用方看到 status:'success'。
+  assertNotFutureSalaryMonth(month, now);
 
   const settled: ComputeHourlyPayrollResult[] = [];
   const errors: Array<{ workerId: string; workerName: string; message: string }> = [];

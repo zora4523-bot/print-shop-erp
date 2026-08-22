@@ -18,12 +18,15 @@ import {
   reportTasks,
   reassignProductionTask,
   ReportError,
+  OverReportError,
   InvalidTaskTransitionError,
 } from '@/lib/production';
 import { OrderInvariantError, InvalidOrderTransitionError } from '@/lib/order';
 import type {
   BatchScheduleOrdersActionResult,
   BatchTaskMutationResult,
+  ReportTaskFormValues,
+  ReportTaskMutationResult,
   ScheduleOrderResult,
   TaskMutationResult,
 } from './production.types';
@@ -119,7 +122,12 @@ export async function batchScheduleOrdersAction(
   }
 }
 
-function mapTaskError(err: unknown): TaskMutationResult | null {
+// 返回类型刻意收窄到 { status: 'error' }：它实际只会产出这一种，声明成
+// TaskMutationResult 会让下面 reportTaskAction 里的 `{ ...mapped, values }`
+// 推不出正确的联合。四个既有调用点在收紧后都仍然可编译。
+function mapTaskError(
+  err: unknown,
+): { status: 'error'; message: string } | null {
   if (err instanceof ReportError) {
     return { status: 'error', message: err.message };
   }
@@ -211,27 +219,65 @@ export async function reassignProductionTaskAction(
 // Worker submits final counts — IN_PROGRESS → COMPLETED. Accepts
 // FormData since this is a simple three-field form; preprocess in
 // reportTaskSchema handles the string → int coercion.
+// 原样取回一个字段用于回填。截断到 32 字符：这三个框都是数量，正常值远
+// 短于此，超长只可能是被改过的请求，没必要原样吐回页面。
+function reportFormString(formData: FormData, name: string): string {
+  const raw = formData.get(name);
+  return typeof raw === 'string' ? raw.slice(0, 32) : '';
+}
+
 export async function reportTaskAction(
   taskId: string,
-  _prev: TaskMutationResult | null,
+  _prev: ReportTaskMutationResult | null,
   formData: FormData,
-): Promise<TaskMutationResult> {
+): Promise<ReportTaskMutationResult> {
   const actor = await requirePermission('task:report');
+
+  // 回填值在校验之前就取好：任何一条失败路径都要带着它返回，否则零 JS 下
+  // 输入框会被重置回 defaultValue（计划数），而师傅只会以为系统接受了他
+  // 刚才填的数字。
+  const values: ReportTaskFormValues = {
+    completedQty: reportFormString(formData, 'completedQty'),
+    defectQty: reportFormString(formData, 'defectQty'),
+    reworkQty: reportFormString(formData, 'reworkQty'),
+    overReportConfirmed: formData.get('overReportConfirmed') !== null,
+  };
 
   const parsed = reportTaskSchema.safeParse({
     completedQty: formData.get('completedQty'),
     defectQty: formData.get('defectQty'),
     reworkQty: formData.get('reworkQty'),
+    overReportConfirmed: formData.get('overReportConfirmed'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+      values,
+    };
   }
 
   try {
     await reportTask(taskId, parsed.data, actor);
   } catch (err) {
+    // 顺序不能反：OverReportError 继承 ReportError，先走 mapTaskError 会把
+    // 「勾一下就能过」也吞成通用 error，复选框就永远不会出现。
+    // 这两种结局对师傅是完全不同的动作，必须给完全不同的呈现：
+    //   confirmable → 挂在复选框上的字段错误（「请勾选…后再提交」）
+    //   不可确认    → 顶部 role="alert"（「已达 N 倍上限，请核对数量」）
+    if (err instanceof OverReportError && err.confirmable) {
+      return {
+        status: 'invalid',
+        fieldErrors: { overReportConfirmed: [err.message] },
+        values,
+        overReport: {
+          plannedQty: err.plannedQty,
+          totalReported: err.totalReported,
+        },
+      };
+    }
     const mapped = mapTaskError(err);
-    if (mapped) return mapped;
+    if (mapped) return { ...mapped, values };
     throw err;
   }
 

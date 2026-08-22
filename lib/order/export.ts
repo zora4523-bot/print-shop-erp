@@ -628,9 +628,42 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
     '结束时间', '创建时间', '更新时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
+    // 显式 select：只取本表头 yield 的列。别退回 include —— 那会连
+    // searchPinyin / searchPinyinInitials / processingAmount 一起拖回来。
     const rows = await db.order.findMany({
       where: { id: { in: keys.map((key) => key.id) } },
-      include: {
+      select: {
+        id: true,
+        orderNo: true,
+        customName: true,
+        status: true,
+        kind: true,
+        billingMode: true,
+        settlementType: true,
+        reworkCause: true,
+        reworkReason: true,
+        requiresOutsource: true,
+        isUrgent: true,
+        isSfCollect: true,
+        customerRef: true,
+        receiverName: true,
+        receiverPhone: true,
+        receiverAddress: true,
+        expressCode: true,
+        trackingNo: true,
+        totalAmount: true,
+        revision: true,
+        promisedDate: true,
+        packageRequirement: true,
+        remark: true,
+        submitterRole: true,
+        submittedAt: true,
+        scheduledAt: true,
+        completedAt: true,
+        shippedAt: true,
+        finishedAt: true,
+        createdAt: true,
+        updatedAt: true,
         submitter: { select: { displayName: true } },
         createdBy: { select: { displayName: true, role: true } },
         sourceOrder: { select: { orderNo: true } },
@@ -691,9 +724,28 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   const crafts = await db.craft.findMany({ select: { id: true, name: true } });
   const craftNames = new Map(crafts.map((craft) => [craft.id, craft.name]));
   for await (const keys of membershipBatches(membershipPath)) {
+    // pricingSnapshot 是每款一份的报价规则大 JSON，导出一列都不用。
+    // 这里必须是 select 而不是 include，否则 15 万款式会把它整表拉回来。
     const rows = await db.orderItem.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
-      include: {
+      select: {
+        orderId: true,
+        sequence: true,
+        name: true,
+        specification: true,
+        paperType: true,
+        quantity: true,
+        crafts: true,
+        foilColors: true,
+        isDoubleSided: true,
+        isDoubleColor: true,
+        unitPrice: true,
+        fixedFee: true,
+        subtotal: true,
+        suggestedSubtotal: true,
+        priceOverrideReason: true,
+        remark: true,
+        createdAt: true,
         product: { select: { code: true, name: true, category: true } },
       },
       orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
@@ -735,12 +787,27 @@ async function* taskRows(membershipPath: string): AsyncGenerator<XlsxRow> {
     '完成时间', '任务备注',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
+    // salaryRuleSnapshot 是完工时锁定的计件规则大 JSON，导出不用。
+    // worker 只需要 displayName —— 工种列读的是 row.workerType 快照，不是账号当前 role。
     const rows = await db.productionTask.findMany({
       where: { orderItem: { orderId: { in: keys.map((key) => key.id) } } },
-      include: {
+      select: {
+        workerType: true,
+        machineType: true,
+        status: true,
+        plannedQty: true,
+        boardCount: true,
+        pressCount: true,
+        completedQty: true,
+        defectQty: true,
+        reworkQty: true,
+        pieceworkAmount: true,
+        startedAt: true,
+        completedAt: true,
+        remark: true,
         orderItem: { select: { orderId: true, sequence: true, name: true } },
         craft: { select: { name: true } },
-        worker: { select: { displayName: true, role: true } },
+        worker: { select: { displayName: true } },
       },
       orderBy: { id: 'asc' },
     });
@@ -780,6 +847,20 @@ async function* shipmentRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderShipment.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
+      select: {
+        orderId: true,
+        sequence: true,
+        receiverName: true,
+        receiverPhone: true,
+        receiverAddress: true,
+        expressCode: true,
+        trackingNo: true,
+        weightKg: true,
+        status: true,
+        shippedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
     });
     const grouped = groupBy(rows, (row) => row.orderId);
@@ -809,7 +890,8 @@ async function* shipmentLineRows(membershipPath: string): AsyncGenerator<XlsxRow
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderShipmentLine.findMany({
       where: { shipment: { orderId: { in: keys.map((key) => key.id) } } },
-      include: {
+      select: {
+        quantity: true,
         shipment: { select: { orderId: true, sequence: true } },
         orderItem: { select: { sequence: true, name: true } },
       },
@@ -841,7 +923,23 @@ async function* outsourceRows(membershipPath: string): AsyncGenerator<XlsxRow> {
     const [rows, items] = await Promise.all([
       db.outsourceOrder.findMany({
         where: { orderId: { in: orderIds } },
-        include: { createdBy: { select: { displayName: true } } },
+        select: {
+          orderId: true,
+          supplierName: true,
+          supplierContact: true,
+          craftDescription: true,
+          specialRequirement: true,
+          orderItemIds: true,
+          totalQty: true,
+          expectedDate: true,
+          actualDate: true,
+          amount: true,
+          status: true,
+          remark: true,
+          createdAt: true,
+          updatedAt: true,
+          createdBy: { select: { displayName: true } },
+        },
         orderBy: { id: 'asc' },
       }),
       db.orderItem.findMany({
@@ -885,7 +983,19 @@ async function* costRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderCostEntry.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
-      include: { createdBy: { select: { displayName: true } } },
+      select: {
+        orderId: true,
+        category: true,
+        description: true,
+        quantity: true,
+        unit: true,
+        unitPrice: true,
+        amount: true,
+        sourceType: true,
+        remark: true,
+        createdAt: true,
+        createdBy: { select: { displayName: true } },
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     const grouped = groupBy(rows, (row) => row.orderId);
@@ -915,9 +1025,19 @@ async function* changeRequestRows(membershipPath: string): AsyncGenerator<XlsxRo
     '审核意见', '审核时间', '更新时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
+    // beforeSnapshot 里存的是整单 items（每个 item 又各带一份 pricingSnapshot），
+    // proposedChanges 同理。工作表只出审批元数据，两个 JSON 都不能取。
     const rows = await db.orderChangeRequest.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
-      include: {
+      select: {
+        orderId: true,
+        baseRevision: true,
+        status: true,
+        reason: true,
+        reviewRemark: true,
+        reviewedAt: true,
+        createdAt: true,
+        updatedAt: true,
         requester: { select: { displayName: true } },
         reviewedBy: { select: { displayName: true } },
       },
@@ -950,7 +1070,16 @@ async function* logRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderLog.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
-      include: { operator: { select: { displayName: true } } },
+      select: {
+        orderId: true,
+        action: true,
+        // changedFields 是本表唯一真正要用的 JSON —— 白名单过滤在
+        // exportableOrderLogFields 里做，不能顺手删掉。
+        changedFields: true,
+        remark: true,
+        createdAt: true,
+        operator: { select: { displayName: true } },
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     const grouped = groupBy(rows, (row) => row.orderId);
@@ -996,7 +1125,11 @@ async function* designRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.orderItemDesign.findMany({
       where: { orderItem: { orderId: { in: keys.map((key) => key.id) } } },
-      include: {
+      select: {
+        fileType: true,
+        fileName: true,
+        fileSize: true,
+        uploadedAt: true,
         orderItem: { select: { orderId: true, sequence: true, name: true } },
       },
       orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
@@ -1026,7 +1159,10 @@ async function* billRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const rows = await db.billItem.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
-      include: {
+      select: {
+        orderId: true,
+        orderAmount: true,
+        createdAt: true,
         bill: {
           select: {
             period: true,

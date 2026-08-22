@@ -6,7 +6,7 @@ const {
   computeDailyMock,
   settleReadyCsMock,
   getOverdueOutsourcingMock,
-  getDueOrdersMock,
+  scanOverdueOrdersMock,
   getEndingPeriodsMock,
   dbMock,
   dispatchMock,
@@ -16,7 +16,7 @@ const {
   computeDailyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOverdueOutsourcingMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  getDueOrdersMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  scanOverdueOrdersMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getEndingPeriodsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   dbMock: {
     user: { findMany: vi.fn() },
@@ -48,7 +48,10 @@ vi.mock('@/lib/salary/cs', () => ({
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
   getOverdueOutsourcing: getOverdueOutsourcingMock,
   getEndingPeriods: getEndingPeriodsMock,
-  getDueOrders: getDueOrdersMock,
+}));
+vi.mock('@/lib/order/overdue-scan', () => ({
+  ORDER_OVERDUE_NOTIFY_CAP: 200,
+  scanOverdueOrders: scanOverdueOrdersMock,
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
@@ -67,7 +70,7 @@ beforeEach(() => {
   computeDailyMock.mockReset();
   settleReadyCsMock.mockReset();
   getOverdueOutsourcingMock.mockReset();
-  getDueOrdersMock.mockReset();
+  scanOverdueOrdersMock.mockReset();
   getEndingPeriodsMock.mockReset();
   dbMock.user.findMany.mockReset();
   dispatchMock.mockReset();
@@ -473,6 +476,10 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
         dedupeKey: expect.stringMatching(
           /^notification:CS_PERIOD_ENDING:\d{4}-\d{2}-\d{2}:p1$/,
         ),
+        // 批量扇出按循环下标摊开 availableAt，压在企业微信 20 条/分钟
+        // 之下（lib/background-jobs/notification.ts FANOUT_SPACING_MS）。
+        // 第一条是 0，不会被推迟。
+        spreadIndex: 0,
       },
     );
   });
@@ -497,29 +504,37 @@ describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
 // ─── /api/cron/order-overdue (ORDER_OVERDUE，业主 2026-07-07 新增) ───
 
 describe('POST /api/cron/order-overdue → ORDER_OVERDUE', () => {
-  const dueRow = (over: Record<string, unknown> = {}) => ({
+  // 「due-soon 不进群」现在由 SQL 边界保证，断言在
+  // lib/order/__tests__/overdue-scan.test.ts（where.promisedDate.lt =
+  // 今日上海日界）。这里只管：拿到多少推多少、payload 映射、截断透传。
+  const overdueRow = (over: Record<string, unknown> = {}) => ({
     id: 'o1',
     orderNo: '20260701-0001',
     customerRef: '苹果福',
     status: 'IN_PRODUCTION',
-    isUrgent: false,
     promisedDate: new Date('2026-07-04T00:00:00Z'),
-    daysLeft: -3,
+    daysOverdue: 3,
     ...over,
   });
 
-  it('只推送 daysLeft < 0 的逾期单；due-soon（>=0）不进群', async () => {
-    getDueOrdersMock.mockResolvedValue([
-      dueRow(),
-      dueRow({ id: 'o2', orderNo: '20260701-0002', daysLeft: 0 }),
-      dueRow({ id: 'o3', orderNo: '20260701-0003', daysLeft: 2 }),
-    ]);
+  it('扫描结果逐条推送（不再在 JS 里过滤）', async () => {
+    scanOverdueOrdersMock.mockResolvedValue({
+      rows: [
+        overdueRow(),
+        overdueRow({ id: 'o2', orderNo: '20260701-0002', daysOverdue: 1 }),
+      ],
+      truncated: false,
+    });
     const res = await orderOverduePost(
       authedReq('http://x/api/cron/order-overdue'),
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: 'ok', overdueCount: 1 });
-    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toEqual({
+      status: 'ok',
+      overdueCount: 2,
+      truncated: false,
+    });
+    expect(dispatchMock).toHaveBeenCalledTimes(2);
     const [event, payload] = dispatchMock.mock.calls[0]!;
     expect(event).toBe('ORDER_OVERDUE');
     const p = payload as Record<string, unknown>;
@@ -530,8 +545,34 @@ describe('POST /api/cron/order-overdue → ORDER_OVERDUE', () => {
     expect(p.promisedDate).toMatch(/2026\/07\/04/);
   });
 
+  it('撞到 fan-out 上限：已取回的仍然推，响应带 truncated，日志不含工单号', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    scanOverdueOrdersMock.mockResolvedValue({
+      rows: [overdueRow()],
+      truncated: true,
+    });
+    const res = await orderOverduePost(
+      authedReq('http://x/api/cron/order-overdue'),
+    );
+    expect(await res.json()).toEqual({
+      status: 'ok',
+      overdueCount: 1,
+      truncated: true,
+    });
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toContain(
+      '20260701-0001',
+    );
+    expect(JSON.stringify(errorSpy.mock.calls[0])).not.toContain('苹果福');
+    errorSpy.mockRestore();
+  });
+
   it('customerRef null → 映射为「未填」（模板必填占位符不留 raw）', async () => {
-    getDueOrdersMock.mockResolvedValue([dueRow({ customerRef: null })]);
+    scanOverdueOrdersMock.mockResolvedValue({
+      rows: [overdueRow({ customerRef: null })],
+      truncated: false,
+    });
     await orderOverduePost(authedReq('http://x/api/cron/order-overdue'));
     const p = dispatchMock.mock.calls[0]![1] as Record<string, unknown>;
     expect(p.customerRef).toBe('未填');
@@ -548,7 +589,7 @@ describe('POST /api/cron/order-overdue → ORDER_OVERDUE', () => {
     ).toBe(401);
     expect(dispatchMock).not.toHaveBeenCalled();
 
-    getDueOrdersMock.mockRejectedValue(new Error('db down: secret detail'));
+    scanOverdueOrdersMock.mockRejectedValue(new Error('db down: secret detail'));
     const res = await orderOverduePost(
       authedReq('http://x/api/cron/order-overdue'),
     );
