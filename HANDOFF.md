@@ -8,98 +8,95 @@
 
 ## 当前任务
 
-**2026-08-21：上线前对抗审查 + 修复（第二批）**。
+**2026-08-22：发布源连续性收口 —— 两个 PR 已合并，`main` 成为发布候选。**
 
-本次没有做新功能。做法是：先对四条候选高风险修复做**对抗性审查**（每条方案由另一方逐锚点实读代码找破绽），再对全部 blocking / major 破绽逐条定稿，然后只实施定稿后的版本。四条方案**没有一条能照原样实施**——全部 blocking 破绽经实读代码核对均属实。定稿报告在会话 scratchpad，其结论已分别落进 `DECISIONS.md` 2026-08-21 的 6 条新条目和 `docs/上线前置操作清单.md`。
+本次没有改任何业务代码。做的是把上一批（2026-08-21 上线前对抗审查）的成果归档进 Git，并解决长期挂着的"发布分支领先 main 且无 remote"问题。
 
-### 已落地的修复
+### 已完成
 
-| # | 内容 | 是否改 schema |
-|---|---|---|
-| 1 | **单条报工数量守卫**：合计 `>=` 计划数 × N 硬拒（N 进 `Setting`，默认 3、范围 1–10）；超计划但未达上限由师傅勾选确认并留痕；**计件仍按实际合计数全额付**；配套老板看板「超计划报工」表作为知情通道 | 否 |
-| 2 | **工单完工闸口收紧为款式级外协覆盖**：每个含外协工艺的款式都要被至少一张本工单未取消的外协单覆盖；新增共用谓词 `outsourceCoverageApplies` 让闸口与详情页横幅口径一致 | 否 |
-| 3 | **盘点并发守卫改用逐行账面回声 CAS**（原「时间戳基线」方案整体否决）+ 部分过账 + 事务外预检 | 否 |
-| 4 | **通知投递失败可重试并进死信**，幂等靠 `NotificationLog.deliveryKey`；瞬时失败写 `RETRYING`；`/api/health/jobs` 拆出通知类死信告警码 | **是**（2 个 migration） |
+| 事项 | 结果 |
+|---|---|
+| 首次配置 Git remote | `https://github.com/zora4523-bot/print-shop-erp.git`（**私有**） |
+| 推送前的敏感数据核查 | `.env` 从未进过任何 commit（`.gitignore:37` 覆盖 `.env*`）；`.env.example` 全是占位符；全历史无 xlsx/csv 真实数据；无硬编码 AK/token |
+| PR #1 | 17 项修复按主题拆 10 个 commit → `fix/launch-review` → `codex/complex-client-data-layer-poc`，已合并（`9a0825e`） |
+| PR #2 | 发布分支快进合入 `main`（104 commit / 795 文件），已合并（`dd648c0`） |
+| 合并后门禁 | 在 `main` 上实跑：lint 0 / typecheck 0 / **206 文件 2758 项单测** / Prisma validate 全绿 |
 
-migration 由 75 项增至 **77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
+### 现在的 Git 事实（取代此前多处"无 remote"的记述）
 
-### 明确**不做**的，以及原因
+- `main` = `dd648c0`，**就是发布候选**，77 项 migration，尾项 `20260821120100_notification_log_delivery_key_unique`。
+- **`aa42ba0`（生产当前运行的版本）已是 `main` 的祖先**，可从 `main` 重建。此前 HANDOFF 记的"没有可依赖的远端恢复路径""不能从 `main@245be5c` 发版"两条**均已失效**，`deploy/update.sh` 的默认 `git pull` 路径恢复可用。
+- ⚠️ **SSH 在开发机上不通**：`git@github.com` 解析到 `198.18.1.8`（保留段地址，像是 VPN 分流或本地 DNS 劫持），推送直接 `Connection closed`。remote 已改用 **HTTPS**，凭据走 `gh` 的 token（`gh auth setup-git` 配的 `osxkeychain`）。**不要把 remote 改回 SSH**，除非先确认 VPN 分流规则已修。
 
-- **fix#4「临时 key + 服务端 copy」（OSS 直传重放加固）本批不做**。业主决定保持现有缓解（STS session policy 收窄到单 objectKey + 15 分钟过期）。**这是已知接受的风险，不是「已修复」**：15 分钟窗口内浏览器仍可覆写自己刚登记的对象。它的前置动作全在阿里云控制台且顺序不能反，不适合和其它修复挤同一个发布窗口。**将来实施时有两个必踩陷阱已写进 DECISIONS**（ali-oss 的 `copyObject` 对 headers 只加前缀不删原键 → 裸 `If-Match` 让 copy 恒 412；etag 缺失被当成成功 → 写出悬空指针），别再踩一遍。
-- **fix#3b（逐行 `snapshotAt` + ledger scan）本批不做**，已拆出单独设计评审。它只多解决一件事：盘点的「净额为零的往返」。代码注释里已写「别把这条当 bug 顺手改回时间戳基线」。
-- **CLAUDE.md 未改**（配置文件，留给业主落笔）。有两处值得业主同步：§4.5 关于 `reportTasks` 的措辞已漂移（见 DECISIONS 2026-08-21 对应条目）；§15.7 或 §5.3 值得补一句「`Setting` 现在有 4 个键，`report_qty_max_multiple` 是唯一 money-adjacent 的那个，但 `resolveSetting` 的『校验不过退回 fallback』对它仍然安全」——这一条已写进 `lib/settings/definitions.ts` 的 doc 注释和 `definitions.test.ts`，只是 CLAUDE.md 里还没有。
-- **`tests/e2e` 门禁本次未加**：并发多 agent 改同一仓库时 e2e 结果不可信，且 CLAUDE.md §14 禁止给它加 `--workers`。
+### 仍未变的关键事实
 
-### 发布候选基线（不变，供对照）
+**生产未动。** <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。本次只是 Git 归档，**没有部署**。`main` 上的 77 项是发布候选口径，不是生产事实——部署意味着一次性应用 **32 个迁移**。
 
-- 生产 <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。本仓库的 77 项是**本地发布候选口径**，不是生产事实。
-- 发布候选的业务范围（对客加工费自动报价、身份结算隔离、外部销售版本化价目簿与收费工作台、供应商应付账本、改单审批重报价、快递/耗材费、产品价格阶梯合并编辑、工单列表/筛选/导出）已由 2026-08-18 的提交固化但**尚未部署**；逐项内容见 `PROGRESS.md` 的分日期小节。
-- 发布分支 `codex/complex-client-data-layer-poc` 领先 `main@245be5c`，且仓库**无 Git remote**；`aa42ba0` 尚不能通过默认 `git pull` 或从 `main` 重建。
+---
 
 ## 下一步具体指令（给下次 AI）
 
-**先做的（本批收尾）**
+**部署前必须先做（顺序不能反）**
 
-1. **补一次完整门禁**。本批和上一批都是多 agent 并发改同一仓库，全量结果当时无意义。合并前必须跑：
-   ```bash
-   pnpm lint && pnpm typecheck && pnpm test run
-   pnpm vitest run --coverage        # lib/**/status-machine.ts 与算钱纯函数的 100% 门禁
-   pnpm test:admin-ui && pnpm test:worker-ui
-   ```
-2. **把 `docs/上线前置操作清单.md` §一的两段只读 SQL 交业主跑**。查询 1 的存量缺口**补完之前不要上外协闸口那一步**（fix#2b）。查询 2 是「横幅会误报」而不是「会被卡住」，**必须单独成表报**，别和查询 1 混在一起。
-3. **补 fix#2b 的人工验收**（单测覆盖不到的唯一真验证）：两个款式、只给其中一个建外协单并收货 → 报完全部内部任务后工单仍停 `IN_PRODUCTION`，主管点「已回货」时看到 notice。
-4. **补 fix#1 的知情通道验收**：计划 5000 报 6200 → 出现「确认超出计划数」复选框 → 勾选提交成功 → 工单时间线出现「超计划报工」→ **老板看板「超计划报工」表里能看到这一条**。守卫与看板是一个决策的两半，看板没验就等于守卫没上。
-5. **补 fix#3a 的人工验收**：两个浏览器窗口，A 录入实盘数不提交，B 对同库位做一次领料改动，A 提交 → 该行被点名退回、其余行正常过账。
-6. **迁移后验收唯一索引**：`SELECT indisvalid FROM pg_index WHERE indexrelid = '"NotificationLog_deliveryKey_channelId_key"'::regclass;` 必须为 `t`（理由见 `docs/上线前置操作清单.md` §二）。
+1. **跑 `docs/上线前置操作清单.md` §一的"底数核对" + 查询 1**（只读，可反复跑）。
+   ⚠️ **查询 1 返回 0 行有两种完全不同的含义**：真的没缺口，或谓词根本没匹配到任何东西。2026-08-21 在开发库上实测就是后者（6 个外协工艺、1 张有效外协单，但"应外协款式数 = 0"），那次执行**只证明了 SQL 语法可用，没有证明判定逻辑对**。先看底数核对的三个数字再解读查询 1。
+2. **查询 2 单独成表报**——它是"横幅会误报"而不是"会被卡住"，混在一起报会让业主误判。
+3. **外协那条要拆两步部署**：`f512046` 这一个 commit 里读路径横幅和完工闸口都在，**部署时需手动拆**。先上横幅让主管照着补完存量缺口，确认查询 1 返回空之后再上闸口。顺序反了 = 部署当天一批在产工单突然完不了工。
+4. **盘点页低峰期发布**：部署瞬间浏览器里开着旧版盘点页的操作员，提交会因缺 `bookQuantity` 被判 invalid（fail-closed，刻意设计），刷新即可——**但已录入未提交的数据会丢**（`counts` 是纯 `useState`）。建议先口头通知盘点岗。
+5. **迁移后验收唯一索引**：`SELECT indisvalid FROM pg_index WHERE indexrelid = '"NotificationLog_deliveryKey_channelId_key"'::regclass;` 必须为 `t`。`20260821120100` 用了 `CREATE INDEX CONCURRENTLY`，不能包在事务里跑（`prisma migrate deploy` 会正确处理）。
 
-**接着做的（已排期、需业主或单独评审）**
+**部署前的人工验收（单测覆盖不到的）**
 
-7. **fix#3b：盘点的逐行时间基线 + ledger scan**（单独设计评审）。只解决「净额为零的往返」。要做就必须做**逐行**基线：`counts` 的 entry 加 `snapshotAt`、提交时逐行下发、服务端一条 `groupBy` 走 `(materialId, locationId, createdAt)` 复合索引、`InventoryCount.snapshotAt` 存 `min(item.snapshotAt)`、成功后服务端回 `postedAt` 让客户端设 `baselineFloor`。**不要**重新引入整页共用的基线时刻，也不要引入 `inventory_count_snapshot_max_age_hours` 这类墙上时钟阈值——那正是被否的四条理由的来源。需要 1 个 migration（可空列 + 复合索引，additive）。
-8. **fix#4：OSS 临时 key + 服务端 copy**。**前置动作必须先于代码上线**：RAM 子账号加 `upload-tmp/*` 的 `GetObject`+`DeleteObject`、加 `design/*` 的 `PutObject`、bucket 给 `upload-tmp/` 挂生命周期规则。清单在 `docs/上线前置操作清单.md` §六。`design/` 前缀**永远不能挂生命周期规则**。
-9. **通知重试的已知缺口**：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，那一轮写下的 `NotificationLog(RETRYING)` 行永远翻不成 `FAILED`，而 `countRecentFailures` 只数 `FAILED` —— 这条**真正丢掉**的推送会在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法：在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`。本次没做只是因为该文件当时正被并发 agent 做数据库时钟重构。
-10. **三处无界查询（backlog，本批未动）**——都是 `findMany` 无 `take`，行数随时间线性增长：
-    - `lib/salary/daily.ts:593 listDailyWorkerSalaries`（`/owner/salary/daily`，按日期/师傅/是否发放筛选，不筛就是全表）
-    - `lib/salary/hourly-aggregate.ts:549 listHourlyPayrolls`（`/owner/salary/hourly`，同上）
-    - `lib/worker-portal.ts:222 listWorkerSalaries`（师傅端 H5，`@@unique([workerId, date])` → 三年约 900 行，一次渲染 900 张卡片并逐张做 Decimal 运算）
-    **`listWorkerSalaries` 不能照抄 `listWorkerOrders` 的分页补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 从整个数组 reduce 出「累计工资 / 尚未发放」，直接分页会把这两个金额静默变成「本页合计」——给师傅看错工资总额比慢更糟。正确修法是行分页 + 用 `db.dailyWorkerSalary.aggregate` 单独算 total / unpaid。（`listWorkerHourlyPayrolls` 已核实**不需要**分页：每人每月最多一行，十年 120 行，结构有界。）
+6. **fix#2b 外协闸口**：两个款式、只给其中一个建外协单并收货 → 报完全部内部任务后工单仍停 `IN_PRODUCTION`，主管点「已回货」时看到 notice。
+7. **fix#1 报工守卫的知情通道**：计划 5000 报 6200 → 出现「确认超出计划数」复选框 → 勾选提交成功 → 工单时间线出现「超计划报工」→ **老板看板「超计划报工」表里能看到这一条**。守卫与看板是一个决策的两半，看板没验就等于守卫没上。
+   （守卫本身已在真实应用上以零 JS 路径端到端验过：计划 1000 时 1500 需确认且输入值回填、3000 恰好等于 3 倍上限被硬拒、10000 被硬拒、1500+确认通过并写入 remark 与 `TASK_OVER_REPORT` 日志。验证用的开发库数据已还原。）
+8. **fix#3a 盘点 CAS**：两个浏览器窗口，A 录入实盘数不提交，B 对同库位做一次领料改动，A 提交 → 该行被点名退回、其余行正常过账。
+9. **业务侧重点验收**：外部销售加工费 / 快递耗材价目、改价审批、真实 OSS 图片 PDF、企业微信推送、cron、批量报工、分次结款、多地址与售后重做。
 
-**发布相关（沿用上一轮结论，未变）**
+**已排期、需业主或单独评审**
 
-11. 发布候选已固化但尚未部署；不要把提交内的 77 项 migration 误记为生产事实。发布前先核对生产仍运行 `aa42ba0`、45 / 45 migrations、ready 200，并单独获得发布授权。迁移开始后继续只允许前向修复。
-12. 先解决发布源连续性：确认是否把 `codex/complex-client-data-layer-poc` 合并进 `main`，并配置受控远端保存 `aa42ba0` 及后续提交。完成前不得按旧部署指南直接 `git pull`，也不得从 `main@245be5c` 发版。
-13. 补齐运维缺口：Pigsty 异地 repo2、30 天保留、恢复演练；生产 `SENTRY_DSN / APP_VERSION`；应用机至少 4 GiB RAM；`deploy-smoke` 继承 PM2 的系统 Chromium 路径与 `--no-sandbox`。
-14. 重点人工验收（业务侧）：外部销售加工费 / 快递耗材价目、改价审批、真实 OSS 图片 PDF、企业微信推送、cron、批量报工、分次结款、多地址与售后重做。
+10. **fix#3b：盘点的逐行时间基线 + ledger scan**（单独设计评审）。只解决「净额为零的往返」。要做就必须做**逐行**基线：`counts` 的 entry 加 `snapshotAt`、提交时逐行下发、服务端一条 `groupBy` 走 `(materialId, locationId, createdAt)` 复合索引、`InventoryCount.snapshotAt` 存 `min(item.snapshotAt)`、成功后服务端回 `postedAt` 让客户端设 `baselineFloor`。**不要**重新引入整页共用的基线时刻，也不要引入 `inventory_count_snapshot_max_age_hours` 这类墙上时钟阈值——那正是被否的四条理由的来源。需要 1 个 migration（可空列 + 复合索引，additive）。
+11. **fix#4：OSS 临时 key + 服务端 copy**。**前置动作必须先于代码上线**：RAM 子账号加 `upload-tmp/*` 的 `GetObject`+`DeleteObject`、加 `design/*` 的 `PutObject`、bucket 给 `upload-tmp/` 挂生命周期规则。清单在 `docs/上线前置操作清单.md`。`design/` 前缀**永远不能挂生命周期规则**（它是业务数据）。实施时两个必踩陷阱已写进 DECISIONS 2026-08-21：`ali-oss` 的 `copyObject` 对 headers 只加前缀不删原键 → 裸 `If-Match` 让 copy 恒 412 而所有单测都 mock 了 SDK、CI 会一路全绿；`etag` 缺失被当成成功 → 写出悬空指针。
+12. **通知重试的已知缺口**：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，那一轮写下的 `NotificationLog(RETRYING)` 行永远翻不成 `FAILED`，而 `countRecentFailures` 只数 `FAILED` —— 这条**真正丢掉**的推送会在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法：在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`。
+13. **三处无界查询（backlog）**——都是 `findMany` 无 `take`，行数随时间线性增长：
+    - `lib/salary/daily.ts:593 listDailyWorkerSalaries`（`/owner/salary/daily`，不筛就是全表）
+    - `lib/salary/hourly-aggregate.ts:549 listHourlyPayrolls`（同上）
+    - `lib/worker-portal.ts:222 listWorkerSalaries`（师傅端 H5，三年约 900 行）
+    **`listWorkerSalaries` 不能照抄 `listWorkerOrders` 的分页补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 从整个数组 reduce 出「累计工资 / 尚未发放」，直接分页会把这两个金额静默变成「本页合计」——给师傅看错工资总额比慢更糟。正确修法是行分页 + `db.dailyWorkerSalary.aggregate` 单独算 total / unpaid。（`listWorkerHourlyPayrolls` 已核实**不需要**分页：每人每月最多一行。）
+14. **运维缺口**：Pigsty 异地 repo2、30 天保留、恢复演练；生产 `SENTRY_DSN / APP_VERSION`；应用机至少 4 GiB RAM；`deploy-smoke` 继承 PM2 的系统 Chromium 路径与 `--no-sandbox`。
+15. **`/api/health/jobs` 尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信响应目标不生效。
+
+---
 
 ## 卡住的问题
 
-### 本批新增的待业主拍板项
+### 待业主拍板（本批新增，代码已按默认口径落地）
 
 - **盘点「部分过账」语义需业主点头**：一次提交现在可能只过账一部分行，`InventoryCount` 单据上只有被接受的那些，冲突行原样退回要求重数。原设计是一行冲突整单驳回（99 行合格数据陪葬且无 override）。风险评估为低（盘点行本来就是逐 (物料, 库位) 独立的），但要确认。
-- **盘点页部署瞬间的 fail-closed 需要排期配合**：浏览器里开着旧版盘点页的操作员，提交会因缺 `bookQuantity` 被判 invalid（提示「缺少账面数快照，请刷新页面后重新盘点」）。刷新即可，**但已录入的数据会丢**（`counts` 是纯 `useState`）。建议低峰期发布或先口头通知盘点岗。
 - **师傅超报要多一次提交往返**（零 JS 下是整页 POST + 重渲染），弱网车间会感知到延迟。这是拍板方案的固有成本，上线前跟业主对一次预期。
 - **首页「24 小时推送失败」告警条的计数语义变了**：瞬时抖动不再点红，重试成功会把历史 `FAILED` 行就地翻成 `SUCCESS`。上线前告知业主，别让人以为数据丢了。
 - **`ProductionTask.remark` 的写入格式从此是对外契约**：`[超计划报工] YYYY-MM-DD 计划 N / 合计 M（合格 a / 不良 b / 返工 c），报工人 <id>，已勾选确认`，多次写入 `\n` 追加；老板看板「明细」列原样渲染它。
 
-### 上一批带出、仍未拍板的 6 组
+### **CLAUDE.md 待业主落笔**（配置文件，AI 不改）
 
-（代码已按各条注明的默认口径落地，改口径只动一处，详见 DECISIONS 2026-08-21）
+- **§4.5 措辞已漂移**：`reportTasks` 实际是「逐任务 advisory 锁 + 读 + 逐条 update」，比文档描述的 `updateMany({ where: { status } })` **更稳**，但 §4.5 与 DECISIONS 2026-08-19 的措辞都还停在旧写法。（`beginTasks` 仍符合原描述，不要改错。）
+- **§15.7 或 §5.3 值得补一句**：`Setting` 现在有 4 个键，`report_qty_max_multiple` 是唯一 money-adjacent 的那个（守着会算出计件金额那条路径），但 `resolveSetting` 的「校验不过退回 fallback」对它仍然安全——它不参与金额计算、只是一个上界，退回 3 只会更严。这一条已写进 `lib/settings/definitions.ts` 的 doc 注释和 `definitions.test.ts`，只是 CLAUDE.md 里还没有。
+
+### 上一批带出、仍未拍板
 
 - **薪资「当天 / 当月」重算的残余风险**：现只拒绝**严格未来**（日薪 `date > 今天`、月结 `month > 本月`）。(1) 当天日薪——上午 10 点点一次全员重算，当天还没报工的师傅会被写出一条只有 `dailyBase` 的正式行，能被标记已发，晚上真报工后重算又被 paid guard 挡住，只能人工撤销。(2) 月中月结更肉疼——COOK 的 `monthlyBasePay` 是整月 flat、不按天折算，月中重算厨师立刻拿满一整月 `COOK_MONTHLY`。选项 A（现状）/ B（月结改成只允许已结束的月份，方案作者推荐）/ C（连当天也拒）。任一选择都只动谓词里一个比较符 + 一条测试断言。
 - **交期预警口径**：(1) 未提交的草稿单 `DRAFT` 该不该继续留在 `PROMISE_ALERT_STATUSES`？摘掉的影响不止看板——工单详情页 `PromisedDateBadge` 用同一份清单，草稿单详情页会同时不再显示「已逾期」红标。(2) 逾期超过多少天后停止预警/推送？要设就按 `outsource_overdue_days` 的样子加 `Setting`（建议 key `order_overdue_alert_max_days`），不硬编码。
 - **师傅端「我的工单」**：是否接受不再急单置顶（待办队列仍在 `/worker/tasks`，那里保持急单分组）；每页 20 条（`WORKER_ORDER_PAGE_SIZE`）对手机端是否合适。
 - **登录限流配套**：厂区 NAT 出口 IP 是否加 `geo` 白名单；429 是否配 `error_page` 友好提示；应用层账号级失败锁定是否另立项（现状完全没有）。
 - **6 处冗余 `router.refresh()`**：已确认「`revalidatePath` 不刷 client RSC 缓存」是错误认知。选 A（清代码 + 订正注释）/ B（只订正注释，当前做法）/ C（照抄 refresh）。
-- **CLAUDE.md §4.5 的措辞同步**：`reportTasks` 已改成「逐任务 advisory 锁 + 读 + 逐条 update」，比文档描述的更稳，但 §4.5 与 DECISIONS 2026-08-19 的措辞都还停在 `updateMany({ where: { status } })`（`beginTasks` 仍符合原描述，不要改错）。
 
-### 长期未决（沿用）
+### 长期未决
 
 - 默认本地开发库 `print_shop_erp` 尚不能直接跑本发布候选：前向 migration `20260807180000_order_pricing_and_settlement` 的财务护栏识别到已全额结清账单 `cmsbmplo40008850rahu58pb4`（已付 ¥3000、2 笔付款）混入非外部销售项目，拒绝自动改写。失败 migration 已按 Prisma 标准流程标为 rolled back，未删除或修正业务行。必须先由业务负责人决定该历史账单归属，再显式修复，不能绕过护栏或猜测重分账。
 - 生产 pgBackRest 只有 repo1 且仅保留 2 份 full；即时备份和 WAL 正常，但两 repo / 30 天 / 月度恢复演练目标未达成。
-- 发布分支领先 `main` 且无 Git remote；在合并/远端策略确认前，生产源码没有可依赖的远端恢复路径，`deploy/update.sh` 的默认 `git pull` 不可直接使用。
 - 生产尚未配置 `SENTRY_DSN`，`APP_VERSION` 需核对；当前错误主要依赖 PM2 / Next 日志。
 - `deploy-smoke` 尚未自动继承 PM2 的系统 Chromium 路径与 root sandbox 参数，直接按旧文档运行会假失败。
 - 应用机仅 1.6 GiB RAM，构建严重依赖 swap。
-- `/api/health/jobs` 已就绪但**尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信响应目标不生效。
 - 新增三款 A4 视觉基线已生成；既有 7 张打印基线未重写。`pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
 - A07（推送按人路由）/ A20（生产单拆分）业务输入，以及 A21 供应商合同自动定价的工艺、单位、阶梯、最低收费与有效期口径。
 - 后台任务账本尚无自动保留清理策略。**注意**：将来给 `NotificationLog` 加保留期时，必须排除「所属 `BackgroundJob` 仍在 `PENDING`/`RUNNING`」的行——`deliveryKey` 行是幂等凭证，删早了会让重试对已收到消息的群重复推送。
@@ -160,3 +157,4 @@ migration 由 75 项增至 **77 项**，尾项 `20260821120100_notification_log_
 - 2026-08-18：将工单筛选/导出、计价结算、工资与外协账本、外部销售加工/物流价目、收费工作台、价格阶梯编辑、74 项 migration、测试和记录文档统一固化为提交 `feat: complete pricing, settlement, and order operations`。183 文件 / 2441 单测、typecheck、lint、Prisma、build、diff-check 与零 JS 会话门禁 3 / 3 全绿；本条只表示 Git 归档完成，生产仍为 `aa42ba0 / 45 migrations`。
 - 2026-08-21：并行缺陷修复批次（11 项）：cron 密钥不再进 curl argv + 恒定时间比较、登录限流改挂 `location = /login` 并按方法豁免 GET、新增 `/api/health/jobs` 死信探针（`/ready` 状态码语义不变）、日薪/月结拒绝严格未来日期、`/owner/salary` 未发聚合下推数据库（+1 项 CONCURRENTLY 索引 migration，累计 75 项）、交期看板与逾期推送各自收窄并加 200 条 fan-out 安全阀、师傅端「我的工单」改 `createdAt desc` 分页、9 个详情页 `generateMetadata` 查真实业务编号（含四页越权标题泄漏修复）、`lib/order/export.ts` 全量显式 `select`、background-jobs 时间戳锚到数据库时钟、`OrderForm` 必填语义与 `AttendanceRecordDialog` 保存回执的无障碍修复。文档由单一 agent 统一同步：README、`docs/部署指南.md`、`docs/deployment-smoke-checklist.md`、`docs/production-slo-and-recovery.md`，DECISIONS 追加 12 条。**CLAUDE.md 未改**（配置文件，留给业主）。
 - 2026-08-21：上线前对抗审查 + 修复。四条候选高风险修复经对抗性审查后**没有一条能照原样实施**，全部 blocking 破绽实读代码核对属实；定稿后落地四项：单条报工数量守卫（判据 `>=`、`Setting` 默认 3、配套老板看板「超计划报工」知情通道）、工单完工闸口收紧为款式级外协覆盖（残留粒度缺口显式接受）、盘点并发守卫改用逐行账面回声 CAS + 部分过账（时间戳基线方案整体否决）、通知投递失败可重试并进死信（`NotificationLog.deliveryKey` 幂等，+2 项 migration，累计 77 项）。OSS 直传重放加固与盘点 ledger scan 明确本批不做并写明理由与陷阱。新增 `docs/上线前置操作清单.md`（外协覆盖的两段部署前只读 SQL、唯一索引 `indisvalid` 验收、单向门与人工验证），DECISIONS 追加 6 条。**CLAUDE.md 未改**（留给业主）。
+- 2026-08-22：发布源连续性收口。仓库首次配置 Git remote（`https://github.com/zora4523-bot/print-shop-erp.git`，私有）；`main`、`codex/complex-client-data-layer-poc`、`fix/launch-review` 三个分支推送完成。上线前审查的 17 项修复按主题拆成 10 个 commit 经 PR #1 合入发布分支，随后 PR #2 将发布分支快进合入 `main`（`245be5c → dd648c0`，104 commit / 795 文件）。合并后在 `main` 上复跑门禁：lint 0 / typecheck 0 / 206 文件 2758 项单测 / Prisma validate 全绿。**生产仍为 `aa42ba0` / 45 migrations，本次只是 Git 归档，未部署。**

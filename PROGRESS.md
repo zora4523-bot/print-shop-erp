@@ -237,7 +237,10 @@
 以下全部**需业主拍板**后才能推进：
 
 1. **发布候选部署评审**：本次发布候选已提交固化；部署仍需业主单独授权，并执行生产备份、历史数据预检、migration 与恢复门禁。发布前另需过一遍 `docs/上线前置操作清单.md`。
-2. **发布源连续性**：确认把 `codex/complex-client-data-layer-poc@aa42ba0` 合并进哪个长期分支并配置受控 Git remote；当前 `main@245be5c` 是旧版，不能用于下一次生产发布。
+2. ~~**发布源连续性**~~ —— **2026-08-22 已完成**：仓库配置了私有 remote
+   `https://github.com/zora4523-bot/print-shop-erp.git`；发布分支经 PR #2 快进合入 `main`
+   （`245be5c → dd648c0`）。生产的 `aa42ba0` 已是 `main` 的祖先，可从 `main` 重建。
+   （开发机 SSH 被本地网络劫持，remote 用 HTTPS，见 `docs/部署指南.md` §3。）
 3. **生产运维收尾**：补 Pigsty 异地 `repo2`、30 天保留和恢复演练；配置 `SENTRY_DSN / APP_VERSION`；把应用机升级到至少 4 GiB RAM；完成真实 OSS 图片 PDF、企业微信和 cron 入队的人工验收。
 4. **A07 推送按人路由**（P2）— 需确认客服/师傅是否有私有 webhook
 5. **A20 生产单拆分**（P1）— 需确认生产单粒度与发料时机
