@@ -40,6 +40,16 @@ import {
 import { backgroundJobErrorCode, retryDelayMs } from '../policy';
 import type { ClaimedBackgroundJob } from '../types';
 
+/** 数据库现在是时钟：所有非 claim 路径都靠这行 `SELECT now()` 决定时间。 */
+const DB_NOW = new Date('2026-07-17T08:00:00.000Z');
+
+/**
+ * 抓出一条 SQL 里所有「往时间戳列写值」的赋值。RHS 取到行尾而不是逗号，
+ * 因为 `"startedAt" = COALESCE(job."startedAt", now())` 自己带逗号。
+ */
+const TIMESTAMP_ASSIGNMENT =
+  /"(finishedAt|updatedAt|lockedAt|heartbeatAt|startedAt)"\s*=\s*([^\n]+)/g;
+
 beforeEach(() => {
   for (const group of [
     dbMock.backgroundJob,
@@ -52,7 +62,7 @@ beforeEach(() => {
   dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
   dbMock.orderExport.updateMany.mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
-  dbMock.$queryRaw.mockReset().mockResolvedValue([]);
+  dbMock.$queryRaw.mockReset().mockResolvedValue([{ now: DB_NOW }]);
   dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
     callback(dbMock),
   );
@@ -159,6 +169,8 @@ describe('claim and lease lifecycle', () => {
   };
 
   it('claims through the transaction and opens an attempt log', async () => {
+    // claimedAt 现在由语句自己的 now() 从 RETURNING 带回，所以这一行 mock
+    // 就是本用例的时钟。
     dbMock.$queryRaw.mockResolvedValue([
       {
         id: claimed.id,
@@ -168,6 +180,7 @@ describe('claim and lease lifecycle', () => {
         payload: claimed.payload,
         attempts: claimed.attempts,
         maxAttempts: claimed.maxAttempts,
+        claimedAt: claimed.claimedAt,
       },
     ]);
     dbMock.backgroundJobAttempt.create.mockResolvedValue({});
@@ -177,7 +190,6 @@ describe('claim and lease lifecycle', () => {
         queue: BackgroundJobQueue.LIGHT,
         workerId: 'worker-1',
         leaseMs: 300_000,
-        now: claimed.claimedAt,
       }),
     ).resolves.toEqual(claimed);
 
@@ -216,12 +228,99 @@ describe('claim and lease lifecycle', () => {
     });
   });
 
+  it('anchors every lease decision on the database clock', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        id: claimed.id,
+        type: claimed.type,
+        queue: claimed.queue,
+        dedupeKey: claimed.dedupeKey,
+        payload: claimed.payload,
+        attempts: claimed.attempts,
+        maxAttempts: claimed.maxAttempts,
+        claimedAt: claimed.claimedAt,
+      },
+    ]);
+    dbMock.backgroundJobAttempt.create.mockResolvedValue({});
+
+    await claimNextBackgroundJob({
+      queue: BackgroundJobQueue.LIGHT,
+      workerId: 'worker-1',
+      leaseMs: 300_000,
+    });
+
+    const statements = [
+      ...dbMock.$executeRaw.mock.calls,
+      ...dbMock.$queryRaw.mock.calls,
+    ];
+    expect(statements).toHaveLength(5);
+
+    for (const [strings, ...values] of statements) {
+      const sql = (strings as TemplateStringsArray).join('?');
+      // 整条 claim 事务里没有一个 JS 瞬间被绑进去。谁把 new Date() 塞回租约
+      // 路径，谁就在这里变红 —— 这就是本缺陷的回归门。
+      expect(
+        values.some((value) => value instanceof Date),
+        `a JS Date was bound into: ${sql}`,
+      ).toBe(false);
+      // 而每一个真正被写下的时间戳都由数据库自己产生（清空成 NULL 除外）。
+      for (const match of sql.matchAll(TIMESTAMP_ASSIGNMENT)) {
+        const assignment = `"${match[1]}" = ${match[2]!.trim().replace(/,$/, '')}`;
+        expect(
+          assignment.endsWith('NULL') || assignment.includes('now()'),
+          `timestamp not written by the database: ${assignment}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('parameterizes the lease window and keeps the row lock hand-off intact', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+
+    await expect(
+      claimNextBackgroundJob({
+        queue: BackgroundJobQueue.LIGHT,
+        workerId: 'worker-1',
+        leaseMs: 300_000,
+      }),
+    ).resolves.toBeNull();
+
+    const [strings, ...values] = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = (strings as TemplateStringsArray).join('?');
+    // 并发安全靠这一行，改租约时钟不该顺手把它弄丢。
+    expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(sql).toContain('"availableAt" <= now()');
+    // claimedAt 与 lockedAt 是同一个 now()，所以 durationMs 两端同源。
+    expect(sql).toContain('now() AS "claimedAt"');
+
+    const leaseCutoff = values.find(
+      (value): value is Prisma.Sql => value instanceof Prisma.Sql,
+    );
+    expect(leaseCutoff?.sql).toContain("interval '1 millisecond'");
+    // leaseMs 是绑定参数，不是拼进 SQL 的字符串。
+    expect(leaseCutoff?.values).toEqual([300_000]);
+  });
+
   it('heartbeat rejects when the worker no longer owns the lease', async () => {
-    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 0 });
+    dbMock.$executeRaw.mockResolvedValue(0);
 
     await expect(heartbeatBackgroundJob(claimed)).rejects.toBeInstanceOf(
       BackgroundJobLeaseLostError,
     );
+  });
+
+  it('heartbeat stamps the database clock, never the worker process clock', async () => {
+    dbMock.$executeRaw.mockResolvedValue(1);
+
+    await expect(heartbeatBackgroundJob(claimed)).resolves.toBeUndefined();
+
+    const [strings, ...values] = dbMock.$executeRaw.mock.calls[0]!;
+    const sql = (strings as TemplateStringsArray).join('?');
+    expect(sql).toContain('"heartbeatAt" = clock_timestamp()');
+    // 租约守卫必须原封不动地留在 WHERE 里。
+    expect(sql).toContain('"status" = \'RUNNING\'::"BackgroundJobStatus"');
+    expect(values).toEqual([claimed.id, claimed.workerId, claimed.attempts]);
+    expect(values.some((value) => value instanceof Date)).toBe(false);
   });
 
   it('completes the owned job and its attempt atomically', async () => {
@@ -255,6 +354,35 @@ describe('claim and lease lifecycle', () => {
     });
   });
 
+  it('takes the completion instant from the database when none is injected', async () => {
+    const started = {
+      ...claimed,
+      claimedAt: new Date('2026-07-17T07:59:58.500Z'),
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await completeBackgroundJob(started, { delivered: true });
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.SUCCEEDED,
+          finishedAt: DB_NOW,
+        }),
+      }),
+    );
+    expect(dbMock.backgroundJobAttempt.update).toHaveBeenCalledWith({
+      where: { jobId_attempt: { jobId: started.id, attempt: 1 } },
+      data: {
+        status: 'SUCCEEDED',
+        finishedAt: DB_NOW,
+        // claimedAt 也来自库时钟，所以这个差值才是真实耗时而不是时钟偏差。
+        durationMs: 1_500,
+      },
+    });
+  });
+
   it('returns a retryable failure to PENDING with bounded backoff', async () => {
     const retryable = { ...claimed, attempts: 2 };
     const failedAt = new Date('2026-07-17T08:00:01Z');
@@ -276,6 +404,51 @@ describe('claim and lease lifecycle', () => {
         }),
       }),
     );
+  });
+
+  it('anchors retry backoff on the database clock when none is injected', async () => {
+    const retryable = { ...claimed, attempts: 2 };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      retryable,
+      Object.assign(new Error('private'), { name: 'TemporaryError' }),
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.PENDING,
+          // 退避锚在库时钟上：claim 稍后拿 `availableAt <= now()` 比较，
+          // 用 worker 自己的钟做锚点等于让偏差决定重试早晚。
+          availableAt: new Date(DB_NOW.getTime() + 60_000),
+        }),
+      }),
+    );
+  });
+
+  it('re-arms a dead job at the database instant', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION',
+      attempts: 5,
+      maxAttempts: 5,
+    });
+    dbMock.backgroundJob.update.mockResolvedValue({});
+
+    await expect(retryDeadBackgroundJob(claimed.id)).resolves.toBe(true);
+
+    expect(dbMock.backgroundJob.update).toHaveBeenCalledWith({
+      where: { id: claimed.id },
+      data: {
+        status: BackgroundJobStatus.PENDING,
+        maxAttempts: 8,
+        availableAt: DB_NOW,
+        finishedAt: null,
+        lastErrorCode: null,
+      },
+    });
   });
 });
 

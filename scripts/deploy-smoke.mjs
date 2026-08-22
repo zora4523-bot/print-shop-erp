@@ -122,6 +122,18 @@ async function checkRoutes() {
     }
   }
 
+  // 队列探针是发布时的「看一眼」项，不是门禁：死信多半是上一版留下的
+  // 历史事实，让它 fail 会把昨天失败的月结任务变成今天不能发布。
+  const jobsProbe = await request('/api/health/jobs');
+  if (jobsProbe.status === 200) {
+    info('/api/health/jobs ok');
+  } else {
+    const jobsBody = await jobsProbe.text();
+    info(
+      `WARNING: /api/health/jobs returned ${jobsProbe.status}; 队列需要人工处理: ${jobsBody}`,
+    );
+  }
+
   const protectedRoute = await request('/owner/pigsty');
   const location = protectedRoute.headers.get('location') ?? '';
   if (
