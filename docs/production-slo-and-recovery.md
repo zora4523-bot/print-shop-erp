@@ -11,13 +11,15 @@
 | 数据库 RTO | ≤ 60 分钟 | 每月在隔离环境做完整恢复演练并记录耗时 |
 | 轻任务开始延迟 | 95% < 1 分钟 | 任务账本 `createdAt` 到 `startedAt` |
 | 重任务开始延迟 | 95% < 15 分钟 | `/owner/background-jobs` 与 ready 端点 |
-| 死信响应 | 工作时间 30 分钟内 | Sentry + ready 端点 `deadLast24h` 告警 |
+| 死信响应（**非通知类**） | 工作时间 30 分钟内 | 外部监控每 1 分钟请求 `/api/health/jobs`，非 200 即告警（连续 2 次失败再通知）；告警码 `dead-jobs-last-24h` |
+| 通知投递失败响应 | 工作时间 30 分钟内 | **不看 `/api/health/jobs` 的状态码**（通知类死信只让它 200 `degraded`）。采样点是 `/owner/notifications` 的 `NotificationLog(status=FAILED)` 与 `/owner` 首页的 24 小时推送失败告警条 |
 
 ## 当前生产偏差（2026-08-02）
 
 - <https://bag.sshapi.cn> 已运行 `aa42ba0`，45 / 45 migrations，Web、LIGHT、HEAVY 与 ready 正常。
 - pgBackRest full `20260802-193420F` 和连续 WAL 正常，但仅有 repo1、full retention 为 2；因此“两 repo + 30 天”仍未达标，默认备份门禁应失败。
-- `SENTRY_DSN` 尚未配置，当前只能依赖 PM2/Next 日志和 ready；“Sentry + ready”死信响应目标尚未完整生效。
+- `SENTRY_DSN` 尚未配置，当前只能依赖 PM2/Next 日志和 ready。
+- `/api/health/jobs` 已在应用侧就绪（2026-08-21），但**尚未接进任何外部监控**；在有东西按分钟去拉它之前，上表的死信响应目标不生效——代码只是把信号暴露出来了，不会自己告警。
 - 应用机为 1.6 GiB RAM + 4 GiB swap，自动使用低内存 PM2 档；生产构建曾因换页耗时约 10.9 分钟。至少 4 GiB RAM 仍是整改目标。
 - PDF 固定使用 `/usr/bin/chromium`，已实测生成 37,646 字节中文 PDF；真实 OSS 设计图打印仍需人工验收。
 
@@ -52,7 +54,9 @@ pnpm check:backup
 ## 监控与告警
 
 - `/api/health/live`：只判断 Node 进程存活，不用于业务就绪。
-- `/api/health/ready`：验证 DB、LIGHT/HEAVY worker 心跳、积压、死信与超时 RUNNING 任务。
+- `/api/health/ready`：判断「能不能接流量」——DB 连通 + LIGHT/HEAVY worker 心跳。死信、卡死 RUNNING、积压只出现在 `warnings` 与 `jobs` 计数里，**不影响状态码**：`deploy/update.sh` 用它判定发布成败，非 200 会让三个进程保持停止，历史死信不该有这种杀伤力。
+- `/api/health/jobs`：队列告警专用。**非通知类**死信、超时 RUNNING、worker 心跳缺失或版本不一致 → 503；会自愈的积压、以及**通知类死信**（`deadNotificationLast24h` / 告警码 `dead-notification-jobs-last-24h`）→ 200 `degraded`。这是**非通知类**死信 30 分钟响应目标的采样点。通知类之所以降级不 503（2026-08-21）：通知死信是**批量**的（一次企业微信扇出可以一口气产生几十条），且真正需要人处置的信息是「哪个群、哪个事件、什么错误码」——那在 `/owner/notifications` 上，不在探针的计数里；让它 503 只会把发布人和值班人训练成忽略这个端点。**「连续 2 次失败再通知」的去抖要放在监控侧**：HEAVY 队列并发固定 1、`runLane` 只在 claim 时扫租约，唯一 lane 跑长任务期间一条崩溃遗留的 RUNNING 会持续计入 `staleRunning`，探针会稳定 503 一段时间——不要为此把代码里的阈值调松。它是匿名端点（跟随 `proxy.ts` 对 `api/health` 的整体排除），只回计数与告警码，不回 worker 明细、任务 id、类型或错误信息。
+- `scripts/deploy-smoke.mjs` 也会拉一次 `/api/health/jobs`，但**非致命**——只打 WARNING 给发布人看，不作为发布门禁（历史死信多半是上一版留下的事实，不该拦住这一版发布）。
 - Sentry：目标是 Web 未捕获错误和 worker 错误都上报，以 `APP_VERSION` 区分发布；当前生产尚未配置，不能把该告警链视为已启用。
 - PM2：≥3 GiB 主机使用 Web 768 / LIGHT 384 / HEAVY 1280 MiB restart 上限；<3 GiB 主机自动使用 Web 512 / LIGHT 384 / HEAVY 640 MiB 低内存档（V8 heap 分别 384 / 256 / 448 MiB）。HEAVY 并发固定为 1，低内存档是带 swap 的临时方案。
 - PostgreSQL：用 Pigsty 自带监控 + `pg_stat_statements`，不在应用主机重复搭建 Prometheus/Grafana/ELK。

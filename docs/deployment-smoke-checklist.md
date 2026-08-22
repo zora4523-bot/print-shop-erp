@@ -3,6 +3,10 @@
 Use this checklist before deployment. The local smoke script does not require
 production secrets and does not run production database operations.
 
+> 本清单只覆盖**每次发布都要跑**的自动化自检。当前发布批次另有一次性的部署前排查、
+> 单向门与人工验证，见 `docs/上线前置操作清单.md`（外协覆盖的两段只读 SQL、
+> `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 验收等）。
+
 ## One Local Command Sequence
 
 Terminal 1:
@@ -136,6 +140,13 @@ Before production rollout:
 
 Cron endpoints are protected by `Authorization: Bearer $CRON_SECRET`.
 
+Never pass a real secret with `-H "Authorization: Bearer $CRON_SECRET"`: the
+expanded plaintext lands in the process argv and in shell history, so any local
+user can read it with `ps -efww | grep Bearer`. Feed the header from stdin with
+`--header @-` (curl >= 7.55) instead — that is what `deploy/run-cron.sh` does.
+The literal `Bearer invalid` below is a deliberate negative test and carries no
+secret, so it stays on the command line.
+
 Preflight checks:
 
 ```bash
@@ -151,12 +162,21 @@ Expected:
 - `503` when `CRON_SECRET` is missing.
 - Never `200` for an invalid token.
 
+Since 2026-08-21 two endpoints have one extra rejection: `daily-salary` returns
+`400 { "error": "future date: <date>" }` when `body.date` is strictly after
+today in Shanghai, and `hourly-payroll` returns
+`400 { "error": "future month: <month>" }` when `body.month` is strictly after
+the current Shanghai month. The scheduled calls carry no body and settle
+yesterday / last month, so they never hit this branch; only a manual re-run with
+an explicit body can. All other response shapes (`202`, `200`, `401`, `500`,
+`503`) are unchanged.
+
 After deployment, trigger the daily export-retention job once and confirm the
 returned job reaches `SUCCEEDED` on `/owner/background-jobs`:
 
 ```bash
-curl -i -X POST "$APP_PUBLIC_URL/api/cron/order-export-cleanup" \
-  -H "Authorization: Bearer $CRON_SECRET"
+printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+  curl -i -X POST --header @- "$APP_PUBLIC_URL/api/cron/order-export-cleanup"
 ```
 
 The HTTP response is `202 queued`; the eventual result contains counts only.

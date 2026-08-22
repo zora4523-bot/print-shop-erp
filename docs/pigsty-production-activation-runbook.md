@@ -355,6 +355,22 @@ ORDER BY jobname;
 Keep the `manual_curl` values from the readiness view as the break-glass
 fallback if cron is temporarily disabled.
 
+> **Rewrite the header before you paste it into a shell.** `manual_curl` is a
+> display string built inside `app_ops.cron_http_job_readiness` and still reads
+> `-H "Authorization: Bearer $CRON_SECRET"`. That is harmless where it lives —
+> pg_cron calls the endpoint through `net.http_post`, never through a shell — but
+> running it verbatim on a host puts the expanded secret into the process argv and
+> into shell history, where `ps -efww | grep Bearer` can read it. Feed the header
+> from stdin instead (curl >= 7.55):
+>
+> ```bash
+> printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
+>   curl -X POST --header @- -H "Content-Type: application/json" \
+>     -d '<request_body from the view>' "$ERP_BASE_URL<endpoint_path>"
+> ```
+>
+> See DECISIONS 2026-08-21 "cron 密钥不进 curl 的命令行参数".
+
 ## Rollback
 
 ### Cron Jobs
