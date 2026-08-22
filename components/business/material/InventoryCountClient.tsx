@@ -12,30 +12,29 @@ import { RefreshCw, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { MutationResult } from '@/lib/admin/action-helpers';
+import type { InventoryCountMutationResult } from '@/actions/owner-inventory.types';
 import type { InventoryCountMaterialRow } from '@/lib/inventory-count';
+import {
+  buildSubmittedItems,
+  countKey,
+  parseCountValue,
+  sameBookQuantity,
+  type CountEntry,
+} from '@/lib/inventory-count-entries';
 import { MATERIAL_CATEGORY_LABELS } from '@/lib/material-labels';
 
 type ApiResponse = { materials: InventoryCountMaterialRow[] };
 
 type Props = {
   action: (
-    prev: MutationResult | null,
+    prev: InventoryCountMutationResult | null,
     formData: FormData,
-  ) => Promise<MutationResult>;
+  ) => Promise<InventoryCountMutationResult>;
   initialIdempotencyKey: string;
 };
 
 function decimal(value: string | null): string {
   return value === null || value === '' ? '-' : value;
-}
-
-function parseDecimal(value: string): number | null {
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
-  if (!/^\d{1,10}(\.\d{0,2})?$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
@@ -47,7 +46,12 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [rows, setRows] = useState<InventoryCountMaterialRow[]>([]);
-  const [counts, setCounts] = useState<Record<string, string>>({});
+  // 值是 { value, book }：book 在**首次录入这一格**时钉住当时显示的账面数，
+  // 后续搜索/刷新换掉 rows 也不会覆盖它。提交时回传的就是操作员当时看到的数，
+  // 服务端据此做 CAS。详见 lib/inventory-count-entries.ts。
+  const [counts, setCounts] = useState<Record<string, CountEntry>>({});
+  // 服务端点名「账面数已变动、没给你过账」的行，等操作员重新录入就消掉。
+  const [staleKeys, setStaleKeys] = useState<string[]>([]);
   const [remark, setRemark] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const [error, setError] = useState<string | null>(null);
@@ -77,12 +81,32 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   }, [fetchRows]);
 
   const submitCount = useCallback(
-    async (prev: MutationResult | null, formData: FormData) => {
+    async (prev: InventoryCountMutationResult | null, formData: FormData) => {
       const result = await action(prev, formData);
       if (result.status === 'success') {
+        // 部分过账时 staleKeys 非空：没冲突的行已经入库，被点名的行连同它们
+        // 钉住的旧账面数一起作废，操作员必须对着新账面数重数一遍。所以这里
+        // 一律整体清空，而不是「保留冲突行的数字、悄悄换个新 book 再提交」
+        // ——后者等于把守卫刚拦下的那次提交原样放行。
         setIdempotencyKey(window.crypto.randomUUID());
         setCounts({});
         setRemark('');
+        setStaleKeys(result.staleKeys ?? []);
+        fetchRows(submittedQuery);
+        return result;
+      }
+      if (result.status === 'error' && result.staleKeys?.length) {
+        // 全量失效：一行都没过账。清掉被点名行的录入（它们的 book 已经过期），
+        // 其余录入原样保留。
+        // 幂等键刻意不换：这是一次被明确拒绝、已整体回滚的提交，换键只会在
+        // 「其实成功了但响应丢了」的情况下多开一张盘点单。
+        const stale = new Set(result.staleKeys);
+        setCounts((current) => {
+          const next = { ...current };
+          for (const key of stale) delete next[key];
+          return next;
+        });
+        setStaleKeys(result.staleKeys);
         fetchRows(submittedQuery);
       }
       return result;
@@ -90,24 +114,12 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
     [action, fetchRows, submittedQuery],
   );
   const [state, formAction, actionPending] = useActionState<
-    MutationResult | null,
+    InventoryCountMutationResult | null,
     FormData
   >(submitCount, null);
 
   const submittedItems = useMemo(
-    () =>
-      rows.flatMap((row) =>
-        row.locations.flatMap((location) => {
-          const counted = parseDecimal(counts[`${row.id}:${location.locationId}`] ?? '');
-          return counted === null
-            ? []
-            : [{
-                materialId: row.id,
-                locationId: location.locationId,
-                countedQuantity: counted.toFixed(2),
-              }];
-        }),
-      ),
+    () => buildSubmittedItems(rows, counts),
     [counts, rows],
   );
 
@@ -117,8 +129,8 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
     let shortage = 0;
     for (const row of rows) {
       for (const location of row.locations) {
-        const counted = parseDecimal(
-          counts[`${row.id}:${location.locationId}`] ?? '',
+        const counted = parseCountValue(
+          counts[countKey(row.id, location.locationId)]?.value ?? '',
         );
         if (counted === null) continue;
         const diff = counted - Number(location.currentStock);
@@ -135,9 +147,16 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
     };
   }, [counts, rows]);
 
-  const actionErrors = state?.status === 'invalid' ? state.fieldErrors : {};
+  // 扁平取第一条：逐行的 bookQuantity 错误落在 fieldErrors.items 上，但顶层
+  // 字段（idempotencyKey / remark）出问题时只看 items 会让提示整条消失、页面
+  // 看起来像什么都没发生。
+  const firstFieldError =
+    state?.status === 'invalid'
+      ? (Object.values(state.fieldErrors).flat()[0] ?? null)
+      : null;
   const actionError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success' ? state.message : null;
+  const staleKeySet = useMemo(() => new Set(staleKeys), [staleKeys]);
 
   return (
     <section className="space-y-4">
@@ -218,12 +237,18 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                     ];
                   }
                   return row.locations.map((location, index) => {
-                    const key = `${row.id}:${location.locationId}`;
-                    const countedRaw = counts[key] ?? '';
-                    const counted = parseDecimal(countedRaw);
+                    const key = countKey(row.id, location.locationId);
+                    const entry = counts[key];
+                    const countedRaw = entry?.value ?? '';
+                    const counted = parseCountValue(countedRaw);
                     const diff = counted === null
                       ? null
                       : counted - Number(location.currentStock);
+                    // 录入之后账面数又被别人动过：这一行提交上去必被拒，先在
+                    // 页面上就说清楚，别让操作员点了提交才知道。
+                    const bookDrifted =
+                      entry !== undefined &&
+                      !sameBookQuantity(entry.book, location.currentStock);
                     return (
                       <tr key={key} className="border-b last:border-0">
                         {index === 0 ? <MaterialCells row={row} rowSpan={row.locations.length} /> : null}
@@ -235,20 +260,51 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                         </td>
                         <td className="px-4 py-3 text-right align-top font-sans tabular-nums text-xs">
                           {decimal(location.currentStock)} {row.unit}
+                          {bookDrifted ? (
+                            <div className="text-warning-foreground">
+                              录入时 {entry.book}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-right align-top">
                           <Input
                             inputMode="decimal"
                             value={countedRaw}
-                            onChange={(event) => setCounts((current) => ({
-                              ...current,
-                              [key]: event.target.value,
-                            }))}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setCounts((current) => {
+                                if (value.trim() === '') {
+                                  // 清空 = 这一行当没录入过，连同钉住的账面数一起
+                                  // 丢掉；下次再录入会重新钉当时显示的值。
+                                  const next = { ...current };
+                                  delete next[key];
+                                  return next;
+                                }
+                                return {
+                                  ...current,
+                                  [key]: {
+                                    value,
+                                    // 首次录入即钉住当时显示的账面数，之后不再覆盖
+                                    book: current[key]?.book ?? location.currentStock,
+                                  },
+                                };
+                              });
+                              setStaleKeys((current) =>
+                                current.includes(key)
+                                  ? current.filter((item) => item !== key)
+                                  : current,
+                              );
+                            }}
                             className="ml-auto w-28 text-right font-sans tabular-nums text-xs"
                             aria-label={row.locations.length === 1
                               ? `${row.name} 实盘数`
                               : `${row.name} ${location.warehouseName}/${location.locationName} 实盘数`}
                           />
+                          {staleKeySet.has(key) ? (
+                            <div className="mt-1 text-xs text-warning-foreground">
+                              账面数已变动，未过账，请重数
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-right align-top">
                           {diff === null ? (
@@ -286,11 +342,15 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               {actionPending ? '过账中…' : `提交盘点过账（${submittedItems.length} 条）`}
             </Button>
           </div>
-          {actionErrors.items?.[0] ? <p className="mt-2 text-sm text-destructive">{actionErrors.items[0]}</p> : null}
-          {actionError ? <p className="mt-2 text-sm text-destructive">{actionError}</p> : null}
-          {success ? <p className="mt-2 text-sm text-success-foreground">✓ {success}</p> : null}
+          {firstFieldError ? <p role="alert" className="mt-2 text-sm text-destructive">{firstFieldError}</p> : null}
+          {actionError ? <p role="alert" className="mt-2 text-sm text-destructive">{actionError}</p> : null}
+          {success ? <p role="status" className="mt-2 text-sm text-success-foreground">✓ {success}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">
             未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            提交时会带上你录入那一刻看到的账面数。如果这之后有人动过某个库位的库存，
+            那一行不会被过账，会点名要求重数，其余行照常过账。
           </p>
         </div>
       </form>

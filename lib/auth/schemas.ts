@@ -1134,6 +1134,17 @@ export type CreateStockTransferInput = z.infer<
   typeof createStockTransferSchema
 >;
 
+// 盘点回传的「账面回声」：录入这一格时页面上显示的账面数。
+// 单独定义而不是复用 warehouseQuantityField，是为了给**缺字段**一条中文消息——
+// getFormString 缺键返回 undefined、JSON 里少这个键也是 undefined，zod v4 会走
+// invalid_type 分支，.regex() 的自定义消息根本不触发，默认文案是英文的
+// "Invalid input: expected string, received undefined"。
+// 库位余额恒非负（写入口有 lt(0) 兜底），所以正则和 warehouseQuantityField 同款。
+const inventoryBookQuantityField = z
+  .string({ error: '缺少账面数快照，请刷新页面后重新盘点' })
+  .trim()
+  .regex(/^\d{1,10}(\.\d{1,2})?$/, '账面数快照格式非法，请刷新页面后重新盘点');
+
 export const postInventoryCountSchema = z.object({
   idempotencyKey: z.string().uuid('盘点请求标识格式非法'),
   remark: productTextFieldOptional('备注', 500),
@@ -1142,6 +1153,10 @@ export const postInventoryCountSchema = z.object({
       z.object({
         materialId: warehouseEntityIdField('物料'),
         locationId: warehouseEntityIdField('库位'),
+        // 必填而不是可选：漏传必须当场失败，让操作员刷新页面重新盘点，而不是
+        // 静默退回「提交那一刻才读账面数」的旧行为。部署窗口里还开着旧页面的
+        // 浏览器会命中这一条——这是刻意的 fail closed。
+        bookQuantity: inventoryBookQuantityField,
         countedQuantity: warehouseQuantityField,
       }),
     )
@@ -2120,11 +2135,22 @@ const taskCountField = (label: string) =>
       .max(10_000_000, `${label}超出合理范围`),
   );
 
+// 注意这里**只做字段形状校验**。「合计不得达到 plannedQty 的 N 倍」的守卫在
+// lib/production.ts 的 reportTask() 里，不在这个 schema 里，原因有两条，都不是
+// 风格问题：
+//   1. Zod 是同步纯校验。plannedQty 在库里、倍数上限在 Setting 表里，两个都要
+//      await，schema 拿不到。
+//   2. plannedQty 必须和最终写入在同一个事务、同一把 taskLockKey advisory lock
+//      内读，才能和写入取到同一个一致性快照。这只有 lib 层做得到。
+// overReportConfirmed 用 optionalFormBoolean（不是 formBoolean）：undefined 保持
+// undefined，让 ReportTaskInput 对既有的三字段直调调用点保持可编译，语义上
+// undefined ≡ 未确认，守卫只认显式 true。
 export const reportTaskSchema = z
   .object({
     completedQty: taskCountField('合格数'),
     defectQty: taskCountField('不良数'),
     reworkQty: taskCountField('返工数'),
+    overReportConfirmed: optionalFormBoolean,
   })
   .refine(
     (v) => v.completedQty + v.defectQty + v.reworkQty > 0,
