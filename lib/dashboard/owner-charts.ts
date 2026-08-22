@@ -50,7 +50,7 @@ export async function getProductionTrend(
   );
   const endExclusive = new Date(todayStart.getTime() + MS_PER_DAY);
 
-  // PG `AT TIME ZONE` 语义陷阱（Codex round 100 high）：`completedAt`
+  // PG `AT TIME ZONE` 语义陷阱：`completedAt`
   // 列是 `timestamp without time zone`，Prisma 把 UTC 瞬时写进去。对
   // naked timestamp 跑 `AT TIME ZONE 'Asia/Shanghai'` 会被 PG 解读
   // 成"把这个本地 Shanghai 时间转回 UTC"——方向反了。必须先 `AT TIME
@@ -124,11 +124,11 @@ export async function getSalesRanking(
       // （工艺免费试做 / 退单冲账等场景），但放进&ldquo;销售排行&rdquo;里只会
       // 噪音，让&ldquo;Top 10&rdquo;失去信号。同时也兜住 dev DB 脏数据 / E2E
       // fixture 的 0 元 SUBMITTED 工单不污染排行视觉。
-      totalAmount: { gt: 0 },
+      processingAmount: { gt: 0 },
     },
-    _sum: { totalAmount: true },
+    _sum: { processingAmount: true },
     _count: { _all: true },
-    orderBy: { _sum: { totalAmount: 'desc' } },
+    orderBy: { _sum: { processingAmount: 'desc' } },
     take: 10,
   });
 
@@ -144,7 +144,7 @@ export async function getSalesRanking(
   return grouped.flatMap((g) => {
     const u = byId.get(g.submitterId);
     if (!u) return [];
-    const sum = g._sum.totalAmount;
+    const sum = g._sum.processingAmount;
     // groupBy 后 sum 极少为 0（已经在 where 里过滤），但 _sum 可能在
     // 极端 NULL 行下回 null —— 兜底排掉，避免一行 ¥0.00 上榜。
     const sumDec = new Decimal((sum ?? 0) as unknown as Decimal.Value);
@@ -204,8 +204,7 @@ export async function getCategoryDistribution(
     ORDER BY order_count DESC, category ASC
   `;
   // Secondary `category ASC` keeps pie slice / legend order stable
-  // when multiple categories have the same count (Codex round 100
-  // medium). Without it PG chooses arbitrary tie-break order →
+  // when multiple categories have the same count. Without it PG chooses arbitrary tie-break order →
   // visual baseline drifts + UI flickers across refreshes.
 
   return rows.map((r) => ({

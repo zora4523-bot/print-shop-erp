@@ -1,4 +1,4 @@
-import { SalaryRuleType } from '../../generated/prisma/enums';
+import { MachineType, SalaryRuleType } from '../../generated/prisma/enums';
 import { db } from '../db';
 import type { MachineSalaryRule } from './machine-piecework';
 import type { CsTiersConfig } from './cs-commission';
@@ -14,14 +14,78 @@ import type { CsTiersConfig } from './cs-commission';
 
 export type MachineRuleWithBase = MachineSalaryRule & { dailyBase: string | number };
 
-export async function getActiveMachineRule(
+// 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
+// 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。直接复用
+// Prisma delegate 的函数类型，避免用 unknown 重写参数后破坏函数参数逆变兼容性。
+export type SalaryRuleClient = {
+  salaryRule: Pick<typeof db.salaryRule, 'findFirst'>;
+};
+
+export type SalaryRuleSnapshotLockClient = {
+  $executeRaw: (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+};
+
+const SALARY_RULE_SNAPSHOT_LOCK_KEY =
+  'print-shop-erp:salary-rules:snapshot';
+
+export function salaryRuleLockKey(
+  ruleType: SalaryRuleType,
+  ruleKey: string,
+): string {
+  return `print-shop-erp:salary-rule:${ruleType}:${ruleKey}`;
+}
+
+// Finance calculations read several independently versioned rows. A shared
+// advisory lock lets payroll readers run concurrently while excluding the
+// admin writer, so one immutable snapshot cannot mix rows from before and
+// after the same rule edit under PostgreSQL READ COMMITTED.
+export async function acquireSalaryRuleSnapshotReadLock(
+  client: SalaryRuleSnapshotLockClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
+}
+
+export async function acquireSalaryRuleSnapshotWriteLock(
+  client: SalaryRuleSnapshotLockClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
+}
+
+export type MachineRuleClient = SalaryRuleClient & {
+  workerMachineSalaryRule: Pick<
+    typeof db.workerMachineSalaryRule,
+    'findFirst'
+  >;
+};
+
+// Shared by personal-rule writes and every finance-of-record read. Taking the
+// same transaction-scoped advisory lock guarantees a report/daily snapshot
+// sees either the complete old version or the complete new version.
+export function machineRuleLockKey(
+  workerId: string,
   machineType: string,
-  now: Date = new Date(),
-): Promise<MachineRuleWithBase | null> {
-  const rule = await db.salaryRule.findFirst({
+): string {
+  return `print-shop-erp:piecework-rule:${workerId}:${machineType}`;
+}
+
+// 版本化规则"当前生效"查询的**唯一实现**（此前同形 findFirst 复制
+// 6 处：machine/cs/hourly/cook + cs.ts 的 tx 版）。语义：effectiveFrom
+// <= now 中最新一条，且 effectiveTo 为 null 或 > now。
+// ruleValue 是 Prisma Json——形状由 seed / owner 规则编辑器在写入侧
+// 保证，读侧信任断言为 T。
+export async function getActiveRuleValue<T>(
+  ruleType: SalaryRuleType,
+  ruleKey: string,
+  now: Date,
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
+): Promise<T | null> {
+  const rule = await client.salaryRule.findFirst({
     where: {
-      ruleType: SalaryRuleType.WORKER_MACHINE,
-      ruleKey: machineType,
+      ruleType,
+      ruleKey,
       effectiveFrom: { lte: now },
       OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
     },
@@ -29,11 +93,36 @@ export async function getActiveMachineRule(
     select: { ruleValue: true },
   });
   if (!rule) return null;
-  // ruleValue is Json in Prisma; the seed shape is
-  // { dailyBase, pieceRate, boardRate, smallOrderThreshold,
-  //   smallOrderFlatPrice, multiplierFactors }.
-  // We trust the seed / owner-side rule editor to validate on write.
-  return rule.ruleValue as unknown as MachineRuleWithBase;
+  return rule.ruleValue as unknown as T;
+}
+
+export async function getActiveMachineRule(
+  machineType: string,
+  now: Date = new Date(),
+  workerId?: string,
+  client: MachineRuleClient = db as unknown as MachineRuleClient,
+): Promise<MachineRuleWithBase | null> {
+  if (workerId) {
+    const workerRule = await client.workerMachineSalaryRule.findFirst({
+      where: {
+        workerId,
+        machineType: machineType as MachineType,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      orderBy: { effectiveFrom: 'desc' },
+      select: { ruleValue: true },
+    });
+    if (workerRule) {
+      return workerRule.ruleValue as unknown as MachineRuleWithBase;
+    }
+  }
+  return getActiveRuleValue<MachineRuleWithBase>(
+    SalaryRuleType.WORKER_MACHINE,
+    machineType,
+    now,
+    client,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -54,18 +143,7 @@ async function getActiveCsRule<T>(
   ruleKey: string,
   now: Date,
 ): Promise<T | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.CS_COMMISSION,
-      ruleKey,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  return rule.ruleValue as unknown as T;
+  return getActiveRuleValue<T>(SalaryRuleType.CS_COMMISSION, ruleKey, now);
 }
 
 export async function getActiveCsMonthlyBase(
@@ -108,60 +186,63 @@ export async function getActiveCsTiers(
 async function getActiveHourlyRule<T>(
   ruleKey: string,
   now: Date,
+  client: SalaryRuleClient,
 ): Promise<T | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.WORKER_HOURLY,
-      ruleKey,
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  return rule.ruleValue as unknown as T;
+  return getActiveRuleValue<T>(
+    SalaryRuleType.WORKER_HOURLY,
+    ruleKey,
+    now,
+    client,
+  );
 }
 
 export async function getActivePackerHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'PACKER_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
 
 export async function getActiveCleanerHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'CLEANER_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
 
 // COOK 空闲时间打包按 PACKER 时薪的独立规则（SPEC §5.4 "spare_pay =
 // attendance.spareHours * packer_rule.hourlyRate"）。单独一条规则
-// key 让老板可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
+// key 让管理员可以把"厨师打包兼职时薪"和主 PACKER_HOURLY 解耦调整。
 export async function getActiveCookSpareHourlyRate(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ hourlyRate: number }>(
     'COOK_SPARE_HOURLY',
     now,
+    client,
   );
   return v?.hourlyRate ?? null;
 }
 
 export async function getActiveOtMultiplier(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
   const v = await getActiveHourlyRule<{ multiplier: number }>(
     'OT_MULTIPLIER',
     now,
+    client,
   );
   return v?.multiplier ?? null;
 }
@@ -178,25 +259,21 @@ export type WorkHoursConfig = {
 // 快速填 hint；严格要求从 SalaryRule 读（注意事项 5），不得硬编码。
 export async function getActiveWorkHours(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<WorkHoursConfig | null> {
-  return getActiveHourlyRule<WorkHoursConfig>('WORK_HOURS', now);
+  return getActiveHourlyRule<WorkHoursConfig>('WORK_HOURS', now, client);
 }
 
 // COOK_SALARY / COOK_MONTHLY — separate ruleType from WORKER_HOURLY.
 export async function getActiveCookMonthlyBase(
   now: Date = new Date(),
+  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
 ): Promise<number | null> {
-  const rule = await db.salaryRule.findFirst({
-    where: {
-      ruleType: SalaryRuleType.COOK_SALARY,
-      ruleKey: 'COOK_MONTHLY',
-      effectiveFrom: { lte: now },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-    },
-    orderBy: { effectiveFrom: 'desc' },
-    select: { ruleValue: true },
-  });
-  if (!rule) return null;
-  const v = rule.ruleValue as unknown as { monthlyBase: number };
+  const v = await getActiveRuleValue<{ monthlyBase: number }>(
+    SalaryRuleType.COOK_SALARY,
+    'COOK_MONTHLY',
+    now,
+    client,
+  );
   return v?.monthlyBase ?? null;
 }

@@ -15,7 +15,7 @@ import {
 // 真下载）。
 //
 // CRON_SECRET 用了同一份 .env；CDR 路由不需要 secret（24h cuid token
-// + middleware 排除 api/cdr）。
+// + Proxy 排除 api/cdr）。
 
 test.describe('CDR 汇总下载 — golden path', () => {
   test('foreman 选 1 条 CDR 工单 → 生成 mock 下载包 → /api/cdr/bundles/[id] 返 503', async ({
@@ -84,7 +84,7 @@ test.describe('CDR 汇总下载 — golden path', () => {
     const fakeBody = await fake.json();
     expect(fakeBody.error).toMatch(/链接已失效或不存在/);
 
-    // session 未认证也能访问下载路由（middleware 已排除 api/cdr）
+    // session 未认证也能访问下载路由（Proxy 已排除 api/cdr）
     // —— 这是 SPEC §3.5 设计意图：外协方拿链接直下，无登录态。
     void orderId;
   });

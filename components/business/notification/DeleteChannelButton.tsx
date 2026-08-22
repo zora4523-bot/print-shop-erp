@@ -42,7 +42,9 @@ export function DeleteChannelButton({
       variant="outline"
       disabled={pending}
       onClick={() => {
-        if (!confirm(`确定删除&ldquo;${channelName}&rdquo;？此操作不可撤销。`)) return;
+        // 注意这是 JS 模板字符串不是 JSX：HTML 实体不会被解析，必须写
+        // 字面量引号，否则用户看到的是 `确定删除&ldquo;渠道名&rdquo;？`。
+        if (!confirm(`确定删除“${channelName}”？此操作不可撤销。`)) return;
         startTransition(async () => {
           const r = await deleteChannelAction(channelId);
           if (r.status === 'error') {

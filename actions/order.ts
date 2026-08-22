@@ -5,11 +5,15 @@ import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   createOrderSchema,
+  createReworkOrderSchema,
   cancelOrderSchema,
   shipOrderSchema,
   updateEditableOrderSchema,
   setOrderUrgentSchema,
-  type CreateOrderInput,
+  setOrderSfCollectSchema,
+  createOrderChangeRequestSchema,
+  previewOrderChangeRequestPricingSchema,
+  reviewOrderChangeRequestSchema,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
@@ -19,43 +23,48 @@ import {
   finishOrder,
   updateOrderFields,
   setOrderUrgent,
+  setOrderSfCollect,
   OrderInvariantError,
   InvalidOrderTransitionError,
 } from '@/lib/order';
-import type { OrderMutationResult } from './order.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    // Compound paths like ['items', 0, 'quantity'] flatten to
-    // 'items.0.quantity' so the client form can target the right row.
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import {
+  createReworkOrder,
+  ReworkOrderError,
+} from '@/lib/order/rework';
+import {
+  createOrderChangeRequest,
+  OrderChangeRequestError,
+  previewOrderChangeRequestPricing,
+  reviewOrderChangeRequest,
+} from '@/lib/order/change-request';
+import type {
+  CreateOrderChangeRequestMutationResult,
+  CreateOrderMutationResult,
+  CreateReworkOrderMutationResult,
+  OrderMutationResult,
+  PreviewOrderChangeRequestPricingResult,
+  ReviewOrderChangeRequestMutationResult,
+} from './order.types';
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
 // (Slice B) will hand this function a structured payload via a
 // progressively-enhanced form + JSON body or a bound call.
 export async function createOrderAction(
-  _prev: OrderMutationResult | null,
+  _prev: CreateOrderMutationResult | null,
   raw: unknown,
-): Promise<OrderMutationResult> {
+): Promise<CreateOrderMutationResult> {
   const actor = await requirePermission('order:create');
 
   const parsed = createOrderSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  let createdId: string;
+  let created: Awaited<ReturnType<typeof createOrder>>;
   try {
-    const created = await createOrder(parsed.data, actor);
-    createdId = created.id;
+    created = await createOrder(parsed.data, actor);
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -64,24 +73,47 @@ export async function createOrderAction(
   }
 
   revalidatePath('/orders');
-  redirect(`/orders/${createdId}`);
+  return {
+    status: 'success',
+    orderId: created.id,
+    itemIds: created.itemIds,
+  };
 }
 
-// A thin no-permission-check helper for callers that have already resolved
-// the input via a trusted path (tests, seed scripts). Not exported via
-// `'use server'` semantics.
-export async function createOrderFromInput(
-  input: CreateOrderInput,
-  actor: { id: string; role: import('../generated/prisma/client').Role },
-) {
-  return createOrder(input, actor);
+export async function createReworkOrderAction(
+  _prev: CreateReworkOrderMutationResult | null,
+  raw: unknown,
+): Promise<CreateReworkOrderMutationResult> {
+  const actor = await requirePermission('order:schedule');
+
+  const parsed = createReworkOrderSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const created = await createReworkOrder(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath('/foreman/scheduling');
+    revalidatePath(`/orders/${parsed.data.sourceOrderId}`);
+    revalidatePath(`/orders/${created.id}`);
+    return { status: 'success', orderId: created.id };
+  } catch (error) {
+    if (error instanceof ReworkOrderError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
 }
 
 export async function submitOrderAction(
   orderId: string,
 ): Promise<OrderMutationResult> {
   // 'order:create' is the coarse role gate. Ownership — "you can only
-  // submit your own DRAFT unless you're OWNER / FOREMAN" — is enforced
+  // submit your own DRAFT unless you're ADMIN" — is enforced
   // deeper in lib/order.submitOrder's `authz` callback (round 27), which
   // throws OrderInvariantError and is mapped to `{ status: 'error' }`
   // below. Any direct POST to this action bypassing the UI still hits
@@ -120,7 +152,7 @@ export async function cancelOrderAction(
     reason: formData.get('reason'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -140,7 +172,7 @@ export async function cancelOrderAction(
   return { status: 'success' };
 }
 
-// COMPLETED → SHIPPED. OWNER + FOREMAN per `order:ship` permission.
+// COMPLETED → SHIPPED. ADMIN per `order:ship` permission.
 // FormData carries optional trackingNo (运单号).
 export async function shipOrderAction(
   orderId: string,
@@ -149,15 +181,71 @@ export async function shipOrderAction(
 ): Promise<OrderMutationResult> {
   const actor = await requirePermission('order:ship');
 
+  const shipmentIds = formData.getAll('shipmentId');
+  const shipmentTrackingNos = formData.getAll('shipmentTrackingNo');
+  const shipmentWeights = formData.getAll('shipmentWeightKg');
+  const shipmentProvinces = formData.getAll('shipmentDestinationProvince');
+  const shipmentShippingFees = formData.getAll('shipmentShippingFee');
+  const shipmentPackingFees = formData.getAll('shipmentPackingMaterialFee');
+  const shipmentChargeReasons = formData.getAll('shipmentChargeOverrideReason');
+  const hasMatchingOptionalShape = (values: FormDataEntryValue[]) =>
+    values.length === 0 || values.length === shipmentIds.length;
+  const hasValidWeightShape =
+    shipmentWeights.length === 0 || shipmentWeights.length === shipmentIds.length;
+  const shipments =
+    shipmentIds.length === shipmentTrackingNos.length &&
+    hasValidWeightShape &&
+    hasMatchingOptionalShape(shipmentProvinces) &&
+    hasMatchingOptionalShape(shipmentShippingFees) &&
+    hasMatchingOptionalShape(shipmentPackingFees) &&
+    hasMatchingOptionalShape(shipmentChargeReasons)
+      ? shipmentIds.map((shipmentId, index) => ({
+          shipmentId,
+          trackingNo: shipmentTrackingNos[index],
+          ...(shipmentWeights.length > 0
+            ? { weightKg: shipmentWeights[index] }
+            : {}),
+          ...(shipmentProvinces.length > 0
+            ? { destinationProvince: shipmentProvinces[index] }
+            : {}),
+          ...(shipmentShippingFees.length > 0
+            ? { shippingFee: shipmentShippingFees[index] }
+            : {}),
+          ...(shipmentPackingFees.length > 0
+            ? { packingMaterialFee: shipmentPackingFees[index] }
+            : {}),
+          ...(shipmentChargeReasons.length > 0
+            ? {
+                customerChargeOverrideReason:
+                  shipmentChargeReasons[index],
+              }
+            : {}),
+        }))
+      : [
+          {
+            shipmentId: null,
+            trackingNo: null,
+            weightKg: null,
+            destinationProvince: null,
+            shippingFee: null,
+            packingMaterialFee: null,
+            customerChargeOverrideReason: null,
+          },
+        ];
   const parsed = shipOrderSchema.safeParse({
     trackingNo: formData.get('trackingNo'),
+    shipments,
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    await shipOrder(orderId, actor, parsed.data.trackingNo);
+    await shipOrder(
+      orderId,
+      actor,
+      parsed.data.shipments.length > 0 ? parsed.data : parsed.data.trackingNo,
+    );
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
@@ -209,6 +297,7 @@ export async function updateOrderAction(
 
   const raw: Record<string, unknown> = {};
   for (const key of [
+    'customName',
     'customerRef',
     'receiverName',
     'receiverPhone',
@@ -216,7 +305,9 @@ export async function updateOrderAction(
     'expressCode',
     'packageRequirement',
     'remark',
+    'promisedDate',
     'isUrgent',
+    'isSfCollect',
   ] as const) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
@@ -233,7 +324,7 @@ export async function updateOrderAction(
 
   const parsed = updateEditableOrderSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -263,7 +354,7 @@ export async function setOrderUrgentAction(
     isUrgent: formData.get('isUrgent'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -278,4 +369,147 @@ export async function setOrderUrgentAction(
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
   return { status: 'success' };
+}
+
+// 独立维护顺丰到付标识：允许在普通字段冻结后继续补录，但底层仍会
+// 拒绝 FINISHED / CANCELLED 终态，并记录完整变更日志。
+export async function setOrderSfCollectAction(
+  orderId: string,
+  _prev: OrderMutationResult | null,
+  formData: FormData,
+): Promise<OrderMutationResult> {
+  const actor = await requirePermission('order:create');
+
+  const shipmentIds = formData.getAll('sfShipmentId');
+  const shipmentProvinces = formData.getAll('sfShipmentDestinationProvince');
+  const shipmentWeights = formData.getAll('sfShipmentWeightKg');
+  const shipmentShippingFees = formData.getAll('sfShipmentShippingFee');
+  const shipmentChargeReasons = formData.getAll('sfShipmentChargeOverrideReason');
+  const shipmentFieldCounts = [
+    shipmentProvinces.length,
+    shipmentWeights.length,
+    shipmentShippingFees.length,
+    shipmentChargeReasons.length,
+  ];
+  if (shipmentFieldCounts.some((count) => count !== shipmentIds.length)) {
+    return {
+      status: 'invalid',
+      fieldErrors: { shipments: ['发货收费字段数量不一致'] },
+    };
+  }
+
+  const parsed = setOrderSfCollectSchema.safeParse({
+    isSfCollect: formData.get('isSfCollect'),
+    shipments: shipmentIds.map((shipmentId, index) => ({
+      shipmentId,
+      destinationProvince: shipmentProvinces[index],
+      weightKg: shipmentWeights[index],
+      shippingFee: shipmentShippingFees[index],
+      customerChargeOverrideReason: shipmentChargeReasons[index],
+    })),
+  });
+  if (!parsed.success) {
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+  }
+
+  try {
+    await setOrderSfCollect(
+      orderId,
+      parsed.data.isSfCollect,
+      actor,
+      parsed.data.shipments,
+    );
+  } catch (err) {
+    if (err instanceof OrderInvariantError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  return { status: 'success' };
+}
+
+export async function createOrderChangeRequestAction(
+  _prev: CreateOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<CreateOrderChangeRequestMutationResult> {
+  const actor = await requirePermission('order:change:request');
+  const parsed = createOrderChangeRequestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const request = await createOrderChangeRequest(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath('/owner/order-changes');
+    return { status: 'success', requestId: request.id };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function reviewOrderChangeRequestAction(
+  _prev: ReviewOrderChangeRequestMutationResult | null,
+  raw: unknown,
+): Promise<ReviewOrderChangeRequestMutationResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = reviewOrderChangeRequestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const request = await reviewOrderChangeRequest(parsed.data, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${request.orderId}`);
+    revalidatePath('/owner/order-changes');
+    revalidatePath('/worker/tasks');
+    revalidatePath('/worker/orders');
+    return { status: 'success', requestStatus: request.status };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function previewOrderChangeRequestPricingAction(
+  _prev: PreviewOrderChangeRequestPricingResult | null,
+  raw: unknown,
+): Promise<PreviewOrderChangeRequestPricingResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = previewOrderChangeRequestPricingSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const preview = await previewOrderChangeRequestPricing(
+      parsed.data.requestId,
+      actor,
+    );
+    return { status: 'success', preview };
+  } catch (error) {
+    if (error instanceof OrderChangeRequestError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
 }

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SalaryRuleType } from '../../../generated/prisma/client';
+import { MachineType, SalaryRuleType } from '../../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     salaryRule: { findFirst: vi.fn() },
+    workerMachineSalaryRule: { findFirst: vi.fn() },
   };
   return { dbMock: mock };
 });
@@ -16,10 +17,76 @@ import {
   getActiveOtMultiplier,
   getActiveWorkHours,
   getActiveCookMonthlyBase,
+  getActiveMachineRule,
 } from '../rules';
 
 beforeEach(() => {
   dbMock.salaryRule.findFirst.mockReset();
+  dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
+});
+
+describe('getActiveMachineRule — personal override priority', () => {
+  const globalRule = {
+    dailyBase: 100,
+    pieceRate: 0.007,
+    boardRate: 5,
+    smallOrderThreshold: 1000,
+    smallOrderFlatPrice: 12,
+    multiplierFactors: ['DOUBLE_SIDED'],
+  };
+
+  it('prefers the active worker-specific version over the machine default', async () => {
+    const personalRule = { ...globalRule, dailyBase: 180, pieceRate: 0.01 };
+    dbMock.workerMachineSalaryRule.findFirst.mockResolvedValue({
+      ruleValue: personalRule,
+    });
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: globalRule });
+    const now = new Date('2026-07-19T03:00:00Z');
+
+    await expect(
+      getActiveMachineRule(MachineType.HAND_PRESS, now, 'worker-1'),
+    ).resolves.toEqual(personalRule);
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.workerMachineSalaryRule.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          workerId: 'worker-1',
+          machineType: MachineType.HAND_PRESS,
+          effectiveFrom: { lte: now },
+        }),
+      }),
+    );
+  });
+
+  it('falls back to the machine default when no personal version is active', async () => {
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: globalRule });
+    await expect(
+      getActiveMachineRule(MachineType.HAND_PRESS, new Date(), 'worker-1'),
+    ).resolves.toEqual(globalRule);
+  });
+
+  it('uses the supplied transaction client for personal and global reads', async () => {
+    const txClient = {
+      workerMachineSalaryRule: { findFirst: vi.fn().mockResolvedValue(null) },
+      salaryRule: {
+        findFirst: vi.fn().mockResolvedValue({ ruleValue: globalRule }),
+      },
+    };
+    const now = new Date('2026-07-19T03:00:00Z');
+
+    await expect(
+      getActiveMachineRule(
+        MachineType.HAND_PRESS,
+        now,
+        'worker-1',
+        txClient,
+      ),
+    ).resolves.toEqual(globalRule);
+    expect(txClient.workerMachineSalaryRule.findFirst).toHaveBeenCalled();
+    expect(txClient.salaryRule.findFirst).toHaveBeenCalled();
+    expect(dbMock.workerMachineSalaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 function mockRule(byKey: Record<string, unknown>) {

@@ -6,8 +6,16 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  /* 跨平台 UI 无衬线字体栈：拉丁字符优先系统 UI 字体，中文按
+     macOS/iOS 苹方、Windows 雅黑、Linux Noto CJK 逐字形回退。 */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", Arial, sans-serif;
+  /* 末尾补 CJK 回退：本仓有若干处用 font-mono 渲染中文（推送模板、
+     计价预览），而等宽字体多数不含汉字字形。 */
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo,
+    Consolas, "Sarasa Mono SC", "Noto Sans Mono CJK SC", "PingFang SC",
+    "Microsoft YaHei", monospace;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -22,6 +30,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -64,15 +74,15 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   /* 红包印刷品牌红——浅色模式偏 vivid scarlet（OKLCH chroma 0.20+ 显得鲜艳但不刺眼）。 */
-  --primary: oklch(0.62 0.21 25);
+  --primary: oklch(0.55 0.2 25);
   --primary-foreground: oklch(0.99 0.01 25);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.52 0.22 27);
   /* 语义色（KPI tone / banner / 状态徽章共用）。配 bg-warning/10
      这种 alpha-mix 写法即得 soft 背景，不需要再单独建 -soft 变量。 */
   --warning: oklch(0.72 0.16 60);
@@ -84,11 +94,17 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Okabe–Ito 色觉友好分类色的 OKLCH 表达；色相与明度共同区分，
+     不依赖红/绿二分。 */
+  --chart-1: oklch(0.532 0.131 244);
+  --chart-2: oklch(0.753 0.158 76.8);
+  --chart-3: oklch(0.62 0.13 165.5);
+  --chart-4: oklch(0.679 0.118 346.3);
+  --chart-5: oklch(0.735 0.117 236.2);
+  --chart-6: oklch(0.621 0.17 47.5);
+  /* 第 7 色：Okabe–Ito 的黄。产品线分类有 7 个枚举值，只有 6 色时
+     BYO_MATERIAL 与 UNCATEGORIZED 会撞成同一个扇区颜色。 */
+  --chart-7: oklch(0.86 0.15 100);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -101,6 +117,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -109,7 +126,7 @@
   --popover-foreground: oklch(0.985 0 0);
   /* 暗色模式品牌红稍提亮、降饱和，避免 OLED 上炫光。 */
   --primary: oklch(0.7 0.18 25);
-  --primary-foreground: oklch(0.18 0.04 25);
+  --primary-foreground: oklch(0.1 0.025 25);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -126,11 +143,13 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: oklch(0.6 0.131 244);
+  --chart-2: oklch(0.8 0.158 76.8);
+  --chart-3: oklch(0.69 0.13 165.5);
+  --chart-4: oklch(0.74 0.118 346.3);
+  --chart-5: oklch(0.8 0.117 236.2);
+  --chart-6: oklch(0.69 0.17 47.5);
+  --chart-7: oklch(0.88 0.15 100);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -150,5 +169,141 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer utilities {
+  /* Worker H5 shell: keep vh as the legacy fallback, prefer the small
+     viewport while support is partial, then let dvh follow mobile browser
+     chrome on current engines. This scope deliberately does not touch print. */
+  .worker-viewport {
+    min-height: 100vh;
+  }
+
+  @supports (min-height: 100svh) {
+    .worker-viewport {
+      min-height: 100svh;
+    }
+  }
+
+  @supports (min-height: 100dvh) {
+    .worker-viewport {
+      min-height: 100dvh;
+    }
+  }
+
+  .worker-safe-inline {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  .worker-safe-top {
+    padding-top: 0.75rem;
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+  }
+
+  .worker-safe-bottom {
+    padding-bottom: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .worker-wrap-anywhere {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  @supports (overflow-wrap: anywhere) {
+    .worker-wrap-anywhere {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+  }
+
+  .admin-viewport {
+    min-height: 100vh;
+  }
+
+  @supports (min-height: 100svh) {
+    .admin-viewport {
+      min-height: 100svh;
+    }
+  }
+
+  @supports (min-height: 100dvh) {
+    .admin-viewport {
+      min-height: 100dvh;
+    }
+  }
+
+  .admin-safe-inline {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+  }
+
+  @media (min-width: 640px) {
+    .admin-safe-inline {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+      padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+      padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+    }
+  }
+
+  .admin-safe-top {
+    padding-top: 0.25rem;
+    padding-top: max(0.25rem, env(safe-area-inset-top, 0px));
+  }
+
+  .admin-safe-bottom {
+    padding-bottom: 1rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-wrap-anywhere {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  @supports (overflow-wrap: anywhere) {
+    .admin-wrap-anywhere {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+  }
+
+  /* 44px 触控目标兜底。
+     注意：这条规则**不是**组件自带的，控件本身是 h-8（32px）。凡是没被
+     下面这些容器罩住的路由，触控目标就不合规——曾经 /login 与
+     /account/password 就落在外面（它们不在 (admin)/(worker) 壳里）。
+     所以这里用一个可复用的 .touch-viewport 类，任何独立页面外壳都能挂。 */
+  .admin-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])),
+  .touch-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])) {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .touch-viewport a[href] {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .admin-viewport a[href] {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .admin-viewport *,
+    .admin-viewport *::before,
+    .admin-viewport *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

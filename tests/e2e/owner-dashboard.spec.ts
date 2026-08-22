@@ -30,7 +30,7 @@ import {
 // 数据污染。
 
 test.describe('owner dashboard — KPI + 关注列表', () => {
-  test('OWNER /owner 渲染 4 张 KPI + 3 个 watchlist（待发货 / 超期外协 / 即将结算客服）', async ({
+  test('ADMIN /owner 渲染 4 张 KPI + 3 个 watchlist（待发货 / 超期外协 / 即将结算客服）', async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -57,7 +57,7 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
     await expect(kpis).toHaveCount(4);
 
     // 数字断言用 ">= seeded" 而不是精确相等：dev DB 是共享的，开发期手工
-    // 创建的 OWNER 工单也会在今日 submitted/completed/shipped 中累计，
+    // 创建的 ADMIN 工单也会在今日 submitted/completed/shipped 中累计，
     // wipe 仅安全地清掉 e2e-* 用户。结构断言（4 卡 + 各自标签）+ 关键
     // seeded 行为（急单 ≥ 1 / bill 金额至少 5000）才是稳定信号。
 
@@ -172,6 +172,12 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
     //
     // 这里做&ldquo;render-without-crash&rdquo;断言：3 个 chart card 可见 + 各自
     // 的 recharts SVG 已经 paint（ResponsiveContainer 没 stuck 在 0 高）。
+    // 图表是 IntersectionObserver 延迟加载；先把容器滚入视口，测试才与
+    // 真实用户查看图表时的触发条件一致。不能直接等待 card，否则页面停在
+    // 顶部时组件按设计只会保留 placeholder。
+    await page
+      .locator('[data-slot="dashboard-charts-deferred"]')
+      .scrollIntoViewIfNeeded();
     const trendCard = page.locator(
       '[data-slot="dashboard-chart-trend-card"]',
     );

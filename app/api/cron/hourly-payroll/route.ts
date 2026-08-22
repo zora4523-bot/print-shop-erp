@@ -1,92 +1,79 @@
 import { NextResponse } from 'next/server';
-import { computeHourlyForAllInMonth, HourlyAggregateError } from '@/lib/salary/hourly-aggregate';
+import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
+import { enqueueCronJob } from '@/lib/background-jobs/cron';
+import { backgroundJobsMode } from '@/lib/background-jobs/mode';
+import { requireCronAuth } from '@/lib/cron-auth';
+import { isStrictYearMonth, previousShanghaiMonth } from '@/lib/cron/schedule';
+import { runHourlyPayrollTask } from '@/lib/cron/tasks';
+import { isFutureShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
+import { HourlyAggregateError } from '@/lib/salary/hourly-aggregate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// SPEC §3.9 "月底定时任务" — scan every active hourly worker and
-// settle the given month's HourlyWorkerPayroll. Same shared-secret
-// Bearer pattern as /api/cron/daily-salary and /api/cron/cs-settle
-// (DECISIONS 2026-04-24). When `month` is omitted, defaults to the
-// previous Shanghai calendar month — typical pattern is "run on the
-// 1st of each month at 00:05 to settle the month that just ended."
-//
-// Usage:
-//   curl -X POST https://host/api/cron/hourly-payroll \
-//     -H "Authorization: Bearer $CRON_SECRET" \
-//     -d '{"month":"2026-05"}'
 export async function POST(req: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
+  const denied = requireCronAuth(req);
+  if (denied) return denied;
+
+  const body = await readJsonBody(req);
+  const month = extractString(body, 'month') ?? previousShanghaiMonth();
+  if (!isStrictYearMonth(month)) {
+    return NextResponse.json({ error: `invalid month: ${month}` }, { status: 400 });
+  }
+  // 【对外契约变更】新增状态码 400 + { error: "future month: <month>" }，
+  // 触发条件：body.month 严格晚于上海日历的本月。原有 202/200/401/500/503
+  // 的形状一律不变。默认参数 previousShanghaiMonth() 不会命中这条分支。
+  // 见 daily-salary/route.ts 的同位注释：真闸口在
+  // lib/salary/hourly-aggregate.ts，这里只做入队前的提前失败。
+  if (isFutureShanghaiMonth(month)) {
+    return NextResponse.json({ error: `future month: ${month}` }, { status: 400 });
+  }
+
+  if (backgroundJobsMode() === 'durable') {
+    const queued = await enqueueCronJob({
+      type: BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL,
+      scope: month,
+      payload: { month },
+    });
     return NextResponse.json(
-      { error: 'CRON_SECRET not configured' },
-      { status: 503 },
+      { status: 'queued', month, ...queued },
+      { status: 202 },
     );
   }
 
-  const auth = req.headers.get('authorization');
-  if (!auth || auth !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  let body: unknown;
   try {
-    body = await req.json();
+    return NextResponse.json(await runHourlyPayrollTask(month));
+  } catch (error) {
+    if (error instanceof HourlyAggregateError) {
+      return NextResponse.json(
+        { status: 'error', month, message: error.message },
+        { status: 500 },
+      );
+    }
+    console.error(
+      '[cron:hourly-payroll] unexpected error:',
+      error instanceof Error ? error.name : 'UnknownError',
+    );
+    return NextResponse.json(
+      {
+        status: 'error',
+        month,
+        message: '批处理失败；查看 owner /owner/salary/hourly 页面确认',
+      },
+      { status: 500 },
+    );
+  }
+}
+async function readJsonBody(req: Request): Promise<unknown> {
+  try {
+    return await req.json();
   } catch {
-    body = {};
-  }
-
-  const month = extractMonth(body) ?? previousShanghaiMonth();
-  if (!/^\d{4}-\d{2}$/.test(month)) {
-    return NextResponse.json({ error: `invalid month: ${month}` }, { status: 400 });
-  }
-
-  try {
-    const { settled, errors } = await computeHourlyForAllInMonth(month);
-    // Return COUNTS ONLY — both the `settled` rows (full salary
-    // breakdown) AND the `errors` messages (paid-row refusal embeds
-    // existing totalSalary per Codex round 49 / P2) would leak
-    // payroll figures into scheduler / pg_cron logs. Owner sees the
-    // per-row state at /owner/salary/hourly; operator sees whether
-    // the cron succeeded at all via counts.
-    return NextResponse.json({
-      status: 'ok',
-      month,
-      workerCount: settled.length,
-      errorCount: errors.length,
-    });
-  } catch (err) {
-    const message =
-      err instanceof HourlyAggregateError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : String(err);
-    return NextResponse.json({ status: 'error', month, message }, { status: 500 });
+    return {};
   }
 }
 
-function extractMonth(body: unknown): string | null {
-  if (body && typeof body === 'object' && 'month' in body) {
-    const v = (body as { month: unknown }).month;
-    if (typeof v === 'string' && v.trim() !== '') return v.trim();
-  }
-  return null;
-}
-
-// Previous month in Shanghai time. We get today's month, subtract 1
-// (carrying over year boundary via Date.UTC which handles it for us).
-function previousShanghaiMonth(): string {
-  const todayShanghai = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-  const [yStr, mStr] = todayShanghai.split('-');
-  const year = Number(yStr);
-  const month = Number(mStr);
-  const prevY = month === 1 ? year - 1 : year;
-  const prevM = month === 1 ? 12 : month - 1;
-  return `${prevY}-${String(prevM).padStart(2, '0')}`;
+function extractString(body: unknown, key: string): string | null {
+  if (!body || typeof body !== 'object' || !(key in body)) return null;
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

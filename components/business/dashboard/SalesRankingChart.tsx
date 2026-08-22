@@ -15,8 +15,8 @@ import {
 // 轴、Y 轴当类目（recharts 的 vertical 命名跟人的直觉相反，但这是
 // 它的约定）。
 //
-// 配色按角色：SALES = 蓝色，CUSTOMER_SERVICE = 绿色。OWNER / FOREMAN
-// 在 dashboard 看排行的概率不大但极少数 owner 自己接的工单也会上榜
+// 配色按角色：SALES = 蓝色，CUSTOMER_SERVICE = 绿色。ADMIN
+// 在 dashboard 看排行的概率不大，但管理员自己接的工单也可能上榜
 // → 用 muted 灰色。
 
 export type SalesRankingChartProps = {
@@ -30,11 +30,18 @@ export type SalesRankingChartProps = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  SALES: '#2563eb',
-  CUSTOMER_SERVICE: '#10b981',
-  OWNER: '#94a3b8',
-  FOREMAN: '#94a3b8',
+  SALES: 'var(--chart-1)',
+  CUSTOMER_SERVICE: 'var(--chart-3)',
+  // 注释上面写的是「用 muted 灰色」，之前却实现成 chart-5——那是一支
+  // 蓝，和 SALES 的 chart-1 对比度只有 2.25:1，两个角色看起来一样。
+  ADMIN: 'var(--muted-foreground)',
 };
+
+const ROLE_LEGEND: ReadonlyArray<{ role: string; label: string }> = [
+  { role: 'SALES', label: '销售' },
+  { role: 'CUSTOMER_SERVICE', label: '客服' },
+  { role: 'ADMIN', label: '管理员' },
+];
 
 export function SalesRankingChart({ data }: SalesRankingChartProps) {
   if (data.length === 0) {
@@ -49,40 +56,69 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
   }
   // recharts 期望 number 类型给 BarChart 数值轴；从 decimal-string 转
   // 一道。Top 10 总额一般在百万级，Number 精度足够（千分位由 tick 显示）。
+  // 只带图表真正要用的字段。之前是 `{...d}` 整行摊平，recharts 会把
+  // payload 上的属性透传到 <path>，于是渲染出 role="CUSTOMER_SERVICE"
+  // 这种非法 ARIA 角色，axe aria-roles 直接报错。
   const rows = data.map((d) => ({
-    ...d,
+    displayName: d.displayName,
     amount: Number(d.totalAmount),
   }));
+  const barColors = data.map(
+    (d) => ROLE_COLORS[d.role] ?? 'var(--muted-foreground)',
+  );
 
   return (
-    <div data-slot="dashboard-chart-ranking" className="h-80 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div data-slot="dashboard-chart-ranking" className="flex h-80 w-full flex-col">
+      {/* 柱子颜色编码的是「角色」，但此前整张图没有任何图例，颜色承载的
+          信息对用户不可解读。这一行同时也是 WCAG 1.4.1（不能只靠颜色
+          传达信息）的补救：颜色 + 文字双通道。 */}
+      <ul className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {ROLE_LEGEND.map((entry) => (
+          <li key={entry.role} className="flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: ROLE_COLORS[entry.role] }}
+            />
+            {entry.label}
+          </li>
+        ))}
+      </ul>
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        initialDimension={{ width: 1, height: 1 }}
+      >
         <BarChart
           data={rows}
           layout="vertical"
           margin={{ top: 8, right: 32, bottom: 8, left: 16 }}
         >
-          <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" horizontal={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
           <XAxis
             type="number"
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
             fontSize={11}
             tickFormatter={(v: number) => formatAxisMoney(v)}
           />
           <YAxis
             type="category"
             dataKey="displayName"
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
             fontSize={11}
             width={72}
           />
           <Tooltip
             isAnimationActive={false}
-            contentStyle={{ fontSize: 12 }}
+            contentStyle={{
+              fontSize: 12,
+              backgroundColor: 'var(--popover)',
+              borderColor: 'var(--border)',
+              color: 'var(--popover-foreground)',
+            }}
             // tooltip 走&ldquo;精确到分&rdquo;格式，**不**用 formatAxisMoney——后者
             // 会把 5000.50 圆成 5,001、把 12500 压成 1.3 万，这是 axis
-            // tick 的密度妥协，不是金额展示口径（Codex round 100
-            // medium）。
+            // tick 的密度妥协，不是金额展示口径。
             formatter={(value) => [
               `¥ ${formatTooltipMoney(Number(value))}`,
               '业绩',
@@ -90,11 +126,8 @@ export function SalesRankingChart({ data }: SalesRankingChartProps) {
             labelFormatter={(label) => String(label ?? '')}
           />
           <Bar dataKey="amount" isAnimationActive={false}>
-            {rows.map((row) => (
-              <Cell
-                key={row.userId}
-                fill={ROLE_COLORS[row.role] ?? '#94a3b8'}
-              />
+            {data.map((row, i) => (
+              <Cell key={row.userId} fill={barColors[i]} />
             ))}
           </Bar>
         </BarChart>

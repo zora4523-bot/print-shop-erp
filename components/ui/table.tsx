@@ -4,11 +4,26 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+// 注意：外层这个可键盘聚焦的滚动容器（role=region + aria-label +
+// tabIndex）是本地相对 shadcn 原版加的，responsive-tables 门禁依赖它。
+// `shadcn add table --overwrite` 会静默抹掉——见 CLAUDE.md §15.6 旁的
+// registry 漂移清单。
+//
+// label 可传：此前 aria-label 硬编码成「数据表格」，同一页渲染多张表时
+// （如 /owner/prices 的价格阶梯 + 加价规则）会出现多个同名地标，读屏器
+// 的地标列表里根本分不出谁是谁。默认值保留原文案，避免一次性改崩。
+function Table({
+  className,
+  label = "数据表格",
+  ...props
+}: React.ComponentProps<"table"> & { label?: string }) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      role="region"
+      aria-label={label}
+      tabIndex={0}
+      className="relative w-full overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <table
         data-slot="table"

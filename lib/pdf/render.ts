@@ -13,7 +13,7 @@ import type { Browser, LaunchOptions, PDFOptions } from 'puppeteer';
 export type RenderPdfOptions = {
   html: string;
   // Extra `page.pdf()` flags if a caller wants a non-A4 size. Defaults
-  // come from SPEC 附录 E: A4 portrait with 15mm margins.
+// come from SPEC 附录 E: A4 portrait with 10mm margins.
   pdf?: PDFOptions;
   // Extra `puppeteer.launch()` flags — mostly for tests, where a
   // pre-existing browser is injected via `browser` below.
@@ -42,7 +42,7 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' },
+      margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
       ...opts.pdf,
     });
     return Buffer.from(pdf);

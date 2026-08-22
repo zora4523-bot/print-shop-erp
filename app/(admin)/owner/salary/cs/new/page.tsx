@@ -1,15 +1,14 @@
-import { db } from '@/lib/db';
-import { Role } from '@/generated/prisma/enums';
+import { listActiveCsUsers } from '@/lib/salary/cs';
 import { StartCsPeriodForm } from '@/components/business/salary/StartCsPeriodForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '新建客服周期' };
 
 export default async function NewCsPeriodPage() {
-  const csUsers = await db.user.findMany({
-    where: { role: Role.CUSTOMER_SERVICE, isActive: true },
-    orderBy: { displayName: 'asc' },
-    select: { id: true, displayName: true, username: true },
-  });
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:rule:manage');
+  const csUsers = await listActiveCsUsers();
 
   return (
     <div className="space-y-6">

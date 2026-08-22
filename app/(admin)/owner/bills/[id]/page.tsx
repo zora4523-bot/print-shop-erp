@@ -1,52 +1,65 @@
+import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import Decimal from 'decimal.js';
+import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getBillDetail } from '@/lib/bill';
-import { BillStatus, Role } from '@/generated/prisma/enums';
+import { getAdminBillDetail } from '@/lib/bill';
+import { BillStatus } from '@/generated/prisma/enums';
 import {
   BILL_STATUS_LABELS,
   ROLE_LABELS,
 } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getAdminBillTitleRef } from '@/lib/page-title/refs';
+import { adminBillTitle } from '@/lib/page-title/titles';
+import {
+  calculateCsBillAttribution,
+  hasCustomerServiceAttribution,
+} from '@/lib/bill/cs-attribution';
+import { calculateOrderCostBreakdown } from '@/lib/bill/costing';
+import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
+import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 
+import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
-
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `账单 · ${id.slice(0, 8)}` };
+  // 这张表没有行级 scope，唯一闸口就是权限。metadata 不抛错（流式
+  // metadata 下抛不干净），无权时回落到模块名，不透露实体是否存在。
+  const session = await getSession();
+  if (!session || !hasPermission('bill:view:all', session.user.role)) {
+    return { title: '账单' };
+  }
+  const ref = await getAdminBillTitleRef(id);
+  return {
+    title: adminBillTitle(
+      ref
+        ? { period: ref.period, salesUserName: ref.salesUser.displayName }
+        : null,
+    ),
+  };
 }
 
 export default async function OwnerBillDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('bill:view:all');
   const { id } = await params;
-  const bill = await getBillDetail(id);
+  const bill = await getAdminBillDetail(id);
   if (!bill) notFound();
 
   const total = new Decimal(bill.totalAmount as unknown as Decimal.Value);
+  const openingAmount = new Decimal(
+    bill.openingAmount as unknown as Decimal.Value,
+  );
   const paid = new Decimal(bill.paidAmount as unknown as Decimal.Value);
   const remaining = total.minus(paid);
   // 进度条百分比：防 total=0 的除零。total=0 意味着 DRAFT 账单无订单，
@@ -54,39 +67,71 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
   const paidPercent = total.isZero()
     ? 0
     : Math.min(100, Math.max(0, paid.div(total).times(100).toNumber()));
+  const costingRows = bill.items.map((item) => {
+    const costs = calculateOrderCostBreakdown(item.order);
+    const customerChargeAmount = (categoryCode: string) =>
+      item.order.customerCharges
+        .filter((charge) => String(charge.category.code) === categoryCode)
+        .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+    return {
+      ...item,
+      ...costs,
+      shippingReceivable: customerChargeAmount('SHIPPING_FEE'),
+      packingReceivable: customerChargeAmount('PACKING_MATERIAL'),
+    };
+  });
+  const totalCost = costingRows.reduce(
+    (sum, item) => sum.plus(item.totalCost),
+    new Decimal(0),
+  );
+  const processingRevenue = costingRows.reduce(
+    (sum, item) => sum.plus(item.order.processingAmount),
+    new Decimal(0),
+  );
+  const grossProfit = total.minus(totalCost);
+  const csAttribution = calculateCsBillAttribution(bill.items);
+  const isCsAttributedBill = hasCustomerServiceAttribution(bill.items);
+  const settledRateLabel = csAttribution.settledRates.length
+    ? csAttribution.settledRates
+        .map((rate) => `${new Decimal(rate).times(100).toFixed(2)}%`)
+        .join('、')
+    : '待周期结算';
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={`${bill.period} ${bill.salesUser.displayName}`} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold">
             账单 · {bill.salesUser.displayName}
           </h1>
           <p className="text-sm text-muted-foreground">
-            周期 <span className="font-mono">{bill.period}</span> ·{' '}
-            {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
-            {bill.issuedAt ? ` · 发单 ${formatDateTime(bill.issuedAt)}` : ''}
-            {bill.paidAt ? ` · 结清 ${formatDateTime(bill.paidAt)}` : ''}
+            周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}
+            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
+            {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
+            {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
         </div>
         <StatusBadge status={bill.status} />
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
-        <div className="grid grid-cols-3 gap-4">
-          <Row label="总额" value={`¥ ${String(bill.totalAmount)}`} mono />
-          <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} mono />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Row label="应收总额" value={`¥ ${String(bill.totalAmount)}`} tabular />
+          <Row label="已收" value={`¥ ${String(bill.paidAmount)}`} tabular />
           <Row
             label="未收"
             value={`¥ ${remaining.toFixed(2)}`}
-            mono
+            tabular
             highlight={remaining.gt(0)}
           />
         </div>
         <div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>收款进度</span>
-            <span className="font-mono">{paidPercent.toFixed(1)}%</span>
+            <span className="font-sans tabular-nums">{paidPercent.toFixed(1)}%</span>
           </div>
           <div className="mt-1 h-2 rounded-full bg-muted">
             <div
@@ -97,13 +142,92 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         </div>
       </section>
 
+      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <div>
+          <h2 className="text-base font-semibold">收入与成本</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            计件和外协从生产记录自动汇总；材料、物流、伙食、电费等来自工单成本流水。
+          </p>
+        </div>
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+          <Row label="对客应收" value={`¥ ${total.toFixed(2)}`} tabular />
+          <Row
+            label="加工销售额"
+            value={`¥ ${processingRevenue.toFixed(2)}`}
+            tabular
+          />
+          <Row
+            label="历史期初/手工差额"
+            value={`¥ ${openingAmount.toFixed(2)}`}
+            tabular
+          />
+          <Row label="成本合计" value={`¥ ${totalCost.toFixed(2)}`} tabular />
+          <Row
+            label="毛利"
+            value={`¥ ${grossProfit.toFixed(2)}`}
+            tabular
+            highlight={grossProfit.isNegative()}
+          />
+        </dl>
+        {openingAmount.isZero() ? null : (
+          <p className="text-xs text-muted-foreground">
+            该金额用于解释逐单账单启用前的历史账面差额；总额 = 此差额 + 工单明细。
+          </p>
+        )}
+        {isCsAttributedBill ? (
+          <dl className="grid grid-cols-1 gap-3 rounded-lg bg-muted/40 p-3 text-sm sm:grid-cols-3">
+            <Row
+              label="本账单业绩流水"
+              value={
+                csAttribution.entryCount > 0
+                  ? `¥ ${csAttribution.ledgerSales.toFixed(2)}`
+                  : '无逐单历史流水'
+              }
+              tabular
+            />
+            <Row
+              label="实际命中周期比例"
+              value={settledRateLabel}
+              tabular
+            />
+            <Row
+              label="已结算提成估算"
+              value={
+                csAttribution.settledRates.length
+                  ? `¥ ${csAttribution.attributedCommission.toFixed(2)}`
+                  : '待周期结算'
+              }
+              tabular
+            />
+            {csAttribution.settledRates.length ? (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                按本账单工单的业绩流水与其所属客服周期最终费率估算；分币尾差及实际发放
+                以客服周期工资记录为准。
+              </p>
+            ) : null}
+            {csAttribution.pendingSales.isZero() ? null : (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                其中 ¥ {csAttribution.pendingSales.toFixed(2)} 尚在进行中的客服周期，
+                待该周期结算后才能确定提成比例。
+              </p>
+            )}
+            {csAttribution.entryCount === 0 ? (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                该账单来自逐单业绩流水启用前；历史累计只保留在客服周期期初校准中，
+                系统不会用账单月份猜测一个提成比例。
+              </p>
+            ) : null}
+          </dl>
+        ) : null}
+      </section>
+
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">发单</h2>
           <p className="text-xs text-muted-foreground">
             发单后进入 ISSUED，可接受付款。状态单向，不可回退到 DRAFT。发单
             前请先在列表页&ldquo;生成 / 追加月账单&rdquo;把截至目前所有完工
-            订单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
+            工单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
             {BILL_STATUS_LABELS[BillStatus.PARTIAL_PAID]} /
             {BILL_STATUS_LABELS[BillStatus.FULLY_PAID]} 的账单不再由生成流程
             自动追加新工单。
@@ -118,14 +242,15 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           <h2 className="text-base font-semibold">录入付款</h2>
           <p className="text-xs text-muted-foreground">
             累加式记账；累计 = 总额自动切 FULLY_PAID 终态（不可回退）。最多可录
-            入 <span className="font-mono">¥ {remaining.toFixed(2)}</span>。
-            {bill.salesUser.role === Role.CUSTOMER_SERVICE
-              ? ' 该账单归属客服；收款时会按金额累计到对应客服周期的业绩。'
+            入 <span className="font-sans tabular-nums">¥ {remaining.toFixed(2)}</span>。
+            {isCsAttributedBill
+              ? ' 该账单归属客服；客服销售额已在工单提交时记入，收款不会重复计算提成。'
               : ''}
           </p>
           <RecordPaymentForm
             billId={bill.id}
             remainingAmount={remaining.toFixed(2)}
+            initialIdempotencyKey={randomUUID()}
           />
         </section>
       ) : null}
@@ -134,13 +259,53 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
             ✓ 已结清。
-            {bill.salesUser.role === Role.CUSTOMER_SERVICE
-              ? ' 付款过程中客服业绩已按金额累计到对应周期（若该周期 IN_PROGRESS）。'
+            {isCsAttributedBill
+              ? ' 客服提成基于销售额流水，不基于本账单收款次数。'
               : ''}
-            如有退款 / 折扣，请另开负数金额的月账单，不可回退此账单状态。
+            如有退款 / 折扣，请先由财务核对原工单和已收流水；已结清账单不可直接回退或改成负数。
           </p>
         </section>
       ) : null}
+
+      <section className="rounded-xl border bg-card shadow-sm">
+        <h2 className="border-b px-4 py-3 text-base font-semibold sm:px-6">
+          结款明细（{bill.payments.length}）
+        </h2>
+        {bill.payments.length === 0 ? (
+          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
+            暂无收款流水。
+          </p>
+        ) : (
+          <ol className="divide-y">
+            {bill.payments.map((payment) => (
+              <li
+                key={payment.id}
+                className="grid min-w-0 gap-2 px-4 py-3 text-sm sm:grid-cols-[160px_120px_1fr_auto] sm:px-6"
+              >
+                <span className="font-sans tabular-nums">
+                  {isLegacyOpeningBillPayment(payment)
+                    ? '历史期初 · 时间未知'
+                    : formatDateTimeShanghai(payment.paidAt)}
+                </span>
+                <span>{payment.paymentMethod ?? '未填方式'}</span>
+                <span className="admin-wrap-anywhere text-muted-foreground">
+                  {payment.referenceNo ? `流水号 ${payment.referenceNo}` : ''}
+                  {payment.remark
+                    ? `${payment.referenceNo ? ' · ' : ''}${payment.remark}`
+                    : ''}
+                  {!payment.referenceNo && !payment.remark ? '—' : ''}
+                </span>
+                <span className="font-sans font-medium tabular-nums">
+                  {formatMoney(payment.amount)}
+                </span>
+                <span className="text-xs text-muted-foreground sm:col-span-4">
+                  记录人：{payment.recordedBy.displayName}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section className="rounded-xl border bg-card shadow-sm">
         <h2 className="border-b px-6 py-3 text-base font-semibold">
@@ -151,38 +316,82 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             本账单无工单。
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div
+            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="账单工单明细"
+            tabIndex={0}
+          >
+          <table className="w-full min-w-[1480px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 text-left">工单号</th>
-                <th className="px-4 py-2 text-left">客户</th>
-                <th className="px-4 py-2 text-left">完工时间</th>
-                <th className="px-4 py-2 text-center">工单状态</th>
-                <th className="px-4 py-2 text-right">金额</th>
+                <th scope="col" className="px-4 py-2 text-left">工单号</th>
+                <th scope="col" className="px-4 py-2 text-left">客户名称/简称</th>
+                <th scope="col" className="px-4 py-2 text-left">完工时间</th>
+                <th scope="col" className="px-4 py-2 text-center">工单状态</th>
+                <th scope="col" className="px-4 py-2 text-right">加工费</th>
+                <th scope="col" className="px-4 py-2 text-right">对客快递</th>
+                <th scope="col" className="px-4 py-2 text-right">对客耗材</th>
+                <th scope="col" className="px-4 py-2 text-right">应收合计</th>
+                <th scope="col" className="px-4 py-2 text-right">计件</th>
+                <th scope="col" className="px-4 py-2 text-right">外协</th>
+                <th scope="col" className="px-4 py-2 text-right">补录成本</th>
+                <th scope="col" className="px-4 py-2 text-right">售后重做</th>
+                <th scope="col" className="px-4 py-2 text-right">毛利</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {bill.items.map((it) => (
+              {costingRows.map((it) => (
                 <tr key={it.id}>
-                  <td className="px-4 py-3 font-mono text-xs">
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">
                     {it.order.orderNo}
                   </td>
                   <td className="px-4 py-3">{it.order.customerRef ?? '—'}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(it.order.finishedAt)}
+                    {formatDateShanghai(it.order.finishedAt)}
                   </td>
                   <td className="px-4 py-3 text-center text-xs">
-                    {it.order.status}
+                    <OrderStatusBadge status={it.order.status} />
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    ¥ {String(it.orderAmount)}
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    {formatMoney(it.order.processingAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.shippingReceivable.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.packingReceivable.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
+                    {formatMoney(it.orderAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.piecework.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.outsource.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.manual.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥ {it.rework.toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    ¥{' '}
+                    {new Decimal(it.orderAmount as Decimal.Value)
+                      .minus(it.totalCost)
+                      .toFixed(2)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
+
+      <BillCostEntryList items={bill.items} />
 
       {bill.remark ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
@@ -206,19 +415,19 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 function Row({
   label,
   value,
-  mono,
+  tabular,
   highlight,
 }: {
   label: string;
   value: string;
-  mono?: boolean;
+  tabular?: boolean;
   highlight?: boolean;
 }) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={`${mono ? 'font-mono' : ''} ${
+        className={`${tabular ? 'font-sans tabular-nums' : ''} ${
           highlight ? 'text-destructive font-semibold' : ''
         } text-base`}
       >

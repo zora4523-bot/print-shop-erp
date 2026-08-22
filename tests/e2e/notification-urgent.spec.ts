@@ -11,7 +11,7 @@ import {
 // P1 #2 Slice C — URGENT_ORDER wire smoke。
 //
 // production-flow.spec.ts 的主链路用的是非急单，所以 ORDER_SUBMITTED
-// 单触发；急单这条路（SPEC §8.1：急单 → 排产群+老板群，**两条事件
+// 单触发；急单这条路（SPEC §8.1：急单 → 排产群+管理员群，**两条事件
 // 都触发**）需要单独一个 fixture：勾"急单"复选框创建工单 → 提交 →
 // 断言 NotificationLog 同时多 1 行 ORDER_SUBMITTED + 1 行 URGENT_ORDER。
 //
@@ -39,11 +39,7 @@ test.describe('notification urgent wire — golden path', () => {
     await page.locator('input[name="customerRef"]').fill(orderRef);
     await page.locator('input[name="items.0.name"]').fill(itemName);
     await page.locator('input[name="items.0.quantity"]').fill('1000');
-    await page
-      .locator('label')
-      .filter({ hasText: '现货加烫' })
-      .locator('input[type="checkbox"]')
-      .check();
+    await page.getByRole('button', { name: '现货加烫' }).click();
     // 急单复选框 (CreateOrderForm name="isUrgent")
     await page.locator('input[name="isUrgent"]').check();
     await page.getByRole('button', { name: /创建工单/ }).click();

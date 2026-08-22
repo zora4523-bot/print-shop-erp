@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import {
   Bell,
   ClipboardList,
@@ -17,9 +18,14 @@ import {
 import {
   getEndingPeriods,
   getOverdueOutsourcing,
+  getDueOrders,
   getPendingShipments,
+  getRecentOverReports,
+  OVER_REPORT_WINDOW_DAYS,
   type EndingPeriodRow,
+  type DueOrderRow,
   type OverdueOutsourceRow,
+  type OverReportRow,
   type PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
 import {
@@ -37,48 +43,46 @@ import {
   WatchlistTable,
   type WatchlistColumn,
 } from '@/components/business/dashboard/WatchlistTable';
-import { ProductionTrendChart } from '@/components/business/dashboard/ProductionTrendChart';
-import { SalesRankingChart } from '@/components/business/dashboard/SalesRankingChart';
-import { CategoryDistributionChart } from '@/components/business/dashboard/CategoryDistributionChart';
+import { DeferredDashboardCharts } from '@/components/business/dashboard/DeferredDashboardCharts';
 import { Badge } from '@/components/ui/badge';
+import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
-import { requireSession } from '@/lib/auth/session';
+import { PROMISE_ALERT_STATUSES } from '@/lib/order/promised-date';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 
-export const metadata = { title: '老板 Dashboard' };
+export const metadata = { title: '管理员 Dashboard' };
 
-// /owner is the OWNER landing page. Layered build (P1 #1):
+// /owner is the ADMIN landing page. Layered build (P1 #1):
 //   - Slice A: 4 KPI cards
-//   - Slice B: 3 watchlist tables
+//   - Slice B: 4 watchlist tables（含「超计划报工」——超报的知情通道，
+//     见 lib/dashboard/owner-watchlist.ts 的 getRecentOverReports）
 //   - Slice C: 3 charts — 30 天产量 / 销售业绩 Top10 / 产品分布
 //
-// Permission: `report:all` is OWNER-only; matches the (admin)/owner
+// Permission: `report:all` is ADMIN-only; matches the (admin)/owner
 // layout gate but keeps the page-level guard as defense in depth (the
 // layout could be bypassed if a future Server Action reuses this page
 // as a fragment — defensive habit, no measurable cost).
 export default async function OwnerDashboardPage() {
-  await requirePermission('report:all');
-
-  // displayName 用于 HeroBanner welcome；权限 gate 已通过，session 必有。
-  const { user } = await requireSession();
+  // requirePermission 已返回通过权限检查的 session user；不要再读一次
+  // session 只为拿 displayName。
+  const user = await requirePermission('report:all');
 
   const [
     today,
     monthly,
     pendingShipments,
     overdueOutsourcing,
+    dueOrders,
+    overReports,
     endingPeriods,
-    productionTrend,
-    salesRanking,
-    categoryDistribution,
   ] = await Promise.all([
     getTodayOrderStats(),
     getMonthlyBillStats(),
     getPendingShipments(),
     getOverdueOutsourcing(),
+    getDueOrders(),
+    getRecentOverReports(),
     getEndingPeriods(),
-    getProductionTrend(),
-    getSalesRanking(),
-    getCategoryDistribution(),
   ]);
 
   // 完工同比：今日 vs 昨日。差值正→上升，负→下降，0→持平。
@@ -90,14 +94,26 @@ export default async function OwnerDashboardPage() {
         ? `较昨日 ${completedDiff}`
         : '与昨日持平';
 
+  // 交期预警只渲染前 N 条，footer 的「查看全部」把同一个窗口交给工单
+  // 列表页：status = 未发货五态、promisedTo = 窗口右界日历日、按交期正
+  // 序。窗口右界由 getDueOrders 一起返回，页面不自己算日期，否则链接
+  // 筛出来的和上面列出来的会悄悄不是一批。
+  // （列表页的 status 支持逗号分隔，见 lib/order/list-query.ts valuesOf。）
+  const dueOrdersHref = `/orders?${new URLSearchParams({
+    status: PROMISE_ALERT_STATUSES.join(','),
+    promisedTo: dueOrders.promisedThroughYmd,
+    sort: 'promisedDate',
+    dir: 'asc',
+  })}`;
+
   return (
     <div className="space-y-6">
       <HeroBanner
         title={`欢迎回来，${user.displayName}`}
         subtitle={
           <>
-            今日 <span className="font-mono">{today.date}</span> · 本月{' '}
-            <span className="font-mono">{monthly.month}</span> · 时区
+            今日 <span className="font-sans tabular-nums">{today.date}</span> · 本月{' '}
+            <span className="font-sans tabular-nums">{monthly.month}</span> · 时区
             Asia/Shanghai
           </>
         }
@@ -151,7 +167,7 @@ export default async function OwnerDashboardPage() {
           hint={
             <>
               已收 {formatMoney(monthly.paid)} · 未收{' '}
-              <span className="font-mono">{formatMoney(monthly.outstanding)}</span>
+              <span className="font-sans tabular-nums">{formatMoney(monthly.outstanding)}</span>
             </>
           }
         />
@@ -172,7 +188,7 @@ export default async function OwnerDashboardPage() {
           href="/owner/products"
           icon={PackageOpen}
           label="产品库"
-          description="规格、建议单价"
+          description="规格、基础价与起订量"
           tone="info"
         />
         <ActionShortcut
@@ -198,11 +214,11 @@ export default async function OwnerDashboardPage() {
           description="完工但未发货 · 急单优先"
           rows={pendingShipments.rows}
           rowKey={(r) => r.id}
-          emptyText="暂无待发货工单 — 所有完工单已发货。"
+          emptyText="暂无待发货工单 — 所有完工单已发货"
           columns={pendingShipmentColumns}
           footer={
             // 没做 /orders?status=COMPLETED 过滤入口（orders index 不读
-            // searchParams，Codex round 99 low）；先只提示&ldquo;有更多&rdquo;，链接
+            // searchParams）；先只提示&ldquo;有更多&rdquo;，链接
             // 等订单管理页支持 status filter 后再加。
             pendingShipments.hasMore ? (
               <span>还有更多待发货工单（仅显示前 10 条）。</span>
@@ -216,8 +232,71 @@ export default async function OwnerDashboardPage() {
           description="预计交付日已过仍未收"
           rows={overdueOutsourcing}
           rowKey={(r) => r.id}
-          emptyText="暂无超期外协。"
+          emptyText="暂无超期外协"
           columns={overdueOutsourceColumns}
+        />
+
+        <WatchlistTable
+          slot="dashboard-watchlist-due-orders"
+          title="交期预警"
+          description="承诺交期已逾期或 3 天内到期 · 未发货工单"
+          rows={dueOrders.rows}
+          rowKey={(r) => r.id}
+          emptyText="暂无交期风险工单"
+          columns={dueOrderColumns}
+          footer={
+            // 截断必须说出来，并且给得出总数：这张表的窗口没有下界，
+            // 积压多少正是业主要看的信号。链接与上表同窗口（见
+            // dueOrdersHref）。
+            dueOrders.total > dueOrders.rows.length ? (
+              <span>
+                共{' '}
+                <span className="font-sans tabular-nums">
+                  {dueOrders.total}
+                </span>{' '}
+                条 · 仅显示交期最紧的前{' '}
+                <span className="font-sans tabular-nums">
+                  {dueOrders.rows.length}
+                </span>{' '}
+                条 ·{' '}
+                <Link
+                  href={dueOrdersHref}
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  查看全部 →
+                </Link>
+              </span>
+            ) : null
+          }
+        />
+
+        <WatchlistTable
+          slot="dashboard-watchlist-over-reports"
+          title="超计划报工"
+          description={`近 ${OVER_REPORT_WINDOW_DAYS} 天 · 师傅勾确认后超出计划数完工`}
+          rows={overReports.rows}
+          rowKey={(r) => r.id}
+          emptyText={`近 ${OVER_REPORT_WINDOW_DAYS} 天没有超计划报工。`}
+          columns={overReportColumns}
+          footer={
+            // 这张表是超报的唯一知情通道：批准权在师傅自己手上（勾一下就
+            // 过），而计件按合计数全额付。总数必须给全，不能只显示前 10 条
+            // 就当没别的了。空窗口不渲染 footer —— emptyText 已经把话说完，
+            // 再补一句「共 0 条」只是噪音。
+            overReports.total > 0 ? (
+              <span>
+                共{' '}
+                <span className="font-sans tabular-nums">
+                  {overReports.total}
+                </span>{' '}
+                条（{overReports.sinceYmd} 起）
+                {overReports.total > overReports.rows.length
+                  ? ` · 仅显示最近 ${overReports.rows.length} 条`
+                  : ''}
+                。明细在工单时间线里，点工单号进去看。
+              </span>
+            ) : null
+          }
         />
       </div>
 
@@ -231,58 +310,44 @@ export default async function OwnerDashboardPage() {
         columns={endingPeriodColumns}
       />
 
-      <ChartCard
-        slot="dashboard-chart-trend-card"
-        title="近 30 天产量趋势"
-        description="按完工时间汇总 · COMPLETED / SHIPPED / FINISHED"
-      >
-        <ProductionTrendChart data={productionTrend} />
-      </ChartCard>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard
-          slot="dashboard-chart-ranking-card"
-          title="本月销售业绩 Top 10"
-          description="按提交时间归属 · SALES 蓝色 / 客服 绿色"
-        >
-          <SalesRankingChart data={salesRanking} />
-        </ChartCard>
-        <ChartCard
-          slot="dashboard-chart-category-card"
-          title="本月产品线分布"
-          description="按工单计数（同一工单多款式只计 1 次）"
-        >
-          <CategoryDistributionChart data={categoryDistribution} />
-        </ChartCard>
-      </div>
+      <Suspense fallback={<DashboardChartsLoading />}>
+        <DashboardChartsSection />
+      </Suspense>
     </div>
   );
 }
 
-function ChartCard({
-  slot,
-  title,
-  description,
-  children,
-}: {
-  slot: string;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
+async function DashboardChartsSection() {
+  const [productionTrend, salesRanking, categoryDistribution] =
+    await Promise.all([
+      getProductionTrend(),
+      getSalesRanking(),
+      getCategoryDistribution(),
+    ]);
+
   return (
-    <section
-      data-slot={slot}
-      className="rounded-xl border bg-card shadow-sm"
+    <DeferredDashboardCharts
+      productionTrend={productionTrend}
+      salesRanking={salesRanking}
+      categoryDistribution={categoryDistribution}
+    />
+  );
+}
+
+function DashboardChartsLoading() {
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="正在加载统计图表"
+      className="space-y-4"
     >
-      <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
-        <h2 className="text-base font-semibold">{title}</h2>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
+      <div className="h-[23rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
+      </div>
+    </div>
   );
 }
 
@@ -294,14 +359,14 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     cell: (r) => (
       <Link
         href={`/orders/${r.id}`}
-        className="font-mono text-xs underline-offset-2 hover:underline"
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
       >
         {r.orderNo}
       </Link>
     ),
   },
   {
-    header: '客户',
+    header: '客户名称/简称',
     cell: (r) => r.customerRef ?? '—',
   },
   {
@@ -312,12 +377,56 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
     header: '完工时间',
     cell: (r) => formatDateTimeShanghai(r.completedAt),
     align: 'right',
-    className: 'font-mono text-xs',
+    className: 'font-sans tabular-nums text-xs',
   },
   {
     header: '急单',
     cell: (r) =>
       r.isUrgent ? <Badge variant="destructive">急</Badge> : null,
+    align: 'center',
+  },
+];
+
+const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
+  {
+    header: '工单号',
+    cell: (r) => (
+      <Link
+        href={`/orders/${r.id}`}
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
+      >
+        {r.orderNo}
+      </Link>
+    ),
+  },
+  {
+    header: '客户名称/简称',
+    cell: (r) => r.customerRef ?? '—',
+  },
+  {
+    header: '状态',
+    cell: (r) => <OrderStatusBadge status={r.status} />,
+    align: 'center',
+  },
+  {
+    header: '承诺交期',
+    cell: (r) => r.promisedDate.toISOString().slice(0, 10),
+    align: 'right',
+    className: 'font-sans tabular-nums text-xs',
+  },
+  {
+    header: '交期',
+    cell: (r) =>
+      r.daysLeft < 0 ? (
+        <Badge variant="destructive">逾期 {-r.daysLeft} 天</Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className="border-warning/50 bg-warning/10 text-warning-foreground"
+        >
+          {r.daysLeft === 0 ? '今天到期' : `剩 ${r.daysLeft} 天`}
+        </Badge>
+      ),
     align: 'center',
   },
 ];
@@ -335,7 +444,7 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
       header: '工单号',
       cell: (r) =>
         r.orderNo ? (
-          <span className="font-mono text-xs">{r.orderNo}</span>
+          <span className="font-sans tabular-nums text-xs">{r.orderNo}</span>
         ) : (
           '—'
         ),
@@ -348,7 +457,7 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
       header: '预计交付',
       cell: (r) => formatDateShanghai(r.expectedDate),
       align: 'right',
-      className: 'font-mono text-xs',
+      className: 'font-sans tabular-nums text-xs',
     },
     {
       header: '超期',
@@ -366,6 +475,40 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
     },
   ];
 
+const overReportColumns: readonly WatchlistColumn<OverReportRow>[] = [
+  {
+    header: '工单号',
+    cell: (r) => (
+      <Link
+        href={`/orders/${r.orderId}`}
+        className="font-sans tabular-nums text-xs underline-offset-2 hover:underline"
+      >
+        {r.orderNo}
+      </Link>
+    ),
+  },
+  {
+    header: '报工人',
+    cell: (r) => r.operatorDisplayName,
+  },
+  {
+    // remark 的格式由 lib/production.ts 的 overReportRemark 决定，
+    // 形如「款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200
+    // （合格 6000 / 不良 100 / 返工 100），报工人 …，已勾选确认」。
+    // 这里原样显示——比再解析一遍诚实，也不会因为格式微调就显示成空白。
+    header: '明细',
+    cell: (r) => (
+      <span className="text-xs text-muted-foreground">{r.remark ?? '—'}</span>
+    ),
+  },
+  {
+    header: '时间',
+    cell: (r) => formatDateTimeShanghai(r.createdAt),
+    align: 'right',
+    className: 'font-sans tabular-nums text-xs',
+  },
+];
+
 const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   {
     header: '客服',
@@ -374,7 +517,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   {
     header: '周期',
     cell: (r) => (
-      <span className="font-mono text-xs">
+      <span className="font-sans tabular-nums text-xs">
         {formatDateShanghai(r.periodStart)} → {formatDateShanghai(r.periodEnd)}
       </span>
     ),
@@ -390,7 +533,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
   },
   {
     // 业绩合计（算档用）= totalSales + initialSales。同 owner/salary/cs/[id]
-    // 详情页的口径，保证与右侧"预测提成"档位一致（Codex round 99 medium：
+    // 详情页的口径，保证与右侧"预测提成"档位一致（
     // 不能让显示数比命中档低，否则 owner 看不出为什么提成是这个金额）。
     header: '业绩合计',
     cell: (r) => {
@@ -407,7 +550,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
       );
     },
     align: 'right',
-    className: 'font-mono',
+    className: 'font-sans tabular-nums',
   },
   {
     header: '预测提成',
@@ -420,7 +563,7 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
         formatMoney(r.predictedCommission)
       ),
     align: 'right',
-    className: 'font-mono',
+    className: 'font-sans tabular-nums',
   },
   {
     header: '预测总收入',
@@ -431,29 +574,8 @@ const endingPeriodColumns: readonly WatchlistColumn<EndingPeriodRow>[] = [
         formatMoney(r.predictedTotalIncome)
       ),
     align: 'right',
-    className: 'font-mono font-semibold',
+    className: 'font-sans tabular-nums font-semibold',
   },
 ];
 
 // ─── helpers ───
-
-function formatDateShanghai(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTimeShanghai(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role } from '../../../generated/prisma/client';
+import { OrderStatus, Role } from '../../../generated/prisma/enums';
 
 vi.mock('@/lib/auth/session', () => ({
-  getSession: vi.fn(),
+  requireSession: vi.fn(),
 }));
 
 import {
@@ -12,10 +12,11 @@ import {
   getOrderScopeFilter,
   type Permission,
 } from '../permissions';
-import { getSession } from '@/lib/auth/session';
+import { hasPermission } from '../permissions-dict';
+import { requireSession } from '@/lib/auth/session';
 import { UnauthorizedError } from '../errors';
 
-const mockedGetSession = vi.mocked(getSession);
+const mockedRequireSession = vi.mocked(requireSession);
 
 type SessionUser = Parameters<typeof requireOwnership>[1];
 
@@ -41,10 +42,13 @@ describe('PERMISSIONS map', () => {
       'order:update:post-schedule',
       'order:view:all',
       'order:view:self',
+      'order:export:all',
       'order:schedule',
       'order:ship',
       'order:mark-urgent',
       'order:cancel',
+      'order:change:request',
+      'order:change:review',
       'task:assign',
       'task:report',
       'outsource:manage',
@@ -52,6 +56,8 @@ describe('PERMISSIONS map', () => {
       'design:bundle:create',
       'material:manage',
       'material:issue',
+      'purchase:manage',
+      'warehouse:manage',
       'bill:view:all',
       'bill:view:self',
       'bill:mark-paid',
@@ -59,10 +65,15 @@ describe('PERMISSIONS map', () => {
       'salary:view:self',
       'salary:view:team',
       'salary:rule:manage',
+      'party:manage',
       'dict:product:manage',
       'dict:craft:manage',
       'dict:price:manage',
+      'bom:manage',
       'notification:config',
+      'setting:manage',
+      'ops:pigsty:view',
+      'ops:jobs:manage',
       'account:manage',
       'report:all',
       'report:production',
@@ -79,51 +90,67 @@ describe('PERMISSIONS map', () => {
     }
   });
 
-  it('OWNER-exclusive permissions are exactly [OWNER]', () => {
-    const ownerOnly: Permission[] = [
+  it('administrator-only permissions are exactly [ADMIN]', () => {
+    const adminOnly: Permission[] = [
       'order:cancel',
+      'order:change:review',
+      'order:export:all',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
       'salary:rule:manage',
+      'party:manage',
+      'purchase:manage',
+      'warehouse:manage',
       'dict:product:manage',
       'dict:craft:manage',
       'dict:price:manage',
+      'bom:manage',
       'notification:config',
+      'setting:manage',
+      'ops:pigsty:view',
+      'ops:jobs:manage',
       'account:manage',
       'report:all',
     ];
-    for (const perm of ownerOnly) {
-      expect(PERMISSIONS[perm], perm).toEqual([Role.OWNER]);
+    for (const perm of adminOnly) {
+      expect(PERMISSIONS[perm], perm).toEqual([Role.ADMIN]);
     }
   });
 
   it('worker-only permission task:report is [WORKER]', () => {
     expect(PERMISSIONS['task:report']).toEqual([Role.WORKER]);
   });
+
+  it('external-sales self billing is SALES-only', () => {
+    expect(PERMISSIONS['bill:view:self']).toEqual([Role.SALES]);
+  });
 });
 
 describe('requirePermission', () => {
   beforeEach(() => {
-    mockedGetSession.mockReset();
+    mockedRequireSession.mockReset();
   });
 
   it('throws UnauthorizedError when no session', async () => {
-    mockedGetSession.mockResolvedValue(null);
+    mockedRequireSession.mockRejectedValue(new UnauthorizedError('未登录'));
     await expect(requirePermission('order:create')).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
   it.each([
     [Role.SALES, 'order:create'],
     [Role.CUSTOMER_SERVICE, 'order:create'],
-    [Role.OWNER, 'order:create'],
-    [Role.FOREMAN, 'order:create'],
-    [Role.OWNER, 'account:manage'],
+    [Role.ADMIN, 'order:create'],
+    [Role.ADMIN, 'account:manage'],
+    [Role.ADMIN, 'order:export:all'],
+    [Role.SALES, 'bill:view:self'],
     [Role.WORKER, 'task:report'],
-    [Role.OWNER, 'salary:rule:manage'],
-    [Role.FOREMAN, 'report:production'],
+    [Role.WORKER, 'order:view:self'],
+    [Role.WORKER, 'salary:view:self'],
+    [Role.ADMIN, 'salary:rule:manage'],
+    [Role.ADMIN, 'report:production'],
   ] as const)('role %s is allowed for %s', async (role, perm) => {
-    mockedGetSession.mockResolvedValue(session(role));
+    mockedRequireSession.mockResolvedValue(session(role));
     const user = await requirePermission(perm);
     expect(user.role).toBe(role);
   });
@@ -131,36 +158,64 @@ describe('requirePermission', () => {
   it.each([
     [Role.WORKER, 'order:create'],
     [Role.SALES, 'account:manage'],
-    [Role.FOREMAN, 'account:manage'],
     [Role.CUSTOMER_SERVICE, 'salary:rule:manage'],
     [Role.WORKER, 'order:view:all'],
+    [Role.SALES, 'order:export:all'],
+    [Role.CUSTOMER_SERVICE, 'bill:view:self'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
-    mockedGetSession.mockResolvedValue(session(role));
+    mockedRequireSession.mockResolvedValue(session(role));
     await expect(requirePermission(perm)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
   it('throws a plain Error (not Unauthorized) when permission key is unknown', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.OWNER));
+    mockedRequireSession.mockResolvedValue(session(Role.ADMIN));
     // Bypass the compile-time guard to simulate a runtime bug.
     const badKey = 'does:not:exist' as Permission;
     await expect(requirePermission(badKey)).rejects.toThrow(/未定义的权限/);
   });
 
   it('returned user has id, role, username, displayName', async () => {
-    mockedGetSession.mockResolvedValue(session(Role.OWNER, 'owner-42'));
+    mockedRequireSession.mockResolvedValue(session(Role.ADMIN, 'owner-42'));
     const user = await requirePermission('account:manage');
     expect(user.id).toBe('owner-42');
     expect(user.username).toBe('test');
     expect(user.displayName).toBe('测试');
-    expect(user.role).toBe(Role.OWNER);
+    expect(user.role).toBe(Role.ADMIN);
+  });
+});
+
+describe('hasPermission', () => {
+  // 纯谓词版，只给「需要软判断、不能抛」的场景用 —— 目前是各详情页的
+  // generateMetadata（流式 metadata 下抛异常未必还能干净落到 error.tsx）。
+  // 它和 requirePermission 读的是同一张 PERMISSIONS 字典，所以标签页标题
+  // 的可见性永远跟着权限规则走，不会各写一份。
+  it('ADMIN 有 bill:view:all', () => {
+    expect(hasPermission('bill:view:all', Role.ADMIN)).toBe(true);
+  });
+
+  it('SALES 没有 bill:view:all（直连 /owner/bills/<id> 时标题不能泄露账期+姓名）', () => {
+    expect(hasPermission('bill:view:all', Role.SALES)).toBe(false);
+  });
+
+  it('SALES 有 bill:view:self', () => {
+    expect(hasPermission('bill:view:self', Role.SALES)).toBe(true);
+  });
+
+  it('和 requirePermission 用的是同一张字典', () => {
+    for (const [permission, roles] of Object.entries(PERMISSIONS)) {
+      for (const role of Object.values(Role)) {
+        expect(hasPermission(permission as Permission, role)).toBe(
+          (roles as readonly Role[]).includes(role),
+        );
+      }
+    }
   });
 });
 
 describe('requireOwnership', () => {
   const selfUser: SessionUser = { id: 'u-self', role: Role.SALES };
-  const ownerUser: SessionUser = { id: 'u-owner', role: Role.OWNER };
-  const foremanUser: SessionUser = { id: 'u-foreman', role: Role.FOREMAN };
+  const adminUser: SessionUser = { id: 'u-admin', role: Role.ADMIN };
 
   it('passes when the user is the owner (no global permission given)', async () => {
     const order = { submitterId: 'u-self' };
@@ -177,10 +232,7 @@ describe('requireOwnership', () => {
   it('passes when globalPermission grants access regardless of ownership', async () => {
     const order = { submitterId: 'u-other' };
     await expect(
-      requireOwnership(order, ownerUser, 'submitterId', 'order:view:all'),
-    ).resolves.toBeUndefined();
-    await expect(
-      requireOwnership(order, foremanUser, 'submitterId', 'order:view:all'),
+      requireOwnership(order, adminUser, 'submitterId', 'order:view:all'),
     ).resolves.toBeUndefined();
   });
 
@@ -193,12 +245,8 @@ describe('requireOwnership', () => {
 });
 
 describe('getOrderScopeFilter', () => {
-  it('OWNER sees all orders (empty filter)', () => {
-    expect(getOrderScopeFilter({ id: 'x', role: Role.OWNER })).toEqual({});
-  });
-
-  it('FOREMAN sees all orders (empty filter)', () => {
-    expect(getOrderScopeFilter({ id: 'x', role: Role.FOREMAN })).toEqual({});
+  it('ADMIN sees all orders (empty filter)', () => {
+    expect(getOrderScopeFilter({ id: 'x', role: Role.ADMIN })).toEqual({});
   });
 
   it('SALES sees only their own orders', () => {
@@ -211,8 +259,9 @@ describe('getOrderScopeFilter', () => {
     });
   });
 
-  it('WORKER sees orders whose items have a task assigned to them', () => {
+  it('WORKER sees assigned orders only after they leave the scheduling-draft state', () => {
     expect(getOrderScopeFilter({ id: 'w1', role: Role.WORKER })).toEqual({
+      status: { not: OrderStatus.SUBMITTED },
       items: { some: { tasks: { some: { workerId: 'w1' } } } },
     });
   });

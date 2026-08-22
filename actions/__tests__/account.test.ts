@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import bcrypt from 'bcryptjs';
-import { Role } from '../../generated/prisma/client';
+import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 // vi.mock factories are hoisted above top-level declarations, so refs to

@@ -4,6 +4,7 @@ import { AuthError } from 'next-auth';
 import { signIn } from '@/lib/auth/config';
 import { loginSchema } from '@/lib/auth/schemas';
 import { safeInternalPath } from '@/lib/auth/redirect';
+import { invalidFromIssuesDeep } from '@/lib/admin/action-helpers';
 
 // Shape the LoginForm reads to render error text / decide redirect.
 // `redirectTo` on success is the path we want the client to navigate to; we
@@ -23,16 +24,11 @@ export async function signInWithCredentials(
   };
   const parsed = loginSchema.safeParse(raw);
   if (!parsed.success) {
-    const fieldErrors: Record<string, string[]> = {};
-    for (const issue of parsed.error.issues) {
-      const key = issue.path.join('.') || '_';
-      (fieldErrors[key] ??= []).push(issue.message);
-    }
-    return { status: 'invalid', fieldErrors };
+    return invalidFromIssuesDeep(parsed.error.issues);
   }
 
   // Sanitize the post-login target so `/login?from=//evil.example` can't turn
-  // the auth flow into an open redirect (Codex round 8).
+  // the auth flow into an open redirect .
   const from = safeInternalPath(formData.get('from'));
 
   try {

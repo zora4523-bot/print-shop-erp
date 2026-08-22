@@ -5,19 +5,17 @@ import {
   uniqueSuffix,
   E2E_PASSWORD,
   E2E_USERS,
-  ADMIN_USERNAME,
-  ADMIN_PASSWORD,
   seedNotificationWireFixture,
   readNotificationLogs,
 } from './_helpers';
 
-// 这条测试的具体使命：把 SALES 创建 → 提交 → FOREMAN 排产 → WORKER
+// 这条测试的具体使命：把 SALES 创建 → 提交 → ADMIN 排产 → WORKER
 // 报工 → 工单级联 FINISHED 整条链 cover 一遍。所有 advisory lock 都
 // 在这条链上：order submit / schedule / task begin / task report /
 // order-cascade。HANDOFF 历史里 round 39 P0 race 就埋在 cascade 锁内
 // fresh-read Order.status，没有 E2E 真实跑过那段就只能靠相信单测。
 test.describe('生产流程 — golden path', () => {
-  test('SALES create → submit, FOREMAN schedule, WORKER report → cascade COMPLETED → SHIP → FINISHED', async ({
+  test('SALES create → submit, ADMIN schedule, WORKER report → cascade COMPLETED → SHIP → FINISHED', async ({
     page,
   }) => {
     test.setTimeout(60_000); // 多角色切换 + 多次表单提交，给点余量
@@ -46,11 +44,7 @@ test.describe('生产流程 — golden path', () => {
       await page.locator('input[name="items.0.quantity"]').fill('1000');
       // &ldquo;现货加烫&rdquo; 是 seed 里 defaultMachineType=HAND_PRESS 的工艺，
       // 和我们的 e2e-worker-hand 师傅匹配 → 排产能选到。
-      await page
-        .locator('label')
-        .filter({ hasText: '现货加烫' })
-        .locator('input[type="checkbox"]')
-        .check();
+      await page.getByRole('button', { name: '现货加烫' }).click();
       await page.getByRole('button', { name: /创建工单/ }).click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
         timeout: 10_000,
@@ -103,7 +97,7 @@ test.describe('生产流程 — golden path', () => {
       ).toHaveLength(0);
     });
 
-    await test.step('FOREMAN 登录 → 直接到排产详情页', async () => {
+    await test.step('ADMIN 登录 → 直接到排产详情页', async () => {
       await logout(page);
       // 直接 deep-link 到这个工单的排产页：order id 我们刚捕获了，
       // /foreman/scheduling/[id] 用同一个 id。比按 customerRef 在
@@ -224,12 +218,15 @@ test.describe('生产流程 — golden path', () => {
       expect(mine[0]!.messageContent).toContain('工单完工');
     });
 
-    await test.step('OWNER 视角验证工单 cascade 到 COMPLETED', async () => {
+    await test.step('ADMIN 视角验证工单 cascade 到 COMPLETED', async () => {
       await logout(page);
       await login(page, {
         from: orderUrl,
-        username: ADMIN_USERNAME,
-        password: ADMIN_PASSWORD,
+        // Keep the flow hermetic: globalSetup owns this ADMIN account and
+        // refreshes its password every run. The operator's real admin account
+        // may intentionally use different credentials.
+        username: E2E_USERS.foreman.username,
+        password: E2E_PASSWORD,
       });
       // 详情页 status badge 应显示&ldquo;已完工&rdquo;（OrderStatus.FINISHED）。
       // 用工单详情页里 Row 渲染状态那一格 + customerRef 双重确认我们看的
@@ -258,7 +255,7 @@ test.describe('生产流程 — golden path', () => {
     });
 
     let trackingNoForLog = '';
-    await test.step('OWNER 标记发货 (COMPLETED → SHIPPED)', async () => {
+    await test.step('ADMIN 标记发货 (COMPLETED → SHIPPED)', async () => {
       // 还在 admin (orderUrl) 上；ShipOrderForm 在 COMPLETED 下渲染。
       // 填一个运单号 + 提交，验证 status badge 切到&ldquo;已发货&rdquo;。
       trackingNoForLog = `SF-${Date.now().toString(36)}`;
@@ -297,7 +294,7 @@ test.describe('生产流程 — golden path', () => {
       expect(mine[0]!.messageContent).not.toContain('{trackingNo}');
     });
 
-    await test.step('OWNER 确认完工 (SHIPPED → FINISHED 终态)', async () => {
+    await test.step('ADMIN 确认完工 (SHIPPED → FINISHED 终态)', async () => {
       // 发货后 FinishOrderButton 渲染；按一下走到 FINISHED。
       await page.getByRole('button', { name: /^确认完工$/ }).click();
       // 终态：badge =&ldquo;已完成&rdquo;（不是&ldquo;已完工&rdquo;）。这里精准断言别

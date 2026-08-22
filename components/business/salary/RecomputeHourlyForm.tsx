@@ -8,9 +8,12 @@ import type { RecomputeHourlyResult } from '@/actions/owner-salary.types';
 
 type Props = {
   defaultMonth: string;
+  // 上海日历的本月。纯浏览器层提示，真闸口在 lib/salary/hourly-aggregate.ts
+  // 的 assertNotFutureSalaryMonth。
+  maxMonth: string;
 };
 
-export function RecomputeHourlyForm({ defaultMonth }: Props) {
+export function RecomputeHourlyForm({ defaultMonth, maxMonth }: Props) {
   const [state, action] = useActionState<RecomputeHourlyResult | null, unknown>(
     recomputeHourlyPayrollAction,
     null,
@@ -29,7 +32,9 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
         <Input
           type="month"
           name="month"
+          aria-label="重算月份"
           defaultValue={defaultMonth}
+          max={maxMonth}
           className="max-w-[180px]"
         />
         <Button type="submit" disabled={pending}>
@@ -43,16 +48,18 @@ export function RecomputeHourlyForm({ defaultMonth }: Props) {
         </p>
       ) : null}
       {state?.status === 'success' && state.errors.length > 0 ? (
-        <ul className="text-xs text-destructive space-y-1">
+        // role="alert"：汇总行是 role="status"，读屏器只会念到「已处理 N
+        // 位 · M 个失败」，念不到具体是谁失败了。
+        <ul role="alert" className="text-xs text-destructive space-y-1">
           {state.errors.map((e) => (
             <li key={e.workerId}>
-              {e.workerId}: {e.message}
+              {e.workerName}：{e.message}
             </li>
           ))}
         </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
         <p className="text-xs text-destructive">

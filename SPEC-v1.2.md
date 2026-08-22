@@ -7,13 +7,70 @@
 
 ---
 
+## J. 2026-08-07 现行计价与结算补充（取代本文早期“金额手填 / 建议价仅参考”口径）
+
+本节描述当前代码的权威实现；与正文或附录 C 冲突时，以本节为准。
+
+### J.1 工单结算方向不是账号当前角色
+
+工单创建时把资金方向冻结到 `Order.settlementType`：
+
+| 创建身份 | 结算方向 | 财务含义 |
+|---|---|---|
+| 外部销售 `SALES` | `EXTERNAL_SALES` | 外部销售应付工厂加工费，进入销售应收 Bill |
+| 内部客服 `CUSTOMER_SERVICE` | `INTERNAL_SALES` | 工厂内部销售业绩，进入客服销售额/工资流水，不生成外部应收 |
+| 管理员 `ADMIN` | `FACTORY_DIRECT` | 工厂直接业务，不借用外部销售或员工工资账本 |
+| 免费重做 | `NO_CHARGE` | 不向客户重复收费，生产计件和成本仍按真实事实记录 |
+
+账号角色只回答权限；历史工单的资金方向不得因改岗、停用或重命名重新推导。
+
+### J.2 对客加工费公式
+
+每个款式独立报价，最终恒满足：
+
+```text
+款式小计 = round(数量 × 成交单价, 2) + 一次性费用
+工单总额 = Σ 款式小计
+```
+
+系统先校验产品最小起订量；数量低于起订量时报价不完整，特殊单只能由有权录单人员手工填价并保存原因。通过校验后，选择同一产品中“`minQty <= 数量` 的最大起订量”价格阶梯；没有适用阶梯时回退到产品基础单价。随后叠加所有命中的启用收费项：
+
+- `PER_PIECE`：按个，`金额 = 费率 × 数量`；
+- `PER_SHEET`：按张，`张数 = ceil(数量 / unitsPerSheet)`；
+- `PER_10K`：每万个，`金额 = 费率 × 数量 / 10000`；
+- `PER_ORDER`：历史枚举名保留，现行业务含义是“每款一次”，不是整张工单只收一次。
+
+收费项可按产品、工艺（任一/全部）、规格、纸张、烫金色、单双面、单双色、数量区间和结算方向命中；`perFoilColor=true` 时按实际所选烫金颜色数倍增，“无颜色（纯彩印）”不计为烫金色。
+
+各组件先按分币舍入，再合计款式建议小计。服务端会把可归入按个的部分保存为四位小数成交单价，把舍入余数和按张/每万个/每款费用保存为两位小数一次性费用，保证页面、数据库和导出对平。
+
+### J.3 服务端权威报价与快照
+
+- 浏览器的“计算并应用建议价”只用于预览；创建工单时服务端必须在写入事务内按当前规则重新报价。
+- 未人工填写价格且规则完整时，自动应用建议价；人工成交价与建议价不同，或规则不完整时，必须填写人工改价说明。
+- `OrderItem.pricingSnapshot` 保存输入事实、基础价来源、命中收费项、各组件和实际成交金额；后续修改字典不得回写历史快照。
+- 修改申请若改变数量、规格、烫金颜色或新增款式，管理员批准时按合并后的完整事实重新报价；只改名称不得因字典后来变化而改价。无法完整报价而沿用旧成交价时必须由审核人明确说明原因。
+- `Decimal(10,4)` 单价和 `Decimal(12,2)` 款式/工单金额在报价引擎与领域写入边界双重校验；任何派生溢出都在写数据库前明确拒绝。
+
+### J.4 五类金额事实必须分账
+
+1. 外部销售加工费应收：`Bill / BillItem / BillPayment`；
+2. 内部客服销售额与提成：`CsSalesEntry / SalaryPeriod / CsPayrollPayment`；
+3. 开机师傅计件及保底：任务规则快照、日工资和调整流水；
+4. 打包、清废、厨师工资：考勤 + 版本化工资规则 + 月结快照；
+5. 外协供应商应付：`OutsourceOrder.amount / OutsourceAmountChange / OutsourcePayment`。
+
+客户售价规则不得用于计算员工工资或供应商应付。当前外协供应商尚无结构化合同价规则；应付金额必须由管理员按供应商对账结果人工确认/更正后再付款，系统只负责数量归属校验、不可覆盖变更历史和防超付。不得为了“自动”而套用对客价格字典。
+
+---
+
 ## 0. 文档说明
 
 本文档是系统开发的**权威业务规格**。所有开发决策、代码实现、测试用例都以本文档为准。v1.2 较 v1.1 的主要变更：
 
 - 计件算法最终定版：双面/双色多维度乘倍、机器特异性
 - 工艺-机器映射表完整，激凸归风车机、UV和啤为外协
-- 报价表细节降级为P1/P2事项，MVP阶段金额手填
+- 报价表细节曾降级为 P1/P2、MVP 阶段金额手填（历史口径，现已由 §J 取代）
 - 增加《不做清单》保护开发聚焦
 
 本文档的附录B（工艺清单）和第7章（算法示例）是与代码实现一一对应的，**修改时需同步更新代码**。
@@ -38,7 +95,7 @@
 - 销售/客服在线录单 → 系统生成打印工单 → 车间师傅扫码报工
 - 师傅薪资按机器规则日结 / 客服4月周期自动算提成
 - 销售账单月度自动生成
-- CDR文件统一管理，车间主管一键打包发外协
+- CDR文件统一管理，管理员一键打包发外协
 - 关键事件通过企业微信机器人实时推送
 
 ### 1.3 范围边界
@@ -55,45 +112,48 @@
 
 | 角色枚举 | 中文名 | 主用终端 | 结算方式 |
 |---|---|---|---|
-| OWNER | 老板 | PC | — |
-| FOREMAN | 车间主管 | PC + 手机 | 系统不管 |
+| ADMIN | 管理员 | PC + 手机 | — |
 | SALES | 外部销售 | 手机 + PC | 按报价表应付工厂 |
 | CUSTOMER_SERVICE | 客服 | 手机 + PC | 2000底薪 + 4月累计提成 |
 | WORKER | 师傅 | 手机 | 按身份不同 |
 
-师傅（WORKER）通过`workerType`+`machineType`细分：
+师傅（WORKER）通过 `workerType` 细分岗位；开机师傅另外登记主机型与
+全部可操作机型：
 
 ```
 workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
   当 workerType=MACHINE 时：
-    machineType ∈ {HAND_PRESS, WINDMILL, GLUE}
+    machineType ∈ {HAND_PRESS, WINDMILL, GLUE}          # 主机型
+    machineCapabilities ⊆ {HAND_PRESS, WINDMILL, GLUE}  # 全部可操作机型，必须包含主机型
 ```
 
-**师傅一人一岗，不支持一人多岗**。
+**师傅仍是一人一岗位类型，不跨 MACHINE/PACKER/CLEANER/COOK；开机师傅可
+操作多种机器。** 管理员另为师傅登记熟练工艺，作为排产推荐依据而非唯一
+派工权限。
 
 ### 2.2 权限矩阵
 
-| 能力 | 老板 | 主管 | 销售 | 客服 | 开机师傅 | 打包/清废 |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| 查看所有工单 | ✓ | ✓ | 仅自己 | 仅自己 | 分配任务 | 分配任务 |
-| 创建工单 | ✓ | ✓ | ✓ | ✓ | — | — |
-| 修改工单（未排产前） | ✓ | ✓ | 仅自己 | 仅自己 | — | — |
-| 修改工单（排产后） | 仅地址/备注 | 仅地址/备注 | — | — | — | — |
-| 标记急单 | ✓ | ✓ | ✓ | ✓ | — | — |
-| 排产、派师傅 | ✓ | ✓ | — | — | — | — |
-| 外协管理 | ✓ | ✓ | — | — | — | — |
-| 物料出入库（P1） | ✓ | ✓ | — | — | ✓（领料） | — |
-| 报工 | — | — | — | — | ✓（自己任务） | ✓（自己任务） |
-| CDR汇总下载 | ✓ | ✓ | — | — | — | — |
-| 查看所有应收账单 | ✓ | — | — | — | — | — |
-| 查看自己账单 | — | — | ✓ | — | — | — |
-| 查看自己工资/业绩 | — | — | — | ✓ | ✓ | ✓ |
-| 查看所有薪资 | ✓ | — | — | — | — | — |
-| 管理产品/报价字典 | ✓ | — | — | — | — | — |
-| 管理薪资规则 | ✓ | — | — | — | — | — |
-| 管理工艺字典 | ✓ | — | — | — | — | — |
-| 管理推送规则 | ✓ | — | — | — | — | — |
-| 管理账号 | ✓ | — | — | — | — | — |
+| 能力 | 管理员 | 销售 | 客服 | 开机师傅 | 打包/清废 |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 查看所有工单 | ✓ | 仅自己 | 仅自己 | 分配任务 | 分配任务 |
+| 创建工单 | ✓ | ✓ | ✓ | — | — |
+| 修改工单（未排产前） | ✓ | 仅自己 | 仅自己 | — | — |
+| 修改工单（排产后） | 仅地址/备注 | — | — | — | — |
+| 标记急单 | ✓ | ✓ | ✓ | — | — |
+| 排产、派师傅 | ✓ | — | — | — | — |
+| 外协管理 | ✓ | — | — | — | — |
+| 物料出入库（P1） | ✓ | — | — | ✓（领料） | — |
+| 报工 | — | — | — | ✓（自己任务） | ✓（自己任务） |
+| CDR汇总下载 | ✓ | — | — | — | — |
+| 查看所有应收账单 | ✓ | — | — | — | — |
+| 查看自己账单 | — | ✓ | — | — | — |
+| 查看自己工资/业绩 | — | — | ✓ | ✓ | ✓ |
+| 查看所有薪资 | ✓ | — | — | — | — |
+| 管理产品/报价字典 | ✓ | — | — | — | — |
+| 管理薪资规则 | ✓ | — | — | — | — |
+| 管理工艺字典 | ✓ | — | — | — | — |
+| 管理推送规则 | ✓ | — | — | — | — |
+| 管理账号 | ✓ | — | — | — | — |
 
 ---
 
@@ -102,7 +162,7 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 ### 3.1 销售/客服创建工单
 
 ```
-登录 → 新建工单 → 填工单头（客户代号、收货信息、包装要求、备注、是否急单）
+登录 → 新建工单 → 填工单头（自定义名称、客户名称/简称、收货信息、包装要求、备注、是否急单、是否顺丰到付）
   → 添加款式（可多款式）
       ├─ 款式名
       ├─ 规格（中/大/方形/西封...）
@@ -112,25 +172,52 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
       ├─ 数量
       ├─ 是否双面
       ├─ 是否双色
-      ├─ 金额（手填，可点"建议价"参考报价表）
+      ├─ 加工费（服务端自动报价；规则不完整或人工议价时填写价格与原因）
       ├─ 上传设计图（JPG/PNG，多张）
       └─ 上传CDR源文件（多个，可选）
-  → 系统累加款式金额为工单总额
+  → 如需多地址：添加最多9个额外地址，为每个款式分配正整数数量
+      ├─ 各额外地址至少分配一个款式
+      ├─ 各款式分配总数不得超过款式数量
+      └─ 主地址至少保留一个款式数量
+  → 系统累加款式金额为工单总额（不计物流费用）
   → 提交
   → 工单状态：DRAFT → SUBMITTED
   → 企业微信机器人推送到"排产群"
 ```
 
-### 3.2 排产与外协（车间主管）
+#### 3.1.1 工单列表查询与导出
+
+- 工单列表默认严格按 `createdAt DESC, id DESC` 排列；急单只作标识和筛选，不打乱新单优先顺序。
+- 页数、总数、排序和所有筛选在服务端 PostgreSQL 执行；筛选条件始终与当前账号的工单数据范围做 `AND`，不得因搜索、地址、款式、任务或外协条件绕过权限。
+- 管理员可按工单、客户、收货/发货、提交人/师傅、金额/日期、款式/工艺、任务/机器和外协信息逐项独立筛选；已停用账号和退役工艺仍作为历史筛选项可见。
+- 只有 ADMIN 可导出全部或当前筛选结果。生产环境由 HEAVY worker 流式生成私有多工作表 XLSX；精确十进制金额不经 `Number`，不导出 OSS 地址/对象键、内部 ID、工资快照、任务载荷或 raw JSON。
+- 导出文件只允许发起人本人且下载时仍为启用 ADMIN 时获取，响应使用 `private, no-store`，生成后 24 小时过期；请求、完成和下载均写审计记录。
+- 导出筛选参数只在 PENDING 生成期保留并用哈希校验完整性；READY / FAILED / EXPIRED 终态只保留 `scope`，不保留原值或可枚举的确定性哈希。
+
+### 3.2 排产与外协（管理员）
 
 ```
-车间主管查看"已提交"工单
+管理员查看"已提交"工单
+→ 待排产列表展示款式/数量、具体工艺、纯外协/外协+回厂、交期、提交人与阻断原因
 → 对每个款式的每个工艺：
-    ├─ 若 Craft.isOutsource=true → 加入外协清单
-    └─ 否 → 创建生产任务，按 Craft.defaultMachineType 推荐师傅
+    ├─ 纯外协：加入外协清单，不派内部师傅
+    ├─ 纯内部：创建生产任务，优先推荐已登记该工艺能力的师傅
+    └─ 外协+回厂加工：先加入外协清单，同时按 Craft.inHouseMachineTypes
+       从开机仔/风车机中选择回厂烫金师傅并创建内部任务
+→ 可勾选多个工艺，一次应用同一位师傅；所有启用师傅可搜索：
+    ├─ 岗位与设备能力匹配、且登记了该工艺能力：优先推荐
+    ├─ 岗位与设备能力匹配、但未登记该工艺能力：允许管理员分配，但必须填写原因
+    └─ 停用账号、岗位不匹配、缺必要设备、纯外协工艺：硬阻断
+→ 也可先选师傅，再跨工单勾选最多 30 张，把该师傅兼容的剩余工艺批量分配：
+    ├─ 混合岗位/机型工单允许分步派给不同师傅，并展示“已排/待排”进度
+    ├─ 分步产生的 PENDING 任务属于排产草稿，工单仍保持 SUBMITTED
+    ├─ 草稿任务不向师傅端展示，也不能开始生产
+    ├─ 纯外协、外协单未创建、停用/缺失工艺仍显示明确阻断原因
+    ├─ 选择器显示师傅当前在制任务数，并区分推荐项与“需说明”项
+    └─ 每张工单独立事务执行；最后一个内部工艺分配完成后才原子切换 SCHEDULING
 → 若有外协工艺 → 创建外协单 → 发印刷厂 → 等回货
 → 外协回货后 → 工单可排产
-→ 确认所有任务派师傅完毕 → 工单状态：SUBMITTED → SCHEDULING
+→ 确认所有任务派师傅完毕 → 工单状态：SUBMITTED → SCHEDULING，草稿任务对师傅开放
 → 企业微信机器人推送对应师傅群
 ```
 
@@ -138,10 +225,13 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 
 ```
 师傅手机H5 → 扫工单/任务二维码
-→ 查看任务详情 → "开始生产"
+→ 任务按“急单优先、同组按工单创建时间升序”排列
+→ 详情展示效果图和接单人，避免同名工单认错
+→ 可单项或多选“一键开始生产”
     └─ status: PENDING → IN_PROGRESS，记录开始时间
-→ 生产完成 → "完工"
+→ 生产完成 → 单项“完工”或多选“一键完工”
     ├─ 填：合格数、不良数、返工数
+    ├─ 一键完工：合格数=计划数，不良/返工=0；异常数量必须单项报工
     ├─ 系统自动：
     │    ├─ 抓取师傅当前机器类型的薪资规则
     │    ├─ 计算本任务计件金额
@@ -154,45 +244,78 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
 ### 3.4 发货
 
 ```
-工单COMPLETED → 车间主管打包 → 填快递单号、发货日期、件数
-→ 状态：COMPLETED → SHIPPED
+工单COMPLETED → 管理员打包 → 按收货地址分别填写快递单号
+  ├─ 单地址：记录一条发货记录
+  ├─ 多地址：每个地址独立记录款式数量、运单号与发货状态
+  └─ 顺丰到付：全部由内部自行预约，物流费用不计入工单金额
+→ 所有地址在同一事务中确认发货，状态：COMPLETED → SHIPPED
 → 企业微信推送给提交人（可选）
+```
+
+### 3.4.1 售后重做
+
+```
+已发货 / 已完成工单发生质量问题或物流损毁
+→ 管理员在原工单选择重做款式、数量、工艺并填写原因
+→ 系统创建关联的 REWORK 子工单
+    ├─ 状态直接进入 SUBMITTED，按普通工单重新排产和报工
+    ├─ 复制所选款式的规格、纸张、设计稿和主收货地址快照
+    ├─ billingMode=NO_CHARGE、金额=0，不进入客户应收账单
+    └─ 师傅生产任务与计件工资仍按正常规则记录
+→ 原工单状态、历史应收、历史工资保持不变
+→ 原单与重做单互相展示关联编号和状态
+→ 重做单不能继续派生嵌套重做；再次售后必须回到原单新建，保证所有重做成本都可由原单一层汇总
 ```
 
 ### 3.5 CDR汇总下载
 
 ```
-车间主管 → CDR汇总页面
+管理员 → CDR汇总页面
 → 筛选日期范围 → 勾选工单/文件
 → 点"生成下载包"
     ├─ 系统打包ZIP（内部按工单号分文件夹）
     ├─ 生成24小时有效下载链接
     └─ 写入DesignBundle记录
-→ 车间主管复制链接发外协模具厂
+→ 管理员复制链接发外协模具厂
 ```
 
 ### 3.6 工单修改
 
 ```
-打开工单 → 按状态判断可修改性
-  ├─ DRAFT / SUBMITTED：全部可改
-  ├─ SCHEDULING / IN_PRODUCTION：仅改收货信息/备注
-  └─ COMPLETED 及之后：不可改
-→ 每次修改写 OrderLog
+销售/客服在工单完工前提交修改申请
+  ├─ 可申请改款式名称、数量、规格、烫金颜色
+  └─ 可基于现有款式新增一款（继承纸张、工艺和单价）
+→ 管理员后台“工单修改申请”批准/拒绝
+  ├─ 申请记录 baseRevision；审核时版本不一致自动标记 STALE
+  ├─ 数量变更遇已开工/完工任务时拒绝，防生产数据回退
+  ├─ 批准后同步更新款式、主地址数量、待生产任务与工单总额
+  └─ 工单 revision + 1，写 OrderLog；所有端口下次读取看到同一版本
+
+收货/履约字段仍按状态直接修改：
+  ├─ DRAFT / SUBMITTED：可直接编辑
+  ├─ SCHEDULING / IN_PRODUCTION：主收货信息/备注/顺丰到付
+  ├─ COMPLETED / SHIPPED：仅单独更正顺丰到付
+  └─ FINISHED / CANCELLED：不可改
 ```
 
 ### 3.7 客服周期结算
 
 ```
-客服开户 → 系统创建 SalaryPeriod（start=本月，end=4月后）
-→ 每次该客服提交工单 → period.totalSales += 工单金额
-→ 周期结束当日（定时任务）:
+客服开户 → 系统按当前规则自动创建 SalaryPeriod（start=本月，end=周期最后一天）
+→ 每次该客服提交收费工单 → 追加 CsSalesEntry 正数流水并累加 period.totalSales
+→ 管理员批准工单修改 → 按新旧金额差额追加调整流水
+→ 工单取消 → 追加负数冲销流水
+→ 账单收款只写付款流水，不重复增加客服销售额
+→ 如业务日期没有可用的 IN_PROGRESS 周期，工单操作与业绩写入整体回滚
+→ 周期结束日的次日（上海自然日，定时任务）:
     ├─ 查 SalaryRule 找档位
-    ├─ 计算提成 = totalSales × tierRate
+    ├─ 计算提成 = (totalSales + initialSales) × tierRate
     ├─ 生成 CustomerServiceCommission 记录
     ├─ 周期 status: IN_PROGRESS → SETTLED
     └─ 自动开启下一个周期
-→ 企业微信推送老板和客服
+→ 底薪可在周期内按月/分次发放；提成只能在 SETTLED 后发放
+→ 每次工资发放追加 CsPayrollPayment，不覆盖历史流水
+→ 企业微信推送管理员和客服
 ```
 
 ### 3.8 师傅日薪结算
@@ -204,16 +327,32 @@ workerType ∈ {MACHINE, PACKER, CLEANER, COOK}
     ├─ 生成 DailyWorkerSalary:
     │    actualSalary = max(汇总计件, 保底)
     └─ 企业微信推送车间群（可选）
+→ 师傅端可按日期范围查询；每天明确显示“计件高于保底”、
+  “计件等于保底”或“按保底补足”，低于保底时同时显示原因
 ```
 
 ### 3.9 时薪工月结
 
 ```
-车间主管每日录入时薪工上下班时间 → 系统算当日工时
+管理员为全体在职正式员工记录实际上班/请假（支持 0.5 天）
+→ PACKER / CLEANER / COOK 同时录入正常、加班和代班工时
 月底定时任务 → 对每位时薪工:
     ├─ 汇总本月总工时
     ├─ 计算：正常工时 × 时薪 + 加班工时 × 时薪 × 加班倍率
     └─ 生成 HourlyWorkerPayroll
+```
+
+### 3.10 应收、收款与成本明细
+
+```
+账单发出后 → 每次结款追加 BillPayment（金额、时间、方式、流水号、备注、记录人）
+→ Bill.paidAmount 只做累计快照，结款明细永久可追溯
+
+管理员在工单详情追加成本流水：
+  材料 / 物流 / 伙食费 / 电费 / 外协 / 上板装板 / 其他 / 调整
+→ 已入账记录不覆盖；更正用正负调整项
+→ 账单详情自动汇总计件、外协、人工补录及关联售后重做成本
+→ 展示销售额、总成本、毛利；客服账单另展示提成比例与归属提成
 ```
 
 ---
@@ -249,12 +388,16 @@ specification          规格
 paperType              纸张
 quantity               数量 ★
 crafts                 工艺ID数组 ★
-foilColor              烫金颜色
+foilColors             烫金颜色数组（最多 5 色；无颜色与其他颜色互斥）
 isDoubleSided          是否双面 ★（影响开机仔计件）
 isDoubleColor          是否双色 ★（影响开机仔和风车机计件）
-unitPrice              单价（手填）
-subtotal               小计（手填）
-suggestedPrice         建议价（报价表算出）
+unitPrice              成交单价（服务端自动报价或受控人工改价）
+fixedFee               一次性费用（按张/每万个/每款等分项对平）
+subtotal               成交小计 = round(数量 × 成交单价, 2) + 一次性费用
+suggestedPrice         历史建议单价（旧字段，新报价不再写入）
+suggestedSubtotal      当次规则建议小计
+pricingSnapshot        报价输入、命中规则、分项与实际成交价快照
+priceOverrideReason    规则不完整或人工改价原因
 remark
 ```
 
@@ -264,7 +407,7 @@ remark
 orderItemId            关联款式
 craftId                工艺
 workerId               师傅
-machineType            师傅当时机器类型（快照）★
+machineType            本任务实际使用机器类型（派工快照）★
 status                 PENDING/IN_PROGRESS/COMPLETED/CANCELLED
 plannedQty             计划数量
 boardCount             板数（计算值）
@@ -298,7 +441,7 @@ completedAt
 
 **三条铁律**：
 
-1. **所有薪资参数存数据库**：老板随时可改，不改代码
+1. **所有薪资参数存数据库**：管理员随时可改，不改代码
 2. **历史记录快照化**：每条薪资记录完工时锁定当时的规则，事后改参数不影响历史
 3. **三套薪资完全独立**：客服/开机师傅/时薪工互不干扰
 
@@ -311,8 +454,10 @@ def calc_machine_piecework(task, machine_rule):
     quantity = task.quantity
     
     # 小单保护
-    if (machine_rule.smallOrderThreshold 
-        and quantity < machine_rule.smallOrderThreshold):
+    if (machine_rule.smallOrderThreshold
+        and (quantity < machine_rule.smallOrderThreshold
+             or (machine_rule.smallOrderInclusive
+                 and quantity == machine_rule.smallOrderThreshold))):
         return machine_rule.smallOrderFlatPrice
     
     # 计算倍率（多维度独立生效）
@@ -328,31 +473,45 @@ def calc_machine_piecework(task, machine_rule):
     
     # 计件金额
     return (board_count * machine_rule.boardRate 
-            + press_count * machine_rule.pieceRate)
+            + press_count * machine_rule.pieceRate
+            + task.itemCount * machine_rule.largeOrderSetupFee)
 
 
 def calc_daily_salary(worker, date):
     """计算单日师傅日薪"""
     tasks = get_completed_tasks(worker, date)
     total_piecework = sum(t.pieceworkAmount for t in tasks)
-    base = worker.machine_rule.dailyBase
+    worked_machines = unique(t.machineType for t in tasks)
+    if worked_machines:
+        # 同日跨机型支援时取实际生产机型中最高的日保底
+        base = max(active_rule(m).dailyBase for m in worked_machines)
+    else:
+        # 当日无任务时才回退账号主机型
+        base = active_rule(worker.primaryMachineType).dailyBase
     return max(total_piecework, base)
 ```
 
 **关键参数**（初始值，可修改）：
 
-| 机器 | dailyBase | pieceRate | boardRate | smallThreshold | smallFlatPrice | multiplierFactors |
-|---|---|---|---|---|---|---|
-| HAND_PRESS（开机仔） | 100 | 0.007 | 5 | 1000 | 12 | [DOUBLE_SIDED, DOUBLE_COLOR] |
-| WINDMILL（风车机） | 120 | 0.01 | 0 | 1000 | 20 | [DOUBLE_COLOR] |
-| GLUE（黏封机） | 120 | 0.002 | 0 | — | — | [] |
+| 机器 | dailyBase | pieceRate | boardRate | smallThreshold | smallFlatPrice | inclusive | setupFee | multiplierFactors |
+|---|---|---|---|---|---|---|---|---|
+| HAND_PRESS（开机仔） | 100 | 0.007 | 5 | 1000 | 12 | false | 0 | [DOUBLE_SIDED, DOUBLE_COLOR] |
+| WINDMILL（风车机） | 120 | 0.01 | 0 | 1000 | 20 | true | 10 | [DOUBLE_COLOR] |
+| GLUE（黏封机） | 120 | 0.002 | 0 | — | — | false | 0 | [] |
+
+风车机规则：**1000 个及以下 20 元/单；1000 个以上按 0.01 元/个 +
+10 元装板费**。装板费每款只加一次，不随双面/双色倍率翻倍。管理员可为
+单个师傅可针对其登记的每一种机器能力建立版本化个性规则。报工按
+`ProductionTask.machineType` 查实际任务机型的个人规则，未配置时使用该机型
+统一规则，并把命中规则快照到任务。
 
 ### 5.3 客服提成算法
 
 ```python
 def calc_cs_commission(period, tiers, mode="FLAT"):
     """计算客服周期提成"""
-    total = period.totalSales
+    # totalSales 由 CsSalesEntry 对账；initialSales 是历史导入的期初额
+    total = period.totalSales + period.initialSales
     
     # 查档位（从高到低）
     applicable_tier = None
@@ -427,7 +586,7 @@ def calc_hourly_payroll(worker, month):
 
 ### 5.5 历史业绩导入
 
-系统上线时，老板可为每个客服初始化：
+系统上线时，管理员可为每个客服初始化：
 
 ```
 {
@@ -462,8 +621,14 @@ def calc_hourly_payroll(worker, month):
 | 清废 | CLEANING | false | — | 清废工 |
 
 说明：
-- `isOutsource=true` 的工艺**不创建生产任务**，只加入外协清单
-- `defaultMachineType` 决定派师傅时的默认建议
+- `isOutsource=true` 且 `inHouseMachineTypes=[]` 的纯外协工艺不创建生产任务
+- `isOutsource=true` 且配置 `inHouseMachineTypes` 的混合工艺既加入外协清单，
+  也创建回厂加工任务；彩印+烫金允许 HAND_PRESS / WINDMILL
+- `defaultMachineType / inHouseMachineTypes` 决定任务允许使用的设备集合
+- 师傅账号的 `machineCapabilities` 与允许设备集合取交集；优先用主机型，
+  否则确定一个匹配设备并快照到任务
+- `WorkerCraftCapability` 只决定推荐顺序；管理员可越过推荐派工，但原因必须
+  写入 `OrderLog`
 - 特殊工艺"冰白彩印-印刷+烫金"既要外协（印刷部分）也要内部生产（烫金部分），需在排产时拆成两步
 
 ### 6.2 组合工艺处理
@@ -500,12 +665,12 @@ def calc_hourly_payroll(worker, month):
 | 任务 | 数量 | 双色 | 下数 | 计件 |
 |---|---|---|---|---|
 | T1 | 500 | 否 | — | 20元（小单） |
-| T2 | 5000 | 否 | 5000 | 50元 |
-| T3 | 8000 | 是 | 16000 | 160元 |
+| T2 | 5000 | 否 | 5000 | 50+10=60元 |
+| T3 | 8000 | 是 | 16000 | 160+10=170元 |
 
-当日计件合计：20+50+160 = **230元**
+当日计件合计：20+60+170 = **250元**
 当日保底：120元
-**实发：max(230, 120) = 230元**
+**实发：max(250, 120) = 250元**
 
 ### 7.3 客服周期结算示例
 
@@ -516,8 +681,9 @@ def calc_hourly_payroll(worker, month):
 - 提成：550000 × 0.06 = **33000元**
 - 4月底薪合计：2000 × 4 = 8000元
 - 周期总收入：**41000元**
-- 前3月已发：6000元
-- 第4月发：2000（底薪）+ 33000（提成）= **35000元**
+- 前3月已发：3 条底薪发放流水，合计 6000元
+- 第4月结算后发：2000（底薪）+ 33000（提成）= **35000元**，追加第4条工资发放流水
+- 上述工资发放与客户账单回款无关；客户回款不改变 55 万的业绩合计
 
 ### 7.4 打包工月工资示例
 
@@ -538,21 +704,21 @@ def calc_hourly_payroll(worker, month):
 | eventType | 触发时机 | 默认渠道 |
 |---|---|---|
 | ORDER_SUBMITTED | 新工单提交 | 排产群 |
-| URGENT_ORDER | 急单提交 | 排产群+老板群 |
+| URGENT_ORDER | 急单提交 | 排产群+管理员群 |
 | ORDER_SCHEDULED | 工单排产完成 | 对应师傅群 |
 | ORDER_COMPLETED | 工单所有任务完工 | 发货群 |
-| ORDER_SHIPPED | 工单发货 | 老板群 |
+| ORDER_SHIPPED | 工单发货 | 管理员群 |
 | OUTSOURCE_OVERDUE | 外协超预计回货日 | 管理群 |
 | STOCK_ALERT | 物料低于安全库存（P1） | 管理群 |
-| CS_PERIOD_ENDING | 客服周期前7天预警 | 老板群+对应客服 |
-| CS_PERIOD_SETTLED | 客服周期结算 | 老板群+对应客服 |
+| CS_PERIOD_ENDING | 客服周期前7天预警 | 管理员群+对应客服 |
+| CS_PERIOD_SETTLED | 客服周期结算 | 管理员群+对应客服 |
 | DAILY_WORKER_SALARY | 师傅日薪结算 | 车间群 |
 
 ### 8.2 消息模板
 
 所有消息使用Markdown格式，推送到企业微信机器人Webhook。消息模板存在`NotificationRule.messageTemplate`字段，支持占位符`{orderNo}`、`{submitterName}`、`{amount}`等。
 
-失败重试3次，3次后写入`NotificationLog.status=FAILED`，老板Dashboard显示告警。
+失败重试3次，3次后写入`NotificationLog.status=FAILED`，管理员Dashboard显示告警。
 
 ---
 
@@ -576,13 +742,13 @@ def calc_hourly_payroll(worker, month):
 - 销售应收账单月度自动生成
 
 **CDR**
-- 车间主管汇总下载、24小时链接
+- 管理员汇总下载、24小时链接
 
 **推送**
 - 企业微信Webhook配置、10个预置事件、推送日志
 
 **统计**
-- 老板Dashboard、基础生产和销售报表
+- 管理员Dashboard、基础生产和销售报表
 
 ### 9.2 P1（上线1-2月后）
 
@@ -630,7 +796,7 @@ def calc_hourly_payroll(worker, month):
 
 ### C. 报价表消化策略
 
-**MVP阶段**：报价表存为参考字典，销售/客服录单时金额手填，系统提供"建议价"按钮仅作提示。
+**历史 MVP 口径（已由 §J 取代）**：报价表曾只作参考字典、金额手填；现行实现由服务端重新报价并保存快照，不能把浏览器提示当权威结果。
 
 **P1阶段**：补充完整价格阶梯、纸张加价、工艺加价、一次性费用，建议价精确度提升。
 
@@ -664,13 +830,14 @@ def calc_hourly_payroll(worker, month):
 
 #### E.2 打印视图布局（固定模板）
 
-- 规格：A4纵向（210×297mm），边距15mm
+- 规格：A4纵向（210×297mm），边距10mm
 - 不含任何价格、金额、成本信息
 - 急单顶部红条+大号红字提示
 - 每款式独立一块（左设计图、右信息表）
 - 每任务独立二维码，尺寸15mm
 - 工单二维码25mm置于页眉
 - 款式不跨页（`page-break-inside: avoid`）
+- 恰好3个款式时启用紧凑排版，长工单名、长关键备注、多色烫金基线必须保持单页
 - 页脚含打印时间与页码
 
 #### E.2.1 多设计图布局规则（预设）
@@ -699,7 +866,7 @@ def calc_hourly_payroll(worker, month):
 
 **关键CSS**：
 ```css
-@page { size: A4 portrait; margin: 15mm; }
+@page { size: A4 portrait; margin: 10mm; }
 @media print {
   .no-print { display: none; }
   .order-item { page-break-inside: avoid; }
@@ -737,9 +904,9 @@ const pdf = await page.pdf({ format: 'A4', printBackground: true });
 
 系统原生支持：
 
-- 按日期：老板Dashboard按天/周/月展示
+- 按日期：管理员Dashboard按天/周/月展示
 - 按销售/客服：列表过滤+累计汇总
-- 按客户代号：历史复购查询
+- 按客户名称/简称：历史复购查询
 - 按状态：待排产、生产中、待发货的工单列表
 - 按工单号/快递单号：模糊搜索
 - 历史追溯：查看3年前任意工单的完整信息和修改历史
@@ -875,7 +1042,7 @@ MVP 阶段先接入：
 
 即使不搭复杂的监控，以下指标必须有方式查看：
 
-- 今日工单数、完工数、发货数（在老板 Dashboard 显示）
+- 今日工单数、完工数、发货数（在管理员 Dashboard 显示）
 - 企业微信推送失败率（`NotificationLog.status='FAILED'` 计数）
 - 师傅日薪结算成功/失败（定时任务结束写日志）
 - 客服周期结算成功/失败（同上）

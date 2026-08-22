@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findMany: vi.fn() },
+    $transaction: vi.fn(),
+    // 链接有效期现在从 Setting 读（cdr_link_expire_hours）
+    setting: { findUnique: vi.fn() },
     designBundle: {
       create: vi.fn(),
       update: vi.fn(),
@@ -20,12 +23,20 @@ const { uploadMock } = vi.hoisted(() => ({
 }));
 vi.mock('../zip', () => ({ uploadBundleZip: uploadMock }));
 
+const { enqueueBackgroundJobMock } = vi.hoisted(() => ({
+  enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+}));
+vi.mock('@/lib/background-jobs/repository', () => ({
+  enqueueBackgroundJob: enqueueBackgroundJobMock,
+}));
+
 import {
   BundleExpiredError,
   BundleNotFoundError,
   CdrBundleError,
   consumeBundle,
   createBundle,
+  enqueueBundle,
   listEligibleOrders,
   listRecentBundles,
 } from '../bundle';
@@ -34,9 +45,15 @@ beforeEach(() => {
   Object.values(dbMock.order).forEach((fn) => fn.mockReset());
   Object.values(dbMock.designBundle).forEach((fn) => fn.mockReset());
   uploadMock.mockReset();
+  enqueueBackgroundJobMock.mockReset();
+  dbMock.$transaction.mockReset().mockImplementation(async (callback) =>
+    callback(dbMock),
+  );
   // Default: bundle.update succeeds
   dbMock.designBundle.update.mockResolvedValue({});
   dbMock.designBundle.delete.mockResolvedValue({});
+  // 默认「没有配置行」→ 退回内置默认 24 小时，即这些用例原本的行为。
+  dbMock.setting.findUnique.mockReset().mockResolvedValue(null);
 });
 
 describe('listEligibleOrders', () => {
@@ -171,6 +188,42 @@ describe('createBundle', () => {
     expect(dbMock.designBundle.create).not.toHaveBeenCalled();
   });
 
+  it('链接有效期来自 Setting：占位过期时间和传给 zip 的时长都跟着走', async () => {
+    // 「Setting 表只写不读」的回归门禁：之前 24 小时在 bundle.ts 和 zip.ts
+    // 里各写死一份（占位行、预签 URL、mock 路径共三处），
+    // seed 里的 cdr_link_expire_hours 改成什么都没有效果。
+    dbMock.setting.findUnique.mockResolvedValue({ value: { hours: 72 } });
+    setupOrders([
+      {
+        id: 'o1',
+        orderNo: 'O-1',
+        designs: [{ id: 'd1', fileName: 'a.cdr', fileUrl: 'https://x/a.cdr' }],
+      },
+    ]);
+    dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
+    uploadMock.mockResolvedValue({
+      zipFileUrl: 'mock://bundle/b1.zip',
+      expiresAt: new Date('2026-05-08T00:00:00Z'),
+      isMock: true,
+    });
+
+    const before = Date.now();
+    await createBundle(
+      { from: '2026-05-05', orderIds: ['o1'], baseUrl: 'https://erp.example.com' },
+      { id: 'u1' },
+    );
+
+    // ① 传给 OSS 适配层的时长
+    expect(uploadMock.mock.calls[0][1]).toEqual({ expireHours: 72 });
+
+    // ② 占位行的过期时间也用同一个阈值（打包失败时留下的就是这一行）
+    const placeholderExpiry = (
+      dbMock.designBundle.create.mock.calls[0][0].data.expiresAt as Date
+    ).getTime();
+    expect(placeholderExpiry - before).toBeGreaterThanOrEqual(72 * 3600_000 - 5_000);
+    expect(placeholderExpiry - before).toBeLessThanOrEqual(72 * 3600_000 + 5_000);
+  });
+
   it('happy path：write DesignBundle + 调 uploadBundleZip + 二次 update zipFileUrl/downloadUrl/expiresAt', async () => {
     setupOrders([
       {
@@ -256,7 +309,7 @@ describe('createBundle', () => {
     expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
   });
 
-  it('uploadBundleZip 抛 OssNotWiredError → 删占位 + CdrBundleError 友好文案', async () => {
+  it('uploadBundleZip 失败 → 删占位 + CdrBundleError 友好文案', async () => {
     setupOrders([
       {
         id: 'o1',
@@ -265,8 +318,10 @@ describe('createBundle', () => {
       },
     ]);
     dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
-    const { OssNotWiredError } = await import('@/lib/oss/sign');
-    uploadMock.mockRejectedValue(new OssNotWiredError());
+    const consoleSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    uploadMock.mockRejectedValue(new Error('AccessDenied: 403'));
 
     await expect(
       createBundle(
@@ -277,10 +332,68 @@ describe('createBundle', () => {
         },
         { id: 'u1' },
       ),
-    ).rejects.toThrow(/OSS STS SDK 未接入/);
+    ).rejects.toThrow(/CDR 打包上传失败：AccessDenied/);
     // 占位行清理
     expect(dbMock.designBundle.delete).toHaveBeenCalledWith({
       where: { id: 'b1' },
+    });
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('enqueueBundle durable path', () => {
+  it('persists bundle and HEAVY job in one transaction', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'o1',
+        orderNo: 'O-1',
+        items: [
+          {
+            designs: [
+              { id: 'd1', fileName: 'a.cdr', fileUrl: 'https://x/a.cdr' },
+            ],
+          },
+        ],
+      },
+    ]);
+    dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
+    dbMock.designBundle.update.mockResolvedValue({});
+    enqueueBackgroundJobMock.mockResolvedValue({
+      job: { id: 'job-1' },
+      created: true,
+      requeued: false,
+    });
+
+    await expect(
+      enqueueBundle(
+        {
+          from: '2026-05-05',
+          orderIds: ['o1'],
+          baseUrl: 'https://erp.example.com',
+        },
+        { id: 'u1' },
+      ),
+    ).resolves.toMatchObject({
+      bundleId: 'b1',
+      jobId: 'job-1',
+      fileCount: 1,
+    });
+
+    expect(enqueueBackgroundJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'CDR_BUNDLE',
+        queue: 'HEAVY',
+        dedupeKey: 'cdr-bundle:b1',
+        payload: { bundleId: 'b1' },
+      }),
+      dbMock,
+    );
+    expect(dbMock.designBundle.update).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      data: {
+        backgroundJobId: 'job-1',
+        downloadUrl: 'https://erp.example.com/api/cdr/bundles/b1',
+      },
     });
   });
 });
@@ -296,6 +409,7 @@ describe('consumeBundle', () => {
   it('已过期 → BundleExpiredError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-04T00:00:00Z'), // 已过
       downloadCount: 0,
@@ -308,6 +422,7 @@ describe('consumeBundle', () => {
   it('未过期 → 返 row + 增 downloadCount（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 5,
@@ -323,6 +438,7 @@ describe('consumeBundle', () => {
   it('downloadCount 自增写入失败不影响下载（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      status: 'READY',
       zipFileUrl: 'https://oss/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 0,

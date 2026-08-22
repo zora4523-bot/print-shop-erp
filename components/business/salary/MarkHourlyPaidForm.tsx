@@ -36,7 +36,7 @@ export function MarkHourlyPaidForm({ id, currentPaid }: Props) {
         {pending ? '处理中…' : currentPaid ? '撤销发放' : '标记已发'}
       </Button>
       {state?.status === 'error' ? (
-        <span className="ml-2 text-xs text-destructive">{state.message}</span>
+        <span role="alert" className="ml-2 text-xs text-destructive">{state.message}</span>
       ) : null}
     </form>
   );

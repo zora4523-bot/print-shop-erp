@@ -21,7 +21,7 @@ export function IssueBillButton({ billId }: { billId: string }) {
         <p className="text-xs text-muted-foreground">已发单。</p>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
     </form>
   );

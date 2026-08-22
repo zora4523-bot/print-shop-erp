@@ -1,0 +1,84 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { dbMock, getBackgroundJobHealthMock } = vi.hoisted(() => ({
+  dbMock: { $queryRaw: vi.fn() },
+  getBackgroundJobHealthMock: vi.fn(),
+}));
+
+vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/background-jobs/health', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/background-jobs/health')>();
+  return { ...actual, getBackgroundJobHealth: getBackgroundJobHealthMock };
+});
+vi.mock('@/lib/background-jobs/mode', () => ({
+  backgroundJobsMode: () => 'durable',
+}));
+
+import { BackgroundJobQueue } from '@/generated/prisma/enums';
+import type { BackgroundJobHealth } from '@/lib/background-jobs/health';
+import { GET } from '../ready/route';
+
+const VERSION = 'v1';
+
+function fixture(): BackgroundJobHealth {
+  const now = new Date();
+  return {
+    activeWorkers: [
+      { queue: BackgroundJobQueue.LIGHT, version: VERSION, lastSeenAt: now },
+      { queue: BackgroundJobQueue.HEAVY, version: VERSION, lastSeenAt: now },
+    ],
+    pending: { LIGHT: 0, HEAVY: 0 },
+    oldestPendingAt: { LIGHT: null, HEAVY: null },
+    running: 0,
+    staleRunning: 0,
+    deadLast24h: 0,
+    deadNotificationLast24h: 0,
+  };
+}
+
+beforeEach(() => {
+  dbMock.$queryRaw.mockReset();
+  // BigInt(0) 而不是 0n —— tsconfig 的 target 是 ES2017，BigInt 字面量会被
+  // tsc 拒绝（TS2737）。仓库既有写法同样是 BigInt(...)，见 lib/order/export.ts:272。
+  dbMock.$queryRaw.mockResolvedValue([{ mismatchCount: BigInt(0) }]);
+  getBackgroundJobHealthMock.mockReset();
+  vi.stubEnv('APP_VERSION', VERSION);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('GET /api/health/ready', () => {
+  it('死信与卡死 RUNNING 只降级、不改状态码（deploy/update.sh 靠它判发布成败）', async () => {
+    const health = fixture();
+    health.deadLast24h = 5;
+    health.staleRunning = 2;
+    health.running = 2;
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('degraded');
+    expect(body.warnings).toContain('dead-jobs-last-24h');
+    expect(body.warnings).toContain('stale-running-jobs');
+    expect(body.jobs.deadLast24h).toBe(5);
+    expect(body.jobs.staleRunning).toBe(2);
+  });
+
+  it('worker 缺失仍然 503：本次改动没有削弱原有的 worker 门禁', async () => {
+    const health = fixture();
+    health.activeWorkers = health.activeWorkers.filter(
+      (worker) => worker.queue !== BackgroundJobQueue.HEAVY,
+    );
+    getBackgroundJobHealthMock.mockResolvedValue(health);
+
+    const res = await GET();
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.status).toBe('error');
+    expect(body.warnings).toContain('heavy-worker-missing');
+  });
+});

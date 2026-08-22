@@ -1,0 +1,2 @@
+ALTER TABLE "Order"
+ADD COLUMN "isSfCollect" BOOLEAN NOT NULL DEFAULT false;

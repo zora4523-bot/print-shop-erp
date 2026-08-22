@@ -26,4 +26,7 @@ export type { PageHeaderProps } from './PageHeader';
 export { EmptyState } from './EmptyState';
 export type { EmptyStateProps } from './EmptyState';
 
+export { TableScrollArea } from './TableScrollArea';
+export type { TableScrollAreaProps } from './TableScrollArea';
+
 export { TONES, type Tone } from './_tones';

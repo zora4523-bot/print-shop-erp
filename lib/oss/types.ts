@@ -70,6 +70,11 @@ export type SignUploadResult =
       objectKey: string;
       // Absolute URL the client should PUT to (region endpoint + bucket).
       uploadUrl: string;
+      // 预签 PUT URL（用 STS 临时凭证签，1h 有效，绑定 Content-Type）。
+      // 浏览器直接 `fetch(putUrl, { method: 'PUT', body: file })` 即可，
+      // 不需要在前端打包 ali-oss SDK。credentials 仍保留给未来需要
+      // 分片/断点续传的大文件场景。
+      putUrl: string;
       // After successful upload, the server records this as
       // OrderItemDesign.fileUrl for subsequent reads.
       publicUrl: string;

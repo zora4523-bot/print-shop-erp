@@ -82,7 +82,7 @@ export function StatCard({
       ) : null}
       <div className="min-w-0 flex-1">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-1 font-mono text-xl font-semibold tracking-tight">
+        <div className="mt-1 break-words font-sans tabular-nums text-xl font-semibold tracking-tight">
           {value}
         </div>
         {delta && DeltaIcon ? (
@@ -91,9 +91,9 @@ export function StatCard({
             className={cn(
               'mt-1 inline-flex items-center gap-1 text-xs',
               dTone === 'success'
-                ? 'text-success'
+                ? 'text-success-foreground'
                 : dTone === 'warning'
-                  ? 'text-warning'
+                  ? 'text-warning-foreground'
                   : 'text-muted-foreground',
             )}
           >

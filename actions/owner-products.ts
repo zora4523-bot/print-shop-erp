@@ -11,17 +11,22 @@ import {
   ProductInvariantError,
 } from '@/lib/product';
 import type { ProductMutationResult } from './owner-products.types';
+import {
+  collectFieldErrors,
+  mapPrismaUniqueViolation,
+  type UniqueViolationMapping,
+} from '@/lib/admin/action-helpers';
 
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
+const PRODUCT_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
+  {
+    field: 'code',
+    targets: ['code', 'Product_code_key'],
+    message: '该产品编码已被占用',
+  },
+];
+
+function mapUniqueViolation(err: unknown): ProductMutationResult | null {
+  return mapPrismaUniqueViolation(err, PRODUCT_UNIQUE_VIOLATIONS);
 }
 
 function normalizeFormInput(formData: FormData) {
@@ -30,7 +35,8 @@ function normalizeFormInput(formData: FormData) {
     return typeof v === 'string' ? v : undefined;
   };
   return {
-    category: get('category'),
+    code: get('code') ?? '',
+    categoryNodeId: get('categoryNodeId'),
     name: get('name'),
     specification: get('specification') ?? '',
     paperType: get('paperType') ?? '',
@@ -56,13 +62,15 @@ export async function createProductAction(
     const created = await createProduct(parsed.data);
     createdId = created.id;
   } catch (err) {
+    const unique = mapUniqueViolation(err);
+    if (unique) return unique;
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };
     }
     throw err;
   }
 
-  revalidatePath('/owner/products');
+  revalidateProductPaths(createdId);
   redirect(`/owner/products/${createdId}`);
 }
 
@@ -81,14 +89,15 @@ export async function updateProductAction(
   try {
     await updateProduct(id, parsed.data);
   } catch (err) {
+    const unique = mapUniqueViolation(err);
+    if (unique) return unique;
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };
     }
     throw err;
   }
 
-  revalidatePath('/owner/products');
-  revalidatePath(`/owner/products/${id}`);
+  revalidateProductPaths(id);
   return { status: 'success' };
 }
 
@@ -107,7 +116,14 @@ export async function setProductActiveAction(
     throw err;
   }
 
+  revalidateProductPaths(id);
+  return { status: 'success' };
+}
+
+function revalidateProductPaths(id: string) {
   revalidatePath('/owner/products');
   revalidatePath(`/owner/products/${id}`);
-  return { status: 'success' };
+  revalidatePath('/orders/new');
+  revalidatePath('/owner/boms/new');
+  revalidatePath('/owner/prices/tiers/new');
 }

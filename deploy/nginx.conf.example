@@ -1,0 +1,163 @@
+# Nginx 反向代理示例（红包印刷 ERP）。
+#
+# 用法：复制到 /etc/nginx/conf.d/print-shop-erp.conf，改 server_name 与证书路径，
+#      nginx -t 测试通过后 systemctl reload nginx。
+#
+# 关键点（部署审计强调，漏配会静默出问题）：
+#   1. 必须转发 X-Forwarded-Proto: https —— 否则 (a) 登录 cookie 的 Secure 标志失效，
+#      (b) 工单打印二维码/CDR 外协短链的 base URL 推导退化成 localhost 死链。
+#   2. 必须转发 Host / X-Forwarded-Host —— 二维码/短链域名跟随它。
+#   3. 登录限流必须挂在 /login 上，只挂 /api/auth/callback/credentials 是无效的。
+#      本项目登录走 Server Action：登录页渲染出的是 <form action="" method="POST">，
+#      action="" 按 HTML 规范即「当前 URL」，浏览器把用户名密码 POST 回 /login 本身。
+#      Auth.js 的 signIn() 在 Server Action 里是**进程内**调用 Auth(request)
+#      （next-auth/lib/actions.js：new Request(url) 之后直接 await Auth(req)，没有 fetch），
+#      所以那个 callback URL 浏览器一次都不会访问。2026-08 实测：连发 12 次错误密码
+#      全部 200，限流形同虚设。该 callback 路由本身确实挂载在
+#      app/api/auth/[...nextauth]/route.ts 上、可被直接构造请求爆破，所以它的 location
+#      块保留做纵深防御，并与 /login 共用同一个令牌桶。
+#   4. PDF 生成端点独立限流，避免按需 Chromium 被同源并发压垮。
+#   5. CDR 生成已在 HEAVY worker 异步执行，不占 Nginx 长连接。
+#
+# 设计图上传是浏览器直传 OSS（不经过本服务器），所以 client_max_body_size 不需要很大；
+# 20m 足够覆盖 PDF、普通表单。
+
+# conf.d 通常被 include 在 http {} 内，因此 limit_req_zone / map 都可放在此处。
+
+# 登录限流的 key：只有 POST 才产生非空值。
+# nginx 官方语义：limit_req_zone 的 key 求值为空字符串时该请求**不计数**
+# （"Requests with an empty key value are not accounted"）。于是：
+#   POST /login              → key = 客户端 IP，计入 erp_auth 桶
+#   GET  /login / RSC 预取   → key = ""，完全不受限流影响
+#
+# GET 必须豁免，否则会踩到一个很难查的坑：未登录访问任何受保护路由都会被
+# layout redirect 到 /login?from=...，再叠加 RSC 预取，正常用户点几下就能打满
+# 10r/m —— 最后是**登录页本身返回 429**，用户没有任何自救手段。
+#
+# 为什么不用 limit_except：limit_req 的 context 只有 http/server/location
+# （模块没声明 NGX_HTTP_LMT_CONF），写进 limit_except 会被 nginx -t 拒绝
+# （"limit_req directive is not allowed here"）。`if ($request_method = POST)`
+# 同理不可用。map 是 nginx 官方文档给的写法，也是唯一干净的写法。
+map $request_method $erp_auth_limit_key {
+    default "";
+    POST    $binary_remote_addr;
+}
+
+limit_req_zone $erp_auth_limit_key zone=erp_auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=erp_heavy:10m rate=10r/m;
+
+# ── HTTP → HTTPS 跳转 ──
+server {
+    listen 80;
+    server_name erp.example.com;          # ← 改成你的域名
+
+    # Certbot webroot 续期必须在 HTTP 下直接读到挑战文件。
+    # 不要把 return 301 写在 server 层，否则会在 location 匹配前就跳转。
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS 主服务 ──
+server {
+    listen 443 ssl http2;
+    server_name erp.example.com;          # ← 改成你的域名
+
+    ssl_certificate     /etc/nginx/ssl/erp.example.com.pem;   # ← 证书路径
+    ssl_certificate_key /etc/nginx/ssl/erp.example.com.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 20m;
+
+    # 登录限流的真实落点是 /login，不是下面那个 callback URL。
+    #
+    # LoginForm 把 signInWithCredentials 直接交给 useActionState + <form
+    # action={formAction}>，React SSR 出来的是 <form action="" method="POST">，
+    # action="" 即「当前 URL」，所以用户名密码 POST 回 /login 本身。带 ?from=...
+    # 也不影响匹配 —— location 只看路径。
+    #
+    # `= /login` 是精确匹配，优先级高于 `location /`，与书写顺序无关。
+    # 该 Server Action 只被 app/(auth)/login/page.tsx 用到，而 Next 的
+    # serverModuleMap 按当前页面 scope 查 action（manifests-singleton.js:
+    # workers[normalizeWorkerPageName(workStore.page)]，查不到直接抛
+    # "Failed to find Server Action"），所以攻击者无法拿 Next-Action 头 POST
+    # 到别的路径来绕开这里 —— 这一个块就覆盖了浏览器侧的全部登录面。
+    #
+    # burst=5 nodelay 沿用原有标定：允许连着输错 5 次，之后每 6 秒放行一次。
+    location = /login {
+        limit_req zone=erp_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # —— 下面 5 行是二维码短链与 cookie Secure 标志正确的关键，漏一行会静默出错 ——
+        # Host / X-Forwarded-Host 决定短链与二维码的域名；X-Forwarded-Proto 决定登录
+        # cookie 的 Secure 标志，以及 base URL 会不会退化成 localhost 死链。
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP         $remote_addr;
+    }
+
+    # Auth.js 凭据回调：浏览器不走这里（见上），但 app/api/auth/[...nextauth]/route.ts
+    # 确实把它挂载成了可达端点，攻击者可以直接构造请求爆破（GET /api/auth/csrf 就能
+    # 拿到 csrfToken，CSRF 校验拦不住脚本）。所以保留做纵深防御，并与 /login 共用
+    # 同一个 erp_auth 令牌桶 —— 换条路径不该给攻击者一份新配额。
+    location = /api/auth/callback/credentials {
+        limit_req zone=erp_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # 同上：这 5 行是短链/cookie Secure 正确的关键，不要精简。
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP         $remote_addr;
+    }
+
+    # PDF 仍是按需 Chromium 生成；限流避免同一来源并发压垮 Web。
+    location ~ ^/api/orders/[^/]+/pdf$ {
+        limit_req zone=erp_heavy burst=2 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 180s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # —— 下面 5 行是二维码/短链/cookie 正确的关键 ——
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Proto $scheme;   # https
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP         $remote_addr;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout   120s;
+        proxy_send_timeout   120s;
+        proxy_connect_timeout 10s;
+    }
+}

@@ -7,16 +7,20 @@ import {
   BILL_STATUS_LABELS,
   ROLE_LABELS,
 } from '@/lib/auth/role-labels';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   BILL_STATUS_TO_BADGE,
   EmptyState,
   PageHeader,
   StatCard,
   StatusBadge,
+  TableScrollArea,
 } from '@/components/ui-business';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '销售应收账单' };
 
 type PageProps = {
@@ -37,19 +41,6 @@ function currentMonthShanghai(): string {
   return parts;
 }
 
-function formatDateTime(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
-
 function isValidYm(s: string | undefined): s is string {
   if (!s) return false;
   const m = /^(\d{4})-(\d{2})$/.exec(s);
@@ -58,7 +49,7 @@ function isValidYm(s: string | undefined): s is string {
   // error; catching the throw in the Server Component would only make
   // the page crash silently. Pre-validate range here so a bookmark /
   // hand-edited URL like ?period=2026-13 cleanly falls back to
-  // &ldquo;no filter&rdquo; (Codex round 56 / P2).
+  // &ldquo;no filter&rdquo; .
   const mo = Number(m[2]);
   return mo >= 1 && mo <= 12;
 }
@@ -68,6 +59,9 @@ function isBillStatus(s: string | undefined): s is BillStatus {
 }
 
 export default async function OwnerBillsPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('bill:view:all');
   const sp = await searchParams;
   const currentMonth = currentMonthShanghai();
 
@@ -121,20 +115,20 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="销售应收账单"
-        subtitle="月初按 Asia/Shanghai 日历月把上月 FINISHED 工单归集给销售 / 客服；每位一条账单，老板发单后记录付款。"
+        subtitle="月初按 Asia/Shanghai 日历月归集上月已结束的外部销售工单；加工、快递、耗材等对客收费进入同一张应收账单，管理员发单后记录付款。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          重跑选中月份会把新完工订单追加到已有 DRAFT 账单。该月账单一旦发单
+          重跑选中月份会把新完工工单追加到已有 DRAFT 账单。该月账单一旦发单
           （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程对该条账单会报错，
           不再向其追加任何工单。含义是：凡是在发单那一刻没被归集进 BillItems
           的&ldquo;该月 finishedAt&rdquo;工单——无论是发单前已 FINISHED 但业主没再
           点一次&ldquo;生成 / 追加&rdquo;来拉取，还是发单后才 FINISHED——之后都不会被任何
           月份的生成流程抓到，需业主线下单独处理。因此发单前务必确认：
           (1) 所选周期内所有待入账工单都已 FINISHED，(2) 再点一次&ldquo;生成 /
-          追加&rdquo;把最新 FINISHED 订单拉入 DRAFT。
+          追加&rdquo;把最新 FINISHED 工单拉入 DRAFT。
         </p>
       </section>
 
@@ -176,13 +170,16 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
           }
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea
+          label="销售应收账单列表"
+          className="rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">周期</th>
                 <th className="px-4 py-2 text-left">销售 / 客服</th>
-                <th className="px-4 py-2 text-left">角色</th>
+                <th className="px-4 py-2 text-left">当前角色</th>
                 <th className="px-4 py-2 text-right">总额</th>
                 <th className="px-4 py-2 text-right">已收</th>
                 <th className="px-4 py-2 text-center">状态</th>
@@ -193,22 +190,22 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-mono text-xs">{r.period}</td>
+                  <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.period}</td>
                   <td className="px-4 py-3">{r.salesUser.displayName}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {ROLE_LABELS[r.salesUser.role] ?? r.salesUser.role}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    ¥ {String(r.totalAmount)}
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    {formatMoney(r.totalAmount)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    ¥ {String(r.paidAmount)}
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    {formatMoney(r.paidAmount)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <BillStatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(r.issuedAt)}
+                    {formatDateTimeShanghai(r.issuedAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
@@ -225,7 +222,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );
@@ -255,8 +252,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="owner-bills-status" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="owner-bills-status"
           name="status"
           defaultValue={status ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -270,8 +268,9 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">周期</label>
+        <label htmlFor="owner-bills-period" className="text-xs text-muted-foreground">周期</label>
         <input
+          id="owner-bills-period"
           type="month"
           name="period"
           defaultValue={period ?? ''}
@@ -279,10 +278,11 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">
+        <label htmlFor="owner-bills-sales-user" className="text-xs text-muted-foreground">
           销售 / 客服 id (可选)
         </label>
         <input
+          id="owner-bills-sales-user"
           type="text"
           name="salesUserId"
           defaultValue={salesUserId ?? ''}
@@ -290,9 +290,9 @@ function FilterBar({
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button type="submit" className={buttonVariants({ size: 'sm' })}>
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/owner/bills"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

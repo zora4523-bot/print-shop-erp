@@ -1,7 +1,13 @@
 import { db } from '../db';
-import { OssNotWiredError } from '../oss/sign';
 import { uploadBundleZip, type ZipUploadResult } from './zip';
+import { getSetting } from '../settings';
 import { parseStrictYmd } from '../auth/schemas';
+import {
+  BackgroundJobQueue,
+  DesignBundleStatus,
+} from '../../generated/prisma/enums';
+import { enqueueBackgroundJob } from '../background-jobs/repository';
+import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
 
 // CDR 汇总下载（SPEC §3.5 / §3.6）业务层。
 //
@@ -108,7 +114,7 @@ export type CreateBundleInput = {
   // 拼绝对 URL 用 base（含 protocol，无尾斜线，如
   // 'https://erp.example.com'）。action 层从请求 headers 推导
   // （host + x-forwarded-proto），保证 split-origin 部署也得到对的
-  // 公网域。Codex round 121 medium：之前从 env 读会让 dev 端点 (127.0.0.1
+  // 公网域。
   // / ngrok) 拿到 localhost:3000 死链。
   baseUrl: string;
 };
@@ -125,20 +131,34 @@ export type CreateBundleResult = {
   isMock: boolean;
 };
 
-export async function createBundle(
-  input: CreateBundleInput,
-  actor: { id: string },
-): Promise<CreateBundleResult> {
+export type EnqueueBundleResult = {
+  bundleId: string;
+  jobId: string;
+  downloadUrl: string;
+  relativePath: string;
+  fileCount: number;
+};
+
+type CollectedBundle = {
+  start: Date;
+  end: Date;
+  orderIds: string[];
+  designIds: string[];
+  files: Array<{
+    id: string;
+    orderNo: string;
+    fileName: string;
+    fileUrl: string;
+  }>;
+};
+
+async function collectBundle(input: CreateBundleInput): Promise<CollectedBundle> {
   if (input.orderIds.length === 0) {
     throw new CdrBundleError('至少勾选 1 个工单');
   }
 
   const { start } = shanghaiDayBoundary(input.from);
   const { end } = shanghaiDayBoundary(input.to ?? input.from);
-
-  // 先收集所有 CDR design：仅取勾选的工单 + 在日期窗口内（防 owner
-  // 传入的 orderIds 不在窗口里——比如旧 bundle 的 orderId 被复用作
-  // payload 攻击）。
   const orders = await db.order.findMany({
     where: {
       id: { in: [...input.orderIds] },
@@ -151,11 +171,7 @@ export async function createBundle(
         select: {
           designs: {
             where: { fileType: 'CDR' },
-            select: {
-              id: true,
-              fileName: true,
-              fileUrl: true,
-            },
+            select: { id: true, fileName: true, fileUrl: true },
           },
         },
       },
@@ -167,24 +183,35 @@ export async function createBundle(
     );
   }
 
-  const files: Array<{ id: string; orderNo: string; fileName: string; fileUrl: string }> = [];
+  const files: CollectedBundle['files'] = [];
   const designIds: string[] = [];
-  for (const o of orders) {
-    for (const item of o.items) {
-      for (const d of item.designs) {
-        files.push({
-          id: d.id,
-          orderNo: o.orderNo,
-          fileName: d.fileName,
-          fileUrl: d.fileUrl,
-        });
-        designIds.push(d.id);
+  for (const order of orders) {
+    for (const item of order.items) {
+      for (const design of item.designs) {
+        files.push({ ...design, orderNo: order.orderNo });
+        designIds.push(design.id);
       }
     }
   }
   if (files.length === 0) {
     throw new CdrBundleError('所选工单没有 CDR 设计文件');
   }
+
+  return {
+    start,
+    end,
+    orderIds: orders.map((order) => order.id),
+    designIds,
+    files,
+  };
+}
+
+export async function createBundle(
+  input: CreateBundleInput,
+  actor: { id: string },
+): Promise<CreateBundleResult> {
+  const collected = await collectBundle(input);
+  const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
 
   // 先创建 DesignBundle 拿 id（即作为 token / object key 的一部分）。
   // zipFileUrl + downloadUrl + expiresAt 占位，下面 ZIP 步骤后 update。
@@ -193,38 +220,39 @@ export async function createBundle(
   const bundle = await db.designBundle.create({
     data: {
       createdById: actor.id,
-      dateRangeFrom: start,
-      dateRangeTo: end,
-      orderIds: orders.map((o) => o.id),
-      designIds,
+      dateRangeFrom: collected.start,
+      dateRangeTo: collected.end,
+      orderIds: collected.orderIds,
+      designIds: collected.designIds,
       zipFileUrl: '',
       downloadUrl: '',
-      // tentative expiry——下面 OSS 步骤会覆写。
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      // tentative expiry——下面 OSS 步骤会覆写。用同一个阈值，免得打包
+      // 失败留下的占位行带着一个和配置无关的过期时间。
+      expiresAt: new Date(Date.now() + expireHours * 60 * 60 * 1000),
     },
     select: { id: true },
   });
 
   let upload: ZipUploadResult;
   try {
-    upload = await uploadBundleZip({
-      files: files.map(({ orderNo, fileName, fileUrl }) => ({
-        orderNo,
-        fileName,
-        fileUrl,
-      })),
-      bundleId: bundle.id,
-    });
+    upload = await uploadBundleZip(
+      {
+        files: collected.files.map(({ orderNo, fileName, fileUrl }) => ({
+          orderNo,
+          fileName,
+          fileUrl,
+        })),
+        bundleId: bundle.id,
+      },
+      { expireHours },
+    );
   } catch (err) {
-    // OSS 真接入前 generateRealZip throws OssNotWiredError；删掉
-    // 占位 row 让 UI 看到清晰失败状态。
+    // OSS 打包失败（凭证 403 / 网络 / 对象缺失）：删掉占位 row 让 UI
+    // 看到清晰失败状态，并把原因翻译成 CdrBundleError 给表单展示。
     await db.designBundle.delete({ where: { id: bundle.id } }).catch(() => {});
-    if (err instanceof OssNotWiredError) {
-      throw new CdrBundleError(
-        'OSS STS SDK 未接入；CDR 打包暂不可用（业主请配齐 OSS 环境后重试）',
-      );
-    }
-    throw err;
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('[cdr] bundle zip upload failed:', detail);
+    throw new CdrBundleError(`CDR 打包上传失败：${detail}`);
   }
 
   // 下载链接走我们自己的 token-route，不直接暴露 OSS 对象 URL：
@@ -232,10 +260,10 @@ export async function createBundle(
   // 当前 mock-mode 下，route 看到 `mock://...` 直接 503。
   //
   // **绝对 URL**——SPEC §3.5 是&ldquo;复制链接发外协&rdquo;的语义，外协在
-  // WeChat / 邮件里点链接得直接打开（Codex round 119 high）。
+  // WeChat / 邮件里点链接得直接打开。
   // baseUrl 由 action 层从 request headers 推导（host + x-forwarded-
   // proto / x-forwarded-host），保证 dev (127.0.0.1 / ngrok) 也得对的
-  // 域而不是回到 localhost。Codex round 121 medium。
+  // 域而不是回到 localhost。
   const baseUrl = input.baseUrl.replace(/\/+$/, '');
   const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
 
@@ -245,6 +273,8 @@ export async function createBundle(
       zipFileUrl: upload.zipFileUrl,
       downloadUrl,
       expiresAt: upload.expiresAt,
+      status: DesignBundleStatus.READY,
+      lastErrorCode: null,
     },
   });
 
@@ -254,9 +284,127 @@ export async function createBundle(
     downloadUrl,
     relativePath: `/api/cdr/bundles/${bundle.id}`,
     expiresAt: upload.expiresAt,
-    fileCount: files.length,
+    fileCount: collected.files.length,
     isMock: upload.isMock,
   };
+}
+
+/**
+ * Production path: validate and persist the bundle + HEAVY job in one DB
+ * transaction. No OSS download or compression happens in the web process.
+ */
+export async function enqueueBundle(
+  input: CreateBundleInput,
+  actor: { id: string },
+): Promise<EnqueueBundleResult> {
+  const collected = await collectBundle(input);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const baseUrl = input.baseUrl.replace(/\/+$/, '');
+
+  return db.$transaction(async (tx) => {
+    const bundle = await tx.designBundle.create({
+      data: {
+        createdById: actor.id,
+        dateRangeFrom: collected.start,
+        dateRangeTo: collected.end,
+        orderIds: collected.orderIds,
+        designIds: collected.designIds,
+        zipFileUrl: '',
+        downloadUrl: '',
+        expiresAt,
+        status: DesignBundleStatus.PENDING,
+      },
+      select: { id: true },
+    });
+    const downloadUrl = `${baseUrl}/api/cdr/bundles/${bundle.id}`;
+    const { job } = await enqueueBackgroundJob(
+      {
+        type: BACKGROUND_JOB_TYPES.CDR_BUNDLE,
+        queue: BackgroundJobQueue.HEAVY,
+        dedupeKey: `cdr-bundle:${bundle.id}`,
+        payload: { bundleId: bundle.id },
+        priority: 100,
+        maxAttempts: 3,
+      },
+      tx,
+    );
+    await tx.designBundle.update({
+      where: { id: bundle.id },
+      data: { backgroundJobId: job.id, downloadUrl },
+    });
+    return {
+      bundleId: bundle.id,
+      jobId: job.id,
+      downloadUrl,
+      relativePath: `/api/cdr/bundles/${bundle.id}`,
+      fileCount: collected.files.length,
+    };
+  });
+}
+
+export async function processQueuedBundle(bundleId: string): Promise<{
+  bundleId: string;
+  fileCount: number;
+  isMock: boolean;
+}> {
+  const bundle = await db.designBundle.findUnique({
+    where: { id: bundleId },
+    select: { id: true, designIds: true, downloadUrl: true, status: true },
+  });
+  if (!bundle) throw new CdrBundleError('CDR 下载包不存在');
+  if (bundle.status === DesignBundleStatus.READY) {
+    return { bundleId, fileCount: bundle.designIds.length, isMock: false };
+  }
+
+  const designs = await db.orderItemDesign.findMany({
+    where: { id: { in: bundle.designIds } },
+    select: {
+      id: true,
+      fileName: true,
+      fileUrl: true,
+      orderItem: { select: { order: { select: { orderNo: true } } } },
+    },
+  });
+  if (designs.length !== bundle.designIds.length) {
+    throw new CdrBundleError('CDR 设计文件已变更，请重新生成下载包');
+  }
+
+  const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
+  const upload = await uploadBundleZip(
+    {
+      bundleId,
+      files: designs.map((design) => ({
+        orderNo: design.orderItem.order.orderNo,
+        fileName: design.fileName,
+        fileUrl: design.fileUrl,
+      })),
+    },
+    { expireHours },
+  );
+  await db.designBundle.update({
+    where: { id: bundleId },
+    data: {
+      zipFileUrl: upload.zipFileUrl,
+      expiresAt: upload.expiresAt,
+      status: DesignBundleStatus.READY,
+      lastErrorCode: null,
+    },
+  });
+  return { bundleId, fileCount: designs.length, isMock: upload.isMock };
+}
+
+export async function markQueuedBundleFailure(
+  bundleId: string,
+  errorCode: string,
+  terminal: boolean,
+): Promise<void> {
+  await db.designBundle.updateMany({
+    where: { id: bundleId, status: DesignBundleStatus.PENDING },
+    data: {
+      status: terminal ? DesignBundleStatus.FAILED : DesignBundleStatus.PENDING,
+      lastErrorCode: errorCode,
+    },
+  });
 }
 
 // ─── 3. 下载查询（route 用）───
@@ -280,6 +428,12 @@ export class BundleExpiredError extends Error {
     this.name = 'BundleExpiredError';
   }
 }
+export class BundleNotReadyError extends Error {
+  constructor(public readonly status: DesignBundleStatus) {
+    super('下载包尚未就绪');
+    this.name = 'BundleNotReadyError';
+  }
+}
 
 /**
  * 路由用：按 id 取 bundle，校验未过期，自增 downloadCount。
@@ -297,9 +451,13 @@ export async function consumeBundle(
       zipFileUrl: true,
       expiresAt: true,
       downloadCount: true,
+      status: true,
     },
   });
   if (!row) throw new BundleNotFoundError();
+  if (row.status !== DesignBundleStatus.READY) {
+    throw new BundleNotReadyError(row.status);
+  }
   if (row.expiresAt.getTime() < now.getTime()) {
     throw new BundleExpiredError(row.expiresAt);
   }
@@ -328,6 +486,8 @@ export type RecentBundleRow = {
   createdById: string;
   createdByName: string;
   createdAt: Date;
+  status: DesignBundleStatus;
+  lastErrorCode: string | null;
 };
 
 export async function listRecentBundles(
@@ -348,6 +508,8 @@ export async function listRecentBundles(
       downloadCount: true,
       createdById: true,
       createdAt: true,
+      status: true,
+      lastErrorCode: true,
       createdBy: { select: { displayName: true } },
     },
   });
@@ -364,5 +526,7 @@ export async function listRecentBundles(
     createdById: r.createdById,
     createdByName: r.createdBy.displayName,
     createdAt: r.createdAt,
+    status: r.status,
+    lastErrorCode: r.lastErrorCode,
   }));
 }

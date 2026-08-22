@@ -6,7 +6,7 @@ import { setUserActiveAction } from '@/actions/owner-accounts';
 import type { AccountMutationResult } from '@/actions/owner-accounts.types';
 
 // Small client component so we can show the invariant error ("不能停用自己
-// 的账号" / "系统至少需要 1 位活跃 OWNER") inline instead of dropping it.
+// 的账号" / "系统至少需要 1 位活跃管理员") inline instead of dropping it.
 export function ToggleActiveButton({
   userId,
   currentlyActive,

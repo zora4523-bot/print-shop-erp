@@ -1,39 +1,31 @@
-import qrcode from 'qrcode';
+import { buildQrSvg } from './qr';
 import { db } from '../db';
 import { Role } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
+import { signDesignReadUrl } from '../oss/read-url';
 import { roleLabel } from '../auth/role-labels';
 import type {
   PrintDesign,
   PrintOrder,
   PrintOrderItem,
+  PrintShipment,
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
 
-// QR SVG pre-render. Layout consumes plain SVG strings via
-// dangerouslySetInnerHTML to dodge the qrcode.react / two-Reacts bug
-// when the PDF route's renderToStaticMarkup dynamically imports
-// react-dom/server (which loads its own React vs the bundled one and
-// breaks hooks). margin=1 keeps the quiet zone tight; errorCorrection
-// 'M' is the SPEC default (handles ~15% damage which prints can take).
-async function buildQrSvg(value: string, size: number): Promise<string> {
-  return qrcode.toString(value, {
-    type: 'svg',
-    errorCorrectionLevel: 'M',
-    width: size,
-    margin: 1,
-  });
-}
-
 // Loads the narrow shape the print layout needs. Scope filter mirrors
 // getOrderDetail so SALES / CUSTOMER_SERVICE only print their own,
-// OWNER / FOREMAN everything, WORKER (future) only what they have a
-// task on. Returns null when the actor can't see the order — the page
+// ADMIN sees everything. WORKER sees only assigned orders that have left
+// the SUBMITTED scheduling-draft state. Returns null when the actor can't
+// see the order — the page
 // maps that to notFound() so there's no "this order exists but you
 // can't print it" disclosure.
 export async function getOrderForPrint(
   id: string,
   user: { id: string; role: Role },
+  // 二维码内容的绝对 URL base（调用方用 derivePublicBaseUrl 推导）。
+  // 码里存 URL 而不是裸 id：师傅用微信"扫一扫"直接打开报工页
+  // （未登录先登录再回跳），不需要专用扫码器。
+  baseUrl: string,
 ): Promise<PrintOrder | null> {
   const order = await db.order.findFirst({
     where: {
@@ -43,6 +35,18 @@ export async function getOrderForPrint(
     include: {
       submitter: {
         select: { displayName: true, role: true },
+      },
+      sourceOrder: { select: { orderNo: true } },
+      shipments: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          lines: {
+            orderBy: { orderItem: { sequence: 'asc' } },
+            include: {
+              orderItem: { select: { sequence: true, name: true } },
+            },
+          },
+        },
       },
       items: {
         orderBy: { sequence: 'asc' },
@@ -83,9 +87,10 @@ export async function getOrderForPrint(
   // the I/O-bound calls. Order QR + one per task; task counts cap out
   // around 10–20 in practice.
   const taskQrPairs = order.items.flatMap((item) => item.tasks);
+  const base = baseUrl.replace(/\/+$/, '');
   const [orderQrSvg, ...taskQrSvgs] = await Promise.all([
-    buildQrSvg(`order:${order.id}`, 95),
-    ...taskQrPairs.map((t) => buildQrSvg(`task:${t.id}`, 55)),
+    buildQrSvg(`${base}/orders/${order.id}`, 95),
+    ...taskQrPairs.map((t) => buildQrSvg(`${base}/worker/tasks/${t.id}`, 55)),
   ]);
   const taskQrById = new Map(
     taskQrPairs.map((t, i) => [t.id, taskQrSvgs[i] as string]),
@@ -98,7 +103,7 @@ export async function getOrderForPrint(
     specification: item.specification,
     paperType: item.paperType,
     quantity: item.quantity,
-    foilColor: item.foilColor,
+    foilColors: item.foilColors,
     isDoubleSided: item.isDoubleSided,
     isDoubleColor: item.isDoubleColor,
     // Drop unresolvable IDs silently rather than rendering a raw cuid
@@ -112,9 +117,15 @@ export async function getOrderForPrint(
       (d): PrintDesign => ({
         id: d.id,
         fileType: d.fileType,
-        fileUrl: d.fileUrl,
+        // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
+        // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
+        // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
+        fileUrl:
+          d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
         fileName: d.fileName,
-        thumbnailUrl: d.thumbnailUrl,
+        thumbnailUrl: d.thumbnailUrl
+          ? signDesignReadUrl(d.thumbnailUrl)
+          : d.thumbnailUrl,
         uploadedAt: d.uploadedAt,
       }),
     ),
@@ -127,11 +138,30 @@ export async function getOrderForPrint(
       }),
     ),
   }));
+  const printShipments: PrintShipment[] = order.shipments.map((shipment) => ({
+    id: shipment.id,
+    sequence: shipment.sequence,
+    receiverName: shipment.receiverName,
+    receiverPhone: shipment.receiverPhone,
+    receiverAddress: shipment.receiverAddress,
+    expressCode: shipment.expressCode,
+    trackingNo: shipment.trackingNo,
+    lines: shipment.lines.map((line) => ({
+      orderItemSequence: line.orderItem.sequence,
+      orderItemName: line.orderItem.name,
+      quantity: line.quantity,
+    })),
+  }));
 
   return {
     id: order.id,
     orderNo: order.orderNo,
+    customName: order.customName,
+    kind: order.kind,
+    sourceOrderNo: order.sourceOrder?.orderNo ?? null,
     isUrgent: order.isUrgent,
+    isSfCollect: order.isSfCollect,
+    promisedDate: order.promisedDate,
     customerRef: order.customerRef,
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
@@ -144,6 +174,7 @@ export async function getOrderForPrint(
     submitterDisplayName: order.submitter.displayName,
     submitterRoleLabel: roleLabel(order.submitter.role),
     items: printItems,
+    shipments: printShipments,
     orderQrSvg,
   };
 }

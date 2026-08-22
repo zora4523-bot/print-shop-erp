@@ -12,6 +12,7 @@ import { isMockMode } from '@/lib/notification';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { PageHeader } from '@/components/ui-business';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -35,7 +36,7 @@ export default async function OwnerNotificationsPage() {
     <div className="space-y-8">
       <PageHeader
         title="推送配置"
-        subtitle="企业微信群机器人 webhook 配置 + 10 个事件规则。"
+        subtitle="企业微信群机器人 webhook 配置 + 11 个事件规则。"
       />
 
       {mock ? (
@@ -73,7 +74,12 @@ export default async function OwnerNotificationsPage() {
             还没建任何群。点击右上角&ldquo;新建群&rdquo;开始。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="企业微信群列表"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -135,7 +141,7 @@ export default async function OwnerNotificationsPage() {
         )}
       </section>
 
-      {/* ─── 事件规则（10 条固定） ─── */}
+      {/* ─── 事件规则（11 条固定） ─── */}
       <section className="space-y-3">
         <h2 className="text-base font-semibold">事件规则</h2>
         {rules.length === 0 ? (
@@ -143,7 +149,12 @@ export default async function OwnerNotificationsPage() {
             seed 还没初始化默认规则。请运行 <code>pnpm prisma db seed</code>。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="通知事件规则"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -198,7 +209,12 @@ export default async function OwnerNotificationsPage() {
             暂无推送日志。
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="最近推送日志"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -213,7 +229,7 @@ export default async function OwnerNotificationsPage() {
                 {logs.map((l) => (
                   <tr key={l.id}>
                     <td className="px-3 py-2 font-mono text-xs">
-                      {formatDateTime(l.createdAt)}
+                      {formatDateTimeShanghai(l.createdAt)}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{l.eventType}</td>
                     <td className="px-3 py-2 text-xs">
@@ -263,16 +279,4 @@ function maskWebhookUrl(url: string): string {
 function firstLine(s: string): string {
   const line = s.split('\n')[0] ?? '';
   return line.length > 60 ? `${line.slice(0, 60)}…` : line;
-}
-
-function formatDateTime(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
 }

@@ -3,6 +3,7 @@
 import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -15,18 +16,34 @@ import {
 // 固定段名 → 中文标签。匹配不到的段（如 [id] 这类）直接回落到原 segment
 // 字符串显示。新增顶层导航时同步更新。
 const SEGMENT_LABELS: Record<string, string> = {
-  owner: '老板后台',
-  foreman: '车间',
+  owner: '管理后台',
+  foreman: '生产管理',
   sales: '销售',
   'customer-service': '客服',
   worker: '师傅',
   orders: '工单',
+  purchases: '采购单',
   bills: '账单',
   accounts: '账号管理',
+  parties: '客户/供应商',
   crafts: '工艺',
   products: '产品',
+  'product-categories': '产品分类',
+  boms: 'BOM/用料',
+  materials: '物料',
+  warehouses: '仓库/库位',
+  prices: '价格管理',
+  'external-sales': '外部销售收费',
+  items: '收费项目',
+  versions: '发布中心',
+  quote: '报价查询',
+  adjustments: '加价规则',
+  tiers: '价格阶梯',
+  notifications: '推送配置',
+  pigsty: 'Pigsty 运维',
   salary: '薪资',
-  daily: '师傅日薪',
+  daily: '计件工资',
+  'piecework-rules': '计件规则',
   hourly: '时薪工月结',
   cs: '客服周期',
   scheduling: '排产',
@@ -35,24 +52,40 @@ const SEGMENT_LABELS: Record<string, string> = {
   account: '账户',
   password: '修改密码',
   new: '新建',
+  edit: '编辑',
+  count: '盘点',
 };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
-// 404s. Render those segments as text instead. Codex round 78 / P2.
+// 404s. Render those segments as text instead。
 // Keep this in sync with the file tree in `app/`; if a layout-only
 // shell becomes a real page, drop the entry here.
 const LAYOUT_ONLY_PATHS = new Set<string>([
-  '/owner',
   '/foreman',
   '/sales',
 ]);
 
-function labelFor(segment: string): string {
-  return SEGMENT_LABELS[segment] ?? segment;
+// cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读
+// 标签，把 25 位随机串印在面包屑上等于什么都没说。
+const ID_SEGMENT =
+  /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+// 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
+export function resolveSegmentLabel(
+  segment: string,
+  entityLabel: string | null,
+): string {
+  const known = SEGMENT_LABELS[segment];
+  if (known) return known;
+  if (ID_SEGMENT.test(segment)) return entityLabel ?? '详情';
+  return segment;
 }
 
 export function AdminBreadcrumb() {
   const pathname = usePathname();
+  // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
+  // 这里不发任何请求。
+  const entityLabel = useBreadcrumbEntityLabel();
   const segments = pathname.split('/').filter(Boolean);
 
   if (segments.length === 0) {
@@ -74,32 +107,36 @@ export function AdminBreadcrumb() {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
           // Layout-only paths can't be navigated to (404)；render the
-          // label as text not link. Codex round 78 / P2.
+          // label as text not link。
           const isLinkable = !LAYOUT_ONLY_PATHS.has(href);
           return (
             // Separator must be a SIBLING of BreadcrumbItem, not a
             // child — both render `<li>`, and `<li>` inside `<li>` is
-            // invalid DOM. Codex round 78 / P2.
+            // invalid DOM。
             <Fragment key={href}>
               <BreadcrumbItem>
                 {isLast ? (
                   // Real terminal — semantically "current page".
-                  <BreadcrumbPage>{labelFor(seg)}</BreadcrumbPage>
+                  <BreadcrumbPage>
+                    {resolveSegmentLabel(seg, entityLabel)}
+                  </BreadcrumbPage>
                 ) : isLinkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
                   // prop 把 <a> 替换成 next/link。
-                  <BreadcrumbLink render={<Link href={href} />}>
-                    {labelFor(seg)}
+                  <BreadcrumbLink
+                    render={<Link href={href} prefetch={false} />}
+                  >
+                    {resolveSegmentLabel(seg, entityLabel)}
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the
                   // current page. Plain <span>, no aria-current —
                   // BreadcrumbPage would hard-code aria-current="page"
                   // and screen readers would announce two "current"s
-                  // on a single breadcrumb (Codex round 81 / P3).
+                  // on a single breadcrumb .
                   <span className="text-muted-foreground">
-                    {labelFor(seg)}
+                    {resolveSegmentLabel(seg, entityLabel)}
                   </span>
                 )}
               </BreadcrumbItem>

@@ -4,18 +4,25 @@
 
 const FIELD_LABELS: Record<string, string> = {
   // Top-level Order fields the edit form can touch
-  customerRef: '客户代号',
+  customName: '工单名称',
+  customerRef: '客户名称/简称',
   receiverName: '收货人',
   receiverPhone: '收货电话',
   receiverAddress: '收货地址',
   expressCode: '快递代码',
   packageRequirement: '包装要求',
   remark: '工单备注',
+  promisedDate: '承诺交期',
   isUrgent: '急单',
+  isSfCollect: '顺丰到付',
   // Status changes land in the same log table under action='STATUS_CHANGE'
   status: '状态',
   // Created-by / submitted-by meta
   trackingNo: '快递单号',
+  // 超计划报工（action='TASK_OVER_REPORT'）落在同一张表里
+  completedQty: '合格数',
+  defectQty: '不良数',
+  reworkQty: '返工数',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -28,6 +35,11 @@ const STATUS_LABELS: Record<string, string> = {
   FINISHED: '已完成',
   CANCELLED: '已取消',
 };
+
+// 工单状态中文标签（cron 推送 / 日志渲染共用）。
+export function orderStatusZh(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
 
 export function fieldLabel(name: string): string {
   return FIELD_LABELS[name] ?? name;
@@ -45,6 +57,11 @@ export function formatLogValue(
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (fieldName === 'status' && typeof value === 'string') {
     return STATUS_LABELS[value] ?? value;
+  }
+  // 日期字段：diff 里的 Date 落 JSON 后是 ISO 串，只展示日期部分
+  if (fieldName === 'promisedDate') {
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string') return value.slice(0, 10);
   }
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   // Unexpected shape — show JSON so reviewers can still decode it
@@ -91,6 +108,10 @@ const ACTION_LABELS: Record<string, string> = {
   UPDATE: '编辑',
   STATUS_CHANGE: '状态变更',
   DELETE: '删除',
+  // lib/production.ts 写这两个 action；此前它们没有标签，时间线上直接
+  // 显示英文枚举串。
+  TASK_REASSIGN: '任务改派',
+  TASK_OVER_REPORT: '超计划报工',
 };
 
 export function actionLabel(action: string): string {

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import bcrypt from 'bcryptjs';
-import { Role, WorkerType, MachineType } from '../../generated/prisma/client';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+  MachineType,
+  SalaryPeriodStatus,
+} from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -10,6 +16,12 @@ const { dbMock } = vi.hoisted(() => {
       create: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
+    };
+    craft: { findMany: ReturnType<typeof vi.fn> };
+    salaryRule: { findFirst: ReturnType<typeof vi.fn> };
+    salaryPeriod: {
+      findFirst: ReturnType<typeof vi.fn>;
+      create: ReturnType<typeof vi.fn>;
     };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
@@ -21,6 +33,9 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       count: vi.fn(),
     },
+    craft: { findMany: vi.fn() },
+    salaryRule: { findFirst: vi.fn() },
+    salaryPeriod: { findFirst: vi.fn(), create: vi.fn() },
     // $executeRaw is only used to acquire the advisory lock; no return value.
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     // $transaction runs the callback with the same mock as tx so every
@@ -45,7 +60,7 @@ import {
   AccountInvariantError,
 } from '../account';
 
-const baseActor = { id: 'owner-self', role: Role.OWNER };
+const baseActor = { id: 'owner-self', role: Role.ADMIN };
 
 const makeUser = (over: Partial<{
   id: string;
@@ -55,6 +70,7 @@ const makeUser = (over: Partial<{
   role: Role;
   workerType: WorkerType | null;
   machineType: MachineType | null;
+  machineCapabilities: MachineType[];
   isActive: boolean;
 }> = {}) => ({
   id: 'user-1',
@@ -64,6 +80,8 @@ const makeUser = (over: Partial<{
   role: Role.SALES,
   workerType: null,
   machineType: null,
+  machineCapabilities: [],
+  craftCapabilities: [],
   isActive: true,
   createdAt: new Date('2026-04-22T00:00:00Z'),
   updatedAt: new Date('2026-04-22T00:00:00Z'),
@@ -72,6 +90,20 @@ const makeUser = (over: Partial<{
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.user)) fn.mockReset();
+  dbMock.craft.findMany.mockReset().mockResolvedValue([]);
+  dbMock.salaryRule.findFirst.mockReset().mockImplementation(
+    async (args: { where: { ruleKey: string } }) => {
+      if (args.where.ruleKey === 'CS_BASE_SALARY') {
+        return { ruleValue: { monthlyBase: 2000 } };
+      }
+      if (args.where.ruleKey === 'CS_PERIOD_LENGTH') {
+        return { ruleValue: { months: 4 } };
+      }
+      return null;
+    },
+  );
+  dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.salaryPeriod.create.mockReset().mockResolvedValue({ id: 'period-1' });
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -129,6 +161,25 @@ describe('createUser', () => {
     expect(data.machineType).toBeNull();
   });
 
+  it('never persists employee fields for an external sales account', async () => {
+    dbMock.user.create.mockResolvedValue(makeUser({ role: Role.SALES }));
+    await createUser({
+      username: 'external-sales',
+      password: 'plaintext-9chars',
+      displayName: '外部销售',
+      role: Role.SALES,
+      employmentType: EmploymentType.FULL_TIME,
+      employmentStartDate: new Date('2026-08-01T00:00:00.000Z'),
+      employmentEndDate: new Date('2026-08-02T00:00:00.000Z'),
+    });
+
+    expect(dbMock.user.create.mock.calls[0]![0].data).toMatchObject({
+      employmentType: null,
+      employmentStartDate: null,
+      employmentEndDate: null,
+    });
+  });
+
   it('keeps workerType / machineType for WORKER + MACHINE', async () => {
     dbMock.user.create.mockResolvedValue(makeUser({ role: Role.WORKER }));
     await createUser({
@@ -143,6 +194,56 @@ describe('createUser', () => {
     expect(data.role).toBe(Role.WORKER);
     expect(data.workerType).toBe(WorkerType.MACHINE);
     expect(data.machineType).toBe(MachineType.WINDMILL);
+  });
+
+  it('stores multiple machine capabilities and validated craft capabilities atomically', async () => {
+    dbMock.craft.findMany.mockResolvedValue([
+      {
+        id: 'craft-foil',
+        name: '烫金',
+        isActive: true,
+        isOutsource: false,
+        defaultWorkerType: WorkerType.MACHINE,
+        defaultMachineType: MachineType.WINDMILL,
+        inHouseMachineTypes: [],
+      },
+    ]);
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ role: Role.WORKER }),
+    );
+
+    await createUser({
+      username: 'multi',
+      password: 'plaintext-9chars',
+      displayName: '多能师傅',
+      role: Role.WORKER,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.HAND_PRESS,
+      machineCapabilities: [
+        MachineType.HAND_PRESS,
+        MachineType.WINDMILL,
+      ],
+      craftCapabilities: ['craft-foil'],
+    });
+
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ['craft-foil'] } },
+      }),
+    );
+    expect(dbMock.user.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({
+        machineType: MachineType.HAND_PRESS,
+        machineCapabilities: [
+          MachineType.HAND_PRESS,
+          MachineType.WINDMILL,
+        ],
+        craftCapabilities: {
+          create: [{ craftId: 'craft-foil' }],
+        },
+      }),
+    );
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('drops machineType when workerType is not MACHINE', async () => {
@@ -180,11 +281,109 @@ describe('createUser', () => {
     });
     expect(dbMock.user.create.mock.calls[1][0].data.phone).toBe('13800138000');
   });
+
+  it('creates the initial four-month salary period in the same transaction for CS', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE }),
+    );
+    await createUser({
+      username: 'cs',
+      password: 'plaintext-9chars',
+      displayName: '客服',
+      role: Role.CUSTOMER_SERVICE,
+    });
+
+    expect(dbMock.salaryPeriod.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        csUserId: 'cs-1',
+        durationMonths: 4,
+        monthlyBase: '2000.00',
+        status: 'IN_PROGRESS',
+      }),
+    });
+    const data = dbMock.salaryPeriod.create.mock.calls[0][0].data;
+    expect(data.periodStart.getUTCDate()).toBe(1);
+  });
+
+  it('rolls back CS account creation when salary rules are missing', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createUser({
+        username: 'cs',
+        password: 'plaintext-9chars',
+        displayName: '客服',
+        role: Role.CUSTOMER_SERVICE,
+      }),
+    ).rejects.toThrow(/客服底薪或周期规则/);
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+  });
+
+  it('uses the same 1..24 month policy as manual CS-period creation', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE }),
+    );
+    dbMock.salaryRule.findFirst.mockImplementation(
+      async (args: { where: { ruleKey: string } }) => {
+        if (args.where.ruleKey === 'CS_BASE_SALARY') {
+          return { ruleValue: { monthlyBase: 2000 } };
+        }
+        if (args.where.ruleKey === 'CS_PERIOD_LENGTH') {
+          return { ruleValue: { months: 25 } };
+        }
+        return null;
+      },
+    );
+
+    await expect(
+      createUser({
+        username: 'cs',
+        password: 'plaintext-9chars',
+        displayName: '客服',
+        role: Role.CUSTOMER_SERVICE,
+      }),
+    ).rejects.toThrow(/1 到 24/);
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an active period that does not cover today instead of silently leaving a gap', async () => {
+    dbMock.user.create.mockResolvedValue(
+      makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE }),
+    );
+    dbMock.salaryPeriod.findFirst.mockResolvedValue({
+      id: 'future-period',
+      periodStart: new Date('2027-01-01T00:00:00.000Z'),
+      periodEnd: new Date('2027-04-30T00:00:00.000Z'),
+      status: SalaryPeriodStatus.IN_PROGRESS,
+    });
+
+    await expect(
+      createUser({
+        username: 'cs',
+        password: 'plaintext-9chars',
+        displayName: '客服',
+        role: Role.CUSTOMER_SERVICE,
+      }),
+    ).rejects.toThrow(/未覆盖今天/);
+
+    expect(dbMock.salaryPeriod.create).not.toHaveBeenCalled();
+    expect(dbMock.salaryPeriod.findFirst.mock.calls[0][0].where).toEqual(
+      expect.objectContaining({
+        csUserId: 'cs-1',
+        OR: expect.arrayContaining([
+          { status: SalaryPeriodStatus.IN_PROGRESS },
+        ]),
+      }),
+    );
+  });
 });
 
 describe('updateUser invariants', () => {
-  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
-  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.ADMIN });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.ADMIN });
   const salesPerson = makeUser({ id: 'sales-1', role: Role.SALES });
 
   it('wraps the check + write in a transaction and holds the owner advisory lock (Codex round 13 / P1)', async () => {
@@ -199,16 +398,16 @@ describe('updateUser invariants', () => {
 
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     // First tx-scoped call is the advisory lock — ensures the critical
-    // section is serialized against concurrent OWNER mutations.
+    // section is serialized against concurrent ADMIN mutations.
     expect(dbMock.$executeRaw).toHaveBeenCalled();
     const firstCall = dbMock.$executeRaw.mock.calls[0];
     const templateText = (firstCall[0] as TemplateStringsArray).join('?');
     expect(templateText).toMatch(/pg_advisory_xact_lock/);
   });
 
-  it('refuses to demote the last active OWNER', async () => {
+  it('refuses to demote the last active ADMIN', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
-    dbMock.user.count.mockResolvedValue(0); // no other active OWNER
+    dbMock.user.count.mockResolvedValue(0); // no other active ADMIN
 
     await expect(
       updateUser(
@@ -224,9 +423,9 @@ describe('updateUser invariants', () => {
     expect(dbMock.user.update).not.toHaveBeenCalled();
   });
 
-  it('allows demoting one OWNER when another active OWNER exists', async () => {
+  it('allows demoting one ADMIN when another active ADMIN exists', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
-    dbMock.user.count.mockResolvedValue(1); // some other OWNER
+    dbMock.user.count.mockResolvedValue(1); // some other ADMIN
     dbMock.user.update.mockResolvedValue(makeUser({ id: 'owner-other', role: Role.SALES }));
 
     await expect(
@@ -264,6 +463,28 @@ describe('updateUser invariants', () => {
     expect(dbMock.user.update.mock.calls[0][0].data.phone).toBe('13800138000');
   });
 
+  it('serializes a CS role change with salary-period settlement before updating the user', async () => {
+    const cs = makeUser({ id: 'cs-1', role: Role.CUSTOMER_SERVICE });
+    dbMock.user.findUnique.mockResolvedValue(cs);
+    dbMock.user.update.mockResolvedValue(
+      makeUser({ id: 'cs-1', role: Role.SALES }),
+    );
+
+    await updateUser(
+      'cs-1',
+      { displayName: '客服', role: Role.SALES },
+      baseActor,
+    );
+
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:cs-user:cs-1',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]!).toBeLessThan(
+      dbMock.user.update.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('throws when the target does not exist', async () => {
     dbMock.user.findUnique.mockResolvedValue(null);
     await expect(
@@ -273,8 +494,8 @@ describe('updateUser invariants', () => {
 });
 
 describe('setUserActive invariants', () => {
-  const ownerSelf = makeUser({ id: 'owner-self', role: Role.OWNER });
-  const ownerOther = makeUser({ id: 'owner-other', role: Role.OWNER });
+  const ownerSelf = makeUser({ id: 'owner-self', role: Role.ADMIN });
+  const ownerOther = makeUser({ id: 'owner-other', role: Role.ADMIN });
 
   it('also runs inside the transaction + advisory lock (Codex round 13 / P1)', async () => {
     const inactive = makeUser({ id: 'inactive', isActive: false, role: Role.SALES });
@@ -288,6 +509,26 @@ describe('setUserActive invariants', () => {
     expect((firstCall[0] as TemplateStringsArray).join('?')).toMatch(/pg_advisory_xact_lock/);
   });
 
+  it('serializes CS deactivation with settlement before updating the user', async () => {
+    const activeCs = makeUser({
+      id: 'cs-1',
+      isActive: true,
+      role: Role.CUSTOMER_SERVICE,
+    });
+    dbMock.user.findUnique.mockResolvedValue(activeCs);
+    dbMock.user.update.mockResolvedValue({ ...activeCs, isActive: false });
+
+    await setUserActive('cs-1', false, baseActor);
+
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(dbMock.$executeRaw.mock.calls[1]?.[1]).toBe(
+      'print-shop-erp:cs-user:cs-1',
+    );
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[1]!).toBeLessThan(
+      dbMock.user.update.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('refuses self-deactivation even when other OWNERs exist', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerSelf);
     dbMock.user.count.mockResolvedValue(5);
@@ -297,7 +538,7 @@ describe('setUserActive invariants', () => {
     );
   });
 
-  it('refuses to deactivate the last active OWNER', async () => {
+  it('refuses to deactivate the last active ADMIN', async () => {
     dbMock.user.findUnique.mockResolvedValue(ownerOther);
     dbMock.user.count.mockResolvedValue(0);
 

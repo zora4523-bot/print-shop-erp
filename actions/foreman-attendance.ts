@@ -12,22 +12,12 @@ import {
   AttendanceError,
 } from '@/lib/attendance';
 import type { AttendanceMutationResult } from './foreman-attendance.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Foreman records one (worker, date) attendance row. Idempotent by
 // design — same (worker, date) re-posts overwrite via upsert.
 //
-// Permission: reuse 'task:assign' (FOREMAN + OWNER) since the foreman
+// Permission: reuse 'task:assign' (ADMIN) since the administrator
 // already has broad workshop authority; adding a new permission key
 // for attendance alone is yak-shaving at this stage.
 export async function recordAttendanceAction(
@@ -38,7 +28,7 @@ export async function recordAttendanceAction(
 
   const parsed = recordAttendanceSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -49,6 +39,9 @@ export async function recordAttendanceAction(
         normalHours: parsed.data.normalHours,
         otHours: parsed.data.otHours,
         spareHours: parsed.data.spareHours,
+        workUnits: parsed.data.workUnits,
+        leaveUnits: parsed.data.leaveUnits,
+        leaveType: parsed.data.leaveType,
         remark: parsed.data.remark ?? null,
       },
       actor,
@@ -74,7 +67,7 @@ export async function removeAttendanceAction(
 
   const parsed = removeAttendanceSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {

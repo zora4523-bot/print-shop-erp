@@ -3,6 +3,7 @@ import { getCraftSummary } from '@/lib/craft';
 import { updateCraftAction } from '@/actions/owner-crafts';
 import { CraftForm } from '@/components/business/craft/CraftForm';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -17,6 +18,9 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditCraftPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:craft:manage');
   const { id } = await params;
   const craft = await getCraftSummary(id);
   if (!craft) notFound();
@@ -28,7 +32,7 @@ export default async function EditCraftPage({ params }: PageProps) {
       <div>
         <h1 className="text-xl font-semibold">编辑工艺：{craft.name}</h1>
         <p className="text-sm text-muted-foreground">
-          代码 <span className="font-mono">{craft.code}</span>
+          代码 <span className="font-sans tabular-nums">{craft.code}</span>
           {craft.isActive ? ' · 启用' : ' · 停用'}
           {craft.isOutsource ? ' · 外协' : ''}
         </p>

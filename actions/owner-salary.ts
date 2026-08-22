@@ -7,7 +7,7 @@ import {
   recomputeDailySalarySchema,
   markDailySalaryPaidSchema,
   startCsPeriodSchema,
-  markCsCommissionPaidSchema,
+  recordCsPayrollPaymentSchema,
   recomputeHourlyPayrollSchema,
   markHourlyPayrollPaidSchema,
 } from '@/lib/auth/schemas';
@@ -15,13 +15,20 @@ import {
   computeDailyForAllMachineWorkers,
   computeDailyWorkerSalary,
   markDailySalaryPaid,
+  addDailySalaryAdjustment,
   DailySalaryError,
 } from '@/lib/salary/daily';
+import {
+  createWorkerMachineSalaryRule,
+  PieceworkRuleError,
+  salaryAdjustmentInputSchema,
+  workerMachineRuleInputSchema,
+} from '@/lib/salary/piecework-admin';
 import {
   startCsPeriod,
   settleCsPeriod,
   settleReadyCsPeriods,
-  markCsCommissionPaid,
+  recordCsPayrollPayment,
   CsPeriodError,
   InvalidCsPeriodTransitionError,
 } from '@/lib/salary/cs';
@@ -38,18 +45,10 @@ import type {
   SettleCsPeriodResult,
   SettleReadyCsResult,
   RecomputeHourlyResult,
+  PieceworkRuleMutationResult,
+  CsPayrollPaymentResult,
 } from './owner-salary.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 // Owner kicks the daily-salary computation manually — useful when
 // cron missed, when a worker's late report changes the totals, or
@@ -64,7 +63,7 @@ export async function recomputeDailySalaryAction(
 
   const parsed = recomputeDailySalarySchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -110,12 +109,104 @@ export async function setDailySalaryPaidAction(
     isPaid: formData.get('isPaid'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  await markDailySalaryPaid(id, parsed.data.isPaid);
+  const marked = await markDailySalaryPaid(id, parsed.data.isPaid);
   revalidatePath('/owner/salary/daily');
+
+  // 「仅未发」筛选下标记已发后，这一行会直接从列表消失，承载 success
+  // 状态的组件跟着卸载——发钱操作最需要确认的一步反而完全没有反馈。
+  // 用 redirect 把确认信息提升到页面级：保留用户当前的筛选，附带刚
+  // 处理的师傅名字，由页面渲染一条确认条。
+  const back = formData.get('returnTo');
+  // returnTo 来自客户端，必须限定前缀，避免变成开放重定向。
+  const safeBack =
+    typeof back === 'string' && back.startsWith('/owner/salary/daily')
+      ? back
+      : '/owner/salary/daily';
+  const sep = safeBack.includes('?') ? '&' : '?';
+  redirect(
+    `${safeBack}${sep}marked=${encodeURIComponent(marked.workerName)}` +
+      `&markedPaid=${parsed.data.isPaid ? '1' : '0'}`,
+  );
+}
+
+export async function addDailySalaryAdjustmentAction(
+  dailySalaryId: string,
+  _prev: SalaryMutationResult | null,
+  formData: FormData,
+): Promise<SalaryMutationResult> {
+  const actor = await requirePermission('salary:rule:manage');
+  const parsed = salaryAdjustmentInputSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
+    dailySalaryId,
+    type: formData.get('type'),
+    amount: formData.get('amount'),
+    reason: formData.get('reason'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    await addDailySalaryAdjustment({
+      ...parsed.data,
+      actor,
+    });
+  } catch (err) {
+    if (err instanceof DailySalaryError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
+  revalidatePath('/owner/salary/daily');
+  revalidatePath(`/owner/salary/daily/${dailySalaryId}`);
   return { status: 'success' };
+}
+
+export async function createWorkerMachineSalaryRuleAction(
+  _prev: PieceworkRuleMutationResult | null,
+  formData: FormData,
+): Promise<PieceworkRuleMutationResult> {
+  const actor = await requirePermission('salary:rule:manage');
+  const parsed = workerMachineRuleInputSchema.safeParse({
+    workerId: formData.get('workerId'),
+    machineType: formData.get('machineType'),
+    dailyBase: formData.get('dailyBase'),
+    pieceRate: formData.get('pieceRate'),
+    boardRate: formData.get('boardRate'),
+    smallOrderThreshold: formData.get('smallOrderThreshold'),
+    smallOrderFlatPrice: formData.get('smallOrderFlatPrice'),
+    smallOrderInclusive: formData.get('smallOrderInclusive') === 'true',
+    largeOrderSetupFee: formData.get('largeOrderSetupFee'),
+    multiplierFactors: formData.getAll('multiplierFactors'),
+    effectiveFrom: formData.get('effectiveFrom'),
+    remark: formData.get('remark'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const created = await createWorkerMachineSalaryRule({
+      ...parsed.data,
+      actor,
+    });
+    revalidatePath('/owner/salary/piecework-rules');
+    return { status: 'success', ruleId: created.id };
+  } catch (err) {
+    if (err instanceof PieceworkRuleError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -141,15 +232,15 @@ export async function startCsPeriodAction(
   _prev: StartCsPeriodResult | null,
   raw: unknown,
 ): Promise<StartCsPeriodResult> {
-  await requirePermission('salary:rule:manage');
+  const actor = await requirePermission('salary:rule:manage');
 
   const parsed = startCsPeriodSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    const created = await startCsPeriod(parsed.data);
+    const created = await startCsPeriod(parsed.data, new Date(), actor);
     revalidatePath('/owner/salary/cs');
     redirect(`/owner/salary/cs/${created.id}`);
   } catch (err) {
@@ -203,36 +294,55 @@ export async function settleReadyCsPeriodsAction(): Promise<SettleReadyCsResult>
       errors,
     };
   } catch (err) {
-    if (err instanceof Error) {
+    // Only the known business error is a safe UI message; anything else
+    // (Prisma, etc.) rethrows to onRequestError → Sentry rather than
+    // being swallowed into a toast that hides the fault from monitoring.
+    if (err instanceof CsPeriodError) {
       return { status: 'error', message: err.message };
     }
     throw err;
   }
 }
 
-export async function markCsCommissionPaidAction(
-  id: string,
-  _prev: SalaryMutationResult | null,
+export async function recordCsPayrollPaymentAction(
+  salaryPeriodId: string,
+  _prev: CsPayrollPaymentResult | null,
   formData: FormData,
-): Promise<SalaryMutationResult> {
-  await requirePermission('salary:view:all');
+): Promise<CsPayrollPaymentResult> {
+  const actor = await requirePermission('salary:view:all');
 
-  const parsed = markCsCommissionPaidSchema.safeParse({
-    isPaid: formData.get('isPaid'),
+  const parsed = recordCsPayrollPaymentSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
+    baseAmount: formData.get('baseAmount'),
+    commissionAmount: formData.get('commissionAmount'),
+    paidAt: formData.get('paidAt'),
+    paymentMethod: formData.get('paymentMethod'),
+    referenceNo: formData.get('referenceNo'),
+    remark: formData.get('remark'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
-    await markCsCommissionPaid(id, parsed.data.isPaid);
+    const payment = await recordCsPayrollPayment(
+      salaryPeriodId,
+      parsed.data,
+      actor,
+    );
+    revalidatePath('/owner/salary/cs');
+    revalidatePath(`/owner/salary/cs/${salaryPeriodId}`);
+    return {
+      status: 'success',
+      paidBase: payment.paidBase,
+      paidCommission: payment.paidCommission,
+      isFullyPaid: payment.isFullyPaid,
+    };
   } catch (err) {
     const mapped = mapCsError(err);
     if (mapped) return mapped;
     throw err;
   }
-  revalidatePath('/owner/salary/cs');
-  return { status: 'success' };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -250,7 +360,7 @@ export async function recomputeHourlyPayrollAction(
 
   const parsed = recomputeHourlyPayrollSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   try {
@@ -296,7 +406,7 @@ export async function setHourlyPayrollPaidAction(
     isPaid: formData.get('isPaid'),
   });
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
   await markHourlyPayrollPaid(id, parsed.data.isPaid);

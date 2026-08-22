@@ -1,9 +1,12 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
+import { Button } from '@/components/ui/button';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type EligibleOrder = {
   id: string;
@@ -22,6 +25,7 @@ export function CreateBundleForm({
   to: string;
   eligible: readonly EligibleOrder[];
 }) {
+  const router = useRouter();
   const [state, formAction, isPending] = useActionState<
     CreateBundleResult | null,
     FormData
@@ -29,10 +33,22 @@ export function CreateBundleForm({
 
   // 全选 / 反选 / 单选状态。useState 初始化只跑一次，所以**外层用
   // `key={eligibleIdsKey}` 强制 remount**——日期 filter 变化 → 候选
-  // 集换组 → form 重挂 → setSelected 拿新 allIds（Codex round 119
-  // medium）。比 useEffect+setState 更纯。
+  // 集换组 → form 重挂 → setSelected 拿新 allIds。比 useEffect+setState 更纯。
   const allIds = useMemo(() => eligible.map((o) => o.id), [eligible]);
   const [selected, setSelected] = useState<Set<string>>(new Set(allIds));
+
+  useEffect(() => {
+    if (state?.status !== 'queued') return;
+    const timer = window.setInterval(() => router.refresh(), 3_000);
+    const stop = window.setTimeout(() => window.clearInterval(timer), 120_000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
+  }, [router, state]);
+
+  const allSelected = allIds.length > 0 && selected.size === allIds.length;
+  const someSelected = selected.size > 0 && !allSelected;
 
   function toggleAll() {
     if (selected.size === allIds.length) {
@@ -74,22 +90,33 @@ export function CreateBundleForm({
           所选日期窗口内没有含 CDR 文件的工单。
         </div>
       ) : (
-        <div className="overflow-hidden rounded-md border">
+        <div
+          className="overflow-x-auto rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="CDR 打包工单选择"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left">
                   <input
                     type="checkbox"
-                    aria-label="全选 / 反选"
-                    checked={
-                      selected.size === allIds.length && allIds.length > 0
-                    }
+                    // toggleAll 的语义是全选/全清，不是反选。
+                    aria-label="全选 / 全不选"
+                    // 部分选中时置原生 indeterminate：读屏器据此播报
+                    // “mixed”，视觉上浏览器也画横线而不是空框。只用 DOM
+                    // 属性、不额外写 aria-checked——原生 checkbox 上手写
+                    // aria-checked 会和原生状态打架。
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected;
+                    }}
+                    checked={allSelected}
                     onChange={toggleAll}
                   />
                 </th>
                 <th className="px-3 py-2 text-left">工单号</th>
-                <th className="px-3 py-2 text-left">客户</th>
+                <th className="px-3 py-2 text-left">客户名称/简称</th>
                 <th className="px-3 py-2 text-right">CDR 数</th>
                 <th className="px-3 py-2 text-left">提交时间</th>
                 <th className="px-3 py-2"></th>
@@ -105,17 +132,18 @@ export function CreateBundleForm({
                         type="checkbox"
                         name="orderIds"
                         value={o.id}
+                        aria-label={`选择工单 ${o.orderNo}`}
                         checked={checked}
                         onChange={() => toggleOne(o.id)}
                       />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">
+                    <td className="px-3 py-2 font-sans tabular-nums text-xs">
                       {o.orderNo}
                     </td>
                     <td className="px-3 py-2">{o.customerRef ?? '—'}</td>
-                    <td className="px-3 py-2 text-right">{o.cdrCount}</td>
+                    <td className="px-3 py-2 text-right font-sans tabular-nums">{o.cdrCount}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {formatDateTime(o.submittedAt)}
+                      {formatDateTimeShanghai(new Date(o.submittedAt))}
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Link
@@ -134,15 +162,14 @@ export function CreateBundleForm({
       )}
 
       <div className="flex items-center justify-between">
-        <button
+        <Button
           type="submit"
           disabled={isPending || selected.size === 0}
-          className="rounded-md border bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isPending ? '生成中…' : '生成下载包'}
-        </button>
+        </Button>
         {state?.status === 'error' ? (
-          <p className="text-sm text-destructive">{state.message}</p>
+          <p role="alert" className="text-sm text-destructive">{state.message}</p>
         ) : null}
         {state?.status === 'invalid' ? (
           <p className="text-sm text-destructive">
@@ -162,7 +189,7 @@ export function CreateBundleForm({
           {/* href 用绝对 URL（不是 relativePath）—— owner 在 admin
               host 上右键&ldquo;复制链接地址&rdquo;时拿到的是 APP_PUBLIC_URL 域，
               而不是当前 admin 域（split-origin 部署：staff 走内网域，
-              外协拿公网域）。Codex round 119 → 120 follow-up。 */}
+              外协拿公网域）。 */}
           <div className="mt-2 break-all font-mono text-xs">
             <a
               href={state.downloadUrl}
@@ -174,24 +201,21 @@ export function CreateBundleForm({
             </a>
           </div>
           <div className="mt-1 text-xs text-success-foreground/80">
-            链接 24 小时有效（{formatDateTime(state.expiresAt)} 过期）。复制
+            链接 24 小时有效（{formatDateTimeShanghai(new Date(state.expiresAt))} 过期）。复制
             上方完整 URL 发给外协。
           </div>
         </div>
       ) : null}
+
+      {state?.status === 'queued' ? (
+        <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm">
+          已将 {state.fileCount} 个 CDR 文件加入重任务队列。打包在独立进程中进行，
+          完成后会出现在下方列表。
+          <span className="ml-2 font-mono text-xs text-muted-foreground">
+            任务 {state.jobId}
+          </span>
+        </div>
+      ) : null}
     </form>
   );
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
 }

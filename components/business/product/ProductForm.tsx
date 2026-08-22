@@ -2,15 +2,15 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { ProductCategory } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
-import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
+import type { ProductCategoryOption } from '@/lib/product';
 
 type EditInitial = {
-  category: ProductCategory;
+  code: string | null;
+  categoryNodeId: string;
   name: string;
   specification: string | null;
   paperType: string | null;
@@ -26,6 +26,7 @@ type Props =
         prev: ProductMutationResult | null,
         fd: FormData,
       ) => Promise<ProductMutationResult>;
+      categoryNodes: ProductCategoryOption[];
     }
   | {
       mode: 'edit';
@@ -34,19 +35,11 @@ type Props =
         fd: FormData,
       ) => Promise<ProductMutationResult>;
       initial: EditInitial;
+      categoryNodes: ProductCategoryOption[];
     };
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
-
-const CATEGORY_OPTIONS = [
-  ProductCategory.BLANK_STOCK,
-  ProductCategory.GENERIC_STOCK,
-  ProductCategory.CUSTOM_FLAT_FOIL,
-  ProductCategory.COLOR_PRINT,
-  ProductCategory.STOCK_FOIL_ADD,
-  ProductCategory.BYO_MATERIAL,
-] as const;
 
 export function ProductForm(props: Props) {
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
@@ -59,6 +52,8 @@ export function ProductForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const missingCategoryNodes = props.categoryNodes.length === 0;
+  const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
 
   const priceDefault =
     initial?.baseUnitPrice === null || initial?.baseUnitPrice === undefined
@@ -67,23 +62,71 @@ export function ProductForm(props: Props) {
 
   return (
     <form action={formAction} className="space-y-5" noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="category">分类</Label>
-        <select
-          id="category"
-          name="category"
-          className={selectClass}
-          defaultValue={initial?.category ?? CATEGORY_OPTIONS[0]}
-          disabled={pending}
+      {isCreate ? (
+        <details
+          className="rounded-lg border border-dashed p-3"
+          open={Boolean(errs.code?.[0])}
         >
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c} value={c}>
-              {PRODUCT_CATEGORY_LABELS[c]}
-            </option>
-          ))}
+          <summary className="cursor-pointer text-sm text-muted-foreground">
+            高级设置：自定义产品编码（通常无需填写）
+          </summary>
+          <div className="mt-3">
+            <TextField
+              id="code"
+              label="自定义编码（选填）"
+              hint="留空将自动生成，例如 PRD-000001。"
+              disabled={pending}
+              error={errs.code?.[0]}
+            />
+          </div>
+        </details>
+      ) : (
+        <TextField
+          id="code"
+          label="产品编码"
+          hint="用于内部 SKU / 快速搜索；大小写不敏感。"
+          disabled={pending}
+          error={errs.code?.[0]}
+          defaultValue={initial?.code ?? ''}
+        />
+      )}
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="categoryNodeId">分类</Label>
+          <Link
+            href="/owner/product-categories/new"
+            className="text-xs text-primary hover:underline"
+          >
+            新建分类
+          </Link>
+        </div>
+        <select
+          id="categoryNodeId"
+          name="categoryNodeId"
+          className={selectClass}
+          defaultValue={defaultCategoryNodeId}
+          disabled={pending || missingCategoryNodes}
+        >
+          {props.categoryNodes.map((node) => {
+            const depth = Math.max(0, node.path.split('.').length - 2);
+            const prefix = depth > 0 ? `${'· '.repeat(depth)}` : '';
+            return (
+              <option key={node.id} value={node.id}>
+                {prefix}
+                {node.name}
+                {node.isActive ? '' : '（已停用）'}
+              </option>
+            );
+          })}
         </select>
-        {errs.category?.[0] ? (
-          <p className="text-sm text-destructive">{errs.category[0]}</p>
+        {errs.categoryNodeId?.[0] ? (
+          <p className="text-sm text-destructive">{errs.categoryNodeId[0]}</p>
+        ) : null}
+        {missingCategoryNodes ? (
+          <p role="alert" className="text-sm text-warning-foreground">
+            暂无可用产品分类，请先创建并启用分类。
+          </p>
         ) : null}
       </div>
 
@@ -116,8 +159,8 @@ export function ProductForm(props: Props) {
 
       <TextField
         id="baseUnitPrice"
-        label="建议单价（选填）"
-        hint="Decimal(10,4)：整数部分 ≤ 6 位，小数 ≤ 4 位。录单时作为建议价参考，不强制。"
+        label="内部销售/工厂直单基础单价（选填）"
+        hint="最多 6 位整数、4 位小数。仅在内部销售或工厂直单没有适用阶梯价时使用；外部销售不读取此价格。"
         type="text"
         disabled={pending}
         error={errs.baseUnitPrice?.[0]}
@@ -127,7 +170,7 @@ export function ProductForm(props: Props) {
       <TextField
         id="minOrderQty"
         label="最小起订量（选填）"
-        hint="正整数；空表示不限。"
+        hint="正整数；空表示不限。低于起订量时不自动报价，特殊单需手工填价并说明原因。"
         type="number"
         min={1}
         step={1}
@@ -142,13 +185,13 @@ export function ProductForm(props: Props) {
         </p>
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success">
+        <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
         </p>
       ) : null}
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || missingCategoryNodes}>
           {pending ? '提交中…' : isCreate ? '创建产品' : '保存修改'}
         </Button>
         <Link href="/owner/products" className={buttonVariants({ variant: 'outline' })}>

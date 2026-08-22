@@ -1,12 +1,19 @@
 import Link from 'next/link';
 import { createProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
+import { listProductCategoryOptions } from '@/lib/product';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
   title: '新建产品 · 红包印刷 ERP',
 };
 
-export default function NewProductPage() {
+export default async function NewProductPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:product:manage');
+  const categoryNodes = await listProductCategoryOptions();
+
   return (
     <div className="space-y-4">
       <div>
@@ -19,7 +26,11 @@ export default function NewProductPage() {
         </p>
       </div>
       <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <ProductForm mode="create" action={createProductAction} />
+        <ProductForm
+          mode="create"
+          action={createProductAction}
+          categoryNodes={categoryNodes}
+        />
       </div>
     </div>
   );

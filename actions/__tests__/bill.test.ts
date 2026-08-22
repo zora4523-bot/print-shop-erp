@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BillStatus, Role } from '../../generated/prisma/client';
+import { BillStatus, Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -51,14 +51,15 @@ import {
 const ownerActor = {
   id: 'owner-1',
   username: 'o',
-  displayName: '老板',
-  role: Role.OWNER,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
 
 const fd = (data: Record<string, string>): FormData => {
   const f = new FormData();
+  f.set('idempotencyKey', '00000000-0000-4000-8000-000000000001');
   for (const [k, v] of Object.entries(data)) f.set(k, v);
   return f;
 };
@@ -153,7 +154,7 @@ describe('issueBillAction', () => {
 });
 
 describe('recordBillPaymentAction', () => {
-  it("requirePermission('bill:mark-paid') [OWNER-only]", async () => {
+  it("requirePermission('bill:mark-paid') [ADMIN-only]", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
@@ -225,7 +226,11 @@ describe('recordBillPaymentAction', () => {
     expect(billMock.recordPayment).toHaveBeenCalledWith(
       'b1',
       '1000',
-      expect.objectContaining({ id: 'owner-1', role: Role.OWNER }),
+      expect.objectContaining({ id: 'owner-1', role: Role.ADMIN }),
+      expect.any(Date),
+      expect.objectContaining({
+        idempotencyKey: '00000000-0000-4000-8000-000000000001',
+      }),
     );
   });
 

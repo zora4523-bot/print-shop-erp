@@ -1,31 +1,58 @@
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
-import { getProductSummary } from '@/lib/product';
+import { getProductSummary, listProductCategoryOptions } from '@/lib/product';
 import { updateProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
-import { productCategoryLabel } from '@/lib/auth/role-labels';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
+// generateMetadata 与页面组件是同一请求里两次独立执行，Next 只自动 memo
+// fetch()、不 memo Prisma，所以这里本来是实打实查两遍。React cache()
+// 把同一请求内的重复调用收敛成一次（Next 文档 14-metadata-and-og-images.md
+// 「Memoizing data requests」）。参数是 primitive，缓存命中；换成对象
+// 字面量就永远 miss（cache 对对象参数用 WeakMap 引用相等）。
+const loadProduct = cache(getProductSummary);
+
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  const p = await getProductSummary(id);
+  const p = await loadProduct(id);
   return { title: p ? `编辑 ${p.name} · 产品字典` : '产品不存在' };
 }
 
 export default async function EditProductPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('dict:product:manage');
   const { id } = await params;
-  const product = await getProductSummary(id);
+  const product = await loadProduct(id);
   if (!product) notFound();
+  const categoryOptions = await listProductCategoryOptions({
+    includeInactiveIds: [product.categoryNodeId],
+  });
 
   const boundUpdate = updateProductAction.bind(null, id);
+  const formInitial = {
+    code: product.code,
+    categoryNodeId: product.categoryNodeId,
+    name: product.name,
+    specification: product.specification,
+    paperType: product.paperType,
+    baseUnitPrice:
+      product.baseUnitPrice === null || product.baseUnitPrice === undefined
+        ? null
+        : String(product.baseUnitPrice),
+    minOrderQty: product.minOrderQty,
+    isActive: product.isActive,
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">编辑产品：{product.name}</h1>
         <p className="text-sm text-muted-foreground">
-          {productCategoryLabel(product.category)}
+          {product.categoryNode.name}
           {product.isActive ? ' · 启用' : ' · 停用'}
         </p>
       </div>
@@ -36,7 +63,8 @@ export default async function EditProductPage({ params }: PageProps) {
           key={`${product.id}-${product.updatedAt.toISOString()}`}
           mode="edit"
           action={boundUpdate}
-          initial={product}
+          initial={formInitial}
+          categoryNodes={categoryOptions}
         />
       </section>
 

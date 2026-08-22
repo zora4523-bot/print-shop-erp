@@ -48,8 +48,8 @@ import {
 const ownerActor = {
   id: 'actor-owner',
   username: 'admin',
-  displayName: '老板',
-  role: 'OWNER',
+  displayName: '管理员',
+  role: 'ADMIN',
   workerType: null,
   machineType: null,
 };
@@ -58,6 +58,7 @@ const validCreateFields = {
   name: '专版单色平烫',
   code: 'FLAT_FOIL_SINGLE',
   isOutsource: 'false',
+  defaultWorkerType: 'MACHINE',
   defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
@@ -80,6 +81,19 @@ beforeEach(() => {
 });
 
 describe('createCraftAction', () => {
+  it('passes null to the library when code is left for automatic generation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
+
+    await expect(
+      createCraftAction(null, fd({ ...validCreateFields, code: '' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(craftMock.createCraft).toHaveBeenCalledWith(
+      expect.objectContaining({ code: null }),
+    );
+  });
+
   it("first-line requirePermission('dict:craft:manage'); unauth bubbles", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
@@ -222,6 +236,7 @@ describe('createCraftAction', () => {
     const f = new FormData();
     f.set('name', '粘封');
     f.set('code', 'GLUING');
+    f.set('defaultWorkerType', 'MACHINE');
     f.set('defaultMachineType', MachineType.GLUE);
     f.set('sortOrder', '40');
     // isOutsource deliberately absent

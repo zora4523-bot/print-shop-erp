@@ -1,12 +1,21 @@
 'use client';
 
-import { useActionState, useMemo, useState, useTransition } from 'react';
+import {
+  useActionState,
+  useCallback,
+  useId,
+  useMemo,
+  useState,
+  useTransition,
+  type FormEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createOutsourceAction } from '@/actions/outsource';
 import type { OutsourceMutationResult } from '@/actions/outsource.types';
+import { nextOutsourceIdempotencyKey } from './idempotency';
 
 export type OutsourceFormItem = {
   id: string;
@@ -19,25 +28,50 @@ type Props = {
   orderId: string;
   orderNo: string;
   items: OutsourceFormItem[];
+  initialIdempotencyKey: string;
 };
 
-export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
+export function CreateOutsourceForm({
+  orderId,
+  orderNo,
+  items,
+  initialIdempotencyKey,
+}: Props) {
+  const router = useRouter();
+  const [idempotencyKey, setIdempotencyKey] = useState(
+    initialIdempotencyKey,
+  );
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [supplierName, setSupplierName] = useState('');
   const [supplierContact, setSupplierContact] = useState('');
   const [craftDescription, setCraftDescription] = useState('');
   const [specialRequirement, setSpecialRequirement] = useState('');
-  const [totalQty, setTotalQty] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
 
+  const submitOutsource = useCallback(
+    async (previous: OutsourceMutationResult | null, raw: unknown) => {
+      const result = await createOutsourceAction(previous, raw);
+      setIdempotencyKey((current) =>
+        nextOutsourceIdempotencyKey(
+          current,
+          result,
+          () => window.crypto.randomUUID(),
+        ),
+      );
+      if (result.status === 'success') {
+        router.push(`/foreman/outsource/${result.id}`);
+      }
+      return result;
+    },
+    [router],
+  );
   const [state, action] = useActionState<OutsourceMutationResult | null, unknown>(
-    createOutsourceAction,
+    submitOutsource,
     null,
   );
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const chosenIds = useMemo(
     () =>
@@ -46,21 +80,28 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
         .map((it) => it.id),
     [items, selected],
   );
+  const chosenTotalQty = useMemo(
+    () =>
+      items.reduce(
+        (sum, item) => sum + (selected[item.id] ? item.quantity : 0),
+        0,
+      ),
+    [items, selected],
+  );
 
-  // createOutsourceAction ends with redirect() on success, which throws
-  // NEXT_REDIRECT — useActionState never sees a 'success' value. So no
-  // need to useEffect on state.status here.
-  void router;
-
-  function handleSubmit() {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     const payload = {
+      idempotencyKey,
       orderId,
       orderItemIds: chosenIds,
       supplierName,
       supplierContact: supplierContact || null,
       craftDescription: craftDescription || null,
       specialRequirement: specialRequirement || null,
-      totalQty: totalQty === '' ? null : totalQty,
+      // The server always derives and verifies this value from the selected
+      // order items. It is sent only as a stale-page/tamper guard.
+      totalQty: chosenTotalQty,
       expectedDate: expectedDate || null,
       amount: amount === '' ? null : amount,
       remark: remark || null,
@@ -69,10 +110,11 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
   }
 
   return (
-    <div className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">
-          选择款式（工单 <span className="font-mono">{orderNo}</span>）
+          选择款式（工单 <span className="font-sans tabular-nums">{orderNo}</span>）
         </h2>
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">该工单没有可外协的款式。</p>
@@ -105,11 +147,20 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
             {fieldErrors(state, 'orderItemIds')[0]}
           </p>
         ) : null}
+        <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">已选款式合计：</span>{' '}
+          <output aria-live="polite" className="font-medium tabular-nums">
+            {chosenTotalQty.toLocaleString()} 个
+          </output>
+          <span className="ml-2 text-xs text-muted-foreground">
+            （由系统根据所选款式计算，不可手工修改）
+          </span>
+        </div>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">外协厂信息</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
             label="外协厂名 *"
             value={supplierName}
@@ -137,14 +188,7 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
             full
           />
           <Field
-            label="总数量"
-            value={totalQty}
-            onChange={setTotalQty}
-            errors={fieldErrors(state, 'totalQty')}
-            inputMode="numeric"
-          />
-          <Field
-            label="金额 (元)"
+            label="供应商应付金额（人工确认，元）"
             value={amount}
             onChange={setAmount}
             errors={fieldErrors(state, 'amount')}
@@ -165,16 +209,20 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
             full
           />
         </div>
+        <p className="text-xs text-muted-foreground">
+          供应商应付按外协报价或合同人工确认，不套用客户报价、员工计件工资或销售提成规则；金额未知时可留空，回货后再补录。
+        </p>
       </section>
 
       {state?.status === 'error' ? (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p role="alert" className="text-sm text-destructive" aria-live="polite">
+          {state.message}
+        </p>
       ) : null}
 
       <div className="flex items-center gap-3">
         <Button
-          type="button"
-          onClick={handleSubmit}
+          type="submit"
           disabled={pending || chosenIds.length === 0 || supplierName === ''}
         >
           {pending ? '提交中…' : '创建外协单'}
@@ -186,7 +234,7 @@ export function CreateOutsourceForm({ orderId, orderNo, items }: Props) {
           返回工单详情
         </a>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -215,18 +263,31 @@ function Field({
   type?: string;
   inputMode?: 'numeric' | 'decimal';
 }) {
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
   return (
-    <div className={full ? 'col-span-2' : undefined}>
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+    <div className={full ? 'sm:col-span-2' : undefined}>
+      <Label htmlFor={inputId} className="text-xs text-muted-foreground">
+        {label}
+      </Label>
       <Input
+        id={inputId}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         inputMode={inputMode}
+        aria-invalid={errors.length > 0}
+        aria-describedby={errors.length > 0 ? errorId : undefined}
         className={`mt-1 ${errors.length > 0 ? 'border-destructive' : ''}`}
       />
       {errors.length > 0 ? (
-        <p className="mt-1 text-xs text-destructive">{errors[0]}</p>
+        <p
+          id={errorId}
+          className="mt-1 text-xs text-destructive"
+          aria-live="polite"
+        >
+          {errors[0]}
+        </p>
       ) : null}
     </div>
   );

@@ -17,24 +17,13 @@ import {
   AccountInvariantError,
 } from '@/lib/account';
 import type { AccountMutationResult } from './owner-accounts.types';
+import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 // NB: Next.js strips every non-async-function export from a 'use server'
 // module, so a `export type { AccountMutationResult }` re-export here would
 // be silently dropped at RSC compile time. All callers — pages, client
 // components, and tests — must import the type from './owner-accounts.types'
 // directly.
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const head = issue.path[0];
-    const key = head === undefined ? '_' : String(head);
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
 
 // P2002 on the User table's unique username column. `meta.target` comes in
 // several shapes depending on the driver — `string[]` of columns, a single
@@ -69,11 +58,15 @@ function normalizeFormInput(formData: FormData) {
   // Turn FormData into a plain object. Empty strings stay empty so Zod can
   // tell "absent" from "the operator cleared this field". `isActive` is
   // passed through as-is; the schema's `formBoolean` preprocess handles
-  // both the browser-default 'on' (Codex round 13 / P2) and explicit 'true'.
+  // both the browser-default 'on'  and explicit 'true'.
   const get = (k: string) => {
     const v = formData.get(k);
     return typeof v === 'string' ? v : undefined;
   };
+  const getAll = (k: string) =>
+    formData
+      .getAll(k)
+      .filter((value): value is string => typeof value === 'string');
   return {
     username: get('username'),
     displayName: get('displayName'),
@@ -81,8 +74,13 @@ function normalizeFormInput(formData: FormData) {
     role: get('role'),
     workerType: get('workerType') || null,
     machineType: get('machineType') || null,
+    machineCapabilities: getAll('machineCapabilities'),
+    craftCapabilities: getAll('craftCapabilities'),
     password: get('password'),
     isActive: get('isActive'),
+    employmentType: get('employmentType') || null,
+    employmentStartDate: get('employmentStartDate') || null,
+    employmentEndDate: get('employmentEndDate') || null,
   };
 }
 
@@ -111,7 +109,7 @@ export async function createUserAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
+  revalidateAccountPickerPaths(createdId);
   // Send the operator straight to the edit page — clearer feedback than a
   // silent "✓ 已保存" and prevents accidental double-submit from a lingering
   // filled-in create form.
@@ -140,8 +138,7 @@ export async function updateUserAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
-  revalidatePath(`/owner/accounts/${id}`);
+  revalidateAccountPickerPaths(id);
   return { status: 'success' };
 }
 
@@ -160,8 +157,7 @@ export async function setUserActiveAction(
     throw err;
   }
 
-  revalidatePath('/owner/accounts');
-  revalidatePath(`/owner/accounts/${id}`);
+  revalidateAccountPickerPaths(id);
   return { status: 'success' };
 }
 
@@ -188,4 +184,11 @@ export async function resetUserPasswordAction(
 
   revalidatePath(`/owner/accounts/${id}`);
   return { status: 'success' };
+}
+
+function revalidateAccountPickerPaths(id: string) {
+  revalidatePath('/owner/accounts');
+  revalidatePath(`/owner/accounts/${id}`);
+  revalidatePath('/owner/salary/cs/new');
+  revalidatePath('/foreman/scheduling/[id]', 'page');
 }

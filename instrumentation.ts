@@ -1,6 +1,5 @@
-// Next.js instrumentation hook — runs once at process boot in BOTH the
-// Node runtime (Server Components / Server Actions / API routes) and
-// the Edge runtime (middleware). See:
+// Next.js instrumentation hook — runs once at process boot for the
+// Node runtime (Server Components / Server Actions / API routes / Proxy). See:
 //   https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
 //
 // Posture: graceful no-op when SENTRY_DSN is unset (dev / pre-prod).

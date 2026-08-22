@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test';
 import {
   login,
   ADMIN_USERNAME,
-  ADMIN_PASSWORD,
+  E2E_PASSWORD,
+  E2E_USERS,
   getUserIdByUsername,
   seedPrintableOrder,
 } from '../e2e/_helpers';
@@ -17,7 +18,7 @@ import {
 //
 // Stability tactics:
 //   - seedPrintableOrder uses a deterministic orderId per count, so
-//     QR pixels (encoded `order:<id>`) hash identically every run.
+//     QR pixels (encoded `{base}/orders/<id>` URL) hash identically every run.
 //   - Designs render an inline 1×1 PNG (data:image/png;base64,...)
 //     so no network fetch / no image caching variance.
 //   - print-footer (打印时间) is masked — wall-clock varies.
@@ -48,8 +49,8 @@ test.describe('OrderPrintLayout 截图回归', () => {
 
       await login(page, {
         from: `/print/orders/${orderId}`,
-        username: ADMIN_USERNAME,
-        password: ADMIN_PASSWORD,
+        username: E2E_USERS.owner!.username,
+        password: E2E_PASSWORD,
       });
       await expect(page).toHaveURL(`/print/orders/${orderId}`);
 
@@ -81,4 +82,128 @@ test.describe('OrderPrintLayout 截图回归', () => {
       );
     });
   }
+
+  test('完整工单上下文与红底关键备注稳定', async ({ page }) => {
+    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const {
+      orderId,
+      customName,
+      itemRemark,
+      foilColors,
+    } = await seedPrintableOrder({
+      submitterId: adminId,
+      designCount: 1,
+      variant: 'rich-context',
+    });
+
+    await login(page, {
+      from: `/print/orders/${orderId}`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await expect(page).toHaveURL(`/print/orders/${orderId}`);
+
+    await expect(page.locator('.order-custom-name')).toHaveText(customName!);
+    await expect(
+      page.locator('.item-info dd').filter({
+        hasText: foilColors.join('、'),
+      }),
+    ).toBeVisible();
+    const highlightedRemark = page.locator('.item-remark-text');
+    await expect(highlightedRemark).toHaveText(itemRemark!);
+    await expect(highlightedRemark).toHaveCSS('color', 'rgb(192, 0, 0)');
+    await expect(highlightedRemark).toHaveCSS(
+      'background-color',
+      'rgb(255, 230, 230)',
+    );
+    await expect(page.locator('.print-container')).toHaveCSS(
+      'print-color-adjust',
+      'exact',
+    );
+
+    await expect(page.locator('.print-container')).toHaveScreenshot(
+      'order-print-rich-context.png',
+      {
+        mask: [
+          page.locator('.print-footer'),
+          page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
+        ],
+      },
+    );
+  });
+
+  test('三款完整上下文分页正常且每页重复表头', async ({ page }) => {
+    const adminId = await getUserIdByUsername(ADMIN_USERNAME);
+    const { orderId, customName, itemRemark, foilColors } =
+      await seedPrintableOrder({
+        submitterId: adminId,
+        designCount: 1,
+        variant: 'three-items',
+      });
+
+    await login(page, {
+      from: `/print/orders/${orderId}`,
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+    await expect(page).toHaveURL(`/print/orders/${orderId}`);
+    await expect(page.locator('.order-item')).toHaveCount(3);
+    await expect(page.locator('.order-custom-name')).toHaveText(customName!);
+    await expect(page.locator('.item-remark-text')).toHaveCount(3);
+    await expect(page.getByText('多地址 ×2', { exact: false }).first()).toBeVisible();
+    await expect(page.locator('.item-remark-text').first()).toHaveText(
+      itemRemark!,
+    );
+    await expect(
+      page.locator('.item-info dd').filter({
+        hasText: foilColors.join('、'),
+      }),
+    ).toHaveCount(3);
+
+    await expect(page.locator('.print-container')).toHaveScreenshot(
+      'order-print-three-items.png',
+      {
+        mask: [
+          page.locator('.print-footer'),
+          page.getByRole('button', { name: /Open Next\.js Dev Tools/i }),
+        ],
+      },
+    );
+
+    await page.emulateMedia({ media: 'print' });
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '10mm',
+        right: '10mm',
+        bottom: '10mm',
+        left: '10mm',
+      },
+    });
+    const pageObjects =
+      pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? [];
+    // 业主 2026-08-18 决策：放弃「三款必须一页」。硬压一页的 compact-3
+    // 只在恰好 3 款时生效，而工单一旦排产仍然放不下——那条断言给的是
+    // 假的安全感。现在的契约是「正常分页 + 每页重复表头」，所以这里
+    // 只断言页数合理（≥1 且不炸裂），页眉重复由下面的 DOM 断言保证。
+    expect(pageObjects.length).toBeGreaterThanOrEqual(1);
+    expect(
+      pageObjects.length,
+      '三款工单不应该分出异常多的页面（分页塌陷的典型症状）',
+    ).toBeLessThanOrEqual(4);
+
+    // 每页重复表头的机制是 <thead>：浏览器原生在每个打印页重复它，并
+    // 预留空间。断言结构存在，避免有人把它改回 position: fixed。
+    await expect(page.locator('.print-sheet > thead .running-header-no')).toHaveText(
+      /^E2E-VR-THREE-/,
+    );
+    await expect(page.locator('.print-sheet > tfoot .print-footer')).toHaveCount(1);
+    const footerPosition = await page
+      .locator('.print-footer')
+      .evaluate((el) => getComputedStyle(el).position);
+    expect(footerPosition, '页脚不能再用 fixed —— 它每页重画却不占位，会压住正文').not.toBe(
+      'fixed',
+    );
+  });
 });

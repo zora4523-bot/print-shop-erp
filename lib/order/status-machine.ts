@@ -21,7 +21,13 @@ export class InvalidOrderTransitionError extends Error {
 export const ORDER_TRANSITIONS = {
   [OrderStatus.DRAFT]: [OrderStatus.SUBMITTED, OrderStatus.CANCELLED],
   [OrderStatus.SUBMITTED]: [OrderStatus.SCHEDULING, OrderStatus.CANCELLED],
-  [OrderStatus.SCHEDULING]: [OrderStatus.IN_PRODUCTION, OrderStatus.CANCELLED],
+  // Pure-outsource orders have no internal task to trigger IN_PRODUCTION;
+  // receiving the last outsource order completes them directly.
+  [OrderStatus.SCHEDULING]: [
+    OrderStatus.IN_PRODUCTION,
+    OrderStatus.COMPLETED,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.IN_PRODUCTION]: [OrderStatus.COMPLETED, OrderStatus.CANCELLED],
   [OrderStatus.COMPLETED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
   [OrderStatus.SHIPPED]: [OrderStatus.FINISHED, OrderStatus.CANCELLED],
@@ -53,16 +59,16 @@ export function isTerminalOrderStatus(status: OrderStatus): boolean {
 // Whether new outsource work can still be attached to an order in
 // this status. Distinct from `isTerminalOrderStatus` because SHIPPED
 // is non-terminal (it can still go to FINISHED) yet shouldn't accept
-// new production work — the goods are already out the door (Codex
-// round 87 / P2). Production-active states only.
+// new production work — the goods are already out the door.
+// Production-active states only.
 export function canAttachOutsource(status: OrderStatus): boolean {
   switch (status) {
     case OrderStatus.DRAFT:
     case OrderStatus.SUBMITTED:
     case OrderStatus.SCHEDULING:
     case OrderStatus.IN_PRODUCTION:
-    case OrderStatus.COMPLETED:
       return true;
+    case OrderStatus.COMPLETED:
     case OrderStatus.SHIPPED:
     case OrderStatus.FINISHED:
     case OrderStatus.CANCELLED:

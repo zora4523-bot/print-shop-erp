@@ -68,7 +68,9 @@ export function WatchlistTable<T>({
           {emptyText}
         </div>
       ) : (
-        <Table>
+        // 用 title 当地标名：owner 首页同时渲染 4 个 WatchlistTable，
+        // 全叫「数据表格」的话读屏器的地标列表分不出谁是谁。
+        <Table label={title}>
           <TableHeader>
             <TableRow>
               {columns.map((c, i) => (

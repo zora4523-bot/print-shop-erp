@@ -8,16 +8,19 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { FileArchive } from 'lucide-react';
+import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { DesignBundleStatus } from '@/generated/prisma/enums';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
 type SearchParams = Promise<{ from?: string; to?: string }>;
 
-// SPEC §3.5：CDR 汇总下载 = 车间主管按日期窗口勾工单 → 生成 24h 短链
+// SPEC §3.5：CDR 汇总下载 = 管理员按日期窗口勾工单 → 生成 24h 短链
 // → 复制给外协模具厂。本页不显示 admin 工单详情链接（外协方不需要）；
-// 只显示工单号 + 客户代号 + CDR 文件数。
+// 只显示工单号 + 客户名称/简称 + CDR 文件数。
 //
 // `from` / `to` URL query：foreman 输入起 / 止日期（YYYY-MM-DD），
 // 缺省 = 今天，提交后 server fetches eligible orders。
@@ -62,7 +65,7 @@ export default async function ForemanCdrPage({
 
       <FilterBar from={from} to={to} />
 
-      {/* key prop 强制 form 在 filter URL 变化时重挂（Codex round 119
+      {/* key prop 强制 form 在 filter URL 变化时重挂（
           medium）—— 否则 selected useState 初始化保留旧 eligible IDs，
           表面候选都未勾、提交报"至少勾选 1"。key 用 from-to 即可
           区分窗口。 */}
@@ -88,7 +91,12 @@ export default async function ForemanCdrPage({
             description="勾选上方候选工单即可生成 24 小时有效的下载链接。"
           />
         ) : (
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="CDR 打包候选工单"
+            tabIndex={0}
+          >
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
@@ -107,16 +115,20 @@ export default async function ForemanCdrPage({
                   const isMock = b.zipFileUrl.startsWith('mock://');
                   return (
                     <tr key={b.id}>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {formatDate(b.dateRangeFrom)} →{' '}
-                        {formatDate(
+                      <td className="px-4 py-3 font-sans tabular-nums text-xs">
+                        {formatDateShanghai(b.dateRangeFrom)} →{' '}
+                        {formatDateShanghai(
                           new Date(b.dateRangeTo.getTime() - 1),
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">{b.orderCount}</td>
-                      <td className="px-4 py-3 text-right">{b.fileCount}</td>
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">{b.orderCount}</td>
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">{b.fileCount}</td>
                       <td className="px-4 py-3">
-                        {expired ? (
+                        {b.status === DesignBundleStatus.PENDING ? (
+                          <Badge variant="outline">排队生成中</Badge>
+                        ) : b.status === DesignBundleStatus.FAILED ? (
+                          <Badge variant="destructive">生成失败</Badge>
+                        ) : expired ? (
                           <Badge variant="outline">已过期</Badge>
                         ) : isMock ? (
                           <Badge variant="outline">mock URL</Badge>
@@ -133,9 +145,9 @@ export default async function ForemanCdrPage({
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        {formatDateTime(b.expiresAt)}
+                        {formatDateTimeShanghai(b.expiresAt)}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right font-sans tabular-nums">
                         {b.downloadCount}
                       </td>
                       <td className="px-4 py-3 text-xs">{b.createdByName}</td>
@@ -150,8 +162,8 @@ export default async function ForemanCdrPage({
 
       <p className="text-xs text-muted-foreground">
         提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。{' '}
-        <Link href="/foreman" className="underline">
-          ← 返回车间首页
+        <Link href="/owner" className="underline">
+          ← 返回管理后台
         </Link>
       </p>
     </div>
@@ -165,8 +177,11 @@ function FilterBar({ from, to }: { from: string; to: string }) {
       action="/foreman/cdr"
     >
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">起始日期</label>
+        <label htmlFor="cdr-from" className="text-xs text-muted-foreground">
+          起始日期
+        </label>
         <input
+          id="cdr-from"
           type="date"
           name="from"
           defaultValue={from}
@@ -174,20 +189,20 @@ function FilterBar({ from, to }: { from: string; to: string }) {
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">终止日期</label>
+        <label htmlFor="cdr-to" className="text-xs text-muted-foreground">
+          终止日期
+        </label>
         <input
+          id="cdr-to"
           type="date"
           name="to"
           defaultValue={to}
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button
-        type="submit"
-        className="rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
-      >
+      <Button type="submit" size="sm">
         刷新候选工单
-      </button>
+      </Button>
     </form>
   );
 }
@@ -200,25 +215,3 @@ function todayShanghai(): string {
     day: '2-digit',
   }).format(new Date());
 }
-
-function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function formatDateTime(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
-}
-

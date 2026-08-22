@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import Decimal from 'decimal.js';
-import { WorkerType } from '../../../generated/prisma/client';
+import { WorkerType } from '../../../generated/prisma/enums';
 import {
   calcHourlyPayroll,
   HourlyPayrollError,
@@ -118,6 +118,22 @@ describe('calcHourlyPayroll — PACKER / CLEANER', () => {
       { hourlyRate: 0.1, otMultiplier: 1.0 },
     );
     expect(r.normalPay.toFixed(2)).toBe('0.30');
+  });
+
+  it('rounds payable components before summing so the cent total reconciles', () => {
+    const r = calcHourlyPayroll(
+      {
+        workerType: WorkerType.PACKER,
+        totalNormalHours: '0.5',
+        totalOtHours: '0.5',
+      },
+      { hourlyRate: '11.11', otMultiplier: '1' },
+    );
+
+    expect(r.normalPay.toFixed(2)).toBe('5.56');
+    expect(r.otPay.toFixed(2)).toBe('5.56');
+    expect(r.totalSalary.toFixed(2)).toBe('11.12');
+    expect(r.normalPay.plus(r.otPay).eq(r.totalSalary)).toBe(true);
   });
 });
 

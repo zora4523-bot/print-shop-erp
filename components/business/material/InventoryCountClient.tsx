@@ -1,0 +1,395 @@
+'use client';
+
+import {
+  useActionState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from 'react';
+import { RefreshCw, Search } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import type { InventoryCountMutationResult } from '@/actions/owner-inventory.types';
+import type { InventoryCountMaterialRow } from '@/lib/inventory-count';
+import {
+  buildSubmittedItems,
+  countKey,
+  parseCountValue,
+  sameBookQuantity,
+  type CountEntry,
+} from '@/lib/inventory-count-entries';
+import { MATERIAL_CATEGORY_LABELS } from '@/lib/material-labels';
+
+type ApiResponse = { materials: InventoryCountMaterialRow[] };
+
+type Props = {
+  action: (
+    prev: InventoryCountMutationResult | null,
+    formData: FormData,
+  ) => Promise<InventoryCountMutationResult>;
+  initialIdempotencyKey: string;
+};
+
+function decimal(value: string | null): string {
+  return value === null || value === '' ? '-' : value;
+}
+
+function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
+  if (diff === 0) return 'secondary';
+  return diff > 0 ? 'outline' : 'destructive';
+}
+
+export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [rows, setRows] = useState<InventoryCountMaterialRow[]>([]);
+  // 值是 { value, book }：book 在**首次录入这一格**时钉住当时显示的账面数，
+  // 后续搜索/刷新换掉 rows 也不会覆盖它。提交时回传的就是操作员当时看到的数，
+  // 服务端据此做 CAS。详见 lib/inventory-count-entries.ts。
+  const [counts, setCounts] = useState<Record<string, CountEntry>>({});
+  // 服务端点名「账面数已变动、没给你过账」的行，等操作员重新录入就消掉。
+  const [staleKeys, setStaleKeys] = useState<string[]>([]);
+  const [remark, setRemark] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
+  const [error, setError] = useState<string | null>(null);
+  const [fetchPending, startTransition] = useTransition();
+
+  const fetchRows = useCallback((q: string) => {
+    startTransition(async () => {
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (q.trim()) params.set('q', q.trim());
+        params.set('limit', '80');
+        const res = await fetch(`/api/admin/inventory-count/materials?${params}`, {
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`库存盘点数据读取失败（${res.status}）`);
+        const data = (await res.json()) as ApiResponse;
+        setRows(data.materials);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '库存盘点数据读取失败');
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchRows('');
+  }, [fetchRows]);
+
+  const submitCount = useCallback(
+    async (prev: InventoryCountMutationResult | null, formData: FormData) => {
+      const result = await action(prev, formData);
+      if (result.status === 'success') {
+        // 部分过账时 staleKeys 非空：没冲突的行已经入库，被点名的行连同它们
+        // 钉住的旧账面数一起作废，操作员必须对着新账面数重数一遍。所以这里
+        // 一律整体清空，而不是「保留冲突行的数字、悄悄换个新 book 再提交」
+        // ——后者等于把守卫刚拦下的那次提交原样放行。
+        setIdempotencyKey(window.crypto.randomUUID());
+        setCounts({});
+        setRemark('');
+        setStaleKeys(result.staleKeys ?? []);
+        fetchRows(submittedQuery);
+        return result;
+      }
+      if (result.status === 'error' && result.staleKeys?.length) {
+        // 全量失效：一行都没过账。清掉被点名行的录入（它们的 book 已经过期），
+        // 其余录入原样保留。
+        // 幂等键刻意不换：这是一次被明确拒绝、已整体回滚的提交，换键只会在
+        // 「其实成功了但响应丢了」的情况下多开一张盘点单。
+        const stale = new Set(result.staleKeys);
+        setCounts((current) => {
+          const next = { ...current };
+          for (const key of stale) delete next[key];
+          return next;
+        });
+        setStaleKeys(result.staleKeys);
+        fetchRows(submittedQuery);
+      }
+      return result;
+    },
+    [action, fetchRows, submittedQuery],
+  );
+  const [state, formAction, actionPending] = useActionState<
+    InventoryCountMutationResult | null,
+    FormData
+  >(submitCount, null);
+
+  const submittedItems = useMemo(
+    () => buildSubmittedItems(rows, counts),
+    [counts, rows],
+  );
+
+  const totals = useMemo(() => {
+    let changed = 0;
+    let surplus = 0;
+    let shortage = 0;
+    for (const row of rows) {
+      for (const location of row.locations) {
+        const counted = parseCountValue(
+          counts[countKey(row.id, location.locationId)]?.value ?? '',
+        );
+        if (counted === null) continue;
+        const diff = counted - Number(location.currentStock);
+        if (diff === 0) continue;
+        changed += 1;
+        if (diff > 0) surplus += diff;
+        else shortage += Math.abs(diff);
+      }
+    }
+    return {
+      changed,
+      surplus: surplus.toFixed(2),
+      shortage: shortage.toFixed(2),
+    };
+  }, [counts, rows]);
+
+  // 扁平取第一条：逐行的 bookQuantity 错误落在 fieldErrors.items 上，但顶层
+  // 字段（idempotencyKey / remark）出问题时只看 items 会让提示整条消失、页面
+  // 看起来像什么都没发生。
+  const firstFieldError =
+    state?.status === 'invalid'
+      ? (Object.values(state.fieldErrors).flat()[0] ?? null)
+      : null;
+  const actionError = state?.status === 'error' ? state.message : null;
+  const success = state?.status === 'success' ? state.message : null;
+  const staleKeySet = useMemo(() => new Set(staleKeys), [staleKeys]);
+
+  return (
+    <section className="space-y-4">
+      <form
+        className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSubmittedQuery(query);
+          fetchRows(query);
+        }}
+      >
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索物料编码、名称、规格、拼音"
+            className="pl-8"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button type="submit" disabled={fetchPending}>搜索</Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={fetchPending}
+            onClick={() => fetchRows(submittedQuery)}
+          >
+            <RefreshCw aria-hidden className="size-4" />
+            刷新
+          </Button>
+        </div>
+      </form>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <Summary label="有差异库位" value={`${totals.changed}`} />
+        <Summary label="盘盈合计" value={totals.surplus} />
+        <Summary label="盘亏合计" value={totals.shortage} />
+      </div>
+
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+
+      <form action={formAction} className="space-y-4">
+        <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+        <input type="hidden" name="items" value={JSON.stringify(submittedItems)} />
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="盘点物料列表"
+          tabIndex={0}
+        >
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="px-4 py-3">物料</th>
+                <th className="px-4 py-3">分类</th>
+                <th className="px-4 py-3">仓库 / 库位</th>
+                <th className="px-4 py-3 text-right">账面数</th>
+                <th className="px-4 py-3 text-right">实盘数</th>
+                <th className="px-4 py-3 text-right">差异</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fetchPending && rows.length === 0 ? (
+                <EmptyRow text="正在读取库存..." />
+              ) : rows.length === 0 ? (
+                <EmptyRow text="暂无匹配物料" />
+              ) : (
+                rows.flatMap((row) => {
+                  if (row.locations.length === 0) {
+                    return [
+                      <tr key={row.id} className="border-b last:border-0">
+                        <MaterialCells row={row} />
+                        <td colSpan={4} className="px-4 py-3 text-muted-foreground">
+                          无库位库存记录，请先通过收货、调拨或其他入库建立库位。
+                        </td>
+                      </tr>,
+                    ];
+                  }
+                  return row.locations.map((location, index) => {
+                    const key = countKey(row.id, location.locationId);
+                    const entry = counts[key];
+                    const countedRaw = entry?.value ?? '';
+                    const counted = parseCountValue(countedRaw);
+                    const diff = counted === null
+                      ? null
+                      : counted - Number(location.currentStock);
+                    // 录入之后账面数又被别人动过：这一行提交上去必被拒，先在
+                    // 页面上就说清楚，别让操作员点了提交才知道。
+                    const bookDrifted =
+                      entry !== undefined &&
+                      !sameBookQuantity(entry.book, location.currentStock);
+                    return (
+                      <tr key={key} className="border-b last:border-0">
+                        {index === 0 ? <MaterialCells row={row} rowSpan={row.locations.length} /> : null}
+                        <td className="px-4 py-3 align-top">
+                          <div>{location.warehouseName} / {location.locationName}</div>
+                          <div className="font-sans tabular-nums text-xs text-muted-foreground">
+                            {location.warehouseCode} / {location.locationCode}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right align-top font-sans tabular-nums text-xs">
+                          {decimal(location.currentStock)} {row.unit}
+                          {bookDrifted ? (
+                            <div className="text-warning-foreground">
+                              录入时 {entry.book}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 text-right align-top">
+                          <Input
+                            inputMode="decimal"
+                            value={countedRaw}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setCounts((current) => {
+                                if (value.trim() === '') {
+                                  // 清空 = 这一行当没录入过，连同钉住的账面数一起
+                                  // 丢掉；下次再录入会重新钉当时显示的值。
+                                  const next = { ...current };
+                                  delete next[key];
+                                  return next;
+                                }
+                                return {
+                                  ...current,
+                                  [key]: {
+                                    value,
+                                    // 首次录入即钉住当时显示的账面数，之后不再覆盖
+                                    book: current[key]?.book ?? location.currentStock,
+                                  },
+                                };
+                              });
+                              setStaleKeys((current) =>
+                                current.includes(key)
+                                  ? current.filter((item) => item !== key)
+                                  : current,
+                              );
+                            }}
+                            className="ml-auto w-28 text-right font-sans tabular-nums text-xs"
+                            aria-label={row.locations.length === 1
+                              ? `${row.name} 实盘数`
+                              : `${row.name} ${location.warehouseName}/${location.locationName} 实盘数`}
+                          />
+                          {staleKeySet.has(key) ? (
+                            <div className="mt-1 text-xs text-warning-foreground">
+                              账面数已变动，未过账，请重数
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 text-right align-top">
+                          {diff === null ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            <Badge variant={diffTone(diff)}>
+                              {diff > 0 ? '+' : ''}{diff.toFixed(2)} {row.unit}
+                            </Badge>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="flex-1 space-y-2">
+              <label htmlFor="inventory-count-remark" className="text-sm font-medium">
+                盘点备注（选填）
+              </label>
+              <Input
+                id="inventory-count-remark"
+                name="remark"
+                value={remark}
+                onChange={(event) => setRemark(event.target.value)}
+                disabled={actionPending}
+              />
+            </div>
+            <Button type="submit" disabled={actionPending || submittedItems.length === 0}>
+              {actionPending ? '过账中…' : `提交盘点过账（${submittedItems.length} 条）`}
+            </Button>
+          </div>
+          {firstFieldError ? <p role="alert" className="mt-2 text-sm text-destructive">{firstFieldError}</p> : null}
+          {actionError ? <p role="alert" className="mt-2 text-sm text-destructive">{actionError}</p> : null}
+          {success ? <p role="status" className="mt-2 text-sm text-success-foreground">✓ {success}</p> : null}
+          <p className="mt-2 text-xs text-muted-foreground">
+            未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            提交时会带上你录入那一刻看到的账面数。如果这之后有人动过某个库位的库存，
+            那一行不会被过账，会点名要求重数，其余行照常过账。
+          </p>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function MaterialCells({
+  row,
+  rowSpan,
+}: {
+  row: InventoryCountMaterialRow;
+  rowSpan?: number;
+}) {
+  return (
+    <>
+      <td rowSpan={rowSpan} className="px-4 py-3 align-top">
+        <div className="font-medium">{row.name}</div>
+        <div className="font-sans tabular-nums text-xs text-muted-foreground">{row.code}</div>
+        {row.specification ? <div className="text-xs text-muted-foreground">{row.specification}</div> : null}
+      </td>
+      <td rowSpan={rowSpan} className="px-4 py-3 align-top">
+        <Badge variant={row.isActive ? 'outline' : 'secondary'}>
+          {MATERIAL_CATEGORY_LABELS[row.category]}
+        </Badge>
+      </td>
+    </>
+  );
+}
+
+function EmptyRow({ text }: { text: string }) {
+  return <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{text}</td></tr>;
+}
+
+function Summary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-card px-4 py-3 shadow-sm">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 font-sans tabular-nums text-lg font-semibold">{value}</div>
+    </div>
+  );
+}

@@ -1,11 +1,15 @@
 import Decimal from 'decimal.js';
-import { Role, WorkerType } from '../generated/prisma/enums';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+} from '../generated/prisma/enums';
 import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
 
-// 时薪工考勤 (PACKER / CLEANER / COOK) — MVP 车间主管每日录入三个小时
-// 数字。请假 = 没有行（删除或不录即可）。WORK_HOURS 规则仅用于录入
-// UI 的"全勤"快速填 hint，不在后端再做任何时段派生。
+// 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天），
+// 时薪工额外记录正常、加班与厨师空闲打包工时。WORK_HOURS 规则仅用于
+// 录入 UI 的“全勤”快捷值，不在后端派生考勤。
 
 export class AttendanceError extends Error {
   constructor(message: string) {
@@ -22,6 +26,62 @@ export const HOURLY_WORKER_TYPES = [
   WorkerType.COOK,
 ] as const;
 
+export type HourlyWorkerOption = {
+  id: string;
+  displayName: string;
+  workerType: WorkerType;
+  username: string;
+};
+
+export type AttendanceEmployeeOption = {
+  id: string;
+  displayName: string;
+  role: Role;
+  workerType: WorkerType | null;
+  employmentType: EmploymentType;
+  username: string;
+};
+
+// Active hourly workers (PACKER / CLEANER / COOK) for the attendance
+// page's worker picker. Kept in lib/ so the page never touches Prisma
+// directly (CLAUDE.md §3). The `in` filter guarantees a non-null
+// workerType; Prisma's generated type can't narrow through the filter,
+// so we assert the narrowed shape here once.
+export async function listActiveHourlyWorkers(): Promise<HourlyWorkerOption[]> {
+  const rows = await db.user.findMany({
+    where: {
+      role: Role.WORKER,
+      isActive: true,
+      workerType: { in: [...HOURLY_WORKER_TYPES] },
+    },
+    orderBy: [{ workerType: 'asc' }, { displayName: 'asc' }],
+    select: { id: true, displayName: true, workerType: true, username: true },
+  });
+  return rows as HourlyWorkerOption[];
+}
+
+export async function listActiveAttendanceEmployees(): Promise<
+  AttendanceEmployeeOption[]
+> {
+  const rows = await db.user.findMany({
+    where: {
+      isActive: true,
+      role: { not: Role.ADMIN },
+      employmentType: { not: null },
+    },
+    orderBy: [{ role: 'asc' }, { displayName: 'asc' }],
+    select: {
+      id: true,
+      displayName: true,
+      role: true,
+      workerType: true,
+      employmentType: true,
+      username: true,
+    },
+  });
+  return rows as AttendanceEmployeeOption[];
+}
+
 export type RecordAttendanceInput = {
   normalHours: string | number | Decimal;
   otHours: string | number | Decimal;
@@ -29,6 +89,9 @@ export type RecordAttendanceInput = {
   // send the same shape for every worker type.
   spareHours?: string | number | Decimal;
   remark?: string | null;
+  workUnits?: string | number | Decimal;
+  leaveUnits?: string | number | Decimal;
+  leaveType?: string | null;
 };
 
 export type AttendanceRow = {
@@ -39,12 +102,19 @@ export type AttendanceRow = {
   otHours: string;
   spareHours: string;
   remark: string | null;
+  workUnits: string;
+  leaveUnits: string;
+  leaveType: string | null;
   workerDisplayName: string;
-  workerType: WorkerType;
+  // Immutable identity captured when the row was first recorded. Payroll
+  // must not follow the mutable User.role / User.workerType fields.
+  workerType: WorkerType | null;
+  workerRole: Role;
+  employmentType: EmploymentType;
 };
 
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
-// the previous row. 车间主管可能早上快速录"全勤"再下午细调，这里必须
+// the previous row. 管理员可能早上快速录"全勤"再下午细调，这里必须
 // 宽松（注意事项 2 — 幂等）。
 export async function recordAttendance(
   workerId: string,
@@ -71,17 +141,26 @@ export async function recordAttendance(
       workerType: true,
       isActive: true,
       displayName: true,
+      employmentType: true,
     },
   });
   if (!worker) throw new AttendanceError('工人不存在');
   if (!worker.isActive) throw new AttendanceError('工人已停用');
-  if (worker.role !== Role.WORKER) {
-    throw new AttendanceError('不是工人（role != WORKER）');
+  if (worker.role === Role.ADMIN || worker.employmentType === null) {
+    throw new AttendanceError('该账号不是可录考勤的在职员工');
   }
-  if (!worker.workerType || !isHourlyWorkerType(worker.workerType)) {
-    throw new AttendanceError(
-      '仅时薪工（打包 / 清废 / 厨师）可录入考勤；机器师傅走计件报工',
-    );
+  const existingIdentity = await db.attendance.findUnique({
+    where: { workerId_date: { workerId, date: dateCol } },
+    select: { roleSnapshot: true, workerTypeSnapshot: true },
+  });
+  const roleSnapshot = existingIdentity?.roleSnapshot ?? worker.role;
+  const workerTypeSnapshot = existingIdentity
+    ? existingIdentity.workerTypeSnapshot
+    : worker.role === Role.WORKER
+      ? worker.workerType
+      : null;
+  if (roleSnapshot === Role.WORKER && workerTypeSnapshot === null) {
+    throw new AttendanceError('师傅账号未配置工种，不能录入考勤');
   }
 
   const normal = dec(input.normalHours);
@@ -108,7 +187,16 @@ export async function recordAttendance(
   // one — keeps the foreman's form shape uniform without polluting
   // PACKER / CLEANER rows.
   const effectiveSpare =
-    worker.workerType === WorkerType.COOK ? spare : new Decimal(0);
+    workerTypeSnapshot === WorkerType.COOK ? spare : new Decimal(0);
+  const workUnits = dec(input.workUnits ?? 1);
+  const leaveUnits = dec(input.leaveUnits ?? 0);
+  if (
+    ![0, 0.5, 1].includes(workUnits.toNumber()) ||
+    ![0, 0.5, 1].includes(leaveUnits.toNumber()) ||
+    workUnits.plus(leaveUnits).gt(1)
+  ) {
+    throw new AttendanceError('上班和请假只支持半天单位，合计不能超过 1 天');
+  }
 
   const saved = await db.attendance.upsert({
     where: { workerId_date: { workerId, date: dateCol } },
@@ -118,16 +206,27 @@ export async function recordAttendance(
       normalHours: normal.toFixed(2),
       otHours: ot.toFixed(2),
       spareHours: effectiveSpare.toFixed(2),
+      workUnits: workUnits.toFixed(1),
+      leaveUnits: leaveUnits.toFixed(1),
+      leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
+      roleSnapshot,
+      workerTypeSnapshot,
+      identitySnapshotVerified: true,
       createdById: actor.id,
     },
     update: {
       normalHours: normal.toFixed(2),
       otHours: ot.toFixed(2),
       spareHours: effectiveSpare.toFixed(2),
+      workUnits: workUnits.toFixed(1),
+      leaveUnits: leaveUnits.toFixed(1),
+      leaveType: input.leaveType?.trim() || null,
       remark: input.remark ?? null,
-      // Deliberately don't overwrite createdById on re-entry; the
-      // original recorder stays the auditable actor.
+      // Deliberately don't overwrite createdById, identity snapshots or their
+      // verification marker on re-entry; both the original recorder and
+      // historical payroll classification stay auditable after an account
+      // change.
     },
     select: {
       id: true,
@@ -136,7 +235,12 @@ export async function recordAttendance(
       normalHours: true,
       otHours: true,
       spareHours: true,
+      workUnits: true,
+      leaveUnits: true,
+      leaveType: true,
       remark: true,
+      roleSnapshot: true,
+      workerTypeSnapshot: true,
     },
   });
 
@@ -147,15 +251,18 @@ export async function recordAttendance(
     normalHours: String(saved.normalHours),
     otHours: String(saved.otHours),
     spareHours: String(saved.spareHours),
+    workUnits: String(saved.workUnits),
+    leaveUnits: String(saved.leaveUnits),
+    leaveType: saved.leaveType,
     remark: saved.remark,
     workerDisplayName: worker.displayName,
-    workerType: worker.workerType,
+    workerType: saved.workerTypeSnapshot,
+    workerRole: saved.roleSnapshot,
+    employmentType: worker.employmentType ?? EmploymentType.FULL_TIME,
   };
 }
 
-// Remove an attendance row — models a leave day (请假). MVP keeps the
-// "no row = absent" convention, so deleting is the way to record a
-// previously-entered day as leave.
+// Remove an attendance row — used to correct an accidentally recorded day.
 export async function removeAttendance(
   workerId: string,
   date: string,
@@ -201,9 +308,17 @@ export async function listMonthlyAttendance(
       normalHours: true,
       otHours: true,
       spareHours: true,
+      workUnits: true,
+      leaveUnits: true,
+      leaveType: true,
       remark: true,
+      roleSnapshot: true,
+      workerTypeSnapshot: true,
       worker: {
-        select: { displayName: true, workerType: true },
+        select: {
+          displayName: true,
+          employmentType: true,
+        },
       },
     },
   });
@@ -214,15 +329,48 @@ export async function listMonthlyAttendance(
     normalHours: String(r.normalHours),
     otHours: String(r.otHours),
     spareHours: String(r.spareHours),
+    workUnits: String(r.workUnits),
+    leaveUnits: String(r.leaveUnits),
+    leaveType: r.leaveType,
     remark: r.remark,
     workerDisplayName: r.worker.displayName,
-    workerType: r.worker.workerType as WorkerType,
+    workerType: r.workerTypeSnapshot,
+    workerRole: r.roleSnapshot,
+    employmentType: r.worker.employmentType as EmploymentType,
   }));
 }
 
-// Month-range helper. SPEC §5.4 operates on calendar months in the
-// Shanghai timezone; UTC-midnight on the 1st of the month matches the
-// @db.Date column's stored format, so we reuse that convention.
+export async function getAttendanceSummaries(
+  userIds: string[],
+  range: { start: Date; end: Date; inclusiveEnd?: boolean },
+): Promise<Map<string, { workUnits: string; leaveUnits: string }>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db.attendance.groupBy({
+    by: ['workerId'],
+    where: {
+      workerId: { in: [...new Set(userIds)] },
+      date: {
+        gte: range.start,
+        ...(range.inclusiveEnd ? { lte: range.end } : { lt: range.end }),
+      },
+    },
+    _sum: { workUnits: true, leaveUnits: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      row.workerId,
+      {
+        workUnits: String(row._sum.workUnits ?? 0),
+        leaveUnits: String(row._sum.leaveUnits ?? 0),
+      },
+    ]),
+  );
+}
+
+// Month-range helper for Prisma `@db.Date` columns. A database DATE has no
+// timezone; Prisma represents it as UTC midnight, so this deliberately returns
+// UTC-midnight calendar dates. Do not use this range for timestamp columns such
+// as Order.finishedAt -- use parseShanghaiMonthInstantRange below instead.
 export function parseShanghaiMonth(
   month: string,
 ): { start: Date; end: Date } {
@@ -242,10 +390,23 @@ export function parseShanghaiMonth(
   return { start, end };
 }
 
-function isHourlyWorkerType(
-  type: WorkerType,
-): type is (typeof HOURLY_WORKER_TYPES)[number] {
-  return (HOURLY_WORKER_TYPES as readonly WorkerType[]).includes(type);
+/**
+ * Returns the UTC instant range spanning one Asia/Shanghai calendar month.
+ *
+ * Example: May 2026 in Shanghai is
+ * [2026-04-30T16:00:00Z, 2026-05-31T16:00:00Z). This is the range timestamp
+ * columns must use; applying the @db.Date range above would lose the first
+ * eight local hours and include eight hours from the next month.
+ */
+export function parseShanghaiMonthInstantRange(
+  month: string,
+): { start: Date; end: Date } {
+  const dateRange = parseShanghaiMonth(month);
+  const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
+  return {
+    start: new Date(dateRange.start.getTime() - shanghaiOffsetMs),
+    end: new Date(dateRange.end.getTime() - shanghaiOffsetMs),
+  };
 }
 
 function dec(v: string | number | Decimal): Decimal {

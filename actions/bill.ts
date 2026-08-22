@@ -5,11 +5,13 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   generateBillsSchema,
   recordBillPaymentSchema,
+  createOrderCostEntrySchema,
 } from '@/lib/auth/schemas';
 import {
   generateBillsForPeriod,
   issueBill,
   recordPayment,
+  addOrderCostEntry,
   BillError,
   InvalidBillTransitionError,
 } from '@/lib/bill';
@@ -17,18 +19,9 @@ import type {
   BillMutationResult,
   GenerateBillsResult,
   RecordBillPaymentResult,
+  OrderCostMutationResult,
 } from './bill.types';
-
-function collectFieldErrors(
-  issues: readonly { path: readonly PropertyKey[]; message: string }[],
-) {
-  const out: Record<string, string[]> = {};
-  for (const issue of issues) {
-    const key = issue.path.length ? issue.path.map(String).join('.') : '_';
-    (out[key] ??= []).push(issue.message);
-  }
-  return out;
-}
+import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 
 function mapBillError(
   err: unknown,
@@ -56,7 +49,7 @@ export async function generateBillsAction(
   if (!parsed.success) {
     return {
       status: 'invalid',
-      fieldErrors: collectFieldErrors(parsed.error.issues),
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
     };
   }
 
@@ -73,7 +66,9 @@ export async function generateBillsAction(
   } catch (err) {
     const mapped = mapBillError(err);
     if (mapped) return mapped;
-    if (err instanceof Error) return { status: 'error', message: err.message };
+    // Unknown error (Prisma, etc.) — rethrow so it reaches Next's
+    // onRequestError → Sentry instead of leaking its message to the UI
+    // as a graceful toast (matches issueBillAction / production.ts).
     throw err;
   }
 }
@@ -96,7 +91,7 @@ export async function issueBillAction(
   return { status: 'success' };
 }
 
-// Record a payment. `bill:mark-paid` is OWNER-only; salesUser never
+// Record a payment. `bill:mark-paid` is ADMIN-only; salesUser never
 // marks their own bills paid.
 export async function recordBillPaymentAction(
   billId: string,
@@ -106,17 +101,33 @@ export async function recordBillPaymentAction(
   const actor = await requirePermission('bill:mark-paid');
 
   const parsed = recordBillPaymentSchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
     amount: formData.get('amount'),
+    paidAt: formData.get('paidAt'),
+    paymentMethod: formData.get('paymentMethod'),
+    referenceNo: formData.get('referenceNo'),
+    remark: formData.get('remark'),
   });
   if (!parsed.success) {
     return {
       status: 'invalid',
-      fieldErrors: collectFieldErrors(parsed.error.issues),
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
     };
   }
 
   try {
-    const r = await recordPayment(billId, parsed.data.amount, actor);
+    const r = await recordPayment(
+      billId,
+      parsed.data.amount,
+      actor,
+      parsed.data.paidAt,
+      {
+        idempotencyKey: parsed.data.idempotencyKey,
+        paymentMethod: parsed.data.paymentMethod,
+        referenceNo: parsed.data.referenceNo,
+        remark: parsed.data.remark,
+      },
+    );
     revalidatePath('/owner/bills');
     revalidatePath(`/owner/bills/${billId}`);
     return {
@@ -130,5 +141,39 @@ export async function recordBillPaymentAction(
     const mapped = mapBillError(err);
     if (mapped) return mapped;
     throw err;
+  }
+}
+
+export async function createOrderCostEntryAction(
+  _prev: OrderCostMutationResult | null,
+  formData: FormData,
+): Promise<OrderCostMutationResult> {
+  const actor = await requirePermission('bill:view:all');
+  const parsed = createOrderCostEntrySchema.safeParse({
+    idempotencyKey: formData.get('idempotencyKey'),
+    orderId: formData.get('orderId'),
+    category: formData.get('category'),
+    description: formData.get('description'),
+    quantity: formData.get('quantity'),
+    unit: formData.get('unit'),
+    unitPrice: formData.get('unitPrice'),
+    amount: formData.get('amount'),
+    remark: formData.get('remark'),
+  });
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const entry = await addOrderCostEntry(parsed.data, actor);
+    revalidatePath(`/orders/${parsed.data.orderId}`);
+    revalidatePath('/owner/bills');
+    return { status: 'success', costEntryId: entry.id };
+  } catch (error) {
+    const mapped = mapBillError(error);
+    if (mapped) return mapped;
+    throw error;
   }
 }

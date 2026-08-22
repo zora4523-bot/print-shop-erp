@@ -8,8 +8,9 @@ import {
 
 describe('fieldLabel', () => {
   it('maps known field names to Chinese labels', () => {
-    expect(fieldLabel('customerRef')).toBe('客户代号');
+    expect(fieldLabel('customerRef')).toBe('客户名称/简称');
     expect(fieldLabel('isUrgent')).toBe('急单');
+    expect(fieldLabel('isSfCollect')).toBe('顺丰到付');
     expect(fieldLabel('status')).toBe('状态');
   });
 

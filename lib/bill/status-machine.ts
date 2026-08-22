@@ -29,7 +29,7 @@ export const BILL_TRANSITIONS = {
   // 等续收。
   [BillStatus.ISSUED]: [BillStatus.PARTIAL_PAID, BillStatus.FULLY_PAID],
   // PARTIAL_PAID 只能往前走到 FULLY_PAID。不允许退回 ISSUED 以免
-  // 一条账单上反复记录加减—退款场景业主要新开一条负数账单冲账。
+  // 一条账单上反复记录加减；退款/贷项当前不在系统内处理。
   [BillStatus.PARTIAL_PAID]: [BillStatus.FULLY_PAID],
   [BillStatus.FULLY_PAID]: [],
 } as const satisfies Record<BillStatus, readonly BillStatus[]>;

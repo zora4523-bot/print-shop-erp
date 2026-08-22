@@ -28,6 +28,21 @@ export type PrintTask = {
   qrSvg: string;
 };
 
+export type PrintShipment = {
+  id: string;
+  sequence: number;
+  receiverName?: string | null;
+  receiverPhone?: string | null;
+  receiverAddress?: string | null;
+  expressCode?: string | null;
+  trackingNo?: string | null;
+  lines: Array<{
+    orderItemSequence: number;
+    orderItemName: string;
+    quantity: number;
+  }>;
+};
+
 export type PrintOrderItem = {
   id: string;
   sequence: number;
@@ -35,7 +50,7 @@ export type PrintOrderItem = {
   specification?: string | null;
   paperType?: string | null;
   quantity: number;
-  foilColor?: string | null;
+  foilColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
   craftNames: string[];
@@ -47,7 +62,12 @@ export type PrintOrderItem = {
 export type PrintOrder = {
   id: string;
   orderNo: string;
+  customName?: string | null;
+  kind: 'NORMAL' | 'REWORK';
+  sourceOrderNo?: string | null;
   isUrgent: boolean;
+  isSfCollect: boolean;
+  promisedDate?: Date | null;
   customerRef?: string | null;
   receiverName?: string | null;
   receiverPhone?: string | null;
@@ -62,6 +82,7 @@ export type PrintOrder = {
   // doesn't need to import auth/role-labels and stays role-agnostic.
   submitterRoleLabel: string;
   items: PrintOrderItem[];
+  shipments: PrintShipment[];
   // Same rationale as PrintTask.qrSvg — pre-rendered to avoid the
   // qrcode.react / hooks bug under renderToStaticMarkup.
   orderQrSvg: string;

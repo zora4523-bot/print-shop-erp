@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProductCategory } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -48,14 +48,15 @@ import {
 const ownerActor = {
   id: 'actor-owner',
   username: 'admin',
-  displayName: '老板',
-  role: 'OWNER',
+  displayName: '管理员',
+  role: 'ADMIN',
   workerType: null,
   machineType: null,
 };
 
 const validCreate = {
-  category: ProductCategory.BLANK_STOCK,
+  code: '',
+  categoryNodeId: 'cat_blank_stock',
   name: '空白红包',
   specification: '',
   paperType: '',
@@ -110,7 +111,8 @@ describe('createProductAction', () => {
     );
     expect(productMock.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({
-        category: ProductCategory.BLANK_STOCK,
+        categoryNodeId: 'cat_blank_stock',
+        code: null,
         name: '空白红包',
         specification: null,
         paperType: null,
@@ -118,6 +120,36 @@ describe('createProductAction', () => {
         minOrderQty: 1000,
       }),
     );
+  });
+
+  it('passes optional product code through', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.createProduct.mockResolvedValue({ id: 'p1' });
+    await expect(
+      createProductAction(null, fd({ ...validCreate, code: 'HB001' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+    expect(productMock.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'HB001' }),
+    );
+  });
+
+  it('maps P2002 on product code to invalid.code field error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.createProduct.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['code'] },
+      }),
+    );
+    const result = await createProductAction(
+      null,
+      fd({ ...validCreate, code: 'HB001' }),
+    );
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.code).toContain('该产品编码已被占用');
+    }
   });
 
   it('converts empty minOrderQty / baseUnitPrice into undefined / null', async () => {
@@ -153,6 +185,9 @@ describe('createProductAction', () => {
       /NEXT_REDIRECT/,
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
     expect(redirectMock).toHaveBeenCalledWith('/owner/products/p1');
   });
 });
@@ -187,13 +222,16 @@ describe('updateProductAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
-  it('revalidates both list + item on success', async () => {
+  it('revalidates list, item, and all product pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
     const result = await updateProductAction('p1', null, fd(baseUpdate));
     expect(result.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/p1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
   });
 });
 

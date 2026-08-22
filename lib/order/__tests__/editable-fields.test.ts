@@ -6,6 +6,7 @@ import {
   editableFieldsetForStatus,
   editableFieldsForStatus,
   isOrderEditable,
+  canEditOrderSfCollect,
 } from '../editable-fields';
 
 describe('editableFieldsetForStatus (SPEC §3.6)', () => {
@@ -59,7 +60,21 @@ describe('editable-field lists (SPEC §3.6 — 仅改收货信息/备注)', () =
     // customer code or flip urgent mid-production, which SPEC §3.6
     // explicitly forbids.
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customerRef');
+    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customName');
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('isUrgent');
+  });
+
+  it('allows the custom name while a draft is fully editable', () => {
+    expect(FULL_EDITABLE_FIELDS as readonly string[]).toContain('customName');
+  });
+
+  it('keeps 顺丰到付 out of generic fieldsets so its dedicated command can recalculate charges', () => {
+    expect(FULL_EDITABLE_FIELDS as readonly string[]).not.toContain(
+      'isSfCollect',
+    );
+    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain(
+      'isSfCollect',
+    );
   });
 
   it('editableFieldsForStatus returns the bucket contents', () => {
@@ -68,6 +83,23 @@ describe('editable-field lists (SPEC §3.6 — 仅改收货信息/备注)', () =
       SHIPPING_EDITABLE_FIELDS,
     );
     expect(editableFieldsForStatus(OrderStatus.FINISHED)).toEqual([]);
+  });
+});
+
+describe('canEditOrderSfCollect', () => {
+  it('allows correction through SHIPPED but keeps terminal states immutable', () => {
+    for (const status of [
+      OrderStatus.DRAFT,
+      OrderStatus.SUBMITTED,
+      OrderStatus.SCHEDULING,
+      OrderStatus.IN_PRODUCTION,
+      OrderStatus.COMPLETED,
+      OrderStatus.SHIPPED,
+    ]) {
+      expect(canEditOrderSfCollect(status), `status=${status}`).toBe(true);
+    }
+    expect(canEditOrderSfCollect(OrderStatus.FINISHED)).toBe(false);
+    expect(canEditOrderSfCollect(OrderStatus.CANCELLED)).toBe(false);
   });
 });
 

@@ -1,10 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
 import { requirePermission } from '@/lib/auth/permissions';
-import { CdrBundleError, createBundle } from '@/lib/cdr/bundle';
-import { deriveBaseUrlFromHeaders } from '@/lib/cdr/base-url';
+import {
+  CdrBundleError,
+  createBundle,
+  enqueueBundle,
+} from '@/lib/cdr/bundle';
+import { backgroundJobsMode } from '@/lib/background-jobs/mode';
+import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import type { CreateBundleResult } from './foreman-cdr.types';
 
@@ -45,11 +49,25 @@ export async function createBundleAction(
 
   // 拼绝对 downloadUrl 用的 base：优先 APP_PUBLIC_URL（部署期固定）
   // > 请求 headers (proto + host)（dev / split-origin 自然跟随当前
-  // 访问域）> 默认 localhost。Codex round 121 medium：之前从 env 读
+  // 访问域）> 默认 localhost。
   // 在 dev (127.0.0.1 / ngrok) 会回退到 localhost:3000 死链。
-  const baseUrl = await deriveBaseUrl();
+  const baseUrl = await derivePublicBaseUrl();
 
   try {
+    if (backgroundJobsMode() === 'durable') {
+      const queued = await enqueueBundle(
+        { from, to, orderIds, baseUrl },
+        { id: actor.id },
+      );
+      revalidatePath('/foreman/cdr');
+      return {
+        status: 'queued',
+        bundleId: queued.bundleId,
+        jobId: queued.jobId,
+        fileCount: queued.fileCount,
+      };
+    }
+
     const result = await createBundle(
       { from, to, orderIds, baseUrl },
       { id: actor.id },
@@ -69,35 +87,5 @@ export async function createBundleAction(
       return { status: 'error', message: err.message };
     }
     throw err;
-  }
-}
-
-/**
- * 从 Next.js request headers 推 baseUrl（含 protocol、不含尾斜线）。
- *   1. APP_PUBLIC_URL env 显式配置 → 直接用（部署期最稳，跨进程一致；
- *      split-origin 部署必走这条）
- *   2. x-forwarded-proto + (x-forwarded-host || host) → 推 base
- *      （dev localhost / ngrok / 单域名 prod 反代默认走这条）
- *   3. 兜底 http://localhost:3000（极端：单测 / scripts 无 request scope）
- *
- * Multi-proxy 场景下 x-forwarded-* 是 comma-separated hop list（如
- * `https, http`）—— 取第一个 + trim，避免拼出 `https,http://...` 死链
- * （Codex round 122 medium）。proto 缺失时**不**默认 http：让 base 为
- * 空回退到 fallback，比给个错的 https-降级 http 链更安全。
- */
-async function deriveBaseUrl(): Promise<string> {
-  if (process.env.APP_PUBLIC_URL) {
-    return process.env.APP_PUBLIC_URL.replace(/\/+$/, '');
-  }
-  try {
-    const h = await headers();
-    return deriveBaseUrlFromHeaders({
-      proto: h.get('x-forwarded-proto'),
-      forwardedHost: h.get('x-forwarded-host'),
-      host: h.get('host'),
-    });
-  } catch {
-    // headers() 抛 = no request scope；走兜底
-    return 'http://localhost:3000';
   }
 }

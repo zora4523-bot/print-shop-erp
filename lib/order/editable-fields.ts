@@ -18,6 +18,7 @@ export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY' | 'NONE';
 // tuple (not a Set) so tests can assert the exact set + the action
 // layer can map directly to Zod schema keys.
 export const FULL_EDITABLE_FIELDS = [
+  'customName',
   'customerRef',
   'receiverName',
   'receiverPhone',
@@ -25,6 +26,7 @@ export const FULL_EDITABLE_FIELDS = [
   'expressCode',
   'packageRequirement',
   'remark',
+  'promisedDate',
   'isUrgent',
 ] as const;
 
@@ -71,4 +73,10 @@ export function editableFieldsForStatus(
 
 export function isOrderEditable(status: OrderStatus): boolean {
   return editableFieldsetForStatus(status) !== 'NONE';
+}
+
+// 顺丰到付通过详情页专用 action 维护，因为外部销售工单必须同步重算
+// 对客快递应收；不能混入普通字段 UPDATE。FINISHED / CANCELLED 终态不变。
+export function canEditOrderSfCollect(status: OrderStatus): boolean {
+  return status !== OrderStatus.FINISHED && status !== OrderStatus.CANCELLED;
 }

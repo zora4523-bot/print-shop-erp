@@ -3,7 +3,7 @@ import { ChevronRight, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TONE_ICON_BOX, type Tone } from './_tones';
 
-// 导航卡——比 ActionShortcut 更&ldquo;列表化&rdquo;的入口（截图&ldquo;老板后台&rdquo;那 4 行）。
+// 导航卡——比 ActionShortcut 更&ldquo;列表化&rdquo;的入口（截图&ldquo;管理员后台&rdquo;那 4 行）。
 // 区别：行布局 + 右侧 chevron + 更紧凑的 padding，适合垂直堆叠。
 //
 // 与 ActionShortcut 的取舍：grid 排布用 ActionShortcut，列表排布用 NavCard。
@@ -54,7 +54,7 @@ export function NavCard({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-foreground">{label}</div>
         {description ? (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+          <div className="admin-wrap-anywhere mt-0.5 text-xs text-muted-foreground">
             {description}
           </div>
         ) : null}

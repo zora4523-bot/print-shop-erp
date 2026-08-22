@@ -3,10 +3,14 @@ import { Calculator, CalendarClock, Clock } from 'lucide-react';
 import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '薪资总览' };
 
 export default async function SalaryIndexPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const s = await getSalaryIndexSummary();
 
   return (
@@ -15,14 +19,34 @@ export default async function SalaryIndexPage() {
         title="薪资总览"
         subtitle={
           <>
-            今日：<span className="font-mono">{s.today}</span> · 所有金额按 Asia/Shanghai 日历。
+            今日：<span className="font-sans tabular-nums">{s.today}</span> · 所有金额按 Asia/Shanghai 日历。
           </>
+        }
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/owner/salary/rules"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              设置员工工资规则
+            </Link>
+            <Link
+              href="/owner/salary/piecework-rules"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              设置开机师傅计件规则
+            </Link>
+          </div>
         }
       />
 
+      <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        本页均为工厂支付给内部员工的工资与提成；外部销售的加工费归入“账单”应收，避免把应收和应付混在同一套规则里。
+      </p>
+
       <section className="space-y-3">
-        <h2 className="text-base font-semibold">师傅日薪</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <h2 className="text-base font-semibold">生产师傅计件工资</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="今日记录"
             value={`${s.dailyToday.count} 条`}
@@ -49,14 +73,14 @@ export default async function SalaryIndexPage() {
             href="/owner/salary/daily"
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
-            查看日薪列表 →
+            查看计件工资明细 →
           </Link>
         </div>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold">客服周期 / 提成</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="活跃周期"
             value={`${s.csActivePeriods} 个`}
@@ -72,11 +96,11 @@ export default async function SalaryIndexPage() {
             hint="periodEnd 已过"
           />
           <StatCard
-            label="未发提成合计"
+            label="已结算周期剩余未发"
             value={`¥${s.csUnpaid.totalIncome}`}
             icon={CalendarClock}
             tone="primary"
-            hint={`${s.csUnpaid.count} 条`}
+            hint={`${s.csUnpaid.count} 个已结算但未全额发放周期（剩余底薪 + 提成）`}
           />
         </div>
         <div>
@@ -93,7 +117,7 @@ export default async function SalaryIndexPage() {
         <h2 className="text-base font-semibold">
           时薪工月结（打包 / 清废 / 厨师）
         </h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label={`${s.currentMonth} 记录`}
             value={`${s.hourlyCurrentMonth.count} 条`}

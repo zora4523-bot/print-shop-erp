@@ -24,13 +24,15 @@ export type CategoryDistributionChartProps = {
 // 6 类常见 + "未分类" 兜底，固定颜色避免每次重渲染颜色重排（视觉
 // 回归会因此 fail）。
 const CATEGORY_COLOR_MAP: Record<string, string> = {
-  BLANK_STOCK: '#3b82f6',
-  GENERIC_STOCK: '#10b981',
-  CUSTOM_FLAT_FOIL: '#f59e0b',
-  COLOR_PRINT: '#a855f7',
-  STOCK_FOIL_ADD: '#ef4444',
-  BYO_MATERIAL: '#06b6d4',
-  UNCATEGORIZED: '#94a3b8',
+  BLANK_STOCK: 'var(--chart-1)',
+  GENERIC_STOCK: 'var(--chart-2)',
+  CUSTOM_FLAT_FOIL: 'var(--chart-3)',
+  COLOR_PRINT: 'var(--chart-4)',
+  STOCK_FOIL_ADD: 'var(--chart-5)',
+  BYO_MATERIAL: 'var(--chart-6)',
+  // 之前和 BYO_MATERIAL 同为 chart-6，饼图里两个扇区完全同色，只能
+  // 靠图例文字区分。新增的 --chart-7 是 Okabe–Ito 里还没用掉的黄。
+  UNCATEGORIZED: 'var(--chart-7)',
 };
 
 function labelFor(category: string): string {
@@ -57,11 +59,16 @@ export function CategoryDistributionChart({
   const rows = data.map((d) => ({
     name: labelFor(d.category),
     value: d.orderCount,
-    color: CATEGORY_COLOR_MAP[d.category] ?? '#94a3b8',
+    // 真正的「未知类目」用灰，不要再去撞已经分配出去的分类色。
+    color: CATEGORY_COLOR_MAP[d.category] ?? 'var(--muted-foreground)',
   }));
   return (
     <div data-slot="dashboard-chart-category" className="h-80 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        initialDimension={{ width: 1, height: 1 }}
+      >
         <PieChart>
           <Pie
             data={rows}
@@ -85,7 +92,12 @@ export function CategoryDistributionChart({
           </Pie>
           <Tooltip
             isAnimationActive={false}
-            contentStyle={{ fontSize: 12 }}
+            contentStyle={{
+              fontSize: 12,
+              backgroundColor: 'var(--popover)',
+              borderColor: 'var(--border)',
+              color: 'var(--popover-foreground)',
+            }}
             formatter={(value, name) => [
               `${Number(value)} 单`,
               String(name ?? ''),

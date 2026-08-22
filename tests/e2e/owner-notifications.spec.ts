@@ -26,7 +26,7 @@ import {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('owner notifications — admin UI', () => {
-  test('OWNER 配置 channel + rule + 测试 + 删除前置检查', async ({ page }) => {
+  test('ADMIN 配置 channel + rule + 测试 + 删除前置检查', async ({ page }) => {
     test.setTimeout(60_000);
 
     await resetNotificationFixture();

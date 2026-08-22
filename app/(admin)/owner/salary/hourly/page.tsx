@@ -5,15 +5,21 @@ import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { WorkerType } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
+import { requirePermission } from '@/lib/auth/permissions';
 import {
   EmptyState,
   PageHeader,
   StatCard as UiStatCard,
 } from '@/components/ui-business';
+import {
+  getAttendanceSummaries,
+  parseShanghaiMonth,
+} from '@/lib/attendance';
 
+import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
 
 type PageProps = {
@@ -31,6 +37,9 @@ function currentShanghaiMonth(): string {
 }
 
 export default async function HourlySalaryPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const sp = await searchParams;
   const selectedMonth =
     sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();
@@ -42,6 +51,11 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
     workerId: sp.workerId,
     isPaid,
   });
+  const monthRange = parseShanghaiMonth(selectedMonth);
+  const attendanceSummaries = await getAttendanceSummaries(
+    rows.map((row) => row.workerId),
+    monthRange,
+  );
 
   const totalSalary = rows
     .reduce(
@@ -65,7 +79,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeHourlyForm defaultMonth={selectedMonth} />
+        <RecomputeHourlyForm defaultMonth={selectedMonth} maxMonth={currentShanghaiMonth()} />
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -102,15 +116,21 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           description="先点击上方&ldquo;重算该月全员时薪工月结&rdquo;生成数据。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="时薪月结列表"
+          tabIndex={0}
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">月份</th>
-                <th className="px-4 py-2 text-left">工人</th>
+                <th className="px-4 py-2 text-left">师傅</th>
                 <th className="px-4 py-2 text-left">类型</th>
                 <th className="px-4 py-2 text-right">正常工时</th>
                 <th className="px-4 py-2 text-right">加班 / 代班</th>
+                <th className="px-4 py-2 text-right">上班 / 请假</th>
                 <th className="px-4 py-2 text-right">底薪</th>
                 <th className="px-4 py-2 text-right">加班费 / 代班费</th>
                 <th className="px-4 py-2 text-right">实发</th>
@@ -120,31 +140,41 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
             </thead>
             <tbody className="divide-y">
               {rows.map((r) => {
-                const wt = r.worker.workerType as WorkerType | null;
+                // Render the immutable payroll snapshot, never the employee's
+                // current account type. A later transfer must not relabel a
+                // historical PACKER row as COOK and swap overtime for spare pay.
+                const wt = r.payrollWorkerType;
                 const isCook = wt === WorkerType.COOK;
+                const attendance = attendanceSummaries.get(r.workerId) ?? {
+                  workUnits: '0',
+                  leaveUnits: '0',
+                };
                 return (
                   <tr key={r.id}>
-                    <td className="px-4 py-3 font-mono text-xs">{r.month}</td>
+                    <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
                     <td className="px-4 py-3">{r.worker.displayName}</td>
                     <td className="px-4 py-3 text-xs">
                       {wt ? (WORKER_TYPE_LABELS[wt] ?? wt) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {String(r.totalWorkHours)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {isCook
                         ? `${String(r.totalSpareHours)} (代班)`
                         : `${String(r.totalOtHours)} (加班)`}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
+                      {attendance.workUnits} / {attendance.leaveUnits} 天
+                    </td>
+                    <td className="px-4 py-3 text-right font-sans tabular-nums">
                       {String(r.baseSalary)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs text-muted-foreground">
+                    <td className="px-4 py-3 text-right font-sans tabular-nums text-xs text-muted-foreground">
                       {isCook ? String(r.spareSalary) : String(r.otSalary)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-medium">
-                      ¥ {String(r.totalSalary)}
+                    <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
+                      {formatMoney(r.totalSalary)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {r.isPaid ? (
@@ -179,8 +209,9 @@ function FilterBar({
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">月份</label>
+        <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
         <input
+          id="hourly-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
@@ -188,8 +219,9 @@ function FilterBar({
         />
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">状态</label>
+        <label htmlFor="hourly-paid" className="text-xs text-muted-foreground">状态</label>
         <select
+          id="hourly-paid"
           name="paid"
           defaultValue={paid ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -200,8 +232,9 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label className="text-xs text-muted-foreground">工人 id (可选)</label>
+        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅 id（选填）</label>
         <input
+          id="hourly-workerId"
           type="text"
           name="workerId"
           defaultValue={workerId ?? ''}
@@ -209,12 +242,9 @@ function FilterBar({
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
       </div>
-      <button
-        type="submit"
-        className={buttonVariants({ size: 'sm' })}
-      >
+      <Button type="submit" size="sm">
         筛选
-      </button>
+      </Button>
       <Link
         href="/owner/salary/hourly"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}

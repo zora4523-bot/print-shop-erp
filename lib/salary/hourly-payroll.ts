@@ -55,6 +55,13 @@ export class HourlyPayrollError extends Error {
 
 const ZERO = new Decimal(0);
 
+// Payroll rows are persisted as Decimal(..., 2). Round each independently
+// payable component before summing so the displayed breakdown always
+// reconciles to the stored total down to the cent.
+function money(value: Decimal): Decimal {
+  return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
+
 export function calcHourlyPayroll(
   input: HourlyInputs,
   rules: HourlyPayrollRules,
@@ -76,10 +83,10 @@ export function calcHourlyPayroll(
     if (rules.monthlyBase === undefined) {
       throw new HourlyPayrollError('厨师缺少 COOK_MONTHLY 规则');
     }
-    const base = dec(rules.monthlyBase);
+    const base = money(dec(rules.monthlyBase));
     const spareRate =
       rules.spareHourlyRate === undefined ? ZERO : dec(rules.spareHourlyRate);
-    const sparePay = spareRate.times(spare);
+    const sparePay = money(spareRate.times(spare));
     return {
       normalPay: ZERO,
       otPay: ZERO,
@@ -97,8 +104,8 @@ export function calcHourlyPayroll(
   const rate = dec(rules.hourlyRate);
   const multiplier =
     rules.otMultiplier === undefined ? new Decimal(1) : dec(rules.otMultiplier);
-  const normalPay = rate.times(normal);
-  const otPay = rate.times(ot).times(multiplier);
+  const normalPay = money(rate.times(normal));
+  const otPay = money(rate.times(ot).times(multiplier));
   return {
     normalPay,
     otPay,

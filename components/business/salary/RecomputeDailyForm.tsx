@@ -8,9 +8,12 @@ import type { RecomputeDailyResult } from '@/actions/owner-salary.types';
 
 type Props = {
   defaultDate: string;
+  // 上海日历的今天。纯浏览器层提示，真闸口在 lib/salary/daily.ts 的
+  // assertNotFutureSalaryDate —— 客户端时钟不可信，这里只是少一次往返。
+  maxDate: string;
 };
 
-export function RecomputeDailyForm({ defaultDate }: Props) {
+export function RecomputeDailyForm({ defaultDate, maxDate }: Props) {
   const [state, action] = useActionState<RecomputeDailyResult | null, unknown>(
     recomputeDailySalaryAction,
     null,
@@ -29,7 +32,9 @@ export function RecomputeDailyForm({ defaultDate }: Props) {
         <Input
           type="date"
           name="date"
+          aria-label="重算日期"
           defaultValue={defaultDate}
+          max={maxDate}
           className="max-w-[180px]"
         />
         <Button type="submit" disabled={pending}>
@@ -43,16 +48,18 @@ export function RecomputeDailyForm({ defaultDate }: Props) {
         ) : null}
       </div>
       {state?.status === 'success' && state.errors.length > 0 ? (
-        <ul className="text-xs text-destructive space-y-1">
+        // role="alert"：汇总行是 role="status"，读屏器只会念到「已处理 N
+        // 位 · M 个失败」，念不到具体是谁失败了。
+        <ul role="alert" className="text-xs text-destructive space-y-1">
           {state.errors.map((e) => (
             <li key={e.workerId}>
-              {e.workerId}: {e.message}
+              {e.workerName}：{e.message}
             </li>
           ))}
         </ul>
       ) : null}
       {state?.status === 'error' ? (
-        <p className="text-xs text-destructive">{state.message}</p>
+        <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
         <p className="text-xs text-destructive">

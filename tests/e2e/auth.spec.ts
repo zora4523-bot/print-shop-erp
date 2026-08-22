@@ -9,11 +9,11 @@ test.describe('登录闸口', () => {
 
   test('seeded admin 能登录并落到首页', async ({ page }) => {
     await login(page);
-    // Phase C（2026-05-06）/ 是按角色路由分发器，admin (OWNER) 落到
+    // Phase C（2026-05-06）/ 是按角色路由分发器，admin (ADMIN) 落到
     // /owner 而不是 /。允许任何 admin shell 路径（owner / orders /
     // foreman），登录成功后 URL 必须不是 /login。
     await expect(page).toHaveURL(/\/(owner|orders|foreman|sales)/);
-    // 不写死 displayName 文案（seed 里是&ldquo;老板&rdquo;，业主可能改）；
+    // 不写死 displayName 文案（seed 里是&ldquo;管理员&rdquo;，业主可能改）；
     // 用 AdminHeader 的 UserMenu trigger（aria-label 以&ldquo;用户菜单&rdquo;开头）
     // 作为已登录信号——每个 admin 页面都有。
     await expect(

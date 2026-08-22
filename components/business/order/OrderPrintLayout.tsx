@@ -1,25 +1,33 @@
+import { pickDesignGridClass } from './design-grid';
 import {
-  DESIGN_GRID_WARN_THRESHOLD,
-  pickDesignGridClass,
-} from './design-grid';
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import type {
   PrintDesign,
   PrintOrder,
   PrintOrderItem,
 } from './OrderPrintLayout.types';
+import { formatFoilColors } from '@/lib/order/foil-colors';
+import { formatReceiverInfo } from '@/lib/order/receiver-info';
 
 // Shared print layout for both browser print and server-rendered PDF.
 // Pure render of a PrintOrder view-model — no data fetching, no
 // side-effects. Page layer is responsible for mapping DB rows into this
 // shape (craft IDs → names, role enum → Chinese label, etc).
 //
-// SPEC §E: A4 portrait, 15mm margin, no prices / no money, per-item
+// SPEC §E: A4 portrait, 10mm margin, no prices / no money, per-item
 // page-break-inside avoid, urgent banner, per-task QR code at 15mm,
 // order QR code at the page header.
 
 interface Props {
   order: PrintOrder;
-  factoryName?: string;
+  // 必填，不给默认值。这里原本是 `factoryName = '红包印刷厂'`，而三个渲染
+  // 入口（打印页 / PDF 路由 / PDF background job）一个都没传过——业主在
+  // Setting 表里改厂名永远不生效，而且那个默认值和 seed 里的
+  // '佛山红包印刷厂' 早就对不上了，没人发现。设成必填，下一个渲染入口忘了
+  // 传就是编译错误。取值见 lib/settings。
+  factoryName: string;
   // Injected for determinism — tests / PDF renders can pin the footer
   // timestamp instead of capturing wall-clock at render time.
   renderedAt?: Date;
@@ -27,7 +35,7 @@ interface Props {
 
 export function OrderPrintLayout({
   order,
-  factoryName = '红包印刷厂',
+  factoryName,
   renderedAt,
 }: Props) {
   const printedAt = renderedAt ?? new Date();
@@ -35,7 +43,47 @@ export function OrderPrintLayout({
     <>
       <style>{PRINT_CSS}</style>
 
+      {/* 表格外壳：thead / tfoot 是浏览器**原生**的「每页重复」机制，
+          浏览器打印和 Puppeteer PDF 两条路径行为一致，而且会为页眉页脚
+          预留空间。此前页脚用 position: fixed，Chrome 每页重画它却不占
+          位，实测 168 个组合里 125 个（74%）压在正文墨迹上。
+          业主 2026-08-18 决策：放弃「三款一页」，改显式分页 + 每页重复
+          表头。 */}
+      <table className="print-sheet">
+        <thead>
+          <tr>
+            <td>
+              <div className="running-header">
+                <span className="running-header-no">{order.orderNo}</span>
+                <span className="running-header-name">
+                  {order.customName ?? order.customerRef ?? ''}
+                </span>
+                {order.isUrgent ? (
+                  <span className="running-header-urgent">急单</span>
+                ) : null}
+              </div>
+            </td>
+          </tr>
+        </thead>
+        <tfoot>
+          <tr>
+            <td>
+              <div className="print-footer">
+                打印时间：{formatShanghaiDateTime(printedAt)}
+              </div>
+            </td>
+          </tr>
+        </tfoot>
+        <tbody>
+          <tr>
+            <td>
       <div className="print-container">
+        {order.kind === 'REWORK' ? (
+          <div className="rework-banner">
+            重 做 单
+            {order.sourceOrderNo ? ` · 原单 ${order.sourceOrderNo}` : ''}
+          </div>
+        ) : null}
         {order.isUrgent && (
           <div className="urgent-banner">
             急 单 · 请优先处理
@@ -47,6 +95,9 @@ export function OrderPrintLayout({
             <div className="factory-name">{factoryName}</div>
             <h1 className="order-title">工 单</h1>
             <div className="order-no">{order.orderNo}</div>
+            {order.customName && (
+              <div className="order-custom-name">{order.customName}</div>
+            )}
           </div>
           <div
             // QR SVG pre-rendered server-side via the `qrcode` package.
@@ -60,11 +111,22 @@ export function OrderPrintLayout({
 
         <div className="order-meta">
           <div>下单日期：{formatShanghaiDate(order.submittedAt ?? order.createdAt)}</div>
-          <div>客户代号：{order.customerRef ?? '-'}</div>
+          <div>客户名称/简称：{order.customerRef ?? '-'}</div>
           <div>
             提交人：{order.submitterDisplayName}（{order.submitterRoleLabel}）
           </div>
           <div>急单：{order.isUrgent ? '【是】' : '否'}</div>
+          <div>
+            配送：
+            {order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
+            {order.shipments.length > 1
+              ? ` · 多地址 ×${order.shipments.length}`
+              : ''}
+          </div>
+          <div>
+            承诺交期：
+            {order.promisedDate ? formatShanghaiDate(order.promisedDate) : '-'}
+          </div>
         </div>
 
         {order.items.map((item) => (
@@ -84,20 +146,56 @@ export function OrderPrintLayout({
               {order.remark}
             </div>
           )}
-          {(order.receiverName || order.receiverPhone || order.receiverAddress) && (
-            <div style={{ marginTop: 8 }}>
-              <strong>收货信息：</strong>
-              <div>
-                {order.receiverName ?? '-'} {order.receiverPhone ?? ''}
-              </div>
-              {order.receiverAddress && <div>{order.receiverAddress}</div>}
-              {order.expressCode && <div>快递代码：{order.expressCode}</div>}
+          {order.shipments.length > 0 ? (
+            <div className="shipment-list">
+              <strong>
+                收货信息
+                {order.shipments.length > 1
+                  ? `（多地址 ×${order.shipments.length}）`
+                  : ''}
+                ：
+              </strong>
+              {order.shipments.map((shipment) => (
+                <div key={shipment.id} className="shipment-row">
+                  <span>
+                    地址 {shipment.sequence}：{formatReceiverInfo(shipment, '-')}
+                  </span>
+                  {shipment.expressCode ? (
+                    <span> · 快递代码 {shipment.expressCode}</span>
+                  ) : null}
+                  {shipment.trackingNo ? (
+                    <span> · 运单号 {shipment.trackingNo}</span>
+                  ) : null}
+                  {shipment.lines.length > 0 ? (
+                    <span>
+                      {' '}
+                      ·{' '}
+                      {shipment.lines
+                        .map(
+                          (line) =>
+                            `#${line.orderItemSequence} ${line.orderItemName} ×${line.quantity}`,
+                        )
+                        .join('；')}
+                    </span>
+                  ) : null}
+                </div>
+              ))}
             </div>
-          )}
+          ) : order.receiverName ||
+            order.receiverPhone ||
+            order.receiverAddress ? (
+            <div className="shipment-list">
+              <strong>收货信息：</strong>
+              <div>{formatReceiverInfo(order, '-')}</div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="print-footer">打印时间：{formatShanghaiDateTime(printedAt)}</div>
       </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </>
   );
 }
@@ -121,7 +219,7 @@ function OrderItemBlock({ item }: { item: PrintOrderItem }) {
             <dt>数量：</dt>
             <dd>{item.quantity}</dd>
             <dt>烫金色：</dt>
-            <dd>{item.foilColor ?? '-'}</dd>
+            <dd>{formatFoilColors(item.foilColors, '-')}</dd>
             <dt>双面：</dt>
             <dd>{item.isDoubleSided ? '是' : '否'}</dd>
             <dt>双色：</dt>
@@ -129,7 +227,12 @@ function OrderItemBlock({ item }: { item: PrintOrderItem }) {
             <dt>工艺：</dt>
             <dd>{item.craftNames.length > 0 ? item.craftNames.join('、') : '-'}</dd>
           </dl>
-          {item.remark && <div className="item-remark">备注：{item.remark}</div>}
+          {item.remark && (
+            <div className="item-remark">
+              <span className="item-remark-label">款式备注：</span>
+              <span className="item-remark-text">{item.remark}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -188,38 +291,17 @@ function DesignGrid({ designs }: { designs: PrintDesign[] }) {
           />
         ))}
       </div>
-      {printable.length >= DESIGN_GRID_WARN_THRESHOLD && (
-        <div className="no-print design-many-warn">
-          设计图较多（{printable.length} 张），建议分款式打印以保证清晰度
-        </div>
-      )}
     </div>
   );
 }
 
-const SHANGHAI_DATE = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-const SHANGHAI_DATETIME = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
-
+// 打印视图的空值占位用 '-'（窄字符，打印排版紧凑），与页面端 '—' 区分。
 function formatShanghaiDate(d: Date | null | undefined): string {
-  if (!d) return '-';
-  return SHANGHAI_DATE.format(d);
+  return formatDateShanghai(d, '-');
 }
 
 function formatShanghaiDateTime(d: Date): string {
-  return SHANGHAI_DATETIME.format(d);
+  return formatDateTimeShanghai(d);
 }
 
 function shortId(id: string): string {
@@ -232,18 +314,82 @@ function shortId(id: string): string {
 const PRINT_CSS = `
   @page {
     size: A4 portrait;
-    margin: 15mm;
+    margin: 10mm;
   }
+  /* 打印视图按定义是纸张模拟，不跟随界面主题。根 layout 的主题脚本会在
+     hydration 前把 .dark 打到 <html> 上，globals.css 的 body 于是变成
+     深色背景，而 PRINT_CSS 只设了 color:#000 —— 结果管理员开着暗色主题
+     点「打印」，预览是黑底黑字，整页看不见。
+     这份 style 只在打印路由注入（OrderPrintLayout 的两个消费者都是打印
+     路径），所以裸 body 选择器的作用域是安全的。 */
+  html:has(.print-sheet), html:has(.print-sheet) body {
+    background: #fff;
+    color: #000;
+    color-scheme: light;
+  }
+
+  /* 两条渲染路径（浏览器 window.print() 与 PDF 的 buildPrintHtml doc
+     shell）之前 box-sizing 不一致，设计图在 PDF 侧比网页宽 2px 并溢出
+     网格格子。reset 放在这里，两条路径共用同一份规则。 */
+  .print-sheet, .print-sheet *, .print-sheet *::before, .print-sheet *::after {
+    box-sizing: border-box;
+  }
+  .print-sheet img, .print-sheet svg { display: block; }
+
+  /* 运行页眉 / 页脚：thead、tfoot 由浏览器在每个打印页重复并预留空间。 */
+  .print-sheet {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .print-sheet > thead > tr > td,
+  .print-sheet > tfoot > tr > td,
+  .print-sheet > tbody > tr > td {
+    padding: 0;
+  }
+  .running-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    border-bottom: 1px solid #999;
+    padding-bottom: 3px;
+    margin-bottom: 6px;
+    font-size: 10px;
+    color: #444;
+  }
+  .running-header-no { font-weight: bold; color: #000; }
+  .running-header-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .running-header-urgent { color: #dc2626; font-weight: bold; }
+
   @media print {
     body { margin: 0; padding: 0; }
     .no-print { display: none !important; }
-    .order-item { page-break-inside: avoid; }
+    /* 不要对整个 .order-item 用 avoid：款式本身高于一页时，浏览器无处
+       可断，会塌陷成「非单调页数 + 近乎空白页」。只保护真正不可切的
+       子块，让高款式正常跨页。 */
+    .item-header { break-after: avoid; page-break-after: avoid; }
+    .task-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .design-grid figure { break-inside: avoid; page-break-inside: avoid; }
     .page-break { page-break-before: always; }
+    /* 首页不需要重复页眉——它下面紧跟着完整的工单抬头。 */
+    .print-sheet > thead { display: table-header-group; }
+    .print-sheet > tfoot { display: table-footer-group; }
   }
   .print-container {
-    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    /* 打印视图按定义是纸张模拟，不该跟随界面主题。此前暗色模式下
+       /print/orders/{id} 是黑底黑字（PRINT_CSS 只设了 color:#000，
+       没设 background），整页看不见。 */
+    background: #fff;
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC",
+      "Microsoft YaHei", Arial, sans-serif;
     color: #000;
     line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .urgent-banner {
     background: #dc2626;
@@ -253,6 +399,16 @@ const PRINT_CSS = `
     font-weight: bold;
     font-size: 18px;
     margin-bottom: 10px;
+  }
+  .rework-banner {
+    border: 2px solid #b45309;
+    background: #fffbeb;
+    color: #92400e;
+    padding: 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 8px;
   }
   .order-header {
     display: flex;
@@ -265,6 +421,11 @@ const PRINT_CSS = `
   .factory-name { font-size: 12px; color: #666; }
   .order-title { font-size: 24px; margin: 4px 0; }
   .order-no { font-size: 16px; font-weight: bold; }
+  .order-custom-name {
+    margin-top: 2px;
+    font-size: 14px;
+    font-weight: bold;
+  }
   .order-meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -326,7 +487,22 @@ const PRINT_CSS = `
   }
   .item-info dt { font-weight: 600; }
   .item-info dd { margin: 0; }
-  .item-remark { margin-top: 6px; font-size: 12px; color: #666; }
+  .item-remark {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #000;
+  }
+  .item-remark-label {
+    color: #333;
+  }
+  .item-remark-text {
+    padding: 1px 3px;
+    font-weight: bold;
+    color: #c00000;
+    background: #ffe6e6;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
   .task-table {
     width: 100%;
     border-collapse: collapse;
@@ -344,11 +520,20 @@ const PRINT_CSS = `
     padding-top: 10px;
     font-size: 13px;
   }
+  .shipment-list { margin-top: 8px; }
+  .shipment-row {
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
+  /* compact-3 已移除：它把三款工单的字号压小以塞进一张 A4，
+     而工单一旦排产仍然放不下。业主 2026-08-18 决策改为显式分页 +
+     每页重复表头，车间拿到的字号因此恢复正常大小。 */
+  /* 不再用 position: fixed —— 它每页重画却不占位，会压住正文。现在
+     由 tfoot 承载，浏览器自动每页重复并预留空间。 */
   .print-footer {
-    position: fixed;
-    bottom: 5mm;
-    left: 0;
-    right: 0;
+    border-top: 1px solid #ccc;
+    margin-top: 6px;
+    padding-top: 3px;
     text-align: center;
     font-size: 10px;
     color: #666;

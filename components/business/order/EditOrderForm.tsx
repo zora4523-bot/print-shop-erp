@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState } from 'react';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,19 +10,20 @@ import type { OrderMutationResult } from '@/actions/order.types';
 
 // E-lean edit form. Single status-agnostic component; the `fieldset`
 // prop controls which fields are enabled. No RHF (no array), no Zod on
-// the client — FormData + server-side validation is enough for a
-// 7-field form, and a plain form gives zero-JS fallback for free.
+// the client — FormData + server-side validation is enough here, and
+// a plain form gives zero-JS fallback for free.
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
 export type EditOrderInitialValues = {
+  customName: string | null;
   customerRef: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
   receiverAddress: string | null;
   expressCode: string | null;
   packageRequirement: string | null;
   remark: string | null;
+  // YYYY-MM-DD（页面层从 Date 转好）
+  promisedDate: string | null;
   isUrgent: boolean;
 };
 
@@ -32,23 +33,23 @@ type Props = {
   initial: EditOrderInitialValues;
 };
 
-const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set(['customerRef', 'isUrgent']);
+const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
+  'customName',
+  'customerRef',
+  'isUrgent',
+]);
 
 export function EditOrderForm({ orderId, fieldset, initial }: Props) {
   const boundAction = updateOrderAction.bind(null, orderId);
-  const [state, formAction] = useActionState<OrderMutationResult | null, FormData>(
-    boundAction,
-    null,
-  );
-  const [pending, startTransition] = useTransition();
+  const [state, formAction, pending] = useActionState<
+    OrderMutationResult | null,
+    FormData
+  >(boundAction, null);
 
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
 
   return (
-    <form
-      action={(formData) => startTransition(() => formAction(formData))}
-      className="space-y-6"
-    >
+    <form action={formAction} className="space-y-6">
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           工单已进入排产 / 生产，仅可修改收货信息与备注（SPEC §3.6）。
@@ -57,25 +58,21 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field
+            name="customName"
+            label="工单名称"
+            full
+            disabled={FULL_ONLY_FIELDS.has('customName') && isShippingOnly}
+            initial={initial.customName}
+            errors={fieldErrors(state, 'customName')}
+          />
           <Field
             name="customerRef"
-            label="客户代号"
+            label="客户名称/简称（选填）"
             disabled={FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly}
             initial={initial.customerRef}
             errors={fieldErrors(state, 'customerRef')}
-          />
-          <Field
-            name="receiverName"
-            label="收货人"
-            initial={initial.receiverName}
-            errors={fieldErrors(state, 'receiverName')}
-          />
-          <Field
-            name="receiverPhone"
-            label="收货电话"
-            initial={initial.receiverPhone}
-            errors={fieldErrors(state, 'receiverPhone')}
           />
           <Field
             name="expressCode"
@@ -85,8 +82,9 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
           />
           <Field
             name="receiverAddress"
-            label="收货地址"
+            label="收货信息"
             full
+            multiline
             initial={initial.receiverAddress}
             errors={fieldErrors(state, 'receiverAddress')}
           />
@@ -106,7 +104,16 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             errors={fieldErrors(state, 'remark')}
           />
           {!isShippingOnly && (
-            <div className="col-span-2 flex items-center gap-2">
+            <Field
+              name="promisedDate"
+              label="承诺交期"
+              type="date"
+              initial={initial.promisedDate}
+              errors={fieldErrors(state, 'promisedDate')}
+            />
+          )}
+          {!isShippingOnly && (
+            <div className="sm:col-span-2 flex items-center gap-2">
               <input
                 id="isUrgent"
                 name="isUrgent"
@@ -117,13 +124,14 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
               <Label htmlFor="isUrgent" className="text-sm">
                 标记为急单
               </Label>
+              <input type="hidden" name="isUrgent" value="false" />
             </div>
           )}
         </div>
       </section>
 
       {state?.status === 'error' && (
-        <p className="text-sm text-destructive">{state.message}</p>
+        <p role="alert" className="text-sm text-destructive">{state.message}</p>
       )}
 
       <div className="flex items-center gap-3">
@@ -154,6 +162,7 @@ function Field({
   full,
   multiline,
   disabled,
+  type = 'text',
 }: {
   name: string;
   label: string;
@@ -162,9 +171,12 @@ function Field({
   full?: boolean;
   multiline?: boolean;
   disabled?: boolean;
+  type?: string;
 }) {
+  const hasError = errors.length > 0;
+  const errorId = `${name}-error`;
   return (
-    <div className={full ? 'col-span-2' : undefined}>
+    <div className={full ? 'sm:col-span-2' : undefined}>
       <Label htmlFor={name} className="text-sm text-muted-foreground">
         {label}
       </Label>
@@ -174,6 +186,8 @@ function Field({
           name={name}
           disabled={disabled}
           defaultValue={initial ?? ''}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? errorId : undefined}
           className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
           rows={3}
         />
@@ -181,13 +195,21 @@ function Field({
         <Input
           id={name}
           name={name}
+          type={type}
           disabled={disabled}
           defaultValue={initial ?? ''}
+          aria-invalid={hasError}
+          aria-describedby={hasError ? errorId : undefined}
           className="mt-1"
         />
       )}
-      {errors.length > 0 && (
-        <p className="mt-1 text-xs text-destructive">{errors[0]}</p>
+      {hasError && (
+        // 不用 role="alert"：逐字段错误靠 aria-describedby 与控件关联，
+        // 用户聚焦到该字段时读屏器自然读出来。标 alert 会在每次校验时
+        // 抢播报。
+        <p id={errorId} className="mt-1 text-xs text-destructive">
+          {errors[0]}
+        </p>
       )}
     </div>
   );

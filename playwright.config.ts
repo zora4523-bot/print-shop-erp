@@ -9,8 +9,29 @@ import { loadEnvConfig } from '@next/env';
 // would diverge from the running app (Codex round 74 / P2).
 loadEnvConfig(process.cwd(), /* dev */ true);
 
+const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
+const webServerPort = new URL(baseURL).port || '3000';
+
+const workerViewportProjects = [
+  { name: 'worker-375x667', width: 375, height: 667 },
+  { name: 'worker-393x852', width: 393, height: 852 },
+  { name: 'worker-768x1024', width: 768, height: 1024 },
+  { name: 'worker-1024x768', width: 1024, height: 768 },
+  { name: 'worker-1280x800', width: 1280, height: 800 },
+  { name: 'worker-1920x1080', width: 1920, height: 1080 },
+] as const;
+
+const adminViewportProjects = [
+  { name: 'admin-375x667', width: 375, height: 667 },
+  { name: 'admin-393x852', width: 393, height: 852 },
+  { name: 'admin-768x1024', width: 768, height: 1024 },
+  { name: 'admin-1024x768', width: 1024, height: 768 },
+  { name: 'admin-1280x800', width: 1280, height: 800 },
+  { name: 'admin-1920x1080', width: 1920, height: 1080 },
+] as const;
+
 // E2E config — runs against the Next.js dev server. Locally we reuse
-// whatever dev server is already running on :3000 (via `pnpm dev`);
+// whatever dev server is already running at E2E_BASE_URL (default :3000);
 // CI / one-shot `pnpm test:e2e` spawns its own. Tests share the dev
 // database (per CLAUDE.md MVP posture) and use unique-per-run inputs
 // so reruns don't collide. A separate test DB can be added later.
@@ -26,7 +47,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['github'], ['html']] : 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL,
     // Trace + screenshot on first retry — cheap to keep on, useful when
     // a failure surfaces in CI / a stale environment.
     trace: 'on-first-retry',
@@ -35,12 +56,50 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: [
+        '**/worker-responsive.spec.ts',
+        '**/admin-responsive.spec.ts',
+        // Has its own project below with JS turned off; running it here
+        // too would just re-test the hydrated path.
+        '**/no-js.spec.ts',
+      ],
       use: { ...devices['Desktop Chrome'] },
     },
+    // Zero-JS fallback gate (DECISIONS.md 2026-08-17). Only the three
+    // paths whose failure mode is "user can't recover" are covered:
+    // login / logout / change-password. Everything else keeps zero-JS
+    // submit as a default coding preference, not an asserted contract.
+    {
+      name: 'no-js',
+      testMatch: '**/no-js.spec.ts',
+      use: { ...devices['Desktop Chrome'], javaScriptEnabled: false },
+    },
+    ...workerViewportProjects.map(({ name, width, height }) => ({
+      name,
+      testMatch: '**/worker-responsive.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width, height },
+        screen: { width, height },
+        hasTouch: width <= 768,
+        isMobile: width <= 768,
+      },
+    })),
+    ...adminViewportProjects.map(({ name, width, height }) => ({
+      name,
+      testMatch: '**/admin-responsive.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width, height },
+        screen: { width, height },
+        hasTouch: width <= 768,
+        isMobile: width <= 768,
+      },
+    })),
   ],
   webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:3000',
+    command: `node ./node_modules/next/dist/bin/next dev --port ${webServerPort}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
     stdout: 'pipe',

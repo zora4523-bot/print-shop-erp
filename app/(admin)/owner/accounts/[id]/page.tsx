@@ -1,9 +1,13 @@
 import { notFound } from 'next/navigation';
-import { getUserSummary } from '@/lib/account';
+import {
+  getUserSummary,
+  listWorkerCapabilityCrafts,
+} from '@/lib/account';
 import { updateUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
 import { ResetPasswordForm } from '@/components/business/account/ResetPasswordForm';
 import { ToggleActiveButton } from '@/components/business/account/ToggleActiveButton';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -18,8 +22,14 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function EditAccountPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('account:manage');
   const { id } = await params;
-  const account = await getUserSummary(id);
+  const [account, capabilityCrafts] = await Promise.all([
+    getUserSummary(id),
+    listWorkerCapabilityCrafts(),
+  ]);
   if (!account) notFound();
 
   // Bind the id once so the form only has to pass (prev, fd).
@@ -54,6 +64,7 @@ export default async function EditAccountPage({ params }: PageProps) {
           mode="edit"
           action={boundUpdate}
           initial={account}
+          capabilityCrafts={capabilityCrafts}
         />
       </section>
 
@@ -71,7 +82,7 @@ export default async function EditAccountPage({ params }: PageProps) {
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
           {account.isActive
-            ? '停用后该账号无法登录；历史记录全部保留。不能停用自己，也不能停用最后一位活跃 OWNER。'
+            ? '停用后该账号无法登录；历史记录全部保留。不能停用自己，也不能停用最后一位活跃管理员。'
             : '激活后该账号可重新登录。'}
         </p>
         <ToggleActiveButton userId={account.id} currentlyActive={account.isActive} />

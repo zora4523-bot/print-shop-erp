@@ -3,7 +3,7 @@ import {
   Role,
   WorkerType,
   SalaryRuleType,
-} from '../../../generated/prisma/client';
+} from '../../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
@@ -29,6 +29,8 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   computeHourlyPayroll,
   computeHourlyForAllInMonth,
+  HourlyAggregateError,
+  HourlyBatchUnexpectedError,
   listHourlyPayrolls,
   markHourlyPayrollPaid,
 } from '../hourly-aggregate';
@@ -46,7 +48,7 @@ const PACKER_RULES: Record<string, unknown> = {
   },
 };
 
-function workerFixture(overrides: Partial<{ workerType: WorkerType; isActive: boolean; role: Role }> = {}) {
+function workerFixture(overrides: Partial<{ workerType: WorkerType | null; isActive: boolean; role: Role }> = {}) {
   return {
     id: 'worker-1',
     role: Role.WORKER,
@@ -120,6 +122,66 @@ describe('computeHourlyPayroll — worker validation', () => {
   });
 });
 
+describe('computeHourlyPayroll — immutable attendance identity', () => {
+  it.each([
+    [
+      '改岗',
+      workerFixture({ role: Role.SALES, workerType: null }),
+    ],
+    ['改工种', workerFixture({ workerType: WorkerType.COOK })],
+    ['停用', workerFixture({ isActive: false })],
+  ])('uses the historical PACKER snapshot after the account is %s', async (_label, currentWorker) => {
+    dbMock.user.findUnique.mockResolvedValue(currentWorker);
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '2',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
+    ]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-05'),
+    ).resolves.toMatchObject({
+      workerType: WorkerType.PACKER,
+      baseSalary: '88.00',
+      otSalary: '22.00',
+      totalSalary: '110.00',
+    });
+  });
+
+  it('fails closed when one month contains more than one historical hourly type', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
+      {
+        date: new Date('2026-05-02'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.CLEANER,
+      },
+    ]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-05'),
+    ).rejects.toThrow(/多个历史时薪工种/);
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+});
+
 describe('computeHourlyPayroll — PACKER', () => {
   beforeEach(() => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture());
@@ -134,6 +196,8 @@ describe('computeHourlyPayroll — PACKER', () => {
         normalHours: '8.00',
         otHours: i < 12 ? '1.00' : '0.00',
         spareHours: '0.00',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
       })),
     );
     const r = await computeHourlyPayroll('worker-1', '2026-05');
@@ -160,7 +224,14 @@ describe('computeHourlyPayroll — PACKER', () => {
       PACKER_HOURLY: { hourlyRate: 11 },
     });
     dbMock.attendance.findMany.mockResolvedValue([
-      { date: new Date('2026-05-01'), normalHours: '8', otHours: '2', spareHours: '0' },
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '2',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
     ]);
     const r = await computeHourlyPayroll('worker-1', '2026-05');
     expect(r.otMultiplier).toBe('1.00');
@@ -168,9 +239,43 @@ describe('computeHourlyPayroll — PACKER', () => {
     expect(r.totalSalary).toBe('110.00');
   });
 
+  it('persists a total equal to the sum of independently rounded components', async () => {
+    setupAllRules({
+      ...PACKER_RULES,
+      PACKER_HOURLY: { hourlyRate: 11.11 },
+    });
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '0.5',
+        otHours: '0.5',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
+    ]);
+
+    const r = await computeHourlyPayroll('worker-1', '2026-05');
+    const data = dbMock.hourlyWorkerPayroll.upsert.mock.calls[0][0].create;
+
+    expect(r.baseSalary).toBe('5.56');
+    expect(r.otSalary).toBe('5.56');
+    expect(r.totalSalary).toBe('11.12');
+    expect(data.baseSalary).toBe('5.56');
+    expect(data.otSalary).toBe('5.56');
+    expect(data.totalSalary).toBe('11.12');
+  });
+
   it('snapshots full rule context including WORK_HOURS + OT multiplier', async () => {
     dbMock.attendance.findMany.mockResolvedValue([
-      { date: new Date('2026-05-01'), normalHours: '8', otHours: '0', spareHours: '0' },
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
     ]);
     await computeHourlyPayroll('worker-1', '2026-05');
     const data = dbMock.hourlyWorkerPayroll.upsert.mock.calls[0][0].create;
@@ -202,7 +307,14 @@ describe('computeHourlyPayroll — CLEANER', () => {
       OT_MULTIPLIER: { multiplier: 1.0 },
     });
     dbMock.attendance.findMany.mockResolvedValue([
-      { date: new Date('2026-05-01'), normalHours: '8', otHours: '0', spareHours: '0' },
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.CLEANER,
+      },
     ]);
     const r = await computeHourlyPayroll('worker-1', '2026-05');
     expect(r.hourlyRate).toBe('12.00');
@@ -225,6 +337,8 @@ describe('computeHourlyPayroll — COOK (全职/混合/请假/请假代班)', ()
         normalHours: '8.00',
         otHours: '0.00',
         spareHours: '0.00',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.COOK,
       })),
     );
     const r = await computeHourlyPayroll('worker-1', '2026-05');
@@ -236,8 +350,22 @@ describe('computeHourlyPayroll — COOK (全职/混合/请假/请假代班)', ()
 
   it('混合打包（20h spare × 11 = 220）→ 3000 + 220 = 3220', async () => {
     dbMock.attendance.findMany.mockResolvedValue([
-      { date: new Date('2026-05-10'), normalHours: '8', otHours: '0', spareHours: '10' },
-      { date: new Date('2026-05-11'), normalHours: '8', otHours: '0', spareHours: '10' },
+      {
+        date: new Date('2026-05-10'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '10',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.COOK,
+      },
+      {
+        date: new Date('2026-05-11'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '10',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.COOK,
+      },
     ]);
     const r = await computeHourlyPayroll('worker-1', '2026-05');
     expect(r.totalSpareHours).toBe('20.00');
@@ -260,7 +388,14 @@ describe('computeHourlyPayroll — COOK (全职/混合/请假/请假代班)', ()
 
   it('请假 + 代班打包（仅 spare 15h）→ 3000 + 165 = 3165', async () => {
     dbMock.attendance.findMany.mockResolvedValue([
-      { date: new Date('2026-05-20'), normalHours: '0', otHours: '0', spareHours: '15' },
+      {
+        date: new Date('2026-05-20'),
+        normalHours: '0',
+        otHours: '0',
+        spareHours: '15',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.COOK,
+      },
     ]);
     const r = await computeHourlyPayroll('worker-1', '2026-05');
     expect(r.totalNormalHours).toBe('0.00');
@@ -368,11 +503,153 @@ describe('computeHourlyForAllInMonth', () => {
     dbMock.user.findMany.mockResolvedValue([]);
     await computeHourlyForAllInMonth('2026-05');
     const where = dbMock.user.findMany.mock.calls[0][0].where;
-    expect(where.workerType.in).toEqual([
+    expect(where.OR[0].workerType.in).toEqual([
       WorkerType.PACKER,
       WorkerType.CLEANER,
       WorkerType.COOK,
     ]);
+    expect(where.OR[1].attendanceRecords.some).toMatchObject({
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: {
+        in: [WorkerType.PACKER, WorkerType.CLEANER, WorkerType.COOK],
+      },
+    });
+  });
+
+  it('rethrows an unexpected worker failure with committed partial results', async () => {
+    const databaseFailure = new Error('connection lost');
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]);
+    dbMock.user.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === 'w2') throw databaseFailure;
+        return workerFixture({ workerType: WorkerType.PACKER });
+      },
+    );
+    setupAllRules();
+
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth('2026-05');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HourlyBatchUnexpectedError);
+    const unexpected = caught as HourlyBatchUnexpectedError;
+    expect(unexpected.partialResult.settled.map((row) => row.workerId)).toEqual([
+      'w1',
+    ]);
+    expect(unexpected.partialResult.errors).toEqual([]);
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
+
+  it('wraps a worker-scan failure with an empty partial result', async () => {
+    const databaseFailure = new Error('scan unavailable');
+    dbMock.user.findMany.mockRejectedValue(databaseFailure);
+
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth('2026-05');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HourlyBatchUnexpectedError);
+    const unexpected = caught as HourlyBatchUnexpectedError;
+    expect(unexpected.partialResult).toEqual({ settled: [], errors: [] });
+    expect(unexpected.cause).toBe(databaseFailure);
+  });
+
+  it('pins one coherent rule bundle for every worker in the batch', async () => {
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]);
+    dbMock.user.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => ({
+        ...workerFixture(),
+        id: where.id,
+      }),
+    );
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
+    ]);
+
+    const result = await computeHourlyForAllInMonth(
+      '2026-05',
+      new Date('2026-06-01T00:00:00Z'),
+    );
+
+    expect(result.settled.map((row) => row.totalSalary)).toEqual([
+      '88.00',
+      '88.00',
+    ]);
+    // Six rule keys are resolved once for the whole batch, not once per
+    // worker. This is what prevents an admin edit between w1 and w2 from
+    // changing only half of one settlement run.
+    expect(dbMock.salaryRule.findFirst).toHaveBeenCalledTimes(6);
+    const snapshots = dbMock.hourlyWorkerPayroll.upsert.mock.calls.map(
+      (call) => call[0].create.salaryRuleSnapshot,
+    );
+    expect(snapshots[0]).toEqual(snapshots[1]);
+  });
+
+  it('batch includes a changed-role worker with historical hourly attendance', async () => {
+    dbMock.user.findMany.mockResolvedValue([{ id: 'former-worker' }]);
+    dbMock.user.findUnique.mockResolvedValue({
+      ...workerFixture(),
+      id: 'former-worker',
+      role: Role.SALES,
+      workerType: null,
+      isActive: false,
+    });
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([
+      {
+        date: new Date('2026-05-01'),
+        normalHours: '8',
+        otHours: '0',
+        spareHours: '0',
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+      },
+    ]);
+
+    const result = await computeHourlyForAllInMonth('2026-05');
+
+    expect(result.settled).toEqual([
+      expect.objectContaining({
+        workerId: 'former-worker',
+        workerType: WorkerType.PACKER,
+        totalSalary: '88.00',
+      }),
+    ]);
+  });
+
+  it('wraps a rule-bundle read failure before settling any worker', async () => {
+    const databaseFailure = new Error('salary rules unavailable');
+    dbMock.user.findMany.mockResolvedValue([{ id: 'w1' }]);
+    dbMock.salaryRule.findFirst.mockRejectedValue(databaseFailure);
+
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth('2026-05');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(HourlyBatchUnexpectedError);
+    const unexpected = caught as HourlyBatchUnexpectedError;
+    expect(unexpected.message).toBe('时薪规则快照读取失败');
+    expect(unexpected.partialResult).toEqual({ settled: [], errors: [] });
+    expect(unexpected.cause).toBe(databaseFailure);
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
   });
 });
 
@@ -396,6 +673,22 @@ describe('listHourlyPayrolls', () => {
       workerId: 'worker-1',
       isPaid: false,
     });
+  });
+
+  it('derives the historical display type from the payroll snapshot, not current User.workerType', async () => {
+    dbMock.hourlyWorkerPayroll.findMany.mockResolvedValue([
+      {
+        id: 'payroll-1',
+        salaryRuleSnapshot: { workerType: WorkerType.PACKER },
+        worker: { displayName: '已改岗员工' },
+      },
+    ]);
+
+    const rows = await listHourlyPayrolls({});
+
+    expect(rows[0].payrollWorkerType).toBe(WorkerType.PACKER);
+    expect(dbMock.hourlyWorkerPayroll.findMany.mock.calls[0][0].select.worker)
+      .toEqual({ select: { displayName: true } });
   });
 });
 
@@ -441,6 +734,72 @@ describe('markHourlyPayrollPaid', () => {
   });
 });
 
+describe('future-dated settlement guard (上海日历)', () => {
+  // 未来月份的 Attendance 必然为空，而 COOK 的 monthlyBase 是整月 flat、
+  // 不按天折算 —— 一次误操作就能凭空写出一整月厨师月固定工资。
+  const FUTURE_MONTH = '2026-07';
+  const NOW = new Date('2026-06-15T12:00:00Z');
+
+  it('single path refuses a future month before touching the database', async () => {
+    await expect(
+      computeHourlyPayroll('worker-1', FUTURE_MONTH, NOW),
+    ).rejects.toThrow(/未来月份/);
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+
+  it('COOK: a future month cannot mint a whole month of COOK_MONTHLY base', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ workerType: WorkerType.COOK }),
+    );
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', FUTURE_MONTH, NOW),
+    ).rejects.toThrow(/未来月份/);
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+
+  it('still allows the current month (口径：只拒严格未来，别改成 >=)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-06', NOW),
+    ).resolves.toBeDefined();
+    expect(dbMock.hourlyWorkerPayroll.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('judges "future" on the Shanghai calendar, not UTC', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    // UTC 2026-06-30T15:59:59Z = Shanghai 06-30 23:59:59 → 7 月仍是未来
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-07', new Date('2026-06-30T15:59:59Z')),
+    ).rejects.toThrow(/未来月份/);
+    // UTC 2026-06-30T16:00:00Z = Shanghai 07-01 00:00 → 7 月已是当月
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-07', new Date('2026-06-30T16:00:00Z')),
+    ).resolves.toBeDefined();
+  });
+
+  it('batch aborts wholesale instead of reporting a per-worker error', async () => {
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth(FUTURE_MONTH, NOW);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(HourlyAggregateError);
+    expect((caught as Error).message).toMatch(/未来月份/);
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)', () => {
   it('takes the per-(worker, month) advisory lock (P0)', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture());
@@ -453,6 +812,14 @@ describe('computeHourlyPayroll — advisory lock + now pinning (Codex round 48)'
     expect(sql).toMatch(/pg_advisory_xact_lock/);
     expect(sqlCalls[0][1]).toMatch(
       /print-shop-erp:hourly:worker-1:2026-05/,
+    );
+    const sharedRuleLock = sqlCalls.find((call) =>
+      (call[0] as TemplateStringsArray)
+        .join('?')
+        .includes('pg_advisory_xact_lock_shared'),
+    );
+    expect(sharedRuleLock?.[1]).toBe(
+      'print-shop-erp:salary-rules:snapshot',
     );
   });
 

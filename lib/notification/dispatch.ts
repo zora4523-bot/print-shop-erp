@@ -4,20 +4,17 @@ import {
   type NotificationPayloadFor,
 } from './events';
 import { notify } from './notify';
+import { backgroundJobsMode } from '../background-jobs/mode';
 
 // `dispatchNotification` 是 5 个状态机 wire 点的标准入口（CLAUDE.md
 // §7.1 公开 API 仍是 `notify`，wire 内部走这里）。
 //
-// 设计目标：
-//   1. **不阻塞 Server Action** —— webhook.ts 最差 ~16s/channel 的
-//      retry，await 会让&ldquo;工单已提交&rdquo;在用户屏幕上挂半分钟。
-//   2. **不被 SIGTERM 静默吞掉** —— `void notify(...)` 是裸 fire-and-
-//      forget；pm2 reload / Vercel serverless freeze 都会把进行中的
-//      promise 一起切掉，连同 NotificationLog 一起丢（Codex round 110
-//      P1）。Next 16 的 `after()` 是&ldquo;响应已发出但请求 scope 还
-//      managed&rdquo;的官方机制——runtime 会等它跑完才允许进程退出。
+// 生产 durable 模式只在请求内将事件写入 PostgreSQL 任务账本；
+// webhook 重试由 LIGHT worker 执行，因此响应不被外部 HTTP 阻塞，
+// PM2 reload 也不会丢掉已入队任务。dev/test 的 inline 模式仍使用
+// Next 16 `after()`，以保持本地开发无需额外 worker。
 //
-// 失败模式：
+// inline 模式的失败模式：
 //   - 在 Server Action / Route Handler 里调用 → after() 走 Next 管理；
 //     notify 在响应后跑，SIGTERM 时 runtime 会等。
 //   - 在 vitest / 一次性脚本里调 → 没有 Next request scope，after()
@@ -26,7 +23,7 @@ import { notify } from './notify';
 //   - **任何其他**错误（Next runtime broken / after() 实现挂了 / 未来
 //     api 变 throws 别的）→ console.warn 留 ops 信号再降级。否则
 //     after()-without-after 静默回到&ldquo;SIGTERM 丢推送&rdquo;的状态，本文件
-//     存在的意义就被绕开了（Codex round 111 medium）。
+//     存在的意义就被绕开了。
 //
 // 识别 expected error：Next 抛的 message 含 `request scope`（Next 16
 // 的实现在 src/server/after/after.ts，错误消息&ldquo;cannot be called
@@ -46,10 +43,36 @@ function isExpectedNoScope(err: unknown): boolean {
   return EXPECTED_NO_SCOPE_PATTERNS.some((p) => msg.includes(p));
 }
 
-export function dispatchNotification<E extends NotificationEvent>(
+export async function dispatchNotification<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
-): void {
+  // spreadIndex：批量扇出时传循环下标，durable 模式据此把 availableAt 摊开，
+  // 避免整批同时打向企业微信被限流（见 background-jobs/notification.ts 的
+  // FANOUT_SPACING_MS）。inline 模式忽略它 —— dev/test 本来就不真发。
+  options: { dedupeKey?: string; spreadIndex?: number } = {},
+): Promise<void> {
+  if (backgroundJobsMode() === 'durable') {
+    // Lazy import keeps the inline test/dev path free of lib/db side effects.
+    // It also avoids loading Prisma into a process that only exercises the
+    // pure notification renderer.
+    try {
+      const { enqueueNotificationJob } = await import(
+        '../background-jobs/notification'
+      );
+      await enqueueNotificationJob(event, payload, options);
+    } catch (error) {
+      // 业务事务通常已经提交，任务账本写入失败不能把已成功的用户操作
+      // 重新表现成 500。只记录脱敏错误类型，并降级到 notify() 自身的
+      // best-effort 顶层兜底；notify() 的公开契约仍然是永不抛。
+      console.error(
+        '[dispatchNotification] durable enqueue failed:',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
+      void notify(event, payload);
+    }
+    return;
+  }
+
   try {
     after(() => notify(event, payload));
   } catch (err) {

@@ -1,13 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role, WorkerType } from '../../generated/prisma/client';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+} from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     user: { findUnique: vi.fn() },
     attendance: {
       upsert: vi.fn(),
+      findUnique: vi.fn(),
       delete: vi.fn(),
       findMany: vi.fn(),
+      groupBy: vi.fn(),
     },
   };
   return { dbMock: mock };
@@ -19,16 +25,18 @@ import {
   removeAttendance,
   listMonthlyAttendance,
   parseShanghaiMonth,
+  parseShanghaiMonthInstantRange,
   AttendanceError,
 } from '../attendance';
 
-const foremanActor = { id: 'foreman-1', role: Role.FOREMAN };
+const foremanActor = { id: 'foreman-1', role: Role.ADMIN };
 
 function workerFixture(
   overrides: Partial<{
     workerType: WorkerType | null;
     role: Role;
     isActive: boolean;
+    employmentType: EmploymentType | null;
   }> = {},
 ) {
   return {
@@ -36,6 +44,7 @@ function workerFixture(
     role: Role.WORKER,
     workerType: WorkerType.PACKER,
     isActive: true,
+    employmentType: EmploymentType.FULL_TIME,
     displayName: '打包阿姨',
     ...overrides,
   };
@@ -54,23 +63,42 @@ beforeEach(() => {
     normalHours: create.normalHours,
     otHours: create.otHours,
     spareHours: create.spareHours,
+    workUnits: create.workUnits,
+    leaveUnits: create.leaveUnits,
+    leaveType: create.leaveType ?? null,
     remark: create.remark ?? null,
+    roleSnapshot: create.roleSnapshot,
+    workerTypeSnapshot: create.workerTypeSnapshot ?? null,
   }));
+  dbMock.attendance.findUnique.mockReset().mockResolvedValue(null);
   dbMock.attendance.delete.mockReset();
   dbMock.attendance.findMany.mockReset().mockResolvedValue([]);
+  dbMock.attendance.groupBy.mockReset().mockResolvedValue([]);
 });
 
 describe('parseShanghaiMonth', () => {
-  it('returns UTC midnight [first, first-of-next) for valid YYYY-MM', () => {
+  it('returns UTC-midnight DATE values for valid YYYY-MM', () => {
     const { start, end } = parseShanghaiMonth('2026-05');
     expect(start.toISOString()).toBe('2026-05-01T00:00:00.000Z');
     expect(end.toISOString()).toBe('2026-06-01T00:00:00.000Z');
+  });
+
+  it('returns the real UTC instant range for a Shanghai calendar month', () => {
+    const { start, end } = parseShanghaiMonthInstantRange('2026-05');
+    expect(start.toISOString()).toBe('2026-04-30T16:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-05-31T16:00:00.000Z');
   });
 
   it('handles year boundary (Dec → next Jan)', () => {
     const { start, end } = parseShanghaiMonth('2026-12');
     expect(start.toISOString()).toBe('2026-12-01T00:00:00.000Z');
     expect(end.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('handles instant-range year boundary (Dec → next Jan)', () => {
+    const { start, end } = parseShanghaiMonthInstantRange('2026-12');
+    expect(start.toISOString()).toBe('2026-11-30T16:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-12-31T16:00:00.000Z');
   });
 
   it('rejects bad format', () => {
@@ -123,35 +151,33 @@ describe('recordAttendance — worker validation', () => {
     ).rejects.toThrow(/已停用/);
   });
 
-  it('rejects a non-WORKER role', async () => {
+  it('accepts a non-admin sales employee', async () => {
     dbMock.user.findUnique.mockResolvedValue(workerFixture({ role: Role.SALES }));
-    await expect(
-      recordAttendance(
-        'worker-1',
-        '2026-05-01',
-        { normalHours: 8, otHours: 0 },
-        foremanActor,
-      ),
-    ).rejects.toThrow(/不是工人/);
+    const result = await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      { normalHours: 8, otHours: 0 },
+      foremanActor,
+    );
+    expect(result.workerRole).toBe(Role.SALES);
   });
 
-  it('rejects a MACHINE-type worker (piecework path, not attendance)', async () => {
+  it('accepts a full-time MACHINE worker so actual work and leave days remain auditable', async () => {
     dbMock.user.findUnique.mockResolvedValue(
       workerFixture({ workerType: WorkerType.MACHINE }),
     );
-    await expect(
-      recordAttendance(
-        'worker-1',
-        '2026-05-01',
-        { normalHours: 8, otHours: 0 },
-        foremanActor,
-      ),
-    ).rejects.toThrow(/仅时薪工.*可录入考勤/);
+    const result = await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      { normalHours: 8, otHours: 0 },
+      foremanActor,
+    );
+    expect(result.workerType).toBe(WorkerType.MACHINE);
   });
 
-  it('rejects a worker with no workerType set', async () => {
+  it('accepts a non-worker employee without a worker subtype', async () => {
     dbMock.user.findUnique.mockResolvedValue(
-      workerFixture({ workerType: null }),
+      workerFixture({ role: Role.SALES, workerType: null }),
     );
     await expect(
       recordAttendance(
@@ -160,7 +186,37 @@ describe('recordAttendance — worker validation', () => {
         { normalHours: 8, otHours: 0 },
         foremanActor,
       ),
-    ).rejects.toThrow(/仅时薪工/);
+    ).resolves.toMatchObject({ workerType: null });
+  });
+
+  it('rejects a WORKER account without a subtype so the snapshot cannot be ambiguous', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ workerType: null }),
+    );
+
+    await expect(
+      recordAttendance(
+        'worker-1',
+        '2026-05-01',
+        { normalHours: 8, otHours: 0 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/未配置工种/);
+    expect(dbMock.attendance.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects accounts that are not marked as employees', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ employmentType: null }),
+    );
+    await expect(
+      recordAttendance(
+        'worker-1',
+        '2026-05-01',
+        { normalHours: 8, otHours: 0 },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/不是可录考勤/);
   });
 });
 
@@ -208,6 +264,40 @@ describe('recordAttendance — hours validation', () => {
     );
     expect(r.normalHours).toBe('24.00');
   });
+
+  it('accepts half-day work plus half-day leave and persists the leave reason', async () => {
+    const result = await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      {
+        normalHours: 4,
+        otHours: 0,
+        workUnits: 0.5,
+        leaveUnits: 0.5,
+        leaveType: '事假',
+      },
+      foremanActor,
+    );
+    expect(result.workUnits).toBe('0.5');
+    expect(result.leaveUnits).toBe('0.5');
+    expect(result.leaveType).toBe('事假');
+  });
+
+  it('rejects attendance units over one day', async () => {
+    await expect(
+      recordAttendance(
+        'worker-1',
+        '2026-05-01',
+        {
+          normalHours: 8,
+          otHours: 0,
+          workUnits: 1,
+          leaveUnits: 0.5,
+        },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/合计不能超过 1 天/);
+  });
 });
 
 describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
@@ -229,6 +319,9 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     });
     expect(call.create.normalHours).toBe('8.00');
     expect(call.create.otHours).toBe('2.00');
+    expect(call.create.roleSnapshot).toBe(Role.WORKER);
+    expect(call.create.workerTypeSnapshot).toBe(WorkerType.PACKER);
+    expect(call.create.identitySnapshotVerified).toBe(true);
     expect(call.update.normalHours).toBe('8.00');
     expect(call.update.otHours).toBe('2.00');
     expect(call.update.remark).toBe('加班到 19:30');
@@ -243,6 +336,47 @@ describe('recordAttendance — upsert idempotency (注意事项 2)', () => {
     );
     const updateArg = dbMock.attendance.upsert.mock.calls[0][0].update;
     expect('createdById' in updateArg).toBe(false);
+    expect('roleSnapshot' in updateArg).toBe(false);
+    expect('workerTypeSnapshot' in updateArg).toBe(false);
+    expect('identitySnapshotVerified' in updateArg).toBe(false);
+  });
+
+  it('T1 PACKER -> T2 COOK -> T3 re-entry keeps the T1 payroll identity', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ workerType: WorkerType.COOK }),
+    );
+    dbMock.attendance.upsert.mockResolvedValue({
+      id: 'att-1',
+      workerId: 'worker-1',
+      date: new Date('2026-05-01T00:00:00.000Z'),
+      normalHours: '8.00',
+      otHours: '0.00',
+      spareHours: '0.00',
+      workUnits: '1.0',
+      leaveUnits: '0.0',
+      leaveType: null,
+      remark: null,
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: WorkerType.PACKER,
+    });
+    dbMock.attendance.findUnique.mockResolvedValue({
+      roleSnapshot: Role.WORKER,
+      workerTypeSnapshot: WorkerType.PACKER,
+    });
+
+    const result = await recordAttendance(
+      'worker-1',
+      '2026-05-01',
+      { normalHours: 8, otHours: 0, spareHours: 3 },
+      foremanActor,
+    );
+
+    const updateArg = dbMock.attendance.upsert.mock.calls[0][0].update;
+    expect(updateArg).not.toHaveProperty('roleSnapshot');
+    expect(updateArg).not.toHaveProperty('workerTypeSnapshot');
+    expect(updateArg.spareHours).toBe('0.00');
+    expect(result.workerType).toBe(WorkerType.PACKER);
+    expect(result.workerRole).toBe(Role.WORKER);
   });
 });
 
@@ -329,8 +463,16 @@ describe('listMonthlyAttendance', () => {
         normalHours: '8.00',
         otHours: '0.00',
         spareHours: '0.00',
+        workUnits: '1.0',
+        leaveUnits: '0.0',
+        leaveType: null,
         remark: null,
-        worker: { displayName: '打包阿姨', workerType: WorkerType.PACKER },
+        roleSnapshot: Role.WORKER,
+        workerTypeSnapshot: WorkerType.PACKER,
+        worker: {
+          displayName: '打包阿姨',
+          employmentType: EmploymentType.FULL_TIME,
+        },
       },
     ]);
     const rows = await listMonthlyAttendance('worker-1', '2026-05');

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role } from '../../generated/prisma/client';
+import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -13,18 +13,27 @@ const {
   MockCsPeriodError,
   MockInvalidCsPeriodTransitionError,
   MockHourlyAggregateError,
+  pieceworkAdminMock,
+  auditMock,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   salaryMock: {
     computeDailyWorkerSalary: vi.fn(),
     computeDailyForAllMachineWorkers: vi.fn(),
     markDailySalaryPaid: vi.fn(),
+    addDailySalaryAdjustment: vi.fn(),
   },
+  pieceworkAdminMock: {
+    createWorkerMachineSalaryRule: vi.fn(),
+    salaryAdjustmentInputSchema: { safeParse: vi.fn() },
+    workerMachineRuleInputSchema: { safeParse: vi.fn() },
+  },
+  auditMock: { writeAuditLog: vi.fn() },
   csMock: {
     startCsPeriod: vi.fn(),
     settleCsPeriod: vi.fn(),
     settleReadyCsPeriods: vi.fn(),
-    markCsCommissionPaid: vi.fn(),
+    recordCsPayrollPayment: vi.fn(),
   },
   hourlyMock: {
     computeHourlyPayroll: vi.fn(),
@@ -68,13 +77,26 @@ vi.mock('@/lib/salary/daily', () => ({
   computeDailyWorkerSalary: salaryMock.computeDailyWorkerSalary,
   computeDailyForAllMachineWorkers: salaryMock.computeDailyForAllMachineWorkers,
   markDailySalaryPaid: salaryMock.markDailySalaryPaid,
+  addDailySalaryAdjustment: salaryMock.addDailySalaryAdjustment,
   DailySalaryError: MockDailySalaryError,
+}));
+vi.mock('@/lib/salary/piecework-admin', () => ({
+  createWorkerMachineSalaryRule:
+    pieceworkAdminMock.createWorkerMachineSalaryRule,
+  salaryAdjustmentInputSchema:
+    pieceworkAdminMock.salaryAdjustmentInputSchema,
+  workerMachineRuleInputSchema:
+    pieceworkAdminMock.workerMachineRuleInputSchema,
+  PieceworkRuleError: class extends Error {},
+}));
+vi.mock('@/lib/audit-log', () => ({
+  writeAuditLog: auditMock.writeAuditLog,
 }));
 vi.mock('@/lib/salary/cs', () => ({
   startCsPeriod: csMock.startCsPeriod,
   settleCsPeriod: csMock.settleCsPeriod,
   settleReadyCsPeriods: csMock.settleReadyCsPeriods,
-  markCsCommissionPaid: csMock.markCsCommissionPaid,
+  recordCsPayrollPayment: csMock.recordCsPayrollPayment,
   CsPeriodError: MockCsPeriodError,
   InvalidCsPeriodTransitionError: MockInvalidCsPeriodTransitionError,
 }));
@@ -90,10 +112,11 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 import {
   recomputeDailySalaryAction,
   setDailySalaryPaidAction,
+  addDailySalaryAdjustmentAction,
   startCsPeriodAction,
   settleCsPeriodAction,
   settleReadyCsPeriodsAction,
-  markCsCommissionPaidAction,
+  recordCsPayrollPaymentAction,
   recomputeHourlyPayrollAction,
   setHourlyPayrollPaidAction,
 } from '../owner-salary';
@@ -101,8 +124,8 @@ import {
 const ownerActor = {
   id: 'owner-1',
   username: 'o',
-  displayName: '老板',
-  role: Role.OWNER,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
@@ -112,10 +135,13 @@ beforeEach(() => {
   salaryMock.computeDailyWorkerSalary.mockReset();
   salaryMock.computeDailyForAllMachineWorkers.mockReset();
   salaryMock.markDailySalaryPaid.mockReset();
+  salaryMock.addDailySalaryAdjustment.mockReset();
+  pieceworkAdminMock.salaryAdjustmentInputSchema.safeParse.mockReset();
+  auditMock.writeAuditLog.mockReset();
   csMock.startCsPeriod.mockReset();
   csMock.settleCsPeriod.mockReset();
   csMock.settleReadyCsPeriods.mockReset();
-  csMock.markCsCommissionPaid.mockReset();
+  csMock.recordCsPayrollPayment.mockReset();
   hourlyMock.computeHourlyPayroll.mockReset();
   hourlyMock.computeHourlyForAllInMonth.mockReset();
   hourlyMock.markHourlyPayrollPaid.mockReset();
@@ -205,6 +231,19 @@ describe('recomputeDailySalaryAction', () => {
     if (r.status === 'error') expect(r.message).toMatch(/机型/);
   });
 
+  it('maps a batch-path DailySalaryError → error (future-date guard aborts wholesale)', async () => {
+    // 未来日期的守卫落在 lib 层的批量入口上，会整批抛错而不是返回
+    // { settled: [], errors: [...] } —— action 必须把它映射成
+    // { status: 'error' }，而不是让它冒泡成 500。
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.computeDailyForAllMachineWorkers.mockRejectedValueOnce(
+      new MockDailySalaryError('不能结算未来日期（2026-04-24，上海日历）：该日尚未开始'),
+    );
+    const r = await recomputeDailySalaryAction(null, { date: '2026-04-23' });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toMatch(/未来日期/);
+  });
+
   it('revalidates /owner/salary/daily on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
@@ -249,8 +288,13 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'on' }));
+    // 成功后 action 走 redirect（把确认信息提升到页面级），测试里的
+    // redirect mock 会抛 NEXT_REDIRECT，所以这里断言抛出而不是返回值。
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(salaryMock.markDailySalaryPaid).toHaveBeenCalledWith('ds-1', true);
   });
 
@@ -259,9 +303,50 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: false,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({}));
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({})),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(salaryMock.markDailySalaryPaid).toHaveBeenCalledWith('ds-1', false);
+  });
+
+  it('returnTo 被限制在 /owner/salary/daily 前缀内（防开放重定向）', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.markDailySalaryPaid.mockResolvedValue({
+      id: 'ds-1',
+      isPaid: true,
+      workerName: '张师傅',
+    });
+    // returnTo 是客户端提交的 hidden field，必须当不可信输入处理。
+    await expect(
+      setDailySalaryPaidAction(
+        'ds-1',
+        null,
+        fd({ isPaid: 'true', returnTo: 'https://evil.example.com/steal' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT:\/owner\/salary\/daily\?marked=/);
+  });
+
+  it('合法 returnTo 保留用户当前筛选', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.markDailySalaryPaid.mockResolvedValue({
+      id: 'ds-1',
+      isPaid: true,
+      workerName: '张师傅',
+    });
+    await expect(
+      setDailySalaryPaidAction(
+        'ds-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: '/owner/salary/daily?date=2026-04-23&paid=unpaid',
+        }),
+      ),
+    ).rejects.toThrow(
+      /NEXT_REDIRECT:\/owner\/salary\/daily\?date=2026-04-23&paid=unpaid&marked=/,
+    );
   });
 
   it('revalidates the list on success', async () => {
@@ -269,9 +354,81 @@ describe('setDailySalaryPaidAction', () => {
     salaryMock.markDailySalaryPaid.mockResolvedValue({
       id: 'ds-1',
       isPaid: true,
+      workerName: '张师傅',
     });
-    await setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' }));
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/daily');
+  });
+});
+
+describe('addDailySalaryAdjustmentAction', () => {
+  const idempotencyKey = '00000000-0000-4000-8000-000000000001';
+  const parsedData = {
+    idempotencyKey,
+    dailySalaryId: 'ds-1',
+    type: 'BONUS',
+    amount: '20.00',
+    reason: '急单奖励',
+  };
+
+  beforeEach(() => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    pieceworkAdminMock.salaryAdjustmentInputSchema.safeParse.mockReturnValue({
+      success: true,
+      data: parsedData,
+    });
+  });
+
+  it('passes the browser request key into the append-only salary ledger', async () => {
+    salaryMock.addDailySalaryAdjustment.mockResolvedValue({
+      id: 'adjustment-1',
+      amount: '20.00',
+      adjustmentAmount: '20.00',
+      actualSalary: '120.00',
+    });
+
+    const result = await addDailySalaryAdjustmentAction(
+      'ds-1',
+      null,
+      fd({
+        idempotencyKey,
+        type: 'BONUS',
+        amount: '20.00',
+        reason: '急单奖励',
+      }),
+    );
+
+    expect(result).toEqual({ status: 'success' });
+    expect(salaryMock.addDailySalaryAdjustment).toHaveBeenCalledWith({
+      ...parsedData,
+      actor: ownerActor,
+    });
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('delegates an exact replay to the atomic domain command', async () => {
+    salaryMock.addDailySalaryAdjustment.mockResolvedValue({
+      id: 'adjustment-1',
+      amount: '20.00',
+      adjustmentAmount: '20.00',
+      actualSalary: '120.00',
+    });
+
+    await addDailySalaryAdjustmentAction(
+      'ds-1',
+      null,
+      fd({
+        idempotencyKey,
+        type: 'BONUS',
+        amount: '20.00',
+        reason: '急单奖励',
+      }),
+    );
+
+    expect(salaryMock.addDailySalaryAdjustment).toHaveBeenCalledTimes(1);
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
   });
 });
 
@@ -435,52 +592,97 @@ describe('settleReadyCsPeriodsAction', () => {
     }
   });
 
-  it('maps scan-level errors to { status: error }', async () => {
+  it('maps a known CsPeriodError to { status: error }', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     csMock.settleReadyCsPeriods.mockRejectedValueOnce(
-      new Error('db down'),
+      new MockCsPeriodError('结算冲突'),
     );
     const r = await settleReadyCsPeriodsAction();
     expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toBe('结算冲突');
+  });
+
+  it('rethrows an unknown error instead of swallowing it into a toast (→ Sentry)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    csMock.settleReadyCsPeriods.mockRejectedValueOnce(new Error('db down'));
+    // Unknown errors must bubble to Next onRequestError → Sentry, not be
+    // returned as a graceful { status: 'error' } that hides the fault.
+    await expect(settleReadyCsPeriodsAction()).rejects.toThrow('db down');
   });
 });
 
-describe('markCsCommissionPaidAction', () => {
+describe('recordCsPayrollPaymentAction', () => {
+  const paymentForm = () =>
+    fd({
+      idempotencyKey: '00000000-0000-4000-8000-000000000001',
+      baseAmount: '2000.00',
+      commissionAmount: '0',
+      paidAt: '2026-05-01T10:30',
+    });
+
   it("first-line requirePermission('salary:view:all')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
     await expect(
-      markCsCommissionPaidAction('comm-1', null, fd({ isPaid: 'true' })),
+      recordCsPayrollPaymentAction('period-1', null, paymentForm()),
     ).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('parses isPaid=true and calls markCsCommissionPaid', async () => {
+  it('records a partial bottom-salary payment and refreshes the detail', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    csMock.markCsCommissionPaid.mockResolvedValue({
-      id: 'comm-1',
-      isFullyPaid: true,
+    csMock.recordCsPayrollPayment.mockResolvedValue({
+      paymentId: 'payment-1',
+      paidBase: '2000.00',
+      paidCommission: '0.00',
+      isFullyPaid: false,
     });
-    const r = await markCsCommissionPaidAction(
-      'comm-1',
+    const r = await recordCsPayrollPaymentAction(
+      'period-1',
       null,
-      fd({ isPaid: 'true' }),
+      paymentForm(),
     );
     expect(r.status).toBe('success');
-    expect(csMock.markCsCommissionPaid).toHaveBeenCalledWith('comm-1', true);
+    expect(csMock.recordCsPayrollPayment).toHaveBeenCalledWith(
+      'period-1',
+      expect.objectContaining({
+        baseAmount: '2000.00',
+        commissionAmount: '0',
+      }),
+      expect.objectContaining({ id: 'owner-1' }),
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/salary/cs/period-1',
+    );
   });
 
   it('maps CsPeriodError → error', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    csMock.markCsCommissionPaid.mockRejectedValueOnce(
-      new MockCsPeriodError('提成记录不存在'),
+    csMock.recordCsPayrollPayment.mockRejectedValueOnce(
+      new MockCsPeriodError('发放金额超出剩余金额'),
     );
-    const r = await markCsCommissionPaidAction(
-      'comm-1',
+    const r = await recordCsPayrollPaymentAction(
+      'period-1',
       null,
-      fd({ isPaid: 'true' }),
+      paymentForm(),
     );
     expect(r.status).toBe('error');
+  });
+
+  it('rejects an empty zero-value payment at the action boundary', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const r = await recordCsPayrollPaymentAction(
+      'period-1',
+      null,
+      fd({
+        idempotencyKey: '00000000-0000-4000-8000-000000000001',
+        baseAmount: '',
+        commissionAmount: '',
+        paidAt: '2026-05-01T10:30',
+      }),
+    );
+    expect(r.status).toBe('invalid');
+    expect(csMock.recordCsPayrollPayment).not.toHaveBeenCalled();
   });
 });
 
@@ -549,6 +751,17 @@ describe('recomputeHourlyPayrollAction', () => {
       workerId: 'worker-1',
     });
     expect(r.status).toBe('error');
+  });
+
+  it('maps a batch-path HourlyAggregateError → error (future-month guard aborts wholesale)', async () => {
+    // 同 daily 那条：月份错是整批的输入错，lib 层整批抛 HourlyAggregateError。
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.computeHourlyForAllInMonth.mockRejectedValueOnce(
+      new MockHourlyAggregateError('不能结算未来月份（2026-07，上海日历）：该月尚未开始'),
+    );
+    const r = await recomputeHourlyPayrollAction(null, { month: '2026-05' });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') expect(r.message).toMatch(/未来月份/);
   });
 
   it('revalidates /owner/salary/hourly on success', async () => {

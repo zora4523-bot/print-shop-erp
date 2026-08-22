@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import OSS from 'ali-oss';
 import { readOssConfig, type OssConfig } from './config';
+import { createOssClient } from './client';
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_MIME,
   FILE_SIZE_LIMITS,
   type SignUploadParams,
   type SignUploadResult,
+  type StsCredentials,
 } from './types';
 
 // Strict allowlist for characters that can appear in path-sensitive ids.
@@ -13,19 +16,6 @@ import {
 // and rejects `/`, `..`, control chars, URL-significant characters.
 // If a caller sends garbage here, it's a bug or attack, not a user typo.
 const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
-
-// Thrown when OSS is fully configured per env, but the actual STS signing
-// library (ali-oss / @alicloud/sts20150401) hasn't been plumbed in yet.
-// A loud runtime error so we catch missed wiring fast — NOT silently
-// faking success, per the owner's guidance.
-export class OssNotWiredError extends Error {
-  constructor() {
-    super(
-      'OSS 环境变量已配齐，但 STS 签发代码尚未接入。请安装 `ali-oss` 或 `@alicloud/sts20150401` 并在 lib/oss/sign.ts 中替换 `signViaSts` 的占位实现。',
-    );
-    this.name = 'OssNotWiredError';
-  }
-}
 
 function buildObjectKey(params: SignUploadParams): string {
   // Extension is derived from the DECLARED fileType, not the untrusted
@@ -90,25 +80,68 @@ function validate(params: SignUploadParams): Record<string, string[]> | null {
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-// Concrete STS implementation — deliberately a throw stub so the call
-// site is forced to plug in the real SDK when creds arrive. Unit tests
-// cover everything ABOVE this line without executing the stub.
-//
-// When you plug in the real implementation, the signature takes the
-// config (bucket/region/STS role) and the object key to scope the token
-// policy to exactly that path. That's why both params are reserved even
-// though the stub doesn't use them.
-/* c8 ignore next 6 */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function signViaSts(cfg: OssConfig, objectKey: string): never {
-  throw new OssNotWiredError();
+// STS 凭证有效期：15 分钟。浏览器拿到 token 后立即开始 PUT，
+// 100 MiB CDR 在一般宽带上也远小于此窗口。刻意压短：预签 PUT URL
+// 在寿命内可重复使用，登记后再 PUT 可替换对象内容——短凭证把这个
+// 重放覆写窗口压到最小（彻底修复需 ETag 固定校验，P1）。
+const STS_DURATION_SECONDS = 900;
+
+// Real STS AssumeRole via ali-oss. The session policy narrows the
+// temporary credential to exactly ONE object key — even narrower than
+// the RAM role's own policy (design/* + bundles/*). A leaked token can
+// only PUT the single path it was minted for.
+async function signViaSts(
+  cfg: OssConfig,
+  objectKey: string,
+): Promise<StsCredentials> {
+  const sts = new OSS.STS({
+    accessKeyId: cfg.accessKeyId,
+    accessKeySecret: cfg.accessKeySecret,
+  });
+  const sessionPolicy = {
+    Version: '1',
+    Statement: [
+      {
+        Effect: 'Allow',
+        Action: ['oss:PutObject', 'oss:AbortMultipartUpload', 'oss:ListParts'],
+        Resource: [`acs:oss:*:*:${cfg.bucket}/${objectKey}`],
+      },
+    ],
+  };
+  const result = await sts.assumeRole(
+    cfg.stsRoleArn,
+    sessionPolicy,
+    STS_DURATION_SECONDS,
+    'erp-design-upload',
+  );
+  return {
+    accessKeyId: result.credentials.AccessKeyId,
+    accessKeySecret: result.credentials.AccessKeySecret,
+    securityToken: result.credentials.SecurityToken,
+    expiration: new Date(result.credentials.Expiration),
+  };
 }
 
 export async function signDesignUpload(
   params: SignUploadParams,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SignUploadResult> {
-  const result = readOssConfig(env);
+  // readOssConfig 对 malformed OSS_ENDPOINT 会 throw——同样折叠成
+  // status:'error'，保证四态 union 对调用方真正穷尽，不让 Server
+  // Action 500。
+  let result: ReturnType<typeof readOssConfig>;
+  try {
+    result = readOssConfig(env);
+  } catch (err) {
+    console.error(
+      '[oss] config parse failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return {
+      status: 'error',
+      message: 'OSS 环境配置无效（OSS_ENDPOINT 格式错误），请联系管理员修正。',
+    };
+  }
   if (!result.configured) {
     return {
       status: 'not-configured',
@@ -124,15 +157,35 @@ export async function signDesignUpload(
   const objectKey = buildObjectKey(params);
   const cfg = result.cfg;
 
-  // When the real SDK is wired, `signViaSts` returns StsCredentials with
-  // an expiration ~60 minutes out; for now it throws OssNotWiredError.
-  // We keep the interface here stable so the UI call site doesn't change.
-  const credentials = signViaSts(cfg, objectKey);
+  let credentials: StsCredentials;
+  let putUrl: string;
+  try {
+    credentials = await signViaSts(cfg, objectKey);
+    // 用临时凭证再签一个预签 PUT URL（寿命 = 凭证寿命 1h，绑定
+    // Content-Type）——浏览器普通 fetch 就能上传，无需前端 SDK。
+    const tempClient = createOssClient(cfg, credentials);
+    putUrl = tempClient.signatureUrl(objectKey, {
+      method: 'PUT',
+      expires: STS_DURATION_SECONDS,
+      'Content-Type': params.mimeType,
+    });
+  } catch (err) {
+    // AssumeRole 失败（AK 错、角色信任策略不含本子账号、网络等）。
+    // 原始错误进服务端日志给 ops；给 UI 的 message 不回显 SDK 错误
+    // 文本，避免把 ARN / RequestId 之类内部细节带到浏览器。
+    console.error(
+      '[oss] STS assumeRole failed:',
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
+    return {
+      status: 'error',
+      message:
+        '上传凭证签发失败，请稍后重试；若持续失败请联系管理员检查 OSS / RAM 配置。',
+    };
+  }
 
   return {
     status: 'ok',
-    // Unreachable until signViaSts is wired — the `never` return of
-    // signViaSts keeps TypeScript honest about the remaining branches.
     credentials,
     bucket: cfg.bucket,
     region: cfg.region,
@@ -142,6 +195,7 @@ export async function signDesignUpload(
     // here: that value can be a read-only CDN / custom domain (round
     // 30). Stored designs still read from publicBaseUrl.
     uploadUrl: `${cfg.bucketUrl}/${objectKey}`,
+    putUrl,
     publicUrl: `${cfg.publicBaseUrl}/${objectKey}`,
   };
 }

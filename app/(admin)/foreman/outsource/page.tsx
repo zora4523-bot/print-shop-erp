@@ -3,6 +3,9 @@ import { listOutsourceOrders } from '@/lib/outsource';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
+import { TableScrollArea } from '@/components/ui-business';
 
 export const metadata = { title: '外协单' };
 
@@ -13,17 +16,10 @@ const STATUS_LABELS: Record<OutsourceStatus, string> = {
   [OutsourceStatus.CANCELLED]: '已取消',
 };
 
-function formatDate(d: Date | null): string {
-  if (!d) return '—';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
 export default async function OutsourceListPage() {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('outsource:manage');
   const rows = await listOutsourceOrders();
 
   return (
@@ -42,7 +38,10 @@ export default async function OutsourceListPage() {
           暂无外协单。
         </div>
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea
+          label="外协单列表"
+          className="rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
@@ -60,7 +59,7 @@ export default async function OutsourceListPage() {
                 <tr key={r.id}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono">
+                      <span className="font-sans tabular-nums">
                         {r.order?.orderNo ?? '—'}
                       </span>
                       {r.order?.isUrgent ? (
@@ -70,11 +69,11 @@ export default async function OutsourceListPage() {
                   </td>
                   <td className="px-4 py-3">{r.supplierName}</td>
                   <td className="px-4 py-3">{r.craftDescription ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {r.totalQty?.toLocaleString() ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(r.expectedDate)}
+                    {formatDateShanghai(r.expectedDate)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <StatusPill status={r.status} />
@@ -91,7 +90,7 @@ export default async function OutsourceListPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScrollArea>
       )}
     </div>
   );

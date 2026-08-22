@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 // Re-export so specs don't have to import from global-setup directly.
+import { E2E_USERS } from './global-setup';
 export { E2E_PASSWORD, E2E_USERS } from './global-setup';
 
 // ---- DB-side fixture helpers ----
@@ -71,8 +72,8 @@ export async function resetBillsForUser(userId: string): Promise<void> {
           'created by globalSetup.ts).',
       );
     }
-    // Step 1: clear all BillItems for this user's bills
-    //   (BillItem → Bill is RESTRICT, must go first).
+    // Step 1: clear append-only payments and BillItems for this user's bills
+    //   (both reference Bill and must go first).
     // Step 2: clear all Bills for this user (full wipe — e2e-* user
     //   is test-only; round 80 contract).
     // Step 3: clear FINISHED orders for this user.
@@ -86,6 +87,12 @@ export async function resetBillsForUser(userId: string): Promise<void> {
     // broad. Order children cascade automatically (OrderItem +
     // OrderLog ON DELETE CASCADE, ProductionTask + OrderItemDesign
     // via OrderItem, OutsourceOrder.orderId → SET NULL).
+    await db.query(
+      `DELETE FROM "BillPayment" WHERE "billId" IN (
+         SELECT id FROM "Bill" WHERE "salesUserId" = $1
+       )`,
+      [userId],
+    );
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT id FROM "Bill" WHERE "salesUserId" = $1
@@ -127,12 +134,18 @@ export async function seedFinishedOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "totalAmount",
         "submittedAt", "scheduledAt", "completedAt", "shippedAt", "finishedAt",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, $4::"Role", $3,
+        $1, $2, $3, $4::"Role",
+        CASE $4::"Role"
+          WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+          WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+          WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
+        END,
+        $3,
         'FINISHED'::"OrderStatus", FALSE, $5, $6,
         $7, $7, $7, $7, $7,
         NOW(), NOW()
@@ -174,12 +187,47 @@ const PLACEHOLDER_PNG_DATA_URL =
 export async function seedPrintableOrder(opts: {
   submitterId: string;
   designCount: number;
-}): Promise<{ orderId: string; orderNo: string; orderItemId: string }> {
-  // Deterministic per (designCount). Same id across runs → same QR
-  // SVG, same screenshot bytes. CASCADE FKs on Order → OrderItem and
-  // OrderItem → OrderItemDesign clean up children automatically.
-  const orderId = `e2e-vr-${opts.designCount}`;
-  const orderNo = `E2E-VR-${opts.designCount}`;
+  variant?: 'default' | 'rich-context' | 'three-items';
+}): Promise<{
+  orderId: string;
+  orderNo: string;
+  orderItemId: string;
+  customName: string | null;
+  itemRemark: string | null;
+  foilColors: string[];
+}> {
+  const variant = opts.variant ?? 'default';
+  const richContext =
+    variant === 'rich-context' || variant === 'three-items';
+  const itemCount = variant === 'three-items' ? 3 : 1;
+  const customName = richContext
+    ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
+    : null;
+  const itemRemark = richContext
+    ? '关键备注：正面品牌标志必须使用红金，背面祝福语使用哑金，潘通 871C 仅用于边框；严格按最终设计稿方向生产，不可镜像、不可漏烫。LONG-CRITICAL-NOTE-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789'
+    : null;
+  const foilColors = richContext
+    ? ['哑金', '红金', '潘通 871C']
+    : ['金色'];
+
+  // Deterministic per (variant, designCount). Existing default IDs stay
+  // unchanged so the original six bucket baselines do not churn. The
+  // same ID across runs also keeps the QR SVG and screenshot bytes stable.
+  // CASCADE FKs on Order → OrderItem and OrderItem → OrderItemDesign
+  // clean up children automatically.
+  const idStem =
+    variant === 'three-items'
+      ? `e2e-vr-three-items-${opts.designCount}`
+      : richContext
+        ? `e2e-vr-rich-${opts.designCount}`
+        : `e2e-vr-${opts.designCount}`;
+  const orderId = idStem;
+  const orderNo =
+    variant === 'three-items'
+      ? `E2E-VR-THREE-${opts.designCount}`
+      : richContext
+        ? `E2E-VR-RICH-${opts.designCount}`
+        : `E2E-VR-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
   await withDb(async (db) => {
@@ -188,63 +236,136 @@ export async function seedPrintableOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
-        status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
+        status, "isUrgent", "customerRef", "customName", "receiverName",
+        "receiverPhone", "receiverAddress", "isSfCollect",
         "totalAmount", "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'OWNER'::"Role", $3,
+        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
         'DRAFT'::"OrderStatus", FALSE,
         'VR-CUSTOMER',
+        $4,
         'VR 收件人',
         '13800138000',
+        $5,
+        $6,
         0,
         TIMESTAMP '2026-01-01 00:00:00',
         TIMESTAMP '2026-01-01 00:00:00',
         TIMESTAMP '2026-01-01 00:00:00'
       )
       `,
-      [orderId, orderNo, opts.submitterId],
+      [
+        orderId,
+        orderNo,
+        opts.submitterId,
+        customName,
+        variant === 'three-items' ? '佛山市测试主地址 88 号' : null,
+        variant === 'three-items',
+      ],
     );
 
-    await db.query(
-      `
-      INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, specification, "paperType",
-        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
-        crafts, "createdAt", "updatedAt"
-      ) VALUES (
-        $1, $2, 1, 'VR 款式', '9cm × 17cm', '珠光纸',
-        5000, '金色', TRUE, FALSE,
-        ARRAY[]::text[], NOW(), NOW()
-      )
-      `,
-      [orderItemId, orderId],
-    );
-
-    for (let i = 0; i < opts.designCount; i++) {
+    for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+      const currentOrderItemId =
+        itemCount === 1 ? orderItemId : `${orderItemId}-${itemIndex + 1}`;
       await db.query(
         `
-        INSERT INTO "OrderItemDesign" (
-          id, "orderItemId", "fileType", "fileUrl", "fileName",
-          "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+        INSERT INTO "OrderItem" (
+          id, "orderId", sequence, name, specification, "paperType",
+          quantity, "foilColors", "isDoubleSided", "isDoubleColor",
+          crafts, remark, "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
-          1024, $3, $5,
-          TIMESTAMP '2026-01-01 00:00:00'
+          $1, $2, $3, $4, '9cm × 17cm', $8,
+          $5, $6::text[], TRUE, $9,
+          ARRAY[]::text[], $7, NOW(), NOW()
         )
         `,
         [
-          `${orderItemId}-design-${i}`,
-          orderItemId,
-          PLACEHOLDER_PNG_DATA_URL,
-          `design-${i + 1}.png`,
-          opts.submitterId,
+          currentOrderItemId,
+          orderId,
+          itemIndex + 1,
+          itemCount === 1 ? 'VR 款式' : `VR 款式 ${itemIndex + 1}`,
+          5000 + itemIndex * 1000,
+          foilColors,
+          itemRemark,
+          itemCount === 3 ? '艳红珠光纸' : '珠光纸',
+          itemCount === 3,
         ],
       );
+
+      for (let designIndex = 0; designIndex < opts.designCount; designIndex++) {
+        await db.query(
+          `
+          INSERT INTO "OrderItemDesign" (
+            id, "orderItemId", "fileType", "fileUrl", "fileName",
+            "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+          ) VALUES (
+            $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
+            1024, $3, $5,
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          `,
+          [
+            `${currentOrderItemId}-design-${designIndex}`,
+            currentOrderItemId,
+            PLACEHOLDER_PNG_DATA_URL,
+            itemCount === 1
+              ? `design-${designIndex + 1}.png`
+              : `design-${itemIndex + 1}-${designIndex + 1}.png`,
+            opts.submitterId,
+          ],
+        );
+      }
+    }
+
+    if (variant === 'three-items') {
+      const primaryShipmentId = `${orderId}-shipment-1`;
+      const secondaryShipmentId = `${orderId}-shipment-2`;
+      await db.query(
+        `
+        INSERT INTO "OrderShipment" (
+          id, "orderId", sequence, "receiverName", "receiverPhone",
+          "receiverAddress", "expressCode", status, "createdAt", "updatedAt"
+        ) VALUES
+          ($1, $3, 1, 'VR 主地址收件人', '13800138000',
+           '佛山市测试主地址 88 号', 'SF', 'PLANNED'::"ShipmentStatus", NOW(), NOW()),
+          ($2, $3, 2, 'VR 分地址收件人', '13900139000',
+           '广州市测试分地址 99 号', 'SF', 'PLANNED'::"ShipmentStatus", NOW(), NOW())
+        `,
+        [primaryShipmentId, secondaryShipmentId, orderId],
+      );
+      for (let itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        const currentOrderItemId = `${orderItemId}-${itemIndex + 1}`;
+        const totalQuantity = 5000 + itemIndex * 1000;
+        await db.query(
+          `
+          INSERT INTO "OrderShipmentLine" (
+            id, "shipmentId", "orderItemId", quantity
+          ) VALUES
+            ($1, $3, $5, $6),
+            ($2, $4, $5, 100)
+          `,
+          [
+            `${orderId}-shipment-line-primary-${itemIndex + 1}`,
+            `${orderId}-shipment-line-secondary-${itemIndex + 1}`,
+            primaryShipmentId,
+            secondaryShipmentId,
+            currentOrderItemId,
+            totalQuantity - 100,
+          ],
+        );
+      }
     }
   });
 
-  return { orderId, orderNo, orderItemId };
+  return {
+    orderId,
+    orderNo,
+    orderItemId,
+    customName,
+    itemRemark,
+    foilColors,
+  };
 }
 
 // Wipes ALL SalaryPeriods + CommissionRecords for an e2e-* user.
@@ -252,8 +373,8 @@ export async function seedPrintableOrder(opts: {
 // empty period (totalSales=0). Same e2e-* guard as resetBillsForUser
 // so this can never wipe a real CS user's salary state.
 //
-// CustomerServiceCommission has a RESTRICT FK to SalaryPeriod, so we
-// drop commissions first, then periods.
+// The append-only sales/payroll ledgers and CustomerServiceCommission all
+// reference SalaryPeriod, so dependent facts must be removed first.
 export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
   await withDb(async (db) => {
     const r = await db.query<{ username: string }>(
@@ -269,6 +390,15 @@ export async function resetCsSalaryStateForUser(userId: string): Promise<void> {
         `resetCsSalaryStateForUser refuses to wipe non-E2E user "${username}".`,
       );
     }
+    await db.query(
+      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+       )`,
+      [userId],
+    );
+    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+      userId,
+    ]);
     await db.query(
       `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
       [userId],
@@ -419,8 +549,8 @@ export async function seedDashboardSnapshot(opts: {
   chartFixture?: boolean;
   // Slice C 排行 fixture 还要一个额外的销售用户（不同于 salesUserId）
   // 来体现"3 个不同 submitter / 3 种不同业绩高度"。e2e-cs (CS) 提供
-  // 第二种角色色（绿）；admin (OWNER) 提供第三种（muted）。foreman 是
-  // FOREMAN 角色，用其 id 喂入则角色色用 muted 同色板。
+  // 第二种角色色（绿）；admin (ADMIN) 提供第三种（muted）。foreman 是
+  // ADMIN 角色，用其 id 喂入则角色色用 muted 同色板。
   ownerUserId?: string;
 }): Promise<DashboardSnapshot> {
   const now = new Date();
@@ -465,18 +595,22 @@ export async function seedDashboardSnapshot(opts: {
   const overdueExpectedDate = new Date(todayStartUtc.getTime() - 3 * dayMs);
   // For SalaryPeriod (@db.Date), PG reads back UTC 00:00 of the stored
   // date. We pass `'YYYY-MM-DD'` strings; date-add via JS Date.UTC.
-  const csPeriodStartUtcMidnight = new Date(
-    Date.UTC(yyyy!, mm! - 1, dd! - 90),
-  );
   const csPeriodEndUtcMidnight = new Date(Date.UTC(yyyy!, mm! - 1, dd! + 3));
 
   return withDb(async (db) => {
     // Step 1: wipe Slice A + B fixtures.
-    // Bills first (BillItem → Bill RESTRICT), then Orders, then Slice
+    // Bills first (BillPayment/BillItem → Bill), then Orders, then Slice
     // B aux state. OutsourceOrder.orderId → ON DELETE SET NULL so a
     // wide Order delete leaves orphaned OutsourceOrder rows pointing
     // at no order — those would still surface in 超期外协 list. Wipe
     // them by id-prefix instead.
+    await db.query(
+      `DELETE FROM "BillPayment" WHERE "billId" IN (
+         SELECT b.id FROM "Bill" b
+         JOIN "User" u ON u.id = b."salesUserId"
+         WHERE u.username LIKE 'e2e-%'
+       )`,
+    );
     await db.query(
       `DELETE FROM "BillItem" WHERE "billId" IN (
          SELECT b.id FROM "Bill" b
@@ -495,7 +629,7 @@ export async function seedDashboardSnapshot(opts: {
        )`,
     );
     // Slice C ranking fixture also seeds Orders submitted by `admin`
-    // (OWNER role) — those don't match the e2e-* user filter above.
+    // (ADMIN role) — those don't match the e2e-* user filter above.
     // Catch them by id-prefix instead. e2e-dash-* IDs are owned
     // exclusively by this helper (Slice A trend / Slice B linked
     // outsource / Slice C trend + ranking).
@@ -517,6 +651,15 @@ export async function seedDashboardSnapshot(opts: {
     // Slice B: nuke prior CS commission + period rows for the cs user.
     // Same RESTRICT order as resetCsSalaryStateForUser.
     if (opts.csUserId) {
+      await db.query(
+        `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+           SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+         )`,
+        [opts.csUserId],
+      );
+      await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+        opts.csUserId,
+      ]);
       await db.query(
         `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
         [opts.csUserId],
@@ -541,11 +684,11 @@ export async function seedDashboardSnapshot(opts: {
       await db.query(
         `
         INSERT INTO "Order" (
-          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
           status, "isUrgent", "totalAmount",
           "submittedAt", "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $3, 'SALES'::"Role", $3,
+          $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
           'SUBMITTED'::"OrderStatus", $4, 0,
           $5, $5, $5
         )
@@ -568,12 +711,12 @@ export async function seedDashboardSnapshot(opts: {
       await db.query(
         `
         INSERT INTO "Order" (
-          id, "orderNo", "submitterId", "submitterRole", "createdById",
+          id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
           status, "isUrgent", "totalAmount",
           "submittedAt", "scheduledAt", "completedAt",
           "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $3, 'SALES'::"Role", $3,
+          $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
           'COMPLETED'::"OrderStatus", FALSE, 0,
           $4, $4, $4,
           $4, $4
@@ -593,12 +736,12 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "totalAmount",
         "submittedAt", "scheduledAt", "completedAt", "shippedAt",
         "createdAt", "updatedAt"
       ) VALUES (
-        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", $2,
+        $1, 'E2E-DASH-SHIPPED-1', $2, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $2,
         'SHIPPED'::"OrderStatus", FALSE, 0,
         $3, $3, $3, $3,
         $3, $3
@@ -627,6 +770,18 @@ export async function seedDashboardSnapshot(opts: {
       `,
       [billId, opts.salesUserId, period, monthlyTotal, monthlyPaid],
     );
+    // A material/issued bill must have a provenance row.  Besides matching
+    // the production ledger, this lets settlement migrations prove that the
+    // receivable belongs to an external-sales order without guessing from the
+    // account's current role.
+    await db.query(
+      `
+      INSERT INTO "BillItem" (
+        id, "billId", "orderId", "orderAmount", "createdAt"
+      ) VALUES ($1, $2, $3, $4, NOW())
+      `,
+      [`${billId}-item`, billId, completedOrderIds[0], monthlyTotal],
+    );
 
     // Step 4 (Slice B): seed one overdue outsource order linked to the
     // first completed order, so 超期外协 list has one row with a real
@@ -636,10 +791,10 @@ export async function seedDashboardSnapshot(opts: {
     await db.query(
       `
       INSERT INTO "OutsourceOrder" (
-        id, "orderId", "supplierName", "expectedDate",
+        id, "idempotencyKey", "orderId", "orderItemIds", "supplierName", "expectedDate",
         status, "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, 'E2E 阿福外协',
+        $1, $1 || ':fixture', $2, ARRAY[]::text[], 'E2E 阿福外协',
         $3, 'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
       )
       `,
@@ -656,19 +811,43 @@ export async function seedDashboardSnapshot(opts: {
       csPeriodId = `e2e-dash-csp-${randomBytes(4).toString('hex')}`;
       await db.query(
         `
+        WITH target AS (
+          SELECT $3::date AS period_end
+        ), candidate AS (
+          SELECT
+            (
+              target.period_end + interval '1 day'
+              - make_interval(months => months.value)
+            )::date AS period_start,
+            months.value AS duration_months
+          FROM target
+          CROSS JOIN generate_series(1, 24) AS months(value)
+          WHERE (
+            (
+              target.period_end + interval '1 day'
+              - make_interval(months => months.value)
+            )::date
+            + make_interval(months => months.value)
+            - interval '1 day'
+          )::date = target.period_end
+          ORDER BY ABS(months.value - 4), months.value
+          LIMIT 1
+        )
         INSERT INTO "SalaryPeriod" (
           id, "csUserId", "periodStart", "periodEnd",
           "durationMonths", "totalSales", "initialSales", "monthlyBase",
           status, "createdAt", "updatedAt"
-        ) VALUES (
-          $1, $2, $3, $4, 4, 300000, 0, 5000,
-          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
         )
+        SELECT
+          $1, $2, candidate.period_start, target.period_end,
+          candidate.duration_months, 300000, 0, 5000,
+          'IN_PROGRESS'::"SalaryPeriodStatus", NOW(), NOW()
+        FROM target
+        CROSS JOIN candidate
         `,
         [
           csPeriodId,
           opts.csUserId,
-          csPeriodStartUtcMidnight.toISOString().slice(0, 10),
           csPeriodEndUtcMidnight.toISOString().slice(0, 10),
         ],
       );
@@ -715,12 +894,12 @@ export async function seedDashboardSnapshot(opts: {
           await db.query(
             `
             INSERT INTO "Order" (
-              id, "orderNo", "submitterId", "submitterRole", "createdById",
+              id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
               status, "isUrgent", "totalAmount",
               "submittedAt", "scheduledAt", "completedAt",
               "createdAt", "updatedAt"
             ) VALUES (
-              $1, $2, $3, 'SALES'::"Role", $3,
+              $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
               'COMPLETED'::"OrderStatus", FALSE, 0,
               $4, $4, $4,
               $4, $4
@@ -780,7 +959,7 @@ export async function seedDashboardSnapshot(opts: {
       // Sales ranking: 3 submitters × different total amounts.
       //   - salesUserId (SALES, blue):       ¥5,000
       //   - csUserId (CS, green):            ¥3,000   (only when provided)
-      //   - ownerUserId (OWNER, muted):      ¥1,500   (only when provided)
+      //   - ownerUserId (ADMIN, muted):      ¥1,500   (only when provided)
       // Each order goes through the current month at varying days so
       // submittedAt is a believable spread.
       const monthlyMidUtc = new Date(Date.UTC(yyyy!, mm! - 1, 15, 4, 0));
@@ -811,7 +990,7 @@ export async function seedDashboardSnapshot(opts: {
       if (opts.ownerUserId) {
         rankingSpecs.push({
           submitterId: opts.ownerUserId,
-          submitterRole: 'OWNER',
+          submitterRole: 'ADMIN',
           amount: '1500.00',
           daysOffset: -2,
           productSuffix: null, // → UNCATEGORIZED bucket
@@ -837,11 +1016,17 @@ export async function seedDashboardSnapshot(opts: {
         await db.query(
           `
           INSERT INTO "Order" (
-            id, "orderNo", "submitterId", "submitterRole", "createdById",
+            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
             status, "isUrgent", "totalAmount",
             "submittedAt", "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, $3, $4::"Role", $3,
+            $1, $2, $3, $4::"Role",
+            CASE $4::"Role"
+              WHEN 'SALES'::"Role" THEN 'EXTERNAL_SALES'::"OrderSettlementType"
+              WHEN 'CUSTOMER_SERVICE'::"Role" THEN 'INTERNAL_SALES'::"OrderSettlementType"
+              WHEN 'ADMIN'::"Role" THEN 'FACTORY_DIRECT'::"OrderSettlementType"
+            END,
+            $3,
             'SUBMITTED'::"OrderStatus", FALSE, $5,
             $6, $6, $6
           )
@@ -962,10 +1147,417 @@ export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+export async function cleanupAutoCodePartyFixture(opts: {
+  partyId: string;
+  expectedName: string;
+}): Promise<void> {
+  if (!opts.expectedName.startsWith('Codex E2E 自动编码供应商 ')) {
+    throw new Error('cleanupAutoCodePartyFixture refuses a non-E2E name');
+  }
+
+  await withDb(async (db) => {
+    const result = await db.query<{
+      id: string;
+      code: string;
+      name: string;
+      type: string;
+      customerOrderCount: string;
+      purchaseOrderCount: string;
+    }>(
+      `SELECT p.id, p.code, p.name, p.type::text AS type,
+              (SELECT COUNT(*)::text FROM "Order" o
+                WHERE o."customerPartyId" = p.id) AS "customerOrderCount",
+              (SELECT COUNT(*)::text FROM "PurchaseOrder" po
+                WHERE po."supplierPartyId" = p.id) AS "purchaseOrderCount"
+         FROM "Party" p
+        WHERE p.id = $1`,
+      [opts.partyId],
+    );
+
+    if (result.rowCount === 0) return;
+    const row = result.rows[0]!;
+    if (
+      row.name !== opts.expectedName ||
+      row.type !== 'SUPPLIER' ||
+      !/^PTY-\d{6}$/.test(row.code) ||
+      row.customerOrderCount !== '0' ||
+      row.purchaseOrderCount !== '0'
+    ) {
+      throw new Error('cleanupAutoCodePartyFixture refuses unexpected data');
+    }
+
+    await db.query(`DELETE FROM "Party" WHERE id = $1`, [opts.partyId]);
+  });
+}
+
+// ---- Automation smoke fixtures ----
+//
+// The smoke suite is intentionally narrow: it proves that protected routes,
+// owner-only Pigsty readiness, and the three search surfaces render against a
+// real dev database. Fixtures are idempotent and use fixed CODX/E2E values so
+// failed runs are easy to inspect manually.
+export async function seedSearchSmokeFixtures(opts: {
+  ownerId: string;
+}): Promise<{
+  productCode: string;
+  productName: string;
+  orderId: string;
+  orderNo: string;
+  customerRef: string;
+  materialCode: string;
+  materialName: string;
+  materialCurrentStock: string;
+  partyId: string;
+  partyCode: string;
+  partyName: string;
+  partyContactName: string;
+  partyContactPhone: string;
+  partyAddress: string;
+  supplierPartyId: string;
+  supplierPartyCode: string;
+  supplierPartyName: string;
+}> {
+  const productCode = 'CODX-E2E-PROD-001';
+  const productName = 'Codex E2E 测试红包';
+  const orderId = 'codx_e2e_order_search_001';
+  const orderNo = 'CODX-E2E-ORDER-001';
+  const customerRef = 'CODX-E2E客户代号';
+  const materialCode = 'CODX-E2E-MAT-001';
+  const materialName = 'Codex E2E 测试铜版纸';
+  const partyId = 'codx_e2e_party_search_001';
+  const partyCode = 'CODX_E2E_CUST_001';
+  const partyName = 'Codex E2E 客户主数据';
+  const partyContactName = 'Codex E2E 联系人';
+  const partyContactPhone = '13800002222';
+  const partyAddress = '广东深圳南山科技园 1 号';
+  const supplierPartyId = 'codx_e2e_supplier_search_001';
+  const supplierPartyCode = 'CODX_E2E_SUP_001';
+  const supplierPartyName = 'Codex E2E 纸张供应商';
+  let materialCurrentStock = '0.00';
+
+  await withDb(async (db) => {
+    const categoryNode = await db.query<{
+      id: string;
+      legacyCategory: string;
+    }>(
+      `SELECT id, "legacyCategory" AS "legacyCategory"
+         FROM "ProductCategoryNode"
+        WHERE "isActive" = true
+        ORDER BY "sortOrder" ASC, path ASC
+        LIMIT 1`,
+    );
+    if (categoryNode.rowCount === 0) {
+      throw new Error('seedSearchSmokeFixtures: no active product category');
+    }
+
+    await db.query(
+      `
+      INSERT INTO "Product" (
+        id, code, category, "categoryNodeId", name, specification,
+        "paperType", "baseUnitPrice", "minOrderQty", "isActive",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_product_search_001', $1, $2::"ProductCategory", $3,
+        $4, '7寸 单色', '铜版纸', 0.1200, 1000, true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        category = EXCLUDED.category,
+        "categoryNodeId" = EXCLUDED."categoryNodeId",
+        name = EXCLUDED.name,
+        specification = EXCLUDED.specification,
+        "paperType" = EXCLUDED."paperType",
+        "baseUnitPrice" = EXCLUDED."baseUnitPrice",
+        "minOrderQty" = EXCLUDED."minOrderQty",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [
+        productCode,
+        categoryNode.rows[0]!.legacyCategory,
+        categoryNode.rows[0]!.id,
+        productName,
+      ],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Material" (
+        id, code, name, category, specification, unit,
+        "safetyStock", "averageCost", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_material_search_001', $1, $2, 'PAPER'::"MaterialCategory",
+        '250g A4', '张', 1000.00, 0.0800, true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        name = EXCLUDED.name,
+        category = EXCLUDED.category,
+        specification = EXCLUDED.specification,
+        unit = EXCLUDED.unit,
+        "safetyStock" = EXCLUDED."safetyStock",
+        "averageCost" = EXCLUDED."averageCost",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [materialCode, materialName],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "MaterialLocationStock" (
+        id, "materialId", "warehouseId", "locationId", "currentStock",
+        "createdAt", "updatedAt"
+      )
+      SELECT
+        'mls_' || md5(material.id || ':default_location'),
+        material.id,
+        'default_warehouse',
+        'default_location',
+        0,
+        NOW(),
+        NOW()
+      FROM "Material" material
+      WHERE material.code = $1
+      ON CONFLICT ("materialId", "locationId") DO NOTHING
+      `,
+      [materialCode],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Party" (
+        id, type, code, name, "shortName", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'CUSTOMER'::"PartyType", $2, $3, 'E2E客户', true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        type = EXCLUDED.type,
+        name = EXCLUDED.name,
+        "shortName" = EXCLUDED."shortName",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [partyId, partyCode, partyName],
+    );
+    await db.query(
+      `
+      INSERT INTO "Party" (
+        id, type, code, name, "shortName", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, 'SUPPLIER'::"PartyType", $2, $3, 'E2E供应商', true, NOW(), NOW()
+      )
+      ON CONFLICT (code) DO UPDATE SET
+        type = EXCLUDED.type,
+        name = EXCLUDED.name,
+        "shortName" = EXCLUDED."shortName",
+        "isActive" = true,
+        "updatedAt" = NOW()
+      `,
+      [supplierPartyId, supplierPartyCode, supplierPartyName],
+    );
+    await db.query(`DELETE FROM "PartyContact" WHERE "partyId" = $1`, [partyId]);
+    await db.query(`DELETE FROM "PartyAddress" WHERE "partyId" = $1`, [partyId]);
+    await db.query(
+      `
+      INSERT INTO "PartyContact" (
+        id, "partyId", name, phone, "isPrimary", "sortOrder", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_party_contact_001', $1, $2, $3, true, 0, NOW(), NOW()
+      )
+      `,
+      [partyId, partyContactName, partyContactPhone],
+    );
+    await db.query(
+      `
+      INSERT INTO "PartyAddress" (
+        id, "partyId", "receiverName", "receiverPhone",
+        province, city, district, detail, "isDefault", "sortOrder",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_party_address_001', $1, $2, $3,
+        '广东', '深圳', '南山', '科技园 1 号', true, 0,
+        NOW(), NOW()
+      )
+      `,
+      [partyId, partyContactName, partyContactPhone],
+    );
+
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
+        status, "isUrgent", "customerRef", "receiverName", "receiverPhone",
+        "receiverAddress", "expressCode", "trackingNo", "createdAt",
+        "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
+        'DRAFT'::"OrderStatus", true, $4, 'Codex E2E 收货人',
+        '13900001111', 'E2E 测试地址', 'SF-CODX-E2E',
+        'SF123456789E2E', NOW(), NOW()
+      )
+      ON CONFLICT ("orderNo") DO UPDATE SET
+        "submitterId" = EXCLUDED."submitterId",
+        "createdById" = EXCLUDED."createdById",
+        "isUrgent" = true,
+        "customerRef" = EXCLUDED."customerRef",
+        "receiverName" = EXCLUDED."receiverName",
+        "receiverPhone" = EXCLUDED."receiverPhone",
+        "receiverAddress" = EXCLUDED."receiverAddress",
+        "expressCode" = EXCLUDED."expressCode",
+        "trackingNo" = EXCLUDED."trackingNo",
+        "updatedAt" = NOW()
+      `,
+      [orderId, orderNo, opts.ownerId, customerRef],
+    );
+
+    await db.query(`DELETE FROM "OrderItem" WHERE "orderId" = $1`, [orderId]);
+    await db.query(
+      `
+      INSERT INTO "OrderItem" (
+        id, "orderId", sequence, name, "productId", specification,
+        "paperType", quantity, crafts, "unitPrice", subtotal,
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_order_item_search_001', $1, 1, 'Codex E2E 款式',
+        'codx_e2e_product_search_001', '7寸 单色', '铜版纸',
+        2000, ARRAY[]::text[], 0.1200, 240.00, NOW(), NOW()
+      )
+      `,
+      [orderId],
+    );
+
+    await db.query(
+      `DELETE FROM "BillOfMaterial"
+        WHERE id = 'codx_e2e_bom_search_001'
+           OR "productId" = 'codx_e2e_product_search_001'`,
+    );
+    await db.query(
+      `
+      INSERT INTO "BillOfMaterial" (
+        id, "productId", "categoryNodeId", name, version,
+        "baseQuantity", "isActive", "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_bom_search_001', 'codx_e2e_product_search_001',
+        NULL, 'Codex E2E 标准 BOM', 1, 1000, true, NOW(), NOW()
+      )
+      `,
+    );
+    await db.query(
+      `
+      INSERT INTO "BillOfMaterialItem" (
+        id, "bomId", "materialId", quantity, "sortOrder",
+        "createdAt", "updatedAt"
+      ) VALUES (
+        'codx_e2e_bom_item_search_001', 'codx_e2e_bom_search_001',
+        'codx_e2e_material_search_001', 500.0000, 10, NOW(), NOW()
+      )
+      `,
+    );
+
+    const generatedColumns = await db.query<{
+      tableName: string;
+      columnName: string;
+      isGenerated: string;
+    }>(
+      `
+      SELECT table_name AS "tableName", column_name AS "columnName",
+             is_generated AS "isGenerated"
+        FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name IN ('Order', 'Product', 'Material', 'Party')
+         AND column_name IN ('searchPinyin', 'searchPinyinInitials')
+      `,
+    );
+    const canWriteSearchColumn = (tableName: string, columnName: string) =>
+      generatedColumns.rows.some(
+        (row) =>
+          row.tableName === tableName &&
+          row.columnName === columnName &&
+          row.isGenerated === 'NEVER',
+      );
+
+    if (
+      canWriteSearchColumn('Product', 'searchPinyin') &&
+      canWriteSearchColumn('Product', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Product"
+            SET "searchPinyin" = 'codexeeceshihongbao',
+                "searchPinyinInitials" = 'cdxeecshb'
+          WHERE code = $1`,
+        [productCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Material', 'searchPinyin') &&
+      canWriteSearchColumn('Material', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Material"
+            SET "searchPinyin" = 'codexeeceshitongbanzhi',
+                "searchPinyinInitials" = 'cdxeecstbz'
+          WHERE code = $1`,
+        [materialCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Party', 'searchPinyin') &&
+      canWriteSearchColumn('Party', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Party"
+            SET "searchPinyin" = 'codexeecekehuzhushuju',
+                "searchPinyinInitials" = 'cdxeeckhzsj'
+          WHERE code = $1`,
+        [partyCode],
+      );
+    }
+    if (
+      canWriteSearchColumn('Order', 'searchPinyin') &&
+      canWriteSearchColumn('Order', 'searchPinyinInitials')
+    ) {
+      await db.query(
+        `UPDATE "Order"
+            SET "searchPinyin" = 'codexeekehu',
+                "searchPinyinInitials" = 'cdxeekh'
+          WHERE "orderNo" = $1`,
+        [orderNo],
+      );
+    }
+
+    const materialStock = await db.query<{ currentStock: string }>(
+      `SELECT "currentStock"::text AS "currentStock"
+         FROM "Material"
+        WHERE code = $1`,
+      [materialCode],
+    );
+    materialCurrentStock = materialStock.rows[0]?.currentStock ?? '0.00';
+  });
+
+  return {
+    productCode,
+    productName,
+    orderId,
+    orderNo,
+    customerRef,
+    materialCode,
+    materialName,
+    materialCurrentStock,
+    partyId,
+    partyCode,
+    partyName,
+    partyContactName,
+    partyContactPhone,
+    partyAddress,
+    supplierPartyId,
+    supplierPartyCode,
+    supplierPartyName,
+  };
+}
+
 // Logs out the currently signed-in user via the header UserMenu dropdown
 // and waits to land on /login. Used by multi-role flow tests where the
-// same browser context switches between SALES → FOREMAN → WORKER →
-// OWNER. We click the form's submit button rather than fetch the
+// same browser context switches between SALES → ADMIN → WORKER →
+// ADMIN. We click the form's submit button rather than fetch the
 // signOut endpoint directly so we exercise the same path users do.
 //
 // Phase D（2026-05-06）退出按钮收进 AdminHeader 的 UserMenu dropdown：
@@ -1028,11 +1620,11 @@ export async function seedCdrOrder(opts: {
     await db.query(
       `
       INSERT INTO "Order" (
-        id, "orderNo", "submitterId", "submitterRole", "createdById",
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "totalAmount",
         "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
-        $1, $2, $3, 'SALES'::"Role", $3,
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
         'SUBMITTED'::"OrderStatus", FALSE, 0,
         $4, $4, $4
       )
@@ -1043,11 +1635,11 @@ export async function seedCdrOrder(opts: {
       `
       INSERT INTO "OrderItem" (
         id, "orderId", sequence, name, "specification", "paperType",
-        quantity, "foilColor", "isDoubleSided", "isDoubleColor",
+        quantity, "foilColors", "isDoubleSided", "isDoubleColor",
         crafts, "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, 1, 'CDR 测试款', '9cm', '珠光纸',
-        5000, '金色', FALSE, FALSE,
+        5000, ARRAY['金色']::text[], FALSE, FALSE,
         ARRAY[]::text[], NOW(), NOW()
       )
       `,
@@ -1142,10 +1734,9 @@ export async function seedNotificationWireFixture(): Promise<{
       [channelId],
     );
 
-    // Step 3: bind + activate **all 9 wired events**（5 status-machine
-    // + 4 cron）。Slice C wire 只用 5 个；Slice D wire cron 又用了 4 个
-    // （DAILY_WORKER_SALARY / CS_PERIOD_SETTLED / OUTSOURCE_OVERDUE /
-    // CS_PERIOD_ENDING）。STOCK_ALERT 仍未 wire（Material 模型 P1）。
+    // Step 3: bind + activate all wired events（5 状态机 + 5 cron/库存）。
+    // STOCK_ALERT 由出库跨越检测触发；ORDER_OVERDUE 由
+    // /api/cron/order-overdue 触发（2026-07-07 新增）。
     await db.query(
       `
       UPDATE "NotificationRule"
@@ -1156,13 +1747,44 @@ export async function seedNotificationWireFixture(): Promise<{
          'ORDER_SUBMITTED', 'URGENT_ORDER', 'ORDER_SCHEDULED',
          'ORDER_COMPLETED', 'ORDER_SHIPPED',
          'DAILY_WORKER_SALARY', 'CS_PERIOD_SETTLED',
-         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING'
+         'OUTSOURCE_OVERDUE', 'CS_PERIOD_ENDING', 'ORDER_OVERDUE'
        )
       `,
       [channelId],
     );
 
     return { channelId };
+  });
+}
+
+// Seeds 1 overdue Order (promisedDate 5 天前 + IN_PRODUCTION) for
+// /api/cron/order-overdue tests. id 前缀 e2e-cron-order-，每次先 wipe。
+export async function seedOrderOverdueForCron(): Promise<{
+  orderId: string;
+  orderNo: string;
+}> {
+  return withDb(async (db) => {
+    await db.query(`DELETE FROM "Order" WHERE id LIKE 'e2e-cron-order-%'`);
+    const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const suffix = randomBytes(4).toString('hex');
+    const orderId = `e2e-cron-order-${suffix}`;
+    const orderNo = `E2E-DUE-${suffix.toUpperCase()}`;
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await db.query(
+      `
+      INSERT INTO "Order" (
+        id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
+        status, "isUrgent", "customerRef", "totalAmount", "promisedDate",
+        "submittedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
+        'IN_PRODUCTION'::"OrderStatus", false, 'E2E交期客户', 100, $4,
+        NOW(), NOW(), NOW()
+      )
+      `,
+      [orderId, orderNo, salesId, fiveDaysAgo.toISOString()],
+    );
+    return { orderId, orderNo };
   });
 }
 
@@ -1184,10 +1806,10 @@ export async function seedOverdueOutsourceForCron(): Promise<{
     await db.query(
       `
       INSERT INTO "OutsourceOrder" (
-        id, "supplierName", "expectedDate",
+        id, "idempotencyKey", "orderItemIds", "supplierName", "expectedDate",
         status, "createdAt", "updatedAt"
       ) VALUES (
-        $1, 'E2E cron 阿福外协', $2,
+        $1, $1 || ':fixture', ARRAY[]::text[], 'E2E cron 阿福外协', $2,
         'IN_PROGRESS'::"OutsourceStatus", NOW(), NOW()
       )
       `,
@@ -1206,6 +1828,15 @@ export async function seedEndingPeriodForCron(opts: {
 }): Promise<{ periodId: string }> {
   return withDb(async (db) => {
     // Same wipe-by-user pattern as resetCsSalaryStateForUser
+    await db.query(
+      `DELETE FROM "CsPayrollPayment" WHERE "salaryPeriodId" IN (
+         SELECT id FROM "SalaryPeriod" WHERE "csUserId" = $1
+       )`,
+      [opts.csUserId],
+    );
+    await db.query(`DELETE FROM "CsSalesEntry" WHERE "csUserId" = $1`, [
+      opts.csUserId,
+    ]);
     await db.query(
       `DELETE FROM "CustomerServiceCommission" WHERE "csUserId" = $1`,
       [opts.csUserId],

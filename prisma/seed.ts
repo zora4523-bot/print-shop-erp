@@ -14,9 +14,19 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { PrismaClient, Role, MachineType } from '../generated/prisma/client';
+import {
+  PrismaClient,
+  Role,
+  WorkerType,
+  MachineType,
+} from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
+import {
+  RETIRED_SETTING_KEYS,
+  SETTING_DEFINITIONS,
+  SETTING_KEYS,
+} from '../lib/settings/definitions';
 
 // Prisma 7 要求显式指定 adapter
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -44,41 +54,38 @@ async function seedAdmin() {
 
   // ── Branch 1: the target username already exists ────────────────────────
   if (existing) {
-    // Non-OWNER collision: refuse — silently promoting a WORKER/SALES/etc to
-    // OWNER is the privilege-leak Codex round 2 called out.
-    if (existing.role !== Role.OWNER) {
+    // Non-admin collision: refuse — silently promoting a WORKER/SALES/etc to
+    // ADMIN would be a privilege leak.
+    if (existing.role !== Role.ADMIN) {
       throw new Error(
-        `SEED_ADMIN_USERNAME "${username}" 已被非 OWNER 账号占用（role=${existing.role}）；` +
-          '拒绝将已有账号静默提权为 OWNER。请换用其它 SEED_ADMIN_USERNAME。',
+        `SEED_ADMIN_USERNAME "${username}" 已被非管理员账号占用（role=${existing.role}）；` +
+          '拒绝将已有账号静默提权为管理员。请换用其它 SEED_ADMIN_USERNAME。',
       );
     }
 
-    // Row is an OWNER. Separate "reset password" (never privilege-altering)
-    // from "reactivate a dormant OWNER" (privilege-altering when another
-    // OWNER is already active, per Codex round 5).
+    // The row is already ADMIN. Separate password reset from reactivation.
     if (fromEnv) {
       const hashed = await bcrypt.hash(fromEnv, 10);
 
       if (existing.isActive) {
-        // Pure password reset — the row is already the (or an) active OWNER.
+        // Pure password reset — the row is already an active administrator.
         await db.user.update({
           where: { id: existing.id },
           data: { password: hashed },
         });
-        console.log(`  🔑 已重置活跃 OWNER ${username} 的密码（来自 SEED_ADMIN_PASSWORD）`);
+        console.log(`  🔑 已重置活跃管理员 ${username} 的密码（来自 SEED_ADMIN_PASSWORD）`);
         return;
       }
 
-      // Dormant OWNER: reactivation would add a second active OWNER if any
-      // other OWNER is already active under a different username.
-      const otherActiveOwners = await db.user.count({
-        where: { role: Role.OWNER, isActive: true },
+      // Do not silently reactivate a dormant administrator when another active
+      // administrator already exists under a different username.
+      const otherActiveAdmins = await db.user.count({
+        where: { role: Role.ADMIN, isActive: true },
       });
-      if (otherActiveOwners > 0) {
+      if (otherActiveAdmins > 0) {
         throw new Error(
-          `既有 ${otherActiveOwners} 位活跃 OWNER，拒绝同时将非活跃 OWNER "${username}" 重新激活` +
-            '（会产生多个同时活跃的超级用户）。请先 deactivate 当前活跃 OWNER 再重跑 seed，' +
-            '或换用其它 SEED_ADMIN_USERNAME 以定向重置活跃 OWNER。',
+          `既有 ${otherActiveAdmins} 位活跃管理员，拒绝同时将非活跃管理员 "${username}" 重新激活。` +
+            '请先停用当前管理员再重跑 seed，或换用对应活跃管理员的用户名重置密码。',
         );
       }
 
@@ -86,15 +93,15 @@ async function seedAdmin() {
         where: { id: existing.id },
         data: { password: hashed, isActive: true },
       });
-      console.log(`  🔑 已重置 OWNER ${username} 的密码并重新激活（来自 SEED_ADMIN_PASSWORD）`);
+      console.log(`  🔑 已重置管理员 ${username} 的密码并重新激活（来自 SEED_ADMIN_PASSWORD）`);
       return;
     }
 
     if (existing.isActive) {
-      console.log(`  ⏭  已有活跃 OWNER ${username}，跳过管理员种子`);
+      console.log(`  ⏭  已有活跃管理员 ${username}，跳过管理员种子`);
     } else {
       throw new Error(
-        `用户 "${username}" 已存在且 role=OWNER（isActive=false）。` +
+        `用户 "${username}" 已存在且 role=ADMIN（isActive=false）。` +
           '可选恢复路径：(1) DBA 直接 UPDATE isActive=true；' +
           '(2) 设置 SEED_ADMIN_PASSWORD 后重跑 seed，将自动重置密码并激活。',
       );
@@ -103,21 +110,21 @@ async function seedAdmin() {
   }
 
   // ── Branch 2: the target username does not exist ────────────────────────
-  // Don't create a second superuser behind the back of an existing active OWNER
+  // Don't create a second administrator behind the back of an existing one
   // (e.g. the operator renamed the original admin but left the default
   // SEED_ADMIN_USERNAME in env — the fresh "admin" would silently become a
-  // second OWNER).
-  const activeOwnerCount = await db.user.count({
-    where: { role: Role.OWNER, isActive: true },
+  // second ADMIN).
+  const activeAdminCount = await db.user.count({
+    where: { role: Role.ADMIN, isActive: true },
   });
-  if (activeOwnerCount > 0) {
+  if (activeAdminCount > 0) {
     console.log(
-      `  ⏭  已有 ${activeOwnerCount} 位活跃 OWNER（与 SEED_ADMIN_USERNAME=${username} 不同名），跳过`,
+      `  ⏭  已有 ${activeAdminCount} 位活跃管理员（与 SEED_ADMIN_USERNAME=${username} 不同名），跳过`,
     );
     return;
   }
 
-  // First seed into an empty DB, or recovery after all OWNERs were removed.
+  // First seed into an empty DB, or recovery after all administrators were removed.
   const generated = fromEnv ? null : randomBytes(12).toString('base64url');
   const plaintext = fromEnv ?? generated!;
   const hashed = await bcrypt.hash(plaintext, 10);
@@ -126,8 +133,8 @@ async function seedAdmin() {
     data: {
       username,
       password: hashed,
-      role: Role.OWNER,
-      displayName: '老板',
+      role: Role.ADMIN,
+      displayName: '管理员',
       isActive: true,
     },
   });
@@ -150,20 +157,26 @@ async function seedAdmin() {
 async function seedCrafts() {
   const crafts = [
     // 自产工艺
-    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 10 },
-    { name: '专版单色平烫', code: 'FLAT_FOIL_SINGLE', isOutsource: false, defaultMachineType: MachineType.WINDMILL, sortOrder: 20 },
-    { name: '专版双色平烫', code: 'FLAT_FOIL_DOUBLE', isOutsource: false, defaultMachineType: MachineType.WINDMILL, sortOrder: 21 },
-    { name: '浮雕', code: 'EMBOSS', isOutsource: false, defaultMachineType: MachineType.WINDMILL, sortOrder: 30 },
-    { name: '激凸', code: 'BUMP', isOutsource: false, defaultMachineType: MachineType.WINDMILL, sortOrder: 31 },
-    { name: '粘封', code: 'GLUING', isOutsource: false, defaultMachineType: MachineType.GLUE, sortOrder: 40 },
-    { name: '打包/入袋', code: 'PACKING', isOutsource: false, defaultMachineType: null, sortOrder: 50 },
-    { name: '清废', code: 'CLEANING', isOutsource: false, defaultMachineType: null, sortOrder: 51 },
+    { name: '局部烫金', code: 'FLAT_FOIL_PARTIAL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 10 },
+    { name: '专版单色平烫', code: 'FLAT_FOIL_SINGLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 20 },
+    { name: '专版双色平烫', code: 'FLAT_FOIL_DOUBLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 21 },
+    { name: '专版三色平烫', code: 'FLAT_FOIL_TRIPLE', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 22 },
+    { name: '浮雕', code: 'EMBOSS', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 30 },
+    { name: '激凸', code: 'BUMP', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, sortOrder: 31 },
+    { name: '粘封', code: 'GLUING', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.GLUE, sortOrder: 40 },
+    { name: '打包/入袋', code: 'PACKING', isOutsource: false, defaultWorkerType: WorkerType.PACKER, defaultMachineType: null, sortOrder: 50 },
 
     // 外协工艺
-    { name: 'UV', code: 'UV', isOutsource: true, defaultMachineType: null, sortOrder: 60 },
-    { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultMachineType: null, sortOrder: 61 },
-    { name: '冰白彩印（纯印刷）', code: 'COLOR_PRINT', isOutsource: true, defaultMachineType: null, sortOrder: 70 },
-    { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultMachineType: MachineType.WINDMILL, sortOrder: 71 },
+    { name: '铜版纸纯彩印', code: 'COATED_COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 60 },
+    { name: '铜版纸彩印+烫金', code: 'COATED_COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, inHouseMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL], sortOrder: 61 },
+    { name: '冰白彩印（纯印刷）', code: 'COLOR_PRINT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 70 },
+    { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, inHouseMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL], sortOrder: 71 },
+
+    // 低频工艺：录单页固定归到末尾分组
+    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900 },
+    { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 901 },
+    { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 902 },
+    { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 903 },
   ];
 
   for (const craft of crafts) {
@@ -240,9 +253,11 @@ async function seedSalaryRules() {
         boardRate: 0,
         smallOrderThreshold: 1000,
         smallOrderFlatPrice: 20,
+        smallOrderInclusive: true,
+        largeOrderSetupFee: 10,
         multiplierFactors: ['DOUBLE_COLOR'],
       },
-      remark: '风车机师傅计件规则（无装板费，只按双色乘倍）',
+      remark: '风车机师傅计件规则（1000 个及以下 20 元；以上每个 0.01 元 + 装板 10 元）',
     },
     {
       ruleType: 'WORKER_MACHINE' as const,
@@ -387,13 +402,17 @@ async function seedNotificationEvents() {
       messageTemplate: '⚠️ **外协超期**\n外协单：{outsourceId}\n供应商：{supplierName}\n预计回货日：{expectedDate}',
     },
     {
+      eventType: 'ORDER_OVERDUE',
+      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n客户：{customerRef}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
+    },
+    {
       eventType: 'STOCK_ALERT',
       messageTemplate: '📦 **库存告警**\n物料：{materialName}\n当前库存：{currentStock}\n安全库存：{safetyStock}',
     },
     // &ldquo;业绩合计&rdquo;反映 Slice D wire 喂入的 salesForTier (= totalSales
     // + initialSales)，与提成档位口径一致（Codex round 113 medium）。
     // 之前写&ldquo;当前业绩&rdquo;会让 initialSales != 0 的客服看到&ldquo;业绩&rdquo;
-    // 比命中档位低，老板看不出 why。
+    // 比命中档位低，管理员看不出 why。
     {
       eventType: 'CS_PERIOD_ENDING',
       messageTemplate: '📅 **客服周期即将结束**\n客服：{csName}\n业绩合计：¥{totalSales}\n还有{daysLeft}天结算',
@@ -416,7 +435,7 @@ async function seedNotificationEvents() {
       },
       create: {
         eventType: rule.eventType,
-        channelIds: [], // 上线后老板自己配置
+        channelIds: [], // 上线后管理员自己配置
         messageTemplate: rule.messageTemplate,
         isActive: false, // 默认关闭，配好Webhook再开启
       },
@@ -429,21 +448,32 @@ async function seedNotificationEvents() {
 // 5. 系统配置
 // ============================================================
 async function seedSettings() {
-  const settings = [
-    { key: 'factory_name', value: { name: '佛山红包印刷厂' }, remark: '工厂名称（可改）' },
-    { key: 'order_no_prefix', value: { format: 'YYYYMMDD-XXXX' }, remark: '工单号格式' },
-    { key: 'cdr_link_expire_hours', value: { hours: 24 }, remark: 'CDR下载链接有效期' },
-    { key: 'outsource_overdue_days', value: { days: 1 }, remark: '外协超期阈值（超过预计日N天报警）' },
-  ];
-
-  for (const s of settings) {
-    await db.setting.upsert({
-      where: { key: s.key },
-      update: { value: s.value, remark: s.remark },
-      create: { key: s.key, value: s.value, remark: s.remark },
+  // key / 默认值 / remark 都来自 lib/settings/definitions —— 那里同时是读取侧
+  // 和后台设置页的唯一定义处。此前这份清单是手写的，和代码里的常量各写各的，
+  // 结果 seed 的 '佛山红包印刷厂' 和打印组件默认的 '红包印刷厂' 长期对不上，
+  // 而且谁都没发现，因为根本没有代码读这张表。
+  //
+  // 只 create、不 update：业主改过的值不能被下一次 seed 冲掉。这张表从来是
+  // 配置而不是字典，覆盖写等于把人家的设置改回默认。
+  let created = 0;
+  for (const key of SETTING_KEYS) {
+    const definition = SETTING_DEFINITIONS[key];
+    const result = await db.setting.createMany({
+      data: [{ key, value: definition.fallback, remark: definition.remark }],
+      skipDuplicates: true,
     });
+    created += result.count;
   }
-  console.log(`  ✓ 系统配置 ${settings.length} 条`);
+
+  // 退役的 key：留着会让翻库的人以为还能配。见 definitions.ts 的
+  // RETIRED_SETTING_KEYS 注释。
+  const { count: removed } = await db.setting.deleteMany({
+    where: { key: { in: [...RETIRED_SETTING_KEYS] } },
+  });
+
+  console.log(
+    `  ✓ 系统配置 ${SETTING_KEYS.length} 项（新建 ${created}，保留已有 ${SETTING_KEYS.length - created}，清理退役 ${removed}）`,
+  );
 }
 
 main()

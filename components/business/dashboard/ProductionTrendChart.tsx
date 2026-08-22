@@ -37,12 +37,16 @@ export function ProductionTrendChart({ data }: ProductionTrendChartProps) {
   ]);
   return (
     <div data-slot="dashboard-chart-trend" className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        initialDimension={{ width: 1, height: 1 }}
+      >
         <LineChart
           data={data as { day: string; count: number }[]}
           margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
         >
-          <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
           <XAxis
             dataKey="day"
             interval={0}
@@ -64,32 +68,37 @@ export function ProductionTrendChart({ data }: ProductionTrendChartProps) {
                   y={y + 12}
                   textAnchor="middle"
                   fontSize={11}
-                  fill="#6b7280"
+                  fill="var(--muted-foreground)"
                 >
                   {(p.payload?.value ?? '').slice(5)}
                 </text>
               );
             }}
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
           />
           <YAxis
             allowDecimals={false}
-            stroke="#9ca3af"
+            stroke="var(--muted-foreground)"
             fontSize={11}
             width={32}
           />
           <Tooltip
             isAnimationActive={false}
-            contentStyle={{ fontSize: 12 }}
+            contentStyle={{
+              fontSize: 12,
+              backgroundColor: 'var(--popover)',
+              borderColor: 'var(--border)',
+              color: 'var(--popover-foreground)',
+            }}
             labelFormatter={(label) => `${String(label ?? '')}（完工）`}
             formatter={(value) => [`${Number(value)} 单`, '完工']}
           />
           <Line
             type="monotone"
             dataKey="count"
-            stroke="#2563eb"
+            stroke="var(--chart-1)"
             strokeWidth={2}
-            dot={{ r: 2, fill: '#2563eb' }}
+            dot={{ r: 2, fill: 'var(--chart-1)' }}
             activeDot={{ r: 4 }}
             isAnimationActive={false}
           />

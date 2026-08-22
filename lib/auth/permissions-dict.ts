@@ -11,56 +11,83 @@ import { Role } from '../../generated/prisma/enums';
 
 export const PERMISSIONS = {
   // 工单
-  'order:create':               [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:update:post-schedule': [Role.OWNER, Role.FOREMAN],
-  'order:view:all':             [Role.OWNER, Role.FOREMAN],
-  'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE],
-  'order:schedule':             [Role.OWNER, Role.FOREMAN],
-  'order:ship':                 [Role.OWNER, Role.FOREMAN],
-  'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'order:cancel':               [Role.OWNER],
+  'order:create':               [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:update:pre-schedule':  [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:update:post-schedule': [Role.ADMIN],
+  'order:view:all':             [Role.ADMIN],
+  'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
+  'order:export:all':           [Role.ADMIN],
+  'order:schedule':             [Role.ADMIN],
+  'order:ship':                 [Role.ADMIN],
+  'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'order:cancel':               [Role.ADMIN],
+  'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE],
+  'order:change:review':        [Role.ADMIN],
 
   // 生产任务
-  'task:assign':                [Role.OWNER, Role.FOREMAN],
+  'task:assign':                [Role.ADMIN],
   'task:report':                [Role.WORKER],
 
   // 外协
-  'outsource:manage':           [Role.OWNER, Role.FOREMAN],
+  'outsource:manage':           [Role.ADMIN],
 
   // 设计文件
-  'design:upload':              [Role.SALES, Role.CUSTOMER_SERVICE, Role.OWNER, Role.FOREMAN],
-  'design:bundle:create':       [Role.OWNER, Role.FOREMAN],
+  'design:upload':              [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
+  'design:bundle:create':       [Role.ADMIN],
 
   // 物料
-  'material:manage':            [Role.OWNER, Role.FOREMAN],
-  'material:issue':             [Role.OWNER, Role.FOREMAN, Role.WORKER],
+  'material:manage':            [Role.ADMIN],
+  'material:issue':             [Role.ADMIN, Role.WORKER],
+
+  // 采购
+  'purchase:manage':            [Role.ADMIN],
+
+  // 仓库 / 库位
+  'warehouse:manage':           [Role.ADMIN],
 
   // 账单
-  'bill:view:all':              [Role.OWNER],
-  'bill:view:self':             [Role.SALES, Role.CUSTOMER_SERVICE],
-  'bill:mark-paid':             [Role.OWNER],
+  'bill:view:all':              [Role.ADMIN],
+  'bill:view:self':             [Role.SALES],
+  'bill:mark-paid':             [Role.ADMIN],
 
   // 薪资
-  'salary:view:all':            [Role.OWNER],
+  'salary:view:all':            [Role.ADMIN],
   'salary:view:self':           [Role.CUSTOMER_SERVICE, Role.WORKER],
-  'salary:view:team':           [Role.FOREMAN],
-  'salary:rule:manage':         [Role.OWNER],
+  'salary:view:team':           [Role.ADMIN],
+  'salary:rule:manage':         [Role.ADMIN],
 
   // 字典管理
-  'dict:product:manage':        [Role.OWNER],
-  'dict:craft:manage':          [Role.OWNER],
-  'dict:price:manage':          [Role.OWNER],
+  'party:manage':               [Role.ADMIN],
+  'dict:product:manage':        [Role.ADMIN],
+  'dict:craft:manage':          [Role.ADMIN],
+  'dict:price:manage':          [Role.ADMIN],
+  'bom:manage':                 [Role.ADMIN],
 
   // 推送
-  'notification:config':        [Role.OWNER],
+  'notification:config':        [Role.ADMIN],
+
+  // 运维
+  'setting:manage':             [Role.ADMIN],
+  'ops:pigsty:view':            [Role.ADMIN],
+  'ops:jobs:manage':            [Role.ADMIN],
 
   // 账号管理
-  'account:manage':             [Role.OWNER],
+  'account:manage':             [Role.ADMIN],
 
   // 报表
-  'report:all':                 [Role.OWNER],
-  'report:production':          [Role.OWNER, Role.FOREMAN],
+  'report:all':                 [Role.ADMIN],
+  'report:production':          [Role.ADMIN],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
+
+/**
+ * 纯谓词版权限判断。授权入口仍然是 permissions.ts 的 requirePermission()
+ * （§4.6）；这个函数只给「需要软判断、不能抛」的场景用 —— 目前是各详情页
+ * 的 generateMetadata：它决定标签页标题显示实体名还是模块名，绝不能成为
+ * 唯一闸口，也绝不能抛错（流式 metadata 下首屏可能已经冲出去了）。
+ */
+export function hasPermission(permission: Permission, role: Role): boolean {
+  const allowed = PERMISSIONS[permission] as readonly Role[] | undefined;
+  return Boolean(allowed?.includes(role));
+}

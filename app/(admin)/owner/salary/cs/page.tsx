@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
 import { EmptyState, PageHeader } from '@/components/ui-business';
+import { formatDateShanghai } from '@/lib/format/dates';
+import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = { title: '客服周期与提成' };
 
@@ -13,16 +15,10 @@ type PageProps = {
   searchParams: Promise<{ status?: string; csUserId?: string }>;
 };
 
-function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
 export default async function CsSalaryListPage({ searchParams }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('salary:view:all');
   const sp = await searchParams;
   const status =
     sp.status === 'IN_PROGRESS'
@@ -61,8 +57,13 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
           description="点击右上角&ldquo;新建周期&rdquo;为客服开启首个业绩周期。"
         />
       ) : (
-        <div className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+        <div
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="客服提成周期列表"
+          tabIndex={0}
+        >
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">客服</th>
@@ -79,17 +80,17 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
               {periods.map((p) => (
                 <tr key={p.id}>
                   <td className="px-4 py-3">{p.csUser.displayName}</td>
-                  <td className="px-4 py-3 text-xs font-mono">
-                    {formatDate(p.periodStart)} ~ {formatDate(p.periodEnd)}
+                  <td className="px-4 py-3 text-xs font-sans tabular-nums">
+                    {formatDateShanghai(p.periodStart)} ~ {formatDateShanghai(p.periodEnd)}
                   </td>
                   <td className="px-4 py-3 text-center">{p.durationMonths}</td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                     {String(p.initialSales)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(p.totalSales)}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-xs">
+                  <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                     {String(p.monthlyBase)}
                   </td>
                   <td className="px-4 py-3 text-center">

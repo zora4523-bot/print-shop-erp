@@ -8,140 +8,155 @@
 
 ## 当前任务
 
-**P0 #1–#6 全部完成 clean** + 上线前运维补齐 + 本地真实跑起来发现的 4 个 prod-only bug 全修 + Playwright E2E + 视觉回归 + SHIP/FINISH 状态机端到端打通。整体&ldquo;能上线&rdquo;级别。下一阶段（P1）待业主拍板优先级。
+**2026-08-21：上线前对抗审查 + 修复（第二批）**。
 
-## 本次 session 主要产出
+本次没有做新功能。做法是：先对四条候选高风险修复做**对抗性审查**（每条方案由另一方逐锚点实读代码找破绽），再对全部 blocking / major 破绽逐条定稿，然后只实施定稿后的版本。四条方案**没有一条能照原样实施**——全部 blocking 破绽经实读代码核对均属实。定稿报告在会话 scratchpad，其结论已分别落进 `DECISIONS.md` 2026-08-21 的 6 条新条目和 `docs/上线前置操作清单.md`。
 
-跨度大，按层归类。
+### 已落地的修复
 
-### A. 本地启动暴露的 4 个 prod-only bug（mock 单测全漏）
-1. `pg_advisory_xact_lock` 返 void → Prisma 7 `$queryRaw` 反序列化炸；16 个 callsite + 5 narrow tx 类型 + 7 测试 mock 一律切到 `$executeRaw`。commit `5481d58`。
-2. `react-dom/server` 静态 import → Next 16 build guard 拒；改动态 import + buildPrintHtml 改 async；commit `dae18ba`。
-3. `qrcode.react` 跨 React 实例 hooks 炸 → 改服务端 `qrcode.toString` 预渲染 SVG 字符串，layout 用 `dangerouslySetInnerHTML`；删 `qrcode.react` 依赖；commit `7847415`。
-4. Puppeteer Chrome 没装（pnpm 默认跳过 postinstall）；`npx puppeteer browsers install chrome` + README §🚢 §6 写明 + hint regex 加 Chrome 支持 + 同时覆盖&ldquo;没装&rdquo;和&ldquo;路径错配&rdquo;两种原因；commits `9489696` / `f218cca`。
+| # | 内容 | 是否改 schema |
+|---|---|---|
+| 1 | **单条报工数量守卫**：合计 `>=` 计划数 × N 硬拒（N 进 `Setting`，默认 3、范围 1–10）；超计划但未达上限由师傅勾选确认并留痕；**计件仍按实际合计数全额付**；配套老板看板「超计划报工」表作为知情通道 | 否 |
+| 2 | **工单完工闸口收紧为款式级外协覆盖**：每个含外协工艺的款式都要被至少一张本工单未取消的外协单覆盖；新增共用谓词 `outsourceCoverageApplies` 让闸口与详情页横幅口径一致 | 否 |
+| 3 | **盘点并发守卫改用逐行账面回声 CAS**（原「时间戳基线」方案整体否决）+ 部分过账 + 事务外预检 | 否 |
+| 4 | **通知投递失败可重试并进死信**，幂等靠 `NotificationLog.deliveryKey`；瞬时失败写 `RETRYING`；`/api/health/jobs` 拆出通知类死信告警码 | **是**（2 个 migration） |
 
-### B. E2E + 视觉回归（waves 1–5）
-- 12 Playwright 测试 / ~12s 总时长。803 单测仍全绿。
-- **Wave 1**（auth + order create）3 commits。`tests/e2e/auth.spec.ts`（3 测）+ `order-create.spec.ts`（1 测）。`@next/env` 加载 `.env*`；E2E_PASSWORD 必填守 guard；bad-password 断言 `role=alert`。
-- **Wave 2**（production flow）SALES create → submit → FOREMAN schedule → WORKER report → cascade COMPLETED → SHIP → FINISHED 整链 1 个测试。
-- **Wave 3**（bill flow）OWNER 生成 → 发单 → 录入全款 → FULLY_PAID。
-- **Wave 4**（CS 业绩累加）payment 后 SalaryPeriod.totalSales 真 increment。**关键**：拆 1500+1500 两笔，否则 delta vs cumulative 回归测不出来（Codex round 85）。
-- **Wave 5**（视觉回归）OrderPrintLayout 6 个 design-grid bucket（1/2/3/5/8/10）。**架构关键**：locator-scoped screenshot（`.print-container`）+ button mask `Open Next.js Dev Tools` 双层防御 ——`page` 全屏会卷 dev toolbar，element 范围又会因 fixed-position 在高 bucket 滚动时 bleed in（rounds 90→93 迭代）。
-- **测试基础设施**：`tests/e2e/global-setup.ts`（4 个 e2e- 用户 idempotent upsert）；`tests/e2e/_helpers.ts` 一组 helpers（login / logout / seedFinishedOrder / resetBillsForUser / seedActiveCsPeriod / seedPrintableOrder / midShanghaiMonth）。**`resetBillsForUser` 的 e2e- 用户 guard** 是反复迭代后的最终设计（rounds 79→80→82→83）：拒绝非 e2e- 用户 + 全 wipe + Order 仅清 status=FINISHED（不冲掉 production-flow 的 COMPLETED）。
+migration 由 75 项增至 **77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
 
-### C. SHIP / FINISH 状态机收尾（feat）
-- COMPLETED → SHIPPED → FINISHED 之前只在状态机声明，没 UI/action。本 session 补全：`shipOrder` / `finishOrder` lib + 2 actions + `ShipOrderForm` + `FinishOrderButton` + 工单详情页 conditional 渲染 + 9 单测 + 扩 production-flow E2E。
-- 顺手把所有 Order.status 写入路径（submit/cancel/ship/finish/scheduleOrder/worker cascade/createOutsourceOrder）统一在同一把 advisory lock `print-shop-erp:order-cascade:<id>`（rounds 87→88，2 轮迭代才覆盖完整）。
-- 加 `canAttachOutsource()` helper：SHIPPED/FINISHED/CANCELLED 状态拒绝新建外协（lib + UI 双闸）。
+### 明确**不做**的，以及原因
 
-### D. Admin shell scaffolding（feat）
-- 用户在 session 中并行做的——committed shadcn UI 组件（avatar/breadcrumb/sidebar/...）+ `lib/auth/permissions-dict.ts`（拆 PERMISSIONS 字典出 next-auth）+ `lib/navigation/admin-menu.ts`（按角色提供 menu 配置）+ `(admin)`/`(worker)`/`(auth)` 路由组。
-- Claude 这边补 `components/business/admin/AppSidebar.tsx` + `AdminBreadcrumb.tsx`：三个 P2 修迭代到 round 81 收敛——嵌套 `<li>` / breadcrumb 404 / sidebar multi-active / `<BreadcrumbPage>` 的 aria-current 副作用。
-- `hooks/use-mobile.ts` 重写成 `useSyncExternalStore`，避 `react-hooks/set-state-in-effect` lint 规则。
+- **fix#4「临时 key + 服务端 copy」（OSS 直传重放加固）本批不做**。业主决定保持现有缓解（STS session policy 收窄到单 objectKey + 15 分钟过期）。**这是已知接受的风险，不是「已修复」**：15 分钟窗口内浏览器仍可覆写自己刚登记的对象。它的前置动作全在阿里云控制台且顺序不能反，不适合和其它修复挤同一个发布窗口。**将来实施时有两个必踩陷阱已写进 DECISIONS**（ali-oss 的 `copyObject` 对 headers 只加前缀不删原键 → 裸 `If-Match` 让 copy 恒 412；etag 缺失被当成成功 → 写出悬空指针），别再踩一遍。
+- **fix#3b（逐行 `snapshotAt` + ledger scan）本批不做**，已拆出单独设计评审。它只多解决一件事：盘点的「净额为零的往返」。代码注释里已写「别把这条当 bug 顺手改回时间戳基线」。
+- **CLAUDE.md 未改**（配置文件，留给业主落笔）。有两处值得业主同步：§4.5 关于 `reportTasks` 的措辞已漂移（见 DECISIONS 2026-08-21 对应条目）；§15.7 或 §5.3 值得补一句「`Setting` 现在有 4 个键，`report_qty_max_multiple` 是唯一 money-adjacent 的那个，但 `resolveSetting` 的『校验不过退回 fallback』对它仍然安全」——这一条已写进 `lib/settings/definitions.ts` 的 doc 注释和 `definitions.test.ts`，只是 CLAUDE.md 里还没有。
+- **`tests/e2e` 门禁本次未加**：并发多 agent 改同一仓库时 e2e 结果不可信，且 CLAUDE.md §14 禁止给它加 `--workers`。
 
-### E. Codex review 总览
-本 session 跑了 rounds 70–94，共约 25 轮 review，最终全部 clean。意外学到的事：
-- 我 `git add -A` 把 user 并行 commit 留下的 untracked 文件卷进了我的 commit，回滚才看清。规则已存 memory：**`git ls-files --others --exclude-standard` 看一眼再删/staging**。
-- 多次出现"修法过犹不及"模式：90 隐藏整个 portal → 91 揭示连错误 overlay 一起吞了；82 wipe 全部 order → 83 揭示 cross-spec 干扰。每次正确答案是更精准的 scope，不是把锁、mask、wipe 范围拧得更宽。
+### 发布候选基线（不变，供对照）
 
-- **Slice A 排产**（rounds 37 / 38）
-  - `lib/production.ts scheduleOrder`：tx 内批量 createMany + 状态机转换 + OrderLog。按 Craft.isOutsource 拆两条路径，每个 item × non-outsource craft 对要求唯一 assignment。
-  - `TaskStatus` 状态机 `lib/production/status-machine.ts`（PENDING→IN_PROGRESS→COMPLETED，任何非终态可 CANCELLED）
-  - `print-shop-erp:schedule:order:<id>` advisory lock 防双击
-  - 活动工艺 gate（round 37 P1）
-  - `/foreman/scheduling` list + detail 派工表单
-- **Slice D 薪资算法纯函数**（一次过）
-  - `lib/salary/machine-piecework.ts`：`calcMachinePieceworkBreakdown` / `calcMachinePiecework` / `calcMachineDailySalary`
-  - 与 SPEC §7.1 / §7.2 行对行完全一致（HAND_PRESS 张三、WINDMILL 李四全部示例）
-  - 风车机忽略双面、黏封机无小单保护、`DOUBLE_SIDED × DOUBLE_COLOR = ×4` 等边界全覆盖
-- **Slice B 师傅报工**（rounds 39 / 40）
-  - `beginTask` + `reportTask` + Order-status 双向级联
-  - 三把 advisory lock namespace（schedule / task / order-cascade）各管一个不变量
-  - **cascade 锁后 fresh-read Order.status**（round 39 关键修复）
-  - 计件口径 `totalPressed = completedQty + defectQty + reworkQty`（DECISIONS）
-  - `/worker/tasks` H5（phone-first layout，inputMode=numeric，autoFocus on 合格数）
-- **Slice C 外协单**（rounds 41 / 42）
-  - 独立 CRUD，不阻塞 Order 级联（DECISIONS）
-  - `SENT → IN_PROGRESS → RECEIVED`，SENT → RECEIVED 短路合法
-  - **严格 YYYY-MM-DD 解析**（round 41，拒绝 `2024-02-31` 滚动）
-  - `/foreman/outsource` 列表 + new?orderId + detail + Actions 组件
-  - 工单详情页 foreman 可见"外协"入口
+- 生产 <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。本仓库的 77 项是**本地发布候选口径**，不是生产事实。
+- 发布候选的业务范围（对客加工费自动报价、身份结算隔离、外部销售版本化价目簿与收费工作台、供应商应付账本、改单审批重报价、快递/耗材费、产品价格阶梯合并编辑、工单列表/筛选/导出）已由 2026-08-18 的提交固化但**尚未部署**；逐项内容见 `PROGRESS.md` 的分日期小节。
+- 发布分支 `codex/complex-client-data-layer-poc` 领先 `main@245be5c`，且仓库**无 Git remote**；`aa42ba0` 尚不能通过默认 `git pull` 或从 `main` 重建。
 
 ## 下一步具体指令（给下次 AI）
 
-**P0 + 上线前运维 + prod-only bug 全修 + E2E + 视觉 + SHIP/FINISH 已交付**。下一步：
+**先做的（本批收尾）**
 
-1. **业主拍板 P1 优先级**。候选：
-   - **老板 Dashboard**（SPEC §6）—— 业主每天首屏，验收标准之一&ldquo;一眼看到今日工单 / 产量 / 待发货&rdquo;。今天没做。
-   - **企业微信推送**（SPEC §3.10）—— `lib/notification/` 是空壳；急单 3 秒推送是验收标准。10 个事件类型已 enum 占位。
-   - **E-full 工单款式级编辑**（P0 #3 当时延期）—— 业主反馈优先级低但 SPEC 写过。
-   - **报表**（SPEC §6 完整版）—— 先 Dashboard 顶替，看业主用一段时间反馈再做。
-   - **Docker 化**（CLAUDE.md 说 MVP 稳定 2-3 月后做）—— 现在还早。
-2. **Admin shell wire 进 layout**：`AppSidebar` + `AdminBreadcrumb` scaffolding 已就绪但未 wire。补一个 `app/(admin)/layout.tsx` 引入两件套是下一步小工作（半天）。
-3. **运维剩下的纯 ops 动作**：填 `.env` 真值；cron 切 pg_cron；pgbackrest 启用。
-4. **已知未拍板的业务空白**（HANDOFF&ldquo;卡住的问题&rdquo;里）：CS 提成累加触发链 vs 退单语义；考勤录入 UI 形态；历史业绩导入。
+1. **补一次完整门禁**。本批和上一批都是多 agent 并发改同一仓库，全量结果当时无意义。合并前必须跑：
+   ```bash
+   pnpm lint && pnpm typecheck && pnpm test run
+   pnpm vitest run --coverage        # lib/**/status-machine.ts 与算钱纯函数的 100% 门禁
+   pnpm test:admin-ui && pnpm test:worker-ui
+   ```
+2. **把 `docs/上线前置操作清单.md` §一的两段只读 SQL 交业主跑**。查询 1 的存量缺口**补完之前不要上外协闸口那一步**（fix#2b）。查询 2 是「横幅会误报」而不是「会被卡住」，**必须单独成表报**，别和查询 1 混在一起。
+3. **补 fix#2b 的人工验收**（单测覆盖不到的唯一真验证）：两个款式、只给其中一个建外协单并收货 → 报完全部内部任务后工单仍停 `IN_PRODUCTION`，主管点「已回货」时看到 notice。
+4. **补 fix#1 的知情通道验收**：计划 5000 报 6200 → 出现「确认超出计划数」复选框 → 勾选提交成功 → 工单时间线出现「超计划报工」→ **老板看板「超计划报工」表里能看到这一条**。守卫与看板是一个决策的两半，看板没验就等于守卫没上。
+5. **补 fix#3a 的人工验收**：两个浏览器窗口，A 录入实盘数不提交，B 对同库位做一次领料改动，A 提交 → 该行被点名退回、其余行正常过账。
+6. **迁移后验收唯一索引**：`SELECT indisvalid FROM pg_index WHERE indexrelid = '"NotificationLog_deliveryKey_channelId_key"'::regclass;` 必须为 `t`（理由见 `docs/上线前置操作清单.md` §二）。
 
-**E2E 现状**：13 个 Playwright 测试，覆盖核心 5 条状态机链 + 4 个钱相关路径。每个真实 advisory lock / cascade / 状态机 transition 都被真 PG 跑过一次。Mock 单测漏抓的 4 个 prod-only bug 各有专测守护。
+**接着做的（已排期、需业主或单独评审）**
 
-**Codex review 闸口**：本 session 跑了 ~25 轮，最终全部 clean。803 单测 / lint / typecheck / 13 Playwright 全绿。
+7. **fix#3b：盘点的逐行时间基线 + ledger scan**（单独设计评审）。只解决「净额为零的往返」。要做就必须做**逐行**基线：`counts` 的 entry 加 `snapshotAt`、提交时逐行下发、服务端一条 `groupBy` 走 `(materialId, locationId, createdAt)` 复合索引、`InventoryCount.snapshotAt` 存 `min(item.snapshotAt)`、成功后服务端回 `postedAt` 让客户端设 `baselineFloor`。**不要**重新引入整页共用的基线时刻，也不要引入 `inventory_count_snapshot_max_age_hours` 这类墙上时钟阈值——那正是被否的四条理由的来源。需要 1 个 migration（可空列 + 复合索引，additive）。
+8. **fix#4：OSS 临时 key + 服务端 copy**。**前置动作必须先于代码上线**：RAM 子账号加 `upload-tmp/*` 的 `GetObject`+`DeleteObject`、加 `design/*` 的 `PutObject`、bucket 给 `upload-tmp/` 挂生命周期规则。清单在 `docs/上线前置操作清单.md` §六。`design/` 前缀**永远不能挂生命周期规则**。
+9. **通知重试的已知缺口**：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，那一轮写下的 `NotificationLog(RETRYING)` 行永远翻不成 `FAILED`，而 `countRecentFailures` 只数 `FAILED` —— 这条**真正丢掉**的推送会在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法：在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`。本次没做只是因为该文件当时正被并发 agent 做数据库时钟重构。
+10. **三处无界查询（backlog，本批未动）**——都是 `findMany` 无 `take`，行数随时间线性增长：
+    - `lib/salary/daily.ts:593 listDailyWorkerSalaries`（`/owner/salary/daily`，按日期/师傅/是否发放筛选，不筛就是全表）
+    - `lib/salary/hourly-aggregate.ts:549 listHourlyPayrolls`（`/owner/salary/hourly`，同上）
+    - `lib/worker-portal.ts:222 listWorkerSalaries`（师傅端 H5，`@@unique([workerId, date])` → 三年约 900 行，一次渲染 900 张卡片并逐张做 Decimal 运算）
+    **`listWorkerSalaries` 不能照抄 `listWorkerOrders` 的分页补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 从整个数组 reduce 出「累计工资 / 尚未发放」，直接分页会把这两个金额静默变成「本页合计」——给师傅看错工资总额比慢更糟。正确修法是行分页 + 用 `db.dailyWorkerSalary.aggregate` 单独算 total / unpaid。（`listWorkerHourlyPayrolls` 已核实**不需要**分页：每人每月最多一行，十年 120 行，结构有界。）
+
+**发布相关（沿用上一轮结论，未变）**
+
+11. 发布候选已固化但尚未部署；不要把提交内的 77 项 migration 误记为生产事实。发布前先核对生产仍运行 `aa42ba0`、45 / 45 migrations、ready 200，并单独获得发布授权。迁移开始后继续只允许前向修复。
+12. 先解决发布源连续性：确认是否把 `codex/complex-client-data-layer-poc` 合并进 `main`，并配置受控远端保存 `aa42ba0` 及后续提交。完成前不得按旧部署指南直接 `git pull`，也不得从 `main@245be5c` 发版。
+13. 补齐运维缺口：Pigsty 异地 repo2、30 天保留、恢复演练；生产 `SENTRY_DSN / APP_VERSION`；应用机至少 4 GiB RAM；`deploy-smoke` 继承 PM2 的系统 Chromium 路径与 `--no-sandbox`。
+14. 重点人工验收（业务侧）：外部销售加工费 / 快递耗材价目、改价审批、真实 OSS 图片 PDF、企业微信推送、cron、批量报工、分次结款、多地址与售后重做。
 
 ## 卡住的问题
 
-- **考勤数据源** — SPEC §3.9 说"车间主管每日录入时薪工上下班时间"——UI 是每日一次批量录入？还是每次打卡一次？业主确认前，先假设"车间主管每天下班前在一个表里录 N 行"，做简单表单即可。
-- **CS 提成触发链**——业绩累加应该发生在"账单 mark-paid"时还是"工单 FINISHED"时？SPEC §3.7 文字上说"每次该客服提交工单 → period.totalSales += 工单金额"但这样退单/折扣就难处理。等 P0 #6 账单设计时决定，现在只做 `accumulateSales` 接口。
-- **历史业绩导入 UI 形态**——页面 vs seed？业主给几个客服导入就足够了，做成 `/owner/salary/cs/import` 的 CSV 上传或 seed 文件都行。Slice B 做时再选。
+### 本批新增的待业主拍板项
 
-## 相关文件清单（下次 AI 必读）
+- **盘点「部分过账」语义需业主点头**：一次提交现在可能只过账一部分行，`InventoryCount` 单据上只有被接受的那些，冲突行原样退回要求重数。原设计是一行冲突整单驳回（99 行合格数据陪葬且无 override）。风险评估为低（盘点行本来就是逐 (物料, 库位) 独立的），但要确认。
+- **盘点页部署瞬间的 fail-closed 需要排期配合**：浏览器里开着旧版盘点页的操作员，提交会因缺 `bookQuantity` 被判 invalid（提示「缺少账面数快照，请刷新页面后重新盘点」）。刷新即可，**但已录入的数据会丢**（`counts` 是纯 `useState`）。建议低峰期发布或先口头通知盘点岗。
+- **师傅超报要多一次提交往返**（零 JS 下是整页 POST + 重渲染），弱网车间会感知到延迟。这是拍板方案的固有成本，上线前跟业主对一次预期。
+- **首页「24 小时推送失败」告警条的计数语义变了**：瞬时抖动不再点红，重试成功会把历史 `FAILED` 行就地翻成 `SUCCESS`。上线前告知业主，别让人以为数据丢了。
+- **`ProductionTask.remark` 的写入格式从此是对外契约**：`[超计划报工] YYYY-MM-DD 计划 N / 合计 M（合格 a / 不良 b / 返工 c），报工人 <id>，已勾选确认`，多次写入 `\n` 追加；老板看板「明细」列原样渲染它。
 
-- SPEC-v1.2.md §5.1-5.5（三条铁律 + 三套算法）、§7.1-7.4（示例表对应测试用例）
-- `prisma/seed.ts` 第 182-310 行（SalaryRule 初始值，直接复用）
-- 已建范式：
-  - `lib/salary/machine-piecework.ts` — 纯函数 + Decimal 数学 + SPEC 行对行测试
-  - `lib/salary/rules.ts getActiveMachineRule` — 规则查找（半开区间 `effectiveFrom <= now && (effectiveTo IS NULL || effectiveTo > now)`）
-  - `lib/production.ts reportTask` — snapshot pattern，已经在 Task 层做了，P0 #5 读 snapshot 不回查
-  - `lib/order.ts` 和 `lib/production.ts` 的 tx + advisory lock 模式
-- CLAUDE.md §4.4（薪资快照化铁律）、§4.5（状态机铁律）、§4.7（金额全 Decimal）
+### 上一批带出、仍未拍板的 6 组
 
-## 约束提醒（本次任务特有）
+（代码已按各条注明的默认口径落地，改口径只动一处，详见 DECISIONS 2026-08-21）
 
-- **薪资快照化（CLAUDE.md §4.4）**：P0 #5 每生成一条 `DailyWorkerSalary` / `CustomerServiceCommission` / `HourlyWorkerPayroll` 都必须同步把当时的规则 ruleValue 完整写入 `salaryRuleSnapshot` 字段（每个表都有）。改 SalaryRule 只影响新记录。
-- **计件时金额口径已定 (DECISIONS 2026-04-23)**：`totalPressed = completedQty + defectQty + reworkQty`。P0 #5 的日薪汇总直接 sum `ProductionTask.pieceworkAmount`，不重算——快照保证数据一致。
-- **状态机铁律**：`SalaryPeriod.status IN_PROGRESS → SETTLED` 必须走状态机函数，禁止裸写。参考 `lib/outsource/status-machine.ts` 的最小实现。
-- **Decimal(12,2) / Decimal(10,2) 精度**：`DailyWorkerSalary.actualSalary` 是 10,2；`CustomerServiceCommission.amount` 是 12,2（可能几十万）；都用 `decimal.js` 算再 `.toFixed(2)` 写库。
-- **幂等性**：日薪汇总的 unique 约束是 `@@unique([workerId, date])`；上次汇总出错或师傅补报某天的任务都需要能 rerun。用 upsert 而非 create-then-throw。
-- **Cron 从 pg_cron 触发 or Next.js endpoint**：Pigsty 的 `pg_cron` 已启用（DECISIONS 2026-04-22），薪资结算是纯 DB 工作可以放 pg_cron；但 Next.js 的 Route Handler + `Authorization` 头部保护也能做，业主拍板前做成后者（env 里一个 `CRON_SECRET`），上线前切 pg_cron。
+- **薪资「当天 / 当月」重算的残余风险**：现只拒绝**严格未来**（日薪 `date > 今天`、月结 `month > 本月`）。(1) 当天日薪——上午 10 点点一次全员重算，当天还没报工的师傅会被写出一条只有 `dailyBase` 的正式行，能被标记已发，晚上真报工后重算又被 paid guard 挡住，只能人工撤销。(2) 月中月结更肉疼——COOK 的 `monthlyBasePay` 是整月 flat、不按天折算，月中重算厨师立刻拿满一整月 `COOK_MONTHLY`。选项 A（现状）/ B（月结改成只允许已结束的月份，方案作者推荐）/ C（连当天也拒）。任一选择都只动谓词里一个比较符 + 一条测试断言。
+- **交期预警口径**：(1) 未提交的草稿单 `DRAFT` 该不该继续留在 `PROMISE_ALERT_STATUSES`？摘掉的影响不止看板——工单详情页 `PromisedDateBadge` 用同一份清单，草稿单详情页会同时不再显示「已逾期」红标。(2) 逾期超过多少天后停止预警/推送？要设就按 `outsource_overdue_days` 的样子加 `Setting`（建议 key `order_overdue_alert_max_days`），不硬编码。
+- **师傅端「我的工单」**：是否接受不再急单置顶（待办队列仍在 `/worker/tasks`，那里保持急单分组）；每页 20 条（`WORKER_ORDER_PAGE_SIZE`）对手机端是否合适。
+- **登录限流配套**：厂区 NAT 出口 IP 是否加 `geo` 白名单；429 是否配 `error_page` 友好提示；应用层账号级失败锁定是否另立项（现状完全没有）。
+- **6 处冗余 `router.refresh()`**：已确认「`revalidatePath` 不刷 client RSC 缓存」是错误认知。选 A（清代码 + 订正注释）/ B（只订正注释，当前做法）/ C（照抄 refresh）。
+- **CLAUDE.md §4.5 的措辞同步**：`reportTasks` 已改成「逐任务 advisory 锁 + 读 + 逐条 update」，比文档描述的更稳，但 §4.5 与 DECISIONS 2026-08-19 的措辞都还停在 `updateMany({ where: { status } })`（`beginTasks` 仍符合原描述，不要改错）。
 
-## 上次会话结束时间
+### 长期未决（沿用）
 
-2026-05-06
-
----
+- 默认本地开发库 `print_shop_erp` 尚不能直接跑本发布候选：前向 migration `20260807180000_order_pricing_and_settlement` 的财务护栏识别到已全额结清账单 `cmsbmplo40008850rahu58pb4`（已付 ¥3000、2 笔付款）混入非外部销售项目，拒绝自动改写。失败 migration 已按 Prisma 标准流程标为 rolled back，未删除或修正业务行。必须先由业务负责人决定该历史账单归属，再显式修复，不能绕过护栏或猜测重分账。
+- 生产 pgBackRest 只有 repo1 且仅保留 2 份 full；即时备份和 WAL 正常，但两 repo / 30 天 / 月度恢复演练目标未达成。
+- 发布分支领先 `main` 且无 Git remote；在合并/远端策略确认前，生产源码没有可依赖的远端恢复路径，`deploy/update.sh` 的默认 `git pull` 不可直接使用。
+- 生产尚未配置 `SENTRY_DSN`，`APP_VERSION` 需核对；当前错误主要依赖 PM2 / Next 日志。
+- `deploy-smoke` 尚未自动继承 PM2 的系统 Chromium 路径与 root sandbox 参数，直接按旧文档运行会假失败。
+- 应用机仅 1.6 GiB RAM，构建严重依赖 swap。
+- `/api/health/jobs` 已就绪但**尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信响应目标不生效。
+- 新增三款 A4 视觉基线已生成；既有 7 张打印基线未重写。`pnpm-workspace.yaml` 的 `allowBuilds` 占位符待业主定夺。
+- A07（推送按人路由）/ A20（生产单拆分）业务输入，以及 A21 供应商合同自动定价的工艺、单位、阶梯、最低收费与有效期口径。
+- 后台任务账本尚无自动保留清理策略。**注意**：将来给 `NotificationLog` 加保留期时，必须排除「所属 `BackgroundJob` 仍在 `PENDING`/`RUNNING`」的行——`deliveryKey` 行是幂等凭证，删早了会让重试对已收到消息的群重复推送。
+- 已结算/已发客服提成遇跨周期撤单或降价时的政策（下期扣回 / 历史工资调整 / 不追溯）；客服停用或改岗时同样不能猜测。当前代码宁可整体阻断。
+- 已发布报价条件仍有 `productCodes / craftCodes` 字符串引用；若允许修改产品/工艺编码，需改用稳定 ID 或在仍被 CURRENT/SCHEDULED 价目引用时阻止改码。
+- 收费类目若要新增停用入口，必须先明确 `category.isActive` 是「全局紧急停收」还是「随冻结版本不漂移」。
 
 ## 历史（追加式时间线）
 
 - 2026-04-22：建立了项目记忆管理体系（PROGRESS / DECISIONS / HANDOFF + CLAUDE.md §13）。
-- 2026-04-22 → 2026-04-23：完成 P0 #1 认证与用户管理全部切片（seed 硬化 + 认证基础 + 登录 + 自服务改密 + 老板管账号 CRUD）。16 个 feature/fix commits + 1 docs commit，149 单测，Codex 走了 15 轮 review。
-- 2026-04-23：完成 P0 #2 工艺字典 + 产品字典。10 个 feature/fix commits，+100 单测（累计 249），Codex 9 轮 review。Round 24 统一修了三份字典的 "编辑页双 isActive 控件" 和 "create 后停留 /new" 两个通病。
-- 2026-04-23：完成 P0 #3 工单核心（E-lean）。21 commits，+151 单测（累计 400），Codex rounds 25–36 共 9 轮。E-full（款式级编辑）延期到 P1。OSS 直传脚手架、打印 + PDF 双通道、工单编辑 + 急单 + OrderLog diff 全部落地。
-- 2026-04-23：完成 P0 #4 生产流程。9 commits，+107 单测（累计 507），Codex rounds 37–42 共 6 轮。排产 + 师傅报工 + 薪资算法纯函数 + 外协单全部落地。级联的并发正确性一来就被 round 39 打中，cascade 锁内 fresh-read 补上；严格 `YYYY-MM-DD` 日期解析避免 JS Date 的滚动坑。
-- 2026-04-24：完成 P0 #5 薪资系统 4/5 切片。15 commits，+119 单测（累计 626），Codex rounds 43–47 共 5 轮。师傅日薪 + 客服周期 / 提成 + 老板总览页 + 时薪工纯函数全部落地。时薪工的 DB / UI / cron 留到下一 session。关键修复：已发放行拒绝重算（round 43 / P0）；CS accumulate-vs-settle race 最后切到 per-CS-user advisory lock（round 46 / P0）；完整 `salaryRuleSnapshot` on CustomerServiceCommission（round 45 / P1 + migration）。
-- 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。12 commits，+90 单测（累计 716），Codex rounds 48–51 共 4 轮。核心修复：hourly payroll 的 paid-row race → per-(worker, month) advisory lock + tx（round 48 P0）；batch now 贯穿所有 rule getters 防版本漂移（round 48 P1）；**三条 cron 路径统一 COUNTS ONLY 响应**，不返回 settled / errors 避免 pg_cron 日志泄漏薪资（rounds 49-50 P2）；daily batch 改 per-worker try/catch（round 50 P2）；recompute action 补 errors[] 给 owner UI，不然偷摸跳过失败 worker（round 51 P1）。
-- 2026-04-25：完成 P0 #6 Slice A 应收账单后端。4 commits，+56 单测（累计 772），Codex rounds 52–54 共 3 轮。状态机 DRAFT → ISSUED → {PARTIAL_PAID | FULLY_PAID}；核心修复 2 个 P1：generateBillsForPeriod read-diff-write race → per-(salesUser, period) advisory lock + `@@unique([billId, orderId])` DB last-line guard（migration 加 pre-dedupe DELETE）；mark-paid 调 accumulateCsSales 独立开事务 → 改成 tx 贯穿，bill write + CS 累计 atomic。Bill FULLY_PAID 为终态（退款新开负数账单，不回退状态）。
-- 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。和 hourly round 48 同构的 paid-row race —— compute 的 findUnique(isPaid) 和 upsert 之间被 markDailySalaryPaid 翻转，update 分支静默覆盖金额。修法镜像 hourly：per-(worker,date) advisory lock + tx（compute 和 mark-paid 共用同一把锁，rule 读留在 tx 外）。+4 单测（累计 776）。
-- 2026-04-25：完成 P0 #6 Slice B 老板账单 UI + Slices C/D 销售 UI + cron。8 个 commits（5 + 3），0 新单测（纯 Server Component UI），Codex rounds 55–63 共 9 轮。Slice B 1 个 P2 真 bug（period 月份范围）+ 4 轮文案精度迭代；Slice C/D 2 个 P2/P3 真 bug（cron malformed period 静默 fallback、sales layout OWNER 转发丢 leaf id）+ 1 轮 layout-pathname 限制讨论（最终决定不在 layout 做 OWNER 转发，留给 middleware）。**至此 P0 #1-#6 全部 clean，776 测试全绿**。
-- 2026-04-25：上线前运维补齐（业主选项 A）。1 个初始 commit（`fe3c668`）+ 5 轮 Codex 进步式 privacy 收紧（rounds 64–68，最终 round 69 clean）。`.env.example` 加 CRON_SECRET / SENTRY_DSN / APP_VERSION + 影响说明；instrumentation.ts 真实 Sentry init（DSN-gated graceful no-op）；README 加&ldquo;上线运维&rdquo;章节（env 表格 + cron pg_cron 切换 + pgbackrest + Sentry + OSS RAM + 10 步 smoke checklist）。**Sentry 隐私收紧关键路径**：Codex 5 轮进步式发现 `captureRequestError` 默认捕获 (1) headers 含 Authorization / Cookie，(2) URL query 含 reset token，(3) transaction event vs exception event 双路径，(4) span.data + span.description，(5) `contexts.nextjs.request_path`，(6) OTel 新旧 method 键名 + Prisma 的 `?` 在 SQL 不能被 URL trim 误伤。最终方案：`scrubEvent()` 同时挂 `beforeSend` + `beforeSendTransaction`，URL 一律 strip query → pathname；span data 走 SAFE_SPAN_DATA_KEYS allowlist；HTTP-op 才 trim description。776 测试不变，无新代码逻辑。
-- 2026-04-25 → 2026-04-26：本地真跑暴露 4 个 prod-only bug（mock 单测全漏）。commits `5481d58`（advisory lock $queryRaw → $executeRaw，16 callsite）/ `dae18ba`（PDF react-dom/server 动态 import）/ `7847415`（QR pre-render，删 qrcode.react）/ `f218cca`（Puppeteer install hint 双因素）。Codex rounds 70–72。
-- 2026-04-26：Playwright E2E + 视觉回归落地，5 个 wave，9 个 test 文件，13 个 Playwright 测试 / ~12s。Wave 1（auth + order create）→ Wave 2（production flow 含 SHIP/FINISH 全链）→ Wave 3（bill flow）→ Wave 4（CS accumulate，1500+1500 拆笔抓 delta vs cumulative）→ Wave 5（视觉，6 design-grid bucket，element-scope screenshot）。Codex rounds 73–94 共 ~25 轮 review，主要修法包括：`@next/env` 加载 .env\*；e2e- 用户 guard + 全 wipe + status=FINISHED 范围；视觉测试逐步收敛 element-scope + button-mask 双层防御。**Mock 单测漏抓的 4 个 bug 至此每条都有 E2E 守护**。
-- 2026-04-26：SHIP / FINISH 状态机收尾。commits `7bbfa0a` (feat) / `c6c42be`（round 87 race lock + outsource gate）/ `60c5f28`（round 88 schedule lock 统一）。**所有 Order.status 写入路径**（submit/cancel/ship/finish/scheduleOrder/worker cascade/createOutsourceOrder）现在共享同一把 advisory lock `print-shop-erp:order-cascade:<id>`。SHIP 接受可选 trackingNo（whitespace 边界 case 已 cover）；FINISH 是终态。canAttachOutsource() 显式拒绝 SHIPPED/FINISHED/CANCELLED 状态新建外协。+10 单测（含 7 SHIP/FINISH + 3 outsource scope）。
-- 2026-04-26：Admin shell scaffolding（user 并行 commit + Claude 补 P2 修复）。AppSidebar / AdminBreadcrumb 双组件，3 P2（嵌套 `<li>` / breadcrumb 404 / sidebar multi-active）+ 1 P3（layout-only crumb 误报 aria-current）4 轮收敛 round 81。`hooks/use-mobile.ts` 重写 `useSyncExternalStore` 避 React 19 lint 规则。组件还没 wire 进任何 layout，类型正确即可。
-- 2026-04-26：DECISIONS / memory 学习——**永远不 git add -A**，user 并行 commit 时 untracked 文件会被卷入；写入 `~/.claude/.../memory/feedback_untracked_files.md`。
-- 2026-04-26：P1 #1 老板 Dashboard Slice A（KPI 卡片层）落地，2 commits（`fdf6fb5` feat + `eeb1ded` round 98 fix）。新文件 `lib/dashboard/format.ts`（zh-CN 千分位）/ `shanghai-clock.ts`（todayShanghai / currentShanghaiMonth / shanghaiDayBoundary）/ `owner-stats.ts`（getTodayOrderStats + getMonthlyBillStats，全 Decimal sum）/ `components/business/dashboard/StatCard.tsx`（共享 KPI 卡 + data-slot="dashboard-kpi"）/ `app/(admin)/owner/page.tsx`（4 张卡 + requirePermission('report:all') + Promise.all 取数）。OWNER sidebar Dashboard href: `#` → `/owner` 恢复，admin-menu 单测加 href 锁定断言。E2E `tests/e2e/owner-dashboard.spec.ts` + `seedDashboardSnapshot()` helper：3 提交（1 急）/ 2 完工 / 1 发货 / 1 张当月 5000-2000 账单。**Codex round 98 抓 2 P1/P2 真 bug**：(P1) getMonthlyBillStats 没排除 DRAFT，与 /owner/bills 已有"DRAFT 未发单不算应收"口径冲突 → filter status IN [ISSUED, PARTIAL_PAID, FULLY_PAID]，seed bill 升 PARTIAL_PAID + issuedAt；(P2) Order.{submittedAt,completedAt,shippedAt} + Bill.period 没索引，dashboard 5 个 range count 在生产数据上退化 seq scan → migration `add_dashboard_indexes` 加 4 个 single-column index。+33 单测（累计 835，新增：format 8 / shanghai-clock 9 / owner-stats 16）。14 Playwright 测试 / ~12s。
-- 2026-04-26：P1 #1 老板 Dashboard Slice B（关注列表层）落地，3 commits（`bc20724` DECISIONS docs + `769f8a9` feat + `8a1610e` round 99 fix）。先写 DECISIONS：业绩按 `Order.submittedAt`（不按 finishedAt）+ recharts@3.8.1 选型。新文件 `lib/dashboard/owner-watchlist.ts`（getPendingShipments / getOverdueOutsourcing / getEndingPeriods）+ `components/business/dashboard/WatchlistTable.tsx`（通用表壳）。/owner 页扩成 KPI 卡 + 3 张关注列表（待发货 max 10 含 hasMore 探针 / 超期外协 daysOverdue / 即将结算客服周期 7 天内 + 当前 active CS_TIERS 预测提成）。E2E seedDashboardSnapshot 扩 OutsourceOrder + SalaryPeriod fixture，wipe 范围扩到 e2e-dash-os-* 与 csUserId 的 commission/period。**Codex round 99 抓 2 medium/low**：(medium) 即将结算列&ldquo;已累计业绩&rdquo;只显示 totalSales，但提成按 totalSales+initialSales 算档 → 列改名&ldquo;业绩合计&rdquo;并添 salesForTier 字段，initialSales > 0 时下方 hint 显示&ldquo;含期初&rdquo;；(low) /orders?status=COMPLETED 链是死链（orders index 不读 searchParams）→ 去掉链接保留计数提示。+18 单测（累计 853）。14 Playwright 不变。
-- 2026-04-27：P1 #1 老板 Dashboard Slice C（图表层）落地，2 commits（`6631660` feat + `85f7a25` round 100 fix）。`pnpm add recharts@3.8.1` 锁精确版本（DECISIONS 2026-04-26）。新文件 `lib/dashboard/owner-charts.ts`（getProductionTrend 30 天 raw SQL / getSalesRanking 本月 Top 10 groupBy / getCategoryDistribution 本月分布 raw SQL）+ 3 个 `'use client'` chart 组件（ProductionTrendChart LineChart / SalesRankingChart horizontal BarChart / CategoryDistributionChart donut PieChart）。所有 chart `isAnimationActive={false}` + `<ResponsiveContainer>`。视觉回归 `tests/visual/owner-dashboard.spec.ts`（3 darwin baselines）。**视觉基线提交前先 preview spec 截图给用户确认风格**（新 memory `feedback_visual_baseline_review.md`）。E2E seedDashboardSnapshot 加 chartFixture 选项（6 Products + 7 天 trend pattern + 4 ranking 工单），wipe 范围扩到 e2e-dash-* id-prefix（catch admin-submitted）。**Codex round 100 抓 1 high + 2 medium 真 bug**：(high) PG `AT TIME ZONE 'Asia/Shanghai'` 应用在 naked timestamp 列方向反 → 双层 `AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai'` 修；(medium) pie ORDER BY 缺二级排序 → 加 `category ASC` 字典序兜底；(medium) Tooltip 误用 formatAxisMoney（5000.50 → 5,001 / 12500 → 1.3 万 有损）→ 拆 formatTooltipMoney 精确到分。视觉回归基线（category）regenerated。+17 单测（累计 870；新增 trend 5 + ranking 7 + category 5）。17 Playwright（含 3 视觉基线 owner-dashboard-{trend,ranking,category}）。**至此 P1 #1 老板 Dashboard 全部 3 Slices clean**。
-- 2026-04-27：P1 #2 企业微信推送 Slice A（notify 引擎 + dev mock）落地，4 commits（`63e0783` feat + `702a4ba` 拆出 visual baseline 删除 + `a27bb53` round 101 fix + `bb39967` round 102 fix）。先写 2 条 DECISIONS：(1) notify best-effort 永不抛（业务永不感知推送失败）+ (2) dev/test 默认 mock-mode。新文件 `lib/notification/{events,render,webhook,notify,index}.ts`（10 事件 const + payload 类型 + `{key}` 占位符替换 + fetch 5s 超时 + 3 次重试 + rule lookup → render → log）；NOT wired 到任何 Server Action，零调用点（Slice C/D 才 wire）。.env.example 加 `NOTIFICATION_MOCK_MODE`。**Codex 抓 4 真 bug**：(round 101 P1) events.ts payload 类型缺 prisma/seed.ts 默认 template 引用的字段 → 把 totalAmount/urgentMark/expectedDate/csName/commission/totalSales/daysLeft 加进 payload 类型；(round 101 P2) inactive channel 早 return 静默漏推 → findMany 不再 isActive 过滤，JS 侧分流，inactive channel 写 status=FAILED errorMessage='channel inactive'，channelIds 空/全 stale 走 console.warn；(round 102 P1) ORDER_SHIPPED.trackingNo 仍是 string \| null，与 seed `{trackingNo}` 必填模板冲突 → 改必填 string，调用方在 wire 时做 null→'未填' 映射。同 commit 顺手把 dashboard wall-clock-coupled visual baseline 删掉（trend X 轴日期每天滚动 / category 跨月数据漂移 → spec 设计上做不了它该做的事；E2E presence + 改 chart 时人工 review 接管）。+41 单测（累计 911；render 13 / webhook 9 / notify 19）。Slice B（admin UI） / C（5 状态机事件 wire） / D（cron 事件 + 2 新端点）待开。
-- 2026-04-27：P1 #2 Slice A 收尾审计 —— **placeholder 与 payload 字段全量交叉检查**（Codex round 101/102 已修 6/10，剩 4 检查零盲点）。grep `prisma/seed.ts:seedNotificationEvents` 抽出 17 个唯一 placeholder（`{commission} {csName} {currentStock} {daysLeft} {expectedDate} {materialName} {orderNo} {outsourceId} {safetyStock} {submitterName} {supplierName} {taskCount} {totalAmount} {totalSales} {trackingNo} {urgentMark} {workerCount}`），逐一对照 `lib/notification/events.ts:NotificationPayloads` 的对应字段类型——全部命中**必填非 null** string/number。剩 4 个未走过 round 101/102 的事件（URGENT_ORDER / ORDER_SCHEDULED / ORDER_COMPLETED / STOCK_ALERT）模板都只引用必填字段，零隐性 null 风险。**业务源头 null 风险**也走了一遍：`OutsourceOrder.expectedDate` schema 是 nullable 但 `getOverdueOutsourcing` 已 NOT null filter；`Order.trackingNo` schema 是 nullable 且 `lib/order.ts:shipOrder` 业务允许 null（round 102 已 surface）；`Order.customerRef` nullable 但任何 template 都不引用它。**Slice C wire 时已知 TODO（防 round 103/104 再来）**：(1) `notify('ORDER_SHIPPED', {...})` 调用前必须把 `trackingNo: string \| null` 映射成 `trackingNo ?? '未填'`（或同义可读串）—— 否则 null → raw `{trackingNo}` 流到群消息；(2) 该路径写一条 unit test：mock null 入参，断言 messageContent 不含字面量 `{trackingNo}`；(3) 同样的&ldquo;null→可读串&rdquo;映射习惯也要 review `OUTSOURCE_OVERDUE.expectedDate`（Slice D wire 时格式化 Date → YYYY-MM-DD）和 `CS_PERIOD_SETTLED.csName`（lib/salary/cs.ts settle 处需 fetch user.displayName）。**可选延伸**（不阻 Slice B）：events.ts 加 runtime `NOTIFICATION_PAYLOAD_FIELDS` const，写一条 spec 解析 seed.ts 模板占位符 + 断言每个都在对应 const 里——这样未来人改 seed 加新占位符会立刻挂 unit test，比再来一轮 Codex review 便宜。
-- 2026-04-27：P1 #2 企业微信推送 Slice B（admin UI）落地。新文件 `lib/auth/schemas.ts`（+createNotificationChannelSchema / updateNotificationChannelSchema / updateNotificationRuleSchema：webhook URL 严格 https://qyapi.weixin.qq.com/cgi-bin/webhook/send 前缀防 SSRF）/ `lib/notification/admin.ts`（listChannelsWithRefCount / getChannel / createChannel / updateChannel / deleteChannel + ChannelInUseError / listRules / getRule / updateRule + RuleNotFoundError / StaleChannelIdsError / updateRuleWithGuard + EmptyChannelIdsError / listLogs / countRecentFailures）/ `lib/notification/payload-fields.ts`（**之前 HANDOFF 提的&ldquo;可选延伸&rdquo;也实现了**：runtime const + spec 解析 seed.ts 占位符断言 ⊆ payload 字段——未来再有 round 103/104 类型级遗漏会立即挂 unit test）/ `actions/owner-notifications.ts`（4 个 server action：createChannel / updateChannel / deleteChannel / updateRule + testChannelAction 旁路 mock 测试）/ `components/business/notification/{ChannelForm,RuleForm,DeleteChannelButton,TestChannelButton}.tsx` / `app/(admin)/owner/notifications/{page.tsx,channels/new/page.tsx,channels/[id]/page.tsx,rules/[event]/page.tsx}`（3 个表单页 + 1 个 landing 页含 channel 表 / rule 表 / 最近 log 表 / mock-mode banner / 24h 失败告警条 / webhook URL mask）。Sidebar OWNER 菜单 +1 项&ldquo;推送配置&rdquo;（11 项），admin-menu 单测同步更新 + 新断言 href + perm。**lessons learned**：useTransition + 直调 server action **不会**自动刷新 RSC 缓存，需要 useRouter.refresh() —— DeleteChannel / TestChannel buttons 各加一行；revalidatePath 只对 form action 自动刷。删 channel 双闸：(a) 被 active rule 引用 → ChannelInUseError + 按钮 disabled；(b) 历史 log 引用 → PG FK P2003 → action 翻译成&ldquo;改为停用&rdquo;提示。+33 单测（累计 944；schemas 12 / admin 14 / payload-fields 3 + 2 sanity / 既有 41）。+1 E2E `tests/e2e/owner-notifications.spec.ts`（resetNotificationFixture helper 清 e2e_-prefix channel + 重置 ORDER_SUBMITTED/URGENT_ORDER rule；spec 覆盖建群 → 编规则 → 测试 → 删除前置闸 → FK 闸全链）。15 Playwright / lint / typecheck 全绿。
-- 2026-05-05：P1 #2 企业微信推送 Slice C（5 状态机事件 wire）落地，4 commits（`45221bd` feat + `d506140` round 109 fix + `e65aeb4` round 110 fix + `223eb03` round 111 fix）。5 个事件实际接通（ORDER_SUBMITTED / URGENT_ORDER / ORDER_SCHEDULED / ORDER_COMPLETED / ORDER_SHIPPED）—— wire 都在 tx commit 后；submitOrder 后 fetch order → 触发；isUrgent 时**额外** URGENT_ORDER（独立事件不替代）；shipOrder 把 `trackingNo: string \| null` 映射成 `tracking ?? '未填'`（round 102 P1 wire 端兜底）。**Codex 抓 6 真 bug**（rounds 109/110/111）：(round 109 P1 high) `await notify` 阻塞 Server Action 最差 30s+，dead webhook 把"工单已提交"卡 loading → 改 `void notify`；(round 109 P2 medium) `formatMoney` 返 `¥ 5,000.00` 与 seed 模板 `金额：¥{totalAmount}` 双前缀 → 新 `formatMoneyPlain` 不带 ¥；(round 110 P1 high) raw `void notify` 在 SIGTERM 时被切，连 NotificationLog 一起丢 → 新 `lib/notification/dispatch.ts` 包装 Next 16 `after()` + 单测降级 void；(round 110 P2 medium) totalAmount 契约变更没通知 owner（Slice B 让他们自由编模板）→ RuleForm 加金额占位符 hint + events.ts 注释扩写；(round 111 medium) dispatch.ts catch all 把 unexpected `after()` 错误也静默吞掉 → 区分预期 no-scope vs 真意外，后者 console.warn 留 ops 信号；(round 111 low) RuleForm `**不含**` 字面星号渲染 → 改 `<strong>`。+16 单测（累计 967；wire spy 12 / dispatch 4）。E2E：`production-flow.spec.ts` 加 expect.poll 在 4 步后断言 NotificationLog（防 toHaveCount→读空时序 gap）；新 `notification-urgent.spec.ts` 单独覆盖 URGENT_ORDER 路径。新 helpers `seedNotificationWireFixture` + `readNotificationLogs`。16 Playwright / lint / typecheck 全绿。
-- 2026-05-05：P1 #2 企业微信推送 Slice D（cron 事件 + 2 新端点）落地，8 commits（`68f42c9` feat + 7 轮 Codex fix `bf3f118`/112、`be04794`/113、`d778b1f`/114、`7e6b821`/115、`ca9f1cb`/116、`38ee9e0`/117、`c7c52ad`/118）。`/api/cron/daily-salary` 末尾 wire DAILY_WORKER_SALARY（settled 行 actualSalary Decimal sum，formatMoneyPlain 千分位）；`/api/cron/cs-settle` 末尾 per-period wire CS_PERIOD_SETTLED（batch user.findMany 拼 csName）；新 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 复用 `lib/dashboard/owner-watchlist:getOverdueOutsourcing` / `getEndingPeriods`（P1 #1 Slice B 已写）。**Pre-existing latent bug surface 出来**：middleware.ts matcher 没排除 `api/cron`，cron 端点的 Bearer auth 之前被 session middleware 抢先 redirect 到 /login（cron 全是 mocked 单测，没真 HTTP 跑过）→ matcher 加 `api/cron` 排除。**Codex 抓 11 真 bug**（rounds 112-118）：(112 high) "对应客服" SPEC 期望 vs MVP 现实文档化 + (112 medium) cron 用 r.salesForTier 替代 totalSales 与 dashboard 口径一致 + (112 medium) cs-settle 500 scrub err.message；(113 high) UI 警告易被绕开 → server-side TooManyChannelsForPrivateEventError + (113 medium) seed.ts 模板&ldquo;业绩合计&rdquo;改名（注意：comment 必须放 `eventType:` 行**之前**，payload-fields.test 正则要求两者紧邻）；(114 high) Legacy 已存在多 channel 行不会被写时 guard 救 → notify.ts runtime cap + (114 medium) draft 模式被误拒 → guard 仅在 isActive=true 时拒；(115 high) PG `IN()` 不保证返回顺序 → byId Map 重排回 rule.channelIds 顺序；(116 medium) 重排破坏 findMany 的隐式去重 → Set-based dedupe；(117 medium) stale 检测用 raw rule.channelIds.length 与 deduped channels.length 不匹配 → uniqueRuleChannelIds 全程统一。+24 单测（cron 路由 14 / admin guard 5 / notify cap+order+dedupe 5；累计 991）。+2 E2E（`notification-cron.spec.ts` outsource-overdue + cs-period-ending）。新 helpers `seedOverdueOutsourceForCron` / `seedEndingPeriodForCron`；`seedNotificationWireFixture` 扩 9 个事件全 bind。.env 加 `CRON_SECRET` + `NOTIFICATION_MOCK_MODE`。README §🚢 cron 段更新（6 endpoints + matcher 排除），smoke checklist 加&ldquo;NOTIFICATION_MOCK_MODE=false 验真发&rdquo;条。**至此 P1 #2 企业微信推送 4 Slices 全部 clean**：notify 引擎 → admin UI → 5 状态机 wire → cron 事件。SPEC §8.1 9/10 事件全接通（STOCK_ALERT 待物料模型 P1）。991 unit / 18 Playwright / lint / typecheck 全绿。
-- 2026-05-05：**P0 #7 CDR 汇总下载**（SPEC §3.5）落地——P0 最后一块。新文件 `lib/cdr/zip.ts`（封装 OSS 打包步骤，dev/test 默认 mock-mode 写 `mock://bundle/<id>.zip` 占位，prod / OSS 配齐时走 generateRealZip——当前 throw OssNotWiredError 等 STS SDK 接入；同 NotificationMockMode 同款&ldquo;契约清晰但 MVP 不强制&rdquo;）/ `lib/cdr/bundle.ts`（listEligibleOrders 按 Order.submittedAt + items.designs.fileType=CDR 双闸过滤；createBundle 先创占位 row 再调 zip uploader，OSS 错误时删占位行；consumeBundle 路由用，校验 expiresAt + 自增 downloadCount best-effort；listRecentBundles owner/foreman 复看）/ `actions/foreman-cdr.ts`（createBundleAction 走 design:bundle:create 权限）/ `app/api/cdr/bundles/[id]/route.ts`（无 session 鉴权，cuid-as-token + 24h 过期；404 vs 410 不区分&ldquo;猜对了已过期&rdquo;和&ldquo;不存在&rdquo;降低暴力可见性；mock-mode 返 503）/ `app/(admin)/foreman/cdr/page.tsx` + `components/business/cdr/CreateBundleForm.tsx`（日期窗口 GET form + 候选工单全选/反选/单选 + 提交后成功 banner 含 downloadUrl + 24h 过期提示 + mock-mode 警告条 + 最近 20 条 bundle 列表显示已过期/mock URL 状态）。Sidebar FOREMAN 菜单 +1 项&ldquo;CDR 汇总&rdquo;（FileArchive icon），admin-menu 单测同步加断言。`middleware.ts` matcher 也排除 `api/cdr` —— bundle 下载路由本来就是无 session（外协方拿链接下，没有登录态），跟之前的 `api/cron` 排除同款理由。+20 单测（zip 5 / bundle 13 / admin-menu CDR 1 + 1；累计 1011）。+1 E2E（`cdr-bundle.spec.ts`：foreman 登录 → 看到候选工单 → 全选生成 → 成功提示 → 真访问 downloadUrl 收 503 mock-mode 提示 + 不存在 id 收 404）。**至此 P0 9/9 全部完成**（CDR 是最后一块）；STOCK_ALERT 仍在物料模型 P1 后置。1011 unit / 19 Playwright / lint / typecheck 全绿。
-- 2026-05-06：P0 #7 CDR 收尾审计 8 轮 Codex（rounds 119-126），8 commits（`80404c0`/119、`7daaf6e`/120、`2e70c47`/121、`8f376a7`/122、`0a4469a`/123、`93ad43d`/124、`ca05856`/125、`7b58ecc`/126）。**Codex 抓 8 真 bug**（多数集中在&ldquo;给外协的下载链接 baseUrl 推导&rdquo;一小块）：(119 high) Server Component 用 `Date.now()` 触发 react-hooks/purity → 提到 props 计算外；(119 medium) `BundleNotFound` vs `BundleExpired` 路由分别返 404 / 410 区分了&ldquo;猜对了过期&rdquo;和&ldquo;不存在&rdquo; → 统一 404 同文案降信息泄漏；(119 high) downloadUrl 是 relative path，外协复制到 WeChat 是死链 → action 层从 request headers 推 baseUrl 拼绝对 URL；(120 medium) `<Link>` cross-origin 用不上 + .env.example 加 `APP_PUBLIC_URL` 配置说明；(121 medium) baseUrl 从 env 读 → dev/split-origin 死链 → APP_PUBLIC_URL 优先，否则从 headers 推（dev 自然 follow ngrok / 127.0.0.1）；(122 medium) multi-proxy hop list `https, http` 直接拼出 `https,http://...` 死链 → firstHopValue 取第一跳 trim；(123 high) IPv6 字面量 `[::1]:3000` 被旧 host regex 拒（regex 设计只支持 DNS） → 拓展接受 `\[[0-9a-fA-F:]+\]` 形态；(124 medium) 手写 IPv6 hex regex 既漏 IPv4-mapped `[::ffff:127.0.0.1]` 又放过 `[abc]` / `[2001:db8:::1]` → 改用 WHATWG URL parser 让 authoritative 解析器决定 + 返 url.origin；(125 medium) URL parser 接受很多输入但会静默 canonicalize（`%65rp.example.com` → `erp.example.com`、`127.1` → `127.0.0.1`、`example.com:000443` → `example.com:443`、empty port `host:` 被剥），foreman 看到的链接域和 header 输入不同是潜在伪装风险 → 严格 round-trip `lowercase(input) === url.host` + reject percent-encoding；(126 medium) IPv6 carve-out 太宽豁免了整个 authority 包括 port，`[::1]:443` 被 URL 静默剥成 `[::1]` → 拆 `[hostname]` + `:port`，hostname 继续允许 IPv6 zero-fold / IPv4-mapped 折叠，port 必须原样匹配 url.port。所有改动集中在新 `lib/cdr/base-url.ts` + `lib/cdr/__tests__/base-url.test.ts`（23 tests，覆盖 IPv4 短格式 / IPv6 字面量 / IPv6 default-port 拒 / multi-hop 列表 / 注入字符 / 大小写）。+12 单测（累计 1035；之前 1023 → 现 1035）。E2E 不变（19 Playwright），typecheck / lint / 1035 unit 全绿。**round 126 review 干净，CDR P0 #7 整段收官**。
+- 2026-04-22 → 2026-04-23：完成 P0 #1 认证与用户管理全部切片。149 单测，Codex 15 轮 review。
+- 2026-04-23：完成 P0 #2 工艺字典 + 产品字典。+100 单测（累计 249），Codex 9 轮。
+- 2026-04-23：完成 P0 #3 工单核心（E-lean）。21 commits，+151 单测（累计 400），Codex rounds 25–36。E-full 延期 P1。
+- 2026-04-23：完成 P0 #4 生产流程。+107 单测（累计 507），Codex rounds 37–42。
+- 2026-04-24：完成 P0 #5 薪资系统 4/5 切片。+119 单测（累计 626），Codex rounds 43–47。
+- 2026-04-24：完成 P0 #5 Slice C（时薪工 + 考勤）。+90 单测（累计 716），Codex rounds 48–51。
+- 2026-04-25：完成 P0 #6 Slice A 应收账单后端。+56 单测（累计 772），Codex rounds 52–54。
+- 2026-04-25：闭合 P0 #5 遗留 daily-salary race（commit `50956ee`）。+4 单测（累计 776）。
+- 2026-04-25：完成 P0 #6 Slice B/C/D 账单 UI + cron。Codex rounds 55–63。P0 #1–#6 全 clean。
+- 2026-04-25：上线前运维补齐 + Sentry 隐私收紧（rounds 64–69）。
+- 2026-04-25 → 2026-04-26：本地真跑暴露 4 个 prod-only bug 全修（rounds 70–72）。
+- 2026-04-26：Playwright E2E + 视觉回归落地（5 waves，13 测试，rounds 73–94）。
+- 2026-04-26：SHIP / FINISH 状态机收尾，Order.status 写入路径统一 advisory lock（rounds 87–88）。
+- 2026-04-26：Admin shell scaffolding（AppSidebar / AdminBreadcrumb，round 81 收敛）。
+- 2026-04-26 → 2026-04-27：P1 #1 管理员 Dashboard 三切片（KPI / 关注列表 / recharts 图表）。+68 单测（累计 870），rounds 98–100。
+- 2026-04-27 → 2026-05-05：P1 #2 企业微信推送四切片（引擎 / admin UI / 状态机 wire / cron）。+121 单测（累计 991），rounds 101–118。
+- 2026-05-05：P0 #7 CDR 汇总下载落地。+20 单测（累计 1011）。
+- 2026-05-06：CDR 收尾审计 8 轮（rounds 119–126，baseUrl 推导硬化）。+12 单测（累计 1035）。**P0 9/9 收官**。
+- 2026-06-28：（Codex 批次，工作区交付）Pigsty 扩展 PR-1..10 + admin 框架 A11–A15 + ERP 主数据 A16–A19 + 审计 A22 + 客户端数据层 POC A23 + agent 自动化协议（backlog / routines / agent:next）。16 个新 migration。
+- 2026-07-05：（本 session）UI Phase A–E 之后的工作区大批次全量验证绿（1214 单测 / 21 Playwright / build / lint / typecheck / migrate deploy）；A09 分区 cutover 计划交付 `docs/partition-cutover-plan.md`（Codex 2 findings 闭合）；PROGRESS.md 刷新到真实状态。队列无 `agent-ready` 任务，剩余项等业主输入。
+- 2026-07-05：（业主授权）大批次按模块拆 12 commit 固化（`c84162f → accb713`）；STOCK_ALERT 出库跨越检测接线收官 SPEC §8.1 10/10 事件（`3184a26` + `4f76a85`，Codex 抓 payload 丢尾零 + 测试锁提交顺序，复核 clean）。1220 单测 / lint / typecheck 全绿。
+- 2026-07-05：**A06 OSS STS 真实接入**（`968b131` feat + `d65804f` / `89b1302` fix，Codex rounds 抓 6 真 bug）。业主提供 bucket `hongbaowebdb` / region `oss-cn-guangzhou` / 角色 `erp-oss-upload` / 子账号 `webhongbao` AK（**曾误填 .env.example，已迁 .env 并恢复模板，密钥未进 git**；region 从完整域名归一化）。`ali-oss` + `archiver` 落地：signViaSts 真 AssumeRole（session policy 收缩单 objectKey，1h）+ CDR 流式打包（get→zip→putStream bundles/* + 24h 预签 GET，长期凭证——STS 1h 签不出 24h 链接）。Codex 6 修：endpoint 走 config、putStream settled 折叠防 unhandled rejection、CDR mock 非生产默认开、expiresAt 对齐签发时刻、malformed OSS_ENDPOINT 双路径降级（sign 折叠 error / isMockMode 降级 mock 防 /foreman/cdr 500）、PassThrough destroy 需先挂 error 监听器（否则崩进程）。真实冒烟：AssumeRole ✅ / 临时凭证 PUT design/* ✅ / 越权护栏 ✅ / 子账号直连 ❌（等业主挂策略）。测试对象遗留 bucket（无 DeleteObject 权限，预期）。1229 单测全绿。pnpm store v10/v11 冲突用 `CI=true pnpm install` 重链接解决。
+- 2026-07-05：A06 全链路验证收官——业主挂好 `webhongbao` 对象策略后复跑冒烟 6/6 全通；真实 `uploadBundleZip` 端到端（archiver 流式打包 + 预签 URL 下载 + ZIP 魔数校验）通过。
+- 2026-07-05：设计图上传 UI 接线（`3849cbd` + `ed9733e`）。工单详情页款式卡设计图面板（DRAFT 增删/其余只读）；预签 PUT URL 直传（前端零 SDK）；Codex 抓 5 真 bug 全修：sign 前置授权闸（防任意 id 铸凭证写孤儿对象）、HEAD Content-Length 权威 size + 上限兜底（防申报小传大）、order-cascade 锁内 fresh-read（防与提交并发 TOCTOU）、凭证 1h→15min（压缩重放覆写窗口，ETag 固定记 P1）、input 重置。预签 PUT 真实冒烟（含错误 Content-Type 403 护栏）通过。1242 单测。
+- 2026-07-06：上线前检查 + 注释清理（`f0cebce`）。全库移除 90+ 处 "Codex round N" 溯源标注（保留约束说明；历史在 git log/HANDOFF/DECISIONS 可查），49 文件纯注释改动。教训：第一版全局正则把代码里的 `()` 也删了——回滚重做，改成只作用于注释行的脚本 + 跨行引用逐处手修。验证：tsc / eslint / 1249 单测 / next build / deploy:smoke（prisma validate + migrate status + mock-mode + Puppeteer + 路由探测）/ 21 Playwright E2E+视觉 全绿。生产部署剩纯运维动作（README §🚢）：服务器 .env 真值、NOTIFICATION_MOCK_MODE=false、OSS CORS 加生产域名、pg_cron 切换、pgbackrest、Pigsty 扩展安装。
+- 2026-07-07：承诺交期 + 交期预警 + ORDER_OVERDUE 推送 + 二维码 URL 化（`d240061` / `1483867` / `5d6b04a` / `6c3fdc5`）。Order.promisedDate（2 个 migration：字段 + 规则行数据迁移）；预警口径集中 lib/order/promised-date（详情徽标 / dashboard 关注列表 / 每日 cron 三处共用）；第 11 个推送事件 ORDER_OVERDUE 只推逾期；QR 内容改 {base}/orders|worker/tasks URL（lib/public-base-url 与 CDR 共用推导，foreman-cdr 去重）；打印页眉加承诺交期行。Codex 抓 3 真问题：升级库缺规则行（数据 migration 修，高危）、视觉基线（按惯例截图待业主确认后提交）、cron E2E 缺口（补全链测试）。1264 单测 / 22 E2E 全绿。**待办：视觉基线 6 张 png 等业主看截图 OK 后以 [visual-regression] commit 提交。**
+- 2026-07-08：上线前多维度审计（6 维度并行 audit → 逐条对抗性验证 workflow，54 agent；含手动核实）。发现并**即修 4 项**：(1) **blocker** `createOrderFromInput`/`scheduleOrderFromInput` 从 'use server' 导出成公开 Server Action、信任调用方 actor 无 requirePermission = 越权+审计伪造后门，零调用方直接删除（`5bdf5a3`）；(2) **high** `.env.example` 出厂 `NOTIFICATION_MOCK_MODE="true"` 会诱导运维带进生产静默 mock 推送→改留空按 NODE_ENV 判定（`3eaf050`）；(3) README env 表补 mock 开关行+OSS CORS 手动步骤+APP_PUBLIC_URL 扩到二维码、6→7 cron 漂移修正（`3eaf050`）；(4) **low** hourly-payroll cron 意外错误 scrub 对齐 COUNTS-ONLY（`c5ac707`）。1264 单测/tsc/eslint/build 全绿。**剩余为纯手动运维项**（见报告）：生产 .env 注入（APP_PUBLIC_URL/SENTRY_DSN/AUTH_SECRET 新值/DATABASE_URL 生产库）、OSS 控制台配 CORS、首次 seed、cron 调度器（crontab/pg_cron 7 端点）、Pigsty 扩展安装、pgbackrest、Puppeteer chrome、PM2/Nginx 自备。视觉基线 6 png 仍待业主确认后提交。
+- 2026-07-09：全库架构体检（6 子系统深读 + 44 agent 提案验证 workflow）→ 7 个行为零变化重构切片落地（日期/cron 认证/OSS 工厂+锁 key/通知常量/collectFieldErrors/createOrder 批量/薪资规则查询，`06ecc62`→`f4b6ab7`），Codex 复核 PASS，1272 单测全绿；交付 `docs/架构体检报告-2026-07-09.md`（含行为缺口 A1-A7、结构债清单、已验证路线图、不做清单）；DECISIONS 记录去重边界决策。
+- 2026-07-17：生产硬化：PostgreSQL 任务账本 + LIGHT/HEAVY worker + cron/通知持久化 + CDR/PDF 资源隔离 + live/ready + ADMIN 任务看板 + pgBackRest 验收脚本落地。本地 migration 和 PDF worker 真实演练通过；1296 单测 / lint / typecheck / build 全绿。
+- 2026-07-17：生产硬化上线前纠偏：修复 worker 资源限制落在 tsx 包装进程、durable 通知可抛、终态 dedupe 永久占位、CDR 永久 PENDING、未知任务不进 fail、部署 env/重启配置和 PDF 排队体验；补齐生产分支测试，1353 单测 / lint / typecheck / Prisma validate / build 全绿。
+- 2026-07-19：后台角色收敛：OWNER / FOREMAN 数据与权限统一迁移为 ADMIN，管理员菜单合并经营、生产、财务、字典和运维入口；保留 `/owner/*`、`/foreman/*` 旧 URL，旧 JWT 与早期默认姓名自动归一化。迁移已在本地库执行并确认 3 个管理账号全部为 ADMIN，后台不再展示“老板/车间主管”；1397 单测 / 3 项登录 E2E / lint / typecheck / Prisma validate / build / 页面实测全绿。
+- 2026-07-19：新工单号改为 `GD-YYMMDD-XXX`（例 `GD-260719-001`），保留历史编号；上海业务日 advisory lock 与严格三位流水校验继续生效。配置迁移已执行，真实新建工单 E2E 与工单列表页面验证通过。
+- 2026-07-31：管理端履约与售后增强：多地址发货/分地址运单、顺丰到付后期更正、免计费关联重做、批量派工与三款 A4 单页打印落地。本地迁移和真实 Chromium 打印验收通过；109 文件 / 1479 单测全绿。
+- 2026-07-31：工单变更、生产、薪资与财务闭环：版本化修改申请、彩印+烫金混合排产、师傅批量开工/完工、风车机新阶梯与账号规则、日期底薪对比、全员半天考勤、客服销售额/结款/成本分账落地；111 文件 / 1496 单测、36 项跨设备 UI、8 项打印视觉/PDF、生产 build 全绿。
+- 2026-07-31：待排产列表升级为按兼容工艺分步批量排产：先选师傅再跨工单勾选，混合机型可分两次派给不同师傅；PENDING 草稿由 Order 状态双重门控，全部派完才进入生产。真实同机型批量与混合机型两阶段 E2E 均通过。
+- 2026-07-31：修复删除/停用账号的长效 JWT 仍可进入排产动作并在 OrderLog 外键处 500；统一数据库实时会话校验，排产动作提供重新登录恢复态，真实失效会话 E2E 验证零任务落库。
+- 2026-07-31：多能力师傅与管理员最终派工落地：账号支持主机型/多设备/熟练工艺，单单/批量/改派统一推荐与硬资格，非推荐派工强制原因并审计；任务按实际设备计薪，个人规则覆盖全部登记机型。1527 单测、4 项真实排产 E2E、375px 明暗与 1280px 管理端 UI 门禁、生产 build 全绿。
+- 2026-08-02：财务/薪资/外协对账审查以 `aa42ba0` 固化（121 文件 / 1688 单测、45 项 fresh migration 全绿），随后发布到 <https://bag.sshapi.cn>。Pigsty 上线前 full backup `20260802-193420F` 成功，生产 12 条待迁移全部应用，三 PM2 进程、ready、HTTPS 路由和系统 Chromium PDF 内存生成验收通过；同时确认 repo2/Sentry/内存升级与 smoke 口径为后续运维缺口。
+- 2026-08-03：同步近期功能与生产事实到三份记忆文档、README、部署/冒烟/SLO 和同事使用手册；清除 A06、任务排序、工单修改申请与生产 Chromium 等陈旧口径，并记录发布分支领先 `main`、无 Git remote 的恢复风险。
+- 2026-08-07：工单列表新单优先、37 类独立筛选、稳定服务端分页和 ADMIN 全量/筛选异步 XLSX 导出在本地收官。导出包含 11 工作表、精确 Decimal、发起人+当前 ADMIN 双重授权、24h 保留和第 8 cron；事务模糊提交、过期竞态、终态 PII 收缩与删除重试经对抗性复核闭合。筛选表单导航同步、烫金色可逆转义和 WORKER 排产草稿边界已补回归；Fresh 64 migration、1840 单测、build 和 24 项全视口/axe 门禁全绿；未 commit、未部署。
+- 2026-08-07：修复管理端工单详情把工艺 ID 直接显示给用户的问题；详情查询批量映射中文名并保留历史/缺失回退，款式卡补数量、四位单价、小计和准确排产语义。139 文件 / 1845 单测、生产 build、24 项全视口明暗/axe 门禁及真实草稿单浏览器回归全绿；未 commit、未部署。
+- 2026-08-07：完成对客加工费自动报价与资金方向隔离：订单冻结结算类型，产品阶梯/基础价叠加工艺收费项并保存快照，MOQ 失败关闭，改单提供只读差额预览且批准时重新报价；客户应收、内部工资/提成、师傅计件和供应商应付互不复用。历史建议单价、考勤身份快照和数据库兼容围栏由第 67–71 项前向 migration 严格收口；本地库及 PostgreSQL 16 空库 71 / 71、156 文件 / 2070 单测、空库 Dashboard E2E、typecheck、lint、Prisma、生产 build 全绿；未 commit、未部署。
+- 2026-08-08：外部销售快递/打包耗材对客收费完成：中通与纸箱两份来源的 SHA-256/单元格证据、每票创建估算、最终重量发货终审、顺丰到付管理员后期更正、改单耗材跨档重算、账单分项与工厂内部成本分账均已收口。74 / 74 migrations、170 个测试文件 / 2265 项单测、typecheck、lint、Prisma validate、生产 build、375px + 1280px 管理/销售明暗响应式 + axe 门禁全绿；未 commit、未部署。
+- 2026-08-09：外部销售报价统一为管理/销售单入口，已接入 PROCESSING/LOGISTICS 草稿复制、单项目编辑、严格校验、上海时间发布与放弃；已发布版只读，技术证据不进入业务页面，并发陈旧覆盖失败关闭。178 个测试文件 / 2325 项单测、typecheck、lint、Prisma validate、生产 build、375×667 管理/销售 viewport+axe+touch 门禁全绿；真实草稿页技术字段零可见且无横向溢出。未 commit、未部署。
+- 2026-08-11：管理端外部销售收费拆为 `/items` 日常工作台与 `/versions` 发布中心，左侧菜单可直达；121 条加工规则与物流规则支持服务端搜索、类目/产品/省份/数量/计价/状态组合筛选和当前价→草稿价对比。客户端编辑 DTO 已裁掉 code/JSON/SHA/Excel/互斥组/优先级，服务端写锁内保留技术条件并同步产品匹配。计划生效与无当前版不再显示必失败动作；桌面长编辑器改为视口内滚动。180 文件 / 2362 单测、typecheck、lint、Prisma、build 及干净 74 migration 隔离库的 375×667、1280×800 管理/销售明暗 viewport+touch+axe 门禁全绿；未 commit、未部署。
+- 2026-08-12：外部销售收费按纸张、产品/工艺/规格聚合精确数量锚点；157 克与 200 克严格分组，底层规则仍逐档独立。草稿可在一个编辑器中原子保存全部数量档金额/启停，固定总价与按个/按张/每万/每款单位分别诚实展示；181 文件 / 2427 单测、生产 build 和 12 个确定性响应式/axe 场景全绿；未 commit、未部署。
+- 2026-08-17：将零 JS 硬约束收敛到登录、登出、改密码三条关键会话路径，新增禁用 JavaScript 的 Playwright project；师傅端开工/报工恢复原生 form 形状，其余后台 CRUD 不再被未拍板的全仓约束阻断。
+- 2026-08-18：将工单筛选/导出、计价结算、工资与外协账本、外部销售加工/物流价目、收费工作台、价格阶梯编辑、74 项 migration、测试和记录文档统一固化为提交 `feat: complete pricing, settlement, and order operations`。183 文件 / 2441 单测、typecheck、lint、Prisma、build、diff-check 与零 JS 会话门禁 3 / 3 全绿；本条只表示 Git 归档完成，生产仍为 `aa42ba0 / 45 migrations`。
+- 2026-08-21：并行缺陷修复批次（11 项）：cron 密钥不再进 curl argv + 恒定时间比较、登录限流改挂 `location = /login` 并按方法豁免 GET、新增 `/api/health/jobs` 死信探针（`/ready` 状态码语义不变）、日薪/月结拒绝严格未来日期、`/owner/salary` 未发聚合下推数据库（+1 项 CONCURRENTLY 索引 migration，累计 75 项）、交期看板与逾期推送各自收窄并加 200 条 fan-out 安全阀、师傅端「我的工单」改 `createdAt desc` 分页、9 个详情页 `generateMetadata` 查真实业务编号（含四页越权标题泄漏修复）、`lib/order/export.ts` 全量显式 `select`、background-jobs 时间戳锚到数据库时钟、`OrderForm` 必填语义与 `AttendanceRecordDialog` 保存回执的无障碍修复。文档由单一 agent 统一同步：README、`docs/部署指南.md`、`docs/deployment-smoke-checklist.md`、`docs/production-slo-and-recovery.md`，DECISIONS 追加 12 条。**CLAUDE.md 未改**（配置文件，留给业主）。
+- 2026-08-21：上线前对抗审查 + 修复。四条候选高风险修复经对抗性审查后**没有一条能照原样实施**，全部 blocking 破绽实读代码核对属实；定稿后落地四项：单条报工数量守卫（判据 `>=`、`Setting` 默认 3、配套老板看板「超计划报工」知情通道）、工单完工闸口收紧为款式级外协覆盖（残留粒度缺口显式接受）、盘点并发守卫改用逐行账面回声 CAS + 部分过账（时间戳基线方案整体否决）、通知投递失败可重试并进死信（`NotificationLog.deliveryKey` 幂等，+2 项 migration，累计 77 项）。OSS 直传重放加固与盘点 ledger scan 明确本批不做并写明理由与陷阱。新增 `docs/上线前置操作清单.md`（外协覆盖的两段部署前只读 SQL、唯一索引 `indisvalid` 验收、单向门与人工验证），DECISIONS 追加 6 条。**CLAUDE.md 未改**（留给业主）。

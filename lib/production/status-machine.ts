@@ -31,8 +31,14 @@ export const TASK_TRANSITIONS = {
   [TaskStatus.CANCELLED]: [],
 } as const satisfies Record<TaskStatus, readonly TaskStatus[]>;
 
-// Pure guard. Same contract as `transitionOrder` — every TaskStatus
-// write must flow through this function (CLAUDE.md §4.5).
+// Pure guard. Same contract as `transitionOrder`.
+//
+// 单条路径的 TaskStatus 写入必须走这里。**批量路径是显式例外**
+// （业主 2026-08-19 拍板，见 DECISIONS.md）：lib/production.ts 的
+// beginTasks / reportTasks 用 `where: { status: <前置状态> }` 在 SQL 层
+// 表达同一个守卫，换取单条语句的原子批量更新；逐行调用本函数会迫使先
+// 查后写，丢掉原子性。改动那两处时要自己维持 where 子句与下方转换表
+// 的一致性——没有编译期保障。
 export function transitionProductionTask(
   from: TaskStatus,
   to: TaskStatus,

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Role, WorkerType, MachineType, Prisma } from '../../generated/prisma/client';
+import {
+  EmploymentType,
+  Role,
+  WorkerType,
+  MachineType,
+  Prisma,
+} from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -62,8 +68,8 @@ import {
 const ownerActor = {
   id: 'actor-owner',
   username: 'admin',
-  displayName: '老板',
-  role: Role.OWNER,
+  displayName: '管理员',
+  role: Role.ADMIN,
   workerType: null,
   machineType: null,
 };
@@ -200,6 +206,8 @@ describe('createUserAction', () => {
           role: Role.WORKER,
           workerType: WorkerType.MACHINE,
           machineType: MachineType.WINDMILL,
+          machineCapabilities: MachineType.WINDMILL,
+          employmentType: EmploymentType.FULL_TIME,
           password: 'plain-pass-1',
           phone: '',
         }),
@@ -207,6 +215,11 @@ describe('createUserAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/foreman/scheduling/[id]',
+      'page',
+    );
     expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1');
   });
 });
@@ -241,7 +254,7 @@ describe('updateUserAction', () => {
         displayName: 'Alice',
         role: Role.SALES,
       }),
-      expect.objectContaining({ id: 'actor-owner', role: Role.OWNER }),
+      expect.objectContaining({ id: 'actor-owner', role: Role.ADMIN }),
     );
     // isActive is OWNED BY setUserActive, not this path — must not reach lib.
     const args = accountMock.updateUser.mock.calls[0][1] as Record<string, unknown>;
@@ -250,12 +263,12 @@ describe('updateUserAction', () => {
 
   it('maps AccountInvariantError to error result, not a throw', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    accountMock.updateUser.mockRejectedValueOnce(new MockAccountInvariantError('最后一位 OWNER'));
+    accountMock.updateUser.mockRejectedValueOnce(new MockAccountInvariantError('最后一位管理员'));
 
     const result = await updateUserAction('user-1', null, fd(baseUpdate));
     expect(result.status).toBe('error');
     if (result.status === 'error') {
-      expect(result.message).toBe('最后一位 OWNER');
+      expect(result.message).toBe('最后一位管理员');
     }
   });
 
@@ -290,7 +303,7 @@ describe('setUserActiveAction', () => {
     expect(accountMock.setUserActive).toHaveBeenCalledWith(
       'other-owner',
       false,
-      expect.objectContaining({ id: 'actor-owner', role: Role.OWNER }),
+      expect.objectContaining({ id: 'actor-owner', role: Role.ADMIN }),
     );
   });
 

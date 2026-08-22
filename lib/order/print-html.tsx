@@ -16,7 +16,7 @@ import type { PrintOrder } from '../../components/business/order/OrderPrintLayou
 // negligible vs. Puppeteer cold start that comes right after.
 export async function buildPrintHtml(
   order: PrintOrder,
-  options: { renderedAt?: Date; factoryName?: string } = {},
+  options: { renderedAt?: Date; factoryName: string },
 ): Promise<string> {
   const { renderToStaticMarkup } = await import('react-dom/server');
   const body = renderToStaticMarkup(

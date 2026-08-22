@@ -10,10 +10,9 @@ import {
 
 // Canonical Chinese label for each Role enum. Keep in sync with SPEC §2.1.
 export const ROLE_LABELS: Record<Role, string> = {
-  [Role.OWNER]: '老板',
-  [Role.FOREMAN]: '车间主管',
-  [Role.SALES]: '销售',
-  [Role.CUSTOMER_SERVICE]: '客服',
+  [Role.ADMIN]: '管理员',
+  [Role.SALES]: '外部销售',
+  [Role.CUSTOMER_SERVICE]: '内部销售/客服',
   [Role.WORKER]: '师傅',
 };
 

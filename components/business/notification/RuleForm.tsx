@@ -84,7 +84,7 @@ export function RuleForm({
         {/* totalAmount / totalSales / commission 是&ldquo;千分位 + 2 位小数&rdquo;
             纯数字，**不**含 ¥ 前缀。需要货币符号请在模板里手写
             （如默认 `金额：¥{totalAmount}` →&ldquo;金额：¥1,234.56&rdquo;）。
-            Codex round 110 P2：避免 owner 误以为占位符已含 ¥。 */}
+            避免 owner 误以为占位符已含 ¥。 */}
         {payloadFields.some((f) =>
           /^(totalAmount|totalSales|commission)$/.test(f),
         ) ? (
@@ -102,7 +102,7 @@ export function RuleForm({
         {/* Privacy 警告：CS_PERIOD_* 事件含具体客服业绩 / 提成数据，
             绑多个 channel 会让所有 channel 看到所有客服的业绩。
             schema 暂无 per-user 路由（SPEC §8.1 &ldquo;对应客服&rdquo; 待 P2 加
-            User.notificationChannelId 后实现）。Codex round 113 high：
+            User.notificationChannelId 后实现）。
             源码注释敌不过 owner 误配；UI 需明示。 */}
         {(eventType === 'CS_PERIOD_ENDING' ||
           eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
@@ -128,14 +128,14 @@ export function RuleForm({
           <div className="space-y-2 rounded-md border bg-card p-3">
             {channels.map((c) => {
               const isSelected = selected.has(c.id);
-              // Codex round 103 #2 / round 104 #1：inactive channel
+              // inactive channel
               // 的 checkbox 三态语义：
               //   - active → enabled，正常勾/反勾
               //   - inactive 已绑定 → enabled，让 owner 看到现状、决定
               //     保留还是手动取消（保留 round 103 修的"停用 channel
               //     不丢现有 binding"承诺）
               //   - inactive 未绑定 → disabled，禁止新绑（否则 notify()
-              //     必失败，dashboard 永红，Codex round 104）
+              //     必失败，dashboard 永红）
               const disabled = !c.isActive && !isSelected;
               return (
                 <label
@@ -185,7 +185,7 @@ export function RuleForm({
       </div>
 
       {state?.status === 'error' ? (
-        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {state.message}
         </p>
       ) : null}

@@ -1,17 +1,31 @@
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { getSchedulingView } from '@/lib/production';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
+import { getSchedulingTitleRef } from '@/lib/page-title/refs';
+import { schedulingTitle } from '@/lib/page-title/titles';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
+import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { SchedulingForm } from '@/components/business/production/SchedulingForm';
+import { requirePermission } from '@/lib/auth/permissions';
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `排产 · ${id.slice(0, 8)}` };
+  const session = await getSession();
+  if (!session || !hasPermission('order:schedule', session.user.role)) {
+    return { title: '排产' };
+  }
+  const ref = await getSchedulingTitleRef(id);
+  return { title: schedulingTitle(ref?.orderNo ?? null) };
 }
 
 export default async function SchedulingDetailPage({ params }: PageProps) {
+  // Page-level server-side authz (defense-in-depth: layout gate
+  // doesn't re-run on soft navigation; lib read is unscoped global data).
+  await requirePermission('order:schedule');
   const { id } = await params;
   const view = await getSchedulingView(id);
   if (!view) {
@@ -21,21 +35,27 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
   }
   // getSchedulingView would have returned null (handled above) but the
   // compiler can't infer that after redirect. Narrow explicitly.
-  if (!view.items.length) notFound();
+  if (!view.items.length) redirect('/foreman/scheduling');
 
   return (
     <div className="space-y-6">
+      {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
+          不产生额外请求；组件自身不渲染任何 DOM。 */}
+      <BreadcrumbEntity label={view.orderNo} />
       <div>
         <h1 className="text-xl font-semibold">
-          排产 <span className="font-mono">{view.orderNo}</span>
+          排产 <span className="font-sans tabular-nums">{view.orderNo}</span>
           {view.isUrgent ? (
             <Badge variant="destructive" className="ml-3">
               急单
             </Badge>
           ) : null}
         </h1>
+        {view.customName ? (
+          <p className="font-semibold text-foreground">{view.customName}</p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
-          客户代号：{view.customerRef ?? '—'} · 提交人：{view.submitterDisplayName}
+          客户名称/简称：{view.customerRef ?? '—'} · 提交人：{view.submitterDisplayName}
         </p>
       </div>
 

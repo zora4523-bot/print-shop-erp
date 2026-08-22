@@ -103,12 +103,13 @@ describe('getSalesRanking', () => {
     expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 
-  it('groupBy where 包含本月范围 + status≠CANCELLED + totalAmount>0', async () => {
+  it('groupBy where 包含本月范围 + status≠CANCELLED + processingAmount>0', async () => {
     dbMock.order.groupBy.mockResolvedValue([]);
     await getSalesRanking(new Date('2026-04-25T08:00:00Z'));
     const args = dbMock.order.groupBy.mock.calls[0][0];
     expect(args.where.status).toEqual({ not: 'CANCELLED' });
-    expect(args.where.totalAmount).toEqual({ gt: 0 });
+    expect(args.where.processingAmount).toEqual({ gt: 0 });
+    expect(args.where).not.toHaveProperty('totalAmount');
     // 本月窗口
     expect((args.where.submittedAt.gte as Date).toISOString()).toBe(
       '2026-03-31T16:00:00.000Z',
@@ -119,23 +120,24 @@ describe('getSalesRanking', () => {
     expect(args.take).toBe(10);
   });
 
-  it('排序按 _sum.totalAmount desc', async () => {
+  it('排序按 _sum.processingAmount desc，快递与包材不抬高销售业绩', async () => {
     dbMock.order.groupBy.mockResolvedValue([]);
     await getSalesRanking(new Date('2026-04-25T08:00:00Z'));
     const args = dbMock.order.groupBy.mock.calls[0][0];
-    expect(args.orderBy).toEqual({ _sum: { totalAmount: 'desc' } });
+    expect(args._sum).toEqual({ processingAmount: true });
+    expect(args.orderBy).toEqual({ _sum: { processingAmount: 'desc' } });
   });
 
   it('Top 排序保持 + role / displayName 拼回', async () => {
     dbMock.order.groupBy.mockResolvedValue([
       {
         submitterId: 'u-sales',
-        _sum: { totalAmount: '5000.00' },
+        _sum: { processingAmount: '5000.00' },
         _count: { _all: 3 },
       },
       {
         submitterId: 'u-cs',
-        _sum: { totalAmount: '3000.00' },
+        _sum: { processingAmount: '3000.00' },
         _count: { _all: 2 },
       },
     ]);
@@ -159,12 +161,12 @@ describe('getSalesRanking', () => {
     dbMock.order.groupBy.mockResolvedValue([
       {
         submitterId: 'u-ghost',
-        _sum: { totalAmount: '100.00' },
+        _sum: { processingAmount: '100.00' },
         _count: { _all: 1 },
       },
       {
         submitterId: 'u-sales',
-        _sum: { totalAmount: '5000.00' },
+        _sum: { processingAmount: '5000.00' },
         _count: { _all: 3 },
       },
     ]);
@@ -176,11 +178,11 @@ describe('getSalesRanking', () => {
     expect(r[0]!.userId).toBe('u-sales');
   });
 
-  it('_sum.totalAmount = null 安全兜底（极端 NULL 行）→ 不上榜', async () => {
+  it('_sum.processingAmount = null 安全兜底（极端 NULL 行）→ 不上榜', async () => {
     dbMock.order.groupBy.mockResolvedValue([
       {
         submitterId: 'u-edge',
-        _sum: { totalAmount: null },
+        _sum: { processingAmount: null },
         _count: { _all: 0 },
       },
     ]);

@@ -48,12 +48,17 @@ export function OutsourceActions({ id, canReceive, canCancel }: Props) {
               {receivePending ? '处理中…' : '已回货'}
             </Button>
           </div>
+          {receiveState?.status === 'success' && receiveState.notice ? (
+            <p className="text-xs text-warning-foreground">
+              {receiveState.notice}
+            </p>
+          ) : null}
           {receiveState?.status === 'error' ? (
             <p className="text-xs text-destructive">{receiveState.message}</p>
           ) : null}
           {receiveState?.status === 'invalid' ? (
             // Surface per-field Zod errors — otherwise an invalid
-            // actualDate silently fails (Codex round 41 UX note).
+            // actualDate silently fails .
             <ul className="text-xs text-destructive">
               {Object.entries(receiveState.fieldErrors).flatMap(
                 ([field, msgs]) =>
