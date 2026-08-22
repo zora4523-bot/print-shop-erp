@@ -29,6 +29,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   computeHourlyPayroll,
   computeHourlyForAllInMonth,
+  HourlyAggregateError,
   HourlyBatchUnexpectedError,
   listHourlyPayrolls,
   markHourlyPayrollPaid,
@@ -730,6 +731,72 @@ describe('markHourlyPayrollPaid', () => {
     expect(sqlCalls[0][1]).toMatch(
       /print-shop-erp:hourly:worker-1:2026-05/,
     );
+  });
+});
+
+describe('future-dated settlement guard (上海日历)', () => {
+  // 未来月份的 Attendance 必然为空，而 COOK 的 monthlyBase 是整月 flat、
+  // 不按天折算 —— 一次误操作就能凭空写出一整月厨师月固定工资。
+  const FUTURE_MONTH = '2026-07';
+  const NOW = new Date('2026-06-15T12:00:00Z');
+
+  it('single path refuses a future month before touching the database', async () => {
+    await expect(
+      computeHourlyPayroll('worker-1', FUTURE_MONTH, NOW),
+    ).rejects.toThrow(/未来月份/);
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+
+  it('COOK: a future month cannot mint a whole month of COOK_MONTHLY base', async () => {
+    dbMock.user.findUnique.mockResolvedValue(
+      workerFixture({ workerType: WorkerType.COOK }),
+    );
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', FUTURE_MONTH, NOW),
+    ).rejects.toThrow(/未来月份/);
+    expect(dbMock.hourlyWorkerPayroll.upsert).not.toHaveBeenCalled();
+  });
+
+  it('still allows the current month (口径：只拒严格未来，别改成 >=)', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-06', NOW),
+    ).resolves.toBeDefined();
+    expect(dbMock.hourlyWorkerPayroll.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('judges "future" on the Shanghai calendar, not UTC', async () => {
+    dbMock.user.findUnique.mockResolvedValue(workerFixture());
+    setupAllRules();
+    dbMock.attendance.findMany.mockResolvedValue([]);
+
+    // UTC 2026-06-30T15:59:59Z = Shanghai 06-30 23:59:59 → 7 月仍是未来
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-07', new Date('2026-06-30T15:59:59Z')),
+    ).rejects.toThrow(/未来月份/);
+    // UTC 2026-06-30T16:00:00Z = Shanghai 07-01 00:00 → 7 月已是当月
+    await expect(
+      computeHourlyPayroll('worker-1', '2026-07', new Date('2026-06-30T16:00:00Z')),
+    ).resolves.toBeDefined();
+  });
+
+  it('batch aborts wholesale instead of reporting a per-worker error', async () => {
+    let caught: unknown;
+    try {
+      await computeHourlyForAllInMonth(FUTURE_MONTH, NOW);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(HourlyAggregateError);
+    expect((caught as Error).message).toMatch(/未来月份/);
+    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 });
 

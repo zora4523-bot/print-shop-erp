@@ -79,7 +79,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeHourlyForm defaultMonth={selectedMonth} />
+        <RecomputeHourlyForm defaultMonth={selectedMonth} maxMonth={currentShanghaiMonth()} />
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

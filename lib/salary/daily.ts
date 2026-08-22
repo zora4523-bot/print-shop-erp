@@ -8,6 +8,7 @@ import {
 import { db } from '../db';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { parseStrictYmd } from '../auth/schemas';
+import { isFutureShanghaiDate } from '../dashboard/shanghai-clock';
 import {
   calcMachineDailySalary,
   type MachineSalaryRule,
@@ -140,6 +141,28 @@ function dailyLockKey(workerId: string, date: string): string {
   return `print-shop-erp:daily:${workerId}:${date}`;
 }
 
+// 单人与批量两个入口共用的守卫。**刻意放在 lib/ 而不是 action/route**：
+// owner 的重算按钮、/api/cron/daily-salary 的 inline 分支、以及 durable
+// worker 领取的 CRON_DAILY_SALARY 任务，三条写路径全部收敛到本文件这两个
+// 函数，只有这一层能覆盖所有写入者。
+//
+// `now` 兼作可注入时钟：批量调用方与测试显式传入，生产不传、走真实墙上
+// 时钟。**不能用 computeDailyWorkerSalary 里的 `ruleAt` 当时钟** —— 未传
+// `now` 时 ruleAt = 该日 23:59:59.999，对未来日期它本身就在未来，检查会
+// 永远通过。
+//
+// 口径：只拒绝**严格未来**。当天允许 —— cron 凌晨跑的是昨天，业主手工重算
+// 的典型场景恰恰是「今天有人补报工了，重算今天」，当日已完工任务是真实事实。
+function assertNotFutureSalaryDate(date: string, now?: Date): void {
+  if (isFutureShanghaiDate(date, now ?? new Date())) {
+    throw new DailySalaryError(
+      `不能结算未来日期（${date}，上海日历）：该日尚未开始，` +
+        `已完工任务必然为 0，写出的只会是一条凭空的保底工资，` +
+        `且一旦被标记已发就只能人工撤销。请等该日结束后再重算。`,
+    );
+  }
+}
+
 // Compute (or recompute) one worker × one date. Upserts on
 // @@unique([workerId, date]) so re-running the job on an already-
 // processed day is idempotent and corrects any after-the-fact task
@@ -150,6 +173,9 @@ export async function computeDailyWorkerSalary(
   now?: Date,
 ): Promise<DailyWorkerSalaryResult> {
   const { start, end } = shanghaiDayRange(date);
+  // 必须在下面那段事务之前 —— tasks.length === 0 分支会照 dailyBase 写出
+  // 一条正式 DailyWorkerSalary，对未来日期那是 100% 会命中的分支。
+  assertNotFutureSalaryDate(date, now);
   const ruleAt = now ?? new Date(end.getTime() - 1);
 
   const worker = await db.user.findUnique({
@@ -491,6 +517,11 @@ export async function computeDailyForAllMachineWorkers(
   now?: Date,
 ): Promise<BatchDailyResult> {
   const { start, end } = shanghaiDayRange(date);
+  // 在扫师傅之前整批中止。放在这里而不是靠 per-worker try/catch 兜住，是
+  // 因为日期错是**整批的输入错**，不是某个师傅的业务错：逐人捕获会返回
+  // status:'success' + errorCount = 全员数，UI 上看着像"部分失败"，实际是
+  // 一个参数打错了。抛出去让 action 映射成 {status:'error'}。
+  assertNotFutureSalaryDate(date, now);
   const settled: DailyWorkerSalaryResult[] = [];
   const errors: Array<{ workerId: string; workerName: string; message: string }> = [];
   let workers: Array<{ id: string; displayName: string }>;

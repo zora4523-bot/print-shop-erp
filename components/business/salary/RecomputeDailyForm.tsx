@@ -8,9 +8,12 @@ import type { RecomputeDailyResult } from '@/actions/owner-salary.types';
 
 type Props = {
   defaultDate: string;
+  // 上海日历的今天。纯浏览器层提示，真闸口在 lib/salary/daily.ts 的
+  // assertNotFutureSalaryDate —— 客户端时钟不可信，这里只是少一次往返。
+  maxDate: string;
 };
 
-export function RecomputeDailyForm({ defaultDate }: Props) {
+export function RecomputeDailyForm({ defaultDate, maxDate }: Props) {
   const [state, action] = useActionState<RecomputeDailyResult | null, unknown>(
     recomputeDailySalaryAction,
     null,
@@ -31,6 +34,7 @@ export function RecomputeDailyForm({ defaultDate }: Props) {
           name="date"
           aria-label="重算日期"
           defaultValue={defaultDate}
+          max={maxDate}
           className="max-w-[180px]"
         />
         <Button type="submit" disabled={pending}>
