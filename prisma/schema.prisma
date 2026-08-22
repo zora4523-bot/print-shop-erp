@@ -1756,6 +1756,16 @@ model NotificationLog {
   id             String             @id @default(cuid())
   eventType      String
   channelId      String
+  // 一次「逻辑投递」的稳定标识 = BackgroundJob.dedupeKey，跨 job attempt 不变。
+  // durable worker 重试前用 (deliveryKey, status=SUCCESS) 查出已经推成功的
+  // channel 并跳过 —— fan-out 部分成功时不重复打扰已收到消息的群
+  // （CLAUDE.md §15.4「携带部分进度」在通知侧的落地）。写入也走
+  // upsert(deliveryKey, channelId)，重试成功时把 RETRYING/FAILED 行就地翻成
+  // SUCCESS，owner 的 24h 失败告警条因此会自愈。
+  //
+  // 可空：inline/dev 路径与 owner 的「测试发送」不带 key。PG 唯一索引默认
+  // NULLS DISTINCT，任意多条 NULL 行互不冲突，所以存量数据与老路径零影响。
+  deliveryKey    String?
   messageContent String
   status         NotificationStatus
   errorMessage   String?
@@ -1766,6 +1776,7 @@ model NotificationLog {
 
   channel NotificationChannel @relation(fields: [channelId], references: [id])
 
+  @@unique([deliveryKey, channelId])
   @@index([eventType])
   @@index([status])
   @@index([createdAt])
