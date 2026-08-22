@@ -22,10 +22,12 @@ const { dbMock } = vi.hoisted(() => {
       findMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
     };
+    orderItem: { findMany: ReturnType<typeof vi.fn> };
     outsourceOrder: { findMany: ReturnType<typeof vi.fn> };
     productionTask: {
       createMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
       groupBy: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
@@ -34,6 +36,8 @@ const { dbMock } = vi.hoisted(() => {
     salaryRule: { findFirst: ReturnType<typeof vi.fn> };
     workerMachineSalaryRule: { findFirst: ReturnType<typeof vi.fn> };
     orderLog: { create: ReturnType<typeof vi.fn> };
+    // 报工数量上限倍数现在从 Setting 读（report_qty_max_multiple）
+    setting: { findUnique: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   } = {
@@ -45,10 +49,12 @@ const { dbMock } = vi.hoisted(() => {
     },
     craft: { findMany: vi.fn() },
     user: { findMany: vi.fn(), findUnique: vi.fn() },
+    orderItem: { findMany: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
     productionTask: {
       createMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
       groupBy: vi.fn(),
       update: vi.fn(),
@@ -57,6 +63,7 @@ const { dbMock } = vi.hoisted(() => {
     salaryRule: { findFirst: vi.fn() },
     workerMachineSalaryRule: { findFirst: vi.fn() },
     orderLog: { create: vi.fn() },
+    setting: { findUnique: vi.fn() },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
@@ -86,8 +93,10 @@ import {
   getPendingSchedulingBoard,
   getSchedulingView,
   getWorkerAssignmentEligibility,
+  getWorkerTaskDetail,
   listWorkerTasks,
   ReportError,
+  OverReportError,
 } from '../production';
 import { OrderInvariantError } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
@@ -175,7 +184,14 @@ beforeEach(() => {
   dbMock.order.findMany.mockReset();
   dbMock.order.findUnique.mockReset();
   dbMock.order.update.mockReset();
-  dbMock.craft.findMany.mockReset();
+  // 默认值要让完工闸口的覆盖分支「适用但通过」，而不是被短路：
+  // fixtureCrafts() 里 craft-foil / craft-glue 都是 isOutsource:false，
+  // 默认款式不进应外协集合。给 orderItem 一个空数组反而会让覆盖分支静默
+  // 短路，看起来「都过了」其实一次都没走到。
+  dbMock.craft.findMany.mockReset().mockResolvedValue(fixtureCrafts());
+  dbMock.orderItem.findMany.mockReset().mockResolvedValue([
+    { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-foil', 'craft-glue'] },
+  ]);
   dbMock.user.findMany.mockReset();
   dbMock.user.findUnique.mockReset().mockResolvedValue({
     id: 'worker-1',
@@ -189,6 +205,7 @@ beforeEach(() => {
   ]);
   dbMock.productionTask.createMany.mockReset();
   dbMock.productionTask.findUnique.mockReset();
+  dbMock.productionTask.findFirst.mockReset().mockResolvedValue(null);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionTask.groupBy.mockReset().mockResolvedValue([]);
   dbMock.productionTask.update.mockReset();
@@ -196,6 +213,9 @@ beforeEach(() => {
   dbMock.salaryRule.findFirst.mockReset();
   dbMock.workerMachineSalaryRule.findFirst.mockReset().mockResolvedValue(null);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
+  // 默认「没有配置行」→ resolveSetting 退回内置默认 3 倍。需要别的倍数的
+  // 用例自己 mockResolvedValue({ value: { multiple: N } })。
+  dbMock.setting.findUnique.mockReset().mockResolvedValue(null);
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -788,7 +808,14 @@ describe('scheduleOrder', () => {
     dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
     dbMock.user.findMany.mockResolvedValue([]);
     dbMock.outsourceOrder.findMany.mockResolvedValue([
-      { id: 'outsource-1', status: OutsourceStatus.RECEIVED },
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+      },
+    ]);
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-outsource'] },
     ]);
     dbMock.productionTask.createMany.mockResolvedValue({ count: 0 });
     dbMock.productionTask.findMany.mockResolvedValue([]);
@@ -955,6 +982,7 @@ function fixtureTask(
     workerType: WorkerType | null;
     machineType: MachineType | null;
     plannedQty: number;
+    remark: string | null;
     orderStatus: OrderStatus;
     isDoubleSided: boolean;
     isDoubleColor: boolean;
@@ -973,6 +1001,7 @@ function fixtureTask(
     workerType: WorkerType.MACHINE,
     machineType: MachineType.HAND_PRESS,
     plannedQty: 5000,
+    remark: null,
     ...taskLevel,
     orderItem: {
       id: 'item-1',
@@ -1430,6 +1459,42 @@ describe('worker task visibility', () => {
   });
 });
 
+describe('getWorkerTaskDetail', () => {
+  // 这个函数原来是 findUnique 整行读出来、再在 JS 里判 workerId 和
+  // 工单状态。改成 findFirst + lib/auth/task-scope 的共享片段之后，
+  // 同一条 authz 规则只剩一份（标题查询 lib/page-title/refs.ts 也用它）。
+  // 下面钉住等价性：闸口确实落在 where 上，不是 SQL 拉全量再过滤。
+  it('ADMIN 无行级限制，where 只有主键', async () => {
+    await getWorkerTaskDetail('task-1', ownerActor);
+
+    expect(dbMock.productionTask.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'task-1' } }),
+    );
+  });
+
+  it('WORKER 的 where 带 workerId 与「工单已离开 SUBMITTED」', async () => {
+    await getWorkerTaskDetail('task-1', { id: 'worker-1', role: Role.WORKER });
+
+    expect(dbMock.productionTask.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'task-1',
+          workerId: 'worker-1',
+          orderItem: { order: { status: { not: OrderStatus.SUBMITTED } } },
+        },
+      }),
+    );
+  });
+
+  it('查不到（被 where 挡掉或本就不存在）时返回 null', async () => {
+    dbMock.productionTask.findFirst.mockResolvedValue(null);
+
+    await expect(
+      getWorkerTaskDetail('task-1', { id: 'worker-9', role: Role.WORKER }),
+    ).resolves.toBeNull();
+  });
+});
+
 describe('reportTask', () => {
   const validInput = { completedQty: 4900, defectQty: 50, reworkQty: 50 };
 
@@ -1600,6 +1665,11 @@ describe('reportTask', () => {
         orderStatus: OrderStatus.IN_PRODUCTION,
         isDoubleSided: true,
         isDoubleColor: true,
+        // ⚠️ 故意把 plannedQty 拉到和报工合计一致（30,000,000），让数量守卫
+        // 走「等于计划数 → 直接通过」分支。这条用例测的是**另一个**闸口：
+        // calculateStorablePiecework 的 Decimal(10,2) 溢出。有人把它改回
+        // 5000，数量守卫会先抛 OverReportError，这道算钱门禁就被静默遮掉。
+        plannedQty: 30_000_000,
       }),
     );
     dbMock.salaryRule.findFirst.mockResolvedValue({
@@ -1741,6 +1811,46 @@ describe('reportTask', () => {
     expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
+  it('外协单已收货但没覆盖到含外协工艺的款式二 → 报完最后一根内部任务也不完工', async () => {
+    // 报工路径上的端到端回归：闸口从「有外协单且全部 RECEIVED」收紧成
+    // 款式级覆盖之后，这种「只给款式一发了外协单」的工单不能再自动完工。
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+    ]);
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+      requiresOutsource: true,
+    });
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+      },
+    ]);
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-outsource'] },
+      { id: 'item-2', sequence: 2, name: '款式二', crafts: ['craft-outsource'] },
+    ]);
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+
+    const result = await reportTask('task-1', validInput, workerActor);
+    expect(result.orderCompleted).toBe(false);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
   it('counts CANCELLED siblings out of the cascade check (order can still complete)', async () => {
     dbMock.productionTask.findUnique.mockResolvedValue(
       fixtureTask({
@@ -1869,6 +1979,203 @@ describe('reportTask', () => {
       reportTask('task-1', validInput, workerActor),
     ).rejects.toBeInstanceOf(InvalidTaskTransitionError);
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('reportTask 数量守卫（业主 2026-08-21）', () => {
+  // 计划数 5000（fixtureTask 默认）。缺配置行 → fallback 3 倍 → 合计上限
+  // 15000，判据是 **>=**（合计达到 15000 就硬拒）。
+  function armMachineReport(taskOverrides = {}) {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+        ...taskOverrides,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+      requiresOutsource: false,
+    });
+    // 还有兄弟任务没完 → 完工闸口在 INTERNAL_TASKS 早退，不写 STATUS_CHANGE
+    // 日志，所以 orderLog 上就只可能有超报那一条。
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+      { id: 'task-2', status: TaskStatus.IN_PROGRESS },
+    ]);
+  }
+
+  const updateData = () => dbMock.productionTask.update.mock.calls[0][0].data;
+
+  it('少报（3000 < 计划 5000）直接通过，不写超报备注也不写工单日志', async () => {
+    armMachineReport();
+    await reportTask(
+      'task-1',
+      { completedQty: 3000, defectQty: 0, reworkQty: 0 },
+      workerActor,
+    );
+    expect(updateData().status).toBe(TaskStatus.COMPLETED);
+    expect(updateData().remark).toBeUndefined();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('合计正好等于计划数 → 通过，且不算超报', async () => {
+    armMachineReport();
+    await reportTask(
+      'task-1',
+      { completedQty: 4900, defectQty: 50, reworkQty: 50 },
+      workerActor,
+    );
+    expect(updateData().status).toBe(TaskStatus.COMPLETED);
+    expect(updateData().remark).toBeUndefined();
+  });
+
+  it('超报未勾确认 → 抛可确认的 OverReportError，且一行都不写', async () => {
+    armMachineReport();
+    await expect(
+      reportTask(
+        'task-1',
+        { completedQty: 5001, defectQty: 0, reworkQty: 0 },
+        workerActor,
+      ),
+    ).rejects.toThrow(/请勾选「确认超出计划数」/);
+    // 守卫在规则查询和计件计算之前 —— 被拒的报工不该产生任何计件计算。
+    expect(dbMock.salaryRule.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('超报未勾确认时错误对象带 confirmable=true 和数量，供 action 拼提示', async () => {
+    armMachineReport();
+    const err = await reportTask(
+      'task-1',
+      { completedQty: 6200, defectQty: 0, reworkQty: 0 },
+      workerActor,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OverReportError);
+    expect((err as OverReportError).confirmable).toBe(true);
+    expect((err as OverReportError).plannedQty).toBe(5000);
+    expect((err as OverReportError).totalReported).toBe(6200);
+    expect((err as OverReportError).limitQty).toBe(15000);
+  });
+
+  it('超报已勾确认 → 通过，把超出情况写进任务备注 + 一条 TASK_OVER_REPORT 工单日志', async () => {
+    armMachineReport();
+    await reportTask(
+      'task-1',
+      {
+        completedQty: 6000,
+        defectQty: 100,
+        reworkQty: 100,
+        overReportConfirmed: true,
+      },
+      workerActor,
+    );
+
+    const remark = updateData().remark as string;
+    expect(remark).toContain('[超计划报工]');
+    expect(remark).toContain('计划 5000');
+    expect(remark).toContain('合计 6200');
+    expect(remark).toContain('合格 6000');
+    expect(remark).toContain('不良 100');
+    expect(remark).toContain('返工 100');
+
+    expect(dbMock.orderLog.create).toHaveBeenCalledTimes(1);
+    const log = dbMock.orderLog.create.mock.calls[0][0].data;
+    expect(log.action).toBe('TASK_OVER_REPORT');
+    expect(log.orderId).toBe('order-1');
+    expect(log.operatorId).toBe(workerActor.id);
+    expect(log.changedFields.completedQty).toEqual({ before: 0, after: 6000 });
+    expect(log.remark).toContain('[超计划报工]');
+  });
+
+  it('已有任务备注时追加而不是覆盖', async () => {
+    armMachineReport({ remark: '机台中途换刀' });
+    await reportTask(
+      'task-1',
+      { completedQty: 6000, defectQty: 0, reworkQty: 0, overReportConfirmed: true },
+      workerActor,
+    );
+    const remark = updateData().remark as string;
+    expect(remark.startsWith('机台中途换刀\n')).toBe(true);
+    expect(remark).toContain('[超计划报工]');
+  });
+
+  it('合计恰好等于上限（计划 5000 × 3 = 15000）时硬拒 —— 挡多打一个零', async () => {
+    // 判据必须是 >= 而不是 >：多打一个零把 P 变成 10P，严格大于时 N=10
+    // 恰好落进「勾一下就能过」的分支，守卫要挡的唯一场景一次都挡不住。
+    // 这条用例就是钉住那个等号的。
+    armMachineReport();
+    const err = await reportTask(
+      'task-1',
+      { completedQty: 15_000, defectQty: 0, reworkQty: 0, overReportConfirmed: true },
+      workerActor,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OverReportError);
+    expect((err as OverReportError).confirmable).toBe(false);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('计划 5000 时把合格数多打一个零（50000）一律拒绝', async () => {
+    armMachineReport();
+    await expect(
+      reportTask(
+        'task-1',
+        { completedQty: 50_000, defectQty: 0, reworkQty: 0, overReportConfirmed: true },
+        workerActor,
+      ),
+    ).rejects.toThrow(/已达到.*3 倍上限（15000）/);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('Setting 把倍数改成 5 后上限变成 25000（阈值真的从库里读，不是写死的 3）', async () => {
+    // 这条是「Setting 表只写不读」的回归门禁，和 owner-watchlist /
+    // cdr bundle 两处同型。默认 3 倍下上限是 15000，改成 5 倍后必须变成
+    // 25000 —— 报文里的两个数字同时变，写死任何一个都会红。
+    dbMock.setting.findUnique.mockResolvedValue({ value: { multiple: 5 } });
+    armMachineReport();
+    await expect(
+      reportTask(
+        'task-1',
+        { completedQty: 25_000, defectQty: 0, reworkQty: 0, overReportConfirmed: true },
+        workerActor,
+      ),
+    ).rejects.toThrow(/5 倍上限（25000）/);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
+  });
+
+  it('Setting 为 5 时 20000 仍在上限内，勾确认即可通过', async () => {
+    // 和上一条配对：同一个数字在默认 3 倍下是硬拒（20000 >= 15000），
+    // 5 倍下是「勾确认就过」。一起看才证明阈值真的在动。
+    dbMock.setting.findUnique.mockResolvedValue({ value: { multiple: 5 } });
+    armMachineReport();
+    await reportTask(
+      'task-1',
+      { completedQty: 20_000, defectQty: 0, reworkQty: 0, overReportConfirmed: true },
+      workerActor,
+    );
+    expect(updateData().status).toBe(TaskStatus.COMPLETED);
+    expect(updateData().remark).toContain('合计 20000');
+  });
+
+  it('plannedQty 为 0 时守卫整段跳过，不把任务锁死在无法报工的状态', async () => {
+    // 防御性分支，正常不可达（orderItemQuantityField 的 min(1) 保证计划数
+    // 至少是 1）。留着是因为脏数据下 limit 会是 0，而 schema 又要求合计
+    // > 0；不跳过的话这个任务永远报不了工。
+    armMachineReport({ plannedQty: 0 });
+    await reportTask(
+      'task-1',
+      { completedQty: 100, defectQty: 0, reworkQty: 0 },
+      workerActor,
+    );
+    expect(updateData().status).toBe(TaskStatus.COMPLETED);
+    expect(updateData().remark).toBeUndefined();
   });
 });
 

@@ -21,6 +21,7 @@ import type {
   ScheduleOrderInput,
 } from './auth/schemas';
 import { orderCascadeLockKey } from './order/locks';
+import { getWorkerTaskScopeFilter } from './auth/task-scope';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import {
   getActiveMachineRule,
@@ -31,6 +32,8 @@ import {
   maybeCompleteProductionOrder,
   type ProductionCompletionTx,
 } from './production-completion';
+import { getSetting } from './settings';
+import { todayShanghai } from './dashboard/shanghai-clock';
 
 // Thrown when a scheduling request violates the allowlist contract
 // (duplicate / missing / unknown craft-item pairs, bad worker, etc.).
@@ -468,12 +471,14 @@ export async function scheduleOrder(
 
     const orderCompleted =
       inserted.count === 0 && skippedOutsourceCrafts > 0
-        ? await maybeCompleteProductionOrder(
-            txClient as unknown as ProductionCompletionTx,
-            order.id,
-            actor.id,
-            new Date(),
-          )
+        ? (
+            await maybeCompleteProductionOrder(
+              txClient as unknown as ProductionCompletionTx,
+              order.id,
+              actor.id,
+              new Date(),
+            )
+          ).completed
         : false;
 
     return {
@@ -684,6 +689,33 @@ export class ReportError extends Error {
   }
 }
 
+// 单条报工的数量守卫（业主 2026-08-21 拍板）。继承 ReportError 是刻意的：
+// actions 层的 mapTaskError 已经有 `instanceof ReportError` 分支，硬拒那条
+// 不用改就会变成 { status: 'error' }；action 只需要在它**之前**多拦一次
+// confirmable 那条，把它变成挂在复选框上的字段错误。
+export class OverReportError extends ReportError {
+  /** true = 勾选「确认超出计划数」后重提即可通过；false = 已达倍数上限，勾了也不给过。 */
+  readonly confirmable: boolean;
+  readonly plannedQty: number;
+  readonly totalReported: number;
+  readonly limitQty: number;
+
+  constructor(args: {
+    message: string;
+    confirmable: boolean;
+    plannedQty: number;
+    totalReported: number;
+    limitQty: number;
+  }) {
+    super(args.message);
+    this.name = 'OverReportError';
+    this.confirmable = args.confirmable;
+    this.plannedQty = args.plannedQty;
+    this.totalReported = args.totalReported;
+    this.limitQty = args.limitQty;
+  }
+}
+
 const DECIMAL_10_2_MAX = '99999999.99';
 
 type PieceworkTaskInput = Parameters<
@@ -885,6 +917,7 @@ type TaskTxClient = {
           workerType?: WorkerType | null;
           machineType: MachineType | null;
           plannedQty: number;
+          remark?: string | null;
           orderItem: {
             id: string;
             orderId: string;
@@ -1161,6 +1194,13 @@ export async function reportTask(
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<ReportTaskResult> {
+  // 数量守卫的倍数上限（Setting，业主可后台改，默认 3 倍）。**必须在开事务
+  // 之前读**：getSetting 走全局 db，放进 tx 回调里就是在持有 taskLockKey
+  // advisory lock 的同时再向连接池要一条连接——池打满时这是经典自锁。
+  const { multiple: maxReportMultiple } = await getSetting(
+    'report_qty_max_multiple',
+  );
+
   // Slice C wire ─ 需要 cascade 后的 orderId 来 fire ORDER_COMPLETED。
   // tx 内拿不到 orderId 单独传出（要保留接口稳定），下面在 tx 关闭后
   // 单查一次 task → orderItem.orderId。
@@ -1178,6 +1218,7 @@ export async function reportTask(
         workerType: true,
         machineType: true,
         plannedQty: true,
+        remark: true,
         orderItem: {
           select: {
             id: true,
@@ -1206,6 +1247,63 @@ export async function reportTask(
     }
 
     transitionProductionTask(task.status, TaskStatus.COMPLETED);
+
+    // ── 数量守卫（业主 2026-08-21 拍板）────────────────────────────────
+    // 少报是合法的（材料不足、中途换机、半成品转外协…），直接放行；
+    // 超过计划数要勾确认并留痕；合计**达到**「计划数 × N」一律拒绝，挡的
+    // 是多打一个零。N 在 Setting 里（report_qty_max_multiple），业主可后台调。
+    //
+    // 判据是 >= 而不是 >：多打一个零把 P 变成 10P，严格大于时 N=10 恰好
+    // 放行——那正是这道守卫唯一要挡的场景。默认 N=3、可配上限 10。
+    //
+    // 位置：状态机之后、order 锁和规则查询之前 —— 被拒的报工不该拿走任何
+    // 锁，也不该产生任何计件计算。plannedQty 在这里读是关键：它和下面的
+    // update 在同一事务、同一把 taskLockKey 锁内，两者拿到的是同一个一致性
+    // 快照（plannedQty 本身在任务开工后已不可变，见 assertQuantityChangeAllowed）。
+    //
+    // 批量路径 reportTasks() 强制按 plannedQty 报（SPEC §3.3「一键完工：
+    // 合格数=计划数」），合计恒等于计划数，本守卫对它是恒真的，所以不动它。
+    const totalReported =
+      input.completedQty + input.defectQty + input.reworkQty;
+    let overReportRemark: string | null = null;
+
+    // plannedQty <= 0 是防御性分支，正常不可达（orderItemQuantityField 的
+    // min(1) 保证下来的计划数至少是 1）。留着是因为脏数据下 limit 会是 0，
+    // 而 schema 又要求合计 > 0，不跳过等于把这个任务永久锁死在无法报工的状态。
+    if (task.plannedQty > 0 && totalReported > task.plannedQty) {
+      const limitQty = task.plannedQty * maxReportMultiple;
+
+      if (totalReported >= limitQty) {
+        throw new OverReportError({
+          confirmable: false,
+          plannedQty: task.plannedQty,
+          totalReported,
+          limitQty,
+          message:
+            `合计报工 ${totalReported} 已达到计划数 ${task.plannedQty} 的 ` +
+            `${maxReportMultiple} 倍上限（${limitQty}），请核对数量后重新填写。` +
+            `确实需要超出请联系管理员调整「单条报工数量上限倍数」。`,
+        });
+      }
+
+      if (input.overReportConfirmed !== true) {
+        throw new OverReportError({
+          confirmable: true,
+          plannedQty: task.plannedQty,
+          totalReported,
+          limitQty,
+          message:
+            `合计报工 ${totalReported} 超过计划数 ${task.plannedQty}，` +
+            `请勾选「确认超出计划数」后再提交。`,
+        });
+      }
+
+      overReportRemark =
+        `[超计划报工] ${todayShanghai(now)} 计划 ${task.plannedQty} / ` +
+        `合计 ${totalReported}（合格 ${input.completedQty} / ` +
+        `不良 ${input.defectQty} / 返工 ${input.reworkQty}），` +
+        `报工人 ${actor.id}，已勾选确认`;
+    }
 
     // Keep the same task → order → salary-rule lock order as the batch
     // report path. Besides avoiding a lock-order cycle, holding the order lock
@@ -1285,18 +1383,60 @@ export async function reportTask(
         pieceworkAmount,
         salaryRuleSnapshot,
         completedAt: now,
+        // 只在真的超报时才带上这个 key —— 没超报时 data 里根本不出现
+        // remark，既方便断言，也不会让别的写入方误以为这里会清空备注。
+        // 追加而不是覆盖：ProductionTask.remark 在此之前全仓没有写入方，
+        // 这是它第一个写入方，追加是零成本的向前兼容。
+        ...(overReportRemark
+          ? {
+              remark: [task.remark, overReportRemark]
+                .filter(
+                  (line): line is string =>
+                    typeof line === 'string' && line.trim() !== '',
+                )
+                .join('\n'),
+            }
+          : {}),
       },
       select: { id: true, status: true },
     });
 
+    if (overReportRemark) {
+      // 任务备注是数据层留痕；OrderLog 才是老板真会翻的那条时间线，也是
+      // 看板「超计划报工」那张表的唯一数据源（lib/dashboard/owner-watchlist.ts
+      // 的 getRecentOverReports 按 action='TASK_OVER_REPORT' 查它）。
+      // before 全填 0 是诚实的：这三个计数在本次报工前确实都是 0
+      // （schema 默认值），plannedQty 和合计放在 remark 里给人读。
+      await txClient.orderLog.create({
+        data: {
+          orderId: order.id,
+          operatorId: actor.id,
+          action: 'TASK_OVER_REPORT',
+          changedFields: {
+            completedQty: { before: 0, after: input.completedQty },
+            defectQty: { before: 0, after: input.defectQty },
+            reworkQty: { before: 0, after: input.reworkQty },
+          },
+          remark: `${task.orderItem.name} (#${task.orderItem.sequence})：${overReportRemark}`,
+        },
+      });
+    }
+
     // Cascade-to-COMPLETED gate: all non-CANCELLED tasks for this order must
-    // be COMPLETED. The order lock has been held since before the task write.
-    const orderCompleted = await maybeCompleteProductionOrder(
+    // be COMPLETED, and every item carrying an outsource craft must be
+    // covered by a live outsource order. The order lock has been held since
+    // before the task write.
+    //
+    // 这里只取 .completed：覆盖缺口是主管要处理的事，师傅端报工界面显示
+    // 「款式 B 尚未外协」没有任何可执行动作。缺口的呈现走工单详情页横幅 +
+    // 外协收货返回值，见 app/(admin)/orders/[id]/page.tsx。
+    const completion = await maybeCompleteProductionOrder(
       txClient as unknown as ProductionCompletionTx,
       order.id,
       actor.id,
       now,
     );
+    const orderCompleted = completion.completed;
 
     return {
       taskId: task.id,
@@ -1628,14 +1768,16 @@ export async function reportTasks(
 
     const completedOrderIds: string[] = [];
     for (const orderId of orderIds) {
-      if (
-        await maybeCompleteProductionOrder(
-          tx as unknown as ProductionCompletionTx,
-          orderId,
-          actor.id,
-          now,
-        )
-      ) {
+      // ⚠️ maybeCompleteProductionOrder 返回的是对象，不是 boolean。写成
+      // `if (await maybeCompleteProductionOrder(...))` 会恒为 truthy 而
+      // tsc 一个字都不报——工单会被无条件判为完工。必须显式取 .completed。
+      const completion = await maybeCompleteProductionOrder(
+        tx as unknown as ProductionCompletionTx,
+        orderId,
+        actor.id,
+        now,
+      );
+      if (completion.completed) {
         completedOrderIds.push(orderId);
       }
     }
@@ -1769,8 +1911,10 @@ export async function getWorkerTaskDetail(
   taskId: string,
   actor: { id: string; role: Role },
 ) {
-  const row = await db.productionTask.findUnique({
-    where: { id: taskId },
+  // scope 表达在 where 里（与 getOrderScopeFilter 同构），不再整行读出来
+  // 再判断 —— 标题查询（lib/page-title/refs.ts）复用同一片段，两处不会漂移。
+  const row = await db.productionTask.findFirst({
+    where: { id: taskId, ...getWorkerTaskScopeFilter(actor) },
     select: {
       id: true,
       status: true,
@@ -1823,15 +1967,6 @@ export async function getWorkerTaskDetail(
       craft: { select: { name: true } },
     },
   });
-  if (!row) return null;
-  const globalOverride = actor.role === Role.ADMIN;
-  if (!globalOverride && row.workerId !== actor.id) return null;
-  if (
-    !globalOverride &&
-    row.orderItem.order.status === OrderStatus.SUBMITTED
-  ) {
-    return null;
-  }
   return row;
 }
 

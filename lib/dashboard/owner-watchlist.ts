@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import type { Prisma } from '../../generated/prisma/client';
 import {
   OrderStatus,
   OutsourceStatus,
@@ -177,6 +178,23 @@ export type DueOrderRow = {
   daysLeft: number;
 };
 
+export type DueOrdersResult = {
+  rows: DueOrderRow[];
+  // 满足条件的总数（不受 limit 影响）。看板只渲染前 limit 条，footer 用
+  // total 说明「一共积了多少」——这正是这张表最该暴露的信号：没闭环的
+  // 逾期单（尤其被遗忘的 DRAFT）会一直挂在这个窗口里，不报总数就只能
+  // 看到冰山尖。
+  total: number;
+  // 窗口右界的上海日历日（YYYY-MM-DD）。页面拼「查看全部」链接的
+  // promisedTo 参数时直接用它，保证列表页筛出来的和这里查的是同一批；
+  // 时区运算留在 lib 侧，页面不自己再算一遍。
+  promisedThroughYmd: string;
+};
+
+// 看板一屏能看完的条数。和 getPendingShipments 取同一个数：两张表在同
+// 一个 grid 里并排，行数不一致会让人以为其中一张「没数据了」。
+export const DUE_ORDERS_DEFAULT_LIMIT = 10;
+
 /**
  * 交期预警：未发货状态（PROMISE_ALERT_STATUSES）+ promisedDate 落在
  * "已逾期 .. 今日+DUE_SOON_DAYS" 窗口。promisedDate = null 不预警
@@ -186,42 +204,163 @@ export type DueOrderRow = {
  * promisedDate 存日历日的 UTC 零点；以 Shanghai 次日边界比较可精确
  * 取"日历日 ≤ 今日+N"（D 的 UTC 零点恒大于 D-1 的上海日界、小于
  * D 的上海日界 — 与超期外协同款表示法）。
+ *
+ * **只取前 limit 条**：这个窗口只有上界没有下界，所有没闭环的逾期单会
+ * 永久累积，无界查询迟早把首屏的 RSC payload 拖垮。截断本身对使用者
+ * 必须可见 —— 所以同时返回 total，页面在 footer 里显示「共 N 条 · 查看
+ * 全部」，而不是默默少给几行。
+ *
+ * 排序保持「交期最早的在前」= 逾期最久的先看到，被截断的是窗口右端
+ * （最近几天才到期的）。积压很深时这个取舍会失真：一堆很久以前的僵尸
+ * 草稿单会把明天到期的真活儿挤出前 10。total + 「查看全部」是给这种
+ * 情况留的出口；根治要靠业务口径（DRAFT 该不该进预警、逾期超过多久
+ * 停止预警），不在本函数里替业主定。
  */
 export async function getDueOrders(
   now: Date = new Date(),
-): Promise<DueOrderRow[]> {
+  limit = DUE_ORDERS_DEFAULT_LIMIT,
+): Promise<DueOrdersResult> {
   const today = todayShanghai(now);
   const { start: todayStart } = shanghaiDayBoundary(today);
   const horizon = new Date(
     todayStart.getTime() + (DUE_SOON_DAYS + 1) * MS_PER_DAY,
   );
 
-  const raw = await db.order.findMany({
-    where: {
-      status: { in: [...PROMISE_ALERT_STATUSES] },
-      promisedDate: { lt: horizon },
-      NOT: { promisedDate: null },
-    },
-    orderBy: [{ promisedDate: 'asc' }, { isUrgent: 'desc' }],
-    select: {
-      id: true,
-      orderNo: true,
-      customerRef: true,
-      status: true,
-      isUrgent: true,
-      promisedDate: true,
-    },
-  });
+  // findMany 与 count 共用同一个 where 对象：分开写一旦漂移，footer 会
+  // 报一个和列表对不上的数字，而且没人看得出来。
+  const where: Prisma.OrderWhereInput = {
+    status: { in: [...PROMISE_ALERT_STATUSES] },
+    promisedDate: { lt: horizon },
+    NOT: { promisedDate: null },
+  };
 
-  return raw.map((r) => ({
-    id: r.id,
-    orderNo: r.orderNo,
-    customerRef: r.customerRef,
-    status: r.status,
-    isUrgent: r.isUrgent,
-    promisedDate: r.promisedDate as Date,
-    daysLeft: promisedDaysLeft(r.promisedDate as Date, now),
-  }));
+  const [raw, total] = await Promise.all([
+    db.order.findMany({
+      where,
+      // orderNo 兜底：同交期同急单时 Postgres 不保证行序，加了它相邻两次
+      // 渲染截断掉的才是同一批（不加会出现「刷新一下这单就没了」）。
+      orderBy: [
+        { promisedDate: 'asc' },
+        { isUrgent: 'desc' },
+        { orderNo: 'asc' },
+      ],
+      take: limit,
+      select: {
+        id: true,
+        orderNo: true,
+        customerRef: true,
+        status: true,
+        isUrgent: true,
+        promisedDate: true,
+      },
+    }),
+    db.order.count({ where }),
+  ]);
+
+  return {
+    rows: raw.map((r) => ({
+      id: r.id,
+      orderNo: r.orderNo,
+      customerRef: r.customerRef,
+      status: r.status,
+      isUrgent: r.isUrgent,
+      promisedDate: r.promisedDate as Date,
+      daysLeft: promisedDaysLeft(r.promisedDate as Date, now),
+    })),
+    total,
+    // todayStart 是「今日上海 0:00」的那个瞬间，+N 天再按上海格式化就是
+    // 今日+N 的日历日（上海无夏令时，日长恒定 24h）。
+    promisedThroughYmd: todayShanghai(
+      new Date(todayStart.getTime() + DUE_SOON_DAYS * MS_PER_DAY),
+    ),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 超计划报工 — 近 7 天 action='TASK_OVER_REPORT' 的工单日志
+// ─────────────────────────────────────────────────────────────────────
+
+export type OverReportRow = {
+  id: string;
+  orderId: string;
+  orderNo: string;
+  operatorDisplayName: string;
+  remark: string | null;
+  createdAt: Date;
+};
+
+export type OverReportsResult = {
+  rows: OverReportRow[];
+  // 窗口内的总条数（不受 limit 影响）。看板 footer 用它说「共 N 条」。
+  total: number;
+  // 窗口左界的上海日历日（YYYY-MM-DD），页面直接显示，不自己再算一遍。
+  sinceYmd: string;
+};
+
+// 回看窗口。7 天（含今日）而不是自然周：自然周在周一早上会把上周五的
+// 超报全部抹掉，而那恰好是最该被看到的时候。
+export const OVER_REPORT_WINDOW_DAYS = 7;
+export const OVER_REPORTS_DEFAULT_LIMIT = 10;
+
+/**
+ * 超计划报工的知情通道（业主 2026-08-21 拍板）。
+ *
+ * 单条报工的数量守卫允许师傅自己勾「确认超出计划数」就通过，而计件金额按
+ * 合计数全额付（lib/production.ts 的 reportTask）。批准权在被发钱的人手里，
+ * 所以必须有一条老板**不用主动去翻工单时间线**就能看见的通道 —— 就是这张表。
+ *
+ * 数据源是 OrderLog 里 action='TASK_OVER_REPORT' 的行，由 reportTask 在同一个
+ * 事务里写。刻意**不**新增 NOTIFICATION_EVENTS：那要同步改 lib/notification/
+ * events.ts 与 prisma/seed.ts 的默认模板，成本远高于在看板上多一张表。
+ *
+ * findMany 与 count 共用同一个 where 对象：分开写一旦漂移，footer 会报一个
+ * 和列表对不上的数字，而且没人看得出来（同 getDueOrders）。
+ */
+export async function getRecentOverReports(
+  now: Date = new Date(),
+  limit = OVER_REPORTS_DEFAULT_LIMIT,
+): Promise<OverReportsResult> {
+  const today = todayShanghai(now);
+  const { start: todayStart } = shanghaiDayBoundary(today);
+  const since = new Date(
+    todayStart.getTime() - (OVER_REPORT_WINDOW_DAYS - 1) * MS_PER_DAY,
+  );
+
+  const where: Prisma.OrderLogWhereInput = {
+    action: 'TASK_OVER_REPORT',
+    createdAt: { gte: since },
+  };
+
+  const [raw, total] = await Promise.all([
+    db.orderLog.findMany({
+      where,
+      // 最近的排最前：超报是「刚发生的事」，越新越该先看到。
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        orderId: true,
+        remark: true,
+        createdAt: true,
+        order: { select: { orderNo: true } },
+        operator: { select: { displayName: true } },
+      },
+    }),
+    db.orderLog.count({ where }),
+  ]);
+
+  return {
+    rows: raw.map((r) => ({
+      id: r.id,
+      orderId: r.orderId,
+      orderNo: r.order.orderNo,
+      operatorDisplayName: r.operator.displayName,
+      remark: r.remark,
+      createdAt: r.createdAt,
+    })),
+    total,
+    sinceYmd: todayShanghai(since),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────

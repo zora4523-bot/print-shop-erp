@@ -1,5 +1,5 @@
 import { OrderStatus } from '../../generated/prisma/enums';
-import { todayShanghai } from '../dashboard/shanghai-clock';
+import { shanghaiDayBoundary, todayShanghai } from '../dashboard/shanghai-clock';
 
 // 承诺交期的预警口径（详情页徽标 / dashboard 关注列表 / 每日 cron 推送
 // 三处共用，避免"页面说逾期、推送说没逾期"的口径分裂）：
@@ -36,6 +36,24 @@ export function promisedDaysLeft(promisedDate: Date, now: Date = new Date()): nu
     (Date.parse(`${promisedYmd}T00:00:00Z`) - Date.parse(`${todayYmd}T00:00:00Z`)) /
       MS_PER_DAY,
   );
+}
+
+/**
+ * 「已逾期」在 SQL 层的右开边界：`promisedDate < overdueCutoff(now)`
+ * 恰好等价于 `promisedDaysLeft(promisedDate, now) < 0`。
+ *
+ * 为什么成立：promisedDate 存的是日历日 D 的 **UTC 零点**
+ * （parseStrictYmd 口径），而 D 的上海日界是 (D-1)T16:00Z —— 所以
+ * D 的 UTC 零点恒落在「D 的上海日界」和「D+1 的上海日界」之间。拿
+ * 今日的上海日界当上界，就把「今天到期」排除在外、把「昨天及以前」
+ * 全部收进来，一天不多一天不少。
+ *
+ * 放在本文件而不是各自的查询里：交期口径由这里统一（详情页徽标 /
+ * 看板 / cron 推送三处共用），边界表达式一旦散出去就会出现「页面说
+ * 逾期、推送说没逾期」。
+ */
+export function overdueCutoff(now: Date = new Date()): Date {
+  return shanghaiDayBoundary(todayShanghai(now)).start;
 }
 
 export type PromisedDateAlert = {

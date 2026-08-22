@@ -12,53 +12,89 @@ const {
   MockOrderInvariantError,
   MockInvalidOrderTransitionError,
   MockInvalidTaskTransitionError,
-} = vi.hoisted(() => ({
-  permissionsMock: { requirePermission: vi.fn() },
-  productionMock: {
-    scheduleOrder: vi.fn(),
-    beginTask: vi.fn(),
-    reportTask: vi.fn(),
-    reassignProductionTask: vi.fn(),
-  },
-  productionBatchMock: {
-    scheduleOrdersToWorker: vi.fn(),
-  },
-  revalidatePathMock: vi.fn(),
-  MockSchedulingError: class extends Error {
-    constructor(msg: string) {
-      super(msg);
-      this.name = 'SchedulingError';
-    }
-  },
-  MockReportError: class extends Error {
+  MockOverReportError,
+} = vi.hoisted(() => {
+  class ReportErrorStub extends Error {
     constructor(msg: string) {
       super(msg);
       this.name = 'ReportError';
     }
-  },
-  MockOrderInvariantError: class extends Error {
-    constructor(msg: string) {
-      super(msg);
-      this.name = 'OrderInvariantError';
+  }
+
+  // 数量守卫的错误。**必须**出现在下面的 vi.mock('@/lib/production') 工厂里：
+  // actions/production.ts 对它做 `err instanceof OverReportError`，工厂里缺了
+  // 它就是 `instanceof undefined` → TypeError，整组报工用例当场变红。
+  //
+  // 而且**必须继承 ReportErrorStub**，跟着 lib/production.ts 的真类走：
+  // mapTaskError 靠 `err instanceof ReportError` 兜住「不可确认」那条硬拒，
+  // 这里挂到裸 Error 上，硬拒就会穿过 action 一路抛出去 —— 那正是本文件
+  // 「不可确认的 OverReportError → error」用例要挡的回归。
+  // 用 class 声明（不是对象字面量里的 class 表达式）就是为了能引用它。
+  class OverReportErrorStub extends ReportErrorStub {
+    readonly confirmable: boolean;
+    readonly plannedQty: number;
+    readonly totalReported: number;
+    readonly limitQty: number;
+    constructor(args: {
+      message: string;
+      confirmable: boolean;
+      plannedQty: number;
+      totalReported: number;
+      limitQty: number;
+    }) {
+      super(args.message);
+      this.name = 'OverReportError';
+      this.confirmable = args.confirmable;
+      this.plannedQty = args.plannedQty;
+      this.totalReported = args.totalReported;
+      this.limitQty = args.limitQty;
     }
-  },
-  MockInvalidOrderTransitionError: class extends Error {
-    readonly from: OrderStatus;
-    readonly to: OrderStatus;
-    constructor(from: OrderStatus, to: OrderStatus) {
-      super(`工单状态不能从 ${from} 直接切到 ${to}`);
-      this.name = 'InvalidOrderTransitionError';
-      this.from = from;
-      this.to = to;
-    }
-  },
-  MockInvalidTaskTransitionError: class extends Error {
-    constructor(from: string, to: string) {
-      super(`生产任务状态不能从 ${from} 直接切到 ${to}`);
-      this.name = 'InvalidTaskTransitionError';
-    }
-  },
-}));
+  }
+
+  return {
+    permissionsMock: { requirePermission: vi.fn() },
+    productionMock: {
+      scheduleOrder: vi.fn(),
+      beginTask: vi.fn(),
+      reportTask: vi.fn(),
+      reassignProductionTask: vi.fn(),
+    },
+    productionBatchMock: {
+      scheduleOrdersToWorker: vi.fn(),
+    },
+    revalidatePathMock: vi.fn(),
+    MockSchedulingError: class extends Error {
+      constructor(msg: string) {
+        super(msg);
+        this.name = 'SchedulingError';
+      }
+    },
+    MockReportError: ReportErrorStub,
+    MockOrderInvariantError: class extends Error {
+      constructor(msg: string) {
+        super(msg);
+        this.name = 'OrderInvariantError';
+      }
+    },
+    MockInvalidOrderTransitionError: class extends Error {
+      readonly from: OrderStatus;
+      readonly to: OrderStatus;
+      constructor(from: OrderStatus, to: OrderStatus) {
+        super(`工单状态不能从 ${from} 直接切到 ${to}`);
+        this.name = 'InvalidOrderTransitionError';
+        this.from = from;
+        this.to = to;
+      }
+    },
+    MockInvalidTaskTransitionError: class extends Error {
+      constructor(from: string, to: string) {
+        super(`生产任务状态不能从 ${from} 直接切到 ${to}`);
+        this.name = 'InvalidTaskTransitionError';
+      }
+    },
+    MockOverReportError: OverReportErrorStub,
+  };
+});
 
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: permissionsMock.requirePermission,
@@ -70,6 +106,7 @@ vi.mock('@/lib/production', () => ({
   reassignProductionTask: productionMock.reassignProductionTask,
   SchedulingError: MockSchedulingError,
   ReportError: MockReportError,
+  OverReportError: MockOverReportError,
   InvalidTaskTransitionError: MockInvalidTaskTransitionError,
 }));
 vi.mock('@/lib/production/batch-scheduling', () => ({
@@ -507,6 +544,109 @@ describe('reportTaskAction', () => {
     expect(r.status).toBe('error');
     if (r.status === 'error') {
       expect(r.message).toMatch(/薪资规则/);
+    }
+  });
+
+  it('勾了确认框时把 overReportConfirmed=true 透传给 lib', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockResolvedValue({
+      taskId: 'task-1',
+      status: 'COMPLETED',
+      pieceworkAmount: '48.40',
+      boardCount: 1,
+      pressCount: 6200,
+      orderCompleted: false,
+    });
+    await reportTaskAction(
+      'task-1',
+      null,
+      fd({
+        completedQty: '6200',
+        defectQty: '0',
+        reworkQty: '0',
+        overReportConfirmed: 'true',
+      }),
+    );
+    expect(productionMock.reportTask.mock.calls[0][1]).toEqual({
+      completedQty: 6200,
+      defectQty: 0,
+      reworkQty: 0,
+      overReportConfirmed: true,
+    });
+  });
+
+  it('可确认的 OverReportError → invalid + 挂在复选框上的字段错误 + 回填', async () => {
+    // 这条钉住 actions/production.ts 里两个 catch 分支的**顺序**：
+    // OverReportError 继承 ReportError，先走 mapTaskError 会把「勾一下就能过」
+    // 吞成通用 error，复选框永远不出现、师傅被永久拦在报工外。顺序反了这条红。
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockRejectedValueOnce(
+      new MockOverReportError({
+        message: '合计报工 6200 超过计划数 5000，请勾选「确认超出计划数」后再提交。',
+        confirmable: true,
+        plannedQty: 5000,
+        totalReported: 6200,
+        limitQty: 15000,
+      }),
+    );
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: '6200', defectQty: '0', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.overReportConfirmed?.[0]).toMatch(/请勾选/);
+      expect(r.overReport).toEqual({ plannedQty: 5000, totalReported: 6200 });
+      // 回填：零 JS 下不回填，输入框会被重置回计划数，师傅勾确认再提交就
+      // 静默按计划数入库 —— 正好把守卫要防的事做实。
+      expect(r.values.completedQty).toBe('6200');
+      expect(r.values.overReportConfirmed).toBe(false);
+    }
+  });
+
+  it('不可确认的 OverReportError → error + 仍然回填数量', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    productionMock.reportTask.mockRejectedValueOnce(
+      new MockOverReportError({
+        message:
+          '合计报工 50000 已达到计划数 5000 的 3 倍上限（15000），请核对数量后重新填写。',
+        confirmable: false,
+        plannedQty: 5000,
+        totalReported: 50000,
+        limitQty: 15000,
+      }),
+    );
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({
+        completedQty: '50000',
+        defectQty: '0',
+        reworkQty: '0',
+        overReportConfirmed: 'true',
+      }),
+    );
+    expect(r.status).toBe('error');
+    if (r.status === 'error') {
+      expect(r.message).toMatch(/3 倍上限（15000）/);
+      expect(r.values.completedQty).toBe('50000');
+      expect(r.values.overReportConfirmed).toBe(true);
+    }
+  });
+
+  it('字段校验失败时也回填，不把数字重置回计划数', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    const r = await reportTaskAction(
+      'task-1',
+      null,
+      fd({ completedQty: 'abc', defectQty: '7', reworkQty: '0' }),
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.values.completedQty).toBe('abc');
+      expect(r.values.defectQty).toBe('7');
+      expect(r.overReport).toBeUndefined();
     }
   });
 

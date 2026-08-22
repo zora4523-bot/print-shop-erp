@@ -1,13 +1,16 @@
 import { notFound } from 'next/navigation';
 import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
-import { requireSession } from '@/lib/auth/session';
+import { getSession, requireSession } from '@/lib/auth/session';
 import { getWorkerTaskDetail } from '@/lib/production';
+import { getWorkerTaskTitleRef } from '@/lib/page-title/refs';
+import { workerTaskTitle } from '@/lib/page-title/titles';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { BeginTaskButton } from '@/components/business/production/BeginTaskButton';
 import { ReportTaskForm } from '@/components/business/production/ReportTaskForm';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
+import { getSetting } from '@/lib/settings';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 
@@ -15,7 +18,25 @@ type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  return { title: `任务 · ${id.slice(0, 6).toUpperCase()}` };
+  const session = await getSession();
+  if (!session) return { title: '任务' };
+  // 与 getWorkerTaskDetail 共用 getWorkerTaskScopeFilter：非 ADMIN 只能
+  // 读分配给自己、且工单已离开 SUBMITTED 草稿态的任务。
+  const ref = await getWorkerTaskTitleRef(
+    id,
+    session.user.id,
+    session.user.role,
+  );
+  return {
+    title: workerTaskTitle(
+      ref
+        ? {
+            orderNo: ref.orderItem.order.orderNo,
+            sequence: ref.orderItem.sequence,
+          }
+        : null,
+    ),
+  };
 }
 
 export default async function WorkerTaskDetailPage({ params }: PageProps) {
@@ -24,6 +45,11 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
   const task = await getWorkerTaskDetail(id, { id: user.id, role: user.role });
   if (!task) notFound();
   const isPiecework = task.workerType === WorkerType.MACHINE;
+  // 报工数量上限（计划数 × Setting 的倍数）。只用来在表单上给出说明文字，
+  // 真正的判定在 lib/production.ts 的 reportTask 里、事务内做。
+  const { multiple: maxReportMultiple } = await getSetting(
+    'report_qty_max_multiple',
+  );
 
   return (
     <div className="min-w-0 space-y-5">
@@ -103,6 +129,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           <ReportTaskForm
             taskId={task.id}
             plannedQty={task.plannedQty}
+            maxReportQty={task.plannedQty * maxReportMultiple}
             isPiecework={isPiecework}
           />
         </section>

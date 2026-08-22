@@ -8,7 +8,6 @@ import {
 import { db } from '../db';
 import { formatMoneyPlain } from '../dashboard/format';
 import {
-  getDueOrders,
   getEndingPeriods,
   getOverdueOutsourcing,
 } from '../dashboard/owner-watchlist';
@@ -17,6 +16,10 @@ import { dispatchNotification } from '../notification/dispatch';
 import { orderStatusZh } from '../order/log-format';
 import { cleanupExpiredOrderExports } from '../order/export';
 import { scrubTerminalOrderExportFilters } from '../order/export-retention';
+import {
+  ORDER_OVERDUE_NOTIFY_CAP,
+  scanOverdueOrders,
+} from '../order/overdue-scan';
 import {
   CsBatchUnexpectedError,
   settleReadyCsPeriods,
@@ -207,7 +210,9 @@ export async function runGenerateBillsTask(period: string) {
 
 export async function runOutsourceOverdueTask(runDate: string) {
   const rows = await getOverdueOutsourcing();
-  for (const row of rows) {
+  // spreadIndex：批量扇出按序摊开 availableAt，别把整批同时怼向企业微信
+  // 的 20 条/分钟限额（见 lib/background-jobs/notification.ts）。
+  for (const [index, row] of rows.entries()) {
     await dispatchNotification(
       'OUTSOURCE_OVERDUE',
       {
@@ -219,6 +224,7 @@ export async function runOutsourceOverdueTask(runDate: string) {
       },
       {
         dedupeKey: `notification:OUTSOURCE_OVERDUE:${runDate}:${row.id}`,
+        spreadIndex: index,
       },
     );
   }
@@ -226,7 +232,7 @@ export async function runOutsourceOverdueTask(runDate: string) {
 }
 export async function runCsPeriodEndingTask(runDate: string) {
   const rows = await getEndingPeriods();
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     await dispatchNotification(
       'CS_PERIOD_ENDING',
       {
@@ -237,6 +243,7 @@ export async function runCsPeriodEndingTask(runDate: string) {
       },
       {
         dedupeKey: `notification:CS_PERIOD_ENDING:${runDate}:${row.id}`,
+        spreadIndex: index,
       },
     );
   }
@@ -244,8 +251,20 @@ export async function runCsPeriodEndingTask(runDate: string) {
 }
 
 export async function runOrderOverdueTask(runDate: string) {
-  const rows = (await getDueOrders()).filter((row) => row.daysLeft < 0);
-  for (const row of rows) {
+  // 「只推逾期」由 scanOverdueOrders 在 SQL 层保证（promisedDate <
+  // 今日上海日界）。以前这里取的是看板那份「逾期 + 3 天内到期」的无界
+  // 结果再在 JS 里 filter，等于把 due-soon 的行白搬一趟，还把看板的
+  // 无界查询绑在了推送上。
+  const { rows, truncated } = await scanOverdueOrders();
+  if (truncated) {
+    // 只打计数：工单号 / 客户名不能进进程日志（和 logPartialBatchProgress
+    // 同一条纪律）。
+    console.error('[cron:order-overdue] overdue backlog exceeds notify cap:', {
+      cap: ORDER_OVERDUE_NOTIFY_CAP,
+      dispatched: rows.length,
+    });
+  }
+  for (const [index, row] of rows.entries()) {
     await dispatchNotification(
       'ORDER_OVERDUE',
       {
@@ -253,15 +272,21 @@ export async function runOrderOverdueTask(runDate: string) {
         orderNo: row.orderNo,
         customerRef: row.customerRef ?? '未填',
         promisedDate: formatDateShanghai(row.promisedDate),
-        daysOverdue: -row.daysLeft,
+        daysOverdue: row.daysOverdue,
         status: orderStatusZh(row.status),
       },
       {
+        // 逾期单最多 ORDER_OVERDUE_NOTIFY_CAP=200 条，是全仓最大的一次扇出，
+        // 也是最需要按序摊开的一处。
         dedupeKey: `notification:ORDER_OVERDUE:${runDate}:${row.id}`,
+        spreadIndex: index,
       },
     );
   }
-  return { status: 'ok' as const, overdueCount: rows.length };
+  // truncated 是对既有响应形状的**新增**字段（§15.4：响应形状是对外部
+  // 调度器的契约——只加不减、不改名）。加它是为了让「今天有单没推到」
+  // 在调度器日志里看得见，而不是只能靠翻 stderr。
+  return { status: 'ok' as const, overdueCount: rows.length, truncated };
 }
 
 export async function runOrderExportCleanupTask(runDate: string) {

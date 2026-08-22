@@ -6,15 +6,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { reportTaskAction } from '@/actions/production';
-import type { TaskMutationResult } from '@/actions/production.types';
+import type { ReportTaskMutationResult } from '@/actions/production.types';
 
 type Props = {
   taskId: string;
   plannedQty: number;
+  /**
+   * 计划数 × Setting 的倍数上限。合计**达到**它服务端一律拒绝（勾了确认也拒）。
+   * 只用来写说明文字 —— 判定全在服务端，见下面 NumberField 里为什么不设 max。
+   */
+  maxReportQty: number;
   isPiecework: boolean;
 };
 
-export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
+export function ReportTaskForm({
+  taskId,
+  plannedQty,
+  maxReportQty,
+  isPiecework,
+}: Props) {
   // `bind` on a Server Action keeps the $$FORM_ACTION marker, so React can
   // emit the native form action + hidden $ACTION_ID at SSR time. Passing
   // `formAction` straight to <form action> (rather than wrapping it in an
@@ -22,7 +32,7 @@ export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
   // 失败时师傅仍能报工。See DECISIONS.md 2026-08-17.
   const bound = reportTaskAction.bind(null, taskId);
   const [state, formAction, pending] = useActionState<
-    TaskMutationResult | null,
+    ReportTaskMutationResult | null,
     FormData
   >(bound, null);
   const router = useRouter();
@@ -36,36 +46,103 @@ export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
     queueMicrotask(() => router.refresh());
   }
 
+  // 回填。零 JS 下一次提交就是一次整页 POST + 服务端重渲染，浏览器不会保留
+  // 输入框里的值。不回填的话「超报被拦下 → 数字被重置回计划数 → 勾确认再
+  // 提交」会静默按计划数入库 —— 正好把这个守卫要防的事情做实。
+  const values = state && state.status !== 'success' ? state.values : null;
+
+  // 确认框只依赖**服务端状态**出现，不看输入框的 onChange。这是它在零 JS 下
+  // 也存在的原因：条件在 SSR 时就已经算完了。代价是必须先提交一次才看得见
+  // ——而「停一下再确认」本来就是这个守卫想要的摩擦。
+  //
+  // defaultChecked 跟着回填走：不这样的话，第二次提交若撞上别的校验错误，
+  // 勾选会被悄悄清掉，师傅再点提交仍然被拦，页面上却看不出任何变化，读起来
+  // 就像「按钮坏了」。
+  const overReport = state?.status === 'invalid' ? state.overReport : undefined;
+  const confirmErrors = fieldErrors(state, 'overReportConfirmed');
+  const showOverReportConfirm =
+    overReport !== undefined || values?.overReportConfirmed === true;
+
   return (
     <form action={formAction} className="space-y-4">
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField
           name="completedQty"
           label="合格数"
-          defaultValue={plannedQty}
+          defaultValue={values?.completedQty ?? String(plannedQty)}
           errors={fieldErrors(state, 'completedQty')}
           autoFocus
         />
         <NumberField
           name="defectQty"
           label="不良数"
-          defaultValue={0}
+          defaultValue={values?.defectQty ?? '0'}
           errors={fieldErrors(state, 'defectQty')}
         />
         <NumberField
           name="reworkQty"
           label="返工数"
-          defaultValue={0}
+          defaultValue={values?.reworkQty ?? '0'}
           errors={fieldErrors(state, 'reworkQty')}
         />
       </div>
 
       <p className="worker-wrap-anywhere text-xs text-muted-foreground">
-        计划数量 {plannedQty.toLocaleString()}。合格 + 不良 + 返工 合计需
-        &gt; 0；{isPiecework
+        计划数量 {plannedQty.toLocaleString()}。合格 + 不良 + 返工 合计需 &gt;
+        0；少报可以直接提交，超过计划数需勾选确认，合计达到{' '}
+        {maxReportQty.toLocaleString()} 会被拒绝。{isPiecework
           ? '计件金额按机台薪资规则计算。'
           : '本任务只记录完工数量，工资按考勤时薪结算。'}
       </p>
+
+      {showOverReportConfirm ? (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+          <label
+            htmlFor="overReportConfirmed"
+            className="flex min-w-0 items-start gap-2 text-sm"
+          >
+            {/* 原生 checkbox，不是 Radix 控件：零 JS 下必须能勾能提交。 */}
+            <input
+              id="overReportConfirmed"
+              name="overReportConfirmed"
+              type="checkbox"
+              value="true"
+              defaultChecked={values?.overReportConfirmed ?? false}
+              aria-invalid={confirmErrors.length > 0}
+              aria-describedby={
+                confirmErrors.length > 0
+                  ? 'overReportConfirmed-error overReportConfirmed-help'
+                  : 'overReportConfirmed-help'
+              }
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
+            />
+            <span className="min-w-0">
+              <span className="font-medium text-warning-foreground">
+                确认超出计划数
+              </span>
+              <span
+                id="overReportConfirmed-help"
+                className="worker-wrap-anywhere block text-xs text-muted-foreground"
+              >
+                {overReport
+                  ? `合计 ${overReport.totalReported.toLocaleString()} 超过计划数 ${overReport.plannedQty.toLocaleString()}。`
+                  : ''}
+                勾选后提交，超出情况会记进任务备注和工单日志。
+              </span>
+            </span>
+          </label>
+          {confirmErrors.length > 0 ? (
+            // 逐字段错误不标 role="alert"：靠 aria-describedby 与控件关联，
+            // 聚焦时读屏器自然读出来，不抢播报。与 EditOrderForm 一致。
+            <p
+              id="overReportConfirmed-error"
+              className="mt-2 text-xs text-destructive"
+            >
+              {confirmErrors[0]}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {state?.status === 'error' ? (
         <p role="alert" className="text-sm text-destructive">
@@ -86,7 +163,7 @@ export function ReportTaskForm({ taskId, plannedQty, isPiecework }: Props) {
 }
 
 function fieldErrors(
-  state: TaskMutationResult | null,
+  state: ReportTaskMutationResult | null,
   name: string,
 ): string[] {
   if (!state || state.status !== 'invalid') return [];
@@ -102,7 +179,7 @@ function NumberField({
 }: {
   name: string;
   label: string;
-  defaultValue: number;
+  defaultValue: string;
   errors: string[];
   autoFocus?: boolean;
 }) {
@@ -113,6 +190,13 @@ function NumberField({
       <Label htmlFor={name} className="text-xs text-muted-foreground">
         {label}
       </Label>
+      {/*
+        刻意**不设 max**。上限是「合计 >= 计划数 × 倍数」，只有服务端算得出；
+        而原生约束校验在关掉 JS 时也生效，手机上只弹一个原生气泡、极易滚出
+        视野，那句写清楚「已达到计划数 N 倍上限（具体数字）」的中文提示就
+        永远看不到。上限信息放在下面的说明文字里，判定留在服务端。
+        （schema 的单字段 10,000,000 已是绝对上限，越界会走同一套逐字段错误。）
+      */}
       <Input
         id={name}
         name={name}

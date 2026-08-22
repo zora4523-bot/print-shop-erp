@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { dbMock, getActiveCsTiersMock } = vi.hoisted(() => {
   const mock = {
-    order: { findMany: vi.fn() },
+    // getDueOrders 现在同时跑 findMany（前 N 条）和 count（总数）
+    order: { findMany: vi.fn(), count: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
     salaryPeriod: { findMany: vi.fn() },
+    // 超计划报工看板：OrderLog where action='TASK_OVER_REPORT'
+    orderLog: { findMany: vi.fn(), count: vi.fn() },
     // 超期阈值现在从 Setting 读（outsource_overdue_days）
     setting: { findUnique: vi.fn() },
   };
@@ -19,16 +22,23 @@ vi.mock('../../salary/rules', () => ({
 }));
 
 import {
+  DUE_ORDERS_DEFAULT_LIMIT,
+  OVER_REPORT_WINDOW_DAYS,
   getEndingPeriods,
   getDueOrders,
   getOverdueOutsourcing,
   getPendingShipments,
+  getRecentOverReports,
 } from '../owner-watchlist';
 
 beforeEach(() => {
   dbMock.order.findMany.mockReset();
+  dbMock.order.count.mockReset();
+  dbMock.order.count.mockResolvedValue(0);
   dbMock.outsourceOrder.findMany.mockReset();
   dbMock.salaryPeriod.findMany.mockReset();
+  dbMock.orderLog.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderLog.count.mockReset().mockResolvedValue(0);
   dbMock.setting.findUnique.mockReset();
   // 默认「没有配置行」→ resolveSetting 退回内置默认 1 天，也就是这些用例
   // 原本断言的行为。需要别的阈值的用例自己覆盖。
@@ -133,8 +143,72 @@ describe('getDueOrders', () => {
       row('b', '2026-07-07'),
       row('c', '2026-07-10'),
     ]);
+    dbMock.order.count.mockResolvedValue(3);
     const r = await getDueOrders(NOW);
-    expect(r.map((x) => x.daysLeft)).toEqual([-2, 0, 3]);
+    expect(r.rows.map((x) => x.daysLeft)).toEqual([-2, 0, 3]);
+    expect(r.total).toBe(3);
+  });
+
+  it('首屏查询有界：默认 take = DUE_ORDERS_DEFAULT_LIMIT，传 limit 时跟随', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await getDueOrders(NOW);
+    expect(dbMock.order.findMany.mock.calls[0][0].take).toBe(
+      DUE_ORDERS_DEFAULT_LIMIT,
+    );
+    expect(DUE_ORDERS_DEFAULT_LIMIT).toBe(10);
+
+    dbMock.order.findMany.mockClear();
+    await getDueOrders(NOW, 3);
+    expect(dbMock.order.findMany.mock.calls[0][0].take).toBe(3);
+  });
+
+  it('count 与 findMany 用的是同一个 where（footer 的数不会和列表漂移）', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await getDueOrders(NOW);
+    expect(dbMock.order.count.mock.calls[0][0].where).toEqual(
+      dbMock.order.findMany.mock.calls[0][0].where,
+    );
+  });
+
+  it('total 来自 count，不受 limit 截断影响', async () => {
+    const row = (id: string, ymd: string) => ({
+      id,
+      orderNo: `O-${id}`,
+      customerRef: null,
+      status: 'IN_PRODUCTION',
+      isUrgent: false,
+      promisedDate: new Date(`${ymd}T00:00:00Z`),
+    });
+    dbMock.order.findMany.mockResolvedValue([
+      row('a', '2026-07-05'),
+      row('b', '2026-07-06'),
+    ]);
+    dbMock.order.count.mockResolvedValue(143);
+    const r = await getDueOrders(NOW, 2);
+    expect(r.rows).toHaveLength(2);
+    expect(r.total).toBe(143);
+  });
+
+  it('promisedThroughYmd = 今日 + DUE_SOON_DAYS 的上海日历日', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    expect((await getDueOrders(NOW)).promisedThroughYmd).toBe('2026-07-10');
+
+    // UTC 2026-07-07T16:30 = 上海 2026-07-08 00:30 → 今天是 07-08
+    dbMock.order.findMany.mockResolvedValue([]);
+    expect(
+      (await getDueOrders(new Date('2026-07-07T16:30:00Z')))
+        .promisedThroughYmd,
+    ).toBe('2026-07-11');
+  });
+
+  it('orderBy 带 orderNo 兜底（截断在两次渲染之间稳定）', async () => {
+    dbMock.order.findMany.mockResolvedValue([]);
+    await getDueOrders(NOW);
+    expect(dbMock.order.findMany.mock.calls[0][0].orderBy).toEqual([
+      { promisedDate: 'asc' },
+      { isUrgent: 'desc' },
+      { orderNo: 'asc' },
+    ]);
   });
 });
 
@@ -424,3 +498,69 @@ function makePendingRow(
     submitter: { displayName: submitterName },
   };
 }
+
+describe('getRecentOverReports', () => {
+  const NOW = new Date('2026-08-21T02:00:00.000Z'); // 上海 2026-08-21 10:00
+
+  it('空 → rows: [] / total: 0，并给出窗口左界', async () => {
+    const r = await getRecentOverReports(NOW);
+    expect(r.rows).toEqual([]);
+    expect(r.total).toBe(0);
+    // 7 天窗口含今日 → 左界是今日 - 6 天
+    expect(r.sinceYmd).toBe('2026-08-15');
+  });
+
+  it("只查 action='TASK_OVER_REPORT' 且落在窗口内的日志，最新的排最前", async () => {
+    await getRecentOverReports(NOW);
+    const args = dbMock.orderLog.findMany.mock.calls[0][0];
+    expect(args.where.action).toBe('TASK_OVER_REPORT');
+    expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    // 窗口左界 = 上海 2026-08-15 00:00 = UTC 2026-08-14T16:00Z
+    expect((args.where.createdAt.gte as Date).toISOString()).toBe(
+      '2026-08-14T16:00:00.000Z',
+    );
+    expect(OVER_REPORT_WINDOW_DAYS).toBe(7);
+  });
+
+  it('count 与 findMany 用同一个 where —— footer 的总数不能和列表漂移', async () => {
+    await getRecentOverReports(NOW);
+    const listWhere = dbMock.orderLog.findMany.mock.calls[0][0].where;
+    const countWhere = dbMock.orderLog.count.mock.calls[0][0].where;
+    expect(countWhere).toBe(listWhere);
+  });
+
+  it('展平 order.orderNo / operator.displayName，remark 原样带出', async () => {
+    dbMock.orderLog.findMany.mockResolvedValue([
+      {
+        id: 'log-1',
+        orderId: 'order-1',
+        remark: '款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200',
+        createdAt: new Date('2026-08-21T01:00:00.000Z'),
+        order: { orderNo: 'GD-260821-001' },
+        operator: { displayName: '张师傅' },
+      },
+    ]);
+    dbMock.orderLog.count.mockResolvedValue(3);
+
+    const r = await getRecentOverReports(NOW);
+    expect(r.rows).toEqual([
+      {
+        id: 'log-1',
+        orderId: 'order-1',
+        orderNo: 'GD-260821-001',
+        operatorDisplayName: '张师傅',
+        remark: '款式 A (#1)：[超计划报工] 2026-08-21 计划 5000 / 合计 6200',
+        createdAt: new Date('2026-08-21T01:00:00.000Z'),
+      },
+    ]);
+    // 截断后 total 仍是窗口内的真实条数，看板据此说「共 N 条」。
+    expect(r.total).toBe(3);
+  });
+
+  it('limit 只截断列表，不截断 total', async () => {
+    await getRecentOverReports(NOW, 5);
+    expect(dbMock.orderLog.findMany.mock.calls[0][0].take).toBe(5);
+    // count 不带 take
+    expect(dbMock.orderLog.count.mock.calls[0][0].take).toBeUndefined();
+  });
+});

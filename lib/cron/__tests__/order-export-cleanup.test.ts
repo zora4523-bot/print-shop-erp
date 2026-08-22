@@ -10,7 +10,6 @@ vi.mock('@/lib/bill', () => ({
   generateBillsForPeriod: vi.fn(),
 }));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
-  getDueOrders: vi.fn(),
   getEndingPeriods: vi.fn(),
   getOverdueOutsourcing: vi.fn(),
 }));
