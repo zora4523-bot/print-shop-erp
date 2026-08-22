@@ -29,6 +29,11 @@ import type {
 import { getOrderScopeFilter } from './auth/order-scope';
 import { orderCascadeLockKey } from './order/locks';
 import {
+  collectOutsourceCraftIds,
+  findUncoveredOutsourceItems,
+  outsourceCoverageApplies,
+} from './outsource/coverage';
+import {
   FULL_EDITABLE_FIELDS,
   SHIPPING_EDITABLE_FIELDS,
   canEditOrderSfCollect,
@@ -2131,7 +2136,8 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
             },
           },
       outsourceOrders: {
-        select: { id: true, status: true },
+        // orderItemIds 供「暂不能完工」横幅做款式级覆盖比对，不额外发查询。
+        select: { id: true, status: true, orderItemIds: true },
         orderBy: { createdAt: 'desc' },
       },
       shipments: {
@@ -2204,13 +2210,45 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
     ...new Set(order.items.flatMap((item) => item.crafts)),
   ];
   const craftNameById = new Map<string, string>();
+  // 复用同一条字典查询算出「哪些款式还没被外协单覆盖」——完工闸口
+  // （lib/production-completion.ts）用同一个纯函数 + 同一个前置谓词判定，
+  // 页面提示和实际能否完工不会打架。这里不新增任何查询。
+  let uncoveredOutsourceItems: Array<{
+    id: string;
+    sequence: number;
+    name: string;
+  }> = [];
   if (craftIds.length > 0) {
     const crafts = await db.craft.findMany({
       where: { id: { in: craftIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, isOutsource: true },
     });
     for (const craft of crafts) {
       craftNameById.set(craft.id, craft.name);
+    }
+    // ⚠️ 覆盖计算必须和闸口同一个前置条件（outsourceCoverageApplies）；
+    //    craft 名称解析**不能**一起挪进这个 if，否则 craftNames 会全部
+    //    退化成「已删除工艺」。
+    if (outsourceCoverageApplies(order)) {
+      uncoveredOutsourceItems = findUncoveredOutsourceItems(
+        order.items.map((item) => ({
+          id: item.id,
+          sequence: item.sequence,
+          name: item.name,
+          crafts: item.crafts,
+        })),
+        collectOutsourceCraftIds(crafts),
+        order.outsourceOrders.filter(
+          (row) => row.status !== OutsourceStatus.CANCELLED,
+        ),
+      )
+        // 只投出横幅要用的三个字段：crafts 留在返回值里会让这个对外形状
+        // 白白多背一个数组，且与闸口 uncoveredItems 的形状不一致。
+        .map((item) => ({
+          id: item.id,
+          sequence: item.sequence,
+          name: item.name,
+        }));
     }
   }
 
@@ -2220,6 +2258,7 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
     // Preserve a stable page shape without reintroducing any row data.
     changeRequests: isWorkerView ? [] : order.changeRequests,
     customerCharges,
+    uncoveredOutsourceItems,
     items: order.items.map((item) => ({
       ...item,
       craftNames: item.crafts.map(

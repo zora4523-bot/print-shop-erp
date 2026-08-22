@@ -592,6 +592,14 @@ export type OutsourceMutationResult = {
   status: OutsourceStatus;
   orderCompleted?: boolean;
   orderId?: string | null;
+  // 收货后工单没转完工、且原因是「还有款式没被任何外协单覆盖」时带出缺口
+  // 款式。主管点了「已回货」却没等到完工，必须当场知道差什么；其它阻塞原因
+  // （内部任务没做完、还有外协单没收货）在列表页一眼可见，不需要额外提示。
+  pendingOutsourceItems?: Array<{
+    id: string;
+    sequence: number;
+    name: string;
+  }>;
 };
 
 type ReceiveOutsourceTxClient = ProductionCompletionTx & {
@@ -658,15 +666,23 @@ export async function markOutsourceReceived(
       select: { id: true, status: true },
     });
 
-    const orderCompleted = fresh.orderId
+    const completion = fresh.orderId
       ? await maybeCompleteProductionOrder(
           txClient,
           fresh.orderId,
           actor.id,
           now,
         )
-      : false;
-    return { ...updated, orderCompleted, orderId: fresh.orderId };
+      : null;
+    return {
+      ...updated,
+      orderCompleted: completion?.completed ?? false,
+      pendingOutsourceItems:
+        completion?.blockedBy === 'OUTSOURCE_COVERAGE'
+          ? completion.uncoveredItems
+          : [],
+      orderId: fresh.orderId,
+    };
   });
 
   if (result.orderCompleted && result.orderId) {
@@ -692,6 +708,12 @@ export async function markOutsourceReceived(
     status: result.status,
     orderCompleted: result.orderCompleted,
     orderId: result.orderId,
+    // ⚠️ 覆盖缺口必须穿过这层重建 —— 这里才是 markOutsourceReceived 真正
+    // 对外的 return，上面事务里那个只是 $transaction 回调的返回值。漏掉
+    // 这一行，pendingOutsourceItems 会被原地丢弃、action 层的 notice 恒为
+    // undefined，而它是可选字段，tsc 一个字都不报。守门用例见
+    // lib/__tests__/outsource.test.ts「回传覆盖缺口」那条。
+    pendingOutsourceItems: result.pendingOutsourceItems,
   };
 }
 
@@ -723,15 +745,20 @@ export async function cancelOutsourceOrder(
       data: { status: OutsourceStatus.CANCELLED },
       select: { id: true, status: true },
     });
-    const orderCompleted = fresh.orderId
+    // 取消路径不带 notice：主管刚点的取消，自己知道少了哪张外协单。
+    const completion = fresh.orderId
       ? await maybeCompleteProductionOrder(
           txClient,
           fresh.orderId,
           actor.id,
           new Date(),
         )
-      : false;
-    return { ...updated, orderId: fresh.orderId, orderCompleted };
+      : null;
+    return {
+      ...updated,
+      orderId: fresh.orderId,
+      orderCompleted: completion?.completed ?? false,
+    };
   });
 
   if (result.orderCompleted && result.orderId) {

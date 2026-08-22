@@ -48,6 +48,11 @@ export function OutsourceActions({ id, canReceive, canCancel }: Props) {
               {receivePending ? '处理中…' : '已回货'}
             </Button>
           </div>
+          {receiveState?.status === 'success' && receiveState.notice ? (
+            <p className="text-xs text-warning-foreground">
+              {receiveState.notice}
+            </p>
+          ) : null}
           {receiveState?.status === 'error' ? (
             <p className="text-xs text-destructive">{receiveState.message}</p>
           ) : null}
