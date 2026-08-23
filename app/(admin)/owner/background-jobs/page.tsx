@@ -115,9 +115,24 @@ export default async function BackgroundJobsPage() {
 }
 
 function JobOperation({ job }: {
-  job: { id: string; type: string; status: BackgroundJobStatus };
+  job: {
+    id: string;
+    type: string;
+    status: BackgroundJobStatus;
+    lastErrorCode: string | null;
+  };
 }) {
   const operation = backgroundJobOperatorAction(job);
+  if (operation === 'RESOLVE_NOTIFICATION') {
+    return (
+      <Link
+        href="/owner/notifications"
+        className={buttonVariants({ variant: 'outline', size: 'xs' })}
+      >
+        核对推送
+      </Link>
+    );
+  }
   if (operation === 'REQUEST_NEW_EXPORT') {
     return (
       <Link
@@ -173,4 +188,3 @@ function JobStatus({ status }: { status: BackgroundJobStatus }) {
       : 'outline';
   return <Badge variant={variant}>{status}</Badge>;
 }
-

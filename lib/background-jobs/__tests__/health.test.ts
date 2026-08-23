@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/db', () => ({ db: {} }));
 import { BackgroundJobQueue } from '../../../generated/prisma/enums';
@@ -10,8 +10,13 @@ import {
 
 const now = new Date('2026-07-17T08:00:00.000Z');
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function fixture(): BackgroundJobHealth {
   return {
+    observedAt: now,
     activeWorkers: [
       { queue: BackgroundJobQueue.LIGHT, version: 'v1', lastSeenAt: now },
       { queue: BackgroundJobQueue.HEAVY, version: 'v1', lastSeenAt: now },
@@ -27,7 +32,7 @@ function fixture(): BackgroundJobHealth {
 
 describe('assessBackgroundJobHealth', () => {
   it('two fresh worker queues are ready', () => {
-    expect(assessBackgroundJobHealth(fixture(), { requireWorkers: true, now })).toEqual({
+    expect(assessBackgroundJobHealth(fixture(), { requireWorkers: true })).toEqual({
       available: true,
       status: 'ok',
       warnings: [],
@@ -39,7 +44,7 @@ describe('assessBackgroundJobHealth', () => {
     health.activeWorkers = health.activeWorkers.filter(
       (worker) => worker.queue !== BackgroundJobQueue.HEAVY,
     );
-    expect(assessBackgroundJobHealth(health, { requireWorkers: true, now })).toMatchObject({
+    expect(assessBackgroundJobHealth(health, { requireWorkers: true })).toMatchObject({
       available: false,
       status: 'error',
       warnings: ['heavy-worker-missing'],
@@ -50,11 +55,22 @@ describe('assessBackgroundJobHealth', () => {
     const health = fixture();
     health.oldestPendingAt.LIGHT = new Date(now.getTime() - 6 * 60_000);
     health.deadLast24h = 1;
-    expect(assessBackgroundJobHealth(health, { requireWorkers: true, now })).toMatchObject({
+    expect(assessBackgroundJobHealth(health, { requireWorkers: true })).toMatchObject({
       available: true,
       status: 'degraded',
       warnings: expect.arrayContaining(['light-backlog-old', 'dead-jobs-last-24h']),
     });
+  });
+
+  it('measures backlog age from observedAt even when the web clock is far ahead', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2035-01-01T00:00:00.000Z'));
+    const health = fixture();
+    health.oldestPendingAt.LIGHT = new Date(now.getTime() - 4 * 60_000);
+
+    expect(
+      assessBackgroundJobHealth(health, { requireWorkers: true }).warnings,
+    ).not.toContain('light-backlog-old');
   });
 
   it('workers from only an old release are unavailable', () => {
@@ -62,7 +78,6 @@ describe('assessBackgroundJobHealth', () => {
       assessBackgroundJobHealth(fixture(), {
         requireWorkers: true,
         expectedVersion: 'v2',
-        now,
       }),
     ).toMatchObject({
       available: false,
@@ -140,7 +155,6 @@ describe('classifyBackgroundJobAlerts', () => {
     health.deadNotificationLast24h = 200;
     const assessment = assessBackgroundJobHealth(health, {
       requireWorkers: true,
-      now,
     });
     expect(assessment.warnings).toEqual(['dead-notification-jobs-last-24h']);
     expect(classifyBackgroundJobAlerts(assessment.warnings)).toEqual({
@@ -156,7 +170,6 @@ describe('classifyBackgroundJobAlerts', () => {
     health.deadNotificationLast24h = 200;
     const assessment = assessBackgroundJobHealth(health, {
       requireWorkers: true,
-      now,
     });
     expect(classifyBackgroundJobAlerts(assessment.warnings)).toMatchObject({
       level: 'alert',
@@ -173,7 +186,6 @@ describe('classifyBackgroundJobAlerts', () => {
     health.deadLast24h = 1;
     const assessment = assessBackgroundJobHealth(health, {
       requireWorkers: true,
-      now,
     });
     expect(assessment.available).toBe(true);
     expect(classifyBackgroundJobAlerts(assessment.warnings)).toMatchObject({

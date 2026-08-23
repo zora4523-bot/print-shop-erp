@@ -7,6 +7,8 @@ import { db } from '../db';
 import { BACKGROUND_JOB_TYPES } from './types';
 
 export type BackgroundJobHealth = {
+  /** 本次健康快照的数据库时钟锚点。 */
+  observedAt: Date;
   activeWorkers: Array<{
     queue: BackgroundJobQueue;
     version: string;
@@ -28,14 +30,16 @@ export type BackgroundJobHealth = {
   deadNotificationLast24h: number;
 };
 
-export async function getBackgroundJobHealth(
-  /** 仅供测试注入；生产留空，锚点来自数据库。 */
-  now?: Date,
-): Promise<BackgroundJobHealth> {
+type DeadCountsRow = {
+  deadLast24h: number;
+  deadNotificationLast24h: number;
+};
+
+export async function getBackgroundJobHealth(): Promise<BackgroundJobHealth> {
   // heartbeatAt / lockedAt / lastSeenAt 全部由 worker 进程写入，可能在另一台
   // 机器上。用本 web 进程的 Node 时钟推截止点，两边一漂就把活着的 worker
   // 报成 missing，/api/health/ready 随之变 error。
-  const at = now ?? (await databaseNow());
+  const at = await databaseNow();
   const workerCutoff = new Date(at.getTime() - 45_000);
   const staleCutoff = new Date(at.getTime() - 6 * 60_000);
   const dayCutoff = new Date(at.getTime() - 24 * 60 * 60_000);
@@ -48,8 +52,7 @@ export async function getBackgroundJobHealth(
     heavyOldest,
     running,
     staleRunning,
-    deadLast24h,
-    deadNotificationLast24h,
+    deadCounts,
   ] = await Promise.all([
     db.backgroundWorkerHeartbeat.findMany({
       where: { lastSeenAt: { gte: workerCutoff } },
@@ -57,20 +60,36 @@ export async function getBackgroundJobHealth(
       orderBy: { lastSeenAt: 'desc' },
     }),
     db.backgroundJob.count({
-      where: { queue: BackgroundJobQueue.LIGHT, status: BackgroundJobStatus.PENDING },
+      where: {
+        queue: BackgroundJobQueue.LIGHT,
+        status: BackgroundJobStatus.PENDING,
+        availableAt: { lte: at },
+      },
     }),
     db.backgroundJob.count({
-      where: { queue: BackgroundJobQueue.HEAVY, status: BackgroundJobStatus.PENDING },
+      where: {
+        queue: BackgroundJobQueue.HEAVY,
+        status: BackgroundJobStatus.PENDING,
+        availableAt: { lte: at },
+      },
     }),
     db.backgroundJob.findFirst({
-      where: { queue: BackgroundJobQueue.LIGHT, status: BackgroundJobStatus.PENDING },
-      select: { createdAt: true },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        queue: BackgroundJobQueue.LIGHT,
+        status: BackgroundJobStatus.PENDING,
+        availableAt: { lte: at },
+      },
+      select: { availableAt: true },
+      orderBy: { availableAt: 'asc' },
     }),
     db.backgroundJob.findFirst({
-      where: { queue: BackgroundJobQueue.HEAVY, status: BackgroundJobStatus.PENDING },
-      select: { createdAt: true },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        queue: BackgroundJobQueue.HEAVY,
+        status: BackgroundJobStatus.PENDING,
+        availableAt: { lte: at },
+      },
+      select: { availableAt: true },
+      orderBy: { availableAt: 'asc' },
     }),
     db.backgroundJob.count({ where: { status: BackgroundJobStatus.RUNNING } }),
     db.backgroundJob.count({
@@ -82,38 +101,44 @@ export async function getBackgroundJobHealth(
         ],
       },
     }),
-    db.backgroundJob.count({
-      where: { status: BackgroundJobStatus.DEAD, finishedAt: { gte: dayCutoff } },
-    }),
-    db.backgroundJob.count({
-      where: {
-        status: BackgroundJobStatus.DEAD,
-        finishedAt: { gte: dayCutoff },
-        type: BACKGROUND_JOB_TYPES.NOTIFICATION,
-      },
-    }),
+    db.$queryRaw<DeadCountsRow[]>`
+      SELECT
+        count(*)::integer AS "deadLast24h",
+        count(*) FILTER (
+          WHERE "type" = ${BACKGROUND_JOB_TYPES.NOTIFICATION}
+        )::integer AS "deadNotificationLast24h"
+      FROM "BackgroundJob"
+      WHERE "status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"
+        AND "finishedAt" >= ${dayCutoff}
+    `,
   ]);
 
+  const deadCount = deadCounts[0];
+  if (!deadCount) {
+    throw new Error('background job health: dead counts unavailable');
+  }
+
   return {
+    observedAt: at,
     activeWorkers: workers,
     pending: {
       [BackgroundJobQueue.LIGHT]: lightPending,
       [BackgroundJobQueue.HEAVY]: heavyPending,
     },
     oldestPendingAt: {
-      [BackgroundJobQueue.LIGHT]: lightOldest?.createdAt ?? null,
-      [BackgroundJobQueue.HEAVY]: heavyOldest?.createdAt ?? null,
+      [BackgroundJobQueue.LIGHT]: lightOldest?.availableAt ?? null,
+      [BackgroundJobQueue.HEAVY]: heavyOldest?.availableAt ?? null,
     },
     running,
     staleRunning,
-    deadLast24h,
-    deadNotificationLast24h,
+    deadLast24h: deadCount.deadLast24h,
+    deadNotificationLast24h: deadCount.deadNotificationLast24h,
   };
 }
 
 export function assessBackgroundJobHealth(
   health: BackgroundJobHealth,
-  options: { requireWorkers: boolean; expectedVersion?: string; now?: Date },
+  options: { requireWorkers: boolean; expectedVersion?: string },
 ): { available: boolean; status: 'ok' | 'degraded' | 'error'; warnings: string[] } {
   const warnings: string[] = [];
   if (options.requireWorkers) {
@@ -143,9 +168,8 @@ export function assessBackgroundJobHealth(
     warnings.push('dead-notification-jobs-last-24h');
   }
 
-  const now = options.now ?? new Date();
-  const lightAge = ageMs(health.oldestPendingAt.LIGHT, now);
-  const heavyAge = ageMs(health.oldestPendingAt.HEAVY, now);
+  const lightAge = ageMs(health.oldestPendingAt.LIGHT, health.observedAt);
+  const heavyAge = ageMs(health.oldestPendingAt.HEAVY, health.observedAt);
   if (lightAge !== null && lightAge > 5 * 60_000) warnings.push('light-backlog-old');
   if (heavyAge !== null && heavyAge > 15 * 60_000) warnings.push('heavy-backlog-old');
 

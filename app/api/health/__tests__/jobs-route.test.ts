@@ -26,6 +26,7 @@ const VERSION = 'v1';
 function fixture(): BackgroundJobHealth {
   const now = new Date();
   return {
+    observedAt: now,
     activeWorkers: [
       { queue: BackgroundJobQueue.LIGHT, version: VERSION, lastSeenAt: now },
       { queue: BackgroundJobQueue.HEAVY, version: VERSION, lastSeenAt: now },
@@ -89,13 +90,16 @@ describe('GET /api/health/jobs', () => {
   it('只有会自愈的积压 → 200 {status:degraded}，不 page', async () => {
     const health = fixture();
     health.pending.LIGHT = 12;
-    health.oldestPendingAt.LIGHT = new Date(Date.now() - 6 * 60_000);
+    health.oldestPendingAt.LIGHT = new Date(
+      health.observedAt.getTime() - 6 * 60_000,
+    );
     getBackgroundJobHealthMock.mockResolvedValue(health);
 
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('degraded');
+    expect(body.time).toBe(health.observedAt.toISOString());
     expect(body.alerts).toEqual([]);
     expect(body.warnings).toContain('light-backlog-old');
   });
