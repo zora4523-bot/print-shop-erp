@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-**P0/P1 + Pigsty/ERP 主数据 + 生产硬化已完成，生产环境仍运行 `aa42ba0`**。当前发布提交另已完成工单列表/导出、工单详情语义修复、对客加工费自动报价、外部销售版本化价目簿、结算方向冻结、员工工资与供应商应付分账、改单审批重报价和金额权限隔离。本轮又把外部销售收费管理重构为可检索、可筛选、可安全编辑的业务工作台，并将同一产品的精确数量价位合并为一个可原子保存的价格阶梯；完整发布候选**已由 2026-08-18 的 Git 提交固化，但尚未部署生产**。2026-08-21 又在其上叠了两批上线前修复（并行缺陷修复 11 项 + 对抗审查修复 4 项），本地 migration 累计 **77 项**；生产仍是 `aa42ba0` / 45 项。
+**P0/P1 + Pigsty/ERP 主数据 + 生产硬化已完成，生产环境仍运行 `aa42ba0`**。当前发布提交另已完成工单列表/导出、工单详情语义修复、对客加工费自动报价、外部销售版本化价目簿、结算方向冻结、员工工资与供应商应付分账、改单审批重报价和金额权限隔离。本轮又把外部销售收费管理重构为可检索、可筛选、可安全编辑的业务工作台，并将同一产品的精确数量价位合并为一个可原子保存的价格阶梯；完整发布候选**已由 2026-08-18 的 Git 提交固化，但尚未部署生产**。2026-08-21 又在其上叠了两批上线前修复，2026-08-23 完成 Codex 独立结构复审与成立项收口。当前 `HEAD` 已跟踪 **82 项** migration，工作树另有 1 项未提交 migration；生产仍是 `aa42ba0` / 45 项。
 
 ## 最后更新
 
-2026-08-21
+2026-08-23
 
 ## 已完成
 
@@ -75,7 +75,7 @@
 - [x] **单条报工数量守卫**：`合格 + 不良 + 返工` 的合计 **达到** `计划数 × N` 一律硬拒；N 进新 `Setting` 键 `report_qty_max_multiple`（默认 3、范围收在 1–10）。判据用 `>=` 而不是 `>`：默认 10 倍配严格大于时，「多打一个零」恰好等于上限、一次都挡不住。超过计划数但未达上限由师傅勾选「确认超出计划数」通过并双处留痕（`ProductionTask.remark` + `OrderLog(action='TASK_OVER_REPORT')`）；**计件仍按实际合计数全额付**（业主拍板，算钱链路未改）。配套老板看板新增「超计划报工」表作为知情通道——**守卫与看板是一个决策的两半**，因为批准权落在被发钱的人手上。数量框刻意不设 `max`，上限判定只在服务端（否则零 JS 下只弹原生气泡，中文提示永远看不到）。
 - [x] **工单完工闸口收紧为款式级外协覆盖**：由「有外协单且全部 `RECEIVED`」改为「每个含外协工艺的款式都被至少一张本工单未取消的外协单覆盖」。不改表，复用 `OrderItem.crafts` 与 `OutsourceOrder.orderItemIds`；新增共用谓词 `outsourceCoverageApplies` 让闸口与工单详情页横幅口径一致（`requiresOutsource` 是排产快照且无重算路径，不共用会出现「页面说不能完工、闸口照样完工」的反向漂移）。`ProductionCompletionTx` 返回值由 `boolean` 改为对象，五个调用点改取 `.completed`。**残留缺口（同款式两道外协工艺只发一道时仍放行）已显式接受，别当 bug 修**。
 - [x] **盘点并发守卫改用逐行账面回声 CAS**：页面把「录入这一格时看到的账面数」钉在该行回传，服务端行锁后比对；冲突行剔除后**部分过账**余下的，一条不剩才整单回滚；另加事务外预检避免每次驳回白烧一个当日 IC 号。原「时间戳基线」方案的 4 条 blocking/major 全部源自那一个设计，整体否决。**零 schema 变更、零 migration、零新 `Setting`**。
-- [x] **通知投递失败可重试并进死信**：`NotificationLog` 新增 `deliveryKey`（取 `BackgroundJob.dedupeKey`）与 `@@unique([deliveryKey, channelId])`，重试时 upsert 就地翻状态、跳过已成功的 channel；瞬时失败写 `RETRYING`、耗尽才 `FAILED`；永久性投递失败仍让 job 判 `SUCCEEDED`（通报渠道是 `NotificationLog` 与首页告警条，不是死信探针）。批量扇出按 `index × 3500ms` 摊开以压在企业微信 20 条/分钟限额之下。`/api/health/jobs` 新增 `deadNotificationLast24h` 与告警码 `dead-notification-jobs-last-24h`，通知类死信只 200 `degraded`；`/api/health/ready` 状态码语义不变。**+2 项 migration，累计 77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
+- [x] **通知投递失败可重试并进死信**：`NotificationLog` 新增 `deliveryKey`（取 `BackgroundJob.dedupeKey`）与 `@@unique([deliveryKey, channelId])`，重试时 upsert 就地翻状态、跳过已成功的 channel；明确未送达的瞬时失败写 `RETRYING`，job 耗尽后日志仍保持 `RETRYING` 并通过 owning `DEAD` job 进入业主告警 / 待处理队列 / “重试耗尽”徽章；永久性投递失败仍让 job 判 `SUCCEEDED`。批量扇出按 `index × 3500ms` 摊开以压在企业微信 20 条/分钟限额之下。`/api/health/jobs` 新增 `deadNotificationLast24h` 与告警码 `dead-notification-jobs-last-24h`，通知类死信只 200 `degraded`；`/api/health/ready` 状态码语义不变。**+2 项 migration，累计 77 项**，尾项 `20260821120100_notification_log_delivery_key_unique`。
 - [x] 文档同步：`DECISIONS.md` 追加 6 条；新增 `docs/上线前置操作清单.md`（外协覆盖的两段部署前只读 SQL、唯一索引 `indisvalid` 验收、单向门、上线后人工验证、OSS 未来实施的前置项）；`README.md`、`docs/部署指南.md`、`docs/production-slo-and-recovery.md` 同步 migration 计数与告警语义。**CLAUDE.md 未改**（配置文件，留给业主）。
 - [ ] **明确不做**：OSS「临时 key + 服务端 copy」（业主决定保持 STS 单 key + 15 分钟过期的现有缓解，**已知接受的风险**，两个必踩陷阱已写进 DECISIONS）；盘点的逐行 `snapshotAt` + ledger scan（只解决「净额为零的往返」，已拆出单独设计评审）。
 - [ ] 本批同样**未跑**全量 typecheck / `pnpm test run` / Playwright（并发多 agent 改同一仓库，全量门禁结果无意义），合并前需补一次完整门禁 + `pnpm vitest run --coverage` + `pnpm test:admin-ui`。
@@ -230,9 +230,13 @@
 
 ## 下一步
 
-**先做（2026-08-21 对抗审查批次收尾，不需要拍板）**：
+**先做（2026-08-23，不需要拍板）**：
 
-0. 补一次完整门禁（`pnpm lint && pnpm typecheck && pnpm test run`、`pnpm vitest run --coverage`、`pnpm test:admin-ui` / `pnpm test:worker-ui`）；把 `docs/上线前置操作清单.md` §一的两段只读 SQL 交业主跑，查询 1 的存量缺口补完之前**不要**上外协闸口那一步；按同文档 §五做四项人工验收。
+0. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
+
+**然后（2026-08-21 对抗审查批次收尾，仍不需要拍板）**：
+
+0b. 结构收口的程序化门禁已补齐；整批发布候选仍需跑 `pnpm test:admin-ui` / `pnpm test:worker-ui`，把 `docs/上线前置操作清单.md` §一的两段只读 SQL 交业主跑，并按同文档 §五做四项人工验收。查询 1 的存量缺口补完之前**不要**上外协闸口那一步。
 
 以下全部**需业主拍板**后才能推进：
 
@@ -275,12 +279,9 @@
 - 外协供应商目前只有独立应付账本，没有可自动计算的合同价字典；增加自动定价前必须先确定供应商、工艺、计量单位、数量阶梯、最低收费和有效期，不能复用客户售价规则。
 - `pg_pinyin` / `pg_ivm` / `pg_partman` 等在非 Pigsty 本地库降级为普通列/视图/缺席，生产安装按 `docs/pigsty-production-activation-runbook.md`
 - **三处无界查询仍在 backlog**（都是 `findMany` 无 `take`，行数随时间线性增长）：`lib/salary/daily.ts:593 listDailyWorkerSalaries`（`/owner/salary/daily`，不筛就是全表）、`lib/salary/hourly-aggregate.ts:549 listHourlyPayrolls`（`/owner/salary/hourly`，同上）、`lib/worker-portal.ts:222 listWorkerSalaries`（师傅端 H5，`@@unique([workerId, date])` → 三年约 900 行，一次渲染 900 张卡片并逐张做 Decimal 运算）。`listWorkerSalaries` **不能照抄 `listWorkerOrders` 的分页补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 从整个数组 reduce 出「累计工资 / 尚未发放」，直接分页会把这两个金额静默变成「本页合计」——给师傅看错工资总额比慢更糟。正确修法是行分页 + 用 `db.dailyWorkerSalary.aggregate` 单独算 total/unpaid。（`listWorkerHourlyPayrolls` 已核实**不需要**分页：每人每月最多一行，十年 120 行，结构有界。）
-- **通知重试的已知缺口**（2026-08-21）：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，`notify` 不会再跑，那一轮写下的 `NotificationLog(RETRYING)` 行永远翻不成 `FAILED`；而 `countRecentFailures` 只数 `FAILED`，于是这条**真正丢掉**的推送在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法：在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`。
 - **`NotificationLog` 若加保留期/清理任务，必须排除「所属 `BackgroundJob` 仍在 `PENDING`/`RUNNING`」的行**——`deliveryKey` 行是幂等凭证，删早了会让重试对已收到消息的群重复推送。
 - **OSS 直传的 15 分钟重放窗口仍开着**（2026-08-21 业主决定本批不做「临时 key + 服务端 copy」）：窗口内浏览器仍可覆写自己刚登记的对象。这是**已知接受的风险**，不是已修复；实施前置与两个必踩陷阱见 `DECISIONS.md` 2026-08-21 与 `docs/上线前置操作清单.md` §六。
 - **盘点 CAS 的残留缺口**：净额为零的往返（先出 20 再进 20，余额回到原值）检测不到。堵口需要逐行 `snapshotAt` + `MaterialTransaction` 复合索引 + ledger scan，已拆出单独设计评审。**别顺手改回时间戳基线**。
-- `enqueueBackgroundJob` 的 DEAD/CANCELLED 复活路径仍是 `input.availableAt ?? new Date()`（Node 时钟）。要改必须把 `EnqueueClient` 从 `Pick<TransactionClient,'backgroundJob'>` 拓宽到含 `$queryRaw`，会波及 `lib/order/export.ts` 与 `lib/cdr/bundle.ts` 的测试 mock；最坏后果只是复活任务被推迟一个时钟偏差，不会重复执行。
-- `assessBackgroundJobHealth` 仍是同步纯函数、用 web 进程的 `new Date()` 算积压时长；它只产出 `light/heavy-backlog-old` 两个 warning，`available` 只由 worker-missing / version-mismatch 决定，后两者已锚到库时钟。改成异步会波及 `app/api/health/ready/route.ts` 与 `/owner/background-jobs` 页面。
 - `databaseNow()` 与 background-jobs 里所有 `now()` 都必须在**主库**执行；目前 `lib/db.ts` 只有单一 `DATABASE_URL`，将来若把只读查询路由到 Pigsty 只读副本，`getBackgroundJobHealth` 这条纯读路径要重新审。
 - `OrderForm` 的逐字段错误挂了 `role="alert"`，与 `29334e0` 就 `EditOrderForm` 拍板的「逐字段错误不给 `role="alert"`」相冲突（`OrderForm` 是 RHF `mode: 'onBlur'`，每次失焦重算都会重新播报）。属独立一致性问题，未混进 2026-08-21 批次。
 - `/api/health/jobs` 已就绪但**尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信 30 分钟响应目标不生效。
