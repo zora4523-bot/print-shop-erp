@@ -1,19 +1,57 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // notify 的公开契约是**永不抛**（dispatch.ts 有 `void notify()`，一旦会抛，
 // Node 24 默认 --unhandled-rejections=throw 会把 web 进程打崩）。所以「要不要
 // 重试」的判断落在 handleNotificationJob 上：它读 NotifyOutcome.retryable，
 // 只有可重试的失败才抛，让 BackgroundJob 走 durable 退避 / 死信。
 // 这个文件锁的就是这条分工。
-const { notifyMock, enqueueBackgroundJobMock } = vi.hoisted(() => ({
-  notifyMock: vi.fn(),
-  enqueueBackgroundJobMock: vi.fn(),
-}));
+const {
+  notifyMock,
+  replayMock,
+  enqueueBackgroundJobMock,
+  databaseNowMock,
+  ReplayConflictError,
+} = vi.hoisted(() => {
+  type ConflictOutcome = {
+    event: string;
+    attempted: number;
+    delivered: number;
+    skipped: number;
+    failed: number;
+    retryable: boolean;
+    unknown: number;
+    unlogged: number;
+    errorCodes: string[];
+  };
 
-vi.mock('../../notification/notify', () => ({ notify: notifyMock }));
+  class ReplayConflictError extends Error {
+    readonly partialOutcome: ConflictOutcome;
+
+    constructor(message: string, partialOutcome: ConflictOutcome) {
+      super(message);
+      this.name = 'NotificationReplayConflictError';
+      this.partialOutcome = partialOutcome;
+    }
+  }
+
+  return {
+    notifyMock: vi.fn(),
+    replayMock: vi.fn(),
+    enqueueBackgroundJobMock: vi.fn(),
+    databaseNowMock: vi.fn(),
+    ReplayConflictError,
+  };
+});
+
+vi.mock('../../notification/notify', () => ({
+  notify: notifyMock,
+  replayDurableNotificationLogs: replayMock,
+  NotificationReplayConflictError: ReplayConflictError,
+}));
 vi.mock('../repository', () => ({
   enqueueBackgroundJob: enqueueBackgroundJobMock,
 }));
+vi.mock('../clock', () => ({ databaseNow: databaseNowMock }));
 
 import { BackgroundJobQueue } from '../../../generated/prisma/enums';
 import {
@@ -21,6 +59,8 @@ import {
   handleNotificationJob,
   InvalidNotificationJobPayloadError,
   NotificationDeliveryFailedError,
+  NotificationDeliveryUnknownError,
+  NotificationReplayTerminalError,
 } from '../notification';
 import type { ClaimedBackgroundJob } from '../types';
 
@@ -35,6 +75,7 @@ const PAYLOAD = {
     urgentMark: '',
   },
 };
+const DB_NOW = new Date('2026-08-21T09:00:00.000Z');
 
 function job(
   overrides: Partial<ClaimedBackgroundJob> = {},
@@ -61,6 +102,7 @@ function outcome(over: Record<string, unknown> = {}) {
     skipped: 0,
     failed: 0,
     retryable: false,
+    unknown: 0,
     unlogged: 0,
     errorCodes: [] as string[],
     ...over,
@@ -69,29 +111,30 @@ function outcome(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   notifyMock.mockReset().mockResolvedValue(outcome());
+  replayMock.mockReset().mockResolvedValue(outcome());
   enqueueBackgroundJobMock.mockReset().mockResolvedValue({
     job: { id: 'job-notif-1' },
     created: true,
     requeued: false,
   });
+  databaseNowMock.mockReset().mockResolvedValue(DB_NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('handleNotificationJob', () => {
-  it('把 job.dedupeKey 当 deliveryKey 传给 notify，并算出 finalAttempt', async () => {
+  it('把 job.dedupeKey 当 deliveryKey 传给 notify', async () => {
     await handleNotificationJob(job({ attempts: 1, maxAttempts: 5 }));
     expect(notifyMock).toHaveBeenCalledWith(
       'ORDER_SUBMITTED',
       expect.objectContaining({ orderId: 'o1' }),
-      { deliveryKey: 'notification:ORDER_SUBMITTED:o1', finalAttempt: false },
+      {
+        deliveryKey: 'notification:ORDER_SUBMITTED:o1',
+        deliveryAttempt: 1,
+      },
     );
-  });
-
-  it('最后一次 attempt 传 finalAttempt=true（失败要落 FAILED 而不是 RETRYING）', async () => {
-    await handleNotificationJob(job({ attempts: 5, maxAttempts: 5 }));
-    expect(notifyMock.mock.calls[0]![2]).toEqual({
-      deliveryKey: 'notification:ORDER_SUBMITTED:o1',
-      finalAttempt: true,
-    });
   });
 
   it('全部送达 → result 里带投递计数，不抛', async () => {
@@ -107,6 +150,136 @@ describe('handleNotificationJob', () => {
     });
   });
 
+  it('人工重发只走原日志定向路径，不再读当前规则扇出', async () => {
+    await handleNotificationJob(
+      job({
+        attempts: 6,
+        maxAttempts: 8,
+        payload: {
+          ...PAYLOAD,
+          manualReplay: {
+            targets: [{ logId: 'log-c2', stateVersion: 4 }],
+          },
+        },
+      }),
+    );
+
+    expect(replayMock).toHaveBeenCalledExactlyOnceWith('ORDER_SUBMITTED', {
+      deliveryKey: 'notification:ORDER_SUBMITTED:o1',
+      deliveryAttempt: 6,
+      targets: [{ logId: 'log-c2', stateVersion: 4 }],
+    });
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('前一目标 429 后发生重放冲突，抛专用终态错误而非传输重试', async () => {
+    replayMock.mockRejectedValueOnce(
+      new ReplayConflictError(
+        'manual notification replay state generation mismatch',
+        outcome({
+          attempted: 1,
+          delivered: 0,
+          failed: 1,
+          retryable: true,
+          errorCodes: ['http 429'],
+        }),
+      ),
+    );
+
+    const handled = handleNotificationJob(
+      job({
+        attempts: 2,
+        maxAttempts: 5,
+        payload: {
+          ...PAYLOAD,
+          manualReplay: {
+            targets: [{ logId: 'log-c2', stateVersion: 4 }],
+          },
+        },
+      }),
+    );
+
+    await expect(handled).rejects.toBeInstanceOf(
+      NotificationReplayTerminalError,
+    );
+    await expect(handled).rejects.toMatchObject({
+      name: 'NotificationReplayTerminalError',
+      partialResult: expect.objectContaining({
+        attempted: 1,
+        failed: 2,
+        errorCodes: ['http 429', 'NotificationReplayConflictError'],
+      }),
+    });
+  });
+
+  it('纯版本冲突也立即进入不重试终态', async () => {
+    replayMock.mockRejectedValueOnce(
+      new ReplayConflictError(
+        'manual notification replay state generation mismatch',
+        outcome(),
+      ),
+    );
+
+    await expect(
+      handleNotificationJob(
+        job({
+          attempts: 1,
+          maxAttempts: 5,
+          payload: {
+            ...PAYLOAD,
+            manualReplay: {
+              targets: [{ logId: 'log-c2', stateVersion: 4 }],
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: 'NotificationReplayTerminalError',
+      partialResult: expect.objectContaining({
+        failed: 1,
+        errorCodes: ['NotificationReplayConflictError'],
+      }),
+    });
+  });
+
+  it('人工重放冲突不得掩盖先前已产生的 UNKNOWN', async () => {
+    replayMock.mockRejectedValueOnce(
+      new ReplayConflictError(
+        'manual notification replay state generation mismatch',
+        outcome({
+          attempted: 1,
+          delivered: 0,
+          unknown: 1,
+          errorCodes: ['TimeoutError'],
+        }),
+      ),
+    );
+
+    await expect(
+      handleNotificationJob(
+        job({
+          attempts: 6,
+          payload: {
+            ...PAYLOAD,
+            manualReplay: {
+              targets: [{ logId: 'log-c2', stateVersion: 4 }],
+            },
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(NotificationDeliveryUnknownError);
+  });
+
+  it('拒绝结构损坏的人工重发路由标记', async () => {
+    await expect(
+      handleNotificationJob(
+        job({ payload: { ...PAYLOAD, manualReplay: { targets: [] } } }),
+      ),
+    ).rejects.toBeInstanceOf(InvalidNotificationJobPayloadError);
+    expect(replayMock).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
   it('可重试失败 → 抛 NotificationDeliveryFailedError，携带部分进度', async () => {
     const errSpy = vi
       .spyOn(console, 'error')
@@ -118,7 +291,7 @@ describe('handleNotificationJob', () => {
         skipped: 1,
         failed: 1,
         retryable: true,
-        errorCodes: ['http 500'],
+        errorCodes: ['http 429'],
       }),
     );
 
@@ -137,7 +310,7 @@ describe('handleNotificationJob', () => {
         delivered: 1,
         skipped: 1,
         failed: 1,
-        errorCodes: ['http 500'],
+        errorCodes: ['http 429'],
       });
     }
     // 只打计数，不打 channel id / 消息正文
@@ -164,6 +337,28 @@ describe('handleNotificationJob', () => {
     });
   });
 
+  it('投递结果未知 → 抛专用错误并携带进度，禁止自动重发', async () => {
+    notifyMock.mockResolvedValue(
+      outcome({
+        attempted: 1,
+        delivered: 0,
+        unknown: 1,
+        errorCodes: ['AbortError'],
+      }),
+    );
+
+    await expect(handleNotificationJob(job())).rejects.toMatchObject({
+      name: 'NotificationDeliveryUnknownError',
+      partialResult: expect.objectContaining({
+        unknown: 1,
+        errorCodes: ['AbortError'],
+      }),
+    });
+    await expect(handleNotificationJob(job())).rejects.toBeInstanceOf(
+      NotificationDeliveryUnknownError,
+    );
+  });
+
   it('payload 结构损坏 → InvalidNotificationJobPayloadError，且不调 notify', async () => {
     await expect(
       handleNotificationJob(job({ payload: { event: 'NOPE', payload: {} } })),
@@ -181,6 +376,7 @@ describe('enqueueNotificationJob', () => {
     expect(input.availableAt).toBeUndefined();
     expect(input.maxAttempts).toBe(5);
     expect(input.queue).toBe(BackgroundJobQueue.LIGHT);
+    expect(databaseNowMock).not.toHaveBeenCalled();
   });
 
   it('spreadIndex=0 也留空（第一条不必推迟）', async () => {
@@ -188,17 +384,19 @@ describe('enqueueNotificationJob', () => {
       spreadIndex: 0,
     });
     expect(enqueueBackgroundJobMock.mock.calls[0]![0].availableAt).toBeUndefined();
+    expect(databaseNowMock).not.toHaveBeenCalled();
   });
 
-  it('批量扇出按 spreadIndex 摊开 availableAt（压在企业微信 20 条/分钟以下）', async () => {
-    const before = Date.now();
+  it('批量扇出以数据库时钟为基准摊开 availableAt', async () => {
+    // 故意把 Node 墙上时间设到别处；availableAt 仍只能由 DB_NOW 决定。
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2035-01-01T00:00:00.000Z'));
     await enqueueNotificationJob('ORDER_SUBMITTED', PAYLOAD.payload, {
       spreadIndex: 10,
     });
     const availableAt = enqueueBackgroundJobMock.mock.calls[0]![0]
       .availableAt as Date;
-    // 10 × 3500ms = 35s；给测试机留一点执行漂移的余量
-    expect(availableAt.getTime() - before).toBeGreaterThanOrEqual(35_000);
-    expect(availableAt.getTime() - before).toBeLessThan(40_000);
+    expect(availableAt).toEqual(new Date(DB_NOW.getTime() + 35_000));
+    expect(databaseNowMock).toHaveBeenCalledTimes(1);
   });
 });
