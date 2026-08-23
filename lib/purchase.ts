@@ -23,6 +23,8 @@ import {
   type MaterialStockAlert,
 } from './material';
 import { dispatchNotification } from './notification/dispatch';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { EnqueueClient } from './background-jobs/repository';
 import type {
   CreatePurchaseOrderInput,
   CreatePurchaseReceiptInput,
@@ -261,6 +263,8 @@ export async function createPurchaseOrder(
   now: Date = new Date(),
 ): Promise<PurchaseOrderDetail> {
   const quantity = parsePositiveDecimal(input.quantity, '采购数量');
+  // 采购单号在业务事务外独立预留；后续供应商 / 物料校验或创建
+  // 失败会留下单号空隙。采购编号契约不要求连续，这里明确接受该空隙。
   const purchaseNo = await reservePurchaseDocumentNumber('PURCHASE_ORDER', now);
 
   const createdId = await db.$transaction(async (tx) => {
@@ -344,6 +348,8 @@ export async function createPurchaseReceipt(
     return existingDetail;
   }
 
+  // 入库单号在幂等快查后、锁事务前独立预留；后续校验失败，或
+  // 并发重放在事务内命中 existingRequest，都会留下空隙。入库编号明确允许不连续。
   const receiptNo = await reservePurchaseDocumentNumber('PURCHASE_RECEIPT', now);
 
   await db.$transaction(async (tx) => {
@@ -469,9 +475,13 @@ export async function cancelPurchaseReceipt(
   now: Date = new Date(),
 ): Promise<PurchaseOrderDetail> {
   let purchaseOrderId: string | null = null;
-  // 取消入库是出库方向，可能把库存带破安全线；告警在 tx 提交后统一
-  // dispatch（tx 内发会在回滚时留下幽灵消息）。
-  const stockAlerts: MaterialStockAlert[] = [];
+  // 取消入库是出库方向，可能把库存带破安全线。生产 durable
+  // 模式在同一 tx 写作业账本；inline dev/test 才在 commit 后 dispatch。
+  const stockAlerts: Array<{
+    payload: MaterialStockAlert;
+    deliveryKey: string;
+  }> = [];
+  let notificationsQueued = false;
 
   await db.$transaction(async (tx) => {
     const receiptPointer = await tx.purchaseReceipt.findUnique({
@@ -549,7 +559,12 @@ export async function cancelPurchaseReceipt(
         remark: `取消采购入库 ${receipt.receiptNo}${reason ? `：${reason}` : ''}`,
         purchaseReceiptItemId: item.id,
       });
-      if (movement.stockAlert) stockAlerts.push(movement.stockAlert);
+      if (movement.stockAlert) {
+        stockAlerts.push({
+          payload: movement.stockAlert,
+          deliveryKey: `notification:STOCK_ALERT:${movement.transaction.id}`,
+        });
+      }
 
       const lockedItems = await tx.$queryRaw<
         { id: string; quantity: Decimal.Value; receivedQuantity: Decimal.Value }[]
@@ -589,11 +604,27 @@ export async function cancelPurchaseReceipt(
       data: { status: statusAfterReceivedQuantities(nextItems) },
       select: { id: true },
     });
+
+    const queueResults: boolean[] = [];
+    for (const alert of stockAlerts) {
+      queueResults.push(
+        await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'STOCK_ALERT',
+          alert.payload,
+          { dedupeKey: alert.deliveryKey },
+        ),
+      );
+    }
+    notificationsQueued = queueResults.length > 0 && queueResults.every(Boolean);
   });
 
   if (!purchaseOrderId) throw new PurchaseInvariantError('采购单不存在');
   for (const alert of stockAlerts) {
-    await dispatchNotification('STOCK_ALERT', alert);
+    if (notificationsQueued) break;
+    await dispatchNotification('STOCK_ALERT', alert.payload, {
+      dedupeKey: alert.deliveryKey,
+    });
   }
   const detail = await getPurchaseOrderDetail(purchaseOrderId);
   if (!detail) throw new PurchaseInvariantError('采购单取消入库后读取失败');

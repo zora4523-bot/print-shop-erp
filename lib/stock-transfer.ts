@@ -68,6 +68,8 @@ export async function createStockTransfer(
     return readStockTransfer(existingBeforeReservation.id);
   }
 
+  // 调拨单号在幂等快查后、锁事务前独立预留；后续校验失败，或
+  // 并发重放在事务内命中 existing，都会留下空隙。调拨编号明确允许不连续。
   let reservedTransferNo: string;
   try {
     reservedTransferNo = await nextDailyDocumentNumber('STOCK_TRANSFER', now);
