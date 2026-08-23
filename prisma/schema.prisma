@@ -122,13 +122,23 @@ model BusinessCodeSequence {
   updatedAt DateTime @updatedAt
 }
 
-// Daily human-readable document numbers. The counter is reserved in a short,
-// independent statement so long-running stock transactions do not serialize
-// behind a transaction-scoped advisory lock.
+// Daily human-readable document numbers. Most callers reserve in a short,
+// independent statement; workflows that need atomic idempotent replay may pass
+// their owning transaction and reserve only after validation succeeds.
 model DailyDocumentSequence {
   key       String   @id
   value     Int      @default(0)
   updatedAt DateTime @updatedAt
+}
+
+// Shared credential-attempt GCRA bucket. Keeping this in PostgreSQL makes the
+// limit authoritative across PM2 restarts and future multiple web instances.
+model LoginRateLimitBucket {
+  key                  String   @id
+  theoreticalArrivalAt DateTime @db.Timestamptz(3)
+  updatedAt            DateTime @db.Timestamptz(3)
+
+  @@index([updatedAt])
 }
 
 // ============================================================
@@ -345,11 +355,12 @@ model OrderItem {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  order         Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product       Product?            @relation(fields: [productId], references: [id])
-  designs       OrderItemDesign[]
-  tasks         ProductionTask[]
-  shipmentLines OrderShipmentLine[]
+  order              Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product            Product?                     @relation(fields: [productId], references: [id])
+  designs            OrderItemDesign[]
+  tasks              ProductionTask[]
+  shipmentLines      OrderShipmentLine[]
+  outsourceSnapshots OutsourceOrderItemSnapshot[]
 
   @@index([orderId])
 }
@@ -503,6 +514,8 @@ model ProductionTask {
   workerType         WorkerType? // 派工时快照，防止账号后续改岗破坏历史任务
   machineType        MachineType? // 派单时快照
   status             TaskStatus   @default(PENDING)
+  // DB CHECK `ProductionTask_plannedQty_positive_check` 已存在并要求 > 0；
+  // Prisma 无 @@check，schema-first 变更禁止覆盖或丢失该约束。
   plannedQty         Int
   boardCount         Int          @default(0) // 板数（计算值）
   pressCount         Int          @default(0) // 下数（计算值）
@@ -560,15 +573,33 @@ model OutsourceOrder {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  order         Order?                  @relation(fields: [orderId], references: [id])
-  createdBy     User?                   @relation("OutsourceOrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  order         Order?                       @relation(fields: [orderId], references: [id])
+  createdBy     User?                        @relation("OutsourceOrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
   amountChanges OutsourceAmountChange[]
   payments      OutsourcePayment[]
+  itemSnapshots OutsourceOrderItemSnapshot[]
 
   @@index([orderId])
   @@index([createdById])
   @@index([status])
   @@index([expectedDate])
+}
+
+// 外协单创建时的逐款式数量快照。orderItemIds 继续作为兼容的款式列表，
+// 但完工闸口只信任这个不可变账本，避免工单增量被已回货外协单冒领。
+model OutsourceOrderItemSnapshot {
+  id               String @id @default(cuid())
+  outsourceOrderId String
+  orderItemId      String
+  // DB CHECK `OutsourceOrderItemSnapshot_quantity_positive_check` 已存在并要求 > 0；
+  // Prisma 无 @@check，schema-first 变更禁止覆盖或丢失该约束。
+  quantity         Int
+
+  outsourceOrder OutsourceOrder @relation(fields: [outsourceOrderId], references: [id], onDelete: Cascade)
+  orderItem      OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@unique([outsourceOrderId, orderItemId])
+  @@index([orderItemId])
 }
 
 model OutsourceAmountChange {
@@ -1167,6 +1198,9 @@ model InventoryCount {
   countedById    String
   countedAt      DateTime @default(now())
   remark         String?
+  // 部分过账的冲突结果必须与盘点单同事务落库，同一幂等键重放才能原样回复。
+  staleKeys      String[] @default([])
+  staleMessage   String?
   createdAt      DateTime @default(now())
 
   countedBy User                 @relation(fields: [countedById], references: [id], onDelete: Restrict)
@@ -1376,6 +1410,25 @@ model DailyWorkerSalary {
   // 头才能被用上。date 放第二列：/owner/salary/daily 的未发筛选正好是
   // isPaid=? + date desc，同一棵索引可以顺带服务。
   @@index([isPaid, date])
+}
+
+// Durable roster + completion checkpoint for the once-per-date salary cron.
+// The JSON roster freezes who was eligible when the first attempt started;
+// retries must not silently add/remove workers after account changes.
+// DB CHECK `DailySalaryCronRun_roster_array_check`,
+// `DailySalaryCronRun_summary_nonnegative_check`,
+// `DailySalaryCronRun_total_nonnegative_check`,
+// `DailySalaryCronRun_completion_shape_check` 已存在；它们约束 roster 为数组、
+// 汇总非负且完成字段成组出现。Prisma 无 @@check，schema-first 变更禁止覆盖或丢失这些约束。
+model DailySalaryCronRun {
+  date                  DateTime  @id @db.Date
+  roster                Json
+  completedAt           DateTime?
+  summaryWorkerCount    Int?
+  summaryTotalAmount    Decimal?  @db.Decimal(14, 2)
+  notificationDedupeKey String?   @unique
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @default(now()) @updatedAt
 }
 
 // 不可变的计件任务账本。日薪重算时从 ProductionTask 重建；标记发放后
@@ -1747,32 +1800,45 @@ model NotificationRule {
 }
 
 enum NotificationStatus {
+  SENDING
   SUCCESS
   FAILED
   RETRYING
+  UNKNOWN
 }
 
 model NotificationLog {
-  id             String             @id @default(cuid())
-  eventType      String
-  channelId      String
+  id                   String             @id @default(cuid())
+  eventType            String
+  channelId            String
   // 一次「逻辑投递」的稳定标识 = BackgroundJob.dedupeKey，跨 job attempt 不变。
-  // durable worker 重试前用 (deliveryKey, status=SUCCESS) 查出已经推成功的
-  // channel 并跳过 —— fan-out 部分成功时不重复打扰已收到消息的群
-  // （CLAUDE.md §15.4「携带部分进度」在通知侧的落地）。写入也走
-  // upsert(deliveryKey, channelId)，重试成功时把 RETRYING/FAILED 行就地翻成
-  // SUCCESS，owner 的 24h 失败告警条因此会自愈。
+  // durable worker 在 HTTP 前先原子预留 (deliveryKey, channelId) 并写
+  // SENDING + deliveryAttemptId。只有持有 fencing token 的 worker 能落终态；
+  // SUCCESS/FAILED/UNKNOWN/SENDING 都不再自动重发，只有明确未送达的
+  // RETRYING 可以被下一 attempt 重领。
   //
   // 可空：inline/dev 路径与 owner 的「测试发送」不带 key。PG 唯一索引默认
   // NULLS DISTINCT，任意多条 NULL 行互不冲突，所以存量数据与老路径零影响。
-  deliveryKey    String?
-  messageContent String
-  status         NotificationStatus
-  errorMessage   String?
-  retryCount     Int                @default(0)
-  relatedOrderId String?
-  sentAt         DateTime?
-  createdAt      DateTime           @default(now())
+  deliveryKey          String?
+  messageContent       String
+  status               NotificationStatus
+  errorMessage         String?
+  retryCount           Int                @default(0)
+  relatedOrderId       String?
+  sentAt               DateTime?
+  // Unique fencing token for the process that atomically claimed this
+  // channel delivery. A stale worker cannot overwrite a later terminal state.
+  deliveryAttemptId    String?
+  // BackgroundJob.attempts generation that owns SENDING. A later generation
+  // may fence an abandoned reservation to UNKNOWN; the same generation may
+  // only observe it and must never steal it.
+  deliveryJobAttempt   Int?
+  // Monotonic CAS generation for owner resolution. Status alone cannot prevent
+  // UNKNOWN -> RETRYING -> SENDING -> UNKNOWN ABA from accepting a stale form.
+  deliveryStateVersion Int                @default(0)
+  lastAttemptAt        DateTime           @default(now())
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @default(now()) @updatedAt
 
   channel NotificationChannel @relation(fields: [channelId], references: [id])
 
@@ -1780,6 +1846,8 @@ model NotificationLog {
   @@index([eventType])
   @@index([status])
   @@index([createdAt])
+  @@index([status, lastAttemptAt])
+  @@index([lastAttemptAt(sort: Desc), id(sort: Desc)])
 }
 
 // ============================================================
