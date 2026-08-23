@@ -6,9 +6,16 @@ import {
   WorkerType,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
+import {
+  assertExecutionFence,
+  type ExecutionFence,
+} from '../execution-fence';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { parseStrictYmd } from '../auth/schemas';
-import { isFutureShanghaiDate } from '../dashboard/shanghai-clock';
+import {
+  isFutureShanghaiDate,
+  todayShanghai,
+} from '../dashboard/shanghai-clock';
 import {
   calcMachineDailySalary,
   type MachineSalaryRule,
@@ -18,21 +25,23 @@ import {
   machineRuleLockKey,
   type MachineRuleWithBase,
 } from './rules';
+import { DailySalaryError, shanghaiDayRange } from './daily-common';
+import {
+  findDailySalaryRoster,
+  parseDailySalaryRoster,
+  type DailySalaryRosterEntry,
+} from './daily-roster';
 
-// Asia/Shanghai is the business timezone (UTC+8, no DST). A calendar
-// date for salary purposes means a 24-hour window starting at Shanghai
-// midnight, i.e. UTC day-previous 16:00 → UTC day 16:00. We compute
-// that range ourselves rather than relying on `toLocaleDateString`
-// quirks.
-const SHANGHAI_OFFSET_HOURS = 8;
+// Keep the established public imports stable while the implementations live
+// in focused modules.
+export { DailySalaryError, shanghaiDayRange } from './daily-common';
+export {
+  findDailySalaryRoster,
+  parseDailySalaryRoster,
+  type DailySalaryRosterEntry,
+} from './daily-roster';
+
 const DECIMAL_10_2_MAX = new Decimal('99999999.99');
-
-export class DailySalaryError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DailySalaryError';
-  }
-}
 
 function storableSalaryAmount(
   value: Decimal.Value,
@@ -60,28 +69,6 @@ function storableSalaryAmount(
     );
   }
   return amount;
-}
-
-// Takes a YYYY-MM-DD calendar date string (as stored in the Prisma
-// `@db.Date` column) and returns the matching [start, end) UTC instant
-// range. Pure helper, exported for testing.
-export function shanghaiDayRange(date: string): { start: Date; end: Date } {
-  // Strict calendar check — rejects 2026-02-31 and other rollover
-  // traps that `new Date(string)` would silently normalize. parseStrictYmd returns a UTC-midnight Date for
-  // the input calendar date.
-  const utcMidnight = parseStrictYmd(date);
-  if (!utcMidnight) {
-    throw new DailySalaryError(
-      `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${date}`,
-    );
-  }
-  // Shanghai is UTC+8 and has no DST, so a Shanghai calendar day
-  // spans from (UTC-midnight − 8h) to (UTC-midnight + 16h).
-  const start = new Date(
-    utcMidnight.getTime() - SHANGHAI_OFFSET_HOURS * 60 * 60 * 1000,
-  );
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
 }
 
 // Pure aggregator for already-fetched task rows. Sums pieceworkAmount
@@ -171,6 +158,11 @@ export async function computeDailyWorkerSalary(
   workerId: string,
   date: string,
   now?: Date,
+  options: {
+    fence?: ExecutionFence;
+    includePaidExisting?: boolean;
+    rosterEntry?: DailySalaryRosterEntry;
+  } = {},
 ): Promise<DailyWorkerSalaryResult> {
   const { start, end } = shanghaiDayRange(date);
   // 必须在下面那段事务之前 —— tasks.length === 0 分支会照 dailyBase 写出
@@ -214,10 +206,32 @@ export async function computeDailyWorkerSalary(
       select: {
         id: true,
         isPaid: true,
+        machineType: true,
+        baseSalary: true,
+        totalPieceworkAmount: true,
         actualSalary: true,
         adjustmentAmount: true,
+        taskCount: true,
+        orderCount: true,
       },
     });
+    if (existing?.isPaid && options.includePaidExisting) {
+      // Paid rows are finance-of-record and therefore immutable. Cron retries
+      // still need them in the authoritative date summary, but must never
+      // rewrite them. Unpaid rows deliberately do *not* take this path: a late
+      // task report must be picked up on every retry rather than being mistaken
+      // for progress from an earlier BackgroundJob attempt.
+      return {
+        workerId,
+        date,
+        machineType: existing.machineType,
+        totalPieceworkAmount: String(existing.totalPieceworkAmount),
+        baseSalary: String(existing.baseSalary),
+        actualSalary: String(existing.actualSalary),
+        taskCount: existing.taskCount,
+        orderCount: existing.orderCount,
+      };
+    }
     if (existing?.isPaid) {
       throw new DailySalaryError(
         `该日已标记发放（${date} · 师傅 ${workerId} · 实发 ¥${String(
@@ -276,7 +290,8 @@ export async function computeDailyWorkerSalary(
       }
     }
 
-    if (tasks.length === 0) {
+    const rosterMachineType = options.rosterEntry?.eligibleMachineType ?? null;
+    if (tasks.length === 0 && !existing && !rosterMachineType) {
       if (worker.role !== Role.WORKER) {
         throw new DailySalaryError('不是师傅（role != WORKER）');
       }
@@ -292,8 +307,16 @@ export async function computeDailyWorkerSalary(
         throw new DailySalaryError('师傅未配置机型');
       }
     }
+    // An existing unpaid row is durable evidence that this worker was eligible
+    // for machine salary on that historical date. Account role/active/machine
+    // fields are mutable and only govern future assignment; reusing the frozen
+    // machine type lets a retry recompute late reports without either erasing a
+    // legitimate base-only row or freezing its old amount.
     const primaryMachineType: MachineType =
-      tasks[0]?.machineType ?? worker.machineType!;
+      tasks[0]?.machineType ??
+      existing?.machineType ??
+      rosterMachineType ??
+      worker.machineType!;
 
     for (const task of tasks) {
       storableSalaryAmount(
@@ -404,6 +427,10 @@ export async function computeDailyWorkerSalary(
       '当日实发金额',
     );
 
+    // This worker may have waited on the salary/rule advisory locks longer
+    // than the job lease. Re-prove ownership after all lock waits and reads,
+    // immediately before the first finance-of-record mutation.
+    await assertExecutionFence(options.fence);
     const dailySalary = await tx.dailyWorkerSalary.upsert({
       where: { workerId_date: { workerId, date: dateCol } },
       create: {
@@ -515,8 +542,10 @@ export class DailyBatchUnexpectedError extends Error {
 export async function computeDailyForAllMachineWorkers(
   date: string,
   now?: Date,
+  fence?: ExecutionFence,
+  includePaidExisting = false,
+  fixedRoster?: readonly DailySalaryRosterEntry[],
 ): Promise<BatchDailyResult> {
-  const { start, end } = shanghaiDayRange(date);
   // 在扫师傅之前整批中止。放在这里而不是靠 per-worker try/catch 兜住，是
   // 因为日期错是**整批的输入错**，不是某个师傅的业务错：逐人捕获会返回
   // status:'success' + errorCount = 全员数，UI 上看着像"部分失败"，实际是
@@ -524,39 +553,11 @@ export async function computeDailyForAllMachineWorkers(
   assertNotFutureSalaryDate(date, now);
   const settled: DailyWorkerSalaryResult[] = [];
   const errors: Array<{ workerId: string; workerName: string; message: string }> = [];
-  let workers: Array<{ id: string; displayName: string }>;
+  let workers: DailySalaryRosterEntry[];
   try {
-    workers = await db.user.findMany({
-      where: {
-        OR: [
-          {
-            role: Role.WORKER,
-            workerType: WorkerType.MACHINE,
-            isActive: true,
-            machineType: { not: null },
-          },
-          {
-            assignedTasks: {
-              some: {
-                status: 'COMPLETED',
-                completedAt: { gte: start, lt: end },
-                OR: [
-                  { workerType: WorkerType.MACHINE },
-                  // Legacy machine tasks may predate workerType while still
-                  // carrying their machine snapshot. Include them so the
-                  // single-worker path emits an explicit reconciliation error.
-                  {
-                    workerType: null,
-                    machineType: { not: null },
-                  },
-                ],
-              },
-            },
-          },
-        ],
-      },
-      select: { id: true, displayName: true },
-    });
+    workers = fixedRoster
+      ? parseDailySalaryRoster(fixedRoster)
+      : await findDailySalaryRoster(date);
   } catch (cause) {
     throw new DailyBatchUnexpectedError(
       '日薪批量扫描失败',
@@ -566,18 +567,25 @@ export async function computeDailyForAllMachineWorkers(
   }
   for (const w of workers) {
     try {
-      settled.push(await computeDailyWorkerSalary(w.id, date, now));
+      await assertExecutionFence(fence);
+      settled.push(
+        await computeDailyWorkerSalary(w.workerId, date, now, {
+          fence,
+          includePaidExisting,
+          rosterEntry: w,
+        }),
+      );
     } catch (err) {
       if (err instanceof DailySalaryError) {
         errors.push({
-          workerId: w.id,
-          workerName: w.displayName,
+          workerId: w.workerId,
+          workerName: w.workerName,
           message: err.message,
         });
         continue;
       }
       throw new DailyBatchUnexpectedError(
-        `师傅 ${w.id} 日薪计算发生系统错误`,
+        `师傅 ${w.workerId} 日薪计算发生系统错误`,
         { settled, errors },
         err,
       );
@@ -891,6 +899,14 @@ export async function markDailySalaryPaid(
       row.workerId,
       dateKey,
     )}))`;
+    // 当日重算仍是合法的临时数据，但当日尚未结束，不能冻结成
+    // finance-of-record。否则后续报工会被已发守卫拒绝重算。撤销发放始终
+    // 允许，以便修复历史上已经误发的开放期记录。
+    if (isPaid && dateKey >= todayShanghai(now)) {
+      throw new DailySalaryError(
+        `不能将当前或未来日期的日薪标记为已发（${dateKey}，上海日历）；请等该日结束后再发放`,
+      );
+    }
     const updated = await tx.dailyWorkerSalary.update({
       where: { id },
       data: {
