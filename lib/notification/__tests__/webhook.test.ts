@@ -94,7 +94,7 @@ describe('sendWebhook', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('HTTP 408 → 进程内重试 3 次后 retryable', async () => {
+  it('HTTP 408 → 标 UNKNOWN 且不自动重发', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 408,
@@ -102,11 +102,12 @@ describe('sendWebhook', () => {
     });
     const r = await sendWebhook('https://x', 'hi');
     expect(r.ok).toBe(false);
-    expect(r.retryable).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(r.retryable).toBe(false);
+    expect(r.unknown).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('500 → 重试 3 次（initial + 2 retry）→ FAILED', async () => {
+  it('HTTP 500 → UNKNOWN 且只发一次', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       status: 500,
@@ -114,11 +115,11 @@ describe('sendWebhook', () => {
     });
     const r = await sendWebhook('https://x', 'hi');
     expect(r.ok).toBe(false);
-    expect(r.retries).toBe(2); // 0-indexed attempts；最后一次 attempt=2
+    expect(r.retries).toBe(0);
     expect(r.errorMessage).toMatch(/http 500/);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    // 进程内 3 枪都是瞬时错 → 交给 durable job 再来一轮
-    expect(r.retryable).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(r.retryable).toBe(false);
+    expect(r.unknown).toBe(true);
   });
 
   it('4xx → non-retryable，单次 FAILED', async () => {
@@ -135,10 +136,9 @@ describe('sendWebhook', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('超时（TimeoutError）→ retryable，但**只发一次**（防群里刷重复消息）', async () => {
-    // 超时只说明「响应没回来」，不说明消息没送到。进程内重发最坏让同一条
-    // 消息在群里出现 3 次，外层 durable job 再来 5 轮就是 15 条。所以超时
-    // 归 defer：一轮 attempt 只打一枪，重复上限从 15 降回 5。
+  it('超时（TimeoutError）→ UNKNOWN 且只发一次，禁止自动重发', async () => {
+    // 超时只说明「响应没回来」，不说明消息没送到。因此归 UNKNOWN，
+    // 进程内与外层 durable job 都不自动重发。
     const abortErr = new Error('Aborted');
     abortErr.name = 'TimeoutError';
     fetchMock.mockRejectedValue(abortErr);
@@ -146,7 +146,8 @@ describe('sendWebhook', () => {
     expect(r.ok).toBe(false);
     expect(r.retries).toBe(0);
     expect(r.errorMessage).toBe('TimeoutError');
-    expect(r.retryable).toBe(true);
+    expect(r.retryable).toBe(false);
+    expect(r.unknown).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -155,24 +156,25 @@ describe('sendWebhook', () => {
     abortErr.name = 'AbortError';
     fetchMock.mockRejectedValue(abortErr);
     const r = await sendWebhook('https://x', 'hi');
-    expect(r.retryable).toBe(true);
+    expect(r.retryable).toBe(false);
+    expect(r.unknown).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('网络异常（connection reset 之类）→ retryable，仍做进程内 3 次重试', async () => {
-    // 连接层错误几乎可以确定服务端没收到，进程内立刻重试不会刷重复消息。
+  it('网络异常（connection reset 之类）→ UNKNOWN，不猜测对端未收到', async () => {
     const netErr = new Error('Connection reset');
     netErr.name = 'TypeError';
     fetchMock.mockRejectedValue(netErr);
     const r = await sendWebhook('https://x', 'hi');
     expect(r.ok).toBe(false);
-    expect(r.retries).toBe(2);
+    expect(r.retries).toBe(0);
     expect(r.errorMessage).toBe('TypeError');
-    expect(r.retryable).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(r.retryable).toBe(false);
+    expect(r.unknown).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('5xx → 5xx → 200：第三次成功 ok=true retries=2', async () => {
+  it('5xx 后即使下一次可成功也不自动重发', async () => {
     fetchMock
       .mockResolvedValueOnce({
         ok: false,
@@ -190,13 +192,11 @@ describe('sendWebhook', () => {
         json: async () => ({ errcode: 0 }),
       });
     const r = await sendWebhook('https://x', 'hi');
-    expect(r.ok).toBe(true);
-    expect(r.retries).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(r).toMatchObject({ ok: false, retries: 0, unknown: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('企业微信成功响应 body 不是 JSON（解析失败）→ 仍按 ok=true 处理', async () => {
-    // 极少见但官方文档说总返 JSON。即使 body 拿不到，我们也信 200。
+  it('企业微信 200 但 body 不是 JSON → UNKNOWN，绝不伪报成功', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -205,6 +205,22 @@ describe('sendWebhook', () => {
       },
     });
     const r = await sendWebhook('https://x', 'hi');
-    expect(r).toEqual({ ok: true, retries: 0 });
+    expect(r).toMatchObject({
+      ok: false,
+      retries: 0,
+      retryable: false,
+      unknown: true,
+      errorMessage: 'invalid wecom response',
+    });
+  });
+
+  it('企业微信 200 JSON 缺少 errcode → UNKNOWN', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    });
+    const r = await sendWebhook('https://x', 'hi');
+    expect(r).toMatchObject({ ok: false, unknown: true });
   });
 });
