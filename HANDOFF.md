@@ -8,7 +8,11 @@
 
 ## 当前任务
 
-**2026-08-23：Codex 已完成未提交上线前加固批次的独立结构复审，并只修复当前代码下仍成立的部分。**
+**2026-08-23：根路由失效会话 500 已修复并提交。**
+
+`/` 原先直接调用 `requireSession()`：签名 JWT 仍有效、但数据库账号已删除或停用时，Edge proxy 的乐观检查会放行，页面层却把 `UnauthorizedError` 演变为 500，进而触发 React 错误恢复阶段的二次 Script 警告。根页现改用 `getSession()`，验证结果为 `null` 时跳转 `/login`；数据库等真实异常仍原样抛出。四角色分流、失效会话和异常透传已有回归测试；修复提交为 `cbc88ca`。Prisma validate、typecheck、lint、236 个测试文件 / 2988 项单测、Next 生产 build 及带失效会话的浏览器复验均通过；未改 `RootLayout` 主题脚本。
+
+**同日已完成的结构复审：** Codex 已完成未提交上线前加固批次的独立结构复审，并只修复当前代码下仍成立的部分。
 
 复审结论已填入 `docs/代码质量审查-2026-08-23.md`：B1 / B2 / B4 / B5 与 S1 / S3 / S5 / S6 / S7 成立，B3 / B6 / S2 / S4 部分成立，没有整项直接证伪。成立部分已按规定修法落地：通知 `RETRYING + DEAD` 业主契约、共用发送 / finalize 循环、queue-local lease reaper、daily / notification admin / outsource 职责拆分、死 API 删除、未 apply 的查询索引 migration 压缩及 S1–S7 收口。
 
@@ -30,7 +34,7 @@
 
 ## 下一步具体指令（给下次 AI）
 
-**结构复审已收口，不要重做 B1–B6 / S1–S7。**
+**根路由修复和结构复审都已收口：不要为消除该警告改 `RootLayout` 的 `beforeInteractive` Script，也不要重做 B1–B6 / S1–S7。**
 
 1. 与本审查无关的原有脏文件仍在；后续处理它们时继续禁止 stash / reset / 猜测性 revert。本次必需门禁已绿；若要把整个上线前加固批次定为发布候选，仍应跑原计划中的 `test:admin-ui` / `test:worker-ui` 与人工验收，不要把它们误记为本次已跑。
 2. B4 压缩的前提已在本地开发库与 HANDOFF 证据中确认；若未来发现任何未纳入核对的外部库曾 apply 旧的 `20260822111000` / `20260822112000`，必须停止部署并恢复不改写历史的方案。
@@ -158,3 +162,4 @@
 - 2026-08-22：发布源连续性收口。仓库首次配置 Git remote（`https://github.com/zora4523-bot/print-shop-erp.git`，私有）；`main`、`codex/complex-client-data-layer-poc`、`fix/launch-review` 三个分支推送完成。上线前审查的 17 项修复按主题拆成 10 个 commit 经 PR #1 合入发布分支，随后 PR #2 将发布分支快进合入 `main`（`245be5c → dd648c0`，104 commit / 795 文件）。合并后在 `main` 上复跑门禁：lint 0 / typecheck 0 / 206 文件 2758 项单测 / Prisma validate 全绿。**生产仍为 `aa42ba0` / 45 migrations，本次只是 Git 归档，未部署。**
 - 2026-08-23：对工作区未提交加固批次（相对 `357a084`，111 文件 +5999/-1991 及 47 个未跟踪文件）做结构审查。结论：要求修改，不能按现状合入。报告 `docs/代码质量审查-2026-08-23.md`，Codex 执行稿 `docs/codex-prompt-代码质量审查修复-2026-08-23.md`。旧「RETRYING→FAILED」修法作废。未改业务代码，未 commit，未部署。
 - 2026-08-23：Codex 独立复审代码质量审查；成立项已按规定修法收口并拆成 `f608e39 → 9dd1cc5` 小提交。未做 / 已证伪的是已发与冻结 roster 语义改写、删外协兼容缓存或把 `max` 改 `sum`、强搬所有取号进事务、客户端化 Server Component `<details>`、改登录令牌消耗时机及 `RETRYING→FAILED`；程序化门禁全绿，未部署。
+- 2026-08-23：修复签名 JWT 仍有效但数据库账号已失效时 `/` 返回 500 并连带触发 Script 警告的问题；根路由现统一跳转 `/login`，四角色分流与异常透传回归已补，提交 `cbc88ca`，全量门禁与浏览器复验通过，未部署。
