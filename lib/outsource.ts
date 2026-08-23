@@ -19,6 +19,8 @@ import type {
   MarkOutsourceReceivedInput,
   RecordOutsourcePaymentInput,
 } from './auth/schemas';
+import { backgroundJobsMode } from './background-jobs/mode';
+import { readFrozenOutsourceTotal } from './outsource/frozen-total';
 
 export class OutsourceError extends Error {
   constructor(message: string) {
@@ -151,6 +153,7 @@ type OutsourceTxClient = {
       amount: Decimal.Value | null;
       remark: string | null;
       createdById: string | null;
+      itemSnapshots: Array<{ orderItemId: string; quantity: number }>;
     } | null>;
     create: (args: { data: unknown; select?: unknown }) => Promise<{ id: string }>;
   };
@@ -182,6 +185,76 @@ export async function createOutsourceOrder(
     // idempotency comparison so a harmless checkbox/order change cannot make
     // an otherwise identical retry conflict.
     const orderItemIds = [...uniqueItemIds].sort();
+    const supplierName = input.supplierName.trim();
+    if (!supplierName) throw new OutsourceError('请填写外协厂名');
+    const supplierContact = normalizeOptionalText(input.supplierContact);
+    const craftDescription = normalizeOptionalText(input.craftDescription);
+    const specialRequirement = normalizeOptionalText(input.specialRequirement);
+    const remark = normalizeOptionalText(input.remark);
+
+    const replay = await txClient.outsourceOrder.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: {
+        id: true,
+        orderId: true,
+        orderItemIds: true,
+        supplierName: true,
+        supplierContact: true,
+        craftDescription: true,
+        specialRequirement: true,
+        totalQty: true,
+        expectedDate: true,
+        amount: true,
+        remark: true,
+        createdById: true,
+        itemSnapshots: {
+          select: { orderItemId: true, quantity: true },
+        },
+      },
+    });
+    if (replay) {
+      const exactNonQuantityPayload =
+        replay.orderId === input.orderId &&
+        replay.createdById === actor.id &&
+        sameStringArray([...replay.orderItemIds].sort(), orderItemIds) &&
+        replay.supplierName === supplierName &&
+        replay.supplierContact === supplierContact &&
+        replay.craftDescription === craftDescription &&
+        replay.specialRequirement === specialRequirement &&
+        sameOptionalDate(replay.expectedDate, input.expectedDate) &&
+        (replay.amount === null
+          ? amount === null
+          : amount !== null && new Decimal(replay.amount).eq(amount)) &&
+        replay.remark === remark;
+      if (!exactNonQuantityPayload) {
+        throw new OutsourceError(
+          '外协创建请求标识已被其他内容使用，请刷新后重试',
+        );
+      }
+
+      // Replay must be decided from the immutable creation ledger, never from
+      // today's OrderItem.quantity. Otherwise a successful first request whose
+      // response was lost starts failing as soon as the order quantity changes.
+      // A non-null legacy total remains sufficient for request equality because
+      // the client payload contains only the aggregate. When both sources are
+      // absent we cannot prove equality and deliberately fail closed.
+      const frozenTotal = readFrozenOutsourceTotal(replay);
+      if (!frozenTotal.ok) {
+        throw new OutsourceError(frozenTotal.errorMessage);
+      }
+      const frozenTotalQty = frozenTotal.totalQty;
+      if (
+        input.totalQty !== null &&
+        input.totalQty !== undefined &&
+        input.totalQty !== frozenTotalQty
+      ) {
+        throw new OutsourceError(
+          '外协创建请求标识已被其他内容使用，请刷新后重试',
+        );
+      }
+      return { id: replay.id };
+    }
+
     const selectedItems = await txClient.orderItem.findMany({
       where: { id: { in: orderItemIds } },
       select: { id: true, orderId: true, quantity: true },
@@ -212,54 +285,6 @@ export async function createOutsourceOrder(
         `外协总数量必须等于所选款式合计 ${totalQty}，请刷新后重试`,
       );
     }
-    const supplierName = input.supplierName.trim();
-    if (!supplierName) throw new OutsourceError('请填写外协厂名');
-    const supplierContact = normalizeOptionalText(input.supplierContact);
-    const craftDescription = normalizeOptionalText(input.craftDescription);
-    const specialRequirement = normalizeOptionalText(input.specialRequirement);
-    const remark = normalizeOptionalText(input.remark);
-
-    const replay = await txClient.outsourceOrder.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: {
-        id: true,
-        orderId: true,
-        orderItemIds: true,
-        supplierName: true,
-        supplierContact: true,
-        craftDescription: true,
-        specialRequirement: true,
-        totalQty: true,
-        expectedDate: true,
-        amount: true,
-        remark: true,
-        createdById: true,
-      },
-    });
-    if (replay) {
-      const exactPayload =
-        replay.orderId === input.orderId &&
-        replay.createdById === actor.id &&
-        sameStringArray([...replay.orderItemIds].sort(), orderItemIds) &&
-        replay.supplierName === supplierName &&
-        replay.supplierContact === supplierContact &&
-        replay.craftDescription === craftDescription &&
-        replay.specialRequirement === specialRequirement &&
-        // Legacy rows could leave this nullable. Selected item quantities are
-        // now the canonical source; any non-null stored value must agree.
-        (replay.totalQty === null || replay.totalQty === totalQty) &&
-        sameOptionalDate(replay.expectedDate, input.expectedDate) &&
-        (replay.amount === null
-          ? amount === null
-          : amount !== null && new Decimal(replay.amount).eq(amount)) &&
-        replay.remark === remark;
-      if (!exactPayload) {
-        throw new OutsourceError(
-          '外协创建请求标识已被其他内容使用，请刷新后重试',
-        );
-      }
-      return { id: replay.id };
-    }
 
     const order = await txClient.order.findUnique({
       where: { id: input.orderId },
@@ -283,6 +308,12 @@ export async function createOutsourceOrder(
         craftDescription,
         specialRequirement,
         totalQty,
+        itemSnapshots: {
+          create: orderItemIds.map((orderItemId) => ({
+            orderItemId,
+            quantity: selectedById.get(orderItemId)!.quantity,
+          })),
+        },
         expectedDate: input.expectedDate ?? null,
         amount,
         remark,
@@ -298,6 +329,10 @@ export async function createOutsourceOrder(
       after: {
         orderId: input.orderId,
         orderItemIds,
+        itemQuantities: orderItemIds.map((orderItemId) => ({
+          orderItemId,
+          quantity: selectedById.get(orderItemId)!.quantity,
+        })),
         supplierName,
         craftDescription,
         totalQty,
@@ -685,7 +720,11 @@ export async function markOutsourceReceived(
     };
   });
 
-  if (result.orderCompleted && result.orderId) {
+  if (
+    result.orderCompleted &&
+    result.orderId &&
+    backgroundJobsMode() !== 'durable'
+  ) {
     const order = await db.order.findUnique({
       where: { id: result.orderId },
       select: { id: true, orderNo: true, customerRef: true },
@@ -761,7 +800,11 @@ export async function cancelOutsourceOrder(
     };
   });
 
-  if (result.orderCompleted && result.orderId) {
+  if (
+    result.orderCompleted &&
+    result.orderId &&
+    backgroundJobsMode() !== 'durable'
+  ) {
     const order = await db.order.findUnique({
       where: { id: result.orderId },
       select: { id: true, orderNo: true, customerRef: true },
@@ -835,6 +878,9 @@ export async function getOutsourceOrderDetail(id: string) {
       id: true,
       orderId: true,
       orderItemIds: true,
+      itemSnapshots: {
+        select: { orderItemId: true, quantity: true },
+      },
       supplierName: true,
       supplierContact: true,
       craftDescription: true,
