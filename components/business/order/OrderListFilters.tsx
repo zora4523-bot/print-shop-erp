@@ -1,14 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ChevronDown, Search, SlidersHorizontal, X } from 'lucide-react';
-import {
-  MachineType,
-  OrderKind,
-  OrderStatus,
-  OutsourceStatus,
-  ShipmentStatus,
-  TaskStatus,
-} from '@/generated/prisma/enums';
+import { OrderStatus } from '@/generated/prisma/enums';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { buildTableHref, type TableHrefParams } from '@/lib/admin/table';
 import { encodeFoilColorFilterValues } from '@/lib/order/foil-color-filter-codec';
@@ -21,35 +14,50 @@ import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { orderStatusLabel } from './OrderStatusBadge';
+import { OrderAdvancedFilters } from './OrderAdvancedFilters';
+import {
+  CheckboxGroup,
+  DateField,
+  fieldLabelClass,
+  OptionSelect,
+  ORDER_KIND_LABELS,
+  OUTSOURCE_STATUS_LABELS,
+  SHIPMENT_STATUS_LABELS,
+  TASK_STATUS_LABELS,
+  TriStateSelect,
+} from './OrderListFilterFields';
 
-const ORDER_KIND_LABELS: Record<OrderKind, string> = {
-  [OrderKind.NORMAL]: '普通工单',
-  [OrderKind.REWORK]: '重做单',
-};
-
-const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
-  [ShipmentStatus.PLANNED]: '待发货',
-  [ShipmentStatus.SHIPPED]: '已发货',
-};
-
-const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  [TaskStatus.PENDING]: '待生产',
-  [TaskStatus.IN_PROGRESS]: '生产中',
-  [TaskStatus.COMPLETED]: '已完工',
-  [TaskStatus.CANCELLED]: '已取消',
-};
-
-const OUTSOURCE_STATUS_LABELS: Record<OutsourceStatus, string> = {
-  [OutsourceStatus.SENT]: '已发送',
-  [OutsourceStatus.IN_PROGRESS]: '进行中',
-  [OutsourceStatus.RECEIVED]: '已收货',
-  [OutsourceStatus.CANCELLED]: '已取消',
-};
-
-const selectClass =
-  'h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 py-1 text-base text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30';
-
-const fieldLabelClass = 'mb-1.5 block text-sm font-medium text-foreground';
+export const ADVANCED_FILTER_KEYS = [
+  'orderNo',
+  'customName',
+  'customerRef',
+  'kind',
+  'receiverName',
+  'receiverPhone',
+  'receiverAddress',
+  'isSfCollect',
+  'addressMode',
+  'trackingNo',
+  'expressCode',
+  'shipmentStatus',
+  'amountMin',
+  'amountMax',
+  'promisedFrom',
+  'promisedTo',
+  'itemName',
+  'productName',
+  'specification',
+  'paperType',
+  'quantityMin',
+  'quantityMax',
+  'foilColor',
+  'craftId',
+  'taskStatus',
+  'machineType',
+  'requiresOutsource',
+  'supplierName',
+  'outsourceStatus',
+] as const;
 
 type FilterChip = {
   id: string;
@@ -64,6 +72,7 @@ export function OrderListFilters({
   total,
   exportControls,
   showCommercialAmounts = true,
+  advancedRequested = false,
 }: {
   query: OrderListQuery;
   options: OrderListFilterOptions;
@@ -71,6 +80,7 @@ export function OrderListFilters({
   total: number;
   exportControls?: ReactNode;
   showCommercialAmounts?: boolean;
+  advancedRequested?: boolean;
 }) {
   const effectiveQuery =
     !showCommercialAmounts &&
@@ -92,36 +102,10 @@ export function OrderListFilters({
   const params = orderListParams(effectiveQuery, showCommercialAmounts);
   const filterStateKey = buildTableHref('/orders', {}, params);
   const chips = activeFilterChips(effectiveQuery, options, params);
-  const hasAdvancedFilters =
-    filters.orderNo !== undefined ||
-    filters.customName !== undefined ||
-    filters.customerRef !== undefined ||
-    filters.receiverName !== undefined ||
-    filters.receiverPhone !== undefined ||
-    filters.receiverAddress !== undefined ||
-    filters.kinds.length > 0 ||
-    filters.isSfCollect !== undefined ||
-    filters.addressMode !== undefined ||
-    (showCommercialAmounts && filters.amountMin !== undefined) ||
-    (showCommercialAmounts && filters.amountMax !== undefined) ||
-    filters.promisedFrom !== undefined ||
-    filters.promisedTo !== undefined ||
-    filters.trackingNo !== undefined ||
-    filters.expressCode !== undefined ||
-    filters.shipmentStatuses.length > 0 ||
-    filters.itemName !== undefined ||
-    filters.productName !== undefined ||
-    filters.specification !== undefined ||
-    filters.paperType !== undefined ||
-    filters.quantityMin !== undefined ||
-    filters.quantityMax !== undefined ||
-    filters.craftIds.length > 0 ||
-    filters.foilColors.length > 0 ||
-    filters.taskStatuses.length > 0 ||
-    filters.machineTypes.length > 0 ||
-    filters.requiresOutsource !== undefined ||
-    filters.outsourceStatuses.length > 0 ||
-    filters.supplierName !== undefined;
+  const hasAdvancedFilters = ADVANCED_FILTER_KEYS.some((key) => {
+    const value = params[key];
+    return value !== undefined && value !== null && value !== '';
+  });
   const clearAllHref = buildTableHref(
     '/orders',
     {},
@@ -205,7 +189,7 @@ export function OrderListFilters({
       <details
         id="order-list-filter-controls"
         className="group min-w-0 rounded-lg border border-dashed border-border p-3"
-        open={issues.length > 0 || undefined}
+        open={issues.length > 0 || advancedRequested || undefined}
       >
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
           <span className="flex min-w-0 items-center gap-2">
@@ -236,11 +220,11 @@ export function OrderListFilters({
           method="get"
           className="mt-4 min-w-0 space-y-4 border-t pt-4"
         >
-        <input type="hidden" name="pageSize" value={effectiveQuery.pageSize} />
-        <input type="hidden" name="sort" value={effectiveQuery.sort} />
-        <input type="hidden" name="dir" value={effectiveQuery.dir} />
+          <input type="hidden" name="pageSize" value={effectiveQuery.pageSize} />
+          <input type="hidden" name="sort" value={effectiveQuery.sort} />
+          <input type="hidden" name="dir" value={effectiveQuery.dir} />
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="min-w-0 sm:col-span-2 xl:col-span-4">
             <label htmlFor="order-filter-q" className={fieldLabelClass}>
               综合搜索
@@ -314,238 +298,21 @@ export function OrderListFilters({
             yesLabel="仅急单"
             noLabel="仅非急单"
           />
-        </div>
-
-        <details
-          className="min-w-0 rounded-lg border border-dashed border-border p-3"
-          open={hasAdvancedFilters || undefined}
-        >
-          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-            <SlidersHorizontal aria-hidden="true" className="size-4 text-muted-foreground" />
-            更多筛选
-            {hasAdvancedFilters ? (
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
-                已启用
-              </span>
-            ) : null}
-          </summary>
-
-          <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2 xl:grid-cols-4">
-            <TextFilter
-              id="order-filter-order-no"
-              name="orderNo"
-              label="工单号"
-              value={filters.orderNo}
-            />
-            <TextFilter
-              id="order-filter-custom-name"
-              name="customName"
-              label="工单名称"
-              value={filters.customName}
-            />
-            <TextFilter
-              id="order-filter-customer"
-              name="customerRef"
-              label="客户名称/简称"
-              value={filters.customerRef}
-            />
-            <CheckboxGroup
-              legend="工单类型"
-              name="kind"
-              selected={filters.kinds}
-              options={enumOptions(OrderKind, ORDER_KIND_LABELS)}
-            />
-
-            <TextFilter
-              id="order-filter-receiver-name"
-              name="receiverName"
-              label="收件人"
-              value={filters.receiverName}
-            />
-            <TextFilter
-              id="order-filter-receiver-phone"
-              name="receiverPhone"
-              label="收件电话"
-              value={filters.receiverPhone}
-              inputMode="tel"
-            />
-            <TextFilter
-              id="order-filter-receiver-address"
-              name="receiverAddress"
-              label="收件地址"
-              value={filters.receiverAddress}
-              className="sm:col-span-2"
-            />
-
-            <TriStateSelect
-              id="order-filter-sf-collect"
-              name="isSfCollect"
-              label="顺丰到付"
-              value={filters.isSfCollect}
-              yesLabel="仅顺丰到付"
-              noLabel="排除顺丰到付"
-            />
-            <div className="min-w-0">
-              <label htmlFor="order-filter-address-mode" className={fieldLabelClass}>
-                地址数量
-              </label>
-              <select
-                id="order-filter-address-mode"
-                name="addressMode"
-                defaultValue={filters.addressMode ?? 'all'}
-                className={selectClass}
-              >
-                <option value="all">全部</option>
-                <option value="single">单地址</option>
-                <option value="multiple">多地址</option>
-              </select>
-            </div>
-            <TextFilter
-              id="order-filter-tracking-no"
-              name="trackingNo"
-              label="快递单号"
-              value={filters.trackingNo}
-            />
-            <TextFilter
-              id="order-filter-express-code"
-              name="expressCode"
-              label="快递代码"
-              value={filters.expressCode}
-            />
-            <CheckboxGroup
-              legend="发货状态"
-              name="shipmentStatus"
-              selected={filters.shipmentStatuses}
-              options={enumOptions(ShipmentStatus, SHIPMENT_STATUS_LABELS)}
-              className="sm:col-span-2"
-            />
-
-            {showCommercialAmounts ? (
-              <>
-                <NumberFilter
-                  id="order-filter-amount-min"
-                  name="amountMin"
-                  label="最低金额（元）"
-                  value={filters.amountMin}
-                  step="0.01"
-                />
-                <NumberFilter
-                  id="order-filter-amount-max"
-                  name="amountMax"
-                  label="最高金额（元）"
-                  value={filters.amountMax}
-                  step="0.01"
-                />
-              </>
-            ) : null}
-            <DateField
-              id="order-filter-promised-from"
-              name="promisedFrom"
-              label="承诺交期从"
-              value={filters.promisedFrom}
-            />
-            <DateField
-              id="order-filter-promised-to"
-              name="promisedTo"
-              label="承诺交期到"
-              value={filters.promisedTo}
-            />
-
-            <TextFilter
-              id="order-filter-item-name"
-              name="itemName"
-              label="款式名称"
-              value={filters.itemName}
-            />
-            <TextFilter
-              id="order-filter-product-name"
-              name="productName"
-              label="产品名称"
-              value={filters.productName}
-            />
-            <TextFilter
-              id="order-filter-specification"
-              name="specification"
-              label="规格"
-              value={filters.specification}
-            />
-            <TextFilter
-              id="order-filter-paper-type"
-              name="paperType"
-              label="纸张"
-              value={filters.paperType}
-            />
-            <NumberFilter
-              id="order-filter-quantity-min"
-              name="quantityMin"
-              label="最小数量"
-              value={filters.quantityMin}
-              step="1"
-            />
-            <NumberFilter
-              id="order-filter-quantity-max"
-              name="quantityMax"
-              label="最大数量"
-              value={filters.quantityMax}
-              step="1"
-            />
-            <TextFilter
-              id="order-filter-foil-colors"
-              name="foilColor"
-              label="烫金色"
-              value={encodeFoilColorFilterValues(filters.foilColors)}
-              placeholder="多个颜色用逗号分隔；颜色名内的逗号写成 \,"
-              maxLength={1000}
-              className="sm:col-span-2"
-            />
-            <CheckboxGroup
-              legend="工艺"
-              name="craftId"
-              selected={filters.craftIds}
-              options={withSelectedOptions(options.crafts, filters.craftIds, '工艺')}
-              emptyMessage="暂无可筛选工艺"
-              className="sm:col-span-2 xl:col-span-4"
-            />
-            <CheckboxGroup
-              legend="生产任务状态"
-              name="taskStatus"
-              selected={filters.taskStatuses}
-              options={enumOptions(TaskStatus, TASK_STATUS_LABELS)}
-              className="sm:col-span-2"
-            />
-            <CheckboxGroup
-              legend="机器类型"
-              name="machineType"
-              selected={filters.machineTypes}
-              options={enumOptions(MachineType, MACHINE_TYPE_LABELS)}
-              className="sm:col-span-2"
-            />
-
-            <TriStateSelect
-              id="order-filter-requires-outsource"
-              name="requiresOutsource"
-              label="是否外协"
-              value={filters.requiresOutsource}
-              yesLabel="仅外协工单"
-              noLabel="仅非外协工单"
-            />
-            <TextFilter
-              id="order-filter-supplier"
-              name="supplierName"
-              label="外协供应商"
-              value={filters.supplierName}
-            />
-            <CheckboxGroup
-              legend="外协状态"
-              name="outsourceStatus"
-              selected={filters.outsourceStatuses}
-              options={enumOptions(OutsourceStatus, OUTSOURCE_STATUS_LABELS)}
-              className="sm:col-span-2"
-            />
           </div>
-        </details>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <OrderAdvancedFilters
+            key={`${filterStateKey}:${advancedRequested ? 'advanced' : 'default'}:${issues.length > 0 ? 'issues' : 'valid'}`}
+            filters={filters}
+            craftOptions={options.crafts}
+            showCommercialAmounts={showCommercialAmounts}
+            hasActiveFilters={hasAdvancedFilters}
+            initiallyOpen={hasAdvancedFilters || advancedRequested}
+            initiallyLoaded={
+              hasAdvancedFilters || issues.length > 0 || advancedRequested
+            }
+          />
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button type="submit" className="min-h-11 sm:min-h-8">
             应用筛选
           </Button>
@@ -562,245 +329,11 @@ export function OrderListFilters({
               清除全部筛选
             </Link>
           ) : null}
-        </div>
+          </div>
         </form>
       </details>
     </section>
   );
-}
-
-function TextFilter({
-  id,
-  name,
-  label,
-  value,
-  placeholder,
-  inputMode,
-  maxLength = 80,
-  className,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  value?: string;
-  placeholder?: string;
-  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
-  maxLength?: number;
-  className?: string;
-}) {
-  return (
-    <div className={cn('min-w-0', className)}>
-      <label htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <Input
-        id={id}
-        name={name}
-        defaultValue={value ?? ''}
-        placeholder={placeholder}
-        inputMode={inputMode}
-        maxLength={maxLength}
-      />
-    </div>
-  );
-}
-
-function NumberFilter({
-  id,
-  name,
-  label,
-  value,
-  step,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  value?: string | number;
-  step: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <label htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <Input
-        id={id}
-        type="number"
-        name={name}
-        defaultValue={value ?? ''}
-        min="0"
-        step={step}
-        inputMode={step === '1' ? 'numeric' : 'decimal'}
-      />
-    </div>
-  );
-}
-
-function DateField({
-  id,
-  name,
-  label,
-  value,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  value?: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <label htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <Input id={id} type="date" name={name} defaultValue={value ?? ''} />
-    </div>
-  );
-}
-
-function TriStateSelect({
-  id,
-  name,
-  label,
-  value,
-  yesLabel,
-  noLabel,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  value?: boolean;
-  yesLabel: string;
-  noLabel: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <label htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <select
-        id={id}
-        name={name}
-        defaultValue={value === undefined ? 'all' : value ? 'yes' : 'no'}
-        className={selectClass}
-      >
-        <option value="all">全部</option>
-        <option value="yes">{yesLabel}</option>
-        <option value="no">{noLabel}</option>
-      </select>
-    </div>
-  );
-}
-
-function OptionSelect({
-  id,
-  name,
-  label,
-  emptyLabel,
-  value,
-  options,
-}: {
-  id: string;
-  name: string;
-  label: string;
-  emptyLabel: string;
-  value?: string;
-  options: readonly OrderFilterOption[];
-}) {
-  const selectOptions = withSelectedOptions(options, value ? [value] : [], label);
-  return (
-    <div className="min-w-0">
-      <label htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <select
-        id={id}
-        name={name}
-        defaultValue={value ?? ''}
-        className={selectClass}
-      >
-        <option value="">{emptyLabel}</option>
-        {selectOptions.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function CheckboxGroup<T extends string>({
-  legend,
-  name,
-  selected,
-  options,
-  emptyMessage,
-  className,
-}: {
-  legend: string;
-  name: string;
-  selected: readonly T[];
-  options: readonly { id: T; label: string }[];
-  emptyMessage?: string;
-  className?: string;
-}) {
-  return (
-    <fieldset className={cn('min-w-0', className)}>
-      <legend className={fieldLabelClass}>{legend}</legend>
-      {options.length > 0 ? (
-        <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border bg-background px-2 py-1 dark:bg-input/30">
-          {options.map((option) => {
-            const id = `order-filter-${name}-${option.id}`;
-            return (
-              <label
-                key={option.id}
-                htmlFor={id}
-                className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 text-sm text-foreground"
-              >
-                <input
-                  id={id}
-                  type="checkbox"
-                  name={name}
-                  value={option.id}
-                  defaultChecked={selected.includes(option.id)}
-                  className="size-4 shrink-0 accent-primary"
-                />
-                <span className="admin-wrap-anywhere">{option.label}</span>
-              </label>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          <input type="hidden" name={name} value="" />
-          {emptyMessage ?? '暂无可选项'}
-        </div>
-      )}
-    </fieldset>
-  );
-}
-
-function enumOptions<T extends string>(
-  values: Record<string, T>,
-  labels: Record<T, string>,
-): Array<{ id: T; label: string }> {
-  return Object.values(values).map((value) => ({ id: value, label: labels[value] }));
-}
-
-function withSelectedOptions(
-  options: readonly OrderFilterOption[],
-  selectedIds: readonly string[],
-  fallbackLabel: string,
-): OrderFilterOption[] {
-  const result = [...options];
-  const known = new Set(result.map((option) => option.id));
-  for (const id of selectedIds) {
-    if (!known.has(id)) {
-      result.push({ id, label: `${fallbackLabel}（${id}）` });
-      known.add(id);
-    }
-  }
-  return result;
 }
 
 function orderListParams(

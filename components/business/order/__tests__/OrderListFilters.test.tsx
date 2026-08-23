@@ -15,7 +15,10 @@ import type {
 } from '@/lib/order/list-query';
 import { decodeFoilColorFilterValues } from '@/lib/order/foil-color-filter-codec';
 import { Button } from '@/components/ui/button';
-import { OrderListFilters } from '../OrderListFilters';
+import {
+  ADVANCED_FILTER_KEYS,
+  OrderListFilters,
+} from '../OrderListFilters';
 
 const options: OrderListFilterOptions = {
   submitters: [{ id: 'sales-1', label: '销售小王' }],
@@ -88,6 +91,54 @@ describe('OrderListFilters', () => {
     );
     expect(html).not.toContain('需要修正');
     expect(html).not.toContain('项已启用');
+    expect(html).not.toContain('name="orderNo"');
+    expect(html).toMatch(/<button\b(?=[^>]*name="advanced")(?=[^>]*value="1")/);
+  });
+
+  it('does not instantiate inactive advanced controls until explicitly requested', () => {
+    const collapsed = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+      />,
+    );
+    const requested = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+        advancedRequested
+      />,
+    );
+
+    expect(collapsed).not.toContain('id="order-filter-order-no"');
+    expect(requested).toContain('id="order-filter-order-no"');
+    expect(requested).toContain('name="craftId"');
+    expect(filterPanelTag(requested)).toContain('open=""');
+    expect(formControlCount(collapsed)).toBeLessThan(formControlCount(requested));
+  });
+
+  it('keeps advanced activation keys aligned with rendered controls', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+        advancedRequested
+      />,
+    );
+    const panel = advancedFilterPanel(html);
+    const renderedKeys = new Set<string>();
+    for (const match of panel.matchAll(/\bname="([^"]+)"/g)) {
+      const name = match[1];
+      if (name) renderedKeys.add(name);
+    }
+
+    expect([...renderedKeys].sort()).toEqual([...ADVANCED_FILTER_KEYS].sort());
   });
 
   it('places the optional export entry in the filter header outside the GET form', () => {
@@ -427,6 +478,20 @@ function filterPanelTag(html: string): string {
     ?.find((candidate) => candidate.includes('id="order-list-filter-controls"'));
   if (!tag) throw new Error('找不到工单筛选面板');
   return tag;
+}
+
+function advancedFilterPanel(html: string): string {
+  const marker = html.indexOf('更多筛选');
+  const start = html.lastIndexOf('<details', marker);
+  const end = html.indexOf('</details>', marker);
+  if (marker < 0 || start < 0 || end < 0) {
+    throw new Error('找不到高级筛选面板');
+  }
+  return html.slice(start, end);
+}
+
+function formControlCount(html: string): number {
+  return html.match(/<(?:input|select|button)\b/g)?.length ?? 0;
 }
 
 function findForm(node: ReactNode): ReactElement {
