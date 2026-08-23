@@ -21,8 +21,19 @@ import {
   updateChannel,
   updateRuleWithGuard,
 } from '@/lib/notification/admin';
-import { TEST_EVENT_TYPE } from '@/lib/notification/events';
-import type { NotificationMutationResult, ChannelTestResult } from './owner-notifications.types';
+import {
+  UnknownNotificationResolutionError,
+  resolveUnknownNotification,
+} from '@/lib/notification/resolve';
+import {
+  TestChannelError,
+  testChannel,
+} from '@/lib/notification/test-channel';
+import type {
+  ChannelTestResult,
+  NotificationMutationResult,
+  NotificationResolutionResult,
+} from './owner-notifications.types';
 import { collectFieldErrors } from '@/lib/admin/action-helpers';
 
 // NB: 同 actions/owner-accounts.ts 的注释——`'use server'` module 只能
@@ -238,101 +249,165 @@ export async function updateRuleAction(
   redirect('/owner/notifications');
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// UNKNOWN 人工处置
+// ──────────────────────────────────────────────────────────────────────
+
+export async function confirmUnknownNotificationDeliveredAction(
+  _prev: NotificationResolutionResult | null,
+  formData: FormData,
+): Promise<NotificationResolutionResult> {
+  const actor = await requirePermission('notification:config');
+  const input = notificationResolutionInput(formData);
+  if (!input) return { status: 'error', message: '推送日志状态参数无效' };
+
+  let result: Awaited<ReturnType<typeof resolveUnknownNotification>>;
+  try {
+    result = await resolveUnknownNotification(
+      input.logId,
+      'DELIVERED',
+      actor,
+      input.stateVersion,
+    );
+  } catch (error) {
+    const mapped = mapUnknownResolutionError(error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  revalidatePath('/owner/notifications');
+  revalidatePath('/owner/background-jobs');
+  return {
+    status: 'success',
+    message:
+      result.pendingUnknownCount > 0
+        ? `已记录该群已送达；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
+        : result.rearmed
+          ? '已记录该群已送达，其他已确认未送达的消息已重新入队'
+          : '已记录人工核对：消息已送达',
+  };
+}
+
+export async function retryUnknownNotificationAction(
+  _prev: NotificationResolutionResult | null,
+  formData: FormData,
+): Promise<NotificationResolutionResult> {
+  const actor = await requirePermission('notification:config');
+  const input = notificationResolutionInput(formData);
+  if (!input) return { status: 'error', message: '推送日志状态参数无效' };
+
+  let result: Awaited<ReturnType<typeof resolveUnknownNotification>>;
+  try {
+    result = await resolveUnknownNotification(
+      input.logId,
+      'NOT_DELIVERED_RETRY',
+      actor,
+      input.stateVersion,
+    );
+  } catch (error) {
+    const mapped = mapUnknownResolutionError(error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  revalidatePath('/owner/notifications');
+  revalidatePath('/owner/background-jobs');
+  return {
+    status: 'success',
+    message:
+      result.pendingUnknownCount > 0
+        ? `已记录该群未送达；同一任务仍有 ${result.pendingUnknownCount} 条待核对，全部核对后再安全重发`
+        : '已按原任务内容与原投递目标重新入队',
+  };
+}
+
+function notificationResolutionInput(
+  formData: FormData,
+): { logId: string; stateVersion: number } | null {
+  const rawId = formData.get('logId');
+  const rawVersion = formData.get('stateVersion');
+  if (typeof rawId !== 'string' || typeof rawVersion !== 'string') return null;
+  const logId = rawId.trim();
+  const stateVersion = Number(rawVersion);
+  if (
+    logId.length === 0 ||
+    logId.length > 191 ||
+    !Number.isSafeInteger(stateVersion) ||
+    stateVersion < 0
+  ) {
+    return null;
+  }
+  return { logId, stateVersion };
+}
+
+function mapUnknownResolutionError(
+  error: unknown,
+): NotificationResolutionResult | null {
+  if (!(error instanceof UnknownNotificationResolutionError)) return null;
+  switch (error.code) {
+    case 'NOT_FOUND':
+      return { status: 'error', message: '该推送日志已不存在' };
+    case 'NOT_UNKNOWN':
+    case 'CONFLICT':
+      return {
+        status: 'error',
+        message: '该推送已被其他管理员处置，请刷新后核对',
+      };
+    case 'NOT_DURABLE':
+      return {
+        status: 'error',
+        message: '该记录没有可重放的原后台任务，只能核对后确认已送达',
+      };
+    case 'JOB_NOT_FOUND':
+    case 'PAYLOAD_MISMATCH':
+      return {
+        status: 'error',
+        message: '原后台任务缺失或与日志不匹配，已拒绝重建消息',
+      };
+    case 'JOB_NOT_READY':
+      return {
+        status: 'error',
+        message: '原后台任务尚未进入可人工重发的死信状态，请稍后刷新',
+      };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
-// Test 按钮：触发一次 mock notify 到指定 channel（一次性 ad-hoc rule）
+// Test 按钮：触发一次 ad-hoc channel test（不创建临时 rule）
 // ─────────────────────────────────────────────────────────────────────
 
-/**
- * Channel 测试按钮：让 owner 在配好 webhookUrl 后点一下，验证链路
- * 通畅。实现：临时 monkey-patch rule 走法不行（rule 是 DB 配置）；
- * 干脆走&ldquo;独立&rdquo;路径——直接构造一份测试 webhook 调用，写一条
- * NotificationLog 标记 eventType='__TEST__'。
- *
- * 范围注：
- * - 不调 notify()——notify 的入口是 event-driven，要求 rule 存在。
- *   测试不该新增临时 rule。
- * - 直接 import sendWebhook + 写 log 重复了 notify 的少量逻辑，但
- *   测试场景本来就&ldquo;旁路&rdquo;主流程，复用 notify 反而把 rule lookup
- *   等无关分支拖进来。
- * - mock-mode 下不真发 HTTP，给 owner 的反馈是&ldquo;链路通了，等真
- *   webhook URL 上线再切&rdquo;。
- */
 export async function testChannelAction(
   channelId: string,
 ): Promise<ChannelTestResult> {
   await requirePermission('notification:config');
 
-  // 走真 notify() 的 mock 模式——但需要一个临时 rule。最简：直接调
-  // sendWebhook + 写 log。复制少量逻辑值得，避免污染 NotificationRule
-  // 表。
-  const { db } = await import('@/lib/db');
-  const { sendWebhook, mockWebhookSender } = await import(
-    '@/lib/notification/webhook'
-  );
-  const { isMockMode } = await import('@/lib/notification/notify');
-  const { NotificationStatus } = await import(
-    '../generated/prisma/enums'
-  );
-
-  const channel = await db.notificationChannel.findUnique({
-    where: { id: channelId },
-    select: { id: true, webhookUrl: true, isActive: true },
-  });
-  if (!channel) {
-    return { status: 'error', message: '该群不存在' };
-  }
-  if (!channel.isActive) {
-    return { status: 'error', message: '该群已停用，请先启用再测试' };
-  }
-
-  const mock = isMockMode();
-  const sender = mock ? mockWebhookSender : sendWebhook;
-  const content = `**[测试推送]**\n这是一条来自 ERP 后台的测试消息。\n如能在该群看到此消息，说明 webhook 配置正确。`;
-
-  let result;
+  let outcome: Awaited<ReturnType<typeof testChannel>>;
   try {
-    result = await sender(channel.webhookUrl, content);
-  } catch (err) {
-    result = {
-      ok: false as const,
-      retries: 0,
-      errorMessage: err instanceof Error ? err.name : 'sender error',
-    };
-  }
-
-  // eventType='__TEST__' 让 log 列表能区分测试 / 真实推送（dashboard
-  // 默认隐藏 __TEST__；owner 在 channel 编辑页能看到测试历史）
-  try {
-    await db.notificationLog.create({
-      data: {
-        eventType: TEST_EVENT_TYPE,
-        channelId: channel.id,
-        messageContent: content,
-        status: result.ok
-          ? NotificationStatus.SUCCESS
-          : NotificationStatus.FAILED,
-        errorMessage: result.ok
-          ? mock
-            ? 'MOCK'
-            : null
-          : (result.errorMessage ?? 'unknown error'),
-        retryCount: result.retries,
-        relatedOrderId: null,
-        sentAt: result.ok ? new Date() : null,
-      },
-    });
-  } catch {
-    // log 写入失败不挂主路径
+    outcome = await testChannel(channelId);
+  } catch (error) {
+    const mapped = mapTestChannelError(error);
+    if (mapped) return mapped;
+    throw error;
   }
 
   revalidatePath('/owner/notifications');
 
-  if (result.ok) {
-    return { status: 'success', mock };
-  }
-  return {
-    status: 'error',
-    message: `测试失败：${result.errorMessage ?? 'unknown'}`,
-  };
+  return outcome.ok
+    ? { status: 'success', mock: outcome.mock }
+    : { status: 'error', message: outcome.errorMessage };
 }
 
+function mapTestChannelError(error: unknown): ChannelTestResult | null {
+  if (!(error instanceof TestChannelError)) return null;
+  switch (error.code) {
+    case 'CHANNEL_NOT_FOUND':
+      return { status: 'error', message: '该群不存在' };
+    case 'CHANNEL_INACTIVE':
+      return { status: 'error', message: '该群已停用，请先启用再测试' };
+    case 'LOG_WRITE_FAILED':
+      return {
+        status: 'error',
+        message: '测试推送结果未能写入日志，请检查数据库后再核对群消息',
+      };
+  }
+}
