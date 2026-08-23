@@ -13,7 +13,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
     },
     // SELECT ... FOR UPDATE 走 $queryRaw（Codex round 106）；mock
     // 默认返 [] 即可，updateRule 拿值靠下一句 findMany。
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(),
   };
   const mock = {
     notificationChannel: {
@@ -24,6 +24,8 @@ const { dbMock, txMock } = vi.hoisted(() => {
     },
     notificationRule: { findMany: vi.fn() },
     notificationLog: { count: vi.fn(), findMany: vi.fn() },
+    backgroundJob: { findMany: vi.fn() },
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) =>
       fn(tx),
     ),
@@ -32,16 +34,21 @@ const { dbMock, txMock } = vi.hoisted(() => {
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
+import { BackgroundJobStatus } from '../../../generated/prisma/enums';
 import {
   ChannelInUseError,
   EmptyChannelIdsError,
-  TooManyChannelsForPrivateEventError,
   InactiveChannelBindError,
   RuleNotFoundError,
   StaleChannelIdsError,
+  TooManyChannelsForPrivateEventError,
   countRecentFailures,
+  countUnresolvedNotifications,
   deleteChannel,
   listChannelsWithRefCount,
+  listLogs,
+  listNotificationConfiguration,
+  listUnresolvedNotificationLogs,
   updateRule,
   updateRuleWithGuard,
 } from '../admin';
@@ -54,13 +61,19 @@ beforeEach(() => {
   dbMock.notificationRule.findMany.mockReset();
   dbMock.notificationLog.count.mockReset();
   dbMock.notificationLog.findMany.mockReset();
+  dbMock.backgroundJob.findMany.mockReset().mockResolvedValue([]);
+  dbMock.$queryRaw
+    .mockReset()
+    .mockResolvedValue([{ now: new Date('2026-08-22T08:00:00Z') }]);
   dbMock.$transaction.mockClear();
   txMock.notificationRule.findMany.mockReset();
   txMock.notificationRule.findUnique.mockReset();
   txMock.notificationRule.update.mockReset();
   txMock.notificationChannel.findMany.mockReset();
   txMock.notificationChannel.delete.mockReset();
-  txMock.$queryRaw.mockReset().mockResolvedValue([]);
+  txMock.$queryRaw
+    .mockReset()
+    .mockResolvedValue([{ now: new Date('2026-08-22T08:00:00Z') }]);
 });
 
 describe('listChannelsWithRefCount', () => {
@@ -117,6 +130,60 @@ describe('listChannelsWithRefCount', () => {
     // findMany 不再过滤 isActive
     const args = dbMock.notificationRule.findMany.mock.calls[0][0];
     expect(args.where).toBeUndefined();
+  });
+});
+
+describe('listNotificationConfiguration', () => {
+  it('用同一次 rule 读取返回列表并计算 channel 引用数', async () => {
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        channelKey: 'owner',
+        channelName: '管理员群',
+        webhookUrl: 'https://qy/1',
+        isActive: true,
+        createdAt: new Date('2026-08-20T00:00:00Z'),
+        updatedAt: new Date('2026-08-20T00:00:00Z'),
+      },
+    ]);
+    const rules = [
+      {
+        eventType: 'ORDER_SUBMITTED',
+        channelIds: ['c1'],
+        messageTemplate: '工单 {orderNo}',
+        isActive: true,
+        updatedAt: new Date('2026-08-21T00:00:00Z'),
+      },
+      {
+        eventType: 'URGENT_ORDER',
+        channelIds: ['c1'],
+        messageTemplate: '急单 {orderNo}',
+        isActive: false,
+        updatedAt: new Date('2026-08-21T00:00:00Z'),
+      },
+    ];
+    dbMock.notificationRule.findMany.mockResolvedValue(rules);
+
+    await expect(listNotificationConfiguration()).resolves.toEqual({
+      channels: [
+        expect.objectContaining({
+          id: 'c1',
+          referencingActiveRuleCount: 2,
+        }),
+      ],
+      rules,
+    });
+    expect(dbMock.notificationRule.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.notificationRule.findMany).toHaveBeenCalledWith({
+      orderBy: { eventType: 'asc' },
+      select: {
+        eventType: true,
+        channelIds: true,
+        messageTemplate: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
   });
 });
 
@@ -435,34 +502,174 @@ describe('updateRuleWithGuard', () => {
   });
 });
 
+describe('owner notification visibility', () => {
+  const retryingLog = {
+    id: 'log-retrying-dead',
+    eventType: 'ORDER_SUBMITTED',
+    channelId: 'channel-1',
+    messageContent: '工单 GD-1',
+    status: 'RETRYING',
+    errorMessage: 'http 429',
+    retryCount: 0,
+    relatedOrderId: 'order-1',
+    sentAt: null,
+    deliveryKey: 'notification:ORDER_SUBMITTED:order-1',
+    deliveryStateVersion: 5,
+    lastAttemptAt: new Date('2026-08-22T07:55:00Z'),
+    createdAt: new Date('2026-08-22T07:50:00Z'),
+    updatedAt: new Date('2026-08-22T07:55:00Z'),
+  } as const;
+
+  it('marks a recent RETRYING log when its owning notification job is DEAD', async () => {
+    dbMock.notificationLog.findMany.mockResolvedValue([
+      {
+        ...retryingLog,
+        channel: { channelName: '生产群' },
+      },
+    ]);
+    dbMock.backgroundJob.findMany.mockResolvedValue([
+      { dedupeKey: retryingLog.deliveryKey },
+    ]);
+
+    await expect(listLogs({ limit: 20 })).resolves.toEqual([
+      expect.objectContaining({
+        id: retryingLog.id,
+        status: 'RETRYING',
+        hasDeadLetterJob: true,
+      }),
+    ]);
+    expect(dbMock.backgroundJob.findMany).toHaveBeenCalledWith({
+      where: {
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        dedupeKey: { in: [retryingLog.deliveryKey] },
+      },
+      select: { dedupeKey: true },
+    });
+  });
+
+  it('paginates UNKNOWN and RETRYING+DEAD together in the owner queue', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        ...retryingLog,
+        channelName: '生产群',
+        hasDeadLetterJob: true,
+      },
+    ]);
+
+    await expect(
+      listUnresolvedNotificationLogs({ limit: 25, skip: 50 }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: retryingLog.id,
+        status: 'RETRYING',
+        hasDeadLetterJob: true,
+      }),
+    ]);
+
+    const call = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = Array.from(call[0] as unknown as readonly string[]).join(' ');
+    const values = call.slice(1);
+    expect(sql).toContain('LEFT JOIN "BackgroundJob"');
+    expect(sql).toContain('job."dedupeKey" = log."deliveryKey"');
+    expect(sql).toContain('ORDER BY log."lastAttemptAt" DESC, log."id" DESC');
+    expect(values).toContain('UNKNOWN');
+    expect(values).toContain('RETRYING');
+    expect(values).toContain(BackgroundJobStatus.DEAD);
+    expect(values.slice(-2)).toEqual([25, 50]);
+  });
+
+  it('counts the full owner queue, including RETRYING logs whose job is DEAD', async () => {
+    dbMock.$queryRaw.mockResolvedValue([{ count: BigInt(37) }]);
+
+    await expect(countUnresolvedNotifications()).resolves.toBe(37);
+    const call = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = Array.from(call[0] as unknown as readonly string[]).join(' ');
+    const values = call.slice(1);
+    expect(sql).toContain('LEFT JOIN "BackgroundJob"');
+    expect(values).toContain('UNKNOWN');
+    expect(values).toContain('RETRYING');
+    expect(values).toContain(BackgroundJobStatus.DEAD);
+  });
+
+  it('fails closed when the unresolved count is unavailable', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+
+    await expect(countUnresolvedNotifications()).rejects.toThrow(
+      'unresolved count unavailable',
+    );
+  });
+});
+
 describe('countRecentFailures', () => {
-  it('查近 24 小时 status=FAILED 的计数', async () => {
-    dbMock.notificationLog.count.mockResolvedValue(3);
-    const before = Date.now();
+
+  it('用单条 DB 时钟 SQL 查近 24 小时 FAILED/UNKNOWN 与 RETRYING+DEAD', async () => {
+    dbMock.$queryRaw.mockResolvedValue([{ count: BigInt(3) }]);
     const r = await countRecentFailures(24);
     expect(r).toBe(3);
-    const where = dbMock.notificationLog.count.mock.calls[0][0].where;
-    expect(where.status).toBe('FAILED');
-    const since = where.createdAt.gte as Date;
-    const diff = before - since.getTime();
-    // 24h ± 1s tolerance
-    expect(diff).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 1000);
-    expect(diff).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 1000);
+    expect(dbMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.notificationLog.count).not.toHaveBeenCalled();
+
+    const call = dbMock.$queryRaw.mock.calls[0]!;
+    const strings = call[0] as unknown as readonly string[];
+    const values = call.slice(1);
+    const sql = Array.from(strings).join(' ');
+    expect(sql).toMatch(/count\(\*\)/i);
+    expect(sql).toMatch(/now\(\)/i);
+    expect(sql).toMatch(/AT TIME ZONE 'UTC'/i);
+    expect(sql).toContain('"lastAttemptAt"');
+    expect(sql).toContain('LEFT JOIN "BackgroundJob"');
+    expect(values).toEqual([
+      'NOTIFICATION',
+      'FAILED',
+      'UNKNOWN',
+      'RETRYING',
+      BackgroundJobStatus.DEAD,
+      24,
+      '__TEST__',
+    ]);
   });
 
   it('窗口可配（默认 24，1 小时也支持）', async () => {
-    dbMock.notificationLog.count.mockResolvedValue(0);
+    dbMock.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     await countRecentFailures(1);
-    const since = dbMock.notificationLog.count.mock.calls[0][0].where.createdAt
-      .gte as Date;
-    const diff = Date.now() - since.getTime();
-    expect(diff).toBeLessThanOrEqual(60 * 60 * 1000 + 1000);
+    const values = dbMock.$queryRaw.mock.calls[0]!.slice(1);
+    expect(values).toEqual([
+      'NOTIFICATION',
+      'FAILED',
+      'UNKNOWN',
+      'RETRYING',
+      BackgroundJobStatus.DEAD,
+      1,
+      '__TEST__',
+    ]);
   });
 
   it('排除 __TEST__ event（Codex round 103 #3：测试失败不应让 dashboard 永远红）', async () => {
-    dbMock.notificationLog.count.mockResolvedValue(0);
+    dbMock.$queryRaw.mockResolvedValue([{ count: BigInt(0) }]);
     await countRecentFailures(24);
-    const where = dbMock.notificationLog.count.mock.calls[0][0].where;
-    expect(where.NOT).toEqual({ eventType: '__TEST__' });
+    const call = dbMock.$queryRaw.mock.calls[0]!;
+    const strings = call[0] as unknown as readonly string[];
+    const values = call.slice(1);
+    expect(Array.from(strings).join(' ')).toContain('"eventType" <>');
+    expect(values.at(-1)).toBe('__TEST__');
+  });
+
+  it('数据库查询错误原样上抛，不回退到 Node 时钟', async () => {
+    dbMock.$queryRaw.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(countRecentFailures(24)).rejects.toThrow(
+      'database unavailable',
+    );
+    expect(dbMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.notificationLog.count).not.toHaveBeenCalled();
+  });
+
+  it('数据库未返回可信 count 时 fail closed', async () => {
+    dbMock.$queryRaw.mockResolvedValue([]);
+
+    await expect(countRecentFailures(24)).rejects.toThrow(
+      'recent failure count unavailable',
+    );
   });
 });

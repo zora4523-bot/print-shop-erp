@@ -4,33 +4,60 @@ import { buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   countRecentFailures,
-  listChannelsWithRefCount,
+  countUnresolvedNotifications,
   listLogs,
-  listRules,
+  listNotificationConfiguration,
+  listUnresolvedNotificationLogs,
 } from '@/lib/notification/admin';
 import { isMockMode } from '@/lib/notification';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
+import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
 import { PageHeader } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
+
+const UNKNOWN_PAGE_SIZE = 25;
 
 // 推送配置 / 规则 / 日志统一在一个 landing 页：3 块独立分区。子路径
 // 走表单：/channels/new、/channels/[id]、/rules/[event]。
 //
 // SPEC §8 + DECISIONS 2026-04-27 mock-mode：dev/test 默认开启不真发；
 // landing 顶部展示 mock-mode 状态条让 owner 一眼分清&ldquo;真发&rdquo; vs &ldquo;测试&rdquo;。
-export default async function OwnerNotificationsPage() {
+export default async function OwnerNotificationsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ unknownPage?: string }>;
+}) {
   await requirePermission('notification:config');
+  const query = (await searchParams) ?? {};
+  const parsedPage = Number(query.unknownPage);
+  const unknownPage =
+    Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
-  const [channels, rules, logs, recentFailures] = await Promise.all([
-    listChannelsWithRefCount(),
-    listRules(),
+  const [
+    notificationConfiguration,
+    logs,
+    recentFailures,
+    unresolvedLogs,
+    unresolvedCount,
+  ] = await Promise.all([
+    listNotificationConfiguration(),
     listLogs({ limit: 20 }),
     countRecentFailures(24),
+    listUnresolvedNotificationLogs({
+      limit: UNKNOWN_PAGE_SIZE,
+      skip: (unknownPage - 1) * UNKNOWN_PAGE_SIZE,
+    }),
+    countUnresolvedNotifications(),
   ]);
+  const { channels, rules } = notificationConfiguration;
   const mock = isMockMode();
+  const unknownPageCount = Math.max(
+    1,
+    Math.ceil(unresolvedCount / UNKNOWN_PAGE_SIZE),
+  );
 
   return (
     <div className="space-y-8">
@@ -52,9 +79,13 @@ export default async function OwnerNotificationsPage() {
       ) : null}
 
       {recentFailures > 0 ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          🚨 过去 24 小时内有 <strong>{recentFailures}</strong> 条推送失败。
-          见下方&ldquo;最近推送日志&rdquo;详情。
+        <div
+          data-slot="notifications-owner-alert"
+          className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
+          🚨 过去 24 小时内有 <strong>{recentFailures}</strong>{' '}
+          条推送失败、结果不明或重试已耗尽。见下方待人工处理队列与
+          &ldquo;最近推送日志&rdquo;详情。
         </div>
       ) : null}
 
@@ -201,6 +232,105 @@ export default async function OwnerNotificationsPage() {
         )}
       </section>
 
+      {/* UNKNOWN 与 RETRYING + DEAD 都不能只混在最近 20 条中：
+          新日志会把它们挤走，而它们都是 owner 的持久化待办。 */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-base font-semibold">待人工处理</h2>
+          <span className="text-xs text-muted-foreground">
+            共 {unresolvedCount} 条 · 第 {unknownPage}/{unknownPageCount} 页
+          </span>
+        </div>
+        {unresolvedLogs.length === 0 ? (
+          <p className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
+            暂无投递结果不明或重试已耗尽的消息。
+          </p>
+        ) : (
+          <div
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            role="region"
+            aria-label="待人工处理的推送"
+            tabIndex={0}
+          >
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">最后尝试</th>
+                  <th className="px-3 py-2 text-left">事件</th>
+                  <th className="px-3 py-2 text-left">群</th>
+                  <th className="px-3 py-2 text-center">状态</th>
+                  <th className="px-3 py-2 text-left">原因</th>
+                  <th className="px-3 py-2 text-right">人工处置</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {unresolvedLogs.map((log) => (
+                  <tr key={log.id}>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {formatDateTimeShanghai(log.lastAttemptAt)}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {log.eventType}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {log.channelName ?? '已删除'}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <StatusBadge
+                        status={log.status}
+                        hasDeadLetterJob={log.hasDeadLetterJob}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {log.errorMessage ?? '未获得可信的下游确认'}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {log.status === 'UNKNOWN' ? (
+                        <UnknownNotificationActions
+                          logId={log.id}
+                          stateVersion={log.deliveryStateVersion}
+                          canRetry={log.deliveryKey !== null}
+                        />
+                      ) : (
+                        <Link
+                          href="/owner/background-jobs"
+                          className={buttonVariants({
+                            variant: 'outline',
+                            size: 'sm',
+                          })}
+                        >
+                          查看死信任务
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {unresolvedCount > UNKNOWN_PAGE_SIZE ? (
+          <nav className="flex items-center justify-end gap-2" aria-label="待处理推送分页">
+            {unknownPage > 1 ? (
+              <Link
+                href={`/owner/notifications?unknownPage=${unknownPage - 1}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                上一页
+              </Link>
+            ) : null}
+            {unknownPage < unknownPageCount ? (
+              <Link
+                href={`/owner/notifications?unknownPage=${unknownPage + 1}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                下一页
+              </Link>
+            ) : null}
+          </nav>
+        ) : null}
+      </section>
+
       {/* ─── 最近推送日志 ─── */}
       <section className="space-y-3">
         <h2 className="text-base font-semibold">最近推送日志</h2>
@@ -229,14 +359,17 @@ export default async function OwnerNotificationsPage() {
                 {logs.map((l) => (
                   <tr key={l.id}>
                     <td className="px-3 py-2 font-mono text-xs">
-                      {formatDateTimeShanghai(l.createdAt)}
+                      {formatDateTimeShanghai(l.lastAttemptAt)}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{l.eventType}</td>
                     <td className="px-3 py-2 text-xs">
                       {l.channelName ?? <span className="text-muted-foreground">已删除</span>}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <StatusBadge status={l.status} />
+                      <StatusBadge
+                        status={l.status}
+                        hasDeadLetterJob={l.hasDeadLetterJob}
+                      />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {l.errorMessage ?? (l.status === 'SUCCESS' ? '—' : '')}
@@ -253,14 +386,28 @@ export default async function OwnerNotificationsPage() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({
+  status,
+  hasDeadLetterJob = false,
+}: {
+  status: string;
+  hasDeadLetterJob?: boolean;
+}) {
   switch (status) {
     case 'SUCCESS':
       return <Badge>成功</Badge>;
     case 'FAILED':
       return <Badge variant="destructive">失败</Badge>;
     case 'RETRYING':
-      return <Badge variant="secondary">重试中</Badge>;
+      return hasDeadLetterJob ? (
+        <Badge variant="destructive">重试耗尽</Badge>
+      ) : (
+        <Badge variant="secondary">重试中</Badge>
+      );
+    case 'SENDING':
+      return <Badge variant="secondary">发送中</Badge>;
+    case 'UNKNOWN':
+      return <Badge variant="destructive">待人工核对</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
