@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { Role } from '../generated/prisma/enums';
-import { requireSession } from '@/lib/auth/session';
+import { getSession } from '@/lib/auth/session';
 
 // `/` is a role dispatcher — `(admin)/(foreman)/(worker)/(sales)`
 // 各自的 landing 页才是真正的&ldquo;首页&rdquo;。这里不再渲染 UI（早期 P0 阶段
@@ -18,6 +18,7 @@ const ROLE_LANDING: Record<Role, string> = {
 };
 
 export default async function Home() {
-  const { user } = await requireSession();
-  redirect(ROLE_LANDING[user.role]);
+  const session = await getSession();
+  if (!session) redirect('/login');
+  redirect(ROLE_LANDING[session.user.role]);
 }
