@@ -111,6 +111,9 @@ describe('status registry', () => {
       ].tone,
     ).toBe('warning');
     expect(OUTSOURCE_STATUS_REGISTRY[OutsourceStatus.SENT].tone).toBe('info');
+    expect(OUTSOURCE_STATUS_REGISTRY[OutsourceStatus.IN_PROGRESS].tone).toBe(
+      'info',
+    );
     expect(PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.PENDING].tone).toBe(
       'neutral',
     );

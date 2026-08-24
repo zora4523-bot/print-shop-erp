@@ -214,7 +214,7 @@ export const OUTSOURCE_STATUS_REGISTRY: StatusRegistry<OutsourceStatus> = {
   },
   [OutsourceStatus.IN_PROGRESS]: {
     label: '进行中',
-    tone: 'primary',
+    tone: 'info',
     dot: true,
   },
   [OutsourceStatus.RECEIVED]: {
