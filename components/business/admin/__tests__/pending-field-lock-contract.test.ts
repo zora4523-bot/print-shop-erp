@@ -10,6 +10,14 @@ const LOCKED_FORM_FILES = [
   'salary/WorkerMachineRuleForm.tsx',
   'setting/SettingsForm.tsx',
 ] as const;
+const LOCKED_NAVIGATION_FORM_FILES = [
+  'bom/BomForm.tsx',
+  'craft/CraftForm.tsx',
+  'price/PriceAdjustmentForm.tsx',
+  'price/PriceTierForm.tsx',
+  'product-category/ProductCategoryForm.tsx',
+  'purchase/PurchaseOrderForm.tsx',
+] as const;
 
 describe('pending mutation field locks', () => {
   it.each(LOCKED_FORM_FILES)(
@@ -43,6 +51,37 @@ describe('pending mutation field locks', () => {
     );
     expect(jsxExpressionAttribute(cancelLink!, 'onClick')).toContain(
       'preventDefault',
+    );
+  });
+
+  it.each(LOCKED_NAVIGATION_FORM_FILES)(
+    '%s routes every link through the pending navigation guard',
+    (relativePath) => {
+      const source = parseBusinessFile(relativePath);
+      const guardedLinks = findOpeningElements(source, 'PendingLink');
+
+      expect(
+        findOpeningElements(source, 'Link'),
+        `${relativePath} must not leave an unguarded Next.js Link in the pending form`,
+      ).toEqual([]);
+      expect(guardedLinks.length).toBeGreaterThan(0);
+      for (const guardedLink of guardedLinks) {
+        expect(jsxExpressionAttribute(guardedLink, 'pending')).toBe('pending');
+      }
+    },
+  );
+
+  it('keeps pending links discoverable while blocking every navigation path', () => {
+    const source = readFileSync(
+      path.join(ROOT, 'components', 'ui-business', 'PendingLink.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain('aria-disabled={pending || undefined}');
+    expect(source).toContain('tabIndex={pending ? -1 : tabIndex}');
+    expect(source.match(/event\.preventDefault\(\)/g)).toHaveLength(2);
+    expect(source).toContain(
+      "pending && 'pointer-events-none cursor-not-allowed opacity-50'",
     );
   });
 });

@@ -50,6 +50,23 @@ describe("shared interaction CSS contract", () => {
     }
   })
 
+  it("reduces motion inside every app shell, including generated content", () => {
+    const reducedMotionRule = globalsCss.slice(
+      globalsCss.indexOf("@media (prefers-reduced-motion: reduce)"),
+      globalsCss.indexOf("[data-slot=\"dialog-content\"]")
+    )
+
+    for (const shell of ["admin", "worker", "touch"]) {
+      expect(reducedMotionRule).toContain(`.${shell}-viewport *`)
+      expect(reducedMotionRule).toContain(`.${shell}-viewport *::before`)
+      expect(reducedMotionRule).toContain(`.${shell}-viewport *::after`)
+    }
+    expect(reducedMotionRule).toContain("scroll-behavior: auto !important")
+    expect(reducedMotionRule).toContain("animation-duration: 0.01ms !important")
+    expect(reducedMotionRule).toContain("animation-iteration-count: 1 !important")
+    expect(reducedMotionRule).toContain("transition-duration: 0.01ms !important")
+  })
+
   it("gives every interactive menu item a 44px target and focus ring", () => {
     expect(dropdownSource.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(5)
     expect(dropdownSource.match(/focus-visible:ring-3/g)?.length).toBeGreaterThanOrEqual(5)

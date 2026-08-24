@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import { MachineType, WorkerType } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business/PendingLink';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -198,9 +198,13 @@ export function CraftForm(props: Props) {
         <Button type="submit" disabled={pending}>
           {pending ? '提交中…' : isCreate ? '创建工艺' : '保存修改'}
         </Button>
-        <Link href="/owner/crafts" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/crafts"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回列表
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

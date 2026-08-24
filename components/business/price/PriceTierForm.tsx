@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import type { PriceMutationResult } from '@/actions/owner-prices.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business/PendingLink';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ProductOption } from '@/lib/product';
@@ -62,9 +62,13 @@ export function PriceTierForm(props: Props) {
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor="productId">产品</Label>
-          <Link href="/owner/products/new" className="text-xs text-primary hover:underline">
+          <PendingLink
+            href="/owner/products/new"
+            pending={pending}
+            className="text-xs text-primary hover:underline"
+          >
             新建产品
-          </Link>
+          </PendingLink>
         </div>
         <select
           id="productId"
@@ -148,9 +152,13 @@ export function PriceTierForm(props: Props) {
         <Button type="submit" disabled={pending || missingProducts}>
           {pending ? '提交中…' : props.mode === 'create' ? '创建价格阶梯' : '保存修改'}
         </Button>
-        <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/prices"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回报价管理
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

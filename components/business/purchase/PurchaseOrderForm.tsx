@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business/PendingLink';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';
@@ -54,9 +54,13 @@ export function PurchaseOrderForm({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="supplierPartyId">供应商</Label>
-            <Link href={NEW_SUPPLIER_HREF} className="text-xs text-primary hover:underline">
+            <PendingLink
+              href={NEW_SUPPLIER_HREF}
+              pending={pending}
+              className="text-xs text-primary hover:underline"
+            >
               新建供应商
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="supplierPartyId"
@@ -88,9 +92,13 @@ export function PurchaseOrderForm({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="materialId">物料</Label>
-            <Link href="/owner/materials/new" className="text-xs text-primary hover:underline">
+            <PendingLink
+              href="/owner/materials/new"
+              pending={pending}
+              className="text-xs text-primary hover:underline"
+            >
               新建物料
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="materialId"
@@ -165,9 +173,13 @@ export function PurchaseOrderForm({
         <Button type="submit" disabled={pending || prerequisitesMissing}>
           {pending ? '提交中…' : '创建采购单'}
         </Button>
-        <Link href="/owner/purchases" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/purchases"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回列表
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState, useState } from 'react';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business/PendingLink';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -91,9 +91,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="productId">产品</Label>
-            <Link href="/owner/products/new" className="text-xs text-primary hover:underline">
+            <PendingLink
+              href="/owner/products/new"
+              pending={pending}
+              className="text-xs text-primary hover:underline"
+            >
               新建产品
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="productId"
@@ -118,12 +122,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="categoryNodeId">产品分类</Label>
-            <Link
+            <PendingLink
               href="/owner/product-categories/new"
+              pending={pending}
               className="text-xs text-primary hover:underline"
             >
               新建分类
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="categoryNodeId"
@@ -214,12 +219,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
                   <div className="flex items-center justify-between gap-3">
                     <Label htmlFor={`items.${index}.materialId`}>物料</Label>
                     {index === 0 ? (
-                      <Link
+                      <PendingLink
                         href="/owner/materials/new"
+                        pending={pending}
                         className="text-xs text-primary hover:underline"
                       >
                         新建物料
-                      </Link>
+                      </PendingLink>
                     ) : null}
                   </div>
                   <select
@@ -271,9 +277,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
         <Button type="submit" disabled={pending || missingTarget || missingMaterials}>
           {pending ? '提交中…' : '创建 BOM'}
         </Button>
-        <Link href="/owner/boms" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/boms"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回列表
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

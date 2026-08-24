@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState, useMemo, useState } from 'react';
 import {
   AdjustmentType,
@@ -8,6 +7,7 @@ import {
 } from '../../../generated/prisma/enums';
 import type { PriceMutationResult } from '@/actions/owner-prices.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business/PendingLink';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';
@@ -212,9 +212,13 @@ export function PriceAdjustmentForm(props: Props) {
         <Button type="submit" disabled={pending}>
           {pending ? '提交中…' : props.mode === 'create' ? '创建收费项目' : '保存修改'}
         </Button>
-        <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/prices"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回报价管理
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );
