@@ -153,6 +153,7 @@ export function validateBatchCompletionPreview(
 function BatchCheckbox({
   checked,
   indeterminate = false,
+  disabled = false,
   onChange,
   label,
 }: {
@@ -161,6 +162,7 @@ function BatchCheckbox({
   // 播报 “mixed”。不额外写 aria-checked——原生 checkbox 上手写会和
   // 原生状态打架。
   indeterminate?: boolean;
+  disabled?: boolean;
   onChange: () => void;
   label?: string;
 }) {
@@ -172,13 +174,14 @@ function BatchCheckbox({
           if (el) el.indeterminate = indeterminate;
         }}
         checked={checked}
+        disabled={disabled}
         onChange={onChange}
         aria-label={label}
-        className="peer absolute inset-0 size-full cursor-pointer opacity-0"
+        className="peer absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
       />
       <span
         aria-hidden="true"
-        className="pointer-events-none flex size-5 items-center justify-center rounded border border-input bg-background text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-checked:border-primary peer-checked:bg-primary peer-indeterminate:border-primary peer-indeterminate:bg-primary"
+        className="pointer-events-none flex size-5 items-center justify-center rounded border border-input bg-background text-primary-foreground peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-checked:border-primary peer-checked:bg-primary peer-indeterminate:border-primary peer-indeterminate:bg-primary"
       >
         {indeterminate ? (
           <Minus className="size-4" />
@@ -249,6 +252,7 @@ export function WorkerTaskBatchList({
   const someSelected = selected.size > 0 && !allSelected;
 
   function toggle(taskId: string) {
+    if (pending) return;
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(taskId)) next.delete(taskId);
@@ -262,7 +266,7 @@ export function WorkerTaskBatchList({
     action: (raw: unknown) => Promise<BatchTaskMutationResult>,
     taskIds: string[],
   ) {
-    if (taskIds.length === 0) return;
+    if (pending || taskIds.length === 0) return;
     setState(null);
     setOperation(nextOperation);
     setTransportFailure(false);
@@ -287,6 +291,7 @@ export function WorkerTaskBatchList({
   }
 
   function prepareCompletionConfirmation() {
+    if (pending) return;
     const previewTasks = tasks.filter(
       (task) =>
         selected.has(task.id) && task.status === TaskStatus.IN_PROGRESS,
@@ -312,7 +317,7 @@ export function WorkerTaskBatchList({
   }
 
   function confirmCompletion() {
-    if (!completionPreview) return;
+    if (pending || !completionPreview) return;
     run(
       'report',
       reportTasksAction,
@@ -337,18 +342,25 @@ export function WorkerTaskBatchList({
     : [];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" aria-busy={pending}>
       <section
         className="sticky top-0 z-10 space-y-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur"
         aria-label="批量处理任务"
         aria-busy={pending}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <label className="flex min-h-11 cursor-pointer items-center gap-1 pr-2 text-sm">
+          <label
+            className={cn(
+              'flex min-h-11 items-center gap-1 pr-2 text-sm',
+              pending ? 'cursor-not-allowed' : 'cursor-pointer',
+            )}
+          >
             <BatchCheckbox
               checked={allSelected}
               indeterminate={someSelected}
+              disabled={pending}
               onChange={() =>
+                !pending &&
                 setSelected(
                   allSelected
                     ? new Set()
@@ -479,6 +491,7 @@ export function WorkerTaskBatchList({
                   key={task.id}
                   task={task}
                   checked={selected.has(task.id)}
+                  disabled={pending}
                   onToggle={() => toggle(task.id)}
                 />
               ))}
@@ -497,10 +510,12 @@ export function WorkerTaskBatchList({
 function WorkerTaskRow({
   task,
   checked,
+  disabled,
   onToggle,
 }: {
   task: WorkerBatchTaskRow;
   checked: boolean;
+  disabled: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -510,9 +525,15 @@ function WorkerTaskRow({
         task.order.isUrgent && 'border-destructive/50',
       )}
     >
-      <label className="flex min-h-11 cursor-pointer items-start justify-center py-2">
+      <label
+        className={cn(
+          'flex min-h-11 items-start justify-center py-2',
+          disabled ? 'cursor-not-allowed' : 'cursor-pointer',
+        )}
+      >
         <BatchCheckbox
           checked={checked}
+          disabled={disabled}
           onChange={onToggle}
           label={`选择 ${task.order.orderNo} ${task.item.name}`}
         />

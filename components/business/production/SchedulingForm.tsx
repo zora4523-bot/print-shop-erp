@@ -15,6 +15,7 @@ import { WorkerType } from '@/generated/prisma/enums';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { DisabledReason } from '@/components/ui-business';
 
 type Props = {
   view: SchedulingView;
@@ -432,9 +433,10 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
       ) : null}
 
       {missingWorkers ? (
-        <p role="alert" className="text-sm text-warning-foreground">
-          存在没有匹配师傅的工艺；请先在账号管理中启用对应岗位和机型的师傅。
-        </p>
+        <DisabledReason
+          cause="prerequisite"
+          reason="存在没有匹配师傅的工艺；请先在账号管理中启用对应岗位和机型的师傅。"
+        />
       ) : null}
       {overrideRows.length > 0 && !allOverridesExplained ? (
         <p role="alert" className="text-sm text-warning-foreground">

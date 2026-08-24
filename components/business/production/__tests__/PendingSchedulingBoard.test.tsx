@@ -189,6 +189,42 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     );
   });
 
+  it('locks every request-snapshot control while batch scheduling is pending', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'PendingSchedulingBoard.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('<div className="space-y-4" aria-busy={pending}>');
+    expect(source).toMatch(
+      /type="search"[\s\S]{0,240}?disabled=\{pending\}/,
+    );
+    expect(source).toMatch(
+      /id="batch-schedule-worker"[\s\S]{0,240}?disabled=\{pending \|\| workers\.length === 0\}/,
+    );
+    expect(source).toMatch(
+      /id="batch-override-reason"[\s\S]{0,240}?disabled=\{pending\}/,
+    );
+    expect(source).toMatch(
+      /checked=\{allSelected\}[\s\S]{0,160}?disabled=\{\s*pending \|\|/,
+    );
+    expect(source).toMatch(
+      /const checkboxDisabled =\s*pending \|\|\s*!effectiveWorkerId/,
+    );
+    expect(source).toMatch(
+      /function toggleOrder\(orderId: string\) \{\s*if \(pending\) return;/,
+    );
+    expect(source).toMatch(
+      /function changeWorker\(nextWorkerId: string\) \{\s*if \(pending\) return;/,
+    );
+  });
+
   it('preselects only compatible handoff orders and explains every exclusion', () => {
     const compatible = order();
     const incompatible = order({

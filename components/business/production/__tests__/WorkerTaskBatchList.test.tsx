@@ -167,6 +167,37 @@ describe('WorkerTaskBatchList groups', () => {
       /aria-haspopup="dialog"[^>]*aria-expanded="false"[^>]*class="[^"]*min-h-11[^"]*"/,
     );
   });
+
+  it('locks all selection controls while a batch snapshot is pending', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'WorkerTaskBatchList.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('<div className="space-y-3" aria-busy={pending}>');
+    expect(source).toMatch(
+      /function BatchCheckbox\(\{[\s\S]{0,120}?disabled = false/,
+    );
+    expect(source).toMatch(
+      /checked=\{checked\}[\s\S]{0,100}?disabled=\{disabled\}/,
+    );
+    expect(source).toMatch(
+      /checked=\{allSelected\}[\s\S]{0,120}?disabled=\{pending\}/,
+    );
+    expect(source).toMatch(
+      /<WorkerTaskRow[\s\S]{0,160}?disabled=\{pending\}/,
+    );
+    expect(source).toMatch(
+      /function toggle\(taskId: string\) \{\s*if \(pending\) return;/,
+    );
+    expect(source).toContain('peer-disabled:opacity-40');
+  });
 });
 
 describe('WorkerTaskBatchList completion confirmation', () => {

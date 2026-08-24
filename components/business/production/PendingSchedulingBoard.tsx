@@ -307,6 +307,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
     : null;
 
   function toggleOrder(orderId: string) {
+    if (pending) return;
     setState(null);
     setSelected((current) => {
       const next = new Set(
@@ -322,11 +323,13 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   }
 
   function toggleAll() {
+    if (pending) return;
     setState(null);
     setSelected(allSelected ? new Set() : new Set(selectAllIds));
   }
 
   function changeWorker(nextWorkerId: string) {
+    if (pending) return;
     setState(null);
     const nextHandoffResolution = handoff
       ? resolveSchedulingHandoff({
@@ -343,7 +346,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   }
 
   function submitBatch() {
-    if (selectedOrders.length === 0 || !effectiveWorkerId) return;
+    if (pending || selectedOrders.length === 0 || !effectiveWorkerId) return;
     setState(null);
     startTransition(async () => {
       const result = await batchScheduleOrdersAction({
@@ -382,10 +385,11 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={pending}>
       <section
         className="admin-sticky-below-header space-y-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur lg:sticky lg:z-10"
         aria-label="跨工单批量排产"
+        aria-busy={pending}
       >
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
           <div className="min-w-0 flex-1">
@@ -406,16 +410,17 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               type="search"
               value={workerSearch}
               onChange={(event) => setWorkerSearch(event.target.value)}
+              disabled={pending}
               aria-label="搜索接单师傅"
               placeholder="按姓名、岗位或设备搜索"
-              className="mt-1 min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+              className="mt-1 min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50"
             />
             <select
               id="batch-schedule-worker"
               value={effectiveWorkerId}
               onChange={(event) => changeWorker(event.target.value)}
-              disabled={workers.length === 0}
-              className="mt-2 min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+              disabled={pending || workers.length === 0}
+              className="mt-2 min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="">
                 {workers.length === 0 ? '暂无可用师傅' : '先选择师傅'}
@@ -480,10 +485,11 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               id="batch-override-reason"
               value={overrideReason}
               onChange={(event) => setOverrideReason(event.target.value)}
+              disabled={pending}
               maxLength={200}
               rows={2}
               placeholder="例如：临时支援，已确认本人可完成"
-              className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
+              className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             />
             <p className="text-xs text-muted-foreground">
               原因将写入每张工单的操作日志，最多 200 字。
@@ -558,7 +564,11 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               <th className="w-14 px-2 py-1 text-center">
                 <SelectionCheckbox
                   checked={allSelected}
-                  disabled={!effectiveWorkerId || selectAllIds.length === 0}
+                  disabled={
+                    pending ||
+                    !effectiveWorkerId ||
+                    selectAllIds.length === 0
+                  }
                   onChange={toggleAll}
                   label="选择全部与当前师傅匹配的工单"
                 />
@@ -590,6 +600,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
                 ? (order.compatibleTaskCounts[effectiveWorkerId] ?? 0)
                 : 0;
               const checkboxDisabled =
+                pending ||
                 !effectiveWorkerId ||
                 order.batchBlockReason !== null ||
                 compatibleTaskCount === 0 ||
