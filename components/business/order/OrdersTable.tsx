@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import type {
   OrderListQuery,
   OrderListRow,
@@ -38,6 +39,7 @@ export function OrdersTable({
   canSchedule = false,
   query,
   queryParams,
+  footer,
 }: {
   orders: OrderListRow[];
   showCommercialAmounts?: boolean;
@@ -45,6 +47,7 @@ export function OrdersTable({
   canSchedule?: boolean;
   query: OrderListQuery;
   queryParams: TableHrefParams;
+  footer?: ReactNode;
 }) {
   if (orders.length === 0) {
     const hasFilters = Object.values(query.filters).some((value) =>
@@ -64,38 +67,42 @@ export function OrdersTable({
         },
       );
       return (
-        <EmptyState
-          kind="no-result"
-          noun="工单"
-          onClear={
-            <Link
-              href={clearFiltersHref}
-              prefetch={false}
-              className={cn(
-                buttonVariants({ variant: 'outline' }),
-                'min-h-11 sm:min-h-8',
-              )}
-            >
-              清除全部筛选
-            </Link>
-          }
-        />
+        <div className="min-w-0 rounded-xl border bg-card shadow-sm">
+          <div className="min-w-0 p-0 sm:p-4">
+            <EmptyState
+              kind="no-result"
+              noun="工单"
+              onClear={
+                <Link
+                  href={clearFiltersHref}
+                  prefetch={false}
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'min-h-11 sm:min-h-8',
+                  )}
+                >
+                  清除全部筛选
+                </Link>
+              }
+            />
+          </div>
+          {footer}
+        </div>
       );
     }
 
-    return <EmptyState kind="no-data" noun="工单" />;
+    return (
+      <div className="min-w-0 rounded-xl border bg-card shadow-sm">
+        <div className="min-w-0 p-0 sm:p-4">
+          <EmptyState kind="no-data" noun="工单" />
+        </div>
+        {footer}
+      </div>
+    );
   }
 
-  return (
-    <OrderListSelectionProvider
-      key={orders.map((order) => order.id).join(':')}
-      items={orders.map((order) => ({
-        id: order.id,
-        orderNo: order.orderNo,
-        status: order.status,
-        canSchedule,
-      }))}
-    >
+  const content = (
+    <>
       <div className="mb-2 flex min-h-11 items-center gap-1 rounded-lg border bg-muted/30 px-1 text-sm md:hidden">
         <OrderListPageSelection />
         <span>选择本页</span>
@@ -351,6 +358,23 @@ export function OrdersTable({
         ))}
       </TableBody>
         </Table>
+      </div>
+    </>
+  );
+
+  return (
+    <OrderListSelectionProvider
+      key={orders.map((order) => order.id).join(':')}
+      items={orders.map((order) => ({
+        id: order.id,
+        orderNo: order.orderNo,
+        status: order.status,
+        canSchedule,
+      }))}
+    >
+      <div className="min-w-0 rounded-xl border bg-card shadow-sm">
+        <div className="min-w-0 p-0 sm:p-4">{content}</div>
+        {footer}
       </div>
     </OrderListSelectionProvider>
   );

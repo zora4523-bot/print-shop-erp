@@ -189,28 +189,26 @@ export async function OrdersListTableSection({
   const showCommercialAmounts = actor.role !== Role.WORKER;
 
   return (
-    <div className="min-w-0 rounded-xl border bg-card shadow-sm">
-      <div className="min-w-0 p-0 sm:p-4">
-        <OrdersTable
-          orders={orderPage.rows}
-          showCommercialAmounts={showCommercialAmounts}
-          showPieceworkCost={actor.role === Role.ADMIN}
-          canSchedule={actor.role === Role.ADMIN}
-          query={displayedQuery}
-          queryParams={queryParams}
-        />
-      </div>
-      <div className="border-t px-4 py-3">
-        <AdminPagination
-          basePath="/orders"
-          page={orderPage.page}
-          pageCount={orderPage.pageCount}
-          total={orderPage.total}
-          pageSize={orderPage.pageSize}
-          queryParams={queryParams}
-        />
-      </div>
-    </div>
+    <OrdersTable
+      orders={orderPage.rows}
+      showCommercialAmounts={showCommercialAmounts}
+      showPieceworkCost={actor.role === Role.ADMIN}
+      canSchedule={actor.role === Role.ADMIN}
+      query={displayedQuery}
+      queryParams={queryParams}
+      footer={
+        <div className="border-t px-4 py-3">
+          <AdminPagination
+            basePath="/orders"
+            page={orderPage.page}
+            pageCount={orderPage.pageCount}
+            total={orderPage.total}
+            pageSize={orderPage.pageSize}
+            queryParams={queryParams}
+          />
+        </div>
+      }
+    />
   );
 }
 

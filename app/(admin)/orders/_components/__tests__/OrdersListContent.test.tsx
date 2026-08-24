@@ -131,6 +131,7 @@ describe('OrdersListContent', () => {
     );
     const tableElement = findElement(tableSection, ordersTableMock);
     expect(tableElement?.props).toMatchObject({ canSchedule: true });
+    expect(tableElement?.props.footer).toBeDefined();
   });
 
   it('does not start an admin export read for non-admin users', async () => {

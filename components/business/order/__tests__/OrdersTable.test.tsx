@@ -106,6 +106,7 @@ describe('OrdersTable commercial visibility', () => {
         canSchedule
         query={query}
         queryParams={{}}
+        footer={<div data-slot="orders-pagination">分页</div>}
       />,
     );
 
@@ -114,6 +115,9 @@ describe('OrdersTable commercial visibility', () => {
     expect(html.match(/aria-label="更多操作：GD-260807-001"/g)).toHaveLength(2);
     expect(html).toContain('role="status"');
     expect(html).toContain('已选 0 项工单');
+    expect(html.indexOf('data-slot="orders-pagination"')).toBeLessThan(
+      html.indexOf('已选 0 项工单'),
+    );
   });
 
   it('distinguishes an empty dataset from an empty filtered result', () => {
