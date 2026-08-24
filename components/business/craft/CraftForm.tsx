@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 import { MachineType, WorkerType } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
@@ -79,13 +80,13 @@ export function CraftForm(props: Props) {
       />
 
       {isCreate ? (
-        <details
+        <Disclosure
           className="rounded-lg border border-dashed p-3"
           open={Boolean(errs.code?.[0])}
         >
-          <summary className="cursor-pointer text-sm text-muted-foreground">
+          <DisclosureSummary className="text-muted-foreground">
             高级设置：自定义工艺代码（通常无需填写）
-          </summary>
+          </DisclosureSummary>
           <div className="mt-3">
             <TextField
               id="code"
@@ -95,7 +96,7 @@ export function CraftForm(props: Props) {
               error={errs.code?.[0]}
             />
           </div>
-        </details>
+        </Disclosure>
       ) : (
         <TextField
           id="code"

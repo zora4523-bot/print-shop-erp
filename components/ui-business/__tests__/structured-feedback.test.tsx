@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ActionNotice,
   BatchActionResult,
@@ -11,6 +11,7 @@ import {
   formMessageA11yProps,
   formMessageId,
 } from '@/components/ui-business';
+import { focusFormErrorSummary } from '@/components/ui-business/FormErrorSummary';
 
 describe('ActionNotice', () => {
   it.each(['success', 'info', 'warning'] as const)(
@@ -62,8 +63,8 @@ describe('form feedback', () => {
     expect(html).toContain('aria-describedby="unit-price-message"');
     expect(html).toContain('aria-errormessage="unit-price-message"');
     expect(html).toContain('id="unit-price-message"');
-    expect(html).toContain('role="alert"');
-    expect(html).toContain('aria-live="assertive"');
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain('aria-live="assertive"');
   });
 
   it('keeps non-error hints out of live regions', () => {
@@ -90,12 +91,21 @@ describe('form feedback', () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain('aria-live="assertive"');
     expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('data-auto-focus="submit-error"');
     expect(html).toContain('href="#unit-price"');
     expect(html).toContain('href="#customer"');
   });
 
   it('does not render an empty error summary', () => {
     expect(renderToStaticMarkup(<FormErrorSummary errors={[]} />)).toBe('');
+  });
+
+  it('moves focus to the submitted error summary', () => {
+    const focus = vi.fn();
+
+    focusFormErrorSummary({ focus });
+
+    expect(focus).toHaveBeenCalledOnce();
   });
 });
 

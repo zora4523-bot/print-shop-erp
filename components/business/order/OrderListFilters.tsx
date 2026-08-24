@@ -12,6 +12,7 @@ import type {
 } from '@/lib/order/list-query';
 import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { orderStatusLabel } from './OrderStatusBadge';
 import { OrderSavedViews } from './OrderSavedViews';
@@ -262,12 +263,12 @@ export function OrderListFilters({
         </div>
       ) : null}
 
-      <details
+      <Disclosure
         id="order-list-filter-controls"
         className="group min-w-0 rounded-lg border border-dashed border-border p-3"
         open={issues.length > 0 || advancedRequested || undefined}
       >
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <DisclosureSummary className="justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2">
             <SlidersHorizontal
               aria-hidden="true"
@@ -288,7 +289,7 @@ export function OrderListFilters({
               className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
             />
           </span>
-        </summary>
+        </DisclosureSummary>
 
         <form
           key={filterStateKey}
@@ -407,7 +408,7 @@ export function OrderListFilters({
           ) : null}
           </div>
         </form>
-      </details>
+      </Disclosure>
     </section>
   );
 }

@@ -68,7 +68,7 @@ export function RegenerateBundleForm({
           已受理，回执 {state.jobId}
         </p>
       ) : state?.status === 'success' ? (
-        <p role="status" className="text-xs text-success">
+        <p role="status" className="text-xs text-success-foreground">
           新下载包已生成
         </p>
       ) : null}

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -98,13 +99,13 @@ export function MaterialForm(props: Props) {
       <FormErrorSummary errors={summaryErrors} />
 
       {isCreate ? (
-        <details
+        <Disclosure
           className="rounded-lg border border-dashed p-3"
           open={Boolean(errs.code?.[0])}
         >
-          <summary className="cursor-pointer text-sm text-muted-foreground">
+          <DisclosureSummary className="text-muted-foreground">
             高级设置：自定义物料编码（通常无需填写）
-          </summary>
+          </DisclosureSummary>
           <div className="mt-3">
             <TextField
               id="code"
@@ -114,7 +115,7 @@ export function MaterialForm(props: Props) {
               error={errs.code?.[0]}
             />
           </div>
-        </details>
+        </Disclosure>
       ) : (
         <TextField
           id="code"

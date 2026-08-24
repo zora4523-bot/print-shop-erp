@@ -17,6 +17,7 @@ import { StockTransferForm } from '@/components/business/warehouse/StockTransfer
 import { WarehouseForms } from '@/components/business/warehouse/WarehouseForms';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ErrorBoundary,
@@ -197,8 +198,8 @@ async function WarehouseDashboardContent() {
         />
       </section>
 
-      <details className="rounded-xl border bg-card p-5 shadow-sm">
-        <summary className="cursor-pointer font-semibold">仓库与库位设置</summary>
+      <Disclosure className="rounded-xl border bg-card p-5 shadow-sm">
+        <DisclosureSummary className="font-semibold">仓库与库位设置</DisclosureSummary>
         <div className="mt-5 space-y-5">
           <WarehouseForms warehouses={dashboard.warehouses.map((warehouse) => ({ id: warehouse.id, code: warehouse.code, name: warehouse.name, isActive: warehouse.isActive }))} />
           <div className="space-y-4">
@@ -210,7 +211,7 @@ async function WarehouseDashboardContent() {
             ))}
           </div>
         </div>
-      </details>
+      </Disclosure>
     </>
   );
 }

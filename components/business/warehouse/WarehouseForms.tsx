@@ -6,6 +6,7 @@ import {
   createWarehouseLocationAction,
 } from '@/actions/owner-warehouses';
 import type { WarehouseMutationResult } from '@/actions/owner-warehouses.types';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -69,10 +70,10 @@ function WarehouseCreateForm() {
         error={errs.name?.[0]}
         disabled={pending}
       />
-      <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
-        <summary className="cursor-pointer text-sm text-muted-foreground">
+      <Disclosure className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
+        <DisclosureSummary className="text-muted-foreground">
           高级设置：自定义仓库编码（通常无需填写）
-        </summary>
+        </DisclosureSummary>
         <div className="mt-3">
           <TextField
             id="warehouse-code"
@@ -83,7 +84,7 @@ function WarehouseCreateForm() {
             disabled={pending}
           />
         </div>
-      </details>
+      </Disclosure>
       {error ? (
         <ActionNotice
           tone="error"
@@ -162,10 +163,10 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
         error={errs.name?.[0]}
         disabled={pending}
       />
-      <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
-        <summary className="cursor-pointer text-sm text-muted-foreground">
+      <Disclosure className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
+        <DisclosureSummary className="text-muted-foreground">
           高级设置：自定义库位编码（通常无需填写）
-        </summary>
+        </DisclosureSummary>
         <div className="mt-3">
           <TextField
             id="location-code"
@@ -176,7 +177,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
             disabled={pending}
           />
         </div>
-      </details>
+      </Disclosure>
       {error ? (
         <ActionNotice
           tone="error"

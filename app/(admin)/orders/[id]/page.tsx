@@ -33,6 +33,7 @@ import {
 } from '@/lib/order/log-format';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import {
   DisabledReason,
   StatusBadge as UiStatusBadge,
@@ -695,25 +696,25 @@ export default async function OrderDetailPage({ params }: PageProps) {
         <ol className="space-y-3">
           {order.items.map((item) => (
             <li key={item.id} className="min-w-0 rounded-lg border text-sm">
-              <details className="group min-w-0">
-              <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-start justify-between gap-2 px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-                <span className="admin-wrap-anywhere min-w-0 font-medium">
-                  <span className="text-muted-foreground">#{item.sequence}</span>
-                  {' · '}
-                  {item.name}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {formatQuantity(item.quantity)} 个
-                  {item.craftNames.length
-                    ? ` · ${item.craftNames.length} 项工艺`
-                    : ''}
-                  {item.tasks.length
-                    ? ` · 已完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
-                    : ' · 尚未排产'}
-                  <span className="ml-2 group-open:hidden">展开</span>
-                  <span className="ml-2 hidden group-open:inline">收起</span>
-                </span>
-              </summary>
+              <Disclosure className="min-w-0">
+                <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
+                  <span className="admin-wrap-anywhere min-w-0 font-medium">
+                    <span className="text-muted-foreground">#{item.sequence}</span>
+                    {' · '}
+                    {item.name}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatQuantity(item.quantity)} 个
+                    {item.craftNames.length
+                      ? ` · ${item.craftNames.length} 项工艺`
+                      : ''}
+                    {item.tasks.length
+                      ? ` · 已完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
+                      : ' · 尚未排产'}
+                    <span className="ml-2 group-open:hidden">展开</span>
+                    <span className="ml-2 hidden group-open:inline">收起</span>
+                  </span>
+                </DisclosureSummary>
               <div className="space-y-3 border-t px-4 py-4">
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <h3 className="sr-only">
@@ -840,7 +841,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 }))}
               />
               </div>
-              </details>
+              </Disclosure>
             </li>
           ))}
         </ol>

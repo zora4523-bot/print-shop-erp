@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import {
   AdminListToolbar,
   AdminTableCard,
@@ -85,11 +86,11 @@ export default async function OwnerPricesPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      <details
+      <Disclosure
         className="group min-w-0 rounded-xl border bg-card p-4 shadow-sm"
         open={q ? true : undefined}
       >
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <DisclosureSummary className="justify-between gap-3 font-semibold">
           <span className="admin-wrap-anywhere min-w-0">
             内部销售/工厂直单兼容价格（低频）
           </span>
@@ -97,7 +98,7 @@ export default async function OwnerPricesPage({ searchParams }: PageProps) {
             aria-hidden="true"
             className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
           />
-        </summary>
+        </DisclosureSummary>
 
         <div className="min-w-0 space-y-6 border-t pt-4">
           <div className="flex min-w-0 flex-wrap gap-2">
@@ -164,7 +165,7 @@ export default async function OwnerPricesPage({ searchParams }: PageProps) {
             </AdminTableCard>
           </section>
         </div>
-      </details>
+      </Disclosure>
     </div>
   );
 }

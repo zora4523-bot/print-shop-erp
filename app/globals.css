@@ -104,7 +104,8 @@
   --info-neutral-foreground: oklch(0.35 0.02 250);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* 3px focus ring must keep >=3:1 contrast against white surfaces. */
+  --ring: oklch(0.44 0.16 25);
   /* Okabe–Ito 色觉友好分类色的 OKLCH 表达；色相与明度共同区分，
      不依赖红/绿二分。 */
   --chart-1: oklch(0.532 0.131 244);
@@ -155,7 +156,7 @@
   --info-neutral-foreground: oklch(0.86 0.01 250);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.78 0.13 25);
   --chart-1: oklch(0.6 0.131 244);
   --chart-2: oklch(0.8 0.158 76.8);
   --chart-3: oklch(0.69 0.13 165.5);
@@ -187,7 +188,7 @@
   /* 未设置布局类的文本链接仍需要可测量的 44px 盒子。这只是 base
      层的低特异性兜底；组件层和工具层的 block / flex / grid 都会
      正常覆盖，不再把所有 admin 链接强制改成 inline-flex。 */
-  :where(.admin-viewport, .touch-viewport) :where(a[href]) {
+  :where(.admin-viewport, .worker-viewport, .touch-viewport) :where(a[href]) {
     display: inline-flex;
     align-items: center;
   }
@@ -327,8 +328,9 @@
      下面这些容器罩住的路由，触控目标就不合规——曾经 /login 与
      /account/password 就落在外面（它们不在 (admin)/(worker) 壳里）。
      所以这里用一个可复用的 .touch-viewport 类，任何独立页面外壳都能挂。 */
-  .admin-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])),
-  .touch-viewport :where(a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])) {
+  .admin-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]),
+  .worker-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]),
+  .touch-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]) {
     min-width: 2.75rem;
     min-height: 2.75rem;
   }
@@ -344,6 +346,21 @@
     .touch-viewport *::before,
     .touch-viewport *::after {
       scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    /* Portals mount under body instead of inside the shell scopes above. */
+    [data-slot="dialog-overlay"],
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-overlay"],
+    [data-slot="alert-dialog-content"],
+    [data-slot="sheet-overlay"],
+    [data-slot="sheet-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="tooltip-content"] {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;

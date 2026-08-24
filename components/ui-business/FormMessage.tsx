@@ -46,7 +46,6 @@ export function FormMessage({
   children,
   className,
 }: FormMessageProps) {
-  const isError = tone === 'error';
   const isSuccess = tone === 'success';
 
   return (
@@ -55,9 +54,11 @@ export function FormMessage({
       data-slot="form-message"
       data-field-id={fieldId}
       data-tone={tone}
-      role={isError ? 'alert' : isSuccess ? 'status' : undefined}
-      aria-live={isError ? 'assertive' : isSuccess ? 'polite' : undefined}
-      aria-atomic={isError || isSuccess ? 'true' : undefined}
+      // 字段错误通过 aria-errormessage 与控件关联；提交失败只由
+      // FormErrorSummary assertive 播报一次，避免摘要 + N 个字段抢播报。
+      role={isSuccess ? 'status' : undefined}
+      aria-live={isSuccess ? 'polite' : undefined}
+      aria-atomic={isSuccess ? 'true' : undefined}
       className={cn('text-sm', MESSAGE_TONE_CLASS[tone], className)}
     >
       {children}

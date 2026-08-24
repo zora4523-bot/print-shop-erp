@@ -6,6 +6,7 @@ import { getWorkerTaskTitleRef } from '@/lib/page-title/refs';
 import { workerTaskTitle } from '@/lib/page-title/titles';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { StatusBadge } from '@/components/ui-business';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { BeginTaskButton } from '@/components/business/production/BeginTaskButton';
 import { ReportTaskForm } from '@/components/business/production/ReportTaskForm';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
@@ -107,35 +108,35 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         </HighlightedRemark>
       ) : null}
 
-      <details className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-        <summary className="min-h-11 cursor-pointer font-semibold">
+      <Disclosure className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+        <DisclosureSummary className="font-semibold">
           任务规格与设计图
-        </summary>
-      <DesignImageGallery
-        headingLevel={2}
-        images={task.orderItem.designs.map((design) => ({
-          ...design,
-          fileUrl: signDesignReadUrl(design.fileUrl),
-        }))}
-      />
+        </DisclosureSummary>
+        <DesignImageGallery
+          headingLevel={2}
+          images={task.orderItem.designs.map((design) => ({
+            ...design,
+            fileUrl: signDesignReadUrl(design.fileUrl),
+          }))}
+        />
 
-      <section className="mt-3">
-        <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
-        <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-          <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
-          <Row label="规格" value={task.orderItem.specification ?? '—'} />
-          <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
-          <Row
-            label="烫金色"
-            value={formatFoilColors(task.orderItem.foilColors)}
-          />
-          <Row
-            label="双面 / 双色"
-            value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}
-          />
-        </dl>
-      </section>
-      </details>
+        <section className="mt-3">
+          <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
+          <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+            <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
+            <Row label="规格" value={task.orderItem.specification ?? '—'} />
+            <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
+            <Row
+              label="烫金色"
+              value={formatFoilColors(task.orderItem.foilColors)}
+            />
+            <Row
+              label="双面 / 双色"
+              value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}
+            />
+          </dl>
+        </section>
+      </Disclosure>
 
       {task.status === TaskStatus.COMPLETED ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">

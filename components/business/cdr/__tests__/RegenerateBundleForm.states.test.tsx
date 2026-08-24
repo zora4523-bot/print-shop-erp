@@ -79,4 +79,20 @@ describe('RegenerateBundleForm state contract', () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain('原工单已不存在，请重新选择');
   });
+
+  it('uses the readable foreground token for compact success feedback', () => {
+    formState.value = {
+      status: 'success',
+      bundleId: 'bundle-new',
+      downloadUrl: 'https://example.test/api/cdr/bundles/bundle-new',
+      relativePath: '/api/cdr/bundles/bundle-new',
+      expiresAt: '2026-08-25T00:00:00.000Z',
+      fileCount: 4,
+      isMock: false,
+    };
+
+    const html = render();
+    expect(html).toContain('text-success-foreground');
+    expect(html).not.toMatch(/\btext-success(?:\s|")/);
+  });
 });

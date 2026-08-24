@@ -12,6 +12,7 @@ import {
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { encodeFoilColorFilterValues } from '@/lib/order/foil-color-filter-codec';
 import { Button } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import type {
   OrderFilterOption,
   OrderListFilters as OrderListFilterValues,
@@ -52,7 +53,7 @@ export function OrderAdvancedFilters({
 
   return (
     <>
-      <details
+      <Disclosure
         className="min-w-0 rounded-lg border border-dashed border-border p-3"
         open={isOpen}
         onToggle={(event) => {
@@ -61,7 +62,7 @@ export function OrderAdvancedFilters({
           if (nextOpen) setHasLoaded(true);
         }}
       >
-        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <DisclosureSummary className="gap-2">
           <SlidersHorizontal aria-hidden="true" className="size-4 text-muted-foreground" />
           更多筛选
           {hasActiveFilters ? (
@@ -69,7 +70,7 @@ export function OrderAdvancedFilters({
               已启用
             </span>
           ) : null}
-        </summary>
+        </DisclosureSummary>
 
         {hasLoaded ? (
           <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -286,7 +287,7 @@ export function OrderAdvancedFilters({
             />
           </div>
         ) : null}
-      </details>
+      </Disclosure>
       <noscript>
         <Button
           type="submit"

@@ -25,6 +25,53 @@ import {
 } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@/components/ui/button"
+import {
+  Disclosure,
+  DisclosureSummary,
+} from "@/components/ui/disclosure"
+
+describe("Button interaction contract", () => {
+  it("keeps the same size identity and strong focus style when disabled", () => {
+    const html = renderToStaticMarkup(
+      <>
+        <Button>保存</Button>
+        <Button disabled>正在保存…</Button>
+      </>
+    )
+
+    expect(html.match(/data-size="default"/g)).toHaveLength(2)
+    expect(html.match(/focus-visible:ring-ring/g)).toHaveLength(2)
+    expect(html).not.toContain("focus-visible:ring-ring/50")
+  })
+
+  it("does not dilute the destructive focus indicator", () => {
+    const html = renderToStaticMarkup(
+      <Button variant="destructive">删除</Button>
+    )
+
+    expect(html).toContain("focus-visible:ring-destructive")
+    expect(html).not.toContain("focus-visible:ring-destructive/")
+  })
+})
+
+describe("Disclosure", () => {
+  it("keeps native semantics with a 44px target and visible keyboard focus", () => {
+    const html = renderToStaticMarkup(
+      <Disclosure>
+        <DisclosureSummary>高级设置</DisclosureSummary>
+        <p>内容</p>
+      </Disclosure>
+    )
+
+    expect(html).toContain("<details")
+    expect(html).toContain("<summary")
+    expect(html).toContain('data-slot="disclosure-summary"')
+    expect(html).toContain("min-h-11")
+    expect(html).toContain("focus-visible:ring-3")
+    expect(html).toContain("focus-visible:ring-ring")
+  })
+})
 
 describe("Card", () => {
   it("exposes stable composition slots without imposing a heading level", () => {

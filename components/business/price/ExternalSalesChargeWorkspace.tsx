@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
@@ -232,21 +233,21 @@ function DraftStatusBar({
           ) : null}
         </div>
         {createDraftEditor ? (
-          <details
+          <Disclosure
             id="start-price-adjustment"
             className="group mt-3 min-w-0 rounded-lg border bg-muted/20 p-3"
             open={createDraftOpen || undefined}
           >
-            <summary
+            <DisclosureSummary
               className={cn(
                 buttonVariants({ variant: 'outline' }),
-                'min-h-11 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
+                'min-h-11',
               )}
             >
               发起调价
-            </summary>
+            </DisclosureSummary>
             <div className="min-w-0 border-t pt-3">{createDraftEditor}</div>
-          </details>
+          </Disclosure>
         ) : null}
       </section>
     );
@@ -373,11 +374,11 @@ function WorkspaceFilters({
         </div>
       </div>
 
-      <details
+      <Disclosure
         className="group min-w-0 rounded-lg border bg-muted/20"
         open={advancedFilterCount > 0}
       >
-        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <DisclosureSummary className="gap-2 rounded-lg px-3">
           <Filter aria-hidden="true" className="size-4" />
           筛选条件
           {advancedFilterCount > 0 ? (
@@ -387,7 +388,7 @@ function WorkspaceFilters({
               （使用时展开）
             </span>
           )}
-        </summary>
+        </DisclosureSummary>
         <div className="grid min-w-0 gap-4 border-t p-3 sm:grid-cols-2 xl:grid-cols-3">
           <label className="min-w-0 space-y-2 text-sm font-medium">
             <span>收费类目</span>
@@ -503,7 +504,7 @@ function WorkspaceFilters({
             </Button>
           </div>
         </div>
-      </details>
+      </Disclosure>
     </form>
   );
 }

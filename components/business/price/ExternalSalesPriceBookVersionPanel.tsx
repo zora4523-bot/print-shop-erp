@@ -7,6 +7,7 @@ import {
 } from '@/components/business/price/ExternalSalesPriceBookDraftForms';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { StatusBadge } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
@@ -500,21 +501,21 @@ function DraftPublishPanel({
         </aside>
       </div>
 
-      <details className="group min-w-0 rounded-lg border bg-card p-3">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md font-medium focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+      <Disclosure className="min-w-0 rounded-lg border bg-card p-3">
+        <DisclosureSummary className="justify-between gap-3">
           <span>更多草稿操作</span>
           <ChevronDown
             aria-hidden="true"
             className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
           />
-        </summary>
+        </DisclosureSummary>
         <div className="border-t pt-3">
           <DiscardCustomerPriceBookDraftForm
             priceBookId={draft.id}
             expectedDraftUpdatedAt={draft.updatedAt}
           />
         </div>
-      </details>
+      </Disclosure>
     </section>
   );
 }
@@ -559,21 +560,21 @@ export function ExternalSalesPriceBookVersionPanel({
         ))}
       </div>
 
-      <details className="group min-w-0 rounded-xl border bg-muted/30 p-4">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md font-semibold focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+      <Disclosure className="min-w-0 rounded-xl border bg-muted/30 p-4">
+        <DisclosureSummary className="justify-between gap-3 font-semibold">
           <span>版本发布说明</span>
           <ChevronDown
             aria-hidden="true"
             className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
           />
-        </summary>
+        </DisclosureSummary>
         <ol className="mt-3 list-decimal space-y-2 border-t pt-3 pl-5 text-sm text-muted-foreground">
           <li>修改价格时建立新草稿，不覆盖已发布版本。</li>
           <li>发布前校验适用数量、金额和自动计价范围。</li>
           <li>新版本只影响生效后创建或重新报价的工单。</li>
           <li>历史工单继续使用创建时冻结的规则与金额快照。</li>
         </ol>
-      </details>
+      </Disclosure>
     </div>
   );
 }
