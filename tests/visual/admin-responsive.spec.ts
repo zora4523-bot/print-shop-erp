@@ -491,7 +491,10 @@ async function expectPriceWorkspaceOverview(page: Page) {
   const groups = page.locator(
     'section[aria-labelledby^="external-charge-group-"]',
   );
-  expect(await groups.count()).toBeGreaterThan(0);
+  // 价格工作台由 Suspense 流式渲染。并发跑多个视口时，Turbopack
+  // 可能仍在展示骨架；直接读取 count() 不会像 Playwright 的 web-first
+  // 断言一样重试，会把尚未挂载误判成数据为空。
+  await expect(groups.first()).toBeAttached({ timeout: 30_000 });
   const firstGroup = groups.first();
   const viewport = page.viewportSize();
   const selectedDetail = page.locator(
@@ -506,7 +509,9 @@ async function expectPriceWorkspaceOverview(page: Page) {
   } else {
     await expect(firstGroup).toBeVisible();
   }
-  expect(await firstGroup.locator('ol > li').count()).toBeGreaterThan(0);
+  await expect(firstGroup.locator('ol > li').first()).toBeAttached({
+    timeout: 30_000,
+  });
   await expect(firstGroup.getByText('档数').first()).toHaveCount(1);
   await expect(firstGroup.getByText('当前价区间').first()).toHaveCount(1);
   await expect(firstGroup.getByText('调整进度').first()).toHaveCount(1);
@@ -610,8 +615,13 @@ async function preparePriceBookWorkspaceState(page: Page) {
     : page.getByRole('link', { name: /^查看详情：/ }).first();
 
   await expect(firstItem).toBeVisible();
+  await expect(firstItem).toHaveAttribute('href', /#selected-charge-detail$/);
   await firstItem.click();
-  await expect(page).toHaveURL(/#selected-charge-detail$/);
+  await expect(page).toHaveURL(/#selected-charge-detail$/, {
+    // 四个视口共享开发态 Turbopack 时，RSC 导航可能超过默认 5 秒；
+    // 等待导航提交，但仍要求落到明确的详情锚点。
+    timeout: 30_000,
+  });
   await expectSelectedPriceWorkspace(page, hasDraft);
 
   await preparePriceBookBusinessState(page);
