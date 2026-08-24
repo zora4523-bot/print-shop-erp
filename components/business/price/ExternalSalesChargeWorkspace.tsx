@@ -455,7 +455,7 @@ function WorkspaceFilters(props: WorkspaceFiltersProps) {
             <Badge
               key={key}
               variant="outline"
-              className="max-w-[85vw] shrink-0 overflow-hidden bg-card p-0 whitespace-normal sm:max-w-full"
+              className="h-auto max-w-[85vw] shrink-0 overflow-hidden bg-card p-0 whitespace-normal sm:max-w-full"
             >
               <PriceWorkspaceLink
                 href={workspaceFilterHref(props, key)}

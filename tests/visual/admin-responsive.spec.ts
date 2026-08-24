@@ -73,6 +73,7 @@ test.describe('deterministic external sales price tier fixture', () => {
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'admin-393x852');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(
       '/owner/prices/external-sales/visual-fixture?state=draft&category=print&kind=ADD_ON&status=ACTIVE&changed=1',
     );
@@ -93,10 +94,19 @@ test.describe('deterministic external sales price tier fixture', () => {
       exact: true,
     });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel('收费类目', { exact: true })).toBeFocused();
+    await expect(
+      dialog.locator('#mobile-external-charge-category'),
+    ).toBeFocused();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.height).toBeLessThanOrEqual(852 * 0.8 + 1);
+    await page.evaluate(async () => {
+      await Promise.all(
+        document
+          .getAnimations()
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
     await expectViewportGate(page, testInfo);
     await expectA11yGate(page);
     await attachCandidateScreenshot(
