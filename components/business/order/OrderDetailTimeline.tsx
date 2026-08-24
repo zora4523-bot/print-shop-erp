@@ -12,9 +12,12 @@ export function OrderDetailTimeline({
     <aside
       aria-label="状态时间线"
       className={cn(
-        'rounded-xl border bg-card p-4 shadow-sm lg:sticky lg:top-20 lg:self-start',
+        'rounded-xl border bg-card p-4 shadow-sm lg:sticky lg:self-start',
         className,
       )}
+      style={{
+        top: 'var(--order-detail-timeline-top, calc(var(--admin-header-offset) + 8rem))',
+      }}
     >
       <h2 className="text-sm font-semibold">状态时间线</h2>
       <ol className="mt-3">

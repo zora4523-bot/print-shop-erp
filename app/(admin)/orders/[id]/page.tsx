@@ -74,6 +74,7 @@ import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
+import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
 import {
   buildOrderDetailTimeline,
   orderCancelImpact,
@@ -260,12 +261,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的 order，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={order.orderNo} />
-      <div
-        className="sticky z-[9] -mx-1 space-y-3 border-b bg-background/95 px-1 py-3 backdrop-blur-sm"
-        style={{
-          top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
-        }}
-      >
+      <OrderDetailStickyScope
+        header={
+          <>
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
@@ -430,7 +428,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
             有款式含 {maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度
           </p>
         ) : null}
-      </div>
+          </>
+        }
+      >
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(15rem,16.75rem)_minmax(0,1fr)]">
         <OrderDetailTimeline steps={timelineSteps} />
@@ -1258,6 +1258,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
 
         </div>
       </div>
+      </OrderDetailStickyScope>
     </div>
   );
 }
