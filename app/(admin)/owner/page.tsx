@@ -37,6 +37,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import {
   ActionShortcut,
   ErrorBoundary,
+  SlowLoadingHint,
   StatCard,
   StatusBadge as UiStatusBadge,
 } from '@/components/ui-business';
@@ -617,13 +618,15 @@ function dueOrdersListHref(promisedThroughYmd: string) {
 
 function DashboardHeaderLoading({ displayName }: { displayName: string }) {
   return (
-    <p
+    <div
       role="status"
-      aria-label="正在加载 Dashboard 日期与账期"
-      className="text-sm text-muted-foreground"
+      aria-busy="true"
+      aria-live="polite"
+      className="space-y-1 text-sm text-muted-foreground"
     >
-      {displayName} · 正在加载日期与账期…
-    </p>
+      <p>{displayName} · 正在加载日期与账期…</p>
+      <SlowLoadingHint />
+    </div>
   );
 }
 
@@ -632,9 +635,16 @@ function DashboardQueueLoading() {
     <div
       role="status"
       aria-busy="true"
-      aria-label="正在加载今日待处理"
-      className="h-48 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
-    />
+      aria-live="polite"
+      className="space-y-2"
+    >
+      <span className="sr-only">正在加载今日待处理</span>
+      <div
+        aria-hidden="true"
+        className="h-48 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
+      />
+      <SlowLoadingHint />
+    </div>
   );
 }
 
@@ -642,11 +652,23 @@ function DashboardStatsLoading({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <div
       key={index}
-      role="status"
-      aria-busy="true"
-      aria-label="正在加载 Dashboard 指标"
-      className="h-28 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
-    />
+      role={index === 0 ? 'status' : undefined}
+      aria-busy={index === 0 ? 'true' : undefined}
+      aria-live={index === 0 ? 'polite' : undefined}
+      aria-hidden={index === 0 ? undefined : 'true'}
+      className="relative h-28 overflow-hidden rounded-xl border bg-card"
+    >
+      {index === 0 ? (
+        <span className="sr-only">正在加载 Dashboard 指标</span>
+      ) : null}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 animate-pulse bg-card motion-reduce:animate-none"
+      />
+      {index === 0 ? (
+        <SlowLoadingHint className="absolute inset-x-3 bottom-2" />
+      ) : null}
+    </div>
   ));
 }
 
@@ -655,9 +677,16 @@ function DashboardWatchlistLoading({ title }: { title: string }) {
     <div
       role="status"
       aria-busy="true"
-      aria-label={`正在加载${title}`}
-      className="h-64 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
-    />
+      aria-live="polite"
+      className="space-y-2"
+    >
+      <span className="sr-only">正在加载{title}</span>
+      <div
+        aria-hidden="true"
+        className="h-64 animate-pulse rounded-xl border bg-card motion-reduce:animate-none"
+      />
+      <SlowLoadingHint />
+    </div>
   );
 }
 
@@ -683,14 +712,16 @@ function DashboardChartsLoading() {
     <div
       role="status"
       aria-busy="true"
-      aria-label="正在加载统计图表"
+      aria-live="polite"
       className="space-y-4"
     >
+      <span className="sr-only">正在加载统计图表</span>
       <div className="h-[23rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
         <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
       </div>
+      <SlowLoadingHint />
     </div>
   );
 }

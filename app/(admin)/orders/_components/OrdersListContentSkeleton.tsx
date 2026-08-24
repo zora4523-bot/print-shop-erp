@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { SlowLoadingHint } from '@/components/ui-business';
 
 export function OrdersListContentSkeleton() {
   return (
@@ -6,6 +7,7 @@ export function OrdersListContentSkeleton() {
       <span className="sr-only">正在加载工单数据</span>
       <OrdersListFiltersSkeleton announce={false} />
       <OrdersListTableSkeleton announce={false} />
+      <SlowLoadingHint />
     </section>
   );
 }
@@ -30,24 +32,37 @@ export function OrdersListFiltersSkeleton({
           <Skeleton className="h-5 w-24 motion-reduce:animate-none" />
           <Skeleton className="h-4 w-36 motion-reduce:animate-none" />
         </div>
-        <OrderExportControlsSkeleton />
+        <OrderExportControlsSkeleton announce={false} />
       </div>
       <Skeleton
         className="h-11 w-full motion-reduce:animate-none"
         aria-hidden="true"
       />
+      {announce ? <SlowLoadingHint /> : null}
     </div>
   );
 }
 
-export function OrderExportControlsSkeleton() {
+export function OrderExportControlsSkeleton({
+  announce = true,
+}: {
+  announce?: boolean;
+}) {
   return (
-    <span className="inline-flex" aria-label="正在加载导出记录">
-      <Skeleton
-        className="h-11 w-24 motion-reduce:animate-none lg:h-8"
-        aria-hidden="true"
-      />
-    </span>
+    <div
+      aria-busy="true"
+      aria-live={announce ? 'polite' : undefined}
+      className="inline-flex flex-col items-end gap-2"
+    >
+      {announce ? <span className="sr-only">正在加载导出记录</span> : null}
+      <span className="inline-flex">
+        <Skeleton
+          className="h-11 w-24 motion-reduce:animate-none lg:h-8"
+          aria-hidden="true"
+        />
+      </span>
+      {announce ? <SlowLoadingHint className="text-right" /> : null}
+    </div>
   );
 }
 
@@ -73,6 +88,7 @@ export function OrdersListTableSkeleton({
         ))}
         <Skeleton className="h-8 w-48 motion-reduce:animate-none" />
       </div>
+      {announce ? <SlowLoadingHint /> : null}
     </div>
   );
 }

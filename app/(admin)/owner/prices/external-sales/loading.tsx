@@ -1,3 +1,5 @@
+import { SlowLoadingHint } from '@/components/ui-business';
+
 export default function ExternalSalesPricesLoading() {
   return (
     <div className="min-w-0 space-y-6" aria-busy="true" aria-live="polite">
@@ -14,6 +16,7 @@ export default function ExternalSalesPricesLoading() {
         ))}
       </div>
       <div className="h-96 animate-pulse rounded-xl border bg-muted/40 motion-reduce:animate-none" />
+      <SlowLoadingHint />
       <span className="sr-only">正在加载外部销售收费项目</span>
     </div>
   );
