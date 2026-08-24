@@ -39,6 +39,22 @@ applies_to: current worktree and docs/ux-redesign
 - 打印 8 张真实像素基线保持通过；管理端与师傅端已具备六视口明暗主题的几何、触控和 axe 基础门禁。
 - `ConfirmActionDialog`、`ConflictResolutionPanel`、`LongTaskReceipt`、`FormErrorSummary` 等基础组件已经存在，后续重点是完善契约并迁移真实消费者。
 
+## 审查后的执行证据
+
+本文保留 `41abe65` 时的发现作为审计证据；完成状态仍只维护在 canonical [`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md)。后续独立提交已完成以下可执行子集：
+
+- `ADV-S1-02`：工单审批/拒绝已有字段、金额与生产影响 L2；`reviewRemark` 仍为服务端可选，所以未伪造 L3。
+- `ADV-S1-04`：盘点过账复用已持久 `remark` 完成 L3，并保留现有并发/部分结果。
+- `ADV-S1-08`：账单发单/收款及外协付款均有实时金额、对象、剩余款和幂等提示的 L2。
+- `ADV-S1-09`：日薪/时薪发放与撤销、客服工资流水、时薪重算、客服周期结算已完成 L2；无持久 reason 的动作仍需 ADR 才能升 L3。
+- `ADV-S1-10A/B/D`：批量排产、发货与师傅批量完工均已迁移确认层；发货文案不再伪称扣库存/进终态。
+- `ADV-S1-11`：未改变后端语义；师傅批量完工 UI 已明示当前“任一失败整批回滚”，最终产品取舍仍待 owner ADR。
+- `ADV-S1-16`：当前 74/74 个生产 `useActionState` 消费者已有 busy/pending 结构契约；确定性断网 E2E 仍属 `ADV-S1-12`。
+- `ADV-S1-17`：账号、工艺、BOM、分类、往来单位、物料与调价的直接启停已改为 L2；真实引用数与审计理由仍未伪造。
+- `ADV-S2-01/02/04/05/06/07/19` 与 `ADV-S3-02`：已收口 44px pending 几何、成功字色/焦点、筛选无结果、根 404、错误聚焦/去重播报、portal motion、disclosure/menu 触控与三个安全动态标题。
+
+这些提交不改变本报告的证据边界：管理端/师傅端候选截图仍不是 owner 签核像素基线，也不能声称 85 页逐页像素对齐。
+
 严重度和成本沿用 [`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md)：S1 高、S2 中、S3 低；C1 小、C2 中、C3 大、C4 计划级。表内“已确认”指代码或实机证据充分；“契约待定”不得在未确认业务规则时自行实现。
 
 [`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 是唯一 canonical 状态表；下列 `ADV-*` 是证据化子任务规格，不维护第二套完成状态。执行时必须挂到文末的 canonical 父任务，或先把新父项写入 backlog。确认层也不等于授权新增数据库字段：领域已经有 reason/remark/audit 时复用，尚无时必须先形成业务/数据 ADR。
