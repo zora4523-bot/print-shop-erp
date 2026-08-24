@@ -4,6 +4,7 @@ import { Role } from '@/generated/prisma/enums';
 
 const {
   getOrderListFilterOptionsMock,
+  getOrderListPageWindowMock,
   listOrdersPageMock,
   listRecentOrderExportsMock,
   orderExportControlsMock,
@@ -11,6 +12,7 @@ const {
   ordersTableMock,
 } = vi.hoisted(() => ({
   getOrderListFilterOptionsMock: vi.fn(),
+  getOrderListPageWindowMock: vi.fn(),
   listOrdersPageMock: vi.fn(),
   listRecentOrderExportsMock: vi.fn(),
   orderExportControlsMock: vi.fn(() => null),
@@ -20,6 +22,7 @@ const {
 
 vi.mock('@/lib/order/list-query', () => ({
   getOrderListFilterOptions: getOrderListFilterOptionsMock,
+  getOrderListPageWindow: getOrderListPageWindowMock,
   listOrdersPage: listOrdersPageMock,
   parseOrderListQuery: vi.fn(() => ({
     issues: [],
@@ -73,6 +76,14 @@ import {
 } from '../OrdersListContent';
 
 beforeEach(() => {
+  getOrderListPageWindowMock.mockReset().mockResolvedValue({
+    total: 0,
+    page: 1,
+    pageCount: 1,
+    pageSize: 20,
+    skip: 0,
+    take: 20,
+  });
   listOrdersPageMock.mockReset().mockResolvedValue({
     rows: [],
     total: 0,
@@ -96,6 +107,12 @@ describe('OrdersListContent', () => {
     });
 
     expect(listOrdersPageMock).toHaveBeenCalledTimes(1);
+    expect(getOrderListPageWindowMock).toHaveBeenCalledTimes(1);
+    expect(listOrdersPageMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      getOrderListPageWindowMock.mock.results[0]?.value,
+    );
     expect(getOrderListFilterOptionsMock).toHaveBeenCalledTimes(1);
     expect(listRecentOrderExportsMock).toHaveBeenCalledTimes(1);
     expect(listRecentOrderExportsMock).toHaveBeenCalledWith('admin-1');
@@ -149,6 +166,48 @@ describe('OrdersListContent', () => {
     );
     const tableElement = findElement(tableSection, ordersTableMock);
     expect(tableElement?.props).toMatchObject({ canSchedule: false });
+  });
+
+  it('keeps filters available when the independent order-row read fails', async () => {
+    const rowFailure = new Error('order rows read failed');
+    let rejectRows: ((reason: Error) => void) | undefined;
+    listOrdersPageMock.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectRows = reject;
+      }),
+    );
+    getOrderListPageWindowMock.mockResolvedValueOnce({
+      total: 42,
+      page: 2,
+      pageCount: 3,
+      pageSize: 20,
+      skip: 20,
+      take: 20,
+    });
+
+    const node = await OrdersListContent({
+      searchParams: Promise.resolve({ page: '2' }),
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    const filterSectionElement = findElement(node, OrdersListFiltersSection)!;
+    const tableSectionElement = findElement(node, OrdersListTableSection)!;
+
+    expect(filterSectionElement.props).not.toHaveProperty('orderPagePromise');
+    const filterSection = await OrdersListFiltersSection(
+      filterSectionElement.props as Parameters<
+        typeof OrdersListFiltersSection
+      >[0],
+    );
+    const filterElement = findElement(filterSection, orderListFiltersMock);
+    expect(filterElement?.props).toMatchObject({ total: 42 });
+
+    const tableResult = OrdersListTableSection(
+        tableSectionElement.props as Parameters<
+          typeof OrdersListTableSection
+        >[0],
+      );
+    rejectRows?.(rowFailure);
+    await expect(tableResult).rejects.toBe(rowFailure);
   });
 
   it('propagates each section error to its nearest boundary instead of returning fake empty data', async () => {

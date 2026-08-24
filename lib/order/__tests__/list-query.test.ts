@@ -25,6 +25,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   buildOrderWhere,
   getOrderListFilterOptions,
+  getOrderListPageWindow,
   listOrdersPage,
   orderListOrderBy,
   parseOrderListQuery,
@@ -553,6 +554,25 @@ describe('buildOrderWhere', () => {
 });
 
 describe('listOrdersPage', () => {
+  it('reuses a prepared page window without repeating the count read', async () => {
+    dbMock.order.count.mockResolvedValue(41);
+    const query = parseOrderListQuery({ page: '3' }).query;
+    const windowPromise = getOrderListPageWindow(adminActor, query);
+
+    const result = await listOrdersPage(adminActor, query, windowPromise);
+
+    expect(dbMock.order.count).toHaveBeenCalledOnce();
+    expect(dbMock.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 40, take: 20 }),
+    );
+    expect(result).toMatchObject({
+      total: 41,
+      page: 3,
+      pageCount: 3,
+      pageSize: 20,
+    });
+  });
+
   it('does not select, filter, sort, or return commercial totals for WORKER', async () => {
     dbMock.order.count.mockResolvedValue(1);
     dbMock.order.findMany.mockResolvedValue([

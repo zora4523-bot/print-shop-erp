@@ -8,6 +8,7 @@ import { OrdersTable } from '@/components/business/order/OrdersTable';
 import { OrderListScrollState } from '@/components/business/order/OrderListNavigationState';
 import { ErrorBoundary } from '@/components/ui-business';
 import {
+  getOrderListPageWindow,
   getOrderListFilterOptions,
   listOrdersPage,
   parseOrderListQuery,
@@ -27,6 +28,7 @@ import {
 
 type OrdersActor = { id: string; role: Role };
 type OrdersPagePromise = ReturnType<typeof listOrdersPage>;
+type OrderListPageWindowPromise = ReturnType<typeof getOrderListPageWindow>;
 type FilterOptionsPromise = ReturnType<typeof getOrderListFilterOptions>;
 type RecentExportsPromise = ReturnType<typeof listRecentOrderExports>;
 
@@ -41,9 +43,15 @@ export async function OrdersListContent({
   const parsed = parseOrderListQuery(rawSearchParams);
   const actor = { id: user.id, role: user.role };
   const query = sanitizeOrderListQueryForActor(actor, parsed.query);
-  // 三次读取只在这里各启动一次。orderPagePromise 会被筛选与表格子区共享；
-  // React 可在两个 Suspense 边界中等待同一个 Promise，不会重复访问数据库。
-  const orderPagePromise = listOrdersPage(actor, query);
+  // count + pagination 和行数据分开：筛选区只等待窗口与选项，
+  // 行查询失败时不会连带替换已可用的筛选控件。列表复用同一窗口
+  // Promise，因此 count 仍只执行一次。
+  const orderListPageWindowPromise = getOrderListPageWindow(actor, query);
+  const orderPagePromise = listOrdersPage(
+    actor,
+    query,
+    orderListPageWindowPromise,
+  );
   const filterOptionsPromise = getOrderListFilterOptions(actor);
   const recentExportsPromise: RecentExportsPromise =
     user.role === Role.ADMIN
@@ -68,7 +76,7 @@ export async function OrdersListContent({
             issues={parsed.issues}
             advancedRequested={advancedRequested}
             actor={actor}
-            orderPagePromise={orderPagePromise}
+            orderListPageWindowPromise={orderListPageWindowPromise}
             filterOptionsPromise={filterOptionsPromise}
             recentExportsPromise={recentExportsPromise}
           />
@@ -96,7 +104,7 @@ export async function OrdersListFiltersSection({
   issues,
   advancedRequested,
   actor,
-  orderPagePromise,
+  orderListPageWindowPromise,
   filterOptionsPromise,
   recentExportsPromise,
 }: {
@@ -104,15 +112,15 @@ export async function OrdersListFiltersSection({
   issues: readonly string[];
   advancedRequested: boolean;
   actor: OrdersActor;
-  orderPagePromise: OrdersPagePromise;
+  orderListPageWindowPromise: OrderListPageWindowPromise;
   filterOptionsPromise: FilterOptionsPromise;
   recentExportsPromise: RecentExportsPromise;
 }) {
-  const [orderPage, filterOptions] = await Promise.all([
-    orderPagePromise,
+  const [orderListPageWindow, filterOptions] = await Promise.all([
+    orderListPageWindowPromise,
     filterOptionsPromise,
   ]);
-  const displayedQuery = { ...query, page: orderPage.page };
+  const displayedQuery = { ...query, page: orderListPageWindow.page };
   const showCommercialAmounts = actor.role !== Role.WORKER;
 
   return (
@@ -120,7 +128,7 @@ export async function OrdersListFiltersSection({
       query={displayedQuery}
       options={filterOptions}
       issues={issues}
-      total={orderPage.total}
+      total={orderListPageWindow.total}
       showCommercialAmounts={showCommercialAmounts}
       advancedRequested={advancedRequested}
       canReviewChanges={actor.role === Role.ADMIN}
@@ -134,7 +142,7 @@ export async function OrdersListFiltersSection({
             <Suspense fallback={<OrderExportControlsSkeleton />}>
               <OrderExportsSection
                 query={displayedQuery}
-                filteredTotal={orderPage.total}
+                filteredTotal={orderListPageWindow.total}
                 recentExportsPromise={recentExportsPromise}
               />
             </Suspense>

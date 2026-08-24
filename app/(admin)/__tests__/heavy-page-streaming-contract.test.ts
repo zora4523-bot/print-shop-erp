@@ -23,11 +23,15 @@ describe('heavy admin page streaming boundaries', () => {
       page.indexOf('<ErrorBoundary'),
     );
     expect(page).not.toContain('listOrdersPage(');
-    expect(content.match(/listOrdersPage\(actor, query\)/g)).toHaveLength(1);
+    expect(content.match(/getOrderListPageWindow\(actor, query\)/g)).toHaveLength(1);
+    expect(content.match(/listOrdersPage\(/g)).toHaveLength(1);
     expect(content.match(/getOrderListFilterOptions\(actor\)/g)).toHaveLength(1);
     expect(content.match(/listRecentOrderExports\(user\.id\)/g)).toHaveLength(1);
     expect(content).toContain(
-      'const orderPagePromise = listOrdersPage(actor, query)',
+      'const orderListPageWindowPromise = getOrderListPageWindow(actor, query)',
+    );
+    expect(content).toMatch(
+      /const orderPagePromise = listOrdersPage\(\s*actor,\s*query,\s*orderListPageWindowPromise,\s*\)/,
     );
     expect(content).toContain(
       'const filterOptionsPromise = getOrderListFilterOptions(actor)',
@@ -35,6 +39,14 @@ describe('heavy admin page streaming boundaries', () => {
     expect(content.match(/<ErrorBoundary/g)).toHaveLength(3);
     expect(content.match(/<Suspense/g)).toHaveLength(3);
     expect(content).toContain('orderPagePromise={orderPagePromise}');
+    expect(content).toContain(
+      'orderListPageWindowPromise={orderListPageWindowPromise}',
+    );
+    const filterSection = content.match(
+      /<OrdersListFiltersSection[\s\S]*?\/>/,
+    )?.[0];
+    expect(filterSection).toBeDefined();
+    expect(filterSection).not.toContain('orderPagePromise=');
     expect(content).toContain('recentExportsPromise={recentExportsPromise}');
     expect(content).toContain('工单筛选暂时无法加载');
     expect(content).toContain('导出记录暂时无法加载');

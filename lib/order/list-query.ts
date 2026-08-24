@@ -12,6 +12,7 @@ import {
   paginatedResult,
   paginationWindow,
   type PaginatedResult,
+  type PaginationWindow,
   type SortDirection,
   type TableHrefParams,
 } from '../admin/table';
@@ -138,6 +139,10 @@ export type OrderListRow = {
   createdAt: Date;
   updatedAt: Date;
   pieceworkCost: string | null;
+};
+
+export type OrderListPageWindow = PaginationWindow & {
+  total: number;
 };
 
 /**
@@ -838,14 +843,29 @@ function booleanParam(value: boolean | undefined): string | undefined {
   return value === undefined ? undefined : value ? 'yes' : 'no';
 }
 
-export async function listOrdersPage(
+export async function getOrderListPageWindow(
   actor: { id: string; role: Role },
   query: OrderListQuery,
-): Promise<PaginatedResult<OrderListRow>> {
+): Promise<OrderListPageWindow> {
   const safeQuery = sanitizeOrderListQueryForActor(actor, query);
   const where = buildOrderWhere(actor, safeQuery.filters);
   const total = await db.order.count({ where });
   const window = paginationWindow(total, safeQuery.page, safeQuery.pageSize);
+
+  return { ...window, total };
+}
+
+export async function listOrdersPage(
+  actor: { id: string; role: Role },
+  query: OrderListQuery,
+  windowPromise: Promise<OrderListPageWindow> = getOrderListPageWindow(
+    actor,
+    query,
+  ),
+): Promise<PaginatedResult<OrderListRow>> {
+  const safeQuery = sanitizeOrderListQueryForActor(actor, query);
+  const where = buildOrderWhere(actor, safeQuery.filters);
+  const { total, ...window } = await windowPromise;
   const rows = await db.order.findMany({
     where,
     select: {
