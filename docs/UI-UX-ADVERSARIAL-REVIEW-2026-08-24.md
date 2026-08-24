@@ -2,6 +2,7 @@
 status: actionable-audit
 owner: engineering
 reviewed_at: 2026-08-24
+last_verified: 2026-08-25
 baseline_commit: 41abe65
 applies_to: current worktree and docs/ux-redesign
 ---
@@ -134,7 +135,7 @@ applies_to: current worktree and docs/ux-redesign
 | `UI-F07` 长任务回执 | `ADV-S1-03`、`ADV-S2-20` |
 | `UI-F10` 主数据引用/停用 | `ADV-S1-17` |
 | `UI-F01B` 分区错误隔离 | `ADV-S1-13` |
-| `UI-F04` 状态注册表（保持“部分完成”） | `ADV-S2-09` |
+| `UI-F04` 状态注册表 | `ADV-S2-09` |
 | `UI-F11` 空态所有权 | `ADV-S2-04` |
 | `UI-F12` 表单字段与错误 | `ADV-S2-03`、`06` |
 | `UI-F13` Loading | `ADV-S2-10` |
@@ -175,10 +176,29 @@ applies_to: current worktree and docs/ux-redesign
 5. 不通过放宽断言、隐藏错误 overlay、删除测试或更新无关基线制造绿色结果。
 6. 每个任务独立提交；状态只同步 canonical backlog，并记录验证命令、剩余边界和必要的 CHANGELOG/ADR。本报告仅在证据或任务边界发生变化时更新。
 
+## 2026-08-25 复核结论
+
+本节只记录 `41abe65` 之后的复核状态，不重写上面的原始发现表。原表继续作为基线时点的审计证据，canonical 完成状态仍以 [`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 为准。
+
+- `ADV-S1-03`、`ADV-S1-13`、`ADV-S2-03`、`ADV-S2-09`、`ADV-S2-11`、`ADV-S2-12` 已完成。
+- `ADV-S1-16` 的当前源码 pending/重复点击保护已完成：29 个关键表单有显式 busy 契约，新 action-state 表单受 AST 门禁，12 个可变快照和 7 条表单内导航路径受 pending 锁保护；网络未知结果仍由 `ADV-S1-12` 承担。
+- `ADV-S2-08` 已完成工单范围的实测 sticky offset、批量条与分页避让；其他详情页族仍需继续迁移。
+- `ADV-S2-10` 已完成工单、Dashboard、仓库、定价和师傅端核心页面；`ADV-S2-17` 已覆盖移动筛选 Sheet、焦点返回、Escape、单 chip 移除、pending 快照和滚动 offset 等关键子集，仍不等于软键盘、WebKit 与真机全覆盖。
+- `ADV-S2-16` 与 `UI-Q01` 仍未完成。管理端和师傅端只有 candidate 截图，只有打印页具备 owner 可审核的像素 expected；因此不能声称 85 页逐像素对齐。
+
+当日正式回归为：管理/销售端 37 通过、5 条件跳过（6 档视口、明暗主题）；师傅端 12/12 通过；打印页 8/8 历史像素基线通过且没有更新 expected PNG；批量排产/生产 E2E 5/5 通过。clean 产品 HEAD 的 Vitest 为 301 文件 / 3387 项全通过。详细命令、作业含义与证据边界见 canonical backlog。
+
+### 必须保留的业务边界
+
+- `ReworkOrder` 创建、`PriceAdjustment` 创建模式、`PurchaseOrder` 创建和 `ProductCategory` 创建模式尚无稳定客户端幂等键与服务端 replay 契约；pending 锁不能替代断线后的安全重试协议。
+- `PriceTier` 唯一约束只能拒绝重复，不能返回原成功结果。
+- 师傅批量完工当前仍是同一事务、任一失败整批回滚；是否改为逐项部分成功必须由 owner 形成 ADR。
+- 工单 CAS/冲突三选、价格覆盖/合并、考勤更正与审计、通知 reason/audit、单项开工/报工确认等级和长任务迁移阈值仍是显式 ADR 边界。
+
 ## 本轮明确不能作出的结论
 
 - 不能说“所有界面都做了视觉回归”；目前只有打印页有真实像素断言。
-- 不能把 36/36 admin 测试理解为 36 张设计基线；它是 6 个 viewport project 下的测试作业，内部循环多个路由。
+- 不能把当日 37 通过 / 5 条件跳过的 admin project 作业理解为 37 张设计基线；每个作业内部循环多个路由，截图仍是 candidate。
 - 不能把“页面没有独立 `loading.tsx` / `error.tsx`”直接判成没有兜底；App Router 会继承分组边界，真正缺口是复杂页的分区隔离和逐状态验证。
 - 不能把设计包的线框/文字要求当成已确认业务规则；批量完工原子性、考勤批量、导航分类、全局搜索范围等必须先由 owner 决策。考勤单条撤销后端已存在，不属于“无契约”。
 - 不能因为稳定初始态 axe 通过，就声称动态菜单、错误聚焦、portal、safe-area、软键盘和 pending 状态已通过。
