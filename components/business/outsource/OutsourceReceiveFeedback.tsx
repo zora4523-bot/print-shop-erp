@@ -1,4 +1,5 @@
 import type { OutsourceMutationResult } from '@/actions/outsource.types';
+import { ActionNotice } from '@/components/ui-business';
 
 export function OutsourceReceiveFeedback({
   state,
@@ -6,22 +7,39 @@ export function OutsourceReceiveFeedback({
   state: OutsourceMutationResult | null;
 }) {
   if (state?.status === 'success' && state.notice) {
-    return <p className="text-xs text-warning-foreground">{state.notice}</p>;
+    return (
+      <ActionNotice
+        tone="warning"
+        title="已标记回货，但工单尚未生产完工"
+        description={state.notice}
+      />
+    );
+  }
+  if (state?.status === 'success') {
+    return (
+      <ActionNotice
+        tone="success"
+        title="外协单已标记回货"
+        description="系统已重新核对关联工单的生产完工条件。"
+      />
+    );
   }
   if (state?.status === 'error') {
-    return <p className="text-xs text-destructive">{state.message}</p>;
+    return (
+      <ActionNotice
+        tone="error"
+        title="外协单未标记回货"
+        description={state.message}
+      />
+    );
   }
   if (state?.status === 'invalid') {
     return (
-      <ul className="text-xs text-destructive">
-        {Object.entries(state.fieldErrors).flatMap(([field, msgs]) =>
-          msgs.map((message) => (
-            <li key={`${field}-${message}`}>
-              {field}: {message}
-            </li>
-          )),
-        )}
-      </ul>
+      <ActionNotice
+        tone="error"
+        title="请检查回货信息"
+        description={Object.values(state.fieldErrors).flat().join('；')}
+      />
     );
   }
   return null;

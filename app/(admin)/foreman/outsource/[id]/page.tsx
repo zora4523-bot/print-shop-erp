@@ -223,6 +223,8 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           ) : (
             <OutsourcePaymentForm
               id={row.id}
+              supplierName={row.supplierName}
+              orderNo={row.order?.orderNo ?? null}
               remainingAmount={remainingAmount?.toFixed(2) ?? '0.00'}
               initialIdempotencyKey={randomUUID()}
             />
@@ -266,16 +268,23 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
         )}
       </section>
 
-      {canReceive || canCancel ? (
-        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
-          <h2 className="text-base font-semibold">状态操作</h2>
-          <OutsourceActions
-            id={row.id}
-            canReceive={canReceive}
-            canCancel={canCancel}
-          />
-        </section>
-      ) : null}
+      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+        <h2 className="text-base font-semibold">状态操作</h2>
+        <OutsourceActions
+          id={row.id}
+          canReceive={canReceive}
+          canCancel={canCancel}
+          supplierName={row.supplierName}
+          orderNo={row.order?.orderNo ?? null}
+          totalQty={row.totalQty}
+          expectedDateLabel={formatDateShanghai(row.expectedDate)}
+        />
+        {!canReceive && !canCancel ? (
+          <p className="text-sm text-muted-foreground">
+            该外协单已进入终态，没有可执行的状态操作。
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }
