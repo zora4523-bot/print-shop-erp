@@ -27,7 +27,8 @@ export function SettingsForm({ initialValues }: Props) {
   >(updateSettingsAction, null);
 
   return (
-    <form action={formAction} aria-busy={pending} className="space-y-6">
+    <form action={formAction} aria-busy={pending}>
+      <fieldset disabled={pending} className="space-y-6 border-0 p-0">
       <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
         {SETTING_KEYS.map((key) => (
           <SettingField
@@ -59,6 +60,7 @@ export function SettingsForm({ initialValues }: Props) {
       <Button type="submit" disabled={pending}>
         {pending ? '保存中…' : '保存设置'}
       </Button>
+      </fieldset>
     </form>
   );
 }

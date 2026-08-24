@@ -78,7 +78,6 @@ export function ReportTaskForm({
     <form
       action={formAction}
       aria-busy={pending}
-      className="space-y-4"
       onInput={(event) => {
         const nativeForm = event.currentTarget;
         const read = (name: string) => {
@@ -92,6 +91,10 @@ export function ReportTaskForm({
         );
       }}
     >
+      <fieldset
+        disabled={pending}
+        className="min-w-0 space-y-4 border-0 p-0"
+      >
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField
           name="completedQty"
@@ -195,6 +198,7 @@ export function ReportTaskForm({
           {pending ? '提交中…' : '完工报工'}
         </Button>
       </div>
+      </fieldset>
     </form>
   );
 }

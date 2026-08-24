@@ -44,8 +44,8 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         startTransition(() => action(payload));
       }}
       aria-busy={pending}
-      className="space-y-4"
     >
+      <fieldset disabled={pending} className="space-y-4 border-0 p-0">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label className="text-xs text-muted-foreground" htmlFor="cs-user">客服 *</Label>
@@ -186,11 +186,19 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         </Button>
         <Link
           href={missingCsUsers ? '/owner/accounts/new' : '/owner/salary/cs'}
-          className={buttonVariants({ variant: 'outline' })}
+          aria-disabled={pending || undefined}
+          tabIndex={pending ? -1 : undefined}
+          onClick={pending ? (event) => event.preventDefault() : undefined}
+          className={`${buttonVariants({ variant: 'outline' })} ${
+            pending
+              ? 'pointer-events-none cursor-not-allowed opacity-50'
+              : ''
+          }`}
         >
           {missingCsUsers ? '新建客服账号' : '取消'}
         </Link>
       </div>
+      </fieldset>
     </form>
   );
 }

@@ -59,8 +59,8 @@ export function WorkerMachineRuleForm({
       key={`${selectedWorker.id}:${machineType}:${defaultEffectiveFrom}`}
       action={(formData) => startTransition(() => action(formData))}
       aria-busy={pending}
-      className="space-y-4"
     >
+      <fieldset disabled={pending} className="space-y-4 border-0 p-0">
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="师傅">
           <select
@@ -196,6 +196,7 @@ export function WorkerMachineRuleForm({
           规则版本已生效。
         </FormMessage>
       ) : null}
+      </fieldset>
     </form>
   );
 }
