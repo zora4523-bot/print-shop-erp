@@ -7,6 +7,7 @@ import type { PieceworkRuleMutationResult } from '@/actions/owner-salary.types';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormMessage } from '@/components/ui-business';
 
 type RuleDefaults = {
   dailyBase: string;
@@ -179,7 +180,7 @@ export function WorkerMachineRuleForm({
         </span>
       </div>
       {state?.status === 'invalid' ? (
-        <p className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {Object.values(state.fieldErrors).flat().join('；')}
         </p>
       ) : null}
@@ -187,7 +188,13 @@ export function WorkerMachineRuleForm({
         <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
-        <p className="text-xs text-success-foreground">规则版本已生效。</p>
+        <FormMessage
+          fieldId="worker-machine-rule-status"
+          tone="success"
+          className="text-xs"
+        >
+          规则版本已生效。
+        </FormMessage>
       ) : null}
     </form>
   );

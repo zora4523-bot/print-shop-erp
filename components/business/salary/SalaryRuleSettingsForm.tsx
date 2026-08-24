@@ -12,6 +12,7 @@ import type { SalaryRuleSettingsData } from '@/lib/salary/rule-admin';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormMessage } from '@/components/ui-business';
 
 type TierRow = { minSales: string; rate: string };
 
@@ -218,7 +219,11 @@ export function SalaryRuleSettingsForm({
         <ErrorText text={Object.entries(errors).filter(([key]) => key !== '_').flatMap(([, messages]) => messages).join('；')} />
       ) : null}
       {state?.status === 'error' ? <ErrorText text={state.message} /> : null}
-      {state?.status === 'success' ? <p className="text-sm text-success-foreground">工资规则新版本已保存。</p> : null}
+      {state?.status === 'success' ? (
+        <FormMessage fieldId="salary-rule-status" tone="success">
+          工资规则新版本已保存。
+        </FormMessage>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>{pending ? '保存中…' : '保存新规则版本'}</Button>
         <span className="text-xs text-muted-foreground">保存会自动关闭相交的上一版本，不会修改历史工资单。</span>

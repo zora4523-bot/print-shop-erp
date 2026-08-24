@@ -84,7 +84,7 @@ export function PriceTierForm(props: Props) {
           <p className="text-sm text-destructive">{errs.productId[0]}</p>
         ) : null}
         {missingProducts ? (
-          <p role="alert" className="text-sm text-warning-foreground">
+          <p className="text-sm text-muted-foreground">
             请先创建并启用至少一个产品，再维护价格阶梯。
           </p>
         ) : null}

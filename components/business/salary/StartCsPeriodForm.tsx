@@ -70,7 +70,7 @@ export function StartCsPeriodForm({ csUsers }: Props) {
             </p>
           ) : null}
           {missingCsUsers ? (
-            <p role="alert" className="mt-1 text-xs text-warning-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               暂无启用的客服账号，请先在用户管理中创建或启用客服。
             </p>
           ) : null}

@@ -146,7 +146,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
       </div>
 
       {missingTarget ? (
-        <p role="alert" className="text-sm text-warning-foreground">
+        <p className="text-sm text-muted-foreground">
           {targetType === 'PRODUCT'
             ? '暂无可用产品，请先创建并启用产品。'
             : '暂无可用产品分类，请先创建并启用分类。'}
@@ -256,7 +256,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
       </section>
 
       {missingMaterials ? (
-        <p role="alert" className="text-sm text-warning-foreground">
+        <p className="text-sm text-muted-foreground">
           暂无可用物料，请先创建并启用至少一种物料。
         </p>
       ) : null}

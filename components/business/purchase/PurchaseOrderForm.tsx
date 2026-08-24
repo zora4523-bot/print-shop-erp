@@ -79,7 +79,7 @@ export function PurchaseOrderForm({
             <p className="text-sm text-destructive">{errs.supplierPartyId[0]}</p>
           ) : null}
           {missingSuppliers ? (
-            <p id="supplierPartyId-empty" role="alert" className="text-sm text-warning-foreground">
+            <p id="supplierPartyId-empty" className="text-sm text-muted-foreground">
               只有启用的“供应商”或“客户/供应商”主数据可用于采购。
             </p>
           ) : null}
@@ -111,7 +111,7 @@ export function PurchaseOrderForm({
             <p className="text-sm text-destructive">{errs.materialId[0]}</p>
           ) : null}
           {missingMaterials ? (
-            <p id="materialId-empty" role="alert" className="text-sm text-warning-foreground">
+            <p id="materialId-empty" className="text-sm text-muted-foreground">
               请先创建并启用至少一种物料。
             </p>
           ) : null}
