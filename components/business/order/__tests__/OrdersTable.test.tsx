@@ -115,4 +115,61 @@ describe('OrdersTable commercial visibility', () => {
     expect(html).toContain('role="status"');
     expect(html).toContain('已选 0 项工单');
   });
+
+  it('distinguishes an empty dataset from an empty filtered result', () => {
+    const emptyHtml = renderToStaticMarkup(
+      <OrdersTable
+        orders={[]}
+        query={query}
+        queryParams={{}}
+      />,
+    );
+    const filteredHtml = renderToStaticMarkup(
+      <OrdersTable
+        orders={[]}
+        query={{
+          ...query,
+          filters: { ...query.filters, q: '不存在的工单' },
+        }}
+        queryParams={{ q: '不存在的工单' }}
+      />,
+    );
+
+    expect(emptyHtml).toContain('data-kind="no-data"');
+    expect(emptyHtml).not.toContain('清除全部筛选');
+    expect(filteredHtml).toContain('data-kind="no-result"');
+    expect(filteredHtml).toContain('没有符合条件的工单');
+    expect(filteredHtml).toContain('清除全部筛选');
+  });
+
+  it('clears filters while retaining table display preferences', () => {
+    const html = renderToStaticMarkup(
+      <OrdersTable
+        orders={[]}
+        query={{
+          ...query,
+          filters: { ...query.filters, isSfCollect: false },
+          page: 4,
+          pageSize: 50,
+          sort: 'orderNo',
+          dir: 'asc',
+          view: 'saved',
+          selectedOrderId: 'order-1',
+          scrollY: 420,
+        }}
+        queryParams={{ isSfCollect: 'no' }}
+      />,
+    );
+    const href = html
+      .match(/href="([^"]+)"[^>]*>\s*清除全部筛选\s*<\/a>/)?.[1]
+      ?.replaceAll('&amp;', '&');
+
+    expect(href).toBeDefined();
+    const url = new URL(href!, 'https://erp.example.test');
+    expect([...url.searchParams.entries()]).toEqual([
+      ['pageSize', '50'],
+      ['sort', 'orderNo'],
+      ['dir', 'asc'],
+    ]);
+  });
 });

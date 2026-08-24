@@ -1,15 +1,17 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import {
   Role,
   SalaryAdjustmentType,
   WorkerType,
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { getSession } from '@/lib/auth/session';
 import {
   getWorkerHourlyPayrollDetail,
   getWorkerSalaryDetail,
-  type WorkerSalaryActor,
 } from '@/lib/worker-portal';
 import {
   MACHINE_TYPE_LABELS,
@@ -24,29 +26,85 @@ import { getAttendanceSummaries } from '@/lib/attendance';
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
+const getWorkerPieceworkSalaryPageData = cache(
+  (id: string, actorId: string, actorRole: Role, workerType: WorkerType) =>
+    getWorkerSalaryDetail(id, {
+      id: actorId,
+      role: actorRole,
+      workerType,
+    }),
+);
+
+const getWorkerHourlySalaryPageData = cache(
+  (id: string, actorId: string, actorRole: Role, workerType: WorkerType) =>
+    getWorkerHourlyPayrollDetail(id, {
+      id: actorId,
+      role: actorRole,
+      workerType,
+    }),
+);
+
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   BONUS: '奖金',
   DEDUCTION: '扣款',
   CORRECTION: '差错修正',
 };
 
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  const user = session?.user;
+  if (!user || user.role !== Role.WORKER || !user.workerType) {
+    return { title: '我的工资' };
+  }
+
+  const { id } = await params;
+  if (user.workerType === WorkerType.MACHINE) {
+    const salary = await getWorkerPieceworkSalaryPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
+    return {
+      title: salary
+        ? `${formatDateShanghai(salary.date)} · 我的工资`
+        : '工资记录不存在',
+    };
+  }
+
+  const payroll = await getWorkerHourlySalaryPageData(
+    id,
+    user.id,
+    user.role,
+    user.workerType,
+  );
+  return {
+    title: payroll ? `${payroll.month} · 我的工资` : '工资记录不存在',
+  };
+}
+
 export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   const user = await requirePermission('salary:view:self');
   if (user.role !== Role.WORKER || !user.workerType) notFound();
   const { id } = await params;
-  const actor: WorkerSalaryActor = {
-    id: user.id,
-    role: user.role,
-    workerType: user.workerType,
-  };
 
   if (user.workerType !== WorkerType.MACHINE) {
-    const payroll = await getWorkerHourlyPayrollDetail(id, actor);
+    const payroll = await getWorkerHourlySalaryPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
     if (!payroll) notFound();
     return <HourlySalaryDetail payroll={payroll} />;
   }
 
-  const salary = await getWorkerSalaryDetail(id, actor);
+  const salary = await getWorkerPieceworkSalaryPageData(
+    id,
+    user.id,
+    user.role,
+    user.workerType,
+  );
   if (!salary) notFound();
   const attendanceEnd = new Date(salary.date);
   attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);

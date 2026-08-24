@@ -1,8 +1,12 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 import { getDailyWorkerSalaryDetail } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -19,16 +23,35 @@ import type { MachineRuleWithBase } from '@/lib/salary/rules';
 
 type PageProps = { params: Promise<{ id: string }> };
 
+const getDailySalaryPageData = cache((id: string) =>
+  getDailyWorkerSalaryDetail(id),
+);
+
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   BONUS: '奖金',
   DEDUCTION: '扣款',
   CORRECTION: '差错修正',
 };
 
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  if (!session || !hasPermission('salary:view:all', session.user.role)) {
+    return { title: '计件工资' };
+  }
+
+  const { id } = await params;
+  const salary = await getDailySalaryPageData(id);
+  return {
+    title: salary
+      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 计件工资`
+      : '计件工资记录不存在',
+  };
+}
+
 export default async function DailySalaryDetailPage({ params }: PageProps) {
   await requirePermission('salary:view:all');
   const { id } = await params;
-  const salary = await getDailyWorkerSalaryDetail(id);
+  const salary = await getDailySalaryPageData(id);
   if (!salary) notFound();
   const salaryDateKey = salary.date.toISOString().slice(0, 10);
 

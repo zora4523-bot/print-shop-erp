@@ -1,9 +1,10 @@
+import Link from 'next/link';
 import type {
   OrderListQuery,
   OrderListRow,
   OrderListSortKey,
 } from '@/lib/order/list-query';
-import type { TableHrefParams } from '@/lib/admin/table';
+import { buildTableHref, type TableHrefParams } from '@/lib/admin/table';
 import {
   Table,
   TableBody,
@@ -13,12 +14,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { OrderKind } from '@/generated/prisma/enums';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
 import { AdminSortLink } from '@/components/business/admin/AdminDataTable';
+import { cn } from '@/lib/utils';
 import { OrderListDetailLink } from './OrderListNavigationState';
 import {
   OrderListPageSelection,
@@ -44,6 +47,42 @@ export function OrdersTable({
   queryParams: TableHrefParams;
 }) {
   if (orders.length === 0) {
+    const hasFilters = Object.values(query.filters).some((value) =>
+      Array.isArray(value)
+        ? value.length > 0
+        : value !== undefined && value !== null && value !== '',
+    );
+
+    if (hasFilters) {
+      const clearFiltersHref = buildTableHref(
+        '/orders',
+        {},
+        {
+          pageSize: query.pageSize,
+          sort: query.sort,
+          dir: query.dir,
+        },
+      );
+      return (
+        <EmptyState
+          kind="no-result"
+          noun="工单"
+          onClear={
+            <Link
+              href={clearFiltersHref}
+              prefetch={false}
+              className={cn(
+                buttonVariants({ variant: 'outline' }),
+                'min-h-11 sm:min-h-8',
+              )}
+            >
+              清除全部筛选
+            </Link>
+          }
+        />
+      );
+    }
+
     return <EmptyState kind="no-data" noun="工单" />;
   }
 

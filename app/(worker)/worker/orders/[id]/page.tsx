@@ -1,7 +1,10 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
+import { cache } from 'react';
+import { Role, TaskStatus, WorkerType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { getSession } from '@/lib/auth/session';
 import { getWorkerOrderDetail } from '@/lib/worker-portal';
 import { orderStatusZh } from '@/lib/order/log-format';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
@@ -18,10 +21,32 @@ import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
+const getWorkerOrderPageData = cache(
+  (id: string, actorId: string, actorRole: Role) =>
+    getWorkerOrderDetail(id, { id: actorId, role: actorRole }),
+);
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  if (!session || session.user.role !== Role.WORKER) {
+    return { title: '我的工单' };
+  }
+
+  const { id } = await params;
+  const order = await getWorkerOrderPageData(
+    id,
+    session.user.id,
+    session.user.role,
+  );
+  return {
+    title: order ? `${order.orderNo} · 我的工单` : '工单不存在',
+  };
+}
+
 export default async function WorkerOrderDetailPage({ params }: PageProps) {
   const user = await requirePermission('order:view:self');
   const { id } = await params;
-  const order = await getWorkerOrderDetail(id, { id: user.id, role: user.role });
+  const order = await getWorkerOrderPageData(id, user.id, user.role);
   if (!order) notFound();
 
   return (
