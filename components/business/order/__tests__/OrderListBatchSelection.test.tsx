@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderStatus } from '@/generated/prisma/enums';
 import {
+  buildBatchSchedulingHref,
   OrderListBatchBar,
   OrderListBatchFeedback,
   reduceOrderListSelection,
@@ -30,12 +31,22 @@ describe('order-list page selection contract', () => {
     ).toEqual([]);
   });
 
-  it('renders a named bulk region with only the safe client-side operation', () => {
+  it('renders a named bulk region, reserves its height and scopes scheduling handoff', () => {
     const html = renderToStaticMarkup(
       <OrderListBatchBar
         selectedItems={[
-          { id: 'order-1', orderNo: 'GD-001' },
-          { id: 'order-2', orderNo: 'GD-002' },
+          {
+            id: 'order-1',
+            orderNo: 'GD-001',
+            status: OrderStatus.SUBMITTED,
+            canSchedule: true,
+          },
+          {
+            id: 'order-2',
+            orderNo: 'GD-002',
+            status: OrderStatus.IN_PRODUCTION,
+            canSchedule: true,
+          },
         ]}
         onClear={vi.fn()}
       />,
@@ -43,11 +54,73 @@ describe('order-list page selection contract', () => {
 
     expect(html).toContain('aria-label="工单批量操作"');
     expect(html).toContain('已选 2 项');
+    expect(html).toContain('data-slot="order-list-batch-placeholder"');
+    expect(html).toContain('data-slot="order-list-batch-placeholder-height"');
+    expect(html.indexOf('order-list-batch-placeholder')).toBeLessThan(
+      html.indexOf('aria-label="工单批量操作"'),
+    );
+    expect(html).toContain('去批量排产（1）');
+    const schedulingHref = html.match(/href="([^"]+)"/)?.[1]?.replaceAll(
+      '&amp;',
+      '&',
+    );
+    expect(
+      new URL(schedulingHref!, 'https://erp.example.test').searchParams.getAll(
+        'orderIds',
+      ),
+    ).toEqual(['order-1']);
     expect(html).toContain('复制工单号');
     expect(html).toContain('取消选择');
     expect(html).not.toContain('批量取消');
     expect(html).not.toContain('批量发货');
+    expect(html).not.toContain('批量付款');
     expect(html).not.toContain('导出所选');
+  });
+
+  it('uses repeated orderIds and excludes unauthorized or non-submitted rows', () => {
+    const href = buildBatchSchedulingHref([
+      {
+        id: 'submitted-1',
+        orderNo: 'GD-001',
+        status: OrderStatus.SUBMITTED,
+        canSchedule: true,
+      },
+      {
+        id: 'submitted-2',
+        orderNo: 'GD-002',
+        status: OrderStatus.SUBMITTED,
+        canSchedule: true,
+      },
+      {
+        id: 'role-denied',
+        orderNo: 'GD-003',
+        status: OrderStatus.SUBMITTED,
+        canSchedule: false,
+      },
+      {
+        id: 'already-producing',
+        orderNo: 'GD-004',
+        status: OrderStatus.IN_PRODUCTION,
+        canSchedule: true,
+      },
+    ]);
+
+    const url = new URL(href!, 'https://erp.example.test');
+    expect(url.pathname).toBe('/foreman/scheduling');
+    expect(url.searchParams.getAll('orderIds')).toEqual([
+      'submitted-1',
+      'submitted-2',
+    ]);
+    expect(
+      buildBatchSchedulingHref([
+        {
+          id: 'role-denied',
+          orderNo: 'GD-003',
+          status: OrderStatus.SUBMITTED,
+          canSchedule: false,
+        },
+      ]),
+    ).toBeNull();
   });
 
   it.each([

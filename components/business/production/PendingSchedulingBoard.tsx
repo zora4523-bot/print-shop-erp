@@ -19,7 +19,7 @@ import {
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { ConfirmActionDialog } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 
 const MAX_BATCH_ORDERS = 30;
@@ -27,7 +27,122 @@ const MAX_BATCH_ORDERS = 30;
 type Props = {
   orders: PendingSchedulingOrderView[];
   workers: SchedulingViewCandidate[];
+  handoff?: PendingSchedulingHandoff;
 };
+
+export type PendingSchedulingHandoff = {
+  requestedOrderIds: readonly string[];
+  matchedOrderIds: readonly string[];
+  invalidCount: number;
+  overflowCount: number;
+};
+
+export type SchedulingHandoffResolution = {
+  matchedOrders: PendingSchedulingOrderView[];
+  compatibleOrderIds: string[];
+  incompatibleOrders: PendingSchedulingOrderView[];
+  unmatchedCount: number;
+  invalidCount: number;
+  overflowCount: number;
+};
+
+export function resolveSchedulingHandoff({
+  orders,
+  workerId,
+  handoff,
+}: {
+  orders: readonly PendingSchedulingOrderView[];
+  workerId: string;
+  handoff: PendingSchedulingHandoff;
+}): SchedulingHandoffResolution {
+  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  const matchedOrders = [...new Set(handoff.matchedOrderIds)].flatMap(
+    (orderId) => {
+      const order = ordersById.get(orderId);
+      return order ? [order] : [];
+    },
+  );
+  const compatibleOrderIds = workerId
+    ? matchedOrders
+        .filter(
+          (order) =>
+            order.batchBlockReason === null &&
+            (order.compatibleTaskCounts[workerId] ?? 0) > 0,
+        )
+        .slice(0, MAX_BATCH_ORDERS)
+        .map((order) => order.id)
+    : [];
+  const compatibleIdSet = new Set(compatibleOrderIds);
+  const incompatibleOrders = workerId
+    ? matchedOrders.filter((order) => !compatibleIdSet.has(order.id))
+    : [];
+
+  return {
+    matchedOrders,
+    compatibleOrderIds,
+    incompatibleOrders,
+    unmatchedCount: Math.max(
+      0,
+      new Set(handoff.requestedOrderIds).size - matchedOrders.length,
+    ),
+    invalidCount: handoff.invalidCount,
+    overflowCount: handoff.overflowCount,
+  };
+}
+
+export function schedulingHandoffNotice(
+  resolution: SchedulingHandoffResolution,
+  workerName: string | null,
+): { tone: 'info' | 'warning'; title: string; description: string } {
+  const ignoredParts = [
+    ...(resolution.unmatchedCount > 0
+      ? [`${resolution.unmatchedCount} 张未命中当前待排产`]
+      : []),
+    ...(resolution.invalidCount > 0
+      ? [`${resolution.invalidCount} 个非法 ID 已忽略`]
+      : []),
+    ...(resolution.overflowCount > 0
+      ? [`${resolution.overflowCount} 张超出单次 30 张限制已忽略`]
+      : []),
+  ];
+
+  if (!workerName) {
+    return {
+      tone: ignoredParts.length > 0 ? 'warning' : 'info',
+      title: '已接收工单列表交接',
+      description: `当前待排产命中 ${resolution.matchedOrders.length} 张。选择师傅后，只会自动预选该师傅兼容且未被阻断的交接工单${ignoredParts.length > 0 ? `；${ignoredParts.join('；')}` : ''}。`,
+    };
+  }
+
+  const incompatibleDetail = resolution.incompatibleOrders.length > 0
+    ? resolution.incompatibleOrders
+        .map(
+          (order) =>
+            `${order.orderNo}（${order.batchBlockReason ?? '与当前师傅无兼容工艺'}）`,
+        )
+        .join('、')
+    : '';
+  const hasWarning =
+    resolution.compatibleOrderIds.length === 0 ||
+    resolution.incompatibleOrders.length > 0 ||
+    ignoredParts.length > 0;
+  return {
+    tone: hasWarning ? 'warning' : 'info',
+    title:
+      resolution.compatibleOrderIds.length > 0
+        ? `已为 ${workerName} 自动预选 ${resolution.compatibleOrderIds.length} 张兼容工单`
+        : `${workerName} 没有可自动预选的交接工单`,
+    description: [
+      incompatibleDetail
+        ? `未预选 ${resolution.incompatibleOrders.length} 张不兼容或已阻断工单：${incompatibleDetail}`
+        : '',
+      ...ignoredParts,
+      '仅更新页面勾选；真正分配仍需点击确认，并由服务端重新校验权限、状态与兼容性。',
+    ]
+      .filter(Boolean)
+      .join('；'),
+  };
+}
 
 function SelectionCheckbox({
   checked,
@@ -99,7 +214,7 @@ export function batchScheduleImpactItems({
   ];
 }
 
-export function PendingSchedulingBoard({ orders, workers }: Props) {
+export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [workerId, setWorkerId] = useState('');
@@ -159,6 +274,19 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
   const allSelected =
     selectAllIds.length > 0 &&
     selectAllIds.every((orderId) => selected.has(orderId));
+  const handoffResolution = handoff
+    ? resolveSchedulingHandoff({
+        orders,
+        workerId: effectiveWorkerId,
+        handoff,
+      })
+    : null;
+  const handoffNotice = handoffResolution
+    ? schedulingHandoffNotice(
+        handoffResolution,
+        effectiveWorker?.displayName ?? null,
+      )
+    : null;
 
   function toggleOrder(orderId: string) {
     setState(null);
@@ -180,7 +308,16 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
 
   function changeWorker(nextWorkerId: string) {
     setState(null);
-    setSelected(new Set());
+    const nextHandoffResolution = handoff
+      ? resolveSchedulingHandoff({
+          orders,
+          workerId: nextWorkerId,
+          handoff,
+        })
+      : null;
+    setSelected(
+      new Set(nextHandoffResolution?.compatibleOrderIds ?? []),
+    );
     setWorkerId(nextWorkerId);
     setOverrideReason('');
   }
@@ -227,7 +364,7 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
   return (
     <div className="space-y-4">
       <section
-        className="space-y-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur lg:sticky lg:top-0 lg:z-10"
+        className="admin-sticky-below-header space-y-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur lg:sticky lg:z-10"
         aria-label="跨工单批量排产"
       >
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
@@ -304,6 +441,13 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
             onConfirm={submitBatch}
           />
         </div>
+        {handoffNotice ? (
+          <ActionNotice
+            tone={handoffNotice.tone}
+            title={handoffNotice.title}
+            description={handoffNotice.description}
+          />
+        ) : null}
         {selectedOverrideTaskCount > 0 ? (
           <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3">
             <label

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   createContext,
   useContext,
@@ -9,13 +10,16 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, ClipboardCopy, Minus, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Check, ClipboardCopy, Minus, Workflow, X } from 'lucide-react';
+import { OrderStatus } from '@/generated/prisma/enums';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export type OrderListSelectionItem = {
   id: string;
   orderNo: string;
+  status: OrderStatus;
+  canSchedule: boolean;
 };
 
 export type OrderListSelectionAction =
@@ -152,6 +156,36 @@ export function OrderListBatchBar({
   >(null);
   const visibleFeedback =
     feedback?.selectionKey === selectionKey ? feedback : null;
+  const batchBarRef = useRef<HTMLElement>(null);
+  const [batchBarHeight, setBatchBarHeight] = useState<number | null>(null);
+  const schedulingHref = buildBatchSchedulingHref(selectedItems);
+  const schedulableCount = selectedItems.filter(
+    (item) => item.canSchedule && item.status === OrderStatus.SUBMITTED,
+  ).length;
+
+  useEffect(() => {
+    const batchBar = batchBarRef.current;
+    if (!batchBar || selectedItems.length === 0) return;
+
+    const syncHeight = () => {
+      const nextHeight = Math.ceil(batchBar.getBoundingClientRect().height);
+      setBatchBarHeight((current) =>
+        current === nextHeight ? current : nextHeight,
+      );
+    };
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(syncHeight);
+    observer?.observe(batchBar);
+
+    return () => {
+      window.removeEventListener('resize', syncHeight);
+      observer?.disconnect();
+    };
+  }, [selectedItems.length, selectionKey]);
 
   if (selectedItems.length === 0) return null;
 
@@ -176,38 +210,77 @@ export function OrderListBatchBar({
   }
 
   return (
-    <section
-      role="region"
-      aria-label="工单批量操作"
-      className="fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom,0px))] left-1/2 z-40 flex w-[calc(100%_-_1rem)] max-w-2xl -translate-x-1/2 flex-col gap-2 rounded-xl bg-foreground px-3 py-3 text-background shadow-xl sm:w-auto sm:min-w-[28rem] sm:flex-row sm:items-center"
-    >
-      <p className="shrink-0 text-sm font-semibold tabular-nums">
-        已选 {selectedItems.length} 项
-      </p>
-      <div className="hidden h-5 w-px bg-background/20 sm:block" aria-hidden="true" />
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
-          onClick={copyOrderNumbers}
-        >
-          <ClipboardCopy aria-hidden="true" />
-          复制工单号
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:min-h-8 sm:flex-none"
-          onClick={onClear}
-        >
-          <X aria-hidden="true" />
-          取消选择
-        </Button>
-        <OrderListBatchFeedback feedback={visibleFeedback} />
+    <>
+      <div
+        data-slot="order-list-batch-placeholder"
+        aria-hidden="true"
+        className="pointer-events-none pb-[calc(1rem_+_env(safe-area-inset-bottom,0px))]"
+      >
+        <div
+          data-slot="order-list-batch-placeholder-height"
+          className="h-32 sm:h-16"
+          style={{ height: batchBarHeight ?? undefined }}
+        />
       </div>
-    </section>
+      <section
+        ref={batchBarRef}
+        role="region"
+        aria-label="工单批量操作"
+        className="fixed bottom-[calc(1rem_+_env(safe-area-inset-bottom,0px))] left-1/2 z-40 flex w-[calc(100%_-_1rem)] max-w-3xl -translate-x-1/2 flex-col gap-2 rounded-xl bg-foreground px-3 py-3 text-background shadow-xl sm:w-auto sm:min-w-[28rem] sm:flex-row sm:items-center"
+      >
+        <p className="shrink-0 text-sm font-semibold tabular-nums">
+          已选 {selectedItems.length} 项
+        </p>
+        <div className="hidden h-5 w-px bg-background/20 sm:block" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {schedulingHref ? (
+            <Link
+              href={schedulingHref}
+              prefetch={false}
+              className={cn(
+                buttonVariants(),
+                'min-h-11 flex-1 sm:min-h-8 sm:flex-none',
+              )}
+            >
+              <Workflow aria-hidden="true" />
+              去批量排产（{schedulableCount}）
+            </Link>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
+            onClick={copyOrderNumbers}
+          >
+            <ClipboardCopy aria-hidden="true" />
+            复制工单号
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11 flex-1 text-background hover:bg-background/10 hover:text-background sm:min-h-8 sm:flex-none"
+            onClick={onClear}
+          >
+            <X aria-hidden="true" />
+            取消选择
+          </Button>
+          <OrderListBatchFeedback feedback={visibleFeedback} />
+        </div>
+      </section>
+    </>
   );
+}
+
+export function buildBatchSchedulingHref(
+  selectedItems: readonly OrderListSelectionItem[],
+): string | null {
+  const params = new URLSearchParams();
+  for (const item of selectedItems) {
+    if (!item.canSchedule || item.status !== OrderStatus.SUBMITTED) continue;
+    params.append('orderIds', item.id);
+  }
+  const query = params.toString();
+  return query ? `/foreman/scheduling?${query}` : null;
 }
 
 export function OrderListBatchFeedback({

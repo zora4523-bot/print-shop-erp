@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MachineType,
@@ -19,7 +20,12 @@ vi.mock('@/actions/production', () => ({
   batchScheduleOrdersAction: vi.fn(),
 }));
 
-import { batchScheduleImpactItems } from '../PendingSchedulingBoard';
+import {
+  batchScheduleImpactItems,
+  PendingSchedulingBoard,
+  resolveSchedulingHandoff,
+  schedulingHandoffNotice,
+} from '../PendingSchedulingBoard';
 
 const worker: SchedulingViewCandidate = {
   id: 'worker-1',
@@ -119,5 +125,110 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     expect(source).toContain('level="L2"');
     expect(source).toContain('onConfirm={submitBatch}');
     expect(source).not.toContain('onClick={submitBatch}');
+  });
+
+  it('keeps the sticky batch controls below the admin header while scrolling', () => {
+    const html = renderToStaticMarkup(
+      <PendingSchedulingBoard orders={[order()]} workers={[worker]} />,
+    );
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'PendingSchedulingBoard.tsx',
+      ),
+      'utf8',
+    );
+    const globalStyles = readFileSync(
+      path.join(process.cwd(), 'app', 'globals.css'),
+      'utf8',
+    );
+
+    expect(html).toMatch(
+      /<section class="[^"]*admin-sticky-below-header[^"]*lg:sticky[^"]*" aria-label="跨工单批量排产"/,
+    );
+    expect(source).not.toContain('lg:top-0');
+    expect(globalStyles).toMatch(
+      /\.admin-sticky-below-header\s*\{\s*top:\s*var\(--admin-header-offset\);\s*\}/,
+    );
+  });
+
+  it('preselects only compatible handoff orders and explains every exclusion', () => {
+    const compatible = order();
+    const incompatible = order({
+      id: 'order-2',
+      orderNo: 'PS-20260824-002',
+      compatibleTaskCounts: { [worker.id]: 0 },
+      recommendedTaskCounts: { [worker.id]: 0 },
+      overrideTaskCounts: { [worker.id]: 0 },
+    });
+    const blocked = order({
+      id: 'order-3',
+      orderNo: 'PS-20260824-003',
+      batchBlockReason: '工单仍有缺失的工艺配置',
+    });
+    const unrelated = order({
+      id: 'order-4',
+      orderNo: 'PS-20260824-004',
+    });
+    const resolution = resolveSchedulingHandoff({
+      orders: [compatible, incompatible, blocked, unrelated],
+      workerId: worker.id,
+      handoff: {
+        requestedOrderIds: [
+          compatible.id,
+          incompatible.id,
+          blocked.id,
+          'order-not-pending',
+        ],
+        matchedOrderIds: [compatible.id, incompatible.id, blocked.id],
+        invalidCount: 1,
+        overflowCount: 2,
+      },
+    });
+
+    expect(resolution.compatibleOrderIds).toEqual([compatible.id]);
+    expect(resolution.incompatibleOrders.map((item) => item.id)).toEqual([
+      incompatible.id,
+      blocked.id,
+    ]);
+    expect(resolution.matchedOrders.map((item) => item.id)).not.toContain(
+      unrelated.id,
+    );
+    expect(resolution.unmatchedCount).toBe(1);
+
+    const notice = schedulingHandoffNotice(resolution, worker.displayName);
+    expect(notice.tone).toBe('warning');
+    expect(notice.title).toContain('自动预选 1 张兼容工单');
+    expect(notice.description).toContain('PS-20260824-002');
+    expect(notice.description).toContain('与当前师傅无兼容工艺');
+    expect(notice.description).toContain('PS-20260824-003');
+    expect(notice.description).toContain('工单仍有缺失的工艺配置');
+    expect(notice.description).toContain('1 张未命中当前待排产');
+    expect(notice.description).toContain('1 个非法 ID 已忽略');
+    expect(notice.description).toContain('2 张超出单次 30 张限制已忽略');
+    expect(notice.description).toContain('服务端重新校验权限');
+  });
+
+  it('announces handoff scope before a worker is selected', () => {
+    const html = renderToStaticMarkup(
+      <PendingSchedulingBoard
+        orders={[order()]}
+        workers={[worker]}
+        handoff={{
+          requestedOrderIds: ['order-1', 'order-not-pending'],
+          matchedOrderIds: ['order-1'],
+          invalidCount: 0,
+          overflowCount: 0,
+        }}
+      />,
+    );
+
+    expect(html).toContain('已接收工单列表交接');
+    expect(html).toContain('当前待排产命中 1 张');
+    expect(html).toContain('选择师傅后，只会自动预选');
+    expect(html).toContain('1 张未命中当前待排产');
   });
 });

@@ -89,7 +89,12 @@ export function OrdersTable({
   return (
     <OrderListSelectionProvider
       key={orders.map((order) => order.id).join(':')}
-      items={orders.map((order) => ({ id: order.id, orderNo: order.orderNo }))}
+      items={orders.map((order) => ({
+        id: order.id,
+        orderNo: order.orderNo,
+        status: order.status,
+        canSchedule,
+      }))}
     >
       <div className="mb-2 flex min-h-11 items-center gap-1 rounded-lg border bg-muted/30 px-1 text-sm md:hidden">
         <OrderListPageSelection />
