@@ -206,6 +206,12 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(filteredHtml).toContain('类型：附加费');
     expect(filteredHtml).toContain('处理：自动计价');
     expect(filteredHtml).toContain('只看本次修改');
+    expect(filteredHtml).toContain(
+      'aria-label="清除筛选：类目：烫金加工"',
+    );
+    expect(filteredHtml).toContain(
+      'href="/owner/prices/external-sales/items?purpose=processing&amp;kind=ADD_ON&amp;automation=AUTO&amp;changed=1"',
+    );
   });
 
   it('uses the shared bottom sheet contract for mobile advanced filters', () => {

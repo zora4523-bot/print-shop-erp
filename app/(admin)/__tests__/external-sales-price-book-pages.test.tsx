@@ -740,7 +740,7 @@ describe('external sales price book pages', () => {
     expect(processingHtml).toContain('已补全');
     expect(processingHtml).toContain('1 项已写入草稿');
     expect(processingHtml).toContain('搜索收费项目');
-    expect(processingHtml).toContain('筛选条件');
+    expect(processingHtml).toContain('更多筛选');
     expect(processingHtml).toContain('href="/owner/prices/external-sales/versions"');
     expect(logisticsHtml).toContain('快递与打包耗材收费项目');
     expect(logisticsHtml).toContain('中通 · 广东');

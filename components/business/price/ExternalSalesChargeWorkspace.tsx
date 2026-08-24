@@ -322,53 +322,122 @@ type WorkspaceFiltersProps = Pick<
   | 'changedFilterAvailable'
 >;
 
-function activeWorkspaceFilterLabels({
+type WorkspaceFilterKey = keyof ExternalSalesChargeWorkspaceFilters;
+
+type ActiveWorkspaceFilter = {
+  key: WorkspaceFilterKey;
+  label: string;
+};
+
+function activeWorkspaceFilters({
   purpose,
   filters,
   filterOptions,
 }: Pick<
   WorkspaceFiltersProps,
   'purpose' | 'filters' | 'filterOptions'
->): string[] {
+>): ActiveWorkspaceFilter[] {
   const option = (
     options: ExternalSalesChargeFilterOption[],
     value: string,
   ) => options.find((entry) => entry.value === value)?.label ?? value;
   return [
-    filters.query ? `搜索：${filters.query}` : '',
+    filters.query ? { key: 'query', label: `搜索：${filters.query}` } : null,
     filters.category
-      ? `类目：${option(filterOptions.categories, filters.category)}`
-      : '',
+      ? {
+          key: 'category',
+          label: `类目：${option(filterOptions.categories, filters.category)}`,
+        }
+      : null,
     filters.subject
-      ? `${purpose === 'processing' ? '产品' : '地区'}：${option(
-          filterOptions.subjects,
-          filters.subject,
-        )}`
-      : '',
+      ? {
+          key: 'subject',
+          label: `${purpose === 'processing' ? '产品' : '地区'}：${option(
+            filterOptions.subjects,
+            filters.subject,
+          )}`,
+        }
+      : null,
     filters.kind
-      ? `类型：${
-          { BASE: '基础价', ADD_ON: '附加费', REFERENCE: '人工参考' }[
-            filters.kind
-          ]
-        }`
-      : '',
+      ? {
+          key: 'kind',
+          label: `类型：${
+            { BASE: '基础价', ADD_ON: '附加费', REFERENCE: '人工参考' }[
+              filters.kind
+            ]
+          }`,
+        }
+      : null,
     filters.calculation
-      ? `计价：${option(filterOptions.calculations, filters.calculation)}`
-      : '',
-    filters.quantity ? `数量：${filters.quantity}` : '',
+      ? {
+          key: 'calculation',
+          label: `计价：${option(
+            filterOptions.calculations,
+            filters.calculation,
+          )}`,
+        }
+      : null,
+    filters.quantity
+      ? { key: 'quantity', label: `数量：${filters.quantity}` }
+      : null,
     filters.automation
-      ? `处理：${filters.automation === 'AUTO' ? '自动计价' : '需人工确认'}`
-      : '',
+      ? {
+          key: 'automation',
+          label: `处理：${
+            filters.automation === 'AUTO' ? '自动计价' : '需人工确认'
+          }`,
+        }
+      : null,
     filters.status
-      ? `状态：${filters.status === 'ACTIVE' ? '已启用' : '已停用'}`
-      : '',
-    filters.changedOnly ? '只看本次修改' : '',
-  ].filter(Boolean);
+      ? {
+          key: 'status',
+          label: `状态：${
+            filters.status === 'ACTIVE' ? '已启用' : '已停用'
+          }`,
+        }
+      : null,
+    filters.changedOnly
+      ? { key: 'changedOnly', label: '只看本次修改' }
+      : null,
+  ].filter((entry): entry is ActiveWorkspaceFilter => entry !== null);
+}
+
+function workspaceFilterHref(
+  props: WorkspaceFiltersProps,
+  omittedFilter: WorkspaceFilterKey,
+): string {
+  const [actionWithoutHash = ''] = props.searchAction.split('#');
+  const [pathname = '', existingQuery = ''] = actionWithoutHash.split('?');
+  const params = new URLSearchParams(existingQuery);
+  Object.entries(props.hiddenSearchFields ?? {}).forEach(([name, value]) => {
+    params.set(name, value);
+  });
+
+  const values: ReadonlyArray<
+    readonly [WorkspaceFilterKey, queryName: string, value: string]
+  > = [
+    ['query', 'q', props.filters.query],
+    ['category', 'category', props.filters.category],
+    ['subject', 'subject', props.filters.subject],
+    ['kind', 'kind', props.filters.kind],
+    ['calculation', 'calculation', props.filters.calculation],
+    ['quantity', 'quantity', props.filters.quantity],
+    ['automation', 'automation', props.filters.automation],
+    ['status', 'status', props.filters.status],
+    ['changedOnly', 'changed', props.filters.changedOnly ? '1' : ''],
+  ];
+  values.forEach(([key, queryName, value]) => {
+    if (key === omittedFilter || !value) params.delete(queryName);
+    else params.set(queryName, value);
+  });
+
+  const query = params.toString();
+  return `${pathname}${query ? `?${query}` : ''}`;
 }
 
 function WorkspaceFilters(props: WorkspaceFiltersProps) {
   const advancedFilterCount = activeAdvancedFilterCount(props.filters);
-  const activeLabels = activeWorkspaceFilterLabels(props);
+  const activeFilters = activeWorkspaceFilters(props);
 
   return (
     <div className="min-w-0 space-y-3">
@@ -377,18 +446,26 @@ function WorkspaceFilters(props: WorkspaceFiltersProps) {
         {...props}
         advancedFilterCount={advancedFilterCount}
       />
-      {activeLabels.length > 0 ? (
+      {activeFilters.length > 0 ? (
         <div
           aria-label="已启用的收费项目筛选"
           className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
         >
-          {activeLabels.map((label) => (
+          {activeFilters.map(({ key, label }) => (
             <Badge
-              key={label}
+              key={key}
               variant="outline"
-              className="min-h-7 max-w-[85vw] shrink-0 whitespace-normal bg-card sm:max-w-full"
+              className="max-w-[85vw] shrink-0 overflow-hidden bg-card p-0 whitespace-normal sm:max-w-full"
             >
-              {label}
+              <PriceWorkspaceLink
+                href={workspaceFilterHref(props, key)}
+                prefetch={false}
+                aria-label={`清除筛选：${label}`}
+                className="inline-flex min-h-11 min-w-0 items-center gap-1 px-2 py-1.5 hover:bg-muted sm:min-h-7 sm:py-0.5"
+              >
+                <span className="min-w-0 break-words">{label}</span>
+                <X aria-hidden="true" className="size-3 shrink-0" />
+              </PriceWorkspaceLink>
             </Badge>
           ))}
           <PriceWorkspaceLink
@@ -673,6 +750,7 @@ function MobileWorkspaceFilters({
                   <select
                     id="mobile-external-charge-category"
                     name="category"
+                    autoFocus
                     className={selectClass}
                     defaultValue={filters.category}
                   >
