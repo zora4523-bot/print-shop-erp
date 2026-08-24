@@ -15,7 +15,7 @@
 2. `docs/ux-redesign/批次五 价格与报价 交互稿.dc.html` —— P1 工作台、发布中心、阶梯表、契约 09
 3. `docs/ux-redesign/收费项目工作台 重设计.dc.html` —— 只当早期演示；**冲突以批次五为准**
 4. `docs/ux-redesign/交互与状态设计规范.dc.html` —— L3、五态；清单没写的情况按契约推
-5. `docs/codex-ui-brief.md` —— 既有展示层护栏（调色板字面量、视口闸、打印基线）
+5. `UI-SYSTEM.md` —— 当前展示层护栏（调色板字面量、视口闸、打印基线）；`docs/codex-ui-brief.md` 仅作历史背景
 6. 实现前先读：
    - `components/business/price/ExternalSalesChargeWorkspace.tsx`
    - `components/business/price/ExternalSalesPriceTierGroupEditor.tsx`

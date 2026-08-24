@@ -18,6 +18,7 @@
 | **[UI-SYSTEM.md](./UI-SYSTEM.md)** | Token、组件分层、页面状态与视觉验收 | 设计 / 开发 |
 | **[docs/UI-DESIGN-COVERAGE.md](./docs/UI-DESIGN-COVERAGE.md)** | 85 页设计证据等级、实现覆盖与视觉验证边界 | 设计 / 开发 / 验收 |
 | **[docs/UI-REMEDIATION-BACKLOG.md](./docs/UI-REMEDIATION-BACKLOG.md)** | UI 问题严重度、成本、独立任务与完成状态 | 开发 / 验收 |
+| **[docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md](./docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)** | 提交 `41abe65` 后的 UI/UX 对抗复审、代码证据、独立子任务与 canonical 映射 | 设计 / 开发 / 验收 |
 | **SPEC-v1.2.md** | 业务规格（冻结版，权威） | 所有人 |
 | **CLAUDE.md** | 开发规范与工作准则 | Claude Code / Codex |
 | **prisma/schema.prisma** | 数据库Schema | 开发 |

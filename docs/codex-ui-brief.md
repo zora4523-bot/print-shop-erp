@@ -1,7 +1,9 @@
-# Codex UI 优化任务 Brief
+# Codex UI 优化任务 Brief（历史归档）
 
-> 本文件是交给 Codex（或任何 AI/人）执行 **UI / 交互 / 跨设备高可用** 优化时的
-> **权威任务书 + 硬护栏 + 验收定义**。目标：生产在手机 / 平板 / 桌面全设备
+> **状态：已被取代。** 本文件记录 2026-07-19 的初始范围与当时仓库现状，不再是当前权威任务书，其中“无主题入口”“只有一个 Desktop Chrome project”等描述已经过期。当前规范以 [`../UI-SYSTEM.md`](../UI-SYSTEM.md)、[`UI-DESIGN-COVERAGE.md`](./UI-DESIGN-COVERAGE.md)、[`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 和 [`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md) 为准。
+
+> 本文件曾用于交给 Codex（或任何 AI/人）执行 **UI / 交互 / 跨设备高可用** 优化时的
+> **初始任务书 + 硬护栏 + 验收定义**。目标：生产在手机 / 平板 / 桌面全设备
 > **无裁切、无溢出、无展示错误**，明暗双主题达标，符合执行当时可用的现代 CSS。
 >
 > 阅读顺序：先读 §1 现状与护栏 → §2 验收闸（没有它就无法证明"无裁切"）→

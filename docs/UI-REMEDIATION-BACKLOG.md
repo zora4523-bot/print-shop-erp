@@ -7,7 +7,7 @@ applies_to: current worktree
 
 # UI、状态反馈与工程文档整改任务
 
-本文把 2026-08-24 的设计稿对齐审查、状态组件审查和工程文档审查整理成可独立实现、独立验证的任务。它是执行顺序与验收边界，不替代业务规格、`DECISIONS.md` 或部署 runbook。
+本文把 2026-08-24 的设计稿对齐审查、状态组件审查和工程文档审查整理成可独立实现、独立验证的任务。它是执行顺序与验收边界，不替代业务规格、`DECISIONS.md` 或部署 runbook。提交 `41abe65` 之后的对抗复审、代码证据和细分任务见 [`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)。
 
 ## 分级方法
 
@@ -34,13 +34,13 @@ applies_to: current worktree
 | 1 | UI-F01 | S1 | C1 | 根路由错误恢复 | 无 | 新增根 `error.tsx`、`global-error.tsx`；认证、账号、打印等非 admin/worker 路由发生意外错误时可重试；不泄露服务端错误详情 | 已完成 |
 | 2 | UI-F02 | S1 | C1 | CDR 过期结果“按同条件重新生成” | 现有 `LongTaskReceipt` | 过期记录有明确操作；保留原条件；重复点击受 pending/幂等保护 | 已完成 |
 | 3 | DOC-01 | S1 | C2 | 建立九类工程文档与 UI 单一事实源 | 无 | 九个标准入口可发现；README 不再指导重建项目；部署、迁移、seed、cron 口径引用权威来源 | 已完成 |
-| 4 | UI-F03 | S1 | C2 | 统一操作反馈与确认层 | UI-P01、UI-S01 | 新增 `ConfirmActionDialog`；替换全部 `alert/confirm`；L2 显示影响范围，L3 必填理由并恢复焦点 | 已完成 |
-| 5 | UI-F04 | S1 | C2 | 统一业务状态注册表 | UI-S01 | 页面不再定义本地 `StatusBadge`；账单、通知、任务、薪资的 label/tone/dot 集中；失败/取消才使用 danger | 已完成（核心域） |
+| 4 | UI-F03 | S1 | C2 | 统一操作反馈与确认层 | UI-P01、UI-S01 | 新增 `ConfirmActionDialog`；替换全部 `alert/confirm`；L2 显示影响范围；L3 在业务已有 reason/remark 契约时必填并恢复焦点，禁止由 UI 自创字段 | 基础组件完成；领域迁移部分完成 |
+| 5 | UI-F04 | S1 | C2 | 统一业务状态注册表 | UI-S01 | 页面不再定义本地 `StatusBadge`；账单、通知、任务、薪资的 label/tone/dot 集中；失败/取消才使用 danger | 部分完成（核心域；采购/CDR/发货/导出待迁移） |
 | 6 | UI-F05 | S1 | C2 | 工单变更逐字段差异 | 无 | 审批页显示字段名、before、after、计价影响和生产阻断；空值和长文本可读；审批仍受现有权限与并发锁保护 | 已完成 |
 | 7 | UI-F06 | S1 | C3 | Server Action 统一 pending 与结果反馈 | UI-S01 | 所有写表单使用 `PendingButton` 或等价 hook；表单有 `aria-busy`；成功/失败不会只靠按钮复原表达 | 部分完成（首批五域） |
-| 8 | UI-F07 | S1 | C3 | 长任务与部分成功统一回执 | UI-S01 | 导出、CDR、账单生成、薪资重算统一显示回执 ID、状态、成功/失败明细、重试与过期 | 部分完成 |
+| 8 | UI-F07 | S1 | C3 | 长任务与部分成功统一回执 | UI-S01 | 已证明的导出/CDR 长任务显示回执 ID、状态、成功/失败明细、重试与过期；账单生成、薪资重算先量化耗时/超时，达到阈值后再迁移后台回执 | 部分完成 |
 | 9 | UI-F08 | S1 | C3 | 通知投递状态与人工决策 | UI-S01；先确认 schema/审计契约 | 传输状态与 job 状态分列；`UNKNOWN` 支持已送达/重发/忽略并留痕；`RETRYING + DEAD` 不被合并成单一状态 | 已完成 |
-| 10 | UI-F09 | S1 | C3 | 工单列表批量选择与行内更多菜单 | UI-P01、List shell | 桌面/手机均可选择；批量条仅出现合法动作；每行保留 1 个主动作，其余进入“⋯”；权限和终态动作不泄露 | 已完成安全子集；批量写操作待后端契约 |
+| 10 | UI-F09 | S1 | C3 | 工单列表批量选择与行内更多菜单 | UI-P01、List shell | 桌面/手机均可选择；批量条仅出现合法动作；每行保留 1 个主动作，其余进入“⋯”；权限和终态动作不泄露 | 安全子集完成；已有批量排产能力待 UI 交接，其他批量写操作待契约 |
 | 10.5 | UI-F01B | S1 | C3 | Dashboard/定价/仓库分区错误隔离 | UI-F01、UI-S01 | 数据获取拆为可独立流式渲染的分区；一个数据源失败只替换该分区，其他内容和页头动作继续可用 | 部分完成 |
 | 11 | UI-F10 | S1 | C4 | 主数据“被引用”与停用影响范围 | UI-F03；需要逐领域查询 | 产品、工艺、账号、BOM 等主数据展示引用状态；停用进入 L3 并列出影响对象；历史引用保留 | 部分完成（产品域） |
 | 12 | UI-S01 | S2 | C1 | 状态反馈组件补齐 | 无 | `ActionNotice`、`FormMessage`、`FormErrorSummary`、`BatchActionResult`、`ConflictResolutionPanel`、`TerminalReadOnlyBanner`、`TableEmptyState` 有测试和 showcase | 已完成 |
@@ -68,7 +68,7 @@ applies_to: current worktree
 
 1. 不改变权限、金额 Decimal、快照、乐观锁、审计和幂等业务不变量。
 2. `pnpm typecheck`、`pnpm lint`、相关 Vitest 必须通过。
-3. 修改页面布局时必须通过 393/768/1024/1280/1440/1920 的 light/dark 几何、axe、溢出与触控门禁。
+3. 修改页面布局时必须通过 375/393/768/1024/1280/1920 的 light/dark 几何、axe、溢出与触控门禁。
 4. 修改打印必须另立任务并经过既有 8 张截图基线；本清单默认不触碰打印。
 5. 禁止通过放宽断言、删除测试或更新无关基线制造“通过”。
 6. 每个任务在对应文档中更新状态、验证命令和仍未覆盖的边界。
