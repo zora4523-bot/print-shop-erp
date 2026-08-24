@@ -27,7 +27,10 @@ test.afterAll(async () => {
 });
 
 test.describe('administrator workspace', () => {
-  test.describe.configure({ timeout: 180_000 });
+  // Each test traverses the complete owner route matrix. Four viewport
+  // projects may share one Turbopack development server, so the budget must
+  // include cold RSC compilation without weakening any per-route assertion.
+  test.describe.configure({ timeout: 360_000 });
 
   test.beforeEach(async ({ page }) => {
     await login(page, {
