@@ -214,6 +214,15 @@ export function batchScheduleImpactItems({
   ];
 }
 
+export function failedOrderIdsForRetry(
+  failures: readonly { orderId: string }[],
+): string[] {
+  return [...new Set(failures.map((failure) => failure.orderId))].slice(
+    0,
+    MAX_BATCH_ORDERS,
+  );
+}
+
 export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -224,10 +233,6 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
     useState<BatchScheduleOrdersActionResult | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const selectedOrders = useMemo(
-    () => orders.filter((order) => selected.has(order.id)),
-    [orders, selected],
-  );
   const effectiveWorkerId = workers.some(
     (worker) => worker.id === workerId,
   )
@@ -245,6 +250,19 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
           )
         : [],
     [effectiveWorkerId, orders],
+  );
+  const selectableIds = useMemo(
+    () => new Set(selectableOrders.map((order) => order.id)),
+    [selectableOrders],
+  );
+  const validSelected = useMemo(
+    () =>
+      new Set([...selected].filter((orderId) => selectableIds.has(orderId))),
+    [selectableIds, selected],
+  );
+  const selectedOrders = useMemo(
+    () => orders.filter((order) => validSelected.has(order.id)),
+    [orders, validSelected],
   );
   const selectedTaskCount = selectedOrders.reduce(
     (sum, order) =>
@@ -273,7 +291,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
     .map((order) => order.id);
   const allSelected =
     selectAllIds.length > 0 &&
-    selectAllIds.every((orderId) => selected.has(orderId));
+    selectAllIds.every((orderId) => validSelected.has(orderId));
   const handoffResolution = handoff
     ? resolveSchedulingHandoff({
         orders,
@@ -291,7 +309,9 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
   function toggleOrder(orderId: string) {
     setState(null);
     setSelected((current) => {
-      const next = new Set(current);
+      const next = new Set(
+        [...current].filter((selectedId) => selectableIds.has(selectedId)),
+      );
       if (next.has(orderId)) {
         next.delete(orderId);
       } else if (next.size < MAX_BATCH_ORDERS) {
@@ -336,7 +356,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
         setSelected(new Set());
         router.refresh();
       } else if (result.status === 'partial') {
-        setSelected(new Set());
+        setSelected(new Set(failedOrderIdsForRetry(result.failed)));
         router.refresh();
       }
     });
@@ -501,6 +521,9 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
                 </li>
               ))}
             </ul>
+            <p>
+              仍在待排产列表且与当前师傅兼容的失败工单会保留勾选；修正原因或状态后，可再次确认分配。
+            </p>
           </div>
         ) : null}
         {state?.status === 'unauthorized' ? (
@@ -570,8 +593,8 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
                 !effectiveWorkerId ||
                 order.batchBlockReason !== null ||
                 compatibleTaskCount === 0 ||
-                (selected.size >= MAX_BATCH_ORDERS &&
-                  !selected.has(order.id));
+                (validSelected.size >= MAX_BATCH_ORDERS &&
+                  !validSelected.has(order.id));
               return (
               <tr
                 key={order.id}
@@ -583,7 +606,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               >
                 <td className="px-2 py-2 text-center">
                   <SelectionCheckbox
-                    checked={selected.has(order.id)}
+                    checked={validSelected.has(order.id)}
                     disabled={checkboxDisabled}
                     onChange={() => toggleOrder(order.id)}
                     label={`选择工单 ${order.orderNo}`}

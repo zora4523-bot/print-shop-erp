@@ -22,6 +22,7 @@ vi.mock('@/actions/production', () => ({
 
 import {
   batchScheduleImpactItems,
+  failedOrderIdsForRetry,
   PendingSchedulingBoard,
   resolveSchedulingHandoff,
   schedulingHandoffNotice,
@@ -107,6 +108,39 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     expect(impact).toContain('每张工单使用独立事务');
     expect(impact).toContain('逐项重新校验并返回成功或失败');
     expect(impact).toContain('单张失败不会回滚其他已成功工单');
+  });
+
+  it('retains only distinct failed orders for a bounded retry', () => {
+    const failures = Array.from({ length: 32 }, (_, index) => ({
+      orderId: `order-${index + 1}`,
+    }));
+
+    expect(
+      failedOrderIdsForRetry([
+        failures[0],
+        failures[0],
+        ...failures.slice(1),
+      ]),
+    ).toEqual(failures.slice(0, 30).map((failure) => failure.orderId));
+  });
+
+  it('keeps failed eligible selections available after a partial result', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'PendingSchedulingBoard.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain(
+      'setSelected(new Set(failedOrderIdsForRetry(result.failed)))',
+    );
+    expect(source).toContain('失败工单会保留勾选');
+    expect(source).toContain('selectableIds.has(orderId)');
   });
 
   it('routes the mutation through the shared L2 confirmation dialog', () => {
