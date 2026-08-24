@@ -41,7 +41,9 @@ describe('detail no-data empty-state ownership', () => {
     {
       file: ['foreman', 'outsource', '[id]'],
       start: '付款明细（',
-      end: '{canReceive || canCancel ? (',
+      // 状态操作区在终态也保留，以便 Server Action 成功
+      // 回执不会因整个组件卸载而丢失。因此用新的稳定组件边界。
+      end: '<OutsourceActions',
       title: '暂无外协付款记录',
     },
   ])('uses one compact shared empty state for $title', ({ file, start, end, title }) => {
