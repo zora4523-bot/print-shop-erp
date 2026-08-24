@@ -36,11 +36,11 @@ import {
   TableEmptyState,
   TerminalReadOnlyBanner,
   TONES,
-  ORDER_STATUS_TO_BADGE,
   formMessageA11yProps,
 } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 // /dev/showcase —— 业务原子组件的可视化目录。
 // **仅 dev 可见**：production 走 notFound() 不暴露。
@@ -110,10 +110,10 @@ export default function ShowcasePage() {
 
       <Section
         title="StatusBadge"
-        subtitle="工单状态徽章——ORDER_STATUS_TO_BADGE map 渲染全 8 状态。"
+        subtitle="工单状态徽章——ORDER_STATUS_REGISTRY 渲染全 8 状态。"
       >
         <div className="flex flex-wrap items-center gap-2">
-          {Object.entries(ORDER_STATUS_TO_BADGE).map(([status, b]) => (
+          {Object.entries(ORDER_STATUS_REGISTRY).map(([status, b]) => (
             <StatusBadge key={status} tone={b.tone} dot={b.dot}>
               {b.label}
             </StatusBadge>

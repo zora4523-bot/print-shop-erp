@@ -5,8 +5,8 @@ import { TONE_BADGE_SOFT, TONE_DOT, type Tone } from './_tones';
 // &ldquo;待审核&rdquo;&ldquo;已完成&rdquo;&ldquo;已发货&rdquo;&ldquo;已取消&rdquo;就是它。
 //
 // 设计原则：组件不感知具体业务枚举（OrderStatus / BillStatus / 等
-// 多套），调用方传 `tone` + label。配套 `orderStatusToBadge()` 等
-// helper 在调用方一侧做枚举 → tone/label 映射，让 StatusBadge 跨领域复用。
+// 多套），调用方传 `tone` + label。业务枚举映射集中在
+// lib/ui/status-registry.ts，让 StatusBadge 保持跨领域复用。
 
 export type StatusBadgeProps = {
   tone: Tone;
@@ -46,43 +46,3 @@ export function StatusBadge({
     </span>
   );
 }
-
-// 工单状态 → tone/label 映射。集中在这里方便维护——状态机变了改一处。
-// 注意：业务方仍然通过 `<StatusBadge tone={...}>` 调用，这个 helper 只
-// 是&ldquo;别名层&rdquo;，不强制使用。
-//
-// label 与 components/business/order/OrderStatusBadge 之前的文案对齐，
-// 不另起新的术语：&ldquo;已完工&rdquo;（COMPLETED 生产完工） vs &ldquo;已完成&rdquo;（FINISHED
-// 整单关闭）是项目沿用的语义切分（production-flow.spec.ts 直接断言这两个
-// 文本），改字会破断言。
-export const ORDER_STATUS_TO_BADGE: Record<
-  string,
-  { tone: Tone; label: string; dot?: boolean }
-> = {
-  DRAFT: { tone: 'neutral', label: '草稿' },
-  SUBMITTED: { tone: 'info', label: '已提交' },
-  SCHEDULING: { tone: 'info', label: '排产中', dot: true },
-  IN_PRODUCTION: { tone: 'primary', label: '生产中', dot: true },
-  COMPLETED: { tone: 'success', label: '已完工' },
-  SHIPPED: { tone: 'success', label: '已发货' },
-  FINISHED: { tone: 'neutral', label: '已完成' },
-  // danger 而非 neutral：之前和 DRAFT / FINISHED 同为灰徽章，用户
-  // 分不出「正常结束」与「被取消」。FINISHED 保持 neutral，这样
-  // COMPLETED/SHIPPED(success) → FINISHED(neutral) → CANCELLED(danger)
-  // 三档仍互不相同。
-  CANCELLED: { tone: 'danger', label: '已取消' },
-};
-
-// 销售应收账单状态 → tone/label。lib/auth/role-labels:BILL_STATUS_LABELS
-// 是文案权威；这里只补 tone（DRAFT 中性 / ISSUED 待付款偏 warning /
-// PARTIAL_PAID 进度蓝 / FULLY_PAID 已收绿）。/owner/bills 与 /sales/bills
-// 共用避免双份本地定义漂移。
-export const BILL_STATUS_TO_BADGE: Record<
-  string,
-  { tone: Tone; label: string; dot?: boolean }
-> = {
-  DRAFT: { tone: 'neutral', label: '草稿' },
-  ISSUED: { tone: 'warning', label: '已发单', dot: true },
-  PARTIAL_PAID: { tone: 'info', label: '部分付款', dot: true },
-  FULLY_PAID: { tone: 'success', label: '已结清' },
-};

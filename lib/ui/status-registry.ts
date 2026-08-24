@@ -5,6 +5,7 @@ import {
   NotificationStatus,
   OrderChangeRequestStatus,
   OrderExportStatus,
+  OrderStatus,
   OutsourceStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
@@ -43,6 +44,21 @@ export type StatusRegistry<TStatus extends PropertyKey> = Readonly<
 export function statusFilterLabel(definition: StatusDefinition): string {
   return definition.filterLabel ?? definition.label;
 }
+
+export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
+  [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
+  [OrderStatus.SUBMITTED]: { label: '已提交', tone: 'info' },
+  [OrderStatus.SCHEDULING]: { label: '排产中', tone: 'info', dot: true },
+  [OrderStatus.IN_PRODUCTION]: {
+    label: '生产中',
+    tone: 'info',
+    dot: true,
+  },
+  [OrderStatus.COMPLETED]: { label: '已完工', tone: 'success' },
+  [OrderStatus.SHIPPED]: { label: '已发货', tone: 'success' },
+  [OrderStatus.FINISHED]: { label: '已完成', tone: 'neutral' },
+  [OrderStatus.CANCELLED]: { label: '已取消', tone: 'danger' },
+};
 
 export const BILL_STATUS_REGISTRY: StatusRegistry<BillStatus> = {
   [BillStatus.DRAFT]: { label: '草稿', tone: 'neutral' },

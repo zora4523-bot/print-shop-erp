@@ -184,4 +184,13 @@ describe('high-risk status registry consumers', () => {
       "@/lib/ui/status-registry",
     );
   });
+
+  it('uses the shared order registry and keeps domain maps out of the badge atom', () => {
+    expect(
+      source('components/business/order/OrderStatusBadge.tsx'),
+    ).toContain('ORDER_STATUS_REGISTRY');
+    const badgeAtom = source('components/ui-business/StatusBadge.tsx');
+    expect(badgeAtom).not.toContain('ORDER_STATUS_TO_BADGE');
+    expect(badgeAtom).not.toContain('BILL_STATUS_TO_BADGE');
+  });
 });

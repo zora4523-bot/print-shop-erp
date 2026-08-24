@@ -6,6 +6,7 @@ import {
   NotificationStatus,
   OrderChangeRequestStatus,
   OrderExportStatus,
+  OrderStatus,
   OutsourceStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
@@ -23,6 +24,7 @@ import {
   NOTIFICATION_STATUS_REGISTRY,
   ORDER_CHANGE_REQUEST_STATUS_REGISTRY,
   ORDER_EXPORT_STATUS_REGISTRY,
+  ORDER_STATUS_REGISTRY,
   OUTSOURCE_STATUS_REGISTRY,
   PAYMENT_STATUS_REGISTRY,
   PRODUCTION_TASK_STATUS_REGISTRY,
@@ -39,6 +41,9 @@ import {
 
 describe('status registry', () => {
   it('exhaustively covers persisted status enums', () => {
+    expect(Object.keys(ORDER_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(OrderStatus).sort(),
+    );
     expect(Object.keys(BILL_STATUS_REGISTRY).sort()).toEqual(
       Object.values(BillStatus).sort(),
     );
@@ -83,6 +88,7 @@ describe('status registry', () => {
   });
 
   it('does not render queued, running, or unresolved work as danger', () => {
+    expect(ORDER_STATUS_REGISTRY[OrderStatus.IN_PRODUCTION].tone).toBe('info');
     expect(BILL_STATUS_REGISTRY[BillStatus.ISSUED].tone).toBe('warning');
     expect(
       NOTIFICATION_STATUS_REGISTRY[NotificationStatus.SENDING].tone,
