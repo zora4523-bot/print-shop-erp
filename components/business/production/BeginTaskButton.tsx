@@ -18,13 +18,13 @@ export function BeginTaskButton({ taskId }: Props) {
   >(beginTaskFormAction, null);
 
   return (
-    <form action={formAction}>
+    <form action={formAction} aria-busy={pending}>
       <input type="hidden" name="taskId" value={taskId} />
       <Button
         type="submit"
         disabled={pending}
         size="lg"
-        className="min-h-11 w-full bg-foreground text-background hover:bg-foreground/80"
+        className="min-h-[52px] w-full bg-foreground text-background hover:bg-foreground/80"
       >
         {pending ? '开始中…' : '开始生产'}
       </Button>

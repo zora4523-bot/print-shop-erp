@@ -4,6 +4,7 @@ import { Role } from '../../../generated/prisma/enums';
 import { getSession } from '@/lib/auth/session';
 import { roleLabel } from '@/lib/auth/role-labels';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
+import { WorkerBottomNavigation } from '@/components/business/production/WorkerBottomNavigation';
 
 // H5 shell for 师傅端. WORKER only — ADMIN has its own
 // overrides in the action layer but view the worker tasks through the
@@ -20,34 +21,18 @@ export default async function WorkerLayout({
   if (user.role !== Role.WORKER) redirect('/');
 
   return (
-    <div className="worker-viewport bg-muted/40">
+    <div className="worker-viewport worker-bottom-nav-space bg-muted/40">
       <header className="border-b bg-background">
         <div className="worker-safe-inline worker-safe-top mx-auto max-w-xl pb-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <Link
-              href="/worker/tasks"
-              className="inline-flex min-h-11 shrink-0 items-center text-base font-semibold"
-            >
-              师傅工作台
-            </Link>
-          </div>
-          <nav aria-label="师傅工作台导航" className="mt-2 grid grid-cols-4 gap-2 text-sm">
-            <Link href="/worker/tasks" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
-              我的任务
-            </Link>
-            <Link href="/worker/orders" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
-              我的工单
-            </Link>
-            <Link href="/worker/salary" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
-              我的工资
-            </Link>
-            <a href="#worker-account" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
-              我的
-            </a>
-          </nav>
+          <Link
+            href="/worker/tasks"
+            className="inline-flex min-h-11 shrink-0 items-center text-base font-semibold"
+          >
+            师傅工作台
+          </Link>
         </div>
       </header>
-      <main className="worker-safe-inline worker-safe-bottom mx-auto w-full max-w-xl pt-4">
+      <main className="worker-safe-inline mx-auto w-full max-w-xl pt-4">
         {children}
       </main>
       <footer
@@ -69,6 +54,7 @@ export default async function WorkerLayout({
           <LogoutButton />
         </section>
       </footer>
+      <WorkerBottomNavigation />
     </div>
   );
 }

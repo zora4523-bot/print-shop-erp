@@ -25,6 +25,7 @@ import {
   StatusBadge,
 } from '@/components/ui-business';
 import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { cn } from '@/lib/utils';
 
 export type WorkerBatchTaskRow = {
   id: string;
@@ -503,7 +504,12 @@ function WorkerTaskRow({
   onToggle: () => void;
 }) {
   return (
-    <li className="grid min-w-0 grid-cols-[44px_minmax(0,1fr)] rounded-xl border bg-card shadow-sm">
+    <li
+      className={cn(
+        'grid min-w-0 grid-cols-[44px_minmax(0,1fr)] rounded-xl border bg-card shadow-sm',
+        task.order.isUrgent && 'border-destructive/50',
+      )}
+    >
       <label className="flex min-h-11 cursor-pointer items-start justify-center py-2">
         <BatchCheckbox
           checked={checked}
@@ -563,7 +569,8 @@ function WorkerTaskRow({
             <span
               className={buttonVariants({
                 size: 'sm',
-                className: 'mt-3 min-h-11',
+                variant: task.order.isUrgent ? 'default' : 'outline',
+                className: 'mt-3 min-h-12 min-w-24',
               })}
             >
               {task.status === TaskStatus.PENDING ? '开始生产' : '报工'}

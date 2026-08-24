@@ -135,6 +135,25 @@ describe('WorkerTaskBatchList groups', () => {
     expect(html).not.toMatch(/\b\d+%/);
   });
 
+  it('weights only urgent row actions as solid and keeps regular actions outlined', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'WorkerTaskBatchList.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain("task.order.isUrgent && 'border-destructive/50'");
+    expect(source).toContain(
+      "variant: task.order.isUrgent ? 'default' : 'outline'",
+    );
+    expect(source).toContain("className: 'mt-3 min-h-12 min-w-24'");
+  });
+
   it('keeps the completion trigger touch-sized and exposes dialog semantics', () => {
     const html = renderToStaticMarkup(
       <WorkerTaskBatchList

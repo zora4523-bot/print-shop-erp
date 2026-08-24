@@ -231,6 +231,10 @@
     padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
   }
 
+  .worker-bottom-nav-space {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .worker-wrap-anywhere {
     overflow-wrap: break-word;
     word-break: break-word;
