@@ -5,11 +5,20 @@ import {
   Filter,
   GitCompareArrows,
   Search,
+  X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { EmptyState } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
 import {
@@ -302,15 +311,7 @@ function DraftStatusBar({
   );
 }
 
-function WorkspaceFilters({
-  purpose,
-  searchAction,
-  hiddenSearchFields,
-  filters,
-  filterOptions,
-  clearFiltersHref,
-  changedFilterAvailable,
-}: Pick<
+type WorkspaceFiltersProps = Pick<
   ExternalSalesChargeWorkspaceProps,
   | 'purpose'
   | 'searchAction'
@@ -319,7 +320,104 @@ function WorkspaceFilters({
   | 'filterOptions'
   | 'clearFiltersHref'
   | 'changedFilterAvailable'
->) {
+>;
+
+function activeWorkspaceFilterLabels({
+  purpose,
+  filters,
+  filterOptions,
+}: Pick<
+  WorkspaceFiltersProps,
+  'purpose' | 'filters' | 'filterOptions'
+>): string[] {
+  const option = (
+    options: ExternalSalesChargeFilterOption[],
+    value: string,
+  ) => options.find((entry) => entry.value === value)?.label ?? value;
+  return [
+    filters.query ? `搜索：${filters.query}` : '',
+    filters.category
+      ? `类目：${option(filterOptions.categories, filters.category)}`
+      : '',
+    filters.subject
+      ? `${purpose === 'processing' ? '产品' : '地区'}：${option(
+          filterOptions.subjects,
+          filters.subject,
+        )}`
+      : '',
+    filters.kind
+      ? `类型：${
+          { BASE: '基础价', ADD_ON: '附加费', REFERENCE: '人工参考' }[
+            filters.kind
+          ]
+        }`
+      : '',
+    filters.calculation
+      ? `计价：${option(filterOptions.calculations, filters.calculation)}`
+      : '',
+    filters.quantity ? `数量：${filters.quantity}` : '',
+    filters.automation
+      ? `处理：${filters.automation === 'AUTO' ? '自动计价' : '需人工确认'}`
+      : '',
+    filters.status
+      ? `状态：${filters.status === 'ACTIVE' ? '已启用' : '已停用'}`
+      : '',
+    filters.changedOnly ? '只看本次修改' : '',
+  ].filter(Boolean);
+}
+
+function WorkspaceFilters(props: WorkspaceFiltersProps) {
+  const advancedFilterCount = activeAdvancedFilterCount(props.filters);
+  const activeLabels = activeWorkspaceFilterLabels(props);
+
+  return (
+    <div className="min-w-0 space-y-3">
+      <WorkspaceSearchAndDesktopFilters {...props} />
+      <MobileWorkspaceFilters
+        {...props}
+        advancedFilterCount={advancedFilterCount}
+      />
+      {activeLabels.length > 0 ? (
+        <div
+          aria-label="已启用的收费项目筛选"
+          className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
+        >
+          {activeLabels.map((label) => (
+            <Badge
+              key={label}
+              variant="outline"
+              className="min-h-7 max-w-[85vw] shrink-0 whitespace-normal bg-card sm:max-w-full"
+            >
+              {label}
+            </Badge>
+          ))}
+          <PriceWorkspaceLink
+            href={props.clearFiltersHref}
+            prefetch={false}
+            aria-label="清除全部收费项目筛选"
+            className={cn(
+              buttonVariants({ variant: 'ghost', size: 'sm' }),
+              'min-h-11 shrink-0 sm:min-h-7',
+            )}
+          >
+            <X aria-hidden="true" />
+            清除全部
+          </PriceWorkspaceLink>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkspaceSearchAndDesktopFilters({
+  purpose,
+  searchAction,
+  hiddenSearchFields,
+  filters,
+  filterOptions,
+  clearFiltersHref,
+  changedFilterAvailable,
+}: WorkspaceFiltersProps) {
   const advancedFilterCount = activeAdvancedFilterCount(filters);
 
   return (
@@ -375,12 +473,12 @@ function WorkspaceFilters({
       </div>
 
       <Disclosure
-        className="group min-w-0 rounded-lg border bg-muted/20"
+        className="group hidden min-w-0 rounded-lg border bg-muted/20 sm:block"
         open={advancedFilterCount > 0}
       >
         <DisclosureSummary className="gap-2 rounded-lg px-3">
           <Filter aria-hidden="true" className="size-4" />
-          筛选条件
+          更多筛选
           {advancedFilterCount > 0 ? (
             <Badge variant="secondary">{advancedFilterCount} 项已选</Badge>
           ) : (
@@ -506,6 +604,232 @@ function WorkspaceFilters({
         </div>
       </Disclosure>
     </form>
+  );
+}
+
+function MobileWorkspaceFilters({
+  purpose,
+  searchAction,
+  hiddenSearchFields,
+  filters,
+  filterOptions,
+  clearFiltersHref,
+  changedFilterAvailable,
+  advancedFilterCount,
+}: WorkspaceFiltersProps & { advancedFilterCount: number }) {
+  return (
+    <div className="sm:hidden">
+      <Sheet>
+        <SheetTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 w-full"
+              aria-label={
+                advancedFilterCount > 0
+                  ? `打开更多筛选，已启用 ${advancedFilterCount} 项`
+                  : '打开更多筛选'
+              }
+            />
+          }
+        >
+          <Filter aria-hidden="true" className="size-4" />
+          更多筛选
+          {advancedFilterCount > 0 ? (
+            <Badge variant="secondary">{advancedFilterCount}</Badge>
+          ) : null}
+        </SheetTrigger>
+        <SheetContent
+          side="bottom"
+          className="flex max-h-[80dvh] min-w-0 flex-col rounded-t-2xl sm:hidden"
+        >
+          <SheetHeader className="shrink-0 border-b pr-14">
+            <SheetTitle className="flex items-center gap-2">
+              <Filter aria-hidden="true" className="size-4" />
+              更多筛选
+            </SheetTitle>
+            <SheetDescription>
+              已启用 {advancedFilterCount} 项；应用后返回收费项目列表。
+            </SheetDescription>
+          </SheetHeader>
+          <form
+            action={searchAction}
+            method="get"
+            aria-label={`筛选${PURPOSE_LABELS[purpose]}收费项目`}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            {Object.entries(hiddenSearchFields ?? {}).map(([name, value]) => (
+              <input key={name} type="hidden" name={name} value={value} />
+            ))}
+            <input type="hidden" name="q" value={filters.query} />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+              <div className="grid min-w-0 gap-4">
+                <label
+                  htmlFor="mobile-external-charge-category"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>收费类目</span>
+                  <select
+                    id="mobile-external-charge-category"
+                    name="category"
+                    className={selectClass}
+                    defaultValue={filters.category}
+                  >
+                    <option value="">全部类目</option>
+                    {filterOptions.categories.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {optionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-subject"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>{purpose === 'processing' ? '适用产品' : '适用地区'}</span>
+                  <select
+                    id="mobile-external-charge-subject"
+                    name="subject"
+                    className={selectClass}
+                    defaultValue={filters.subject}
+                  >
+                    <option value="">
+                      全部{purpose === 'processing' ? '产品' : '地区'}
+                    </option>
+                    {filterOptions.subjects.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {optionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-kind"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>收费类型</span>
+                  <select
+                    id="mobile-external-charge-kind"
+                    name="kind"
+                    className={selectClass}
+                    defaultValue={filters.kind}
+                  >
+                    <option value="">全部收费类型</option>
+                    <option value="BASE">基础价</option>
+                    <option value="ADD_ON">附加费</option>
+                    <option value="REFERENCE">人工参考</option>
+                  </select>
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-calculation"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>计价方式</span>
+                  <select
+                    id="mobile-external-charge-calculation"
+                    name="calculation"
+                    className={selectClass}
+                    defaultValue={filters.calculation}
+                  >
+                    <option value="">全部计价方式</option>
+                    {filterOptions.calculations.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {optionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-quantity"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>适用数量</span>
+                  <Input
+                    id="mobile-external-charge-quantity"
+                    name="quantity"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={9_999_999}
+                    step={1}
+                    className="min-h-11"
+                    defaultValue={filters.quantity}
+                    placeholder="例如：1000"
+                  />
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-automation"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>处理方式</span>
+                  <select
+                    id="mobile-external-charge-automation"
+                    name="automation"
+                    className={selectClass}
+                    defaultValue={filters.automation}
+                  >
+                    <option value="">全部处理方式</option>
+                    <option value="AUTO">自动计价</option>
+                    <option value="MANUAL">需人工确认</option>
+                  </select>
+                </label>
+                <label
+                  htmlFor="mobile-external-charge-status"
+                  className="min-w-0 space-y-2 text-sm font-medium"
+                >
+                  <span>启用状态</span>
+                  <select
+                    id="mobile-external-charge-status"
+                    name="status"
+                    className={selectClass}
+                    defaultValue={filters.status}
+                  >
+                    <option value="">全部状态</option>
+                    <option value="ACTIVE">已启用</option>
+                    <option value="INACTIVE">已停用</option>
+                  </select>
+                </label>
+                {changedFilterAvailable ? (
+                  <label
+                    htmlFor="mobile-external-charge-changed"
+                    className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg border bg-background px-3 text-sm font-medium"
+                  >
+                    <input
+                      id="mobile-external-charge-changed"
+                      type="checkbox"
+                      name="changed"
+                      value="1"
+                      defaultChecked={filters.changedOnly}
+                      className="size-4 shrink-0 accent-primary"
+                    />
+                    只看本次修改
+                  </label>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 border-t bg-popover px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:flex-row">
+              <Button type="submit" className="min-h-11">
+                应用筛选
+              </Button>
+              {advancedFilterCount > 0 ? (
+                <PriceWorkspaceLink
+                  href={clearFiltersHref}
+                  prefetch={false}
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'min-h-11',
+                  )}
+                >
+                  清除筛选
+                </PriceWorkspaceLink>
+              ) : null}
+            </div>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }
 

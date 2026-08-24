@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { Button } from '@/components/ui/button';
@@ -198,6 +200,32 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(filteredHtml).toContain('value="AUTO" selected=""');
     expect(filteredHtml).toContain('value="ADD_ON" selected=""');
     expect(filteredHtml).toContain('checked=""');
+    expect(filteredHtml).toContain('打开更多筛选，已启用 4 项');
+    expect(filteredHtml).toContain('aria-label="已启用的收费项目筛选"');
+    expect(filteredHtml).toContain('类目：烫金加工');
+    expect(filteredHtml).toContain('类型：附加费');
+    expect(filteredHtml).toContain('处理：自动计价');
+    expect(filteredHtml).toContain('只看本次修改');
+  });
+
+  it('uses the shared bottom sheet contract for mobile advanced filters', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'price',
+        'ExternalSalesChargeWorkspace.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('<SheetContent');
+    expect(source).toContain('side="bottom"');
+    expect(source).toContain('max-h-[80dvh]');
+    expect(source).toContain('overflow-y-auto overscroll-contain');
+    expect(source).toContain('env(safe-area-inset-bottom,0px)');
+    expect(source).toContain('className="group hidden');
   });
 
   it('uses responsive, keyboard-accessible controls without exposing implementation data', () => {
