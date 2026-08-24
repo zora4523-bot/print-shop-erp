@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
-import { ActionNotice, PendingButton } from '@/components/ui-business';
+import { useActionState, useId } from 'react';
+import { ActionNotice } from '@/components/ui-business';
+import { ActiveStateConfirmButton } from '@/components/business/master-data/ActiveStateConfirmButton';
 import { setUserActiveAction } from '@/actions/owner-accounts';
 import type { AccountMutationResult } from '@/actions/owner-accounts.types';
 
@@ -14,6 +15,7 @@ export function ToggleActiveButton({
   userId: string;
   currentlyActive: boolean;
 }) {
+  const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<AccountMutationResult | null, FormData>(
     async () => setUserActiveAction(userId, nextActive),
@@ -26,15 +28,25 @@ export function ToggleActiveButton({
 
   return (
     <div className="space-y-2">
-      <form action={formAction} aria-busy={pending}>
-        <PendingButton
-          pending={pending}
-          pendingLabel={currentlyActive ? '正在停用账号…' : '正在激活账号…'}
-          variant={currentlyActive ? 'destructive' : 'default'}
-        >
-          {currentlyActive ? '停用账号' : '激活账号'}
-        </PendingButton>
-      </form>
+      <form id={formId} action={formAction} aria-busy={pending} />
+      <ActiveStateConfirmButton
+        entityLabel="账号"
+        currentlyActive={currentlyActive}
+        pending={pending}
+        formId={formId}
+        activateVerb="激活"
+        deactivateDescription="停用不是删除。服务器仍会校验不能停用自己，也不能停用最后一位活跃管理员。"
+        activateDescription="激活后，该账号将恢复登录能力。"
+        deactivateImpactItems={[
+          '该账号将无法继续登录系统',
+          '历史工单、任务、薪资与操作记录会继续保留',
+          '已有业务归属不会因为停用而自动改派',
+        ]}
+        activateImpactItems={[
+          '该账号可重新登录系统',
+          '历史业务记录和现有归属不会改变',
+        ]}
+      />
       {error ? (
         <ActionNotice
           tone="error"

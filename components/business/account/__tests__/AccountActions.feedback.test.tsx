@@ -67,6 +67,8 @@ describe('account action forms structured feedback', () => {
     const successHtml = renderToStaticMarkup(
       <ToggleActiveButton userId="user-1" currentlyActive />,
     );
+    expect(successHtml).toContain('data-slot="alert-dialog-trigger"');
+    expect(successHtml).toContain('aria-haspopup="dialog"');
     expect(successHtml).toContain('data-tone="success"');
     expect(successHtml).toContain('账号已停用');
 
@@ -82,6 +84,7 @@ describe('account action forms structured feedback', () => {
       <ToggleActiveButton userId="user-1" currentlyActive />,
     );
     expect(pendingHtml).toMatch(/<form[^>]*aria-busy="true"/);
+    expect(pendingHtml).toContain('disabled');
     expect(pendingHtml).toContain('正在停用账号…');
     expect(pendingHtml).not.toContain('系统至少需要 1 位活跃管理员');
   });

@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
-import { ActionNotice, PendingButton } from '@/components/ui-business';
+import { useActionState, useId } from 'react';
+import { ActionNotice } from '@/components/ui-business';
+import { ActiveStateConfirmButton } from '@/components/business/master-data/ActiveStateConfirmButton';
 import { setMaterialActiveAction } from '@/actions/owner-materials';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 
@@ -12,6 +13,7 @@ export function ToggleMaterialActiveButton({
   materialId: string;
   currentlyActive: boolean;
 }) {
+  const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
     MaterialMutationResult | null,
@@ -24,15 +26,18 @@ export function ToggleMaterialActiveButton({
 
   return (
     <div className="space-y-2">
-      <form action={formAction} aria-busy={pending}>
-        <PendingButton
-          pending={pending}
-          pendingLabel={currentlyActive ? '正在停用物料…' : '正在启用物料…'}
-          variant={currentlyActive ? 'destructive' : 'default'}
-        >
-          {currentlyActive ? '停用物料' : '启用物料'}
-        </PendingButton>
-      </form>
+      <form id={formId} action={formAction} aria-busy={pending} />
+      <ActiveStateConfirmButton
+        entityLabel="物料"
+        currentlyActive={currentlyActive}
+        pending={pending}
+        formId={formId}
+        deactivateImpactItems={[
+          '该物料不再出现在新的采购、BOM 和库存作业选择中',
+          '现有库存数量、成本和历史流水不会删除',
+          '已有 BOM 与历史单据引用会继续保留',
+        ]}
+      />
       {error ? (
         <ActionNotice
           tone="error"

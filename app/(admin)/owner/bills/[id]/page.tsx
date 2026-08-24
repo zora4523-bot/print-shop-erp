@@ -233,7 +233,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
             {BILL_STATUS_REGISTRY[BillStatus.FULLY_PAID].label} 的账单不再由生成流程
             自动追加新工单。
           </p>
-          <IssueBillButton billId={bill.id} />
+          <IssueBillButton
+            billId={bill.id}
+            period={bill.period}
+            recipientLabel={`${bill.salesUser.displayName}（${ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}）`}
+            totalAmount={total.toFixed(2)}
+            orderCount={bill.items.length}
+          />
         </section>
       ) : null}
 
