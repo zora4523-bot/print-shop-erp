@@ -1066,8 +1066,11 @@ describe('setHourlyPayrollPaidAction', () => {
     hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
       id: 'p-1',
       isPaid: true,
+      workerName: '李师傅',
     });
-    await setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'on' }));
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(hourlyMock.markHourlyPayrollPaid).toHaveBeenCalledWith('p-1', true);
   });
 
@@ -1076,9 +1079,54 @@ describe('setHourlyPayrollPaidAction', () => {
     hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
       id: 'p-1',
       isPaid: false,
+      workerName: '李师傅',
     });
-    await setHourlyPayrollPaidAction('p-1', null, fd({}));
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({})),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(hourlyMock.markHourlyPayrollPaid).toHaveBeenCalledWith('p-1', false);
+  });
+
+  it('保留时薪筛选并把可信人员名提升为页面级回执', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
+      id: 'p-1',
+      isPaid: true,
+      workerName: '李师傅',
+    });
+
+    await expect(
+      setHourlyPayrollPaidAction(
+        'p-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: '/owner/salary/hourly?month=2026-07&paid=unpaid',
+        }),
+      ),
+    ).rejects.toThrow(
+      /NEXT_REDIRECT:\/owner\/salary\/hourly\?month=2026-07&paid=unpaid&marked=/,
+    );
+  });
+
+  it('拒绝把时薪 returnTo 当成开放重定向', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
+      id: 'p-1',
+      isPaid: true,
+      workerName: '李师傅',
+    });
+
+    await expect(
+      setHourlyPayrollPaidAction(
+        'p-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: 'https://evil.example.com/steal',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT:\/owner\/salary\/hourly\?marked=/);
   });
 
   it('将当前月禁付等已知业务错误返回给表单', async () => {

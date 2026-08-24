@@ -10,6 +10,7 @@ import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidF
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
+  ActionNotice,
   EmptyState,
   PageHeader,
   StatCard as UiStatCard,
@@ -23,7 +24,13 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
 
 type PageProps = {
-  searchParams: Promise<{ month?: string; paid?: string; workerId?: string }>;
+  searchParams: Promise<{
+    month?: string;
+    paid?: string;
+    workerId?: string;
+    marked?: string;
+    markedPaid?: string;
+  }>;
 };
 
 function currentShanghaiMonth(): string {
@@ -48,6 +55,15 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       : currentMonth;
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
+  const filterQuery = new URLSearchParams();
+  if (sp.month) filterQuery.set('month', sp.month);
+  if (sp.paid) filterQuery.set('paid', sp.paid);
+  if (sp.workerId) filterQuery.set('workerId', sp.workerId);
+  const returnTo = filterQuery.size
+    ? `/owner/salary/hourly?${filterQuery.toString()}`
+    : '/owner/salary/hourly';
+  const markedName = sp.marked?.trim();
+  const markedPaid = sp.markedPaid === '1';
 
   // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
   // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
@@ -100,6 +116,22 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {markedName ? (
+        <ActionNotice
+          tone="success"
+          title={markedPaid ? '已标记发放' : '已撤销发放标记'}
+          description={`${markedName} 的时薪月结已${markedPaid ? '标记为已发放' : '解除发放锁定'}。`}
+          action={
+            <Link
+              href={returnTo}
+              prefetch={false}
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              关闭提示
+            </Link>
+          }
+        />
+      ) : null}
       <PageHeader
         title="时薪工月结"
         subtitle="PACKER / CLEANER / COOK — 按 Asia/Shanghai 日历月汇总 Attendance，PACKER/CLEANER 走时薪 + 加班倍率，COOK 按月薪 + 空闲打包时薪。已发行拒绝重算。"
@@ -217,6 +249,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                         workerName={r.worker.displayName}
                         month={r.month}
                         totalSalary={String(r.totalSalary)}
+                        returnTo={returnTo}
                       />
                     </td>
                   </tr>

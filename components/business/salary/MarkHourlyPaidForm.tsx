@@ -12,6 +12,7 @@ type Props = {
   workerName: string;
   month: string;
   totalSalary: string;
+  returnTo: string;
 };
 
 export function hourlyPaidImpactItems({
@@ -19,7 +20,7 @@ export function hourlyPaidImpactItems({
   workerName,
   month,
   totalSalary,
-}: Omit<Props, 'id'>) {
+}: Omit<Props, 'id' | 'returnTo'>) {
   if (currentPaid) {
     return [
       `${workerName} · ${month} · 当前月结金额 ¥ ${totalSalary}。`,
@@ -43,6 +44,7 @@ export function MarkHourlyPaidForm({
   workerName,
   month,
   totalSalary,
+  returnTo,
 }: Props) {
   const formId = useId();
   const bound = setHourlyPayrollPaidAction.bind(null, id);
@@ -64,6 +66,7 @@ export function MarkHourlyPaidForm({
     <div className="space-y-2">
       <form id={formId} action={action} aria-busy={pending}>
         <input type="hidden" name="isPaid" value={String(target)} />
+        <input type="hidden" name="returnTo" value={returnTo} />
       </form>
       {/* 当前 mutation 只存 isPaid / paidAt，不接收审计理由。
           这里必须停在 L2，不能为了 UI 自行添加假 reason。 */}
@@ -106,12 +109,6 @@ export function MarkHourlyPaidForm({
           tone="error"
           title={currentPaid ? '撤销发放失败' : '标记发放失败'}
           description={error}
-        />
-      ) : null}
-      {visibleState?.status === 'success' ? (
-        <ActionNotice
-          tone="success"
-          title={currentPaid ? '已撤销发放标记' : '已标记发放'}
         />
       ) : null}
     </div>

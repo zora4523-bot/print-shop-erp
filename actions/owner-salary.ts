@@ -476,8 +476,9 @@ export async function setHourlyPayrollPaidAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
+  let marked: Awaited<ReturnType<typeof markHourlyPayrollPaid>>;
   try {
-    await markHourlyPayrollPaid(id, parsed.data.isPaid);
+    marked = await markHourlyPayrollPaid(id, parsed.data.isPaid);
   } catch (err) {
     if (err instanceof HourlyAggregateError) {
       return { status: 'error', message: err.message };
@@ -485,5 +486,14 @@ export async function setHourlyPayrollPaidAction(
     throw err;
   }
   revalidatePath('/owner/salary/hourly');
-  return { status: 'success' };
+  const back = formData.get('returnTo');
+  const safeBack =
+    typeof back === 'string' && back.startsWith('/owner/salary/hourly')
+      ? back
+      : '/owner/salary/hourly';
+  const sep = safeBack.includes('?') ? '&' : '?';
+  redirect(
+    `${safeBack}${sep}marked=${encodeURIComponent(marked.workerName)}` +
+      `&markedPaid=${parsed.data.isPaid ? '1' : '0'}`,
+  );
 }

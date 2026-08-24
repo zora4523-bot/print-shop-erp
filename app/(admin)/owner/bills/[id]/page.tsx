@@ -8,6 +8,7 @@ import { BillStatus } from '@/generated/prisma/enums';
 import { ROLE_LABELS } from '@/lib/auth/role-labels';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import {
+  ActionNotice,
   StatusBadge as UiStatusBadge,
   TableEmptyState,
 } from '@/components/ui-business';
@@ -29,7 +30,10 @@ import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
 import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ issued?: string }>;
+};
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -49,11 +53,15 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function OwnerBillDetailPage({ params }: PageProps) {
+export default async function OwnerBillDetailPage({
+  params,
+  searchParams,
+}: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('bill:view:all');
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
   const bill = await getAdminBillDetail(id);
   if (!bill) notFound();
 
@@ -100,6 +108,22 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {sp.issued === '1' ? (
+        <ActionNotice
+          tone="success"
+          title="账单已发布"
+          description="账单已进入可收款状态，后续新完工工单不会再自动追加到本账单。"
+          action={
+            <Link
+              href={`/owner/bills/${bill.id}`}
+              prefetch={false}
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              关闭提示
+            </Link>
+          }
+        />
+      ) : null}
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={`${bill.period} ${bill.salesUser.displayName}`} />

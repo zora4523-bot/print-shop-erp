@@ -58,13 +58,6 @@ export function IssueBillButton({
         ]}
         confirmLabel="确认发单"
       />
-      {visibleState?.status === 'success' ? (
-        <ActionNotice
-          tone="success"
-          title="账单已发布"
-          description="账单已进入可收款状态。"
-        />
-      ) : null}
       {visibleState?.status === 'error' ? (
         <ActionNotice
           tone="error"

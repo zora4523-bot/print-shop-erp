@@ -90,6 +90,35 @@ describe('bill mutation confirmations', () => {
     expect(html).not.toContain('账单状态已变化');
   });
 
+  it('uses the redirected page receipt instead of an unmounting inline success', () => {
+    actionState.current = { status: 'success' };
+    const html = renderToStaticMarkup(
+      <IssueBillButton
+        billId="bill-1"
+        period="2026-08"
+        recipientLabel="林客服（客服）"
+        totalAmount="1280.00"
+        orderCount={3}
+      />,
+    );
+
+    expect(html).not.toContain('账单已发布');
+    const pageSource = readFileSync(
+      path.join(
+        process.cwd(),
+        'app',
+        '(admin)',
+        'owner',
+        'bills',
+        '[id]',
+        'page.tsx',
+      ),
+      'utf8',
+    );
+    expect(pageSource).toContain("sp.issued === '1'");
+    expect(pageSource).toContain('title="账单已发布"');
+  });
+
   it('builds an exact payment preview including the terminal transition', () => {
     expect(
       paymentImpactItems(

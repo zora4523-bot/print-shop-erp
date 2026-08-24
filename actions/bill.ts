@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   generateBillsSchema,
@@ -88,7 +89,9 @@ export async function issueBillAction(
   }
   revalidatePath('/owner/bills');
   revalidatePath(`/owner/bills/${billId}`);
-  return { status: 'success' };
+  // DRAFT 分支会在成功后卸载 IssueBillButton；把回执提升到页面级，
+  // 避免最关键的单向状态变更看起来像“点击后什么也没发生”。
+  redirect(`/owner/bills/${billId}?issued=1`);
 }
 
 // Record a payment. `bill:mark-paid` is ADMIN-only; salesUser never

@@ -605,14 +605,18 @@ export async function markHourlyPayrollPaid(
   id: string,
   isPaid: boolean,
   now: Date = new Date(),
-): Promise<{ id: string; isPaid: boolean }> {
+): Promise<{ id: string; isPaid: boolean; workerName: string }> {
   // Same advisory lock as computeHourlyPayroll so a mark-paid landing
   // mid-recompute blocks until the recompute's tx commits — no more
   // paid-row amount overwrite .
   return db.$transaction(async (tx) => {
     const row = await tx.hourlyWorkerPayroll.findUnique({
       where: { id },
-      select: { workerId: true, month: true },
+      select: {
+        workerId: true,
+        month: true,
+        worker: { select: { displayName: true } },
+      },
     });
     if (!row) {
       throw new HourlyAggregateError('月结记录不存在');
@@ -636,6 +640,9 @@ export async function markHourlyPayrollPaid(
       },
       select: { id: true, isPaid: true },
     });
-    return updated;
+    return {
+      ...updated,
+      workerName: row.worker.displayName,
+    };
   });
 }

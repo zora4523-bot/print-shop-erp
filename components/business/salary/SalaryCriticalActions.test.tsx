@@ -148,6 +148,7 @@ describe('salary critical-action confirmations', () => {
         workerName="李师傅"
         month="2026-07"
         totalSalary="4800.00"
+        returnTo="/owner/salary/hourly?month=2026-07&paid=unpaid"
       />,
     );
 
@@ -155,6 +156,9 @@ describe('salary critical-action confirmations', () => {
     expect(dailyHtml).toContain('aria-haspopup="dialog"');
     expect(hourlyHtml).toContain('data-slot="alert-dialog-trigger"');
     expect(hourlyHtml).toContain('aria-haspopup="dialog"');
+    expect(hourlyHtml).toContain(
+      'name="returnTo" value="/owner/salary/hourly?month=2026-07&amp;paid=unpaid"',
+    );
   });
 
   it('previews the immutable CS payroll ledger with the same idempotent request', () => {

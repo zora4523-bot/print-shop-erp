@@ -697,6 +697,7 @@ describe('markHourlyPayrollPaid', () => {
     dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
       workerId: 'worker-1',
       month: '2026-05',
+      worker: { displayName: '李师傅' },
     });
     dbMock.hourlyWorkerPayroll.update.mockResolvedValue({
       id: 'p-1',
@@ -727,6 +728,7 @@ describe('markHourlyPayrollPaid', () => {
     dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
       workerId: 'worker-1',
       month: '2026-06',
+      worker: { displayName: '李师傅' },
     });
 
     await expect(
@@ -749,6 +751,23 @@ describe('markHourlyPayrollPaid', () => {
     const data = dbMock.hourlyWorkerPayroll.update.mock.calls[0][0].data;
     expect(data.isPaid).toBe(false);
     expect(data.paidAt).toBeNull();
+  });
+
+  it('returns the trusted worker name for a persistent page receipt', async () => {
+    const result = await markHourlyPayrollPaid(
+      'p-1',
+      false,
+      new Date('2026-05-15T04:00:00.000Z'),
+    );
+
+    expect(result).toEqual({
+      id: 'p-1',
+      isPaid: true,
+      workerName: '李师傅',
+    });
+    expect(
+      dbMock.hourlyWorkerPayroll.findUnique.mock.calls[0][0].select.worker,
+    ).toEqual({ select: { displayName: true } });
   });
 
   it('takes the per-(worker, month) advisory lock (Codex round 48 / P0)', async () => {
