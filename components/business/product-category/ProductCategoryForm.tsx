@@ -52,7 +52,7 @@ export function ProductCategoryForm(props: Props) {
   const success = state?.status === 'success';
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       {props.mode === 'create' ? (
         <div className="space-y-2">
           <Label htmlFor="parentId">上级分类</Label>

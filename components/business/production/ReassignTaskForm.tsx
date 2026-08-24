@@ -71,6 +71,7 @@ export function ReassignTaskForm({
   return (
     <form
       action={action}
+      aria-busy={pending}
       className="flex min-w-0 flex-wrap items-end justify-end gap-2"
     >
       <label className="min-w-48 flex-1 text-left text-xs">

@@ -14,7 +14,7 @@ export function SubmitOrderButton({ orderId }: { orderId: string }) {
 
   return (
     <div className="space-y-2">
-      <form action={formAction}>
+      <form action={formAction} aria-busy={pending}>
         <Button type="submit" disabled={pending}>
           {pending ? '提交中…' : '提交工单'}
         </Button>

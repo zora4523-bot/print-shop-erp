@@ -92,6 +92,7 @@ export function SalaryRuleSettingsForm({
     <form
       key={`${selectedKey}:${current?.id ?? 'new'}`}
       action={formAction}
+      aria-busy={pending}
       className="space-y-5"
       noValidate
     >

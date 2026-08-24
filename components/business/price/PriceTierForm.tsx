@@ -58,7 +58,7 @@ export function PriceTierForm(props: Props) {
   const defaultProductId = initial?.productId ?? props.products[0]?.id ?? '';
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor="productId">产品</Label>

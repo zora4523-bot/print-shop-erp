@@ -317,6 +317,7 @@ export function CreateCustomerPriceBookDraftForm({
     <form
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label={`创建${
         purpose === CustomerPriceBookPurpose.PROCESSING
           ? '加工费'
@@ -427,6 +428,7 @@ export function PublishCustomerPriceBookDraftForm({
     <form
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label="发布价目草稿"
       className="min-w-0 space-y-3 rounded-lg border p-3"
     >
@@ -746,6 +748,7 @@ export function CustomerPriceBookDraftRuleForm({
       key={rule.id}
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label={`编辑收费项目：${displayName}`}
       className="min-w-0 space-y-5 rounded-xl border bg-card p-4 shadow-sm"
     >

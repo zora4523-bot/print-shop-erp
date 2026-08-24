@@ -191,7 +191,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-4">
       <p className="text-xs text-muted-foreground">
         勾选要修改的款式；可改款式名、数量、规格和烫金颜色。已开工款式不能改数量。
       </p>

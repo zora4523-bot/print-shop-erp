@@ -28,7 +28,7 @@ export function UrgentToggleForm({ orderId, currentValue }: Props) {
     // "zero-JS plain form" comment is describing. The target boolean rides
     // in the hidden field below — it is computed from the server-rendered
     // currentValue, so it stays correct with or without hydration.
-    <form action={action} className="flex items-center gap-2">
+    <form action={action} aria-busy={pending} className="flex items-center gap-2">
       <input type="hidden" name="isUrgent" value={String(target)} />
       <Button
         type="submit"

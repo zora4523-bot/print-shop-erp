@@ -53,6 +53,7 @@ export function SfCollectToggleForm({
         formData.set('isSfCollect', String(target));
         startTransition(() => action(formData));
       }}
+      aria-busy={pending}
       className={
         requiresShippedChargeCorrection
           ? 'w-full space-y-4 rounded-lg border border-warning/40 bg-warning/5 p-3 sm:p-4'

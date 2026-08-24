@@ -56,7 +56,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
     targetType === 'PRODUCT' ? missingProducts : missingCategories;
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <input type="hidden" name="itemCount" value={rows.length} />
 
       <div className="grid gap-4 md:grid-cols-2">

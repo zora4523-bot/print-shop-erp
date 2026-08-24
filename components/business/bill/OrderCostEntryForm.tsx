@@ -59,7 +59,7 @@ export function OrderCostEntryForm({
   const isAdjustment = selectedCategory === OrderCostCategory.ADJUSTMENT;
 
   return (
-    <form ref={formRef} action={action} className="space-y-3">
+    <form ref={formRef} action={action} aria-busy={pending} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="orderId" value={orderId} />
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

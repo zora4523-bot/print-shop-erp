@@ -110,7 +110,7 @@ export function CreateOutsourceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-6">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">

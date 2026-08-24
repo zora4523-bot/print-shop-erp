@@ -122,7 +122,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-4">
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="font-medium">重做原因类型</span>

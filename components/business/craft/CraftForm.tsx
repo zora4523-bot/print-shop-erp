@@ -68,7 +68,7 @@ export function CraftForm(props: Props) {
   const success = state?.status === 'success';
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <TextField
         id="name"
         label="工艺名"

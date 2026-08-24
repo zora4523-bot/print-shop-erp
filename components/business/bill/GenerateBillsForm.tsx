@@ -24,6 +24,7 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
         const period = String(fd.get('period') ?? '');
         startTransition(() => action({ period }));
       }}
+      aria-busy={pending}
       className="space-y-2"
     >
       <div className="flex flex-wrap items-end gap-3">

@@ -42,6 +42,7 @@ export function AddSalaryAdjustmentForm({
     <form
       ref={formRef}
       action={action}
+      aria-busy={pending}
       className="grid gap-3 sm:grid-cols-[150px_150px_1fr_auto] sm:items-end"
     >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />

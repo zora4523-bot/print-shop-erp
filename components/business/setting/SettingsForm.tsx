@@ -27,7 +27,7 @@ export function SettingsForm({ initialValues }: Props) {
   >(updateSettingsAction, null);
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} aria-busy={pending} className="space-y-6">
       <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
         {SETTING_KEYS.map((key) => (
           <SettingField

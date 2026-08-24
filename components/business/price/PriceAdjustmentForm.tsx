@@ -91,7 +91,7 @@ export function PriceAdjustmentForm(props: Props) {
   }
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <TextField
         id="name"
         label="收费项目名称"

@@ -77,6 +77,7 @@ export function ReportTaskForm({
   return (
     <form
       action={formAction}
+      aria-busy={pending}
       className="space-y-4"
       onInput={(event) => {
         const nativeForm = event.currentTarget;
