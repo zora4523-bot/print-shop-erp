@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
 
@@ -7,7 +9,22 @@ vi.mock('@/actions/order', () => ({
   reviewOrderChangeRequestAction: vi.fn(),
 }));
 
-import { OrderChangePricingPreviewPanel } from '../OrderChangeReviewForm';
+import {
+  OrderChangePricingPreviewPanel,
+  orderChangeApprovalImpactItems,
+  orderChangeRejectionImpactItems,
+} from '../OrderChangeReviewForm';
+
+const source = readFileSync(
+  path.join(
+    process.cwd(),
+    'components',
+    'business',
+    'order',
+    'OrderChangeReviewForm.tsx',
+  ),
+  'utf8',
+);
 
 function preview(
   overrides: Partial<OrderChangePricingPreview> = {},
@@ -93,5 +110,54 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('只有填写审核备注并批准后');
     expect(html).toContain('未找到适用的价格阶梯');
     expect(html).not.toContain('¥960.00');
+  });
+
+  it('builds an approval confirmation from the current revision, diff and non-authoritative quote', () => {
+    const impact = orderChangeApprovalImpactItems(
+      preview({
+        items: [
+          preview().items[0]!,
+          {
+            ...preview().items[0]!,
+            changeIndex: 1,
+            operation: 'ADD',
+            sourceItemId: 'item-template',
+            previousName: null,
+            name: '红包 B',
+            oldSubtotal: null,
+          },
+        ],
+      }),
+    );
+
+    expect(impact).toContain(
+      '申请基于工单第 2 版，共 2 项款式变更（修改 1 项、新增 1 项）。',
+    );
+    expect(impact.join('\n')).toContain(
+      '修改款式“红包 A”：1,200 个，款式小计 ¥1000.00 → ¥960.00',
+    );
+    expect(impact.join('\n')).toContain(
+      '新增款式“红包 B”：1,200 个',
+    );
+    expect(impact.join('\n')).toContain('¥1000.00 → ¥960.00');
+    expect(impact.join('\n')).toContain('服务器会在事务内按最新规则再次报价');
+    expect(impact.join('\n')).toContain('工单应收');
+  });
+
+  it('does not turn the optional review remark into a new rejection requirement', () => {
+    const impact = orderChangeRejectionImpactItems().join('\n');
+
+    expect(impact).toContain('审核备注（如有）');
+    expect(impact).toContain('工单的款式、数量、计价与生产任务保持不变');
+    expect(impact).not.toContain('必填');
+  });
+
+  it('routes both approval and rejection through L2 confirmation instead of direct mutation buttons', () => {
+    expect(source.match(/<ConfirmActionDialog/g)).toHaveLength(2);
+    expect(source.match(/level="L2"/g)).toHaveLength(2);
+    expect(source).toContain("onConfirm={() => submit('APPROVE')}");
+    expect(source).toContain("onConfirm={() => submit('REJECT')}");
+    expect(source).not.toContain("onClick={() => submit('APPROVE')}");
+    expect(source).not.toContain("onClick={() => submit('REJECT')}");
   });
 });

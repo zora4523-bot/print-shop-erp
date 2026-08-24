@@ -19,6 +19,7 @@ import {
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { ConfirmActionDialog } from '@/components/ui-business';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 
 const MAX_BATCH_ORDERS = 30;
@@ -59,6 +60,45 @@ function SelectionCheckbox({
   );
 }
 
+export function batchScheduleImpactItems({
+  orders,
+  worker,
+}: {
+  orders: readonly PendingSchedulingOrderView[];
+  worker: SchedulingViewCandidate;
+}): string[] {
+  const taskCount = orders.reduce(
+    (sum, order) => sum + (order.compatibleTaskCounts[worker.id] ?? 0),
+    0,
+  );
+  const overrideTaskCount = orders.reduce(
+    (sum, order) => sum + (order.overrideTaskCounts[worker.id] ?? 0),
+    0,
+  );
+  const workerDescriptor =
+    machineTypeLabel(worker.machineType) || workerTypeLabel(worker.workerType);
+  const orderItems = orders.map((order) => {
+    const compatibleTaskCount = order.compatibleTaskCounts[worker.id] ?? 0;
+    const remainingAfterAssignment = Math.max(
+      0,
+      order.remainingTaskCount - compatibleTaskCount,
+    );
+    return `工单 ${order.orderNo}：分配 ${compatibleTaskCount} 个匹配任务；承诺交期 ${formatDateShanghai(order.promisedDate, '未设置')}；${remainingAfterAssignment === 0 ? '预计完成全部排产' : `仍有 ${remainingAfterAssignment} 个内部任务待排`}。`;
+  });
+
+  return [
+    `接单师傅：${worker.displayName} · ${workerDescriptor || '未设置岗位'}；当前在制 ${worker.pendingTaskCount + worker.inProgressTaskCount} 个任务。`,
+    `批量范围：${orders.length} 张工单，共 ${taskCount} 个匹配任务。`,
+    ...orderItems,
+    ...(overrideTaskCount > 0
+      ? [
+          `其中 ${overrideTaskCount} 个任务不在该师傅的熟练工艺推荐内，页面已填原因会写入存在非推荐派工项的对应工单操作日志。`,
+        ]
+      : []),
+    '每张工单使用独立事务；服务器会逐项重新校验并返回成功或失败，单张失败不会回滚其他已成功工单。',
+  ];
+}
+
 export function PendingSchedulingBoard({ orders, workers }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -78,6 +118,8 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
   )
     ? workerId
     : '';
+  const effectiveWorker =
+    workers.find((worker) => worker.id === effectiveWorkerId) ?? null;
   const selectableOrders = useMemo(
     () =>
       effectiveWorkerId
@@ -108,6 +150,9 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
     (sum, order) => sum + order.totalQuantity,
     0,
   );
+  const confirmationImpactItems = effectiveWorker
+    ? batchScheduleImpactItems({ orders: selectedOrders, worker: effectiveWorker })
+    : [];
   const selectAllIds = selectableOrders
     .slice(0, MAX_BATCH_ORDERS)
     .map((order) => order.id);
@@ -234,8 +279,8 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
               ))}
             </select>
           </div>
-          <Button
-            type="button"
+          <ConfirmActionDialog
+            level="L2"
             disabled={
               pending ||
               selectedOrders.length === 0 ||
@@ -243,11 +288,21 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
               (selectedOverrideTaskCount > 0 &&
                 overrideReason.trim().length === 0)
             }
-            onClick={submitBatch}
-            className="min-h-11"
-          >
-            {pending ? '正在分配…' : '确认分配所选工艺'}
-          </Button>
+            trigger={
+              <Button type="button" aria-busy={pending} className="min-h-11">
+                {pending ? '正在分配…' : '确认分配所选工艺'}
+              </Button>
+            }
+            title={
+              effectiveWorker
+                ? `确认将 ${selectedTaskCount} 个任务分配给 ${effectiveWorker.displayName}？`
+                : '确认批量分配任务？'
+            }
+            description="请核对已选工单、接单师傅、匹配任务数与承诺交期。确认后仅创建该师傅当前可承接的剩余任务。"
+            impactItems={confirmationImpactItems}
+            confirmLabel={`确认分配 ${selectedTaskCount} 个任务`}
+            onConfirm={submitBatch}
+          />
         </div>
         {selectedOverrideTaskCount > 0 ? (
           <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3">

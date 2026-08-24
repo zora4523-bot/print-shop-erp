@@ -19,6 +19,7 @@ import type {
 } from '@/actions/order.types';
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
 import { Button } from '@/components/ui/button';
+import { ConfirmActionDialog } from '@/components/ui-business';
 
 type Props = {
   requestId: string;
@@ -32,6 +33,58 @@ function deltaMoney(value: string): string {
   if (value.startsWith('-')) return `-¥${value.slice(1)}`;
   if (value === '0.00') return '¥0.00';
   return `+¥${value}`;
+}
+
+export function orderChangeApprovalImpactItems(
+  preview: OrderChangePricingPreview,
+): string[] {
+  const addedCount = preview.items.filter(
+    (item) => item.operation === 'ADD',
+  ).length;
+  const updatedCount = preview.items.length - addedCount;
+  const changeSummary = [
+    updatedCount > 0 ? `修改 ${updatedCount} 项` : null,
+    addedCount > 0 ? `新增 ${addedCount} 项` : null,
+  ]
+    .filter((item): item is string => item !== null)
+    .join('、');
+  const pricingSummary =
+    preview.newTotal === null || preview.delta === null
+      ? `计价预览不完整：当前总额 ${money(preview.oldTotal)}，新总额和差额暂无法计算。`
+      : `计价预览：${money(preview.oldTotal)} → ${money(preview.newTotal)}（差额 ${deltaMoney(preview.delta)}）。`;
+  const itemChanges = preview.items.map((item) => {
+    const itemLabel =
+      item.operation === 'ADD'
+        ? `新增款式“${item.name}”`
+        : `修改款式“${item.previousName ?? item.name}”${item.previousName && item.previousName !== item.name ? ` → “${item.name}”` : ''}`;
+    const subtotal = `${item.oldSubtotal === null ? '新增' : money(item.oldSubtotal)} → ${item.newSubtotal === null ? '待补全规则' : money(item.newSubtotal)}`;
+    const pricingImpact =
+      item.priceImpact === 'UNCHANGED'
+        ? '不影响计价'
+        : item.priceImpact === 'QUOTED'
+          ? '已按当前规则计价'
+          : '当前无法计价';
+    const errors =
+      item.errors.length > 0
+        ? `；计价提示：${item.errors.join('；')}`
+        : '';
+    return `${itemLabel}：${item.quantity.toLocaleString('zh-CN')} 个，款式小计 ${subtotal}，${pricingImpact}${errors}。`;
+  });
+
+  return [
+    `申请基于工单第 ${preview.baseRevision} 版，共 ${preview.items.length} 项款式变更${changeSummary ? `（${changeSummary}）` : ''}。`,
+    ...itemChanges,
+    `${pricingSummary}批准时服务器会在事务内按最新规则再次报价，不会直接写入预览金额。`,
+    '批准后会同步相关款式、数量、待开工任务计划数量与工单应收，并增加工单修订版本。',
+  ];
+}
+
+export function orderChangeRejectionImpactItems(): string[] {
+  return [
+    '该修改申请会标记为已拒绝，并保存当前已填审核备注（如有）。',
+    '现有工单的款式、数量、计价与生产任务保持不变。',
+    '已拒绝的申请不能再次审批；如仍需修改，需要重新发起申请。',
+  ];
 }
 
 export function OrderChangePricingPreviewPanel({
@@ -187,6 +240,10 @@ export function OrderChangeReviewForm({ requestId }: Props) {
   const preview =
     previewState?.status === 'success' ? previewState.preview : null;
   const approvalNeedsRemark = preview?.requiresReviewRemark ?? false;
+  const approvalImpactItems = preview
+    ? orderChangeApprovalImpactItems(preview)
+    : [];
+  const rejectionImpactItems = orderChangeRejectionImpactItems();
   const approveDisabled =
     pending ||
     previewPending ||
@@ -194,7 +251,11 @@ export function OrderChangeReviewForm({ requestId }: Props) {
     (approvalNeedsRemark && reviewRemark.trim() === '');
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2">
+    <form
+      onSubmit={handleSubmit}
+      aria-busy={pending || previewPending}
+      className="space-y-2"
+    >
       {preview ? <OrderChangePricingPreviewPanel preview={preview} /> : null}
       {previewPending && !preview ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -239,27 +300,42 @@ export function OrderChangeReviewForm({ requestId }: Props) {
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
+        <ConfirmActionDialog
+          level="L2"
           disabled={approveDisabled}
-          onClick={() => submit('APPROVE')}
-          className="min-h-11"
-        >
-          {pending
-            ? '处理中…'
-            : approvalNeedsRemark
-              ? '填写沿用说明并批准（将再次报价）'
-              : '批准并按最新规则同步工单'}
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
+          trigger={
+            <Button type="button" className="min-h-11">
+              {pending
+                ? '处理中…'
+                : approvalNeedsRemark
+                  ? '填写沿用说明并批准（将再次报价）'
+                  : '批准并按最新规则同步工单'}
+            </Button>
+          }
+          title="批准这项工单修改申请？"
+          description="请核对当前的只读计价预览和审核备注。确认后服务器会再次校验申请版本、工单状态与最新价格规则。"
+          impactItems={approvalImpactItems}
+          confirmLabel="确认批准并同步工单"
+          onConfirm={() => submit('APPROVE')}
+        />
+        <ConfirmActionDialog
+          level="L2"
           disabled={pending}
-          onClick={() => submit('REJECT')}
-          className="min-h-11"
-        >
-          拒绝申请
-        </Button>
+          trigger={
+            <Button
+              type="button"
+              variant="destructive"
+              className="min-h-11"
+            >
+              拒绝申请
+            </Button>
+          }
+          title="拒绝这项工单修改申请？"
+          description="拒绝后不会改动工单内容。如需说明原因，可在上方填写审核备注；拒绝时不强制填写。"
+          impactItems={rejectionImpactItems}
+          confirmLabel="确认拒绝申请"
+          onConfirm={() => submit('REJECT')}
+        />
       </div>
     </form>
   );

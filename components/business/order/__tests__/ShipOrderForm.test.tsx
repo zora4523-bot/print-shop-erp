@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { actionState } = vi.hoisted(() => ({
@@ -6,7 +8,8 @@ const { actionState } = vi.hoisted(() => ({
     current: null as null | {
       status: 'invalid';
       fieldErrors: Record<string, string[]>;
-    },
+    } | { status: 'error'; message: string },
+    pending: false,
   },
 }));
 
@@ -15,7 +18,7 @@ vi.mock('react', async (importOriginal) => {
   return {
     ...actual,
     useActionState: () => [actionState.current, vi.fn()],
-    useTransition: () => [false, vi.fn()],
+    useTransition: () => [actionState.pending, vi.fn()],
   };
 });
 
@@ -23,7 +26,18 @@ vi.mock('@/actions/order', () => ({
   shipOrderAction: vi.fn(),
 }));
 
-import { ShipOrderForm } from '../ShipOrderForm';
+import { ShipOrderForm, shipOrderImpactItems } from '../ShipOrderForm';
+
+const source = readFileSync(
+  path.join(
+    process.cwd(),
+    'components',
+    'business',
+    'order',
+    'ShipOrderForm.tsx',
+  ),
+  'utf8',
+);
 
 const shipment = {
   id: 'shipment-1',
@@ -40,9 +54,55 @@ const shipment = {
 
 beforeEach(() => {
   actionState.current = null;
+  actionState.pending = false;
 });
 
 describe('ShipOrderForm external-sales charge fields', () => {
+  it('states the exact L2 shipping contract without inventing inventory effects or a terminal state', () => {
+    const impact = shipOrderImpactItems({
+      shipments: [shipment],
+      isExternalSales: true,
+      isSfCollect: false,
+      values: {
+        trackingNos: ['ZTO-20260824'],
+        shippingFees: ['21.50'],
+        packingMaterialFees: ['5.00'],
+      },
+    }).join('\n');
+
+    expect(impact).toContain(
+      '地址 1（张三）：运单号 ZTO-20260824，对客快递费 ¥21.50，打包耗材费 ¥5.00',
+    );
+    expect(impact).toContain('从估算转为最终收费');
+    expect(impact).toContain('重算应收总额');
+    expect(impact).toContain('SHIPPED（已发货），这不是终态');
+    expect(impact).toContain('提交“工单已发货”通知任务');
+    expect(impact).toContain('是否送达以通知记录或队列处理结果为准');
+    expect(impact).toContain('不会扣减库存');
+  });
+
+  it('describes SF collect charges without claiming that shipping is billed to the customer', () => {
+    const impact = shipOrderImpactItems({
+      shipments: [shipment],
+      isExternalSales: true,
+      isSfCollect: true,
+      values: { packingMaterialFees: ['6.00'] },
+    }).join('\n');
+
+    expect(impact).toContain('对客快递费 ¥0.00（顺丰到付）');
+    expect(impact).toContain('打包耗材费 ¥6.00');
+  });
+
+  it('opens the shared L2 confirmation before dispatching the shipping action', () => {
+    expect(source).toContain('<ConfirmActionDialog');
+    expect(source).toContain('level="L2"');
+    expect(source).toContain('onSubmit={handleSubmit}');
+    expect(source).toContain('onConfirm={confirmShipment}');
+    expect(source).not.toContain(
+      'action={(fd) => startTransition(() => action(fd))}',
+    );
+  });
+
   it('locks SF collect shipping inputs to zero while keeping packing material editable and required', () => {
     const html = renderToStaticMarkup(
       <ShipOrderForm
@@ -143,5 +203,23 @@ describe('ShipOrderForm external-sales charge fields', () => {
     expect(html).toContain(
       'id="shipment-shipment-1-packing-error" role="alert"',
     );
+  });
+
+  it('marks the form busy and hides stale failure feedback during resubmission', () => {
+    actionState.current = { status: 'error', message: '工单状态已经变化' };
+    actionState.pending = true;
+
+    const html = renderToStaticMarkup(
+      <ShipOrderForm
+        orderId="order-1"
+        shipments={[shipment]}
+        isExternalSales
+        isSfCollect={false}
+      />,
+    );
+
+    expect(html).toMatch(/<form[^>]*aria-busy="true"/);
+    expect(html).toContain('处理中…');
+    expect(html).not.toContain('工单状态已经变化');
   });
 });

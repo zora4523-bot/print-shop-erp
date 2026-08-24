@@ -276,6 +276,17 @@ test.describe('生产流程 — golden path', () => {
       await page
         .getByRole('button', { name: /^确认 1 个地址已发货$/ })
         .click();
+      const shipDialog = page.getByRole('alertdialog', {
+        name: '确认 1 个地址已发货？',
+      });
+      await expect(shipDialog).toContainText('从估算转为最终收费');
+      await expect(shipDialog).toContainText('重算应收总额');
+      await expect(shipDialog).toContainText('SHIPPED（已发货），这不是终态');
+      await expect(shipDialog).toContainText('提交“工单已发货”通知任务');
+      await expect(shipDialog).toContainText('本次发货不会扣减库存');
+      await shipDialog
+        .getByRole('button', { name: '确认发货并重算应收', exact: true })
+        .click();
       await expect(
         page
           .getByRole('heading', { level: 1 })
