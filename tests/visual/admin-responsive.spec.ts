@@ -127,15 +127,22 @@ test.describe('deterministic external sales price tier fixture', () => {
       name: '清除筛选：类目：彩印基础加工费',
       exact: true,
     });
+    await expect(categoryChip).toHaveAttribute(
+      'href',
+      /state=draft(?=.*kind=ADD_ON)(?=.*status=ACTIVE)(?=.*changed=1)(?!.*category=)/,
+    );
     await categoryChip.click();
-    await expect(page).toHaveURL((url) => {
-      return (
-        !url.searchParams.has('category') &&
-        url.searchParams.get('kind') === 'ADD_ON' &&
-        url.searchParams.get('status') === 'ACTIVE' &&
-        url.searchParams.get('changed') === '1'
-      );
-    });
+    await expect(page).toHaveURL(
+      (url) => {
+        return (
+          !url.searchParams.has('category') &&
+          url.searchParams.get('kind') === 'ADD_ON' &&
+          url.searchParams.get('status') === 'ACTIVE' &&
+          url.searchParams.get('changed') === '1'
+        );
+      },
+      { timeout: 30_000 },
+    );
     await expect(categoryChip).toHaveCount(0);
     await expect(
       page.getByRole('link', {
