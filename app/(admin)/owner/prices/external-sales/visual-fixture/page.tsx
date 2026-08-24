@@ -17,8 +17,21 @@ import {
 import { VisualFixturePriceTierPanel } from './VisualFixturePriceTierPanel';
 
 type PageProps = {
-  searchParams: Promise<{ state?: string | string[] }>;
+  searchParams: Promise<{
+    state?: string | string[];
+    q?: string | string[];
+    category?: string | string[];
+    subject?: string | string[];
+    kind?: string | string[];
+    calculation?: string | string[];
+    quantity?: string | string[];
+    automation?: string | string[];
+    status?: string | string[];
+    changed?: string | string[];
+  }>;
 };
+
+const FIXTURE_PATH = '/owner/prices/external-sales/visual-fixture';
 
 export const metadata = {
   title: '收费工作台视觉验收 · 红包印刷 ERP',
@@ -43,7 +56,8 @@ export default async function ExternalSalesPriceVisualFixturePage({
 }: PageProps) {
   if (process.env.NODE_ENV === 'production') notFound();
   await requirePermission('dict:price:manage');
-  const requestedState = first((await searchParams).state);
+  const params = await searchParams;
+  const requestedState = first(params.state);
   const state =
     requestedState === 'draft-piece'
       ? 'draft-piece'
@@ -52,6 +66,9 @@ export default async function ExternalSalesPriceVisualFixturePage({
         : 'current';
   const hasDraft = state !== 'current';
   const perPiece = state === 'draft-piece';
+  const kind = first(params.kind);
+  const automation = first(params.automation);
+  const status = first(params.status);
   const priceTiers = perPiece
     ? VISUAL_PER_PIECE_PRICE_TIERS
     : VISUAL_PRICE_TIERS;
@@ -97,21 +114,32 @@ export default async function ExternalSalesPriceVisualFixturePage({
         purpose="processing"
         workspaceStatus="CURRENT"
         purposeHrefs={{ processing: '#', logistics: '#' }}
-        searchAction="#"
-        hiddenSearchFields={{ purpose: 'processing' }}
+        searchAction={FIXTURE_PATH}
+        hiddenSearchFields={{ state }}
         filters={{
-          query: '',
-          category: '',
-          subject: '',
-          kind: '',
-          calculation: '',
-          quantity: '',
-          automation: '',
-          status: '',
-          changedOnly: false,
+          query: first(params.q),
+          category: first(params.category),
+          subject: first(params.subject),
+          kind:
+            kind === 'BASE' || kind === 'ADD_ON' || kind === 'REFERENCE'
+              ? kind
+              : '',
+          calculation: first(params.calculation),
+          quantity: first(params.quantity),
+          automation:
+            automation === 'AUTO' || automation === 'MANUAL'
+              ? automation
+              : '',
+          status:
+            status === 'ACTIVE' || status === 'INACTIVE' ? status : '',
+          changedOnly: first(params.changed) === '1',
         }}
-        filterOptions={{ categories: [], subjects: [], calculations: [] }}
-        clearFiltersHref="#"
+        filterOptions={{
+          categories: [{ value: 'print', label: '彩印基础加工费' }],
+          subjects: [{ value: 'paper', label: VISUAL_TIER_PAPER }],
+          calculations: [{ value: 'fixed', label: '整批固定金额' }],
+        }}
+        clearFiltersHref={`${FIXTURE_PATH}?state=${state}`}
         items={[item]}
         selectedItem={item}
         selectedItemId={item.id}

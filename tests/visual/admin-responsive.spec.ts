@@ -68,6 +68,69 @@ test.describe('deterministic external sales price tier fixture', () => {
   }, testInfo) => {
     await checkRoutes(page, testInfo, priceTierFixtureRoutes(), 'dark');
   });
+
+  test('mobile pricing filters preserve focus, height, and single-chip removal', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'admin-393x852');
+    await page.goto(
+      '/owner/prices/external-sales/visual-fixture?state=draft&category=print&kind=ADD_ON&status=ACTIVE&changed=1',
+    );
+    await expect(
+      page.getByRole('heading', {
+        name: '收费工作台视觉验收',
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    const trigger = page.getByRole('button', {
+      name: '打开更多筛选，已启用 4 项',
+      exact: true,
+    });
+    await trigger.click();
+    const dialog = page.getByRole('dialog', {
+      name: '更多筛选',
+      exact: true,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel('收费类目', { exact: true })).toBeFocused();
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.height).toBeLessThanOrEqual(852 * 0.8 + 1);
+    await expectViewportGate(page, testInfo);
+    await expectA11yGate(page);
+    await attachCandidateScreenshot(
+      page,
+      testInfo,
+      'admin',
+      'pricing-filter-sheet-light',
+    );
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    const categoryChip = page.getByRole('link', {
+      name: '清除筛选：类目：彩印基础加工费',
+      exact: true,
+    });
+    await categoryChip.click();
+    await expect(page).toHaveURL((url) => {
+      return (
+        !url.searchParams.has('category') &&
+        url.searchParams.get('kind') === 'ADD_ON' &&
+        url.searchParams.get('status') === 'ACTIVE' &&
+        url.searchParams.get('changed') === '1'
+      );
+    });
+    await expect(categoryChip).toHaveCount(0);
+    await expect(
+      page.getByRole('link', {
+        name: '清除筛选：类型：附加费',
+        exact: true,
+      }),
+    ).toBeVisible();
+  });
 });
 
 test.describe('sales workspace', () => {
@@ -309,11 +372,39 @@ async function prepareOrderFiltersState(page: Page) {
   const filters = page.locator('section').filter({
     has: page.getByRole('heading', { name: '筛选工单', exact: true }),
   });
-  const filterPanel = filters.locator('#order-list-filter-controls');
-  await expect(filterPanel).not.toHaveAttribute('open', '');
-  await filterPanel.locator('summary').first().click();
-  await expect(filterPanel).toHaveAttribute('open', '');
-  await expect(filterPanel.locator('details').first()).toHaveAttribute('open', '');
+  const mobile = (page.viewportSize()?.width ?? 1280) < 640;
+  if (mobile) {
+    const filterTrigger = filters.getByRole('button', {
+      name: /打开筛选条件/,
+    });
+    await expect(filterTrigger).toBeVisible();
+    await filterTrigger.click();
+    const filterDialog = page.getByRole('dialog', {
+      name: '筛选工单',
+      exact: true,
+    });
+    await expect(filterDialog).toBeVisible();
+    await expect(filterDialog.locator('details').first()).toHaveAttribute(
+      'open',
+      '',
+    );
+    const dialogBox = await filterDialog.boundingBox();
+    const viewportHeight = page.viewportSize()?.height ?? 0;
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.height).toBeLessThanOrEqual(viewportHeight * 0.8 + 1);
+    await page.keyboard.press('Escape');
+    await expect(filterDialog).toBeHidden();
+    await expect(filterTrigger).toBeFocused();
+  } else {
+    const filterPanel = filters.locator('#order-list-filter-controls');
+    await expect(filterPanel).not.toHaveAttribute('open', '');
+    await filterPanel.locator('summary').first().click();
+    await expect(filterPanel).toHaveAttribute('open', '');
+    await expect(filterPanel.locator('details').first()).toHaveAttribute(
+      'open',
+      '',
+    );
+  }
   expect(
     await filters
       .getByLabel('已启用的筛选条件')
