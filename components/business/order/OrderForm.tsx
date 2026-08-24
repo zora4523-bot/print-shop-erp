@@ -96,6 +96,32 @@ type LogisticsQuoteViewState = {
 
 type QuoteFacts = Parameters<typeof quoteFactsKey>[0];
 
+type OrderFormPendingStateInput = {
+  localDraftReady: boolean;
+  submitting: boolean;
+  uploading: boolean;
+  quoting: boolean;
+  logisticsQuoting: boolean;
+};
+
+export function resolveOrderFormPendingState({
+  localDraftReady,
+  submitting,
+  uploading,
+  quoting,
+  logisticsQuoting,
+}: OrderFormPendingStateInput) {
+  return {
+    busy:
+      !localDraftReady ||
+      submitting ||
+      uploading ||
+      quoting ||
+      logisticsQuoting,
+    lockNavigation: submitting || uploading,
+  };
+}
+
 const BLANK_ITEM: CreateOrderInput['items'][number] = {
   name: '',
   productId: null,
@@ -352,6 +378,13 @@ export function OrderForm({
         ? '本地旧草稿已损坏或版本过旧，已安全忽略。'
         : null;
   const localDraftStatusError = localDraftError ?? detectedLocalDraftError;
+  const pendingState = resolveOrderFormPendingState({
+    localDraftReady,
+    submitting,
+    uploading,
+    quoting,
+    logisticsQuoting,
+  });
 
   useEffect(() => {
     itemFieldIdsRef.current = itemsArray.fields.map((field) => field.id);
@@ -488,8 +521,8 @@ export function OrderForm({
 
   const onValid: SubmitHandler<CreateOrderInput> = (data) => {
     // The disabled submit button covers clicks; this guard also blocks Enter
-    // key or programmatic submits while an authoritative logistics quote is in flight.
-    if (createdDraft || logisticsQuoting) return;
+    // key or programmatic submits while an authoritative quote is in flight.
+    if (createdDraft || quoting || logisticsQuoting) return;
     const fieldIds = itemsArray.fields.map((field) => field.id);
     const queueSnapshot = Object.fromEntries(
       fieldIds.map((fieldId) => [fieldId, pendingDesigns[fieldId] ?? []]),
@@ -982,7 +1015,7 @@ export function OrderForm({
       onSubmit={handleSubmit(onValid)}
       className="space-y-4"
       noValidate
-      aria-busy={!localDraftReady}
+      aria-busy={pendingState.busy}
     >
       {pendingLocalDraft ? (
         <section
@@ -1010,7 +1043,10 @@ export function OrderForm({
         </section>
       ) : null}
 
-      <fieldset disabled={!localDraftReady} className="contents">
+      <fieldset
+        disabled={!localDraftReady || submitting || uploading}
+        className="contents"
+      >
       <div
         className="flex min-w-0 flex-col gap-2 sm:flex-row"
         role="tablist"
@@ -1901,6 +1937,7 @@ export function OrderForm({
           disabled={
             submitting ||
             uploading ||
+            quoting ||
             logisticsQuoting ||
             Boolean(createdDraft)
           }
@@ -1913,7 +1950,21 @@ export function OrderForm({
                 ? `创建工单（还有 ${formGaps.length} 个缺口）`
                 : '创建工单（草稿）'}
         </Button>
-        <Link href="/orders" className={buttonVariants({ variant: 'outline' })}>
+        <Link
+          href="/orders"
+          aria-disabled={pendingState.lockNavigation || undefined}
+          tabIndex={pendingState.lockNavigation ? -1 : undefined}
+          onClick={
+            pendingState.lockNavigation
+              ? (event) => event.preventDefault()
+              : undefined
+          }
+          className={`${buttonVariants({ variant: 'outline' })} ${
+            pendingState.lockNavigation
+              ? 'pointer-events-none cursor-not-allowed opacity-50'
+              : ''
+          }`}
+        >
           返回列表
         </Link>
       </div>

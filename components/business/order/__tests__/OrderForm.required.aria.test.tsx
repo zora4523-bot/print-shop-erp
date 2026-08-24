@@ -20,7 +20,11 @@ vi.mock('../design-upload-client', () => ({
   uploadOrderItemDesignFile: vi.fn(),
 }));
 
-import { OrderForm, type CraftOption } from '../OrderForm';
+import {
+  OrderForm,
+  resolveOrderFormPendingState,
+  type CraftOption,
+} from '../OrderForm';
 
 const crafts: CraftOption[] = [
   { id: 'craft-1', name: '烫金', isOutsource: false, isLowFrequency: false },
@@ -82,5 +86,51 @@ describe('OrderForm 必填字段的 required 语义', () => {
 
   it('加了 required 不等于换回浏览器原生气泡：form 仍是 noValidate', () => {
     expect(render()).toMatch(/<form[^>]*novalidate/i);
+  });
+
+  it.each([
+    ['本地草稿尚未就绪', { localDraftReady: false }],
+    ['正在创建工单', { submitting: true }],
+    ['正在上传设计图', { uploading: true }],
+    ['正在计算款式报价', { quoting: true }],
+    ['正在计算物流报价', { logisticsQuoting: true }],
+  ])('%s 时向读屏器声明表单忙碌', (_label, override) => {
+    expect(
+      resolveOrderFormPendingState({
+        localDraftReady: true,
+        submitting: false,
+        uploading: false,
+        quoting: false,
+        logisticsQuoting: false,
+        ...override,
+      }).busy,
+    ).toBe(true);
+  });
+
+  it('只在提交或上传这种不可安全离开的阶段锁住返回列表', () => {
+    const ready = {
+      localDraftReady: true,
+      submitting: false,
+      uploading: false,
+      quoting: false,
+      logisticsQuoting: false,
+    };
+
+    expect(resolveOrderFormPendingState(ready)).toEqual({
+      busy: false,
+      lockNavigation: false,
+    });
+    expect(
+      resolveOrderFormPendingState({ ...ready, submitting: true })
+        .lockNavigation,
+    ).toBe(true);
+    expect(
+      resolveOrderFormPendingState({ ...ready, uploading: true })
+        .lockNavigation,
+    ).toBe(true);
+    expect(
+      resolveOrderFormPendingState({ ...ready, logisticsQuoting: true })
+        .lockNavigation,
+    ).toBe(false);
   });
 });

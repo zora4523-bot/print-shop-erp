@@ -69,6 +69,19 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).toMatch(
       /type="submit"[\s\S]{0,180}disabled=\{[\s\S]{0,180}logisticsQuoting/,
     );
+    expect(source).toContain(
+      'if (createdDraft || quoting || logisticsQuoting) return;',
+    );
+  });
+
+  it('announces every pending phase and prevents unsafe navigation during writes', () => {
+    expect(source).toContain('aria-busy={pendingState.busy}');
+    expect(source).toContain(
+      'aria-disabled={pendingState.lockNavigation || undefined}',
+    );
+    expect(source).toContain(
+      "'pointer-events-none cursor-not-allowed opacity-50'",
+    );
   });
 });
 
@@ -89,7 +102,9 @@ describe('OrderForm local draft recovery', () => {
     expect(source).toContain('恢复本地草稿');
     expect(source).toContain('放弃本地草稿');
     expect(source).toContain('reset(pendingLocalDraft.values');
-    expect(source).toContain('disabled={!localDraftReady}');
+    expect(source).toMatch(
+      /<fieldset[\s\S]{0,120}disabled=\{!localDraftReady \|\| submitting \|\| uploading\}/,
+    );
     expect(source).not.toContain('reset(draft.values');
   });
 
