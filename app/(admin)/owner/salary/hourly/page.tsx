@@ -41,16 +41,25 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('salary:view:all');
   const sp = await searchParams;
+  const currentMonth = currentShanghaiMonth();
   const selectedMonth =
-    sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();
+    sp.month && /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.month)
+      ? sp.month
+      : currentMonth;
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
 
-  const rows = await listHourlyPayrolls({
-    month: selectedMonth,
-    workerId: sp.workerId,
-    isPaid,
-  });
+  // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
+  // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
+  // 传给客户端确认层。
+  const [rows, allMonthRows] = await Promise.all([
+    listHourlyPayrolls({
+      month: selectedMonth,
+      workerId: sp.workerId,
+      isPaid,
+    }),
+    listHourlyPayrolls({ month: selectedMonth }),
+  ]);
   const monthRange = parseShanghaiMonth(selectedMonth);
   const attendanceSummaries = await getAttendanceSummaries(
     rows.map((row) => row.workerId),
@@ -70,6 +79,24 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       new Decimal(0),
     )
     .toFixed(2);
+  const allMonthUnpaidRows = allMonthRows.filter((row) => !row.isPaid);
+  const recomputeContext = {
+    existingRecordCount: allMonthRows.length,
+    unpaidRecordCount: allMonthUnpaidRows.length,
+    paidRecordCount: allMonthRows.length - allMonthUnpaidRows.length,
+    unpaidTotal: allMonthUnpaidRows
+      .reduce(
+        (sum, row) =>
+          sum.plus(new Decimal(row.totalSalary as unknown as string)),
+        new Decimal(0),
+      )
+      .toFixed(2),
+    sampleRows: allMonthRows.slice(0, 5).map((row) => ({
+      workerName: row.worker.displayName,
+      totalSalary: String(row.totalSalary),
+      isPaid: row.isPaid,
+    })),
+  };
 
   return (
     <div className="space-y-6">
@@ -79,7 +106,11 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeHourlyForm defaultMonth={selectedMonth} maxMonth={currentShanghaiMonth()} />
+        <RecomputeHourlyForm
+          month={selectedMonth}
+          maxMonth={currentMonth}
+          context={recomputeContext}
+        />
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -180,7 +211,13 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       <PaymentStatusBadge isPaid={r.isPaid} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <MarkHourlyPaidForm id={r.id} currentPaid={r.isPaid} />
+                      <MarkHourlyPaidForm
+                        id={r.id}
+                        currentPaid={r.isPaid}
+                        workerName={r.worker.displayName}
+                        month={r.month}
+                        totalSalary={String(r.totalSalary)}
+                      />
                     </td>
                   </tr>
                 );

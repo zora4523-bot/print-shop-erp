@@ -259,6 +259,9 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                       <MarkPaidForm
                         id={r.id}
                         currentPaid={r.isPaid}
+                        workerName={r.worker.displayName}
+                        salaryDate={formatDateShanghai(r.date)}
+                        amount={String(r.actualSalary)}
                         returnTo={returnTo}
                       />
                     </div>

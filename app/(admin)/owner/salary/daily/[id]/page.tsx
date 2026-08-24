@@ -91,7 +91,14 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
           <p className="text-xs text-muted-foreground">状态</p>
           <div className="mt-2 flex items-center justify-between gap-2">
             <PaymentStatusBadge isPaid={salary.isPaid} />
-            <MarkPaidForm returnTo="/owner/salary/daily" id={salary.id} currentPaid={salary.isPaid} />
+            <MarkPaidForm
+              returnTo="/owner/salary/daily"
+              id={salary.id}
+              currentPaid={salary.isPaid}
+              workerName={salary.worker.displayName}
+              salaryDate={formatDateShanghai(salary.date)}
+              amount={String(salary.actualSalary)}
+            />
           </div>
         </div>
       </section>

@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { getCsPeriodDetail, isCsPeriodDue } from '@/lib/salary/cs';
 import {
   CsSalesEntryType,
+  Role,
   SalaryPeriodStatus,
 } from '@/generated/prisma/enums';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
@@ -81,6 +82,10 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
   const remainingCommission = Decimal.max(
     commissionTotal.minus(paidCommission),
     0,
+  );
+  const periodLabel = `${formatDateShanghai(period.periodStart)} ~ ${formatDateShanghai(period.periodEnd)}`;
+  const tierSalesTotal = new Decimal(period.totalSales as Decimal.Value).plus(
+    new Decimal(period.initialSales as Decimal.Value),
   );
 
   return (
@@ -188,9 +193,24 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
           <h2 className="text-base font-semibold">结算</h2>
           <p className="text-xs text-muted-foreground">
             周期 {ready ? '已到期' : '未到期'}；周期结束后的次日可手动结算，或由
-            cron 自动扫描结算。结算后会自动开启下一个周期。
+            cron 自动扫描结算。若结算时账号仍为启用客服，系统会衔接下一个周期。
           </p>
-          {ready ? <SettleCsPeriodButton periodId={period.id} /> : null}
+          {ready ? (
+            <SettleCsPeriodButton
+              periodId={period.id}
+              context={{
+                csUserName: period.csUser.displayName,
+                periodLabel,
+                tierSalesTotal: tierSalesTotal.toFixed(2),
+                baseTotal: baseTotal.toFixed(2),
+                paidBase: paidBase.toFixed(2),
+                paidCommission: paidCommission.toFixed(2),
+                willStartNextPeriod:
+                  period.csUser.role === Role.CUSTOMER_SERVICE &&
+                  period.csUser.isActive,
+              }}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -227,6 +247,8 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
         {remainingBase.gt(0) || remainingCommission.gt(0) ? (
           <CsPayrollPaymentForm
             periodId={period.id}
+            csUserName={period.csUser.displayName}
+            periodLabel={periodLabel}
             remainingBase={remainingBase.toFixed(2)}
             remainingCommission={remainingCommission.toFixed(2)}
             commissionAvailable={commission !== null}

@@ -1084,7 +1084,14 @@ export async function getCsPeriodDetail(id: string) {
       status: true,
       settledAt: true,
       createdAt: true,
-      csUser: { select: { id: true, displayName: true } },
+      csUser: {
+        select: {
+          id: true,
+          displayName: true,
+          role: true,
+          isActive: true,
+        },
+      },
       salesEntries: {
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
         select: {
