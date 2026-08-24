@@ -150,9 +150,7 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).toContain('生产安排');
     expect(html).toContain('张师傅');
-    expect(html).toContain(
-      'top:calc(3.5rem + env(safe-area-inset-top, 0px))',
-    );
+    expect(html).toContain('top:var(--admin-header-offset)');
     expect(html).toContain('z-[9]');
   });
 
