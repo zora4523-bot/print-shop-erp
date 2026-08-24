@@ -145,7 +145,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (pending || !canSubmit) return;
     const changes: OrderItemChangePayload[] = items.flatMap((item) => {
       const current = editable[item.id];
       if (!current.selected) return [];
@@ -205,6 +205,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 <input
                   type="checkbox"
                   checked={current.selected}
+                  disabled={pending}
                   onChange={(event) =>
                     updateItem(item.id, { selected: event.target.checked })
                   }
@@ -222,6 +223,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       value={current.name}
                       maxLength={64}
                       required
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, { name: event.target.value })
                       }
@@ -235,6 +237,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       step={1}
                       value={current.quantity}
                       required
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
                           quantity: Number(event.target.value),
@@ -247,6 +250,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                     <Input
                       value={current.specification}
                       maxLength={64}
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
                           specification: event.target.value,
@@ -259,6 +263,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                     <Input
                       value={current.foilColors}
                       maxLength={200}
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
                           foilColors: event.target.value,
@@ -279,6 +284,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           <input
             type="checkbox"
             checked={addEnabled}
+            disabled={pending}
             onChange={(event) => setAddEnabled(event.target.checked)}
             className="size-4"
           />
@@ -290,6 +296,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
               <span>参考现有款式（继承纸张、工艺和单价）</span>
               <select
                 value={templateItemId}
+                disabled={pending}
                 onChange={(event) => setTemplateItemId(event.target.value)}
                 className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
               >
@@ -306,6 +313,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 value={newName}
                 maxLength={64}
                 required
+                disabled={pending}
                 onChange={(event) => setNewName(event.target.value)}
               />
             </label>
@@ -317,6 +325,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 step={1}
                 value={newQuantity}
                 required
+                disabled={pending}
                 onChange={(event) => setNewQuantity(Number(event.target.value))}
               />
             </label>
@@ -325,6 +334,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
               <Input
                 value={newSpecification}
                 maxLength={64}
+                disabled={pending}
                 onChange={(event) => setNewSpecification(event.target.value)}
               />
             </label>
@@ -333,6 +343,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
               <Input
                 value={newFoilColors}
                 maxLength={200}
+                disabled={pending}
                 onChange={(event) => setNewFoilColors(event.target.value)}
               />
             </label>
@@ -348,6 +359,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           rows={3}
           maxLength={500}
           required
+          disabled={pending}
           className="w-full rounded-md border bg-background px-3 py-2"
           placeholder="写明客户要求、交期影响等，方便管理员审核"
         />

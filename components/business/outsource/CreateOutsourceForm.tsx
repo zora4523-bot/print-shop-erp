@@ -91,6 +91,7 @@ export function CreateOutsourceForm({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     const payload = {
       idempotencyKey,
       orderId,
@@ -126,6 +127,7 @@ export function CreateOutsourceForm({
                   id={`item-${it.id}`}
                   type="checkbox"
                   checked={!!selected[it.id]}
+                  disabled={pending}
                   onChange={(e) =>
                     setSelected((prev) => ({
                       ...prev,
@@ -164,18 +166,21 @@ export function CreateOutsourceForm({
           <Field
             label="外协厂名 *"
             value={supplierName}
+            disabled={pending}
             onChange={setSupplierName}
             errors={fieldErrors(state, 'supplierName')}
           />
           <Field
             label="联系方式"
             value={supplierContact}
+            disabled={pending}
             onChange={setSupplierContact}
             errors={fieldErrors(state, 'supplierContact')}
           />
           <Field
             label="工艺 / 内容"
             value={craftDescription}
+            disabled={pending}
             onChange={setCraftDescription}
             errors={fieldErrors(state, 'craftDescription')}
             full
@@ -183,6 +188,7 @@ export function CreateOutsourceForm({
           <Field
             label="特殊要求"
             value={specialRequirement}
+            disabled={pending}
             onChange={setSpecialRequirement}
             errors={fieldErrors(state, 'specialRequirement')}
             full
@@ -190,6 +196,7 @@ export function CreateOutsourceForm({
           <Field
             label="供应商应付金额（人工确认，元）"
             value={amount}
+            disabled={pending}
             onChange={setAmount}
             errors={fieldErrors(state, 'amount')}
             inputMode="decimal"
@@ -197,6 +204,7 @@ export function CreateOutsourceForm({
           <Field
             label="预计回货"
             value={expectedDate}
+            disabled={pending}
             onChange={setExpectedDate}
             errors={fieldErrors(state, 'expectedDate')}
             type="date"
@@ -204,6 +212,7 @@ export function CreateOutsourceForm({
           <Field
             label="备注"
             value={remark}
+            disabled={pending}
             onChange={setRemark}
             errors={fieldErrors(state, 'remark')}
             full
@@ -249,6 +258,7 @@ function fieldErrors(
 function Field({
   label,
   value,
+  disabled,
   onChange,
   errors,
   full,
@@ -257,6 +267,7 @@ function Field({
 }: {
   label: string;
   value: string;
+  disabled: boolean;
   onChange: (v: string) => void;
   errors: string[];
   full?: boolean;
@@ -274,6 +285,7 @@ function Field({
         id={inputId}
         type={type}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         inputMode={inputMode}
         aria-invalid={errors.length > 0}

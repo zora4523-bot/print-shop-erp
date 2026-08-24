@@ -21,6 +21,7 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
   return (
     <form
       action={(fd) => {
+        if (pending) return;
         const period = String(fd.get('period') ?? '');
         startTransition(() => action({ period }));
       }}
@@ -35,6 +36,7 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
             type="month"
             name="period"
             defaultValue={defaultPeriod}
+            disabled={pending}
             className="max-w-45"
           />
         </div>

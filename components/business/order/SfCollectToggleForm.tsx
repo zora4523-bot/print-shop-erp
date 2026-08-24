@@ -50,6 +50,7 @@ export function SfCollectToggleForm({
   return (
     <form
       action={(formData) => {
+        if (pending) return;
         formData.set('isSfCollect', String(target));
         startTransition(() => action(formData));
       }}
@@ -104,6 +105,7 @@ export function SfCollectToggleForm({
                       id={`${prefix}-province`}
                       name="sfShipmentDestinationProvince"
                       defaultValue={shipment.destinationProvince ?? ''}
+                      disabled={pending}
                       required
                       aria-required="true"
                       aria-invalid={Boolean(provinceError)}
@@ -134,6 +136,7 @@ export function SfCollectToggleForm({
                       type="text"
                       inputMode="decimal"
                       defaultValue={shipment.weightKg ?? ''}
+                      disabled={pending}
                       required
                       aria-required="true"
                       aria-invalid={Boolean(weightError)}
@@ -160,6 +163,7 @@ export function SfCollectToggleForm({
                       type="text"
                       inputMode="decimal"
                       defaultValue={shipment.shippingFee ?? ''}
+                      disabled={pending}
                       aria-invalid={Boolean(shippingError)}
                       aria-describedby={
                         shippingError
@@ -191,6 +195,7 @@ export function SfCollectToggleForm({
                       defaultValue={
                         shipment.customerChargeOverrideReason ?? ''
                       }
+                      disabled={pending}
                       rows={2}
                       maxLength={500}
                       aria-invalid={Boolean(reasonError)}

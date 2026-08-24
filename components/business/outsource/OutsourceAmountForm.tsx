@@ -64,6 +64,7 @@ export function OutsourceAmountForm({
             id="outsource-amount"
             name="amount"
             value={amount}
+            disabled={pending}
             onChange={(event) => setAmount(event.target.value)}
             inputMode="decimal"
             min="0"
@@ -79,6 +80,7 @@ export function OutsourceAmountForm({
             id="outsource-amount-reason"
             name="reason"
             value={reason}
+            disabled={pending}
             onChange={(event) => setReason(event.target.value)}
             maxLength={200}
             required

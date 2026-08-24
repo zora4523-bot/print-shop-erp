@@ -63,20 +63,27 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             name="customName"
             label="工单名称"
             full
-            disabled={FULL_ONLY_FIELDS.has('customName') && isShippingOnly}
+            disabled={
+              pending ||
+              (FULL_ONLY_FIELDS.has('customName') && isShippingOnly)
+            }
             initial={initial.customName}
             errors={fieldErrors(state, 'customName')}
           />
           <Field
             name="customerRef"
             label="客户名称/简称（选填）"
-            disabled={FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly}
+            disabled={
+              pending ||
+              (FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly)
+            }
             initial={initial.customerRef}
             errors={fieldErrors(state, 'customerRef')}
           />
           <Field
             name="expressCode"
             label="快递代码"
+            disabled={pending}
             initial={initial.expressCode}
             errors={fieldErrors(state, 'expressCode')}
           />
@@ -85,6 +92,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             label="收货信息"
             full
             multiline
+            disabled={pending}
             initial={initial.receiverAddress}
             errors={fieldErrors(state, 'receiverAddress')}
           />
@@ -92,6 +100,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             name="packageRequirement"
             label="包装要求"
             full
+            disabled={pending}
             initial={initial.packageRequirement}
             errors={fieldErrors(state, 'packageRequirement')}
           />
@@ -100,6 +109,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             label="工单备注"
             full
             multiline
+            disabled={pending}
             initial={initial.remark}
             errors={fieldErrors(state, 'remark')}
           />
@@ -108,6 +118,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
               name="promisedDate"
               label="承诺交期"
               type="date"
+              disabled={pending}
               initial={initial.promisedDate}
               errors={fieldErrors(state, 'promisedDate')}
             />
@@ -119,6 +130,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
                 name="isUrgent"
                 type="checkbox"
                 defaultChecked={initial.isUrgent}
+                disabled={pending}
                 className="h-4 w-4"
               />
               <Label htmlFor="isUrgent" className="text-sm">
