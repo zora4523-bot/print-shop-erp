@@ -17,6 +17,7 @@ const LOCKED_NAVIGATION_FORM_FILES = [
   'price/PriceTierForm.tsx',
   'product-category/ProductCategoryForm.tsx',
   'purchase/PurchaseOrderForm.tsx',
+  'salary/StartCsPeriodForm.tsx',
 ] as const;
 
 describe('pending mutation field locks', () => {
@@ -34,25 +35,6 @@ describe('pending mutation field locks', () => {
       ).toBeGreaterThan(0);
     },
   );
-
-  it('prevents the customer-service period form from navigating away while pending', () => {
-    const source = parseBusinessFile('salary/StartCsPeriodForm.tsx');
-    const links = findOpeningElements(source, 'Link');
-    const cancelLink = links.find((opening) =>
-      opening.getText(source).includes('/owner/salary/cs'),
-    );
-
-    expect(cancelLink).toBeDefined();
-    expect(jsxExpressionAttribute(cancelLink!, 'aria-disabled')).toContain(
-      'pending',
-    );
-    expect(jsxExpressionAttribute(cancelLink!, 'tabIndex')).toContain(
-      'pending',
-    );
-    expect(jsxExpressionAttribute(cancelLink!, 'onClick')).toContain(
-      'preventDefault',
-    );
-  });
 
   it.each(LOCKED_NAVIGATION_FORM_FILES)(
     '%s routes every link through the pending navigation guard',

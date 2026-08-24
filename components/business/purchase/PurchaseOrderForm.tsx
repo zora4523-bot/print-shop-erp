@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business/PendingLink';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';

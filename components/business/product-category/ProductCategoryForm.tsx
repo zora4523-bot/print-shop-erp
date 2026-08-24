@@ -4,7 +4,7 @@ import { useActionState } from 'react';
 import { ProductCategory } from '../../../generated/prisma/enums';
 import type { ProductCategoryNodeMutationResult } from '@/actions/owner-product-categories.types';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business/PendingLink';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';

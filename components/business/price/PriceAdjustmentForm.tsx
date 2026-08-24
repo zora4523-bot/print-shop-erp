@@ -7,7 +7,7 @@ import {
 } from '../../../generated/prisma/enums';
 import type { PriceMutationResult } from '@/actions/owner-prices.types';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business/PendingLink';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';

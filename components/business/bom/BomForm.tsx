@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business/PendingLink';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 

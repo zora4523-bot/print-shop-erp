@@ -4,9 +4,9 @@ import { useActionState, useTransition } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import Link from 'next/link';
 import { startCsPeriodAction } from '@/actions/owner-salary';
 import type { StartCsPeriodResult } from '@/actions/owner-salary.types';
+import { PendingLink } from '@/components/ui-business';
 
 export type CsUserOption = {
   id: string;
@@ -184,19 +184,13 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         <Button type="submit" disabled={pending || missingCsUsers}>
           {pending ? '创建中…' : '创建周期'}
         </Button>
-        <Link
+        <PendingLink
           href={missingCsUsers ? '/owner/accounts/new' : '/owner/salary/cs'}
-          aria-disabled={pending || undefined}
-          tabIndex={pending ? -1 : undefined}
-          onClick={pending ? (event) => event.preventDefault() : undefined}
-          className={`${buttonVariants({ variant: 'outline' })} ${
-            pending
-              ? 'pointer-events-none cursor-not-allowed opacity-50'
-              : ''
-          }`}
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
         >
           {missingCsUsers ? '新建客服账号' : '取消'}
-        </Link>
+        </PendingLink>
       </div>
       </fieldset>
     </form>

@@ -45,6 +45,8 @@ export type { DisabledReasonCause, DisabledReasonProps } from './DisabledReason'
 
 export { PendingButton } from './PendingButton';
 export type { PendingButtonProps } from './PendingButton';
+export { PendingLink } from './PendingLink';
+export type { PendingLinkProps } from './PendingLink';
 
 export { EnvNotice } from './EnvNotice';
 export type { EnvNoticeProps } from './EnvNotice';

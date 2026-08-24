@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { MachineType, WorkerType } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business/PendingLink';
+import { PendingLink } from '@/components/ui-business';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';

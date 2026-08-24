@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 
-type PendingLinkProps = ComponentProps<typeof Link> & {
+export type PendingLinkProps = ComponentProps<typeof Link> & {
   pending: boolean;
 };
 
