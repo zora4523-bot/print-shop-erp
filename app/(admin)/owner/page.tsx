@@ -49,7 +49,11 @@ import {
   DashboardQueue,
   type DashboardQueueItem,
 } from '@/components/business/dashboard/DashboardQueue';
-import { DeferredDashboardCharts } from '@/components/business/dashboard/DeferredDashboardCharts';
+import {
+  DeferredCategoryDistributionChart,
+  DeferredProductionTrendChart,
+  DeferredSalesRankingChart,
+} from '@/components/business/dashboard/DeferredDashboardCharts';
 import { Badge } from '@/components/ui/badge';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
@@ -241,15 +245,61 @@ export default async function OwnerDashboardPage() {
         </Suspense>
       </ErrorBoundary>
 
-      <ErrorBoundary
-        scope="section"
-        title="趋势图表暂时无法加载"
-        description="上方指标和关注列表仍可使用；请单独重试图表区域。"
+      <section
+        data-slot="dashboard-charts-deferred"
+        aria-label="Dashboard 统计图表"
+        className="space-y-4"
       >
-        <Suspense fallback={<DashboardChartsLoading />}>
-          <DashboardChartsSection />
-        </Suspense>
-      </ErrorBoundary>
+        <ErrorBoundary
+          scope="section"
+          title="产量趋势暂时无法加载"
+          description="销售排行和产品分布仍可使用；请重试当前图表。"
+        >
+          <Suspense
+            fallback={
+              <DashboardChartLoading label="近 30 天产量趋势" height="trend" />
+            }
+          >
+            <ProductionTrendChartSection />
+          </Suspense>
+        </ErrorBoundary>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ErrorBoundary
+            scope="section"
+            title="销售排行暂时无法加载"
+            description="产量趋势和产品分布仍可使用；请重试当前图表。"
+          >
+            <Suspense
+              fallback={
+                <DashboardChartLoading
+                  label="本月销售业绩 Top 10"
+                  height="detail"
+                />
+              }
+            >
+              <SalesRankingChartSection />
+            </Suspense>
+          </ErrorBoundary>
+
+          <ErrorBoundary
+            scope="section"
+            title="产品分布暂时无法加载"
+            description="产量趋势和销售排行仍可使用；请重试当前图表。"
+          >
+            <Suspense
+              fallback={
+                <DashboardChartLoading
+                  label="本月产品线分布"
+                  height="detail"
+                />
+              }
+            >
+              <CategoryDistributionChartSection />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
+      </section>
     </div>
   );
 }
@@ -690,37 +740,42 @@ function DashboardWatchlistLoading({ title }: { title: string }) {
   );
 }
 
-async function DashboardChartsSection() {
-  const [productionTrend, salesRanking, categoryDistribution] =
-    await Promise.all([
-      getProductionTrend(),
-      getSalesRanking(),
-      getCategoryDistribution(),
-    ]);
-
-  return (
-    <DeferredDashboardCharts
-      productionTrend={productionTrend}
-      salesRanking={salesRanking}
-      categoryDistribution={categoryDistribution}
-    />
-  );
+export async function ProductionTrendChartSection() {
+  const productionTrend = await getProductionTrend();
+  return <DeferredProductionTrendChart data={productionTrend} />;
 }
 
-function DashboardChartsLoading() {
+export async function SalesRankingChartSection() {
+  const salesRanking = await getSalesRanking();
+  return <DeferredSalesRankingChart data={salesRanking} />;
+}
+
+export async function CategoryDistributionChartSection() {
+  const categoryDistribution = await getCategoryDistribution();
+  return <DeferredCategoryDistributionChart data={categoryDistribution} />;
+}
+
+function DashboardChartLoading({
+  label,
+  height,
+}: {
+  label: string;
+  height: 'trend' | 'detail';
+}) {
   return (
     <div
       role="status"
       aria-busy="true"
       aria-live="polite"
-      className="space-y-4"
+      className="space-y-2"
     >
-      <span className="sr-only">正在加载统计图表</span>
-      <div className="h-[23rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
-        <div className="h-[25rem] animate-pulse rounded-xl border bg-card motion-reduce:animate-none" />
-      </div>
+      <span className="sr-only">正在加载{label}</span>
+      <div
+        aria-hidden="true"
+        className={`${
+          height === 'trend' ? 'h-[23rem]' : 'h-[25rem]'
+        } animate-pulse rounded-xl border bg-card motion-reduce:animate-none`}
+      />
       <SlowLoadingHint />
     </div>
   );

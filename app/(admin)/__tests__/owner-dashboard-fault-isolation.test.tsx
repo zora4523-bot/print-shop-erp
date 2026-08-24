@@ -12,6 +12,9 @@ const {
   getDueOrdersMock,
   getRecentOverReportsMock,
   getEndingPeriodsMock,
+  getProductionTrendMock,
+  getSalesRankingMock,
+  getCategoryDistributionMock,
 } = vi.hoisted(() => ({
   requirePermissionMock: vi.fn(),
   getTodayOrderStatsMock: vi.fn(),
@@ -21,6 +24,9 @@ const {
   getDueOrdersMock: vi.fn(),
   getRecentOverReportsMock: vi.fn(),
   getEndingPeriodsMock: vi.fn(),
+  getProductionTrendMock: vi.fn(),
+  getSalesRankingMock: vi.fn(),
+  getCategoryDistributionMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -42,12 +48,16 @@ vi.mock('@/lib/dashboard/owner-watchlist', () => ({
 }));
 
 vi.mock('@/lib/dashboard/owner-charts', () => ({
-  getProductionTrend: vi.fn(),
-  getSalesRanking: vi.fn(),
-  getCategoryDistribution: vi.fn(),
+  getProductionTrend: getProductionTrendMock,
+  getSalesRanking: getSalesRankingMock,
+  getCategoryDistribution: getCategoryDistributionMock,
 }));
 
-import OwnerDashboardPage from '@/app/(admin)/owner/page';
+import OwnerDashboardPage, {
+  CategoryDistributionChartSection,
+  ProductionTrendChartSection,
+  SalesRankingChartSection,
+} from '@/app/(admin)/owner/page';
 
 const pagePath = join(
   process.cwd(),
@@ -81,11 +91,18 @@ beforeEach(() => {
   getDueOrdersMock.mockReset();
   getRecentOverReportsMock.mockReset();
   getEndingPeriodsMock.mockReset();
+  getProductionTrendMock.mockReset();
+  getSalesRankingMock.mockReset();
+  getCategoryDistributionMock.mockReset();
 
   requirePermissionMock.mockResolvedValue({
     id: 'admin-1',
     displayName: '店主',
   });
+
+  getProductionTrendMock.mockResolvedValue([]);
+  getSalesRankingMock.mockResolvedValue([]);
+  getCategoryDistributionMock.mockResolvedValue([]);
   for (const read of [
     getTodayOrderStatsMock,
     getMonthlyBillStatsMock,
@@ -155,6 +172,9 @@ describe('owner dashboard fault isolation', () => {
       'getDueOrders()',
       'getRecentOverReports()',
       'getEndingPeriods()',
+      'getProductionTrend()',
+      'getSalesRanking()',
+      'getCategoryDistribution()',
     ]) {
       expect(page.split(call)).toHaveLength(2);
     }
@@ -164,8 +184,8 @@ describe('owner dashboard fault isolation', () => {
     );
     expect(page.indexOf('<h1')).toBeLessThan(page.indexOf('<ErrorBoundary'));
     expect(page).toContain('data-slot="dashboard-shortcuts"');
-    expect(page.match(/<ErrorBoundary/g)).toHaveLength(10);
-    expect(page.match(/<Suspense/g)).toHaveLength(10);
+    expect(page.match(/<ErrorBoundary/g)).toHaveLength(12);
+    expect(page.match(/<Suspense/g)).toHaveLength(12);
 
     for (const section of [
       'DashboardHeaderMetadata',
@@ -177,7 +197,9 @@ describe('owner dashboard fault isolation', () => {
       'DueOrdersWatchlist',
       'OverReportsWatchlist',
       'EndingPeriodsWatchlist',
-      'DashboardChartsSection',
+      'ProductionTrendChartSection',
+      'SalesRankingChartSection',
+      'CategoryDistributionChartSection',
     ]) {
       const usage = page.indexOf(`<${section}`);
       expect(usage).toBeGreaterThan(-1);
@@ -187,5 +209,25 @@ describe('owner dashboard fault isolation', () => {
 
     expect(page).not.toMatch(/const \[\s*today,\s*monthly,/);
     expect(page).not.toMatch(/\bcatch\s*\(/);
+  });
+
+  it('lets healthy charts render when a sibling chart read fails', async () => {
+    const trendFailure = new Error('trend read failed');
+    getProductionTrendMock.mockRejectedValueOnce(trendFailure);
+    getSalesRankingMock.mockResolvedValueOnce([
+      { userId: 'sales-1', displayName: '销售甲', role: 'SALES', amount: 12 },
+    ]);
+    getCategoryDistributionMock.mockResolvedValueOnce([
+      { categoryId: 'category-1', categoryName: '红包', count: 3 },
+    ]);
+
+    const trendResult = ProductionTrendChartSection();
+    await expect(SalesRankingChartSection()).resolves.toBeDefined();
+    await expect(CategoryDistributionChartSection()).resolves.toBeDefined();
+    await expect(trendResult).rejects.toBe(trendFailure);
+
+    expect(getProductionTrendMock).toHaveBeenCalledOnce();
+    expect(getSalesRankingMock).toHaveBeenCalledOnce();
+    expect(getCategoryDistributionMock).toHaveBeenCalledOnce();
   });
 });

@@ -72,8 +72,8 @@ describe('custom loading fallback slow-loading contract', () => {
       ['DashboardHeaderLoading', 'DashboardQueueLoading'],
       ['DashboardQueueLoading', 'DashboardStatsLoading'],
       ['DashboardStatsLoading', 'DashboardWatchlistLoading'],
-      ['DashboardWatchlistLoading', 'DashboardChartsSection'],
-      ['DashboardChartsLoading', undefined],
+      ['DashboardWatchlistLoading', 'ProductionTrendChartSection'],
+      ['DashboardChartLoading', undefined],
     ] as const;
 
     for (const [name, nextName] of fallbacks) {
