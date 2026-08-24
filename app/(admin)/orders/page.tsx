@@ -4,7 +4,7 @@ import { Role } from '../../../generated/prisma/enums';
 import { buttonVariants } from '@/components/ui/button';
 import { requireSession } from '@/lib/auth/session';
 import type { OrderListSearchParams } from '@/lib/order/list-query';
-import { PageHeader } from '@/components/ui-business';
+import { ErrorBoundary, PageHeader } from '@/components/ui-business';
 import { OrdersListContent } from './_components/OrdersListContent';
 import { OrdersListContentSkeleton } from './_components/OrdersListContentSkeleton';
 
@@ -35,12 +35,18 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
           ) : null
         }
       />
-      <Suspense fallback={<OrdersListContentSkeleton />}>
-        <OrdersListContent
-          searchParams={searchParams}
-          user={{ id: user.id, role: user.role }}
-        />
-      </Suspense>
+      <ErrorBoundary
+        scope="section"
+        title="工单页面数据暂时无法加载"
+        description="页头和新建工单入口仍可使用；请重试工单数据区域。"
+      >
+        <Suspense fallback={<OrdersListContentSkeleton />}>
+          <OrdersListContent
+            searchParams={searchParams}
+            user={{ id: user.id, role: user.role }}
+          />
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

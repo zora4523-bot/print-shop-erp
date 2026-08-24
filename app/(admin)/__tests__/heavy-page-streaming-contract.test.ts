@@ -9,7 +9,7 @@ function source(relativePath: string): string {
 }
 
 describe('heavy admin page streaming boundaries', () => {
-  it('authenticates the orders page before exposing its shell and keeps reads inside one Suspense child', () => {
+  it('authenticates before the orders shell and isolates filter, export, and list reads', () => {
     const page = source('app/(admin)/orders/page.tsx');
     const content = source(
       'app/(admin)/orders/_components/OrdersListContent.tsx',
@@ -19,11 +19,26 @@ describe('heavy admin page streaming boundaries', () => {
       page.indexOf('<PageHeader'),
     );
     expect(page.indexOf('<PageHeader')).toBeLessThan(page.indexOf('<Suspense'));
+    expect(page.indexOf('<PageHeader')).toBeLessThan(
+      page.indexOf('<ErrorBoundary'),
+    );
     expect(page).not.toContain('listOrdersPage(');
     expect(content.match(/listOrdersPage\(actor, query\)/g)).toHaveLength(1);
     expect(content.match(/getOrderListFilterOptions\(actor\)/g)).toHaveLength(1);
     expect(content.match(/listRecentOrderExports\(user\.id\)/g)).toHaveLength(1);
-    expect(content).toContain('await Promise.all([');
+    expect(content).toContain(
+      'const orderPagePromise = listOrdersPage(actor, query)',
+    );
+    expect(content).toContain(
+      'const filterOptionsPromise = getOrderListFilterOptions(actor)',
+    );
+    expect(content.match(/<ErrorBoundary/g)).toHaveLength(3);
+    expect(content.match(/<Suspense/g)).toHaveLength(3);
+    expect(content).toContain('orderPagePromise={orderPagePromise}');
+    expect(content).toContain('recentExportsPromise={recentExportsPromise}');
+    expect(content).toContain('工单筛选暂时无法加载');
+    expect(content).toContain('导出记录暂时无法加载');
+    expect(content).toContain('工单数据暂时无法加载');
     expect(content).not.toMatch(/\bcatch\s*\(/);
   });
 
