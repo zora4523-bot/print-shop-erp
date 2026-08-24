@@ -32,10 +32,11 @@ export {
   EMPTY_NO_ACCESS_TITLE,
 } from './empty-state-copy';
 
-export { ContentSkeleton } from './ContentSkeleton';
+export { ContentSkeleton, SlowLoadingHint } from './ContentSkeleton';
 export type {
   ContentSkeletonProps,
   ContentSkeletonVariant,
+  SlowLoadingHintProps,
 } from './ContentSkeleton';
 
 export { ErrorBoundary } from './ErrorBoundary';

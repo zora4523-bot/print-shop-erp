@@ -42,8 +42,9 @@ describe('heavy admin page streaming boundaries', () => {
     expect(content).not.toMatch(/\bcatch\s*\(/);
   });
 
-  it('checks warehouse permission before its shell and starts each fresh read once', () => {
+  it('checks warehouse permission, starts each read once, and isolates warehouse regions', () => {
     const page = source('app/(admin)/owner/warehouses/page.tsx');
+    const skeleton = source('components/ui-business/ContentSkeleton.tsx');
 
     expect(page.indexOf("await requirePermission('warehouse:manage')")).toBeLessThan(
       page.indexOf('<PageHeader'),
@@ -52,7 +53,28 @@ describe('heavy admin page streaming boundaries', () => {
     expect(page.match(/getWarehouseDashboard\(\)/g)).toHaveLength(1);
     expect(page.match(/listRecentStockTransfers\(8\)/g)).toHaveLength(1);
     expect(page.match(/listRecentInventoryCounts\(8\)/g)).toHaveLength(1);
-    expect(page).toContain('await Promise.all([');
+    expect(page).toContain(
+      'const dashboardPromise = getWarehouseDashboard()',
+    );
+    expect(page).toContain(
+      'const recentTransfersPromise = listRecentStockTransfers(8)',
+    );
+    expect(page).toContain(
+      'const recentCountsPromise = listRecentInventoryCounts(8)',
+    );
+    expect(page.match(/<ErrorBoundary/g)).toHaveLength(4);
+    expect(page.match(/<Suspense/g)).toHaveLength(4);
+    expect(page.match(/dashboardPromise=\{dashboardPromise\}/g)).toHaveLength(2);
+    expect(page).toContain(
+      'recentTransfersPromise={recentTransfersPromise}',
+    );
+    expect(page).toContain('recentCountsPromise={recentCountsPromise}');
+    expect(page).toContain('最近调拨单暂时无法加载');
+    expect(page).toContain('最近盘点单暂时无法加载');
+    expect(page).toContain('仓库与库位设置暂时无法加载');
+    expect(page.match(/<SlowLoadingHint \/>/g)).toHaveLength(3);
+    expect(skeleton).toContain('const SLOW_HINT_MS = 8_000');
+    expect(page).not.toContain('await Promise.all([');
     expect(page).not.toMatch(/\bcatch\s*\(/);
   });
 });

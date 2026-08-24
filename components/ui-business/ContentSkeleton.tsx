@@ -17,6 +17,11 @@ export type ContentSkeletonProps = {
   className?: string;
 };
 
+export type SlowLoadingHintProps = {
+  children?: React.ReactNode;
+  className?: string;
+};
+
 const DEFAULT_ROWS = 20;
 const SLOW_HINT_MS = 8_000;
 
@@ -32,12 +37,6 @@ export function ContentSkeleton({
   className,
 }: ContentSkeletonProps) {
   const count = Math.min(50, Math.max(1, Math.floor(rows)));
-  const [slow, setSlow] = useState(false);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSlow(true), SLOW_HINT_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   return (
     <div
@@ -72,12 +71,35 @@ export function ContentSkeleton({
           />
         ))}
       </div>
-      {slow ? (
-        <p className="text-sm text-muted-foreground">仍在加载，可稍后重试。</p>
-      ) : null}
+      <SlowLoadingHint />
       <span className="sr-only">{label}</span>
     </div>
   );
+}
+
+/**
+ * 统一的慢加载提示。骨架本身立即出现；只有持续 8 秒仍未完成时才展示文案。
+ * 调用方应把它放在 `aria-live="polite"` 的加载区域内。
+ */
+export function SlowLoadingHint({
+  children = '仍在加载，可稍后重试。',
+  className,
+}: SlowLoadingHintProps) {
+  const [slow, setSlow] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), SLOW_HINT_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return slow ? (
+    <p
+      data-slot="slow-loading-hint"
+      className={cn('text-sm text-muted-foreground', className)}
+    >
+      {children}
+    </p>
+  ) : null;
 }
 
 function ChromeSkeleton({ variant }: { variant: ContentSkeletonVariant }) {

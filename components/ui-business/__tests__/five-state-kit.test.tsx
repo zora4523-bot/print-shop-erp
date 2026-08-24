@@ -10,6 +10,7 @@ import {
   LongTaskReceipt,
   PendingButton,
   remainingHoursLabel,
+  SlowLoadingHint,
 } from '@/components/ui-business';
 
 describe('EmptyState kind contract', () => {
@@ -126,6 +127,14 @@ describe('ContentSkeleton', () => {
     expect(kept.match(/data-slot="skeleton"/g)).toHaveLength(2);
     expect(replaced).toContain('data-keep-chrome="false"');
     expect(replaced.match(/data-slot="skeleton"/g)).toHaveLength(5);
+  });
+
+  it('does not flash the shared slow-loading message during initial render', () => {
+    const hint = renderToStaticMarkup(<SlowLoadingHint />);
+    const skeleton = renderToStaticMarkup(<ContentSkeleton rows={1} />);
+
+    expect(hint).toBe('');
+    expect(skeleton).not.toContain('仍在加载，可稍后重试。');
   });
 });
 
