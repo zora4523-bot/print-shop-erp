@@ -1,6 +1,13 @@
 'use client';
 
-import { useActionState, useCallback, useId, useRef, useState } from 'react';
+import {
+  useActionState,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -55,6 +62,7 @@ export function RecordPaymentForm({
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [preview, setPreview] = useState<PaymentPreview | null>(null);
@@ -127,11 +135,23 @@ export function RecordPaymentForm({
     setConfirmationOpen(true);
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+      return;
+    }
+    // 在金额等输入中按 Enter 也必须先通过 L2，
+    // 不能绕过按钮的 prepareConfirmation。
+    event.preventDefault();
+    prepareConfirmation();
+  }
+
   return (
     <form
       ref={formRef}
       id={formId}
       action={action}
+      onSubmit={handleSubmit}
       aria-busy={pending}
       className="space-y-3"
       data-risk-level="L2"
@@ -214,6 +234,9 @@ export function RecordPaymentForm({
           preview ? paymentImpactItems(preview, remainingAmount) : []
         }
         confirmLabel="确认录入付款"
+        onConfirm={() => {
+          confirmedRef.current = true;
+        }}
       />
       {visibleState?.status === 'success' ? (
         <ActionNotice

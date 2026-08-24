@@ -73,6 +73,8 @@ describe('outsource payment detail UI contract', () => {
     expect(paymentForm).toContain('level="L2"');
     expect(paymentForm).toContain('type="button"');
     expect(paymentForm).toContain('onClick={prepareConfirmation}');
+    expect(paymentForm).toContain('onSubmit={handleSubmit}');
+    expect(paymentForm).toContain('confirmedRef.current = true');
     expect(paymentForm).toContain('只记入外协加工付款');
     expect(paymentForm).toContain('防止重复记账');
   });

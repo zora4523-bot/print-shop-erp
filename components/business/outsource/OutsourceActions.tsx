@@ -1,6 +1,13 @@
 'use client';
 
-import { useActionState, useId, useState, useTransition } from 'react';
+import {
+  useActionState,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
@@ -34,7 +41,10 @@ export function OutsourceActions({
 }: Props) {
   const receiveFormId = useId();
   const cancelFormId = useId();
+  const confirmedReceiveRef = useRef(false);
   const [actualDate, setActualDate] = useState('');
+  const [receiveConfirmationOpen, setReceiveConfirmationOpen] =
+    useState(false);
   const receiveBound = markOutsourceReceivedAction.bind(null, id);
   const [receiveState, receiveAction] = useActionState<
     OutsourceMutationResult | null,
@@ -55,12 +65,23 @@ export function OutsourceActions({
   const visibleReceiveState = receivePending ? null : receiveState;
   const visibleCancelState = cancelPending ? null : cancelState;
 
+  function handleReceiveSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedReceiveRef.current) {
+      confirmedReceiveRef.current = false;
+      return;
+    }
+    // 日期输入中的 Enter 不得绕过回货终态确认。
+    event.preventDefault();
+    setReceiveConfirmationOpen(true);
+  }
+
   return (
     <div className="space-y-3">
       {canReceive ? (
         <form
           id={receiveFormId}
           action={(fd) => startReceive(() => receiveAction(fd))}
+          onSubmit={handleReceiveSubmit}
           className="space-y-2"
           aria-busy={receivePending}
           data-risk-level="L2"
@@ -80,6 +101,8 @@ export function OutsourceActions({
             <ConfirmActionDialog
               level="L2"
               formId={receiveFormId}
+              open={receiveConfirmationOpen}
+              onOpenChange={setReceiveConfirmationOpen}
               disabled={receivePending}
               trigger={
                 <Button
@@ -100,6 +123,9 @@ export function OutsourceActions({
                 '本操作不会自动确认外协应付金额，也不会记录付款。',
               ]}
               confirmLabel="确认已回货"
+              onConfirm={() => {
+                confirmedReceiveRef.current = true;
+              }}
             />
           </div>
         </form>

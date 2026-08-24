@@ -38,6 +38,8 @@ describe('OutsourceReceiveFeedback', () => {
     ).toHaveLength(2);
     expect(actionsSource).toContain('formId={receiveFormId}');
     expect(actionsSource).toContain('formId={cancelFormId}');
+    expect(actionsSource).toContain('onSubmit={handleReceiveSubmit}');
+    expect(actionsSource).toContain('confirmedReceiveRef.current = true');
     expect(actionsSource).toContain('已回货终态，不能直接回退');
     expect(actionsSource).toContain('不会自动确认外协应付金额');
     expect(actionsSource).toContain('已取消终态');

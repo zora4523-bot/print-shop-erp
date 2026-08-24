@@ -6,6 +6,7 @@ import {
   useId,
   useRef,
   useState,
+  type FormEvent,
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { recordOutsourcePaymentAction } from '@/actions/outsource';
@@ -70,6 +71,7 @@ export function OutsourcePaymentForm({
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
   const [idempotencyKey, setIdempotencyKey] = useState(
     initialIdempotencyKey,
   );
@@ -153,11 +155,22 @@ export function OutsourcePaymentForm({
     setConfirmationOpen(true);
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+      return;
+    }
+    // 输入框内按 Enter 也只能打开确认层，不得直接记账。
+    event.preventDefault();
+    prepareConfirmation();
+  }
+
   return (
     <form
       ref={formRef}
       id={formId}
       action={action}
+      onSubmit={handleSubmit}
       aria-busy={pending}
       className="space-y-3"
       data-risk-level="L2"
@@ -251,6 +264,9 @@ export function OutsourcePaymentForm({
           preview ? outsourcePaymentImpactItems(preview, remainingAmount) : []
         }
         confirmLabel="确认记录付款"
+        onConfirm={() => {
+          confirmedRef.current = true;
+        }}
       />
 
       {visibleState?.status === 'success' ? (

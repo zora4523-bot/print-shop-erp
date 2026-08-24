@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -127,6 +129,23 @@ describe('bill mutation confirmations', () => {
     expect(html).toContain('inputMode="decimal"');
     expect(html).toContain('data-slot="form-error-summary"');
     expect(html).toContain('本次收款金额：付款金额不能超过剩余应收');
+  });
+
+  it('does not let Enter bypass the payment confirmation', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'bill',
+        'RecordPaymentForm.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('onSubmit={handleSubmit}');
+    expect(source).toContain('event.preventDefault()');
+    expect(source).toContain('confirmedRef.current = true');
   });
 
   it('announces successful payment and disables the form while pending', () => {
