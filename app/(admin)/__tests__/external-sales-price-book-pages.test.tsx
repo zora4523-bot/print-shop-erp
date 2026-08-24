@@ -716,12 +716,12 @@ describe('external sales price book pages', () => {
   it('renders separate processing and logistics charge workspaces for ADMIN', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
 
-    const processingHtml = renderToStaticMarkup(
+    const processingHtml = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({ purpose: 'processing' }),
       }),
     );
-    const logisticsHtml = renderToStaticMarkup(
+    const logisticsHtml = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'logistics',
@@ -759,6 +759,23 @@ describe('external sales price book pages', () => {
         province: '广东',
       }),
     );
+    expect(getWorkspaceMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the charge-workspace header and publish entry while data is pending', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+    getWorkspaceMock.mockReturnValue(new Promise(() => {}));
+
+    const html = renderToStaticMarkup(
+      await OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({ purpose: 'processing' }),
+      }),
+    );
+
+    expect(html).toContain('外部销售收费');
+    expect(html).toContain('href="/owner/prices/external-sales/versions"');
+    expect(html).toContain('正在加载收费项目工作台');
+    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the selected current item and normalized filters when starting a draft', async () => {
@@ -770,7 +787,7 @@ describe('external sales price book pages', () => {
       pageCount: 3,
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -827,7 +844,7 @@ describe('external sales price book pages', () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
     getWorkspaceMock.mockResolvedValue(processingWorkspaceWithoutDraft());
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -853,7 +870,7 @@ describe('external sales price book pages', () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
     getWorkspaceMock.mockResolvedValue(processingWorkspaceWithoutDraft());
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -922,7 +939,7 @@ describe('external sales price book pages', () => {
       },
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'logistics',
@@ -971,7 +988,7 @@ describe('external sales price book pages', () => {
       ],
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1036,7 +1053,7 @@ describe('external sales price book pages', () => {
       ],
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1077,7 +1094,7 @@ describe('external sales price book pages', () => {
       draftCreation: { allowed: true, blockedReason: null },
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1129,10 +1146,26 @@ describe('external sales price book pages', () => {
     expect(getPublishPreviewMock).not.toHaveBeenCalled();
   });
 
+  it('keeps the publish-center header available while version history is pending', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+    listVersionsMock.mockReturnValue(new Promise(() => {}));
+
+    const html = renderToStaticMarkup(
+      await OwnerExternalSalesPriceBookVersionsPage({
+        searchParams: Promise.resolve({}),
+      }),
+    );
+
+    expect(html).toContain('发布中心');
+    expect(html).toContain('href="/owner/prices/external-sales/items"');
+    expect(html).toContain('正在加载内容');
+    expect(listVersionsMock).toHaveBeenCalledTimes(1);
+  });
+
   it('maps a selected current rule to its cloned draft rule editor', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1145,6 +1178,8 @@ describe('external sales price book pages', () => {
       'processing-draft',
       'rule-1',
     );
+    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(getRuleEditorMock).toHaveBeenCalledTimes(1);
     expect(getDraftMock).not.toHaveBeenCalled();
     expect(draftRuleFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1262,7 +1297,7 @@ describe('external sales price book pages', () => {
       },
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1324,7 +1359,7 @@ describe('external sales price book pages', () => {
       products: filteredWorkspace.filters.products,
     });
 
-    const html = renderToStaticMarkup(
+    const html = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
@@ -1340,10 +1375,13 @@ describe('external sales price book pages', () => {
       purpose: CustomerPriceBookPurpose.PROCESSING,
       groupId: selected.draft.id,
     });
+    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceDetailMock).toHaveBeenCalledTimes(1);
     expect(getRuleEditorMock).toHaveBeenCalledWith(
       filteredWorkspace.draft?.id,
       selected.draft.id,
     );
+    expect(getRuleEditorMock).toHaveBeenCalledTimes(1);
     expect(draftRuleFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         successHref:
@@ -1367,6 +1405,9 @@ describe('external sales price book pages', () => {
 
     expect(getDraftMock).toHaveBeenCalledWith('processing-draft');
     expect(getPublishPreviewMock).toHaveBeenCalledWith('processing-draft');
+    expect(listVersionsMock).toHaveBeenCalledTimes(1);
+    expect(getDraftMock).toHaveBeenCalledTimes(1);
+    expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
     expect(html).toContain('发布加工费草稿 · 第 4 版');
     expect(html).toContain('本次修改');
     expect(html).toContain('发布影响');

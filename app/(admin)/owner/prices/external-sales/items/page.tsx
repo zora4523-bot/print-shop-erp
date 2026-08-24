@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import Decimal from 'decimal.js';
 import {
   CustomerPriceBookPurpose,
@@ -16,7 +17,11 @@ import {
 } from '@/components/business/price/ExternalSalesChargeWorkspace';
 import { externalPriceRuleDisplayName } from '@/components/business/price/external-price-display';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import {
+  ContentSkeleton,
+  ErrorBoundary,
+  PageHeader,
+} from '@/components/ui-business';
 import {
   buildTableHref,
   firstSearchParam,
@@ -33,6 +38,7 @@ import {
   type CustomerPriceRuleWorkspaceItemDto,
 } from '@/lib/price/customer-price-book-workspace';
 import { normalizeZtoProvince } from '@/lib/price/external-order-charges';
+import { PriceDataBoundary } from '../../_components/PriceDataBoundary';
 
 export const metadata = {
   title: '外部销售收费项目 · 红包印刷 ERP',
@@ -616,6 +622,34 @@ function isEditableExactBaseProductGroup(
   );
 }
 
+type ChargeWorkspacePromise = ReturnType<
+  typeof getCustomerPriceRuleGroupWorkspacePage
+>;
+type ChargeWorkspace = Awaited<ChargeWorkspacePromise>;
+type ChargeWorkspaceDetailPromise = ReturnType<
+  typeof getCustomerPriceRuleGroupWorkspaceDetail
+>;
+type DraftRuleEditorPromise = ReturnType<
+  typeof getCustomerPriceBookDraftRuleEditor
+>;
+
+type ChargeWorkspaceContext = {
+  purpose: CustomerPriceBookPurpose;
+  purposeValue: 'processing' | 'logistics';
+  q: string;
+  categoryId: string;
+  productId: string;
+  province: string | null;
+  kind: CustomerPriceRuleKind | undefined;
+  calculationType: CustomerPriceCalculationType | undefined;
+  automation: 'AUTOMATIC' | 'MANUAL' | undefined;
+  active: 'ACTIVE' | 'INACTIVE' | undefined;
+  quantity: number | undefined;
+  changedRequested: true | undefined;
+  requestedItemId: string;
+  createDraftOpen: boolean;
+};
+
 export default async function ExternalSalesChargeItemsPage({
   searchParams,
 }: PageProps) {
@@ -634,7 +668,10 @@ export default async function ExternalSalesChargeItemsPage({
     purpose === CustomerPriceBookPurpose.LOGISTICS
       ? normalizeZtoProvince(subjectParam)
       : null;
-  const kind = enumValue(firstSearchParam(sp.kind), Object.values(CustomerPriceRuleKind));
+  const kind = enumValue(
+    firstSearchParam(sp.kind),
+    Object.values(CustomerPriceRuleKind),
+  );
   const calculationType = enumValue(
     firstSearchParam(sp.calculation),
     Object.values(CustomerPriceCalculationType),
@@ -663,8 +700,26 @@ export default async function ExternalSalesChargeItemsPage({
     defaultValue: 1,
     max: 100_000,
   });
+  const requestedItemId = safeOpaqueId(firstSearchParam(sp.item));
+  const context: ChargeWorkspaceContext = {
+    purpose,
+    purposeValue,
+    q,
+    categoryId,
+    productId,
+    province,
+    kind,
+    calculationType,
+    automation,
+    active,
+    quantity,
+    changedRequested,
+    requestedItemId,
+    createDraftOpen: firstSearchParam(sp.start) === '1',
+  };
 
-  const workspace = await getCustomerPriceRuleGroupWorkspacePage({
+  // 权限校验通过后只启动一次；页头动作与工作台共享同一 Promise。
+  const workspacePromise = getCustomerPriceRuleGroupWorkspacePage({
     purpose,
     ...(q ? { q } : {}),
     ...(categoryId ? { categoryId } : {}),
@@ -679,9 +734,405 @@ export default async function ExternalSalesChargeItemsPage({
     page: requestedPage,
     pageSize: 25,
   });
+
+  return (
+    <div className="min-w-0 space-y-6">
+      <PageHeader
+        title="外部销售收费"
+        subtitle={`查看和调整外部销售工单的${
+          purpose === CustomerPriceBookPurpose.LOGISTICS
+            ? '快递费与打包耗材'
+            : '加工费'
+        }；已发布价格和历史工单金额不会被原地覆盖。`}
+        actions={
+          <ErrorBoundary
+            scope="field"
+            title="版本状态暂时无法加载"
+            description="可直接进入发布中心查看。"
+            action={<PublishCenterLink purpose={purpose} />}
+          >
+            <Suspense fallback={<PublishCenterLink purpose={purpose} />}>
+              <WorkspacePublishCenterLink
+                purpose={purpose}
+                workspacePromise={workspacePromise}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        }
+      />
+
+      <ErrorBoundary
+        scope="section"
+        title="收费项目工作台暂时无法加载"
+        description="页头与发布中心入口仍可使用；请重试工作台区域。"
+      >
+        <Suspense fallback={<ChargeWorkspaceSkeleton />}>
+          <ExternalSalesChargeItemsContent
+            context={context}
+            workspacePromise={workspacePromise}
+          />
+        </Suspense>
+      </ErrorBoundary>
+    </div>
+  );
+}
+
+function PublishCenterLink({
+  purpose,
+  scheduled = false,
+}: {
+  purpose: CustomerPriceBookPurpose;
+  scheduled?: boolean;
+}) {
+  return (
+    <Link
+      href={
+        scheduled
+          ? `/owner/prices/external-sales/versions#price-book-history-${purpose}`
+          : '/owner/prices/external-sales/versions'
+      }
+      prefetch={false}
+      className={buttonVariants({ variant: 'outline' })}
+    >
+      {scheduled ? '查看计划生效版本' : '发布中心'}
+    </Link>
+  );
+}
+
+async function WorkspacePublishCenterLink({
+  purpose,
+  workspacePromise,
+}: {
+  purpose: CustomerPriceBookPurpose;
+  workspacePromise: ChargeWorkspacePromise;
+}) {
+  const workspace = await workspacePromise;
+  return (
+    <PublishCenterLink
+      purpose={purpose}
+      scheduled={Boolean(workspace.scheduledBook)}
+    />
+  );
+}
+
+function ChargeWorkspaceSkeleton() {
+  return (
+    <div
+      className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <ContentSkeleton
+        variant="table"
+        rows={6}
+        label="正在加载收费项目工作台"
+      />
+      <aside className="hidden min-w-0 rounded-xl border bg-card p-4 text-sm text-muted-foreground shadow-sm xl:block">
+        选择一个收费项目
+      </aside>
+    </div>
+  );
+}
+
+async function ExternalSalesChargeItemsContent({
+  context,
+  workspacePromise,
+}: {
+  context: ChargeWorkspaceContext;
+  workspacePromise: ChargeWorkspacePromise;
+}) {
+  const workspace = await workspacePromise;
+  const selectedWorkspaceGroup = context.requestedItemId
+    ? workspace.groups.find((group) =>
+        groupContainsItemId(group, context.requestedItemId),
+      )
+    : undefined;
+
+  if (!context.requestedItemId || selectedWorkspaceGroup) {
+    return renderWorkspaceWithSelectedGroup({
+      workspace,
+      context,
+      selectedGroup: selectedWorkspaceGroup,
+    });
+  }
+
+  const preservedWorkspace = (
+    <ExternalSalesChargeWorkspaceView
+      workspace={workspace}
+      context={context}
+    />
+  );
+  const detailPromise = getCustomerPriceRuleGroupWorkspaceDetail({
+    purpose: context.purpose,
+    groupId: context.requestedItemId,
+  });
+
+  return (
+    <PriceDataBoundary
+      title="收费项目详情暂时无法加载"
+      description="列表、筛选和调价状态仍可使用；请重试详情区域。"
+      preservedContent={preservedWorkspace}
+    >
+      <Suspense fallback={preservedWorkspace}>
+        <DetachedChargeWorkspace
+          workspace={workspace}
+          context={context}
+          detailPromise={detailPromise}
+        />
+      </Suspense>
+    </PriceDataBoundary>
+  );
+}
+
+async function DetachedChargeWorkspace({
+  workspace,
+  context,
+  detailPromise,
+}: {
+  workspace: ChargeWorkspace;
+  context: ChargeWorkspaceContext;
+  detailPromise: ChargeWorkspaceDetailPromise;
+}) {
+  const detail = await detailPromise;
+  return renderWorkspaceWithSelectedGroup({
+    workspace,
+    context,
+    selectedGroup: detail?.group,
+  });
+}
+
+function renderWorkspaceWithSelectedGroup({
+  workspace,
+  context,
+  selectedGroup,
+}: {
+  workspace: ChargeWorkspace;
+  context: ChargeWorkspaceContext;
+  selectedGroup?: CustomerPriceRuleWorkspaceGroupDto;
+}): React.ReactNode {
+  const preservedWorkspace = (
+    <ExternalSalesChargeWorkspaceView
+      workspace={workspace}
+      context={context}
+      selectedGroup={selectedGroup}
+    />
+  );
+
+  if (!selectedGroup || !workspace.draft) return preservedWorkspace;
+
+  const selectedTier = selectedGroupTier(
+    selectedGroup,
+    context.requestedItemId,
+  );
+  if (isEditableExactBaseProductGroup(selectedGroup)) {
+    return (
+      <ExternalSalesChargeWorkspaceView
+        workspace={workspace}
+        context={context}
+        selectedGroup={selectedGroup}
+        selectedEditor={
+          <ErrorBoundary
+            scope="field"
+            title="价格阶梯编辑器暂时无法加载"
+            description="收费项目详情仍可查看；重试前不会保存任何更改。"
+          >
+            <ExternalSalesPriceTierGroupEditorContent
+              workspace={workspace}
+              context={context}
+              selectedGroup={selectedGroup}
+            />
+          </ErrorBoundary>
+        }
+      />
+    );
+  }
+
+  const selectedDraftRuleId = selectedTier?.draft?.id;
+  if (!selectedDraftRuleId) return preservedWorkspace;
+
+  const editorPromise = getCustomerPriceBookDraftRuleEditor(
+    workspace.draft.id,
+    selectedDraftRuleId,
+  );
+  const editorLoadingWorkspace = (
+    <ExternalSalesChargeWorkspaceView
+      workspace={workspace}
+      context={context}
+      selectedGroup={selectedGroup}
+      selectedEditor={
+        <ContentSkeleton
+          variant="form"
+          rows={5}
+          label="正在加载收费项目编辑器"
+        />
+      }
+    />
+  );
+  const editorUnavailableWorkspace = (
+    <ExternalSalesChargeWorkspaceView
+      workspace={workspace}
+      context={context}
+      selectedGroup={selectedGroup}
+      selectedEditor={
+        <div className="min-w-0 rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+          编辑器暂不可用；当前价格与变更摘要仅供查看。
+        </div>
+      }
+    />
+  );
+
+  return (
+    <PriceDataBoundary
+      title="收费项目编辑器暂时无法加载"
+      description="列表与当前价格仍可查看；重试前不会保存任何更改。"
+      preservedContent={editorUnavailableWorkspace}
+    >
+      <Suspense fallback={editorLoadingWorkspace}>
+        <DraftRuleEditorWorkspace
+          workspace={workspace}
+          context={context}
+          selectedGroup={selectedGroup}
+          editorPromise={editorPromise}
+        />
+      </Suspense>
+    </PriceDataBoundary>
+  );
+}
+
+function ExternalSalesPriceTierGroupEditorContent({
+  workspace,
+  context,
+  selectedGroup,
+}: {
+  workspace: ChargeWorkspace;
+  context: ChargeWorkspaceContext;
+  selectedGroup: CustomerPriceRuleWorkspaceGroupDto;
+}) {
+  const draft = workspace.draft;
+  if (!draft) return null;
+  const editorSuccessHref = selectedChargeHref(
+    context.purposeValue,
+    selectedGroup.id,
+  );
+
+  return (
+    <ExternalSalesPriceTierGroupEditor
+      key={`${selectedGroup.id}:${selectedGroup.tiers
+        .map((tier) => tier.expectedUpdatedAt)
+        .join(':')}`}
+      productTitle={selectedGroup.product?.name ?? selectedGroup.name}
+      paperLabel={selectedGroup.product?.paperType ?? '未设置纸张'}
+      sizeLabel={selectedGroup.product?.specification ?? '未设置规格'}
+      calculationType={
+        selectedGroup.calculationType as CustomerPriceCalculationType
+      }
+      priceBookId={draft.id}
+      anchorRuleId={selectedGroup.tiers[0]?.draft?.id ?? ''}
+      tiers={selectedGroup.tiers.map((tier) => {
+        const tierDraft = tier.draft;
+        if (
+          !tierDraft ||
+          tierDraft.amount === null ||
+          tierDraft.minQty === null ||
+          tier.expectedUpdatedAt === null
+        ) {
+          throw new Error('价格阶梯缺少可编辑数据');
+        }
+        return {
+          ruleId: tierDraft.id,
+          quantity: tierDraft.minQty,
+          currentAmount: tier.current?.amount ?? null,
+          draftAmount: tierDraft.amount,
+          expectedUpdatedAt: tier.expectedUpdatedAt,
+          isActive: tierDraft.isActive,
+          changed: tier.changed,
+        };
+      })}
+      saveAction={updateCustomerPriceRuleDraftGroupAction}
+      successHref={editorSuccessHref}
+    />
+  );
+}
+
+async function DraftRuleEditorWorkspace({
+  workspace,
+  context,
+  selectedGroup,
+  editorPromise,
+}: {
+  workspace: ChargeWorkspace;
+  context: ChargeWorkspaceContext;
+  selectedGroup: CustomerPriceRuleWorkspaceGroupDto;
+  editorPromise: DraftRuleEditorPromise;
+}) {
+  const editor = await editorPromise;
+  if (!editor) {
+    return (
+      <ExternalSalesChargeWorkspaceView
+        workspace={workspace}
+        context={context}
+        selectedGroup={selectedGroup}
+      />
+    );
+  }
+
+  return (
+    <ExternalSalesChargeWorkspaceView
+      workspace={workspace}
+      context={context}
+      selectedGroup={selectedGroup}
+      selectedEditor={
+        <CustomerPriceBookDraftRuleForm
+          key={`${editor.rule.id}:${editor.rule.updatedAt}`}
+          context={editor.context}
+          rule={editor.rule}
+          successHref={selectedChargeHref(
+            context.purposeValue,
+            selectedGroup.id,
+          )}
+        />
+      }
+    />
+  );
+}
+
+function selectedChargeHref(
+  purposeValue: 'processing' | 'logistics',
+  selectedGroupId: string,
+): string {
+  return `${WORKSPACE_PATH}?purpose=${purposeValue}&item=${encodeURIComponent(
+    selectedGroupId,
+  )}#selected-charge-detail`;
+}
+
+function ExternalSalesChargeWorkspaceView({
+  workspace,
+  context,
+  selectedGroup,
+  selectedEditor,
+}: {
+  workspace: ChargeWorkspace;
+  context: ChargeWorkspaceContext;
+  selectedGroup?: CustomerPriceRuleWorkspaceGroupDto;
+  selectedEditor?: React.ReactNode;
+}) {
+  const {
+    purpose,
+    purposeValue,
+    q,
+    categoryId,
+    productId,
+    province,
+    kind,
+    calculationType,
+    automation,
+    active,
+    quantity,
+    changedRequested,
+    createDraftOpen,
+  } = context;
   const changed =
     changedRequested && workspace.filters.changedAvailable ? true : undefined;
-
   const queryParams = {
     purpose: purposeValue,
     q: q || undefined,
@@ -700,37 +1151,7 @@ export default async function ExternalSalesChargeItemsPage({
     changed: changed ? 1 : undefined,
     page: workspace.page,
   };
-  const requestedItemId = safeOpaqueId(firstSearchParam(sp.item));
-  const selectedWorkspaceGroup = requestedItemId
-    ? workspace.groups.find((group) =>
-        groupContainsItemId(group, requestedItemId),
-      )
-    : undefined;
-  const detachedDetail =
-    requestedItemId && !selectedWorkspaceGroup
-      ? await getCustomerPriceRuleGroupWorkspaceDetail({
-          purpose,
-          groupId: requestedItemId,
-        })
-      : null;
-  const selectedGroup = selectedWorkspaceGroup ?? detachedDetail?.group;
   const selectedGroupId = selectedGroup?.id ?? '';
-  const selectedTier = selectedGroup
-    ? selectedGroupTier(selectedGroup, requestedItemId)
-    : undefined;
-  const selectedDraftRuleId = selectedTier?.draft?.id ?? '';
-  const useTierGroupEditor =
-    workspace.draft !== null &&
-    selectedGroup !== undefined &&
-    isEditableExactBaseProductGroup(selectedGroup);
-  const draftRuleEditor =
-    workspace.draft && selectedDraftRuleId && !useTierGroupEditor
-      ? await getCustomerPriceBookDraftRuleEditor(
-          workspace.draft.id,
-          selectedDraftRuleId,
-        )
-      : null;
-
   const itemRows = workspace.groups.map((group) =>
     workspaceGroupItem(
       group,
@@ -742,61 +1163,9 @@ export default async function ExternalSalesChargeItemsPage({
   const selectedItem = selectedGroup
     ? workspaceGroupItem(
         selectedGroup,
-        `${WORKSPACE_PATH}?purpose=${purposeValue}&item=${encodeURIComponent(
-          selectedGroupId,
-        )}#selected-charge-detail`,
+        selectedChargeHref(purposeValue, selectedGroupId),
       )
     : undefined;
-  const editorSuccessHref = selectedGroupId
-    ? `${WORKSPACE_PATH}?purpose=${purposeValue}&item=${encodeURIComponent(
-        selectedGroupId,
-      )}#selected-charge-detail`
-    : undefined;
-  const selectedEditor =
-    useTierGroupEditor && selectedGroup && workspace.draft ? (
-      <ExternalSalesPriceTierGroupEditor
-        key={`${selectedGroup.id}:${selectedGroup.tiers
-          .map((tier) => tier.expectedUpdatedAt)
-          .join(':')}`}
-        productTitle={selectedGroup.product?.name ?? selectedGroup.name}
-        paperLabel={selectedGroup.product?.paperType ?? '未设置纸张'}
-        sizeLabel={selectedGroup.product?.specification ?? '未设置规格'}
-        calculationType={
-          selectedGroup.calculationType as CustomerPriceCalculationType
-        }
-        priceBookId={workspace.draft.id}
-        anchorRuleId={selectedGroup.tiers[0]?.draft?.id ?? ''}
-        tiers={selectedGroup.tiers.map((tier) => {
-          const draft = tier.draft;
-          if (
-            !draft ||
-            draft.amount === null ||
-            draft.minQty === null ||
-            tier.expectedUpdatedAt === null
-          ) {
-            throw new Error('价格阶梯缺少可编辑数据');
-          }
-          return {
-            ruleId: draft.id,
-            quantity: draft.minQty,
-            currentAmount: tier.current?.amount ?? null,
-            draftAmount: draft.amount,
-            expectedUpdatedAt: tier.expectedUpdatedAt,
-            isActive: draft.isActive,
-            changed: tier.changed,
-          };
-        })}
-        saveAction={updateCustomerPriceRuleDraftGroupAction}
-        successHref={editorSuccessHref}
-      />
-    ) : draftRuleEditor ? (
-      <CustomerPriceBookDraftRuleForm
-        key={`${draftRuleEditor.rule.id}:${draftRuleEditor.rule.updatedAt}`}
-        context={draftRuleEditor.context}
-        rule={draftRuleEditor.rule}
-        successHref={editorSuccessHref}
-      />
-    ) : undefined;
   const canCreateDraft =
     workspace.draft === null &&
     workspace.scheduledBook === null &&
@@ -818,138 +1187,111 @@ export default async function ExternalSalesChargeItemsPage({
     : workspace.draftCreation.blockedReason;
 
   return (
-    <div className="min-w-0 space-y-6">
-      <PageHeader
-        title="外部销售收费"
-        subtitle={`查看和调整外部销售工单的${
+    <ExternalSalesChargeWorkspace
+      purpose={purposeValue}
+      workspaceStatus={
+        workspace.scheduledBook
+          ? 'SCHEDULED'
+          : workspace.currentBook
+            ? 'CURRENT'
+            : 'UNAVAILABLE'
+      }
+      purposeHrefs={{
+        processing: `${WORKSPACE_PATH}?purpose=processing`,
+        logistics: `${WORKSPACE_PATH}?purpose=logistics`,
+      }}
+      searchAction={WORKSPACE_PATH}
+      hiddenSearchFields={{ purpose: purposeValue }}
+      filters={{
+        query: q,
+        category: categoryId,
+        subject: productId || province || '',
+        kind: kind ?? '',
+        calculation: calculationType ?? '',
+        quantity: quantity ? String(quantity) : '',
+        automation:
+          automation === 'AUTOMATIC'
+            ? 'AUTO'
+            : automation === 'MANUAL'
+              ? 'MANUAL'
+              : '',
+        status: active ?? '',
+        changedOnly: changed === true,
+      }}
+      filterOptions={{
+        categories: workspace.filters.categories.map((category) => ({
+          value: category.id,
+          label: category.name,
+        })),
+        subjects:
           purpose === CustomerPriceBookPurpose.LOGISTICS
-            ? '快递费与打包耗材'
-            : '加工费'
-        }；已发布价格和历史工单金额不会被原地覆盖。`}
-        actions={
-          <Link
-            href={
-              workspace.scheduledBook
-                ? `/owner/prices/external-sales/versions#price-book-history-${purpose}`
-                : '/owner/prices/external-sales/versions'
+            ? workspace.filters.provinces.map((entry) => ({
+                value: entry.value,
+                label: entry.name,
+              }))
+            : workspace.filters.products.map((product) => ({
+                value: product.id,
+                label: product.name,
+              })),
+        calculations: workspace.filters.calculationTypes.map((value) => ({
+          value,
+          label: CALCULATION_LABELS[value],
+        })),
+      }}
+      clearFiltersHref={`${WORKSPACE_PATH}?purpose=${purposeValue}`}
+      items={itemRows}
+      selectedItem={selectedItem}
+      selectedItemId={selectedGroupId || undefined}
+      selectedEditor={selectedEditor}
+      draft={
+        workspace.draft
+          ? {
+              version: workspace.draft.version,
+              changeReason: workspace.draft.changeReason,
+              changedCount: workspace.draft.changedCount,
+              lastSavedLabel: formatShanghaiDateTime(workspace.draft.updatedAt),
+              compareHref: buildTableHref(WORKSPACE_PATH, queryParams, {
+                changed: 1,
+                page: 1,
+                item: null,
+              }),
+              publishHref: `/owner/prices/external-sales/versions?draft=${encodeURIComponent(
+                workspace.draft.id,
+              )}`,
             }
-            prefetch={false}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            {workspace.scheduledBook
-              ? '查看计划生效版本'
-              : '发布中心'}
-          </Link>
-        }
-      />
-      <ExternalSalesChargeWorkspace
-        purpose={purposeValue}
-        workspaceStatus={
-          workspace.scheduledBook
-            ? 'SCHEDULED'
-            : workspace.currentBook
-              ? 'CURRENT'
-              : 'UNAVAILABLE'
-        }
-        purposeHrefs={{
-          processing: `${WORKSPACE_PATH}?purpose=processing`,
-          logistics: `${WORKSPACE_PATH}?purpose=logistics`,
-        }}
-        searchAction={WORKSPACE_PATH}
-        hiddenSearchFields={{ purpose: purposeValue }}
-        filters={{
-          query: q,
-          category: categoryId,
-          subject: productId || province || '',
-          kind: kind ?? '',
-          calculation: calculationType ?? '',
-          quantity: quantity ? String(quantity) : '',
-          automation:
-            automation === 'AUTOMATIC'
-              ? 'AUTO'
-              : automation === 'MANUAL'
-                ? 'MANUAL'
-                : '',
-          status: active ?? '',
-          changedOnly: changed === true,
-        }}
-        filterOptions={{
-          categories: workspace.filters.categories.map((category) => ({
-            value: category.id,
-            label: category.name,
-          })),
-          subjects:
-            purpose === CustomerPriceBookPurpose.LOGISTICS
-              ? workspace.filters.provinces.map((entry) => ({
-                  value: entry.value,
-                  label: entry.name,
-                }))
-              : workspace.filters.products.map((product) => ({
-                  value: product.id,
-                  label: product.name,
-                })),
-          calculations: workspace.filters.calculationTypes.map((value) => ({
-            value,
-            label: CALCULATION_LABELS[value],
-          })),
-        }}
-        clearFiltersHref={`${WORKSPACE_PATH}?purpose=${purposeValue}`}
-        items={itemRows}
-        selectedItem={selectedItem}
-        selectedItemId={selectedGroupId || undefined}
-        selectedEditor={selectedEditor}
-        draft={
-          workspace.draft
-            ? {
-                version: workspace.draft.version,
-                changeReason: workspace.draft.changeReason,
-                changedCount: workspace.draft.changedCount,
-                lastSavedLabel: formatShanghaiDateTime(
-                  workspace.draft.updatedAt,
-                ),
-                compareHref: buildTableHref(WORKSPACE_PATH, queryParams, {
-                  changed: 1,
-                  page: 1,
-                  item: null,
-                }),
-                publishHref: `/owner/prices/external-sales/versions?draft=${encodeURIComponent(
-                  workspace.draft.id,
-                )}`,
-              }
-            : null
-        }
-        createDraftHref={
-          canCreateDraft
+          : null
+      }
+      createDraftHref={
+        canCreateDraft
+          ? buildTableHref(WORKSPACE_PATH, queryParams, {
+              item: selectedGroupId || null,
+              start: 1,
+            })
+          : undefined
+      }
+      createDraftEditor={createDraftEditor}
+      createDraftOpen={createDraftOpen}
+      createDraftBlockedReason={createDraftBlockedReason}
+      changedFilterAvailable={workspace.filters.changedAvailable}
+      pagination={{
+        page: workspace.page,
+        pageCount: workspace.pageCount,
+        total: workspace.total,
+        previousHref:
+          workspace.page > 1
             ? buildTableHref(WORKSPACE_PATH, queryParams, {
-                item: selectedGroupId || null,
-                start: 1,
+                page: workspace.page - 1,
+                item: null,
               })
-            : undefined
-        }
-        createDraftEditor={createDraftEditor}
-        createDraftOpen={firstSearchParam(sp.start) === '1'}
-        createDraftBlockedReason={createDraftBlockedReason}
-        changedFilterAvailable={workspace.filters.changedAvailable}
-        pagination={{
-          page: workspace.page,
-          pageCount: workspace.pageCount,
-          total: workspace.total,
-          previousHref:
-            workspace.page > 1
-              ? buildTableHref(WORKSPACE_PATH, queryParams, {
-                  page: workspace.page - 1,
-                  item: null,
-                })
-              : null,
-          nextHref:
-            workspace.page < workspace.pageCount
-              ? buildTableHref(WORKSPACE_PATH, queryParams, {
-                  page: workspace.page + 1,
-                  item: null,
-                })
-              : null,
-        }}
-      />
-    </div>
+            : null,
+        nextHref:
+          workspace.page < workspace.pageCount
+            ? buildTableHref(WORKSPACE_PATH, queryParams, {
+                page: workspace.page + 1,
+                item: null,
+              })
+            : null,
+      }}
+    />
   );
 }

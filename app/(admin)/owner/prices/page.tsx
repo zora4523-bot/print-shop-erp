@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
@@ -10,7 +11,11 @@ import {
   PriceAdjustmentsTable,
   PriceTiersTable,
 } from '@/components/business/price/PriceTables';
-import { PageHeader } from '@/components/ui-business';
+import {
+  ContentSkeleton,
+  ErrorBoundary,
+  PageHeader,
+} from '@/components/ui-business';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listPriceAdjustments, listPriceTiers } from '@/lib/price';
@@ -26,14 +31,17 @@ type PageProps = {
 
 const PRICES_PATH = '/owner/prices';
 
+type PriceTiersPromise = ReturnType<typeof listPriceTiers>;
+type PriceAdjustmentsPromise = ReturnType<typeof listPriceAdjustments>;
+
 export default async function OwnerPricesPage({ searchParams }: PageProps) {
   await requirePermission('dict:price:manage');
   const sp = await searchParams;
   const q = firstSearchParam(sp.q).trim();
-  const [tiers, adjustments] = await Promise.all([
-    listPriceTiers({ q }),
-    listPriceAdjustments({ q }),
-  ]);
+
+  // 权限校验通过后各启动一次；两块数据独立等待，互不拖累。
+  const tiersPromise = listPriceTiers({ q });
+  const adjustmentsPromise = listPriceAdjustments({ q });
 
   return (
     <div className="space-y-6">
@@ -138,13 +146,15 @@ export default async function OwnerPricesPage({ searchParams }: PageProps) {
                 供内部销售与工厂直单使用：选用“不超过当前数量的最大起订量”档位；无命中档位时回退到产品基础单价。
               </p>
             </div>
-            <AdminTableCard
-              isEmpty={tiers.length === 0}
-              emptyTitle="暂无价格阶梯"
-              emptyDescription={q ? '没有匹配当前搜索条件的价格阶梯。' : undefined}
+            <ErrorBoundary
+              scope="section"
+              title="价格阶梯暂时无法加载"
+              description="页头、搜索和加价规则仍可使用；请重试价格阶梯区域。"
             >
-              <PriceTiersTable tiers={tiers} />
-            </AdminTableCard>
+              <Suspense fallback={<ContentSkeleton variant="table" rows={6} />}>
+                <PriceTiersSection tiersPromise={tiersPromise} q={q} />
+              </Suspense>
+            </ErrorBoundary>
           </section>
 
           <section className="space-y-3">
@@ -156,16 +166,61 @@ export default async function OwnerPricesPage({ searchParams }: PageProps) {
                 供内部销售与工厂直单使用；外部销售只读取版本化价目簿，不会误用这里的全局规则。
               </p>
             </div>
-            <AdminTableCard
-              isEmpty={adjustments.length === 0}
-              emptyTitle="暂无加价规则"
-              emptyDescription={q ? '没有匹配当前搜索条件的加价规则。' : undefined}
+            <ErrorBoundary
+              scope="section"
+              title="加价规则暂时无法加载"
+              description="页头、搜索和价格阶梯仍可使用；请重试加价规则区域。"
             >
-              <PriceAdjustmentsTable adjustments={adjustments} />
-            </AdminTableCard>
+              <Suspense fallback={<ContentSkeleton variant="table" rows={6} />}>
+                <PriceAdjustmentsSection
+                  adjustmentsPromise={adjustmentsPromise}
+                  q={q}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </section>
         </div>
       </Disclosure>
     </div>
+  );
+}
+
+async function PriceTiersSection({
+  tiersPromise,
+  q,
+}: {
+  tiersPromise: PriceTiersPromise;
+  q: string;
+}) {
+  const tiers = await tiersPromise;
+
+  return (
+    <AdminTableCard
+      isEmpty={tiers.length === 0}
+      emptyTitle="暂无价格阶梯"
+      emptyDescription={q ? '没有匹配当前搜索条件的价格阶梯。' : undefined}
+    >
+      <PriceTiersTable tiers={tiers} />
+    </AdminTableCard>
+  );
+}
+
+async function PriceAdjustmentsSection({
+  adjustmentsPromise,
+  q,
+}: {
+  adjustmentsPromise: PriceAdjustmentsPromise;
+  q: string;
+}) {
+  const adjustments = await adjustmentsPromise;
+
+  return (
+    <AdminTableCard
+      isEmpty={adjustments.length === 0}
+      emptyTitle="暂无加价规则"
+      emptyDescription={q ? '没有匹配当前搜索条件的加价规则。' : undefined}
+    >
+      <PriceAdjustmentsTable adjustments={adjustments} />
+    </AdminTableCard>
   );
 }
