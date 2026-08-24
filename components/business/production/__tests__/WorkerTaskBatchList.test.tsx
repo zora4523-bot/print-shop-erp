@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MachineType,
@@ -14,7 +16,11 @@ vi.mock('@/actions/production', () => ({
   reportTasksAction: vi.fn(),
 }));
 
-import { WorkerTaskBatchList } from '../WorkerTaskBatchList';
+import {
+  WorkerTaskBatchList,
+  batchCompletionImpactItems,
+  validateBatchCompletionPreview,
+} from '../WorkerTaskBatchList';
 
 function task(
   id: string,
@@ -48,6 +54,7 @@ describe('WorkerTaskBatchList groups', () => {
   it('renders in-progress before pending with independent counts', () => {
     const html = renderToStaticMarkup(
       <WorkerTaskBatchList
+        workerName="王师傅"
         tasks={[
           task('pending-1', TaskStatus.PENDING, '待开款式'),
           task('progress-1', TaskStatus.IN_PROGRESS, '在制款式'),
@@ -77,6 +84,7 @@ describe('WorkerTaskBatchList groups', () => {
   it('keeps an explicit empty group so the two-state queue stays legible', () => {
     const html = renderToStaticMarkup(
       <WorkerTaskBatchList
+        workerName="王师傅"
         tasks={[task('pending-1', TaskStatus.PENDING, '待开款式')]}
       />,
     );
@@ -87,11 +95,131 @@ describe('WorkerTaskBatchList groups', () => {
   it('renders urgency as warning rather than destructive red', () => {
     const html = renderToStaticMarkup(
       <WorkerTaskBatchList
+        workerName="王师傅"
         tasks={[task('urgent-1', TaskStatus.IN_PROGRESS, '急单款式', true)]}
       />,
     );
 
     expect(html).toMatch(/data-tone="warning"[^>]*>急单<\/span>/);
     expect(html).not.toMatch(/bg-destructive[^>]*>急单/);
+  });
+
+  it('keeps the completion trigger touch-sized and exposes dialog semantics', () => {
+    const html = renderToStaticMarkup(
+      <WorkerTaskBatchList
+        workerName="王师傅"
+        tasks={[task('progress-1', TaskStatus.IN_PROGRESS, '在制款式')]}
+      />,
+    );
+
+    expect(html).toContain('aria-label="批量处理任务" aria-busy="false"');
+    expect(html).toMatch(
+      /aria-haspopup="dialog"[^>]*aria-expanded="false"[^>]*class="[^"]*min-h-11[^"]*"/,
+    );
+  });
+});
+
+describe('WorkerTaskBatchList completion confirmation', () => {
+  it('lists each order, task, craft, quantity, current worker and piecework impact', () => {
+    const impacts = batchCompletionImpactItems({
+      workerName: '王师傅',
+      excludedPendingCount: 1,
+      tasks: [task('progress-1', TaskStatus.IN_PROGRESS, '卡纸盒')],
+    }).join('\n');
+
+    expect(impacts).toContain('本次仅完工 1 个进行中任务');
+    expect(impacts).toContain('不良数和返工数均为 0');
+    expect(impacts).toContain('工单 PS-progress-1');
+    expect(impacts).toContain('任务 #1 卡纸盒');
+    expect(impacts).toContain('工艺 模切');
+    expect(impacts).toContain('计划/合格数量 5,000');
+    expect(impacts).toContain('当前师傅 王师傅');
+    expect(impacts).toContain('“开机仔”薪资规则');
+    expect(impacts).toContain('保存规则快照');
+    expect(impacts).toContain(
+      '另外选中的 1 个待开始任务不在本次完工范围内',
+    );
+  });
+
+  it('states the exact all-or-nothing transaction contract', () => {
+    const impacts = batchCompletionImpactItems({
+      workerName: '王师傅',
+      tasks: [
+        task('progress-1', TaskStatus.IN_PROGRESS, '在制款式'),
+        task('progress-2', TaskStatus.IN_PROGRESS, '在制款式二'),
+      ],
+    }).join('\n');
+
+    expect(impacts).toContain('同一数据库事务内提交');
+    expect(impacts).toContain('任一任务在提交时失效');
+    expect(impacts).toContain('整批全部回滚');
+    expect(impacts).toContain('不会部分成功');
+    expect(impacts).not.toContain('逐项成功');
+  });
+
+  it('describes hourly work without inventing a piecework amount', () => {
+    const hourlyTask = {
+      ...task('packer-1', TaskStatus.IN_PROGRESS, '打包任务'),
+      workerType: WorkerType.PACKER,
+      machineType: null,
+    };
+    const impacts = batchCompletionImpactItems({
+      workerName: '李师傅',
+      tasks: [hourlyTask],
+    }).join('\n');
+
+    expect(impacts).toContain('“打包工”时薪岗位快照');
+    expect(impacts).toContain('不生成计件金额（¥0.00）');
+  });
+
+  it('validates the client snapshot before opening confirmation', () => {
+    expect(
+      validateBatchCompletionPreview([
+        task('progress-1', TaskStatus.IN_PROGRESS, '在制款式'),
+      ]),
+    ).toBeNull();
+    expect(validateBatchCompletionPreview([])).toBe(
+      '请至少选择一个进行中任务',
+    );
+    expect(
+      validateBatchCompletionPreview(
+        Array.from({ length: 51 }, (_, index) =>
+          task(
+            `progress-${index}`,
+            TaskStatus.IN_PROGRESS,
+            `任务 ${index}`,
+          ),
+        ),
+      ),
+    ).toBe('单次最多完工 50 个任务');
+    expect(
+      validateBatchCompletionPreview([
+        {
+          ...task('bad-quantity', TaskStatus.IN_PROGRESS, '异常任务'),
+          plannedQty: 0,
+        },
+      ]),
+    ).toContain('计划数量异常');
+  });
+
+  it('routes completion through the shared L2 dialog instead of executing on trigger click', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'WorkerTaskBatchList.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('<ConfirmActionDialog');
+    expect(source).toContain('level="L2"');
+    expect(source).toContain('onClick={prepareCompletionConfirmation}');
+    expect(source).toContain('onConfirm={confirmCompletion}');
+    expect(source).not.toContain(
+      'onClick={() => run(reportTasksAction, selectedInProgress)}',
+    );
   });
 });

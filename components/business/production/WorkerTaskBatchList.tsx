@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import { Check, Minus } from 'lucide-react';
 import { beginTasksAction, reportTasksAction } from '@/actions/production';
 import type { BatchTaskMutationResult } from '@/actions/production.types';
@@ -11,14 +11,21 @@ import {
   TaskStatus,
   WorkerType,
 } from '@/generated/prisma/enums';
-import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
+import {
+  MACHINE_TYPE_LABELS,
+  WORKER_TYPE_LABELS,
+} from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { StatusBadge } from '@/components/ui-business';
+import {
+  ActionNotice,
+  ConfirmActionDialog,
+  StatusBadge,
+} from '@/components/ui-business';
 import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
-type TaskRow = {
+export type WorkerBatchTaskRow = {
   id: string;
   status: TaskStatus;
   workerType: WorkerType | null;
@@ -38,6 +45,107 @@ type TaskRow = {
     submitterName: string;
   };
 };
+
+type BatchOperation = 'begin' | 'report';
+
+type CompletionPreview = {
+  tasks: WorkerBatchTaskRow[];
+  excludedPendingCount: number;
+};
+
+function compensationImpact(task: WorkerBatchTaskRow): string {
+  const workerType =
+    task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+
+  if (workerType === WorkerType.MACHINE) {
+    if (!task.machineType) {
+      return '计件影响：缺少机型快照，服务端将拒绝整批提交';
+    }
+    const machineLabel =
+      MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType;
+    return `计件影响：按提交时生效的“${machineLabel}”薪资规则计算金额并保存规则快照`;
+  }
+
+  if (
+    workerType === WorkerType.PACKER ||
+    workerType === WorkerType.CLEANER
+  ) {
+    const workerTypeLabel = WORKER_TYPE_LABELS[workerType] ?? workerType;
+    return `薪资影响：写入“${workerTypeLabel}”时薪岗位快照，本次任务不生成计件金额（¥0.00）`;
+  }
+
+  return '薪资影响：生产岗位快照缺失或不可用，服务端将拒绝整批提交';
+}
+
+/**
+ * 仅预览当前客户端已经拥有的任务快照。最终权限、状态、
+ * 计划数与薪资规则仍由 reportTasks() 在同一事务内重新校验。
+ */
+export function batchCompletionImpactItems({
+  tasks,
+  workerName,
+  excludedPendingCount = 0,
+}: {
+  tasks: readonly WorkerBatchTaskRow[];
+  workerName: string;
+  excludedPendingCount?: number;
+}): string[] {
+  const impacts = [
+    `本次仅完工 ${tasks.length} 个进行中任务；每项按计划数全部记为合格，不良数和返工数均为 0。`,
+    '任务状态、报工数量、薪资快照与可能触发的整单生产完工在同一数据库事务内提交；任一任务在提交时失效，整批全部回滚，不会部分成功。',
+  ];
+
+  if (excludedPendingCount > 0) {
+    impacts.push(
+      `另外选中的 ${excludedPendingCount} 个待开始任务不在本次完工范围内，不会被报工。`,
+    );
+  }
+
+  return impacts.concat(
+    tasks.map(
+      (task) =>
+        `工单 ${task.order.orderNo} · 任务 #${task.item.sequence} ${task.item.name} · 工艺 ${task.craft.name} · 计划/合格数量 ${task.plannedQty.toLocaleString()} · 当前师傅 ${workerName} · ${compensationImpact(task)}`,
+    ),
+  );
+}
+
+export function validateBatchCompletionPreview(
+  tasks: readonly WorkerBatchTaskRow[],
+): string | null {
+  if (tasks.length === 0) return '请至少选择一个进行中任务';
+  if (tasks.length > 50) return '单次最多完工 50 个任务';
+
+  const taskIds = tasks.map((task) => task.id);
+  if (new Set(taskIds).size !== taskIds.length) return '任务不能重复选择';
+  if (taskIds.some((taskId) => !/^[A-Za-z0-9_-]+$/.test(taskId.trim()))) {
+    return '任务参数异常，请刷新后重试';
+  }
+
+  for (const task of tasks) {
+    const taskLabel = `工单 ${task.order.orderNo} 的任务“${task.item.name}”`;
+    if (task.status !== TaskStatus.IN_PROGRESS) {
+      return `${taskLabel}不是进行中状态，请刷新后重试`;
+    }
+    if (!Number.isSafeInteger(task.plannedQty) || task.plannedQty <= 0) {
+      return `${taskLabel}的计划数量异常，请联系管理员修复`;
+    }
+
+    const workerType =
+      task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
+    if (workerType === WorkerType.MACHINE && !task.machineType) {
+      return `${taskLabel}缺少机型快照，请联系管理员改派`;
+    }
+    if (
+      workerType !== WorkerType.MACHINE &&
+      workerType !== WorkerType.PACKER &&
+      workerType !== WorkerType.CLEANER
+    ) {
+      return `${taskLabel}缺少有效的生产岗位快照，请联系管理员改派`;
+    }
+  }
+
+  return null;
+}
 
 function BatchCheckbox({
   checked,
@@ -79,10 +187,23 @@ function BatchCheckbox({
   );
 }
 
-export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
+export function WorkerTaskBatchList({
+  tasks,
+  workerName,
+}: {
+  tasks: WorkerBatchTaskRow[];
+  workerName: string;
+}) {
   const router = useRouter();
+  const completionTriggerRef = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [state, setState] = useState<BatchTaskMutationResult | null>(null);
+  const [operation, setOperation] = useState<BatchOperation | null>(null);
+  const [transportFailure, setTransportFailure] = useState(false);
+  const [completionPreview, setCompletionPreview] =
+    useState<CompletionPreview | null>(null);
+  const [completionConfirmationOpen, setCompletionConfirmationOpen] =
+    useState(false);
   const [pending, startTransition] = useTransition();
   const selectedPending = useMemo(
     () =>
@@ -134,35 +255,90 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
   }
 
   function run(
+    nextOperation: BatchOperation,
     action: (raw: unknown) => Promise<BatchTaskMutationResult>,
     taskIds: string[],
   ) {
     if (taskIds.length === 0) return;
     setState(null);
+    setOperation(nextOperation);
+    setTransportFailure(false);
     startTransition(async () => {
-      const result = await action({ taskIds });
-      setState(result);
-      if (result.status === 'success') {
-        setSelected(new Set());
-        router.refresh();
+      try {
+        const result = await action({ taskIds });
+        setState(result);
+        if (result.status === 'success') {
+          setSelected(new Set());
+          router.refresh();
+        }
+      } catch {
+        // Server Action 传输失败时无法知道事务是否已经提交，
+        // 因此保留选择并要求先刷新核对，不盲目自动重试。
+        setTransportFailure(true);
+        setState({
+          status: 'error',
+          message: '未能确认服务器返回结果',
+        });
       }
     });
   }
 
-  const message =
-    state?.status === 'error'
-      ? state.message
-      : state?.status === 'invalid'
-        ? Object.values(state.fieldErrors).flat()[0]
-        : state?.status === 'success'
-          ? `已处理 ${state.taskIds.length} 个任务`
-          : null;
+  function prepareCompletionConfirmation() {
+    const previewTasks = tasks.filter(
+      (task) =>
+        selected.has(task.id) && task.status === TaskStatus.IN_PROGRESS,
+    );
+    const validationError = validateBatchCompletionPreview(previewTasks);
+    if (validationError) {
+      setOperation('report');
+      setTransportFailure(false);
+      setState({
+        status: 'invalid',
+        fieldErrors: { taskIds: [validationError] },
+      });
+      return;
+    }
+
+    setState(null);
+    setTransportFailure(false);
+    setCompletionPreview({
+      tasks: previewTasks,
+      excludedPendingCount: selectedPending.length,
+    });
+    setCompletionConfirmationOpen(true);
+  }
+
+  function confirmCompletion() {
+    if (!completionPreview) return;
+    run(
+      'report',
+      reportTasksAction,
+      completionPreview.tasks.map((task) => task.id),
+    );
+  }
+
+  const visibleState = pending ? null : state;
+  const errorMessage =
+    visibleState?.status === 'error'
+      ? visibleState.message
+      : visibleState?.status === 'invalid'
+        ? Object.values(visibleState.fieldErrors).flat()[0] ??
+          '请检查选中任务'
+        : null;
+  const completionImpactItems = completionPreview
+    ? batchCompletionImpactItems({
+        tasks: completionPreview.tasks,
+        workerName,
+        excludedPendingCount: completionPreview.excludedPendingCount,
+      })
+    : [];
 
   return (
     <div className="space-y-3">
       <section
         className="sticky top-0 z-10 space-y-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur"
         aria-label="批量处理任务"
+        aria-busy={pending}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <label className="flex min-h-11 cursor-pointer items-center gap-1 pr-2 text-sm">
@@ -182,35 +358,97 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
           <Button
             type="button"
             disabled={pending || selectedPending.length === 0}
-            onClick={() => run(beginTasksAction, selectedPending)}
+            aria-busy={pending && operation === 'begin'}
+            onClick={() => run('begin', beginTasksAction, selectedPending)}
             className="min-h-11"
           >
-            一键开始 {selectedPending.length || ''}
+            {pending && operation === 'begin'
+              ? '正在开始…'
+              : `一键开始 ${selectedPending.length || ''}`}
           </Button>
           <Button
+            ref={completionTriggerRef}
             type="button"
             variant="secondary"
             disabled={pending || selectedInProgress.length === 0}
-            onClick={() => run(reportTasksAction, selectedInProgress)}
+            aria-busy={pending && operation === 'report'}
+            aria-haspopup="dialog"
+            aria-expanded={completionConfirmationOpen}
+            onClick={prepareCompletionConfirmation}
             className="min-h-11"
           >
-            一键完工 {selectedInProgress.length || ''}
+            {pending && operation === 'report'
+              ? '正在提交完工…'
+              : `一键完工 ${selectedInProgress.length || ''}`}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
           一键完工按每项计划数量报为合格数，不良/返工为 0；有异常数量时请进入任务单独报工。
         </p>
-        {message ? (
-          <p
-            role={state?.status === 'success' ? 'status' : 'alert'}
-            className={
-              state?.status === 'success'
-                ? 'text-sm text-success-foreground'
-                : 'text-sm text-destructive'
+        <ConfirmActionDialog
+          level="L2"
+          open={completionConfirmationOpen}
+          onOpenChange={setCompletionConfirmationOpen}
+          focusReturnRef={completionTriggerRef}
+          disabled={pending || completionPreview === null}
+          title={`确认整批完工 ${completionPreview?.tasks.length ?? 0} 个任务？`}
+          description="确认前请逐项核对工单、工艺、计划数和计薪影响。提交后仍会在服务端重新校验权限与最新状态。"
+          impactItems={completionImpactItems}
+          confirmLabel="确认整批完工"
+          onConfirm={confirmCompletion}
+        />
+        {pending ? (
+          <ActionNotice
+            tone="info"
+            title={
+              operation === 'report'
+                ? '正在提交整批完工'
+                : '正在批量开始任务'
             }
-          >
-            {message}
-          </p>
+            description="请不要重复提交，结果返回后会自动刷新任务列表。"
+          />
+        ) : null}
+        {visibleState?.status === 'success' ? (
+          <ActionNotice
+            tone="success"
+            title={
+              operation === 'report'
+                ? '整批完工成功'
+                : '批量开始成功'
+            }
+            description={
+              operation === 'report'
+                ? `已在同一事务内完工 ${visibleState.taskIds.length} 个任务。`
+                : `已开始 ${visibleState.taskIds.length} 个任务。`
+            }
+          />
+        ) : null}
+        {errorMessage ? (
+          <ActionNotice
+            tone="error"
+            title={
+              operation === 'report'
+                ? '整批完工未确认'
+                : '批量开始失败'
+            }
+            description={
+              transportFailure
+                ? `${errorMessage}。提交结果可能已经在服务端生效，请先刷新任务列表核对，避免重复报工。`
+                : operation === 'report'
+                  ? `${errorMessage}。本次未产生部分成功：服务端已拒绝提交或回滚整批事务。`
+                  : errorMessage
+            }
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11"
+                onClick={() => router.refresh()}
+              >
+                刷新任务列表
+              </Button>
+            }
+          />
         ) : null}
       </section>
 
@@ -258,7 +496,7 @@ function WorkerTaskRow({
   checked,
   onToggle,
 }: {
-  task: TaskRow;
+  task: WorkerBatchTaskRow;
   checked: boolean;
   onToggle: () => void;
 }) {

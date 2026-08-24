@@ -26,7 +26,10 @@ export default async function WorkerTasksPage() {
           description="管理员派工后会出现在这里。"
         />
       ) : (
-        <WorkerTaskBatchList tasks={tasks} />
+        <WorkerTaskBatchList
+          tasks={tasks}
+          workerName={user.displayName}
+        />
       )}
     </div>
   );
