@@ -1,10 +1,15 @@
 import {
   BackgroundJobStatus,
   BillStatus,
+  DesignBundleStatus,
   NotificationStatus,
   OrderChangeRequestStatus,
+  OrderExportStatus,
   OutsourceStatus,
+  PurchaseOrderStatus,
+  PurchaseReceiptStatus,
   SalaryPeriodStatus,
+  ShipmentStatus,
   TaskStatus,
 } from '@/generated/prisma/enums';
 
@@ -25,6 +30,8 @@ export type StatusTone =
 
 export type StatusDefinition = Readonly<{
   label: string;
+  /** 在筛选器需要更明确的领域动词时保留既有文案。 */
+  filterLabel?: string;
   tone: StatusTone;
   dot?: boolean;
 }>;
@@ -32,6 +39,10 @@ export type StatusDefinition = Readonly<{
 export type StatusRegistry<TStatus extends PropertyKey> = Readonly<
   Record<TStatus, StatusDefinition>
 >;
+
+export function statusFilterLabel(definition: StatusDefinition): string {
+  return definition.filterLabel ?? definition.label;
+}
 
 export const BILL_STATUS_REGISTRY: StatusRegistry<BillStatus> = {
   [BillStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
@@ -181,6 +192,7 @@ export const ORDER_CHANGE_REQUEST_STATUS_REGISTRY: StatusRegistry<OrderChangeReq
 export const OUTSOURCE_STATUS_REGISTRY: StatusRegistry<OutsourceStatus> = {
   [OutsourceStatus.SENT]: {
     label: '已发出',
+    filterLabel: '已发送',
     tone: 'info',
     dot: true,
   },
@@ -191,6 +203,7 @@ export const OUTSOURCE_STATUS_REGISTRY: StatusRegistry<OutsourceStatus> = {
   },
   [OutsourceStatus.RECEIVED]: {
     label: '已回货',
+    filterLabel: '已收货',
     tone: 'success',
   },
   [OutsourceStatus.CANCELLED]: {
@@ -202,11 +215,13 @@ export const OUTSOURCE_STATUS_REGISTRY: StatusRegistry<OutsourceStatus> = {
 export const PRODUCTION_TASK_STATUS_REGISTRY: StatusRegistry<TaskStatus> = {
   [TaskStatus.PENDING]: {
     label: '待开始',
+    filterLabel: '待生产',
     tone: 'neutral',
     dot: true,
   },
   [TaskStatus.IN_PROGRESS]: {
     label: '进行中',
+    filterLabel: '生产中',
     tone: 'info',
     dot: true,
   },
@@ -217,6 +232,109 @@ export const PRODUCTION_TASK_STATUS_REGISTRY: StatusRegistry<TaskStatus> = {
   [TaskStatus.CANCELLED]: {
     label: '已取消',
     tone: 'danger',
+  },
+};
+
+export const SHIPMENT_STATUS_REGISTRY: StatusRegistry<ShipmentStatus> = {
+  [ShipmentStatus.PLANNED]: {
+    label: '待发货',
+    tone: 'warning',
+    dot: true,
+  },
+  [ShipmentStatus.SHIPPED]: {
+    label: '已发货',
+    tone: 'success',
+  },
+};
+
+export const PURCHASE_ORDER_STATUS_REGISTRY: StatusRegistry<PurchaseOrderStatus> = {
+  [PurchaseOrderStatus.ORDERED]: {
+    label: '已下单',
+    tone: 'info',
+    dot: true,
+  },
+  [PurchaseOrderStatus.PARTIALLY_RECEIVED]: {
+    label: '部分收货',
+    tone: 'warning',
+    dot: true,
+  },
+  [PurchaseOrderStatus.RECEIVED]: {
+    label: '已收货',
+    tone: 'success',
+  },
+  [PurchaseOrderStatus.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
+  },
+};
+
+export const PURCHASE_RECEIPT_STATUS_REGISTRY: StatusRegistry<PurchaseReceiptStatus> = {
+  [PurchaseReceiptStatus.POSTED]: {
+    label: '已收货过账',
+    tone: 'success',
+  },
+  [PurchaseReceiptStatus.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
+  },
+};
+
+export const ORDER_EXPORT_STATUS_REGISTRY: StatusRegistry<OrderExportStatus> = {
+  [OrderExportStatus.PENDING]: {
+    label: '生成中',
+    tone: 'info',
+    dot: true,
+  },
+  [OrderExportStatus.READY]: {
+    label: '已生成',
+    tone: 'success',
+  },
+  [OrderExportStatus.FAILED]: {
+    label: '生成失败，请重新导出',
+    tone: 'danger',
+  },
+  [OrderExportStatus.EXPIRED]: {
+    label: '已过期',
+    tone: 'neutral',
+  },
+};
+
+/**
+ * CDR 的“过期”和 mock URL 是 READY 记录的展示态，不写回业务状态机。
+ * 将它们放在 UI registry 中，避免页面重新发明标签或危险色。
+ */
+export const DESIGN_BUNDLE_DISPLAY_STATUS = {
+  PENDING: DesignBundleStatus.PENDING,
+  READY: DesignBundleStatus.READY,
+  FAILED: DesignBundleStatus.FAILED,
+  EXPIRED: 'EXPIRED',
+  MOCK: 'MOCK',
+} as const;
+
+export type DesignBundleDisplayStatus =
+  (typeof DESIGN_BUNDLE_DISPLAY_STATUS)[keyof typeof DESIGN_BUNDLE_DISPLAY_STATUS];
+
+export const DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY: StatusRegistry<DesignBundleDisplayStatus> = {
+  [DESIGN_BUNDLE_DISPLAY_STATUS.PENDING]: {
+    label: '排队生成中',
+    tone: 'info',
+    dot: true,
+  },
+  [DESIGN_BUNDLE_DISPLAY_STATUS.READY]: {
+    label: '已生成',
+    tone: 'success',
+  },
+  [DESIGN_BUNDLE_DISPLAY_STATUS.FAILED]: {
+    label: '生成失败',
+    tone: 'danger',
+  },
+  [DESIGN_BUNDLE_DISPLAY_STATUS.EXPIRED]: {
+    label: '已过期',
+    tone: 'neutral',
+  },
+  [DESIGN_BUNDLE_DISPLAY_STATUS.MOCK]: {
+    label: 'mock URL',
+    tone: 'neutral',
   },
 };
 

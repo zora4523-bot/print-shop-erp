@@ -19,14 +19,17 @@ import { OrderSavedViews } from './OrderSavedViews';
 import { OrderAdvancedFilters } from './OrderAdvancedFilters';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import {
+  OUTSOURCE_STATUS_REGISTRY,
+  PRODUCTION_TASK_STATUS_REGISTRY,
+  SHIPMENT_STATUS_REGISTRY,
+  statusFilterLabel,
+} from '@/lib/ui/status-registry';
+import {
   CheckboxGroup,
   DateField,
   fieldLabelClass,
   OptionSelect,
   ORDER_KIND_LABELS,
-  OUTSOURCE_STATUS_LABELS,
-  SHIPMENT_STATUS_LABELS,
-  TASK_STATUS_LABELS,
   TriStateSelect,
 } from './OrderListFilterFields';
 
@@ -534,7 +537,8 @@ function activeFilterChips(
   list(
     'shipmentStatus',
     f.shipmentStatuses,
-    (value) => `发货：${SHIPMENT_STATUS_LABELS[value]}`,
+    (value) =>
+      `发货：${statusFilterLabel(SHIPMENT_STATUS_REGISTRY[value])}`,
   );
   scalar('itemName', f.itemName, `款式：${f.itemName}`);
   scalar('productName', f.productName, `产品：${f.productName}`);
@@ -552,7 +556,8 @@ function activeFilterChips(
   list(
     'taskStatus',
     f.taskStatuses,
-    (value) => `任务：${TASK_STATUS_LABELS[value]}`,
+    (value) =>
+      `任务：${statusFilterLabel(PRODUCTION_TASK_STATUS_REGISTRY[value])}`,
   );
   list(
     'machineType',
@@ -567,7 +572,8 @@ function activeFilterChips(
   list(
     'outsourceStatus',
     f.outsourceStatuses,
-    (value) => `外协状态：${OUTSOURCE_STATUS_LABELS[value]}`,
+    (value) =>
+      `外协状态：${statusFilterLabel(OUTSOURCE_STATUS_REGISTRY[value])}`,
   );
   scalar('supplierName', f.supplierName, `外协供应商：${f.supplierName}`);
   return chips;

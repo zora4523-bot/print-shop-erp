@@ -9,7 +9,6 @@ import {
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
-  ShipmentStatus,
   Role,
   TaskStatus,
 } from '../../../../generated/prisma/enums';
@@ -41,6 +40,7 @@ import {
 } from '@/components/ui-business';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
+import { ShipmentStatusBadge } from '@/components/business/order/ShipmentStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SubmitOrderButton } from '@/components/business/order/SubmitOrderButton';
 import { CancelOrderForm } from '@/components/business/order/CancelOrderForm';
@@ -598,17 +598,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium">地址 {shipment.sequence}</span>
-                <Badge
-                  variant={
-                    shipment.status === ShipmentStatus.SHIPPED
-                      ? 'secondary'
-                      : 'outline'
-                  }
-                >
-                  {shipment.status === ShipmentStatus.SHIPPED
-                    ? '已发货'
-                    : '待发货'}
-                </Badge>
+                <ShipmentStatusBadge status={shipment.status} />
               </div>
               <p className="mt-2 text-muted-foreground">
                 {formatReceiverInfo(shipment, '未填写收货信息')}

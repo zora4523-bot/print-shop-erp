@@ -8,15 +8,24 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { EmptyState, EnvNotice, PageHeader } from '@/components/ui-business';
+import {
+  EmptyState,
+  EnvNotice,
+  PageHeader,
+  StatusBadge,
+} from '@/components/ui-business';
 import {
   formatDateInputShanghai,
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { DesignBundleStatus } from '@/generated/prisma/enums';
+import {
+  DESIGN_BUNDLE_DISPLAY_STATUS,
+  DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY,
+  type DesignBundleDisplayStatus,
+} from '@/lib/ui/status-registry';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -137,12 +146,18 @@ export default async function ForemanCdrPage({
                       <td className="px-4 py-3 text-right font-sans tabular-nums">{b.fileCount}</td>
                       <td className="px-4 py-3">
                         {b.status === DesignBundleStatus.PENDING ? (
-                          <Badge variant="outline">排队生成中</Badge>
+                          <DesignBundleStatusBadge
+                            status={DESIGN_BUNDLE_DISPLAY_STATUS.PENDING}
+                          />
                         ) : b.status === DesignBundleStatus.FAILED ? (
-                          <Badge variant="destructive">生成失败</Badge>
+                          <DesignBundleStatusBadge
+                            status={DESIGN_BUNDLE_DISPLAY_STATUS.FAILED}
+                          />
                         ) : expired ? (
                           <div>
-                            <Badge variant="outline">已过期</Badge>
+                            <DesignBundleStatusBadge
+                              status={DESIGN_BUNDLE_DISPLAY_STATUS.EXPIRED}
+                            />
                             <RegenerateBundleForm
                               from={formatDateInputShanghai(b.dateRangeFrom)}
                               to={formatDateInputShanghai(
@@ -152,7 +167,9 @@ export default async function ForemanCdrPage({
                             />
                           </div>
                         ) : isMock ? (
-                          <Badge variant="outline">mock URL</Badge>
+                          <DesignBundleStatusBadge
+                            status={DESIGN_BUNDLE_DISPLAY_STATUS.MOCK}
+                          />
                         ) : (
                           // b.downloadUrl 是绝对 URL（lib 写入时拼了
                           // APP_PUBLIC_URL）。外协方复制粘贴；本地点击
@@ -188,6 +205,19 @@ export default async function ForemanCdrPage({
         </Link>
       </p>
     </div>
+  );
+}
+
+function DesignBundleStatusBadge({
+  status,
+}: {
+  status: DesignBundleDisplayStatus;
+}) {
+  const definition = DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[status];
+  return (
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </StatusBadge>
   );
 }
 

@@ -108,4 +108,80 @@ describe('high-risk status registry consumers', () => {
       source('components/business/price/ExternalSalesPriceBookVersionPanel.tsx'),
     ).not.toContain('statusBadgeClass');
   });
+
+  it('centralizes purchase, shipment, CDR, export, and order-filter status UI', () => {
+    const consumers: Array<[string, string]> = [
+      [
+        'components/business/purchase/PurchaseStatusBadge.tsx',
+        'PURCHASE_ORDER_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/purchase/PurchaseStatusBadge.tsx',
+        'PURCHASE_RECEIPT_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/ShipmentStatusBadge.tsx',
+        'SHIPMENT_STATUS_REGISTRY',
+      ],
+      [
+        'app/(admin)/foreman/cdr/page.tsx',
+        'DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/OrderExportControls.tsx',
+        'ORDER_EXPORT_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/OrderAdvancedFilters.tsx',
+        'SHIPMENT_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/OrderAdvancedFilters.tsx',
+        'PRODUCTION_TASK_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/OrderAdvancedFilters.tsx',
+        'OUTSOURCE_STATUS_REGISTRY',
+      ],
+      [
+        'components/business/order/OrderListFilters.tsx',
+        'SHIPMENT_STATUS_REGISTRY',
+      ],
+    ];
+
+    for (const [file, registry] of consumers) {
+      expect(source(file), file).toContain(registry);
+    }
+
+    expect(
+      source('components/business/purchase/PurchaseOrdersTable.tsx'),
+    ).toContain('PurchaseOrderStatusBadge');
+    expect(source('app/(admin)/owner/purchases/[id]/page.tsx')).toContain(
+      'PurchaseReceiptStatusBadge',
+    );
+    expect(source('app/(admin)/owner/warehouses/page.tsx')).toContain(
+      'PurchaseOrderStatusBadge',
+    );
+    expect(source('app/(admin)/orders/[id]/page.tsx')).toContain(
+      'ShipmentStatusBadge',
+    );
+
+    const filterFields = source(
+      'components/business/order/OrderListFilterFields.tsx',
+    );
+    expect(filterFields).not.toContain('SHIPMENT_STATUS_LABELS');
+    expect(filterFields).not.toContain('TASK_STATUS_LABELS');
+    expect(filterFields).not.toContain('OUTSOURCE_STATUS_LABELS');
+    expect(source('lib/purchase.ts')).not.toContain(
+      'PURCHASE_ORDER_STATUS_LABELS',
+    );
+    expect(source('lib/purchase.ts')).not.toContain(
+      'PURCHASE_RECEIPT_STATUS_LABELS',
+    );
+
+    // Excel 生成是服务端领域输出，不反向依赖 UI 注册表。
+    expect(source('lib/order/export.ts')).not.toContain(
+      "@/lib/ui/status-registry",
+    );
+  });
 });

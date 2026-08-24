@@ -37,18 +37,6 @@ export class PurchaseInvariantError extends Error {
   }
 }
 
-export const PURCHASE_ORDER_STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
-  ORDERED: '已下单',
-  PARTIALLY_RECEIVED: '部分收货',
-  RECEIVED: '已收货',
-  CANCELLED: '已取消',
-};
-
-export const PURCHASE_RECEIPT_STATUS_LABELS: Record<PurchaseReceiptStatus, string> = {
-  POSTED: '已收货过账',
-  CANCELLED: '已取消',
-};
-
 export const PURCHASE_ORDER_LIST_SORT_KEYS = [
   'default',
   'purchaseNo',

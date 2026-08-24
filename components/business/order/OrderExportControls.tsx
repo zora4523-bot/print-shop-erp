@@ -7,6 +7,7 @@ import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { requestOrderExportAction, type OrderExportActionResult } from '@/actions/order-export';
 import { OrderExportStatus } from '@/generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui-business';
 import {
   Sheet,
   SheetClose,
@@ -17,6 +18,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { ORDER_EXPORT_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
 
 export type OrderExportView = {
@@ -51,6 +53,8 @@ export function OrderExportControls({
   const readyCount = recent.filter(
     (item) => item.status === OrderExportStatus.READY,
   ).length;
+  const pendingDefinition =
+    ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.PENDING];
 
   // 轮询把状态从「生成中」改成「已生成」并插入下载按钮，视觉上很明显，
   // 但读屏器用户全程无感知——DOM 变了没人告诉他们。用一个**常驻**的
@@ -93,9 +97,13 @@ export function OrderExportControls({
         <FileSpreadsheet aria-hidden="true" />
         导出工单
         {hasPending ? (
-          <span className="rounded-full bg-warning/10 px-1.5 py-0.5 text-xs text-warning-foreground">
-            生成中
-          </span>
+          <StatusBadge
+            tone={pendingDefinition.tone}
+            dot={pendingDefinition.dot}
+            className="h-5 px-1.5"
+          >
+            {pendingDefinition.label}
+          </StatusBadge>
         ) : null}
       </SheetTrigger>
 
@@ -239,8 +247,14 @@ function ActionFeedback({ state }: { state: OrderExportActionResult }) {
 }
 
 function ExportStatusText({ item }: { item: OrderExportView }) {
-  if (item.status === OrderExportStatus.PENDING) return <>生成中</>;
-  if (item.status === OrderExportStatus.FAILED) return <>生成失败，请重新导出</>;
-  if (item.status === OrderExportStatus.EXPIRED) return <>已过期</>;
-  return <>已生成 {item.matchedOrderCount} 张工单</>;
+  const definition = ORDER_EXPORT_STATUS_REGISTRY[item.status];
+  const label =
+    item.status === OrderExportStatus.READY
+      ? `${definition.label} ${item.matchedOrderCount} 张工单`
+      : definition.label;
+  return (
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
+      {label}
+    </StatusBadge>
+  );
 }

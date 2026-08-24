@@ -11,6 +11,12 @@ import {
 } from '@/generated/prisma/enums';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { encodeFoilColorFilterValues } from '@/lib/order/foil-color-filter-codec';
+import {
+  OUTSOURCE_STATUS_REGISTRY,
+  PRODUCTION_TASK_STATUS_REGISTRY,
+  SHIPMENT_STATUS_REGISTRY,
+  statusFilterLabel,
+} from '@/lib/ui/status-registry';
 import { Button } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import type {
@@ -24,10 +30,7 @@ import {
   fieldLabelClass,
   NumberFilter,
   ORDER_KIND_LABELS,
-  OUTSOURCE_STATUS_LABELS,
   selectClass,
-  SHIPMENT_STATUS_LABELS,
-  TASK_STATUS_LABELS,
   TextFilter,
   TriStateSelect,
   withSelectedOptions,
@@ -159,7 +162,10 @@ export function OrderAdvancedFilters({
               legend="发货状态"
               name="shipmentStatus"
               selected={filters.shipmentStatuses}
-              options={enumOptions(ShipmentStatus, SHIPMENT_STATUS_LABELS)}
+              options={enumOptions(
+                ShipmentStatus,
+                (status) => statusFilterLabel(SHIPMENT_STATUS_REGISTRY[status]),
+              )}
               className="sm:col-span-2"
             />
 
@@ -253,7 +259,11 @@ export function OrderAdvancedFilters({
               legend="生产任务状态"
               name="taskStatus"
               selected={filters.taskStatuses}
-              options={enumOptions(TaskStatus, TASK_STATUS_LABELS)}
+              options={enumOptions(
+                TaskStatus,
+                (status) =>
+                  statusFilterLabel(PRODUCTION_TASK_STATUS_REGISTRY[status]),
+              )}
               className="sm:col-span-2"
             />
             <CheckboxGroup
@@ -282,7 +292,11 @@ export function OrderAdvancedFilters({
               legend="外协状态"
               name="outsourceStatus"
               selected={filters.outsourceStatuses}
-              options={enumOptions(OutsourceStatus, OUTSOURCE_STATUS_LABELS)}
+              options={enumOptions(
+                OutsourceStatus,
+                (status) =>
+                  statusFilterLabel(OUTSOURCE_STATUS_REGISTRY[status]),
+              )}
               className="sm:col-span-2"
             />
           </div>

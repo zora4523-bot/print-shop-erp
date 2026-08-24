@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   BackgroundJobStatus,
   BillStatus,
+  DesignBundleStatus,
   NotificationStatus,
   OrderChangeRequestStatus,
+  OrderExportStatus,
   OutsourceStatus,
+  PurchaseOrderStatus,
+  PurchaseReceiptStatus,
   SalaryPeriodStatus,
+  ShipmentStatus,
   TaskStatus,
 } from '@/generated/prisma/enums';
 import {
@@ -13,16 +18,23 @@ import {
   BILL_STATUS_REGISTRY,
   CUSTOMER_PRICE_BOOK_VERSION_STATUS,
   CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY,
+  DESIGN_BUNDLE_DISPLAY_STATUS,
+  DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY,
   NOTIFICATION_STATUS_REGISTRY,
   ORDER_CHANGE_REQUEST_STATUS_REGISTRY,
+  ORDER_EXPORT_STATUS_REGISTRY,
   OUTSOURCE_STATUS_REGISTRY,
   PAYMENT_STATUS_REGISTRY,
   PRODUCTION_TASK_STATUS_REGISTRY,
+  PURCHASE_ORDER_STATUS_REGISTRY,
+  PURCHASE_RECEIPT_STATUS_REGISTRY,
   SALARY_PERIOD_DISPLAY_STATUS,
   SALARY_PERIOD_STATUS_REGISTRY,
+  SHIPMENT_STATUS_REGISTRY,
   notificationStatusDefinition,
   paymentStatusDefinition,
   salaryPeriodStatusDefinition,
+  statusFilterLabel,
 } from '../status-registry';
 
 describe('status registry', () => {
@@ -44,6 +56,26 @@ describe('status registry', () => {
     );
     expect(Object.keys(PRODUCTION_TASK_STATUS_REGISTRY).sort()).toEqual(
       Object.values(TaskStatus).sort(),
+    );
+    expect(Object.keys(SHIPMENT_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(ShipmentStatus).sort(),
+    );
+    expect(Object.keys(PURCHASE_ORDER_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(PurchaseOrderStatus).sort(),
+    );
+    expect(Object.keys(PURCHASE_RECEIPT_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(PurchaseReceiptStatus).sort(),
+    );
+    expect(Object.keys(ORDER_EXPORT_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(OrderExportStatus).sort(),
+    );
+    expect(
+      Object.values(DesignBundleStatus).every(
+        (status) => status in DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY,
+      ),
+    ).toBe(true);
+    expect(Object.keys(DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY).sort()).toEqual(
+      Object.values(DESIGN_BUNDLE_DISPLAY_STATUS).sort(),
     );
     expect(
       Object.keys(CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY).sort(),
@@ -76,6 +108,38 @@ describe('status registry', () => {
     expect(PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.PENDING].tone).toBe(
       'neutral',
     );
+    expect(SHIPMENT_STATUS_REGISTRY[ShipmentStatus.PLANNED].tone).toBe(
+      'warning',
+    );
+    expect(
+      PURCHASE_ORDER_STATUS_REGISTRY[PurchaseOrderStatus.ORDERED].tone,
+    ).toBe('info');
+    expect(
+      PURCHASE_ORDER_STATUS_REGISTRY[
+        PurchaseOrderStatus.PARTIALLY_RECEIVED
+      ].tone,
+    ).toBe('warning');
+    expect(
+      ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.PENDING].tone,
+    ).toBe('info');
+    expect(
+      DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[
+        DESIGN_BUNDLE_DISPLAY_STATUS.PENDING
+      ].tone,
+    ).toBe('info');
+    expect(
+      ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.EXPIRED].tone,
+    ).toBe('neutral');
+    expect(
+      DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[
+        DESIGN_BUNDLE_DISPLAY_STATUS.EXPIRED
+      ].tone,
+    ).toBe('neutral');
+    expect(
+      DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[
+        DESIGN_BUNDLE_DISPLAY_STATUS.MOCK
+      ].tone,
+    ).toBe('neutral');
     expect(
       CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY[
         CUSTOMER_PRICE_BOOK_VERSION_STATUS.SCHEDULED
@@ -109,6 +173,20 @@ describe('status registry', () => {
     expect(
       PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.CANCELLED].tone,
     ).toBe('danger');
+    expect(
+      PURCHASE_ORDER_STATUS_REGISTRY[PurchaseOrderStatus.CANCELLED].tone,
+    ).toBe('danger');
+    expect(
+      PURCHASE_RECEIPT_STATUS_REGISTRY[PurchaseReceiptStatus.CANCELLED].tone,
+    ).toBe('danger');
+    expect(
+      ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.FAILED].tone,
+    ).toBe('danger');
+    expect(
+      DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[
+        DESIGN_BUNDLE_DISPLAY_STATUS.FAILED
+      ].tone,
+    ).toBe('danger');
   });
 
   it('keeps completed and current domain work positive', () => {
@@ -123,6 +201,23 @@ describe('status registry', () => {
     expect(PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.COMPLETED].tone).toBe(
       'success',
     );
+    expect(SHIPMENT_STATUS_REGISTRY[ShipmentStatus.SHIPPED].tone).toBe(
+      'success',
+    );
+    expect(
+      PURCHASE_ORDER_STATUS_REGISTRY[PurchaseOrderStatus.RECEIVED].tone,
+    ).toBe('success');
+    expect(
+      PURCHASE_RECEIPT_STATUS_REGISTRY[PurchaseReceiptStatus.POSTED].tone,
+    ).toBe('success');
+    expect(
+      ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.READY].tone,
+    ).toBe('success');
+    expect(
+      DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[
+        DESIGN_BUNDLE_DISPLAY_STATUS.READY
+      ].tone,
+    ).toBe('success');
     expect(
       CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY[
         CUSTOMER_PRICE_BOOK_VERSION_STATUS.CURRENT
@@ -151,5 +246,25 @@ describe('status registry', () => {
         SALARY_PERIOD_DISPLAY_STATUS.READY_TO_SETTLE
       ].tone,
     ).toBe('warning');
+  });
+
+  it('keeps precise filter wording without duplicating local label maps', () => {
+    expect(
+      statusFilterLabel(PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.PENDING]),
+    ).toBe('待生产');
+    expect(
+      statusFilterLabel(
+        PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.IN_PROGRESS],
+      ),
+    ).toBe('生产中');
+    expect(
+      statusFilterLabel(OUTSOURCE_STATUS_REGISTRY[OutsourceStatus.SENT]),
+    ).toBe('已发送');
+    expect(
+      statusFilterLabel(OUTSOURCE_STATUS_REGISTRY[OutsourceStatus.RECEIVED]),
+    ).toBe('已收货');
+    expect(
+      statusFilterLabel(SHIPMENT_STATUS_REGISTRY[ShipmentStatus.PLANNED]),
+    ).toBe('待发货');
   });
 });

@@ -1,10 +1,5 @@
 import type { HTMLAttributes } from 'react';
-import {
-  OrderKind,
-  OutsourceStatus,
-  ShipmentStatus,
-  TaskStatus,
-} from '@/generated/prisma/enums';
+import { OrderKind } from '@/generated/prisma/enums';
 import type { OrderFilterOption } from '@/lib/order/list-query';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -12,25 +7,6 @@ import { Input } from '@/components/ui/input';
 export const ORDER_KIND_LABELS: Record<OrderKind, string> = {
   [OrderKind.NORMAL]: '普通工单',
   [OrderKind.REWORK]: '重做单',
-};
-
-export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
-  [ShipmentStatus.PLANNED]: '待发货',
-  [ShipmentStatus.SHIPPED]: '已发货',
-};
-
-export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  [TaskStatus.PENDING]: '待生产',
-  [TaskStatus.IN_PROGRESS]: '生产中',
-  [TaskStatus.COMPLETED]: '已完工',
-  [TaskStatus.CANCELLED]: '已取消',
-};
-
-export const OUTSOURCE_STATUS_LABELS: Record<OutsourceStatus, string> = {
-  [OutsourceStatus.SENT]: '已发送',
-  [OutsourceStatus.IN_PROGRESS]: '进行中',
-  [OutsourceStatus.RECEIVED]: '已收货',
-  [OutsourceStatus.CANCELLED]: '已取消',
 };
 
 export const selectClass =
@@ -251,9 +227,12 @@ export function CheckboxGroup<T extends string>({
 
 export function enumOptions<T extends string>(
   values: Record<string, T>,
-  labels: Record<T, string>,
+  labels: Record<T, string> | ((value: T) => string),
 ): Array<{ id: T; label: string }> {
-  return Object.values(values).map((value) => ({ id: value, label: labels[value] }));
+  return Object.values(values).map((value) => ({
+    id: value,
+    label: typeof labels === 'function' ? labels(value) : labels[value],
+  }));
 }
 
 export function withSelectedOptions(

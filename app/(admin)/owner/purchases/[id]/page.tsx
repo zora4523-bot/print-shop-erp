@@ -6,14 +6,13 @@ import { createPurchaseReceiptAction } from '@/actions/owner-purchases';
 import { CancelPurchaseOrderButton } from '@/components/business/purchase/CancelPurchaseOrderButton';
 import { CancelPurchaseReceiptButton } from '@/components/business/purchase/CancelPurchaseReceiptButton';
 import { PurchaseReceiptForm } from '@/components/business/purchase/PurchaseReceiptForm';
-import { Badge } from '@/components/ui/badge';
+import {
+  PurchaseOrderStatusBadge,
+  PurchaseReceiptStatusBadge,
+} from '@/components/business/purchase/PurchaseStatusBadge';
 import { PageHeader, TableEmptyState } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
-import {
-  getPurchaseOrderDetail,
-  PURCHASE_ORDER_STATUS_LABELS,
-  PURCHASE_RECEIPT_STATUS_LABELS,
-} from '@/lib/purchase';
+import { getPurchaseOrderDetail } from '@/lib/purchase';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
 // 之前这里直接 receivedAt.toLocaleString('zh-CN')，走的是服务器本地
 // 时区——而部署里没有设 TZ，收货时间会随机器时区漂。
@@ -60,9 +59,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
         title={`采购单：${order.purchaseNo}`}
         subtitle={`${order.supplierName} · ${order.supplierCode}`}
         actions={
-          <Badge variant="outline">
-            {PURCHASE_ORDER_STATUS_LABELS[order.status]}
-          </Badge>
+          <PurchaseOrderStatusBadge status={order.status} />
         }
       />
 
@@ -159,9 +156,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                       {formatDateTimeShanghai(receipt.receivedAt)}
                     </div>
                   </div>
-                  <Badge variant={receipt.status === PurchaseReceiptStatus.POSTED ? 'outline' : 'secondary'}>
-                    {PURCHASE_RECEIPT_STATUS_LABELS[receipt.status]}
-                  </Badge>
+                  <PurchaseReceiptStatusBadge status={receipt.status} />
                 </div>
                 <ul className="mb-3 space-y-1 text-sm">
                   {receipt.items.map((item) => (

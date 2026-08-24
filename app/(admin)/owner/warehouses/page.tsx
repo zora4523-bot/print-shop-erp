@@ -13,6 +13,7 @@ import {
   Warehouse,
 } from 'lucide-react';
 import { createStockTransferAction } from '@/actions/owner-inventory';
+import { PurchaseOrderStatusBadge } from '@/components/business/purchase/PurchaseStatusBadge';
 import { StockTransferForm } from '@/components/business/warehouse/StockTransferForm';
 import { WarehouseForms } from '@/components/business/warehouse/WarehouseForms';
 import { Badge } from '@/components/ui/badge';
@@ -30,7 +31,6 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { listRecentInventoryCounts } from '@/lib/inventory-count-posting';
 import { txReasonLabel } from '@/lib/material-labels';
-import { PURCHASE_ORDER_STATUS_LABELS } from '@/lib/purchase';
 import { listRecentStockTransfers } from '@/lib/stock-transfer';
 import { getWarehouseDashboard } from '@/lib/warehouse';
 
@@ -106,7 +106,7 @@ async function WarehouseDashboardContent() {
             <tbody>
               {dashboard.pendingReceipts.length === 0 ? <EmptyRow columns={7} text="暂无待收货明细" /> : dashboard.pendingReceipts.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">
-                  <td className="px-3 py-2"><Link className="font-sans tabular-nums text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><Badge variant="outline">{PURCHASE_ORDER_STATUS_LABELS[item.purchaseOrder.status]}</Badge></div></td>
+                  <td className="px-3 py-2"><Link className="font-sans tabular-nums text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><PurchaseOrderStatusBadge status={item.purchaseOrder.status} /></div></td>
                   <td className="px-3 py-2">{item.purchaseOrder.supplierName}</td>
                   <td className="px-3 py-2"><div>{item.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{item.material.code}</div></td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums">{item.orderedQuantity} {item.material.unit}</td>
