@@ -26,6 +26,7 @@ import {
   DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY,
   type DesignBundleDisplayStatus,
 } from '@/lib/ui/status-registry';
+import { cdrBundleFailureDisplay } from '@/lib/cdr/failure-display';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -134,6 +135,13 @@ export default async function ForemanCdrPage({
                 {recentBundles.map((b) => {
                   const expired = b.expiresAt.getTime() < nowMs;
                   const isMock = b.zipFileUrl.startsWith('mock://');
+                  const regenerateProps = {
+                    from: formatDateInputShanghai(b.dateRangeFrom),
+                    to: formatDateInputShanghai(
+                      new Date(b.dateRangeTo.getTime() - 1),
+                    ),
+                    orderIds: b.orderIds,
+                  };
                   return (
                     <tr key={b.id}>
                       <td className="px-4 py-3 font-sans tabular-nums text-xs">
@@ -150,21 +158,21 @@ export default async function ForemanCdrPage({
                             status={DESIGN_BUNDLE_DISPLAY_STATUS.PENDING}
                           />
                         ) : b.status === DesignBundleStatus.FAILED ? (
-                          <DesignBundleStatusBadge
-                            status={DESIGN_BUNDLE_DISPLAY_STATUS.FAILED}
-                          />
+                          <div className="max-w-xs space-y-2">
+                            <DesignBundleStatusBadge
+                              status={DESIGN_BUNDLE_DISPLAY_STATUS.FAILED}
+                            />
+                            <BundleFailureMessage
+                              errorCode={b.lastErrorCode}
+                            />
+                            <RegenerateBundleForm {...regenerateProps} />
+                          </div>
                         ) : expired ? (
                           <div>
                             <DesignBundleStatusBadge
                               status={DESIGN_BUNDLE_DISPLAY_STATUS.EXPIRED}
                             />
-                            <RegenerateBundleForm
-                              from={formatDateInputShanghai(b.dateRangeFrom)}
-                              to={formatDateInputShanghai(
-                                new Date(b.dateRangeTo.getTime() - 1),
-                              )}
-                              orderIds={b.orderIds}
-                            />
+                            <RegenerateBundleForm {...regenerateProps} />
                           </div>
                         ) : isMock ? (
                           <DesignBundleStatusBadge
@@ -205,6 +213,16 @@ export default async function ForemanCdrPage({
         </Link>
       </p>
     </div>
+  );
+}
+
+function BundleFailureMessage({ errorCode }: { errorCode: string | null }) {
+  const display = cdrBundleFailureDisplay(errorCode);
+  return (
+    <p role="alert" className="text-xs text-destructive">
+      <span className="font-medium">{display.title}：</span>
+      {display.description}
+    </p>
   );
 }
 
