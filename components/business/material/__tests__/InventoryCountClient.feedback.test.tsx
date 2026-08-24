@@ -19,7 +19,10 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
-import { InventoryCountClient } from '../InventoryCountClient';
+import {
+  createInventoryCountSubmitGate,
+  InventoryCountClient,
+} from '../InventoryCountClient';
 
 function render() {
   return renderToStaticMarkup(
@@ -84,13 +87,45 @@ describe('InventoryCountClient structured feedback contract', () => {
     expect(html).not.toContain('账面数已变动，未过账');
   });
 
-  it('routes posting through an L3 confirmation with a required persisted reason', () => {
+  it('routes posting through a controlled L3 confirmation gate', () => {
     const html = render();
 
-    expect(html).toContain('data-slot="alert-dialog-trigger"');
+    expect(html).toMatch(
+      /<form[^>]*id="inventory-count-form"[^>]*data-risk-level="L3"/,
+    );
+    expect(html).toContain('name="remark"');
+    expect(html).toContain('id="inventory-count-submit-trigger"');
     expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('核对并提交盘点过账');
     expect(html).toContain('disabled');
+  });
+
+  it('consumes confirmation authorization exactly once', () => {
+    const gate = createInventoryCountSubmitGate();
+
+    // 普通 submit / Enter 没有确认 token，必须被组件拦截。
+    expect(gate.consume()).toBeNull();
+    expect(gate.arm('  月末例行盘点  ')).toBe('月末例行盘点');
+    expect(gate.snapshot()).toEqual({
+      armed: true,
+      remark: '月末例行盘点',
+    });
+
+    expect(gate.consume()).toBe('月末例行盘点');
+    expect(gate.consume()).toBeNull();
+    expect(gate.snapshot()).toEqual({ armed: false, remark: '' });
+  });
+
+  it('clears both the armed state and audit reason on cancel or Escape', () => {
+    const gate = createInventoryCountSubmitGate();
+
+    gate.arm('已输入但取消的原因');
+    gate.clear();
+
+    expect(gate.snapshot()).toEqual({ armed: false, remark: '' });
+    expect(gate.consume()).toBeNull();
+    expect(gate.arm('   ')).toBeNull();
   });
 
   it('distinguishes full success, partial posting and full failure', () => {

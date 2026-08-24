@@ -5,8 +5,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
+  type FormEvent,
 } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +44,36 @@ type Props = {
   initialIdempotencyKey: string;
 };
 
+/**
+ * 盘点过账的一次性提交授权。理由本身就是 token：只有 L3
+ * 确认按钮能 arm，紧接着的第一次 submit 消费它，之后立即失效。
+ */
+export function createInventoryCountSubmitGate() {
+  let armedRemark: string | null = null;
+
+  return {
+    arm(reason: string | null): string | null {
+      const normalized = reason?.trim() ?? '';
+      armedRemark = normalized.length > 0 ? normalized : null;
+      return armedRemark;
+    },
+    consume(): string | null {
+      const remark = armedRemark;
+      armedRemark = null;
+      return remark;
+    },
+    clear(): void {
+      armedRemark = null;
+    },
+    snapshot(): { armed: boolean; remark: string } {
+      return {
+        armed: armedRemark !== null,
+        remark: armedRemark ?? '',
+      };
+    },
+  };
+}
+
 function decimal(value: string | null): string {
   return value === null || value === '' ? '-' : value;
 }
@@ -65,6 +97,17 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const [error, setError] = useState<string | null>(null);
   const [fetchPending, startTransition] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmationTriggerRef = useRef<HTMLButtonElement>(null);
+  const remarkInputRef = useRef<HTMLInputElement>(null);
+  const confirmationSubmitDispatchingRef = useRef(false);
+  const submitGateRef = useRef<ReturnType<
+    typeof createInventoryCountSubmitGate
+  > | null>(null);
+  if (submitGateRef.current === null) {
+    submitGateRef.current = createInventoryCountSubmitGate();
+  }
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   const fetchRows = useCallback((q: string) => {
     startTransition(async () => {
@@ -189,6 +232,86 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   const fetchError = fetchPending ? null : error;
   const staleKeySet = useMemo(() => new Set(staleKeys), [staleKeys]);
 
+  function clearSubmissionAuthorization() {
+    submitGateRef.current?.clear();
+    if (remarkInputRef.current) remarkInputRef.current.value = '';
+  }
+
+  function prepareConfirmation() {
+    const form = formRef.current;
+    clearSubmissionAuthorization();
+    if (!form || actionPending) return;
+
+    // 无论是点击触发器还是在输入框内按 Enter，都先走浏览器
+    // 约束校验；非法数字不应被当成“未录入”后继续打开确认层。
+    if (!form.reportValidity()) return;
+    if (submittedItems.length === 0) return;
+
+    setConfirmationOpen(true);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    const authorizedRemark = submitGateRef.current?.consume() ?? null;
+    if (authorizedRemark !== null) {
+      // requestSubmit() 会同步派发 submit；在 React 捕获 FormData 前
+      // 确保审计理由已经写入表单。授权在 consume 后已立即失效。
+      if (remarkInputRef.current) {
+        remarkInputRef.current.value = authorizedRemark;
+      }
+      return;
+    }
+
+    // 所有普通 submit（包括实盘数输入中的 Enter）都只能打开
+    // L3，不得直接调用 Server Action。
+    event.preventDefault();
+    prepareConfirmation();
+  }
+
+  function handleConfirmationOpenChange(nextOpen: boolean) {
+    setConfirmationOpen(nextOpen);
+    if (!nextOpen) {
+      submitGateRef.current?.clear();
+      // 确认按钮会先 requestSubmit，随后 AlertDialog 才关闭。该同步
+      // 提交窗口内保留 hidden reason，取消 / Escape 则立即清理。
+      if (!confirmationSubmitDispatchingRef.current && remarkInputRef.current) {
+        remarkInputRef.current.value = '';
+      }
+    }
+  }
+
+  function submitFromConfirmation(reason: string | null) {
+    const form = formRef.current;
+    if (!form || actionPending || submittedItems.length === 0) {
+      clearSubmissionAuthorization();
+      return;
+    }
+    if (!form.reportValidity()) {
+      clearSubmissionAuthorization();
+      return;
+    }
+
+    const authorizedRemark = submitGateRef.current?.arm(reason) ?? null;
+    if (authorizedRemark === null) {
+      clearSubmissionAuthorization();
+      return;
+    }
+    if (remarkInputRef.current) {
+      remarkInputRef.current.value = authorizedRemark;
+    }
+
+    confirmationSubmitDispatchingRef.current = true;
+    try {
+      form.requestSubmit();
+    } finally {
+      // React 在 submit 事件中同步捕获 FormData。到微任务时已可安全
+      // 清除 DOM 镜像，避免之后的 Enter 夹带陈旧理由。
+      queueMicrotask(() => {
+        confirmationSubmitDispatchingRef.current = false;
+        clearSubmissionAuthorization();
+      });
+    }
+  }
+
   return (
     <section className="space-y-4">
       <form
@@ -247,13 +370,17 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
       ) : null}
 
       <form
+        ref={formRef}
         id="inventory-count-form"
         action={formAction}
+        onSubmit={handleSubmit}
         aria-busy={actionPending}
         className="space-y-4"
+        data-risk-level="L3"
       >
         <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
         <input type="hidden" name="items" value={JSON.stringify(submittedItems)} />
+        <input ref={remarkInputRef} type="hidden" name="remark" />
         <FormErrorSummary errors={summaryErrors} />
         <div
           id="inventory-count-items"
@@ -330,6 +457,9 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                         <td className="px-4 py-3 text-right align-top">
                           <Input
                             inputMode="decimal"
+                            pattern="\d{1,10}(\.\d{0,2})?"
+                            maxLength={13}
+                            title="请输入最多 10 位整数、2 位小数的非负数"
                             value={countedRaw}
                             disabled={actionPending}
                             onChange={(event) => {
@@ -394,26 +524,29 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         ) : null}
 
         <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <Button
+            ref={confirmationTriggerRef}
+            id="inventory-count-submit-trigger"
+            type="button"
+            disabled={actionPending || submittedItems.length === 0}
+            aria-busy={actionPending}
+            aria-haspopup="dialog"
+            aria-expanded={confirmationOpen}
+            className="min-h-11"
+            onClick={prepareConfirmation}
+          >
+            {actionPending
+              ? '正在提交盘点过账…'
+              : `核对并提交盘点过账（${submittedItems.length} 条）`}
+          </Button>
           <ConfirmActionDialog
             level="L3"
-            formId="inventory-count-form"
-            reasonName="remark"
             reasonLabel="盘点过账原因"
             reasonPlaceholder="例如：月末例行盘点，复核库位实物后调整"
+            open={confirmationOpen}
+            onOpenChange={handleConfirmationOpenChange}
+            focusReturnRef={confirmationTriggerRef}
             disabled={actionPending || submittedItems.length === 0}
-            trigger={
-              <Button
-                id="inventory-count-submit-trigger"
-                type="button"
-                disabled={actionPending || submittedItems.length === 0}
-                aria-busy={actionPending}
-                className="min-h-11"
-              >
-                {actionPending
-                  ? '正在提交盘点过账…'
-                  : `核对并提交盘点过账（${submittedItems.length} 条）`}
-              </Button>
-            }
             title={`确认过账 ${submittedItems.length} 个库位？`}
             description="盘点过账会直接改变库存余额并写入不可覆盖的盘点单与库存流水。请核对差异并填写业务原因。"
             impactItems={
@@ -427,6 +560,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                   ]
             }
             confirmLabel="填写原因并确认过账"
+            onConfirm={submitFromConfirmation}
           />
           {submittedItems.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">

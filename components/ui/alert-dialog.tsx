@@ -141,7 +141,10 @@ function AlertDialogAction({
       data-slot="alert-dialog-action"
       className={cn(
         buttonVariants({ variant, size }),
-        "min-h-11 sm:min-h-8",
+        // Alert dialogs render in a body-level portal, outside the admin/worker
+        // viewport shells that enforce touch geometry. Keep the destructive
+        // decision target at 44px on tablets and desktop as well as phones.
+        "min-h-11",
         className
       )}
       {...props}
@@ -159,7 +162,7 @@ function AlertDialogCancel({
       data-slot="alert-dialog-cancel"
       className={cn(
         buttonVariants({ variant: "outline", size }),
-        "min-h-11 sm:min-h-8",
+        "min-h-11",
         className
       )}
       {...props}

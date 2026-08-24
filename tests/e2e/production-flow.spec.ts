@@ -322,8 +322,15 @@ test.describe('生产流程 — golden path', () => {
     });
 
     await test.step('ADMIN 确认完工 (SHIPPED → FINISHED 终态)', async () => {
-      // 发货后 FinishOrderButton 渲染；按一下走到 FINISHED。
+      // 发货后 FinishOrderButton 渲染；终态变更必须先经过 L2 影响确认。
       await page.getByRole('button', { name: /^确认完工$/ }).click();
+      const finishDialog = page.getByRole('alertdialog');
+      await expect(finishDialog).toContainText('FINISHED（已完成）终态');
+      await expect(finishDialog).toContainText('业务台账（ledger）将关闭');
+      await expect(finishDialog).toContainText('退出活跃工作区');
+      await finishDialog
+        .getByRole('button', { name: /^确认关闭并完成$/ })
+        .click();
       // 终态：badge =&ldquo;已完成&rdquo;（不是&ldquo;已完工&rdquo;）。这里精准断言别
       // 与 COMPLETED 混淆。
       await expect(

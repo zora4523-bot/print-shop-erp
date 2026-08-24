@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
@@ -21,7 +23,10 @@ vi.mock('@/actions/owner-materials', () => ({
   setMaterialActiveAction: vi.fn(),
 }));
 
-import { StockTransactionForm } from '../StockTransactionForm';
+import {
+  StockTransactionForm,
+  stockTransactionImpactItems,
+} from '../StockTransactionForm';
 import { ToggleMaterialActiveButton } from '../ToggleMaterialActiveButton';
 
 function renderTransaction() {
@@ -36,6 +41,55 @@ beforeEach(() => {
 });
 
 describe('material action forms structured feedback', () => {
+  it('builds an exact L2 stock movement preview from current form data', () => {
+    expect(
+      stockTransactionImpactItems({
+        direction: 'OUT',
+        locationLabel: '主仓 / 成品区',
+        quantity: '12.50',
+        unit: '张',
+        unitCost: '0.1200',
+        reasonLabel: '生产领用',
+      }),
+    ).toEqual([
+      '方向：出库',
+      '物料：当前详情页物料',
+      '库位：主仓 / 成品区',
+      '数量：12.50 张',
+      '单位成本：0.1200',
+      '原因：生产领用',
+      '系统会写入一条库存流水，并同步更新该库位与物料汇总库存；提交时会再次校验库位和库存。',
+    ]);
+  });
+
+  it('routes Enter and ordinary stock submits through one-shot L2 confirmation', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'material',
+        'StockTransactionForm.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('onSubmit={handleSubmit}');
+    expect(source).toContain('event.preventDefault()');
+    expect(source).toContain('form.reportValidity()');
+    expect(source).toContain('onInvalidCapture={() =>');
+    expect(source).toContain('confirmedRef.current = true');
+    expect(source).toContain('confirmedRef.current = false');
+    expect(source).toContain('<ConfirmActionDialog');
+    expect(source).toContain('level="L2"');
+    expect(source).not.toContain('level="L3"');
+
+    const html = renderTransaction();
+    expect(html).toContain('data-risk-level="L2"');
+    expect(html).toContain('核对并提交出入库');
+    expect(html).toMatch(/id="quantity"[^>]*required=""/);
+  });
+
   it('summarizes stock validation and links controls to stable messages', () => {
     actionState.current = {
       status: 'invalid',

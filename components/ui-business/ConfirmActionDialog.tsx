@@ -85,13 +85,16 @@ export function ConfirmActionDialog({
       <AlertDialog
         {...(open === undefined ? { defaultOpen } : { open })}
         onOpenChange={(nextOpen) => {
-          // 在下一次打开时清空，而不是在关闭时清空。确认按钮若关联外部
-          // form，浏览器会在 click 默认动作阶段读取下面的 hidden input；
-          // 关闭时同步清空会让审计理由在提交前丢失。
+          // 打开时立即清空；关闭时等当前 click/submit 默认动作完成后再清。
+          // 这样外部 form 仍能读取本次理由，同时 Escape/取消不会留下可被
+          // 后续 Enter 提交复用的陈旧 hidden value。
           if (nextOpen) setReason('');
           onOpenChange?.(nextOpen);
-          if (!nextOpen && focusReturnRef?.current) {
-            window.requestAnimationFrame(() => focusReturnRef.current?.focus());
+          if (!nextOpen) {
+            window.requestAnimationFrame(() => {
+              setReason('');
+              focusReturnRef?.current?.focus();
+            });
           }
         }}
       >

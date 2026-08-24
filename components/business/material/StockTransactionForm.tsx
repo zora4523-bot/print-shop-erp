@@ -1,13 +1,20 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import {
   ActionNotice,
+  ConfirmActionDialog,
   FormErrorSummary,
   FormMessage,
-  PendingButton,
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -23,6 +30,29 @@ type Props = {
   unit: string;
   locationOptions: WarehouseLocationOption[];
 };
+
+export type StockTransactionPreview = {
+  direction: 'IN' | 'OUT';
+  locationLabel: string;
+  quantity: string;
+  unit: string;
+  unitCost: string;
+  reasonLabel: string;
+};
+
+export function stockTransactionImpactItems(
+  preview: StockTransactionPreview,
+): string[] {
+  return [
+    `方向：${preview.direction === 'IN' ? '入库' : '出库'}`,
+    '物料：当前详情页物料',
+    `库位：${preview.locationLabel}`,
+    `数量：${preview.quantity} ${preview.unit}`,
+    `单位成本：${preview.unitCost || '未填写'}`,
+    `原因：${preview.reasonLabel}`,
+    '系统会写入一条库存流水，并同步更新该库位与物料汇总库存；提交时会再次校验库位和库存。',
+  ];
+}
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
@@ -57,6 +87,11 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   // 外层不再用 key 强制重挂载（那会连成功提示一起清掉），改成成功后
   // 只 reset 原生表单字段，useActionState 的 state 得以保留并渲染。
   const formRef = useRef<HTMLFormElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
+  const formId = 'stock-transaction-form';
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [preview, setPreview] = useState<StockTransactionPreview | null>(null);
   useEffect(() => {
     if (state?.status === 'success') formRef.current?.reset();
   }, [state]);
@@ -68,14 +103,65 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
       : option.value === 'PRODUCTION_USE' || option.value === 'OTHER',
   );
 
+  function prepareConfirmation() {
+    const form = formRef.current;
+    if (!form) return;
+
+    const quantityInput = form.elements.namedItem('quantity');
+    const unitCostInput = form.elements.namedItem('unitCost');
+    if (
+      !(quantityInput instanceof HTMLInputElement) ||
+      !(unitCostInput instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+
+    setPositiveQuantityValidity(quantityInput);
+    if (!form.reportValidity()) return;
+
+    const formData = new FormData(form);
+    const nextDirection =
+      formData.get('direction') === 'OUT' ? ('OUT' as const) : ('IN' as const);
+    const nextReason = String(formData.get('reasonType') ?? '');
+    setPreview({
+      direction: nextDirection,
+      locationLabel: stockLocationLabel(
+        String(formData.get('locationId') ?? ''),
+        locationOptions,
+      ),
+      quantity: String(formData.get('quantity') ?? '').trim(),
+      unit,
+      unitCost: String(formData.get('unitCost') ?? '').trim(),
+      reasonLabel:
+        TX_REASON_OPTIONS.find((option) => option.value === nextReason)?.label ??
+        nextReason,
+    });
+    setConfirmationOpen(true);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+      return;
+    }
+    // Enter、requestSubmit() 与普通提交都必须先进入同一个 L2 确认层。
+    event.preventDefault();
+    prepareConfirmation();
+  }
+
   return (
     <form
-      id="stock-transaction-form"
+      id={formId}
       ref={formRef}
       action={formAction}
+      onSubmit={handleSubmit}
+      onInvalidCapture={() => {
+        // 若确认后浏览器原生校验阻止 submit，立即销毁一次性放行令牌。
+        confirmedRef.current = false;
+      }}
       aria-busy={pending}
+      data-risk-level="L2"
       className="space-y-4"
-      noValidate
     >
       <FormErrorSummary errors={summaryErrors} />
 
@@ -109,6 +195,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
         <TextField
           id="quantity"
           label={`数量（${unit}）`}
+          required
+          pattern="\d{1,10}(\.\d{1,2})?"
+          maxLength={13}
           disabled={pending}
           error={errs.quantity?.[0]}
         />
@@ -173,6 +262,8 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
           id="unitCost"
           label="单位成本（选填）"
           hint="每单位进价，如 0.12；入库时建议填写。"
+          pattern="\d{1,6}(\.\d{1,4})?"
+          maxLength={11}
           disabled={pending}
           error={errs.unitCost?.[0]}
         />
@@ -184,6 +275,7 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
           id="remark"
           name="remark"
           rows={3}
+          maxLength={500}
           disabled={pending}
           {...(errs.remark?.[0]
             ? formMessageA11yProps('remark', 'error')
@@ -208,9 +300,30 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
         <ActionNotice tone="success" title={success} />
       ) : null}
 
-      <PendingButton pending={pending} pendingLabel="正在更新库存…">
-        提交出入库
-      </PendingButton>
+      <Button
+        ref={triggerRef}
+        type="submit"
+        disabled={pending}
+        aria-busy={pending}
+        className="min-h-11"
+      >
+        {pending ? '正在更新库存…' : '核对并提交出入库'}
+      </Button>
+      <ConfirmActionDialog
+        level="L2"
+        formId={formId}
+        open={confirmationOpen}
+        onOpenChange={setConfirmationOpen}
+        focusReturnRef={triggerRef}
+        disabled={pending || preview === null}
+        title={`确认${preview?.direction === 'OUT' ? '出库' : '入库'}？`}
+        description="请核对方向、当前物料、库位、数量和成本。本操作会立即形成库存流水。"
+        impactItems={preview ? stockTransactionImpactItems(preview) : []}
+        confirmLabel="确认提交出入库"
+        onConfirm={() => {
+          confirmedRef.current = true;
+        }}
+      />
     </form>
   );
 }
@@ -222,6 +335,9 @@ function TextField({
   error,
   defaultValue,
   disabled,
+  required,
+  pattern,
+  maxLength,
 }: {
   id: string;
   label: string;
@@ -229,6 +345,9 @@ function TextField({
   error?: string | undefined;
   defaultValue?: string;
   disabled?: boolean;
+  required?: boolean;
+  pattern?: string;
+  maxLength?: number;
 }) {
   return (
     <div className="space-y-2">
@@ -237,6 +356,11 @@ function TextField({
         id={id}
         name={id}
         defaultValue={defaultValue}
+        inputMode="decimal"
+        required={required}
+        pattern={pattern}
+        maxLength={maxLength}
+        onInput={(event) => event.currentTarget.setCustomValidity('')}
         disabled={disabled}
         {...(error
           ? formMessageA11yProps(id, 'error')
@@ -255,6 +379,23 @@ function TextField({
       ) : null}
     </div>
   );
+}
+
+function setPositiveQuantityValidity(input: HTMLInputElement) {
+  input.setCustomValidity('');
+  if (!/^\d{1,10}(\.\d{1,2})?$/.test(input.value.trim())) return;
+  if (Number(input.value) <= 0) input.setCustomValidity('数量必须大于 0');
+}
+
+function stockLocationLabel(
+  locationId: string,
+  options: readonly WarehouseLocationOption[],
+): string {
+  const location = locationId
+    ? options.find((option) => option.id === locationId)
+    : options.find((option) => option.isDefault);
+  if (!location) return locationId ? `库位 ${locationId}` : '系统默认库位';
+  return `${location.warehouseName} / ${location.name}${location.isDefault ? '（默认）' : ''}`;
 }
 
 function toStockTransactionErrorSummary(

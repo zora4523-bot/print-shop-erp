@@ -1,4 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,5 +34,26 @@ describe('ConfirmActionDialog', () => {
     expect(html).toContain('data-slot="alert-dialog-trigger"');
     expect(html).toContain('aria-haspopup="dialog"');
     expect(html).toContain('删除');
+  });
+
+  it('keeps portal actions touch-sized and clears stale reasons after close', () => {
+    const alertDialogSource = readFileSync(
+      path.join(process.cwd(), 'components', 'ui', 'alert-dialog.tsx'),
+      'utf8',
+    );
+    const confirmDialogSource = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'ui-business',
+        'ConfirmActionDialog.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(alertDialogSource.match(/"min-h-11"/g)).toHaveLength(2);
+    expect(alertDialogSource).not.toContain('"min-h-11 sm:min-h-8"');
+    expect(confirmDialogSource).toContain("requestAnimationFrame(() => {");
+    expect(confirmDialogSource).toContain("setReason('');");
   });
 });
