@@ -1,5 +1,6 @@
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { databasePoolConfig } from './database-session';
 
 // Prisma 7 rust-free client requires a driver adapter. Singleton pattern
 // avoids pool exhaustion under Next.js dev hot-reload (each reload would
@@ -13,7 +14,7 @@ function makeClient(): PrismaClient {
   if (!connectionString) {
     throw new Error('DATABASE_URL is not set');
   }
-  const adapter = new PrismaPg({ connectionString });
+  const adapter = new PrismaPg(databasePoolConfig(connectionString));
   return new PrismaClient({ adapter });
 }
 

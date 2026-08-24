@@ -108,7 +108,7 @@ describe('customer price-book Server Actions', () => {
     ['create', () => createCustomerPriceBookDraftAction({ purpose: 'PROCESSING', changeReason: '调整价格' })],
     ['update', () => updateCustomerPriceRuleDraftAction(validRule)],
     ['group update', () => updateCustomerPriceRuleDraftGroupAction(validGroup)],
-    ['publish', () => publishCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30' })],
+    ['publish', () => publishCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30', publishNote: '已完成价格复核', confirmedImpact: true })],
     ['discard', () => discardCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z' })],
   ])('checks dict:price:manage before %s input processing', async (_label, invoke) => {
     permissionMock.requirePermission.mockRejectedValue(new UnauthorizedError('未登录'));
@@ -434,6 +434,8 @@ describe('customer price-book Server Actions', () => {
       priceBookId: 'book-v2-draft',
       expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
       effectiveFrom: '2026-08-10T09:30',
+      publishNote: '已完成价格复核',
+      confirmedImpact: true,
     });
 
     expect(adminMock.publishCustomerPriceBookDraft).toHaveBeenCalledWith(
@@ -441,9 +443,29 @@ describe('customer price-book Server Actions', () => {
         priceBookId: 'book-v2-draft',
         expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
         effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+        publishNote: '已完成价格复核',
       },
       actor,
     );
+  });
+
+  it('拒绝缺少发布说明或 L3 影响确认的请求', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      effectiveFrom: '2026-08-10T09:30',
+      publishNote: '',
+      confirmedImpact: false,
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.publishNote?.join('\n')).toContain('发布说明');
+      expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('影响范围');
+    }
+    expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -454,6 +476,8 @@ describe('customer price-book Server Actions', () => {
           priceBookId: 'book-v2-draft',
           expectedDraftUpdatedAt: '2026-08-09 10:00',
           effectiveFrom: '2026-08-10T09:30',
+          publishNote: '已完成价格复核',
+          confirmedImpact: true,
         }),
     ],
     [

@@ -34,6 +34,9 @@ import {
 } from './production-completion';
 import { getSetting } from './settings';
 import { todayShanghai } from './dashboard/shanghai-clock';
+import { backgroundJobsMode } from './background-jobs/mode';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { EnqueueClient } from './background-jobs/repository';
 
 // Thrown when a scheduling request violates the allowlist contract
 // (duplicate / missing / unknown craft-item pairs, bad worker, etc.).
@@ -57,6 +60,7 @@ type ScheduleTxClient = {
       include?: unknown;
     }) => Promise<{
       id: string;
+      orderNo: string;
       status: OrderStatus;
       submitterId: string;
       items: Array<{
@@ -168,6 +172,7 @@ export async function scheduleOrder(
   input: ScheduleOrderInput,
   actor: { id: string; role: Role },
 ): Promise<ScheduleOrderResult> {
+  let scheduledNotificationQueued = false;
   const result = await db.$transaction(async (tx) => {
     const txClient = tx as unknown as ScheduleTxClient;
 
@@ -186,6 +191,7 @@ export async function scheduleOrder(
       where: { id: input.orderId },
       select: {
         id: true,
+        orderNo: true,
         status: true,
         submitterId: true,
         items: {
@@ -481,6 +487,17 @@ export async function scheduleOrder(
           ).completed
         : false;
 
+    scheduledNotificationQueued = await enqueueNotificationInTransaction(
+      tx as unknown as EnqueueClient,
+      'ORDER_SCHEDULED',
+      {
+        orderId: order.id,
+        orderNo: order.orderNo,
+        taskCount: expectedKeys.size,
+      },
+      { dedupeKey: `notification:ORDER_SCHEDULED:${order.id}` },
+    );
+
     return {
       orderId: updated.id,
       status: orderCompleted ? OrderStatus.COMPLETED : updated.status,
@@ -491,12 +508,12 @@ export async function scheduleOrder(
   });
 
   // Slice C wire ─ ORDER_SCHEDULED（tx 已 commit；生产入持久化队列）。
-  const payload = await db.order.findUnique({
-    where: { id: result.orderId },
-    select: { orderNo: true, customerRef: true },
-  });
-  if (payload) {
-    await dispatchNotification(
+  if (!scheduledNotificationQueued) {
+    const payload = await db.order.findUnique({
+      where: { id: result.orderId },
+      select: { orderNo: true, customerRef: true },
+    });
+    if (payload) await dispatchNotification(
       'ORDER_SCHEDULED',
       {
         orderId: result.orderId,
@@ -505,7 +522,7 @@ export async function scheduleOrder(
       },
       { dedupeKey: `notification:ORDER_SCHEDULED:${result.orderId}` },
     );
-    if (result.orderCompleted) {
+    if (payload && result.orderCompleted) {
       await dispatchNotification(
         'ORDER_COMPLETED',
         {
@@ -717,6 +734,17 @@ export class OverReportError extends ReportError {
 }
 
 const DECIMAL_10_2_MAX = '99999999.99';
+
+function assertValidPlannedQuantity(
+  plannedQty: number,
+  taskLabel = '该任务',
+): void {
+  if (!Number.isSafeInteger(plannedQty) || plannedQty <= 0) {
+    throw new ReportError(
+      `${taskLabel}的计划数量异常（${plannedQty}），不能报工；请联系管理员先修复任务计划数`,
+    );
+  }
+}
 
 type PieceworkTaskInput = Parameters<
   typeof calcMachinePieceworkBreakdown
@@ -1247,6 +1275,9 @@ export async function reportTask(
     }
 
     transitionProductionTask(task.status, TaskStatus.COMPLETED);
+    // 表单校验只能保护新数据；历史脚本/直连 SQL 留下的非法计划数
+    // 必须在任何金额计算或状态写入前 fail-closed。批量报工走同一守卫。
+    assertValidPlannedQuantity(task.plannedQty);
 
     // ── 数量守卫（业主 2026-08-21 拍板）────────────────────────────────
     // 少报是合法的（材料不足、中途换机、半成品转外协…），直接放行；
@@ -1267,10 +1298,7 @@ export async function reportTask(
       input.completedQty + input.defectQty + input.reworkQty;
     let overReportRemark: string | null = null;
 
-    // plannedQty <= 0 是防御性分支，正常不可达（orderItemQuantityField 的
-    // min(1) 保证下来的计划数至少是 1）。留着是因为脏数据下 limit 会是 0，
-    // 而 schema 又要求合计 > 0，不跳过等于把这个任务永久锁死在无法报工的状态。
-    if (task.plannedQty > 0 && totalReported > task.plannedQty) {
+    if (totalReported > task.plannedQty) {
       const limitQty = task.plannedQty * maxReportMultiple;
 
       if (totalReported >= limitQty) {
@@ -1450,7 +1478,7 @@ export async function reportTask(
 
   // Slice C wire ─ ORDER_COMPLETED（仅 cascade 路径；tx 已 commit；
   // 生产入持久化队列）。
-  if (result.orderCompleted) {
+  if (result.orderCompleted && backgroundJobsMode() !== 'durable') {
     const taskWithOrder = await db.productionTask.findUnique({
       where: { id: result.taskId },
       select: {
@@ -1689,6 +1717,10 @@ export async function reportTasks(
       if (task.status !== TaskStatus.IN_PROGRESS) {
         throw new ReportError(`任务“${task.orderItem.name}”尚未开始或已报工`);
       }
+      assertValidPlannedQuantity(
+        task.plannedQty,
+        `任务“${task.orderItem.name}”`,
+      );
     }
 
     const machineRuleLocks = [
@@ -1784,7 +1816,10 @@ export async function reportTasks(
     return { taskIds: ids, completedOrderIds };
   });
 
-  if (result.completedOrderIds.length > 0) {
+  if (
+    result.completedOrderIds.length > 0 &&
+    backgroundJobsMode() !== 'durable'
+  ) {
     const orders = await db.order.findMany({
       where: { id: { in: result.completedOrderIds } },
       select: { id: true, orderNo: true, customerRef: true },

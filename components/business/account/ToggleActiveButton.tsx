@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ActionNotice, PendingButton } from '@/components/ui-business';
 import { setUserActiveAction } from '@/actions/owner-accounts';
 import type { AccountMutationResult } from '@/actions/owner-accounts.types';
 
@@ -20,23 +20,33 @@ export function ToggleActiveButton({
     null,
   );
 
-  const error = state?.status === 'error' ? state.message : null;
+  const visibleState = pending ? null : state;
+  const error = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
 
   return (
     <div className="space-y-2">
-      <form action={formAction}>
-        <Button
-          type="submit"
+      <form action={formAction} aria-busy={pending}>
+        <PendingButton
+          pending={pending}
+          pendingLabel={currentlyActive ? '正在停用账号…' : '正在激活账号…'}
           variant={currentlyActive ? 'destructive' : 'default'}
-          disabled={pending}
         >
-          {pending ? '…' : currentlyActive ? '停用账号' : '激活账号'}
-        </Button>
+          {currentlyActive ? '停用账号' : '激活账号'}
+        </PendingButton>
       </form>
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <ActionNotice
+          tone="error"
+          title={currentlyActive ? '账号停用失败' : '账号激活失败'}
+          description={error}
+        />
+      ) : null}
+      {success ? (
+        <ActionNotice
+          tone="success"
+          title={currentlyActive ? '账号已停用' : '账号已激活'}
+        />
       ) : null}
     </div>
   );

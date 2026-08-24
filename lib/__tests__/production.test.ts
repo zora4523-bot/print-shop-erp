@@ -812,10 +812,17 @@ describe('scheduleOrder', () => {
         id: 'outsource-1',
         status: OutsourceStatus.RECEIVED,
         orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
       },
     ]);
     dbMock.orderItem.findMany.mockResolvedValue([
-      { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-outsource'] },
+      {
+        id: 'item-1',
+        sequence: 1,
+        name: '款式一',
+        quantity: 5000,
+        crafts: ['craft-outsource'],
+      },
     ]);
     dbMock.productionTask.createMany.mockResolvedValue({ count: 0 });
     dbMock.productionTask.findMany.mockResolvedValue([]);
@@ -1838,11 +1845,12 @@ describe('reportTask', () => {
         id: 'outsource-1',
         status: OutsourceStatus.RECEIVED,
         orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
       },
     ]);
     dbMock.orderItem.findMany.mockResolvedValue([
-      { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-outsource'] },
-      { id: 'item-2', sequence: 2, name: '款式二', crafts: ['craft-outsource'] },
+      { id: 'item-1', sequence: 1, name: '款式一', quantity: 5000, crafts: ['craft-outsource'] },
+      { id: 'item-2', sequence: 2, name: '款式二', quantity: 5000, crafts: ['craft-outsource'] },
     ]);
     dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
 
@@ -2164,18 +2172,16 @@ describe('reportTask 数量守卫（业主 2026-08-21）', () => {
     expect(updateData().remark).toContain('合计 20000');
   });
 
-  it('plannedQty 为 0 时守卫整段跳过，不把任务锁死在无法报工的状态', async () => {
-    // 防御性分支，正常不可达（orderItemQuantityField 的 min(1) 保证计划数
-    // 至少是 1）。留着是因为脏数据下 limit 会是 0，而 schema 又要求合计
-    // > 0；不跳过的话这个任务永远报不了工。
+  it('plannedQty 为 0 的脏任务 fail-closed，不产生状态或计件写入', async () => {
     armMachineReport({ plannedQty: 0 });
-    await reportTask(
-      'task-1',
-      { completedQty: 100, defectQty: 0, reworkQty: 0 },
-      workerActor,
-    );
-    expect(updateData().status).toBe(TaskStatus.COMPLETED);
-    expect(updateData().remark).toBeUndefined();
+    await expect(
+      reportTask(
+        'task-1',
+        { completedQty: 100, defectQty: 0, reworkQty: 0 },
+        workerActor,
+      ),
+    ).rejects.toThrow(/计划数量异常.*不能报工/);
+    expect(dbMock.productionTask.update).not.toHaveBeenCalled();
   });
 });
 

@@ -712,8 +712,40 @@ describe('markHourlyPayrollPaid', () => {
     expect(data.paidAt).toBe(now);
   });
 
+  it('拒绝将上海当月的临时月结冻结为已发', async () => {
+    await expect(
+      markHourlyPayrollPaid(
+        'p-1',
+        true,
+        new Date('2026-05-15T04:00:00.000Z'),
+      ),
+    ).rejects.toThrow(/当前或未来月份.*2026-05/);
+    expect(dbMock.hourlyWorkerPayroll.update).not.toHaveBeenCalled();
+  });
+
+  it('拒绝历史遗留的未来月份记录被标记已发', async () => {
+    dbMock.hourlyWorkerPayroll.findUnique.mockResolvedValue({
+      workerId: 'worker-1',
+      month: '2026-06',
+    });
+
+    await expect(
+      markHourlyPayrollPaid(
+        'p-1',
+        true,
+        new Date('2026-05-15T04:00:00.000Z'),
+      ),
+    ).rejects.toThrow(/当前或未来月份.*2026-06/);
+    expect(dbMock.hourlyWorkerPayroll.update).not.toHaveBeenCalled();
+  });
+
   it('clears paidAt on un-pay', async () => {
-    await markHourlyPayrollPaid('p-1', false);
+    // 当月的历史误发记录必须可撤销。
+    await markHourlyPayrollPaid(
+      'p-1',
+      false,
+      new Date('2026-05-15T04:00:00.000Z'),
+    );
     const data = dbMock.hourlyWorkerPayroll.update.mock.calls[0][0].data;
     expect(data.isPaid).toBe(false);
     expect(data.paidAt).toBeNull();

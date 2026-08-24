@@ -10,10 +10,10 @@ import {
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { AddSalaryAdjustmentForm } from '@/components/business/salary/AddSalaryAdjustmentForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { PageHeader } from '@/components/ui-business';
 import type { MachineRuleWithBase } from '@/lib/salary/rules';
 
@@ -67,7 +67,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">状态</p>
           <div className="mt-2 flex items-center justify-between gap-2">
-            {salary.isPaid ? <Badge>已发</Badge> : <Badge variant="outline">未发</Badge>}
+            <PaymentStatusBadge isPaid={salary.isPaid} />
             <MarkPaidForm returnTo="/owner/salary/daily" id={salary.id} currentPaid={salary.isPaid} />
           </div>
         </div>

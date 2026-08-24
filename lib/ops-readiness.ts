@@ -51,7 +51,7 @@ type RawCronHttpJobReadiness = {
   appCronSecretSet: boolean;
   readyToSchedule: boolean;
   blockers: string[] | null;
-  scheduleSql: string;
+  scheduleSql: string | null;
   unscheduleSql: string;
   manualCurl: string;
 };

@@ -21,7 +21,8 @@ Covered extensions:
 
 - Search: `pg_pinyin`, `pg_bigm`
 - Inventory summaries: `pg_ivm`
-- Scheduler: `pg_cron`, `pg_net`
+- Scheduler is intentionally out of scope: production uses host crontab with a
+  root-only secret file. Database HTTP scheduling is retired.
 - Query observability: `pg_stat_statements`
 - Masked test/demo export: `anon`
 - DBA audit logging: `pgaudit`
@@ -41,8 +42,8 @@ Before any production activation:
 2. Confirm pgBackRest backup is green and a restore drill has been tested.
 3. Apply and verify this runbook on staging restored from production-like data.
 4. Confirm `/owner/pigsty` can be opened by an ADMIN user.
-5. Keep `CRON_SECRET` and webhook/OSS secrets outside git.
-6. Do not enable cron schedules until the app deployment is live and healthy.
+5. Keep `CRON_SECRET` and webhook/OSS secrets outside git and PostgreSQL.
+6. Do not create `pg_cron` + `pg_net` HTTP schedules for this application.
 
 ## Extension Classes
 
@@ -51,8 +52,6 @@ Cluster restart or preload-sensitive:
 | Extension | Why | Preload target |
 |---|---|---|
 | `pg_ivm` | Incrementally maintained inventory summaries | `shared_preload_libraries` before creating IMMVs |
-| `pg_cron` | PostgreSQL scheduled HTTP calls | `shared_preload_libraries` |
-| `pg_net` | HTTP calls from `pg_cron` jobs | `shared_preload_libraries` |
 | `pg_stat_statements` | Query statistics | `shared_preload_libraries` |
 | `pgaudit` | Database audit logging | `shared_preload_libraries` |
 | `anon` | Dynamic masking for test/demo export role | `shared_preload_libraries` or database/session preload |
@@ -75,7 +74,7 @@ Example Pigsty config fragment:
 
 ```yaml
 pg_extensions:
-  - pg_bigm pg_pinyin pg_ivm pg_cron pg_net pg_stat_statements anon pgaudit pg_partman
+  - pg_bigm pg_pinyin pg_ivm pg_stat_statements anon pgaudit pg_partman
 ```
 
 Pigsty package aliases vary by OS and PostgreSQL major version. Verify package
@@ -90,7 +89,7 @@ Example for an existing cluster:
 
 ```bash
 pg edit-config <pg_cluster> --force \
-  -p shared_preload_libraries='pg_stat_statements,auto_explain,pg_cron,pg_net,pg_ivm,pgaudit,anon'
+  -p shared_preload_libraries='pg_stat_statements,auto_explain,pg_ivm,pgaudit,anon'
 
 pg restart <pg_cluster>
 ```
@@ -103,7 +102,6 @@ Recommended PostgreSQL parameters:
 ```yaml
 pg_parameters:
   compute_query_id: 'on'
-  cron.database_name: 'print_shop_erp'
   pgaudit.log: 'write, ddl, role'
   pgaudit.log_parameter: 'off'
   pgaudit.log_relation: 'on'
@@ -120,8 +118,6 @@ Run in the ERP database after the package and preload step is complete:
 CREATE EXTENSION IF NOT EXISTS pg_bigm;
 CREATE EXTENSION IF NOT EXISTS pg_pinyin;
 CREATE EXTENSION IF NOT EXISTS pg_ivm;
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 CREATE SCHEMA IF NOT EXISTS partman;
@@ -140,15 +136,40 @@ END
 $$;
 ```
 
-Then set app-local scheduler settings. Prefer Pigsty-managed parameters for
-cluster-level settings; these database settings are application secrets/config:
+Do **not** store scheduler credentials as PostgreSQL settings. If an earlier
+runbook was applied, remove its jobs and settings as DBA before (or while)
+applying `20260822102000_retire_database_http_scheduler`:
 
 ```sql
-ALTER DATABASE print_shop_erp SET app.erp_base_url = 'https://erp.example.com';
-ALTER DATABASE print_shop_erp SET app.cron_secret = '<same value as CRON_SECRET>';
+SELECT cron.unschedule(jobid)
+FROM cron.job
+WHERE jobname LIKE 'erp-%'
+   OR command LIKE '%app.cron_secret%'
+   OR command LIKE '%/api/cron/%';
+ALTER DATABASE print_shop_erp RESET app.erp_base_url;
+ALTER DATABASE print_shop_erp RESET app.cron_secret;
 ```
 
-Reconnect sessions after `ALTER DATABASE ... SET` before checking readiness.
+The migration fails loudly if its role can see this legacy state but cannot
+remove it. Resolve the ownership/privilege issue and retry; do not mark the
+migration applied manually while jobs or settings remain.
+
+`RESET` only changes settings inherited by **new** database sessions. Sessions
+that connected before the reset can retain the old `app.cron_secret`, so the
+database-stored value must never be reused. Immediately after this retirement,
+generate a new secret and update both restricted locations before starting the
+new app revision:
+
+1. Set application-server `CRON_SECRET` for the endpoint verifier. Restrict the
+   service environment or `.env` to the application service account.
+2. Write the exact same value to the host scheduler's `CRON_SECRET_FILE` as a
+   root-owned regular file with mode `0600`.
+3. Restart/reload the Web and worker processes with the new environment, then
+   trigger one endpoint and confirm it reaches `SUCCEEDED`.
+
+This rotation invalidates the value retained by any old PostgreSQL session.
+The secret must not appear in PostgreSQL, git, crontab, process arguments, or
+shell history.
 
 ## Phase 4: Apply App Migrations
 
@@ -222,7 +243,6 @@ not get `pg_ivm` write-time maintenance benefits.
 
 ```sql
 SELECT
-  ready_for_pg_cron_http,
   ready_for_query_stats,
   ready_for_auto_explain,
   ready_for_index_advisor,
@@ -240,11 +260,14 @@ SELECT
   ready_to_schedule,
   blockers,
   schedule_sql,
-  unschedule_sql,
   manual_curl
 FROM app_ops.cron_http_job_readiness
 ORDER BY priority, job_name;
 ```
+
+`ready_to_schedule` is always false, `schedule_sql` is null, and `manual_curl`
+is now the safe host command (`/usr/local/sbin/print-shop-erp-cron <endpoint>`).
+This retained view is an inventory/retirement aid, not an activation surface.
 
 ```sql
 SELECT
@@ -257,9 +280,6 @@ SELECT
 FROM app_ops.query_observability_readiness
 ORDER BY priority, candidate_key;
 ```
-
-Only execute `schedule_sql` rows where `ready_to_schedule = true`, and only
-after the app deployment and `CRON_SECRET` are confirmed.
 
 ### Security: `anon` And `pgaudit`
 
@@ -339,62 +359,35 @@ Do not execute `create_parent_sql` until A09 has a table-by-table cutover plan.
 Current Prisma tables still have single-column primary keys and incoming foreign
 keys that need a manual migration strategy.
 
-## Phase 6: Enable Cron Jobs
+## Phase 6: Enable Host Cron Jobs
 
-After all scheduler readiness rows are ready, copy each `schedule_sql` from
-`app_ops.cron_http_job_readiness` and execute it once.
-
-Check scheduled jobs:
+Follow `docs/部署指南.md` §10: install `deploy/run-cron.sh`; place the
+rotated bearer value in application-server `CRON_SECRET` for verification and
+in the root-owned `0600` `CRON_SECRET_FILE` for the host scheduler; then install
+`deploy/crontab.example` with `sudo crontab`. Verify PostgreSQL contains no
+legacy ERP HTTP jobs:
 
 ```sql
-SELECT jobid, schedule, command, active, jobname
+SELECT jobid, jobname
 FROM cron.job
-ORDER BY jobname;
+WHERE jobname LIKE 'erp-%'
+   OR command LIKE '%app.cron_secret%'
+   OR command LIKE '%/api/cron/%';
 ```
 
-Keep the `manual_curl` values from the readiness view as the break-glass
-fallback if cron is temporarily disabled.
-
-> **Rewrite the header before you paste it into a shell.** `manual_curl` is a
-> display string built inside `app_ops.cron_http_job_readiness` and still reads
-> `-H "Authorization: Bearer $CRON_SECRET"`. That is harmless where it lives —
-> pg_cron calls the endpoint through `net.http_post`, never through a shell — but
-> running it verbatim on a host puts the expanded secret into the process argv and
-> into shell history, where `ps -efww | grep Bearer` can read it. Feed the header
-> from stdin instead (curl >= 7.55):
->
-> ```bash
-> printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
->   curl -X POST --header @- -H "Content-Type: application/json" \
->     -d '<request_body from the view>' "$ERP_BASE_URL<endpoint_path>"
-> ```
->
-> See DECISIONS 2026-08-21 "cron 密钥不进 curl 的命令行参数".
+The query must return zero rows. `deploy/run-cron.sh` rejects symlinks,
+non-regular files, non-root owners, and any mode other than `0600`; neither the
+secret nor an expanded Authorization header may appear in crontab, process
+arguments, PostgreSQL settings, or shell history.
 
 ## Rollback
 
 ### Cron Jobs
 
-Use generated rollback SQL:
-
-```sql
-SELECT job_name, unschedule_sql
-FROM app_ops.cron_http_job_readiness
-ORDER BY priority, job_name;
-```
-
-Then execute the `unschedule_sql` rows. Confirm:
-
-```sql
-SELECT jobname, active FROM cron.job ORDER BY jobname;
-```
-
-Optional after rollback:
-
-```sql
-ALTER DATABASE print_shop_erp RESET app.erp_base_url;
-ALTER DATABASE print_shop_erp RESET app.cron_secret;
-```
+To pause scheduling, remove or comment the ERP entries with `sudo crontab -e`.
+Keep the root-only secret file for a short rollback window, then rotate/delete
+it through the normal secret-management procedure. Do not roll back to the
+database HTTP scheduler.
 
 ### Audit Logging
 
@@ -453,9 +446,12 @@ A09 cutover rollback plan.
 ## Final Acceptance Checklist
 
 - `/owner/pigsty` shows no blockers for search required extensions/indexes.
-- `app_ops.ops_extension_readiness.ready_for_pg_cron_http = true` before cron
-  scheduling.
-- `cron.job` contains only the expected ERP jobs.
+- Host crontab contains exactly the expected ERP jobs and uses
+  `/usr/local/sbin/print-shop-erp-cron`.
+- `cron.job` contains no ERP HTTP jobs, and PostgreSQL has no
+  `app.cron_secret` setting.
+- The pre-retirement cron secret was rotated; application-server `CRON_SECRET`
+  and the root-owned `0600` `CRON_SECRET_FILE` contain the same new value.
 - `app_ops.security_extension_readiness.blockers` is empty or every remaining
   blocker has an explicit owner-approved exception.
 - `app_ops.partition_readiness` is reviewed but no partition cutover is executed.

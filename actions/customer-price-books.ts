@@ -247,6 +247,14 @@ const publishDraftSchema = z
   .object({
     priceBookId: safeId,
     expectedDraftUpdatedAt: strictIsoInstant,
+    publishNote: z
+      .string()
+      .trim()
+      .min(2, '请填写至少 2 个字符的发布说明')
+      .max(500, '发布说明最多 500 字'),
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解发布影响范围',
+    }),
     effectiveFrom: z.string().trim().transform((value, ctx) => {
       const parsed = parseStrictShanghaiDateTimeLocal(value);
       if (!parsed) {
@@ -448,7 +456,15 @@ export async function publishCustomerPriceBookDraftAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
   try {
-    const published = await publishCustomerPriceBookDraft(parsed.data, actor);
+    const published = await publishCustomerPriceBookDraft(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedDraftUpdatedAt: parsed.data.expectedDraftUpdatedAt,
+        effectiveFrom: parsed.data.effectiveFrom,
+        publishNote: parsed.data.publishNote,
+      },
+      actor,
+    );
     revalidatePriceBookPaths();
     return {
       status: 'success',

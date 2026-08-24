@@ -32,7 +32,7 @@ export const TONE_ICON_BOX: Record<Tone, string> = {
 
 // 实色徽章：StatusBadge / Tag 类直接展示&ldquo;状态色&rdquo;时用。背景 + 同色暗版前景。
 export const TONE_BADGE_SOFT: Record<Tone, string> = {
-  primary: 'bg-primary/10 text-primary border-primary/20',
+  primary: 'bg-primary/10 text-foreground border-primary/30',
   warning: 'bg-warning/10 text-warning-foreground border-warning/30',
   info: 'bg-info/10 text-info-foreground border-info/30',
   success: 'bg-success/10 text-success-foreground border-success/30',

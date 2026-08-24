@@ -6,6 +6,9 @@ import {
   E2E_USERS,
   seedNotificationWireFixture,
   readNotificationLogs,
+  fillExternalSalesOrderCharges,
+  openFirstOrderItemEditor,
+  submitDraftOrderAndWait,
 } from './_helpers';
 
 // P1 #2 Slice C — URGENT_ORDER wire smoke。
@@ -37,11 +40,17 @@ test.describe('notification urgent wire — golden path', () => {
 
     // 创建工单 + 勾"急单"复选框
     await page.locator('input[name="customerRef"]').fill(orderRef);
+    // 急单在客户步骤，先填完再进入款式编辑。
+    await page.locator('input[name="isUrgent"]').check();
+    await openFirstOrderItemEditor(page);
     await page.locator('input[name="items.0.name"]').fill(itemName);
     await page.locator('input[name="items.0.quantity"]').fill('1000');
     await page.getByRole('button', { name: '现货加烫' }).click();
-    // 急单复选框 (CreateOrderForm name="isUrgent")
-    await page.locator('input[name="isUrgent"]').check();
+    await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
+    await page
+      .locator('textarea[name="items.0.priceOverrideReason"]')
+      .fill('E2E 急单通知链路人工报价');
+    await fillExternalSalesOrderCharges(page);
     await page.getByRole('button', { name: /创建工单/ }).click();
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
       timeout: 10_000,
@@ -49,10 +58,7 @@ test.describe('notification urgent wire — golden path', () => {
     const orderId = new URL(page.url()).pathname.split('/').filter(Boolean).pop()!;
 
     // 提交工单 → notify('ORDER_SUBMITTED') + notify('URGENT_ORDER') 都触发
-    await page.getByRole('button', { name: /^提交工单$/ }).click();
-    await expect(
-      page.getByRole('button', { name: /^提交工单$/ }),
-    ).toHaveCount(0, { timeout: 10_000 });
+    await submitDraftOrderAndWait(page);
 
     // 等待 notify 真正写入 NotificationLog —— Server Action 完成 +
     // revalidatePath 触发的 fetch 都跑完。expect.poll 比 waitForTimeout

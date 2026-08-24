@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,7 +9,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
+import {
+  PriceWorkspaceLink,
+  PriceWorkspaceNavigationGuardProvider,
+  PriceWorkspaceUnsavedSummary,
+} from './PriceWorkspaceNavigationGuard';
 
 export type ExternalSalesChargePurpose = 'processing' | 'logistics';
 
@@ -164,15 +169,6 @@ function groupWorkspaceItems(
   return [...groups.values()];
 }
 
-function priceChangeLabel(
-  item: ExternalSalesChargeWorkspaceItem,
-  hasDraft: boolean,
-): string {
-  if (!hasDraft) return '—';
-  if (!item.changed) return '无变更';
-  return item.priceChangeLabel ?? '已调整';
-}
-
 function DraftStatusBar({
   draft,
   workspaceStatus,
@@ -193,8 +189,7 @@ function DraftStatusBar({
       CURRENT: {
         badge: '当前生效',
         title: '当前价格正在用于工单计价',
-        description:
-          '如需调整，请先发起调价；发布前不会影响正在使用的价格。',
+        description: '当前为生效价，发起调价后才能改',
       },
       SCHEDULED: {
         badge: '等待生效',
@@ -211,7 +206,7 @@ function DraftStatusBar({
     return (
       <section
         aria-label="价格状态"
-        className="min-w-0 rounded-xl border bg-card p-4 shadow-sm"
+        className="admin-sticky-below-header sticky z-[5] min-w-0 rounded-xl border bg-card p-4 shadow-sm"
       >
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -224,7 +219,7 @@ function DraftStatusBar({
             </p>
           </div>
           {createDraftEditor ? null : createDraftHref ? (
-            <Link
+            <PriceWorkspaceLink
               href={createDraftHref}
               prefetch={false}
               className={cn(
@@ -233,7 +228,7 @@ function DraftStatusBar({
               )}
             >
               发起调价
-            </Link>
+            </PriceWorkspaceLink>
           ) : null}
         </div>
         {createDraftEditor ? (
@@ -260,7 +255,7 @@ function DraftStatusBar({
   return (
     <section
       aria-label="调价草稿状态"
-      className="min-w-0 rounded-xl border border-warning/40 bg-warning/10 p-4"
+      className="admin-sticky-below-header sticky z-[5] min-w-0 rounded-xl border border-warning/40 bg-warning/10 p-4 shadow-sm"
     >
       <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
@@ -270,8 +265,9 @@ function DraftStatusBar({
               本轮调价 · 第 {draft.version} 版
             </p>
             <p className="font-sans text-sm tabular-nums text-warning-foreground">
-              {draft.changedCount} 项已修改
+              {draft.changedCount} 项已写入草稿
             </p>
+            <PriceWorkspaceUnsavedSummary />
           </div>
           <p className="admin-wrap-anywhere mt-2 text-sm">
             调价原因：{draft.changeReason}
@@ -281,7 +277,7 @@ function DraftStatusBar({
           </p>
         </div>
         <div className="flex min-w-0 flex-wrap gap-2">
-          <Link
+          <PriceWorkspaceLink
             href={draft.compareHref}
             prefetch={false}
             className={cn(
@@ -290,15 +286,15 @@ function DraftStatusBar({
             )}
           >
             <GitCompareArrows aria-hidden="true" />
-            查看本次修改
-          </Link>
-          <Link
+            查看草稿差异
+          </PriceWorkspaceLink>
+          <PriceWorkspaceLink
             href={draft.publishHref}
             prefetch={false}
             className={cn(buttonVariants(), 'min-h-11')}
           >
-            去校验并发布
-          </Link>
+            前往校验发布
+          </PriceWorkspaceLink>
         </div>
       </div>
     </section>
@@ -363,7 +359,7 @@ function WorkspaceFilters({
             查找
           </Button>
           {filters.query || advancedFilterCount > 0 ? (
-            <Link
+            <PriceWorkspaceLink
               href={clearFiltersHref}
               prefetch={false}
               className={cn(
@@ -372,7 +368,7 @@ function WorkspaceFilters({
               )}
             >
               清除条件
-            </Link>
+            </PriceWorkspaceLink>
           ) : null}
         </div>
       </div>
@@ -512,51 +508,6 @@ function WorkspaceFilters({
   );
 }
 
-function ItemPriceComparison({
-  item,
-  hasDraft,
-}: {
-  item: ExternalSalesChargeWorkspaceItem;
-  hasDraft: boolean;
-}) {
-  return (
-    <dl className="grid min-w-0 grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-      <div className="min-w-0">
-        <dt className="text-xs text-muted-foreground">当前价</dt>
-        <dd className="admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums">
-          {item.currentAmountLabel}
-        </dd>
-      </div>
-      <div className="min-w-0">
-        <dt className="text-xs text-muted-foreground">草稿价</dt>
-        <dd
-          className={cn(
-            'admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums',
-            item.changed && 'text-warning-foreground',
-          )}
-        >
-          {!hasDraft
-            ? '暂无草稿'
-            : item.changed
-            ? (item.draftAmountLabel ?? '已修改')
-            : '未修改'}
-        </dd>
-      </div>
-      <div className="col-span-2 min-w-0 sm:col-span-1">
-        <dt className="text-xs text-muted-foreground">价格变化</dt>
-        <dd
-          className={cn(
-            'admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums',
-            item.changed && hasDraft && 'text-warning-foreground',
-          )}
-        >
-          {priceChangeLabel(item, hasDraft)}
-        </dd>
-      </div>
-    </dl>
-  );
-}
-
 function BusinessChangeSummary({
   item,
 }: {
@@ -580,44 +531,102 @@ function BusinessChangeSummary({
   );
 }
 
-function ProductPriceTiers({
+function SelectedChargePriceSummary({
   item,
   hasDraft,
 }: {
   item: ExternalSalesChargeWorkspaceItem;
   hasDraft: boolean;
 }) {
-  if (!item.priceTiers?.length) return null;
+  const statusLabel =
+    item.statusLabel ?? (item.status === 'ACTIVE' ? '已启用' : '已停用');
 
   return (
     <dl
-      aria-label={`${item.name}数量价格阶梯`}
-      className="mt-3 grid min-w-0 grid-cols-2 gap-2 border-t pt-3 sm:grid-cols-4 2xl:grid-cols-7"
+      aria-label={`${item.name}价格对比`}
+      className="grid min-w-0 grid-cols-2 gap-3 rounded-xl border bg-card p-4 text-sm shadow-sm"
     >
-      {item.priceTiers.map((tier, index) => (
-        <div
-          key={`${tier.quantityLabel}-${index}`}
+      <div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">当前</dt>
+        <dd className="admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums">
+          {item.currentAmountLabel}
+        </dd>
+      </div>
+      <div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">草稿</dt>
+        <dd className="admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums">
+          {hasDraft ? (item.draftAmountLabel ?? '待补全') : '暂无草稿'}
+        </dd>
+      </div>
+      <div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">变化</dt>
+        <dd
           className={cn(
-            'min-w-0 rounded-lg border bg-background px-2.5 py-2',
-            tier.changed && hasDraft && 'border-warning/50 bg-warning/5',
+            'admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums',
+            item.changed && hasDraft && 'text-warning-foreground',
           )}
         >
-          <dt className="font-sans text-xs tabular-nums text-muted-foreground">
-            {tier.quantityLabel}
-          </dt>
-          <dd className="admin-wrap-anywhere mt-1 font-sans text-sm font-semibold tabular-nums">
-            {tier.currentAmountLabel}
-          </dd>
-          {hasDraft && tier.changed ? (
-            <dd className="admin-wrap-anywhere mt-0.5 font-sans text-xs font-medium tabular-nums text-warning-foreground">
-              <span className="sr-only">草稿价：</span>
-              → {tier.draftAmountLabel ?? '待设置'}
-            </dd>
-          ) : null}
-        </div>
-      ))}
+          {!hasDraft
+            ? '—'
+            : item.changed
+              ? (item.priceChangeLabel ?? '已调整')
+              : '无变更'}
+        </dd>
+      </div>
+      <div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">启用</dt>
+        <dd className="admin-wrap-anywhere mt-1 font-medium">{statusLabel}</dd>
+      </div>
     </dl>
   );
+}
+
+function compactCurrentAmountLabel(
+  item: ExternalSalesChargeWorkspaceItem,
+): string {
+  return item.currentAmountLabel.replace(
+    /^\s*\d+\s*档\s*(?:·|•|｜|\|)\s*/,
+    '',
+  );
+}
+
+function itemTierSummary(
+  item: ExternalSalesChargeWorkspaceItem,
+  hasDraft: boolean,
+) {
+  const tiers = item.priceTiers;
+  const tierCount = tiers?.length ?? 1;
+  const changedCount = tiers
+    ? tiers.filter((tier) => tier.changed).length
+    : item.changed
+      ? 1
+      : 0;
+  const incompleteCount = !hasDraft
+    ? 0
+    : tiers
+      ? tiers.filter(
+          (tier) =>
+            !tier.draftAmountLabel ||
+            /待(?:设置|补全|人工确认|确认)/.test(tier.draftAmountLabel),
+        ).length
+      : !item.draftAmountLabel ||
+          /待(?:设置|补全|人工确认|确认)/.test(item.draftAmountLabel)
+        ? 1
+        : 0;
+
+  return {
+    tierCount,
+    currentAmountLabel: compactCurrentAmountLabel(item),
+    progressLabel: hasDraft
+      ? `${changedCount}/${tierCount} 档已调整`
+      : '未发起调整',
+    completionLabel: !hasDraft
+      ? '无需补全'
+      : incompleteCount > 0
+        ? `待补全 ${incompleteCount} 档`
+        : '已补全',
+    incompleteCount,
+  };
 }
 
 function ChargeItemRow({
@@ -631,103 +640,62 @@ function ChargeItemRow({
 }) {
   const actionLabel = hasDraft ? '编辑收费项目' : '查看详情';
   const selectedActionLabel = hasDraft ? '正在编辑' : '正在查看';
+  const summary = itemTierSummary(item, hasDraft);
 
   return (
     <li className="min-w-0">
-      <Link
+      <PriceWorkspaceLink
         href={item.detailHref}
         prefetch={false}
         aria-current={selected ? 'page' : undefined}
         aria-label={`${selected ? selectedActionLabel : actionLabel}：${item.name}`}
         className={cn(
-          'block min-h-11 min-w-0 px-3 py-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-4',
+          '!flex !w-full min-h-11 min-w-0 !flex-col !items-stretch px-3 py-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 sm:px-4',
           selected && 'bg-primary/5',
         )}
       >
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="admin-wrap-anywhere font-medium">{item.name}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {item.automation === 'AUTO' ? '自动计价' : '需人工确认'}
-            </p>
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            {item.changed ? (
-              <Badge variant="secondary">已修改</Badge>
-            ) : null}
-            <Badge
-              variant="outline"
-              className={item.status === 'INACTIVE' ? 'border-destructive/60' : undefined}
-            >
-              {item.statusLabel ?? (item.changeSummaryLabels?.some((label) =>
-                label.startsWith('状态：'),
-              )
-                ? item.status === 'ACTIVE'
-                  ? '草稿已启用'
-                  : '草稿已停用'
-                : item.status === 'ACTIVE'
-                  ? '已启用'
-                  : '已停用')}
-            </Badge>
-            <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
-              {selected ? selectedActionLabel : actionLabel}
-              <ChevronRight aria-hidden="true" className="size-4" />
-            </span>
-          </div>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <p className="admin-wrap-anywhere min-w-0 flex-1 font-medium">
+            {item.name}
+          </p>
+          <ChevronRight
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+          />
         </div>
-
-        {item.priceTiers?.length ? (
-          <ProductPriceTiers item={item} hasDraft={hasDraft} />
-        ) : (
-          <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 text-sm sm:grid-cols-5">
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">数量范围</dt>
-              <dd className="admin-wrap-anywhere mt-1">
-                {item.quantityLabel}
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">计价方式</dt>
-              <dd className="admin-wrap-anywhere mt-1">
-                {item.calculationLabel}
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">当前价</dt>
-              <dd className="admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums">
-                {item.currentAmountLabel}
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">草稿价</dt>
-              <dd
-                className={cn(
-                  'admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums',
-                  item.changed && hasDraft && 'text-warning-foreground',
-                )}
-              >
-                {!hasDraft
-                  ? '—'
-                  : item.changed
-                    ? (item.draftAmountLabel ?? '已修改')
-                    : '未修改'}
-              </dd>
-            </div>
-            <div className="col-span-2 min-w-0 sm:col-span-1">
-              <dt className="text-xs text-muted-foreground">价格变化</dt>
-              <dd
-                className={cn(
-                  'admin-wrap-anywhere mt-1 font-sans font-medium tabular-nums',
-                  item.changed && hasDraft && 'text-warning-foreground',
-                )}
-              >
-                {priceChangeLabel(item, hasDraft)}
-              </dd>
-            </div>
-          </dl>
-        )}
-        <BusinessChangeSummary item={item} />
-      </Link>
+        <dl className="mt-2 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-sm sm:grid-cols-4">
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">档数</dt>
+            <dd className="mt-0.5 font-sans tabular-nums">
+              {summary.tierCount} 档
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">当前价区间</dt>
+            <dd className="admin-wrap-anywhere mt-0.5 font-sans font-medium tabular-nums">
+              {summary.currentAmountLabel}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">调整进度</dt>
+            <dd className="mt-0.5 font-sans tabular-nums">
+              {summary.progressLabel}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">待补全</dt>
+            <dd
+              className={cn(
+                'mt-0.5 font-sans tabular-nums',
+                summary.incompleteCount > 0 &&
+                  'font-medium text-warning-foreground',
+              )}
+            >
+              {summary.completionLabel}
+            </dd>
+          </div>
+        </dl>
+      </PriceWorkspaceLink>
     </li>
   );
 }
@@ -792,7 +760,7 @@ function Pagination({
       </p>
       <div className="flex min-w-0 gap-2">
         {pagination.previousHref ? (
-          <Link
+          <PriceWorkspaceLink
             href={pagination.previousHref}
             prefetch={false}
             className={cn(
@@ -802,7 +770,7 @@ function Pagination({
           >
             <ChevronLeft aria-hidden="true" />
             上一页
-          </Link>
+          </PriceWorkspaceLink>
         ) : (
           <span
             aria-disabled="true"
@@ -816,7 +784,7 @@ function Pagination({
           </span>
         )}
         {pagination.nextHref ? (
-          <Link
+          <PriceWorkspaceLink
             href={pagination.nextHref}
             prefetch={false}
             className={cn(
@@ -826,7 +794,7 @@ function Pagination({
           >
             下一页
             <ChevronRight aria-hidden="true" />
-          </Link>
+          </PriceWorkspaceLink>
         ) : (
           <span
             aria-disabled="true"
@@ -844,6 +812,18 @@ function Pagination({
   );
 }
 
+export function externalSalesChargeListHref(detailHref: string): string {
+  if (detailHref.trim().startsWith('#')) return '#external-charge-list';
+  try {
+    const url = new URL(detailHref, 'https://price-workspace.local');
+    url.searchParams.delete('item');
+    url.hash = 'external-charge-list';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '#external-charge-list';
+  }
+}
+
 function SelectedChargeDetail({
   selectedItem,
   selectedEditor,
@@ -859,12 +839,14 @@ function SelectedChargeDetail({
     return (
       <aside
         aria-label="收费项目详情"
-        className="hidden min-w-0 rounded-xl border bg-card p-4 text-sm text-muted-foreground shadow-sm xl:sticky xl:top-4 xl:block xl:self-start"
+        className="hidden min-w-0 rounded-xl border bg-card p-4 text-sm text-muted-foreground shadow-sm xl:order-2 xl:block xl:self-start"
       >
-        选择一个收费项目后，这里会显示当前价格和可编辑内容。
+        选择一个收费项目
       </aside>
     );
   }
+
+  const listHref = externalSalesChargeListHref(selectedItem.detailHref);
 
   return (
     <aside
@@ -872,11 +854,12 @@ function SelectedChargeDetail({
       // tabIndex={-1}：hash 主从导航跳转后要能把焦点送过来，否则键盘/读屏用户不知道跳到哪了。
       tabIndex={-1}
       aria-labelledby="selected-charge-heading"
-      className="min-w-0 scroll-mt-4 space-y-4 focus-visible:outline-none xl:max-h-[calc(100dvh-2rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:pr-1"
+      className="admin-scroll-target min-w-0 space-y-4 focus-visible:outline-none xl:order-2 xl:max-h-[calc(100dvh_-_var(--admin-header-offset)_-_1rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:pr-1"
     >
       <div className="xl:hidden">
-        <a
-          href="#external-charge-list"
+        <PriceWorkspaceLink
+          href={listHref}
+          prefetch={false}
           className={cn(
             buttonVariants({ variant: 'outline' }),
             'min-h-11',
@@ -884,71 +867,78 @@ function SelectedChargeDetail({
         >
           <ChevronLeft aria-hidden="true" />
           返回收费项目列表
-        </a>
+        </PriceWorkspaceLink>
       </div>
-      <section className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">收费项目详情</p>
-            <h2
-              id="selected-charge-heading"
-              className="admin-wrap-anywhere mt-1 text-lg font-semibold"
-            >
-              {selectedItem.name}
-            </h2>
-          </div>
-          <Badge
-            variant="outline"
-            className={
-              selectedItem.status === 'INACTIVE'
-                ? 'border-destructive/60'
-                : undefined
-            }
-          >
-            {selectedItem.statusLabel ??
-              (selectedItem.status === 'ACTIVE' ? '已启用' : '已停用')}
-          </Badge>
-        </div>
-        <dl className="mt-4 grid min-w-0 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">收费类目</dt>
-            <dd className="admin-wrap-anywhere mt-1">
-              {selectedItem.categoryLabel}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">适用范围</dt>
-            <dd className="admin-wrap-anywhere mt-1">
-              {selectedItem.subjectLabel}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">数量范围</dt>
-            <dd className="admin-wrap-anywhere mt-1">
-              {selectedItem.quantityLabel}
-            </dd>
-          </div>
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">计价方式</dt>
-            <dd className="admin-wrap-anywhere mt-1">
-              {selectedItem.calculationLabel}
-            </dd>
-          </div>
-        </dl>
-        <div
-          className={cn(
-            'mt-4',
-            !selectedItem.priceTiers?.length && 'border-t pt-4',
-          )}
-        >
-          {selectedItem.priceTiers?.length ? (
-            <ProductPriceTiers item={selectedItem} hasDraft={hasDraft} />
-          ) : (
-            <ItemPriceComparison item={selectedItem} hasDraft={hasDraft} />
-          )}
+      {selectedEditor ? (
+        <>
+          <h2 id="selected-charge-heading" className="sr-only">
+            {selectedItem.name}
+          </h2>
+          {!selectedItem.priceTiers?.length ? (
+            <SelectedChargePriceSummary
+              item={selectedItem}
+              hasDraft={hasDraft}
+            />
+          ) : null}
           <BusinessChangeSummary item={selectedItem} />
-        </div>
-      </section>
+        </>
+      ) : (
+        <section className="min-w-0 rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">收费项目详情</p>
+              <h2
+                id="selected-charge-heading"
+                className="admin-wrap-anywhere mt-1 text-lg font-semibold"
+              >
+                {selectedItem.name}
+              </h2>
+            </div>
+            <Badge
+              variant="outline"
+              className={
+                selectedItem.status === 'INACTIVE'
+                  ? 'border-destructive/60'
+                  : undefined
+              }
+            >
+              {selectedItem.statusLabel ??
+                (selectedItem.status === 'ACTIVE' ? '已启用' : '已停用')}
+            </Badge>
+          </div>
+          <dl className="mt-4 grid min-w-0 gap-4 text-sm sm:grid-cols-2 xl:grid-cols-1">
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">收费类目</dt>
+              <dd className="admin-wrap-anywhere mt-1">
+                {selectedItem.categoryLabel}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">适用范围</dt>
+              <dd className="admin-wrap-anywhere mt-1">
+                {selectedItem.subjectLabel}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">数量范围</dt>
+              <dd className="admin-wrap-anywhere mt-1">
+                {selectedItem.quantityLabel}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">计价方式</dt>
+              <dd className="admin-wrap-anywhere mt-1">
+                {selectedItem.calculationLabel}
+              </dd>
+            </div>
+          </dl>
+          <BusinessChangeSummary item={selectedItem} />
+        </section>
+      )}
+
+      {!selectedEditor ? (
+        <SelectedChargePriceSummary item={selectedItem} hasDraft={hasDraft} />
+      ) : null}
 
       {selectedEditor ? (
         <section aria-label="编辑收费项目" className="min-w-0">
@@ -957,21 +947,21 @@ function SelectedChargeDetail({
       ) : (
         <section className="min-w-0 rounded-xl border bg-muted/20 p-4 text-sm">
           <h3 className="font-medium">
-            {hasDraft ? '该项目暂不可编辑' : '当前价格仅供查看'}
+            {hasDraft ? '该项目不在当前调价草稿内' : '当前为生效价'}
           </h3>
           <p className="mt-1 text-muted-foreground">
             {hasDraft
-              ? '请确认收费项目是否属于当前草稿。'
-              : '调整价格前需要先发起调价，已发布价格和历史工单不会被覆盖。'}
+              ? '该项目不在当前调价草稿内，只能查看生效价'
+              : '当前为生效价，发起调价后才能改'}
           </p>
           {!hasDraft && createDraftHref ? (
-            <Link
+            <PriceWorkspaceLink
               href={createDraftHref}
               prefetch={false}
               className={cn(buttonVariants(), 'mt-3 min-h-11')}
             >
               发起调价
-            </Link>
+            </PriceWorkspaceLink>
           ) : null}
         </section>
       )}
@@ -1005,7 +995,8 @@ export function ExternalSalesChargeWorkspace({
   const itemGroups = groupWorkspaceItems(items);
 
   return (
-    <div className="min-w-0 space-y-5">
+    <PriceWorkspaceNavigationGuardProvider>
+      <div className="min-w-0 space-y-5">
       <nav
         aria-label="外部销售收费类型"
         className="grid min-w-0 grid-cols-1 gap-2 rounded-xl border bg-card p-2 shadow-sm sm:grid-cols-2"
@@ -1014,7 +1005,7 @@ export function ExternalSalesChargeWorkspace({
           (entry) => {
             const active = entry === purpose;
             return (
-              <Link
+              <PriceWorkspaceLink
                 key={entry}
                 href={purposeHrefs[entry]}
                 prefetch={false}
@@ -1025,7 +1016,7 @@ export function ExternalSalesChargeWorkspace({
                 )}
               >
                 {PURPOSE_LABELS[entry]}
-              </Link>
+              </PriceWorkspaceLink>
             );
           },
         )}
@@ -1050,13 +1041,23 @@ export function ExternalSalesChargeWorkspace({
         changedFilterAvailable={changedFilterAvailable}
       />
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]">
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(30rem,31.25rem)]">
+        <SelectedChargeDetail
+          selectedItem={selectedItem}
+          selectedEditor={selectedEditor}
+          hasDraft={Boolean(draft)}
+          createDraftHref={createDraftHref}
+        />
+
         <section
           id="external-charge-list"
           // tabIndex={-1}：同上，「返回列表」的 hash 跳转要能落焦点。
           tabIndex={-1}
           aria-labelledby="charge-list-heading"
-          className="min-w-0 scroll-mt-4 space-y-3 focus-visible:outline-none"
+          className={cn(
+            'admin-scroll-target min-w-0 space-y-3 focus-visible:outline-none xl:order-1',
+            selectedItem && 'max-xl:hidden',
+          )}
         >
           <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
             <h2 id="charge-list-heading" className="font-semibold">
@@ -1079,35 +1080,32 @@ export function ExternalSalesChargeWorkspace({
                 />
               ))}
             </div>
+          ) : filters.query || activeAdvancedFilterCount(filters) > 0 ? (
+            <EmptyState
+              kind="no-result"
+              noun="收费项目"
+              onClear={
+                <PriceWorkspaceLink
+                  href={clearFiltersHref}
+                  prefetch={false}
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'min-h-11',
+                  )}
+                >
+                  清除条件
+                </PriceWorkspaceLink>
+              }
+            />
           ) : (
-            <div className="rounded-xl border bg-card p-6 text-center shadow-sm">
-              <p className="font-medium">没有找到符合条件的收费项目</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                请调整关键词或清除部分筛选条件。
-              </p>
-              <Link
-                href={clearFiltersHref}
-                prefetch={false}
-                className={cn(
-                  buttonVariants({ variant: 'outline' }),
-                  'mt-4 min-h-11',
-                )}
-              >
-                清除条件
-              </Link>
-            </div>
+            <EmptyState kind="no-data" noun="收费项目" />
           )}
 
           <Pagination pagination={pagination} />
         </section>
 
-        <SelectedChargeDetail
-          selectedItem={selectedItem}
-          selectedEditor={selectedEditor}
-          hasDraft={Boolean(draft)}
-          createDraftHref={createDraftHref}
-        />
       </div>
-    </div>
+      </div>
+    </PriceWorkspaceNavigationGuardProvider>
   );
 }

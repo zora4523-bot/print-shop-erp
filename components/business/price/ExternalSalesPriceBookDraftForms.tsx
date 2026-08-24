@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createCustomerPriceBookDraftAction,
@@ -15,6 +15,7 @@ import type {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ConfirmActionDialog } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -192,6 +193,8 @@ export async function publishDraftFromForm(
     priceBookId: textValue(formData, 'priceBookId'),
     expectedDraftUpdatedAt: textValue(formData, 'expectedDraftUpdatedAt'),
     effectiveFrom: textValue(formData, 'effectiveFrom'),
+    publishNote: textValue(formData, 'publishNote'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
   });
 }
 
@@ -370,12 +373,26 @@ export function PublishCustomerPriceBookDraftForm({
   priceBookId,
   expectedDraftUpdatedAt,
   defaultEffectiveFrom,
+  ruleCount,
+  impact,
 }: {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
   defaultEffectiveFrom: string;
+  ruleCount?: number;
+  impact?: {
+    totalRuleCount: number;
+    changedItemCount: number;
+    changedRuleCount: number;
+    increasedRuleCount: number;
+    decreasedRuleCount: number;
+    deltaPercentMin: string | null;
+    deltaPercentMax: string | null;
+    validationStatus: 'PASS' | 'FAIL';
+  };
 }) {
   const router = useRouter();
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
     publishDraftFromForm,
     null,
@@ -385,6 +402,21 @@ export function PublishCustomerPriceBookDraftForm({
   const effectiveFromId = `effectiveFrom-${priceBookId}`;
   const effectiveFromHintId = `${effectiveFromId}-hint`;
   const effectiveFromErrorId = `${effectiveFromId}-error`;
+  const publishNoteId = `publishNote-${priceBookId}`;
+  const publishNoteHintId = `${publishNoteId}-hint`;
+  const publishNoteErrorId = `${publishNoteId}-error`;
+  const confirmedImpactId = `confirmedImpact-${priceBookId}`;
+  const confirmedImpactErrorId = `${confirmedImpactId}-error`;
+  const validationPassed = impact?.validationStatus !== 'FAIL';
+
+  const deltaRange =
+    impact && impact.deltaPercentMin !== null && impact.deltaPercentMax !== null
+      ? impact.deltaPercentMin === impact.deltaPercentMax
+        ? `${Number(impact.deltaPercentMin) > 0 ? '+' : ''}${impact.deltaPercentMin}%`
+        : `${Number(impact.deltaPercentMin) > 0 ? '+' : ''}${impact.deltaPercentMin}% 〜 ${
+            Number(impact.deltaPercentMax) > 0 ? '+' : ''
+          }${impact.deltaPercentMax}%`
+      : '含启停或非金额修改';
 
   useEffect(() => {
     if (state?.status !== 'success') return;
@@ -416,6 +448,7 @@ export function PublishCustomerPriceBookDraftForm({
           defaultValue={defaultEffectiveFrom}
           required
           aria-required="true"
+          onChange={() => setConfirmationOpen(false)}
           aria-invalid={Boolean(errors.effectiveFrom?.length)}
           aria-describedby={fieldDescriptionIds(
             effectiveFromErrorId,
@@ -431,9 +464,135 @@ export function PublishCustomerPriceBookDraftForm({
           messages={errors.effectiveFrom}
         />
       </div>
-      <Button type="submit" className="min-h-11" disabled={pending}>
-        {pending ? '校验并发布中…' : '校验并发布'}
-      </Button>
+      <div className="space-y-2">
+        <Label htmlFor={publishNoteId}>发布说明（必填）</Label>
+        <textarea
+          id={publishNoteId}
+          name="publishNote"
+          className={`${textareaClass} min-h-24`}
+          placeholder="例如：已完成 2026 年 9 月加工费复核，按新价目生效"
+          minLength={2}
+          maxLength={500}
+          required
+          aria-required="true"
+          aria-invalid={Boolean(errors.publishNote?.length)}
+          aria-describedby={fieldDescriptionIds(
+            publishNoteErrorId,
+            errors.publishNote,
+            publishNoteHintId,
+          )}
+          onChange={() => setConfirmationOpen(false)}
+        />
+        <p id={publishNoteHintId} className="text-xs text-muted-foreground">
+          说明会和发布人、生效时间、影响摘要一起留在版本审计中。
+        </p>
+        <FieldErrorMessages id={publishNoteErrorId} messages={errors.publishNote} />
+      </div>
+
+      {!confirmationOpen ? (
+        <div className="space-y-2">
+          <Button
+            type="button"
+            className="min-h-11 w-full"
+            disabled={pending || !validationPassed}
+            onClick={() => {
+              if (!formRef.current?.reportValidity()) return;
+              setConfirmationOpen(true);
+            }}
+          >
+            校验通过，进入发布确认
+          </Button>
+          {!validationPassed ? (
+            <p className="text-xs text-destructive">
+              完整规则集校验未通过，请先按上方问题定位修正。
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <section
+          aria-live="polite"
+          aria-labelledby={`${confirmedImpactId}-heading`}
+          className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
+              L3 · 不可逆
+            </span>
+            <p id={`${confirmedImpactId}-heading`} className="font-medium">
+              最后确认发布影响
+            </p>
+          </div>
+          <dl className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">影响收费项目</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.changedItemCount ?? '—'} 项
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">影响数量档/规则</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.changedRuleCount ?? ruleCount ?? '—'} 档
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">涨跌区间</dt>
+              <dd className="font-sans tabular-nums">{deltaRange}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">涨价 / 下调</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.increasedRuleCount ?? '—'} / {impact?.decreasedRuleCount ?? '—'} 档
+              </dd>
+            </div>
+          </dl>
+          <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
+            已按旧价开出的工单不会重新计价；新价只影响生效时间后新建或重新报价的工单。
+          </p>
+          <label
+            htmlFor={confirmedImpactId}
+            className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border bg-background p-2 text-sm"
+          >
+            <input
+              id={confirmedImpactId}
+              name="confirmedImpact"
+              type="checkbox"
+              value="true"
+              required
+              aria-required="true"
+              aria-invalid={Boolean(errors.confirmedImpact?.length)}
+              aria-describedby={
+                errors.confirmedImpact?.length ? confirmedImpactErrorId : undefined
+              }
+              className="mt-1 size-4 shrink-0"
+            />
+            <span>我已核对变更明细、生效时间与历史工单影响范围。</span>
+          </label>
+          <FieldErrorMessages
+            id={confirmedImpactErrorId}
+            messages={errors.confirmedImpact}
+          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 sm:flex-1"
+              disabled={pending}
+              onClick={() => setConfirmationOpen(false)}
+            >
+              返回修改
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              className="min-h-11 sm:flex-[1.4]"
+              disabled={pending}
+            >
+              {pending ? '校验并发布中…' : '确认校验并发布'}
+            </Button>
+          </div>
+        </section>
+      )}
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
@@ -455,6 +614,7 @@ export function DiscardCustomerPriceBookDraftForm({
     discardDraftFromForm,
     null,
   );
+  const formId = useId();
 
   useEffect(() => {
     if (state?.status !== 'success') return;
@@ -463,18 +623,11 @@ export function DiscardCustomerPriceBookDraftForm({
 
   return (
     <form
+      id={formId}
       action={formAction}
       aria-label="放弃价目草稿"
+      aria-busy={pending}
       className="min-w-0 space-y-3 rounded-lg border border-destructive/30 p-3"
-      onSubmit={(event) => {
-        if (
-          !window.confirm(
-            '确定放弃这份草稿？草稿和其中所有未发布修改将永久删除，已发布版本不受影响。',
-          )
-        ) {
-          event.preventDefault();
-        }
-      }}
     >
       <input type="hidden" name="priceBookId" value={priceBookId} />
       <input
@@ -485,14 +638,29 @@ export function DiscardCustomerPriceBookDraftForm({
       <p className="text-xs text-muted-foreground">
         仅删除未发布草稿，不影响当前价目和历史工单。
       </p>
-      <Button
-        type="submit"
-        variant="destructive"
-        className="min-h-11"
+      <ConfirmActionDialog
+        level="L2"
+        formId={formId}
         disabled={pending}
-      >
-        {pending ? '放弃中…' : '放弃草稿'}
-      </Button>
+        trigger={
+          <Button
+            type="button"
+            variant="destructive"
+            className="min-h-11"
+            disabled={pending}
+          >
+            {pending ? '放弃中…' : '放弃草稿'}
+          </Button>
+        }
+        title="放弃这份价目草稿？"
+        description="请确认未发布修改已不再需要。"
+        impactItems={[
+          '草稿及其中所有未发布修改将永久删除。',
+          '当前已发布版本、历史版本与既有工单不受影响。',
+        ]}
+        confirmLabel="确认放弃草稿"
+        cancelLabel="返回检查"
+      />
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}

@@ -97,6 +97,52 @@ describe('parseOrderListQuery', () => {
     });
   });
 
+  it('round-trips selected row, scroll position and the active saved view without filtering data', () => {
+    const result = parseOrderListQuery({
+      selected: 'order-123',
+      scroll: '1842',
+      view: 'urgent',
+      isUrgent: 'yes',
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.query).toEqual(
+      expect.objectContaining({
+        selectedOrderId: 'order-123',
+        scrollY: 1842,
+        view: 'urgent',
+      }),
+    );
+    expect(serializeOrderListQuery(result.query)).toEqual(
+      expect.objectContaining({
+        selected: 'order-123',
+        scroll: 1842,
+        view: 'urgent',
+        isUrgent: 'yes',
+      }),
+    );
+    expect(buildOrderWhere(adminActor, result.query.filters)).toEqual({
+      AND: [{}, { isUrgent: true }],
+    });
+  });
+
+  it('rejects forged presentation state instead of reflecting it into the page', () => {
+    const result = parseOrderListQuery({
+      selected: '../secret',
+      scroll: '-10',
+      view: 'unknown-view',
+    });
+
+    expect(result.issues).toEqual([
+      '当前选中工单格式不合法',
+      '列表滚动位置不合法',
+      '保存视图不合法',
+    ]);
+    expect(result.query).not.toHaveProperty('selectedOrderId');
+    expect(result.query).not.toHaveProperty('scrollY');
+    expect(result.query).not.toHaveProperty('view');
+  });
+
   it('normalizes every filter family without losing repeated values', () => {
     const result = parseOrderListQuery({
       q: '  苹果福  ',

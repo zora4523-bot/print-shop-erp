@@ -14,6 +14,10 @@ import {
 import { resolveBusinessCode } from './business-code';
 import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 import { sortBySearchRelevance } from './search-ranking';
+import {
+  writeAuditLogInTx,
+  type AuditActor,
+} from './audit-log';
 
 export class ProductInvariantError extends Error {
   constructor(message: string) {
@@ -43,6 +47,22 @@ export type ProductSummary = Pick<
     ProductCategoryNode,
     'id' | 'path' | 'name' | 'legacyCategory' | 'isActive'
   >;
+};
+
+export type ProductActiveStatusFilter = 'all' | 'active' | 'inactive';
+
+export type ProductReferenceImpact = {
+  /** Distinct orders, not order-item rows. */
+  orderCount: number;
+  bomCount: number;
+  /** Enabled rules belonging to a currently effective, enabled price book. */
+  currentExternalPriceRuleCount: number;
+  /** Internal price tiers whose effective interval contains `now`. */
+  currentInternalPriceTierCount: number;
+};
+
+export type ProductListRow = ProductSummary & {
+  referenceImpact: ProductReferenceImpact;
 };
 
 export type ProductCategoryOption = Pick<
@@ -135,15 +155,136 @@ const PRODUCT_OPTION_SELECT = {
   },
 } as const;
 
+type ProductReferenceImpactRaw = {
+  productId: string;
+  orderCount: bigint | number;
+  bomCount: bigint | number;
+  currentExternalPriceRuleCount: bigint | number;
+  currentInternalPriceTierCount: bigint | number;
+};
+
+type ProductReferenceReadClient = Pick<
+  Prisma.TransactionClient,
+  '$queryRaw'
+>;
+
+function emptyProductReferenceImpact(): ProductReferenceImpact {
+  return {
+    orderCount: 0,
+    bomCount: 0,
+    currentExternalPriceRuleCount: 0,
+    currentInternalPriceTierCount: 0,
+  };
+}
+
+function referenceCount(value: bigint | number): number {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new ProductInvariantError('产品引用数超出可安全展示范围');
+  }
+  return count;
+}
+
+async function readProductReferenceImpacts(
+  client: ProductReferenceReadClient,
+  productIds: readonly string[],
+  now: Date,
+): Promise<Map<string, ProductReferenceImpact>> {
+  const ids = [...new Set(productIds)].filter(Boolean);
+  const impacts = new Map(
+    ids.map((id) => [id, emptyProductReferenceImpact()] as const),
+  );
+  if (ids.length === 0) return impacts;
+
+  // A single indexed aggregate query keeps a 100-row list from turning into
+  // hundreds of count calls.  Order references are counted by DISTINCT
+  // orderId because one order may contain the same product in several items.
+  const rows = await client.$queryRaw<ProductReferenceImpactRaw[]>(Prisma.sql`
+    SELECT
+      product."id" AS "productId",
+      (
+        SELECT COUNT(DISTINCT item."orderId")
+        FROM "OrderItem" AS item
+        WHERE item."productId" = product."id"
+      ) AS "orderCount",
+      (
+        SELECT COUNT(*)
+        FROM "BillOfMaterial" AS bom
+        WHERE bom."productId" = product."id"
+      ) AS "bomCount",
+      (
+        SELECT COUNT(*)
+        FROM "CustomerPriceRule" AS rule
+        INNER JOIN "CustomerPriceBook" AS book
+          ON book."id" = rule."priceBookId"
+        WHERE rule."productId" = product."id"
+          AND rule."isActive" = true
+          AND book."isActive" = true
+          AND book."settlementType" = 'EXTERNAL_SALES'
+          AND book."purpose" = 'PROCESSING'
+          AND book."effectiveFrom" <= ${now}
+          AND (book."effectiveTo" IS NULL OR book."effectiveTo" > ${now})
+      ) AS "currentExternalPriceRuleCount",
+      (
+        SELECT COUNT(*)
+        FROM "PriceTier" AS tier
+        WHERE tier."productId" = product."id"
+          AND tier."effectiveFrom" <= ${now}
+          AND (tier."effectiveTo" IS NULL OR tier."effectiveTo" > ${now})
+      ) AS "currentInternalPriceTierCount"
+    FROM "Product" AS product
+    WHERE product."id" IN (${Prisma.join(ids)})
+  `);
+
+  for (const row of rows) {
+    impacts.set(row.productId, {
+      orderCount: referenceCount(row.orderCount),
+      bomCount: referenceCount(row.bomCount),
+      currentExternalPriceRuleCount: referenceCount(
+        row.currentExternalPriceRuleCount,
+      ),
+      currentInternalPriceTierCount: referenceCount(
+        row.currentInternalPriceTierCount,
+      ),
+    });
+  }
+  return impacts;
+}
+
+export async function getProductReferenceImpacts(
+  productIds: readonly string[],
+  now: Date = new Date(),
+): Promise<Map<string, ProductReferenceImpact>> {
+  return readProductReferenceImpacts(db, productIds, now);
+}
+
+export async function getProductReferenceImpact(
+  productId: string,
+  now: Date = new Date(),
+): Promise<ProductReferenceImpact> {
+  const impacts = await readProductReferenceImpacts(db, [productId], now);
+  return impacts.get(productId) ?? emptyProductReferenceImpact();
+}
+
 function normalizeSearchQuery(q?: string | null): string | null {
   const trimmed = q?.trim();
   return trimmed ? trimmed.slice(0, 80) : null;
 }
 
-function productSearchFilter(q?: string | null): Prisma.ProductWhereInput | undefined {
+function productSearchFilter(
+  q?: string | null,
+  status: ProductActiveStatusFilter = 'all',
+): Prisma.ProductWhereInput | undefined {
   const query = normalizeSearchQuery(q);
-  if (!query) return undefined;
+  const activeFilter =
+    status === 'active'
+      ? { isActive: true }
+      : status === 'inactive'
+        ? { isActive: false }
+        : {};
+  if (!query) return Object.keys(activeFilter).length > 0 ? activeFilter : undefined;
   return {
+    ...activeFilter,
     OR: [
       { name: { contains: query, mode: 'insensitive' } },
       { code: { contains: query, mode: 'insensitive' } },
@@ -157,10 +298,10 @@ function productSearchFilter(q?: string | null): Prisma.ProductWhereInput | unde
 }
 
 export async function listProducts(
-  opts: { q?: string | null } = {},
+  opts: { q?: string | null; status?: ProductActiveStatusFilter } = {},
 ): Promise<ProductSummary[]> {
   const query = normalizeSearchQuery(opts.q);
-  const where = productSearchFilter(query);
+  const where = productSearchFilter(query, opts.status);
   const rows = await db.product.findMany({
     where,
     select: SUMMARY_SELECT,
@@ -180,10 +321,11 @@ export async function listProducts(
 
 export async function listProductsPage(opts: {
   q?: string | null;
+  status?: ProductActiveStatusFilter;
   page: number;
   pageSize: number;
-}): Promise<PaginatedResult<ProductSummary>> {
-  const where = productSearchFilter(opts.q);
+}): Promise<PaginatedResult<ProductListRow>> {
+  const where = productSearchFilter(opts.q, opts.status);
   const total = await db.product.count({ where });
   const window = paginationWindow(total, opts.page, opts.pageSize);
   const rows = await db.product.findMany({
@@ -198,7 +340,19 @@ export async function listProductsPage(opts: {
     skip: window.skip,
     take: window.take,
   });
-  return paginatedResult(rows, total, window);
+  const impacts = await readProductReferenceImpacts(
+    db,
+    rows.map((row) => row.id),
+    new Date(),
+  );
+  return paginatedResult(
+    rows.map((row) => ({
+      ...row,
+      referenceImpact: impacts.get(row.id) ?? emptyProductReferenceImpact(),
+    })),
+    total,
+    window,
+  );
 }
 
 export async function listActiveProductOrderOptions(): Promise<
@@ -504,9 +658,16 @@ export async function updateProduct(
   });
 }
 
+export type ProductActiveChangeContext = {
+  actor: AuditActor;
+  /** Required for deactivation; activation may omit a reason. */
+  reason: string | null;
+};
+
 export async function setProductActive(
   id: string,
   isActive: boolean,
+  context: ProductActiveChangeContext,
 ): Promise<ProductSummary> {
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
@@ -514,10 +675,41 @@ export async function setProductActive(
     if (!target) throw new ProductInvariantError('目标产品不存在');
     if (target.isActive === isActive) return target;
 
-    return tx.product.update({
+    const reason = context.reason?.trim() || null;
+    if (!isActive && !reason) {
+      throw new ProductInvariantError('停用产品必须填写业务理由');
+    }
+    if (reason && reason.length > 500) {
+      throw new ProductInvariantError('操作理由不能超过 500 个字符');
+    }
+
+    // Re-read the submit-time impact after taking the same exclusive lock used
+    // by cooperating price-rule writes and order quote snapshots. BOM writes
+    // do not take this lock, so their count is a statement-time snapshot, not
+    // a global serializable snapshot. The observed impact, audit record, and
+    // status flip still commit atomically in this transaction.
+    const impact =
+      (
+        await readProductReferenceImpacts(tx, [id], new Date())
+      ).get(id) ?? emptyProductReferenceImpact();
+
+    const updated = await tx.product.update({
       where: { id },
       data: { isActive },
       select: SUMMARY_SELECT,
     });
+    await writeAuditLogInTx(tx, {
+      actor: context.actor,
+      action: isActive ? 'PRODUCT_ACTIVATE' : 'PRODUCT_DEACTIVATE',
+      entityType: 'Product',
+      entityId: id,
+      before: { isActive: target.isActive },
+      after: { isActive: updated.isActive },
+      requestMetadata: {
+        reason,
+        referenceImpact: impact,
+      },
+    });
+    return updated;
   });
 }

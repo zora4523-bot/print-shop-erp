@@ -55,7 +55,7 @@ export function AdminHeader({
       </nav>
       <Badge
         variant="outline"
-        className="hidden rounded-md font-mono uppercase text-muted-foreground sm:inline-flex"
+        className="hidden rounded-md font-mono uppercase text-muted-foreground xl:inline-flex"
       >
         {environmentLabel}
       </Badge>

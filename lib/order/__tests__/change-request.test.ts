@@ -1170,6 +1170,55 @@ describe('reviewOrderChangeRequest', () => {
     });
   });
 
+  it('新增款式不会被模板款式已回货的外协单自动继承', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '红包 B',
+            quantity: 500,
+            specification: '中号',
+            foilColors: ['哑金'],
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        outsourceOrders: [
+          {
+            id: 'outsource-received',
+            status: 'RECEIVED',
+            orderItemIds: ['item-1'],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.create.mockResolvedValue({ id: 'item-2' });
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '1000.00' },
+      { subtotal: '500.00' },
+    ]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.orderItem.create).toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.update).not.toHaveBeenCalled();
+  });
+
   it('quotes all affected updates and additions in one batched rule read', async () => {
     const request = baseReviewRequest({
       proposedChanges: {

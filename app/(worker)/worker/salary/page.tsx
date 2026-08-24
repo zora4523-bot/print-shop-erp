@@ -16,6 +16,7 @@ import {
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui-business';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { Button } from '@/components/ui/button';
 
@@ -103,7 +104,7 @@ async function PieceworkSalaryContent({
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <strong>{formatDateShanghai(salary.date)}</strong>
-                      <PaidBadge isPaid={salary.isPaid} />
+                      <PaymentStatusBadge isPaid={salary.isPaid} />
                       {salaryFloorBadge(
                         new Decimal(
                           salary.totalPieceworkAmount as Decimal.Value,
@@ -193,7 +194,7 @@ async function HourlySalaryContent({
                       <strong className="font-sans tabular-nums">
                         {payroll.month}
                       </strong>
-                      <PaidBadge isPaid={payroll.isPaid} />
+                      <PaymentStatusBadge isPaid={payroll.isPaid} />
                       <Badge variant="outline">
                         {payrollWorkerType
                           ? WORKER_TYPE_LABELS[payrollWorkerType]
@@ -296,14 +297,6 @@ function SalaryRangeFilter({
         </Link>
       </div>
     </form>
-  );
-}
-
-function PaidBadge({ isPaid }: { isPaid: boolean }) {
-  return isPaid ? (
-    <Badge variant="secondary">已发</Badge>
-  ) : (
-    <Badge variant="outline">未发</Badge>
   );
 }
 

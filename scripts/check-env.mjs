@@ -81,9 +81,10 @@ if (isProd && (!env.APP_PUBLIC_URL || env.APP_PUBLIC_URL.trim() === '')) {
 } else if (env.APP_PUBLIC_URL && env.APP_PUBLIC_URL.endsWith('/')) {
   warnings.push('APP_PUBLIC_URL 末尾带斜线 —— 应去掉尾斜线（避免 // 拼接）。');
 }
-if (env.APP_PUBLIC_URL && isProd && env.APP_PUBLIC_URL.startsWith('http://')) {
-  warnings.push(
-    'APP_PUBLIC_URL 是 http:// —— 生产建议 https（师傅微信内置浏览器对非 https 有限制）。',
+if (env.APP_PUBLIC_URL && isProd && !isSecureOrLoopbackOrigin(env.APP_PUBLIC_URL)) {
+  errors.push(
+    'APP_PUBLIC_URL 必须是不带路径、查询或片段的 https origin；只有 localhost / 127.0.0.1 / [::1] 回环地址允许 http。' +
+      '否则 deploy/run-cron.sh 会通过明文网络发送 CRON_SECRET。',
   );
 }
 
@@ -140,3 +141,19 @@ if (errors.length) {
 }
 console.log(`[check-env] 通过。（${warnings.length} 条警告供确认）\n`);
 process.exit(0);
+
+function isSecureOrLoopbackOrigin(value) {
+  try {
+    if (value !== value.trim()) return false;
+    const url = new URL(value);
+    if (url.username || url.password) return false;
+    if (url.pathname !== '/' || url.search || url.hash) return false;
+    if (url.protocol === 'https:') return true;
+    return (
+      url.protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}

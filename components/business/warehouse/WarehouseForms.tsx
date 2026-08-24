@@ -6,9 +6,16 @@ import {
   createWarehouseLocationAction,
 } from '@/actions/owner-warehouses';
 import type { WarehouseMutationResult } from '@/actions/owner-warehouses.types';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 
 export type WarehouseFormOption = {
   id: string;
@@ -37,21 +44,39 @@ function WarehouseCreateForm() {
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseAction, null);
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const error = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success' ? state.message ?? null : null;
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const error = visibleState?.status === 'error' ? visibleState.message : null;
+  const success =
+    visibleState?.status === 'success'
+      ? (visibleState.message ?? '仓库已创建')
+      : null;
+  const summaryErrors = toWarehouseErrorSummary(errs);
 
   return (
-    <form action={formAction} className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
+    <form
+      id="warehouse-create-form"
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
+    >
       <h2 className="text-base font-semibold">新增仓库</h2>
-      <TextField id="name" label="仓库名称" error={errs.name?.[0]} disabled={pending} />
+      <FormErrorSummary errors={summaryErrors} />
+      <TextField
+        id="warehouse-name"
+        name="name"
+        label="仓库名称"
+        error={errs.name?.[0]}
+        disabled={pending}
+      />
       <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
         <summary className="cursor-pointer text-sm text-muted-foreground">
           高级设置：自定义仓库编码（通常无需填写）
         </summary>
         <div className="mt-3">
           <TextField
-            id="code"
+            id="warehouse-code"
+            name="code"
             label="自定义编码（选填）"
             hint="留空将自动生成，例如 WH-000001。"
             error={errs.code?.[0]}
@@ -59,10 +84,17 @@ function WarehouseCreateForm() {
           />
         </div>
       </details>
-      <ActionFeedback error={error} success={success} />
-      <Button type="submit" disabled={pending}>
-        {pending ? '提交中…' : '创建仓库'}
-      </Button>
+      {error ? (
+        <ActionNotice
+          tone="error"
+          title="仓库创建失败"
+          description={error}
+        />
+      ) : null}
+      {success ? <ActionNotice tone="success" title={success} /> : null}
+      <PendingButton pending={pending} pendingLabel="正在创建仓库…">
+        创建仓库
+      </PendingButton>
     </form>
   );
 }
@@ -72,19 +104,33 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseLocationAction, null);
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const error = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success' ? state.message ?? null : null;
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const error = visibleState?.status === 'error' ? visibleState.message : null;
+  const success =
+    visibleState?.status === 'success'
+      ? (visibleState.message ?? '库位已创建')
+      : null;
   const missingWarehouses = warehouses.length === 0;
+  const summaryErrors = toLocationErrorSummary(errs);
 
   return (
-    <form action={formAction} className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
+    <form
+      id="location-create-form"
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
+    >
       <h2 className="text-base font-semibold">新增库位</h2>
+      <FormErrorSummary errors={summaryErrors} />
       <div className="space-y-2">
-        <Label htmlFor="warehouseId">所属仓库</Label>
+        <Label htmlFor="location-warehouse">所属仓库</Label>
         <select
-          id="warehouseId"
+          id="location-warehouse"
           name="warehouseId"
+          {...(errs.warehouseId?.[0]
+            ? formMessageA11yProps('location-warehouse', 'error')
+            : {})}
           className={selectClass}
           disabled={pending || missingWarehouses}
           defaultValue=""
@@ -97,22 +143,33 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
           ))}
         </select>
         {errs.warehouseId?.[0] ? (
-          <p className="text-sm text-destructive">{errs.warehouseId[0]}</p>
+          <FormMessage fieldId="location-warehouse" tone="error">
+            {errs.warehouseId[0]}
+          </FormMessage>
         ) : null}
         {missingWarehouses ? (
-          <p role="alert" className="text-sm text-warning-foreground">
-            暂无启用仓库，请先在左侧创建仓库。
-          </p>
+          <ActionNotice
+            tone="warning"
+            title="缺少启用仓库"
+            description="请先在左侧创建仓库，再新增库位。"
+          />
         ) : null}
       </div>
-      <TextField id="name" label="库位名称" error={errs.name?.[0]} disabled={pending} />
+      <TextField
+        id="location-name"
+        name="name"
+        label="库位名称"
+        error={errs.name?.[0]}
+        disabled={pending}
+      />
       <details className="rounded-lg border border-dashed p-3" open={Boolean(errs.code?.[0])}>
         <summary className="cursor-pointer text-sm text-muted-foreground">
           高级设置：自定义库位编码（通常无需填写）
         </summary>
         <div className="mt-3">
           <TextField
-            id="code"
+            id="location-code"
+            name="code"
             label="自定义编码（选填）"
             hint="留空将自动生成，例如 LOC-000001。"
             error={errs.code?.[0]}
@@ -120,22 +177,35 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
           />
         </div>
       </details>
-      <ActionFeedback error={error} success={success} />
-      <Button type="submit" disabled={pending || missingWarehouses}>
-        {pending ? '提交中…' : '创建库位'}
-      </Button>
+      {error ? (
+        <ActionNotice
+          tone="error"
+          title="库位创建失败"
+          description={error}
+        />
+      ) : null}
+      {success ? <ActionNotice tone="success" title={success} /> : null}
+      <PendingButton
+        pending={pending}
+        pendingLabel="正在创建库位…"
+        disabled={missingWarehouses}
+      >
+        创建库位
+      </PendingButton>
     </form>
   );
 }
 
 function TextField({
   id,
+  name,
   label,
   hint,
   error,
   disabled,
 }: {
   id: string;
+  name: string;
   label: string;
   hint?: string;
   error?: string | undefined;
@@ -146,43 +216,55 @@ function TextField({
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
-        name={id}
+        name={name}
         disabled={disabled}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
   );
 }
 
-function ActionFeedback({
-  error,
-  success,
-}: {
-  error: string | null;
-  success: string | null;
-}) {
-  return (
-    <>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ {success}
-        </p>
-      ) : null}
-    </>
-  );
+function toWarehouseErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  const targets: Record<string, { fieldId: string; label: string }> = {
+    name: { fieldId: 'warehouse-name', label: '仓库名称' },
+    code: { fieldId: 'warehouse-code', label: '仓库编码' },
+  };
+  return toErrorSummary(fieldErrors, targets, 'warehouse-create-form');
+}
+
+function toLocationErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  const targets: Record<string, { fieldId: string; label: string }> = {
+    warehouseId: { fieldId: 'location-warehouse', label: '所属仓库' },
+    name: { fieldId: 'location-name', label: '库位名称' },
+    code: { fieldId: 'location-code', label: '库位编码' },
+  };
+  return toErrorSummary(fieldErrors, targets, 'location-create-form');
+}
+
+function toErrorSummary(
+  fieldErrors: Record<string, string[]>,
+  targets: Record<string, { fieldId: string; label: string }>,
+  fallbackFieldId: string,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([field, messages]) => {
+    const target = targets[field] ?? { fieldId: fallbackFieldId, label: field };
+    return messages.map((message) => ({ ...target, message }));
+  });
 }

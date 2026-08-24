@@ -21,6 +21,8 @@ export type RenderPdfOptions = {
   // Inject an already-launched browser (tests). When present, launch
   // is skipped and the caller retains responsibility for teardown.
   browser?: Browser;
+  // Durable workers abort this when they can no longer prove lease ownership.
+  signal?: AbortSignal;
 };
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
@@ -34,19 +36,28 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     }));
 
   const page = await browser.newPage();
+  const abortRender = () => {
+    void page.close().catch(() => undefined);
+    if (!opts.browser) void browser.close().catch(() => undefined);
+  };
+  opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
+    opts.signal?.throwIfAborted();
     // `networkidle0` is required so OSS-hosted design thumbnails have
     // finished loading before we snapshot. Inline SVG (QR codes)
     // doesn't trigger network activity, but image tags do.
     await page.setContent(opts.html, { waitUntil: 'networkidle0' });
+    opts.signal?.throwIfAborted();
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
       ...opts.pdf,
     });
+    opts.signal?.throwIfAborted();
     return Buffer.from(pdf);
   } finally {
+    opts.signal?.removeEventListener('abort', abortRender);
     // Always dispose of the page — when the caller shares a browser,
     // closing only at browser-shutdown would accumulate pages across
     // renders. Swallow errors so a page-close failure doesn't mask

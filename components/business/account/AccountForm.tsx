@@ -11,9 +11,17 @@ import {
   MachineType,
   EmploymentType,
 } from '../../../generated/prisma/enums';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 import type { AccountMutationResult } from '@/actions/owner-accounts.types';
 import {
   ROLE_LABELS,
@@ -85,6 +93,21 @@ const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {
   [EmploymentType.FULL_TIME]: '正式员工',
   [EmploymentType.PART_TIME]: '兼职',
   [EmploymentType.TEMPORARY]: '临时工',
+};
+
+const ACCOUNT_FIELD_LABELS: Record<string, string> = {
+  username: '用户名',
+  password: '初始密码',
+  displayName: '姓名',
+  phone: '电话',
+  role: '角色',
+  workerType: '岗位类型',
+  machineType: '主机型',
+  machineCapabilities: '可操作机器',
+  craftCapabilities: '熟练工艺',
+  employmentType: '用工类型',
+  employmentStartDate: '入职日期',
+  employmentEndDate: '离职日期',
 };
 
 export function AccountForm(props: Props) {
@@ -190,12 +213,21 @@ export function AccountForm(props: Props) {
     craftMatchesWorker(craft, workerType, machineCapabilities),
   );
 
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success';
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const summaryErrors = toAccountErrorSummary(errs);
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-5"
+      noValidate
+    >
+      <FormErrorSummary errors={summaryErrors} />
+
       {isCreate ? (
         <>
           <TextField
@@ -242,6 +274,7 @@ export function AccountForm(props: Props) {
         <select
           id="role"
           name="role"
+          {...(errs.role?.[0] ? formMessageA11yProps('role', 'error') : {})}
           className={selectClass}
           value={role}
           onChange={(e) => onRoleChange(e.target.value as Role)}
@@ -254,7 +287,9 @@ export function AccountForm(props: Props) {
           ))}
         </select>
         {errs.role?.[0] ? (
-          <p className="text-sm text-destructive">{errs.role[0]}</p>
+          <FormMessage fieldId="role" tone="error">
+            {errs.role[0]}
+          </FormMessage>
         ) : null}
       </div>
 
@@ -264,6 +299,9 @@ export function AccountForm(props: Props) {
           <select
             id="workerType"
             name="workerType"
+            {...(errs.workerType?.[0]
+              ? formMessageA11yProps('workerType', 'error')
+              : {})}
             className={selectClass}
             value={workerType}
             onChange={(e) => onWorkerTypeChange(e.target.value as WorkerType | '')}
@@ -277,7 +315,9 @@ export function AccountForm(props: Props) {
             ))}
           </select>
           {errs.workerType?.[0] ? (
-            <p className="text-sm text-destructive">{errs.workerType[0]}</p>
+            <FormMessage fieldId="workerType" tone="error">
+              {errs.workerType[0]}
+            </FormMessage>
           ) : null}
         </div>
       ) : null}
@@ -288,6 +328,10 @@ export function AccountForm(props: Props) {
           <select
             id="machineType"
             name="machineType"
+            {...formMessageA11yProps(
+              'machineType',
+              errs.machineType?.[0] ? 'error' : 'hint',
+            )}
             className={selectClass}
             value={machineType}
             onChange={(e) =>
@@ -303,16 +347,25 @@ export function AccountForm(props: Props) {
             ))}
           </select>
           {errs.machineType?.[0] ? (
-            <p className="text-sm text-destructive">{errs.machineType[0]}</p>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            默认优先使用主机型；实际派工会按工艺与可操作机器的交集锁定计薪机型。
-          </p>
+            <FormMessage fieldId="machineType" tone="error">
+              {errs.machineType[0]}
+            </FormMessage>
+          ) : (
+            <FormMessage fieldId="machineType" tone="hint" className="text-xs">
+              默认优先使用主机型；实际派工会按工艺与可操作机器的交集锁定计薪机型。
+            </FormMessage>
+          )}
         </div>
       ) : null}
 
       {role === Role.WORKER && workerType === WorkerType.MACHINE ? (
-        <fieldset className="space-y-2 rounded-lg border p-3">
+        <fieldset
+          id="machineCapabilities"
+          {...(errs.machineCapabilities?.[0]
+            ? formMessageA11yProps('machineCapabilities', 'error')
+            : {})}
+          className="space-y-2 rounded-lg border p-3"
+        >
           <legend className="px-1 text-sm font-medium">可操作机器</legend>
           <div className="grid gap-2 sm:grid-cols-3">
             {MACHINE_TYPE_OPTIONS.map((machine) => (
@@ -348,15 +401,21 @@ export function AccountForm(props: Props) {
             ))}
           </div>
           {errs.machineCapabilities?.[0] ? (
-            <p className="text-sm text-destructive">
+            <FormMessage fieldId="machineCapabilities" tone="error">
               {errs.machineCapabilities[0]}
-            </p>
+            </FormMessage>
           ) : null}
         </fieldset>
       ) : null}
 
       {role === Role.WORKER && workerType ? (
-        <fieldset className="space-y-2 rounded-lg border p-3">
+        <fieldset
+          id="craftCapabilities"
+          {...(errs.craftCapabilities?.[0]
+            ? formMessageA11yProps('craftCapabilities', 'error')
+            : {})}
+          className="space-y-2 rounded-lg border p-3"
+        >
           <legend className="px-1 text-sm font-medium">熟练工艺（推荐项）</legend>
           <p className="text-xs text-muted-foreground">
             勾选后排产时优先推荐。管理员仍可把设备和岗位匹配的其他工艺派给该师傅，但必须填写原因。
@@ -387,9 +446,9 @@ export function AccountForm(props: Props) {
             </p>
           )}
           {errs.craftCapabilities?.[0] ? (
-            <p className="text-sm text-destructive">
+            <FormMessage fieldId="craftCapabilities" tone="error">
               {errs.craftCapabilities[0]}
-            </p>
+            </FormMessage>
           ) : null}
         </fieldset>
       ) : null}
@@ -401,6 +460,9 @@ export function AccountForm(props: Props) {
             <select
               id="employmentType"
               name="employmentType"
+              {...(errs.employmentType?.[0]
+                ? formMessageA11yProps('employmentType', 'error')
+                : {})}
               className={selectClass}
               value={employmentType}
               onChange={(event) =>
@@ -415,9 +477,9 @@ export function AccountForm(props: Props) {
               ))}
             </select>
             {errs.employmentType?.[0] ? (
-              <p className="text-sm text-destructive">
+              <FormMessage fieldId="employmentType" tone="error">
                 {errs.employmentType[0]}
-              </p>
+              </FormMessage>
             ) : null}
           </div>
           <TextField
@@ -448,20 +510,20 @@ export function AccountForm(props: Props) {
       ) : null}
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="账号保存失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ 已保存
-        </p>
+        <ActionNotice tone="success" title="账号已保存" />
       ) : null}
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : isCreate ? '创建账号' : '保存修改'}
-        </Button>
+        <PendingButton pending={pending} pendingLabel="正在保存账号…">
+          {isCreate ? '创建账号' : '保存修改'}
+        </PendingButton>
         <Link href="/owner/accounts" className={buttonVariants({ variant: 'outline' })}>
           返回列表
         </Link>
@@ -517,19 +579,34 @@ function TextField({
         id={id}
         name={id}
         type={type}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
         {...inputProps}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
+  );
+}
+
+function toAccountErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
+    messages.map((message) => ({
+      fieldId,
+      label: ACCOUNT_FIELD_LABELS[fieldId] ?? fieldId,
+      message,
+    })),
   );
 }

@@ -21,12 +21,16 @@ describe('owner notification page query contract', () => {
     expect(page).not.toContain('listRules()');
   });
 
-  it('keeps RETRYING+DEAD logs visible in the alert, owner queue, and badge', () => {
+  it('keeps RETRYING+DEAD visible while rendering transport and job states separately', () => {
     expect(page).toContain('listUnresolvedNotificationLogs({');
     expect(page).toContain('data-slot="notifications-owner-alert"');
     expect(page).toContain('重试已耗尽');
-    expect(page).toContain('hasDeadLetterJob={log.hasDeadLetterJob}');
-    expect(page).toContain('<Badge variant="destructive">重试耗尽</Badge>');
+    expect(page).toContain('投递状态');
+    expect(page).toContain('后台任务');
+    expect(page).toContain('NOTIFICATION_STATUS_REGISTRY[status]');
+    expect(page).toContain('BACKGROUND_JOB_STATUS_REGISTRY[status]');
+    expect(page).not.toContain('hasDeadLetterJob={log.hasDeadLetterJob}');
+    expect(page).toContain('<UiStatusBadge tone={definition.tone}');
     expect(page).toContain('href="/owner/background-jobs"');
     expect(page).toContain('查看死信任务');
   });

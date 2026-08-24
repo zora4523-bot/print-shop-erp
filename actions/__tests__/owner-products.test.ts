@@ -250,14 +250,46 @@ describe('setProductActiveAction', () => {
     productMock.setProductActive.mockRejectedValueOnce(
       new MockProductInvariantError('目标产品不存在'),
     );
-    const r = await setProductActiveAction('p1', false);
+    const r = await setProductActiveAction(
+      'p1',
+      false,
+      fd({ reason: '旧款停产' }),
+    );
     expect(r.status).toBe('error');
+  });
+
+  it('rejects a forged deactivation without a reason before the mutation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const r = await setProductActiveAction('p1', false, fd({ reason: '   ' }));
+    expect(r).toEqual({
+      status: 'invalid',
+      fieldErrors: { reason: ['停用产品必须填写业务理由'] },
+    });
+    expect(productMock.setProductActive).not.toHaveBeenCalled();
+  });
+
+  it('forwards the authorized actor and trimmed audit reason', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.setProductActive.mockResolvedValue({ id: 'p1' });
+    await setProductActiveAction(
+      'p1',
+      false,
+      fd({ reason: '  旧款停产  ' }),
+    );
+    expect(productMock.setProductActive).toHaveBeenCalledWith('p1', false, {
+      actor: ownerActor,
+      reason: '旧款停产',
+    });
   });
 
   it('revalidates on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductActive.mockResolvedValue({ id: 'p1' });
-    const r = await setProductActiveAction('p1', false);
+    const r = await setProductActiveAction(
+      'p1',
+      false,
+      fd({ reason: '旧款停产' }),
+    );
     expect(r.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
   });

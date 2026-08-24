@@ -36,19 +36,23 @@ import {
 import { formatMoney } from '@/lib/dashboard/format';
 import {
   ActionShortcut,
-  HeroBanner,
+  ErrorBoundary,
   StatCard,
+  StatusBadge as UiStatusBadge,
 } from '@/components/ui-business';
 import {
   WatchlistTable,
   type WatchlistColumn,
 } from '@/components/business/dashboard/WatchlistTable';
+import { DashboardQueue } from '@/components/business/dashboard/DashboardQueue';
 import { DeferredDashboardCharts } from '@/components/business/dashboard/DeferredDashboardCharts';
 import { Badge } from '@/components/ui/badge';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { PROMISE_ALERT_STATUSES } from '@/lib/order/promised-date';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = { title: '管理员 Dashboard' };
 
@@ -106,33 +110,99 @@ export default async function OwnerDashboardPage() {
     dir: 'asc',
   })}`;
 
+  const queueItems = [
+    pendingShipments.rows.length > 0 || pendingShipments.hasMore
+      ? {
+          id: 'shipments',
+          kind: '待发货',
+          title: '完工但未发货',
+          detail: '急单优先，处理完即可出库',
+          countLabel: pendingShipments.hasMore
+            ? `${pendingShipments.rows.length}+`
+            : String(pendingShipments.rows.length),
+          dueLabel: pendingShipments.rows[0]
+            ? formatDateTimeShanghai(pendingShipments.rows[0].completedAt)
+            : '—',
+          href: '#dashboard-watchlist-shipments',
+          actionLabel: '去发货',
+        }
+      : null,
+    overdueOutsourcing.length > 0
+      ? {
+          id: 'outsource',
+          kind: '超期外协',
+          title: '预计交付日已过仍未收',
+          detail: overdueOutsourcing[0]?.supplierName
+            ? `最早：${overdueOutsourcing[0].supplierName}`
+            : '外协未闭环',
+          countLabel: String(overdueOutsourcing.length),
+          dueLabel: overdueOutsourcing[0]
+            ? `超期 ${overdueOutsourcing[0].daysOverdue} 天`
+            : '—',
+          dueUrgent: true,
+          href: '#dashboard-watchlist-outsource',
+          actionLabel: '去跟进',
+        }
+      : null,
+    dueOrders.total > 0
+      ? {
+          id: 'due',
+          kind: '交期预警',
+          title: '承诺交期已逾期或 3 天内到期',
+          detail: '未发货工单',
+          countLabel: String(dueOrders.total),
+          dueLabel: dueOrders.rows[0]
+            ? dueOrders.rows[0].daysLeft < 0
+              ? `逾期 ${-dueOrders.rows[0].daysLeft} 天`
+              : dueOrders.rows[0].daysLeft === 0
+                ? '今天到期'
+                : `剩 ${dueOrders.rows[0].daysLeft} 天`
+            : '—',
+          dueUrgent: (dueOrders.rows[0]?.daysLeft ?? 1) <= 0,
+          href: dueOrdersHref,
+          actionLabel: '看工单',
+        }
+      : null,
+    overReports.total > 0
+      ? {
+          id: 'over-report',
+          kind: '超计划报工',
+          title: `近 ${OVER_REPORT_WINDOW_DAYS} 天有师傅超计划报工`,
+          detail: '计件按合计全额付，明细在工单时间线',
+          countLabel: String(overReports.total),
+          dueLabel: overReports.rows[0]
+            ? formatDateTimeShanghai(overReports.rows[0].createdAt)
+            : '—',
+          href: '#dashboard-watchlist-over-reports',
+          actionLabel: '查看',
+        }
+      : null,
+    endingPeriods.length > 0
+      ? {
+          id: 'cs-periods',
+          kind: '客服周期',
+          title: '7 天内有客服业绩周期到期',
+          detail: endingPeriods[0]?.csDisplayName ?? '待结算',
+          countLabel: String(endingPeriods.length),
+          dueLabel: endingPeriods[0]
+            ? `${endingPeriods[0].daysUntilEnd} 天后`
+            : '—',
+          href: '#dashboard-watchlist-cs-periods',
+          actionLabel: '去结算',
+        }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
+
   return (
     <div className="space-y-6">
-      <HeroBanner
-        title={`欢迎回来，${user.displayName}`}
-        subtitle={
-          <>
-            今日 <span className="font-sans tabular-nums">{today.date}</span> · 本月{' '}
-            <span className="font-sans tabular-nums">{monthly.month}</span> · 时区
-            Asia/Shanghai
-          </>
-        }
-        cta={
-          <Link
-            href="/orders"
-            className="text-sm font-medium text-primary underline-offset-2 hover:underline"
-          >
-            查看全部工单 →
-          </Link>
-        }
-      />
-
       <div>
         <h1 className="text-xl font-semibold">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
-          关键指标 · 关注列表 · 30 天趋势
+          {user.displayName} · {today.date} · 本月 {monthly.month}
         </p>
       </div>
+
+      <DashboardQueue dateLabel={today.date} items={queueItems} />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
@@ -310,9 +380,15 @@ export default async function OwnerDashboardPage() {
         columns={endingPeriodColumns}
       />
 
-      <Suspense fallback={<DashboardChartsLoading />}>
-        <DashboardChartsSection />
-      </Suspense>
+      <ErrorBoundary
+        scope="section"
+        title="趋势图表暂时无法加载"
+        description="上方指标和关注列表仍可使用；请单独重试图表区域。"
+      >
+        <Suspense fallback={<DashboardChartsLoading />}>
+          <DashboardChartsSection />
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }
@@ -381,8 +457,7 @@ const pendingShipmentColumns: readonly WatchlistColumn<PendingShipmentRow>[] = [
   },
   {
     header: '急单',
-    cell: (r) =>
-      r.isUrgent ? <Badge variant="destructive">急</Badge> : null,
+    cell: (r) => (r.isUrgent ? <UrgentBadge /> : null),
     align: 'center',
   },
 ];
@@ -431,13 +506,6 @@ const dueOrderColumns: readonly WatchlistColumn<DueOrderRow>[] = [
   },
 ];
 
-const OUTSOURCE_STATUS_LABELS: Record<OutsourceStatus, string> = {
-  [OutsourceStatus.SENT]: '已发出',
-  [OutsourceStatus.IN_PROGRESS]: '进行中',
-  [OutsourceStatus.RECEIVED]: '已收',
-  [OutsourceStatus.CANCELLED]: '取消',
-};
-
 const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
   [
     {
@@ -468,12 +536,19 @@ const overdueOutsourceColumns: readonly WatchlistColumn<OverdueOutsourceRow>[] =
     },
     {
       header: '状态',
-      cell: (r) => (
-        <Badge variant="outline">{OUTSOURCE_STATUS_LABELS[r.status]}</Badge>
-      ),
+      cell: (r) => <OutsourceStatusBadge status={r.status} />,
       align: 'center',
     },
   ];
+
+function OutsourceStatusBadge({ status }: { status: OutsourceStatus }) {
+  const definition = OUTSOURCE_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
+}
 
 const overReportColumns: readonly WatchlistColumn<OverReportRow>[] = [
   {

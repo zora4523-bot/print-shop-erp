@@ -1,3 +1,5 @@
+import type { DailySalaryRecomputeImpact } from '@/lib/salary/daily-recompute-impact';
+
 export type SalaryMutationResult =
   | { status: 'success' }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
@@ -20,11 +22,19 @@ export type PieceworkRuleMutationResult =
 
 export type RecomputeDailyResult =
   | {
+      status: 'confirm';
+      date: string;
+      workerId?: string;
+      reason: string;
+      impact: DailySalaryRecomputeImpact;
+    }
+  | {
       status: 'success';
       date: string;
       workerCount: number;
       errorCount: number;
       errors: Array<{ workerId: string; workerName: string; message: string }>;
+      impact: DailySalaryRecomputeImpact;
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

@@ -451,11 +451,12 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3">
+      <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur-sm pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Button
           type="button"
           onClick={handleSubmit}
           disabled={pending || !allAssigned || !allOverridesExplained}
+          className="min-h-11"
         >
           {pending ? '排产中…' : '确认排产'}
         </Button>
@@ -566,86 +567,59 @@ function WorkerSelect({
         worker.workerType ?? WorkerType.MACHINE
       ]?.includes(search.trim()),
   );
-  const recommended = filtered.filter((worker) =>
-    isWorkerRecommended(worker, craftId),
-  );
-  const overrides = filtered.filter(
-    (worker) => !isWorkerRecommended(worker, craftId),
-  );
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <input
         type="search"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         aria-label={`搜索${label}`}
         placeholder="搜索师傅姓名"
-        className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+        className="min-h-11 w-full rounded-md border bg-background px-3 py-2 text-sm"
       />
-      <select
+      <div
+        role="radiogroup"
         aria-label={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
         aria-invalid={invalid}
         aria-describedby={invalid && errorId ? errorId : undefined}
-        className={`w-full rounded-md border bg-background px-3 py-2 text-sm ${
-          invalid ? 'border-destructive' : ''
-        }`}
+        className="grid gap-2 sm:grid-cols-2"
       >
-        <option value="">选择师傅…</option>
-        <WorkerOptionGroup
-          label="推荐师傅"
-          workers={recommended}
-          machineTypeLabels={machineTypeLabels}
-          recommendedMachine={recommendedMachine}
-        />
-        <WorkerOptionGroup
-          label="其他可分配（需说明）"
-          workers={overrides}
-          machineTypeLabels={machineTypeLabels}
-          recommendedMachine={recommendedMachine}
-        />
-      </select>
+        {filtered.map((worker) => {
+          const recommendedWorker = isWorkerRecommended(worker, craftId);
+          const selected = worker.id === value;
+          const load = worker.pendingTaskCount + worker.inProgressTaskCount;
+          return (
+            <Button
+              key={worker.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              variant="outline"
+              onClick={() => onChange(worker.id)}
+              className={`h-auto min-h-11 justify-start whitespace-normal rounded-lg px-3 py-2 text-left text-sm ${
+                selected
+                  ? 'border-primary bg-primary/5'
+                  : recommendedWorker
+                    ? 'border-border bg-background'
+                    : 'border-warning/40 bg-warning/5'
+              }`}
+            >
+              <span className="block font-medium">{worker.displayName}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {WORKER_TYPE_LABELS[worker.workerType ?? WorkerType.MACHINE]}
+                {worker.machineType
+                  ? ` · ${machineTypeLabels[worker.machineType] ?? worker.machineType}`
+                  : ''}
+                {` · 在制 ${load}`}
+                {recommendedWorker ? ' · 推荐' : ' · 需说明'}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-xs text-muted-foreground">没有符合搜索的师傅</p>
+      ) : null}
     </div>
-  );
-}
-
-function WorkerOptionGroup({
-  label,
-  workers,
-  machineTypeLabels,
-  recommendedMachine,
-}: {
-  label: string;
-  workers: SchedulingViewCandidate[];
-  machineTypeLabels: Record<string, string>;
-  recommendedMachine: MachineType | null;
-}) {
-  if (workers.length === 0) return null;
-  return (
-    <optgroup label={label}>
-      {workers.map((worker) => {
-        const match = worker.machineType === recommendedMachine;
-        const job = worker.workerType
-          ? WORKER_TYPE_LABELS[worker.workerType]
-          : '未配岗';
-        const machines =
-          worker.machineCapabilities.length > 0
-            ? ` · ${worker.machineCapabilities
-                .map(
-                  (machine) =>
-                    machineTypeLabels[machine] ?? machine,
-                )
-                .join('/')}`
-            : '';
-        const tag = `（${job}${machines}${match ? '，主机型匹配' : ''}；待办 ${worker.pendingTaskCount} / 进行中 ${worker.inProgressTaskCount}）`;
-        return (
-          <option key={worker.id} value={worker.id}>
-            {worker.displayName}
-            {tag}
-          </option>
-        );
-      })}
-    </optgroup>
   );
 }

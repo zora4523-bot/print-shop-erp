@@ -19,6 +19,7 @@ import {
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 
 const MAX_BATCH_ORDERS = 30;
 
@@ -340,17 +341,29 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                   label="选择全部与当前师傅匹配的工单"
                 />
               </th>
-              <th className="px-3 py-2 text-left">工单</th>
-              <th className="px-3 py-2 text-left">客户 / 提交人</th>
-              <th className="px-3 py-2 text-left">款式 / 数量</th>
-              <th className="min-w-72 px-3 py-2 text-left">工艺</th>
-              <th className="px-3 py-2 text-left">交期 / 提交时间</th>
-              <th className="px-3 py-2 text-left">批量状态</th>
+              <th className="px-3 py-2 text-left">工单 / 客户</th>
+              <th className="px-3 py-2 text-right">款式 / 数量</th>
+              <th className="min-w-40 px-3 py-2 text-left">工艺</th>
+              <th className="px-3 py-2 text-left">本次可派</th>
+              <th className="px-3 py-2 text-right">承诺交期</th>
+              <th className="px-3 py-2 text-left">阻断原因</th>
               <th className="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {orders.map((order) => {
+            {[...orders]
+              .sort((left, right) => {
+                if (!effectiveWorkerId) return 0;
+                const leftBlocked = left.batchBlockReason !== null;
+                const rightBlocked = right.batchBlockReason !== null;
+                if (leftBlocked !== rightBlocked) return leftBlocked ? 1 : -1;
+                const leftMatch =
+                  left.compatibleTaskCounts[effectiveWorkerId] ?? 0;
+                const rightMatch =
+                  right.compatibleTaskCounts[effectiveWorkerId] ?? 0;
+                return rightMatch - leftMatch;
+              })
+              .map((order) => {
               const compatibleTaskCount = effectiveWorkerId
                 ? (order.compatibleTaskCounts[effectiveWorkerId] ?? 0)
                 : 0;
@@ -361,7 +374,14 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                 (selected.size >= MAX_BATCH_ORDERS &&
                   !selected.has(order.id));
               return (
-              <tr key={order.id} className="align-top">
+              <tr
+                key={order.id}
+                className={
+                  order.batchBlockReason
+                    ? 'align-top bg-warning/5'
+                    : 'align-top'
+                }
+              >
                 <td className="px-2 py-2 text-center">
                   <SelectionCheckbox
                     checked={selected.has(order.id)}
@@ -376,7 +396,7 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                       {order.orderNo}
                     </span>
                     {order.isUrgent ? (
-                      <Badge variant="destructive">急单</Badge>
+                      <UrgentBadge />
                     ) : null}
                     {order.kind === OrderKind.REWORK ? (
                       <Badge variant="outline">重做单</Badge>
@@ -385,34 +405,24 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                   <p className="mt-1 max-w-64 break-words font-medium">
                     {order.customName ?? '未命名工单'}
                   </p>
+                  <p className="mt-1 max-w-64 break-words text-xs text-muted-foreground">
+                    {order.customerRef ?? '—'} · {order.submitter.displayName}
+                    （{roleLabel(order.submitter.role)}）
+                  </p>
                   {order.sourceOrder ? (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       原单 {order.sourceOrder.orderNo}
                     </p>
                   ) : null}
                 </td>
-                <td className="px-3 py-3">
-                  <p className="max-w-48 break-words">
-                    {order.customerRef ?? '—'}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {order.submitter.displayName}（
-                    {roleLabel(order.submitter.role)}）
-                  </p>
-                </td>
-                <td className="px-3 py-3 font-sans tabular-nums">
+                <td className="px-3 py-3 text-right font-sans tabular-nums">
                   <p>{order.itemCount} 款</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {order.totalQuantity.toLocaleString()} 个 ·{' '}
-                    {order.internalTaskCount} 个内部任务
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    已排 {order.assignedTaskCount} · 待排{' '}
-                    {order.remainingTaskCount}
+                    {order.totalQuantity.toLocaleString()} 个
                   </p>
                 </td>
                 <td className="px-3 py-3">
-                  <div className="flex max-w-96 flex-wrap gap-1.5">
+                  <div className="flex max-w-72 flex-wrap gap-1.5">
                     {order.craftSummaries.map((craft) => (
                       <Badge
                         key={craft.id}
@@ -421,9 +431,6 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                       >
                         {craft.name}
                         {craft.count > 1 ? ` ×${craft.count}` : ''}
-                        {craft.assignedCount > 0
-                          ? ` · 已排 ${craft.assignedCount}`
-                          : ''}
                         {craft.isHybrid
                           ? ' · 外协+回厂'
                           : craft.isOutsource
@@ -433,39 +440,30 @@ export function PendingSchedulingBoard({ orders, workers }: Props) {
                     ))}
                   </div>
                 </td>
-                <td className="px-3 py-3 text-xs text-muted-foreground">
-                  <p>{formatDateShanghai(order.promisedDate, '未设置交期')}</p>
-                  <p className="mt-1">
-                    {formatDateShanghai(
-                      order.submittedAt ?? order.createdAt,
-                      '-',
-                    )}
-                  </p>
+                <td className="px-3 py-3">
+                  {!effectiveWorkerId ? (
+                    <span className="text-xs text-muted-foreground">先选师傅</span>
+                  ) : compatibleTaskCount > 0 ? (
+                    <Badge
+                      variant="outline"
+                      className="border-success/40 bg-success/10 text-success-foreground"
+                    >
+                      可派 {compatibleTaskCount} 项
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">无可派</span>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-right font-sans text-xs tabular-nums">
+                  {formatDateShanghai(order.promisedDate, '未设置')}
                 </td>
                 <td className="px-3 py-3">
                   {order.batchBlockReason ? (
                     <p className="max-w-48 text-xs text-warning-foreground">
                       {order.batchBlockReason}
                     </p>
-                  ) : !effectiveWorkerId ? (
-                    <p className="max-w-48 text-xs text-muted-foreground">
-                      剩余 {order.remainingTaskCount} 项，可由{' '}
-                      {order.compatibleWorkerIds.length} 位师傅分步承接
-                    </p>
-                  ) : compatibleTaskCount > 0 ? (
-                    <p className="max-w-48 text-xs text-success-foreground">
-                      当前师傅可承接 {compatibleTaskCount} 项
-                      {(order.overrideTaskCounts[effectiveWorkerId] ?? 0) > 0
-                        ? `（其中 ${order.overrideTaskCounts[effectiveWorkerId]} 项需说明）`
-                        : '（均为推荐项）'}
-                      {compatibleTaskCount < order.remainingTaskCount
-                        ? `，另 ${order.remainingTaskCount - compatibleTaskCount} 项待派`
-                        : '，本次可完成排产'}
-                    </p>
                   ) : (
-                    <p className="max-w-48 text-xs text-muted-foreground">
-                      当前师傅没有匹配的待排工艺
-                    </p>
+                    <p className="text-xs text-muted-foreground">—</p>
                   )}
                 </td>
                 <td className="px-3 py-3 text-right">

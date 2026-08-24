@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { E2E_PASSWORD, E2E_USERS, login } from '../e2e/_helpers';
 import {
   cleanupWorkerUiFixture,
@@ -12,6 +12,11 @@ import {
 } from './ui-gates';
 
 let fixture: WorkerUiFixture;
+
+// Each project exercises seven routes serially, including axe, geometry and a
+// full-page candidate screenshot per route. Keep gate-level thresholds strict
+// while giving the complete matrix the same explicit budget as the admin suite.
+test.describe.configure({ timeout: 90_000 });
 
 test.beforeAll(async ({}, testInfo) => {
   fixture = await seedWorkerUiFixture(`worker-${testInfo.project.name}`);
@@ -30,33 +35,42 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('worker routes pass overflow, clipping, touch-target and axe gates', async ({ page }, testInfo) => {
-  for (const route of workerRoutes(fixture)) {
-    await test.step(route.name, async () => {
-      await page.goto(route.path);
-      await expect(
-        page.getByRole('heading', { name: route.readyHeading, exact: true }),
-      ).toBeVisible();
-      await route.assertGateState?.(page);
-      await expectViewportGate(page, testInfo);
-      await expectA11yGate(page);
-      await attachCandidateScreenshot(
-        page,
-        testInfo,
-        'worker',
-        `${route.name}-light`,
-      );
-    });
-  }
+  await checkWorkerRoutes(page, testInfo, fixture, 'light');
 });
 
 test('worker routes pass the same layout gate with dark tokens', async ({ page }, testInfo) => {
-  await page.addInitScript(() => document.documentElement.classList.add('dark'));
-  for (const route of workerRoutes(fixture)) {
+  await checkWorkerRoutes(page, testInfo, fixture, 'dark');
+});
+
+async function checkWorkerRoutes(
+  page: Page,
+  testInfo: TestInfo,
+  data: WorkerUiFixture,
+  theme: 'light' | 'dark',
+) {
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+  await page.addInitScript((requestedTheme) => {
+    localStorage.setItem('erp-theme', requestedTheme);
+  }, theme);
+
+  for (const route of workerRoutes(data)) {
     await test.step(route.name, async () => {
       await page.goto(route.path);
       await expect(
         page.getByRole('heading', { name: route.readyHeading, exact: true }),
       ).toBeVisible();
+      await page.evaluate((requestedTheme) => {
+        localStorage.setItem('erp-theme', requestedTheme);
+        document.documentElement.classList.toggle('dark', requestedTheme === 'dark');
+        document.documentElement.dataset.theme = requestedTheme;
+        document.documentElement.style.colorScheme = requestedTheme;
+      }, theme);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      if (theme === 'dark') {
+        await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+      } else {
+        await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
+      }
       await route.assertGateState?.(page);
       await expectViewportGate(page, testInfo);
       await expectA11yGate(page);
@@ -64,11 +78,11 @@ test('worker routes pass the same layout gate with dark tokens', async ({ page }
         page,
         testInfo,
         'worker',
-        `${route.name}-dark`,
+        `${route.name}-${theme}`,
       );
     });
   }
-});
+}
 
 type WorkerRoute = {
   name: string;
@@ -79,12 +93,12 @@ type WorkerRoute = {
 
 function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
   return [
-    { name: 'tasks', path: '/worker/tasks', readyHeading: '待处理任务' },
+    { name: 'tasks', path: '/worker/tasks', readyHeading: '我的任务' },
     {
       name: 'task-detail-reporting',
       path: `/worker/tasks/${data.activeTaskId}`,
       readyHeading: '报工',
-      assertGateState: assertProductionContext,
+      assertGateState: assertTaskProductionContext,
     },
     { name: 'orders', path: '/worker/orders', readyHeading: '我的工单' },
     {
@@ -102,9 +116,18 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
     {
       name: 'not-found',
       path: '/worker/tasks/e2e-worker-ui-missing',
-      readyHeading: '没有找到这条记录',
+      readyHeading: '找不到这个页面，或你没有访问权限',
     },
   ];
+}
+
+async function assertTaskProductionContext(page: Page) {
+  const details = page.locator('details').filter({
+    has: page.locator('summary', { hasText: '任务规格与设计图' }),
+  });
+  await details.locator('summary').click();
+  await expect(details).toHaveAttribute('open', '');
+  await assertProductionContext(page);
 }
 
 async function assertProductionContext(page: Page) {

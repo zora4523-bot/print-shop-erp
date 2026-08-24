@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a; }
+  h1, h2, h3, h4 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em; }
+  a { color: #dc2626; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .ph { width: 393px; height: 852px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; border-radius: 18px; display: flex; flex-direction: column }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-p { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .btn-x { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: 1px solid #e4e4e7; border-radius: 8px; background: #f4f4f5; color: #52525b; white-space: nowrap }
+  .fld { font-size: 12.5px; height: 32px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; display: flex; align-items: center; padding: 0 10px }
+  .lb { font-size: 11.5px; color: #52525b; margin-bottom: 4px; display: block }
+  .cap { font-size: 12.5px; color: #52525b }
+  .oid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 3px 8px; background: #18181b; color: #fff; border-radius: 5px; text-decoration: none }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">批次四 · 排产与师傅端</h1>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">1280×800 + 393×852</span>
+      <span class="pill" style="background: #fef2f2; color: #b91c1c">8 个页面</span>
+    </div>
+    <p style="max-width: 1160px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">旅程：管理员排产 → 师傅开工报工 → 完工。<b>师傅端是全站唯一手机为主的场景</b>，所以这一批的手机稿不是降级版，是主稿。证据：本轮打开了 scheduling-light、scheduling-detail-light（1280）与 worker/task-detail-reporting-light（393）三张原图；worker 另外四页未打开，相关判断一律标推断。</p>
+    <div class="pcard" style="max-width: 1160px; margin-top: 14px; padding: 12px 15px; border-color: #fecaca">
+      <div style="font-size: 14px; font-weight: 600; color: #b91c1c">本批最重的一条</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">观察（task-detail-reporting-light 393）：报工表单在整页约 1550px 的<b>最底部</b>，师傅要滚过工单号、款式名、款式备注、设计图、任务规格五块才能填第一个数字；而<b>「退出登录」是首屏最显眼的描边按钮之一</b>，主操作「完工报工」在页面尽头且不吸底。车间里单手拿手机、机台旁边操作 —— 权重完全反了。这一批的核心改动就是把报工提到首屏并吸底。</div>
+    </div>
+  </div>
+
+  <section class="sect" id="w2">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">W2</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">师傅报工</h2>
+      <span class="cap">/worker/tasks/:id · 393×852 主视口 · 规范 F 段 + 契约 08 09 10</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
+
+      <div style="flex: none">
+        <div class="cap" style="margin-bottom: 8px"><b>W2a</b> 默认态 —— 报工卡置顶，生产上下文折叠在下</div>
+        <div class="ph">
+          <div style="padding: 10px 14px 9px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="font-size: 15px; font-weight: 700">我的任务</span>
+              <span class="pill" style="background: #fef2f2; color: #b91c1c">急单</span>
+              <span class="pill" style="background: #fffbeb; color: #b45309">进行中</span>
+              <div style="flex: 1"></div>
+              <span class="cap" style="font-size: 12px">E2E 开机仔</span>
+            </div>
+            <div style="font-size: 11.5px; color: #52525b; margin-top: 3px; word-break: break-all; line-height: 1.4">GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789</div>
+          </div>
+
+          <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 0; display: flex; flex-direction: column; gap: 10px">
+            <div class="pcard" style="padding: 13px 14px 14px; border-color: #fca5a5">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 15px; font-weight: 700">报工</span>
+                <span class="cap" style="font-size: 12px">计划 1,234,567 个</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 10px">
+                <sc-for list="{{ report }}" as="r" hint-placeholder-count="3">
+                  <div>
+                    <span class="lb">{{ r.k }}</span>
+                    <div style="height: 48px; border: 1.5px solid {{ r.bd }}; border-radius: 10px; background: #fff; display: flex; align-items: center; padding: 0 13px; font-size: 20px; font-variant-numeric: tabular-nums; font-weight: {{ r.w }}; color: {{ r.c }}">{{ r.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding: 9px 11px; border-radius: 9px; background: #fafafa">
+                <span class="cap" style="font-size: 12px">合计</span>
+                <span class="nw" style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums">1,234,567 / 1,234,567</span>
+              </div>
+              <div class="cap" style="font-size: 11.5px; margin-top: 8px; line-height: 1.6">少报可直接提交；超过计划数需勾选确认；合计上限 3,703,701。计件金额按机台薪资规则计算。</div>
+            </div>
+
+            <sc-for list="{{ ctx }}" as="c" hint-placeholder-count="4">
+              <div class="pcard" style="padding: 11px 13px">
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <span style="font-size: 13.5px; font-weight: 600">{{ c.name }}</span>
+                  <span class="pill" style="background: #f4f4f5; color: #52525b">{{ c.n }}</span>
+                  <div style="flex: 1"></div>
+                  <span class="cap" style="font-size: 12px">{{ c.fold }}</span>
+                </div>
+                <sc-if value="{{ c.body }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 5px; word-break: break-all">{{ c.body }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+            <div style="height: 8px; flex: none"></div>
+          </div>
+
+          <div style="padding: 10px 12px 16px; background: #fff; border-top: 1px solid #ececec; flex: none">
+            <button type="button" style="width: 100%; height: 52px; border: none; border-radius: 12px; background: #dc2626; color: #fff; font: inherit; font-size: 17px; font-weight: 600">完工报工</button>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 9px">
+              <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+                <span class="nw" style="font-size: 12.5px; font-weight: {{ t.w }}; color: {{ t.c }}">{{ t.label }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="flex: none">
+        <div class="cap" style="margin-bottom: 8px"><b>W2b</b> 超出计划数 —— 需勾选确认，不静默拒绝</div>
+        <div class="ph">
+          <div style="padding: 10px 14px 9px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="font-size: 15px; font-weight: 700">我的任务</span>
+              <span class="pill" style="background: #fef2f2; color: #b91c1c">急单</span>
+              <div style="flex: 1"></div>
+              <span class="cap" style="font-size: 12px">E2E 开机仔</span>
+            </div>
+          </div>
+          <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 0; display: flex; flex-direction: column; gap: 10px">
+            <div class="pcard" style="padding: 13px 14px 14px; border-color: #fca5a5">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 15px; font-weight: 700">报工</span>
+                <span class="cap" style="font-size: 12px">计划 1,234,567 个</span>
+              </div>
+              <div style="margin-top: 10px">
+                <span class="lb">合格数</span>
+                <div style="height: 48px; border: 1.5px solid #b45309; border-radius: 10px; background: #fffbeb; display: flex; align-items: center; padding: 0 13px; font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 600; color: #b45309">1,300,000</div>
+              </div>
+              <div style="margin-top: 10px; padding: 10px 12px; border: 1px solid #fed7aa; border-radius: 10px; background: #fffbeb">
+                <div style="font-size: 13px; font-weight: 600; color: #b45309">合计超出计划数 65,433 个</div>
+                <div style="font-size: 12.5px; line-height: 1.6; color: #92400e; margin-top: 3px">超产会按机台薪资规则计入计件金额，并影响该工单的完工判定。</div>
+                <div style="display: flex; align-items: center; gap: 9px; margin-top: 9px">
+                  <i style="display: block; width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid #b45309; background: #b45309; flex: none"></i>
+                  <span style="font-size: 13px; font-weight: 500; color: #92400e">我确认这是真实超产</span>
+                </div>
+              </div>
+              <div style="margin-top: 10px; padding: 9px 11px; border: 1px solid #fecaca; border-radius: 9px; background: #fffafa">
+                <div style="font-size: 12.5px; line-height: 1.6; color: #b91c1c">合计达到 3,703,701 会被服务端拒绝——上限提示在输入时就出现，不等提交后才报错。</div>
+              </div>
+            </div>
+            <div style="height: 8px; flex: none"></div>
+          </div>
+          <div style="padding: 10px 12px 16px; background: #fff; border-top: 1px solid #ececec; flex: none">
+            <button type="button" style="width: 100%; height: 52px; border: none; border-radius: 12px; background: #dc2626; color: #fff; font: inherit; font-size: 17px; font-weight: 600">确认超产并报工</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="flex: none">
+        <div class="cap" style="margin-bottom: 8px"><b>W1</b> 任务列表 —— 当前任务单卡置顶 · <span style="color: #92400e">推断（该页原图本轮未打开）</span></div>
+        <div class="ph">
+          <div style="padding: 10px 14px 9px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="font-size: 15px; font-weight: 700">我的任务</span>
+              <div style="flex: 1"></div>
+              <span class="cap" style="font-size: 12px">E2E 开机仔 · 开机师傅</span>
+            </div>
+            <div class="cap" style="font-size: 12px; margin-top: 2px">今日已报 3 单 · 计件 ¥186.40</div>
+          </div>
+          <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 0; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px">
+              <span style="font-size: 12.5px; font-weight: 600">进行中 2</span>
+              <span class="cap" style="font-size: 11.5px">急单在前</span>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12px; color: #b91c1c">批量完工</span>
+            </div>
+            <sc-for list="{{ active }}" as="a" hint-placeholder-count="2">
+              <div class="pcard" style="padding: 12px 13px 13px; border-color: {{ a.bd }}; background: {{ a.bg }}">
+                <div style="display: flex; align-items: center; gap: 7px">
+                  <sc-if value="{{ a.urgent }}" hint-placeholder-val="{{ false }}">
+                    <span class="pill" style="background: #fee2e2; color: #b91c1c">急单</span>
+                  </sc-if>
+                  <span class="pill" style="background: #fffbeb; color: #b45309">进行中</span>
+                  <div style="flex: 1"></div>
+                  <span class="cap nw" style="font-size: 11.5px">{{ a.due }}</span>
+                </div>
+                <div style="font-size: 15px; font-weight: 700; margin-top: 6px; line-height: 1.35">{{ a.name }}</div>
+                <div class="cap" style="font-size: 12.5px; margin-top: 3px">{{ a.meta }}</div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px">
+                  <div style="flex: 1; height: 6px; border-radius: 3px; background: #f0f0f2; overflow: hidden">
+                    <div style="height: 100%; background: #dc2626; width: {{ a.pct }}"></div>
+                  </div>
+                  <span class="nw" style="font-size: 11.5px; font-variant-numeric: tabular-nums; color: #52525b">{{ a.pct }}</span>
+                </div>
+                <button type="button" style="width: 100%; height: 46px; margin-top: 10px; border: none; border-radius: 11px; background: {{ a.btnBg }}; color: {{ a.btnFg }}; font: inherit; font-size: 15.5px; font-weight: 600">{{ a.btn }}</button>
+              </div>
+            </sc-for>
+            <div style="display: flex; align-items: center; gap: 8px; padding: 6px 2px 0">
+              <span style="font-size: 12.5px; font-weight: 600">待生产 3</span>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12px; color: #b91c1c">多选批量开工</span>
+            </div>
+            <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="4">
+              <div class="pcard" style="padding: 11px 13px">
+                <div style="display: flex; align-items: center; gap: 7px">
+                  <sc-if value="{{ t.urgent }}" hint-placeholder-val="{{ false }}">
+                    <span class="pill" style="background: #fee2e2; color: #b91c1c">急单</span>
+                  </sc-if>
+                  <span class="pill" style="background: {{ t.stBg }}; color: {{ t.stFg }}">{{ t.st }}</span>
+                  <div style="flex: 1"></div>
+                  <span class="cap nw" style="font-size: 11.5px">{{ t.due }}</span>
+                </div>
+                <div style="font-size: 13.5px; font-weight: 600; margin-top: 5px; line-height: 1.4">{{ t.name }}</div>
+                <div class="cap" style="font-size: 12px; margin-top: 2px">{{ t.meta }}</div>
+              </div>
+            </sc-for>
+            <div style="height: 8px; flex: none"></div>
+          </div>
+          <div style="display: flex; padding: 8px 8px 16px; background: #fff; border-top: 1px solid #ececec; flex: none">
+            <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+              <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 4px; min-height: 48px; border-radius: 10px; background: {{ t.bg }}">
+                <i style="display: block; width: 18px; height: 18px; border-radius: 5px; border: 1.6px solid {{ t.c }}"></i>
+                <span class="nw" style="font-size: 11.5px; font-weight: {{ t.w }}; color: {{ t.c }}">{{ t.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pcard" style="max-width: 1240px; margin-top: 18px; padding: 13px 15px">
+      <div style="font-size: 14px; font-weight: 600">这三屏改了什么</div>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 22px; margin-top: 8px">
+        <sc-for list="{{ wchanges }}" as="c" hint-placeholder-count="6">
+          <div style="display: flex; align-items: flex-start; gap: 8px">
+            <span class="pill nw" style="background: {{ c.bg }}; color: {{ c.fg }}; flex: none">{{ c.tag }}</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ c.t }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="sc1">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">SC1</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">待排产</h2>
+      <span class="cap">/foreman/scheduling · 1280×800 · 契约 02 03 04 08</span>
+    </div>
+    <p class="cap" style="max-width: 1160px; margin: 0 0 16px">观察（scheduling-light 1280）：批量条已经存在且做得不错——「已选 2 张，本次将分配 3 个匹配任务，总数量 6,000，其中推荐 3 项，需说明 0 项」是实时的。两个问题：最右「批量状态」列被容器裁切读不全；关键业务规则（每张工单独立事务、只创建兼容任务、单次最多 30 张）挤成一行小字。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>生产管理</span><span>›</span><span style="color: #3f3f46">排产</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div><h3 style="margin: 0; font-size: 24px; font-weight: 700">待排产</h3><div class="cap" style="margin-top: 2px">已提交工单按急单、承诺交期和提交时间排列。</div></div>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span class="pill" style="background: #fef2f2; color: #b91c1c">急单 2</span>
+            <span class="pill" style="background: #fffbeb; color: #b45309">未设交期 4</span>
+            <button type="button" class="btn-s">按机型看负载</button>
+          </div>
+        </div>
+
+        <div style="padding: 12px 20px 0; flex: none">
+          <div class="pcard" style="padding: 12px 14px; border-color: #fca5a5">
+            <div style="display: flex; align-items: flex-start; gap: 14px">
+              <div style="flex: none; width: 240px">
+                <span class="lb">① 先选接单师傅</span>
+                <div class="fld nw" style="height: 34px; font-weight: 500">E2E 开机仔 · 开机师傅 ▾</div>
+                <div class="cap" style="font-size: 11.5px; margin-top: 5px">在制 2 · 待办 1 · 主机型 风车机</div>
+              </div>
+              <div style="flex: 1; min-width: 0">
+                <span class="lb">② 勾选工单后，这里实时汇总</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px">
+                  <sc-for list="{{ schSum }}" as="s" hint-placeholder-count="4">
+                    <div style="padding: 6px 11px; border: 1px solid {{ s.bd }}; border-radius: 9px; background: {{ s.bg }}">
+                      <div class="nw" style="font-size: 11px; color: #52525b">{{ s.k }}</div>
+                      <div class="nw" style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: {{ s.c }}; margin-top: 1px">{{ s.v }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <button type="button" class="btn-p" style="flex: none; height: 38px; align-self: flex-end">确认分配所选工艺</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #f4f4f5">
+              <sc-for list="{{ schRules }}" as="r" hint-placeholder-count="4">
+                <span class="pill nw" style="background: #f4f4f5; color: #52525b">{{ r }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden">
+            <div style="display: grid; grid-template-columns: 30px 236px 118px 118px 148px 104px 1fr; gap: 10px; padding: 10px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a">
+              <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid #dc2626; border-radius: 4px; background: #dc2626"></i></div>
+              <div>工单 / 客户</div><div style="text-align: right">款式 / 数量</div><div>工艺</div><div>本次可派</div><div style="text-align: right">承诺交期</div><div>阻断原因</div>
+            </div>
+            <sc-for list="{{ schRows }}" as="r" hint-placeholder-count="5">
+              <div style="display: grid; grid-template-columns: 30px 236px 118px 118px 148px 104px 1fr; gap: 10px; align-items: center; padding: 10px 13px; border-bottom: 1px solid #f5f5f7; background: {{ r.bg }}">
+                <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid {{ r.ckBd }}; border-radius: 4px; background: {{ r.ckBg }}"></i></div>
+                <div style="min-width: 0">
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <sc-if value="{{ r.urgent }}" hint-placeholder-val="{{ false }}">
+                      <span class="pill" style="background: #fee2e2; color: #b91c1c; font-size: 10.5px; padding: 2px 6px">急单</span>
+                    </sc-if>
+                    <span class="nw" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ r.no }}</span>
+                  </div>
+                  <div class="nw" style="font-size: 11.5px; color: #52525b; margin-top: 1px; overflow: hidden; text-overflow: ellipsis">{{ r.who }}</div>
+                </div>
+                <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums">{{ r.qty }}</div>
+                <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ r.craft }}</div>
+                <div><span class="pill nw" style="background: {{ r.mBg }}; color: {{ r.mFg }}">{{ r.match }}</span></div>
+                <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: {{ r.dueC }}">{{ r.due }}</div>
+                <div class="nw" style="font-size: 11.5px; color: {{ r.blkC }}; overflow: hidden; text-overflow: ellipsis">{{ r.blocker }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 20px 13px; flex: none; font-size: 12px; color: #52525b; font-variant-numeric: tabular-nums">
+          <span class="nw">共 18 张待排产 · 每页 20 条 ▾ · 第 1 / 1 页</span>
+          <span class="cap" style="font-size: 11.5px">「本次可派」按所选师傅的岗位与机型实时重算</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="sc2" style="border-bottom: none">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">SC2</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">排产详情 · 逐款派工</h2>
+      <span class="cap">/foreman/scheduling/:id · 1280×800 · 契约 03 07 08</span>
+    </div>
+    <p class="cap" style="max-width: 1160px; margin: 0 0 16px">观察（scheduling-detail-light 1280）：派工靠一个下拉，「主机型匹配；待办 1 / 进行中 1」这些决策信息全塞在选项文字里，选之前无法横向比较；款式备注又是红色正文；「确认排产」在页面底部不吸底；面包屑第二项是超长英文 slug 折两行把顶栏撑到约 110px。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>生产管理</span><span>›</span><span>排产</span><span>›</span><span style="color: #3f3f46">GD-260719-BULK…-1280X800</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 13px 20px 12px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <div style="min-width: 0">
+            <div style="display: flex; align-items: center; gap: 9px">
+              <h3 style="margin: 0; font-size: 21px; font-weight: 700">排产 · 批量排产响应式与无障碍测试</h3>
+              <span class="pill" style="background: #eff6ff; color: #1d4ed8">待排产</span>
+            </div>
+            <div class="cap nw" style="margin-top: 3px">GD-260719-BULK-SCHEDULING-ADMIN-ADMIN-1280X800 · 批量排产客户 · 提交人 E2E 销售 · 2 款 3,000 个</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex: none">
+            <button type="button" class="btn-s">返回工单详情</button>
+            <button type="button" class="btn-p">确认排产（2 项）</button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 320px; gap: 14px; padding: 13px 20px 0; flex: 1; min-height: 0">
+          <div class="pcard" style="overflow: hidden; display: flex; flex-direction: column; min-height: 0">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; flex: none">
+              <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #dc2626; border-radius: 4px; background: #dc2626"></i>
+              <span style="font-size: 12.5px; font-weight: 500">已选 2 项</span>
+              <span class="cap" style="font-size: 12px">批量派给同一位师傅</span>
+              <div class="fld nw" style="height: 30px; width: 200px">E2E 开机仔 · 在制 2 ▾</div>
+              <button type="button" class="btn-s" style="height: 30px; font-size: 12.5px">应用到已选</button>
+            </div>
+            <div style="overflow-y: auto; min-height: 0">
+              <sc-for list="{{ assign }}" as="a" hint-placeholder-count="2">
+                <div style="padding: 12px 13px; border-bottom: 1px solid #f5f5f7">
+                  <div style="display: flex; align-items: flex-start; gap: 11px">
+                    <i style="display: block; width: 15px; height: 15px; border: 1.4px solid #dc2626; border-radius: 4px; background: #dc2626; flex: none; margin-top: 2px"></i>
+                    <div style="min-width: 0; flex: 1">
+                      <div style="font-size: 13.5px; font-weight: 600">{{ a.name }}</div>
+                      <div class="cap" style="font-size: 12px; margin-top: 2px">{{ a.meta }}</div>
+                      <div style="display: flex; align-items: center; gap: 7px; margin-top: 6px">
+                        <span class="pill" style="background: #f4f4f5; color: #52525b">所需 {{ a.need }}</span>
+                        <span class="pill" style="background: #eff6ff; color: #1d4ed8">{{ a.craft }}</span>
+                      </div>
+                      <div style="margin-top: 7px; padding: 7px 9px; border: 1px solid #f0f0f2; border-radius: 8px; background: #fafafa">
+                        <span class="cap" style="font-size: 11.5px">款式备注</span>
+                        <div style="font-size: 12.5px; color: #3f3f46; margin-top: 1px">{{ a.note }}</div>
+                      </div>
+                    </div>
+                    <div style="flex: none; width: 318px">
+                      <span class="lb">派工 · 按匹配度排序</span>
+                      <div style="display: flex; flex-direction: column; gap: 6px">
+                        <sc-for list="{{ a.cands }}" as="c" hint-placeholder-count="3">
+                          <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1.5px solid {{ c.bd }}; border-radius: 9px; background: {{ c.bg }}">
+                            <i style="display: block; width: 14px; height: 14px; border-radius: 999px; border: 1.5px solid {{ c.dot }}; background: {{ c.fill }}; flex: none"></i>
+                            <div style="min-width: 0; flex: 1">
+                              <div class="nw" style="font-size: 12.5px; font-weight: 500">{{ c.name }}</div>
+                              <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px">{{ c.meta }}</div>
+                            </div>
+                            <span class="pill nw" style="background: {{ c.tagBg }}; color: {{ c.tagFg }}; flex: none">{{ c.tag }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px; min-height: 0">
+            <div class="pcard" style="padding: 12px 13px">
+              <div style="font-size: 13px; font-weight: 600">本次排产影响</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px">
+                <sc-for list="{{ impact }}" as="m" hint-placeholder-count="4">
+                  <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px">
+                    <span class="nw" style="font-size: 12px; color: #52525b">{{ m.k }}</span>
+                    <span class="nw" style="font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 500; color: {{ m.c }}">{{ m.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div class="pcard" style="padding: 12px 13px; border-color: #fed7aa; background: #fffbeb">
+              <div style="font-size: 13px; font-weight: 600; color: #b45309">未分配将留在待排产</div>
+              <div style="font-size: 12.5px; line-height: 1.6; color: #92400e; margin-top: 4px">本工单其余工艺（专版单色平烫）没有兼容的在岗师傅，会继续留在待排产列表；<b>全部工艺分配完成后，师傅端才会开放开工</b>。</div>
+            </div>
+            <div class="pcard" style="padding: 12px 13px">
+              <div style="font-size: 13px; font-weight: 600">管理员覆盖推荐</div>
+              <div class="cap" style="font-size: 12.5px; line-height: 1.6; margin-top: 4px">选择非推荐师傅时必须填写原因，记入排产日志。当前 0 项需说明。</div>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+
+    <div class="pcard" style="max-width: 2380px; margin-top: 20px; padding: 14px 16px">
+      <div style="font-size: 15px; font-weight: 600">本批其余四页（worker 只读页）与下一轮材料</div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; margin-top: 10px">
+        <sc-for list="{{ rest }}" as="r" hint-placeholder-count="6">
+          <div style="display: flex; align-items: flex-start; gap: 9px; padding-top: 9px; border-top: 1px solid #f0f0f2">
+            <span class="pill nw" style="background: {{ r.bg }}; color: {{ r.fg }}; flex: none">{{ r.tag }}</span>
+            <div style="min-width: 0">
+              <div style="font-size: 13px; font-weight: 600">{{ r.name }}</div>
+              <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 2px; text-wrap: pretty">{{ r.t }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+function navFor(active) {
+  const G = [
+    ['概览', [['Dashboard', 0]]],
+    ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0]]],
+    ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+  ];
+  return G.map(([group, items]) => ({
+    group,
+    items: items.map(([label]) => ({
+      label, w: label === active ? 600 : 400,
+      bg: label === active ? '#f4f4f5' : 'transparent',
+      edge: label === active ? '#dc2626' : 'transparent',
+    })),
+  }));
+}
+
+const REPORT = [
+  ['合格数 *', '1,234,567', '#dc2626', 600, '#27272a'],
+  ['不良数', '0', '#e4e4e7', 400, '#71717a'],
+  ['返工数', '0', '#e4e4e7', 400, '#71717a'],
+];
+
+const CTX = [
+  ['款式与工艺', '#1 局部烫金', '收起', '超长款式名 · 大号 9×16.5 · 特种珠光纸 · 烫金色 哑金/红金/潘通 871C · 双面双色'],
+  ['款式备注', '1 条', '展开', '款式备注包含连续文本，防止隐式裁切——注意这是普通备注，不是警告'],
+  ['设计图', '1 张', '点开看大图', ''],
+  ['工单与客户', '', '展开', '七夕红包加急批次 · 超长客户代号 · 接单人 E2E 销售'],
+];
+
+const TABS = [['我的任务', 1], ['我的工单', 0], ['我的工资', 0]];
+
+// 业主已确认：师傅可同时进行多个任务。所以首屏不是「当前任务」单卡，
+// 而是「进行中 N」分组——每个任务各自有进度与报工入口，急单排在前面。
+const ACTIVE = [
+  ['#1 中秋礼盒外盒 · 局部烫金', '开机仔 · 已报 4,800 / 12,000', '交期 09-12', 1, '40%', '继续报工'],
+  ['#2 请柬内页 · 专版单色平烫', '开机仔 · 已报 0 / 8,000', '交期 09-18', 0, '0%', '去报工'],
+];
+
+const TASKS = [
+  ['#2 腰封 · 粘封', '开机仔 · 目标 4,000 个', '待生产', 0, '交期 09-14'],
+  ['#3 外盒 · 打包/入袋', '打包 · 目标 12,000 个', '待生产', 0, '交期 09-20'],
+  ['#1 喜帖烫金 · 局部烫金', '开机仔 · 已报 6,000 / 6,000', '已完工', 0, '08-09 报工'],
+];
+
+const WCHANGES = [
+  ['最重', '报工卡从页面最底部提到<b>首屏第一块</b>，生产上下文（款式、备注、设计图、规格）折叠在下方按需展开。师傅打开就能填数字。', '#fee2e2', '#b91c1c'],
+  ['最重', '主按钮吸底、52px 高、占满宽度；「退出登录」从首屏描边按钮降级进「我的」，不再和主操作抢注意力。', '#fee2e2', '#b91c1c'],
+  ['契约 09', '超出计划数从「小字规则 + 提交后拒绝」改成<b>输入时即时反馈</b>：橙色提示 + 必须勾选「我确认这是真实超产」，上限 3,703,701 也在输入时提示。', '#fef2f2', '#b91c1c'],
+  ['契约 10', '底部三 Tab 取代顶部三个描边按钮，命中区 ≥48px，拇指可达。', '#f4f4f5', '#52525b'],
+  ['规范 F', '长工单号从占三行改为一行截断 + 点开看全文；款式名不再用超大字号吃掉首屏。', '#f4f4f5', '#52525b'],
+  ['红色收紧', '款式备注改为常规文字 + 灰底块。红色只留给急单、危险动作与校验错误。', '#f4f4f5', '#52525b'],
+];
+
+const SCH_SUM = [
+  ['已选工单', '2 张', '#e4e4e7', '#fff', '#27272a'],
+  ['可派任务', '3 个', '#fca5a5', '#fffafa', '#b91c1c'],
+  ['总数量', '6,000', '#e4e4e7', '#fff', '#27272a'],
+  ['需说明', '0 项', '#e4e4e7', '#fff', '#71717a'],
+];
+
+const SCH_RULES = ['每张工单独立事务', '只创建该师傅兼容的剩余任务', '其余工艺留在待排产', '单次最多 30 张'];
+
+const SCH_ROWS = [
+  ['GD-260719-BULK-SCHEDULING-ADMIN', '批量排产客户 · E2E 销售', '2 款 · 3,000', '局部烫金 ×2', '2 个 · 主机型匹配', 1, '未设交期', 1, '—', 1],
+  ['GD-260719-BULK-SCHEDULING-SECOND', '第二批量排产客户 · E2E 销售', '1 款 · 3,000', '局部烫金', '1 个 · 主机型匹配', 1, '未设交期', 1, '—', 1],
+  ['GD-260719-BULK-SCHEDULING-MIXED', '混合机型批量排产客户', '1 款 · 2,600', '局部烫金 · 专版单色平烫', '1 / 2 个 · 部分兼容', 2, '未设交期', 1, '专版单色平烫无在岗兼容师傅', 0],
+  ['GD-260719-BULK-SCHEDULING-OVERRIDE', '非推荐派工测试客户', '1 款 · 1,800', '局部烫金', '1 个 · 非推荐', 3, '09-02', 0, '所选师傅机型不匹配，需填写原因', 0],
+  ['GD-260807-001', '王总中秋礼盒首批', '2 款 · 12,000', '局部烫金 · 粘封', '0 个 · 不兼容', 0, '09-12', 0, '风车机满负荷，最早 09-04 可排', 0],
+];
+
+const ASSIGN = [
+  {
+    name: '#1 · 批量派工款式一', meta: '数量 1,000 · 烫金色 哑金', need: '开机师傅 · 开机仔', craft: '局部烫金',
+    note: '批量派工关键备注：注一',
+    cands: [
+      ['E2E 开机仔', '主机型匹配 · 在制 2 · 待办 1', '推荐', 1],
+      ['李师傅', '主机型匹配 · 在制 5 · 待办 3', '负载高', 0],
+      ['王师傅', '机型不匹配 · 需填写原因', '非推荐', 2],
+    ],
+  },
+  {
+    name: '#2 · 批量派工款式二', meta: '数量 2,000 · 烫金色 红金', need: '开机师傅 · 开机仔', craft: '局部烫金',
+    note: '批量派工关键备注：注二',
+    cands: [
+      ['E2E 开机仔', '主机型匹配 · 在制 2 · 待办 1', '推荐', 1],
+      ['李师傅', '主机型匹配 · 在制 5 · 待办 3', '负载高', 0],
+    ],
+  },
+];
+
+const IMPACT = [
+  ['创建生产任务', '2 个', '#27272a'],
+  ['分配给', 'E2E 开机仔', '#27272a'],
+  ['该师傅在制将变为', '4 个', '#b45309'],
+  ['本工单剩余待排', '1 个工艺', '#b45309'],
+];
+
+const REST = [
+  ['已确认', '/worker/tasks 任务列表', '业主确认：师傅可同时进行多个任务。所以首屏不是「当前任务」单卡，而是「进行中 N」分组——每个任务各自有进度条与报工入口，急单卡片用红边和实心主按钮加权，非急单用描边按钮，避免多个同等重量的红按钮互相抢。下面才是「待生产」分组。列表原图仍未打开，排序规则与批量入口是否已存在需确认。', '#ecfdf5', '#047857'],
+  ['推断', '/worker/orders + /orders/:id', '师傅只读工单页。沿用 S2 详情骨架的精简版：只显示与本人任务相关的款式、工艺、设计图；无任何写操作。需要原图确认当前展示了多少工单字段。', '#fffbeb', '#b45309'],
+  ['推断', '/worker/salary + /salary/:id', '计件日薪与月结。规则快照必须保留并标注「按当时规则计算」，人工调整是追加事实。列表按日期筛选，详情列任务明细与保底/调整。需要原图。', '#fffbeb', '#b45309'],
+  ['契约', '排产的五态', 'Loading 骨架 5 行；Empty 分「今天没有待排产」与「筛选无结果」；Error 保留已勾选项；Disabled 对不兼容工单禁用勾选并写原因；Pending 批量分配逐条回执，部分成功不回滚。', '#f4f4f5', '#52525b'],
+  ['契约', '排产属 L2，覆盖推荐属 L3', '确认排产要列出影响（创建 N 个任务、该师傅在制变为 N、剩余待排 N 个工艺）。选择非推荐师傅必须填原因并记入排产日志——这是 L3。', '#f4f4f5', '#52525b'],
+  ['待你确认', '报工上限的算法', '3,703,701 ≈ 计划数 1,234,567 × 3。如果规则确实是「合计不超过计划数的 3 倍」，界面就该直接写这句话，而不是甩一个没头没尾的数字——师傅算不出它从哪来，也就无法判断自己填的数会不会被拒。请确认倍数是否为 3、是否所有工种一致。', '#fef2f2', '#b91c1c'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: navFor('排产'),
+      report: REPORT.map(([k, v, bd, w, c]) => ({ k, v, bd, w, c })),
+      ctx: CTX.map(([name, n, fold, body]) => ({ name, n, fold, body })),
+      tabs: TABS.map(([label, on]) => ({ label, w: on ? 600 : 400, c: on ? '#b91c1c' : '#52525b', bg: on ? '#fef2f2' : 'transparent' })),
+      active: ACTIVE.map(([name, meta, due, urgent, pct, btn]) => ({
+        name, meta, due, pct, btn, urgent: !!urgent,
+        bd: urgent ? '#fca5a5' : '#e4e4e7',
+        bg: urgent ? '#fffafa' : '#fff',
+        btnBg: urgent ? '#dc2626' : '#fff',
+        btnFg: urgent ? '#fff' : '#b91c1c',
+      })),
+      tasks: TASKS.map(([name, meta, st, urgent, due]) => ({
+        name, meta, st, due, urgent: !!urgent,
+        stBg: st === '已完工' ? '#ecfdf5' : '#f4f4f5',
+        stFg: st === '已完工' ? '#047857' : '#52525b',
+      })),
+      wchanges: WCHANGES.map(([tag, t, bg, fg]) => ({ tag, t: t.replace(/<\/?b>/g, ''), bg, fg })),
+      schSum: SCH_SUM.map(([k, v, bd, bg, c]) => ({ k, v, bd, bg, c })),
+      schRules: SCH_RULES,
+      schRows: SCH_ROWS.map(([no, who, qty, craft, match, m, due, noDue, blocker, checked]) => ({
+        no, who, qty, craft, match, due, blocker,
+        urgent: no.indexOf('260807') > -1,
+        bg: checked ? '#fffafa' : '#fff',
+        ckBd: checked ? '#dc2626' : '#d4d4d8',
+        ckBg: checked ? '#dc2626' : '#fff',
+        mBg: m === 1 ? '#ecfdf5' : (m === 2 ? '#fffbeb' : (m === 3 ? '#eff6ff' : '#fef2f2')),
+        mFg: m === 1 ? '#047857' : (m === 2 ? '#b45309' : (m === 3 ? '#1d4ed8' : '#b91c1c')),
+        dueC: noDue ? '#b45309' : '#3f3f46',
+        blkC: blocker === '—' ? '#71717a' : '#b45309',
+      })),
+      assign: ASSIGN.map((a) => ({
+        ...a,
+        cands: a.cands.map(([name, meta, tag, kind]) => ({
+          name, meta, tag,
+          bd: kind === 1 ? '#dc2626' : '#e4e4e7',
+          bg: kind === 1 ? '#fffafa' : '#fff',
+          dot: kind === 1 ? '#dc2626' : '#d4d4d8',
+          fill: kind === 1 ? '#dc2626' : '#fff',
+          tagBg: kind === 1 ? '#ecfdf5' : (kind === 2 ? '#eff6ff' : '#fffbeb'),
+          tagFg: kind === 1 ? '#047857' : (kind === 2 ? '#1d4ed8' : '#b45309'),
+        })),
+      })),
+      impact: IMPACT.map(([k, v, c]) => ({ k, v, c })),
+      rest: REST.map(([tag, name, t, bg, fg]) => ({ tag, name, t, bg, fg })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

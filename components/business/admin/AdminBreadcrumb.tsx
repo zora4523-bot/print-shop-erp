@@ -1,9 +1,10 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
+import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -71,14 +72,43 @@ const ID_SEGMENT =
   /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
+function labelFromModules(segment: string): string | undefined {
+  const labels = new Set<string>();
+  for (const adminModule of ADMIN_MODULES) {
+    if (adminModule.routeBase === '#') continue;
+    const last = adminModule.routeBase.split('/').filter(Boolean).at(-1);
+    if (last === segment) labels.add(adminModule.breadcrumbLabel);
+  }
+  return labels.size === 1 ? [...labels][0] : undefined;
+}
+
 export function resolveSegmentLabel(
   segment: string,
   entityLabel: string | null,
+  pageHeading?: string | null,
 ): string {
+  const fromModule = labelFromModules(segment);
+  if (fromModule) return fromModule;
   const known = SEGMENT_LABELS[segment];
   if (known) return known;
-  if (ID_SEGMENT.test(segment)) return entityLabel ?? '详情';
-  return segment;
+  if (ID_SEGMENT.test(segment)) return entityLabel ?? pageHeading ?? '详情';
+  return pageHeading ?? '页面';
+}
+
+function subscribePageHeading(listener: () => void) {
+  const root = document.querySelector('#admin-main');
+  if (!root) return () => undefined;
+  const observer = new MutationObserver(listener);
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
+  return () => observer.disconnect();
+}
+
+function getPageHeadingSnapshot(): string | null {
+  return document.querySelector('#admin-main h1')?.textContent?.trim() || null;
+}
+
+function getPageHeadingServerSnapshot(): null {
+  return null;
 }
 
 export function AdminBreadcrumb() {
@@ -86,6 +116,11 @@ export function AdminBreadcrumb() {
   // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
   // 这里不发任何请求。
   const entityLabel = useBreadcrumbEntityLabel();
+  const pageHeading = useSyncExternalStore(
+    subscribePageHeading,
+    getPageHeadingSnapshot,
+    getPageHeadingServerSnapshot,
+  );
   const segments = pathname.split('/').filter(Boolean);
 
   if (segments.length === 0) {
@@ -101,11 +136,16 @@ export function AdminBreadcrumb() {
   }
 
   return (
-    <Breadcrumb>
-      <BreadcrumbList>
+    <Breadcrumb className="min-w-0 overflow-hidden">
+      <BreadcrumbList className="w-full min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">
         {segments.map((seg, i) => {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
+          const label = resolveSegmentLabel(
+            seg,
+            entityLabel,
+            isLast ? pageHeading : null,
+          );
           // Layout-only paths can't be navigated to (404)；render the
           // label as text not link。
           const isLinkable = !LAYOUT_ONLY_PATHS.has(href);
@@ -114,11 +154,22 @@ export function AdminBreadcrumb() {
             // child — both render `<li>`, and `<li>` inside `<li>` is
             // invalid DOM。
             <Fragment key={href}>
-              <BreadcrumbItem>
+              <BreadcrumbItem
+                className={
+                  isLast
+                    ? 'min-w-0 flex-1'
+                    : i === 0
+                      ? 'hidden shrink-0 lg:inline-flex'
+                      : 'hidden shrink-0 2xl:inline-flex'
+                }
+              >
                 {isLast ? (
                   // Real terminal — semantically "current page".
-                  <BreadcrumbPage>
-                    {resolveSegmentLabel(seg, entityLabel)}
+                  <BreadcrumbPage
+                    className="block max-w-[min(42vw,24rem)] truncate"
+                    title={label}
+                  >
+                    {label}
                   </BreadcrumbPage>
                 ) : isLinkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
@@ -127,7 +178,7 @@ export function AdminBreadcrumb() {
                   <BreadcrumbLink
                     render={<Link href={href} prefetch={false} />}
                   >
-                    {resolveSegmentLabel(seg, entityLabel)}
+                    {label}
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the
@@ -136,11 +187,19 @@ export function AdminBreadcrumb() {
                   // and screen readers would announce two "current"s
                   // on a single breadcrumb .
                   <span className="text-muted-foreground">
-                    {resolveSegmentLabel(seg, entityLabel)}
+                    {label}
                   </span>
                 )}
               </BreadcrumbItem>
-              {!isLast && <BreadcrumbSeparator />}
+              {!isLast && (
+                <BreadcrumbSeparator
+                  className={
+                    i === 0
+                      ? 'hidden shrink-0 lg:block'
+                      : 'hidden shrink-0 2xl:block'
+                  }
+                />
+              )}
             </Fragment>
           );
         })}

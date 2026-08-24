@@ -5,8 +5,8 @@ import { getSession } from '@/lib/auth/session';
 import { getSchedulingTitleRef } from '@/lib/page-title/refs';
 import { schedulingTitle } from '@/lib/page-title/titles';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { Badge } from '@/components/ui/badge';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SchedulingForm } from '@/components/business/production/SchedulingForm';
 import { requirePermission } from '@/lib/auth/permissions';
 
@@ -45,11 +45,7 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
       <div>
         <h1 className="text-xl font-semibold">
           排产 <span className="font-sans tabular-nums">{view.orderNo}</span>
-          {view.isUrgent ? (
-            <Badge variant="destructive" className="ml-3">
-              急单
-            </Badge>
-          ) : null}
+          {view.isUrgent ? <UrgentBadge className="ml-3" /> : null}
         </h1>
         {view.customName ? (
           <p className="font-semibold text-foreground">{view.customName}</p>

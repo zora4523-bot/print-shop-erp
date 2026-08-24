@@ -4,10 +4,10 @@ import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { WorkerType } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   EmptyState,
@@ -177,11 +177,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {formatMoney(r.totalSalary)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {r.isPaid ? (
-                        <Badge>已发</Badge>
-                      ) : (
-                        <Badge variant="outline">未发</Badge>
-                      )}
+                      <PaymentStatusBadge isPaid={r.isPaid} />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <MarkHourlyPaidForm id={r.id} currentPaid={r.isPaid} />

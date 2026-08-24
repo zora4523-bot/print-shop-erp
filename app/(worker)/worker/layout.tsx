@@ -30,14 +30,8 @@ export default async function WorkerLayout({
             >
               师傅工作台
             </Link>
-            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 text-sm [&_button]:min-h-11">
-              <span className="worker-wrap-anywhere min-w-0 text-right text-muted-foreground">
-                {user.displayName}（{roleLabel(user.role)}）
-              </span>
-              <LogoutButton />
-            </div>
           </div>
-          <nav aria-label="师傅工作台导航" className="mt-2 grid grid-cols-3 gap-2 text-sm">
+          <nav aria-label="师傅工作台导航" className="mt-2 grid grid-cols-4 gap-2 text-sm">
             <Link href="/worker/tasks" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
               我的任务
             </Link>
@@ -47,12 +41,34 @@ export default async function WorkerLayout({
             <Link href="/worker/salary" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
               我的工资
             </Link>
+            <a href="#worker-account" className="inline-flex min-h-11 items-center justify-center rounded-md border px-2 text-center hover:bg-muted">
+              我的
+            </a>
           </nav>
         </div>
       </header>
       <main className="worker-safe-inline worker-safe-bottom mx-auto w-full max-w-xl pt-4">
         {children}
       </main>
+      <footer
+        id="worker-account"
+        className="worker-safe-inline worker-safe-bottom mx-auto mt-2 w-full max-w-xl border-t pt-4"
+      >
+        <section
+          aria-labelledby="worker-account-heading"
+          className="flex min-w-0 flex-wrap items-center gap-3 rounded-xl border bg-card p-4 text-sm shadow-sm [&_button]:min-h-11"
+        >
+          <div className="min-w-0 flex-1">
+            <h2 id="worker-account-heading" className="font-semibold">
+              我的
+            </h2>
+            <p className="worker-wrap-anywhere text-muted-foreground">
+              {user.displayName}（{roleLabel(user.role)}）
+            </p>
+          </div>
+          <LogoutButton />
+        </section>
+      </footer>
     </div>
   );
 }

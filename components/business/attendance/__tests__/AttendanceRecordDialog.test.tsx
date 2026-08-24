@@ -10,6 +10,7 @@ const { actionState } = vi.hoisted(() => ({
   actionState: {
     // 类型是纯编译期的，vi.hoisted 提升到 import 之上也不会有运行时引用。
     current: null as AttendanceMutationResult | null,
+    pending: false,
   },
 }));
 
@@ -17,7 +18,11 @@ vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
   return {
     ...actual,
-    useActionState: () => [actionState.current, vi.fn(), false],
+    useActionState: () => [
+      actionState.current,
+      vi.fn(),
+      actionState.pending,
+    ],
   };
 });
 
@@ -28,8 +33,12 @@ vi.mock('@/actions/foreman-attendance', () => ({
 
 import { AttendanceRecordDialog } from '../AttendanceRecordDialog';
 
-function render(state: AttendanceMutationResult | null) {
+function render(
+  state: AttendanceMutationResult | null,
+  options: { pending?: boolean } = {},
+) {
   actionState.current = state;
+  actionState.pending = options.pending ?? false;
   return renderToStaticMarkup(
     <AttendanceRecordDialog
       workerId="worker-1"
@@ -42,6 +51,7 @@ function render(state: AttendanceMutationResult | null) {
 
 beforeEach(() => {
   actionState.current = null;
+  actionState.pending = false;
 });
 
 describe('AttendanceRecordDialog 保存回执', () => {
@@ -50,6 +60,22 @@ describe('AttendanceRecordDialog 保存回执', () => {
 
     expect(html).toMatch(/<p role="status"[^>]*>[\s\S]*?2026-08-21[\s\S]*?<\/p>/);
     expect(html).toContain('已保存');
+  });
+
+  it('连续两次得到相同 success 时，pending 期间先卸载旧 live region', () => {
+    const success: AttendanceMutationResult = { status: 'success' };
+
+    const firstSuccess = render(success);
+    const duringSecondSave = render(success, { pending: true });
+    const secondSuccess = render(success);
+
+    expect(firstSuccess).toContain('role="status"');
+    expect(duringSecondSave).not.toContain('role="status"');
+    expect(duringSecondSave).not.toContain('已保存 2026-08-21 的考勤');
+    // 完成后重新挂载；即使文案和第一次一样，读屏器也能把
+    // 新插入的 status 当作新回执。
+    expect(secondSuccess).toContain('role="status"');
+    expect(secondSuccess).toContain('已保存 2026-08-21 的考勤');
   });
 
   it('一进面板不播报任何东西', () => {
@@ -66,5 +92,39 @@ describe('AttendanceRecordDialog 保存回执', () => {
       /<p role="alert"[^>]*>[\s\S]*?WORK_HOURS 规则未配置[\s\S]*?<\/p>/,
     );
     expect(html).not.toContain('role="status"');
+  });
+
+  it('字段校验失败作为单个原子 alert 播报全部错误', () => {
+    const html = render({
+      status: 'invalid',
+      fieldErrors: {
+        normalHours: ['正常工时不能超过 24'],
+        leaveType: ['请填写请假类型'],
+      },
+    });
+
+    const alert = html.match(/<ul[^>]*role="alert"[^>]*>/)?.[0];
+    expect(alert).toBeDefined();
+    expect(alert).toContain('aria-atomic="true"');
+    expect(html).toContain('正常工时不能超过 24');
+    expect(html).toContain('请填写请假类型');
+    expect(html).not.toContain('role="status"');
+  });
+
+  it('重提时卸载上一轮字段错误和 aria-describedby', () => {
+    const invalid: AttendanceMutationResult = {
+      status: 'invalid',
+      fieldErrors: {
+        normalHours: ['正常工时不能超过 24'],
+      },
+    };
+
+    const beforeRetry = render(invalid);
+    const duringRetry = render(invalid, { pending: true });
+
+    expect(beforeRetry).toContain('正常工时不能超过 24');
+    expect(beforeRetry).toContain('aria-describedby=');
+    expect(duringRetry).not.toContain('正常工时不能超过 24');
+    expect(duringRetry).not.toContain('aria-describedby=');
   });
 });

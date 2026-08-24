@@ -55,6 +55,10 @@ export type PublishCustomerPriceBookDraftActionInput = {
   expectedDraftUpdatedAt: string;
   /** Shanghai wall time from an HTML datetime-local control. */
   effectiveFrom: string;
+  /** Human-readable release note stored with the published workflow and audit. */
+  publishNote: string;
+  /** Explicit acknowledgement for the L3, all-future-orders impact. */
+  confirmedImpact: boolean;
 };
 
 export type DiscardCustomerPriceBookDraftActionInput = {

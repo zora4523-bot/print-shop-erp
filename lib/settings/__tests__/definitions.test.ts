@@ -8,6 +8,7 @@ import {
   parseSettingInput,
   resolveSetting,
 } from '../definitions';
+import { SETTING_METADATA } from '../metadata';
 
 describe('SETTING_DEFINITIONS', () => {
   it('每一项的兜底值都能通过自己的 schema', () => {
@@ -27,6 +28,14 @@ describe('SETTING_DEFINITIONS', () => {
     for (const key of SETTING_KEYS) {
       const { field, fallback } = SETTING_DEFINITIONS[key];
       expect(Object.hasOwn(fallback as object, field.name), key).toBe(true);
+    }
+  });
+
+  it('服务端定义与客户端表单元数据保持同一份约束', () => {
+    expect(Object.keys(SETTING_METADATA)).toEqual(SETTING_KEYS);
+    for (const key of SETTING_KEYS) {
+      const { label, help, field } = SETTING_DEFINITIONS[key];
+      expect({ label, help, field }, key).toEqual(SETTING_METADATA[key]);
     }
   });
 

@@ -321,6 +321,46 @@ export async function retryUnknownNotificationAction(
   };
 }
 
+export async function ignoreUnknownNotificationAction(
+  _prev: NotificationResolutionResult | null,
+  formData: FormData,
+): Promise<NotificationResolutionResult> {
+  const actor = await requirePermission('notification:config');
+  const input = notificationResolutionInput(formData);
+  const reason = notificationResolutionReason(formData);
+  if (!input) return { status: 'error', message: '推送日志状态参数无效' };
+  if (!reason) {
+    return { status: 'error', message: '请填写 1–500 字的忽略理由' };
+  }
+
+  let result: Awaited<ReturnType<typeof resolveUnknownNotification>>;
+  try {
+    result = await resolveUnknownNotification(
+      input.logId,
+      'IGNORED',
+      actor,
+      input.stateVersion,
+      reason,
+    );
+  } catch (error) {
+    const mapped = mapUnknownResolutionError(error);
+    if (mapped) return mapped;
+    throw error;
+  }
+
+  revalidatePath('/owner/notifications');
+  revalidatePath('/owner/background-jobs');
+  return {
+    status: 'success',
+    message:
+      result.pendingUnknownCount > 0
+        ? `已记录忽略理由；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
+        : result.rearmed
+          ? '已忽略该条，其他已确认未送达的消息已重新入队'
+          : '已记录忽略理由并关闭该条待办',
+  };
+}
+
 function notificationResolutionInput(
   formData: FormData,
 ): { logId: string; stateVersion: number } | null {
@@ -338,6 +378,13 @@ function notificationResolutionInput(
     return null;
   }
   return { logId, stateVersion };
+}
+
+function notificationResolutionReason(formData: FormData): string | null {
+  const rawReason = formData.get('reason');
+  if (typeof rawReason !== 'string') return null;
+  const reason = rawReason.trim();
+  return reason.length > 0 && reason.length <= 500 ? reason : null;
 }
 
 function mapUnknownResolutionError(
@@ -369,6 +416,8 @@ function mapUnknownResolutionError(
         status: 'error',
         message: '原后台任务尚未进入可人工重发的死信状态，请稍后刷新',
       };
+    case 'INVALID_REASON':
+      return { status: 'error', message: '请填写 1–500 字的忽略理由' };
   }
 }
 

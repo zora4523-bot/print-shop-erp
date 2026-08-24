@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ProductSummary } from '@/lib/product';
+import type { ProductListRow, ProductSummary } from '@/lib/product';
 import {
   Table,
   TableBody,
@@ -9,6 +9,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { ProductReferenceImpact } from './ProductReferenceImpact';
 
 function formatPrice(v: ProductSummary['baseUnitPrice']): string {
   if (v === null || v === undefined) return '—';
@@ -16,9 +17,9 @@ function formatPrice(v: ProductSummary['baseUnitPrice']): string {
   return String(v);
 }
 
-export function ProductsTable({ products }: { products: ProductSummary[] }) {
+export function ProductsTable({ products }: { products: ProductListRow[] }) {
   if (products.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无产品</p>;
+    return null;
   }
 
   return (
@@ -33,12 +34,13 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
           <TableHead className="text-right">内部/直单基础单价</TableHead>
           <TableHead className="text-right">起订量</TableHead>
           <TableHead>状态</TableHead>
+          <TableHead>被引用</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {products.map((p) => (
-          <TableRow key={p.id} className={!p.isActive ? 'opacity-60' : undefined}>
+          <TableRow key={p.id} className={!p.isActive ? 'bg-muted/30' : undefined}>
             <TableCell className="font-sans tabular-nums text-xs">{p.code ?? '—'}</TableCell>
             <TableCell className="text-muted-foreground">
               {p.categoryNode.name}
@@ -58,6 +60,9 @@ export function ProductsTable({ products }: { products: ProductSummary[] }) {
               ) : (
                 <Badge variant="secondary">停用</Badge>
               )}
+            </TableCell>
+            <TableCell>
+              <ProductReferenceImpact impact={p.referenceImpact} variant="compact" />
             </TableCell>
             <TableCell>
               <Link

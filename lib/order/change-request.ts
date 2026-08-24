@@ -1086,10 +1086,6 @@ export async function reviewOrderChangeRequest(
                 },
               },
             },
-            outsourceOrders: {
-              where: { status: { not: 'CANCELLED' } },
-              select: { id: true, orderItemIds: true },
-            },
             shipments: {
               orderBy: { sequence: 'asc' },
               select: {
@@ -1284,13 +1280,9 @@ export async function reviewOrderChangeRequest(
           })),
         });
       }
-      for (const outsource of request.order.outsourceOrders) {
-        if (!outsource.orderItemIds.includes(template.id)) continue;
-        await tx.outsourceOrder.update({
-          where: { id: outsource.id },
-          data: { orderItemIds: { push: created.id } },
-        });
-      }
+      // 已发出/加工中/已回货的外协单都是不可变履约快照。新款式即使
+      // 模板款式曾外协，也不能被旧外协单自动“继承”；它保持未覆盖，
+      // 直到主管显式新建外协单。完工闸口会用逐款数量快照拦住。
     }
 
     const shipmentQuantityChanged = changes.some((change) => {

@@ -7,11 +7,15 @@ import {
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
+import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { EmptyState, PageHeader } from '@/components/ui-business';
-import { FileArchive } from 'lucide-react';
-import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { EmptyState, EnvNotice, PageHeader } from '@/components/ui-business';
+import {
+  formatDateInputShanghai,
+  formatDateShanghai,
+  formatDateTimeShanghai,
+} from '@/lib/format/dates';
 import { DesignBundleStatus } from '@/generated/prisma/enums';
 
 export const metadata = { title: 'CDR 汇总下载' };
@@ -55,12 +59,12 @@ export default async function ForemanCdrPage({
       />
 
       {mock ? (
-        <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground">
-          ⚠️ <strong>OSS 未配置 / mock-mode</strong>：可以走完&ldquo;勾选 → 生成下载包&rdquo;
-          流程并写入 DesignBundle 记录，但 ZIP 文件 URL 是占位 (
-          <code>mock://...</code>)，外协下载会返 503。上线时业主在 .env
-          配齐 OSS_* 后即可真打包。
-        </div>
+        <EnvNotice>
+          <strong className="text-foreground">OSS 未配置 / mock-mode</strong>
+          ：可以走完「勾选 → 生成下载包」流程并写入 DesignBundle 记录，但 ZIP
+          文件 URL 是占位（<code>mock://...</code>），外协下载会返 503。上线时在
+          .env 配齐 OSS_* 后即可真打包。
+        </EnvNotice>
       ) : null}
 
       <FilterBar from={from} to={to} />
@@ -86,9 +90,17 @@ export default async function ForemanCdrPage({
         <h2 className="text-base font-semibold">最近生成的下载包</h2>
         {recentBundles.length === 0 ? (
           <EmptyState
-            icon={FileArchive}
-            title="尚未生成过 CDR 下载包"
-            description="勾选上方候选工单即可生成 24 小时有效的下载链接。"
+            kind="no-data"
+            noun="CDR 下载包"
+            onCreate={
+              <Button
+                render={<Link href="#cdr-bundle-form" prefetch={false} />}
+                nativeButton={false}
+                variant="outline"
+              >
+                去勾选候选工单
+              </Button>
+            }
           />
         ) : (
           <div
@@ -129,7 +141,16 @@ export default async function ForemanCdrPage({
                         ) : b.status === DesignBundleStatus.FAILED ? (
                           <Badge variant="destructive">生成失败</Badge>
                         ) : expired ? (
-                          <Badge variant="outline">已过期</Badge>
+                          <div>
+                            <Badge variant="outline">已过期</Badge>
+                            <RegenerateBundleForm
+                              from={formatDateInputShanghai(b.dateRangeFrom)}
+                              to={formatDateInputShanghai(
+                                new Date(b.dateRangeTo.getTime() - 1),
+                              )}
+                              orderIds={b.orderIds}
+                            />
+                          </div>
                         ) : isMock ? (
                           <Badge variant="outline">mock URL</Badge>
                         ) : (
@@ -173,6 +194,7 @@ export default async function ForemanCdrPage({
 function FilterBar({ from, to }: { from: string; to: string }) {
   return (
     <form
+      id="cdr-filter"
       className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm"
       action="/foreman/cdr"
     >

@@ -1,10 +1,17 @@
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
-import { getProductSummary, listProductCategoryOptions } from '@/lib/product';
+import {
+  getProductReferenceImpact,
+  getProductSummary,
+  listProductCategoryOptions,
+} from '@/lib/product';
 import { updateProductAction } from '@/actions/owner-products';
 import { ProductForm } from '@/components/business/product/ProductForm';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
+import { ProductReferenceImpact } from '@/components/business/product/ProductReferenceImpact';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -17,6 +24,13 @@ const loadProduct = cache(getProductSummary);
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
+  // metadata 会与页面独立解析并可能流式输出。父 layout 和
+  // Page 里的硬闸口都不能替这次全局产品查询授权；无权时只回
+  // 模块名，也不透露该 id 是否存在。
+  const session = await getSession();
+  if (!session || !hasPermission('dict:product:manage', session.user.role)) {
+    return { title: '产品字典' };
+  }
   const p = await loadProduct(id);
   return { title: p ? `编辑 ${p.name} · 产品字典` : '产品不存在' };
 }
@@ -26,7 +40,10 @@ export default async function EditProductPage({ params }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('dict:product:manage');
   const { id } = await params;
-  const product = await loadProduct(id);
+  const [product, referenceImpact] = await Promise.all([
+    loadProduct(id),
+    getProductReferenceImpact(id),
+  ]);
   if (!product) notFound();
   const categoryOptions = await listProductCategoryOptions({
     includeInactiveIds: [product.categoryNodeId],
@@ -69,6 +86,14 @@ export default async function EditProductPage({ params }: PageProps) {
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
+        <h2 className="mb-2 text-base font-semibold">被引用 / 停用影响</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          这是页面加载时的快照。工单按工单去重，报价仅统计当前生效的规则和数量档；提交状态变更时服务器会再次查询并记入审计。
+        </p>
+        <ProductReferenceImpact impact={referenceImpact} />
+      </section>
+
+      <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-2 text-base font-semibold">
           {product.isActive ? '停用产品' : '启用产品'}
         </h2>
@@ -77,7 +102,12 @@ export default async function EditProductPage({ params }: PageProps) {
             ? '停用后该产品不再出现在录单页的产品选择器里；历史工单里已经引用的记录全部保留。'
             : '启用后该产品会重新出现在录单页的选择器里。'}
         </p>
-        <ToggleActiveButton productId={product.id} currentlyActive={product.isActive} />
+        <ToggleActiveButton
+          key={`${product.id}-${product.isActive}`}
+          productId={product.id}
+          currentlyActive={product.isActive}
+          impact={referenceImpact}
+        />
       </section>
     </div>
   );

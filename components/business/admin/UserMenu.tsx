@@ -36,7 +36,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`用户菜单：${displayName}`}
-        className="flex min-h-11 min-w-11 items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-2 text-sm shadow-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:pr-3"
+        className="flex min-h-11 min-w-11 items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-2 text-sm shadow-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:pr-3"
       >
         <Avatar className="size-7">
           <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
@@ -44,7 +44,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
           </AvatarFallback>
         </Avatar>
         <span
-          className="hidden min-w-0 max-w-[140px] truncate sm:inline"
+          className="hidden min-w-0 max-w-[140px] truncate xl:inline"
           title={displayName}
         >
           <span className="font-medium">{displayName}</span>

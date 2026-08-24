@@ -7,6 +7,7 @@ import {
   cancelOutsourceAction,
 } from '@/actions/outsource';
 import type { OutsourceMutationResult } from '@/actions/outsource.types';
+import { OutsourceReceiveFeedback } from './OutsourceReceiveFeedback';
 
 type Props = {
   id: string;
@@ -48,30 +49,12 @@ export function OutsourceActions({ id, canReceive, canCancel }: Props) {
               {receivePending ? '处理中…' : '已回货'}
             </Button>
           </div>
-          {receiveState?.status === 'success' && receiveState.notice ? (
-            <p className="text-xs text-warning-foreground">
-              {receiveState.notice}
-            </p>
-          ) : null}
-          {receiveState?.status === 'error' ? (
-            <p className="text-xs text-destructive">{receiveState.message}</p>
-          ) : null}
-          {receiveState?.status === 'invalid' ? (
-            // Surface per-field Zod errors — otherwise an invalid
-            // actualDate silently fails .
-            <ul className="text-xs text-destructive">
-              {Object.entries(receiveState.fieldErrors).flatMap(
-                ([field, msgs]) =>
-                  msgs.map((m) => (
-                    <li key={`${field}-${m}`}>
-                      {field}: {m}
-                    </li>
-                  )),
-              )}
-            </ul>
-          ) : null}
         </form>
       ) : null}
+
+      {/* Server Function 的 revalidatePath 会立即把 canReceive 刷成 false。
+          回执必须在表单外，否则最需要给主管看的覆盖缺口会随表单一起卸载。 */}
+      <OutsourceReceiveFeedback state={receiveState} />
 
       {canCancel ? (
         <form action={() => startCancel(() => cancelAction())}>

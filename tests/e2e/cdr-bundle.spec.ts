@@ -71,14 +71,14 @@ test.describe('CDR 汇总下载 — golden path', () => {
 
     // 真去访问 downloadUrl —— mock-mode zipFileUrl 形如 mock://...，
     // 路由识别后返 503（不是 404，不是 redirect 到 mock://）。
-    const res = await request.get(`http://localhost:3000${relativePath}`);
+    const res = await request.get(relativePath);
     expect(res.status()).toBe(503);
     const body = await res.json();
     expect(body.error).toMatch(/OSS 未配置/);
 
     // 不存在的 bundle id → 404（与&ldquo;过期&rdquo;不区分文案；round 119 medium）
     const fake = await request.get(
-      'http://localhost:3000/api/cdr/bundles/cknotrealid000000000000000',
+      '/api/cdr/bundles/cknotrealid000000000000000',
     );
     expect(fake.status()).toBe(404);
     const fakeBody = await fake.json();

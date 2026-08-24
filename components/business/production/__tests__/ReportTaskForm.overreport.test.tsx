@@ -1,13 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReportTaskMutationResult } from '@/actions/production.types';
 
-// 「超报确认」这条路径的 DOM 只在提交失败之后才存在，tests/visual 的 axe
-// 门禁跑的是页面加载态，一次都走不到。这里注入服务端返回的 state 把它钉住。
+// 「超报确认」在 hydration 后会随输入即时出现；零 JS 时仍由提交后的服务端
+// state 驱动。tests/visual 的页面加载态走不到后者，这里注入 state 把降级路径钉住。
 //
 // 钉的是三件事，都是回归过就会静默出事的：
-//   1. 复选框是**服务端状态**驱动的原生 input[type=checkbox]。改成基于输入框
-//      onChange 的条件渲染，零 JS 下它就永远不存在，师傅被永久拦在报工外。
+//   1. 复选框保留**服务端状态**驱动的原生 input[type=checkbox] 降级路径；
+//      即时 onInput 只是增强，零 JS 提交后仍能勾选再提交。
 //   2. 三个数量框回填服务端传回的字符串。回退成 defaultValue={plannedQty}
 //      会让「超报被拦 → 数字重置回计划数 → 勾确认后按计划数入库」，正好把
 //      守卫要防的事做实。
@@ -35,6 +37,17 @@ vi.mock('@/actions/production', () => ({
 
 import { ReportTaskForm } from '../ReportTaskForm';
 
+const source = readFileSync(
+  path.join(
+    process.cwd(),
+    'components',
+    'business',
+    'production',
+    'ReportTaskForm.tsx',
+  ),
+  'utf8',
+);
+
 function render() {
   return renderToStaticMarkup(
     <ReportTaskForm
@@ -53,6 +66,20 @@ describe('ReportTaskForm 超报确认', () => {
     expect(html).not.toContain('name="overReportConfirmed"');
     // 默认值仍然是计划数
     expect(html).toMatch(/name="completedQty"[^>]*value="5000"/);
+  });
+
+  it('hydration 后输入一超计划就显示确认区，不必先提交失败一次', () => {
+    expect(source).toContain('setLiveTotal(');
+    expect(source).toMatch(
+      /const showOverReportConfirm =[\s\S]{0,100}liveOverPlan \|\|/,
+    );
+    expect(source).toContain('当前合计 ${liveTotal.toLocaleString()}');
+  });
+
+  it('报工主按钮以 52px 吸底并保留 safe-area', () => {
+    expect(source).toContain('sticky bottom-0');
+    expect(source).toContain('env(safe-area-inset-bottom)');
+    expect(source).toContain('min-h-[52px]');
   });
 
   it('服务端说需要确认时渲染原生 checkbox（零 JS 也能勾能提交）', () => {

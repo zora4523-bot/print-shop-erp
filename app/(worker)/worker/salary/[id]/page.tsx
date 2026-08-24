@@ -17,6 +17,7 @@ import {
 } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import Decimal from 'decimal.js';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
@@ -67,11 +68,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
             {formatDateShanghai(salary.date)} 工资明细
           </h1>
-          {salary.isPaid ? (
-            <Badge variant="secondary">已发</Badge>
-          ) : (
-            <Badge variant="outline">未发</Badge>
-          )}
+          <PaymentStatusBadge isPaid={salary.isPaid} />
           <Badge variant={pieceworkVsBase > 0 ? 'secondary' : 'outline'}>
             {pieceworkVsBase > 0
               ? '计件高于保底'
@@ -188,11 +185,7 @@ function HourlySalaryDetail({
           <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
             {payroll.month} 工资明细
           </h1>
-          {payroll.isPaid ? (
-            <Badge variant="secondary">已发</Badge>
-          ) : (
-            <Badge variant="outline">未发</Badge>
-          )}
+          <PaymentStatusBadge isPaid={payroll.isPaid} />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'} ·

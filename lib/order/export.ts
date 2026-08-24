@@ -182,6 +182,10 @@ export async function requestOrderExport(input: {
 
 export async function processQueuedOrderExport(
   exportId: string,
+  context: {
+    signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+  } = {},
 ): Promise<Prisma.InputJsonValue> {
   const orderExport = await db.orderExport.findUnique({
     where: { id: exportId },
@@ -237,12 +241,16 @@ export async function processQueuedOrderExport(
   const membershipPath = `${artifactPath}.${randomUUID()}.orders`;
   const rowCounts: RowCounts = {};
 
+  await context.assertLease?.();
+  context.signal?.throwIfAborted();
   await ensureOrderExportArtifactDir();
   let matchedOrderCount = 0;
   try {
     matchedOrderCount = await writeMembershipManifest(membershipPath, snapshotWhere);
     const sheets = buildWorkbookSheets(membershipPath, rowCounts);
     const result = await writeXlsxFile({ filePath: artifactPath, sheets });
+    await context.assertLease?.();
+    context.signal?.throwIfAborted();
     const actor: AuditActor = {
       id: orderExport.createdBy.id,
       username: orderExport.createdBy.username,

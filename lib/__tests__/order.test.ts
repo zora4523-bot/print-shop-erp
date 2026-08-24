@@ -1398,15 +1398,11 @@ describe('cancelOrder', () => {
     expect(logArg.data.remark).toBe('取消：客户取消');
   });
 
-  it('uses a default remark when reason is null', async () => {
-    dbMock.order.findUnique.mockResolvedValue({
-      id: 'o1',
-      status: OrderStatus.DRAFT,
-      submitterId: 'sales-1',
-    });
-    dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrder('o1', ownerActor, null);
-    expect(dbMock.orderLog.create.mock.calls[0][0].data.remark).toBe('取消工单');
+  it('rejects an empty reason at the domain boundary before reading the order', async () => {
+    await expect(cancelOrder('o1', ownerActor, '   ')).rejects.toThrow(
+      '取消原因必填',
+    );
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
   });
 
   it('refuses to cancel terminal states (FINISHED)', async () => {
@@ -1415,7 +1411,7 @@ describe('cancelOrder', () => {
       status: OrderStatus.FINISHED,
       submitterId: 'sales-1',
     });
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toBeInstanceOf(
       InvalidOrderTransitionError,
     );
   });
@@ -1462,10 +1458,10 @@ describe('cancelOrder', () => {
       { id: 't1', status: TaskStatus.IN_PROGRESS },
     ]);
 
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toBeInstanceOf(
       OrderInvariantError,
     );
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toThrow(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
       /已开工\/已报工任务/,
     );
     // Cascade throws BEFORE the order row or any task is written.
@@ -1483,7 +1479,7 @@ describe('cancelOrder', () => {
       { id: 't1', status: TaskStatus.COMPLETED },
     ]);
 
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toBeInstanceOf(
       OrderInvariantError,
     );
     expect(dbMock.order.update).not.toHaveBeenCalled();
@@ -1503,10 +1499,10 @@ describe('cancelOrder', () => {
     ]);
     dbMock.outsourceOrder.findMany.mockResolvedValue([{ id: 'os1' }]);
 
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toBeInstanceOf(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toBeInstanceOf(
       OrderInvariantError,
     );
-    await expect(cancelOrder('o1', ownerActor, null)).rejects.toThrow(
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
       /已发送或进行中的外协单/,
     );
     // We do NOT auto-cancel the outsource order, void the PENDING task,
@@ -1527,7 +1523,7 @@ describe('cancelOrder', () => {
     dbMock.outsourceOrder.findMany.mockResolvedValue([]);
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
 
-    const r = await cancelOrder('o1', ownerActor, null);
+    const r = await cancelOrder('o1', ownerActor, '测试取消');
     expect(r.status).toBe(OrderStatus.CANCELLED);
     // The block query filters to in-flight statuses only.
     const where = dbMock.outsourceOrder.findMany.mock.calls[0][0].where;
@@ -1546,7 +1542,7 @@ describe('cancelOrder', () => {
     ]);
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
 
-    await cancelOrder('o1', ownerActor, null);
+    await cancelOrder('o1', ownerActor, '测试取消');
     // Only t1 is written; t2 (already CANCELLED) is left alone.
     expect(dbMock.productionTask.update).toHaveBeenCalledTimes(1);
     expect(dbMock.productionTask.update.mock.calls[0][0].where.id).toBe('t1');
@@ -1561,12 +1557,12 @@ describe('cancelOrder', () => {
     dbMock.productionTask.findMany.mockResolvedValue([]);
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
 
-    const r = await cancelOrder('o1', ownerActor, null);
+    const r = await cancelOrder('o1', ownerActor, '清理草稿');
     expect(r.status).toBe(OrderStatus.CANCELLED);
     expect(dbMock.productionTask.update).not.toHaveBeenCalled();
     // Only the status-change log; no task-cascade log.
     const remarks = dbMock.orderLog.create.mock.calls.map((c) => c[0].data.remark);
-    expect(remarks).toEqual(['取消工单']);
+    expect(remarks).toEqual(['取消：清理草稿']);
   });
 
   it('does not subtract CS sales when cancelling a draft that was never accrued', async () => {
@@ -2377,13 +2373,23 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
       requiresOutsource: true,
       outsourceOrders: [
         // 已取消的那张不算覆盖，哪怕它写着 item-2。
-        { id: 'os-cancelled', status: 'CANCELLED', orderItemIds: ['item-2'] },
-        { id: 'os-live', status: 'RECEIVED', orderItemIds: ['item-1'] },
+        {
+          id: 'os-cancelled',
+          status: 'CANCELLED',
+          orderItemIds: ['item-2'],
+          itemSnapshots: [{ orderItemId: 'item-2', quantity: 100 }],
+        },
+        {
+          id: 'os-live',
+          status: 'RECEIVED',
+          orderItemIds: ['item-1'],
+          itemSnapshots: [{ orderItemId: 'item-1', quantity: 100 }],
+        },
       ],
       items: [
-        { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-uv'] },
-        { id: 'item-2', sequence: 2, name: '款式二', crafts: ['craft-uv'] },
-        { id: 'item-3', sequence: 3, name: '款式三', crafts: ['craft-foil'] },
+        { id: 'item-1', sequence: 1, name: '款式一', quantity: 100, crafts: ['craft-uv'] },
+        { id: 'item-2', sequence: 2, name: '款式二', quantity: 100, crafts: ['craft-uv'] },
+        { id: 'item-3', sequence: 3, name: '款式三', quantity: 100, crafts: ['craft-foil'] },
       ],
     });
     dbMock.craft.findMany.mockResolvedValueOnce([

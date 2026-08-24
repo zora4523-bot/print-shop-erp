@@ -235,9 +235,12 @@ test('混合机型工单可分两次派给不同师傅，全部完成后才离�
   const mixedRow = page
     .getByRole('row')
     .filter({ hasText: fixture.mixedSchedulingOrderNo });
-  await expect(mixedRow).toContainText('已排 1 · 待排 1');
+  await expect(mixedRow).toContainText('无可派');
+  await expect(orderCheckbox).toBeDisabled();
 
   await selectWorker(workerSelect, E2E_USERS.workerWindmill!.displayName);
+  await expect(mixedRow).toContainText('可派 1 项');
+  await expect(orderCheckbox).toBeEnabled();
   await orderCheckbox.check();
   await page
     .getByRole('button', { name: '确认分配所选工艺', exact: true })

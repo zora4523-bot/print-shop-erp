@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { login, uniqueSuffix, expectNoNextErrorOverlay } from './_helpers';
+import {
+  login,
+  uniqueSuffix,
+  expectNoNextErrorOverlay,
+  openFirstOrderItemEditor,
+} from './_helpers';
 
 test.describe('创建工单 — golden path', () => {
   // 这条用例存在的具体理由：手动测试时这里炸了
@@ -19,6 +24,7 @@ test.describe('创建工单 — golden path', () => {
     await page.locator('input[name="customerRef"]').fill(customerRef);
 
     // 第一个款式：必填 name + quantity + 至少一项工艺（schema §449）。
+    await openFirstOrderItemEditor(page);
     await page.locator('input[name="items.0.name"]').fill('E2E 测试款式');
     await page.locator('input[name="items.0.quantity"]').fill('1000');
     await page
@@ -44,6 +50,10 @@ test.describe('创建工单 — golden path', () => {
     await page.getByLabel('款式备注').fill('烫金方向不要旋转，生产前先核对');
     // 工艺使用可多选的 aria-pressed 卡片；现货加烫位于低频分组。
     await page.getByRole('button', { name: '现货加烫' }).click();
+    await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
+    await page
+      .locator('textarea[name="items.0.priceOverrideReason"]')
+      .fill('E2E 非标纸张人工报价');
 
     // 浏览器剪贴板文件常没有文件名；先验证粘贴会被规范化并进入预览。
     // 为避免 golden-path 依赖外部 OSS，再移除图片后提交。OSS 三步上传
@@ -88,6 +98,12 @@ test.describe('创建工单 — golden path', () => {
     ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('E2E 测试款式').first()).toBeVisible();
     await expect(page.getByText(customName).first()).toBeVisible();
+    const itemDetails = page
+      .locator('details')
+      .filter({ hasText: 'E2E 测试款式' })
+      .first();
+    await itemDetails.locator('summary').click();
+    await expect(itemDetails).toHaveAttribute('open', '');
     await expect(page.getByText('万元封', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('E2E 特种纤维纸', { exact: true }).first()).toBeVisible();
     await expect(
@@ -97,7 +113,8 @@ test.describe('创建工单 — golden path', () => {
       .locator('mark')
       .filter({ hasText: '烫金方向不要旋转，生产前先核对' });
     await expect(highlightedRemark).toBeVisible();
-    await expect(highlightedRemark).toHaveClass(/bg-destructive/);
+    await expect(highlightedRemark).toHaveClass(/bg-muted/);
+    await expect(highlightedRemark).not.toHaveClass(/bg-destructive/);
     await expect(page.getByText(/^GD-\d{6}-\d{3}$/).first()).toBeVisible();
 
     // 标签页标题里是工单号，不是 id 前 8 位。这是唯一能验证

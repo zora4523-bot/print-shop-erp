@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Suspense } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -16,7 +17,14 @@ import { StockTransferForm } from '@/components/business/warehouse/StockTransfer
 import { WarehouseForms } from '@/components/business/warehouse/WarehouseForms';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  ErrorBoundary,
+  PageHeader,
+  StatCard,
+  TableEmptyState,
+  TableScrollArea,
+} from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { listRecentInventoryCounts } from '@/lib/inventory-count-posting';
@@ -31,13 +39,6 @@ export const metadata = {
 
 export default async function OwnerWarehousesPage() {
   await requirePermission('warehouse:manage');
-  const [dashboard, recentTransfers, recentCounts] = await Promise.all([
-    getWarehouseDashboard(),
-    listRecentStockTransfers(8),
-    listRecentInventoryCounts(8),
-  ]);
-  const integrityOk = dashboard.metrics.integrityMismatchCount === 0;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -51,6 +52,29 @@ export default async function OwnerWarehousesPage() {
         }
       />
 
+      <ErrorBoundary
+        scope="section"
+        title="仓库数据暂时无法加载"
+        description="页头和盘点入口仍可使用；请重试仓库数据区域。"
+      >
+        <Suspense fallback={<WarehouseDashboardSkeleton />}>
+          <WarehouseDashboardContent />
+        </Suspense>
+      </ErrorBoundary>
+    </div>
+  );
+}
+
+async function WarehouseDashboardContent() {
+  const [dashboard, recentTransfers, recentCounts] = await Promise.all([
+    getWarehouseDashboard(),
+    listRecentStockTransfers(8),
+    listRecentInventoryCounts(8),
+  ]);
+  const integrityOk = dashboard.metrics.integrityMismatchCount === 0;
+
+  return (
+    <>
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label="启用仓库" value={`${dashboard.metrics.warehouseCount}`} icon={Warehouse} tone="info" />
         <StatCard label="启用库位" value={`${dashboard.metrics.activeLocationCount}`} icon={MapPin} tone="info" />
@@ -187,12 +211,12 @@ export default async function OwnerWarehousesPage() {
           </div>
         </div>
       </details>
-    </div>
+    </>
   );
 }
 
 function EmptyRow({ columns, text }: { columns: number; text: string }) {
-  return <tr><td colSpan={columns} className="px-3 py-8 text-center text-muted-foreground">{text}</td></tr>;
+  return <TableEmptyState colSpan={columns} title={text} />;
 }
 
 function DocumentList({ title, empty, rows }: { title: string; empty: string; rows: { id: string; number: string; description: string; quantity: string; time: string }[] }) {
@@ -201,5 +225,34 @@ function DocumentList({ title, empty, rows }: { title: string; empty: string; ro
       <h2 className="mb-4 font-semibold">{title}</h2>
       {rows.length === 0 ? <p className="text-sm text-muted-foreground">{empty}</p> : <div className="space-y-3">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"><div><div className="font-sans tabular-nums text-sm font-medium">{row.number}</div><div className="mt-1 text-xs text-muted-foreground">{row.description}</div><div className="mt-1 text-xs text-muted-foreground">{row.time}</div></div><Badge variant="outline">{row.quantity}</Badge></div>)}</div>}
     </div>
+  );
+}
+
+function WarehouseDashboardSkeleton() {
+  return (
+    <section aria-busy="true" aria-live="polite" className="space-y-6">
+      <span className="sr-only">正在加载仓库数据</span>
+      <div
+        aria-hidden="true"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6"
+      >
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+            <Skeleton className="h-4 w-20 motion-reduce:animate-none" />
+            <Skeleton className="h-7 w-16 motion-reduce:animate-none" />
+          </div>
+        ))}
+      </div>
+      {Array.from({ length: 3 }, (_, index) => (
+        <div
+          key={index}
+          aria-hidden="true"
+          className="space-y-4 rounded-xl border bg-card p-5 shadow-sm"
+        >
+          <Skeleton className="h-5 w-28 motion-reduce:animate-none" />
+          <Skeleton className="h-28 w-full motion-reduce:animate-none" />
+        </div>
+      ))}
+    </section>
   );
 }

@@ -17,7 +17,12 @@ export async function handleOrderExportJob(
     throw new InvalidOrderExportJobPayloadError();
   }
 
-  return processQueuedOrderExport(exportId);
+  return job.signal || job.assertLease
+    ? processQueuedOrderExport(exportId, {
+        ...(job.signal ? { signal: job.signal } : {}),
+        ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+      })
+    : processQueuedOrderExport(exportId);
 }
 
 function asRecord(value: Prisma.JsonValue): Record<string, Prisma.JsonValue> {

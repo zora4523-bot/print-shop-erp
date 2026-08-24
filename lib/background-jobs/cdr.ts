@@ -16,8 +16,12 @@ export async function handleCdrBundleJob(
   }
 
   try {
-    return await processQueuedBundle(bundleId);
+    return await processQueuedBundle(bundleId, {
+      ...(job.signal ? { signal: job.signal } : {}),
+      ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+    });
   } catch (error) {
+    if (job.signal?.aborted) throw error;
     await markQueuedBundleFailure(
       bundleId,
       backgroundJobErrorCode(error),

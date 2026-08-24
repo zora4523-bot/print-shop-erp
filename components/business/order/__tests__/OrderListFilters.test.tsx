@@ -75,6 +75,37 @@ const fullQuery: OrderListQuery = {
 };
 
 describe('OrderListFilters', () => {
+  it('renders shareable preset views and a persistent save-current action', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={{ ...emptyQuery(), view: 'urgent' }}
+        options={{ submitters: [], workers: [], crafts: [] }}
+        issues={[]}
+        total={30}
+        canReviewChanges
+      />,
+    );
+
+    expect(html).toContain('aria-label="常用工单视图"');
+    expect(html).toContain('>我的急单</a>');
+    expect(html).toContain('>今天要发</a>');
+    expect(html).toContain('>待排产</a>');
+    expect(html).toContain('>待审核修改</a>');
+    expect(html).toContain('>保存当前条件</button>');
+    expect(anchorHref(html, '切换视图：我的急单')).toContain(
+      'view=urgent',
+    );
+    expect(anchorHref(html, '切换视图：今天要发')).toContain(
+      'view=due-today',
+    );
+    expect(anchorHref(html, '切换视图：待排产')).toContain(
+      'status=SUBMITTED',
+    );
+    expect(
+      html.match(/<a\b[^>]*aria-label="切换视图：我的急单"[^>]*>/)?.[0],
+    ).toContain('aria-current="page"');
+  });
+
   it('keeps the filter controls collapsed by default', () => {
     const html = renderToStaticMarkup(
       <OrderListFilters

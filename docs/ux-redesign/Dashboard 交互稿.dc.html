@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .fld { font-size: 12.5px; height: 30px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; display: flex; align-items: center; padding: 0 10px }
+  .cap { font-size: 12.5px; color: #52525b }
+  .oid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 3px 8px; background: #18181b; color: #fff; border-radius: 5px }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">Dashboard 交互稿</h1>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">补批次二</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">批次三到八都出了交互稿，只有批次二停在线框 —— 而它是每天的入口。<b>证据</b>：dashboard-light 1280 与 393 都打开过。首屏顺序是 160px 问候卡 → 4 张 KPI → 4 张快捷入口 → 才轮到超期外协与待发货工单，而那两张卡里的表格右侧被容器裁掉，「进…」动作链接切没了。侧栏为现状 13 项。</p>
+    <div class="pcard" style="max-width: 1180px; margin-top: 13px; padding: 12px 15px; border-color: #fed7aa">
+      <div style="font-size: 14px; font-weight: 600; color: #92400e">这一屏里有三处是提案，不是现有能力</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">① <b>本月经营摘要</b>里的毛利率依赖经营分析立项——毛利是推导指标，系统里没这个字段，口径未定之前不要在 Dashboard 上渲染具体数字。② <b>上次查看</b>需要按人记录的 last-viewed 存储，现在没有。③ <b>查看已处理</b>需要一个 dismissal 存储：超期外协这类信号是从外协单算出来的，本身没有独立的「已处理」状态。三条都已在界面上标「提案」，实现前需先拍板。</div>
+    </div>
+  </div>
+
+  <section class="sect" id="d1">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 12px">
+      <span class="oid">DASH-01</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">处理队列优先</h2>
+      <span class="cap">/owner · 契约 03 07 09 · 首屏回答「今天必须处理什么」</span>
+    </div>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column; min-height: 0; overflow-y: auto">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #3f3f46">管理后台</div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div>
+            <h3 style="margin: 0; font-size: 22px; font-weight: 700">今天要处理 <span style="color: #b91c1c">6</span> 件</h3>
+            <div class="cap" style="margin-top: 2px">2026-08-23 周日 · 按可操作性排序，处理完这几条就可以了</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 7px">
+            <span class="pill nw" style="background: #fffbeb; color: #92400e">提案</span>
+            <span class="cap nw" style="font-size: 12px">上次查看 08-22 17:40 · 需新增按人记录的 last-viewed 存储</span>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden; display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: 128px 1fr 116px 108px 120px 96px; gap: 12px; padding: 9px 14px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a; flex: none">
+              <div>信号</div><div>内容</div><div style="text-align: right">数量</div><div style="text-align: right">最早到期</div><div>责任人</div><div style="text-align: right">处置</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ queue }}" as="q" hint-placeholder-count="6">
+                <div style="display: grid; grid-template-columns: 128px 1fr 116px 108px 120px 96px; gap: 12px; align-items: center; padding: 11px 14px; border-bottom: 1px solid #f5f5f7; background: {{ q.bg }}; box-shadow: inset 3px 0 0 {{ q.edge }}">
+                  <div><span class="pill nw" style="background: {{ q.tBg }}; color: {{ q.tFg }}">{{ q.icon }} {{ q.kind }}</span></div>
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ q.title }}</div>
+                    <div class="nw" style="font-size: 11.5px; color: #52525b; margin-top: 1px; overflow: hidden; text-overflow: ellipsis">{{ q.sub }}</div>
+                  </div>
+                  <div class="nw" style="text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums">{{ q.n }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: {{ q.dueC }}">{{ q.due }}</div>
+                  <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ q.who }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-weight: 500; color: #b91c1c">{{ q.act }} →</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid #f0f0f2; background: #fafafa; flex: none">
+              <span class="cap" style="font-size: 11.5px">图标 + 文字双编码，颜色不单独承担含义。队列为空时显示「今天没有待处理信号」并给常规入口。</span>
+              <div style="flex: 1"></div>
+              <span class="pill nw" style="background: #fffbeb; color: #92400e">提案</span>
+              <span class="nw" style="font-size: 12px; color: #b91c1c">查看已处理</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; padding: 11px 20px 0; flex: none">
+          <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+            <div class="pcard" style="padding: 9px 12px 10px">
+              <div class="cap nw" style="font-size: 11.5px">{{ k.k }}</div>
+              <div class="nw" style="font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px">{{ k.v }}</div>
+              <div class="nw" style="font-size: 11px; color: #52525b">{{ k.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 9px 20px 13px; flex: none">
+          <span class="cap" style="font-size: 11.5px">KPI 降为第二层证据；趋势图与业绩排行移到第二屏；问候卡删除。</span>
+          <div style="flex: 1"></div>
+          <span class="pill nw" style="background: #fffbeb; color: #92400e">提案 · 依赖经营分析立项</span>
+          <span class="nw" style="font-size: 12px; color: #b91c1c">本月经营摘要 →</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="d2" style="border-bottom: none">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 12px">
+      <span class="oid">DASH-02</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">未解决队列 · 通知四态</h2>
+      <span class="cap">告警条的落地页 · 规范 D 段「结果不明」</span>
+    </div>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column; min-height: 0; overflow-y: auto">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>管理后台</span><span>›</span><span style="color: #3f3f46">未解决队列</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div><h3 style="margin: 0; font-size: 22px; font-weight: 700">未解决队列</h3><div class="cap" style="margin-top: 2px">通知投递与后台任务里需要人工判断的那些。四种传输状态语义不同，不合并。</div></div>
+          <button type="button" class="btn-s">通知配置</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; padding: 12px 20px 0; flex: none">
+          <sc-for list="{{ states }}" as="s" hint-placeholder-count="4">
+            <div class="pcard" style="padding: 10px 12px 11px; border-color: {{ s.bd }}; background: {{ s.bg }}">
+              <div style="display: flex; align-items: center; gap: 7px">
+                <span class="pill nw" style="background: {{ s.tBg }}; color: {{ s.tFg }}">{{ s.k }}</span>
+                <div style="flex: 1"></div>
+                <span class="nw" style="font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums">{{ s.n }}</span>
+              </div>
+              <div style="font-size: 11.5px; line-height: 1.55; color: #3f3f46; margin-top: 5px; text-wrap: pretty">{{ s.t }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="padding: 12px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden; display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: 1fr 128px 108px 108px 132px 128px; gap: 11px; padding: 9px 14px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a; flex: none">
+              <div>事件 / 目标群</div><div>传输状态</div><div>job 状态</div><div style="text-align: right">最后尝试</div><div>人工决策</div><div style="text-align: right">操作</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ rows }}" as="r" hint-placeholder-count="5">
+                <div style="display: grid; grid-template-columns: 1fr 128px 108px 108px 132px 128px; gap: 11px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #f5f5f7; background: {{ r.bg }}">
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ r.ev }}</div>
+                    <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px; overflow: hidden; text-overflow: ellipsis">{{ r.ch }}</div>
+                  </div>
+                  <div><span class="pill nw" style="background: {{ r.sBg }}; color: {{ r.sFg }}">{{ r.st }}</span></div>
+                  <div><span class="pill nw" style="background: {{ r.jBg }}; color: {{ r.jFg }}">{{ r.job }}</span></div>
+                  <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: #52525b">{{ r.at }}</div>
+                  <div class="nw" style="font-size: 12px; color: {{ r.dC }}; overflow: hidden; text-overflow: ellipsis">{{ r.dec }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12px; color: {{ r.aC }}">{{ r.act }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-top: 1px solid #f0f0f2; background: #fffbeb; flex: none">
+              <span class="pill nw" style="background: #fed7aa; color: #92400e; flex: none">契约</span>
+              <span style="font-size: 12px; line-height: 1.6; color: #92400e; text-wrap: pretty">传输状态与 job 状态<b>必须两列</b>——「RETRYING + job DEAD」是合法组合，第 3 行就是。禁止为了让红色更整齐把 RETRYING 改写成 FAILED。UNKNOWN 永远不提供「自动重试」，那一栏的按钮不是禁用而是不存在。</span>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+const NAV = [
+  ['概览', [['Dashboard', 1]]],
+  ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0]]],
+  ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+];
+
+const QUEUE = [
+  ['▲', '超期外协', '阿福外协「铜版纸纯彩印」已过期 3 天未回货', 'GD-260807-001 · 预计交付 08-16', '1', '已逾期 3 天', 1, '张三', '联系供应商', 1],
+  ['▲', '未解决通知', '2 条结果不明、1 条可重试但 job 已死', '需人工判断是否重发客户群', '3', '最早 08-21', 1, '你', '去处置', 1],
+  ['●', '交期风险', '3 天内到期且未发货', 'GD-260719-006 等 2 张', '2', '08-25', 1, '李四', '去发货', 0],
+  ['●', '待排产', '已提交但未分配工艺的工单', '其中 2 张急单、4 张未设交期', '18', '—', 0, '你', '去排产', 0],
+  ['●', '待审核修改', '销售与客服提交的款式变更', '1 条有生产阻断', '4', '08-24', 0, '你', '去审核', 0],
+  ['○', '缺料', '低于安全库存的物料', '160g艳闪红卡 缺 28 令', '1', '—', 0, '王五', '去采购', 0],
+];
+
+const KPIS = [
+  ['今日提交工单', '0 单', '无急单'],
+  ['今日完工', '0 单', '与昨日持平'],
+  ['今日发货', '0 单', '待发货 7 张'],
+  ['本月应收', '¥0.00', '已收 ¥0.00 · 未收 ¥0.00'],
+];
+
+const STATES = [
+  ['SENDING', '1', '已领取，正在投递。等一会儿再看。', '#e4e4e7', '#fff', '#f0f9ff', '#0369a1'],
+  ['RETRYING', '1', '已确认可重试（429 或企业微信 45009）。系统会继续重试。', '#e4e4e7', '#fff', '#fffbeb', '#b45309'],
+  ['UNKNOWN', '2', '无法确认企业微信是否已收到（5xx / 超时 / 网络异常）。为防重复发送不自动重试，需要你判断。', '#fca5a5', '#fffafa', '#fef2f2', '#b91c1c'],
+  ['FAILED', '1', '单调的确定失败，不会被后台任务复活。', '#e4e4e7', '#fff', '#f4f4f5', '#52525b'],
+];
+
+const ROWS = [
+  ['工单完工通知', '生产群 · webhook ****a3f2', 'UNKNOWN', 'DONE', '08-21 14:22', '待你判断', '已送达 / 重发 / 忽略', 1],
+  ['账单发单通知', '销售群 · webhook ****7c19', 'UNKNOWN', 'DONE', '08-22 09:05', '待你判断', '已送达 / 重发 / 忽略', 1],
+  ['外协超期提醒', '采购群 · webhook ****b840', 'RETRYING', 'DEAD', '08-22 18:40', '—', '查看时间线', 0],
+  ['排产完成通知', '生产群 · webhook ****a3f2', 'RETRYING', 'RUNNING', '08-23 08:12', '—', '等待重试', 0],
+  ['密码重置通知', '管理群 · webhook ****1d55', 'FAILED', 'DONE', '08-20 11:30', '已忽略 · 你 08-20', '查看时间线', 0],
+];
+
+const ST = {
+  UNKNOWN: ['#fef2f2', '#b91c1c'], RETRYING: ['#fffbeb', '#b45309'],
+  FAILED: ['#f4f4f5', '#52525b'], SENDING: ['#f0f9ff', '#0369a1'],
+};
+const JOB = {
+  DEAD: ['#fef2f2', '#b91c1c'], RUNNING: ['#f0f9ff', '#0369a1'], DONE: ['#f4f4f5', '#52525b'],
+};
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: NAV.map(([group, items]) => ({
+        group,
+        items: items.map(([label, on]) => ({
+          label, w: on ? 600 : 400,
+          bg: on ? '#f4f4f5' : 'transparent',
+          edge: on ? '#dc2626' : 'transparent',
+        })),
+      })),
+      queue: QUEUE.map(([icon, kind, title, sub, n, due, urgent, who, act, hot]) => ({
+        icon, kind, title, sub, n, due, who, act,
+        bg: hot ? '#fffafa' : '#fff',
+        edge: hot ? '#dc2626' : 'transparent',
+        tBg: hot ? '#fee2e2' : (urgent ? '#fffbeb' : '#f4f4f5'),
+        tFg: hot ? '#b91c1c' : (urgent ? '#b45309' : '#52525b'),
+        dueC: urgent ? '#b91c1c' : '#52525b',
+      })),
+      kpis: KPIS.map(([k, v, sub]) => ({ k, v, sub })),
+      states: STATES.map(([k, n, t, bd, bg, tBg, tFg]) => ({ k, n, t, bd, bg, tBg, tFg })),
+      rows: ROWS.map(([ev, ch, st, job, at, dec, act, need]) => ({
+        ev, ch, st, job, at, dec, act,
+        bg: need ? '#fffafa' : '#fff',
+        sBg: ST[st][0], sFg: ST[st][1],
+        jBg: JOB[job][0], jFg: JOB[job][1],
+        dC: dec === '待你判断' ? '#b91c1c' : '#52525b',
+        aC: need ? '#b91c1c' : '#52525b',
+      })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

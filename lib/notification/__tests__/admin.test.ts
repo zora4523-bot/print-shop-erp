@@ -528,23 +528,26 @@ describe('owner notification visibility', () => {
       },
     ]);
     dbMock.backgroundJob.findMany.mockResolvedValue([
-      { dedupeKey: retryingLog.deliveryKey },
+      {
+        dedupeKey: retryingLog.deliveryKey,
+        status: BackgroundJobStatus.DEAD,
+      },
     ]);
 
     await expect(listLogs({ limit: 20 })).resolves.toEqual([
       expect.objectContaining({
         id: retryingLog.id,
         status: 'RETRYING',
+        backgroundJobStatus: BackgroundJobStatus.DEAD,
         hasDeadLetterJob: true,
       }),
     ]);
     expect(dbMock.backgroundJob.findMany).toHaveBeenCalledWith({
       where: {
         type: 'NOTIFICATION',
-        status: BackgroundJobStatus.DEAD,
         dedupeKey: { in: [retryingLog.deliveryKey] },
       },
-      select: { dedupeKey: true },
+      select: { dedupeKey: true, status: true },
     });
   });
 
@@ -553,6 +556,7 @@ describe('owner notification visibility', () => {
       {
         ...retryingLog,
         channelName: '生产群',
+        backgroundJobStatus: BackgroundJobStatus.DEAD,
         hasDeadLetterJob: true,
       },
     ]);
@@ -563,6 +567,7 @@ describe('owner notification visibility', () => {
       expect.objectContaining({
         id: retryingLog.id,
         status: 'RETRYING',
+        backgroundJobStatus: BackgroundJobStatus.DEAD,
         hasDeadLetterJob: true,
       }),
     ]);

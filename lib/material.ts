@@ -16,6 +16,8 @@ import {
 import { db } from './db';
 import { resolveBusinessCode } from './business-code';
 import { dispatchNotification } from './notification/dispatch';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { EnqueueClient } from './background-jobs/repository';
 import { sortBySearchRelevance } from './search-ranking';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
@@ -510,11 +512,25 @@ export async function applyMaterialStockMovement(
 export async function createMaterialTransaction(
   data: CreateMaterialTransactionData,
 ): Promise<MaterialStockMovementResult> {
+  let notificationQueued = false;
   const result = await db.$transaction(async (tx) => {
-    return applyMaterialStockMovement(tx, data);
+    const movement = await applyMaterialStockMovement(tx, data);
+    if (movement.stockAlert) {
+      notificationQueued = await enqueueNotificationInTransaction(
+        tx as unknown as EnqueueClient,
+        'STOCK_ALERT',
+        movement.stockAlert,
+        {
+          dedupeKey: `notification:STOCK_ALERT:${movement.transaction.id}`,
+        },
+      );
+    }
+    return movement;
   });
-  if (result.stockAlert) {
-    await dispatchNotification('STOCK_ALERT', result.stockAlert);
+  if (result.stockAlert && !notificationQueued) {
+    await dispatchNotification('STOCK_ALERT', result.stockAlert, {
+      dedupeKey: `notification:STOCK_ALERT:${result.transaction.id}`,
+    });
   }
   return result;
 }

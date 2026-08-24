@@ -1,9 +1,16 @@
 'use client';
 
 import { useActionState, useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
 import { TX_REASON_OPTIONS } from '@/lib/material-labels';
@@ -20,14 +27,33 @@ type Props = {
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
+const STOCK_TRANSACTION_FIELDS: Record<
+  string,
+  { fieldId: string; label: string }
+> = {
+  materialId: { fieldId: 'stock-transaction-form', label: '物料' },
+  direction: { fieldId: 'direction', label: '方向' },
+  quantity: { fieldId: 'quantity', label: '数量' },
+  locationId: { fieldId: 'locationId', label: '库位' },
+  reasonType: { fieldId: 'reasonType', label: '原因' },
+  unitCost: { fieldId: 'unitCost', label: '单位成本' },
+  remark: { fieldId: 'remark', label: '备注' },
+};
+
 export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   const [state, formAction, pending] = useActionState<
     MaterialMutationResult | null,
     FormData
   >(action, null);
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success' ? state.message ?? '库存已更新' : null;
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError =
+    visibleState?.status === 'error' ? visibleState.message : null;
+  const success =
+    visibleState?.status === 'success'
+      ? (visibleState.message ?? '库存已更新')
+      : null;
+  const summaryErrors = toStockTransactionErrorSummary(errs);
   // 外层不再用 key 强制重挂载（那会连成功提示一起清掉），改成成功后
   // 只 reset 原生表单字段，useActionState 的 state 得以保留并渲染。
   const formRef = useRef<HTMLFormElement>(null);
@@ -43,13 +69,25 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
   );
 
   return (
-    <form ref={formRef} action={formAction} className="space-y-4" noValidate>
+    <form
+      id="stock-transaction-form"
+      ref={formRef}
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-4"
+      noValidate
+    >
+      <FormErrorSummary errors={summaryErrors} />
+
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="direction">方向</Label>
           <select
             id="direction"
             name="direction"
+            {...(errs.direction?.[0]
+              ? formMessageA11yProps('direction', 'error')
+              : {})}
             className={selectClass}
             value={direction}
             onChange={(event) => {
@@ -63,7 +101,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
             <option value="OUT">出库</option>
           </select>
           {errs.direction?.[0] ? (
-            <p className="text-sm text-destructive">{errs.direction[0]}</p>
+            <FormMessage fieldId="direction" tone="error">
+              {errs.direction[0]}
+            </FormMessage>
           ) : null}
         </div>
         <TextField
@@ -79,6 +119,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
         <select
           id="locationId"
           name="locationId"
+          {...(errs.locationId?.[0]
+            ? formMessageA11yProps('locationId', 'error')
+            : {})}
           className={selectClass}
           defaultValue=""
           disabled={pending}
@@ -92,7 +135,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
           ))}
         </select>
         {errs.locationId?.[0] ? (
-          <p className="text-sm text-destructive">{errs.locationId[0]}</p>
+          <FormMessage fieldId="locationId" tone="error">
+            {errs.locationId[0]}
+          </FormMessage>
         ) : null}
       </div>
 
@@ -102,6 +147,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
           <select
             id="reasonType"
             name="reasonType"
+            {...(errs.reasonType?.[0]
+              ? formMessageA11yProps('reasonType', 'error')
+              : {})}
             className={selectClass}
             value={reasonType}
             onChange={(event) =>
@@ -116,7 +164,9 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
             ))}
           </select>
           {errs.reasonType?.[0] ? (
-            <p className="text-sm text-destructive">{errs.reasonType[0]}</p>
+            <FormMessage fieldId="reasonType" tone="error">
+              {errs.reasonType[0]}
+            </FormMessage>
           ) : null}
         </div>
         <TextField
@@ -135,28 +185,32 @@ export function StockTransactionForm({ action, unit, locationOptions }: Props) {
           name="remark"
           rows={3}
           disabled={pending}
-          aria-invalid={Boolean(errs.remark?.[0])}
+          {...(errs.remark?.[0]
+            ? formMessageA11yProps('remark', 'error')
+            : {})}
           className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
         />
         {errs.remark?.[0] ? (
-          <p className="text-sm text-destructive">{errs.remark[0]}</p>
+          <FormMessage fieldId="remark" tone="error">
+            {errs.remark[0]}
+          </FormMessage>
         ) : null}
       </div>
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="库存更新失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ {success}
-        </p>
+        <ActionNotice tone="success" title={success} />
       ) : null}
 
-      <Button type="submit" disabled={pending}>
-        {pending ? '提交中…' : '提交出入库'}
-      </Button>
+      <PendingButton pending={pending} pendingLabel="正在更新库存…">
+        提交出入库
+      </PendingButton>
     </form>
   );
 }
@@ -184,18 +238,33 @@ function TextField({
         name={id}
         defaultValue={defaultValue}
         disabled={disabled}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
   );
+}
+
+function toStockTransactionErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([field, messages]) => {
+    const target = STOCK_TRANSACTION_FIELDS[field] ?? {
+      fieldId: 'stock-transaction-form',
+      label: field,
+    };
+    return messages.map((message) => ({ ...target, message }));
+  });
 }

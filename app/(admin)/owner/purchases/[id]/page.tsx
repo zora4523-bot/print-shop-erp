@@ -7,7 +7,7 @@ import { CancelPurchaseOrderButton } from '@/components/business/purchase/Cancel
 import { CancelPurchaseReceiptButton } from '@/components/business/purchase/CancelPurchaseReceiptButton';
 import { PurchaseReceiptForm } from '@/components/business/purchase/PurchaseReceiptForm';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, TableEmptyState } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getPurchaseOrderDetail,
@@ -143,7 +143,11 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">收货记录</h2>
         {order.receipts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无收货记录</p>
+          <TableEmptyState
+            variant="compact"
+            title="暂无收货记录"
+            description="采购收货过账后，收货单会显示在这里。"
+          />
         ) : (
           <div className="space-y-4">
             {order.receipts.map((receipt) => (

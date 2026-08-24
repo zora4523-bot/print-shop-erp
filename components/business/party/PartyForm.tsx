@@ -4,9 +4,17 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 import { PartyType } from '../../../generated/prisma/enums';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 
 type PartyFormInitial = {
   type: PartyType;
@@ -52,6 +60,22 @@ const PARTY_TYPE_OPTIONS = [
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
+const PARTY_FIELD_LABELS: Record<string, string> = {
+  type: '类型',
+  code: '编码',
+  name: '名称',
+  shortName: '简称',
+  primaryContactName: '联系人',
+  primaryContactPhone: '联系电话',
+  primaryContactWechat: '微信',
+  defaultReceiverName: '收货人',
+  defaultReceiverPhone: '收货电话',
+  defaultProvince: '省份',
+  defaultCity: '城市',
+  defaultDistrict: '区县',
+  defaultAddressDetail: '详细地址',
+};
+
 export function PartyForm(props: Props) {
   const [state, formAction, pending] = useActionState<
     PartyMutationResult | null,
@@ -67,15 +91,24 @@ export function PartyForm(props: Props) {
     props.mode === 'create' && props.returnTo
       ? props.returnTo
       : '/owner/parties';
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success';
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const summaryErrors = toPartyErrorSummary(errs);
 
   return (
-    <form action={formAction} className="space-y-6" noValidate>
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-6"
+      noValidate
+    >
       {props.mode === 'create' && props.returnTo ? (
         <input type="hidden" name="returnTo" value={props.returnTo} />
       ) : null}
+      <FormErrorSummary errors={summaryErrors} />
+
       <section className="space-y-4">
         <h2 className="text-base font-semibold">基本信息</h2>
         <div className="grid gap-4 md:grid-cols-2">
@@ -84,6 +117,9 @@ export function PartyForm(props: Props) {
             <select
               id="type"
               name="type"
+              {...(errs.type?.[0]
+                ? formMessageA11yProps('type', 'error')
+                : {})}
               className={selectClass}
               defaultValue={initialType}
               disabled={pending}
@@ -95,7 +131,9 @@ export function PartyForm(props: Props) {
               ))}
             </select>
             {errs.type?.[0] ? (
-              <p className="text-sm text-destructive">{errs.type[0]}</p>
+              <FormMessage fieldId="type" tone="error">
+                {errs.type[0]}
+              </FormMessage>
             ) : null}
           </div>
 
@@ -226,24 +264,20 @@ export function PartyForm(props: Props) {
       </section>
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="客户/供应商保存失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ 已保存
-        </p>
+        <ActionNotice tone="success" title="客户/供应商已保存" />
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending}>
-          {pending
-            ? '提交中…'
-            : props.mode === 'create'
-              ? '创建客户/供应商'
-              : '保存修改'}
-        </Button>
+        <PendingButton pending={pending} pendingLabel="正在保存客户/供应商…">
+          {props.mode === 'create' ? '创建客户/供应商' : '保存修改'}
+        </PendingButton>
         <Link href={backHref} className={buttonVariants({ variant: 'outline' })}>
           {props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
         </Link>
@@ -276,19 +310,34 @@ function TextField({
         id={id}
         name={id}
         type={type}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
         {...inputProps}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
+  );
+}
+
+function toPartyErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
+    messages.map((message) => ({
+      fieldId,
+      label: PARTY_FIELD_LABELS[fieldId] ?? fieldId,
+      message,
+    })),
   );
 }

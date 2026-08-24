@@ -92,6 +92,7 @@ describe('order export cleanup cron job', () => {
     });
     expect(runOrderExportCleanupTaskMock).toHaveBeenCalledExactlyOnceWith(
       '2026-08-07',
+      {},
     );
   });
 

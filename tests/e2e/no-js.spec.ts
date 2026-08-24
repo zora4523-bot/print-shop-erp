@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { E2E_PASSWORD, E2E_USERS } from './global-setup';
+import { isolateE2eLoginClient } from './_login-client';
 
 // 零 JS 降级门禁（DECISIONS.md 2026-08-17）。
 //
@@ -28,6 +29,7 @@ const worker = E2E_USERS.workerHandPress!;
 // 本地登录助手：不复用 _helpers.ts 的 login()，因为那个模块在导入时就会
 // 求值 ADMIN_PASSWORD 并在缺环境变量时抛错，而这里只需要 e2e-* 固定账号。
 async function loginWithoutJs(page: Page): Promise<void> {
+  await isolateE2eLoginClient(page);
   await page.goto('/login');
   await page.locator('#username').fill(worker.username);
   await page.locator('#password').fill(E2E_PASSWORD);

@@ -2,7 +2,10 @@ import Link from 'next/link';
 import { BackgroundJobActionButton } from '@/components/business/admin/BackgroundJobActionButton';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import {
+  PageHeader,
+  StatusBadge as UiStatusBadge,
+} from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { getBackgroundJobHealth } from '@/lib/background-jobs/health';
@@ -14,6 +17,7 @@ import {
 } from '@/actions/background-jobs';
 import { BackgroundJobStatus } from '@/generated/prisma/enums';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { BACKGROUND_JOB_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = { title: '后台任务 · 红包印刷 ERP' };
 export const dynamic = 'force-dynamic';
@@ -181,10 +185,10 @@ function Metric({ label, value, alert = false, note }: {
 }
 
 function JobStatus({ status }: { status: BackgroundJobStatus }) {
-  const variant = status === BackgroundJobStatus.DEAD
-    ? 'destructive'
-    : status === BackgroundJobStatus.SUCCEEDED
-      ? 'default'
-      : 'outline';
-  return <Badge variant={variant}>{status}</Badge>;
+  const definition = BACKGROUND_JOB_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
 }

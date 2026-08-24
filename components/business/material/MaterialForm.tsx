@@ -2,9 +2,17 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { MaterialSummary } from '@/lib/material';
 
@@ -52,6 +60,16 @@ const CATEGORY_OPTIONS = [
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
+const MATERIAL_FIELD_LABELS: Record<string, string> = {
+  code: '物料编码',
+  name: '物料名称',
+  category: '分类',
+  specification: '规格',
+  unit: '单位',
+  safetyStock: '安全库存',
+  averageCost: '参考平均成本',
+};
+
 export function MaterialForm(props: Props) {
   const [state, formAction, pending] = useActionState<
     MaterialMutationResult | null,
@@ -60,13 +78,24 @@ export function MaterialForm(props: Props) {
 
   const isCreate = props.mode === 'create';
   const initial = props.mode === 'edit' ? props.initial : undefined;
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success';
+  // 提交中的旧结果先卸载，确保连续两次相同结果仍会作为新的 live region
+  // 播报，也不会让已失效的字段错误继续关联输入。
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const summaryErrors = toMaterialErrorSummary(errs);
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-5"
+      noValidate
+    >
       <input type="hidden" name="routeBase" value={props.routeBase} />
+
+      <FormErrorSummary errors={summaryErrors} />
 
       {isCreate ? (
         <details
@@ -112,6 +141,9 @@ export function MaterialForm(props: Props) {
         <select
           id="category"
           name="category"
+          {...(errs.category?.[0]
+            ? formMessageA11yProps('category', 'error')
+            : {})}
           className={selectClass}
           defaultValue={initial?.category ?? 'PAPER'}
           disabled={pending}
@@ -123,7 +155,9 @@ export function MaterialForm(props: Props) {
           ))}
         </select>
         {errs.category?.[0] ? (
-          <p className="text-sm text-destructive">{errs.category[0]}</p>
+          <FormMessage fieldId="category" tone="error">
+            {errs.category[0]}
+          </FormMessage>
         ) : null}
       </div>
 
@@ -164,20 +198,20 @@ export function MaterialForm(props: Props) {
       />
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="物料保存失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ 已保存
-        </p>
+        <ActionNotice tone="success" title="物料已保存" />
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : isCreate ? '创建物料' : '保存修改'}
-        </Button>
+        <PendingButton pending={pending} pendingLabel="正在保存物料…">
+          {isCreate ? '创建物料' : '保存修改'}
+        </PendingButton>
         <Link href={props.routeBase} className={buttonVariants({ variant: 'outline' })}>
           返回列表
         </Link>
@@ -210,19 +244,34 @@ function TextField({
         id={id}
         name={id}
         type={type}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
         {...inputProps}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
+  );
+}
+
+function toMaterialErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
+    messages.map((message) => ({
+      fieldId,
+      label: MATERIAL_FIELD_LABELS[fieldId] ?? fieldId,
+      message,
+    })),
   );
 }

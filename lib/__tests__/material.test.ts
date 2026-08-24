@@ -415,11 +415,15 @@ describe('createMaterialTransaction', () => {
       safetyStock: '2.00',
     });
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
-      materialName: 'A4 白卡纸',
-      currentStock: '1.00',
-      safetyStock: '2.00',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'STOCK_ALERT',
+      {
+        materialName: 'A4 白卡纸',
+        currentStock: '1.00',
+        safetyStock: '2.00',
+      },
+      { dedupeKey: 'notification:STOCK_ALERT:tx1' },
+    );
     expect(callOrder).toEqual(['commit', 'dispatch']);
   });
 

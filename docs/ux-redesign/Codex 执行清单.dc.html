@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  .nw { white-space: nowrap }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 8px }
+  .pill { display: inline-flex; align-items: center; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: #f4f4f5; color: #3f3f46; padding: 2px 6px; border-radius: 4px }
+  .cap { font-size: 12.5px; color: #52525b }
+  .sect { padding: 28px 40px 30px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 1560px; padding-bottom: 44px">
+
+  <div style="padding: 32px 40px 22px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <h1 style="margin: 0; font-size: 34px; font-weight: 700">Codex 执行清单</h1>
+    <p style="max-width: 1180px; margin: 10px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">按可开工顺序排列。每条给<b>改哪里</b>和<b>怎么验</b>。只列已验证、不依赖新业务决策的项；需要拍板的另列在最后一节，<b>不要动</b>。</p>
+    <div class="pcard" style="max-width: 1180px; margin-top: 12px; padding: 12px 15px; border-color: #fecaca; background: #fffafa">
+      <div style="font-size: 14px; font-weight: 600; color: #b91c1c">先读这一段：四条旧「修法」已作废</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">早期设计稿里有四条建议已被代码核查推翻，<b>不要实现</b>：① 不要补侧栏分组 —— <code class="code">lib/navigation/admin-modules.ts</code> 里 ADMIN 已有 30 个模块，主数据/设置/运维全在；② 不要抽 useListState 改 23 个列表页 —— 筛选状态已在 URL（<code class="code">OrderListSearchParams</code> 25+ 字段）；③ 不要「把分类色从灰阶改成彩色」—— <code class="code">--chart-1</code> 是 <code class="code">oklch(0.532 0.131 244)</code>，本来有彩度；④ 面包屑不是补 key —— 模块表里已有 <code class="code">breadcrumbLabel</code>，是 <code class="code">AdminBreadcrumb</code> 用了另一张表。</div>
+    </div>
+  </div>
+
+  <section class="sect">
+    <h2 style="margin: 0 0 14px; font-size: 22px; font-weight: 700">A · 立刻可做（不需要任何新决策）</h2>
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="9">
+        <div class="pcard" style="display: grid; grid-template-columns: 46px 1fr 1fr; gap: 0">
+          <div style="padding: 12px 0; text-align: center; border-right: 1px solid #f0f0f2; background: #fafafa">
+            <div style="font-size: 15px; font-weight: 700; color: #b91c1c">{{ t.n }}</div>
+            <div class="pill nw" style="background: {{ t.pBg }}; color: {{ t.pFg }}; margin-top: 4px; font-size: 10px; padding: 2px 5px">{{ t.pri }}</div>
+          </div>
+          <div style="padding: 12px 14px; border-right: 1px solid #f0f0f2">
+            <div style="font-size: 14.5px; font-weight: 600">{{ t.name }}</div>
+            <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ t.what }}</div>
+            <div class="cap" style="font-size: 11.5px; margin-top: 5px">{{ t.where }}</div>
+          </div>
+          <div style="padding: 12px 14px; background: #f7fefa">
+            <div style="font-size: 11px; letter-spacing: 0.06em; color: #047857">验收</div>
+            <div style="font-size: 12.5px; line-height: 1.6; color: #065f46; margin-top: 3px; text-wrap: pretty">{{ t.acc }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sect" style="border-bottom: none">
+    <h2 style="margin: 0 0 6px; font-size: 22px; font-weight: 700">B · 不要动（等业主拍板 / 缺稿）</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 14px">这些进了设计稿但不是可实现项。动了会造成返工。</p>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 740px)); gap: 10px 20px">
+      <sc-for list="{{ hold }}" as="h" hint-placeholder-count="6">
+        <div class="pcard" style="padding: 11px 14px 12px; border-color: #fed7aa; background: #fffdf7">
+          <div style="display: flex; align-items: baseline; gap: 8px">
+            <span class="pill nw" style="background: #fffbeb; color: #92400e">{{ h.tag }}</span>
+            <span style="font-size: 14px; font-weight: 600">{{ h.name }}</span>
+          </div>
+          <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ h.t }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1560,&quot;height&quot;:1400}}">
+const TASKS = [
+  ['01', 'P0', '五态组件库六个组件', '按《五态组件库与一致性收口》的属性签名实现：Skeleton / EmptyState / ErrorBoundary / DisabledReason / PendingButton / LongTaskReceipt。这是后面所有一致性工作的地基，先做它。',
+   'components/ui/ 新增六个；业务代码禁止再手写这五种状态',
+   '六个组件各有 story 或 fixture 页可截图；EmptyState 的 no-access 与「记录不存在」渲染完全一致；DisabledReason 在 cause=permission 时返回 null。'],
+  ['02', 'P0', '表格关键列不得静默裁切', '1280 下工单列表只渲染 3 列，状态/承诺交期/金额/动作全不可见；Dashboard「超期外协」「待发货工单」卡内表格右侧被裁，动作链接切没了；393 下工单列表只剩工单号且长号截断。固定标识+状态两列，其余进带阴影提示的横滚区；393 改一行一卡。',
+   'AdminDataTable 或各列表的表格容器；Dashboard 两张卡',
+   '六视口溢出探测器 0 命中；1280 工单列表能看到状态与承诺交期；Dashboard 告警卡动作链接可点击；393 无静默裁列。'],
+  ['03', 'P0', '禁用态统一为中性灰 + 常驻原因', 'CDR「生成下载包」用白字淡红填充做禁用，与主按钮同色系易误点且不写原因；工单详情「发货」禁用后无原因；多处原因只在 hover tooltip（触屏无 hover）。全部走 DisabledReason。',
+   '全站 disabled 按钮；加 lint 规则挡住主色淡化写法',
+   '落地前先在真实页面量一遍现有禁用态对比度并归档；改后所有禁用按钮 ≥4.5:1 且原因常驻可见；axe 0 严重违规。'],
+  ['04', 'P0', '红色收紧为「校验错误 + 破坏性动作」', '红色现在同时是品牌色、主按钮、链接、款式备注正文、急单标、生产中状态色，一屏出现 9 次。款式备注（工单详情与师傅报工两处）改常规文字 + 灰底块；状态色走各自语义 token。',
+   'globals.css 语义 token；OrderDetail 与 worker 报工页的备注渲染',
+   '任一页面红色出现次数 ≤3；款式备注不再是红色正文；校验错误仍然是红色且唯一。'],
+  ['05', 'P1', '危险动作分级', '「重算该日全员日薪」现在是计件工资页唯一的红色主按钮，但它会覆盖该日全员数据 —— 降级为描边危险样式、移到筛选行末尾并用分隔线隔开；「取消工单」从详情页最底部收回页头动作条右端。两者都加 L3 确认层（填理由 + 逐条列受影响对象 + 留痕）。',
+   'salary/daily 页；orders/[id] 页',
+   '重算与取消都需填理由才能提交；确认层列出受影响记录数（如「7 条待发放将被重算、5 条已发放跳过」）；操作可在日志查到。'],
+  ['06', 'P1', '关键动作吸顶 / 吸底', '工单详情页头动作区不吸顶（页面约 2600px）；新建工单提交按钮在约 2900px 页底；师傅报工按钮在约 1550px 页底。三处都改常驻，手机端配 env(safe-area-inset-bottom)。',
+   'orders/[id]、orders/new、worker/tasks/[id]',
+   '三页滚到任意位置，主操作都可见；393 下软键盘弹出不遮挡提交；触控目标 ≥44×44。'],
+  ['07', 'P1', '面包屑读模块表 + 三级回落', '模块表里每个模块已带 breadcrumbLabel（cdr →「CDR 汇总」、order-changes →「工单修改申请」），但 AdminBreadcrumb 用的是自己那张 SEGMENT_LABELS，两张不同步。改为：优先模块表 → 回落 SEGMENT_LABELS → 回落页面 H1 文字。同时长实体 slug 不直接展开（现在折两行把顶栏撑到约 110px）。',
+   'components/business/admin/AdminBreadcrumb.tsx',
+   '全站面包屑无英文路由段；实体 ID 段不显示原始 slug；顶栏高度恒定不被面包屑撑高。'],
+  ['08', 'P1', '环境提示与业务警告分色', 'OSS mock-mode 提示用了和「外协超期未回货」相同的橙色。新增中性语义 token，环境/配置/开发态提示统一走它（中性灰 + 左侧色条）。',
+   'globals.css 新增 --info-neutral；CDR 页与 DEVELOPMENT 标记',
+   'mock-mode 提示为中性灰；橙色只出现在业务异常处；明暗双主题都过对比度。'],
+  ['09', 'P1', '新建工单效率重构', '当前单列长表单，一个款式约 60 个控件约 2000px，一款时整页约 2900px。改三段推进（客户交期 / 款式 / 收货费用）+ 款式摘要行列表（点开一款编辑）+ 右栏常驻摘要与缺口清单（可点跳字段）+ 自动保存草稿。字段一个不删。已知约束：A4 打印最多 5 款带图，加到第 6 款时提示。',
+   'components/business/order/OrderForm.tsx',
+   '录 3 个款式的点击数与滚动距离低于当前实现；提交前缺口清单可点跳到字段；第 6 款触发打印上限提示；字段总数不变。'],
+  ['10', 'P1', '师傅报工提到首屏', '报工表单现在在约 1550px 页面的最底部，师傅要滚过工单号、款式名、备注、设计图、任务规格五块才能填第一个数字；而「退出登录」是首屏最显眼的描边按钮之一。报工卡置顶、生产上下文折叠在下、主按钮吸底 52px 占满宽度、退出登录降级进「我的」；超产从「提交后拒绝」改为输入时提示 + 勾选确认。',
+   'app/(worker)/worker/tasks/[id]',
+   '打开任务详情首屏即可填数字，无需滚动；超产在输入时即提示并要求勾选；底部 Tab 命中区 ≥44×44。'],
+  ['11', 'P2', '列表状态补齐两件', '筛选已在 URL（不要重写）。只补：滚动位置与选中行入 URL；新增保存视图（我的急单 / 今天要发 / 待排产 / 待审核修改 + 保存当前条件）。',
+   'lib/order/list-query.ts 扩两个参数；列表页顶部加视图条',
+   '进详情再返回，滚动位置与选中行还原；点一次视图即切换整组条件；视图可分享（在 URL 里）。'],
+  ['12', 'P2', '侧栏 30 项的长度问题', '不是缺入口（30 个模块都在），是单层平铺 800px 装不下必然滚动且下半被截。改分组可折叠 + 记住折叠状态 + 高频项置顶；SALES/CS 侧栏里 routeBase 为 # 的占位项（我的 Dashboard、我的业绩、我的工资单、报价查询）灰态标「未上线」。',
+   'lib/navigation/admin-menu.ts + 侧栏组件',
+   '800px 高度下不出现被截断的半个菜单项；折叠状态刷新后保留；占位项不可点且标注未上线。'],
+];
+
+const HOLD = [
+  ['待拍板', '经营分析页', '新功能，不在 85 页之内。毛利是推导指标（系统无此字段），口径已定「按发货时间归属」但需与账单的「按结案归集」并存说明。建议先只做收入/成本/毛利 + 库存预警两块。'],
+  ['待拍板', 'Dashboard 的两个新存储', '「上次查看」需按人记录的 last-viewed；「查看已处理」需 dismissal 存储 —— 超期外协这类派生信号本身没有独立的已处理状态。'],
+  ['待拍板', '款式模板', '把常用「产品 + 纸张 + 工艺」组合存成模板。新建工单效率收益最大的一项，但属新功能范围。'],
+  ['未核实', '通知人工决策字段', '界面已按「已送达 / 重发 / 忽略」三选 + 留痕设计，但服务端是否有对应字段与审计未核。实现前先确认 NotificationLog schema。'],
+  ['缺稿', '仓库作业台 + 盘点录入', '41 页里最复杂的两页，只到契约级。仓库建议改 S2 骨架（左侧分区导航 sticky + 右侧单区滚动，取代六段平铺）；盘点是高风险录入，差异预览 + 过账属 L3。可边实现边补稿。'],
+  ['受保护', '打印视图', '/print/orders/:id 是车间生产资产，视觉基线受保护，本轮完全未动。任何改动需单独立案 + 全款式数量 before/after + 业主人工确认。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    const P = { P0: ['#fef2f2', '#b91c1c'], P1: ['#fffbeb', '#92400e'], P2: ['#f4f4f5', '#52525b'] };
+    return {
+      tasks: TASKS.map(([n, pri, name, what, where, acc]) => ({ n, pri, name, what, where, acc, pBg: P[pri][0], pFg: P[pri][1] })),
+      hold: HOLD.map(([tag, name, t]) => ({ tag, name, t })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

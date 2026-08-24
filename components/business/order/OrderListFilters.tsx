@@ -14,7 +14,9 @@ import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { orderStatusLabel } from './OrderStatusBadge';
+import { OrderSavedViews } from './OrderSavedViews';
 import { OrderAdvancedFilters } from './OrderAdvancedFilters';
+import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import {
   CheckboxGroup,
   DateField,
@@ -73,6 +75,7 @@ export function OrderListFilters({
   exportControls,
   showCommercialAmounts = true,
   advancedRequested = false,
+  canReviewChanges = false,
 }: {
   query: OrderListQuery;
   options: OrderListFilterOptions;
@@ -81,6 +84,7 @@ export function OrderListFilters({
   exportControls?: ReactNode;
   showCommercialAmounts?: boolean;
   advancedRequested?: boolean;
+  canReviewChanges?: boolean;
 }) {
   const effectiveQuery =
     !showCommercialAmounts &&
@@ -115,12 +119,84 @@ export function OrderListFilters({
       dir: effectiveQuery.dir,
     },
   );
+  const today = todayShanghai();
+  const savedViewHref = buildTableHref('/orders', {}, {
+    ...params,
+    view: 'saved',
+  });
+  const fixedViews = [
+    {
+      id: 'urgent',
+      label: '我的急单',
+      href: buildTableHref('/orders', {}, {
+        view: 'urgent',
+        isUrgent: 'yes',
+      }),
+    },
+    {
+      id: 'due-today',
+      label: '今天要发',
+      href: buildTableHref('/orders', {}, {
+        view: 'due-today',
+        promisedFrom: today,
+        promisedTo: today,
+      }),
+    },
+    {
+      id: 'scheduling',
+      label: '待排产',
+      href: buildTableHref('/orders', {}, {
+        view: 'scheduling',
+        status: OrderStatus.SUBMITTED,
+      }),
+    },
+  ] as const;
 
   return (
     <section
       aria-labelledby="order-list-filter-heading"
       className="min-w-0 space-y-3 rounded-xl border bg-card p-3 shadow-sm sm:p-4"
     >
+      <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
+        <span className="shrink-0 text-xs text-muted-foreground">视图</span>
+        <nav aria-label="常用工单视图" className="flex shrink-0 items-center gap-2">
+          {fixedViews.map((view) => {
+            const active = effectiveQuery.view === view.id;
+            return (
+              <Link
+                key={view.id}
+                href={view.href}
+                prefetch={false}
+                aria-label={`切换视图：${view.label}`}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  buttonVariants({
+                    variant: active ? 'secondary' : 'outline',
+                    size: 'sm',
+                  }),
+                  'min-h-11 rounded-full sm:min-h-8',
+                )}
+              >
+                {view.label}
+              </Link>
+            );
+          })}
+          {canReviewChanges ? (
+            <Link
+              href="/owner/order-changes"
+              prefetch={false}
+              aria-label="打开待审核修改"
+              className={cn(
+                buttonVariants({ variant: 'outline', size: 'sm' }),
+                'min-h-11 rounded-full sm:min-h-8',
+              )}
+            >
+              待审核修改
+            </Link>
+          ) : null}
+        </nav>
+        <OrderSavedViews currentHref={savedViewHref} />
+      </div>
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h2 id="order-list-filter-heading" className="font-semibold">

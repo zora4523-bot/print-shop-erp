@@ -7,10 +7,13 @@ import { orderStatusZh } from '@/lib/order/log-format';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
@@ -29,14 +32,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
             {order.orderNo}
           </span>
           <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
-          {order.isUrgent ? (
-            <Badge
-              variant="destructive"
-              className="bg-destructive text-background dark:bg-destructive dark:text-background"
-            >
-              急单
-            </Badge>
-          ) : null}
+          {order.isUrgent ? <UrgentBadge /> : null}
         </div>
         <h1 className="text-lg font-semibold">我的工单任务</h1>
         {order.customName ? (
@@ -163,18 +159,11 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
 }
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const label =
-    status === TaskStatus.PENDING
-      ? '待开始'
-      : status === TaskStatus.IN_PROGRESS
-        ? '进行中'
-        : status === TaskStatus.COMPLETED
-          ? '已完工'
-          : '已取消';
+  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
   return (
-    <Badge variant={status === TaskStatus.COMPLETED ? 'secondary' : 'outline'}>
-      {label}
-    </Badge>
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
   );
 }
 

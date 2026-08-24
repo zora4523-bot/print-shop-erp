@@ -30,6 +30,7 @@ const crafts: CraftOption[] = [
 function render() {
   return renderToStaticMarkup(
     <OrderForm
+      draftScope="test-user"
       crafts={crafts}
       products={[]}
       settlementLabel="内部结算"

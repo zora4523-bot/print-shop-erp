@@ -34,7 +34,7 @@ export function BomsTable({
   categoryLabelById: Record<string, string>;
 }) {
   if (boms.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无 BOM</p>;
+    return null;
   }
 
   return (

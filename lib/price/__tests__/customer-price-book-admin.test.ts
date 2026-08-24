@@ -43,6 +43,7 @@ import {
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
   discardCustomerPriceBookDraft,
+  getCustomerPriceBookDraftPublishPreview,
   getCustomerPriceBookDraftRuleEditor,
   listCustomerPriceBookVersionsAndDrafts,
   publishCustomerPriceBookDraft,
@@ -219,6 +220,81 @@ beforeEach(() => {
 });
 
 describe('customer price-book draft lifecycle', () => {
+  it('builds an exact publish preview against the immutable draft baseline', async () => {
+    const impactRule = (amount: string, id: string) => ({
+      id,
+      code: 'BASE_A',
+      name: '基础报价 A',
+      categoryId: 'category-base',
+      productId: 'product-a',
+      kind: 'BASE',
+      calculationType: 'PER_PIECE',
+      amount,
+      includedUnits: null,
+      incrementUnits: null,
+      incrementAmount: null,
+      minQty: 1,
+      maxQty: 1_000,
+      triggerCondition: { productCodes: ['PRODUCT_A'] },
+      exclusiveGroup: null,
+      priority: 100,
+      note: null,
+      blocksAutomaticQuote: false,
+      isActive: true,
+      category: { name: '基础加工费' },
+      product: { name: '产品 A' },
+    });
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule('0.1500', 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [impactRule('0.1350', 'current-rule-a')],
+      });
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      validationRule({ amount: '0.1500' }),
+    ]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      priceBookId: 'book-v2-draft',
+      basedOnVersion: 1,
+      totalRuleCount: 1,
+      activeRuleCount: 1,
+      changedItemCount: 1,
+      changedRuleCount: 1,
+      increasedRuleCount: 1,
+      decreasedRuleCount: 0,
+      deltaPercentMin: '11.1',
+      deltaPercentMax: '11.1',
+      changes: [
+        expect.objectContaining({
+          draftRuleId: 'draft-rule-a',
+          name: '基础报价 A',
+          direction: 'UP',
+          deltaAmount: '0.015',
+          deltaPercent: '11.1',
+          changedFields: ['价格'],
+        }),
+      ],
+    });
+    expect(JSON.stringify(preview)).not.toContain('BASE_A');
+    expect(JSON.stringify(preview)).not.toContain('productCodes');
+  });
+
   it('copies the current book into one inactive, traceable next version', async () => {
     dbMock.customerPriceBook.findMany
       .mockResolvedValueOnce([
@@ -1344,6 +1420,7 @@ describe('customer price-book draft lifecycle', () => {
           priceBookId: 'book-v2-draft',
           expectedDraftUpdatedAt: now,
           effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
         },
         actor,
         now,
@@ -1373,6 +1450,7 @@ describe('customer price-book draft lifecycle', () => {
             workflow: expect.objectContaining({
               status: 'PUBLISHED',
               ruleSetSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+              publishNote: '已完成价格复核',
             }),
           }),
         }),
@@ -1399,6 +1477,7 @@ describe('customer price-book draft lifecycle', () => {
           priceBookId: 'book-v2-draft',
           expectedDraftUpdatedAt: new Date('2026-08-09T01:59:59.999Z'),
           effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
         },
         actor,
         now,

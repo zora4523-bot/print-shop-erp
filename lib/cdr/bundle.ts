@@ -342,7 +342,13 @@ export async function enqueueBundle(
   });
 }
 
-export async function processQueuedBundle(bundleId: string): Promise<{
+export async function processQueuedBundle(
+  bundleId: string,
+  context: {
+    signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+  } = {},
+): Promise<{
   bundleId: string;
   fileCount: number;
   isMock: boolean;
@@ -370,6 +376,8 @@ export async function processQueuedBundle(bundleId: string): Promise<{
   }
 
   const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
+  await context.assertLease?.();
+  context.signal?.throwIfAborted();
   const upload = await uploadBundleZip(
     {
       bundleId,
@@ -379,8 +387,14 @@ export async function processQueuedBundle(bundleId: string): Promise<{
         fileUrl: design.fileUrl,
       })),
     },
-    { expireHours },
+    {
+      expireHours,
+      ...(context.signal ? { signal: context.signal } : {}),
+      ...(context.assertLease ? { assertLease: context.assertLease } : {}),
+    },
   );
+  await context.assertLease?.();
+  context.signal?.throwIfAborted();
   await db.designBundle.update({
     where: { id: bundleId },
     data: {
@@ -477,6 +491,8 @@ export type RecentBundleRow = {
   id: string;
   dateRangeFrom: Date;
   dateRangeTo: Date;
+  /** 保留原始选择，供过期下载包按完全相同条件重新生成。 */
+  orderIds: string[];
   orderCount: number;
   fileCount: number;
   zipFileUrl: string;
@@ -517,6 +533,7 @@ export async function listRecentBundles(
     id: r.id,
     dateRangeFrom: r.dateRangeFrom,
     dateRangeTo: r.dateRangeTo,
+    orderIds: [...r.orderIds],
     orderCount: r.orderIds.length,
     fileCount: r.designIds.length,
     zipFileUrl: r.zipFileUrl,

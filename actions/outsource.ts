@@ -150,13 +150,13 @@ export async function markOutsourceReceivedAction(
   try {
     const result = await markOutsourceReceived(id, parsed.data, actor);
     if (result.orderId) revalidatePath(`/orders/${result.orderId}`);
-    // 收了货、工单却没转完工，唯一「看外协单列表看不出来」的原因就是款式
-    // 覆盖不全。这一刻不说，主管只会看到一个静默不动的工单。
+    // 收了货、工单却没转完工，覆盖/数量缺口不能被内部任务
+    // blocker 或立即 revalidate 吞掉。
     const pending = result.pendingOutsourceItems ?? [];
     if (pending.length > 0) {
       notice = `工单尚未完工：${pending
         .map((item) => `款式 ${item.sequence}「${item.name}」`)
-        .join('、')}含外协工艺但还没有对应的外协单，补单并收货后工单才会自动完工。`;
+        .join('、')}的外协履约数量不足或还没有对应外协单，补单并收货后工单才会自动完工。`;
     }
   } catch (err) {
     const mapped = mapOutsourceError(err);

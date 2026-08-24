@@ -1,20 +1,17 @@
 import Link from 'next/link';
 import { listOutsourceOrders } from '@/lib/outsource';
 import { OutsourceStatus } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
-import { TableScrollArea } from '@/components/ui-business';
+import {
+  StatusBadge as UiStatusBadge,
+  TableScrollArea,
+} from '@/components/ui-business';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
+import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = { title: '外协单' };
-
-const STATUS_LABELS: Record<OutsourceStatus, string> = {
-  [OutsourceStatus.SENT]: '已发出',
-  [OutsourceStatus.IN_PROGRESS]: '进行中',
-  [OutsourceStatus.RECEIVED]: '已回货',
-  [OutsourceStatus.CANCELLED]: '已取消',
-};
 
 export default async function OutsourceListPage() {
   // Page-level server-side authz (defense-in-depth: layout gate
@@ -62,9 +59,7 @@ export default async function OutsourceListPage() {
                       <span className="font-sans tabular-nums">
                         {r.order?.orderNo ?? '—'}
                       </span>
-                      {r.order?.isUrgent ? (
-                        <Badge variant="destructive">急单</Badge>
-                      ) : null}
+                      {r.order?.isUrgent ? <UrgentBadge /> : null}
                     </div>
                   </td>
                   <td className="px-4 py-3">{r.supplierName}</td>
@@ -97,14 +92,10 @@ export default async function OutsourceListPage() {
 }
 
 function StatusPill({ status }: { status: OutsourceStatus }) {
-  switch (status) {
-    case OutsourceStatus.SENT:
-      return <Badge variant="outline">{STATUS_LABELS[status]}</Badge>;
-    case OutsourceStatus.IN_PROGRESS:
-      return <Badge variant="secondary">{STATUS_LABELS[status]}</Badge>;
-    case OutsourceStatus.RECEIVED:
-      return <Badge>{STATUS_LABELS[status]}</Badge>;
-    case OutsourceStatus.CANCELLED:
-      return <Badge variant="outline">{STATUS_LABELS[status]}</Badge>;
-  }
+  const definition = OUTSOURCE_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
 }

@@ -55,6 +55,7 @@ import {
   customerPriceRuleInputFromFormData,
   CustomerPriceBookDraftRuleForm,
   discardDraftFromForm,
+  PublishCustomerPriceBookDraftForm,
   publishDraftFromForm,
   updateDraftRuleFromForm,
 } from '../ExternalSalesPriceBookDraftForms';
@@ -210,6 +211,8 @@ describe('customer price-book draft form bindings', () => {
     publishData.set('priceBookId', 'draft-1');
     publishData.set('expectedDraftUpdatedAt', '2026-08-09T00:30:00.000Z');
     publishData.set('effectiveFrom', '2026-09-01T08:00');
+    publishData.set('publishNote', '已完成价格复核');
+    publishData.set('confirmedImpact', 'true');
     await publishDraftFromForm(null, publishData);
 
     const discardData = new FormData();
@@ -226,6 +229,8 @@ describe('customer price-book draft form bindings', () => {
       priceBookId: 'draft-1',
       expectedDraftUpdatedAt: '2026-08-09T00:30:00.000Z',
       effectiveFrom: '2026-09-01T08:00',
+      publishNote: '已完成价格复核',
+      confirmedImpact: true,
     });
     expect(discardActionMock).toHaveBeenCalledWith({
       priceBookId: 'draft-1',
@@ -308,6 +313,37 @@ describe('CreateCustomerPriceBookDraftForm', () => {
     );
     expect(html).toContain('刷新最新内容');
     expect(html).not.toMatch(/<div role="alert"[^>]*>/);
+  });
+});
+
+describe('PublishCustomerPriceBookDraftForm', () => {
+  it('要求生效时间和发布说明，再进入 L3 确认层', () => {
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-1"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom="2026-09-01T08:00"
+        impact={{
+          totalRuleCount: 121,
+          changedItemCount: 2,
+          changedRuleCount: 7,
+          increasedRuleCount: 7,
+          decreasedRuleCount: 0,
+          deltaPercentMin: '2.8',
+          deltaPercentMax: '5.8',
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+
+    expect(html).toContain('发布说明（必填）');
+    const effectiveFrom = html.match(/<input[^>]*name="effectiveFrom"[^>]*>/)?.[0];
+    const publishNote = html.match(/<textarea[^>]*name="publishNote"[^>]*>/)?.[0];
+    expect(effectiveFrom).toContain('required=""');
+    expect(publishNote).toContain('required=""');
+    expect(html).toContain('校验通过，进入发布确认');
+    expect(html).not.toContain('name="confirmedImpact"');
+    expect(html).not.toContain('确认校验并发布');
   });
 });
 

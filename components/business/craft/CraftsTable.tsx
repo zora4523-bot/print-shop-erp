@@ -13,7 +13,7 @@ import { machineTypeLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 
 export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
   if (crafts.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无工艺</p>;
+    return null;
   }
 
   return (

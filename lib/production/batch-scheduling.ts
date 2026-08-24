@@ -15,6 +15,8 @@ import {
 import { transitionOrder } from '@/lib/order/status-machine';
 import { orderCascadeLockKey } from '@/lib/order/locks';
 import { dispatchNotification } from '@/lib/notification/dispatch';
+import { enqueueNotificationInTransaction } from '@/lib/notification/transactional-outbox';
+import type { EnqueueClient } from '@/lib/background-jobs/repository';
 import {
   InvalidOrderTransitionError,
   OrderInvariantError,
@@ -300,6 +302,19 @@ async function assignCompatibleTasksForOrder(
       });
     }
 
+    const notificationQueued = fullyScheduled
+      ? await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'ORDER_SCHEDULED',
+          {
+            orderId: order.id,
+            orderNo: order.orderNo,
+            taskCount: expectedPairs.length,
+          },
+          { dedupeKey: `notification:ORDER_SCHEDULED:${order.id}` },
+        )
+      : false;
+
     return {
       orderId: order.id,
       orderNo: order.orderNo,
@@ -307,6 +322,7 @@ async function assignCompatibleTasksForOrder(
       totalTaskCount: expectedPairs.length,
       remainingTaskCount,
       fullyScheduled,
+      notificationQueued,
     };
   });
 }
@@ -326,8 +342,9 @@ export async function scheduleOrdersToWorker(
         input.overrideReason,
         actor,
       );
-      result.assigned.push(assigned);
-      if (assigned.fullyScheduled) {
+      const { notificationQueued, ...publicAssigned } = assigned;
+      result.assigned.push(publicAssigned);
+      if (assigned.fullyScheduled && !notificationQueued) {
         await dispatchNotification(
           'ORDER_SCHEDULED',
           {

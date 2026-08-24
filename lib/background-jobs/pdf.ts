@@ -54,9 +54,17 @@ export async function handleOrderPdfJob(
 
   const factory = await getSetting('factory_name');
   const html = await buildPrintHtml(order, { factoryName: factory.name });
-  const pdf = await renderHtmlToPdf({ html });
-  const artifactName = `${job.id}.pdf`;
+  await job.assertLease?.();
+  job.signal?.throwIfAborted();
+  const pdf = await renderHtmlToPdf({
+    html,
+    ...(job.signal ? { signal: job.signal } : {}),
+  });
+  await job.assertLease?.();
+  job.signal?.throwIfAborted();
+  const artifactName = `${job.id}-${job.attempts}.pdf`;
   await writePdfArtifact(artifactName, pdf);
+  await job.assertLease?.();
   await cleanupOldPdfArtifacts();
   return { artifactName, byteLength: pdf.byteLength, orderNo: order.orderNo };
 }

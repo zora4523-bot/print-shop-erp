@@ -1,11 +1,17 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { ExternalSalesPriceBookVersionPanel } from '@/components/business/price/ExternalSalesPriceBookVersionPanel';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import {
+  ContentSkeleton,
+  ErrorBoundary,
+  PageHeader,
+} from '@/components/ui-business';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getCustomerPriceBookDraft,
+  getCustomerPriceBookDraftPublishPreview,
   listCustomerPriceBookVersionsAndDrafts,
 } from '@/lib/price/customer-price-book-admin';
 
@@ -29,15 +35,6 @@ export default async function ExternalSalesPriceBookVersionsPage({
   const sp = await searchParams;
   const rawDraftId = firstSearchParam(sp.draft).trim();
   const draftId = safeOpaqueId(rawDraftId);
-  const versions = await listCustomerPriceBookVersionsAndDrafts();
-  const requestedDraft = draftId
-    ? versions.find(
-        (version) => version.id === draftId && version.status === 'DRAFT',
-      )
-    : undefined;
-  const draft = requestedDraft
-    ? await getCustomerPriceBookDraft(requestedDraft.id)
-    : null;
 
   return (
     <div className="min-w-0 space-y-6">
@@ -54,12 +51,49 @@ export default async function ExternalSalesPriceBookVersionsPage({
           </Link>
         }
       />
-      <ExternalSalesPriceBookVersionPanel
-        versions={versions}
-        draft={draft}
-        invalidDraftSelection={Boolean(rawDraftId) && !draft}
-        defaultPublishAt=""
-      />
+      <ErrorBoundary
+        scope="section"
+        title="发布数据暂时无法加载"
+        description="页面导航仍可使用；请重试发布版本区域。"
+      >
+        <Suspense fallback={<ContentSkeleton variant="table" rows={6} />}>
+          <ExternalSalesPriceBookVersionsContent
+            rawDraftId={rawDraftId}
+            draftId={draftId}
+          />
+        </Suspense>
+      </ErrorBoundary>
     </div>
+  );
+}
+
+async function ExternalSalesPriceBookVersionsContent({
+  rawDraftId,
+  draftId,
+}: {
+  rawDraftId: string;
+  draftId: string | null;
+}) {
+  const versions = await listCustomerPriceBookVersionsAndDrafts();
+  const requestedDraft = draftId
+    ? versions.find(
+        (version) => version.id === draftId && version.status === 'DRAFT',
+      )
+    : undefined;
+  const [draft, preview] = requestedDraft
+    ? await Promise.all([
+        getCustomerPriceBookDraft(requestedDraft.id),
+        getCustomerPriceBookDraftPublishPreview(requestedDraft.id),
+      ])
+    : [null, null];
+
+  return (
+    <ExternalSalesPriceBookVersionPanel
+      versions={versions}
+      draft={draft}
+      preview={preview}
+      invalidDraftSelection={Boolean(rawDraftId) && !draft}
+      defaultPublishAt=""
+    />
   );
 }

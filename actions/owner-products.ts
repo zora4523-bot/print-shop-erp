@@ -104,11 +104,32 @@ export async function updateProductAction(
 export async function setProductActiveAction(
   id: string,
   isActive: boolean,
+  formData?: FormData,
 ): Promise<ProductMutationResult> {
-  await requirePermission('dict:product:manage');
+  // Authorization stays first: forged requests must not learn whether the
+  // product exists or whether their reason would pass validation.
+  const actor = await requirePermission('dict:product:manage');
+
+  const rawReason = formData?.get('reason');
+  const reason = typeof rawReason === 'string' ? rawReason.trim() : '';
+  if (!isActive && reason.length === 0) {
+    return {
+      status: 'invalid',
+      fieldErrors: { reason: ['停用产品必须填写业务理由'] },
+    };
+  }
+  if (reason.length > 500) {
+    return {
+      status: 'invalid',
+      fieldErrors: { reason: ['操作理由不能超过 500 个字符'] },
+    };
+  }
 
   try {
-    await setProductActive(id, isActive);
+    await setProductActive(id, isActive, {
+      actor,
+      reason: reason || null,
+    });
   } catch (err) {
     if (err instanceof ProductInvariantError) {
       return { status: 'error', message: err.message };

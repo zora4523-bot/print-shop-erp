@@ -5,14 +5,16 @@ import { getWorkerTaskDetail } from '@/lib/production';
 import { getWorkerTaskTitleRef } from '@/lib/page-title/refs';
 import { workerTaskTitle } from '@/lib/page-title/titles';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui-business';
 import { BeginTaskButton } from '@/components/business/production/BeginTaskButton';
 import { ReportTaskForm } from '@/components/business/production/ReportTaskForm';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { getSetting } from '@/lib/settings';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -59,14 +61,9 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             {task.orderItem.order.orderNo}
           </span>
           {task.orderItem.order.isUrgent ? (
-            <Badge
-              variant="destructive"
-              className="bg-destructive text-background dark:bg-destructive dark:text-background"
-            >
-              急单
-            </Badge>
+            <UrgentBadge />
           ) : null}
-          <StatusBadge status={task.status} />
+          <ProductionTaskStatusBadge status={task.status} />
         </div>
         <h1 className="worker-wrap-anywhere text-lg font-semibold">
           #{task.orderItem.sequence} · {task.orderItem.name}
@@ -86,37 +83,6 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
         </p>
       </header>
 
-      {task.orderItem.remark ? (
-        <HighlightedRemark className="worker-wrap-anywhere">
-          {task.orderItem.remark}
-        </HighlightedRemark>
-      ) : null}
-
-      <DesignImageGallery
-        headingLevel={2}
-        images={task.orderItem.designs.map((design) => ({
-          ...design,
-          fileUrl: signDesignReadUrl(design.fileUrl),
-        }))}
-      />
-
-      <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-        <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
-        <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-          <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
-          <Row label="规格" value={task.orderItem.specification ?? '—'} />
-          <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
-          <Row
-            label="烫金色"
-            value={formatFoilColors(task.orderItem.foilColors)}
-          />
-          <Row
-            label="双面 / 双色"
-            value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}
-          />
-        </dl>
-      </section>
-
       {task.status === TaskStatus.PENDING ? (
         <section className="rounded-xl border bg-card p-4 shadow-sm">
           <BeginTaskButton taskId={task.id} />
@@ -134,6 +100,42 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
           />
         </section>
       ) : null}
+
+      {task.orderItem.remark ? (
+        <HighlightedRemark className="worker-wrap-anywhere">
+          {task.orderItem.remark}
+        </HighlightedRemark>
+      ) : null}
+
+      <details className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+        <summary className="min-h-11 cursor-pointer font-semibold">
+          任务规格与设计图
+        </summary>
+      <DesignImageGallery
+        headingLevel={2}
+        images={task.orderItem.designs.map((design) => ({
+          ...design,
+          fileUrl: signDesignReadUrl(design.fileUrl),
+        }))}
+      />
+
+      <section className="mt-3">
+        <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
+        <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+          <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
+          <Row label="规格" value={task.orderItem.specification ?? '—'} />
+          <Row label="纸张" value={task.orderItem.paperType ?? '—'} />
+          <Row
+            label="烫金色"
+            value={formatFoilColors(task.orderItem.foilColors)}
+          />
+          <Row
+            label="双面 / 双色"
+            value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}
+          />
+        </dl>
+      </section>
+      </details>
 
       {task.status === TaskStatus.COMPLETED ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
@@ -169,17 +171,13 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
   );
 }
 
-function StatusBadge({ status }: { status: TaskStatus }) {
-  switch (status) {
-    case TaskStatus.PENDING:
-      return <Badge variant="outline">待开始</Badge>;
-    case TaskStatus.IN_PROGRESS:
-      return <Badge variant="secondary">进行中</Badge>;
-    case TaskStatus.COMPLETED:
-      return <Badge variant="secondary">已完工</Badge>;
-    case TaskStatus.CANCELLED:
-      return <Badge variant="outline">已取消</Badge>;
-  }
+function ProductionTaskStatusBadge({ status }: { status: TaskStatus }) {
+  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
+  return (
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </StatusBadge>
+  );
 }
 
 function Row({

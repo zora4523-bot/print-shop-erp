@@ -3,22 +3,19 @@ import Link from 'next/link';
 import { CalendarRange, Inbox, ReceiptText, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
-import {
-  BILL_STATUS_LABELS,
-  ROLE_LABELS,
-} from '@/lib/auth/role-labels';
+import { ROLE_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
-  BILL_STATUS_TO_BADGE,
   EmptyState,
   PageHeader,
   StatCard,
   StatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
+import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '销售应收账单' };
@@ -228,11 +225,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
   );
 }
 
-// 账单状态徽章——委托给 ui-business StatusBadge + BILL_STATUS_TO_BADGE map
+// 账单状态徽章——委托给 ui-business StatusBadge + 集中注册表。
 // 集中色调（与 /sales/bills 共用，避免双份本地定义飘移）。
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  const cfg = BILL_STATUS_TO_BADGE[status];
-  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
+  const cfg = BILL_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={cfg.tone} dot={cfg.dot}>
       {cfg.label}
@@ -262,7 +258,7 @@ function FilterBar({
           <option value="">全部</option>
           {Object.values(BillStatus).map((s) => (
             <option key={s} value={s}>
-              {BILL_STATUS_LABELS[s] ?? s}
+              {BILL_STATUS_REGISTRY[s].label}
             </option>
           ))}
         </select>

@@ -54,7 +54,7 @@ describe('admin navigation prefetch policy', () => {
     ).toEqual([]);
   });
 
-  it('prefetches sidebar routes only after user intent and exposes pending state', () => {
+  it('prefetches sidebar routes only after sustained user intent', () => {
     const sidebar = readFileSync(
       path.join(ROOT, 'components/business/admin/AppSidebar.tsx'),
       'utf8',
@@ -62,11 +62,15 @@ describe('admin navigation prefetch policy', () => {
 
     expect(sidebar).toContain('useLinkStatus');
     expect(sidebar).toContain(
-      'prefetch={intentHref === item.href ? null : false}',
+      'prefetch={intentHref === item.href ? true : false}',
     );
-    expect(sidebar).toContain('onMouseEnter={() => setIntentHref(item.href)}');
-    expect(sidebar).toContain('onFocus={() => setIntentHref(item.href)}');
-    expect(sidebar).toContain('onTouchStart={() => setIntentHref(item.href)}');
+    expect(sidebar).toContain('IntentPrefetchScheduler');
+    expect(sidebar).toContain('onEnter={scheduleIntentPrefetch}');
+    expect(sidebar).toContain('onLeave={cancelIntentPrefetch}');
+    expect(sidebar).toContain('onEnter(item.href)');
+    expect(sidebar).toContain('onMouseLeave');
+    expect(sidebar).not.toContain('onFocus');
+    expect(sidebar).not.toContain('onTouchStart');
     expect(sidebar).toContain('<SidebarLinkPendingIndicator />');
   });
 

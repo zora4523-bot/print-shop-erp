@@ -1,6 +1,15 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+  type KeyboardEvent,
+} from 'react';
 import {
   useForm,
   useFieldArray,
@@ -35,6 +44,20 @@ import {
   ORDER_SPECIFICATION_OPTIONS,
 } from './order-item-options';
 import { uploadOrderItemDesignFile } from './design-upload-client';
+import { OrderFormRail } from './OrderFormRail';
+import {
+  collectOrderFormGaps,
+  ORDER_FORM_STEP_LABELS,
+  PRINT_ITEM_IMAGE_WARN_COUNT,
+  type OrderFormGap,
+  type OrderFormQuoteStatus,
+  type OrderFormStep,
+} from './order-form-gaps';
+import {
+  localOrderFormDraftStorageKey,
+  parseLocalOrderFormDraft,
+  serializeLocalOrderFormDraft,
+} from './order-form-local-draft';
 
 export type CraftOption = {
   id: string;
@@ -56,6 +79,7 @@ type Props = {
   products: ProductOption[];
   settlementLabel: string;
   usesExternalSalesPricing: boolean;
+  draftScope: string;
 };
 
 type QuoteViewState = {
@@ -89,6 +113,29 @@ const BLANK_ITEM: CreateOrderInput['items'][number] = {
   remark: null,
 };
 
+const LOCAL_DRAFT_STORAGE_UNAVAILABLE = '__local-draft-storage-unavailable__';
+
+function subscribeToBrowserStorage(onStoreChange: () => void) {
+  window.addEventListener('storage', onStoreChange);
+  return () => window.removeEventListener('storage', onStoreChange);
+}
+
+function subscribeToHydration() {
+  return () => undefined;
+}
+
+function getHydratedSnapshot() {
+  return true;
+}
+
+function getServerHydratedSnapshot() {
+  return false;
+}
+
+function getServerLocalDraftSnapshot(): string | null {
+  return null;
+}
+
 function quoteFactsKey(item: {
   productId?: string | null;
   specification?: string | null;
@@ -121,11 +168,40 @@ function chargeAmountMatches(
   return Number(trimmed).toFixed(2) === suggested;
 }
 
+function quoteAmountMatches(
+  actual: string | null | undefined,
+  suggested: string | null,
+  scale: number,
+): boolean {
+  const trimmed = actual?.trim() ?? '';
+  if (trimmed === '') return suggested === null;
+  if (!/^\d{1,10}(?:\.\d{1,4})?$/.test(trimmed) || suggested === null) {
+    return false;
+  }
+  return Number(trimmed).toFixed(scale) === Number(suggested).toFixed(scale);
+}
+
+function hasAmount(value: string | null | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+function formatLocalDraftTime(savedAt: string): string {
+  const date = new Date(savedAt);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
 export function OrderForm({
   crafts,
   products,
   settlementLabel,
   usesExternalSalesPricing,
+  draftScope,
 }: Props) {
   const router = useRouter();
   const form = useForm<CreateOrderInput>({
@@ -160,9 +236,10 @@ export function OrderForm({
     control,
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isDirty },
     setValue,
     getValues,
+    reset,
   } = form;
   const itemsArray = useFieldArray({ control, name: 'items' });
   const shipmentsArray = useFieldArray({
@@ -170,7 +247,18 @@ export function OrderForm({
     name: 'additionalShipments',
   });
   const watchedItems = useWatch({ control, name: 'items' });
+  const watchedFormValues = useWatch({ control });
   const watchedShipments = useWatch({ control, name: 'additionalShipments' });
+  const watchedCustomerRef = useWatch({ control, name: 'customerRef' });
+  const watchedPromisedDate = useWatch({ control, name: 'promisedDate' });
+  const watchedReceiverAddress = useWatch({
+    control,
+    name: 'receiverAddress',
+  });
+  const watchedCustomerChargeOverrideReason = useWatch({
+    control,
+    name: 'customerChargeOverrideReason',
+  });
   const watchedIsSfCollect = useWatch({ control, name: 'isSfCollect' });
   const watchedDestinationProvince = useWatch({
     control,
@@ -212,6 +300,95 @@ export function OrderForm({
   );
   const [logisticsQuote, setLogisticsQuote] =
     useState<LogisticsQuoteViewState | null>(null);
+  const [step, setStep] = useState<OrderFormStep>('customer');
+  const [expandedItem, setExpandedItem] = useState(0);
+  const [localDraftDecisionComplete, setLocalDraftDecisionComplete] =
+    useState(false);
+  const [lastLocalDraftSavedAt, setLastLocalDraftSavedAt] = useState<
+    string | null
+  >(null);
+  const [localDraftError, setLocalDraftError] = useState<string | null>(null);
+  const quoteRequestSequence = useRef(0);
+  const latestQuoteRequestByField = useRef<Record<string, number>>({});
+  const itemFieldIdsRef = useRef<string[]>([]);
+  const localDraftStorageKey = localOrderFormDraftStorageKey(
+    draftScope,
+    usesExternalSalesPricing,
+  );
+  const getLocalDraftSnapshot = useCallback(() => {
+    try {
+      return window.localStorage.getItem(localDraftStorageKey);
+    } catch {
+      return LOCAL_DRAFT_STORAGE_UNAVAILABLE;
+    }
+  }, [localDraftStorageKey]);
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerHydratedSnapshot,
+  );
+  const localDraftSnapshot = useSyncExternalStore(
+    subscribeToBrowserStorage,
+    getLocalDraftSnapshot,
+    getServerLocalDraftSnapshot,
+  );
+  const storedLocalDraft = useMemo(
+    () =>
+      localDraftSnapshot &&
+      localDraftSnapshot !== LOCAL_DRAFT_STORAGE_UNAVAILABLE
+        ? parseLocalOrderFormDraft(localDraftSnapshot)
+        : null,
+    [localDraftSnapshot],
+  );
+  const pendingLocalDraft = localDraftDecisionComplete
+    ? null
+    : storedLocalDraft;
+  const localDraftReady = hydrated && pendingLocalDraft === null;
+  const detectedLocalDraftError = !hydrated
+    ? null
+    : localDraftSnapshot === LOCAL_DRAFT_STORAGE_UNAVAILABLE
+      ? '浏览器暂时无法使用本地草稿；本次填写不会自动保存在本机。'
+      : localDraftSnapshot && !storedLocalDraft
+        ? '本地旧草稿已损坏或版本过旧，已安全忽略。'
+        : null;
+  const localDraftStatusError = localDraftError ?? detectedLocalDraftError;
+
+  useEffect(() => {
+    itemFieldIdsRef.current = itemsArray.fields.map((field) => field.id);
+  }, [itemsArray.fields]);
+
+  useEffect(() => {
+    if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const savedAt = new Date();
+      const serialized = serializeLocalOrderFormDraft(
+        watchedFormValues,
+        savedAt,
+      );
+      if (!serialized) {
+        setLocalDraftError('当前表单无法安全序列化，本地草稿未更新。');
+        return;
+      }
+      try {
+        window.localStorage.setItem(localDraftStorageKey, serialized);
+        setLocalDraftDecisionComplete(true);
+        setLastLocalDraftSavedAt(savedAt.toISOString());
+        setLocalDraftError(null);
+      } catch {
+        setLocalDraftError('本地草稿保存失败，请不要在创建工单前关闭页面。');
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [
+    createdDraft,
+    isDirty,
+    localDraftReady,
+    localDraftStorageKey,
+    pendingLocalDraft,
+    watchedFormValues,
+  ]);
 
   async function uploadPendingDesigns(
     draft: NonNullable<typeof createdDraft>,
@@ -274,6 +451,41 @@ export function OrderForm({
     );
   }
 
+  function restoreLocalDraft() {
+    if (!pendingLocalDraft) return;
+    reset(pendingLocalDraft.values as unknown as CreateOrderInput);
+    setQuoteViews({});
+    setLogisticsQuote(null);
+    setPendingDesigns({});
+    setStep('customer');
+    setExpandedItem(0);
+    setLastLocalDraftSavedAt(pendingLocalDraft.savedAt);
+    setLocalDraftDecisionComplete(true);
+    setLocalDraftError(null);
+  }
+
+  function discardLocalDraft() {
+    try {
+      window.localStorage.removeItem(localDraftStorageKey);
+      setLocalDraftError(null);
+    } catch {
+      setLocalDraftError('本地旧草稿无法删除；本次可继续填写，但请留意下次打开时的恢复提示。');
+    }
+    setLocalDraftDecisionComplete(true);
+    setLastLocalDraftSavedAt(null);
+  }
+
+  function clearLocalDraftAfterServerCreate() {
+    try {
+      window.localStorage.removeItem(localDraftStorageKey);
+      setLocalDraftError(null);
+    } catch {
+      setLocalDraftError('工单草稿已创建，但本机的表单草稿未能清除。');
+    }
+    setLocalDraftDecisionComplete(true);
+    setLastLocalDraftSavedAt(null);
+  }
+
   const onValid: SubmitHandler<CreateOrderInput> = (data) => {
     // The disabled submit button covers clicks; this guard also blocks Enter
     // key or programmatic submits while an authoritative logistics quote is in flight.
@@ -303,6 +515,8 @@ export function OrderForm({
       const result = await createOrderAction(null, submittedData);
       setState(result);
       if (result.status !== 'success') return;
+
+      clearLocalDraftAfterServerCreate();
 
       const draft = {
         orderId: result.orderId,
@@ -393,12 +607,22 @@ export function OrderForm({
       isDoubleColor: item.isDoubleColor,
     };
     const inputKey = quoteFactsKey(facts);
+    const requestId = ++quoteRequestSequence.current;
+    latestQuoteRequestByField.current[fieldId] = requestId;
     setQuotingFieldId(fieldId);
     startQuote(async () => {
       const response = await quoteOrderItemsAction({
         items: [facts],
         orderItemCount: getValues('items').length,
       });
+      // A quote can finish after the operator has changed product/quantity/
+      // craft facts, removed the row, or started a newer request for the same
+      // row. Keep the old response available only as a stale-status hint; it
+      // must never write prices into the current form or replace a newer view.
+      if (latestQuoteRequestByField.current[fieldId] !== requestId) return;
+      const sameRow = itemFieldIdsRef.current[index] === fieldId;
+      const factsStillCurrent =
+        sameRow && quoteFactsKey(getValues(`items.${index}`)) === inputKey;
       if (response.status === 'success') {
         const result = response.items[0];
         if (!result) {
@@ -411,7 +635,7 @@ export function OrderForm({
             ...current,
             [fieldId]: { inputKey, result },
           }));
-          if (result.complete) {
+          if (result.complete && factsStillCurrent) {
             setValue(`items.${index}.unitPrice`, result.suggestedUnitPrice, {
               shouldDirty: true,
               shouldValidate: true,
@@ -436,7 +660,11 @@ export function OrderForm({
           [fieldId]: { inputKey, error },
         }));
       }
-      setQuotingFieldId(null);
+      if (latestQuoteRequestByField.current[fieldId] === requestId) {
+        setQuotingFieldId((current) =>
+          current === fieldId ? null : current,
+        );
+      }
     });
   }
 
@@ -588,17 +816,278 @@ export function OrderForm({
     state?.status === 'invalid' ? state.fieldErrors : undefined;
   const serverGeneralError =
     state?.status === 'error' ? state.message : null;
+  const itemGapInputs = watchedItems.map((item, index) => {
+    const fieldId = itemsArray.fields[index]?.id;
+    const view = fieldId ? quoteViews[fieldId] : undefined;
+    const currentKey = quoteFactsKey(item);
+    let quoteStatus: OrderFormQuoteStatus = 'missing';
+    if (fieldId && quoting && quotingFieldId === fieldId) {
+      quoteStatus = 'loading';
+    } else if (view?.inputKey !== undefined && view.inputKey !== currentKey) {
+      quoteStatus = 'stale';
+    } else if (view?.error) {
+      quoteStatus = 'error';
+    } else if (view?.result?.complete) {
+      quoteStatus = 'complete';
+    } else if (view?.result) {
+      quoteStatus = 'incomplete';
+    }
+
+    const completeQuote =
+      quoteStatus === 'complete' ? view?.result : undefined;
+    const manualPriceProvided =
+      hasAmount(item.unitPrice) || hasAmount(item.fixedFee);
+    const priceOverrideRequired = completeQuote
+      ? !quoteAmountMatches(
+          item.unitPrice,
+          completeQuote.suggestedUnitPrice,
+          4,
+        ) ||
+        !quoteAmountMatches(
+          item.fixedFee,
+          completeQuote.suggestedFixedFee,
+          2,
+        )
+      : manualPriceProvided;
+    return {
+      ...item,
+      quoteStatus,
+      manualPriceProvided,
+      priceOverrideRequired,
+    };
+  });
+
+  let logisticsQuoteStatus: OrderFormQuoteStatus = 'missing';
+  if (logisticsQuoting) {
+    logisticsQuoteStatus = 'loading';
+  } else if (
+    logisticsQuote?.inputKey !== undefined &&
+    logisticsQuote.inputKey !== currentLogisticsInputKey
+  ) {
+    logisticsQuoteStatus = 'stale';
+  } else if (logisticsQuote?.error) {
+    logisticsQuoteStatus = 'error';
+  } else if (logisticsQuote?.result?.complete) {
+    logisticsQuoteStatus = 'complete';
+  } else if (logisticsQuote?.result) {
+    logisticsQuoteStatus = 'incomplete';
+  }
+  const currentLogisticsResult =
+    logisticsQuoteStatus === 'complete' ||
+    logisticsQuoteStatus === 'incomplete'
+      ? logisticsQuote?.result
+      : undefined;
+  const primaryQuoteLine = currentLogisticsResult?.shipments[0];
+  const shipmentGapInputs = [
+    {
+      key: 'primary',
+      label: '主地址',
+      idPrefix: 'primary',
+      receiverFieldId: 'receiverAddress',
+      receiverAddress: watchedReceiverAddress,
+      province: watchedDestinationProvince,
+      billableWeightKg: watchedQuotedWeightKg,
+      shippingFee: watchedShippingFee,
+      packingMaterialFee: watchedPackingMaterialFee,
+      chargeOverrideReason: watchedCustomerChargeOverrideReason,
+      chargeOverrideRequired: primaryQuoteLine
+        ? !chargeAmountMatches(
+            watchedShippingFee,
+            primaryQuoteLine.shipping.amount,
+          ) ||
+          !chargeAmountMatches(
+            watchedPackingMaterialFee,
+            primaryQuoteLine.packaging.amount,
+          )
+        : hasAmount(watchedShippingFee) || hasAmount(watchedPackingMaterialFee),
+    },
+    ...watchedShipments.map((shipment, index) => {
+      const quoteLine = currentLogisticsResult?.shipments[index + 1];
+      return {
+        key: `additional-${index}`,
+        label: `额外地址 ${index + 1}`,
+        idPrefix: `shipment-${index}`,
+        receiverFieldId: `additionalShipments.${index}.receiverAddress`,
+        receiverAddress: shipment.receiverAddress,
+        province: shipment.destinationProvince,
+        billableWeightKg: shipment.quotedWeightKg,
+        shippingFee: shipment.shippingFee,
+        packingMaterialFee: shipment.packingMaterialFee,
+        chargeOverrideReason: shipment.customerChargeOverrideReason,
+        chargeOverrideRequired: quoteLine
+          ? !chargeAmountMatches(
+              shipment.shippingFee,
+              quoteLine.shipping.amount,
+            ) ||
+            !chargeAmountMatches(
+              shipment.packingMaterialFee,
+              quoteLine.packaging.amount,
+            )
+          : hasAmount(shipment.shippingFee) ||
+            hasAmount(shipment.packingMaterialFee),
+      };
+    }),
+  ];
+  const formGaps = collectOrderFormGaps({
+    customerRef: watchedCustomerRef,
+    promisedDate: watchedPromisedDate,
+    items: itemGapInputs,
+    shipping: {
+      usesExternalSalesPricing,
+      isSfCollect: watchedIsSfCollect,
+      quoteStatus: logisticsQuoteStatus,
+      shipments: shipmentGapInputs,
+    },
+  });
+  const totalQuantity = watchedItems.reduce(
+    (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
+    0,
+  );
+
+  function jumpToGap(gap: OrderFormGap) {
+    setStep(gap.step);
+    if (gap.itemIndex !== undefined) setExpandedItem(gap.itemIndex);
+    window.setTimeout(() => {
+      document.getElementById(gap.fieldId)?.focus();
+    }, 0);
+  }
+
+  function handleStepKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentStep: OrderFormStep,
+  ) {
+    const steps = Object.keys(ORDER_FORM_STEP_LABELS) as OrderFormStep[];
+    const currentIndex = steps.indexOf(currentStep);
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % steps.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + steps.length) % steps.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = steps.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextStep = steps[nextIndex];
+    setStep(nextStep);
+    window.setTimeout(() => {
+      document.getElementById(`order-step-${nextStep}-tab`)?.focus();
+    }, 0);
+  }
 
   return (
-    <form onSubmit={handleSubmit(onValid)} className="space-y-6" noValidate>
-      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+    <form
+      onSubmit={handleSubmit(onValid)}
+      className="space-y-4"
+      noValidate
+      aria-busy={!localDraftReady}
+    >
+      {pendingLocalDraft ? (
+        <section
+          role="alert"
+          aria-labelledby="local-order-draft-heading"
+          className="rounded-xl border border-warning/50 bg-warning/10 p-4"
+        >
+          <h2 id="local-order-draft-heading" className="font-semibold">
+            发现本机未提交的表单草稿
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            最近保存于 {formatLocalDraftTime(pendingLocalDraft.savedAt)}。请先选择恢复或放弃；系统不会静默覆盖当前表单。
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            本地草稿只包含表单字段，不包含设计图或 File；产品、工艺和价格仍按当前服务端规则校验。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button type="button" onClick={restoreLocalDraft}>
+              恢复本地草稿
+            </Button>
+            <Button type="button" variant="outline" onClick={discardLocalDraft}>
+              放弃本地草稿
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      <fieldset disabled={!localDraftReady} className="contents">
+      <div
+        className="flex min-w-0 flex-col gap-2 sm:flex-row"
+        role="tablist"
+        aria-label="建单步骤"
+      >
+        {(Object.keys(ORDER_FORM_STEP_LABELS) as OrderFormStep[]).map(
+          (key) => {
+            const count = formGaps.filter((gap) => gap.step === key).length;
+            const active = step === key;
+            return (
+              <Button
+                key={key}
+                id={`order-step-${key}-tab`}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-controls={`order-step-${key}-panel`}
+                tabIndex={active ? 0 : -1}
+                variant={active ? 'default' : 'outline'}
+                className="min-h-11 flex-1 justify-between"
+                onClick={() => setStep(key)}
+                onKeyDown={(event) => handleStepKeyDown(event, key)}
+              >
+                <span>{ORDER_FORM_STEP_LABELS[key]}</span>
+                {count > 0 ? (
+                  <span className="font-sans text-xs tabular-nums">
+                    {count} 个缺口
+                  </span>
+                ) : null}
+              </Button>
+            );
+          },
+        )}
+      </div>
+
+      {formGaps.length > 0 ? (
+        <ul className="space-y-1 rounded-xl border border-destructive/30 bg-card p-3 xl:hidden">
+          {formGaps.map((gap) => (
+            <li key={gap.id}>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto min-h-11 justify-start whitespace-normal px-0 py-1 text-left text-sm text-destructive"
+                onClick={() => jumpToGap(gap)}
+              >
+                {gap.label}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start xl:gap-4">
+      <div className="min-w-0 space-y-4">
+      <section
+        className={
+          step === 'items'
+            ? 'hidden'
+            : 'space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6'
+        }
+      >
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h2 className="text-base font-semibold">基本信息与收货信息</h2>
+          <h2 className="text-base font-semibold">
+            {ORDER_FORM_STEP_LABELS[step]}
+          </h2>
           <p className="rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
             结算路径：<span className="font-medium text-foreground">{settlementLabel}</span>
           </p>
         </div>
 
+        <div
+          id="order-step-customer-panel"
+          role="tabpanel"
+          aria-labelledby="order-step-customer-tab"
+          tabIndex={0}
+          className={step === 'customer' ? 'space-y-4' : 'hidden'}
+        >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField
             label="工单自定义名称"
@@ -612,13 +1101,44 @@ export function OrderForm({
             registration={register('customerRef')}
             error={errors.customerRef?.message}
           />
-          <TextField
-            label="快递代码"
-            registration={register('expressCode')}
-            error={errors.expressCode?.message}
-          />
         </div>
 
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <TextField
+            label="承诺交期（选填）"
+            type="date"
+            registration={register('promisedDate')}
+            error={errors.promisedDate?.message as string | undefined}
+          />
+        </div>
+        <TextareaField
+          label="工单备注"
+          registration={register('remark')}
+          error={errors.remark?.message}
+          rows={2}
+        />
+        <label className="flex min-w-0 items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            {...register('isUrgent')}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
+          />
+          <span>急单（提交后会推送至排产群）</span>
+        </label>
+        </div>
+
+        <div
+          id="order-step-shipping-panel"
+          role="tabpanel"
+          aria-labelledby="order-step-shipping-tab"
+          tabIndex={0}
+          className={step === 'shipping' ? 'space-y-4' : 'hidden'}
+        >
+        <TextField
+          label="快递代码"
+          registration={register('expressCode')}
+          error={errors.expressCode?.message}
+        />
         <TextareaField
           label="收货信息"
           hint="请在一处填写收货人、联系电话和完整地址"
@@ -632,49 +1152,22 @@ export function OrderForm({
           error={errors.packageRequirement?.message}
           rows={2}
         />
-        <TextareaField
-          label="工单备注"
-          registration={register('remark')}
-          error={errors.remark?.message}
-          rows={2}
-        />
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <TextField
-            label="承诺交期（选填）"
-            type="date"
-            registration={register('promisedDate')}
-            error={errors.promisedDate?.message as string | undefined}
+        <label className="flex min-w-0 items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            {...register('isSfCollect', {
+              onChange: (event) =>
+                applySfCollectState(Boolean(event.target.checked)),
+            })}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
           />
-        </div>
-
-        <fieldset className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-          <legend className="px-1 text-sm font-medium">工单标记</legend>
-          <label className="flex min-w-0 items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              {...register('isUrgent')}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
-            />
-            <span>急单（提交后会推送至排产群）</span>
-          </label>
-          <label className="flex min-w-0 items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              {...register('isSfCollect', {
-                onChange: (event) =>
-                  applySfCollectState(Boolean(event.target.checked)),
-              })}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input"
-            />
-            <span>
-              顺丰到付
-              <span className="block text-xs text-muted-foreground">
-                自行预约；物流费不计入工单金额
-              </span>
+          <span>
+            顺丰到付
+            <span className="block text-xs text-muted-foreground">
+              自行预约；物流费不计入工单金额
             </span>
-          </label>
-        </fieldset>
+          </span>
+        </label>
 
         {usesExternalSalesPricing ? (
           <section
@@ -694,6 +1187,7 @@ export function OrderForm({
                 </p>
               </div>
               <Button
+                id="logistics-quote"
                 type="button"
                 variant="outline"
                 disabled={
@@ -737,20 +1231,40 @@ export function OrderForm({
             />
           </section>
         ) : null}
+        </div>
       </section>
 
-      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <section
+        id="order-step-items-panel"
+        role="tabpanel"
+        aria-labelledby="order-step-items-tab"
+        tabIndex={0}
+        className={
+          step === 'items'
+            ? 'space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6'
+            : 'hidden'
+        }
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold">款式（{itemsArray.fields.length}）</h2>
           <Button
             type="button"
             variant="outline"
             disabled={submitting || uploading || Boolean(createdDraft)}
-            onClick={addItem}
+            onClick={() => {
+              addItem();
+              setExpandedItem(itemsArray.fields.length);
+            }}
           >
             添加款式
           </Button>
         </div>
+        {itemsArray.fields.length >= PRINT_ITEM_IMAGE_WARN_COUNT ? (
+          <p className="text-sm text-warning-foreground">
+            A4 打印最多 5 款带图。第 {PRINT_ITEM_IMAGE_WARN_COUNT}{' '}
+            款起建议分款式打印，以免车间看不清。
+          </p>
+        ) : null}
 
         {errors.items?.message ? (
           <p className="text-sm text-destructive">{errors.items.message}</p>
@@ -758,9 +1272,46 @@ export function OrderForm({
 
         <ol className="space-y-4">
           {itemsArray.fields.map((field, index) => (
-            <li key={field.id} className="min-w-0 space-y-3 rounded-lg border p-4 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">#{index + 1}</span>
+            <li key={field.id} className="min-w-0 space-y-3 rounded-lg border p-3 text-sm">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  aria-expanded={expandedItem === index}
+                  aria-controls={`order-item-${index}-editor`}
+                  className="h-auto min-h-11 min-w-0 flex-1 justify-start whitespace-normal rounded-md px-1 py-1 text-left"
+                  onClick={() =>
+                    setExpandedItem(expandedItem === index ? -1 : index)
+                  }
+                >
+                  <span className="text-xs text-muted-foreground">#{index + 1}</span>
+                  <span className="ml-2 font-medium">
+                    {watchedItems[index]?.name?.trim() || '未命名款式'}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {(watchedItems[index]?.quantity ?? 0).toLocaleString()} 个
+                    {(watchedItems[index]?.crafts?.length ?? 0) > 0
+                      ? ` · ${watchedItems[index]?.crafts.length} 项工艺`
+                      : ' · 未选工艺'}
+                  </span>
+                </Button>
+                {index > 0 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submitting || uploading || Boolean(createdDraft)}
+                    onClick={() => {
+                      const previous = getValues(`items.${index - 1}`);
+                      setValue(`items.${index}`, {
+                        ...previous,
+                        name: previous.name ? `${previous.name} 副本` : '',
+                      });
+                      setExpandedItem(index);
+                    }}
+                  >
+                    复制上一款
+                  </Button>
+                ) : null}
                 {itemsArray.fields.length > 1 ? (
                   <Button
                     type="button"
@@ -772,6 +1323,13 @@ export function OrderForm({
                   </Button>
                 ) : null}
               </div>
+              <div
+                id={`order-item-${index}-editor`}
+                className={expandedItem === index ? 'space-y-3' : 'hidden'}
+              >
+              <p className="text-xs text-muted-foreground">
+                正在编辑 #{index + 1} · 纸张、工艺与报价选项都在这里，字段没有减少
+              </p>
 
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
                 <TextField
@@ -923,6 +1481,8 @@ export function OrderForm({
 
                     return (
                       <fieldset
+                        id={`items.${index}.crafts`}
+                        tabIndex={-1}
                         aria-invalid={Boolean(errors.items?.[index]?.crafts?.message)}
                         aria-describedby={
                           errors.items?.[index]?.crafts?.message
@@ -988,6 +1548,7 @@ export function OrderForm({
                     </p>
                   </div>
                   <Button
+                    id={`items.${index}.quote`}
                     type="button"
                     variant="outline"
                     disabled={
@@ -1043,7 +1604,6 @@ export function OrderForm({
               <TextareaField
                 label="款式备注"
                 hint="关键颜色、方向、工艺避坑等信息会在生产端高亮显示"
-                tone="destructive"
                 registration={register(`items.${index}.remark`)}
                 error={errors.items?.[index]?.remark?.message}
                 rows={2}
@@ -1055,12 +1615,19 @@ export function OrderForm({
                 disabled={submitting || uploading || Boolean(createdDraft)}
                 onChange={(images) => updatePendingDesigns(field.id, images)}
               />
+              </div>
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <section
+        className={
+          step === 'shipping'
+            ? 'space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6'
+            : 'hidden'
+        }
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">
@@ -1248,6 +1815,15 @@ export function OrderForm({
           </p>
         ) : null}
       </section>
+      </div>
+      <OrderFormRail
+        itemCount={itemsArray.fields.length}
+        totalQuantity={totalQuantity}
+        settlementLabel={settlementLabel}
+        gaps={formGaps}
+        onJump={jumpToGap}
+      />
+      </div>
 
       {serverGeneralError ? (
         <p role="alert" className="text-sm text-destructive">
@@ -1300,7 +1876,26 @@ export function OrderForm({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-3">
+      <div className="sticky bottom-0 z-20 -mx-1 flex flex-wrap items-center gap-3 border-t bg-background/95 px-1 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="space-y-0.5 text-xs text-muted-foreground">
+          <p>
+            {formGaps.length > 0
+              ? `还有 ${formGaps.length} 个缺口。创建草稿始终可用；缺口可点右侧清单跳转。`
+              : '没有阻断缺口。'}
+          </p>
+          <p role="status" aria-live="polite">
+            {localDraftStatusError
+              ? localDraftStatusError
+              : pendingLocalDraft
+                ? '等待选择如何处理本地草稿'
+                : !localDraftReady
+                  ? '正在检查本地草稿…'
+                  : lastLocalDraftSavedAt
+                    ? `本地草稿已保存 · ${formatLocalDraftTime(lastLocalDraftSavedAt)}`
+                    : '输入后将自动保存在本机（不含设计图）'}
+          </p>
+        </div>
+        <div className="flex-1" />
         <Button
           type="submit"
           disabled={
@@ -1314,12 +1909,15 @@ export function OrderForm({
             ? '草稿已创建'
             : submitting
               ? '创建中…'
-              : '创建工单（草稿）'}
+              : formGaps.length > 0
+                ? `创建工单（还有 ${formGaps.length} 个缺口）`
+                : '创建工单（草稿）'}
         </Button>
         <Link href="/orders" className={buttonVariants({ variant: 'outline' })}>
           返回列表
         </Link>
       </div>
+      </fieldset>
     </form>
   );
 }

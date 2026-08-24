@@ -6,7 +6,7 @@ import type { MachineRuleWithBase } from '@/lib/salary/rules';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { WorkerMachineRuleForm } from '@/components/business/salary/WorkerMachineRuleForm';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/ui-business';
+import { PageHeader, TableEmptyState } from '@/components/ui-business';
 
 export const metadata = { title: '计件规则' };
 
@@ -152,7 +152,11 @@ export default async function PieceworkRulesPage() {
                 );
               })}
               {data.personalRules.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">暂无个人规则，当前全部使用机型统一规则。</td></tr>
+                <TableEmptyState
+                  colSpan={7}
+                  title="暂无个人规则"
+                  description="当前全部使用机型统一规则。"
+                />
               ) : null}
             </tbody>
           </table>

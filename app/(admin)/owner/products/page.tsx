@@ -6,11 +6,13 @@ import {
   AdminTableCard,
 } from '@/components/business/admin/AdminDataTable';
 import { listProductsPage } from '@/lib/product';
+import type { ProductActiveStatusFilter } from '@/lib/product';
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   firstSearchParam,
+  buildTableHref,
   parsePositiveInt,
   type TableHrefParams,
 } from '@/lib/admin/table';
@@ -24,6 +26,7 @@ type PageProps = {
     q?: string | string[];
     page?: string | string[];
     pageSize?: string | string[];
+    status?: string | string[];
   }>;
 };
 
@@ -35,17 +38,21 @@ export default async function ProductsListPage({ searchParams }: PageProps) {
   await requirePermission('dict:product:manage');
   const sp = await searchParams;
   const q = firstSearchParam(sp.q).trim();
+  const rawStatus = firstSearchParam(sp.status);
+  const status: ProductActiveStatusFilter =
+    rawStatus === 'all' || rawStatus === 'inactive' ? rawStatus : 'active';
   const page = parsePositiveInt(sp.page, { defaultValue: 1, min: 1 });
   const pageSize = parsePositiveInt(sp.pageSize, {
     defaultValue: 20,
     min: 5,
     max: 100,
   });
-  const productPage = await listProductsPage({ q, page, pageSize });
+  const productPage = await listProductsPage({ q, status, page, pageSize });
   const queryParams: TableHrefParams = {
     q: q || undefined,
     page: productPage.page,
     pageSize,
+    status,
   };
 
   return (
@@ -83,13 +90,52 @@ export default async function ProductsListPage({ searchParams }: PageProps) {
         action={OWNER_PRODUCTS_PATH}
         query={q}
         placeholder="搜索产品编码、产品名、规格、纸张"
-        clearHref={OWNER_PRODUCTS_PATH}
-        hiddenParams={{ pageSize }}
+        clearHref={buildTableHref(OWNER_PRODUCTS_PATH, {}, { status, pageSize })}
+        hiddenParams={{ pageSize, status }}
+        filters={
+          <div
+            role="group"
+            aria-label="产品状态筛选"
+            className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
+          >
+            {(
+              [
+                ['all', '全部'],
+                ['active', '已启用'],
+                ['inactive', '已停用'],
+              ] as const
+            ).map(([value, label]) => (
+              <Link
+                key={value}
+                href={buildTableHref(OWNER_PRODUCTS_PATH, queryParams, {
+                  status: value,
+                  page: null,
+                })}
+                prefetch={false}
+                aria-current={status === value ? 'page' : undefined}
+                className={buttonVariants({
+                  variant: status === value ? 'secondary' : 'ghost',
+                  size: 'sm',
+                })}
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        }
       />
       <AdminTableCard
         isEmpty={productPage.rows.length === 0}
         emptyTitle="暂无产品"
-        emptyDescription={q ? '没有匹配当前搜索条件的产品。' : undefined}
+        emptyDescription={
+          q
+            ? '没有匹配当前搜索与状态条件的产品。'
+            : status === 'inactive'
+              ? '暂无已停用产品。'
+              : status === 'active'
+                ? '暂无已启用产品，可切换到“全部”查看。'
+                : undefined
+        }
         footer={
           <AdminPagination
             basePath={OWNER_PRODUCTS_PATH}

@@ -47,6 +47,7 @@ vi.mock('@/lib/notification/test-channel', () => ({
 
 import {
   confirmUnknownNotificationDeliveredAction,
+  ignoreUnknownNotificationAction,
   retryUnknownNotificationAction,
 } from '../owner-notifications';
 import { UnknownNotificationResolutionError } from '@/lib/notification/resolve';
@@ -60,10 +61,11 @@ const actor = {
   machineType: null,
 };
 
-function form(logId = 'log-1', stateVersion = '7') {
+function form(logId = 'log-1', stateVersion = '7', reason?: string) {
   const data = new FormData();
   data.set('logId', logId);
   data.set('stateVersion', stateVersion);
+  if (reason !== undefined) data.set('reason', reason);
   return data;
 }
 
@@ -125,6 +127,43 @@ describe('UNKNOWN notification resolution actions', () => {
       ['/owner/notifications'],
       ['/owner/background-jobs'],
     ]);
+  });
+
+  it('requires an ignore reason and forwards the trimmed reason into the audited domain decision', async () => {
+    await expect(
+      ignoreUnknownNotificationAction(
+        null,
+        form('log-1', '7', '  业务已电话确认  '),
+      ),
+    ).resolves.toEqual({
+      status: 'success',
+      message: '已记录忽略理由并关闭该条待办',
+    });
+
+    expect(resolveMock).toHaveBeenCalledExactlyOnceWith(
+      'log-1',
+      'IGNORED',
+      actor,
+      7,
+      '业务已电话确认',
+    );
+    expect(revalidatePathMock.mock.calls).toEqual([
+      ['/owner/notifications'],
+      ['/owner/background-jobs'],
+    ]);
+  });
+
+  it('rejects IGNORE without a reason after authorization and before domain mutation', async () => {
+    await expect(
+      ignoreUnknownNotificationAction(null, form('log-1', '7', '   ')),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '请填写 1–500 字的忽略理由',
+    });
+
+    expect(requirePermissionMock).toHaveBeenCalledTimes(1);
+    expect(resolveMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it('maps a concurrent stale submit to an actionable refresh message', async () => {

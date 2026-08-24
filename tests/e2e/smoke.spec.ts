@@ -55,8 +55,12 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/prices');
     await expect(page.getByRole('heading', { name: '报价管理' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '价格阶梯' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '加价规则' })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: '外部销售报价管理' }),
+    ).toHaveAttribute('href', '/owner/prices/external-sales/items');
+    await expect(
+      page.getByText('内部销售/工厂直单兼容价格（低频）', { exact: true }),
+    ).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/boms');
@@ -153,6 +157,7 @@ test.describe('automation smoke', () => {
     await expect(page.locator('input[name="customerRef"]')).toBeVisible();
     await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
+    await page.getByRole('tab', { name: /收货与费用/ }).click();
     await expect(page.getByLabel('收货信息')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
@@ -162,8 +167,40 @@ test.describe('automation smoke', () => {
         .locator('[data-sidebar="sidebar"]')
         .getByRole('link', { name: '采购单' }),
     ).toBeVisible();
-    await expect(page.getByText(fixture.orderNo)).toBeVisible();
-    await expect(page.getByText(fixture.customerRef)).toBeVisible();
+    const matchedOrder = page
+      .locator(`[data-order-id="${fixture.orderId}"]:visible`)
+      .first();
+    await expect(matchedOrder).toContainText(fixture.orderNo);
+    await expect(matchedOrder).toContainText(fixture.customerRef);
+    await expectNoNextErrorOverlay(page);
+
+    const detailFromList = page.locator(
+      `a[href="/orders/${fixture.orderId}"]:visible`,
+    );
+    await detailFromList.first().click();
+    await expect(page).toHaveURL(`/orders/${fixture.orderId}`);
+    await page.goBack();
+    await expect(
+      page.getByRole('heading', { name: '工单', exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL((url) => {
+      return (
+        url.pathname === '/orders' &&
+        url.searchParams.get('q') === fixture.orderNo &&
+        url.searchParams.get('selected') === fixture.orderId
+      );
+    });
+    await expect(
+      page.locator(
+        `[data-order-id="${fixture.orderId}"][data-state="selected"]:visible`,
+      ),
+    ).toBeVisible();
+    const restoredScroll = new URL(page.url()).searchParams.get('scroll');
+    if (restoredScroll) {
+      await expect
+        .poll(() => page.evaluate(() => Math.round(window.scrollY)))
+        .toBe(Number(restoredScroll));
+    }
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders/${fixture.orderId}`);

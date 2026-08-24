@@ -16,6 +16,7 @@ import {
   workerTypeLabel,
   machineTypeLabel,
 } from '@/lib/auth/role-labels';
+import { EmptyState } from '@/components/ui-business';
 
 function workerDetail(a: AccountSummary): string {
   if (a.role !== Role.WORKER) return '—';
@@ -37,9 +38,7 @@ function workerDetail(a: AccountSummary): string {
 
 export function AccountsTable({ accounts }: { accounts: AccountSummary[] }) {
   if (accounts.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">暂无账号</p>
-    );
+    return <EmptyState kind="no-data" noun="账号" />;
   }
 
   return (

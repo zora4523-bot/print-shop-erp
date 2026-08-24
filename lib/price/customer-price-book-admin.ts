@@ -52,6 +52,7 @@ export type CustomerPriceBookVersionAdminDto = {
   basedOnVersion: number | null;
   basedOnBookId: string | null;
   changeReason: string | null;
+  publishNote: string | null;
   ruleSetSha256: string | null;
   createdById: string | null;
   workflowCreatedAt: string | null;
@@ -106,6 +107,49 @@ export type CustomerPriceBookDraftAdminDto = {
   categories: Array<{ id: string; code: string; name: string }>;
   products: Array<{ id: string; code: string; name: string }>;
   rules: CustomerPriceRuleDraftAdminDto[];
+};
+
+export type CustomerPriceBookDraftImpactPriceDto = {
+  amount: string | null;
+  includedUnits: string | null;
+  incrementUnits: string | null;
+  incrementAmount: string | null;
+  isActive: boolean;
+};
+
+export type CustomerPriceBookDraftImpactChangeDto = {
+  draftRuleId: string | null;
+  name: string;
+  categoryName: string;
+  productName: string | null;
+  quantityLabel: string;
+  calculationType: CustomerPriceCalculationType | null;
+  current: CustomerPriceBookDraftImpactPriceDto | null;
+  draft: CustomerPriceBookDraftImpactPriceDto | null;
+  changedFields: string[];
+  direction: 'UP' | 'DOWN' | 'MIXED' | 'OTHER' | 'ADDED' | 'REMOVED';
+  deltaAmount: string | null;
+  deltaPercent: string | null;
+};
+
+export type CustomerPriceBookDraftPublishPreviewDto = {
+  priceBookId: string;
+  purpose: CustomerPriceBookPurpose;
+  version: number;
+  basedOnVersion: number;
+  totalRuleCount: number;
+  activeRuleCount: number;
+  changedItemCount: number;
+  changedRuleCount: number;
+  increasedRuleCount: number;
+  decreasedRuleCount: number;
+  deltaPercentMin: string | null;
+  deltaPercentMax: string | null;
+  changes: CustomerPriceBookDraftImpactChangeDto[];
+  validation: {
+    status: 'PASS' | 'FAIL';
+    issues: DraftPriceBookValidationIssue[];
+  };
 };
 
 export type CustomerPriceRuleDraftEditorMode =
@@ -187,6 +231,7 @@ export type PublishCustomerPriceBookDraftInput = {
   priceBookId: string;
   effectiveFrom: Date;
   expectedDraftUpdatedAt: Date;
+  publishNote: string;
 };
 
 export type DiscardCustomerPriceBookDraftInput = {
@@ -267,6 +312,7 @@ function workflowSummary(notes: unknown): {
   basedOnBookId: string;
   basedOnVersion: number;
   changeReason: string;
+  publishNote: string | null;
   ruleSetSha256: string | null;
   createdById: string;
   createdAt: string;
@@ -287,6 +333,8 @@ function workflowSummary(notes: unknown): {
     basedOnBookId: workflow.basedOn.id,
     basedOnVersion: Number(workflow.basedOn.version),
     changeReason: workflow.changeReason,
+    publishNote:
+      typeof workflow.publishNote === 'string' ? workflow.publishNote : null,
     ruleSetSha256:
       typeof workflow.ruleSetSha256 === 'string'
         ? workflow.ruleSetSha256
@@ -314,6 +362,7 @@ function publishedNotes(
   effectiveFrom: Date,
   now: Date,
   ruleSetSha256: string,
+  publishNote: string,
 ): Prisma.InputJsonObject {
   return notesInput({
     ...notesRecord(notes),
@@ -325,6 +374,7 @@ function publishedNotes(
       publishedAt: now.toISOString(),
       effectiveFrom: effectiveFrom.toISOString(),
       ruleSetSha256,
+      publishNote,
     },
   });
 }
@@ -468,6 +518,205 @@ export function calculateCustomerPriceRuleSetSha256(
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 
+const IMPACT_RULE_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  categoryId: true,
+  productId: true,
+  kind: true,
+  calculationType: true,
+  amount: true,
+  includedUnits: true,
+  incrementUnits: true,
+  incrementAmount: true,
+  minQty: true,
+  maxQty: true,
+  triggerCondition: true,
+  exclusiveGroup: true,
+  priority: true,
+  note: true,
+  blocksAutomaticQuote: true,
+  isActive: true,
+  category: { select: { name: true } },
+  product: { select: { name: true } },
+} as const;
+
+type ImpactRuleRow = {
+  id: string;
+  code: unknown;
+  name: string;
+  categoryId: string;
+  productId: string | null;
+  kind: unknown;
+  calculationType: CustomerPriceCalculationType | null;
+  amount: unknown;
+  includedUnits: unknown;
+  incrementUnits: unknown;
+  incrementAmount: unknown;
+  minQty: number | null;
+  maxQty: number | null;
+  triggerCondition: unknown;
+  exclusiveGroup: string | null;
+  priority: number;
+  note: string | null;
+  blocksAutomaticQuote: boolean;
+  isActive: boolean;
+  category: { name: string };
+  product: { name: string } | null;
+};
+
+const IMPACT_FIELD_LABELS = {
+  name: '项目名称',
+  categoryId: '收费类目',
+  productId: '适用产品',
+  kind: '规则类型',
+  calculationType: '计价方式',
+  amount: '价格',
+  includedUnits: '首重单位',
+  incrementUnits: '续重单位',
+  incrementAmount: '续重价格',
+  minQty: '最小数量',
+  maxQty: '最大数量',
+  triggerCondition: '适用条件',
+  exclusiveGroup: '互斥组',
+  priority: '优先级',
+  note: '说明',
+  blocksAutomaticQuote: '自动报价方式',
+  isActive: '启用状态',
+} as const;
+
+type ImpactComparableField = keyof typeof IMPACT_FIELD_LABELS;
+
+function comparableImpactValue(
+  rule: ImpactRuleRow,
+  field: ImpactComparableField,
+): unknown {
+  if (
+    field === 'amount' ||
+    field === 'includedUnits' ||
+    field === 'incrementUnits' ||
+    field === 'incrementAmount'
+  ) {
+    return decimalText(rule[field]);
+  }
+  if (field === 'triggerCondition') return canonicalJson(rule[field]);
+  if (field === 'kind') return String(rule[field]);
+  return rule[field];
+}
+
+function impactPrice(rule: ImpactRuleRow): CustomerPriceBookDraftImpactPriceDto {
+  return {
+    amount: decimalText(rule.amount),
+    includedUnits: decimalText(rule.includedUnits),
+    incrementUnits: decimalText(rule.incrementUnits),
+    incrementAmount: decimalText(rule.incrementAmount),
+    isActive: rule.isActive,
+  };
+}
+
+function quantityLabel(rule: ImpactRuleRow): string {
+  if (rule.minQty !== null && rule.maxQty !== null) {
+    return rule.minQty === rule.maxQty
+      ? `${rule.minQty.toLocaleString('zh-CN')} 个`
+      : `${rule.minQty.toLocaleString('zh-CN')}–${rule.maxQty.toLocaleString('zh-CN')} 个`;
+  }
+  if (rule.minQty !== null) {
+    return `${rule.minQty.toLocaleString('zh-CN')} 个起`;
+  }
+  if (rule.maxQty !== null) {
+    return `至 ${rule.maxQty.toLocaleString('zh-CN')} 个`;
+  }
+  return '全部数量';
+}
+
+function impactDelta(
+  current: ImpactRuleRow | null,
+  draft: ImpactRuleRow | null,
+): Pick<
+  CustomerPriceBookDraftImpactChangeDto,
+  'direction' | 'deltaAmount' | 'deltaPercent'
+> {
+  if (!current) {
+    return { direction: 'ADDED', deltaAmount: null, deltaPercent: null };
+  }
+  if (!draft) {
+    return { direction: 'REMOVED', deltaAmount: null, deltaPercent: null };
+  }
+
+  const pairs: Array<[unknown, unknown]> = [
+    [current.amount, draft.amount],
+    [current.incrementAmount, draft.incrementAmount],
+  ];
+  const directions: number[] = [];
+  let primaryDelta: Prisma.Decimal | null = null;
+  let primaryPercent: Prisma.Decimal | null = null;
+
+  for (const [beforeRaw, afterRaw] of pairs) {
+    if (beforeRaw === null || beforeRaw === undefined) continue;
+    if (afterRaw === null || afterRaw === undefined) continue;
+    const before = new Prisma.Decimal(String(beforeRaw));
+    const after = new Prisma.Decimal(String(afterRaw));
+    const compared = after.comparedTo(before);
+    if (compared === 0) continue;
+    directions.push(compared);
+    if (!primaryDelta) {
+      primaryDelta = after.minus(before);
+      primaryPercent = before.isZero()
+        ? null
+        : primaryDelta.dividedBy(before).times(100);
+    }
+  }
+
+  const hasUp = directions.some((direction) => direction > 0);
+  const hasDown = directions.some((direction) => direction < 0);
+  return {
+    direction: hasUp && hasDown ? 'MIXED' : hasUp ? 'UP' : hasDown ? 'DOWN' : 'OTHER',
+    deltaAmount: primaryDelta?.toDecimalPlaces(4).toString() ?? null,
+    deltaPercent: primaryPercent?.toDecimalPlaces(1).toString() ?? null,
+  };
+}
+
+function buildImpactChange(
+  current: ImpactRuleRow | null,
+  draft: ImpactRuleRow | null,
+): CustomerPriceBookDraftImpactChangeDto | null {
+  if (!current && !draft) return null;
+  const changedFields = current && draft
+    ? (Object.keys(IMPACT_FIELD_LABELS) as ImpactComparableField[])
+        .filter(
+          (field) =>
+            JSON.stringify(comparableImpactValue(current, field)) !==
+            JSON.stringify(comparableImpactValue(draft, field)),
+        )
+        .map((field) => IMPACT_FIELD_LABELS[field])
+    : ['规则集'];
+  if (changedFields.length === 0) return null;
+
+  const display = draft ?? current!;
+  return {
+    draftRuleId: draft?.id ?? null,
+    name: display.name,
+    categoryName: display.category.name,
+    productName: display.product?.name ?? null,
+    quantityLabel: quantityLabel(display),
+    calculationType: display.calculationType,
+    current: current ? impactPrice(current) : null,
+    draft: draft ? impactPrice(draft) : null,
+    changedFields,
+    ...impactDelta(current, draft),
+  };
+}
+
+function impactItemKey(rule: ImpactRuleRow): string {
+  if (rule.productId) return `${rule.categoryId}:${rule.productId}`;
+  const normalizedName = rule.name.replace(
+    /\s*\d[\d,]*\s*(?:个|件|张)(?:\s.*)?$/u,
+    '',
+  );
+  return `${rule.categoryId}:${normalizedName}`;
+}
+
 async function assertValidRuleSet(
   tx: Prisma.TransactionClient,
   priceBookId: string,
@@ -532,6 +781,7 @@ export async function listCustomerPriceBookVersionsAndDrafts(
         basedOnVersion: metadata?.basedOnVersion ?? null,
         basedOnBookId: metadata?.basedOnBookId ?? null,
         changeReason: metadata?.changeReason ?? null,
+        publishNote: metadata?.publishNote ?? null,
         ruleSetSha256: metadata?.ruleSetSha256 ?? null,
         createdById: metadata?.createdById ?? null,
         workflowCreatedAt: metadata?.createdAt ?? null,
@@ -680,6 +930,143 @@ export async function getCustomerPriceBookDraft(
         },
         updatedAt: rule.updatedAt.toISOString(),
       })),
+    };
+  });
+}
+
+/**
+ * Builds the publish-center read model while holding the same snapshot lock as
+ * quoting and price-book writes. Technical matcher/provenance fields are used
+ * for comparison and validation, but are never returned to the client.
+ */
+export async function getCustomerPriceBookDraftPublishPreview(
+  priceBookId: string,
+): Promise<CustomerPriceBookDraftPublishPreviewDto | null> {
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotReadLock(tx);
+    const draft = await tx.customerPriceBook.findUnique({
+      where: { id: priceBookId },
+      select: {
+        id: true,
+        purpose: true,
+        settlementType: true,
+        version: true,
+        isActive: true,
+        notes: true,
+        rules: {
+          select: IMPACT_RULE_SELECT,
+          orderBy: [{ categoryId: 'asc' }, { priority: 'desc' }, { code: 'asc' }],
+        },
+      },
+    });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (
+      !draft ||
+      draft.settlementType !== EXTERNAL_SETTLEMENT ||
+      draft.isActive ||
+      !workflow
+    ) {
+      return null;
+    }
+
+    const basedOn = await tx.customerPriceBook.findUnique({
+      where: { id: workflow.basedOn.id },
+      select: {
+        id: true,
+        purpose: true,
+        settlementType: true,
+        version: true,
+        rules: {
+          select: IMPACT_RULE_SELECT,
+          orderBy: [{ categoryId: 'asc' }, { priority: 'desc' }, { code: 'asc' }],
+        },
+      },
+    });
+    if (
+      !basedOn ||
+      basedOn.settlementType !== EXTERNAL_SETTLEMENT ||
+      basedOn.purpose !== draft.purpose ||
+      basedOn.version !== workflow.basedOn.version
+    ) {
+      return null;
+    }
+
+    const draftRules = draft.rules as ImpactRuleRow[];
+    const currentRules = basedOn.rules as ImpactRuleRow[];
+    const draftByCode = new Map(
+      draftRules.map((rule) => [String(rule.code), rule] as const),
+    );
+    const currentByCode = new Map(
+      currentRules.map((rule) => [String(rule.code), rule] as const),
+    );
+    const allCodes = new Set([...currentByCode.keys(), ...draftByCode.keys()]);
+    const changes = [...allCodes]
+      .map((code) =>
+        buildImpactChange(
+          currentByCode.get(code) ?? null,
+          draftByCode.get(code) ?? null,
+        ),
+      )
+      .filter(
+        (change): change is CustomerPriceBookDraftImpactChangeDto =>
+          change !== null,
+      )
+      .sort((left, right) => {
+        if (left.deltaPercent !== null && right.deltaPercent !== null) {
+          return new Prisma.Decimal(right.deltaPercent)
+            .comparedTo(new Prisma.Decimal(left.deltaPercent));
+        }
+        if (left.deltaPercent !== null) return -1;
+        if (right.deltaPercent !== null) return 1;
+        return left.name.localeCompare(right.name, 'zh-CN');
+      });
+
+    const changedItemKeys = new Set<string>();
+    for (const code of allCodes) {
+      const current = currentByCode.get(code) ?? null;
+      const next = draftByCode.get(code) ?? null;
+      if (!buildImpactChange(current, next)) continue;
+      changedItemKeys.add(impactItemKey(next ?? current!));
+    }
+
+    const percentValues = changes
+      .map((change) => change.deltaPercent)
+      .filter((value): value is string => value !== null)
+      .map((value) => new Prisma.Decimal(value));
+    const normalizedRules = await validationRules(tx, draft.id);
+    const validationIssues = validateDraftPriceBookRules({
+      purpose: draft.purpose,
+      rules: normalizedRules,
+    });
+
+    return {
+      priceBookId: draft.id,
+      purpose: draft.purpose,
+      version: draft.version,
+      basedOnVersion: workflow.basedOn.version,
+      totalRuleCount: draftRules.length,
+      activeRuleCount: draftRules.filter((rule) => rule.isActive).length,
+      changedItemCount: changedItemKeys.size,
+      changedRuleCount: changes.length,
+      increasedRuleCount: changes.filter(
+        (change) => change.direction === 'UP' || change.direction === 'MIXED',
+      ).length,
+      decreasedRuleCount: changes.filter(
+        (change) => change.direction === 'DOWN' || change.direction === 'MIXED',
+      ).length,
+      deltaPercentMin:
+        percentValues.length > 0
+          ? Prisma.Decimal.min(...percentValues).toString()
+          : null,
+      deltaPercentMax:
+        percentValues.length > 0
+          ? Prisma.Decimal.max(...percentValues).toString()
+          : null,
+      changes,
+      validation: {
+        status: validationIssues.length === 0 ? 'PASS' : 'FAIL',
+        issues: validationIssues,
+      },
     };
   });
 }
@@ -1674,6 +2061,10 @@ export async function publishCustomerPriceBookDraft(
   if (input.effectiveFrom < now) {
     throw new CustomerPriceBookAdminError('价目版本不能追溯生效，请选择当前或未来时间');
   }
+  const publishNote = input.publishNote.trim();
+  if (publishNote.length < 2 || publishNote.length > 500) {
+    throw new CustomerPriceBookAdminError('发布说明需要 2–500 个字符');
+  }
 
   try {
     return await db.$transaction(async (tx) => {
@@ -1785,6 +2176,7 @@ export async function publishCustomerPriceBookDraft(
             input.effectiveFrom,
             now,
             ruleSetSha256,
+            publishNote,
           ),
         },
         select: { id: true, version: true, purpose: true },
@@ -1807,6 +2199,7 @@ export async function publishCustomerPriceBookDraft(
           effectiveFrom: input.effectiveFrom,
           previousEffectiveTo: input.effectiveFrom,
           ruleSetSha256,
+          publishNote,
         },
         requestMetadata: {
           source: 'customer-price-book-admin.publishCustomerPriceBookDraft',

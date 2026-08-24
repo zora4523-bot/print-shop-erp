@@ -14,16 +14,33 @@ import {
   Wallet,
 } from 'lucide-react';
 import {
+  ActionNotice,
   ActionShortcut,
+  BatchActionResult,
+  ConflictResolutionPanel,
+  ConfirmActionDialog,
+  ContentSkeleton,
+  DisabledReason,
   EmptyState,
+  EnvNotice,
+  ErrorState,
+  FormErrorSummary,
+  FormMessage,
   HeroBanner,
+  LongTaskReceipt,
   NavCard,
   PageHeader,
+  PendingButton,
   StatCard,
   StatusBadge,
+  TableEmptyState,
+  TerminalReadOnlyBanner,
   TONES,
   ORDER_STATUS_TO_BADGE,
+  formMessageA11yProps,
 } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 // /dev/showcase —— 业务原子组件的可视化目录。
 // **仅 dev 可见**：production 走 notFound() 不暴露。
@@ -34,7 +51,7 @@ export default function ShowcasePage() {
   if (process.env.NODE_ENV === 'production') notFound();
 
   return (
-    <div className="mx-auto max-w-6xl space-y-12 p-8">
+    <main className="mx-auto max-w-6xl space-y-12 p-8">
       <PageHeader
         title="设计系统 · Showcase"
         subtitle="业务原子组件 + tone 变体可视化目录。改 globals.css 的语义 token 后此页立即跟随。"
@@ -215,6 +232,243 @@ export default function ShowcasePage() {
         </div>
       </Section>
 
+      <Section
+        title="五态组件库"
+        subtitle="ContentSkeleton / EmptyState kind / ErrorState / DisabledReason / PendingButton / LongTaskReceipt。"
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ContentSkeleton rows={4} variant="table" />
+          <EmptyState kind="no-data" noun="工单" />
+          <EmptyState kind="no-result" noun="工单" />
+          <EmptyState kind="no-access" />
+          <ErrorState title="这块数据没加载出来" description="分区级错误，其他分区照常显示。" />
+          <ErrorState
+            blocking
+            title="有 2 个生产任务未完工，完工后可发货"
+          />
+          <DisabledReason cause="status" reason="已结案的工单不能修改">
+            <button
+              type="button"
+              disabled
+              className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+            >
+              发货
+            </button>
+          </DisabledReason>
+          <PendingButton pending groupNote="任意一行失败时，整组价格都不会保存">
+            保存草稿
+          </PendingButton>
+          <LongTaskReceipt
+            taskId="export-demo-001"
+            title="已受理：正在生成导出文件"
+            description="可以离开页面，完成后回这里下载"
+            expiresAt="2026-08-24T18:00:00.000Z"
+            now={new Date('2026-08-24T00:00:00.000Z')}
+          />
+          <EnvNotice>OSS 未配置 / mock-mode：这是环境提示，不是业务预警。</EnvNotice>
+        </div>
+      </Section>
+
+      <Section
+        title="ActionNotice"
+        subtitle="操作反馈四种语义：success / info / warning 礼貌播报，error 强提醒。"
+      >
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <ActionNotice
+            tone="success"
+            title="工单已保存"
+            description="草稿编号 PO-20260824-018，可继续编辑。"
+          />
+          <ActionNotice
+            tone="info"
+            title="导出任务已进入队列"
+            description="完成后会在通知中心提供下载链接。"
+          />
+          <ActionNotice
+            tone="warning"
+            title="还有 2 项资料待补充"
+            description="可以保存草稿，但暂时不能提交生产。"
+          />
+          <ActionNotice
+            tone="error"
+            title="保存失败"
+            description="网络连接已中断，请确认连接后重试。"
+            action={
+              <Button type="button" variant="outline" size="sm">
+                重试
+              </Button>
+            }
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="表单反馈"
+        subtitle="FormMessage 通过稳定 id 关联控件；FormErrorSummary 汇总并跳转到错误字段。"
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="space-y-2 rounded-xl border bg-card p-4">
+            <label htmlFor="showcase-unit-price" className="text-sm font-medium">
+              单价
+            </label>
+            <Input
+              id="showcase-unit-price"
+              defaultValue="-20"
+              {...formMessageA11yProps('showcase-unit-price', 'error')}
+            />
+            <FormMessage fieldId="showcase-unit-price" tone="error">
+              单价必须大于或等于 0
+            </FormMessage>
+          </div>
+          <FormErrorSummary
+            errors={[
+              {
+                fieldId: 'showcase-unit-price',
+                label: '单价',
+                message: '必须大于或等于 0',
+              },
+              {
+                fieldId: 'showcase-customer',
+                label: '客户',
+                message: '请选择有效客户',
+              },
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="BatchActionResult"
+        subtitle="批量动作的完整 / 部分 / 失败回执；失败项必须展示具体原因。"
+      >
+        <BatchActionResult
+          status="partial"
+          succeededCount={2}
+          failedCount={1}
+          items={[
+            { id: 'PO-001', label: 'PO-001', outcome: 'success' },
+            { id: 'PO-002', label: 'PO-002', outcome: 'success' },
+            {
+              id: 'PO-003',
+              label: 'PO-003',
+              outcome: 'failure',
+              reason: '该工单已结案，不能再次排产。',
+            },
+          ]}
+          action={
+            <Button type="button" variant="outline" size="sm">
+              仅重试失败项
+            </Button>
+          }
+        />
+      </Section>
+
+      <Section
+        title="ConflictResolutionPanel"
+        subtitle="并发冲突不会静默覆盖；并列展示我的版本与最新版本，并保留取消路径。"
+      >
+        <ConflictResolutionPanel
+          mine={
+            <div className="space-y-1">
+              <div>数量：1,200</div>
+              <div>交期：8 月 28 日</div>
+            </div>
+          }
+          latest={
+            <div className="space-y-1">
+              <div>数量：1,500</div>
+              <div>交期：8 月 30 日</div>
+            </div>
+          }
+          keepMineAction={
+            <Button type="button" variant="outline" size="sm">
+              保留我的版本
+            </Button>
+          }
+          useLatestAction={
+            <Button type="button" size="sm">
+              使用最新版本
+            </Button>
+          }
+          cancelAction={
+            <Button type="button" variant="ghost" size="sm">
+              取消
+            </Button>
+          }
+        />
+      </Section>
+
+      <Section
+        title="ConfirmActionDialog"
+        subtitle="L2 先核对影响范围；L3 还必须填写审计理由，关闭后焦点回到触发按钮。"
+      >
+        <div className="flex flex-wrap gap-3">
+          <ConfirmActionDialog
+            level="L2"
+            trigger={<Button variant="outline">停用通知群</Button>}
+            title="停用“生产通知群”？"
+            description="停用前请确认下游通知范围。"
+            impactItems={[
+              '新通知不会再投递到该群。',
+              '历史投递日志仍会保留。',
+            ]}
+            confirmLabel="确认停用"
+          />
+          <ConfirmActionDialog
+            level="L3"
+            trigger={<Button variant="destructive">作废结算结果</Button>}
+            title="作废这份结算结果？"
+            description="这是高风险操作，理由会进入审计记录。"
+            impactItems={[
+              '当前结算结果将不再作为付款依据。',
+              '需要重新核算后才能继续后续流程。',
+            ]}
+            confirmLabel="填写理由并作废"
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="终态与表格空态"
+        subtitle="终态保持中性只读；表格空态提供合法 table 行与紧凑移动形态。"
+      >
+        <div className="space-y-4">
+          <TerminalReadOnlyBanner
+            title="工单已结案，仅供查看"
+            description="数量、价格和生产记录已锁定；后续调整请创建新工单。"
+          />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-left">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">工单号</th>
+                    <th className="px-4 py-2 font-medium">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <TableEmptyState
+                    colSpan={2}
+                    title="暂无待处理工单"
+                    description="新工单提交后会出现在这里。"
+                  />
+                </tbody>
+              </table>
+            </div>
+            <TableEmptyState
+              variant="compact"
+              title="筛选无结果"
+              description="请清除筛选或更换查询条件。"
+              action={
+                <Button type="button" variant="outline" size="sm">
+                  清除筛选
+                </Button>
+              }
+            />
+          </div>
+        </div>
+      </Section>
+
       <Section title="PageHeader" subtitle="本页顶部就在用。">
         <div className="rounded-xl border bg-card p-6">
           <PageHeader
@@ -231,7 +485,7 @@ export default function ShowcasePage() {
           />
         </div>
       </Section>
-    </div>
+    </main>
   );
 }
 

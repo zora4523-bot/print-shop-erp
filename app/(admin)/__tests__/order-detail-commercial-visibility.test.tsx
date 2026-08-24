@@ -150,6 +150,10 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).toContain('生产安排');
     expect(html).toContain('张师傅');
+    expect(html).toContain(
+      'top:calc(3.5rem + env(safe-area-inset-top, 0px))',
+    );
+    expect(html).toContain('z-[9]');
   });
 
   it('keeps customer charge details for SALES without exposing internal costs', async () => {
@@ -265,6 +269,8 @@ describe('order detail — 暂不能完工横幅', () => {
 
     expect(html).toContain('暂不能完工');
     expect(html).toContain('烫金款');
+    expect(html).toContain('外协履约数量不足');
+    expect(html).not.toContain('还没有任何未取消的外协单覆盖');
     expect(html).toContain('/foreman/outsource/new?orderId=order-1');
   });
 

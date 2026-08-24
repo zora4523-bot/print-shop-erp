@@ -183,13 +183,18 @@ The HTTP response is `202 queued`; the eventual result contains counts only.
 Any filesystem permission failure must leave the job retryable/DEAD instead of
 being reported as a successful cleanup.
 
-After Pigsty `pg_cron` activation, copy `schedule_sql` only from ready rows:
+Confirm the database HTTP scheduler is retired and no schedule SQL is exposed:
 
 ```sql
 SELECT job_name, ready_to_schedule, blockers, schedule_sql, unschedule_sql
 FROM app_ops.cron_http_job_readiness
 ORDER BY priority, job_name;
 ```
+
+Every row must have `ready_to_schedule = false`,
+`blockers = {database_http_scheduler_retired}`, and `schedule_sql IS NULL`.
+Then confirm the host scheduler is installed with `sudo crontab -l`; its secret
+must come from the root-only `CRON_SECRET_FILE` used by `deploy/run-cron.sh`.
 
 ## pgBackRest 自动验收
 
@@ -233,7 +238,8 @@ SELECT surface_key, ready_for_search, blockers
 FROM app_ops.search_index_readiness
 ORDER BY priority, surface_key;
 
-SELECT ready_for_pg_cron_http, ready_for_query_stats, blockers
+SELECT ready_for_pg_cron_http, ready_for_query_stats, blockers,
+       recommended_scheduler_steps
 FROM app_ops.ops_extension_readiness;
 
 SELECT anon_installed, pgaudit_installed, blockers

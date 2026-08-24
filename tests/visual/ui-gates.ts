@@ -78,7 +78,9 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
         );
       }
       if (
-        (style.position === 'fixed' || style.position === 'sticky') &&
+        (style.position === 'fixed' ||
+          (style.position === 'sticky' &&
+            (style.top !== 'auto' || style.bottom !== 'auto'))) &&
         rect.top < viewportHeight &&
         rect.bottom > viewportHeight + 1
       ) {
@@ -137,6 +139,7 @@ export async function expectA11yGate(page: Page) {
     help: violation.help,
     targets: violation.nodes.map((node) => ({
       selector: node.target.join(' '),
+      html: node.html,
       summary: node.failureSummary,
     })),
   }));

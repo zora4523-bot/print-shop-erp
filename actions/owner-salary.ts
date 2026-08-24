@@ -49,6 +49,8 @@ import type {
   CsPayrollPaymentResult,
 } from './owner-salary.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
+import { getDailySalaryRecomputeImpact } from '@/lib/salary/daily-recompute-impact';
+import { writeAuditLog } from '@/lib/audit-log';
 
 // Owner kicks the daily-salary computation manually — useful when
 // cron missed, when a worker's late report changes the totals, or
@@ -59,7 +61,7 @@ export async function recomputeDailySalaryAction(
   _prev: RecomputeDailyResult | null,
   raw: unknown,
 ): Promise<RecomputeDailyResult> {
-  await requirePermission('salary:rule:manage');
+  const actor = await requirePermission('salary:rule:manage');
 
   const parsed = recomputeDailySalarySchema.safeParse(raw);
   if (!parsed.success) {
@@ -67,28 +69,85 @@ export async function recomputeDailySalaryAction(
   }
 
   try {
+    const impact = await getDailySalaryRecomputeImpact(
+      parsed.data.date,
+      parsed.data.workerId,
+    );
+    const sameImpact =
+      _prev?.status === 'confirm' &&
+      _prev.impact.candidateWorkerCount === impact.candidateWorkerCount &&
+      _prev.impact.affectedWorkerCount === impact.affectedWorkerCount &&
+      _prev.impact.createCount === impact.createCount &&
+      _prev.impact.overwriteUnpaidCount === impact.overwriteUnpaidCount &&
+      _prev.impact.paidSkippedCount === impact.paidSkippedCount;
+    const confirmationMatchesPreview =
+      parsed.data.confirmed &&
+      _prev?.status === 'confirm' &&
+      _prev.date === parsed.data.date &&
+      _prev.workerId === parsed.data.workerId &&
+      // 新 UI 在预检后才输入理由，所以首个空理由允许绑定。
+      // 一旦服务端已返回过非空理由，再改理由就必须重新确认。
+      (_prev.reason === '' || _prev.reason === parsed.data.reason) &&
+      sameImpact;
+
+    // 确认请求也会重新计算 impact。日期/师傅/已绑定理由
+    // 变化，或预检后数据变动，都只返回新预检而不写入。
+    if (!confirmationMatchesPreview) {
+      return {
+        status: 'confirm',
+        date: parsed.data.date,
+        ...(parsed.data.workerId ? { workerId: parsed.data.workerId } : {}),
+        reason: parsed.data.reason,
+        impact,
+      };
+    }
+
+    let result: Extract<RecomputeDailyResult, { status: 'success' }>;
     if (parsed.data.workerId) {
       await computeDailyWorkerSalary(parsed.data.workerId, parsed.data.date);
-      revalidatePath('/owner/salary/daily');
-      return {
+      result = {
         status: 'success',
         date: parsed.data.date,
         workerCount: 1,
         errorCount: 0,
         errors: [],
+        impact,
+      };
+    } else {
+      const { settled, errors } = await computeDailyForAllMachineWorkers(
+        parsed.data.date,
+      );
+      result = {
+        status: 'success',
+        date: parsed.data.date,
+        workerCount: settled.length,
+        errorCount: errors.length,
+        errors,
+        impact,
       };
     }
-    const { settled, errors } = await computeDailyForAllMachineWorkers(
-      parsed.data.date,
-    );
+
+    await writeAuditLog({
+      actor,
+      action: 'SALARY_DAILY_RECOMPUTE',
+      entityType: parsed.data.workerId
+        ? 'DailyWorkerSalary'
+        : 'DailyWorkerSalaryBatch',
+      entityId: parsed.data.workerId
+        ? `${parsed.data.date}:${parsed.data.workerId}`
+        : parsed.data.date,
+      before: { impact },
+      after: {
+        reason: parsed.data.reason,
+        workerCount: result.workerCount,
+        errorCount: result.errorCount,
+      },
+      requestMetadata: {
+        source: 'owner-salary.recomputeDailySalaryAction',
+      },
+    });
     revalidatePath('/owner/salary/daily');
-    return {
-      status: 'success',
-      date: parsed.data.date,
-      workerCount: settled.length,
-      errorCount: errors.length,
-      errors,
-    };
+    return result;
   } catch (err) {
     if (err instanceof DailySalaryError) {
       return { status: 'error', message: err.message };
@@ -112,7 +171,15 @@ export async function setDailySalaryPaidAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  const marked = await markDailySalaryPaid(id, parsed.data.isPaid);
+  let marked: Awaited<ReturnType<typeof markDailySalaryPaid>>;
+  try {
+    marked = await markDailySalaryPaid(id, parsed.data.isPaid);
+  } catch (err) {
+    if (err instanceof DailySalaryError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
   revalidatePath('/owner/salary/daily');
 
   // 「仅未发」筛选下标记已发后，这一行会直接从列表消失，承载 success
@@ -409,7 +476,14 @@ export async function setHourlyPayrollPaidAction(
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 
-  await markHourlyPayrollPaid(id, parsed.data.isPaid);
+  try {
+    await markHourlyPayrollPaid(id, parsed.data.isPaid);
+  } catch (err) {
+    if (err instanceof HourlyAggregateError) {
+      return { status: 'error', message: err.message };
+    }
+    throw err;
+  }
   revalidatePath('/owner/salary/hourly');
   return { status: 'success' };
 }

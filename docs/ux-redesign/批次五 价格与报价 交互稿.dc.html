@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3, h4 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-p { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .btn-x { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: 1px solid #e4e4e7; border-radius: 8px; background: #f4f4f5; color: #52525b; white-space: nowrap }
+  .fld { font-size: 12.5px; height: 30px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; display: flex; align-items: center; padding: 0 10px }
+  .cap { font-size: 12.5px; color: #52525b }
+  .oid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 3px 8px; background: #18181b; color: #fff; border-radius: 5px; text-decoration: none }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">批次五 · 价格与报价</h1>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">1280×800</span>
+      <span class="pill" style="background: #fef2f2; color: #b91c1c">9 个页面</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty"><b>证据范围</b>：本轮打开了 external-sales-price-book-versions-light（1280），加上你最初上传的收费项目工作台全屏图，以及我完整读过的 <code>ExternalSalesChargeWorkspace</code> 与 <code>ExternalSalesPriceTierGroupEditor</code> 两个组件源码——P1 与 P2 因此是观察。<b>未打开的原图有 6 张</b>：sales-processing / sales-logistics 报价查询、external-sales-logistics 工作台、以及三张 seven-tier fixture；凡依赖它们的判断在下方都标了「推断」。<b>本批的核心命题</b>：当前价、调价草稿、计划生效版本必须始终可分——旅程文档写死了「不得将草稿包装成已生效价」，而调价直接影响开单金额。</p>
+  </div>
+
+  <section class="sect" id="p1">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">P1</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">外部销售收费项目工作台</h2>
+      <span class="cap">/owner/prices/external-sales/items · 契约 01–06 08 09</span>
+    </div>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">观察：右侧面板顶部原样复制了左侧行里的 10 个价格胶囊；逐行输入框上方重复「500 个草稿单价（元/个）」；「计价单位 = 每个成品」十行完全相同；行高约 80px 装一个输入框；数字左对齐无法比价；「状态」列把「启用」开关和「未修改」差异态混在一起；草稿条在页面顶部一滚就消失。都改了。<b>注意「计价单位」这一列只有按个/按张/每万个/每款一次时才是常量</b>——整批固定总价时它是算出来的折合单价，不能上移。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>价格管理</span><span>›</span><span>外部销售收费</span><span>›</span><span style="color: #3f3f46">收费项目</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="padding: 10px 20px 0; flex: none">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px; background: #18181b; color: #fff">
+            <span class="pill" style="background: rgba(255,255,255,0.14); color: #fff">调价草稿 · 第 3 版</span>
+            <span class="nw" style="font-size: 13px; font-variant-numeric: tabular-nums"><b>2</b> 个收费项目 · <b>7</b> 个数量档已调整</span>
+            <span class="nw" style="font-size: 12.5px; color: #d4d4d8">原因：8 月原纸上调</span>
+            <span class="nw" style="font-size: 12.5px; color: #d4d4d8">最近保存 14:32</span>
+            <div style="flex: 1"></div>
+            <span class="pill nw" style="background: rgba(255,255,255,0.14); color: #fff">4 项待保存</span>
+            <button type="button" class="btn-s" style="height: 30px; font-size: 12.5px">查看修改</button>
+            <button type="button" class="btn-s" style="height: 30px; font-size: 12.5px">保存改动</button>
+            <button type="button" class="btn-p" style="height: 30px; font-size: 12.5px">去校验并发布</button>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 12px 20px 0; flex: none">
+          <div>
+            <h3 style="margin: 0; font-size: 22px; font-weight: 700">加工费收费项目</h3>
+            <div class="cap" style="margin-top: 2px">草稿只影响未来版本，发布前不改变当前工单计价。</div>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <div style="display: flex; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden">
+              <span class="nw" style="font-size: 12.5px; padding: 8px 13px; background: #dc2626; color: #fff; font-weight: 500">加工费</span>
+              <span class="nw" style="font-size: 12.5px; padding: 8px 13px; background: #fff; color: #3f3f46">快递与打包耗材</span>
+            </div>
+            <button type="button" class="btn-s">价目版本</button>
+          </div>
+        </div>
+
+        <div style="padding: 10px 20px 0; flex: none">
+          <div class="pcard" style="padding: 9px 12px">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <div class="fld nw" style="width: 210px; color: #71717a">搜索项目名称、类目或产品</div>
+              <span class="cap" style="font-size: 12px">类目</span><span class="fld nw">基础加工费 ▾</span>
+              <span class="cap" style="font-size: 12px">计价</span><span class="fld nw">按个计价 ▾</span>
+              <span class="nw" style="font-size: 12.5px; color: #b91c1c">更多筛选 3</span>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums">共 <b>68</b> 项</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f4f4f5">
+              <span class="cap" style="font-size: 11px">已选</span>
+              <sc-for list="{{ chips }}" as="c" hint-placeholder-count="3">
+                <span class="pill nw" style="background: #fef2f2; color: #b91c1c">{{ c }} ✕</span>
+              </sc-for>
+              <span class="nw" style="font-size: 12px; color: #b91c1c">清除全部</span>
+              <div style="flex: 1"></div>
+              <span class="pill nw" style="background: #f4f4f5; color: #52525b">只看本次修改</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 500px; gap: 14px; padding: 11px 20px 0; flex: 1; min-height: 0">
+          <div class="pcard" style="overflow: hidden; display: flex; flex-direction: column; min-height: 0">
+            <div style="overflow-y: auto; min-height: 0">
+              <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; position: sticky; top: 0">
+                    <span style="font-size: 13px; font-weight: 600">{{ g.paper }}</span>
+                    <span class="cap" style="font-size: 11.5px">{{ g.cat }}</span>
+                    <sc-if value="{{ g.warn }}" hint-placeholder-val="{{ false }}">
+                      <span class="pill nw" style="background: #fffbeb; color: #b45309">纸张待补全 · 补全</span>
+                    </sc-if>
+                    <div style="flex: 1"></div>
+                    <span class="cap nw" style="font-size: 11.5px">{{ g.n }} 项</span>
+                  </div>
+                  <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 10px 13px; border-bottom: 1px solid #f5f5f7; background: {{ it.bg }}; box-shadow: inset 3px 0 0 {{ it.edge }}">
+                      <div style="min-width: 0; flex: 1">
+                        <div style="display: flex; align-items: center; gap: 8px">
+                          <span class="nw" style="font-size: 13px; font-weight: 500">{{ it.name }}</span>
+                          <sc-if value="{{ it.sel }}" hint-placeholder-val="{{ false }}">
+                            <span class="pill" style="background: #dc2626; color: #fff">正在编辑</span>
+                          </sc-if>
+                        </div>
+                        <div class="nw" style="font-size: 11.5px; color: #52525b; margin-top: 2px; font-variant-numeric: tabular-nums">自动计价 · {{ it.summary }}</div>
+                      </div>
+                      <div style="width: 68px; height: 6px; border-radius: 3px; background: #f0f0f2; overflow: hidden; flex: none">
+                        <div style="height: 100%; background: #dc2626; width: {{ it.barW }}"></div>
+                      </div>
+                      <span class="nw" style="width: 96px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: {{ it.chC }}">{{ it.changed }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div class="pcard" style="overflow: hidden; display: flex; flex-direction: column; min-height: 0; border-color: #fca5a5">
+            <div style="padding: 11px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; flex: none">
+              <div style="display: flex; align-items: flex-start; gap: 10px">
+                <div style="min-width: 0; flex: 1">
+                  <div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #b91c1c">正在编辑 · 收费项目</div>
+                  <div style="font-size: 17px; font-weight: 700; margin-top: 1px">专版单色平烫 大号</div>
+                </div>
+                <span class="pill" style="background: #fef2f2; color: #b91c1c">10 个数量档</span>
+                <span class="cap nw" style="font-size: 16px; padding: 0 2px">✕</span>
+              </div>
+              <div class="nw" style="display: flex; align-items: center; gap: 7px; margin-top: 7px; font-size: 12px; color: #3f3f46">
+                <span style="color: #52525b">纸张</span><b>160g艳闪 / 红卡</b><span style="color: #d4d4d8">·</span>
+                <span style="color: #52525b">规格</span><b>大号 9×16.5</b><span style="color: #d4d4d8">·</span>
+                <span style="color: #52525b">计价</span><b>按个计价</b><span style="color: #d4d4d8">·</span>
+                <span style="color: #52525b">计价单位</span><b>每个成品</b>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-bottom: 1px solid #f0f0f2; flex: none">
+              <span class="nw" style="font-size: 12.5px; font-weight: 500">批量调整</span>
+              <div class="fld nw" style="width: 78px; justify-content: flex-end">+3 %</div>
+              <button type="button" class="btn-s" style="height: 28px; font-size: 12px">应用到 10 档</button>
+              <button type="button" class="btn-s" style="height: 28px; font-size: 12px">撤销上一步</button>
+              <div style="flex: 1"></div>
+              <span class="cap nw" style="font-size: 11.5px">负数为下调</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 84px 106px 132px 1fr 74px; gap: 10px; padding: 7px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11px; color: #71717a; flex: none">
+              <div style="text-align: right">数量</div><div style="text-align: right">当前单价</div><div style="text-align: right">草稿单价（元/个）</div><div style="text-align: right">变化</div><div style="text-align: right">启用</div>
+            </div>
+            <div style="overflow-y: auto; min-height: 0">
+              <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="10">
+                <div style="display: grid; grid-template-columns: 84px 106px 132px 1fr 74px; gap: 10px; align-items: center; padding: 5px 13px; min-height: 44px; border-bottom: 1px solid #f5f5f7; background: {{ t.bg }}">
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums">{{ t.q }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: #52525b">{{ t.cur }}</div>
+                  <div style="position: relative">
+                    <span style="position: absolute; left: 9px; top: 8px; font-size: 12px; color: #71717a">¥</span>
+                    <div class="fld nw" style="justify-content: flex-end; padding-left: 22px; border-color: {{ t.inBd }}; background: {{ t.inBg }}; font-variant-numeric: tabular-nums">{{ t.draft }}</div>
+                  </div>
+                  <div class="nw" style="display: flex; align-items: baseline; justify-content: flex-end; gap: 7px; font-variant-numeric: tabular-nums; color: {{ t.dC }}">
+                    <span style="font-size: 12.5px; font-weight: 500">{{ t.dA }}</span>
+                    <span style="font-size: 11.5px; opacity: 0.8; min-width: 46px; text-align: right">{{ t.dP }}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                    <i style="display: block; width: 15px; height: 15px; border-radius: 4px; border: 1.4px solid {{ t.ckBd }}; background: {{ t.ckBg }}"></i>
+                    <span class="cap nw" style="font-size: 11.5px">{{ t.on }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; gap: 11px; padding: 9px 13px; border-top: 1px solid #f0f0f2; background: #fafafa; flex: none">
+              <div style="min-width: 0; flex: 1">
+                <div class="nw" style="font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums">4 项待保存 · 4 档相对当前价已调整</div>
+                <div class="cap" style="font-size: 11.5px">任意一行校验失败时，整组价格都不会保存。</div>
+              </div>
+              <button type="button" class="btn-s" style="height: 30px; font-size: 12.5px">放弃改动</button>
+              <button type="button" class="btn-p" style="height: 30px; font-size: 12.5px">保存全部单价（10 项）</button>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="p2">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">P2</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">价目发布中心</h2>
+      <span class="cap">/owner/prices/external-sales/versions · 契约 07 08 09 · 四种版本状态必须始终可分</span>
+    </div>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">观察（external-sales-price-book-versions-light 1280）：页面实名「发布中心」，<b>按用途分两栏</b>（加工费 2 个版本 / 快递与打包耗材 1 个版本），不是按状态分卡；价目簿按月命名「外部销售加工费价目簿（2026-08）· 第 2 版」，生效区间写「2026/08/01 08:00 → 长期」，共 121 项；调价原因在<b>发起时</b>就必填，右侧「从当前生效价目开始调整」会复制当前价目成独立草稿。以上全部保留。<b>我加的是下半屏</b>：发布前把「谁会受影响」摆出来——涨跌区间、生效时间、以及已按旧价开出但尚未结案的工单。发布是 L3：不可逆、改的是所有人开单时用的价。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>价格管理</span><span>›</span><span>外部销售收费</span><span>›</span><span style="color: #3f3f46">价目版本</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div><h3 style="margin: 0; font-size: 22px; font-weight: 700">发布中心</h3><div class="cap" style="margin-top: 2px">集中查看调价草稿、计划生效和历史版本；日常收费项目查看与编辑在独立工作台完成。</div></div>
+          <button type="button" class="btn-s">返回收费项目</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding: 12px 20px 0; flex: none">
+          <sc-for list="{{ purposes }}" as="p" hint-placeholder-count="3">
+            <div class="pcard" style="padding: 11px 12px 12px; border-color: {{ p.bd }}; background: {{ p.bg }}">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600">{{ p.name }}</span>
+                <div style="flex: 1"></div>
+                <span class="cap nw" style="font-size: 11.5px">{{ p.n }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 8px">
+                <sc-for list="{{ p.vers }}" as="v" hint-placeholder-count="2">
+                  <div style="padding: 8px 10px; border: 1px solid {{ v.bd }}; border-radius: 9px; background: {{ v.bg }}">
+                    <div style="display: flex; align-items: center; gap: 7px">
+                      <span class="nw" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ v.title }}</span>
+                      <div style="flex: 1"></div>
+                      <span class="pill nw" style="background: {{ v.tagBg }}; color: {{ v.tagFg }}">{{ v.tag }}</span>
+                    </div>
+                    <div class="nw" style="font-size: 11.5px; color: #52525b; margin-top: 2px; font-variant-numeric: tabular-nums">{{ v.meta }}</div>
+                    <sc-if value="{{ v.act }}" hint-placeholder-val="{{ false }}">
+                      <div class="nw" style="font-size: 12px; font-weight: 500; margin-top: 6px; color: #b91c1c">{{ v.act }}</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ p.form }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top: 8px; padding: 9px 10px; border: 1px solid #f0f0f2; border-radius: 9px; background: #fafafa">
+                  <div class="cap" style="font-size: 11.5px; line-height: 1.55">{{ p.form }}</div>
+                  <div style="height: 40px; margin-top: 6px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; padding: 7px 9px; font-size: 12px; color: #71717a">例如：2026 年 9 月原材料与快递调价</div>
+                  <button type="button" class="btn-p" style="width: 100%; height: 30px; font-size: 12.5px; margin-top: 6px">复制当前价目并开始调价</button>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 420px; grid-template-rows: minmax(0, 1fr); gap: 14px; padding: 13px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="overflow: hidden; display: flex; flex-direction: column; min-height: 0">
+            <div style="display: flex; align-items: center; gap: 9px; padding: 10px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; flex: none">
+              <span style="font-size: 13px; font-weight: 600">第 3 版草稿 · 本次修改</span>
+              <span class="pill" style="background: #fef2f2; color: #b91c1c">2 项 · 7 档</span>
+              <div style="flex: 1"></div>
+              <span class="cap nw" style="font-size: 11.5px">按涨幅从大到小</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 96px 96px 116px; gap: 10px; padding: 8px 13px; border-bottom: 1px solid #f0f0f2; font-size: 11px; color: #71717a; flex: none">
+              <div>收费项目 / 数量档</div><div style="text-align: right">当前价</div><div style="text-align: right">新价</div><div style="text-align: right">变化</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ pub }}" as="p" hint-placeholder-count="7">
+                <div style="display: grid; grid-template-columns: 1fr 96px 96px 116px; gap: 10px; align-items: center; padding: 8px 13px; border-bottom: 1px solid #f5f5f7">
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 12.5px; overflow: hidden; text-overflow: ellipsis">{{ p.name }}</div>
+                    <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px; font-variant-numeric: tabular-nums">{{ p.tier }}</div>
+                  </div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: #52525b">{{ p.a }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500">{{ p.b }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500; color: #b45309">{{ p.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding-right: 2px">
+            <div class="pcard" style="padding: 12px 13px; border-color: #fecaca; flex: none">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span class="pill" style="background: #fef2f2; color: #b91c1c">L3 · 不可逆</span>
+                <span style="font-size: 13px; font-weight: 600">发布影响</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 9px">
+                <sc-for list="{{ impact }}" as="m" hint-placeholder-count="5">
+                  <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px">
+                    <span class="nw" style="font-size: 12px; color: #52525b">{{ m.k }}</span>
+                    <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500; color: {{ m.c }}">{{ m.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top: 10px; padding: 9px 11px; border: 1px solid #fed7aa; border-radius: 9px; background: #fffbeb">
+                <div style="font-size: 12.5px; line-height: 1.6; color: #92400e">已按旧价开出、尚未结案的工单<b>不会</b>被重新计价——金额快照已固定。新价只影响生效时间之后新建的工单。</div>
+              </div>
+            </div>
+            <div class="pcard" style="padding: 12px 13px; flex: none">
+              <div style="font-size: 13px; font-weight: 600">校验</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px">
+                <sc-for list="{{ checks }}" as="c" hint-placeholder-count="4">
+                  <div style="display: flex; align-items: flex-start; gap: 8px">
+                    <span class="pill nw" style="background: {{ c.bg }}; color: {{ c.fg }}; flex: none">{{ c.tag }}</span>
+                    <span style="font-size: 12px; line-height: 1.55; color: #3f3f46">{{ c.t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div class="pcard" style="padding: 11px 13px; flex: none">
+              <div style="display: flex; gap: 8px">
+                <button type="button" class="btn-s" style="flex: 1">仅保存草稿</button>
+                <button type="button" class="btn-p" style="flex: 1.4">校验并发布</button>
+              </div>
+              <div class="cap" style="font-size: 11.5px; margin-top: 7px; line-height: 1.55">发布需选择生效时间并填写发布说明；操作留痕，可在版本历史回溯。</div>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="rest" style="border-bottom: none">
+    <h2 style="margin: 0 0 6px; font-size: 23px; font-weight: 700">本批其余七页</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">销售报价查询与内部报价五页复用已定的骨架，这里只写它们与前两屏的差异和各自独有的状态。</p>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 860px)); gap: 16px 22px">
+      <sc-for list="{{ rest }}" as="r" hint-placeholder-count="7">
+        <div class="pcard" style="padding: 13px 15px 14px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 14.5px; font-weight: 600">{{ r.name }}</span>
+            <span class="pill" style="background: {{ r.skBg }}; color: {{ r.skFg }}">{{ r.sk }}</span>
+          </div>
+          <div class="cap" style="font-size: 11.5px; margin-top: 2px">{{ r.route }}</div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; margin-top: 7px; text-wrap: pretty">{{ r.t }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+function navFor(active) {
+  const G = [
+    ['概览', [['Dashboard', 0]]],
+    ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0]]],
+    ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+  ];
+  return G.map(([group, items]) => ({
+    group,
+    items: items.map(([label]) => ({
+      label, w: label === active ? 600 : 400,
+      bg: label === active ? '#f4f4f5' : 'transparent',
+      edge: label === active ? '#dc2626' : 'transparent',
+    })),
+  }));
+}
+
+const CHIPS = ['收费类目：基础加工费', '计价方式：按个计价', '处理方式：自动计价'];
+
+const GROUPS = [
+  ['160g艳闪 / 红卡', '基础加工费', 0, [
+    ['专版单色平烫 大号', '10 档 · ¥0.52 → ¥0.18 / 个', '40%', '4 / 10 档已调整', 1],
+    ['专版单色平烫 中号/方形', '10 档 · ¥0.48 → ¥0.16 / 个', '30%', '3 / 10 档已调整', 0],
+  ]],
+  ['纸张未标（烫金!B13）', '基础加工费', 1, [
+    ['空封现货 大号', '单档 1–9,999,999 个 · ¥0.19 / 个', '0%', '未调整', 0],
+  ]],
+  ['160g杂色珠光纸', '基础加工费', 0, [
+    ['空封现货 杂色珠光纸大号', '单档 1–9,999,999 个 · ¥0.17 / 个', '0%', '未调整', 0],
+  ]],
+  ['触感纸（克重未标）', '基础加工费', 1, [
+    ['空封现货 触感纸中号', '单档 1–9,999,999 个 · ¥0.23 / 个', '0%', '未调整', 0],
+    ['空封现货 触感纸方形', '单档 1–9,999,999 个 · ¥0.22 / 个', '0%', '未调整', 0],
+  ]],
+];
+
+const TIERS = [
+  ['500 个', '¥0.52 / 个', '0.55', '▲ +¥0.03', '+5.8%', 1],
+  ['1,000 个', '¥0.325 / 个', '0.34', '▲ +¥0.015', '+4.6%', 1],
+  ['2,000 个', '¥0.285 / 个', '0.285', '未修改', '', 0],
+  ['3,000 个', '¥0.27 / 个', '0.27', '未修改', '', 0],
+  ['4,000 个', '¥0.245 / 个', '0.255', '▲ +¥0.01', '+4.1%', 1],
+  ['5,000 个', '¥0.22 / 个', '0.22', '未修改', '', 0],
+  ['10,000 个', '¥0.2 / 个', '0.2', '未修改', '', 0],
+  ['20,000 个', '¥0.19 / 个', '0.19', '未修改', '', 0],
+  ['30,000 个', '¥0.19 / 个', '0.19', '未修改', '', 0],
+  ['50,000 个', '¥0.18 / 个', '0.185', '▲ +¥0.005', '+2.8%', 1],
+];
+
+const PURPOSES = [
+  ['加工费', '2 个版本', '#fca5a5', '#fffafa', '', [
+    ['外部销售加工费价目簿（2026-08）· 第 2 版', '基于第 1 版 · 最后更新 08/09 22:47 · 121 项 · 原因：测试', '草稿', '编辑收费项目 · 准备发布', '#fca5a5', '#fff', '#f4f4f5', '#52525b'],
+    ['外部销售加工费价目簿（2026-08）· 第 1 版', '2026/08/01 08:00 → 长期 · 121 项', '当前生效', '', '#e4e4e7', '#fff', '#fef2f2', '#b91c1c'],
+  ]],
+  ['快递与打包耗材', '1 个版本', '#e4e4e7', '#fff', '', [
+    ['外部销售快递与打包耗材价目簿（2026-08）· 第 1 版', '2026/08/01 08:00 → 长期 · 11 项', '当前生效', '', '#e4e4e7', '#fff', '#fef2f2', '#b91c1c'],
+  ]],
+  ['从当前生效价目开始调整', '发起调价', '#e4e4e7', '#fff', '系统会复制当前价目为一份独立草稿。草稿发布前不会影响当前报价，历史工单的原结算金额也不会改变。调价原因（必填）：', []],
+];
+
+const PUB = [
+  ['专版单色平烫 大号', '500 个', '¥0.52', '¥0.55', '+5.8%'],
+  ['专版单色平烫 中号/方形', '500 个', '¥0.48', '¥0.50', '+4.2%'],
+  ['专版单色平烫 大号', '1,000 个', '¥0.325', '¥0.34', '+4.6%'],
+  ['专版单色平烫 中号/方形', '1,000 个', '¥0.31', '¥0.325', '+4.8%'],
+  ['专版单色平烫 大号', '4,000 个', '¥0.245', '¥0.255', '+4.1%'],
+  ['专版单色平烫 大号', '50,000 个', '¥0.18', '¥0.185', '+2.8%'],
+  ['专版单色平烫 中号/方形', '50,000 个', '¥0.16', '¥0.165', '+3.1%'],
+];
+
+const IMPACT = [
+  ['受影响收费项目', '2 / 121', '#27272a'],
+  ['受影响数量档', '7', '#27272a'],
+  ['涨幅区间', '+2.8% ~ +5.8%', '#b45309'],
+  ['无下调项', '0 档', '#52525b'],
+  ['生效时间', '需选择', '#b91c1c'],
+];
+
+const CHECKS = [
+  ['通过', '全部 121 个收费项目都有有效价格', '#ecfdf5', '#047857'],
+  ['通过', '没有留空或格式非法的数量档', '#ecfdf5', '#047857'],
+  ['注意', '3 个收费项目的纸张信息仍标记为「未标」，不影响发布但会影响报价查询的可读性', '#fffbeb', '#b45309'],
+  ['待办', '尚未填写生效时间与发布说明', '#fef2f2', '#b91c1c'],
+];
+
+const REST = [
+  ['销售报价查询', 'S1 列表', '推断 · /sales/quote?section=processing|logistics', '原图（sales-processing / sales-logistics-price-book-light）本轮未打开。只读：销售看到的必须是「当前生效价」，界面不出现草稿、不出现待生效版本——这是旅程文档的硬约束。建议沿用 P1 的左列表 + 右阶梯表结构但删掉全部编辑控件，并加一个按数量试算的输入框：填数量直接告诉销售落在哪一档、单价多少。需原图确认现有结构。'],
+  ['内部报价首页', '混合', '/owner/prices', '阶梯价与加价规则双区块。两者是不同概念（阶梯按数量、加价按产品/工艺/数量条件触发），不要为了一致性合并成一张表。每个区块自己的列表 + 新建入口，各自分页。区块头写明这套价用于工厂直单/内部报价，与外部销售收费不是同一套。'],
+  ['阶梯价 新建 / 编辑', 'S3 表单', '/owner/prices/tiers/new · /tiers/:id', '产品 + 数量阶梯的表单。用 P1 已定的阶梯表模式：数量档一行一档，可增删档位、可批量按百分比生成。保存前校验档位数量递增且不重叠——这个校验必须在填的时候就给，不是提交后。'],
+  ['加价规则 新建 / 编辑', 'S3 表单', '/owner/prices/adjustments/new · /adjustments/:id', '条件式表单：产品 / 工艺 / 数量区间触发。条件是渐进展开的——选了触发类型才出现对应字段。右栏常驻「命中预览」：按当前条件，会命中哪些产品、大约多少张历史工单会受影响。这是唯一能让人看懂规则写没写对的办法。'],
+  ['视觉 fixture', '特殊', '推断 · /owner/prices/external-sales/visual-fixture', '三张 fixture 原图（current / draft / per-piece seven-tier）本轮未打开。它是确定性视觉验收页，不是日常业务入口；必须与真实工作台的组件完全一致，否则失去做视觉回归基线的意义。改 P1 的阶梯表时这一页必须同步。'],
+  ['两个兼容跳转', '特殊', '/external-sales · /external-sales/logistics', '纯跳转，无独立 UI。保留即可，不要设计成页面。'],
+  ['本批五态与冲突', '契约 09', '—', 'Loading 左列表骨架 6 行、右栏「选择一个收费项目」；Empty 分「无收费项目 / 筛选无结果 / 无权限」；Disabled 分「无草稿时只读」与「该项目不在当前草稿内」，两种文案不同；Pending 保存整组时锁定并显示「任意一行失败整组不保存」；并发冲突用 expectedUpdatedAt（组件里确实有这个字段），冲突时给差异三选而不是静默覆盖。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: navFor(''),
+      chips: CHIPS,
+      groups: GROUPS.map(([paper, cat, warn, items]) => ({
+        paper, cat, warn: !!warn, n: items.length,
+        items: items.map(([name, summary, barW, changed, sel]) => ({
+          name, summary, barW, changed, sel: !!sel,
+          bg: sel ? '#fffafa' : '#fff',
+          edge: sel ? '#dc2626' : 'transparent',
+          chC: changed === '未调整' ? '#71717a' : '#b45309',
+        })),
+      })),
+      tiers: TIERS.map(([q, cur, draft, dA, dP, ch]) => ({
+        q, cur, draft, dA, dP, on: '启用',
+        bg: ch ? '#fffafa' : '#fff',
+        inBd: ch ? '#fca5a5' : '#e4e4e7',
+        inBg: ch ? '#fff' : '#fff',
+        dC: ch ? '#b45309' : '#71717a',
+        ckBd: '#dc2626', ckBg: '#dc2626',
+      })),
+      purposes: PURPOSES.map(([name, n, bd, bg, form, vers]) => ({
+        name, n, bd, bg, form,
+        vers: vers.map(([title, meta, tag, act, vbd, vbg, tagBg, tagFg]) => ({ title, meta, tag, act, bd: vbd, bg: vbg, tagBg, tagFg })),
+      })),
+      pub: PUB.map(([name, tier, a, b, d]) => ({ name, tier, a, b, d })),
+      impact: IMPACT.map(([k, v, c]) => ({ k, v, c })),
+      checks: CHECKS.map(([tag, t, bg, fg]) => ({ tag, t, bg, fg })),
+      rest: REST.map(([name, sk, route, t]) => ({
+        name, sk, route, t,
+        skBg: sk === 'S1 列表' ? '#eff6ff' : (sk === 'S3 表单' ? '#fef2f2' : (sk === '契约 09' ? '#f5f3ff' : '#f4f4f5')),
+        skFg: sk === 'S1 列表' ? '#1d4ed8' : (sk === 'S3 表单' ? '#b91c1c' : (sk === '契约 09' ? '#6d28d9' : '#52525b')),
+      })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

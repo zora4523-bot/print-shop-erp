@@ -154,34 +154,22 @@ describe('dispatchNotification', () => {
     );
   });
 
-  it('durable 入队失败仍永不抛，并降级 best-effort notify', async () => {
+  it('durable 入队失败向上冒泡，绝不做可能双发的 inline fallback', async () => {
     modeMock.mockReturnValue('durable');
     enqueueNotificationJobMock.mockRejectedValue(
       Object.assign(new Error('connection string must stay private'), {
         name: 'DatabaseUnavailableError',
       }),
     );
-    const errorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
     await expect(
       dispatchNotification('ORDER_COMPLETED', {
         orderId: 'o1',
         orderNo: 'O-1',
         customerRef: null,
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ name: 'DatabaseUnavailableError' });
 
-    expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[dispatchNotification] durable enqueue failed:',
-      'DatabaseUnavailableError',
-    );
-    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain(
-      'connection string',
-    );
-    errorSpy.mockRestore();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });
 
@@ -197,6 +185,7 @@ describe('dispatchNotification · notify 返回可重试 outcome 时不带崩同
     skipped: 0,
     failed: 1,
     retryable: true,
+    unknown: 0,
     unlogged: 0,
     errorCodes: ['http 500'],
   };
@@ -231,16 +220,12 @@ describe('dispatchNotification · notify 返回可重试 outcome 时不带崩同
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
-  it('durable 入队失败后的 void 降级：不抛', async () => {
+  it('durable 入队失败：冒泡且不启动 inline sender', async () => {
     modeMock.mockReturnValue('durable');
     enqueueNotificationJobMock.mockRejectedValue(new Error('db down'));
-    const errorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
     await expect(
       dispatchNotification('ORDER_COMPLETED', payload),
-    ).resolves.toBeUndefined();
-    expect(notifyMock).toHaveBeenCalledTimes(1);
-    errorSpy.mockRestore();
+    ).rejects.toThrow('db down');
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });

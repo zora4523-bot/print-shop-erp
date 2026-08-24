@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .cap { font-size: 12.5px; color: #52525b }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2200px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <h1 style="margin: 0; font-size: 36px; font-weight: 700">交付总览与遗漏核对</h1>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">这一页只做一件事：把交付过的东西和还没闭合的东西一次列清，避免「以为做完了」。分四块 —— 交付物、85 页覆盖深度、未闭合项（分三类：等你回答 / 等材料 / 提案待立项）、以及我自己出过的错的清单。<b>最后一块不是自我检讨</b>，是给接手的人看的：这些坑我踩过，别再踩。</p>
+  </div>
+
+  <section class="sect">
+    <h2 style="margin: 0 0 16px; font-size: 24px; font-weight: 700">一 · 交付物（13 份）</h2>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1060px)); gap: 12px 22px">
+      <sc-for list="{{ files }}" as="f" hint-placeholder-count="10">
+        <div class="pcard" style="padding: 12px 15px 13px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 14.5px; font-weight: 600">{{ f.name }}</span>
+            <span class="pill" style="background: {{ f.tBg }}; color: {{ f.tFg }}">{{ f.tag }}</span>
+          </div>
+          <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 5px; text-wrap: pretty">{{ f.t }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2 style="margin: 0 0 4px; font-size: 24px; font-weight: 700">二 · 85 页覆盖深度</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">三档深度：<b>交互稿</b>= 1280 实屏 + 状态 + 操作分级；<b>线框</b>= 区块与契约；<b>契约</b>= 只有模式与规则，没画屏。<b>没有一页是零覆盖</b>，但深度差别很大，实现排期要按这个来。</p>
+    <div class="pcard" style="max-width: 2120px; overflow: hidden">
+      <div style="display: grid; grid-template-columns: 240px 90px 116px 1fr; gap: 14px; padding: 10px 16px; background: #fafafa; border-bottom: 1px solid #ececee; font-size: 11.5px; color: #71717a">
+        <div>页面族</div><div style="text-align: right">页数</div><div>深度</div><div>说明</div>
+      </div>
+      <sc-for list="{{ cover }}" as="c" hint-placeholder-count="12">
+        <div style="display: grid; grid-template-columns: 240px 90px 116px 1fr; gap: 14px; padding: 10px 16px; border-bottom: 1px solid #f5f5f7; align-items: start">
+          <div style="font-size: 13px; font-weight: 500">{{ c.fam }}</div>
+          <div class="nw" style="text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; color: #52525b">{{ c.n }}</div>
+          <div><span class="pill nw" style="background: {{ c.dBg }}; color: {{ c.dFg }}">{{ c.depth }}</span></div>
+          <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ c.t }}</div>
+        </div>
+      </sc-for>
+      <div style="display: grid; grid-template-columns: 240px 90px 116px 1fr; gap: 14px; padding: 11px 16px; background: #fafafa; font-size: 12.5px">
+        <div style="font-weight: 600">合计</div>
+        <div class="nw" style="text-align: right; font-weight: 600; font-variant-numeric: tabular-nums">81 + 4</div>
+        <div></div>
+        <div style="color: #52525b">按行加总：5+8+9+13+1+21+5+7+5+1+2+3+1 = <b>81</b> 个有 UI 的页面，加 4 个纯跳转页 = 85。另有 not-found（清单明确不计入 85）与经营分析（新功能，不在 85 之内）。</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2 style="margin: 0 0 16px; font-size: 24px; font-weight: 700">三 · 未闭合项</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 700px)); gap: 18px 22px">
+      <sc-for list="{{ open }}" as="o" hint-placeholder-count="3">
+        <div class="pcard" style="padding: 14px 16px 15px; border-color: {{ o.bd }}">
+          <div style="display: flex; align-items: baseline; gap: 9px">
+            <span class="pill" style="background: {{ o.tBg }}; color: {{ o.tFg }}">{{ o.kind }}</span>
+            <span style="font-size: 15px; font-weight: 600">{{ o.name }}</span>
+          </div>
+          <div class="cap" style="font-size: 12px; margin-top: 4px">{{ o.why }}</div>
+          <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 10px">
+            <sc-for list="{{ o.items }}" as="x" hint-placeholder-count="5">
+              <div style="display: flex; align-items: flex-start; gap: 8px; padding-top: 7px; border-top: 1px solid #f4f4f5">
+                <span style="flex: none; width: 5px; height: 5px; margin-top: 7px; border-radius: 999px; background: {{ o.tFg }}"></span>
+                <span style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ x }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sect" style="border-bottom: none">
+    <h2 style="margin: 0 0 4px; font-size: 24px; font-weight: 700">四 · 我出过的错（给接手的人）</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">全部被复查抓出来并已改。列在这里不是自我检讨 —— 是这些坑有共同的形状，接手的人容易再踩。</p>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1060px)); gap: 14px 22px">
+      <sc-for list="{{ lessons }}" as="l" hint-placeholder-count="5">
+        <div class="pcard" style="padding: 13px 15px 14px">
+          <div style="display: flex; align-items: baseline; gap: 9px">
+            <span class="pill" style="background: #fef2f2; color: #b91c1c">{{ l.n }}</span>
+            <span style="font-size: 15px; font-weight: 600">{{ l.name }}</span>
+          </div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; margin-top: 6px; text-wrap: pretty">{{ l.t }}</div>
+          <div style="margin-top: 9px; padding: 9px 11px; border-radius: 8px; background: #f7fefa; border: 1px solid #bbf7d0">
+            <span style="font-size: 12.5px; line-height: 1.6; color: #065f46; text-wrap: pretty"><b>规避方法：</b>{{ l.fix }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2200,&quot;height&quot;:1500}}">
+const FILES = [
+  ['ERP 全站线框 批次1-3', '线框 + 评审', '外壳/导航/登录/404、Dashboard 与告警、工单四页共 13 屏线框，每屏五态，加 85 页批次计划与 A–E 评审。含完整性核对（分节 85 = 批次 81+4）。'],
+  ['交互与状态设计规范', '契约', '三类骨架（列表 23 / 详情 18 / 表单 40）、十条交互契约、五态、五种业务特有状态、操作三级阶梯、393 降级、页面族×模式映射。全站的地基。'],
+  ['工单四页 交互稿', '交互稿', '列表（批量条 + 行内菜单）、新建（款式主从 + 常驻摘要 + 缺口清单）、详情（常驻动作条 + 时间线）、变更审批（决策列前移 + 逐字段 diff），加 L2/L3 确认层与六个状态帧。'],
+  ['批次四 排产与师傅端 交互稿', '交互稿', '待排产（可派/阻断两列取代被裁的批量状态列）、排产详情（候选卡取代下拉）、师傅报工与任务列表 393 三屏（报工提到首屏 + 吸底 + 超产即时确认）。'],
+  ['批次五 价格与报价 交互稿', '交互稿', '收费项目工作台（Δ 列、44px 行高、批量调价撤销）、发布中心（按用途两栏 + 发布影响 + 校验三级）。本项目证据最扎实的一批。'],
+  ['批次六 账单与薪资 交互稿', '交互稿', '计件工资（重算降级为危险描边、四列拆分、规则快照列）+ 重算与发放两个 L3 确认层。账单四页与薪资其余八页为推断。'],
+  ['批次七八 主数据设置仓库与打印 交互稿', '交互稿 + 契约', '字典 CRUD 通用骨架（覆盖 21 页，「被引用」列 + 停用 L3）、CDR 汇总下载。其余 37 页按模式映射，打印视图未动。'],
+  ['五态组件库与一致性收口', '实现契约', '六个组件的属性签名（Skeleton / EmptyState / ErrorBoundary / DisabledReason / PendingButton / LongTaskReceipt）+ 四条全站收口。可直接照着写。'],
+  ['Dashboard 交互稿', '交互稿', '处理队列优先的首屏 + 未解决队列（传输状态与 job 状态两列，RETRYING+DEAD 合法组合可见）。'],
+  ['经营分析 线框', '新功能提案', '不在 85 页之内。收入/成本/毛利、成本四线拆解、产能负载、准时率、库存预警、客户贡献按毛利排。立项前需先定毛利口径。'],
+  ['工单列表 高保真对照', '决策依据', '同一屏的 Industry 版与现有 shadcn 皮肤版并排。你选了 1b（现有皮肤），全项目的视觉语言就是在这一屏定下的，后面所有交互稿都继承它。接手的人想知道「为什么是这套皮肤」就看这一页。'],
+  ['收费项目工作台 重设计', '历史版', '你最初提的 P0+P1 重设计，用 Industry 皮肤，带可交互的阶梯表与标注开关。与批次五的关系：同一屏，批次五是换成 shadcn 皮肤并按规范重做的版本 —— 以批次五为准，这一页保留作早期依据与可交互演示，不是两套竞争的规格。'],
+  ['Codex 执行清单', '开工依据', '12 项可开工 + 6 项别动，每项带「改哪里」与「怎么验」。顶部有必读警告：四条旧修法已作废（补侧栏分组、抽 useListState、分类色从灰阶改彩、面包屑补 key）。实现从这份开始读，不要从早期线框开始。'],
+];
+
+const COVER = [
+  ['工单（含变更审批）', '5', '交互稿', '四屏全出，含五态与 L2/L3。CS 角色的动作差异待你给清单。'],
+  ['排产 + 师傅端', '8', '交互稿 / 推断', '排产两页有原图。师傅报工有原图；任务列表、我的工单/详情、工资两页为推断，原图未打开。'],
+  ['价格与报价', '9', '交互稿 / 推断', '工作台与发布中心有原图与源码。销售报价两页、物流工作台、三张 fixture 未打开。'],
+  ['账单与薪资', '13', '交互稿 / 推断', '仅计件工资有原图。账单四页、薪资其余八页为推断。'],
+  ['Dashboard', '1', '交互稿', '原图 1280 与 393 都打开过。'],
+  ['主数据字典', '21', '交互稿', '一个通用骨架覆盖七类各 3 页（产品 / 分类 / 客户供应商 / 工艺 / BOM / 物料 / 账号）。原图未打开，但模式明确。'],
+  ['采购 / 盘点 / 仓库作业台', '5', '契约', '只有模式与规则。盘点与仓库作业台是本批最复杂的两页，建议单独出交互稿。物料主数据三页已归入上一行的字典骨架。'],
+  ['外协 / 考勤 / 车间物料', '7', '契约', '外协覆盖 max 口径已写死。考勤月历录入未画。'],
+  ['通知 / 系统设置', '5', '线框 + 契约', '通知四态在 DASH-02 里画了；配置三页与系统设置为契约级。账号三页已归入字典骨架。'],
+  ['CDR 汇总下载', '1', '交互稿', '原图由你提供，暂护了四个问题（面包屑、禁用态、环境提示颜色、过期后无重生入口）。'],
+  ['后台任务 / Pigsty', '2', '已重分类', '不进侧栏。业务后果并入 DASH-02，纯技术指标留本页。'],
+  ['认证 / 404 / showcase', '3', '线框', '批次一线框级。登录的限流文案与恢复指引已定，未出交互稿。'],
+  ['打印', '1', '受保护', '完全未动。要改必须单独立案并经你人工确认基线。'],
+];
+
+const OPEN = [
+  {
+    kind: '等你回答', name: '业务问题 4 条', bd: '#fecaca', tBg: '#fef2f2', tFg: '#b91c1c',
+    why: '这些答案会改变画法，不是细节。',
+    items: [
+      'Industry 设计系统的落地方式 —— 你已选「用现有 shadcn 皮肤」，但要不要顺带把圆角从 12px 收到 6px、去卡片阴影、行高收紧？这是拿到密度收益的低成本路径。',
+      'CS 与 SALES 的动作差异清单 —— 已从 permissions.ts 确认解决：两者在工单三页上权限完全相同，共用页面按 scope 裁数据不裁动作；差异只在侧栏（SALES 我的账单 / CS 我的工资，互斥）。',
+      '多款式工单里款式平均几款、最多几款？决定摘要行列表要不要虚拟滚动与批量粘贴。',
+      '毛利口径：哪些成本计入、按结案还是按发货归属。经营分析立项的前提。',
+    ],
+  },
+  {
+    kind: '等材料', name: '原图与 fixture 6 项', bd: '#fed7aa', tBg: '#fffbeb', tFg: '#92400e',
+    why: '缺这些，对应结论只能停在「推断」，无法定级。',
+    items: [
+      '有数据的 order-changes 截图 —— 本轮是空态，列结构无法观察。',
+      '有阻断的工单详情截图 —— 现有那张工单在生产中且无阻断，看不到阻断怎么呈现。',
+      'SALES-owned 账单的隔离 fixture —— 交接包说明当前没有，且不能借 ADMIN 账单绕 scope。',
+      'worker 的我的工单 / 工单详情 / 工资三页原图。',
+      '账单四页、薪资其余八页、仓库与盘点原图。',
+      '重新挂载代码目录已完成 —— 已确认四件：① 侧栏是数据驱动的 30 个模块（我之前说「只有 13 项、40 余页无入口」是错的）；② 面包屑模块表里已有 breadcrumbLabel，只是 AdminBreadcrumb 用的是另一张 SEGMENT_LABELS；③ --chart-1 是 oklch(0.532 0.131 244)，chroma 0.131 不是灰阶；④ 列表筛选状态已在 URL 里（OrderListSearchParams 25+ 字段），收口 4 缩小为「滚动位置与选中行入 URL + 新增保存视图」。剩下未核：通知人工决策字段是否有服务端支持。',
+    ],
+  },
+  {
+    kind: '提案待立项', name: '新功能与新存储 4 项', bd: '#e4e4e7', tBg: '#f4f4f5', tFg: '#52525b',
+    why: '都不在 85 页之内，需要你决定做不做。',
+    items: [
+      '经营分析页 —— 建议先只做「收入/成本/毛利 + 库存预警」两块。产能负载依赖工时数据完整性，准时率依赖承诺交期填写率，这两个前提现在都不一定成立（排产页有 4 张工单未设交期）。',
+      '款式模板 —— 把常用「产品 + 纸张 + 工艺」组合存成模板。新建工单效率收益最大的一项。',
+      'Dashboard 的 last-viewed 存储（「上次查看」）与 dismissal 存储（「查看已处理」）。派生信号本身没有独立的已处理状态。',
+      '通知 UNKNOWN 的人工决策字段与审计 —— 界面已按有它设计，需确认服务端是否支持。',
+    ],
+  },
+];
+
+const LESSONS = [
+  ['错 1', '把自己 mock 上的测量值当成产品实测值',
+   '1.98:1 是复查在我自己的灰底灰字 mock 上测的，我搬去描述 CDR 的白字淡红按钮 —— 完全不同的配色，而且那是一张 PNG，我根本没法测。同类还有 31.6% 毛利率：一个系统里还没有的字段，被写成了具体数字渲染在 Dashboard 上。',
+   '凡是文档里出现数字，先问「这个数我是量的还是编的」。量不了就定性描述，并写明为什么量不了。'],
+  ['错 2', '散文里手写计数，改完不复核',
+   '「15 条更正」「64 张未覆盖」「主数据 30 页」「批次七 40 页」——四次都是先写下数字，后续编辑改了内容却没回头核对。批次七还漏掉了刚重分类过的两页，导致 41 页对不上。',
+   '不在散文里手写可计数的东西。要给数就现场数一遍，或者干脆写「以页面上渲染的标签为准」。'],
+  ['错 3', '把建议做进 mock，又声称「只改视觉」',
+   '皮肤对照那一屏，我把自己提的侧栏分组、全局搜索、告警徽章都做进了外壳，然后写「两版结构完全一致，唯一变量是视觉语言」。用户以为在选视觉，实际上在选一堆没披露的结构改动。',
+   '一屏只承载一个变量。要展示提案态就明写「提案态」，并说清和现状差在哪。'],
+  ['错 4', '重建外壳时偏离真实的 13 项',
+   '三次重建外壳都偏了：一次多画成五组（把自己提案里的主数据/运维分组做进了外壳），同时还把财务组里两个真实项删了；一次少画，只剩十项。漏掉的总是「开机师傅计件规则」「员工工资规则」这类看起来像噪音的项。',
+   '外壳只从一个共用函数来（navFor），不手写。重建现有界面时宁可啰嗦也不要整齐；要展示提案态就明写。'],
+  ['错 6', '把截图里看到的长度当成全部',
+   '最严重的一条。我说「侧栏只覆盖 13 项，40 余页没有导航入口」，并以此为依据提了「补主数据/设置两组」。读到 admin-modules.ts 才发现 ADMIN 实际有 30 个模块，主数据、设置、运维全部已在导航里——我看到的 13 项只是截图里没滚到底的那一段。一个错前提支撑了一整批建议。',
+   '截图里的列表、导航、表格列都可能是被截断的。凡是要对「缺了什么」下结论，必须看数据源而不是看图。图只能证明「有什么」，证明不了「没什么」。'],
+  ['错 5', '没看图就写「观察」',
+   '第一版线框里，「侧栏缺失」「告警只有颜色数字」「图表灰阶」三条都标了观察，但对应的图我一张都没打开 —— 而且三条全是错的（侧栏存在、动作链接存在只是被裁、图表无数据无法验证）。',
+   '标「观察」必须能指到文件名 + 视口 + 具体位置。指不出来就标「推断」，并写清缺什么材料。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    const T = {
+      '交互稿': ['#ecfdf5', '#047857'], '线框 + 评审': ['#eff6ff', '#1d4ed8'],
+      '契约': ['#f5f3ff', '#6d28d9'], '实现契约': ['#f5f3ff', '#6d28d9'],
+      '交互稿 + 契约': ['#ecfdf5', '#047857'], '新功能提案': ['#fffbeb', '#92400e'],
+      '开工依据': ['#fef2f2', '#b91c1c'],
+      '决策依据': ['#eff6ff', '#1d4ed8'], '历史版': ['#f4f4f5', '#52525b'],
+    };
+    const D = {
+      '交互稿': ['#ecfdf5', '#047857'], '交互稿 / 推断': ['#fffbeb', '#92400e'],
+      '契约': ['#f5f3ff', '#6d28d9'], '线框': ['#eff6ff', '#1d4ed8'],
+      '线框 + 契约': ['#eff6ff', '#1d4ed8'], '已重分类': ['#f0f9ff', '#0369a1'],
+      '受保护': ['#fef2f2', '#b91c1c'],
+    };
+    return {
+      files: FILES.map(([name, tag, t]) => ({ name, tag, t, tBg: (T[tag] || T['契约'])[0], tFg: (T[tag] || T['契约'])[1] })),
+      cover: COVER.map(([fam, n, depth, t]) => ({ fam, n, depth, t, dBg: (D[depth] || D['契约'])[0], dFg: (D[depth] || D['契约'])[1] })),
+      open: OPEN,
+      lessons: LESSONS.map(([n, name, t, fix]) => ({ n, name, t, fix })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

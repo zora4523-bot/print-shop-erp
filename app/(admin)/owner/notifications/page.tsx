@@ -13,8 +13,22 @@ import { isMockMode } from '@/lib/notification';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
-import { PageHeader } from '@/components/ui-business';
+import {
+  EnvNotice,
+  ErrorState,
+  PageHeader,
+  StatusBadge as UiStatusBadge,
+  TableEmptyState,
+} from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import type {
+  BackgroundJobStatus,
+  NotificationStatus,
+} from '@/generated/prisma/enums';
+import {
+  BACKGROUND_JOB_STATUS_REGISTRY,
+  NOTIFICATION_STATUS_REGISTRY,
+} from '@/lib/ui/status-registry';
 
 export const metadata = { title: '推送配置 · 红包印刷 ERP' };
 
@@ -67,14 +81,13 @@ export default async function OwnerNotificationsPage({
       />
 
       {mock ? (
-        <div
-          data-slot="notifications-mock-banner"
-          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-foreground"
-        >
-          ⚠️ 当前 <strong>mock-mode</strong>：通知不会真发到企业微信，
-          NotificationLog 仍然记录（status=SUCCESS / errorMessage=MOCK）。
-          上线时请把 <code>NOTIFICATION_MOCK_MODE</code> 设为{' '}
-          <code>false</code>。
+        <div data-slot="notifications-mock-banner">
+          <EnvNotice>
+            当前 <strong className="text-foreground">mock-mode</strong>：通知不会真发到企业微信，
+            NotificationLog 仍然记录（status=SUCCESS / errorMessage=MOCK）。
+            上线时请把 <code>NOTIFICATION_MOCK_MODE</code> 设为{' '}
+            <code>false</code>。
+          </EnvNotice>
         </div>
       ) : null}
 
@@ -101,9 +114,19 @@ export default async function OwnerNotificationsPage({
           </Link>
         </div>
         {channels.length === 0 ? (
-          <p className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
-            还没建任何群。点击右上角&ldquo;新建群&rdquo;开始。
-          </p>
+          <TableEmptyState
+            variant="compact"
+            title="尚未配置企业微信群"
+            description="新建群并验证 Webhook 后，才能把通知规则投递到对应群。"
+            action={
+              <Link
+                href="/owner/notifications/channels/new"
+                className={buttonVariants({ size: 'sm' })}
+              >
+                新建群
+              </Link>
+            }
+          />
         ) : (
           <div
             className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -173,12 +196,18 @@ export default async function OwnerNotificationsPage({
       </section>
 
       {/* ─── 事件规则（11 条固定） ─── */}
-      <section className="space-y-3">
+      <section id="notification-rules" className="space-y-3">
         <h2 className="text-base font-semibold">事件规则</h2>
         {rules.length === 0 ? (
-          <p className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
-            seed 还没初始化默认规则。请运行 <code>pnpm prisma db seed</code>。
-          </p>
+          <ErrorState
+            blocking
+            title="默认通知规则尚未初始化"
+            description={
+              <>
+                请由开发或运维人员运行 <code>pnpm prisma db seed</code>，完成后刷新本页。
+              </>
+            }
+          />
         ) : (
           <div
             className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -242,9 +271,11 @@ export default async function OwnerNotificationsPage({
           </span>
         </div>
         {unresolvedLogs.length === 0 ? (
-          <p className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
-            暂无投递结果不明或重试已耗尽的消息。
-          </p>
+          <TableEmptyState
+            variant="compact"
+            title="没有待人工处理的消息"
+            description="当前没有结果不明或自动重试已耗尽的投递。"
+          />
         ) : (
           <div
             className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -258,7 +289,8 @@ export default async function OwnerNotificationsPage({
                   <th className="px-3 py-2 text-left">最后尝试</th>
                   <th className="px-3 py-2 text-left">事件</th>
                   <th className="px-3 py-2 text-left">群</th>
-                  <th className="px-3 py-2 text-center">状态</th>
+                  <th className="px-3 py-2 text-center">投递状态</th>
+                  <th className="px-3 py-2 text-center">后台任务</th>
                   <th className="px-3 py-2 text-left">原因</th>
                   <th className="px-3 py-2 text-right">人工处置</th>
                 </tr>
@@ -276,9 +308,14 @@ export default async function OwnerNotificationsPage({
                       {log.channelName ?? '已删除'}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <StatusBadge
+                      <NotificationStatusBadge
                         status={log.status}
-                        hasDeadLetterJob={log.hasDeadLetterJob}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <BackgroundJobStatusBadge
+                        status={log.backgroundJobStatus}
+                        hasDurableJob={log.deliveryKey !== null}
                       />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -335,9 +372,11 @@ export default async function OwnerNotificationsPage({
       <section className="space-y-3">
         <h2 className="text-base font-semibold">最近推送日志</h2>
         {logs.length === 0 ? (
-          <p className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
-            暂无推送日志。
-          </p>
+          <TableEmptyState
+            variant="compact"
+            title="尚无推送日志"
+            description="规则触发或发送测试消息后，最近结果会显示在这里。"
+          />
         ) : (
           <div
             className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -351,7 +390,8 @@ export default async function OwnerNotificationsPage({
                   <th className="px-3 py-2 text-left">时间</th>
                   <th className="px-3 py-2 text-left">事件</th>
                   <th className="px-3 py-2 text-left">群</th>
-                  <th className="px-3 py-2 text-center">状态</th>
+                  <th className="px-3 py-2 text-center">投递状态</th>
+                  <th className="px-3 py-2 text-center">后台任务</th>
                   <th className="px-3 py-2 text-left">错误 / 标记</th>
                 </tr>
               </thead>
@@ -366,9 +406,14 @@ export default async function OwnerNotificationsPage({
                       {l.channelName ?? <span className="text-muted-foreground">已删除</span>}
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <StatusBadge
+                      <NotificationStatusBadge
                         status={l.status}
-                        hasDeadLetterJob={l.hasDeadLetterJob}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <BackgroundJobStatusBadge
+                        status={l.backgroundJobStatus}
+                        hasDurableJob={l.deliveryKey !== null}
                       />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -386,31 +431,38 @@ export default async function OwnerNotificationsPage({
   );
 }
 
-function StatusBadge({
+function NotificationStatusBadge({
   status,
-  hasDeadLetterJob = false,
 }: {
-  status: string;
-  hasDeadLetterJob?: boolean;
+  status: NotificationStatus;
 }) {
-  switch (status) {
-    case 'SUCCESS':
-      return <Badge>成功</Badge>;
-    case 'FAILED':
-      return <Badge variant="destructive">失败</Badge>;
-    case 'RETRYING':
-      return hasDeadLetterJob ? (
-        <Badge variant="destructive">重试耗尽</Badge>
-      ) : (
-        <Badge variant="secondary">重试中</Badge>
-      );
-    case 'SENDING':
-      return <Badge variant="secondary">发送中</Badge>;
-    case 'UNKNOWN':
-      return <Badge variant="destructive">待人工核对</Badge>;
-    default:
-      return <Badge variant="outline">{status}</Badge>;
+  const definition = NOTIFICATION_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
+}
+
+function BackgroundJobStatusBadge({
+  status,
+  hasDurableJob,
+}: {
+  status: BackgroundJobStatus | null;
+  hasDurableJob: boolean;
+}) {
+  if (!hasDurableJob) {
+    return <UiStatusBadge tone="neutral">无持久任务</UiStatusBadge>;
   }
+  if (!status) {
+    return <UiStatusBadge tone="danger">任务缺失</UiStatusBadge>;
+  }
+  const definition = BACKGROUND_JOB_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
 }
 
 function maskWebhookUrl(url: string): string {

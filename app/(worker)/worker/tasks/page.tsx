@@ -13,9 +13,9 @@ export default async function WorkerTasksPage() {
   return (
     <div className="min-w-0 space-y-3">
       <div className="worker-wrap-anywhere">
-        <h1 className="text-lg font-semibold">待处理任务</h1>
+        <h1 className="text-lg font-semibold">我的任务</h1>
         <p className="text-xs text-muted-foreground">
-          按急单分组后，以工单创建日期从早到晚排列。
+          先看进行中，再看待开始；每组内急单优先，并按工单创建日期从早到晚排列。
         </p>
       </div>
 

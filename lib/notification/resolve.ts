@@ -17,7 +17,10 @@ import { db } from '../db';
 // UNKNOWN 人工处置
 // ─────────────────────────────────────────────────────────────────────
 
-export type UnknownNotificationResolution = 'DELIVERED' | 'NOT_DELIVERED_RETRY';
+export type UnknownNotificationResolution =
+  | 'DELIVERED'
+  | 'NOT_DELIVERED_RETRY'
+  | 'IGNORED';
 
 export type UnknownNotificationResolutionErrorCode =
   | 'NOT_FOUND'
@@ -26,6 +29,7 @@ export type UnknownNotificationResolutionErrorCode =
   | 'JOB_NOT_FOUND'
   | 'JOB_NOT_READY'
   | 'PAYLOAD_MISMATCH'
+  | 'INVALID_REASON'
   | 'CONFLICT';
 
 export class UnknownNotificationResolutionError extends Error {
@@ -40,12 +44,15 @@ export async function resolveUnknownNotification(
   resolution: UnknownNotificationResolution,
   actor: AuditActor,
   expectedStateVersion: number,
+  reason?: string | null,
 ): Promise<{
   backgroundJobId: string | null;
   pendingUnknownCount: number;
   rearmed: boolean;
   completed: boolean;
 }> {
+  const normalizedReason = normalizeResolutionReason(resolution, reason);
+
   return db.$transaction(async (tx) => {
     const log = await tx.notificationLog.findUnique({
       where: { id: logId },
@@ -68,19 +75,28 @@ export async function resolveUnknownNotification(
       throw new UnknownNotificationResolutionError('CONFLICT');
     }
 
-    // Inline/test UNKNOWN rows can be acknowledged as delivered, but cannot be
-    // replayed: there is no durable payload/dedupe identity to prove which
-    // message should be sent.
+    // Inline/test UNKNOWN rows can be acknowledged as delivered or deliberately
+    // ignored, but cannot be replayed: there is no durable payload/dedupe
+    // identity to prove which message should be sent.
     if (!log.deliveryKey) {
-      if (resolution !== 'DELIVERED') {
+      if (resolution === 'NOT_DELIVERED_RETRY') {
         throw new UnknownNotificationResolutionError('NOT_DURABLE');
       }
       const at = await databaseNow(tx);
-      await updateUnknownLogWithCas(tx, log, resolution, at, null);
+      await updateUnknownLogWithCas(
+        tx,
+        log,
+        resolution,
+        at,
+        null,
+        normalizedReason,
+      );
       await writeResolutionAudit(tx, {
         actor,
         log,
         resolution,
+        reason: normalizedReason,
+        resolvedAt: at,
         pendingUnknownCount: 0,
         jobBefore: null,
         jobAfter: null,
@@ -111,7 +127,14 @@ export async function resolveUnknownNotification(
     }
 
     const at = await databaseNow(tx);
-    await updateUnknownLogWithCas(tx, log, resolution, at, job.attempts);
+    await updateUnknownLogWithCas(
+      tx,
+      log,
+      resolution,
+      at,
+      job.attempts,
+      normalizedReason,
+    );
 
     const pendingUnknownCount = await tx.notificationLog.count({
       where: {
@@ -204,6 +227,8 @@ export async function resolveUnknownNotification(
       actor,
       log,
       resolution,
+      reason: normalizedReason,
+      resolvedAt: at,
       pendingUnknownCount,
       jobBefore: {
         id: job.id,
@@ -276,8 +301,9 @@ async function updateUnknownLogWithCas(
   resolution: UnknownNotificationResolution,
   at: Date,
   previousJobAttempt: number | null,
+  reason: string | null,
 ): Promise<void> {
-  const delivered = resolution === 'DELIVERED';
+  const outcome = resolutionLogOutcome(resolution, reason);
   const updated = await tx.notificationLog.updateMany({
     where: {
       id: log.id,
@@ -285,18 +311,18 @@ async function updateUnknownLogWithCas(
       deliveryStateVersion: log.deliveryStateVersion,
     },
     data: {
-      status: delivered
-        ? NotificationStatus.SUCCESS
-        : NotificationStatus.RETRYING,
-      errorMessage: delivered
-        ? '人工核对：已送达'
-        : '人工核对：未送达，等待同组核对完成后安全重发',
-      sentAt: delivered ? (log.sentAt ?? log.lastAttemptAt) : null,
+      status: outcome.status,
+      errorMessage: outcome.errorMessage,
+      sentAt:
+        resolution === 'DELIVERED'
+          ? (log.sentAt ?? log.lastAttemptAt)
+          : null,
       deliveryAttemptId: null,
       // A manually reopened RETRYING row belongs to the generation that just
       // became DEAD. claimDurableDelivery requires a strictly newer job
       // attempt, so a paused worker from the dead generation cannot send it.
-      deliveryJobAttempt: delivered ? null : previousJobAttempt,
+      deliveryJobAttempt:
+        resolution === 'NOT_DELIVERED_RETRY' ? previousJobAttempt : null,
       deliveryStateVersion: { increment: 1 },
       updatedAt: at,
     },
@@ -347,17 +373,22 @@ async function writeResolutionAudit(
     actor: AuditActor;
     log: UnknownLogForResolution;
     resolution: UnknownNotificationResolution;
+    reason: string | null;
+    resolvedAt: Date;
     pendingUnknownCount: number;
     jobBefore: unknown;
     jobAfter: unknown;
   },
 ): Promise<void> {
-  const delivered = input.resolution === 'DELIVERED';
+  const outcome = resolutionLogOutcome(input.resolution, input.reason);
   await writeAuditLogInTx(tx, {
     actor: input.actor,
-    action: delivered
-      ? 'CONFIRM_NOTIFICATION_DELIVERED'
-      : 'CONFIRM_NOTIFICATION_NOT_DELIVERED_RETRY',
+    action:
+      input.resolution === 'DELIVERED'
+        ? 'CONFIRM_NOTIFICATION_DELIVERED'
+        : input.resolution === 'NOT_DELIVERED_RETRY'
+          ? 'CONFIRM_NOTIFICATION_NOT_DELIVERED_RETRY'
+          : 'IGNORE_NOTIFICATION_DELIVERY',
     entityType: 'NotificationLog',
     entityId: input.log.id,
     before: {
@@ -368,21 +399,57 @@ async function writeResolutionAudit(
       backgroundJob: input.jobBefore,
     },
     after: {
-      status: delivered
-        ? NotificationStatus.SUCCESS
-        : NotificationStatus.RETRYING,
+      status: outcome.status,
       stateVersion: input.log.deliveryStateVersion + 1,
-      errorMessage: delivered
-        ? '人工核对：已送达'
-        : '人工核对：未送达，等待同组核对完成后安全重发',
+      errorMessage: outcome.errorMessage,
+      resolvedAt: input.resolvedAt,
       pendingUnknownCount: input.pendingUnknownCount,
       backgroundJob: input.jobAfter,
     },
     requestMetadata: {
       source: 'owner-notifications.resolveUnknownNotification',
       resolution: input.resolution,
+      reason: input.reason,
     },
   });
+}
+
+function resolutionLogOutcome(
+  resolution: UnknownNotificationResolution,
+  reason: string | null,
+): { status: NotificationStatusType; errorMessage: string } {
+  switch (resolution) {
+    case 'DELIVERED':
+      return {
+        status: NotificationStatus.SUCCESS,
+        errorMessage: '人工核对：已送达',
+      };
+    case 'NOT_DELIVERED_RETRY':
+      return {
+        status: NotificationStatus.RETRYING,
+        errorMessage: '人工核对：未送达，等待同组核对完成后安全重发',
+      };
+    case 'IGNORED':
+      if (!reason) {
+        throw new UnknownNotificationResolutionError('INVALID_REASON');
+      }
+      return {
+        status: NotificationStatus.FAILED,
+        errorMessage: `人工忽略：${reason}`,
+      };
+  }
+}
+
+function normalizeResolutionReason(
+  resolution: UnknownNotificationResolution,
+  reason: string | null | undefined,
+): string | null {
+  if (resolution !== 'IGNORED') return null;
+  const normalized = reason?.trim() ?? '';
+  if (normalized.length === 0 || normalized.length > 500) {
+    throw new UnknownNotificationResolutionError('INVALID_REASON');
+  }
+  return normalized;
 }
 
 function notificationEventFromPayload(payload: Prisma.JsonValue): string | null {

@@ -40,6 +40,7 @@ export default async function NewOrderPage() {
         </p>
       </div>
       <OrderForm
+        draftScope={user.id}
         crafts={crafts}
         products={products}
         settlementLabel={

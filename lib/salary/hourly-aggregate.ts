@@ -1,8 +1,15 @@
 import Decimal from 'decimal.js';
 import { Role, WorkerType } from '../../generated/prisma/enums';
 import { db } from '../db';
+import {
+  assertExecutionFence,
+  type ExecutionFence,
+} from '../execution-fence';
 import { parseShanghaiMonth } from '../attendance';
-import { isFutureShanghaiMonth } from '../dashboard/shanghai-clock';
+import {
+  currentShanghaiMonth,
+  isFutureShanghaiMonth,
+} from '../dashboard/shanghai-clock';
 import {
   calcHourlyPayroll,
   HourlyPayrollError,
@@ -157,6 +164,7 @@ export async function computeHourlyPayroll(
   month: string,
   now: Date = new Date(),
   pinnedRuleBundle?: HourlyRuleBundle,
+  fence?: ExecutionFence,
 ): Promise<ComputeHourlyPayrollResult> {
   const { start, end } = parseShanghaiMonth(month);
   // `now` 在这个函数里同时是规则解析时点和 paidAt 时钟，这里直接复用它当
@@ -380,6 +388,9 @@ export async function computeHourlyPayroll(
       spareHours: String(r.spareHours),
     }));
 
+    // Rule/bill locks may outlive the durable lease while this transaction is
+    // waiting. Fence again at the last read-only point before payroll upsert.
+    await assertExecutionFence(fence);
     const saved = await tx.hourlyWorkerPayroll.upsert({
       where: { workerId_month: { workerId, month } },
       create: {
@@ -464,6 +475,7 @@ export class HourlyBatchUnexpectedError extends Error {
 export async function computeHourlyForAllInMonth(
   month: string,
   now: Date = new Date(),
+  fence?: ExecutionFence,
 ): Promise<BatchHourlyResult> {
   // Bounds-check month before fanout so the early bail matches the
   // single-worker signature.
@@ -520,8 +532,9 @@ export async function computeHourlyForAllInMonth(
 
   for (const w of workers) {
     try {
+      await assertExecutionFence(fence);
       settled.push(
-        await computeHourlyPayroll(w.id, month, now, pinnedRuleBundle),
+        await computeHourlyPayroll(w.id, month, now, pinnedRuleBundle, fence),
       );
     } catch (err) {
       if (err instanceof HourlyAggregateError) {
@@ -608,6 +621,13 @@ export async function markHourlyPayrollPaid(
       row.workerId,
       row.month,
     )}))`;
+    // 当月可以临时重算，但月末前不能标已发；特别是 COOK 的固定月薪
+    // 不按进度折算，中途发放会冻结整月金额并阻断后续考勤重算。
+    if (isPaid && row.month >= currentShanghaiMonth(now)) {
+      throw new HourlyAggregateError(
+        `不能将当前或未来月份的月结标记为已发（${row.month}，上海日历）；请等该月结束后再发放`,
+      );
+    }
     const updated = await tx.hourlyWorkerPayroll.update({
       where: { id },
       data: {

@@ -287,14 +287,9 @@ export default async function PigstyOpsPage() {
         >
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <ExtensionLine
-              name="pg_cron + pg_net"
-              ready={ops.data.readyForPgCronHttp}
-              blockers={ops.data.blockers.filter((b) =>
-                b.startsWith('pg_cron') ||
-                b.startsWith('pg_net') ||
-                b.startsWith('cron_') ||
-                b.startsWith('app_'),
-              )}
+              name="数据库 HTTP 调度（已退役）"
+              ready={false}
+              blockers={['database_http_scheduler_retired']}
             />
             <ExtensionLine
               name="pg_stat_statements"
@@ -588,8 +583,8 @@ function ExtensionLine({
 function CronJobsTable({ rows }: { rows: CronHttpJobReadiness[] }) {
   return (
     <Section
-      title="HTTP Cron 任务"
-      description="执行 schedule_sql 前，必须确认 app.erp_base_url 和 app.cron_secret 已在数据库侧设置。"
+      title="主机 Cron 任务"
+      description="数据库 HTTP 调度已停用；请在应用主机安装 deploy/run-cron.sh 与 deploy/crontab.example，密钥仅保存在 root 可读文件中。"
     >
       <div
         className="overflow-x-auto rounded-lg border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

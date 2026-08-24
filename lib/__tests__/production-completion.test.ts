@@ -18,12 +18,15 @@ type FakeOrderRow = {
   id: string;
   status: OrderStatus;
   requiresOutsource?: boolean;
+  orderNo?: string;
+  customerRef?: string | null;
 };
 
 type FakeOutsourceRow = {
   id: string;
   status: OutsourceStatus;
   orderItemIds: string[];
+  itemSnapshots?: Array<{ orderItemId: string; quantity: number }>;
 };
 
 type FakeItemRow = {
@@ -31,6 +34,7 @@ type FakeItemRow = {
   sequence: number;
   name: string;
   crafts: string[];
+  quantity?: number;
 };
 
 function makeTx(opts: {
@@ -40,11 +44,16 @@ function makeTx(opts: {
   items?: FakeItemRow[];
   crafts?: Array<{ id: string; isOutsource: boolean }>;
 }) {
-  const orderFindUnique = vi.fn(async () =>
-    opts.order === undefined
-      ? { id: 'order-1', status: OrderStatus.IN_PRODUCTION }
-      : opts.order,
-  );
+  const orderFindUnique = vi.fn(async () => {
+    if (opts.order === null) return null;
+    return {
+      id: 'order-1',
+      status: OrderStatus.IN_PRODUCTION,
+      orderNo: 'O-1',
+      customerRef: null,
+      ...(opts.order ?? {}),
+    };
+  });
   const orderUpdate = vi.fn(async () => ({ id: 'order-1' }));
   const taskFindMany = vi.fn(async () => opts.tasks ?? []);
   const outsourceFindMany = vi.fn(
@@ -54,12 +63,22 @@ function makeTx(opts: {
         status?: { not?: OutsourceStatus };
       };
       const excluded = where.status?.not;
-      return (opts.outsourceOrders ?? []).filter(
-        (row) => excluded === undefined || row.status !== excluded,
-      );
+      return (opts.outsourceOrders ?? [])
+        .filter((row) => excluded === undefined || row.status !== excluded)
+        .map((row) => ({
+          ...row,
+          itemSnapshots:
+            row.itemSnapshots ??
+            row.orderItemIds.map((orderItemId) => ({
+              orderItemId,
+              quantity: 100,
+            })),
+        }));
     },
   );
-  const itemFindMany = vi.fn(async () => opts.items ?? []);
+  const itemFindMany = vi.fn(async () =>
+    (opts.items ?? []).map((row) => ({ quantity: 100, ...row })),
+  );
   const craftFindMany = vi.fn(
     async (args: { where: unknown; select?: unknown }) => {
       const where = args.where as { id: { in: string[] } };
@@ -119,13 +138,12 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(h.taskFindMany).not.toHaveBeenCalled();
   });
 
-  it('内部任务未全部完工 → INTERNAL_TASKS，三条外协相关查询一次都不跑', async () => {
-    // 性能门禁：报工绝大多数次数在这里就早退。
+  it('内部任务未全部完工且非外协单 → INTERNAL_TASKS', async () => {
     const h = makeTx({
       order: {
         id: 'order-1',
         status: OrderStatus.IN_PRODUCTION,
-        requiresOutsource: true,
+        requiresOutsource: false,
       },
       tasks: [
         { id: 'task-1', status: TaskStatus.COMPLETED },
@@ -329,8 +347,78 @@ describe('maybeCompleteProductionOrder — 款式级覆盖闸口', () => {
     await maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW);
     expect(h.outsourceFindMany).toHaveBeenCalledWith({
       where: { orderId: 'order-1', status: { not: OutsourceStatus.CANCELLED } },
-      select: { id: true, status: true, orderItemIds: true },
+      select: {
+        id: true,
+        status: true,
+        orderItemIds: true,
+        itemSnapshots: {
+          select: { orderItemId: true, quantity: true },
+        },
+      },
     });
+  });
+
+  it('已回货快照只冻结 100，工单后续增到 200 时仍判定数量未覆盖', async () => {
+    const h = makeTx({
+      ...baseOpts,
+      outsourceOrders: [
+        {
+          id: 'os-1',
+          status: OutsourceStatus.RECEIVED,
+          orderItemIds: ['item-1'],
+          itemSnapshots: [{ orderItemId: 'item-1', quantity: 100 }],
+        },
+      ],
+      items: [
+        {
+          id: 'item-1',
+          sequence: 1,
+          name: '款式一',
+          quantity: 200,
+          crafts: ['craft-uv'],
+        },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.blockedBy).toBe('OUTSOURCE_COVERAGE');
+    expect(out.uncoveredItems.map((row) => row.id)).toEqual(['item-1']);
+    expect(h.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('内部任务尚未完工时也优先回传已收货外协的覆盖缺口', async () => {
+    const h = makeTx({
+      ...baseOpts,
+      tasks: [{ id: 'task-1', status: TaskStatus.IN_PROGRESS }],
+      outsourceOrders: [
+        {
+          id: 'os-1',
+          status: OutsourceStatus.RECEIVED,
+          orderItemIds: ['item-1'],
+        },
+      ],
+      items: [
+        { id: 'item-1', sequence: 1, name: '款式一', crafts: ['craft-uv'] },
+        { id: 'item-2', sequence: 2, name: '款式二', crafts: ['craft-uv'] },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.blockedBy).toBe('OUTSOURCE_COVERAGE');
+    expect(out.uncoveredItems.map((row) => row.id)).toEqual(['item-2']);
+    expect(h.orderUpdate).not.toHaveBeenCalled();
   });
 
   it('工艺字典按 id 取、且不加 isActive —— 已停用的外协工艺仍要参与判定', async () => {

@@ -39,6 +39,13 @@ export type ClaimedBackgroundJob = {
   maxAttempts: number;
   workerId: string;
   claimedAt: Date;
+  /** Aborted as soon as this worker can no longer prove lease ownership. */
+  signal?: AbortSignal;
+  /**
+   * Refreshes and verifies the fencing tuple (id, workerId, attempt). Handlers
+   * call this immediately before irreversible external I/O.
+   */
+  assertLease?: () => Promise<void>;
 };
 
 export type BackgroundJobResult = Prisma.InputJsonValue | undefined;

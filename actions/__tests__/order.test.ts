@@ -403,16 +403,15 @@ describe('cancelOrderAction', () => {
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:cancel');
   });
 
-  it('accepts an empty reason and forwards null to lib.cancelOrder', async () => {
+  it('rejects an empty cancellation reason before the destructive write', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
     const r = await cancelOrderAction('o1', null, fd({ reason: '' }));
-    expect(r.status).toBe('success');
-    expect(orderMock.cancelOrder).toHaveBeenCalledWith(
-      'o1',
-      expect.objectContaining({ id: 'sales-1', role: Role.SALES }),
-      null,
-    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.reason?.[0]).toMatch(/取消原因/);
+    }
+    expect(orderMock.cancelOrder).not.toHaveBeenCalled();
   });
 
   it('forwards a trimmed reason', async () => {
@@ -440,14 +439,18 @@ describe('cancelOrderAction', () => {
     orderMock.cancelOrder.mockRejectedValueOnce(
       new MockInvalidOrderTransitionError(OrderStatus.FINISHED, OrderStatus.CANCELLED),
     );
-    const r = await cancelOrderAction('o1', null, fd({ reason: '' }));
+    const r = await cancelOrderAction(
+      'o1',
+      null,
+      fd({ reason: '客户取消' }),
+    );
     expect(r.status).toBe('error');
   });
 
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '' }));
+    await cancelOrderAction('o1', null, fd({ reason: '客户取消' }));
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });

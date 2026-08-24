@@ -5,6 +5,9 @@ import {
   uniqueSuffix,
   E2E_PASSWORD,
   E2E_USERS,
+  fillExternalSalesOrderCharges,
+  openFirstOrderItemEditor,
+  submitDraftOrderAndWait,
 } from './_helpers';
 
 test.describe('非机台生产任务', () => {
@@ -22,19 +25,25 @@ test.describe('非机台生产任务', () => {
       password: E2E_PASSWORD,
     });
     await page.locator('input[name="customerRef"]').fill(orderRef);
+    await openFirstOrderItemEditor(page);
     await page.locator('input[name="items.0.name"]').fill(itemName);
     await page.locator('input[name="items.0.quantity"]').fill('100');
+    const packingCraft = page.getByRole('button', {
+      name: '打包/入袋',
+      exact: true,
+    });
+    await packingCraft.click();
+    await expect(packingCraft).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
     await page
-      .locator('label')
-      .filter({ hasText: '打包/入袋' })
-      .locator('input[type="checkbox"]')
-      .check();
+      .locator('textarea[name="items.0.priceOverrideReason"]')
+      .fill('E2E 非机台任务人工报价');
+    await fillExternalSalesOrderCharges(page);
     await page.getByRole('button', { name: /创建工单/ }).click();
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/);
     orderUrl = new URL(page.url()).pathname;
     orderId = orderUrl.split('/').filter(Boolean).pop() ?? '';
-    await page.getByRole('button', { name: /^提交工单$/ }).click();
-    await expect(page.getByRole('button', { name: /^提交工单$/ })).toHaveCount(0);
+    await submitDraftOrderAndWait(page);
 
     await logout(page);
     await login(page, {
@@ -42,19 +51,24 @@ test.describe('非机台生产任务', () => {
       username: E2E_USERS.foreman.username,
       password: E2E_PASSWORD,
     });
-    const workerSelect = page.locator('select').first();
+    const assignmentRow = page
+      .getByRole('row')
+      .filter({ hasText: itemName })
+      .filter({ hasText: '打包/入袋' });
+    const packerRadio = assignmentRow
+      .getByRole('radio')
+      .filter({ hasText: E2E_USERS.workerPacker.displayName });
+    await expect(packerRadio).toHaveCount(1);
     await expect(
-      workerSelect.locator('option').filter({ hasText: E2E_USERS.workerPacker.displayName }),
-    ).toHaveCount(1);
-    await expect(
-      workerSelect.locator('option').filter({ hasText: E2E_USERS.workerHandPress.displayName }),
+      assignmentRow
+        .getByRole('radio')
+        .filter({ hasText: E2E_USERS.workerHandPress.displayName }),
     ).toHaveCount(0);
-    const packerValue = await workerSelect
-      .locator('option')
-      .filter({ hasText: E2E_USERS.workerPacker.displayName })
-      .getAttribute('value');
-    await workerSelect.selectOption(packerValue as string);
-    await page.getByRole('button', { name: /确认排产/ }).click();
+    await packerRadio.click();
+    await expect(packerRadio).toHaveAttribute('aria-checked', 'true');
+    const confirmScheduling = page.getByRole('button', { name: /确认排产/ });
+    await expect(confirmScheduling).toBeEnabled();
+    await confirmScheduling.click();
     await page.waitForURL(
       (url) => !url.pathname.startsWith(`/foreman/scheduling/${orderId}`),
     );

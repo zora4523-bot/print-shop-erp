@@ -8,7 +8,7 @@
 
 ## 最后更新
 
-2026-08-23
+2026-08-24（UI/UX 整改批次：状态/确认/错误恢复、工单/通知/CDR/产品域收口；全量单测、构建和视觉门禁通过；未 commit/未部署）
 
 ## 已完成
 
@@ -230,9 +230,19 @@
 
 ## 下一步
 
-**先做（2026-08-23，不需要拍板）**：
+**当前批次已完成（2026-08-24）**：
 
-0. [x] **根路由失效会话 500 已修复**：签名 JWT 通过 Edge proxy、但数据库账号已删除或停用时，`/` 现由 `getSession()` 验证后跳转 `/login`，不再抛 `UnauthorizedError` 500 或连带触发 React Script 警告。四角色分流、失效会话和真实异常透传测试已补；提交 `cbc88ca`，Prisma validate、typecheck、lint、236 文件 / 2988 单测、Next build 与浏览器复验全绿。
+0. [x] 设计证据、问题严重度/成本和独立任务已分别落到 `docs/UI-DESIGN-COVERAGE.md` 与 `docs/UI-REMEDIATION-BACKLOG.md`。根错误恢复、共享五态、L2/L3 确认、工单列表安全子集/字段差异、CDR 重生、通知 UNKNOWN 决策和产品引用影响已完成。具体开放边界以整改台账为准。
+
+**下一批可独立执行（仍需守住业务决策边界）**：
+
+1. `UI-F10`：工艺、账号等主数据的真实引用查询和停用策略，需先确认未完成任务/历史引用的处理口径。
+2. `UI-F06/F07/F12–F14`：按页面族迁移剩余写表单、长任务回执、loading 和断网恢复。
+3. `UI-Q01`：在固定 fixture/字体/浏览器后，由业主确认管理端和师傅端第一版设计像素基线；本批候选截图不自动升格为 expected。
+
+**已完成（2026-08-23）**：
+
+- [x] **根路由失效会话 500 已修复**：签名 JWT 通过 Edge proxy、但数据库账号已删除或停用时，`/` 现由 `getSession()` 验证后跳转 `/login`，不再抛 `UnauthorizedError` 500 或连带触发 React Script 警告。四角色分流、失效会话和真实异常透传测试已补；提交 `cbc88ca`，Prisma validate、typecheck、lint、236 文件 / 2988 单测、Next build 与浏览器复验全绿。
 
 0a. [x] **Codex 结构复审已收口**：复审表已填完，B1–B6 和 S1–S7 中当前仍成立的部分已按规定修法落地并拆成小提交。未采用的旧修法 / 过度推论见 `docs/代码质量审查-2026-08-23.md`；`RETRYING` 仍不会在 job DEAD 时被改成 `FAILED`。本次 Prisma validate、typecheck、lint、235 文件 / 2982 单测、覆盖率门禁和 Next 生产 build 均通过；仅有当前 Node 22 低于仓库声明 Node 24 的 engine 警告。
 

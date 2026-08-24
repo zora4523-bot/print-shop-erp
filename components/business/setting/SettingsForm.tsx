@@ -7,10 +7,10 @@ import { Label } from '@/components/ui/label';
 import { updateSettingsAction } from '@/actions/owner-settings';
 import type { SettingsMutationResult } from '@/actions/owner-settings.types';
 import {
-  SETTING_DEFINITIONS,
   SETTING_KEYS,
+  SETTING_METADATA,
   type SettingKey,
-} from '@/lib/settings/definitions';
+} from '@/lib/settings/metadata';
 
 type Props = {
   // 由 Server Component 读好当前值传进来（页面层不直连 Prisma 之外的东西，
@@ -31,7 +31,12 @@ export function SettingsForm({ initialValues }: Props) {
       <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
         {SETTING_KEYS.map((key) => (
           <SettingField
-            key={key}
+            // The action revalidates this Server Component and can return a
+            // new saved default. Base UI correctly warns when an uncontrolled
+            // input's defaultValue changes in place, so remount only that
+            // field when its persisted value changes. Invalid submissions keep
+            // the same key and therefore preserve the user's attempted input.
+            key={`${key}:${initialValues[key]}`}
             settingKey={key}
             defaultValue={initialValues[key]}
             errors={fieldErrors(state, key)}
@@ -67,7 +72,7 @@ function SettingField({
   defaultValue: string;
   errors: string[];
 }) {
-  const definition = SETTING_DEFINITIONS[settingKey];
+  const definition = SETTING_METADATA[settingKey];
   const { field } = definition;
   const hasError = errors.length > 0;
   const errorId = `${settingKey}-error`;

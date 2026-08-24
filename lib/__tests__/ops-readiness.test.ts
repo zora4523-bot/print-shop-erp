@@ -102,7 +102,7 @@ describe('getOpsExtensionReadiness', () => {
 });
 
 describe('listCronHttpJobReadiness', () => {
-  it('returns generated schedule and manual curl commands', async () => {
+  it('returns the retired database scheduler marker and host command', async () => {
     dbMock.$queryRaw.mockResolvedValue([
       {
         jobName: 'erp-daily-salary',
@@ -121,24 +121,23 @@ describe('listCronHttpJobReadiness', () => {
         pgNetAvailable: true,
         pgNetInstalled: true,
         pgNetPreloaded: true,
-        appErpBaseUrlSet: true,
-        appCronSecretSet: true,
-        readyToSchedule: true,
-        blockers: null,
-        scheduleSql:
-          "SELECT cron.schedule('erp-daily-salary', '5 0 * * *', 'SELECT net.http_post(...)');",
+        appErpBaseUrlSet: false,
+        appCronSecretSet: false,
+        readyToSchedule: false,
+        blockers: ['database_http_scheduler_retired'],
+        scheduleSql: null,
         unscheduleSql: "SELECT cron.unschedule('erp-daily-salary');",
-        manualCurl:
-          'curl -X POST "$ERP_BASE_URL/api/cron/daily-salary" -H "Authorization: Bearer $CRON_SECRET"',
+        manualCurl: '/usr/local/sbin/print-shop-erp-cron daily-salary',
       },
     ]);
 
     await expect(listCronHttpJobReadiness()).resolves.toEqual([
       expect.objectContaining({
         jobName: 'erp-daily-salary',
-        readyToSchedule: true,
-        blockers: [],
-        scheduleSql: expect.stringContaining('cron.schedule'),
+        readyToSchedule: false,
+        blockers: ['database_http_scheduler_retired'],
+        scheduleSql: null,
+        manualCurl: '/usr/local/sbin/print-shop-erp-cron daily-salary',
       }),
     ]);
   });

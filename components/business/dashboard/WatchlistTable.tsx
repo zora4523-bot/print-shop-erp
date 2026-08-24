@@ -54,8 +54,9 @@ export function WatchlistTable<T>({
 }: WatchlistTableProps<T>) {
   return (
     <section
+      id={slot}
       data-slot={slot}
-      className="rounded-xl border bg-card shadow-sm"
+      className="scroll-mt-24 rounded-xl border bg-card shadow-sm"
     >
       <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3">
         <h2 className="text-base font-semibold">{title}</h2>
@@ -70,7 +71,7 @@ export function WatchlistTable<T>({
       ) : (
         // 用 title 当地标名：owner 首页同时渲染 4 个 WatchlistTable，
         // 全叫「数据表格」的话读屏器的地标列表分不出谁是谁。
-        <Table label={title}>
+        <Table label={title} className="min-w-[36rem]">
           <TableHeader>
             <TableRow>
               {columns.map((c, i) => (

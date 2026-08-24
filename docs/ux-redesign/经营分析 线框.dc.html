@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .cap { font-size: 12.5px; color: #52525b }
+</style>
+</helmet>
+
+<div style="min-width: 1420px; padding-bottom: 44px">
+
+  <div style="padding: 32px 40px 22px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 34px; font-weight: 700">经营分析</h1>
+      <span class="pill" style="background: #fffbeb; color: #92400e">新功能 · 不在 85 页之内</span>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">1280×800</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">和 <code>/owner</code> 首页是<b>两种不同的东西</b>：首页每天早上看 5 秒、决定今天先干哪件事；这一页每月看 20 分钟、决定要不要调价和加人。所以它不塞进首页，首页只留一个入口 + 一行本月摘要。<b>这一页不放任何写操作</b>——它是判断依据，不是操作台。</p>
+    <div class="pcard" style="max-width: 1180px; margin-top: 13px; padding: 12px 15px; border-color: #fed7aa">
+      <div style="font-size: 14px; font-weight: 600; color: #92400e">立项前你要先拍板的一件事</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">毛利是<b>推导指标</b>，系统里没有这个字段。它 = 已结案工单的收费合计 −（计件工资 + 外协金额 + 物料消耗 + 分摊采购）。这四条线各自的口径、以及「按结案时间还是按发货时间归属」都必须先定死并写在页面上，否则第一次和财务对不上账，这一页就没人信了。下面所有金额都是按这个口径演示的占位数。</div>
+    </div>
+  </div>
+
+  <div style="padding: 26px 40px 30px">
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>概览</span><span>›</span><span style="color: #3f3f46">经营分析</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 13px 20px 0; flex: none">
+          <div style="min-width: 0">
+            <h3 style="margin: 0; font-size: 22px; font-weight: 700">经营分析</h3>
+            <div class="cap nw" style="margin-top: 2px">按工单结案时间归属 · 含计件、外协、物料与分摊采购 · <span style="color: #b91c1c">口径说明</span></div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex: none">
+            <div style="display: flex; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden">
+              <sc-for list="{{ ranges }}" as="r" hint-placeholder-count="4">
+                <span class="nw" style="font-size: 12.5px; padding: 7px 12px; background: {{ r.bg }}; color: {{ r.fg }}; font-weight: {{ r.w }}">{{ r.t }}</span>
+              </sc-for>
+            </div>
+            <button type="button" class="btn-s">导出 Excel</button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; padding: 12px 20px 0; flex: none">
+          <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+            <div class="pcard" style="padding: 11px 13px 12px; border-color: {{ k.bd }}">
+              <div class="cap nw" style="font-size: 11.5px">{{ k.k }}</div>
+              <div class="nw" style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; color: {{ k.c }}">{{ k.v }}</div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
+                <span class="pill nw" style="background: {{ k.dBg }}; color: {{ k.dFg }}; font-size: 11px">{{ k.d }}</span>
+                <span class="cap nw" style="font-size: 11px">{{ k.sub }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding-right: 2px">
+            <div class="pcard" style="padding: 12px 14px 14px; flex: none">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600">成本构成</span>
+                <span class="cap nw" style="font-size: 11.5px">合计 ¥186,420 · 占收入 68.4%</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 10px">
+                <sc-for list="{{ costs }}" as="c" hint-placeholder-count="4">
+                  <div>
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px">
+                      <span class="nw" style="font-size: 12.5px">{{ c.k }}</span>
+                      <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums; color: #52525b">{{ c.v }} · {{ c.pct }}</span>
+                    </div>
+                    <div style="height: 8px; border-radius: 4px; background: #f2f2f4; margin-top: 4px; overflow: hidden">
+                      <div style="height: 100%; background: {{ c.color }}; width: {{ c.pct }}"></div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div class="cap" style="font-size: 11.5px; margin-top: 10px; line-height: 1.6">物料消耗按 BOM 与实际出库孰高计；采购按当月到货金额分摊到当月结案工单。这两条是最容易和财务对不上的地方，口径要先定。</div>
+            </div>
+
+            <div class="pcard" style="padding: 12px 14px 14px; flex: none">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600">产能与负载</span>
+                <span class="cap nw" style="font-size: 11.5px">本周已排产工时 / 可用工时</span>
+                <div style="flex: 1"></div>
+                <span class="pill nw" style="background: #fef2f2; color: #b91c1c">1 处瓶颈</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 10px">
+                <sc-for list="{{ load }}" as="l" hint-placeholder-count="4">
+                  <div>
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px">
+                      <span class="nw" style="font-size: 12.5px; font-weight: {{ l.w }}">{{ l.k }}</span>
+                      <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums; color: {{ l.c }}">{{ l.v }} · {{ l.pct }}</span>
+                    </div>
+                    <div style="height: 8px; border-radius: 4px; background: #f2f2f4; margin-top: 4px; overflow: hidden; position: relative">
+                      <div style="height: 100%; background: {{ l.color }}; width: {{ l.bar }}"></div>
+                    </div>
+                    <sc-if value="{{ l.note }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size: 11.5px; color: #b91c1c; margin-top: 3px">{{ l.note }}</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding-right: 2px">
+            <div class="pcard" style="padding: 12px 14px 14px; flex: none">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600">交付准时率</span>
+                <span class="cap nw" style="font-size: 11.5px">按承诺交期 vs 实际发货</span>
+              </div>
+              <div style="display: flex; align-items: baseline; gap: 10px; margin-top: 8px">
+                <span class="nw" style="font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums">86.4%</span>
+                <span class="pill nw" style="background: #fef2f2; color: #b91c1c">环比 −4.2pt</span>
+                <div style="flex: 1"></div>
+                <span class="cap nw" style="font-size: 11.5px">逾期 <b style="color: #b91c1c">17</b> 单</span>
+              </div>
+              <div style="display: flex; align-items: flex-end; gap: 5px; height: 62px; margin-top: 11px">
+                <sc-for list="{{ trend }}" as="t" hint-placeholder-count="6">
+                  <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px">
+                    <div style="width: 100%; border-radius: 3px 3px 0 0; background: {{ t.color }}; height: {{ t.h }}"></div>
+                    <span class="nw" style="font-size: 10px; color: #52525b">{{ t.m }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div class="cap" style="font-size: 11.5px; margin-top: 8px; line-height: 1.6">连续两个月下滑。逾期单里 11 单卡在外协回货——这条要和外协覆盖一起看。</div>
+            </div>
+
+            <div class="pcard" style="padding: 12px 14px 14px; flex: none; border-color: #fecaca">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600; color: #b91c1c">库存预警</span>
+                <span class="cap nw" style="font-size: 11.5px">低于安全库存</span>
+                <div style="flex: 1"></div>
+                <span class="nw" style="font-size: 12px; color: #b91c1c">去建采购单</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 9px">
+                <sc-for list="{{ stock }}" as="s" hint-placeholder-count="3">
+                  <div style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid #f4f4f5; border-radius: 8px; background: {{ s.bg }}">
+                    <div style="min-width: 0; flex: 1">
+                      <div class="nw" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ s.name }}</div>
+                      <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px; font-variant-numeric: tabular-nums">{{ s.meta }}</div>
+                    </div>
+                    <span class="pill nw" style="background: {{ s.tBg }}; color: {{ s.tFg }}; flex: none">{{ s.tag }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div class="cap" style="font-size: 11.5px; margin-top: 9px; line-height: 1.6">断料直接停产，所以这一块同时进首页告警条——经营分析页只是它的明细视图。</div>
+            </div>
+
+            <div class="pcard" style="padding: 12px 14px 14px; flex: none">
+              <div style="display: flex; align-items: baseline; gap: 8px">
+                <span style="font-size: 13.5px; font-weight: 600">客户贡献 Top 5</span>
+                <span class="cap nw" style="font-size: 11.5px">按毛利排序，不是按单量</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 92px 84px 76px; gap: 9px; margin-top: 9px; padding-bottom: 5px; border-bottom: 1px solid #f0f0f2; font-size: 11px; color: #71717a">
+                <div>客户</div><div style="text-align: right">收入</div><div style="text-align: right">毛利</div><div style="text-align: right">毛利率</div>
+              </div>
+              <sc-for list="{{ top }}" as="t" hint-placeholder-count="5">
+                <div style="display: grid; grid-template-columns: 1fr 92px 84px 76px; gap: 9px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #f7f7f9">
+                  <div class="nw" style="font-size: 12.5px; overflow: hidden; text-overflow: ellipsis">{{ t.name }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: #52525b">{{ t.rev }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; font-weight: 500">{{ t.gp }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: {{ t.c }}">{{ t.rate }}</div>
+                </div>
+              </sc-for>
+              <div class="cap" style="font-size: 11.5px; margin-top: 8px; line-height: 1.6">按单量排会把「大单低毛利」排到前面。老板要看的是谁在赚钱，不是谁下单多。</div>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+
+    <div class="pcard" style="max-width: 1280px; margin-top: 20px; padding: 14px 16px">
+      <div style="font-size: 15px; font-weight: 600">这一页与首页的分工</div>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px 24px; margin-top: 9px">
+        <sc-for list="{{ notes }}" as="n" hint-placeholder-count="6">
+          <div style="display: flex; align-items: flex-start; gap: 9px">
+            <span class="pill nw" style="background: {{ n.bg }}; color: {{ n.fg }}; flex: none">{{ n.tag }}</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ n.t }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1420,&quot;height&quot;:1300}}">
+// 与批次四–六的 navFor() 完全一致的 13 项真实侧栏，只在「概览」组下加了本页。
+// 上一版我手写了简写版，又漏掉「工单修改申请」「工时录入」「开机师傅计件规则」「员工工资规则」——
+// 这一批的论点正是「经营分析该和 Dashboard 平级」，侧栏密度画少了论点就站不住。
+const NAV = [
+  ['概览', [['Dashboard', 0], ['经营分析', 1]]],
+  ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0]]],
+  ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+];
+
+const RANGES = [['本月', 1], ['上月', 0], ['本季', 0], ['自定义', 0]];
+
+const KPIS = [
+  ['收入（已结案工单收费）', '¥272,540', '环比 +8.2%', '较上月 ¥251,900', '#e4e4e7', '#27272a', '#ecfdf5', '#047857'],
+  ['成本合计', '¥186,420', '环比 +14.6%', '涨得比收入快', '#fed7aa', '#27272a', '#fffbeb', '#b45309'],
+  ['毛利', '¥86,120', '环比 −3.4%', '推导指标 · 口径见说明', '#e4e4e7', '#27272a', '#fef2f2', '#b91c1c'],
+  ['毛利率', '31.6%', '环比 −3.8pt', '连续两月下滑', '#fecaca', '#b91c1c', '#fef2f2', '#b91c1c'],
+];
+
+const COSTS = [
+  ['计件工资', '¥68,240', '36.6%', '#dc2626'],
+  ['外协金额', '¥54,180', '29.1%', '#b45309'],
+  ['物料消耗', '¥41,600', '22.3%', '#1d4ed8'],
+  ['分摊采购', '¥22,400', '12.0%', '#6d28d9'],
+];
+
+const LOAD = [
+  ['风车机', '182 / 180 工时', '101%', '100%', '#dc2626', 600, '#b91c1c', '已满载，本周新排的单最早 09-04 才能开工'],
+  ['开机仔（烫金）', '146 / 200 工时', '73%', '73%', '#b45309', 400, '#52525b', ''],
+  ['黏封机', '88 / 160 工时', '55%', '55%', '#1d4ed8', 400, '#52525b', ''],
+  ['打包', '124 / 240 工时', '52%', '52%', '#1d4ed8', 400, '#52525b', ''],
+];
+
+const TREND = [
+  ['3月', '52%', '#e4e4e7'], ['4月', '68%', '#e4e4e7'], ['5月', '74%', '#e4e4e7'],
+  ['6月', '86%', '#d4d4d8'], ['7月', '78%', '#fca5a5'], ['8月', '64%', '#dc2626'],
+];
+
+const STOCK = [
+  ['160g艳闪红卡', '现存 12 令 · 安全库存 40 令 · 在途 0', '缺 28 令', '#fffafa', '#fee2e2', '#b91c1c'],
+  ['哑金烫金纸', '现存 6 卷 · 安全库存 15 卷 · 在途 10 卷', '在途可补', '#fff', '#fffbeb', '#b45309'],
+  ['触感纸 250g', '现存 22 令 · 安全库存 25 令 · 在途 0', '缺 3 令', '#fff', '#fffbeb', '#b45309'],
+];
+
+const TOP = [
+  ['王总 · 中秋礼盒', '¥68,400', '¥24,600', '36.0%', '#047857'],
+  ['超长客户代号 ABCDEF…', '¥54,200', '¥12,100', '22.3%', '#b45309'],
+  ['批量排产客户', '¥41,800', '¥15,900', '38.0%', '#047857'],
+  ['第二批量排产客户', '¥33,600', '¥4,200', '12.5%', '#b91c1c'],
+  ['混合机型批量排产客户', '¥28,900', '¥9,800', '33.9%', '#047857'],
+];
+
+const NOTES = [
+  ['首页', '首页只留一行本月摘要（收入 / 毛利率 / 瓶颈工种 / 缺料数）+ 一个「查看经营分析」入口。不放图表。', '#fef2f2', '#b91c1c'],
+  ['本页', '只读。不放任何写操作——需要下单补料时跳到采购单，需要调价时跳到价目发布中心，本页不代劳。', '#f4f4f5', '#52525b'],
+  ['库存', '库存预警是唯一同时出现在两处的：断料直接停产，属于首页告警条级别，本页只是它的明细视图。', '#fffbeb', '#b45309'],
+  ['口径', '毛利、准时率、产能负载三个都是推导指标，页面上必须常驻口径说明。第一次和财务对不上账，这一页就废了。', '#fffbeb', '#b45309'],
+  ['时间', '区间切换要进 URL（契约 01），这样月度复盘的链接可以直接发给别人。', '#f4f4f5', '#52525b'],
+  ['范围', '这一页不在 85 页之内，是新功能。要做的话建议先只做「收入 / 成本 / 毛利 + 库存预警」两块——产能负载依赖工时数据的完整性，准时率依赖承诺交期的填写率，这两个前提不一定成立。', '#fef2f2', '#b91c1c'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: NAV.map(([group, items]) => ({
+        group,
+        items: items.map(([label, on]) => ({
+          label, w: on ? 600 : 400,
+          bg: on ? '#f4f4f5' : 'transparent',
+          edge: on ? '#dc2626' : 'transparent',
+        })),
+      })),
+      ranges: RANGES.map(([t, on]) => ({ t, bg: on ? '#dc2626' : '#fff', fg: on ? '#fff' : '#3f3f46', w: on ? 500 : 400 })),
+      kpis: KPIS.map(([k, v, d, sub, bd, c, dBg, dFg]) => ({ k, v, d, sub, bd, c, dBg, dFg })),
+      costs: COSTS.map(([k, v, pct, color]) => ({ k, v, pct, color })),
+      load: LOAD.map(([k, v, pct, bar, color, w, c, note]) => ({ k, v, pct, bar, color, w, c, note })),
+      trend: TREND.map(([m, h, color]) => ({ m, h, color })),
+      stock: STOCK.map(([name, meta, tag, bg, tBg, tFg]) => ({ name, meta, tag, bg, tBg, tFg })),
+      top: TOP.map(([name, rev, gp, rate, c]) => ({ name, rev, gp, rate, c })),
+      notes: NOTES.map(([tag, t, bg, fg]) => ({ tag, t, bg, fg })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

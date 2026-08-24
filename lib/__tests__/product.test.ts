@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProductCategory } from '../../generated/prisma/enums';
+import { ProductCategory, Role } from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
+    businessAuditLog: {
+      create: vi.fn(),
+    },
     businessCodeSequence: {
       upsert: vi.fn(),
     },
@@ -36,6 +40,7 @@ import {
   updateProductCategoryNode,
   setProductCategoryNodeActive,
   getProductSummary,
+  getProductReferenceImpact,
   createProduct,
   updateProduct,
   setProductActive,
@@ -45,6 +50,8 @@ import {
 
 beforeEach(() => {
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
+  dbMock.$queryRaw.mockReset().mockResolvedValue([]);
+  dbMock.businessAuditLog.create.mockReset().mockResolvedValue({ id: 'audit-1' });
   dbMock.$transaction
     .mockReset()
     .mockImplementation(
@@ -87,6 +94,16 @@ const makeProduct = (over = {}) => ({
   },
   ...over,
 });
+
+const activeChangeContext = {
+  actor: {
+    id: 'admin-1',
+    role: Role.ADMIN,
+    username: 'admin',
+    displayName: '管理员',
+  },
+  reason: '旧款停产',
+};
 
 describe('listProducts', () => {
   it('orders by isActive desc, category asc, name asc', async () => {
@@ -175,6 +192,36 @@ describe('listProductsPage', () => {
     expect(dbMock.product.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
     );
+  });
+
+  it('applies the explicit active-state filter and attaches real reference counts', async () => {
+    dbMock.product.count.mockResolvedValue(1);
+    dbMock.product.findMany.mockResolvedValue([makeProduct()]);
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        productId: 'p1',
+        orderCount: 3,
+        bomCount: 2,
+        currentExternalPriceRuleCount: 4,
+        currentInternalPriceTierCount: 1,
+      },
+    ]);
+
+    const result = await listProductsPage({
+      status: 'inactive',
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(dbMock.product.count).toHaveBeenCalledWith({
+      where: { isActive: false },
+    });
+    expect(result.rows[0]?.referenceImpact).toEqual({
+      orderCount: 3,
+      bomCount: 2,
+      currentExternalPriceRuleCount: 4,
+      currentInternalPriceTierCount: 1,
+    });
   });
 });
 
@@ -571,7 +618,7 @@ describe('setProductActive', () => {
   it('no-ops when already matching', async () => {
     const p = makeProduct({ isActive: true });
     dbMock.product.findUnique.mockResolvedValue(p);
-    const r = await setProductActive('p1', true);
+    const r = await setProductActive('p1', true, activeChangeContext);
     expect(r).toBe(p);
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
@@ -579,15 +626,71 @@ describe('setProductActive', () => {
   it('flips isActive when different', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
     dbMock.product.update.mockResolvedValue(makeProduct({ isActive: false }));
-    await setProductActive('p1', false);
+    await setProductActive('p1', false, activeChangeContext);
     expect(dbMock.product.update.mock.calls[0][0].data).toEqual({ isActive: false });
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'PRODUCT_DEACTIVATE',
+          entityType: 'Product',
+          entityId: 'p1',
+          actorId: 'admin-1',
+          requestMetadata: expect.objectContaining({
+            reason: '旧款停产',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('requires a reason for deactivation inside the domain transaction', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
+    await expect(
+      setProductActive('p1', false, {
+        ...activeChangeContext,
+        reason: '   ',
+      }),
+    ).rejects.toThrow(/必须填写业务理由/);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('throws when target missing', async () => {
     dbMock.product.findUnique.mockResolvedValue(null);
-    await expect(setProductActive('nope', false)).rejects.toBeInstanceOf(
+    await expect(
+      setProductActive('nope', false, activeChangeContext),
+    ).rejects.toBeInstanceOf(
       ProductInvariantError,
     );
+  });
+});
+
+describe('getProductReferenceImpact', () => {
+  it('counts distinct orders and only currently effective quote sources', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        productId: 'p1',
+        orderCount: 7,
+        bomCount: 2,
+        currentExternalPriceRuleCount: 3,
+        currentInternalPriceTierCount: 4,
+      },
+    ]);
+
+    await expect(
+      getProductReferenceImpact('p1', new Date('2026-08-24T00:00:00Z')),
+    ).resolves.toEqual({
+      orderCount: 7,
+      bomCount: 2,
+      currentExternalPriceRuleCount: 3,
+      currentInternalPriceTierCount: 4,
+    });
+    expect(dbMock.$queryRaw).toHaveBeenCalledOnce();
+    const query = dbMock.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
+    expect(query.sql).toContain('COUNT(DISTINCT item."orderId")');
+    expect(query.sql).toContain('book."settlementType" = \'EXTERNAL_SALES\'');
+    expect(query.sql).toContain('book."effectiveFrom" <=');
+    expect(query.sql).toContain('tier."effectiveFrom" <=');
   });
 });
 

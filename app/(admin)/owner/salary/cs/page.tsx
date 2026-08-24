@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { CalendarClock } from 'lucide-react';
 import { listCsPeriods } from '@/lib/salary/cs';
 import { SalaryPeriodStatus } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
+import { SalaryPeriodStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -94,11 +94,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
                     {String(p.monthlyBase)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {p.status === SalaryPeriodStatus.SETTLED ? (
-                      <Badge>已结算</Badge>
-                    ) : (
-                      <Badge variant="outline">进行中</Badge>
-                    )}
+                    <SalaryPeriodStatusBadge status={p.status} />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

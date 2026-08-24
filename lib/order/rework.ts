@@ -14,6 +14,9 @@ import {
 } from './order-number';
 import { orderCascadeLockKey } from './locks';
 import { dispatchNotification } from '../notification/dispatch';
+import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
+import type { EnqueueClient } from '../background-jobs/repository';
+import { backgroundJobsMode } from '../background-jobs/mode';
 
 export class ReworkOrderError extends Error {
   constructor(message: string) {
@@ -49,6 +52,7 @@ export async function createReworkOrder(
     throw new ReworkOrderError('只有管理员可以创建重做工单');
   }
 
+  let notificationQueued = false;
   const created = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.sourceOrderId,
@@ -243,10 +247,51 @@ export async function createReworkOrder(
       },
     });
 
+    if (backgroundJobsMode() === 'durable') {
+      const payload = await tx.order.findUniqueOrThrow({
+        where: { id: createdOrder.id },
+        select: {
+          id: true,
+          orderNo: true,
+          customerRef: true,
+          totalAmount: true,
+          isUrgent: true,
+          submitter: { select: { displayName: true } },
+        },
+      });
+      notificationQueued = await enqueueNotificationInTransaction(
+        tx as unknown as EnqueueClient,
+        'ORDER_SUBMITTED',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+          totalAmount: String(payload.totalAmount),
+          urgentMark: payload.isUrgent ? '🚨 急单' : '',
+        },
+        { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+      );
+      if (payload.isUrgent) {
+        const urgentQueued = await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'URGENT_ORDER',
+          {
+            orderId: payload.id,
+            orderNo: payload.orderNo,
+            submitterName: payload.submitter.displayName,
+            customerRef: payload.customerRef,
+          },
+          { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+        );
+        notificationQueued = notificationQueued && urgentQueued;
+      }
+    }
+
     return createdOrder;
   });
 
-  const payload = await db.order.findUnique({
+  const payload = notificationQueued ? null : await db.order.findUnique({
     where: { id: created.id },
     select: {
       id: true,
@@ -270,6 +315,18 @@ export async function createReworkOrder(
       },
       { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
     );
+    if (payload.isUrgent) {
+      await dispatchNotification(
+        'URGENT_ORDER',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+        },
+        { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+      );
+    }
   }
 
   return { id: created.id, orderNo: created.orderNo };

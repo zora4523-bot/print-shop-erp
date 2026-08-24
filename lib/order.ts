@@ -30,7 +30,7 @@ import { getOrderScopeFilter } from './auth/order-scope';
 import { orderCascadeLockKey } from './order/locks';
 import {
   collectOutsourceCraftIds,
-  findUncoveredOutsourceItems,
+  findUndercoveredOutsourceItems,
   outsourceCoverageApplies,
 } from './outsource/coverage';
 import {
@@ -40,6 +40,9 @@ import {
   editableFieldsetForStatus,
 } from './order/editable-fields';
 import { dispatchNotification } from './notification/dispatch';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { EnqueueClient } from './background-jobs/repository';
+import { backgroundJobsMode } from './background-jobs/mode';
 import { formatMoneyPlain } from './dashboard/format';
 import {
   assertCsOrderSalesLedgerReconciledInTx,
@@ -737,6 +740,13 @@ type TransitionOptions = {
   // rolls the whole transition back (so a block condition leaves no
   // half-cancel). Used by cancelOrder to void PENDING ProductionTasks.
   cascade?: (tx: CascadeTxClient, orderId: string) => Promise<void>;
+  // Durable notification/outbox work that must commit atomically with the
+  // status transition. Inline dev/test callers return false and dispatch only
+  // after this transaction commits.
+  afterTransition?: (
+    tx: Prisma.TransactionClient,
+    orderId: string,
+  ) => Promise<void>;
 };
 
 async function transitionWithLog(
@@ -804,6 +814,8 @@ async function transitionWithLog(
       },
     });
 
+    await opts.afterTransition?.(tx, orderId);
+
     return updated;
   });
 }
@@ -813,6 +825,7 @@ export async function submitOrder(
   actor: { id: string; role: Role },
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
+  let notificationsQueued = false;
   const result = await transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, {
     remark: '提交工单',
     now,
@@ -860,12 +873,56 @@ export async function submitOrder(
         }
       }
     },
+    afterTransition: async (tx, lockedOrderId) => {
+      if (backgroundJobsMode() !== 'durable') return;
+      const payload = await tx.order.findUniqueOrThrow({
+        where: { id: lockedOrderId },
+        select: {
+          id: true,
+          orderNo: true,
+          customerRef: true,
+          totalAmount: true,
+          isUrgent: true,
+          submitter: { select: { displayName: true } },
+        },
+      });
+      const totalAmount = formatMoneyPlain(
+        payload.totalAmount as unknown as Decimal.Value,
+      );
+      notificationsQueued = await enqueueNotificationInTransaction(
+        tx as unknown as EnqueueClient,
+        'ORDER_SUBMITTED',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+          totalAmount,
+          urgentMark: payload.isUrgent ? '🚨 急单' : '',
+        },
+        { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+      );
+      if (payload.isUrgent) {
+        const urgentQueued = await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'URGENT_ORDER',
+          {
+            orderId: payload.id,
+            orderNo: payload.orderNo,
+            submitterName: payload.submitter.displayName,
+            customerRef: payload.customerRef,
+          },
+          { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+        );
+        notificationsQueued = notificationsQueued && urgentQueued;
+      }
+    },
   });
 
   // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit）。
   // 生产只 await 快速入库，webhook 由 LIGHT worker 重试；dev/test
   // 降级到 Next `after()`。详见 lib/notification/dispatch.ts。
-  const payload = await db.order.findUnique({
+  const payload = notificationsQueued ? null : await db.order.findUnique({
     where: { id: orderId },
     select: {
       id: true,
@@ -918,13 +975,20 @@ export async function submitOrder(
 export async function cancelOrder(
   orderId: string,
   actor: { id: string; role: Role },
-  reason: string | null,
+  reason: string,
   now: Date = new Date(),
 ): Promise<{ id: string; status: OrderStatus }> {
+  const normalizedReason = reason.trim();
+  if (!normalizedReason) {
+    throw new OrderInvariantError('取消原因必填');
+  }
+  if (normalizedReason.length > 500) {
+    throw new OrderInvariantError('取消原因过长（最多 500 个字符）');
+  }
   // The action-layer `requirePermission('order:cancel')` is ADMIN-only, so
   // there's no additional ownership guard to run here.
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
-    remark: reason ? `取消：${reason}` : '取消工单',
+    remark: `取消：${normalizedReason}`,
     now,
     // A1 (owner ruling, DECISIONS 2026-07-09): cancelling an order must
     // dispose of its ProductionTasks in the SAME tx — otherwise cancelled
@@ -1036,7 +1100,7 @@ export async function cancelOrder(
             type: CsSalesEntryType.ORDER_CANCELLED,
             amount: new Decimal(cancelledOrder.totalAmount).negated(),
             occurredAt: now,
-            remark: reason ? `取消工单：${reason}` : '取消工单冲减销售额',
+            remark: `取消工单：${normalizedReason}`,
           });
         } catch (error) {
           if (error instanceof CsSalesLedgerError) {
@@ -1084,6 +1148,7 @@ export async function shipOrder(
     requestedShipments.length > 0
       ? requestedShipments[0]?.trackingNo ?? null
       : tracking;
+  let notificationQueued = false;
   const result = await transitionWithLog(
     orderId,
     OrderStatus.SHIPPED,
@@ -1349,6 +1414,23 @@ export async function shipOrder(
           }
         }
       },
+      afterTransition: async (tx, id) => {
+        if (backgroundJobsMode() !== 'durable') return;
+        const order = await tx.order.findUniqueOrThrow({
+          where: { id },
+          select: { id: true, orderNo: true },
+        });
+        notificationQueued = await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'ORDER_SHIPPED',
+          {
+            orderId: order.id,
+            orderNo: order.orderNo,
+            trackingNo: primaryTracking ?? '未填',
+          },
+          { dedupeKey: `notification:ORDER_SHIPPED:${order.id}` },
+        );
+      },
     },
   );
 
@@ -1357,7 +1439,7 @@ export async function shipOrder(
   // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
   // raw 字面量流到群消息（HANDOFF round 102 Slice C TODO）。这里映射
   // null → '未填'。
-  const payload = await db.order.findUnique({
+  const payload = notificationQueued ? null : await db.order.findUnique({
     where: { id: orderId },
     select: { id: true, orderNo: true },
   });
@@ -2136,8 +2218,15 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
             },
           },
       outsourceOrders: {
-        // orderItemIds 供「暂不能完工」横幅做款式级覆盖比对，不额外发查询。
-        select: { id: true, status: true, orderItemIds: true },
+        // 逐款式数量快照供「暂不能完工」横幅与完工闸口共用。
+        select: {
+          id: true,
+          status: true,
+          orderItemIds: true,
+          itemSnapshots: {
+            select: { orderItemId: true, quantity: true },
+          },
+        },
         orderBy: { createdAt: 'desc' },
       },
       shipments: {
@@ -2230,11 +2319,12 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
     //    craft 名称解析**不能**一起挪进这个 if，否则 craftNames 会全部
     //    退化成「已删除工艺」。
     if (outsourceCoverageApplies(order)) {
-      uncoveredOutsourceItems = findUncoveredOutsourceItems(
+      uncoveredOutsourceItems = findUndercoveredOutsourceItems(
         order.items.map((item) => ({
           id: item.id,
           sequence: item.sequence,
           name: item.name,
+          quantity: item.quantity,
           crafts: item.crafts,
         })),
         collectOutsourceCraftIds(crafts),

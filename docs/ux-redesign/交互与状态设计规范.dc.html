@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #f4f4f5; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a; }
+  h1, h2, h3, h4, h5 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em; }
+  a { color: #dc2626; text-decoration: none; }
+  a:hover { color: #991b1b; }
+  .nw { white-space: nowrap; }
+  .sec { padding: 34px 40px 32px; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
+  /* 设计系统的 styles.css 已有 .card { display:flex; flex-direction:column; gap: var(--space-2) }，
+     同名类会把 6.8px 间隙注进每个子元素之间——映射表的行会被白槽切开。显式夺回。 */
+  .card { display: block; gap: 0; background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .kick { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #71717a; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .blk { border: 1px dashed #d4d4d8; border-radius: 8px; padding: 13px 10px 9px; position: relative; background: #fff; }
+  .blkl { position: absolute; top: -8px; left: 9px; font-size: 10.5px; letter-spacing: 0.04em; padding: 1px 6px; background: #f4f4f5; color: #52525b; border-radius: 4px; }
+  .blka { border-color: #fca5a5; background: #fffafa; }
+  .bar { height: 7px; border-radius: 3px; background: #f0f0f2; }
+</style>
+</helmet>
+
+<div style="min-width: 2600px; padding-bottom: 44px">
+
+  <div style="padding: 38px 40px 28px; background: #fff; border-bottom: 1px solid #e4e4e7">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 38px; font-weight: 700">交互与状态设计规范</h1>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">现有 shadcn 皮肤 · OKLCH 语义 token · 系统 CJK 栈</span>
+      <span class="pill" style="background: #fef2f2; color: #b91c1c">覆盖全站 85 页</span>
+    </div>
+    <p style="max-width: 1140px; margin: 12px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">视觉语言已定，本文档不再讨论颜色和字体，只解决四件事：<b>布局骨架</b>、<b>交互逻辑</b>、<b>现有功能的状态</b>、<b>操作分级</b>。85 页不靠逐页手作覆盖——靠三类骨架 + 十条交互契约 + 五态 + 五种业务特有状态 + 三级操作阶梯，再把每个页面族映射上去。<b>凡是标「契约」的都是硬规则</b>：新页面照抄即可，不需要重新设计。</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px">
+      <sc-for list="{{ toc }}" as="t" hint-placeholder-count="8">
+        <a class="nw" href="{{ t.href }}" style="font-size: 12.5px; padding: 6px 12px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46">{{ t.label }}</a>
+      </sc-for>
+    </div>
+  </div>
+
+  <section class="sec" id="skeleton">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">A · 三类页面骨架</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">85 页里 81 个有 UI 的页面全部落在这三类里。骨架规定<b>区域顺序、滚动边界、主操作位置、返回路径</b>四件事——这四件事一旦统一，用户在第 40 个页面上也不需要重新学。</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
+      <sc-for list="{{ skeletons }}" as="s" hint-placeholder-count="3">
+        <div style="flex: none; width: 820px">
+          <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px">
+            <span class="pill" style="background: #18181b; color: #fff">{{ s.id }}</span>
+            <span style="font-size: 17px; font-weight: 600">{{ s.name }}</span>
+            <span style="font-size: 12.5px; color: #71717a">{{ s.count }}</span>
+          </div>
+          <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 9px">
+            <sc-for list="{{ s.blocks }}" as="b" hint-placeholder-count="6">
+              <div class="blk" style="border-color: {{ b.bd }}; background: {{ b.bg }}; border-style: {{ b.bs }}; min-height: {{ b.h }}px">
+                <span class="blkl" style="color: {{ b.lc }}">{{ b.t }}</span>
+                <div style="font-size: 12px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ b.d }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top: 11px">
+            <div class="kick">滚动边界与返回路径</div>
+            <div style="font-size: 12.5px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ s.scroll }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="contract">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">B · 十条交互契约</h2>
+    <p style="max-width: 1140px; margin: 0 0 10px; color: #52525b">按骨架分组。每条都写了<b>为什么</b>（对应当前实现的哪个问题）和<b>验收口径</b>（能截图或交互测试验证的结果），不写「更现代」这类无法验收的话。</p>
+    <div class="card" style="max-width: 1140px; margin-bottom: 22px; padding: 12px 15px">
+      <div style="font-size: 14px; font-weight: 600">分组口径的一处修正（2026-08-23）</div>
+      <div style="font-size: 12.5px; line-height: 1.7; color: #3f3f46; margin-top: 4px; margin-bottom: 12px; text-wrap: pretty">下方映射表原本有「通知运维」「后台任务与运维」两族，把四类不同的东西归成了「运维」。已按「谁处置、处置的后果是不是业务」重切：<b>Pigsty</b> 是纯基础设施只读，不进侧栏导航，只从告警条进入；<b>后台任务</b>拆开——死信里有业务后果的（通知投递失败、导出失败）并入 Dashboard 的待处理异常队列，worker 心跳与队列深度跟 Pigsty 走；<b>通知配置、系统设置、账号</b>是业务配置，归「设置」组；<b>CDR</b> 是给车间的业务作业，归业务组。因此侧栏<b>不设「运维」组</b>——这也修正了批次一线框里我原来提的建议。</div>
+      <div style="font-size: 14px; font-weight: 600">「为什么」里的证据标注</div>
+      <div style="font-size: 12.5px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">沿用线框文档的口径：<b>观察</b>= 能在指名的截图和视口里指到具体位置；<b>推断</b>= 证据不足，需要材料或你的回答，<b>不当作现状</b>。静态截图无法证明的东西（URL 里有没有筛选参数、返回后状不状态恢复、断网能不能恢复草稿、没打开过的页面长什么样）一律标推断。<b>标推断不等于契约不成立</b>——契约是目标状态；但它意味着「当前实现有没有这个问题」还没核实，落地前要先确认，否则可能在修一个不存在的问题。</div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1220px)); gap: 22px 30px">
+      <sc-for list="{{ contracts }}" as="c" hint-placeholder-count="10">
+        <div class="card" style="padding: 15px 17px 16px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span class="pill" style="background: #fef2f2; color: #b91c1c">{{ c.n }}</span>
+            <span style="font-size: 16px; font-weight: 600">{{ c.name }}</span>
+            <span class="pill" style="background: #f4f4f5; color: #52525b">{{ c.scope }}</span>
+          </div>
+          <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 8px; text-wrap: pretty">{{ c.rule }}</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 11px; padding-top: 11px; border-top: 1px solid #f4f4f5">
+            <div>
+              <div class="kick">为什么</div>
+              <div style="font-size: 12px; line-height: 1.65; color: #52525b; margin-top: 3px; text-wrap: pretty">{{ c.why }}</div>
+            </div>
+            <div>
+              <div class="kick">验收</div>
+              <div style="font-size: 12px; line-height: 1.65; color: #52525b; margin-top: 3px; text-wrap: pretty">{{ c.acc }}</div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="states">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">C · 五态规范</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">每个核心页都要出这五态。这里给的是<b>形态 + 文案模板</b>，页面只需替换名词——不要每个页面重新想一套说法。</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+      <sc-for list="{{ states }}" as="st" hint-placeholder-count="5">
+        <div style="flex: none; width: 480px">
+          <div style="display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px">
+            <span class="pill" style="background: {{ st.bg }}; color: {{ st.fg }}">{{ st.k }}</span>
+            <span style="font-size: 13px; color: #71717a">{{ st.sub }}</span>
+          </div>
+          <div class="card" style="padding: 15px 16px 16px; min-height: 128px">
+            <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; text-wrap: pretty">{{ st.form }}</div>
+            <div style="margin-top: 11px; padding: 10px 12px; background: #fafafa; border: 1px solid #f0f0f2; border-radius: 8px">
+              <div class="kick">文案模板</div>
+              <sc-for list="{{ st.copy }}" as="cp" hint-placeholder-count="3">
+                <div style="font-size: 12.5px; line-height: 1.65; color: #27272a; margin-top: 4px">{{ cp }}</div>
+              </sc-for>
+            </div>
+            <div style="font-size: 12.5px; line-height: 1.65; color: #52525b; margin-top: 9px; text-wrap: pretty">{{ st.no }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="biz">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">D · 业务特有状态</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">五态之外，这个 ERP 有五种状态是必须单独设计的——它们都来自真实业务契约，不是通用模板能覆盖的。</p>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 800px)); gap: 20px 24px">
+      <sc-for list="{{ biz }}" as="z" hint-placeholder-count="5">
+        <div class="card" style="padding: 15px 17px 16px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 16px; font-weight: 600">{{ z.name }}</span>
+            <span class="pill" style="background: #fffbeb; color: #b45309">{{ z.where }}</span>
+          </div>
+          <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 8px; text-wrap: pretty">{{ z.rule }}</div>
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #f4f4f5">
+            <div class="kick">不允许</div>
+            <div style="font-size: 12px; line-height: 1.65; color: #b91c1c; margin-top: 3px; text-wrap: pretty">{{ z.never }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="danger">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">E · 操作三级阶梯</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">这个系统里「重算薪资」「批准变更」「盘点过账」和「切换筛选」不能长得一样。三级阶梯决定按钮样式、位置、确认方式和留痕。</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+      <sc-for list="{{ ladder }}" as="l" hint-placeholder-count="3">
+        <div style="flex: none; width: 800px">
+          <div class="card" style="padding: 16px 18px 17px; border-color: {{ l.bd }}">
+            <div style="display: flex; align-items: baseline; gap: 10px">
+              <span class="pill" style="background: {{ l.bg }}; color: {{ l.fg }}">{{ l.lv }}</span>
+              <span style="font-size: 17px; font-weight: 600">{{ l.name }}</span>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap">
+              <sc-for list="{{ l.demo }}" as="d" hint-placeholder-count="2">
+                <span class="nw" style="font-size: 13px; font-weight: 500; padding: 8px 14px; border-radius: 8px; border: 1px solid {{ d.bd }}; background: {{ d.bg }}; color: {{ d.fg }}">{{ d.label }}</span>
+              </sc-for>
+            </div>
+            <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 12px; text-wrap: pretty">{{ l.rule }}</div>
+            <div style="margin-top: 11px; padding-top: 11px; border-top: 1px solid #f4f4f5">
+              <div class="kick">属于这一级的操作</div>
+              <div style="font-size: 12.5px; line-height: 1.7; color: #52525b; margin-top: 3px; text-wrap: pretty">{{ l.cases }}</div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="mobile">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">F · 393 降级规则</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">师傅端是手机为主场景；后台在手机上是「偶发查看 + 少量处置」。两者规则不同，但都不允许静默裁列。</p>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1220px)); gap: 20px 30px">
+      <sc-for list="{{ mobile }}" as="m" hint-placeholder-count="6">
+        <div class="card" style="padding: 15px 17px 16px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 16px; font-weight: 600">{{ m.name }}</span>
+            <span class="pill" style="background: #f0f9ff; color: #0369a1">{{ m.who }}</span>
+          </div>
+          <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 8px; text-wrap: pretty">{{ m.rule }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sec" id="map" style="border-bottom: none">
+    <h2 style="margin: 0 0 4px; font-size: 26px; font-weight: 700">G · 页面族 × 模式 映射</h2>
+    <p style="max-width: 1140px; margin: 0 0 22px; color: #52525b">全部 81 个有 UI 的页面按族归类，每族指明骨架、必用契约、以及本族独有的状态。<b>这张表就是「所有页面都想过了」的证据</b>——逐页设计稿在各批次里出，但交互契约在这里已经定完。</p>
+    <div class="card" style="overflow: hidden; max-width: 2520px">
+      <div style="display: grid; grid-template-columns: 260px 90px 96px 300px 1fr; gap: 14px; padding: 11px 16px; background: #fafafa; border-bottom: 1px solid #ececee; font-size: 11.5px; color: #71717a">
+        <div>页面族</div><div style="text-align: right">页数</div><div>骨架</div><div>必用契约</div><div>本族独有的状态与操作</div>
+      </div>
+      <sc-for list="{{ map }}" as="r" hint-placeholder-count="14">
+        <div style="display: grid; grid-template-columns: 260px 90px 96px 300px 1fr; gap: 14px; padding: 11px 16px; border-bottom: 1px solid #f5f5f7; align-items: start">
+          <div>
+            <div style="font-size: 13.5px; font-weight: 500">{{ r.fam }}</div>
+            <div style="font-size: 11.5px; color: #71717a; margin-top: 2px; text-wrap: pretty">{{ r.routes }}</div>
+          </div>
+          <div class="nw" style="text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; color: #52525b">{{ r.n }}</div>
+          <div><span class="pill" style="background: {{ r.skBg }}; color: {{ r.skFg }}">{{ r.sk }}</span></div>
+          <div class="nw" style="font-size: 12px; color: #52525b; font-variant-numeric: tabular-nums">{{ r.pat }}</div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; text-wrap: pretty">{{ r.own }}</div>
+        </div>
+      </sc-for>
+      <div style="display: grid; grid-template-columns: 260px 90px 96px 300px 1fr; gap: 14px; padding: 12px 16px; background: #fafafa; font-size: 12.5px; color: #3f3f46">
+        <div style="font-weight: 600">合计</div>
+        <div class="nw" style="text-align: right; font-weight: 600; font-variant-numeric: tabular-nums">81</div>
+        <div></div><div></div>
+        <div style="color: #71717a">另有 4 个纯跳转页无独立 UI；not-found 不计入 85 但已在批次一设计。</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2600,&quot;height&quot;:1400}}">
+const TOC = [
+  ['A · 三类页面骨架', '#skeleton'],
+  ['B · 十条交互契约', '#contract'],
+  ['C · 五态规范', '#states'],
+  ['D · 业务特有状态', '#biz'],
+  ['E · 操作三级阶梯', '#danger'],
+  ['F · 393 降级规则', '#mobile'],
+  ['G · 页面族映射', '#map'],
+];
+
+// blk(标签, 高度, 说明, kind) kind: '' 普通 | 'a' 主操作/决策 | 'd' 折叠
+function blk(t, h, d, k) {
+  return {
+    t, h, d,
+    bd: k === 'a' ? '#fca5a5' : '#d4d4d8',
+    bg: k === 'a' ? '#fffafa' : '#fff',
+    bs: k === 'd' ? 'dashed' : 'solid',
+    lc: k === 'a' ? '#b91c1c' : '#52525b',
+  };
+}
+
+const SKELETONS = [
+  {
+    id: 'S1', name: '列表页骨架', count: '23 个页面',
+    blocks: [
+      blk('① 页头（不滚动）', 30, '面包屑在顶栏内不重复；标题 + 一句职责说明 + 结果计数；右上 1 个主操作 + 最多 1 个次操作。导出这类长任务按钮写明作用范围。'),
+      blk('② 保存视图（一次点击切批）', 30, '4–6 个预设 + 「保存当前条件」。预设按角色不同：ADMIN 看「待排产 / 交期风险」，SALES 看「我的草稿 / 待付款」。这是取代「每天在 30+ 字段里重选同一组条件」的核心。', 'a'),
+      blk('③ 常驻筛选行 + 已选 chips（不滚动）', 34, '高频 3–4 个筛选常驻一行；其余进「更多筛选」抽屉并显示已选数量。已选条件以可单独移除的 chips 永远可见——折叠后只剩一个「已启用」布尔徽章是当前最容易让人看错批次的地方。'),
+      blk('④ 表格区（唯一滚动区）', 66, '固定前 2 列（标识 + 状态）；其余列在明确的横滚区内，滚动边缘给阴影提示。表头 sticky。数值右对齐 + tabular-nums。急单/风险用图标 + 文字双编码。每行末尾 1 个主要行内动作 + 「⋯」放其余。'),
+      blk('⑤ 批量操作条（选中后从底部升起）', 28, '仅在有勾选时出现，显示「已选 N 项」+ 允许的批量动作 + 取消。批量动作必须是本页语义上安全的那些；高风险的不进批量。', 'a'),
+      blk('⑥ 分页（不滚动）', 26, '共 N 条 · 每页可改 · 第 X/Y 页 + 上下页。筛选、排序、页码、选中项全部进 URL。'),
+    ],
+    scroll: '整页不滚动，只有 ④ 滚。页头、筛选、分页常驻可见。返回路径：从详情返回时 URL 已带回筛选 + 页码 + 选中行，列表滚动位置恢复，不重新拉第一页。',
+  },
+  {
+    id: 'S2', name: '详情页骨架', count: '18 个页面',
+    blocks: [
+      blk('① 页头 + 常驻动作条（sticky）', 34, '标识 + 当前状态徽章 + 「下一步动作」（随状态变化，只给状态机允许的那一个）+ 次要动作 + 危险动作（三级阶梯里的 L3，同一条里但视觉分级）。整条 sticky——当前实现里动作区在页头但不吸顶，滚到下半页就找不到。', 'a'),
+      blk('② 左栏：状态时间线（sticky）', 60, '已发生与待发生节点、每节点的时间与责任人。阻断项在节点上写文字原因（「外协未回货」「风车机满负荷」），不用颜色替代说明。这一列取代「通读全页才知道卡在哪」。'),
+      blk('③ 右栏：证据分区（唯一滚动区）', 74, '按业务事实分区，不合并：基本信息 / 款式与工艺 / 设计图 / 生产任务 / 外协 / 收费与金额 / 变更与审计。重复项（款式、任务、明细行）用摘要行 + 点开展开，不全展开平铺。'),
+      blk('④ 写操作收进抽屉', 30, '详情页以阅读为主。需要录入的（成本补录、登记付款、记录收货）从分区里的按钮打开抽屉，提交后回显到对应分区并更新时间线——不把录入表单直接内嵌在只读上下文里。', 'd'),
+      blk('⑤ 终态只读', 26, '已结案 / 已取消的记录进入只读：动作条只留「打印 / 导出 / 复制新建」，所有写入口消失而不是禁用（禁用会让人以为能申请）。', 'd'),
+    ],
+    scroll: '只有 ③ 滚。①② 常驻。返回路径：返回按钮回到来源列表并恢复其筛选与滚动位置；从 Dashboard 告警进来的，返回回到告警队列而不是列表。',
+  },
+  {
+    id: 'S3', name: '表单页骨架', count: '40 个页面',
+    blocks: [
+      blk('① 页头 + 草稿状态（不滚动）', 30, '标题 + 「自动保存于 14:32」时间戳 + 放弃草稿。长表单必须自动存草稿并可恢复——当前新建工单中断即丢失。'),
+      blk('② 分段推进（3–4 段，段头显示本段缺口数）', 30, '段是按业务对象分的，不是按字段数分的。新建工单 = 客户与交期 / 款式 / 收货与费用。字段一个不减，只改一次呈现多少。'),
+      blk('③ 当前段表单（唯一滚动区）', 62, '重复对象（款式、物料行、阶梯档）用「摘要行列表 + 一次只开一个的编辑区」主从结构，配「复制上一项」。字段量大的选择器（15 个纸张、16 个工艺）留在编辑区内，不塞进行内。'),
+      blk('④ 右栏常驻摘要 + 缺口清单（sticky）', 52, '实时汇总（数量、金额、差额）+ 缺口清单，每条可点击跳到字段并聚焦。取代「提交后才知道缺什么」。金额预览标注「以服务端核价为准」，不做唯一计算源。', 'a'),
+      blk('⑤ 底部常驻操作条', 28, '保存草稿（始终可用）+ 提交（有阻断缺口时禁用并显示原因和数量）。当前实现的提交按钮在约 2900px 页面的最底部且不吸底。', 'a'),
+    ],
+    scroll: '只有 ③ 滚。①②④⑤ 常驻。返回路径：离开有未保存改动时拦截并给「保存草稿后离开 / 放弃 / 取消」三选；提交成功后跳详情并高亮新建结果。',
+  },
+];
+
+function C(n, name, scope, rule, why, acc) { return { n, name, scope, rule, why, acc }; }
+
+const CONTRACTS = [
+  C('01', '筛选状态全部进 URL', 'S1 全部列表页',
+    '搜索词、每个筛选、排序、页码、每页条数、当前选中行都写进 query string。任何一次导航（进详情、刷新、分享链接、浏览器后退）都能还原同一屏。列表滚动位置在返回时恢复。',
+    '已核实（读了 lib/order/list-query.ts 与 app/(admin)/orders/page.tsx）：工单列表的筛选状态已经在 URL 里了。OrderListSearchParams 定义了 25+ 个字段（q、orderNo、customName、receiverPhone、amountMin/Max、promisedFrom/To、itemName、paperType、supplierName 等），页面是 server component 按 searchParams 取数；价格工作台同理。所以这条契约的大部分已经做到了——我之前把它当成一整条待做项是错的。真正缺的只有两个：滚动位置与选中行未入 URL，以及没有保存视图（把常用组合固定下来）。',
+    '在列表选 3 个筛选 + 翻到第 2 页 + 进详情 + 浏览器后退 → 三项全部还原，且不重新请求第 1 页。'),
+  C('02', '已选条件永远可见', 'S1 全部列表页',
+    '筛选面板可折叠，但已生效条件必须以 chips 常驻在筛选区，每个可单独移除，末尾一个「清除全部」。折叠态不允许只显示一个布尔徽章。结果计数紧邻筛选区。',
+    '观察（orders-light 1280）：折叠态只有「筛选条件」+ 箭头；有筛选时变为「更多筛选 · 已启用」一个布尔徽章（orders-filtered-light），用户无法确认自己正在看哪一批数据——在账单、薪资这类页面上会直接导致误判。',
+    '任意页面施加 4 个筛选后折叠面板 → 4 个 chips 可见且各自可移除；截图能读出全部生效条件。'),
+  C('03', '关键列不得静默裁切', 'S1 + S2',
+    '1280 下固定标识列与状态列，其余列放进有明确视觉提示的横滚区（滚动阴影 + 「右滑查看更多」首次提示）。393 下改一行一卡。任何情况下不允许列被容器切掉而无提示。',
+    '观察（orders-light 1280 / 393 + dashboard-light 1280 / 393）：1280 工单列表只渲染 3 列，状态/承诺交期/金额/动作全部不可见；393 下只剩工单号一列且长号被切断；Dashboard 的超期外协卡里动作链接也被裁掉。本次审查最高优先的两个 Blocker。',
+    '六视口溢出探测器 0 命中；1280 下工单列表能看到状态与承诺交期；Dashboard 告警卡的动作链接可点击。'),
+  C('04', '行内动作 + 批量操作', 'S1 全部列表页',
+    '每行末尾给 1 个当前状态下最可能的动作 + 「⋯」承载其余。勾选后从底部升起批量条，显示「已选 N 项」与本页语义安全的批量动作。高风险动作（发放薪资、盘点过账、批准变更）不进批量。',
+    '观察（orders-light 1280）：表格无任何行内动作列，也无勾选框，所有操作只能进详情完成，一次处理 20 张工单要往返 20 次。（「返回又丢上下文」属推断，见契约 01。）',
+    '在工单列表不进详情即可完成排产入口跳转与打印；勾选 5 行后批量条出现且不含高风险动作。'),
+  C('05', '长表单必有草稿与缺口清单', 'S3 全部表单页',
+    '① 自动保存草稿 + 时间戳 + 断线可恢复；② 右栏常驻缺口清单，每条点击跳转并聚焦对应字段；③ 提交按钮旁写明剩余缺口数量；④ 校验失败时错误定位到段并在段头标记。',
+    '观察（order-new-light 1280 + 393）：单列长表单，一个款式约 60 个控件、约 2000px，只有一款时整页已约 2900px；无分段、无汇总区、页头无保存时间戳、提交按钮在最底部且不吸底。这是你点名的痛点。（「提交后才报错」「中断即丢失」属推断——没打开过错误态截图，草稿恢复也无法从静态图判定。）',
+    '录 3 个款式的点击数与滚动距离低于当前实现；提交前缺口清单可点跳到字段；断开网络后重新进入能恢复草稿。'),
+  C('06', '重复对象用主从，不用全展开', 'S3 + S2',
+    '款式、物料行、价格阶梯、收货地址这类可重复对象：列表只显示摘要行（标识 / 关键参数 / 数量 / 金额 / 缺口标记），一次只展开一个的编辑区承载完整字段，行尾给「复制上一项」和排序、删除。',
+    '观察（order-new-light + order-detail-light，1280 与 393）：两页都是全展开平铺——详情页 2 个款式约 950px，新建页 1 个款式约 2000px。重复字段（规格 7 选、纸张 15 选、工艺 16 卡）在多款式间绝大多数相同。',
+    '同一张 3 款式工单，详情页与新建页的总高度都低于当前实现的一半；「复制上一项」能带入上一款全部选择。'),
+  C('07', '状态机可视化，且只给合法的下一步', 'S2 全部详情页',
+    '动作条只渲染当前状态允许的动作；不允许的动作不显示（无权限）或禁用并写明原因（状态不允许 / 前置未完成），三种文案分开。左栏时间线画出已发生与待发生节点，阻断项写文字原因。',
+    '观察（order-detail-light 1280）：页头只有一个「生产中」徽章，底部「修改日志」为「暂无」，没有任何时间线，用户判断「下一步」要通读全页。工单、生产任务、账单、外协、薪资各有自己的状态机，界面不得新增、合并或跳过状态。',
+    '任取一张 IN_PRODUCTION 工单：动作条只出现合法动作；有阻断时批准类动作禁用且原因可读；时间线节点与服务端状态一致。'),
+  C('08', '危险动作分级 + 影响范围', 'S2 + S3',
+    '按 E 段三级阶梯：L1 直接执行；L2 二次确认并列出影响范围；L3 需填理由 + 逐条列出影响对象 + 操作留痕可查。破坏性动作与常规动作不同级、不相邻、不同视觉重量。',
+    '观察（order-detail-light 1280 + 393）：「取消工单」被放在页面最底部一个独立区块（取消原因 + 红色按钮），与页头动作区隔了两千多像素。（「薪资重算、批准变更与常规导航同级」属推断——薪资四页与变更审核页本轮都没打开或为空态。）',
+    '取消工单、批准变更、薪资重算、盘点过账四处都进 L2/L3，确认层列出受影响对象数量；操作后可在审计/日志里查到。'),
+  C('09', '五态齐全 + 三种业务边界', '全部页面',
+    'Loading / Empty / Error / Disabled / Pending 五态按 C 段模板出；另外强制覆盖终态只读、部分成功、并发冲突三种业务边界。Empty 必须区分「无数据 / 筛选无结果 / 无权限」三种，且无权限不泄露记录是否存在。',
+    '观察（orders-light 与 order-changes-light 对比）：空态深浅不一——工单列表有图标 + 说明 + 下一步，工单修改申请只有一句「暂无工单修改申请」。（「并发冲突没有设计」属推断——价格页确实有 expectedUpdatedAt 乐观锁字段，但冲突时界面怎么表现本轮无法观察。）',
+    '每个核心页的五态都能截图；无权限与不存在的文案完全一致；并发冲突时给「已被他人修改，刷新查看差异」而不是静默失败。'),
+  C('10', '删可见标签必补 aria-label', '全部页面',
+    '为密度删掉的可见 label，必须以 aria-label 或 sr-only 保留；每个输入有正确关联的名字；焦点顺序符合视觉顺序且焦点环不被裁；非颜色唯一提示；正文对比度 ≥4.5:1；触控目标 ≥44×44（师傅端强制）。列表行是可聚焦的链接而不是 div onClick。',
+    '观察（价格页原图 + 本项目已有的底线）：密度优化最容易顺手砍掉可访问性。价格页把每个输入框上方的「500 个草稿单价」删掉是对的，但那是读屏用户区分 10 个输入框的唯一依据。另：order-new-light 已有「跳到主要内容」跳转链接，order-detail-light 393 长工单号与面包屑能正确换行——这些现有的好实现不要弄丢。',
+    'axe 0 严重违规；键盘可从页头 Tab 到分页且顺序合理；393 下所有交互元素命中区 ≥44×44。'),
+];
+
+const STATES = [
+  {
+    k: 'Loading', bg: '#f0f9ff', fg: '#0369a1', sub: '骨架，不是转圈',
+    form: '外壳、页头、筛选、表头立即渲染；只有数据区出骨架，行数与真实每页条数一致、高度固定，避免布局抖动。分区页面各分区独立骨架，一个数据源慢不拖累其他分区。',
+    copy: ['不写文案。骨架本身就是信息。', '超过 8 秒才追加一行「仍在加载，可稍后重试」。'],
+    no: '不用整页遮罩、不用居中转圈、不让高度从 0 跳到 500。',
+  },
+  {
+    k: 'Empty', bg: '#f4f4f5', fg: '#52525b', sub: '必须分三种',
+    form: '图标 + 一句状态 + 一句下一步 + 一个主操作。三种成因给三套内容：无数据（引导创建）、筛选无结果（一键清除条件）、无权限（不泄露是否存在）。',
+    copy: ['无数据：「还没有{对象}」/「{对象}创建后会出现在这里」+ 新建{对象}', '筛选无结果：「没有符合条件的{对象}」/「试试放宽条件」+ 清除全部筛选', '无权限：「找不到这个页面，或你没有访问权限」+ 回我的工作台'],
+    no: '不把「无权限」写成「记录不存在」，也不反过来——两者文案必须完全一致。',
+  },
+  {
+    k: 'Error', bg: '#fef2f2', fg: '#b91c1c', sub: '按范围分四层',
+    form: '① 字段级：输入框下一行 + 聚焦第一个错误；② 分区级：该分区内错误卡 + 重试，其他分区照常；③ 整页级：错误页 + 重试 + 返回；④ 业务阻断：不是错误，写清阻断项与解除路径。任何一层都保留用户已填内容。',
+    copy: ['字段：「{字段}必须是非负数字，最多 4 位小数」', '分区：「这块数据没加载出来」+ 重试', '阻断：「有 2 个生产任务未完工，完工后可发货」+ 查看任务'],
+    no: '不清空表单、不用「操作失败请重试」这种不说原因的兜底文案、不把业务阻断画成红色错误。',
+  },
+  {
+    k: 'Disabled', bg: '#fffbeb', fg: '#b45309', sub: '禁用必须有原因',
+    form: '三种成因三种处理：无权限 → 不渲染（渲染成灰按钮会让人以为能申请）；状态不允许 → 禁用 + 一行原因；前置未完成 → 禁用 + 原因 + 指向前置的链接。原因常驻可见，不只在 hover 的 tooltip 里。',
+    copy: ['状态：「已结案的工单不能修改」', '前置：「先补齐 2 个款式的设计图」+ 去补齐', '数据：「该项目不在当前调价草稿内」'],
+    no: '不做无说明的灰按钮；不把原因只藏在 tooltip 里（触屏没有 hover）。',
+  },
+  {
+    k: 'Pending', bg: '#f5f3ff', fg: '#6d28d9', sub: '短任务锁定，长任务转后台',
+    form: '短任务（< 3 秒）：按钮内联 spinner + 禁用 + 表单 aria-busy，防重复提交。长任务（导出、CDR 打包、薪资重算）：立即回执「已受理」+ 允许离开 + 完成后在通知或页面上可取回结果。',
+    copy: ['短：「正在保存…」', '长：「已受理，生成完成后可在这里下载，文件 24 小时后过期」', '重复：按钮禁用期间不接受第二次点击（重复提交也计入登录限流这类计次语义）'],
+    no: '不让用户守着页面等长任务；不允许双击产生两条记录。',
+  },
+];
+
+const BIZ = [
+  {
+    name: '终态只读', where: '工单 / 账单 / 外协 / 薪资 / 生产任务',
+    rule: '进入终态（FINISHED / CANCELLED / 已发放 / 已结算）后，页面切换为只读：所有写入口消失，动作条只留打印、导出、复制新建。历史金额与规则快照原样保留并标注「按当时规则计算」。',
+    never: '不允许把终态记录的金额做成可编辑；不允许用禁用按钮暗示还能改；不允许把历史快照替换成当前规则重算的结果。',
+  },
+  {
+    name: '部分成功', where: '批量排产 / 分批收货 / 批量开工 / 薪资批量发放',
+    rule: '批量操作结果按条回执：成功 N 条、失败 M 条并逐条给出原因与重试入口。已成功的部分不回滚。结果面板可复制，便于跟车间对账。',
+    never: '不允许只显示「部分失败」不说哪几条；不允许因为一条失败就整批回滚而不告知。',
+  },
+  {
+    name: '并发冲突', where: '调价草稿 / 变更审批 / 盘点录入 / 工单编辑',
+    rule: '写操作携带版本（updatedAt / 版本号）。冲突时不静默覆盖：提示「已被他人修改」+ 展示差异 + 给「用我的 / 用最新 / 取消」三选。审批类冲突直接告知「已被他人处理」并刷新。',
+    never: '不允许后写覆盖先写；不允许冲突时只提示「保存失败」。',
+  },
+  {
+    name: '结果不明（通知专有）', where: '通知投递 / 企业微信 webhook',
+    rule: 'UNKNOWN 必须诚实表达「无法确认对方是否已收到」，并提供人工决策（已确认送达 / 需重发 / 忽略）且留痕。RETRYING 与 job DEAD 是合法组合，传输状态与 job 状态分两列显示。',
+    never: '不允许把 UNKNOWN 改成自动重试；不允许把 RETRYING 改写成 FAILED 让红色更整齐；不允许暴露完整 webhook。',
+  },
+  {
+    name: '长任务后台完成', where: '导出 / CDR 打包 / 薪资重算 / 账单生成',
+    rule: '提交即回执，用户可离开。完成后通过通知中心或页面内「上次生成结果」取回，附生成时间与过期时间。失败给原因与重试，不静默消失。',
+    never: '不允许让用户守在页面上等；不允许任务失败后什么都不显示。',
+  },
+];
+
+const LADDER = [
+  {
+    lv: 'L1', name: '常规操作', bd: '#ececee', bg: '#f4f4f5', fg: '#52525b',
+    demo: [
+      { label: '应用筛选', bd: '#e4e4e7', bg: '#fff', fg: '#3f3f46' },
+      { label: '保存视图', bd: '#e4e4e7', bg: '#fff', fg: '#3f3f46' },
+      { label: '保存草稿', bd: '#e4e4e7', bg: '#fff', fg: '#3f3f46' },
+    ],
+    rule: '直接执行，无确认。次要按钮样式（描边）。可撤销或无副作用。执行后就地回显结果，不弹提示框。',
+    cases: '筛选、排序、切换视图、展开分区、保存草稿、上传设计图（草稿阶段）、导出（长任务但无副作用）。',
+  },
+  {
+    lv: 'L2', name: '需确认 · 有业务副作用', bd: '#fed7aa', bg: '#fffbeb', fg: '#b45309',
+    demo: [
+      { label: '提交工单', bd: '#dc2626', bg: '#dc2626', fg: '#fff' },
+      { label: '登记收货', bd: '#e4e4e7', bg: '#fff', fg: '#3f3f46' },
+      { label: '发货', bd: '#dc2626', bg: '#dc2626', fg: '#fff' },
+    ],
+    rule: '主按钮样式。点击后二次确认，确认层必须列出影响范围（会创建 / 更新哪些对象、影响哪些下游），不只是「确定要继续吗」。执行中锁定按钮，完成后明确回显结果数量。',
+    cases: '提交工单、发货、登记付款、登记收货、创建外协单、批量开工/完工、生成月账单、发起调价。',
+  },
+  {
+    lv: 'L3', name: '需理由 · 不可逆或改动他人数据', bd: '#fca5a5', bg: '#fffafa', fg: '#b91c1c',
+    demo: [
+      { label: '取消工单', bd: '#fecaca', bg: '#fff', fg: '#b91c1c' },
+      { label: '批准变更并同步任务', bd: '#dc2626', bg: '#dc2626', fg: '#fff' },
+      { label: '重算并发放薪资', bd: '#fecaca', bg: '#fff', fg: '#b91c1c' },
+    ],
+    rule: '与常规动作物理分开（动作条最右、独立分组或抽屉内）。必须填理由；确认层逐条列出受影响对象（N 个生产任务、N 名师傅的工资、N 条库存流水）；操作后留痕可查。不进批量操作。',
+    cases: '取消工单、批准/拒绝变更申请、薪资重算与发放、盘点过账、发布价目版本、停用主数据、通知规则改模板、账号停用。',
+  },
+];
+
+const MOBILE = [
+  {
+    name: '高密度表格 → 一行一卡', who: '后台 + 师傅端',
+    rule: '卡内固定三行：① 标识（工单号 / 单号 / 姓名）② 关键指标与状态（状态徽章 + 承诺交期 + 数量）③ 主动作。按权限决定金额是否出现。不做静默裁列——当前 393 下工单列表只剩「工单号」一列且长号被切断。',
+  },
+  {
+    name: '筛选 → 底部抽屉 + chips 横滚', who: '后台',
+    rule: '搜索与保存视图 chips 常驻并可横向滚动；筛选进底部抽屉，触发器上带已选数量徽章；应用后回列表并把 chips 显示出来。抽屉高度不超过 80vh，内部滚动。',
+  },
+  {
+    name: '长表单 → 分段推进', who: '后台',
+    rule: '一次一段，顶部进度条可跳转且标出各段缺口数。重复对象退回「一个一屏」的卡片编辑。桌面右栏的摘要与缺口清单收为可从底部拉起的抽屉，触发器带缺口计数。',
+  },
+  {
+    name: '常驻底部操作条 + 安全区', who: '后台 + 师傅端',
+    rule: '主操作固定在底部，padding-bottom 用 env(safe-area-inset-bottom)，软键盘弹出时上移不遮挡。触控目标 ≥44×44。师傅端主按钮 ≥48px 高并占满宽度。',
+  },
+  {
+    name: '师傅端：当前任务单卡置顶', who: '师傅端（主场景）',
+    rule: '首屏第一块是「现在做哪一件」的唯一强调卡：工单号 + 款式 + 工艺 + 目标数量 + 承诺交期，主按钮「开始生产 / 报工」占满宽度。急单优先。其余任务降为列表，支持多选批量开工/完工。完成与取消为只读且与可操作项视觉明显区分。',
+  },
+  {
+    name: '视口高度与长页恢复', who: '全站',
+    rule: '用 dvh/svh 而非 100vh，修 iOS 地址栏导致的底部裁切。长页记录滚动位置与展开状态，返回时恢复。报工、盘点这类录入在提交失败时保留已填数字。',
+  },
+];
+
+const SK = { S1: ['#eff6ff', '#1d4ed8'], S2: ['#ecfdf5', '#047857'], S3: ['#fef2f2', '#b91c1c'], 混合: ['#f5f3ff', '#6d28d9'], 特殊: ['#f4f4f5', '#52525b'] };
+
+const MAP = [
+  ['工单', '/orders · /orders/new · /orders/:id · /orders/:id/edit · /owner/order-changes', 5, 'S1+S2+S3', '01–10 全部', '已从 permissions.ts 确认：SALES 与 CS 在工单三页上权限完全相同（order:create / order:update:pre-schedule / order:view:self / order:mark-urgent / design:upload）——共用页面按 scope 裁数据范围，不裁动作。差异在侧栏：SALES 出「我的账单」（bill:view:self），CS 出「我的工资」（salary:view:self），两者互斥。权限名带 pre-schedule 后缀，排产后不能直接改、必须走变更申请——详情页「设计图增删仅草稿阶段可用」不是推断，是权限模型本来就这么切的。变更审批列表仍要前移「计价影响」与「生产阻断」两列。'],
+  ['排产', '/foreman/scheduling · /foreman/scheduling/:id', 2, '混合', '01 02 03 04 07 08', '「款式 × 内部工艺」派给符合岗位/机型的师傅：阻断原因必须写文字（机型不兼容、师傅已满负荷），不用颜色替代。批量排产属 L2，需列出影响的任务数与师傅数；管理员最终派工覆盖推荐要留痕。'],
+  ['师傅 H5', '/worker/tasks · tasks/:id · orders · orders/:id · salary · salary/:id', 6, 'S1+S2', '03 07 09 10 + F 全部', '手机为主场景。当前任务单卡置顶；只能操作分配给自己的任务；报工影响生产进度与工资，属 L2 且必须确认 + 结果回显「已计入今日计件」；完成与取消只读。'],
+  ['价格与报价', '/owner/prices · tiers ×2 · adjustments ×2 · external-sales/items · versions · visual-fixture · /sales/quote', 9, '混合', '01 02 03 05 06 08 09', '当前价 / 调价草稿 / 待生效版本三者必须视觉可分，草稿不得包装成已生效。阶梯档用主从 + 批量按百分比调价 + 撤销一步。发布属 L3。并发冲突（两人改同一草稿）必须给差异三选。销售侧只读。'],
+  ['账单与付款', '/owner/bills · bills/:id · /sales/bills · sales/bills/:id', 4, 'S1+S2', '01 02 03 04 07 08 09', '加工费 / 快递费 / 打包耗材 / 其他分项不得合并成一个总额。部分付款不是错误状态。发单与登记付款属 L2；销售仅查看本人账单，越权入口不渲染。'],
+  ['薪资', '/owner/salary · daily · daily/:id · cs · cs/new · cs/:id · hourly · piecework-rules · rules', 9, '混合', '01 02 03 07 08 09', '保留生成时的规则快照，人工调整是追加事实而非覆盖。「查看 / 重算 / 人工调整 / 发放」四类操作必须分开，重算与发放属 L3 需理由 + 影响人数。客服业绩与客户付款是两件事。'],
+  ['外协', '/foreman/outsource · new · :id', 3, 'S1+S2+S3', '01 02 03 04 07 08', '覆盖口径保持 max，不得改 sum，指标名不重命名。金额变更与付款登记属 L2 并留痕。与工单/款式的关联要双向可跳转。'],
+  ['采购与库存', '/owner/purchases ×3 · /owner/materials ×3 + count · /foreman/materials ×3 · /owner/warehouses', 11, '混合', '01 02 03 04 05 06 08 09', '采购分批收货：已收/订购数量对照 + 按库位过账。盘点是高风险录入，差异预览 + 过账属 L3，冲突恢复信息不得弱化。库存变化与业务单据保持可追溯链。'],
+  ['主数据字典', '/owner/products ×3 · product-categories ×3 · parties ×3 · crafts ×3 · boms ×3', 15, 'S1+S3', '01 02 03 04 09 10', '统一列表 + 新建/编辑表单模式。「停用」不得画成「删除」的视觉语义——历史工单仍引用这些主数据。停用属 L3（影响引用它的对象）。分类树要显示层级与历史映射。'],
+  ['通知配置', '/owner/notifications · channels ×2 · rules/:event', 4, '混合', '01 02 03 09', '归「设置」组，不是运维——企业微信群、事件模板、规则绑定都是业务配置，UNKNOWN 的人工决策（要不要重发给客户群）更是业务判断。UNKNOWN / RETRYING / FAILED / SENDING 四态语义不得合并；RETRYING + job DEAD 必须在告警条、徽章、未解决队列三处可见；人工决策留痕；webhook 脱敏。模板改动属 L3。'],
+  ['异常队列与基础设施', '/owner/background-jobs · /owner/pigsty · /foreman/cdr', 3, '混合', '01 02 03 09', '这三页不是一类，不应归入同一个「运维」分组。① 后台任务：拆开——死信里有业务后果的（通知投递失败、导出失败）并入 Dashboard 的待处理异常队列，用户不需要知道它叫 background job；worker 心跳、队列深度这类纯技术指标跟 Pigsty 走。② Pigsty：纯基础设施只读，不进侧栏导航，只从告警条进入。③ CDR：是给车间的业务作业（长任务 + 24 小时过期），归业务组。'],
+  ['账号与设置', '/owner/accounts ×3 · /owner/settings · /account/password', 5, 'S1+S3', '01 02 09 10', '与通知配置同属「设置」组。角色、工种、能力配置改动影响他人可做什么，属 L3。账号停用不删除。改密码是全角色可恢复路径，不能被视觉重设计藏死。'],
+  ['考勤', '/foreman/attendance', 1, '混合', '01 02 03 09', '月历 + 员工筛选的录入场景：出勤/请假/加班/代班四类录入要能批量填且可撤销一步；改动影响薪资计算，需明确提示影响的月份。'],
+  ['Dashboard', '/owner', 1, '混合', '02 03 07 09', '首屏第一块是按可操作性排序的处理队列，每行可进入处置；KPI 与快捷入口降为第二层；欢迎语删除或压成一行。告警卡内表格当前被裁切，必须修。'],
+  ['认证与特殊页', '/login · /dev/showcase · /print/orders/:id', 3, '特殊', '09 10', '登录：限流文案要可理解可恢复但不改准入语义（成功登录也计次是刻意设计）。打印是车间生产资产，基线受保护，需单独立案经你确认。showcase 是设计原子目录，随规范同步更新。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      toc: TOC.map(([label, href]) => ({ label, href })),
+      skeletons: SKELETONS,
+      contracts: CONTRACTS,
+      states: STATES,
+      biz: BIZ,
+      ladder: LADDER,
+      mobile: MOBILE,
+      map: MAP.map(([fam, routes, n, sk, pat, own]) => {
+        const key = sk.indexOf('S1') === 0 && sk.length > 2 ? 'S1' : sk;
+        const c = SK[key] || SK[sk] || SK['混合'];
+        return { fam, routes, n, sk, pat, own, skBg: c[0], skFg: c[1] };
+      }),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

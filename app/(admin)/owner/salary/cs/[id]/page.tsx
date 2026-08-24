@@ -7,10 +7,13 @@ import {
   CsSalesEntryType,
   SalaryPeriodStatus,
 } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { CsPayrollPaymentForm } from '@/components/business/salary/CsPayrollPaymentForm';
+import {
+  PaymentStatusBadge,
+  SalaryPeriodStatusBadge,
+} from '@/components/business/salary/SalaryStatusBadge';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
@@ -95,13 +98,10 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             月数 {period.durationMonths}
           </p>
         </div>
-        {period.status === SalaryPeriodStatus.SETTLED ? (
-          <Badge>已结算</Badge>
-        ) : ready ? (
-          <Badge variant="destructive">待结算</Badge>
-        ) : (
-          <Badge variant="outline">进行中</Badge>
-        )}
+        <SalaryPeriodStatusBadge
+          status={period.status}
+          readyToSettle={ready}
+        />
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
@@ -327,11 +327,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                     {formatMoney(c.paidCommission)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {c.isFullyPaid ? (
-                      <Badge>已发</Badge>
-                    ) : (
-                      <Badge variant="outline">未发</Badge>
-                    )}
+                    <PaymentStatusBadge isPaid={c.isFullyPaid} />
                   </td>
                 </tr>
               ))}

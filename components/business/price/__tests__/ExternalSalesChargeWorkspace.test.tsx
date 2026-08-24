@@ -1,10 +1,23 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Button } from '@/components/ui/button';
 import {
   ExternalSalesChargeWorkspace,
+  externalSalesChargeListHref,
   type ExternalSalesChargeWorkspaceProps,
 } from '../ExternalSalesChargeWorkspace';
+
+const { pushMock, replaceMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: pushMock,
+    replace: replaceMock,
+  }),
+}));
 
 function props(
   overrides: Partial<ExternalSalesChargeWorkspaceProps> = {},
@@ -111,23 +124,33 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('调价草稿');
     expect(html).toContain('本轮调价 · 第 4 版');
-    expect(html).toContain('3 项已修改');
-    expect(html).toContain('当前价');
+    expect(html).toContain('3 项已写入草稿');
+    expect(html).toContain('当前价区间');
     expect(html).toContain('¥0.48 / 个');
-    expect(html).toContain('草稿价');
-    expect(html).toContain('¥0.52 / 个');
-    expect(html).toContain('+¥0.04 / 个');
+    expect(html).toContain('调整进度');
+    expect(html).toContain('1/1 档已调整');
+    expect(html).toContain('待补全');
     expect(html).toContain('其他业务变更');
     expect(html).toContain(
       '数量范围：500–1,000 个 → 501–1,000 个',
     );
-    expect(html).toContain('自动计价');
-    expect(html).toContain('需人工确认');
-    expect(html).toContain('已启用');
-    expect(html).toContain('已停用');
     expect(html).toContain('第 2 / 5 页，共 121 项');
     expect(html).toContain('保存修改');
     expect(html).not.toContain('正在编辑调价草稿');
+    expect(html).toContain('admin-sticky-below-header sticky z-[5]');
+  });
+
+  it('uses different read-only copy when the selected item is outside the current draft', () => {
+    const html = renderToStaticMarkup(
+      <ExternalSalesChargeWorkspace
+        {...props({
+          selectedEditor: undefined,
+        })}
+      />,
+    );
+
+    expect(html).toContain('该项目不在当前调价草稿内，只能查看生效价');
+    expect(html).not.toContain('当前为生效价，发起调价后才能改');
   });
 
   it('keeps optional filters collapsed until a manager uses them', () => {
@@ -151,7 +174,8 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(collapsedHtml).toContain('当前生效');
     expect(collapsedHtml).toContain('当前价格正在用于工单计价');
     expect(collapsedHtml).toContain('发起调价');
-    expect(collapsedHtml).toContain('暂无草稿');
+    expect(collapsedHtml).toContain('当前为生效价，发起调价后才能改');
+    expect(collapsedHtml).not.toContain('该项目不在当前调价草稿内，只能查看生效价');
     expect(collapsedHtml).not.toContain('上一页');
 
     const filteredHtml = renderToStaticMarkup(
@@ -187,14 +211,24 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(html).toContain('返回收费项目列表');
     expect(html).toContain('min-h-11');
     expect(html).toContain('grid-cols-1');
-    expect(html).toContain('xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]');
+    expect(html).toContain('xl:grid-cols-[minmax(0,1fr)_minmax(30rem,31.25rem)]');
     expect(html).toContain('id="selected-charge-detail"');
     expect(html).toContain('#selected-charge-detail');
-    expect(html).not.toContain('order-1');
-    expect(html).not.toContain('order-2');
-    expect(html).toContain('xl:max-h-[calc(100dvh-2rem)]');
+    expect(html).toContain('xl:order-1');
+    expect(html).toContain('xl:order-2');
+    expect(html).toContain('max-xl:hidden');
+    expect(html).toContain(
+      'xl:max-h-[calc(100dvh_-_var(--admin-header-offset)_-_1rem)]',
+    );
     expect(html).toContain('xl:overflow-y-auto');
-    expect(html).not.toContain('xl:sticky');
+    expect(html).toContain('admin-sticky-below-header');
+    expect(html).toContain('admin-scroll-target');
+    expect(html).toContain(
+      'href="/owner/prices/external-sales/items?purpose=processing#external-charge-list"',
+    );
+    expect(html.indexOf('id="selected-charge-detail"')).toBeLessThan(
+      html.indexOf('id="external-charge-list"'),
+    );
     expect(html).toContain('admin-wrap-anywhere');
     expect(html).not.toContain('RULE-CODE');
     expect(html).not.toContain('triggerCondition');
@@ -222,7 +256,7 @@ describe('ExternalSalesChargeWorkspace', () => {
 
     expect(readOnlyHtml).toContain('aria-label="正在查看：中号专版双面烫金"');
     expect(readOnlyHtml).toContain('aria-label="查看详情：非标尺寸加工"');
-    expect(readOnlyHtml).toContain('当前价格仅供查看');
+    expect(readOnlyHtml).toContain('当前为生效价，发起调价后才能改');
     expect(readOnlyHtml).not.toContain('查看 / 编辑');
     expect(readOnlyHtml).not.toContain('编辑收费项目：非标尺寸加工');
   });
@@ -258,14 +292,13 @@ describe('ExternalSalesChargeWorkspace', () => {
     expect(groupedHtml).toContain('中号红包');
     expect(groupedHtml).toContain('烫金加工');
     expect(groupedHtml).toContain('2 项');
-    expect(groupedHtml).toContain('数量范围');
-    expect(groupedHtml).toContain('计价方式');
-    expect(groupedHtml).toContain('当前价');
-    expect(groupedHtml).toContain('草稿价');
-    expect(groupedHtml).toContain('价格变化');
+    expect(groupedHtml).toContain('档数');
+    expect(groupedHtml).toContain('当前价区间');
+    expect(groupedHtml).toContain('调整进度');
+    expect(groupedHtml).toContain('待补全');
   });
 
-  it('shows one product row with compact quantity-price anchors instead of repeated names', () => {
+  it('shows one product row with a range summary instead of repeated quantity-price pills', () => {
     const tieredHtml = renderToStaticMarkup(
       <ExternalSalesChargeWorkspace
         {...props({
@@ -305,13 +338,66 @@ describe('ExternalSalesChargeWorkspace', () => {
 
     expect(tieredHtml).toContain('157克双铜纸');
     expect(tieredHtml).toContain('彩印 · 大号');
-    expect(tieredHtml).toContain('aria-label="彩印 · 大号数量价格阶梯"');
-    expect(tieredHtml.match(/>1,000 个</g)).toHaveLength(1);
-    expect(tieredHtml.match(/>20,000 个</g)).toHaveLength(1);
-    expect(tieredHtml).toContain('¥295');
-    expect(tieredHtml).toContain('¥2,300');
+    expect(tieredHtml).not.toContain('aria-label="彩印 · 大号数量价格阶梯"');
+    expect(tieredHtml).not.toContain('>1,000 个<');
+    expect(tieredHtml).not.toContain('>20,000 个<');
+    expect(tieredHtml).toContain('7 档');
+    expect(tieredHtml).toContain('¥295–¥2,300');
+    expect(tieredHtml).toContain('未发起调整');
     expect(tieredHtml).not.toContain('157克双铜纸彩印 大号 1000');
     expect(tieredHtml).not.toContain('数量范围');
+  });
+
+  it('builds a mobile return URL without keeping the selected item', () => {
+    expect(
+      externalSalesChargeListHref(
+        '/owner/prices/external-sales/items?purpose=processing&item=item-1&page=2#selected-charge-detail',
+      ),
+    ).toBe(
+      '/owner/prices/external-sales/items?purpose=processing&page=2#external-charge-list',
+    );
+    expect(externalSalesChargeListHref('#selected-charge-detail')).toBe(
+      '#external-charge-list',
+    );
+  });
+
+  it('在列表汇总待补全档位，不展开重复价格胶囊', () => {
+    const item = props().items[0];
+    const html = renderToStaticMarkup(
+      <ExternalSalesChargeWorkspace
+        {...props({
+          selectedItemId: undefined,
+          selectedEditor: undefined,
+          items: [
+            {
+              ...item,
+              currentAmountLabel: '2 档 · ¥100–¥200',
+              priceTiers: [
+                {
+                  quantityLabel: '1,000 个',
+                  currentAmountLabel: '¥100',
+                  draftAmountLabel: '¥105',
+                  changed: true,
+                },
+                {
+                  quantityLabel: '2,000 个',
+                  currentAmountLabel: '¥200',
+                  draftAmountLabel: '待人工确认',
+                  changed: false,
+                },
+              ],
+            },
+          ],
+          pagination: { page: 1, pageCount: 1, total: 1 },
+        })}
+      />,
+    );
+
+    expect(html).toContain('¥100–¥200');
+    expect(html).toContain('1/2 档已调整');
+    expect(html).toContain('待补全 1 档');
+    expect(html).not.toContain('>1,000 个<');
+    expect(html).not.toContain('>2,000 个<');
   });
 
   it('shows a useful empty state and keeps the selected detail optional', () => {
@@ -330,8 +416,8 @@ describe('ExternalSalesChargeWorkspace', () => {
       />,
     );
 
-    expect(html).toContain('没有找到符合条件的收费项目');
-    expect(html).toContain('选择一个收费项目后');
+    expect(html).toContain('还没有收费项目');
+    expect(html).toContain('选择一个收费项目');
     expect(html).toContain('筛选结果 0 项');
   });
 

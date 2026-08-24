@@ -470,6 +470,8 @@ export type LogRow = {
   lastAttemptAt: Date;
   createdAt: Date;
   updatedAt: Date;
+  /** 投递日志所属的持久化后台任务状态；inline/测试投递为 null。 */
+  backgroundJobStatus: BackgroundJobStatus | null;
   /**
    * RETRYING 本身只表示可重试；当对应的 durable job 已经 DEAD
    * 时，才是需要 owner 介入的死信。不改 NotificationLog 的单调状态，
@@ -516,26 +518,21 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
     },
   });
   const deliveryKeys = [
-    ...new Set(
-      rows.flatMap((row) =>
-        row.status === NotificationStatus.RETRYING && row.deliveryKey
-          ? [row.deliveryKey]
-          : [],
-      ),
-    ),
+    ...new Set(rows.flatMap((row) => (row.deliveryKey ? [row.deliveryKey] : []))),
   ];
-  const deadJobs =
+  const jobs =
     deliveryKeys.length === 0
       ? []
       : await db.backgroundJob.findMany({
           where: {
             type: BACKGROUND_JOB_TYPES.NOTIFICATION,
-            status: BackgroundJobStatus.DEAD,
             dedupeKey: { in: deliveryKeys },
           },
-          select: { dedupeKey: true },
+          select: { dedupeKey: true, status: true },
         });
-  const deadDeliveryKeys = new Set(deadJobs.map((job) => job.dedupeKey));
+  const jobStatusByDeliveryKey = new Map(
+    jobs.map((job) => [job.dedupeKey, job.status] as const),
+  );
   return rows.map((r) => ({
     id: r.id,
     eventType: r.eventType,
@@ -552,10 +549,13 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
     lastAttemptAt: r.lastAttemptAt,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    backgroundJobStatus: r.deliveryKey
+      ? (jobStatusByDeliveryKey.get(r.deliveryKey) ?? null)
+      : null,
     hasDeadLetterJob:
       r.status === NotificationStatus.RETRYING &&
       r.deliveryKey !== null &&
-      deadDeliveryKeys.has(r.deliveryKey),
+      jobStatusByDeliveryKey.get(r.deliveryKey) === BackgroundJobStatus.DEAD,
   }));
 }
 
@@ -594,6 +594,7 @@ export async function listUnresolvedNotificationLogs(
            log."lastAttemptAt",
            log."createdAt",
            log."updatedAt",
+           job."status" AS "backgroundJobStatus",
            (
              log."status" = ${NotificationStatus.RETRYING}::"NotificationStatus"
              AND job."status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"

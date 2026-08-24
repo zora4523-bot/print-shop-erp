@@ -1792,7 +1792,7 @@ export const createOrderSchema = z
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 export const cancelOrderSchema = z.object({
-  reason: optionalTrimmedText('取消原因', 500),
+  reason: requiredTrimmedText('取消原因', 500),
 });
 
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
@@ -2383,27 +2383,48 @@ export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSch
 // The recompute-daily endpoint takes a date and optionally a single
 // workerId (for "recompute just this row" from the UI). Strict calendar
 // validation — refuses 2026-02-31 and the like .
-export const recomputeDailySalarySchema = z.object({
-  date: z
-    .string()
-    .trim()
-    .superRefine((val, ctx) => {
-      if (!YMD_RE.test(val)) {
-        ctx.addIssue({
-          code: 'custom',
-          message: '日期格式非法（应为 YYYY-MM-DD）',
-        });
-        return;
-      }
-      if (!parseStrictYmd(val)) {
-        ctx.addIssue({
-          code: 'custom',
-          message: '日期不是合法日历日期',
-        });
-      }
-    }),
-  workerId: safeId('师傅 id').optional(),
-});
+// Server Action 输入契约（不是 Prisma schema）。第一阶段只读预检
+// 不要求用户先编造理由；任何 confirmed=true 的写入请求仍由
+// 服务端强制 1–500 字。这个闸口不依赖客户端对话框的 required。
+export const recomputeDailySalarySchema = z
+  .object({
+    date: z
+      .string()
+      .trim()
+      .superRefine((val, ctx) => {
+        if (!YMD_RE.test(val)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: '日期格式非法（应为 YYYY-MM-DD）',
+          });
+          return;
+        }
+        if (!parseStrictYmd(val)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: '日期不是合法日历日期',
+          });
+        }
+      }),
+    workerId: safeId('师傅 id').optional(),
+    reason: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z
+        .string()
+        .trim()
+        .max(500, '重算理由过长（最多 500 个字符）'),
+    ),
+    confirmed: formBoolean,
+  })
+  .superRefine((data, ctx) => {
+    if (data.confirmed && data.reason.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: '请填写重算理由',
+      });
+    }
+  });
 
 export type RecomputeDailySalaryInput = z.infer<typeof recomputeDailySalarySchema>;
 

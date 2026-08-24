@@ -7,6 +7,9 @@ import {
   E2E_USERS,
   seedNotificationWireFixture,
   readNotificationLogs,
+  fillExternalSalesOrderCharges,
+  openFirstOrderItemEditor,
+  submitDraftOrderAndWait,
 } from './_helpers';
 
 // 这条测试的具体使命：把 SALES 创建 → 提交 → ADMIN 排产 → WORKER
@@ -40,11 +43,17 @@ test.describe('生产流程 — golden path', () => {
         password: E2E_PASSWORD,
       });
       await page.locator('input[name="customerRef"]').fill(orderRef);
+      await openFirstOrderItemEditor(page);
       await page.locator('input[name="items.0.name"]').fill(itemName);
       await page.locator('input[name="items.0.quantity"]').fill('1000');
       // &ldquo;现货加烫&rdquo; 是 seed 里 defaultMachineType=HAND_PRESS 的工艺，
       // 和我们的 e2e-worker-hand 师傅匹配 → 排产能选到。
       await page.getByRole('button', { name: '现货加烫' }).click();
+      await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
+      await page
+        .locator('textarea[name="items.0.priceOverrideReason"]')
+        .fill('E2E 生产全链路人工报价');
+      await fillExternalSalesOrderCharges(page);
       await page.getByRole('button', { name: /创建工单/ }).click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
         timeout: 10_000,
@@ -57,11 +66,9 @@ test.describe('生产流程 — golden path', () => {
     });
 
     await test.step('SALES 提交工单 (DRAFT → PENDING_SCHEDULE)', async () => {
-      await page.getByRole('button', { name: /^提交工单$/ }).click();
-      // 提交后&ldquo;提交工单&rdquo;按钮消失（订单进入 PENDING_SCHEDULE）。
-      await expect(
-        page.getByRole('button', { name: /^提交工单$/ }),
-      ).toHaveCount(0, { timeout: 10_000 });
+      // Wait for the server-rendered status, not merely the pending button
+      // label, so the assertion proves DRAFT → SUBMITTED committed.
+      await submitDraftOrderAndWait(page);
 
       // Slice C 断言：ORDER_SUBMITTED 触发 → 1 条 NotificationLog。
       // 非急单 → URGENT_ORDER 不触发。relatedOrderId 锁定本测试的工单。
@@ -110,20 +117,23 @@ test.describe('生产流程 — golden path', () => {
       });
       await page.waitForURL(`/foreman/scheduling/${orderId}`);
 
-      // 排产表单第一行的 select（每个 item × craft 一行；这里只有一个）。
-      // SchedulingForm 用原生 <select>，option label 形如&ldquo;{displayName}（机型，推荐）&rdquo;
-      // —— Playwright 的 selectOption 只接受 label 精确匹配，所以先按
-      // displayName 子串找到 option 再用其 value 选中。
-      const select = page.locator('select').first();
-      const workerOptionValue = await select
-        .locator('option')
-        .filter({ hasText: E2E_USERS.workerHandPress.displayName })
-        .first()
-        .getAttribute('value');
-      expect(workerOptionValue).toBeTruthy();
-      await select.selectOption(workerOptionValue as string);
+      // Current scheduling is a per-craft radio group. Select the compatible
+      // hand-press worker in the visible task row and prove the assignment is
+      // accepted before submitting the schedule.
+      const assignmentRow = page
+        .getByRole('row')
+        .filter({ hasText: itemName })
+        .filter({ hasText: '现货加烫' });
+      const handPressRadio = assignmentRow
+        .getByRole('radio')
+        .filter({ hasText: E2E_USERS.workerHandPress.displayName });
+      await expect(handPressRadio).toHaveCount(1);
+      await handPressRadio.click();
+      await expect(handPressRadio).toHaveAttribute('aria-checked', 'true');
 
-      await page.getByRole('button', { name: /确认排产/ }).click();
+      const confirmScheduling = page.getByRole('button', { name: /确认排产/ });
+      await expect(confirmScheduling).toBeEnabled();
+      await confirmScheduling.click();
       // 排产成功有两条 navigation 在赛跑：(a) SchedulingForm 的
       // useEffect router.push('/orders/[id]')；(b) server revalidate
       // 后该 order 不再 PENDING_SCHEDULE，detail 页 redirect 回
@@ -259,10 +269,16 @@ test.describe('生产流程 — golden path', () => {
       // 还在 admin (orderUrl) 上；ShipOrderForm 在 COMPLETED 下渲染。
       // 填一个运单号 + 提交，验证 status badge 切到&ldquo;已发货&rdquo;。
       trackingNoForLog = `SF-${Date.now().toString(36)}`;
-      await page.locator('input[name="trackingNo"]').fill(trackingNoForLog);
-      await page.getByRole('button', { name: /^标记发货$/ }).click();
+      await page
+        .locator('input[name="shipmentTrackingNo"]')
+        .fill(trackingNoForLog);
+      await page.locator('input[name="shipmentWeightKg"]').fill('1');
+      await page
+        .getByRole('button', { name: /^确认 1 个地址已发货$/ })
+        .click();
       await expect(
         page
+          .getByRole('heading', { level: 1 })
           .locator('[data-slot="badge"]')
           .filter({ hasText: /^已发货$/ }),
       ).toBeVisible({ timeout: 10_000 });
@@ -301,12 +317,14 @@ test.describe('生产流程 — golden path', () => {
       // 与 COMPLETED 混淆。
       await expect(
         page
+          .getByRole('heading', { level: 1 })
           .locator('[data-slot="badge"]')
           .filter({ hasText: /^已完成$/ }),
       ).toBeVisible({ timeout: 10_000 });
       // 旧的&ldquo;已完工&rdquo;badge 消失。
       await expect(
         page
+          .getByRole('heading', { level: 1 })
           .locator('[data-slot="badge"]')
           .filter({ hasText: /^已完工$/ }),
       ).toHaveCount(0);

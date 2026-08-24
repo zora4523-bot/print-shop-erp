@@ -14,6 +14,9 @@ import {
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
+import { StatusBadge } from '@/components/ui-business';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 type TaskRow = {
   id: string;
@@ -100,6 +103,22 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
         )
         .map((task) => task.id),
     [selected, tasks],
+  );
+  const taskGroups = useMemo(
+    () => [
+      {
+        key: TaskStatus.IN_PROGRESS,
+        label:
+          PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.IN_PROGRESS].label,
+        rows: tasks.filter((task) => task.status === TaskStatus.IN_PROGRESS),
+      },
+      {
+        key: TaskStatus.PENDING,
+        label: PRODUCTION_TASK_STATUS_REGISTRY[TaskStatus.PENDING].label,
+        rows: tasks.filter((task) => task.status === TaskStatus.PENDING),
+      },
+    ],
+    [tasks],
   );
   // tasks.length > 0 是必要的：空列表时 0 === 0 会让表头框显示已勾选。
   const allSelected = tasks.length > 0 && selected.size === tasks.length;
@@ -195,83 +214,118 @@ export function WorkerTaskBatchList({ tasks }: { tasks: TaskRow[] }) {
         ) : null}
       </section>
 
-      <ul className="space-y-2">
-        {tasks.map((task) => (
-          <li
-            key={task.id}
-            className="grid min-w-0 grid-cols-[44px_minmax(0,1fr)] rounded-xl border bg-card shadow-sm"
-          >
-            <label className="flex min-h-11 cursor-pointer items-start justify-center py-2">
-              <BatchCheckbox
-                checked={selected.has(task.id)}
-                onChange={() => toggle(task.id)}
-                label={`选择 ${task.order.orderNo} ${task.item.name}`}
-              />
-            </label>
-            <Link
-              href={`/worker/tasks/${task.id}`}
-              className="min-h-11 min-w-0 border-l p-4 transition hover:bg-muted/40"
+      {taskGroups.map((group) => (
+        <section
+          key={group.key}
+          aria-labelledby={`worker-task-group-${group.key}`}
+          className="space-y-2"
+        >
+          <div className="flex items-center gap-2">
+            <h2
+              id={`worker-task-group-${group.key}`}
+              className="text-sm font-semibold"
             >
-              <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
-                      {task.order.orderNo}
-                    </span>
-                    {task.order.isUrgent ? (
-                      <Badge
-                        variant="destructive"
-                        className="bg-destructive text-background dark:bg-destructive dark:text-background"
-                      >
-                        急单
-                      </Badge>
-                    ) : null}
-                    <Badge
-                      variant={
-                        task.status === TaskStatus.IN_PROGRESS
-                          ? 'secondary'
-                          : 'outline'
-                      }
-                    >
-                      {task.status === TaskStatus.IN_PROGRESS
-                        ? '进行中'
-                        : '待开始'}
-                    </Badge>
-                  </div>
-                  <div className="worker-wrap-anywhere text-sm font-medium">
-                    #{task.item.sequence} · {task.item.name}
-                  </div>
-                  {task.order.customName ? (
-                    <div className="worker-wrap-anywhere text-xs font-medium">
-                      {task.order.customName}
-                    </div>
-                  ) : null}
-                  <div className="worker-wrap-anywhere text-xs text-muted-foreground">
-                    {task.craft.name}
-                    {task.machineType
-                      ? ` · ${MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType}`
-                      : task.workerType === WorkerType.MACHINE
-                        ? ' · 机型未配置'
-                        : ' · 时薪任务'}
-                    {' · '}
-                    {task.item.isDoubleSided ? '双面' : '单面'} ·{' '}
-                    {task.item.isDoubleColor ? '双色' : '单色'}
-                  </div>
-                  <div className="worker-wrap-anywhere text-xs text-muted-foreground">
-                    接单人：{task.order.submitterName}
-                  </div>
-                </div>
-                <div className="ml-auto shrink-0 text-right">
-                  <div className="text-xs text-muted-foreground">计划</div>
-                  <div className="font-sans tabular-nums text-base">
-                    {task.plannedQty.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
+              {group.label}
+            </h2>
+            <Badge variant={group.key === TaskStatus.IN_PROGRESS ? 'secondary' : 'outline'}>
+              {group.rows.length}
+            </Badge>
+          </div>
+          {group.rows.length > 0 ? (
+            <ul className="space-y-2">
+              {group.rows.map((task) => (
+                <WorkerTaskRow
+                  key={task.id}
+                  task={task}
+                  checked={selected.has(task.id)}
+                  onToggle={() => toggle(task.id)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-xl border border-dashed px-3 py-4 text-sm text-muted-foreground">
+              暂无{group.label}任务
+            </p>
+          )}
+        </section>
+      ))}
     </div>
+  );
+}
+
+function WorkerTaskRow({
+  task,
+  checked,
+  onToggle,
+}: {
+  task: TaskRow;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <li className="grid min-w-0 grid-cols-[44px_minmax(0,1fr)] rounded-xl border bg-card shadow-sm">
+      <label className="flex min-h-11 cursor-pointer items-start justify-center py-2">
+        <BatchCheckbox
+          checked={checked}
+          onChange={onToggle}
+          label={`选择 ${task.order.orderNo} ${task.item.name}`}
+        />
+      </label>
+      <Link
+        href={`/worker/tasks/${task.id}`}
+        className="min-h-11 min-w-0 border-l p-4 transition hover:bg-muted/40"
+      >
+        <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
+                {task.order.orderNo}
+              </span>
+              {task.order.isUrgent ? (
+                <UrgentBadge />
+              ) : null}
+              <ProductionTaskStatusBadge status={task.status} />
+            </div>
+            <div className="worker-wrap-anywhere text-sm font-medium">
+              #{task.item.sequence} · {task.item.name}
+            </div>
+            {task.order.customName ? (
+              <div className="worker-wrap-anywhere text-xs font-medium">
+                {task.order.customName}
+              </div>
+            ) : null}
+            <div className="worker-wrap-anywhere text-xs text-muted-foreground">
+              {task.craft.name}
+              {task.machineType
+                ? ` · ${MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType}`
+                : task.workerType === WorkerType.MACHINE
+                  ? ' · 机型未配置'
+                  : ' · 时薪任务'}
+              {' · '}
+              {task.item.isDoubleSided ? '双面' : '单面'} ·{' '}
+              {task.item.isDoubleColor ? '双色' : '单色'}
+            </div>
+            <div className="worker-wrap-anywhere text-xs text-muted-foreground">
+              接单人：{task.order.submitterName}
+            </div>
+          </div>
+          <div className="ml-auto shrink-0 text-right">
+            <div className="text-xs text-muted-foreground">计划</div>
+            <div className="font-sans tabular-nums text-base">
+              {task.plannedQty.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+function ProductionTaskStatusBadge({ status }: { status: TaskStatus }) {
+  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
+  return (
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </StatusBadge>
   );
 }

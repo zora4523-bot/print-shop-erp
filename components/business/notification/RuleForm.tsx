@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { DisabledReason, PendingButton } from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 
 type ChannelOption = {
@@ -45,7 +46,7 @@ export function RuleForm({
   const selected = new Set(initial.channelIds);
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} aria-busy={pending} className="space-y-5">
       <div className="space-y-2">
         <Label>事件</Label>
         <div className="rounded-md border bg-muted/30 px-3 py-2 font-mono text-sm">
@@ -137,16 +138,8 @@ export function RuleForm({
               //   - inactive 未绑定 → disabled，禁止新绑（否则 notify()
               //     必失败，dashboard 永红）
               const disabled = !c.isActive && !isSelected;
-              return (
-                <label
-                  key={c.id}
-                  className="flex items-center gap-2"
-                  title={
-                    disabled
-                      ? '该群已停用，不可新绑；启用群后再勾选'
-                      : undefined
-                  }
-                >
+              const option = (
+                <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     name="channelIds"
@@ -160,6 +153,20 @@ export function RuleForm({
                     {!c.isActive ? '（已停用）' : ''}
                   </span>
                 </label>
+              );
+              return disabled ? (
+                <DisabledReason
+                  key={c.id}
+                  cause="prerequisite"
+                  reason="该群已停用，不可新绑"
+                  fixHref={`/owner/notifications/channels/${c.id}`}
+                  fixLabel="去启用群"
+                  className="[&_[data-slot=disabled-reason-copy]]:text-xs"
+                >
+                  {option}
+                </DisabledReason>
+              ) : (
+                <div key={c.id}>{option}</div>
               );
             })}
           </div>
@@ -191,9 +198,9 @@ export function RuleForm({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={pending}>
+        <PendingButton pending={pending} pendingLabel="保存中…">
           保存修改
-        </Button>
+        </PendingButton>
         <Link
           href="/owner/notifications"
           className={buttonVariants({ variant: 'outline' })}

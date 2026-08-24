@@ -38,14 +38,15 @@ describe('resolveSegmentLabel', () => {
     ).toBe('详情');
   });
 
-  it('非 id 的未知段原样显示', () => {
-    // tests/visual/admin-responsive.spec.ts 会 goto /orders/e2e-admin-ui-missing
-    // 跑 404 用例；这个段带连字符、不匹配 cuid 正则，行为与今天一致。
-    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBe(
-      'e2e-admin-ui-missing',
-    );
-    expect(resolveSegmentLabel('e2e-admin-ui-missing', 'GD-260821-001')).toBe(
-      'e2e-admin-ui-missing',
+  it('模块表里的段优先于本地映射，漏网段不露出英文路由', () => {
+    expect(resolveSegmentLabel('cdr', null)).toBe('CDR 汇总');
+    expect(resolveSegmentLabel('order-changes', null)).toBe('工单修改申请');
+    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBe('页面');
+  });
+
+  it('未知末级路由最终回落到页面 H1，不泄露英文路由段', () => {
+    expect(resolveSegmentLabel('future-screen', null, '未来业务页')).toBe(
+      '未来业务页',
     );
   });
 });

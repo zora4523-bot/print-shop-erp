@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PendingButton } from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 
 type EditInitial = {
@@ -43,7 +44,7 @@ export function ChannelForm(props: Props) {
     state?.status === 'invalid' ? state.fieldErrors : undefined;
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} aria-busy={pending} className="space-y-5">
       <div className="space-y-2">
         <Label htmlFor="channelKey">channelKey（标识符，建好后不可改）</Label>
         {isCreate ? (
@@ -131,9 +132,9 @@ export function ChannelForm(props: Props) {
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={pending}>
+        <PendingButton pending={pending} pendingLabel="保存中…">
           {isCreate ? '创建群' : '保存修改'}
-        </Button>
+        </PendingButton>
         <Link
           href="/owner/notifications"
           className={buttonVariants({ variant: 'outline' })}

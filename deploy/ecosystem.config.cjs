@@ -53,7 +53,10 @@ module.exports = {
       ...common,
       name: 'print-shop-erp',
       script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3000',
+      // Next 16 defaults to 0.0.0.0. Binding explicitly to loopback is part of
+      // the login-rate-limit boundary: exposing :3000 would bypass Nginx and
+      // its /login limit_req block entirely.
+      args: 'start -H 127.0.0.1 -p 3000',
       max_memory_restart: memory.web.restart,
       node_args: `--max-old-space-size=${memory.web.heap}`,
       kill_timeout: 30_000,

@@ -3,18 +3,17 @@ import Link from 'next/link';
 import { CheckCircle2, Inbox, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
-import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
-  BILL_STATUS_TO_BADGE,
   EmptyState,
   PageHeader,
   StatCard,
   StatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
+import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的对客应付账单' };
@@ -166,8 +165,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
 }
 
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  const cfg = BILL_STATUS_TO_BADGE[status];
-  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
+  const cfg = BILL_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={cfg.tone} dot={cfg.dot}>
       {cfg.label}
@@ -195,7 +193,7 @@ function FilterBar({
           <option value="">全部</option>
           {Object.values(BillStatus).map((s) => (
             <option key={s} value={s}>
-              {BILL_STATUS_LABELS[s] ?? s}
+              {BILL_STATUS_REGISTRY[s].label}
             </option>
           ))}
         </select>

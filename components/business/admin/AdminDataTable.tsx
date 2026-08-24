@@ -15,6 +15,7 @@ import {
   type TableHrefParams,
 } from '@/lib/admin/table';
 import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/ui-business';
 
 export function AdminListToolbar({
   action,
@@ -86,13 +87,12 @@ export function AdminTableCard({
     <div className="min-w-0 rounded-xl border bg-card shadow-sm">
       <div className="min-w-0 p-0 sm:p-4">{children}</div>
       {isEmpty ? (
-        <div className="border-t px-4 py-8 text-center">
-          <p className="text-sm font-medium">{emptyTitle}</p>
-          {emptyDescription ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {emptyDescription}
-            </p>
-          ) : null}
+        <div className="border-t p-4">
+          <EmptyState
+            title={emptyTitle}
+            description={emptyDescription}
+            className="border-0 bg-transparent py-6"
+          />
         </div>
       ) : null}
       {footer ? <div className="border-t px-4 py-3">{footer}</div> : null}

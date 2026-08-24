@@ -70,13 +70,16 @@ export function CategoryDistributionChart({
         initialDimension={{ width: 1, height: 1 }}
       >
         <PieChart>
+          {/* External labels sit 10px beyond the arc. At the 375px admin
+              viewport a 90px arc pushes the longest known category label
+              past the document edge, so keep a small invariant label gutter. */}
           <Pie
             data={rows}
             dataKey="value"
             nameKey="name"
             cx="50%"
             cy="50%"
-            outerRadius={90}
+            outerRadius={84}
             innerRadius={48}
             paddingAngle={1}
             isAnimationActive={false}

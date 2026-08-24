@@ -57,6 +57,8 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-info-neutral: var(--info-neutral);
+  --color-info-neutral-foreground: var(--info-neutral-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -67,6 +69,13 @@
 }
 
 :root {
+  /* AdminHeader 的实际高度下限是 3.5rem。顶部安全区超过 py-1 时，
+     额外高度由 44px 触控控件 + 底部 py-1 + safe-area 共同决定。 */
+  --admin-header-offset: max(
+    3.5rem,
+    calc(3rem + env(safe-area-inset-top, 0px))
+  );
+  --admin-scroll-padding-top: calc(var(--admin-header-offset) + 1rem);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -74,7 +83,7 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   /* 红包印刷品牌红——浅色模式偏 vivid scarlet（OKLCH chroma 0.20+ 显得鲜艳但不刺眼）。 */
-  --primary: oklch(0.55 0.2 25);
+  --primary: oklch(0.51 0.2 25);
   --primary-foreground: oklch(0.99 0.01 25);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -91,6 +100,8 @@
   --success-foreground: oklch(0.28 0.07 152);
   --info: oklch(0.62 0.18 240);
   --info-foreground: oklch(0.28 0.08 240);
+  --info-neutral: oklch(0.55 0.02 250);
+  --info-neutral-foreground: oklch(0.35 0.02 250);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -140,6 +151,8 @@
   --success-foreground: oklch(0.96 0.05 152);
   --info: oklch(0.7 0.16 240);
   --info-foreground: oklch(0.95 0.04 240);
+  --info-neutral: oklch(0.72 0.02 250);
+  --info-neutral-foreground: oklch(0.86 0.01 250);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -169,6 +182,14 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* 未设置布局类的文本链接仍需要可测量的 44px 盒子。这只是 base
+     层的低特异性兜底；组件层和工具层的 block / flex / grid 都会
+     正常覆盖，不再把所有 admin 链接强制改成 inline-flex。 */
+  :where(.admin-viewport, .touch-viewport) :where(a[href]) {
+    display: inline-flex;
+    align-items: center;
   }
 }
 
@@ -223,6 +244,22 @@
 
   .admin-viewport {
     min-height: 100vh;
+    scroll-padding-top: var(--admin-scroll-padding-top);
+  }
+
+  /* 页面默认由 document 滚动；同时保留 .admin-viewport 上的设置，
+     便于将来将 admin shell 改成独立滚动容器时继续生效。 */
+  html:has(.admin-viewport) {
+    scroll-padding-top: var(--admin-scroll-padding-top);
+  }
+
+  /* 页内粘性工具条与锚点统一避让 AdminHeader。 */
+  .admin-sticky-below-header {
+    top: var(--admin-header-offset);
+  }
+
+  .admin-scroll-target {
+    scroll-margin-top: var(--admin-scroll-padding-top);
   }
 
   @supports (min-height: 100svh) {
@@ -268,6 +305,16 @@
     word-break: break-word;
   }
 
+  /* 横向表格在两侧保留轻微内阴影，明确提示仍有列可滚动查看；颜色
+     只取当前主题的 foreground，明暗模式无需业务组件各写一套。 */
+  .admin-horizontal-scroll-cue {
+    box-shadow:
+      inset 0.75rem 0 0.75rem -0.875rem
+        color-mix(in oklab, var(--foreground) 45%, transparent),
+      inset -0.75rem 0 0.75rem -0.875rem
+        color-mix(in oklab, var(--foreground) 45%, transparent);
+  }
+
   @supports (overflow-wrap: anywhere) {
     .admin-wrap-anywhere {
       overflow-wrap: anywhere;
@@ -286,20 +333,16 @@
     min-height: 2.75rem;
   }
 
-  .touch-viewport a[href] {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .admin-viewport a[href] {
-    display: inline-flex;
-    align-items: center;
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .admin-viewport *,
     .admin-viewport *::before,
-    .admin-viewport *::after {
+    .admin-viewport *::after,
+    .worker-viewport *,
+    .worker-viewport *::before,
+    .worker-viewport *::after,
+    .touch-viewport *,
+    .touch-viewport *::before,
+    .touch-viewport *::after {
       scroll-behavior: auto !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;

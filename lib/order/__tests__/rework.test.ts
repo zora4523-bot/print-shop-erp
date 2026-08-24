@@ -9,10 +9,11 @@ import {
   ShipmentStatus,
 } from '../../../generated/prisma/enums';
 
-const { dbMock, notifyMock } = vi.hoisted(() => {
+const { dbMock, notifyMock, modeMock, enqueueNotificationMock } = vi.hoisted(() => {
   const mock = {
     order: {
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
     },
@@ -26,12 +27,20 @@ const { dbMock, notifyMock } = vi.hoisted(() => {
   return {
     dbMock: mock,
     notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+    modeMock: vi.fn<() => 'inline' | 'durable'>(),
+    enqueueNotificationMock: vi.fn<(...args: unknown[]) => Promise<boolean>>(),
   };
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: notifyMock,
+}));
+vi.mock('@/lib/background-jobs/mode', () => ({
+  backgroundJobsMode: modeMock,
+}));
+vi.mock('@/lib/notification/transactional-outbox', () => ({
+  enqueueNotificationInTransaction: enqueueNotificationMock,
 }));
 
 import {
@@ -130,6 +139,8 @@ beforeEach(() => {
   dbMock.orderShipmentLine.createMany.mockResolvedValue({ count: 1 });
   dbMock.orderLog.create.mockResolvedValue({});
   notifyMock.mockReset().mockResolvedValue(undefined);
+  modeMock.mockReset().mockReturnValue('inline');
+  enqueueNotificationMock.mockReset().mockResolvedValue(true);
 });
 
 describe('createReworkOrder', () => {
@@ -207,6 +218,92 @@ describe('createReworkOrder', () => {
       }),
       { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
     );
+    expect(notifyMock).toHaveBeenCalledWith(
+      'URGENT_ORDER',
+      {
+        orderId: 'rework-1',
+        orderNo: 'GD-260731-001',
+        submitterName: '管理员',
+        customerRef: '客户 A',
+      },
+      { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
+    );
+    expect(notifyMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not emit URGENT_ORDER when the source order is not urgent', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({ ...sourceOrder, isUrgent: false })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: false,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SUBMITTED',
+      expect.objectContaining({ orderId: 'rework-1', urgentMark: '' }),
+      { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
+    );
+  });
+
+  it('atomically enqueues both submitted and urgent events in durable mode', async () => {
+    modeMock.mockReturnValue('durable');
+    dbMock.order.findUnique.mockResolvedValueOnce(sourceOrder);
+    dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      customerRef: '客户 A',
+      totalAmount: '0.00',
+      isUrgent: true,
+      submitter: { displayName: '管理员' },
+    });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(enqueueNotificationMock).toHaveBeenNthCalledWith(
+      1,
+      dbMock,
+      'ORDER_SUBMITTED',
+      expect.objectContaining({ orderId: 'rework-1', urgentMark: '🚨 急单' }),
+      { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
+    );
+    expect(enqueueNotificationMock).toHaveBeenNthCalledWith(
+      2,
+      dbMock,
+      'URGENT_ORDER',
+      expect.objectContaining({ orderId: 'rework-1' }),
+      { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
+    );
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates an urgent outbox failure so the owning transaction can roll back', async () => {
+    modeMock.mockReturnValue('durable');
+    dbMock.order.findUnique.mockResolvedValueOnce(sourceOrder);
+    dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      customerRef: '客户 A',
+      totalAmount: '0.00',
+      isUrgent: true,
+      submitter: { displayName: '管理员' },
+    });
+    enqueueNotificationMock
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('outbox unavailable'));
+
+    await expect(createReworkOrder(validInput, ownerActor)).rejects.toThrow(
+      'outbox unavailable',
+    );
+    expect(enqueueNotificationMock).toHaveBeenCalledTimes(2);
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('rejects non-admin callers before opening a transaction', async () => {

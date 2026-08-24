@@ -128,6 +128,71 @@ describe('resolveUnknownNotification', () => {
     });
   });
 
+  it('ignores an inline UNKNOWN as terminal FAILED and audits actor, time, and trimmed reason', async () => {
+    txMock.notificationLog.findUnique.mockResolvedValue({
+      ...log,
+      deliveryKey: null,
+    });
+
+    await expect(
+      resolveUnknownNotification(
+        'log-1',
+        'IGNORED',
+        actor,
+        7,
+        '  业务已电话确认，无需补发  ',
+      ),
+    ).resolves.toEqual({
+      backgroundJobId: null,
+      pendingUnknownCount: 0,
+      rearmed: false,
+      completed: true,
+    });
+
+    expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'log-1',
+        status: 'UNKNOWN',
+        deliveryStateVersion: 7,
+      },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        errorMessage: '人工忽略：业务已电话确认，无需补发',
+        sentAt: null,
+        deliveryJobAttempt: null,
+        deliveryStateVersion: { increment: 1 },
+      }),
+    });
+    expect(txMock.businessAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'owner-1',
+        actorUsername: 'owner',
+        action: 'IGNORE_NOTIFICATION_DELIVERY',
+        entityType: 'NotificationLog',
+        entityId: 'log-1',
+        after: expect.objectContaining({
+          status: 'FAILED',
+          resolvedAt: '2026-08-22T08:00:00.000Z',
+        }),
+        requestMetadata: expect.objectContaining({
+          resolution: 'IGNORED',
+          reason: '业务已电话确认，无需补发',
+        }),
+      }),
+      select: expect.any(Object),
+    });
+  });
+
+  it('rejects IGNORE without a non-empty audit reason before opening a transaction', async () => {
+    await expect(
+      resolveUnknownNotification('log-1', 'IGNORED', actor, 7, '   '),
+    ).rejects.toMatchObject({ code: 'INVALID_REASON' });
+
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(txMock.notificationLog.updateMany).not.toHaveBeenCalled();
+    expect(txMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
   it('closes the original DEAD job when its final UNKNOWN is confirmed delivered', async () => {
     txMock.notificationLog.findUnique.mockResolvedValue(log);
     lockDurableJob();
@@ -158,6 +223,48 @@ describe('resolveUnknownNotification', () => {
           manuallyResolved: true,
         }),
         lastErrorCode: null,
+      }),
+    });
+  });
+
+  it('keeps transport and workflow outcomes distinct when the final durable UNKNOWN is ignored', async () => {
+    txMock.notificationLog.findUnique.mockResolvedValue(log);
+    lockDurableJob();
+
+    await expect(
+      resolveUnknownNotification(
+        'log-1',
+        'IGNORED',
+        actor,
+        7,
+        '业务不需要再补发',
+      ),
+    ).resolves.toEqual({
+      backgroundJobId: 'job-1',
+      pendingUnknownCount: 0,
+      rearmed: false,
+      completed: true,
+    });
+
+    expect(txMock.notificationLog.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          errorMessage: '人工忽略：业务不需要再补发',
+        }),
+      }),
+    );
+    expect(txMock.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'job-1',
+        status: BackgroundJobStatus.DEAD,
+      }),
+      data: expect.objectContaining({
+        status: BackgroundJobStatus.SUCCEEDED,
+        result: expect.objectContaining({
+          unknown: 0,
+          manuallyResolved: true,
+        }),
       }),
     });
   });

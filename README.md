@@ -8,6 +8,16 @@
 
 | 文件 | 作用 | 读者 |
 |---|---|---|
+| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | 当前系统边界、分层、进程与数据流 | 开发 / 评审 |
+| **[DEVELOPMENT.md](./DEVELOPMENT.md)** | 本地安装、命令、测试与开发循环 | 开发 |
+| **[CONTRIBUTING.md](./CONTRIBUTING.md)** | 编码、迁移、测试、评审与发布记录规则 | 贡献者 |
+| **[API.md](./API.md)** | Route Handlers 与 Server Actions 契约 | 开发 / 集成 |
+| **[DATABASE.md](./DATABASE.md)** | Prisma、迁移、seed、扩展与数据安全 | 开发 / DBA |
+| **[DEPLOYMENT.md](./DEPLOYMENT.md)** | 稳定部署入口；详细步骤指向唯一 runbook | 运维 / Owner |
+| **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** | 本地开发、Prisma、E2E 与视觉门禁排错 | 开发 / 运维 |
+| **[UI-SYSTEM.md](./UI-SYSTEM.md)** | Token、组件分层、页面状态与视觉验收 | 设计 / 开发 |
+| **[docs/UI-DESIGN-COVERAGE.md](./docs/UI-DESIGN-COVERAGE.md)** | 85 页设计证据等级、实现覆盖与视觉验证边界 | 设计 / 开发 / 验收 |
+| **[docs/UI-REMEDIATION-BACKLOG.md](./docs/UI-REMEDIATION-BACKLOG.md)** | UI 问题严重度、成本、独立任务与完成状态 | 开发 / 验收 |
 | **SPEC-v1.2.md** | 业务规格（冻结版，权威） | 所有人 |
 | **CLAUDE.md** | 开发规范与工作准则 | Claude Code / Codex |
 | **prisma/schema.prisma** | 数据库Schema | 开发 |
@@ -19,84 +29,55 @@
 | **docs/AGENT-BACKLOG.md** | Agent 自动化开发任务队列 | 开发 / Codex routines |
 | **docs/规范合规审查-2026-08-19.md** | CLAUDE.md 规范合规审查快照（含 19 条待处理） | 开发 |
 | **docs/AGENT-ROUTINES.md** | Agent 自动 prompt / draft PR 执行协议 | 开发 / Codex routines |
-| **CHANGELOG.md** | 版本变更历史 | 所有人 |
+| **CHANGELOG.md** | SPEC 历史；不是产品发布日志 | 所有人 |
 | **SPEC-v1.0.md / v1.1.md** | 历史版本（仅归档） | 参考 |
 
 ---
 
-## 🚀 启动开发（给Claude Code的指引）
+## 🚀 启动开发
 
 ### 环境要求
 
 - **Node.js 24 LTS**（Krypton，支持至2028-04-30）
-- **pnpm** 最新版
+- **pnpm 10.33.1**（以 `package.json#packageManager` 为准）
 - **PostgreSQL 16**（开发期用本地 PG 或 Pigsty dev 实例，生产用独立 Pigsty）
 
 ### 第一次启动
 
 ```bash
 # 0. 确认 Node 版本
-node -v  # 必须是 v24.x
+node -v  # 必须满足 package.json 的 >=24
 
-# 1. 初始化项目
-pnpm create next-app@latest print-shop-erp --ts --tailwind --app --no-src-dir
+# 1. 从受控仓库 clone；不要重新运行 create-next-app
+git clone <repository-url> print-shop-erp
 cd print-shop-erp
 
-# 2. 安装核心依赖（版本锁精确，不用 ^ 前缀 —— 安装后手动去 package.json 改）
-pnpm add prisma@7 @prisma/adapter-pg
-pnpm add next-auth@5 @auth/prisma-adapter
-pnpm add react-hook-form zod @hookform/resolvers
-pnpm add bcryptjs decimal.js
-pnpm add qrcode.react qrcode
-pnpm add puppeteer   # PDF生成
-pnpm add @sentry/nextjs   # 错误监控
-pnpm add @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/instrumentation-http
+# 2. 安装锁定依赖并准备本地环境
+pnpm install --frozen-lockfile
+cp .env.example .env  # 填写专用开发库 DATABASE_URL 与本地 secret
 
-# 3. 安装开发依赖
-pnpm add -D @types/bcryptjs @types/qrcode
-pnpm add -D vitest @vitest/browser playwright-core  # 单元+组件测试
-pnpm add -D @playwright/test                         # E2E+截图回归
+# 3. 应用已有 migration、生成 client、运行 seed
+pnpm exec prisma generate
+pnpm exec prisma migrate deploy
+pnpm db:seed
 
-# 4. 初始化 shadcn/ui
-pnpm dlx shadcn@latest init
-
-# 5. 装 Playwright 浏览器
-pnpm exec playwright install chromium
-
-# 6. 复制本目录下的配置文件
-cp ../SPEC-v1.2.md ./
-cp ../CLAUDE.md ./
-cp ../prisma/schema.prisma ./prisma/
-cp ../prisma/seed.ts ./prisma/
-cp -r ../components-reference ./
-
-# 7. 数据库准备
-#    MVP阶段可以用本地 PostgreSQL（brew install postgresql@16 或 apt install postgresql-16）
-#    生产部署请用 Pigsty 独立实例
-createdb print_shop_erp
-export DATABASE_URL="postgresql://localhost:5432/print_shop_erp"
-
-# 8. 生成 Prisma Client（Prisma 7 生成到 ./generated/prisma）
-pnpm prisma generate
-
-# 9. 首次 migration
-pnpm prisma migrate dev --name init
-
-# 10. 跑种子数据（初始化管理员、工艺字典、薪资规则等）
-pnpm prisma db seed
-
-# 11. 启动开发
+# 4. 启动开发
 pnpm dev
 ```
+
+完整环境变量、数据库创建、测试和日常命令见 `DEVELOPMENT.md`。
 
 ### 首次启动后
 
 1. 打开 `http://localhost:3000`
-2. 用种子数据创建的账号登录：`admin` / `admin@2026`
-3. **立刻改默认密码**
-4. 开始按 P0 清单开发第一个功能（认证与用户管理）
+2. 使用 `SEED_ADMIN_USERNAME` 和本地安全保存的 seed 密码登录
+3. 未配置 `SEED_ADMIN_PASSWORD` 时，seed 只在首次创建时打印一次随机密码；不要把输出发到共享日志
+4. **首次登录后立刻修改初始密码**
 
 ### 开发路径（P0优先级）
+
+> 以下保留最初的 P0 规划背景，不代表当前实现进度；当前开发与验收流程以
+> `DEVELOPMENT.md`、`CONTRIBUTING.md` 和实际代码/测试为准。
 
 按以下顺序开发，**每个模块必须端到端完成后再进入下一个**：
 
@@ -124,7 +105,7 @@ pnpm dev
 
 5. **薪资系统（核心难点）**（2周）
    - 三套薪资规则配置界面
-   - 开机师傅日薪计算（每日24:00定时任务）
+   - 开机师傅日薪计算（调度时间以 `deploy/crontab.example` 为准）
    - 客服业绩周期累计 + 结算
    - 时薪工工时录入 + 月结
 
@@ -208,6 +189,9 @@ pnpm dev
 
 ## 🚢 上线运维（P0 部署清单）
 
+> 可执行部署步骤的唯一入口是 `DEPLOYMENT.md`，详细 runbook 是
+> `docs/部署指南.md`。本节包含带日期的历史快照，不应替代目标环境核验。
+
 截至 2026-08-02，`aa42ba0` 已运行在 <https://bag.sshapi.cn>，生产数据库为 45 / 45 migrations。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
 
 > 当前已确认 Web、LIGHT worker、HEAVY worker、ready 和系统 Chromium PDF 正常；仍需补异地备份 repo2、30 天保留与恢复演练、`SENTRY_DSN / APP_VERSION`，并将 1.6 GiB 应用机升级到至少 4 GiB。生产只有 repo1 不能算备份基线通过。
@@ -219,7 +203,7 @@ pnpm dev
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | cron endpoints `Authorization: Bearer <secret>` | 8 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 8 个 `/api/cron/*` 全部 503 |
 | `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `APP_PUBLIC_URL` | 应用公网根 URL（含 protocol，无尾斜线）。**生产强烈推荐显式配置**——尤其 split-origin（staff 内网 + 外协公网）；留空仅适合 dev / 单域名生产，从请求 headers 推 | 留空：**打印单二维码（师傅微信扫码报工）** 与 CDR 外协短链跟随访问域，split-origin 时师傅/外协拿到内网死链；单域名若 Nginx 漏传 `X-Forwarded-Proto` 也会退化成 localhost 死链 |
@@ -234,9 +218,12 @@ pnpm dev
 
 > **⚠️ OSS 手动运维（代码改不了，容易漏）：设计图/CDR 走浏览器直传 PUT，必须在阿里云 OSS 控制台给生产 bucket 配 CORS**——AllowedOrigin=`APP_PUBLIC_URL` 域名（split-origin 则 staff 域也加）、AllowedMethod=`PUT/GET/HEAD`、AllowedHeader=`*`、ExposeHeader=`ETag`。不配则上传预检失败、浏览器静默拦截，签名正常也传不上去。上线 smoke 必须真机点一次上传验证 200。
 
-### 2. Cron 切换：`Bearer` → `pg_cron`
+### 2. Cron 调度：服务端环境 + root-only 发送文件
 
 P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret + 外部 cron 调用。
+
+> 调度时间的唯一事实源是 `deploy/crontab.example`。下方命令仅用于人工触发示例，
+> 不定义生产执行时间。
 
 > **密钥不进命令行参数**：`-H "Authorization: Bearer $CRON_SECRET"` 会把展开后的明文密钥写进
 > 进程 argv 和 shell history——同机任何用户一句 `ps -efww | grep Bearer` 就能读走完整
@@ -245,19 +232,19 @@ P0 + P1 #2 期间建立的 cron 通道现有 8 个 endpoints，用 shared-secret
 > 生产不要手抄这些命令，直接用 `deploy/run-cron.sh`，它已经是这个写法。
 
 ```bash
-# 每日 24:00 师傅日薪（P1 #2 起：完成后推 DAILY_WORKER_SALARY 到车间群）
+# 师傅日薪（完成后推 DAILY_WORKER_SALARY 到车间群）
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/daily-salary
 
-# 月初 00:00 时薪工月结
+# 时薪工月结
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/hourly-payroll
 
-# 每日扫描已到期客服周期（P1 #2 起：每条结算推 CS_PERIOD_SETTLED 到管理员群+客服）
+# 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到管理员群+客服）
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/cs-settle
 
-# 月初 00:30 销售应收账单
+# 销售应收账单
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/generate-bills
 
@@ -284,7 +271,12 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 不入队。crontab 里不带 body 的默认调用算的是「昨天 / 上月」，永远不会命中这个分支；
 `202 queued` / `200` / `401` / `503` 的既有形状一律不变。
 
-上线后切到 Pigsty 的 `pg_cron`（DECISIONS 2026-04-22 已启用扩展）。每个 endpoint 在 PG 侧用 `cron.schedule` + `pg_net` 发 HTTP 请求即可。响应已经统一是 **COUNTS ONLY**（不返回金额 / 销售名 / per-worker 错误明细），所以可以安全地把 cron 输出落到 PG 日志。
+生产固定使用 `deploy/run-cron.sh` + 系统 crontab。同一个密钥必须存在两个
+受限位置：应用服务端环境里的 `CRON_SECRET` 供 endpoint 验证，以及
+`CRON_SECRET_FILE` 指向的 root 所有、`0600` 普通文件供主机 cron 发送。
+不要把它写进 PostgreSQL 自定义 GUC，因为能建立数据库会话的
+角色可通过 `current_setting()` 读取数据库级设置。
+`pg_cron` + `pg_net` HTTP 调度已经退役，前向迁移会撤销遗留 ERP job 并清理旧设置。
 
 **8 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
@@ -344,16 +336,17 @@ fc-list :lang=zh | head
 ./deploy/update.sh
 ```
 
-> **当前发布源例外（2026-08-03）**：生产 `aa42ba0` 来自本地 `codex/complex-client-data-layer-poc`，而本地 `main` 仍为 `245be5c`，仓库也没有 Git remote。配置远端并明确合并策略前，不能依赖脚本中的默认 `git pull`，更不能从旧 `main` 发版。
+> 发布前必须在目标服务器确认 remote、tracking branch 和经过审核的 release SHA；
+> 不得仅凭本地分支名或本文历史快照决定发布源。
 
 脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
 
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。当前工作区的 Fresh DB 验证必须完整应用 **77 项 migration** 到尾部 `20260821120100_notification_log_delivery_key_unique`，并检查无效并发索引为 0（2026-08-21 顺带订正此前已漂掉的 3 项：原文的 71 / `pricing_compatibility_fence` 早在那一轮之前就落后于仓库实际的 74 项）；完整命令、视觉 fixture 和故障处理见 `docs/部署指南.md` §14。其中 `20260821120100_notification_log_delivery_key_unique` 的唯一索引是**通知重试的正确性依赖**（INVALID 索引不能当 `ON CONFLICT` 的 arbiter），迁移后必须单独验收 `indisvalid`，SQL 见 `docs/上线前置操作清单.md` §二。这是本地发布候选口径，不表示生产已从 `aa42ba0` / 45 项 migration 升级。
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，发布批次的外协历史快照对账、无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14 与 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
 
 ### 8. 上线 smoke checklist
 
 按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
-- [ ] `docs/上线前置操作清单.md` §一的两段只读 SQL 已跑，外协覆盖存量缺口清零（否则不要上闸口那一步）
+- [ ] `docs/上线前置操作清单.md` §零的历史外协逐款数量已凭原始证据对账，§一的覆盖缺口也已清零
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
 - [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（`docs/上线前置操作清单.md` §二）
 - [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）

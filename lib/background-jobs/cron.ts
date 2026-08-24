@@ -48,23 +48,29 @@ export async function handleCronJob(
   job: ClaimedBackgroundJob,
 ): Promise<Prisma.InputJsonValue> {
   const payload = asRecord(job.payload);
+  await job.assertLease?.();
+  job.signal?.throwIfAborted();
+  const fence = {
+    ...(job.signal ? { signal: job.signal } : {}),
+    ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+  };
   switch (job.type) {
     case BACKGROUND_JOB_TYPES.CRON_DAILY_SALARY:
-      return runDailySalaryTask(requiredString(payload.date));
+      return runDailySalaryTask(requiredString(payload.date), fence);
     case BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL:
-      return runHourlyPayrollTask(requiredString(payload.month));
+      return runHourlyPayrollTask(requiredString(payload.month), fence);
     case BACKGROUND_JOB_TYPES.CRON_CS_SETTLE:
-      return runCsSettleTask();
+      return runCsSettleTask(fence);
     case BACKGROUND_JOB_TYPES.CRON_GENERATE_BILLS:
-      return runGenerateBillsTask(requiredString(payload.period));
+      return runGenerateBillsTask(requiredString(payload.period), fence);
     case BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE:
-      return runOutsourceOverdueTask(requiredString(payload.runDate));
+      return runOutsourceOverdueTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING:
-      return runCsPeriodEndingTask(requiredString(payload.runDate));
+      return runCsPeriodEndingTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_ORDER_OVERDUE:
-      return runOrderOverdueTask(requiredString(payload.runDate));
+      return runOrderOverdueTask(requiredString(payload.runDate), fence);
     case BACKGROUND_JOB_TYPES.CRON_ORDER_EXPORT_CLEANUP:
-      return runOrderExportCleanupTask(requiredString(payload.runDate));
+      return runOrderExportCleanupTask(requiredString(payload.runDate), fence);
     default:
       throw new InvalidCronJobPayloadError();
   }
