@@ -1863,6 +1863,7 @@ export type WorkerTaskListRow = {
     orderNo: string;
     customName: string | null;
     isUrgent: boolean;
+    promisedDate: Date | null;
     submitterName: string;
   };
 };
@@ -1901,6 +1902,7 @@ export async function listWorkerTasks(
               customName: true,
               status: true,
               isUrgent: true,
+              promisedDate: true,
               createdAt: true,
               submitter: { select: { displayName: true } },
             },
@@ -1935,6 +1937,7 @@ export async function listWorkerTasks(
       orderNo: r.orderItem.order.orderNo,
       customName: r.orderItem.order.customName,
       isUrgent: r.orderItem.order.isUrgent,
+      promisedDate: r.orderItem.order.promisedDate,
       submitterName: r.orderItem.order.submitter.displayName,
     },
   }));

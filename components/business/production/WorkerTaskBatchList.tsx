@@ -15,8 +15,9 @@ import {
   MACHINE_TYPE_LABELS,
   WORKER_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
+import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import {
   ActionNotice,
@@ -42,6 +43,7 @@ export type WorkerBatchTaskRow = {
     orderNo: string;
     customName: string | null;
     isUrgent: boolean;
+    promisedDate: Date | null;
     submitterName: string;
   };
 };
@@ -546,12 +548,26 @@ function WorkerTaskRow({
             <div className="worker-wrap-anywhere text-xs text-muted-foreground">
               接单人：{task.order.submitterName}
             </div>
+            <div className="worker-wrap-anywhere text-xs text-muted-foreground">
+              承诺交期：
+              <span className="font-sans tabular-nums">
+                {formatDateShanghai(task.order.promisedDate, '未设置')}
+              </span>
+            </div>
           </div>
-          <div className="ml-auto shrink-0 text-right">
+          <div className="ml-auto flex shrink-0 flex-col items-end text-right">
             <div className="text-xs text-muted-foreground">计划</div>
             <div className="font-sans tabular-nums text-base">
               {task.plannedQty.toLocaleString()}
             </div>
+            <span
+              className={buttonVariants({
+                size: 'sm',
+                className: 'mt-3 min-h-11',
+              })}
+            >
+              {task.status === TaskStatus.PENDING ? '开始生产' : '报工'}
+            </span>
           </div>
         </div>
       </Link>

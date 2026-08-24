@@ -1464,6 +1464,49 @@ describe('worker task visibility', () => {
       }),
     );
   });
+
+  it('returns the order promised date without changing queue ordering', async () => {
+    const promisedDate = new Date('2026-08-27T04:00:00.000Z');
+    dbMock.productionTask.findMany.mockResolvedValue([
+      {
+        id: 'task-1',
+        status: TaskStatus.PENDING,
+        workerType: WorkerType.MACHINE,
+        machineType: MachineType.HAND_PRESS,
+        plannedQty: 5000,
+        orderItem: {
+          id: 'item-1',
+          name: '卡纸盒',
+          sequence: 1,
+          isDoubleSided: false,
+          isDoubleColor: false,
+          quantity: 5000,
+          order: {
+            id: 'order-1',
+            orderNo: 'PS-20260824-001',
+            customName: '测试工单',
+            status: OrderStatus.SCHEDULING,
+            isUrgent: true,
+            promisedDate,
+            createdAt: new Date('2026-08-24T03:00:00.000Z'),
+            submitter: { displayName: '销售 A' },
+          },
+        },
+        craft: { name: '模切' },
+      },
+    ]);
+
+    const result = await listWorkerTasks('worker-1');
+    const query = dbMock.productionTask.findMany.mock.calls.at(-1)?.[0];
+
+    expect(query.select.orderItem.select.order.select.promisedDate).toBe(true);
+    expect(query.orderBy).toEqual([
+      { orderItem: { order: { isUrgent: 'desc' } } },
+      { orderItem: { order: { createdAt: 'asc' } } },
+      { createdAt: 'asc' },
+    ]);
+    expect(result[0]?.order.promisedDate).toBe(promisedDate);
+  });
 });
 
 describe('getWorkerTaskDetail', () => {

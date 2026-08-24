@@ -27,6 +27,7 @@ function task(
   status: TaskStatus,
   name: string,
   isUrgent = false,
+  promisedDate: Date | null = new Date('2026-08-27T04:00:00.000Z'),
 ) {
   return {
     id,
@@ -45,6 +46,7 @@ function task(
       orderNo: `PS-${id}`,
       customName: null,
       isUrgent,
+      promisedDate,
       submitterName: '销售 A',
     },
   };
@@ -102,6 +104,35 @@ describe('WorkerTaskBatchList groups', () => {
 
     expect(html).toMatch(/data-tone="warning"[^>]*>急单<\/span>/);
     expect(html).not.toMatch(/bg-destructive[^>]*>急单/);
+  });
+
+  it('shows the real promised date and a status-specific navigation CTA', () => {
+    const html = renderToStaticMarkup(
+      <WorkerTaskBatchList
+        workerName="王师傅"
+        tasks={[
+          task('pending-1', TaskStatus.PENDING, '待开款式'),
+          task(
+            'progress-1',
+            TaskStatus.IN_PROGRESS,
+            '在制款式',
+            false,
+            null,
+          ),
+        ]}
+      />,
+    );
+
+    expect(html).toContain('承诺交期：<span');
+    expect(html).toContain('2026/08/27');
+    expect(html).toContain('承诺交期：<span class="font-sans tabular-nums">未设置');
+    expect(html).toMatch(
+      /href="\/worker\/tasks\/pending-1"[\s\S]*?开始生产[\s\S]*?<\/a>/,
+    );
+    expect(html).toMatch(
+      /href="\/worker\/tasks\/progress-1"[\s\S]*?报工[\s\S]*?<\/a>/,
+    );
+    expect(html).not.toMatch(/\b\d+%/);
   });
 
   it('keeps the completion trigger touch-sized and exposes dialog semantics', () => {
