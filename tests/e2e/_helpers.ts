@@ -1218,9 +1218,13 @@ export async function login(
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: /登录|登 录/ }).click();
   // Wait for navigation off /login. Auth.js posts to a server action
-  // and bounces; we settle on whatever non-login page lands.
+  // and bounces; we settle on whatever non-login page commits. The visual
+  // matrix can cold-compile the same action for several viewports at once,
+  // so waiting for the destination's full `load` event (and only 10 seconds)
+  // turns normal Turbopack development latency into a false login failure.
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), {
-    timeout: 10_000,
+    timeout: 30_000,
+    waitUntil: 'commit',
   });
 }
 
