@@ -14,6 +14,14 @@ import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { orderStatusLabel } from './OrderStatusBadge';
 import { OrderSavedViews } from './OrderSavedViews';
 import { OrderAdvancedFilters } from './OrderAdvancedFilters';
@@ -71,6 +79,20 @@ type FilterChip = {
   href: string;
 };
 
+type OrderFilterFormProps = {
+  idPrefix: string;
+  filterStateKey: string;
+  effectiveQuery: OrderListQuery;
+  options: OrderListFilterOptions;
+  issues: readonly string[];
+  chips: readonly FilterChip[];
+  clearAllHref: string;
+  showCommercialAmounts: boolean;
+  hasAdvancedFilters: boolean;
+  advancedRequested: boolean;
+  mobile?: boolean;
+};
+
 export function OrderListFilters({
   query,
   options,
@@ -106,7 +128,6 @@ export function OrderListFilters({
           dir: query.sort === 'totalAmount' ? ('desc' as const) : query.dir,
         }
       : query;
-  const filters = effectiveQuery.filters;
   const params = orderListParams(effectiveQuery, showCommercialAmounts);
   const filterStateKey = buildTableHref('/orders', {}, params);
   const chips = activeFilterChips(effectiveQuery, options, params);
@@ -210,24 +231,78 @@ export function OrderListFilters({
             共找到 <span className="font-sans tabular-nums">{total}</span> 条工单
           </p>
         </div>
-        {exportControls || chips.length > 0 ? (
-          <div className="flex min-w-0 flex-wrap gap-2 sm:shrink-0 sm:justify-end">
-            {exportControls}
-            {chips.length > 0 ? (
-              <Link
-                href={clearAllHref}
-                prefetch={false}
-                aria-label="清除全部筛选"
-                className={cn(
-                  buttonVariants({ variant: 'outline' }),
-                  'min-h-11 sm:min-h-8',
-                )}
-              >
-                清除全部筛选
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex min-w-0 flex-wrap gap-2 sm:shrink-0 sm:justify-end">
+          {exportControls}
+          <Sheet>
+            <SheetTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 sm:hidden"
+                  aria-label={
+                    chips.length > 0
+                      ? `打开筛选条件，已启用 ${chips.length} 项`
+                      : '打开筛选条件'
+                  }
+                />
+              }
+            >
+              <SlidersHorizontal aria-hidden="true" />
+              筛选
+              {chips.length > 0 ? (
+                <span
+                  aria-hidden="true"
+                  className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs text-primary-foreground"
+                >
+                  {chips.length}
+                </span>
+              ) : null}
+            </SheetTrigger>
+            <SheetContent
+              side="bottom"
+              className="max-h-[80dvh] min-w-0 rounded-t-2xl sm:hidden"
+            >
+              <SheetHeader className="shrink-0 border-b pr-14">
+                <SheetTitle className="flex items-center gap-2">
+                  <SlidersHorizontal aria-hidden="true" className="size-4" />
+                  筛选工单
+                </SheetTitle>
+                <SheetDescription>
+                  已启用 {chips.length} 项；应用后返回工单列表。
+                </SheetDescription>
+              </SheetHeader>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
+                {renderOrderFilterForm({
+                  idPrefix: 'mobile-',
+                  filterStateKey,
+                  effectiveQuery,
+                  options,
+                  issues,
+                  chips,
+                  clearAllHref,
+                  showCommercialAmounts,
+                  hasAdvancedFilters,
+                  advancedRequested,
+                  mobile: true,
+                })}
+              </div>
+            </SheetContent>
+          </Sheet>
+          {chips.length > 0 ? (
+            <Link
+              href={clearAllHref}
+              prefetch={false}
+              aria-label="清除全部筛选"
+              className={cn(
+                buttonVariants({ variant: 'outline' }),
+                'min-h-11 sm:min-h-8',
+              )}
+            >
+              清除全部筛选
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {issues.length > 0 ? (
@@ -247,7 +322,10 @@ export function OrderListFilters({
       ) : null}
 
       {chips.length > 0 ? (
-        <div aria-label="已启用的筛选条件" className="flex min-w-0 flex-wrap gap-2">
+        <div
+          aria-label="已启用的筛选条件"
+          className="flex min-w-0 flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
+        >
           {chips.map((chip) => (
             <Link
               key={chip.id}
@@ -256,7 +334,7 @@ export function OrderListFilters({
               aria-label={`清除筛选：${chip.label}`}
               className={cn(
                 buttonVariants({ variant: 'outline', size: 'sm' }),
-                'h-auto min-h-11 max-w-full whitespace-normal py-1 text-left sm:min-h-7',
+                'h-auto min-h-11 max-w-[85vw] shrink-0 whitespace-normal py-1 text-left sm:max-w-full sm:min-h-7',
               )}
             >
               <span className="admin-wrap-anywhere min-w-0">{chip.label}</span>
@@ -266,153 +344,197 @@ export function OrderListFilters({
         </div>
       ) : null}
 
-      <Disclosure
-        id="order-list-filter-controls"
-        className="group min-w-0 rounded-lg border border-dashed border-border p-3"
-        open={issues.length > 0 || advancedRequested || undefined}
-      >
-        <DisclosureSummary className="justify-between gap-3">
-          <span className="flex min-w-0 items-center gap-2">
-            <SlidersHorizontal
-              aria-hidden="true"
-              className="size-4 shrink-0 text-muted-foreground"
-            />
-            <span>筛选条件</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            {issues.length > 0 ? (
-              <span className="text-xs text-destructive">需要修正</span>
-            ) : chips.length > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                {chips.length} 项已启用
-              </span>
-            ) : null}
-            <ChevronDown
-              aria-hidden="true"
-              className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
-            />
-          </span>
-        </DisclosureSummary>
-
-        <form
-          key={filterStateKey}
-          action="/orders"
-          method="get"
-          className="mt-4 min-w-0 space-y-4 border-t pt-4"
+      <div className="hidden sm:block">
+        <Disclosure
+          id="order-list-filter-controls"
+          className="group min-w-0 rounded-lg border border-dashed border-border p-3"
+          open={issues.length > 0 || advancedRequested || undefined}
         >
-          <input type="hidden" name="pageSize" value={effectiveQuery.pageSize} />
-          <input type="hidden" name="sort" value={effectiveQuery.sort} />
-          <input type="hidden" name="dir" value={effectiveQuery.dir} />
-
-          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="min-w-0 sm:col-span-2 xl:col-span-4">
-            <label htmlFor="order-filter-q" className={fieldLabelClass}>
-              综合搜索
-            </label>
-            <div className="relative min-w-0">
-              <Search
+          <DisclosureSummary className="justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2">
+              <SlidersHorizontal
                 aria-hidden="true"
-                className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground"
+                className="size-4 shrink-0 text-muted-foreground"
               />
-              <Input
-                id="order-filter-q"
-                name="q"
-                defaultValue={filters.q ?? ''}
-                maxLength={80}
-                placeholder="工单号、名称、客户、收货信息、款式、提交人或师傅"
-                className="pl-8"
+              <span>筛选条件</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              {issues.length > 0 ? (
+                <span className="text-xs text-destructive">需要修正</span>
+              ) : chips.length > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  {chips.length} 项已启用
+                </span>
+              ) : null}
+              <ChevronDown
+                aria-hidden="true"
+                className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
               />
-            </div>
-          </div>
-
-          <CheckboxGroup
-            legend="工单状态"
-            name="status"
-            selected={filters.statuses}
-            options={Object.values(OrderStatus).map((status) => ({
-              id: status,
-              label: orderStatusLabel(status),
-            }))}
-            className="sm:col-span-2 xl:col-span-4"
-          />
-
-          <DateField
-            id="order-filter-created-from"
-            name="createdFrom"
-            label="创建日期从"
-            value={filters.createdFrom}
-          />
-          <DateField
-            id="order-filter-created-to"
-            name="createdTo"
-            label="创建日期到"
-            value={filters.createdTo}
-          />
-
-          {options.submitters.length > 0 ? (
-            <OptionSelect
-              id="order-filter-submitter"
-              name="submitterId"
-              label="提交人"
-              emptyLabel="全部提交人"
-              value={filters.submitterId}
-              options={options.submitters}
-            />
-          ) : null}
-          {options.workers.length > 0 ? (
-            <OptionSelect
-              id="order-filter-worker"
-              name="workerId"
-              label="师傅"
-              emptyLabel="全部师傅"
-              value={filters.workerId}
-              options={options.workers}
-            />
-          ) : null}
-
-          <TriStateSelect
-            id="order-filter-urgent"
-            name="isUrgent"
-            label="急单"
-            value={filters.isUrgent}
-            yesLabel="仅急单"
-            noLabel="仅非急单"
-          />
-          </div>
-
-          <OrderAdvancedFilters
-            key={`${filterStateKey}:${advancedRequested ? 'advanced' : 'default'}:${issues.length > 0 ? 'issues' : 'valid'}`}
-            filters={filters}
-            craftOptions={options.crafts}
-            showCommercialAmounts={showCommercialAmounts}
-            hasActiveFilters={hasAdvancedFilters}
-            initiallyOpen={hasAdvancedFilters || advancedRequested}
-            initiallyLoaded={
-              hasAdvancedFilters || issues.length > 0 || advancedRequested
-            }
-          />
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button type="submit" className="min-h-11 sm:min-h-8">
-            应用筛选
-          </Button>
-          {chips.length > 0 ? (
-            <Link
-              href={clearAllHref}
-              prefetch={false}
-              aria-label="清除全部筛选"
-              className={cn(
-                buttonVariants({ variant: 'outline' }),
-                'min-h-11 sm:min-h-8',
-              )}
-            >
-              清除全部筛选
-            </Link>
-          ) : null}
-          </div>
-        </form>
-      </Disclosure>
+            </span>
+          </DisclosureSummary>
+          {renderOrderFilterForm({
+            idPrefix: '',
+            filterStateKey,
+            effectiveQuery,
+            options,
+            issues,
+            chips,
+            clearAllHref,
+            showCommercialAmounts,
+            hasAdvancedFilters,
+            advancedRequested,
+          })}
+        </Disclosure>
+      </div>
     </section>
+  );
+}
+
+function renderOrderFilterForm({
+  idPrefix,
+  filterStateKey,
+  effectiveQuery,
+  options,
+  issues,
+  chips,
+  clearAllHref,
+  showCommercialAmounts,
+  hasAdvancedFilters,
+  advancedRequested,
+  mobile = false,
+}: OrderFilterFormProps) {
+  const filters = effectiveQuery.filters;
+  const controlId = (suffix: string) => `${idPrefix}order-filter-${suffix}`;
+
+  return (
+    <form
+      key={`${idPrefix}${filterStateKey}`}
+      action="/orders"
+      method="get"
+      className={cn(
+        'min-w-0 space-y-4',
+        mobile ? 'py-4' : 'mt-4 border-t pt-4',
+      )}
+    >
+      <input type="hidden" name="pageSize" value={effectiveQuery.pageSize} />
+      <input type="hidden" name="sort" value={effectiveQuery.sort} />
+      <input type="hidden" name="dir" value={effectiveQuery.dir} />
+
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="min-w-0 sm:col-span-2 xl:col-span-4">
+          <label htmlFor={controlId('q')} className={fieldLabelClass}>
+            综合搜索
+          </label>
+          <div className="relative min-w-0">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-2.5 top-3.5 size-4 text-muted-foreground sm:top-2"
+            />
+            <Input
+              id={controlId('q')}
+              name="q"
+              defaultValue={filters.q ?? ''}
+              maxLength={80}
+              placeholder="工单号、名称、客户、收货信息、款式、提交人或师傅"
+              className="pl-8"
+            />
+          </div>
+        </div>
+
+        <CheckboxGroup
+          legend="工单状态"
+          name="status"
+          selected={filters.statuses}
+          options={Object.values(OrderStatus).map((status) => ({
+            id: status,
+            label: orderStatusLabel(status),
+          }))}
+          className="sm:col-span-2 xl:col-span-4"
+          idPrefix={idPrefix}
+        />
+
+        <DateField
+          id={controlId('created-from')}
+          name="createdFrom"
+          label="创建日期从"
+          value={filters.createdFrom}
+        />
+        <DateField
+          id={controlId('created-to')}
+          name="createdTo"
+          label="创建日期到"
+          value={filters.createdTo}
+        />
+
+        {options.submitters.length > 0 ? (
+          <OptionSelect
+            id={controlId('submitter')}
+            name="submitterId"
+            label="提交人"
+            emptyLabel="全部提交人"
+            value={filters.submitterId}
+            options={options.submitters}
+          />
+        ) : null}
+        {options.workers.length > 0 ? (
+          <OptionSelect
+            id={controlId('worker')}
+            name="workerId"
+            label="师傅"
+            emptyLabel="全部师傅"
+            value={filters.workerId}
+            options={options.workers}
+          />
+        ) : null}
+
+        <TriStateSelect
+          id={controlId('urgent')}
+          name="isUrgent"
+          label="急单"
+          value={filters.isUrgent}
+          yesLabel="仅急单"
+          noLabel="仅非急单"
+        />
+      </div>
+
+      <OrderAdvancedFilters
+        key={`${idPrefix}${filterStateKey}:${advancedRequested ? 'advanced' : 'default'}:${issues.length > 0 ? 'issues' : 'valid'}`}
+        filters={filters}
+        craftOptions={options.crafts}
+        showCommercialAmounts={showCommercialAmounts}
+        hasActiveFilters={hasAdvancedFilters}
+        initiallyOpen={hasAdvancedFilters || advancedRequested}
+        initiallyLoaded={
+          hasAdvancedFilters || issues.length > 0 || advancedRequested
+        }
+        idPrefix={idPrefix}
+      />
+
+      <div
+        className={cn(
+          'flex flex-col gap-2 sm:flex-row sm:items-center',
+          mobile &&
+            'sticky bottom-0 -mx-4 border-t bg-popover px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))]',
+        )}
+      >
+        <Button type="submit" className="min-h-11 sm:min-h-8">
+          应用筛选
+        </Button>
+        {chips.length > 0 ? (
+          <Link
+            href={clearAllHref}
+            prefetch={false}
+            aria-label="清除全部筛选"
+            className={cn(
+              buttonVariants({ variant: 'outline' }),
+              'min-h-11 sm:min-h-8',
+            )}
+          >
+            清除全部筛选
+          </Link>
+        ) : null}
+      </div>
+    </form>
   );
 }
 

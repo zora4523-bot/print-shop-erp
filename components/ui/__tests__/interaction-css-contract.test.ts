@@ -8,6 +8,10 @@ const dropdownSource = readFileSync(
   join(root, "components/ui/dropdown-menu.tsx"),
   "utf8"
 )
+const sheetSource = readFileSync(
+  join(root, "components/ui/sheet.tsx"),
+  "utf8"
+)
 
 function productionTsxFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -50,6 +54,12 @@ describe("shared interaction CSS contract", () => {
     expect(dropdownSource.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(5)
     expect(dropdownSource.match(/focus-visible:ring-3/g)?.length).toBeGreaterThanOrEqual(5)
     expect(dropdownSource.match(/focus-visible:ring-ring/g)?.length).toBeGreaterThanOrEqual(5)
+  })
+
+  it("keeps portal-mounted sheet controls inside the shared touch contract", () => {
+    expect(sheetSource).toContain(
+      '"touch-viewport fixed z-50 flex flex-col'
+    )
   })
 
   it("routes production disclosures through the shared primitive", () => {

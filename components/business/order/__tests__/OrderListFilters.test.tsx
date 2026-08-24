@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -327,6 +329,38 @@ describe('OrderListFilters', () => {
     expect(chipsIndex).toBeGreaterThan(-1);
     expect(panelIndex).toBeGreaterThan(chipsIndex);
     expect(filterPanelTag(html)).not.toContain('open=""');
+  });
+
+  it('uses the specified mobile bottom drawer while keeping active chips visible', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={fullQuery}
+        options={options}
+        issues={[]}
+        total={12}
+      />,
+    );
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'order',
+        'OrderListFilters.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(html).toContain('打开筛选条件，已启用');
+    expect(html).toMatch(
+      /aria-label="已启用的筛选条件"[^>]*class="[^"]*overflow-x-auto[^"]*"/,
+    );
+    expect(source).toContain('side="bottom"');
+    expect(source).toContain('max-h-[80dvh]');
+    expect(source).toContain('min-h-0 flex-1 overflow-y-auto');
+    expect(source).toContain("idPrefix: 'mobile-'");
+    expect(source).toContain('className="hidden sm:block"');
+    expect(source).toContain('safe-area-inset-bottom');
   });
 
   it('renders independently removable chips while retaining table preferences and other filters', () => {

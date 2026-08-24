@@ -43,6 +43,7 @@ export function OrderAdvancedFilters({
   hasActiveFilters,
   initiallyOpen,
   initiallyLoaded,
+  idPrefix = '',
 }: {
   filters: OrderListFilterValues;
   craftOptions: readonly OrderFilterOption[];
@@ -50,9 +51,11 @@ export function OrderAdvancedFilters({
   hasActiveFilters: boolean;
   initiallyOpen: boolean;
   initiallyLoaded: boolean;
+  idPrefix?: string;
 }) {
   const [isOpen, setIsOpen] = useState(initiallyOpen);
   const [hasLoaded, setHasLoaded] = useState(initiallyLoaded);
+  const controlId = (suffix: string) => `${idPrefix}order-filter-${suffix}`;
 
   return (
     <>
@@ -78,19 +81,19 @@ export function OrderAdvancedFilters({
         {hasLoaded ? (
           <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2 xl:grid-cols-4">
             <TextFilter
-              id="order-filter-order-no"
+              id={controlId('order-no')}
               name="orderNo"
               label="工单号"
               value={filters.orderNo}
             />
             <TextFilter
-              id="order-filter-custom-name"
+              id={controlId('custom-name')}
               name="customName"
               label="工单名称"
               value={filters.customName}
             />
             <TextFilter
-              id="order-filter-customer"
+              id={controlId('customer')}
               name="customerRef"
               label="客户名称/简称"
               value={filters.customerRef}
@@ -100,23 +103,24 @@ export function OrderAdvancedFilters({
               name="kind"
               selected={filters.kinds}
               options={enumOptions(OrderKind, ORDER_KIND_LABELS)}
+              idPrefix={idPrefix}
             />
 
             <TextFilter
-              id="order-filter-receiver-name"
+              id={controlId('receiver-name')}
               name="receiverName"
               label="收件人"
               value={filters.receiverName}
             />
             <TextFilter
-              id="order-filter-receiver-phone"
+              id={controlId('receiver-phone')}
               name="receiverPhone"
               label="收件电话"
               value={filters.receiverPhone}
               inputMode="tel"
             />
             <TextFilter
-              id="order-filter-receiver-address"
+              id={controlId('receiver-address')}
               name="receiverAddress"
               label="收件地址"
               value={filters.receiverAddress}
@@ -124,7 +128,7 @@ export function OrderAdvancedFilters({
             />
 
             <TriStateSelect
-              id="order-filter-sf-collect"
+              id={controlId('sf-collect')}
               name="isSfCollect"
               label="顺丰到付"
               value={filters.isSfCollect}
@@ -132,11 +136,11 @@ export function OrderAdvancedFilters({
               noLabel="排除顺丰到付"
             />
             <div className="min-w-0">
-              <label htmlFor="order-filter-address-mode" className={fieldLabelClass}>
+              <label htmlFor={controlId('address-mode')} className={fieldLabelClass}>
                 地址数量
               </label>
               <select
-                id="order-filter-address-mode"
+                id={controlId('address-mode')}
                 name="addressMode"
                 defaultValue={filters.addressMode ?? 'all'}
                 className={selectClass}
@@ -147,13 +151,13 @@ export function OrderAdvancedFilters({
               </select>
             </div>
             <TextFilter
-              id="order-filter-tracking-no"
+              id={controlId('tracking-no')}
               name="trackingNo"
               label="快递单号"
               value={filters.trackingNo}
             />
             <TextFilter
-              id="order-filter-express-code"
+              id={controlId('express-code')}
               name="expressCode"
               label="快递代码"
               value={filters.expressCode}
@@ -167,19 +171,20 @@ export function OrderAdvancedFilters({
                 (status) => statusFilterLabel(SHIPMENT_STATUS_REGISTRY[status]),
               )}
               className="sm:col-span-2"
+              idPrefix={idPrefix}
             />
 
             {showCommercialAmounts ? (
               <>
                 <NumberFilter
-                  id="order-filter-amount-min"
+                  id={controlId('amount-min')}
                   name="amountMin"
                   label="最低金额（元）"
                   value={filters.amountMin}
                   step="0.01"
                 />
                 <NumberFilter
-                  id="order-filter-amount-max"
+                  id={controlId('amount-max')}
                   name="amountMax"
                   label="最高金额（元）"
                   value={filters.amountMax}
@@ -188,58 +193,58 @@ export function OrderAdvancedFilters({
               </>
             ) : null}
             <DateField
-              id="order-filter-promised-from"
+              id={controlId('promised-from')}
               name="promisedFrom"
               label="承诺交期从"
               value={filters.promisedFrom}
             />
             <DateField
-              id="order-filter-promised-to"
+              id={controlId('promised-to')}
               name="promisedTo"
               label="承诺交期到"
               value={filters.promisedTo}
             />
 
             <TextFilter
-              id="order-filter-item-name"
+              id={controlId('item-name')}
               name="itemName"
               label="款式名称"
               value={filters.itemName}
             />
             <TextFilter
-              id="order-filter-product-name"
+              id={controlId('product-name')}
               name="productName"
               label="产品名称"
               value={filters.productName}
             />
             <TextFilter
-              id="order-filter-specification"
+              id={controlId('specification')}
               name="specification"
               label="规格"
               value={filters.specification}
             />
             <TextFilter
-              id="order-filter-paper-type"
+              id={controlId('paper-type')}
               name="paperType"
               label="纸张"
               value={filters.paperType}
             />
             <NumberFilter
-              id="order-filter-quantity-min"
+              id={controlId('quantity-min')}
               name="quantityMin"
               label="最小数量"
               value={filters.quantityMin}
               step="1"
             />
             <NumberFilter
-              id="order-filter-quantity-max"
+              id={controlId('quantity-max')}
               name="quantityMax"
               label="最大数量"
               value={filters.quantityMax}
               step="1"
             />
             <TextFilter
-              id="order-filter-foil-colors"
+              id={controlId('foil-colors')}
               name="foilColor"
               label="烫金色"
               value={encodeFoilColorFilterValues(filters.foilColors)}
@@ -254,6 +259,7 @@ export function OrderAdvancedFilters({
               options={withSelectedOptions(craftOptions, filters.craftIds, '工艺')}
               emptyMessage="暂无可筛选工艺"
               className="sm:col-span-2 xl:col-span-4"
+              idPrefix={idPrefix}
             />
             <CheckboxGroup
               legend="生产任务状态"
@@ -265,6 +271,7 @@ export function OrderAdvancedFilters({
                   statusFilterLabel(PRODUCTION_TASK_STATUS_REGISTRY[status]),
               )}
               className="sm:col-span-2"
+              idPrefix={idPrefix}
             />
             <CheckboxGroup
               legend="机器类型"
@@ -272,10 +279,11 @@ export function OrderAdvancedFilters({
               selected={filters.machineTypes}
               options={enumOptions(MachineType, MACHINE_TYPE_LABELS)}
               className="sm:col-span-2"
+              idPrefix={idPrefix}
             />
 
             <TriStateSelect
-              id="order-filter-requires-outsource"
+              id={controlId('requires-outsource')}
               name="requiresOutsource"
               label="是否外协"
               value={filters.requiresOutsource}
@@ -283,7 +291,7 @@ export function OrderAdvancedFilters({
               noLabel="仅非外协工单"
             />
             <TextFilter
-              id="order-filter-supplier"
+              id={controlId('supplier')}
               name="supplierName"
               label="外协供应商"
               value={filters.supplierName}
@@ -298,6 +306,7 @@ export function OrderAdvancedFilters({
                   statusFilterLabel(OUTSOURCE_STATUS_REGISTRY[status]),
               )}
               className="sm:col-span-2"
+              idPrefix={idPrefix}
             />
           </div>
         ) : null}

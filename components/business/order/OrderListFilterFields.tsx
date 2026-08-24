@@ -181,6 +181,7 @@ export function CheckboxGroup<T extends string>({
   options,
   emptyMessage,
   className,
+  idPrefix = '',
 }: {
   legend: string;
   name: string;
@@ -188,6 +189,8 @@ export function CheckboxGroup<T extends string>({
   options: readonly { id: T; label: string }[];
   emptyMessage?: string;
   className?: string;
+  /** 同一筛选器在响应式容器中出现时，保持 label/input id 全局唯一。 */
+  idPrefix?: string;
 }) {
   return (
     <fieldset className={cn('min-w-0', className)}>
@@ -195,7 +198,7 @@ export function CheckboxGroup<T extends string>({
       {options.length > 0 ? (
         <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border bg-background px-2 py-1 dark:bg-input/30">
           {options.map((option) => {
-            const id = `order-filter-${name}-${option.id}`;
+            const id = `${idPrefix}order-filter-${name}-${option.id}`;
             return (
               <label
                 key={option.id}
