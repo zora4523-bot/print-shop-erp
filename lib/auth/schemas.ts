@@ -1145,9 +1145,16 @@ const inventoryBookQuantityField = z
   .trim()
   .regex(/^\d{1,10}(\.\d{1,2})?$/, '账面数快照格式非法，请刷新页面后重新盘点');
 
+const inventoryCountReasonField = z
+  .string({ error: '请填写盘点过账原因' })
+  .trim()
+  .min(1, '请填写盘点过账原因')
+  .max(500, '盘点过账原因过长（最多 500 个字符）');
+
 export const postInventoryCountSchema = z.object({
   idempotencyKey: z.string().uuid('盘点请求标识格式非法'),
-  remark: productTextFieldOptional('备注', 500),
+  // 盘点会直接改写库存余额；原因随盘点单持久化，作为 L3 操作审计说明。
+  remark: inventoryCountReasonField,
   items: z
     .array(
       z.object({
@@ -1330,7 +1337,11 @@ export type CreatePurchaseReceiptInput = z.infer<
 >;
 
 export const cancelPurchaseReceiptSchema = z.object({
-  reason: productTextFieldOptional('取消原因', 500),
+  reason: z
+    .string()
+    .trim()
+    .min(1, '请填写取消原因')
+    .max(500, '取消原因过长（最多 500 个字符）'),
 });
 
 export type CancelPurchaseReceiptInput = z.infer<

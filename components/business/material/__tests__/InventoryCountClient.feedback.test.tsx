@@ -63,15 +63,12 @@ describe('InventoryCountClient structured feedback contract', () => {
 
     expect(html).toContain('href="#inventory-count-form"');
     expect(html).toContain('href="#inventory-count-items"');
-    expect(html).toContain('href="#inventory-count-remark"');
+    expect(html).toContain('href="#inventory-count-submit-trigger"');
     expect(html).toMatch(
       /id="inventory-count-items"[^>]*aria-errormessage="inventory-count-items-message"/,
     );
-    expect(html).toMatch(
-      /id="inventory-count-remark"[^>]*aria-errormessage="inventory-count-remark-message"/,
-    );
     expect(html).toContain('id="inventory-count-items-message"');
-    expect(html).toContain('id="inventory-count-remark-message"');
+    expect(html).toContain('盘点过账原因：备注过长');
   });
 
   it('clears stale action feedback while posting and announces explicit progress', () => {
@@ -85,6 +82,15 @@ describe('InventoryCountClient structured feedback contract', () => {
     );
     expect(html).toContain('正在提交盘点过账…');
     expect(html).not.toContain('账面数已变动，未过账');
+  });
+
+  it('routes posting through an L3 confirmation with a required persisted reason', () => {
+    const html = render();
+
+    expect(html).toContain('data-slot="alert-dialog-trigger"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('核对并提交盘点过账');
+    expect(html).toContain('disabled');
   });
 
   it('distinguishes full success, partial posting and full failure', () => {

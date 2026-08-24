@@ -171,7 +171,17 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                   ))}
                 </ul>
                 {receipt.status === PurchaseReceiptStatus.POSTED ? (
-                  <CancelPurchaseReceiptButton receiptId={receipt.id} />
+                  <CancelPurchaseReceiptButton
+                    receiptId={receipt.id}
+                    receiptNo={receipt.receiptNo}
+                    purchaseNo={order.purchaseNo}
+                    items={receipt.items.map((item) => ({
+                      materialCode: item.material.code,
+                      materialName: item.material.name,
+                      quantity: decimal(item.quantity),
+                      unit: item.material.unit,
+                    }))}
+                  />
                 ) : receipt.cancelReason ? (
                   <p className="text-sm text-muted-foreground">
                     取消原因：{receipt.cancelReason}
@@ -189,7 +199,17 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
           <p className="mb-3 text-sm text-muted-foreground">
             只有尚未收货的采购单可以直接取消；已有收货记录时请先取消对应收货单。
           </p>
-          <CancelPurchaseOrderButton purchaseOrderId={order.id} />
+          <CancelPurchaseOrderButton
+            purchaseOrderId={order.id}
+            purchaseNo={order.purchaseNo}
+            supplierName={order.supplierName}
+            items={order.items.map((item) => ({
+              materialCode: item.material.code,
+              materialName: item.material.name,
+              quantity: decimal(item.quantity),
+              unit: item.material.unit,
+            }))}
+          />
         </section>
       ) : null}
     </div>

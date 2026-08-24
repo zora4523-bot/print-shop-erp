@@ -14,9 +14,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
+  ConfirmActionDialog,
   FormErrorSummary,
   FormMessage,
-  PendingButton,
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
@@ -62,7 +62,6 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
   const [counts, setCounts] = useState<Record<string, CountEntry>>({});
   // 服务端点名「账面数已变动、没给你过账」的行，等操作员重新录入就消掉。
   const [staleKeys, setStaleKeys] = useState<string[]>([]);
-  const [remark, setRemark] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const [error, setError] = useState<string | null>(null);
   const [fetchPending, startTransition] = useTransition();
@@ -106,7 +105,6 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         // 一次提交（包括部分过账）结束了当前盘点会话。下次
         // fetch 必须从新账面数重建基线，不能沿用已经过账的快照。
         setBookSnapshots({});
-        setRemark('');
         setStaleKeys(result.staleKeys ?? []);
         fetchRows(submittedQuery);
         return result;
@@ -176,7 +174,6 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
       ? visibleActionState.fieldErrors
       : {};
   const itemError = fieldErrors.items?.[0];
-  const remarkError = fieldErrors.remark?.[0];
   const actionError =
     visibleActionState?.status === 'error'
       ? visibleActionState.message
@@ -397,40 +394,45 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         ) : null}
 
         <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end">
-            <div className="flex-1 space-y-2">
-              <label htmlFor="inventory-count-remark" className="text-sm font-medium">
-                盘点备注（选填）
-              </label>
-              <Input
-                id="inventory-count-remark"
-                name="remark"
-                value={remark}
-                onChange={(event) => setRemark(event.target.value)}
-                disabled={actionPending}
-                {...(remarkError
-                  ? formMessageA11yProps('inventory-count-remark', 'error')
-                  : {})}
-              />
-              {remarkError ? (
-                <FormMessage fieldId="inventory-count-remark" tone="error">
-                  {remarkError}
-                </FormMessage>
-              ) : null}
-            </div>
-            <PendingButton
-              pending={actionPending}
-              pendingLabel="正在提交盘点过账…"
-              disabled={submittedItems.length === 0}
-              groupNote={
-                submittedItems.length === 0
-                  ? '请至少录入一个库位的实盘数'
-                  : undefined
-              }
-            >
-              提交盘点过账（{submittedItems.length} 条）
-            </PendingButton>
-          </div>
+          <ConfirmActionDialog
+            level="L3"
+            formId="inventory-count-form"
+            reasonName="remark"
+            reasonLabel="盘点过账原因"
+            reasonPlaceholder="例如：月末例行盘点，复核库位实物后调整"
+            disabled={actionPending || submittedItems.length === 0}
+            trigger={
+              <Button
+                id="inventory-count-submit-trigger"
+                type="button"
+                disabled={actionPending || submittedItems.length === 0}
+                aria-busy={actionPending}
+                className="min-h-11"
+              >
+                {actionPending
+                  ? '正在提交盘点过账…'
+                  : `核对并提交盘点过账（${submittedItems.length} 条）`}
+              </Button>
+            }
+            title={`确认过账 ${submittedItems.length} 个库位？`}
+            description="盘点过账会直接改变库存余额并写入不可覆盖的盘点单与库存流水。请核对差异并填写业务原因。"
+            impactItems={
+              submittedItems.length === 0
+                ? []
+                : [
+                    `提交范围：${submittedItems.length} 个库位；有差异 ${totals.changed} 个。`,
+                    `页面数值汇总：盘盈 ${totals.surplus}、盘亏 ${totals.shortage}；不同物料单位不可合并比较，以表格逐行差异为准。`,
+                    '无冲突的行会更新库位库存并写入盘点流水；实盘数为 0 表示该库位全部盘亏。',
+                    '若部分库位的账面数在盘点期间发生变化，那些行不会过账，但其他无冲突行仍可能成功。',
+                  ]
+            }
+            confirmLabel="填写原因并确认过账"
+          />
+          {submittedItems.length === 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              请至少录入一个库位的实盘数。
+            </p>
+          ) : null}
           {actionError ? (
             <ActionNotice
               tone="error"
@@ -502,7 +504,12 @@ function toInventoryCountErrorSummary(
   const targets: Record<string, { fieldId: string; label: string }> = {
     idempotencyKey: { fieldId: 'inventory-count-form', label: '盘点请求' },
     items: { fieldId: 'inventory-count-items', label: '盘点明细' },
-    remark: { fieldId: 'inventory-count-remark', label: '盘点备注' },
+    // 理由输入位于关闭的确认层内；服务端校验失败后先把操作员带回
+    // 触发器，重新打开即可修改，避免错误摘要链接到不可见的 Portal。
+    remark: {
+      fieldId: 'inventory-count-submit-trigger',
+      label: '盘点过账原因',
+    },
   };
   return Object.entries(fieldErrors).flatMap(([field, messages]) => {
     const target = targets[field] ?? {

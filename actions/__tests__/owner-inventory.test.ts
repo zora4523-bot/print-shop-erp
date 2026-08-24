@@ -69,6 +69,7 @@ function fd(items: unknown, extra: Record<string, string> = {}): FormData {
   const form = new FormData();
   form.set('idempotencyKey', '00000000-0000-4000-8000-000000000001');
   form.set('items', JSON.stringify(items));
+  form.set('remark', '月末例行盘点');
   for (const [key, value] of Object.entries(extra)) form.set(key, value);
   return form;
 }
@@ -105,6 +106,22 @@ describe('postInventoryCountAction', () => {
       message: '盘点单 IC20260821-0001 已过账',
     });
     expect(postingMock.postInventoryCount.mock.calls[0]![0].items).toEqual(validItems);
+    expect(postingMock.postInventoryCount.mock.calls[0]![0].remark).toBe(
+      '月末例行盘点',
+    );
+  });
+
+  it('缺少盘点原因时在业务写入前失败', async () => {
+    const result = await postInventoryCountAction(
+      null,
+      fd(validItems, { remark: '   ' }),
+    );
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: { remark: ['请填写盘点过账原因'] },
+    });
+    expect(postingMock.postInventoryCount).not.toHaveBeenCalled();
   });
 
   it('部分过账时把未过账的行点名带回页面', async () => {

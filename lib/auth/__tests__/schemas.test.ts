@@ -27,6 +27,7 @@ import {
   materialStockTransactionSchema,
   createPurchaseOrderSchema,
   createPurchaseReceiptSchema,
+  cancelPurchaseReceiptSchema,
   updateProductSchema,
   createOrderSchema,
   shipOrderSchema,
@@ -1194,6 +1195,22 @@ describe('createPurchaseReceiptSchema', () => {
   });
 });
 
+describe('cancelPurchaseReceiptSchema', () => {
+  it('requires a non-blank reason and trims the accepted value', () => {
+    const blank = cancelPurchaseReceiptSchema.safeParse({ reason: '   ' });
+    expect(blank.success).toBe(false);
+    if (!blank.success) {
+      expect(blank.error.issues[0]?.message).toBe('请填写取消原因');
+    }
+
+    const valid = cancelPurchaseReceiptSchema.safeParse({
+      reason: '  供应商送错物料  ',
+    });
+    expect(valid.success).toBe(true);
+    if (valid.success) expect(valid.data.reason).toBe('供应商送错物料');
+  });
+});
+
 describe('warehouse operation schemas', () => {
   const idempotencyKey = '00000000-0000-4000-8000-000000000001';
 
@@ -1215,7 +1232,7 @@ describe('warehouse operation schemas', () => {
   it('accepts zero as a real inventory count and requires at least one item', () => {
     const valid = {
       idempotencyKey,
-      remark: '',
+      remark: '月末例行盘点',
       items: [
         {
           materialId: 'mat_1',
@@ -1229,6 +1246,9 @@ describe('warehouse operation schemas', () => {
     expect(
       postInventoryCountSchema.safeParse({ ...valid, items: [] }).success,
     ).toBe(false);
+    expect(
+      postInventoryCountSchema.safeParse({ ...valid, remark: '   ' }).success,
+    ).toBe(false);
   });
 
   it('缺账面数快照时 fail closed，且消息是中文', () => {
@@ -1236,7 +1256,7 @@ describe('warehouse operation schemas', () => {
     // 走 invalid_type 分支，.regex() 的消息不触发——所以字段本身带了 error 参数。
     const result = postInventoryCountSchema.safeParse({
       idempotencyKey,
-      remark: '',
+      remark: '复核库存差异',
       items: [
         { materialId: 'mat_1', locationId: 'loc_a', countedQuantity: '8.00' },
       ],
