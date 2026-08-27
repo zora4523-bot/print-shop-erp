@@ -52,7 +52,7 @@ token_implementation: ../app/globals.css
 | 字体 | `font-sans`、`font-mono`、`font-heading` | 正文、编号、标题 |
 | 字号 | 标准 `text-xs`…`text-2xl` | 信息层级 |
 | 间距 | Tailwind 标准 spacing scale | gap、padding、margin |
-| 视口 / 安全区 | `admin-*`、`worker-*`、`touch-*` | 动态视口、触控目标、安全区 |
+| 视口 / 安全区 | `admin-viewport` / `admin-safe-*`、`worker-viewport` / `worker-safe-*`、`touch-viewport` | 动态视口、触控目标、安全区 |
 
 通用 `Tone` 只允许：
 
@@ -81,6 +81,7 @@ primary | warning | info | success | danger | neutral
 | 表格 | `Table` 家族 |
 | 导航 | `Sidebar`、`Breadcrumb` |
 | 通用状态 | `Badge`、`Skeleton`、`Tooltip` |
+| 身份 / 组合头像 | `Avatar` 家族 |
 
 当前没有统一 Select 原子件。新增选择器前先确定共享 `NativeSelect` 或 Select 方案，不继续复制本地 class string。
 
@@ -231,7 +232,7 @@ primary | warning | info | success | danger | neutral
 最低矩阵：375×667、393×852、768×1024、1024×768、1280×800、1920×1080。
 
 - 页面 body 不横向溢出；表格内部滚动不等于页面溢出。
-- 手机交互目标最低 44×44 CSS px，使用 `dvh` 并处理 safe area。
+- 手机交互目标最低 44×44 CSS px；视口高度保留 `100vh` 回退，支持时依次采用 `100svh`、`100dvh`，并处理 safe area。
 - 长中文、订单号、地址和备注可换行或提供全文访问，不静默裁字。
 - 保持 heading、label、键盘、焦点陷阱、焦点返回和 reduced-motion 契约。
 - 颜色不是唯一信息通道。
@@ -268,6 +269,7 @@ primary | warning | info | success | danger | neutral
 | 卡片 surface 与原生控件重复 | 多页面手写 Card、`textarea`、`select` | 明确共享边界后分批迁移 |
 | 任意字号、圆角和间距 | 规则工作台与工单表单存在 `text-[…]`、`rounded-[…]` | 登记 A 级例外或收敛到 scale |
 | 材质色板使用 HEX/渐变 | 纸张、烫金 swatch picker | 人工决定是否登记材料外观例外 |
+| 独立页面未使用统一动态视口高度 | `app/(auth)/login/layout.tsx`、`app/account/password/page.tsx` 只有 `min-h-screen` | 迁移到统一 viewport shell 并补移动端视觉门禁 |
 | 高风险业务仍使用 L2 | 主数据启停、部分薪资动作、工单修改审批 | 先确认服务端理由/审计契约 |
 | 工单详情职责过重 | `app/(admin)/orders/[id]/page.tsx` 超过 1800 行 | 仅作架构重构建议 |
 | 工单状态无法按正源核对 | `docs/工单变更与版本规则.md` 缺失 | 恢复文档后核对 11 态、8 词和驳回原因 |
