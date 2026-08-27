@@ -28,10 +28,7 @@ function tiersFrom(value: SalaryRuleValue | null | undefined): TierRow[] {
   }));
 }
 
-function defaultValues(
-  key: SalaryRuleKey,
-  current: SalaryRuleSettingsData[SalaryRuleKey],
-) {
+function defaultValues(current: SalaryRuleSettingsData[SalaryRuleKey]) {
   const value = current?.ruleValue;
   const monthlyBase = value && 'monthlyBase' in value ? value.monthlyBase : undefined;
   const hourlyRate = value && 'hourlyRate' in value ? value.hourlyRate : undefined;
@@ -73,7 +70,7 @@ export function SalaryRuleSettingsForm({
     SalaryRuleVersionMutationResult | null,
     FormData
   >(createSalaryRuleVersionAction, null);
-  const defaults = defaultValues(selectedKey, current);
+  const defaults = defaultValues(current);
   const errors = state?.status === 'invalid' ? state.fieldErrors : {};
 
   function switchRule(key: SalaryRuleKey) {
