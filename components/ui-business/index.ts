@@ -37,7 +37,7 @@ export type {
 
 export { ErrorBoundary } from './ErrorBoundary';
 export type { ErrorBoundaryProps } from './ErrorBoundary';
-export { BlockingPrerequisite, ErrorState } from './ErrorState';
+export { ErrorState } from './ErrorState';
 export type { ErrorStateProps, ErrorStateScope } from './ErrorState';
 
 export { DisabledReason } from './DisabledReason';
