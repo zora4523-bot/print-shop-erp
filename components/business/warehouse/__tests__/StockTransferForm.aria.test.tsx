@@ -32,7 +32,14 @@ function render() {
   return renderToStaticMarkup(
     <StockTransferForm
       action={vi.fn()}
-      materials={[{ id: 'm1', code: 'M-1', name: '铜版纸', unit: '张' }]}
+      materials={[
+        {
+          id: 'm1',
+          code: 'M-1',
+          name: '纸张未标（烫金!B13）',
+          unit: '张',
+        },
+      ]}
       locations={[
         { id: 'l1', name: 'A-01', warehouseName: '主仓' },
         { id: 'l2', name: 'A-02', warehouseName: '主仓' },
@@ -104,5 +111,13 @@ describe('StockTransferForm 字段错误的 aria 连线', () => {
     expect(errorHtml).toContain('data-tone="error"');
     expect(errorHtml).toContain('来源库位库存不足');
     expect(errorHtml).not.toContain('TR-000001');
+  });
+
+  it('物料选项不显示导入工作表坐标', () => {
+    const html = render();
+
+    expect(html).toContain('纸张未标');
+    expect(html).not.toContain('烫金!B13');
+    expect(html).toContain('value="m1"');
   });
 });

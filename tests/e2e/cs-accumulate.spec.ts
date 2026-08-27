@@ -73,7 +73,13 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
         .locator('textarea[name="items.0.priceOverrideReason"]')
         .fill('E2E 客服业绩固定测试价');
       await page.getByRole('button', { name: '现货加烫' }).click();
-      await page.getByRole('button', { name: /创建工单/ }).click();
+      await page.getByRole('tab', { name: /收货与费用/ }).click();
+      await page
+        .getByLabel('收货信息', { exact: true })
+        .fill('E2E 收货人 13800138000 广东省佛山市南海区测试路 1 号');
+      await page
+        .getByRole('button', { name: '保存草稿', exact: true })
+        .click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
         timeout: 10_000,
       });

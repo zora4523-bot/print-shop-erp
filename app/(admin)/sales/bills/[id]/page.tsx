@@ -16,6 +16,7 @@ import { getSalesBillTitleRef } from '@/lib/page-title/refs';
 import { salesBillTitle } from '@/lib/page-title/titles';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import {
   parsePricingSnapshotComponents,
@@ -126,7 +127,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm sm:p-6">
           <h2 className="text-base font-semibold">历史期初/手工差额</h2>
           <p className="mt-2 text-muted-foreground">
-            ¥ {openingAmount.toFixed(2)}；该金额用于解释逐单账单启用前的历史账面差额。
+            逐单账单启用前的历史差额：¥ {openingAmount.toFixed(2)}
           </p>
         </section>
       )}
@@ -142,8 +143,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.FULLY_PAID ? (
         <section className="rounded-xl border bg-card p-6 text-sm shadow-sm">
           <p className="text-muted-foreground">
-            ✓ 已结清。如有退款 / 折扣，请联系管理员由财务线下核对原工单和已支付流水；
-            系统不支持以负数账单冲账，该账单状态也不会回退。
+            ✓ 已结清。退款或折扣请联系管理员核对；账单状态不会回退。
           </p>
         </section>
       ) : null}
@@ -156,7 +156,6 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
           <TableEmptyState
             variant="compact"
             title="暂无支付流水"
-            description="账单出账后，管理员记录的支付会显示在这里。"
             className="m-4 sm:m-6"
           />
         ) : (
@@ -254,7 +253,7 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
           <div className="border-b px-4 py-3 sm:px-6">
             <h2 className="text-base font-semibold">加工费计价依据</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              同时展示系统建议与实际成交小计；发生人工调整时，以实际成交金额为账单依据。
+              人工调整后，以实际成交金额为账单依据。
             </p>
           </div>
           <ol className="min-w-0 divide-y">
@@ -271,7 +270,8 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     {billItem.order.orderNo}
                   </Link>
                   <span className="admin-wrap-anywhere font-medium">
-                    #{orderItem.sequence} · {orderItem.name}
+                    #{orderItem.sequence} ·{' '}
+                    {externalPriceBusinessText(orderItem.name)}
                   </span>
                 </h3>
                 <PricingSnapshotBreakdown

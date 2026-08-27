@@ -192,8 +192,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">结算</h2>
           <p className="text-xs text-muted-foreground">
-            周期 {ready ? '已到期' : '未到期'}；周期结束后的次日可手动结算，或由
-            cron 自动扫描结算。若结算时账号仍为启用客服，系统会衔接下一个周期。
+            周期{ready ? '已到期' : '未到期'}；周期结束次日可手动结算，系统也会自动处理。启用中的客服会自动开始下一周期。
           </p>
           {ready ? (
             <SettleCsPeriodButton

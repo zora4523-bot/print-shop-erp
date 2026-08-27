@@ -67,11 +67,6 @@ export default async function EditOwnerPartyPage({ params }: PageProps) {
         <h2 className="mb-2 text-base font-semibold">
           {party.isActive ? '停用客户/供应商' : '启用客户/供应商'}
         </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          {party.isActive
-            ? '停用后不会出现在新建工单客户选择中；历史工单快照和已有链接仍保留。'
-            : '启用后客户类型和客户/供应商类型会重新进入新建工单客户选择。'}
-        </p>
         <TogglePartyActiveButton
           partyId={party.id}
           currentlyActive={party.isActive}

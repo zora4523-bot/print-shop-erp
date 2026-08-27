@@ -76,7 +76,7 @@ async function PieceworkSalaryContent({
 
   return (
     <div className="min-w-0 space-y-4">
-      <SalaryHeader description="开机师傅 · 只显示当前账号的日薪；点击日期可核对关联工单和每项计件。" />
+      <SalaryHeader description="开机师傅 · 点击日期查看工单和计件明细。" />
       <SalarySummary total={total} unpaid={unpaid} />
       <SalaryRangeFilter
         inputType="date"
@@ -160,7 +160,7 @@ async function HourlySalaryContent({
   return (
     <div className="min-w-0 space-y-4">
       <SalaryHeader
-        description={`${WORKER_TYPE_LABELS[workerType]} · 只显示当前账号的月结工资；点击月份查看工时和计薪分项。`}
+        description={`${WORKER_TYPE_LABELS[workerType]} · 点击月份查看工时和计薪明细。`}
       />
       <SalarySummary total={total} unpaid={unpaid} />
       <SalaryRangeFilter

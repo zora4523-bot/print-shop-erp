@@ -7,8 +7,7 @@ import {
   parseShanghaiMonth,
 } from '@/lib/attendance';
 import { getActiveWorkHours } from '@/lib/salary/rules';
-import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { roleLabel } from '@/lib/auth/role-labels';
+import { roleLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
@@ -117,7 +116,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
         title="员工考勤"
         subtitle={
           <>
-            全体在职员工按半天单位记录实际上班和请假；时薪岗位同时录入工时，供月底工资结算。
+            按半天记录上班和请假；时薪岗位另填工时。
             {workHours ? (
               <>
                 {' · '}当前工时段:{' '}
@@ -130,7 +129,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
             ) : (
               <span className="text-destructive">
                 {' '}
-                · WORK_HOURS 规则未配置，快速填&ldquo;全勤&rdquo;不可用
+                · 未配置工时规则，暂不能快速填&ldquo;全勤&rdquo;
               </span>
             )}
           </>
@@ -165,7 +164,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
               <span className="ml-2 text-xs text-muted-foreground">
                 ({roleLabel(selectedWorker.role)}
                 {selectedWorker.workerType
-                  ? ` · ${WORKER_TYPE_LABELS[selectedWorker.workerType]}`
+                  ? ` · ${workerTypeLabel(selectedWorker.workerType)}`
                   : ''}
                 {' · '}
                 {selectedWorker.username})
@@ -320,7 +319,7 @@ function FilterBar({
               {w.displayName}（
               {roleLabel(w.role)}
               {w.workerType
-                ? ` · ${WORKER_TYPE_LABELS[w.workerType] ?? w.workerType}`
+                ? ` · ${workerTypeLabel(w.workerType)}`
                 : ''}
               ）
             </option>

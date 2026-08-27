@@ -281,7 +281,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
         />
         {!canReceive && !canCancel ? (
           <p className="text-sm text-muted-foreground">
-            该外协单已进入终态，没有可执行的状态操作。
+            该外协单已结束，没有可执行的状态操作。
           </p>
         ) : null}
       </section>

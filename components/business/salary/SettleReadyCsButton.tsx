@@ -41,7 +41,7 @@ export function readyCsSettlementImpactItems(
   return [
     preview.duePeriodCount > 0
       ? `页面加载时发现 ${preview.duePeriodCount} 个已到期周期，涉及 ${preview.csUserCount} 位客服。`
-      : '页面加载时未发现已到期周期；确认后服务器仍会使用最新数据扫描一次。',
+      : '页面加载时未发现已到期周期；确认后仍会按最新数据扫描一次。',
     ...(preview.earliestPeriodEnd && preview.latestPeriodEnd
       ? [
           `当前到期日范围：${preview.earliestPeriodEnd} ~ ${preview.latestPeriodEnd}。`,
@@ -52,10 +52,10 @@ export function readyCsSettlementImpactItems(
     ...(remaining > 0
       ? [`还有 ${remaining} 个初始候选周期未在此预览中逐条展开。`]
       : []),
-    '每个周期都会按执行时有效档位生成提成，转为已结算终态，并根据客服账号实时状态决定是否衔接下一周期。',
+    '每个周期按结算时有效档位生成提成并锁定；仅启用客服会开始下一周期。',
     '批处理会继续扫描自动开启但仍已过期的后续周期，所以最终结算数可能大于当前初始预览数。',
-    '每个周期使用独立事务：早先成功的周期不会因后续已知业务失败而回滚，界面会列出对应周期 ID 和原因。',
-    '如遇未预期系统错误，页面会进入错误恢复流程；此前已结算周期可能仍然生效，重试前应先刷新核对。',
+    '逐周期处理；后续周期失败不影响已完成的结算，结果会列出对应客服、周期和原因。',
+    '如处理意外中断，部分周期可能已结算；重试前请刷新核对。',
   ];
 }
 
@@ -91,7 +91,7 @@ export function SettleReadyCsButton({
         title={
           preview.duePeriodCount > 0
             ? `确认扫描并结算 ${preview.duePeriodCount} 个当前到期周期？`
-            : '确认使用服务器最新数据扫描已到期周期？'
+            : '确认按最新数据扫描已到期周期？'
         }
         description="这是可部分成功的批处理。请核对当前人员、周期、金额和后续周期影响。"
         impactItems={readyCsSettlementImpactItems(preview)}
@@ -112,15 +112,22 @@ export function SettleReadyCsButton({
           succeededCount={visibleState.settledCount}
           failedCount={visibleState.errorCount}
           title="客服工资周期批量结算结果"
-          items={visibleState.errors.map((error) => ({
-            id: error.periodId,
-            label:
-              error.periodId === 'batch-limit'
-                ? '批处理上限'
-                : `周期 ${error.periodId}`,
-            outcome: 'failure' as const,
-            reason: error.message,
-          }))}
+          items={visibleState.errors.map((error) => {
+            const period = preview.samplePeriods.find(
+              (candidate) => candidate.periodId === error.periodId,
+            );
+            return {
+              id: error.periodId,
+              label:
+                error.periodId === 'batch-limit'
+                  ? '批处理上限'
+                  : period
+                    ? `${period.csUserName} · ${period.periodLabel}`
+                    : '未完成周期',
+              outcome: 'failure' as const,
+              reason: error.message,
+            };
+          })}
         />
       ) : null}
       {visibleState?.status === 'error' ? (

@@ -3,6 +3,7 @@
 import { useActionState, useCallback, useMemo, useState } from 'react';
 import type { MutationResult } from '@/lib/admin/action-helpers';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -128,7 +129,7 @@ export function StockTransferForm({
             <option value="">请选择物料</option>
             {materials.map((material) => (
               <option key={material.id} value={material.id}>
-                {material.code} · {material.name}
+                {material.code} · {externalPriceBusinessText(material.name)}
               </option>
             ))}
           </select>

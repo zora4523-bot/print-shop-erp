@@ -138,7 +138,7 @@ export function RecomputeDailyForm({ defaultDate, maxDate }: Props) {
           }
           variant="outline"
           className="border-warning/50 text-warning-foreground"
-          groupNote="第一次只调用服务端预检；确认时服务端会再次计算影响，不信任旧预览。"
+          groupNote="先查看影响范围；确认时会按最新数据重新核对。"
         >
           查看影响
         </PendingButton>
@@ -151,7 +151,7 @@ export function RecomputeDailyForm({ defaultDate, maxDate }: Props) {
           <ActionNotice
             tone="warning"
             title={`已完成 ${preview.date} 影响预检`}
-            description={`服务端返回 ${preview.impact.affectedWorkerCount} 位师傅受影响。请在高风险确认层内核对清单并填写理由。`}
+            description={`${preview.impact.affectedWorkerCount} 位师傅受影响。请核对清单并填写理由。`}
           />
           <ConfirmActionDialog
             level="L3"

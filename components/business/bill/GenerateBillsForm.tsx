@@ -52,9 +52,9 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
       </div>
       {state?.status === 'success' && state.errors.length > 0 ? (
         <ul className="text-xs text-destructive space-y-1">
-          {state.errors.map((e) => (
-            <li key={e.salesUserId}>
-              {e.salesUserId}: {e.message}
+          {state.errors.map((e, index) => (
+            <li key={`${e.salesUserId}:${index}`}>
+              {e.message}
             </li>
           ))}
         </ul>

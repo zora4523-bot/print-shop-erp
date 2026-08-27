@@ -50,7 +50,7 @@ export function paymentImpactItems(
     `收款方式：${preview.paymentMethod || '未填写'}`,
     `流水号：${preview.referenceNo || '未填写'}`,
     settlement,
-    '系统使用本次请求标识防止重复记账；结果未确认前请勿再次录入。',
+    '提交后请等待处理结果，勿重复录入。',
   ];
 }
 

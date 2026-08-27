@@ -86,7 +86,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="客服周期与提成"
-        subtitle="每位客服一条活跃周期（默认 4 个月）。周期到期后扫档位 → 生成提成记录；若账号仍为启用客服，自动衔接下一个周期。"
+        subtitle="查看客服周期、结算状态和提成。"
         actions={
           <Link
             href="/owner/salary/cs/new"

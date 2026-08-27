@@ -47,11 +47,11 @@ export function ToggleBomActiveButton({
         deactivateImpactItems={[
           '该 BOM 不再用于新的物料需求和生产计算',
           '历史工单与物料记录中的 BOM 引用会继续保留',
-          '停用不会删除 BOM 明细',
+          'BOM 明细保留',
         ]}
         activateImpactItems={[
           '该 BOM 会重新参与新的物料需求和生产计算',
-          '服务器会校验关联产品/分类仍然启用',
+          '关联产品或分类必须处于启用状态',
           '同一产品或分类不能同时存在另一份启用 BOM',
         ]}
       />

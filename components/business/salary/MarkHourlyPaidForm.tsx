@@ -32,7 +32,7 @@ export function hourlyPaidImpactItems({
 
   return [
     `${workerName} · ${month} · 将标记已发 ¥ ${totalSalary}。`,
-    '服务器会记录当前发放时间，并锁定该月结记录。',
+    '系统会记录发放时间，并锁定该月结记录。',
     '锁定后不能重算；如需更正考勤或规则结果，必须先撤销发放。',
     '这只记录系统发放状态，不会自动发起外部付款。',
   ];

@@ -7,6 +7,7 @@ import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export type PurchaseMaterialOption = {
   id: string;
@@ -111,7 +112,8 @@ export function PurchaseOrderForm({
             <option value="">{missingMaterials ? '暂无可用物料' : '请选择物料'}</option>
             {materials.map((material) => (
               <option key={material.id} value={material.id}>
-                {material.code} · {material.name}（{material.unit}）
+                {material.code} · {externalPriceBusinessText(material.name)}（
+                {material.unit}）
               </option>
             ))}
           </select>

@@ -31,8 +31,8 @@ export function ActiveStateConfirmButton({
     `${entityLabel}会重新出现在可选项中`,
     '历史业务记录不会改变',
   ],
-  deactivateDescription = '停用不是删除。请先核对影响范围，服务器仍会执行现有业务约束校验。',
-  activateDescription = '启用后，该对象会重新参与后续业务选择。',
+  deactivateDescription = '停用后将影响后续业务选择，请核对下列范围。',
+  activateDescription = '启用后将重新用于后续业务选择，请核对下列范围。',
   deactivateVerb = '停用',
   activateVerb = '启用',
 }: ActiveStateConfirmButtonProps) {

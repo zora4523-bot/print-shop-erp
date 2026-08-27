@@ -32,6 +32,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { listRecentInventoryCounts } from '@/lib/inventory-count-posting';
 import { txReasonLabel } from '@/lib/material-labels';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { listRecentStockTransfers } from '@/lib/stock-transfer';
 import { getWarehouseDashboard } from '@/lib/warehouse';
 
@@ -58,7 +59,7 @@ export default async function OwnerWarehousesPage() {
     <div className="space-y-6">
       <PageHeader
         title="仓库作业台"
-        subtitle="采购收货、库位库存、调拨、盘点和流水的统一入口。采购单不直接增加库存，只有实际收货过账才会入库。"
+        subtitle="库存仅在收货过账后增加。"
         actions={
           <Link href="/owner/materials/count" className={buttonVariants()}>
             <ClipboardCheck aria-hidden />
@@ -159,7 +160,7 @@ async function WarehouseDashboardContent({
                 <tr key={item.id} className="border-b last:border-0">
                   <td className="px-3 py-2"><Link className="font-sans tabular-nums text-primary hover:underline" href={`/owner/purchases/${item.purchaseOrder.id}`}>{item.purchaseOrder.purchaseNo}</Link><div><PurchaseOrderStatusBadge status={item.purchaseOrder.status} /></div></td>
                   <td className="px-3 py-2">{item.purchaseOrder.supplierName}</td>
-                  <td className="px-3 py-2"><div>{item.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{item.material.code}</div></td>
+                  <td className="px-3 py-2"><div>{externalPriceBusinessText(item.material.name)}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{item.material.code}</div></td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums">{item.orderedQuantity} {item.material.unit}</td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums">{item.receivedQuantity} {item.material.unit}</td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums font-semibold">{item.remainingQuantity} {item.material.unit}</td>
@@ -174,7 +175,7 @@ async function WarehouseDashboardContent({
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="flex items-center gap-2 font-semibold"><ArrowRightLeft className="size-4" aria-hidden />库位调拨</h2>
-          <p className="text-sm text-muted-foreground">同一事务内完成来源出库和目标入库，任一步失败都不会留下半成品数据。</p>
+          <p className="text-sm text-muted-foreground">调拨会同时减少来源库存并增加目标库存；任一步失败则不生效。</p>
         </div>
         <StockTransferForm
           action={createStockTransferAction}
@@ -194,7 +195,7 @@ async function WarehouseDashboardContent({
               {dashboard.locationStocks.length === 0 ? <EmptyRow columns={3} text="暂无库位库存记录" /> : dashboard.locationStocks.map((stock) => (
                 <tr key={`${stock.materialId}:${stock.locationId}`} className="border-b last:border-0">
                   <td className="px-3 py-2"><div>{stock.warehouse.name} / {stock.location.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.warehouse.code} / {stock.location.code}</div></td>
-                  <td className="px-3 py-2"><div>{stock.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.material.code}</div></td>
+                  <td className="px-3 py-2"><div>{externalPriceBusinessText(stock.material.name)}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{stock.material.code}</div></td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums">{stock.currentStock} {stock.material.unit}</td>
                 </tr>
               ))}
@@ -212,7 +213,7 @@ async function WarehouseDashboardContent({
               {dashboard.recentTransactions.length === 0 ? <EmptyRow columns={6} text="暂无库存流水" /> : dashboard.recentTransactions.map((transaction) => (
                 <tr key={transaction.id} className="border-b last:border-0">
                   <td className="px-3 py-2 whitespace-nowrap">{formatDateTimeShanghai(transaction.occurredAt)}</td>
-                  <td className="px-3 py-2"><div>{transaction.material.name}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{transaction.material.code}</div></td>
+                  <td className="px-3 py-2"><div>{externalPriceBusinessText(transaction.material.name)}</div><div className="font-sans tabular-nums text-xs text-muted-foreground">{transaction.material.code}</div></td>
                   <td className="px-3 py-2"><Badge variant={transaction.direction === 'IN' ? 'outline' : 'secondary'}>{transaction.direction === 'IN' ? '入库' : '出库'} · {txReasonLabel(transaction.reasonType)}</Badge></td>
                   <td className="px-3 py-2">{transaction.warehouse?.name ?? '—'} / {transaction.location?.name ?? '—'}</td>
                   <td className="px-3 py-2 text-right font-sans tabular-nums">{transaction.direction === 'IN' ? '+' : '-'}{transaction.quantity} {transaction.material.unit}</td>
@@ -242,7 +243,7 @@ async function RecentStockTransfersContent({
       rows={recentTransfers.map((transfer) => ({
         id: transfer.id,
         number: transfer.transferNo,
-        description: `${transfer.material.name} · ${transfer.sourceLocation.warehouse.name}/${transfer.sourceLocation.name} → ${transfer.destinationLocation.warehouse.name}/${transfer.destinationLocation.name}`,
+        description: `${externalPriceBusinessText(transfer.material.name)} · ${transfer.sourceLocation.warehouse.name}/${transfer.sourceLocation.name} → ${transfer.destinationLocation.warehouse.name}/${transfer.destinationLocation.name}`,
         quantity: `${transfer.quantity} ${transfer.material.unit}`,
         time: formatDateTimeShanghai(transfer.occurredAt),
       }))}

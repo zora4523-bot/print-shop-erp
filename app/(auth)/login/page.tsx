@@ -23,9 +23,8 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <div className="w-full max-w-sm rounded-xl border bg-card p-8 shadow-sm">
-      <div className="mb-6 space-y-1">
+      <div className="mb-6">
         <h1 className="text-xl font-semibold">红包印刷 ERP</h1>
-        <p className="text-sm text-muted-foreground">用内部账号登录</p>
       </div>
       <LoginForm from={safeFrom} />
     </div>

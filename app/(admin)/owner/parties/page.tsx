@@ -80,7 +80,6 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="客户/供应商"
-        subtitle="维护客户和供应商编码、联系人、电话、默认收货地址；新建工单可选择客户并带入快照字段。"
         actions={
           <Link href="/owner/parties/new" className={buttonVariants()}>
             新建客户/供应商

@@ -27,7 +27,7 @@ export default function GlobalError({
           >
             <h1 className="text-xl font-semibold">系统暂时无法加载</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              根页面发生了意外错误。请重新加载；系统不会在这里展示可能包含敏感信息的错误详情。
+              请重新加载；若问题持续，请联系管理员。
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button

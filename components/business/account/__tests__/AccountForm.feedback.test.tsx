@@ -35,6 +35,13 @@ beforeEach(() => {
 });
 
 describe('AccountForm structured feedback contract', () => {
+  it('密码帮助不暴露存储实现', () => {
+    const html = render();
+
+    expect(html).toContain('8–72 位');
+    expect(html).not.toContain('bcrypt');
+  });
+
   it('links the error summary and each invalid input to a stable message id', () => {
     actionState.current = {
       status: 'invalid',
@@ -54,6 +61,18 @@ describe('AccountForm structured feedback contract', () => {
     );
     expect(html).toContain('id="username-message"');
     expect(html).toContain('用户名格式非法');
+  });
+
+  it('does not expose an unknown error field name', () => {
+    actionState.current = {
+      status: 'invalid',
+      fieldErrors: { internalAccountField: ['内容无法保存'] },
+    };
+
+    const html = render();
+
+    expect(html).toContain('表单内容：内容无法保存');
+    expect(html).not.toContain('>internalAccountField：');
   });
 
   it('clears stale feedback while pending and exposes the form busy state', () => {

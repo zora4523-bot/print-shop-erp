@@ -49,6 +49,18 @@ describe('PartyForm structured feedback contract', () => {
     expect(html).toContain('id="defaultAddressDetail-message"');
   });
 
+  it('does not expose an unknown error field name', () => {
+    actionState.current = {
+      status: 'invalid',
+      fieldErrors: { internalPartyField: ['内容无法保存'] },
+    };
+
+    const html = render();
+
+    expect(html).toContain('表单内容：内容无法保存');
+    expect(html).not.toContain('>internalPartyField：');
+  });
+
   it('exposes pending on the form and removes the previous validation result', () => {
     actionState.current = {
       status: 'invalid',

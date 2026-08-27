@@ -2,8 +2,9 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
+import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { WorkerType } from '@/generated/prisma/enums';
+import { Role, WorkerType } from '@/generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
@@ -68,14 +69,25 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
   // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
   // 传给客户端确认层。
-  const [rows, allMonthRows] = await Promise.all([
+  const [rows, allMonthRows, accounts] = await Promise.all([
     listHourlyPayrolls({
       month: selectedMonth,
       workerId: sp.workerId,
       isPaid,
     }),
     listHourlyPayrolls({ month: selectedMonth }),
+    listUsers(),
   ]);
+  const payrollWorkerIds = new Set(allMonthRows.map((row) => row.workerId));
+  const workers = accounts.filter(
+    (account) =>
+      account.id === sp.workerId ||
+      payrollWorkerIds.has(account.id) ||
+      (account.role === Role.WORKER &&
+        (account.workerType === WorkerType.PACKER ||
+          account.workerType === WorkerType.CLEANER ||
+          account.workerType === WorkerType.COOK)),
+  );
   const monthRange = parseShanghaiMonth(selectedMonth);
   const attendanceSummaries = await getAttendanceSummaries(
     rows.map((row) => row.workerId),
@@ -134,7 +146,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       ) : null}
       <PageHeader
         title="时薪工月结"
-        subtitle="PACKER / CLEANER / COOK — 按 Asia/Shanghai 日历月汇总 Attendance，PACKER/CLEANER 走时薪 + 加班倍率，COOK 按月薪 + 空闲打包时薪。已发行拒绝重算。"
+        subtitle="按上海日历月汇总打包、清废和厨师工资；已发放记录不可重算。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
@@ -170,6 +182,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         selectedMonth={selectedMonth}
         paid={sp.paid}
         workerId={sp.workerId}
+        workers={workers}
       />
 
       {rows.length === 0 ? (
@@ -217,7 +230,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
                     <td className="px-4 py-3">{r.worker.displayName}</td>
                     <td className="px-4 py-3 text-xs">
-                      {wt ? (WORKER_TYPE_LABELS[wt] ?? wt) : '—'}
+                      {wt ? (WORKER_TYPE_LABELS[wt] ?? '未识别岗位') : '—'}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {String(r.totalWorkHours)}
@@ -267,10 +280,17 @@ function FilterBar({
   selectedMonth,
   paid,
   workerId,
+  workers,
 }: {
   selectedMonth: string;
   paid: string | undefined;
   workerId: string | undefined;
+  workers: Array<{
+    id: string;
+    username: string;
+    displayName: string;
+    isActive: boolean;
+  }>;
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
@@ -298,15 +318,21 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅 id（选填）</label>
-        <input
+        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅</label>
+        <select
           id="hourly-workerId"
-          type="text"
           name="workerId"
           defaultValue={workerId ?? ''}
-          placeholder="留空=全部"
           className="rounded-md border bg-background px-3 py-1 text-sm"
-        />
+        >
+          <option value="">全部师傅</option>
+          {workers.map((worker) => (
+            <option key={worker.id} value={worker.id}>
+              {worker.displayName}（{worker.username}
+              {worker.isActive ? '' : ' · 已停用'}）
+            </option>
+          ))}
+        </select>
       </div>
       <Button type="submit" size="sm">
         筛选

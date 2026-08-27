@@ -40,7 +40,8 @@ describe('RecomputeDailyForm', () => {
     expect(html).toMatch(/<input[^>]*type="date"[^>]*required=""/);
     expect(html).toContain('查看影响');
     expect(html).toContain('预检只读取影响范围');
-    expect(html).toContain('确认时服务端会再次计算影响');
+    expect(html).toContain('确认时会按最新数据重新核对');
+    expect(html).not.toContain('服务端');
     expect(html).not.toContain('重算理由');
     expect(html).not.toContain('data-risk-level="L3"');
   });

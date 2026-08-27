@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useHorizontalScrollCue } from "@/components/ui/use-horizontal-scroll-cue"
 
 // 注意：外层这个可键盘聚焦的滚动容器（role=region + aria-label +
 // tabIndex）是本地相对 shadcn 原版加的，responsive-tables 门禁依赖它。
@@ -17,8 +18,11 @@ function Table({
   label = "数据表格",
   ...props
 }: React.ComponentProps<"table"> & { label?: string }) {
+  const scrollRef = useHorizontalScrollCue<HTMLDivElement>()
+
   return (
     <div
+      ref={scrollRef}
       data-slot="table-container"
       role="region"
       aria-label={label}

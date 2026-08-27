@@ -11,6 +11,7 @@ import {
   categoryChainLabelMap,
   listProductCategoryNodes,
 } from '@/lib/product';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -19,7 +20,7 @@ async function targetLabel(
 ): Promise<string> {
   if (!bom) return '—';
   if (bom.product) {
-    return `${bom.product.code ? `${bom.product.code} · ` : ''}${bom.product.name}`;
+    return `${bom.product.code ? `${bom.product.code} · ` : ''}${externalPriceBusinessText(bom.product.name)}`;
   }
   if (bom.categoryNode) {
     // 名称链消歧跨父级重名的分类
@@ -27,7 +28,7 @@ async function targetLabel(
     const label =
       categoryChainLabelMap(nodes).get(bom.categoryNode.id) ??
       bom.categoryNode.name;
-    return `分类 · ${label}`;
+    return `分类 · ${externalPriceBusinessText(label)}`;
   }
   return '—';
 }
@@ -47,7 +48,11 @@ export async function generateMetadata({ params }: PageProps) {
     return { title: 'BOM/用料' };
   }
   const bom = await loadBom(id);
-  return { title: bom ? `${bom.name} · BOM/用料` : 'BOM 不存在' };
+  return {
+    title: bom
+      ? `${externalPriceBusinessText(bom.name)} · BOM/用料`
+      : 'BOM 不存在',
+  };
 }
 
 export default async function OwnerBomDetailPage({ params }: PageProps) {
@@ -59,7 +64,7 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={bom.name}
+        title={externalPriceBusinessText(bom.name)}
         subtitle={`${await targetLabel(bom)} · v${bom.version} · 基准产量 ${bom.baseQuantity}`}
         actions={
           <Badge variant={bom.isActive ? 'outline' : 'secondary'}>
@@ -95,7 +100,8 @@ export default async function OwnerBomDetailPage({ params }: PageProps) {
                 bom.items.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
                     <td className="py-3 pr-3">
-                      {item.material.code} · {item.material.name}
+                      {item.material.code} ·{' '}
+                      {externalPriceBusinessText(item.material.name)}
                       {!item.material.isActive ? (
                         <span className="ml-2 text-xs text-muted-foreground">
                           已停用

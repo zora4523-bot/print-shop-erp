@@ -37,7 +37,7 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
     <div className="space-y-6">
       <PageHeader
         title="新建采购单"
-        subtitle="选择供应商和物料后创建采购单；采购单不直接改库存，到货时在详情页分批收货过账。"
+        subtitle="创建采购单不会增加库存；到货后可分批收货。"
         actions={
           <Link
             href="/owner/purchases"

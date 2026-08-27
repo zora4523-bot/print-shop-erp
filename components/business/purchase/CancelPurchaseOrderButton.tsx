@@ -29,7 +29,7 @@ export function purchaseOrderCancelImpactItems({
         `停止收货：${item.materialName}（${item.materialCode}）${item.quantity} ${item.unit}。`,
     ),
     '本操作不会删除采购单，也不会写入库存流水。',
-    '若服务器发现任一明细已有收货数量，将拒绝取消；需先取消对应收货过账。',
+    '已有收货明细时不可取消；需先取消收货过账。',
   ];
 }
 

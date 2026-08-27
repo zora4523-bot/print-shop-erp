@@ -31,6 +31,13 @@ beforeEach(() => {
 });
 
 describe('account action forms structured feedback', () => {
+  it('重置密码帮助不暴露存储实现', () => {
+    const html = renderToStaticMarkup(<ResetPasswordForm userId="user-1" />);
+
+    expect(html).toContain('8–72 位。');
+    expect(html).not.toContain('bcrypt');
+  });
+
   it('links password validation to a stable message and summary target', () => {
     actionState.current = {
       status: 'invalid',

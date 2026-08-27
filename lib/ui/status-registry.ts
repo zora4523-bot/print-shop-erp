@@ -349,7 +349,7 @@ export const DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY: StatusRegistry<DesignBundleD
     tone: 'neutral',
   },
   [DESIGN_BUNDLE_DISPLAY_STATUS.MOCK]: {
-    label: 'mock URL',
+    label: '暂不可下载',
     tone: 'neutral',
   },
 };

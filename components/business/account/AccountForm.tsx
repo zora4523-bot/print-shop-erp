@@ -242,7 +242,7 @@ export function AccountForm(props: Props) {
           <TextField
             id="password"
             label="初始密码"
-            hint="至少 8 位；最多 72 字符（bcrypt 限制）"
+            hint="8–72 位"
             type="password"
             required
             disabled={pending}
@@ -352,7 +352,7 @@ export function AccountForm(props: Props) {
             </FormMessage>
           ) : (
             <FormMessage fieldId="machineType" tone="hint" className="text-xs">
-              默认优先使用主机型；实际派工会按工艺与可操作机器的交集锁定计薪机型。
+              主机型默认优先；派工范围以可操作机器和工艺要求为准。
             </FormMessage>
           )}
         </div>
@@ -418,7 +418,7 @@ export function AccountForm(props: Props) {
         >
           <legend className="px-1 text-sm font-medium">熟练工艺（推荐项）</legend>
           <p className="text-xs text-muted-foreground">
-            勾选后排产时优先推荐。管理员仍可把设备和岗位匹配的其他工艺派给该师傅，但必须填写原因。
+            勾选后排产优先推荐；超出推荐范围需填写原因。
           </p>
           {eligibleCapabilityCrafts.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -605,7 +605,7 @@ function toAccountErrorSummary(
   return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
     messages.map((message) => ({
       fieldId,
-      label: ACCOUNT_FIELD_LABELS[fieldId] ?? fieldId,
+      label: ACCOUNT_FIELD_LABELS[fieldId] ?? '表单内容',
       message,
     })),
   );

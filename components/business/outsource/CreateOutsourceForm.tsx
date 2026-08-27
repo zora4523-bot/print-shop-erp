@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createOutsourceAction } from '@/actions/outsource';
 import type { OutsourceMutationResult } from '@/actions/outsource.types';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { nextOutsourceIdempotencyKey } from './idempotency';
 
 export type OutsourceFormItem = {
@@ -137,7 +138,7 @@ export function CreateOutsourceForm({
                   className="h-4 w-4"
                 />
                 <Label htmlFor={`item-${it.id}`} className="flex-1">
-                  #{it.sequence} · {it.name} · 数量{' '}
+                  #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}
                   {it.quantity.toLocaleString()}
                 </Label>
               </li>

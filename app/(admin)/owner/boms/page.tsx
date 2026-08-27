@@ -56,7 +56,7 @@ export default async function OwnerBomsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="BOM/用料"
-        subtitle="维护产品或产品分类的物料用量版本；当前阶段只做估算，不自动扣库存。"
+        subtitle="产品或产品结构的物料用量；不会自动扣减库存。"
         actions={
           <Link href="/owner/boms/new" className={buttonVariants()}>
             新建 BOM

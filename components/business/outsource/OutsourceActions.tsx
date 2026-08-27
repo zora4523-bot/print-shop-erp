@@ -117,9 +117,9 @@ export function OutsourceActions({
               title="确认该外协单已回货？"
               description={`${contextLabel}。预计回货：${expectedDateLabel}。`}
               impactItems={[
-                `实际回货日期：${actualDate || '今天（以服务器接收时间为准）'}`,
+                `实际回货日期：${actualDate || '今天'}`,
                 '外协单将进入已回货终态，不能直接回退。',
-                '系统会重新核对关联工单的内部任务与外协覆盖；全部满足时，工单可能自动生产完工并排队发送通知。',
+                '内部任务和外协工艺全部完成后，关联工单可能自动完工并发送通知。',
                 '本操作不会自动确认外协应付金额，也不会记录付款。',
               ]}
               confirmLabel="确认已回货"

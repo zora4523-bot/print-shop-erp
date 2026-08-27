@@ -16,6 +16,7 @@ import {
   type PurchaseOrderSummary,
 } from '@/lib/purchase';
 import type { SortDirection, TableHrefParams } from '@/lib/admin/table';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PurchaseOrderStatusBadge } from './PurchaseStatusBadge';
 
 type Props = {
@@ -118,7 +119,7 @@ export function PurchaseOrdersTable({
               <TableCell>
                 {firstItem ? (
                   <>
-                    <div>{firstItem.material.name}</div>
+                    <div>{externalPriceBusinessText(firstItem.material.name)}</div>
                     <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {firstItem.material.code}
                     </div>

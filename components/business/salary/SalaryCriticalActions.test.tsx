@@ -181,7 +181,8 @@ describe('salary critical-action confirmations', () => {
     expect(impact).toContain('本次底薪 ¥ 3000.00');
     expect(impact).toContain('底薪和提成将全部发放完成');
     expect(impact).toContain('不可覆盖的工资流水');
-    expect(impact).toContain('当前请求标识防止重复入账');
+    expect(impact).toContain('提交后请等待处理结果，勿重复录入');
+    expect(impact).not.toContain('请求标识');
 
     const html = renderToStaticMarkup(
       <CsPayrollPaymentForm
@@ -214,7 +215,10 @@ describe('salary critical-action confirmations', () => {
     expect(impact).toContain('目标月期：2026-07');
     expect(impact).toContain('3 条月结：2 条未发、1 条已发');
     expect(impact).toContain('当前未发记录合计 ¥ 1800.00');
-    expect(impact).toContain('每位人员使用独立事务');
+    expect(impact).toContain('逐人处理');
+    expect(impact).not.toContain('服务器');
+    expect(impact).not.toContain('独立事务');
+    expect(impact).not.toContain('规则快照');
 
     const html = renderToStaticMarkup(
       <RecomputeHourlyForm
@@ -230,9 +234,11 @@ describe('salary critical-action confirmations', () => {
   it('shows settlement amounts, terminal state and next-period behavior', () => {
     const impact = csPeriodSettlementImpactItems(settlementContext).join('\n');
     expect(impact).toContain('算档业绩（本期累计 + 期初）：¥ 200000.00');
-    expect(impact).toContain('转为已结算终态');
-    expect(impact).toContain('自动新建或复用衔接的下一周期');
-    expect(impact).toContain('整笔结算会原子拒绝');
+    expect(impact).toContain('生成提成记录，并锁定本周期');
+    expect(impact).toContain('自动开始或沿用下一周期');
+    expect(impact).toContain('本次结算不会生效');
+    expect(impact).not.toContain('服务器');
+    expect(impact).not.toContain('原子');
 
     const html = renderToStaticMarkup(
       <SettleCsPeriodButton
@@ -249,7 +255,8 @@ describe('salary critical-action confirmations', () => {
     expect(impact).toContain('2 个已到期周期，涉及 2 位客服');
     expect(impact).toContain('陈客服 · 2026-01-01 ~ 2026-04-30');
     expect(impact).toContain('可能大于当前初始预览数');
-    expect(impact).toContain('每个周期使用独立事务');
+    expect(impact).toContain('逐周期处理');
+    expect(impact).not.toContain('周期 ID');
 
     actionState.current = {
       status: 'success',
@@ -262,7 +269,8 @@ describe('salary critical-action confirmations', () => {
     );
     expect(html).toContain('data-status="partial"');
     expect(html).toContain('1 项成功，1 项失败');
-    expect(html).toContain('周期 period-2');
+    expect(html).toContain('未完成周期');
+    expect(html).not.toContain('period-2');
     expect(html).toContain('缺少提成档位');
   });
 

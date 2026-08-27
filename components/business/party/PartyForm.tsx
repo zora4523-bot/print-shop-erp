@@ -337,7 +337,7 @@ function toPartyErrorSummary(
   return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
     messages.map((message) => ({
       fieldId,
-      label: PARTY_FIELD_LABELS[fieldId] ?? fieldId,
+      label: PARTY_FIELD_LABELS[fieldId] ?? '表单内容',
       message,
     })),
   );

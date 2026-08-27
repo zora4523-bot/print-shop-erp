@@ -89,7 +89,8 @@ describe('purchase cancellation confirmation contracts', () => {
     expect(impact).toContain('华南纸业');
     expect(impact).toContain('250g 白卡纸（PAPER-250）1200.00 张');
     expect(impact).toContain('不会写入库存流水');
-    expect(impact).toContain('已有收货数量');
+    expect(impact).toContain('已有收货明细时不可取消');
+    expect(impact).toContain('需先取消收货过账');
   });
 
   it('describes the real receipt reversal, order rollback and stock alert', () => {

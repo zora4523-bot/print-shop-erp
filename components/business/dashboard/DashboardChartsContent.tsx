@@ -56,7 +56,7 @@ export function ProductionTrendChartContent({
     <ChartCard
       slot="dashboard-chart-trend-card"
       title="近 30 天产量趋势"
-      description="按完工时间汇总 · COMPLETED / SHIPPED / FINISHED"
+      description="按完工时间汇总"
     >
       <ProductionTrendChart data={data} />
     </ChartCard>
@@ -70,7 +70,7 @@ export function SalesRankingChartContent({
     <ChartCard
       slot="dashboard-chart-ranking-card"
       title="本月销售业绩 Top 10"
-      description="按提交时间归属 · SALES 蓝色 / 客服 绿色"
+      description="按提交时间归属"
     >
       <SalesRankingChart data={data} />
     </ChartCard>

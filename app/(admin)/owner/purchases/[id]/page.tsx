@@ -17,6 +17,7 @@ import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
 // 之前这里直接 receivedAt.toLocaleString('zh-CN')，走的是服务器本地
 // 时区——而部署里没有设 TZ，收货时间会随机器时区漂。
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -85,7 +86,9 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               {order.items.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">
                   <td className="py-3 pr-3">
-                    <div className="font-medium">{item.material.name}</div>
+                    <div className="font-medium">
+                      {externalPriceBusinessText(item.material.name)}
+                    </div>
                     <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {item.material.code}
                     </div>
@@ -119,7 +122,8 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               return (
                 <div key={item.id} className="rounded-lg border p-4">
                   <div className="mb-3 text-sm font-medium">
-                    {item.material.name} · 剩余 {remain} {item.material.unit}
+                    {externalPriceBusinessText(item.material.name)} · 剩余 {remain}{' '}
+                    {item.material.unit}
                   </div>
                   <PurchaseReceiptForm
                     action={boundReceiptAction}
@@ -161,7 +165,8 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                 <ul className="mb-3 space-y-1 text-sm">
                   {receipt.items.map((item) => (
                     <li key={item.id}>
-                      {item.material.name}：{decimal(item.quantity)} {item.material.unit}
+                      {externalPriceBusinessText(item.material.name)}：
+                      {decimal(item.quantity)} {item.material.unit}
                     </li>
                   ))}
                 </ul>
@@ -172,7 +177,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                     purchaseNo={order.purchaseNo}
                     items={receipt.items.map((item) => ({
                       materialCode: item.material.code,
-                      materialName: item.material.name,
+                      materialName: externalPriceBusinessText(item.material.name),
                       quantity: decimal(item.quantity),
                       unit: item.material.unit,
                     }))}
@@ -200,7 +205,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
             supplierName={order.supplierName}
             items={order.items.map((item) => ({
               materialCode: item.material.code,
-              materialName: item.material.name,
+              materialName: externalPriceBusinessText(item.material.name),
               quantity: decimal(item.quantity),
               unit: item.material.unit,
             }))}

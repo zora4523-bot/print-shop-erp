@@ -18,6 +18,7 @@ import {
   MATERIAL_CATEGORY_LABELS,
 } from '@/lib/material';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -35,7 +36,9 @@ export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
   const material = await getMaterialSummary(id);
   return {
-    title: material ? `编辑 ${material.name} · 物料库存` : '物料不存在',
+    title: material
+      ? `编辑 ${externalPriceBusinessText(material.name)} · 物料库存`
+      : '物料不存在',
   };
 }
 
@@ -64,7 +67,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`编辑物料：${material.name}`}
+        title={`编辑物料：${externalPriceBusinessText(material.name)}`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         actions={
           <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>

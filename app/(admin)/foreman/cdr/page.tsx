@@ -63,15 +63,13 @@ export default async function ForemanCdrPage({
     <div className="space-y-6">
       <PageHeader
         title="CDR 汇总下载"
-        subtitle="按日期窗口勾选工单 → 生成 ZIP 包 → 24 小时有效短链发外协。"
+        subtitle="按日期选择工单，生成 24 小时有效的外协下载链接。"
       />
 
       {mock ? (
         <EnvNotice>
-          <strong className="text-foreground">OSS 未配置 / mock-mode</strong>
-          ：可以走完「勾选 → 生成下载包」流程并写入 DesignBundle 记录，但 ZIP
-          文件 URL 是占位（<code>mock://...</code>），外协下载会返 503。上线时在
-          .env 配齐 OSS_* 后即可真打包。
+          <strong className="text-foreground">下载功能暂不可用</strong>
+          ：文件存储尚未配置，请联系系统管理员。
         </EnvNotice>
       ) : null}
 

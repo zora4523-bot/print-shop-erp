@@ -134,7 +134,7 @@ export default async function OwnerBillDetailPage({
           </h1>
           <p className="text-sm text-muted-foreground">
             周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}
-            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
+            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? '未识别角色'}
             {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
             {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
@@ -196,7 +196,7 @@ export default async function OwnerBillDetailPage({
         </dl>
         {openingAmount.isZero() ? null : (
           <p className="text-xs text-muted-foreground">
-            该金额用于解释逐单账单启用前的历史账面差额；总额 = 此差额 + 工单明细。
+            历史期初/手工差额 + 工单明细 = 应收总额。
           </p>
         )}
         {isCsAttributedBill ? (
@@ -249,18 +249,10 @@ export default async function OwnerBillDetailPage({
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">发单</h2>
-          <p className="text-xs text-muted-foreground">
-            发单后进入 ISSUED，可接受付款。状态单向，不可回退到 DRAFT。发单
-            前请先在列表页&ldquo;生成 / 追加月账单&rdquo;把截至目前所有完工
-            工单汇入，因为发单后 {BILL_STATUS_REGISTRY[BillStatus.ISSUED].label} /
-            {BILL_STATUS_REGISTRY[BillStatus.PARTIAL_PAID].label} /
-            {BILL_STATUS_REGISTRY[BillStatus.FULLY_PAID].label} 的账单不再由生成流程
-            自动追加新工单。
-          </p>
           <IssueBillButton
             billId={bill.id}
             period={bill.period}
-            recipientLabel={`${bill.salesUser.displayName}（${ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}）`}
+            recipientLabel={`${bill.salesUser.displayName}（${ROLE_LABELS[bill.salesUser.role] ?? '未识别角色'}）`}
             totalAmount={total.toFixed(2)}
             orderCount={bill.items.length}
           />
@@ -271,13 +263,11 @@ export default async function OwnerBillDetailPage({
       bill.status === BillStatus.PARTIAL_PAID ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">录入付款</h2>
-          <p className="text-xs text-muted-foreground">
-            累加式记账；累计 = 总额自动切 FULLY_PAID 终态（不可回退）。最多可录
-            入 <span className="font-sans tabular-nums">¥ {remaining.toFixed(2)}</span>。
-            {isCsAttributedBill
-              ? ' 该账单归属客服；客服销售额已在工单提交时记入，收款不会重复计算提成。'
-              : ''}
-          </p>
+          {isCsAttributedBill ? (
+            <p className="text-xs text-muted-foreground">
+              该账单归属客服；客服业绩已在工单提交时计入，本次收款不会重复计算提成。
+            </p>
+          ) : null}
           <RecordPaymentForm
             billId={bill.id}
             remainingAmount={remaining.toFixed(2)}

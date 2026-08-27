@@ -59,7 +59,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
-        subtitle="逐项核对报工数量、工单、工艺、规则快照和人工调整。上班/请假天数不自动扣减计件保底；已发放后整条记录锁定。"
+        subtitle="核对报工、计件、保底与调整；已发放记录不可修改。"
         actions={
           <div className="flex gap-2">
             <Link

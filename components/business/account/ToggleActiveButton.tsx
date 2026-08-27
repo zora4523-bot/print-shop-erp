@@ -35,7 +35,7 @@ export function ToggleActiveButton({
         pending={pending}
         formId={formId}
         activateVerb="激活"
-        deactivateDescription="停用不是删除。服务器仍会校验不能停用自己，也不能停用最后一位活跃管理员。"
+        deactivateDescription="停用不是删除。不能停用当前登录账号或最后一位启用管理员。"
         activateDescription="激活后，该账号将恢复登录能力。"
         deactivateImpactItems={[
           '该账号将无法继续登录系统',

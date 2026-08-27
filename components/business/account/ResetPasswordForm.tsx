@@ -68,7 +68,7 @@ export function ResetPasswordForm({ userId }: { userId: string }) {
           </FormMessage>
         ) : (
           <FormMessage fieldId="newPassword" tone="hint" className="text-xs">
-            至少 8 位；最多 72 字符（bcrypt 限制）。
+            8–72 位。
           </FormMessage>
         )}
       </div>

@@ -9,19 +9,20 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { BomSummary } from '@/lib/bom';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 function targetLabel(
   bom: BomSummary,
   categoryLabelById: Record<string, string>,
 ): string {
   if (bom.product) {
-    return `${bom.product.code ? `${bom.product.code} · ` : ''}${bom.product.name}`;
+    return `${bom.product.code ? `${bom.product.code} · ` : ''}${externalPriceBusinessText(bom.product.name)}`;
   }
   if (bom.categoryNode) {
     // 名称链（"定制 / 平面烫金"）消歧跨父级重名的分类
     const label =
       categoryLabelById[bom.categoryNode.id] ?? bom.categoryNode.name;
-    return `分类 · ${label}`;
+    return `分类 · ${externalPriceBusinessText(label)}`;
   }
   return '—';
 }
@@ -53,7 +54,7 @@ export function BomsTable({
       <TableBody>
         {boms.map((bom) => (
           <TableRow key={bom.id} className={!bom.isActive ? 'opacity-60' : undefined}>
-            <TableCell>{bom.name}</TableCell>
+            <TableCell>{externalPriceBusinessText(bom.name)}</TableCell>
             <TableCell className="text-muted-foreground">
               {targetLabel(bom, categoryLabelById)}
             </TableCell>
