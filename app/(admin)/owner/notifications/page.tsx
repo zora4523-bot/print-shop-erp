@@ -10,6 +10,10 @@ import {
   listUnresolvedNotificationLogs,
 } from '@/lib/notification/admin';
 import { isMockMode } from '@/lib/notification';
+import {
+  notificationDeliveryMessage,
+  notificationEventLabel,
+} from '@/lib/notification/event-labels';
 import { DeleteChannelButton } from '@/components/business/notification/DeleteChannelButton';
 import { TestChannelButton } from '@/components/business/notification/TestChannelButton';
 import { UnknownNotificationActions } from '@/components/business/notification/UnknownNotificationActions';
@@ -77,16 +81,13 @@ export default async function OwnerNotificationsPage({
     <div className="space-y-8">
       <PageHeader
         title="推送配置"
-        subtitle="企业微信群机器人 webhook 配置 + 11 个事件规则。"
+        subtitle="管理企业微信群、通知规则和投递记录。"
       />
 
       {mock ? (
         <div data-slot="notifications-mock-banner">
           <EnvNotice>
-            当前 <strong className="text-foreground">mock-mode</strong>：通知不会真发到企业微信，
-            NotificationLog 仍然记录（status=SUCCESS / errorMessage=MOCK）。
-            上线时请把 <code>NOTIFICATION_MOCK_MODE</code> 设为{' '}
-            <code>false</code>。
+            当前为测试模式，通知不会发送到企业微信。
           </EnvNotice>
         </div>
       ) : null}
@@ -137,7 +138,6 @@ export default async function OwnerNotificationsPage({
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 text-left">channelKey</th>
                   <th className="px-3 py-2 text-left">群名</th>
                   <th className="px-3 py-2 text-left">Webhook</th>
                   <th className="px-3 py-2 text-center">状态</th>
@@ -148,7 +148,6 @@ export default async function OwnerNotificationsPage({
               <tbody className="divide-y">
                 {channels.map((c) => (
                   <tr key={c.id}>
-                    <td className="px-3 py-2 font-mono text-xs">{c.channelKey}</td>
                     <td className="px-3 py-2">{c.channelName}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                       {maskWebhookUrl(c.webhookUrl)}
@@ -202,11 +201,7 @@ export default async function OwnerNotificationsPage({
           <ErrorState
             blocking
             title="默认通知规则尚未初始化"
-            description={
-              <>
-                请由开发或运维人员运行 <code>pnpm prisma db seed</code>，完成后刷新本页。
-              </>
-            }
+            description="请联系运维人员完成初始化，然后刷新本页。"
           />
         ) : (
           <div
@@ -228,7 +223,9 @@ export default async function OwnerNotificationsPage({
               <tbody className="divide-y">
                 {rules.map((r) => (
                   <tr key={r.eventType}>
-                    <td className="px-3 py-2 font-mono text-xs">{r.eventType}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {notificationEventLabel(r.eventType)}
+                    </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {firstLine(r.messageTemplate)}
                     </td>
@@ -290,7 +287,7 @@ export default async function OwnerNotificationsPage({
                   <th className="px-3 py-2 text-left">事件</th>
                   <th className="px-3 py-2 text-left">群</th>
                   <th className="px-3 py-2 text-center">投递状态</th>
-                  <th className="px-3 py-2 text-center">后台任务</th>
+                  <th className="px-3 py-2 text-center">重发状态</th>
                   <th className="px-3 py-2 text-left">原因</th>
                   <th className="px-3 py-2 text-right">人工处置</th>
                 </tr>
@@ -301,8 +298,8 @@ export default async function OwnerNotificationsPage({
                     <td className="px-3 py-2 font-mono text-xs">
                       {formatDateTimeShanghai(log.lastAttemptAt)}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {log.eventType}
+                    <td className="px-3 py-2 text-xs">
+                      {notificationEventLabel(log.eventType)}
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {log.channelName ?? '已删除'}
@@ -319,7 +316,8 @@ export default async function OwnerNotificationsPage({
                       />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {log.errorMessage ?? '未获得可信的下游确认'}
+                      {notificationDeliveryMessage(log.errorMessage) ??
+                        '未获得可信的送达确认'}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {log.status === 'UNKNOWN' ? (
@@ -336,7 +334,7 @@ export default async function OwnerNotificationsPage({
                             size: 'sm',
                           })}
                         >
-                          查看死信任务
+                          查看失败记录
                         </Link>
                       )}
                     </td>
@@ -391,8 +389,8 @@ export default async function OwnerNotificationsPage({
                   <th className="px-3 py-2 text-left">事件</th>
                   <th className="px-3 py-2 text-left">群</th>
                   <th className="px-3 py-2 text-center">投递状态</th>
-                  <th className="px-3 py-2 text-center">后台任务</th>
-                  <th className="px-3 py-2 text-left">错误 / 标记</th>
+                  <th className="px-3 py-2 text-center">重发状态</th>
+                  <th className="px-3 py-2 text-left">结果</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -401,7 +399,9 @@ export default async function OwnerNotificationsPage({
                     <td className="px-3 py-2 font-mono text-xs">
                       {formatDateTimeShanghai(l.lastAttemptAt)}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">{l.eventType}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {notificationEventLabel(l.eventType)}
+                    </td>
                     <td className="px-3 py-2 text-xs">
                       {l.channelName ?? <span className="text-muted-foreground">已删除</span>}
                     </td>
@@ -417,7 +417,8 @@ export default async function OwnerNotificationsPage({
                       />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {l.errorMessage ?? (l.status === 'SUCCESS' ? '—' : '')}
+                      {notificationDeliveryMessage(l.errorMessage) ??
+                        (l.status === 'SUCCESS' ? '—' : '推送失败')}
                       {l.retryCount > 0 ? ` · 重试 ${l.retryCount} 次` : ''}
                     </td>
                   </tr>
@@ -452,10 +453,10 @@ function BackgroundJobStatusBadge({
   hasDurableJob: boolean;
 }) {
   if (!hasDurableJob) {
-    return <UiStatusBadge tone="neutral">无持久任务</UiStatusBadge>;
+    return <UiStatusBadge tone="neutral">不可重发</UiStatusBadge>;
   }
   if (!status) {
-    return <UiStatusBadge tone="danger">任务缺失</UiStatusBadge>;
+    return <UiStatusBadge tone="danger">记录缺失</UiStatusBadge>;
   }
   const definition = BACKGROUND_JOB_STATUS_REGISTRY[status];
   return (

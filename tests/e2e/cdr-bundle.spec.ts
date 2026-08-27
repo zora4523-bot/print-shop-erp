@@ -48,9 +48,10 @@ test.describe('CDR 汇总下载 — golden path', () => {
     await expect(page.getByText(/已生成 \d+ 个 CDR 文件的下载包/)).toBeVisible({
       timeout: 10_000,
     });
-    // OSS 未配置时显示 mock-mode 提示（页头 banner + 成功 banner 各一处，
-    // 任一可见即可）
-    await expect(page.getByText(/mock-mode|OSS 未配置/).first()).toBeVisible();
+    // 文件存储未配置时显示可执行的业务提示。
+    await expect(
+      page.getByText(/下载功能暂不可用|文件存储尚未配置/).first(),
+    ).toBeVisible();
 
     // success banner 里的 link：href = 绝对 URL（含 host），文本也是
     // 绝对 URL —— "复制链接地址"和"复制文字"得到一致结果（Codex

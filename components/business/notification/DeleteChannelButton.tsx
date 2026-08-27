@@ -65,7 +65,7 @@ export function DeleteChannelButton({
         description="删除后无法撤销，请确认这不是暂时停用。"
         impactItems={[
           '该群配置会从系统中永久删除。',
-          '如果有规则或历史投递日志引用它，服务器会拒绝删除并说明原因。',
+          '存在规则或历史投递记录时无法删除。',
         ]}
         confirmLabel="确认删除"
         onConfirm={() => {

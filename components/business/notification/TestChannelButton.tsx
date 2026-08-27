@@ -50,7 +50,7 @@ export function TestChannelButton({
         variant="secondary"
         pending={pending}
         pendingLabel="发送中…"
-        title="触发一条测试消息（mock-mode 下不真发）"
+        title="发送测试消息（测试模式下不会实际发送）"
         onClick={() => {
           setResult(null);
           startTransition(async () => {
@@ -68,10 +68,10 @@ export function TestChannelButton({
       {result?.status === 'success' ? (
         <ActionNotice
           tone="success"
-          title={result.mock ? '模拟测试已记录' : '测试消息已发送'}
+          title={result.mock ? '测试结果已记录' : '测试消息已发送'}
           description={
             result.mock
-              ? '未发起真实 HTTP 请求；NotificationLog 已写入 SUCCESS / MOCK。'
+              ? '当前为测试模式，未向企业微信群发送消息。'
               : '请到对应企业微信群核对消息。'
           }
           className="max-w-sm p-2 text-left"

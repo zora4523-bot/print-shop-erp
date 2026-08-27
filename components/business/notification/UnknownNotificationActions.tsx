@@ -99,7 +99,7 @@ export function UnknownNotificationActions({
             title="确认未送达并安全重发？"
             description="请先在对应群中确认消息确实不存在。"
             impactItems={[
-              '使用原后台任务内容和原投递目标，不套用当前规则。',
+              '使用原消息内容和原投递目标，不套用当前规则。',
               '同一任务的所有结果不明项核对完成后，才会重新入队。',
             ]}
             confirmLabel="确认未送达并重发"
@@ -108,7 +108,7 @@ export function UnknownNotificationActions({
         ) : (
           <DisabledReason
             cause="status"
-            reason="该日志没有可重放的持久化后台任务，无法自动重发"
+            reason="该消息缺少重发记录，无法自动重发"
             className="items-end text-right [&_[data-slot=disabled-reason-copy]]:max-w-72 [&_[data-slot=disabled-reason-copy]]:text-xs"
           >
             <Button type="button" size="xs" variant="outline" disabled>
@@ -130,7 +130,7 @@ export function UnknownNotificationActions({
           description="忽略表示不再确认是否送达，也不重发该条消息。"
           impactItems={[
             '投递状态会记为“失败”并移出待人工处理队列。',
-            '系统会保留操作人、时间、理由、变更前后状态和当时后台任务快照。',
+            '系统会保留操作人、时间、理由、变更前后状态和原消息记录。',
           ]}
           confirmLabel="确认忽略"
           reasonLabel="忽略理由"

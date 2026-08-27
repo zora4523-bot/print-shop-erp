@@ -35,6 +35,7 @@ import type {
   NotificationResolutionResult,
 } from './owner-notifications.types';
 import { collectFieldErrors } from '@/lib/admin/action-helpers';
+import { notificationEventLabel } from '@/lib/notification/event-labels';
 
 // NB: 同 actions/owner-accounts.ts 的注释——`'use server'` module 只能
 // 导出 async function；类型 re-export 会被 RSC 编译时静默吃掉。客户端
@@ -61,7 +62,7 @@ function mapPrismaError(err: unknown): NotificationMutationResult | null {
       if (matchesUnique(targets, CHANNEL_KEY_UNIQUE_SYNONYMS)) {
         return {
           status: 'invalid',
-          fieldErrors: { channelKey: ['该 channelKey 已被占用'] },
+          fieldErrors: { channelKey: ['该群标识已被占用'] },
         };
       }
     }
@@ -147,7 +148,9 @@ export async function deleteChannelAction(
     await deleteChannel(channelId);
   } catch (err) {
     if (err instanceof ChannelInUseError) {
-      const refs = err.referencingRules.map((r) => r.eventType).join('、');
+      const refs = err.referencingRules
+        .map((rule) => notificationEventLabel(rule.eventType))
+        .join('、');
       return {
         status: 'error',
         message: `该群仍被 ${err.referencingRules.length} 条规则引用（含未启用：${refs}），先在规则里移除再删。`,
@@ -160,7 +163,7 @@ export async function deleteChannelAction(
     ) {
       return {
         status: 'error',
-        message: '该群有历史推送日志，无法删除。请改为停用（isActive=false）。',
+        message: '该群有历史推送记录，无法删除。请改为停用。',
       };
     }
     // Unknown error — rethrow to onRequestError → Sentry.
@@ -219,7 +222,7 @@ export async function updateRuleAction(
         status: 'invalid',
         fieldErrors: {
           channelIds: [
-            `选中的群已被删除：${err.invalidIds.join('、')}。请重新选择。`,
+            '部分所选群已被删除，请重新选择。',
           ],
         },
       };
@@ -229,7 +232,7 @@ export async function updateRuleAction(
         status: 'invalid',
         fieldErrors: {
           channelIds: [
-            `不能新绑定已停用的群：${err.inactiveIds.join('、')}。请先到群配置启用。`,
+            '不能新绑定已停用的群，请先到群配置启用。',
           ],
         },
       };
@@ -237,7 +240,7 @@ export async function updateRuleAction(
     if (err instanceof RuleNotFoundError) {
       return {
         status: 'error',
-        message: `事件 ${err.eventType} 不存在或已下线`,
+        message: '该事件不存在或已下线',
       };
     }
     // Unknown error — rethrow to onRequestError → Sentry.

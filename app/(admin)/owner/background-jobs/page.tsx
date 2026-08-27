@@ -18,6 +18,10 @@ import {
 import { BackgroundJobStatus } from '@/generated/prisma/enums';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { BACKGROUND_JOB_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import {
+  backgroundJobQueueLabel,
+  backgroundJobTypeLabel,
+} from '@/lib/background-jobs/labels';
 
 export const metadata = { title: '后台任务 · 红包印刷 ERP' };
 export const dynamic = 'force-dynamic';
@@ -33,7 +37,7 @@ export default async function BackgroundJobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="后台任务"
-        subtitle="通知、定时结算和文件生成的持久化账本。普通失败任务可重试；导出失败请回工单列表重新发起。"
+        subtitle="查看后台任务状态和失败记录；普通失败可重试，导出失败需重新发起。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -59,7 +63,7 @@ export default async function BackgroundJobsPage() {
         <div className="mt-2 flex flex-wrap gap-2">
           {health.activeWorkers.length ? health.activeWorkers.map((worker, index) => (
             <Badge key={`${worker.queue}-${index}`} variant="outline">
-              {worker.queue} · {worker.version} · {formatDateTimeShanghai(worker.lastSeenAt)}
+              {backgroundJobQueueLabel(worker.queue)} · {formatDateTimeShanghai(worker.lastSeenAt)}
             </Badge>
           )) : <span className="text-destructive">未检测到 worker 心跳</span>}
         </div>
@@ -98,8 +102,8 @@ export default async function BackgroundJobsPage() {
             {jobs.map((job) => (
               <tr key={job.id}>
                 <td className="px-3 py-2 text-xs">{formatDateTimeShanghai(job.createdAt)}</td>
-                <td className="px-3 py-2 font-mono text-xs">{job.type}</td>
-                <td className="px-3 py-2"><Badge variant="outline">{job.queue}</Badge></td>
+                <td className="px-3 py-2 text-xs">{backgroundJobTypeLabel(job.type)}</td>
+                <td className="px-3 py-2"><Badge variant="outline">{backgroundJobQueueLabel(job.queue)}</Badge></td>
                 <td className="px-3 py-2"><JobStatus status={job.status} /></td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{job.attempts}/{job.maxAttempts}</td>
                 {/* 通知的永久性投递失败让 job 正常 SUCCEEDED（重试也是同样

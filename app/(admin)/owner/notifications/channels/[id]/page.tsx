@@ -24,7 +24,7 @@ export default async function EditChannelPage({
       <div>
         <h1 className="text-xl font-semibold">编辑群</h1>
         <p className="text-sm text-muted-foreground">
-          修改群名 / Webhook URL / 启停。channelKey 不可改。
+          修改群名和推送地址，或调整启停状态。群标识不可修改。
         </p>
       </div>
       <ChannelForm

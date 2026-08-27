@@ -238,8 +238,7 @@ export function CreateBundleForm({
           />
           {state.isMock ? (
             <EnvNotice>
-              <strong className="text-foreground">mock-mode</strong>：URL
-              是占位，OSS 配齐后才能真下载。
+              文件存储尚未启用，当前下载地址不可用。
             </EnvNotice>
           ) : null}
         </div>

@@ -46,7 +46,7 @@ export function ChannelForm(props: Props) {
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="channelKey">channelKey（标识符，建好后不可改）</Label>
+        <Label htmlFor="channelKey">群标识（创建后不可修改）</Label>
         {isCreate ? (
           <Input
             id="channelKey"
@@ -69,9 +69,7 @@ export function ChannelForm(props: Props) {
           </p>
         ))}
         <p className="text-xs text-muted-foreground">
-          英文小写 / 数字 / 下划线，如 <code>scheduling_group</code>、
-          <code>owner_group</code>、<code>shipping_group</code>。系统内部使用，
-          不展示给群成员。
+          英文小写、数字或下划线，例如 <code>scheduling_group</code>。
         </p>
       </div>
 
@@ -108,7 +106,7 @@ export function ChannelForm(props: Props) {
           </p>
         ))}
         <p className="text-xs text-muted-foreground">
-          来自企业微信群机器人配置页面。仅管理员可见 / 编辑。
+          从企业微信群机器人配置中复制。
         </p>
       </div>
 

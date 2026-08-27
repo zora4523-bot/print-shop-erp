@@ -88,9 +88,8 @@ describe('UnknownNotificationActions', () => {
 
     expect(retryButton).toBeDefined();
     expect(retryButton).toContain('disabled=""');
-    expect(html).toContain(
-      '该日志没有可重放的持久化后台任务，无法自动重发',
-    );
+    expect(html).toContain('该消息缺少重发记录，无法自动重发');
+    expect(html).not.toContain('持久化后台任务');
     expect(html).not.toContain('title="该日志没有');
   });
 
