@@ -58,6 +58,24 @@ function hasDate(value: Date | string | null | undefined): boolean {
   return hasText(value);
 }
 
+function quoteGapLabel(
+  status: Exclude<OrderFormQuoteStatus, 'complete'> | undefined,
+): string {
+  switch (status) {
+    case 'stale':
+      return '报价条件已变化，需重新核价';
+    case 'loading':
+      return '正在核价';
+    case 'incomplete':
+      return '自动报价不完整，需人工报价';
+    case 'error':
+      return '自动报价失败，需重试或人工报价';
+    case 'missing':
+    case undefined:
+      return '尚未核价';
+  }
+}
+
 /**
  * Builds the operator-facing readiness list. These are not all Zod-required
  * fields: customer/deadline and the automatic quote paths are intentionally
@@ -144,16 +162,7 @@ export function collectOrderFormGaps(
       const hasReason = hasText(item.priceOverrideReason);
       const manualQuoteResolved = item.manualPriceProvided && hasReason;
       if (item.quoteStatus !== 'complete' && !manualQuoteResolved) {
-        const stateLabel =
-          item.quoteStatus === 'stale'
-            ? '报价条件已变化，需重新核价'
-            : item.quoteStatus === 'loading'
-              ? '正在核价'
-              : item.quoteStatus === 'incomplete'
-                ? '自动报价不完整，需人工报价'
-                : item.quoteStatus === 'error'
-                  ? '自动报价失败，需重试或人工报价'
-                  : '尚未核价';
+        const stateLabel = quoteGapLabel(item.quoteStatus);
         gaps.push({
           id: `item-${index}-quote`,
           step: 'items',
