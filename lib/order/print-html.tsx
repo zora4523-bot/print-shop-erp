@@ -41,7 +41,10 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
     : Promise.resolve();
   Promise.all([fontsReady, ...images.map(waitForImage)]).finally(() => {
     if (failedFigures.size > 0) {
-      const message = '设计图加载失败：图 ' + Array.from(failedFigures).join('、');
+      const figures = Array.from(failedFigures);
+      const preview = figures.slice(0, 6).join('、');
+      const remaining = figures.length > 6 ? ' 等，共 ' + figures.length + ' 款' : '';
+      const message = '设计图加载失败：图 ' + preview + remaining;
       document.querySelectorAll('.image-load-warning').forEach((node) => {
         node.hidden = false;
         node.textContent = message;
@@ -66,9 +69,14 @@ const STANDALONE_PRINT_READY_SCRIPT = String.raw`
 // is only ever pulled by server-only entry points). The dynamic
 // import sidesteps the guard and is paid lazily on first call —
 // negligible vs. Puppeteer cold start that comes right after.
-export async function buildPrintHtml(order: PrintOrder): Promise<string> {
+export async function buildPrintHtml(
+  order: PrintOrder,
+  options: { factoryName: string },
+): Promise<string> {
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const body = renderToStaticMarkup(<OrderPrintLayout order={order} />);
+  const body = renderToStaticMarkup(
+    <OrderPrintLayout order={order} factoryName={options.factoryName} />,
+  );
 
   // Minimal doc shell — the layout injects its own <style>, and all
   // image / QR assets are either absolute URLs (OSS) or inline SVG.

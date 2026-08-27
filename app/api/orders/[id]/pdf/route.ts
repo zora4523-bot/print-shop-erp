@@ -8,6 +8,7 @@ import {
 } from '@/lib/order/print-html';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
+import { getSetting } from '@/lib/settings';
 import {
   enqueueOrderPdfJob,
   readAndDeletePdfArtifact,
@@ -88,7 +89,8 @@ export async function GET(_req: Request, ctx: Params) {
     }
   } else {
     try {
-      const html = await buildPrintHtml(order);
+      const { name: factoryName } = await getSetting('factory_name');
+      const html = await buildPrintHtml(order, { factoryName });
       pdf = await renderHtmlToPdf({ html });
     } catch (err) {
       // Most likely cause here is Chromium not yet installed on the

@@ -4,6 +4,7 @@ import { getOrderForPrint } from '@/lib/order/print-view';
 import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderPrintTitle } from '@/lib/page-title/titles';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
+import { getSetting } from '@/lib/settings';
 import { OrderPrintLayout } from '@/components/business/order/OrderPrintLayout';
 import { AutoPrint } from '@/components/business/order/AutoPrint';
 
@@ -36,6 +37,7 @@ export default async function OrderPrintViewPage({
     baseUrl,
   );
   if (!order) notFound();
+  const { name: factoryName } = await getSetting('factory_name');
 
   // Browser print path opts in via `?autoprint=1`; Puppeteer visits
   // without the query so PDF capture happens cleanly. Accept any
@@ -50,7 +52,7 @@ export default async function OrderPrintViewPage({
 
   return (
     <>
-      <OrderPrintLayout order={order} />
+      <OrderPrintLayout order={order} factoryName={factoryName} />
       <AutoPrint enabled={autoprint} />
     </>
   );

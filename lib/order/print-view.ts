@@ -1,6 +1,6 @@
 import { buildQrSvg } from './qr';
 import { db } from '../db';
-import { Role } from '../../generated/prisma/enums';
+import { Role, TaskStatus } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { signDesignReadUrl } from '../oss/read-url';
 import type {
@@ -61,10 +61,11 @@ export async function getOrderForPrint(
         orderBy: { sequence: 'asc' },
         include: {
           designs: {
-            orderBy: { uploadedAt: 'asc' },
+            orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
           },
           tasks: {
-            orderBy: { createdAt: 'asc' },
+            where: { status: { not: TaskStatus.CANCELLED } },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             include: {
               craft: { select: { name: true } },
               worker: { select: { displayName: true } },
@@ -99,51 +100,65 @@ export async function getOrderForPrint(
     { errorCorrectionLevel: 'Q' },
   );
 
-  const printItems: PrintOrderItem[] = order.items.map((item) => ({
-    id: item.id,
-    sequence: item.sequence,
-    name: item.name,
-    pricingRoute: item.pricingRoute,
-    artworkVersion: item.artworkVersion,
-    specification: item.specification,
-    paperType: item.paperType,
-    paperWeightGsm: item.paperWeightGsm,
-    quantity: item.quantity,
-    frontFoilColors: item.frontFoilColors,
-    backFoilColors: item.backFoilColors,
-    foilColors: item.foilColors,
-    isDoubleSided: item.isDoubleSided,
-    isDoubleColor: item.isDoubleColor,
-    // Drop unresolvable IDs silently rather than rendering a raw cuid
-    // into the printed sheet — if a craft was deleted, the workshop
-    // shouldn't see garbage on paper.
-    craftNames: item.crafts
-      .map((cid) => craftNameById.get(cid))
-      .filter((n): n is string => typeof n === 'string'),
-    remark: item.remark,
-    designs: item.designs.map(
-      (d): PrintDesign => ({
-        id: d.id,
-        fileType: d.fileType,
-        // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
-        // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
-        // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
-        fileUrl:
-          d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
-      }),
-    ),
-    tasks: item.tasks.map(
-      (t): PrintTask => ({
-        id: t.id,
-        craftName: t.craft.name,
-        workerDisplayName: t.worker?.displayName ?? null,
-        plannedQty: t.plannedQty,
-        completedQty: t.completedQty,
-        defectQty: t.defectQty,
-        completedAt: t.completedAt,
-      }),
-    ),
-  }));
+  const printItems: PrintOrderItem[] = await Promise.all(
+    order.items.map(async (item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      name: item.name,
+      pricingRoute: item.pricingRoute,
+      artworkVersion: item.artworkVersion,
+      specification: item.specification,
+      paperType: item.paperType,
+      paperWeightGsm: item.paperWeightGsm,
+      quantity: item.quantity,
+      frontFoilColors: item.frontFoilColors,
+      backFoilColors: item.backFoilColors,
+      foilColors: item.foilColors,
+      foilTechnique: item.foilTechnique,
+      hasLocalFoil: item.hasLocalFoil,
+      lamination: item.lamination,
+      printColors: item.printColors,
+      printColorsKnown: item.printColorsKnown,
+      isDoubleSided: item.isDoubleSided,
+      isDoubleColor: item.isDoubleColor,
+      // Drop unresolvable IDs silently rather than rendering a raw cuid
+      // into the printed sheet — if a craft was deleted, the workshop
+      // shouldn't see garbage on paper.
+      craftNames: item.crafts
+        .map((cid) => craftNameById.get(cid))
+        .filter((n): n is string => typeof n === 'string'),
+      remark: item.remark,
+      designs: item.designs.map(
+        (d): PrintDesign => ({
+          id: d.id,
+          fileType: d.fileType,
+          // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
+          // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
+          // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
+          fileUrl:
+            d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
+        }),
+      ),
+      tasks: await Promise.all(
+        item.tasks.map(
+          async (t): Promise<PrintTask> => ({
+            id: t.id,
+            craftName: t.craft.name,
+            workerDisplayName: t.worker?.displayName ?? null,
+            plannedQty: t.plannedQty,
+            completedQty: t.completedQty,
+            defectQty: t.defectQty,
+            completedAt: t.completedAt,
+            taskQrSvg: await buildQrSvg(
+              `${base}/worker/tasks/${encodeURIComponent(t.id)}`,
+              55,
+              { errorCorrectionLevel: 'Q' },
+            ),
+          }),
+        ),
+      ),
+    })),
+  );
   const printPackagingGroups: PrintPackagingGroup[] =
     order.packagingGroups.map((group) => ({
       id: group.id,

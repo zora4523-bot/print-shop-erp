@@ -4,15 +4,17 @@ import { formatDateInputShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 import type {
+  PrintFoilTechnique,
+  PrintLamination,
   PrintOrder,
   PrintOrderItem,
   PrintPackagingGroup,
   PrintShipment,
-  PrintTask,
 } from './OrderPrintLayout.types';
 
 interface Props {
   order: PrintOrder;
+  factoryName: string;
 }
 
 type Artwork = {
@@ -31,20 +33,61 @@ type ItemPackaging = {
 
 type FlowRow = {
   key: string;
+  itemSequence: number | null;
+  itemName: string | null;
   name: string;
+  worker: string | null;
   planned: string;
   completed: string;
   defect: string;
   completedAt: string;
+  taskQrSvg: string | null;
 };
 
-const MAX_ARTWORKS_ON_MAIN_PAGE = 8;
+type SupplementPage = {
+  key: string;
+  label: string;
+  part: number;
+  totalParts: number;
+  value: string;
+};
 
-const PRICING_ROUTE_LABEL: Record<PrintOrderItem['pricingRoute'], string> = {
-  STOCK_BLANK: '局部烫金',
-  CUSTOM_SINGLE_FLAT_FOIL: '专版烫金',
-  COLOR_PRINT: '彩印',
-  MANUAL_QUOTE: '人工报价',
+const MAX_ITEMS_ON_MAIN_PAGE = 8;
+const MAX_ITEMS_PER_ANNEX_PAGE = 12;
+const MAX_ARTWORKS_ON_MAIN_PAGE = 8;
+const MAX_ARTWORKS_PER_ANNEX_PAGE = 10;
+const MAX_FLOW_ROWS_ON_MAIN_PAGE = 1;
+const MAX_FLOW_ROWS_PER_ANNEX_PAGE = 5;
+const MAX_WARNINGS_ON_MAIN_PAGE = 6;
+const MAX_WARNINGS_PER_ANNEX_PAGE = 15;
+const MAX_SHIPMENTS_ON_MAIN_PAGE = 2;
+const MAX_SHIPMENTS_PER_ANNEX_PAGE = 4;
+const MAX_MAIN_FACT_CHARACTERS = 36;
+const MAX_MAIN_REMARK_CHARACTERS = 120;
+const MAX_DENSE_MAIN_FACT_CHARACTERS = 16;
+const MAX_DENSE_MAIN_REMARK_CHARACTERS = 48;
+const MAX_SUPPLEMENT_CHARACTERS_PER_PAGE = 600;
+const MAX_SUPPLEMENT_LINES_PER_PAGE = 22;
+const SUPPLEMENT_CHARACTERS_PER_LINE = 36;
+const MAX_HEADER_FACTORY_CHARACTERS = 24;
+const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
+const MAX_HEADER_TEAM_CHARACTERS = 18;
+const MAX_HEADER_ORDER_NAME_CHARACTERS = 18;
+
+const FOIL_TECHNIQUE_LABEL: Record<PrintFoilTechnique, string> = {
+  UNSPECIFIED: '烫金',
+  NONE: '不烫金',
+  FLAT: '平烫',
+  RELIEF: '浮雕',
+  RAISED: '激凸',
+};
+
+const LAMINATION_LABEL: Record<PrintLamination, string> = {
+  NONE: '不覆膜',
+  MATTE: '亚膜',
+  SOFT_TOUCH: '触感膜',
+  NEW_GLOSS: '新光膜',
+  LASER: '雷射膜',
 };
 
 const CARRIER_LABEL: Record<string, string> = {
@@ -58,22 +101,154 @@ const CARRIER_LABEL: Record<string, string> = {
   DEPPON: '德邦',
 };
 
-export function OrderPrintLayout({ order }: Props) {
+export function OrderPrintLayout({ order, factoryName }: Props) {
   const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const itemPackaging = buildItemPackaging(order.packagingGroups);
   const totalBags = calculateTotalBags(order, itemPackaging);
   const artworks = buildArtworks(order);
-  const hasArtworkAnnex = artworks.length > MAX_ARTWORKS_ON_MAIN_PAGE;
-  const pageCount = hasArtworkAnnex ? 2 : 1;
+  const { mainItems, itemAnnexPages } = paginateItems(order.items);
+  const hasOversizedItem = order.items.some(
+    (item) => estimateItemRowUnits(item) >= 4,
+  );
   const team = getTeam(order);
-  const craft = joinDistinct(order.items.map((item) => PRICING_ROUTE_LABEL[item.pricingRoute]));
-  const paper = joinDistinct(order.items.map(formatPaper));
-  const foil = joinDistinct(order.items.map(formatFoil));
+  const fullCraft = formatProductionCrafts(order);
+  const fullPaper = joinDistinct(order.items.map(formatPaper));
+  const fullFoil = joinDistinct(order.items.map(formatFoil));
+  const fullPackageRequirement = clean(order.packageRequirement);
+  const fullRemark = clean(order.remark);
+  const hasLongMainText = [
+    fullCraft,
+    fullPaper,
+    fullFoil,
+    fullPackageRequirement,
+  ].some(
+    (value) =>
+      Array.from(value ?? '').length >= MAX_MAIN_FACT_CHARACTERS ||
+      hasExplicitLineBreak(value),
+  ) ||
+    Array.from(fullRemark ?? '').length >= MAX_MAIN_REMARK_CHARACTERS ||
+    hasExplicitLineBreak(fullRemark);
+  const needsCondensedMain =
+    itemAnnexPages.length > 0 || hasOversizedItem || hasLongMainText;
+  const mainFactLimit =
+    needsCondensedMain
+      ? MAX_DENSE_MAIN_FACT_CHARACTERS
+      : MAX_MAIN_FACT_CHARACTERS;
+  const mainRemarkLimit =
+    needsCondensedMain
+      ? MAX_DENSE_MAIN_REMARK_CHARACTERS
+      : MAX_MAIN_REMARK_CHARACTERS;
+  const craft = previewForMain(fullCraft, mainFactLimit);
+  const paper = previewForMain(fullPaper, mainFactLimit);
+  const foil = previewForMain(fullFoil, mainFactLimit);
+  const packageRequirement = previewForMain(
+    fullPackageRequirement,
+    mainFactLimit,
+  );
+  const remark = previewForMain(fullRemark, mainRemarkLimit);
+  const supplementPages = buildSupplementPages([
+    {
+      key: 'factory',
+      label: '工厂',
+      value: clean(factoryName),
+      mainLimit: MAX_HEADER_FACTORY_CHARACTERS,
+    },
+    {
+      key: 'customer',
+      label: '客户',
+      value: clean(order.customerName),
+      mainLimit: MAX_HEADER_CUSTOMER_CHARACTERS,
+    },
+    {
+      key: 'team',
+      label: '生产团队',
+      value: team,
+      mainLimit: MAX_HEADER_TEAM_CHARACTERS,
+    },
+    {
+      key: 'order-name',
+      label: '工单名称',
+      value: clean(order.customName),
+      mainLimit: MAX_HEADER_ORDER_NAME_CHARACTERS,
+    },
+    {
+      key: 'craft',
+      label: '生产工艺',
+      value: fullCraft,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'paper',
+      label: '纸张类型',
+      value: fullPaper,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'foil',
+      label: '烫金工艺',
+      value: fullFoil,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'package',
+      label: '包装要求',
+      value: fullPackageRequirement,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'remark',
+      label: '备注',
+      value: fullRemark,
+      mainLimit: mainRemarkLimit,
+    },
+  ]);
+  // A split or unusually tall item table consumes the main page's
+  // variable-height allowance. Move all artwork to bounded annex pages in
+  // that case so the browser never has to invent an undeclared physical page.
+  const hasArtworkOnMainPage =
+    artworks.length === 0 ||
+    (!needsCondensedMain &&
+      artworks.length <= MAX_ARTWORKS_ON_MAIN_PAGE);
+  const artworkAnnexPages = hasArtworkOnMainPage
+    ? []
+    : chunk(artworks, MAX_ARTWORKS_PER_ANNEX_PAGE);
   const warnings = auditOrder(order, itemPackaging, team);
+  const mainWarnings = warnings.slice(0, MAX_WARNINGS_ON_MAIN_PAGE);
+  const warningAnnexPages = chunk(
+    warnings.slice(MAX_WARNINGS_ON_MAIN_PAGE),
+    MAX_WARNINGS_PER_ANNEX_PAGE,
+  );
   const flowRows = buildFlowRows(order, totalQuantity, totalBags);
+  const { mainFlowRows, flowAnnexPages } = paginateFlowRows(flowRows);
+  const shipments =
+    order.shipments.length > 0 ? order.shipments : [fallbackShipment(order)];
+  const hasShipmentAnnex =
+    shipments.length > MAX_SHIPMENTS_ON_MAIN_PAGE ||
+    shipments.some(isLongShipment) ||
+    shipments.reduce(
+      (sum, shipment) => sum + estimateShipmentLines(shipment),
+      0,
+    ) > 6;
+  const mainShipments = hasShipmentAnnex ? [] : shipments;
+  const shipmentAnnexPages = hasShipmentAnnex
+    ? chunk(shipments, MAX_SHIPMENTS_PER_ANNEX_PAGE)
+    : [];
+  const pageCount =
+    1 +
+    warningAnnexPages.length +
+    supplementPages.length +
+    itemAnnexPages.length +
+    artworkAnnexPages.length +
+    shipmentAnnexPages.length +
+    flowAnnexPages.length;
   const orderDate = formatDateInputShanghai(order.submittedAt ?? order.createdAt);
   const denseMainSheet =
-    order.items.length >= 3 || artworks.length >= 5 || order.shipments.length > 1;
+    needsCondensedMain ||
+    hasShipmentAnnex ||
+    order.items.length >= 3 ||
+    artworks.length >= 5 ||
+    order.shipments.length > 1 ||
+    flowRows.some((row) => row.taskQrSvg !== null);
 
   return (
     <>
@@ -86,14 +261,17 @@ export function OrderPrintLayout({ order }: Props) {
           orderDate={orderDate}
           dense={denseMainSheet}
         >
-          <WorkOrderHeader order={order} team={team} />
-          <AuditWarnings warnings={warnings} />
+          <WorkOrderHeader order={order} team={team} factoryName={factoryName} />
+          <AuditWarnings
+            warnings={mainWarnings}
+            remainingCount={warnings.length - mainWarnings.length}
+          />
 
           <section className="sec">
             <div className="grid">
-              <Fact label="工艺类型" value={craft} emphasis="l0" />
+              <Fact label="生产工艺" value={craft} emphasis="l0" />
               <Fact label="纸张类型" value={paper} emphasis="l0" />
-              <Fact label="烫金颜色" value={foil} emphasis="l0" />
+              <Fact label="烫金工艺" value={foil} emphasis="l1" />
               <Fact
                 label="交货日期"
                 value={order.promisedDate ? formatDateInputShanghai(order.promisedDate) : null}
@@ -107,50 +285,226 @@ export function OrderPrintLayout({ order }: Props) {
               />
               <Fact
                 label="包装要求"
-                value={clean(order.packageRequirement)}
+                value={packageRequirement}
                 emphasis="l1"
               />
             </div>
-            {clean(order.remark) ? (
+            {remark ? (
               <div className="remark">
                 <div className="lbl">备注</div>
-                <div className="l1 note">{order.remark}</div>
+                <div className="l1 note">{remark}</div>
               </div>
             ) : null}
           </section>
 
           <section className="sec">
             <ItemTable
-              items={order.items}
+              items={mainItems}
               packaging={itemPackaging}
               totalQuantity={totalQuantity}
               totalBags={totalBags}
+              showTotal={itemAnnexPages.length === 0}
             />
           </section>
 
-          {!hasArtworkAnnex ? (
+          {hasArtworkOnMainPage ? (
             <section className="sec">
               <ArtworkGrid artworks={artworks} onAnnex={false} />
             </section>
           ) : null}
 
           <section className="sec">
-            <FlowTable rows={flowRows} />
+            <FlowTable rows={mainFlowRows} />
           </section>
 
           <section className="sec">
-            <ShippingBlock order={order} />
+            {hasShipmentAnnex ? (
+              <div className="shipment-annex-notice">
+                {shipments.length} 个收货地址见附页
+              </div>
+            ) : (
+              <ShippingBlock
+                shipments={mainShipments}
+                isSfCollect={order.isSfCollect}
+              />
+            )}
           </section>
         </WorkOrderSheet>
 
-        {hasArtworkAnnex ? (
-          <WorkOrderSheet order={order} page={2} pageCount={pageCount} orderDate={orderDate}>
-            <WorkOrderHeader order={order} team={team} />
-            <section className="sec artwork-annex">
-              <ArtworkGrid artworks={artworks} onAnnex />
-            </section>
-          </WorkOrderSheet>
-        ) : null}
+        {warningAnnexPages.map((pageWarnings, index) => {
+          const page = 2 + index;
+          return (
+            <WorkOrderSheet
+              key={`warning-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec warning-annex">
+                <div className="annex-title">数据待补充（续）</div>
+                <ol className="warning-list">
+                  {pageWarnings.map((warning, warningIndex) => (
+                    <li key={`${warningIndex}-${warning}`}>{warning}</li>
+                  ))}
+                </ol>
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {supplementPages.map((supplement, index) => {
+          const page = 2 + warningAnnexPages.length + index;
+          return (
+            <WorkOrderSheet
+              key={`supplement-page-${supplement.key}-${supplement.part}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec supplement-annex">
+                <div className="annex-title">
+                  {supplement.label}
+                  {supplement.totalParts > 1
+                    ? `（${supplement.part} / ${supplement.totalParts}）`
+                    : ''}
+                </div>
+                <div className="supplement-text">{supplement.value}</div>
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {itemAnnexPages.map((items, index) => {
+          const page =
+            2 + warningAnnexPages.length + supplementPages.length + index;
+          const isLastItemPage = index === itemAnnexPages.length - 1;
+          return (
+            <WorkOrderSheet
+              key={`item-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec item-annex">
+                <div className="annex-title">款式明细（续）</div>
+                <ItemTable
+                  items={items}
+                  packaging={itemPackaging}
+                  totalQuantity={totalQuantity}
+                  totalBags={totalBags}
+                  showTotal={isLastItemPage}
+                />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {artworkAnnexPages.map((pageArtworks, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`artwork-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec artwork-annex">
+                <ArtworkGrid artworks={pageArtworks} onAnnex />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {shipmentAnnexPages.map((pageShipments, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            artworkAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`shipment-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec shipment-annex">
+                <div className="annex-title">收货与快递（续）</div>
+                <ShippingBlock
+                  shipments={pageShipments}
+                  isSfCollect={order.isSfCollect}
+                />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {flowAnnexPages.map((rows, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            artworkAnnexPages.length +
+            shipmentAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`flow-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec flow-annex">
+                <div className="annex-title">工序明细（续）</div>
+                <FlowTable rows={rows} />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
       </main>
     </>
   );
@@ -185,18 +539,40 @@ function WorkOrderSheet({
   );
 }
 
-function WorkOrderHeader({ order, team }: { order: PrintOrder; team: string | null }) {
+function WorkOrderHeader({
+  order,
+  team,
+  factoryName,
+}: {
+  order: PrintOrder;
+  team: string | null;
+  factoryName: string;
+}) {
+  const displayFactoryName = previewForHeader(
+    clean(factoryName),
+    MAX_HEADER_FACTORY_CHARACTERS,
+  );
+  const displayCustomerName = previewForHeader(
+    clean(order.customerName),
+    MAX_HEADER_CUSTOMER_CHARACTERS,
+  );
+  const displayTeam = previewForHeader(team, MAX_HEADER_TEAM_CHARACTERS);
+  const displayOrderName = previewForHeader(
+    clean(order.customName),
+    MAX_HEADER_ORDER_NAME_CHARACTERS,
+  );
   return (
     <header className="hd">
       <div className="hd-main">
-        <div className={classNames('cust', !clean(order.customerName) && 'miss')}>
-          {clean(order.customerName) ?? '客户未填'}
+        <div className="factory">{displayFactoryName}</div>
+        <div className={classNames('cust', !displayCustomerName && 'miss')}>
+          {displayCustomerName ?? '客户未填'}
         </div>
         <div className="line">
-          团队 <b className={!team ? 'miss' : undefined}>{team ?? '待排产'}</b>
-          {clean(order.customName) ? (
+          团队 <b className={!displayTeam ? 'miss' : undefined}>{displayTeam ?? '待排产'}</b>
+          {displayOrderName ? (
             <>
-              <span className="sep">·</span>工单 <b>{order.customName}</b>
+              <span className="sep">·</span>工单 <b>{displayOrderName}</b>
             </>
           ) : null}
           {order.isUrgent ? <span className="tag">加急</span> : null}
@@ -219,10 +595,21 @@ function WorkOrderHeader({ order, team }: { order: PrintOrder; team: string | nu
   );
 }
 
-function AuditWarnings({ warnings }: { warnings: string[] }) {
+function AuditWarnings({
+  warnings,
+  remainingCount = 0,
+}: {
+  warnings: string[];
+  remainingCount?: number;
+}) {
   return (
     <>
-      {warnings.length > 0 ? <div className="warn">数据不完整：{warnings.join('；')}</div> : null}
+      {warnings.length > 0 ? (
+        <div className="warn">
+          数据不完整：{warnings.join('；')}
+          {remainingCount > 0 ? `；另有 ${remainingCount} 项见附页` : ''}
+        </div>
+      ) : null}
       <div className="warn image-load-warning" hidden />
     </>
   );
@@ -256,11 +643,13 @@ function ItemTable({
   packaging,
   totalQuantity,
   totalBags,
+  showTotal,
 }: {
   items: PrintOrderItem[];
   packaging: Map<string, ItemPackaging>;
   totalQuantity: number;
   totalBags: number | null;
+  showTotal: boolean;
 }) {
   return (
     <table className="items">
@@ -279,6 +668,7 @@ function ItemTable({
           items.map((item) => {
             const itemPack = packaging.get(item.id);
             const hasPack = Boolean(itemPack?.unitsPerBag && itemPack.unitsPerBag > 0);
+            const processFacts = formatItemProcess(item);
             return (
               <tr key={item.id}>
                 <td><span className="badge">{item.sequence}</span></td>
@@ -287,7 +677,10 @@ function ItemTable({
                     ? externalPriceBusinessText(item.specification!)
                     : '未填'}
                 </td>
-                <td>{clean(item.name) ?? `款式 ${item.sequence}`}</td>
+                <td>
+                  <div>{clean(item.name) ?? `款式 ${item.sequence}`}</div>
+                  {processFacts ? <div className="item-process">{processFacts}</div> : null}
+                </td>
                 <td className="num">{formatNumber(item.quantity)}</td>
                 <td className={classNames('num', !hasPack && 'miss')}>
                   {hasPack ? formatNumber(itemPack!.unitsPerBag!) : '未填'}
@@ -308,16 +701,18 @@ function ItemTable({
           <tr><td colSpan={6} className="empty-row miss">无生产明细</td></tr>
         )}
       </tbody>
-      <tfoot>
-        <tr>
-          <td colSpan={3}>合　计</td>
-          <td className="num">{formatNumber(totalQuantity)}</td>
-          <td />
-          <td className={classNames('num', totalBags === null && 'miss')}>
-            {totalBags === null ? '—' : formatNumber(totalBags)}
-          </td>
-        </tr>
-      </tfoot>
+      {showTotal ? (
+        <tfoot>
+          <tr>
+            <td colSpan={3}>合　计</td>
+            <td className="num">{formatNumber(totalQuantity)}</td>
+            <td />
+            <td className={classNames('num', totalBags === null && 'miss')}>
+              {totalBags === null ? '—' : formatNumber(totalBags)}
+            </td>
+          </tr>
+        </tfoot>
+      ) : null}
     </table>
   );
 }
@@ -327,6 +722,10 @@ function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: bool
   const style = {
     '--cols': String(layout.cols),
     ...(layout.cap ? { '--cap': layout.cap } : {}),
+    ...(layout.maxBoxHeight
+      ? { '--art-max-box-height': layout.maxBoxHeight }
+      : {}),
+    ...(layout.centered ? { '--art-justify': 'center' } : {}),
   } as CSSProperties;
 
   if (artworks.length === 0) return <div className="art-empty miss">未提供设计图</div>;
@@ -371,32 +770,65 @@ function FlowTable({ rows }: { rows: FlowRow[] }) {
           <th className="num flow-number-col">完成数</th>
           <th className="num flow-defect-col">不良数</th>
           <th className="flow-date-col">完成日期</th>
-          <th>签字</th>
+          <th className="flow-qr-col">报工</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.key}>
-            <td className="step">{row.name}</td>
-            <td className="num">{row.planned}</td>
-            <td className="num">{row.completed}</td>
-            <td className="num">{row.defect}</td>
-            <td>{row.completedAt}</td>
-            <td />
-          </tr>
-        ))}
+        {rows.map((row) => {
+          const itemLabel = formatFlowItemLabel(row);
+          const taskQrLabel = [itemLabel, row.name, '任务报工二维码']
+            .filter(Boolean)
+            .join(' ');
+          return (
+            <tr key={row.key}>
+              <td className="step">
+                {itemLabel ? (
+                  <small className="flow-item">{itemLabel}</small>
+                ) : null}
+                {row.name}
+                {row.worker ? (
+                  <small className="flow-worker">{row.worker}</small>
+                ) : null}
+              </td>
+              <td className="num">{row.planned}</td>
+              <td className="num">{row.completed}</td>
+              <td className="num">{row.defect}</td>
+              <td>{row.completedAt}</td>
+              <td className="task-qr-cell">
+                {row.taskQrSvg ? (
+                  <div
+                    className="task-qr"
+                    aria-label={taskQrLabel}
+                    dangerouslySetInnerHTML={{ __html: row.taskQrSvg }}
+                  />
+                ) : (
+                  <span className="task-qr-empty">—</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
-function ShippingBlock({ order }: { order: PrintOrder }) {
-  const shipments = order.shipments.length > 0 ? order.shipments : [fallbackShipment(order)];
+function ShippingBlock({
+  shipments,
+  isSfCollect,
+}: {
+  shipments: PrintShipment[];
+  isSfCollect: boolean;
+}) {
   return (
     <div className="ship-list">
       {shipments.map((shipment) => {
         const receiver = clean(shipment.receiverName);
-        const rest = [clean(shipment.receiverPhone), formatCarrier(shipment, order.isSfCollect), clean(shipment.expressCode)]
+        const rest = [
+          clean(shipment.receiverPhone),
+          formatCarrier(shipment, isSfCollect),
+          clean(shipment.expressCode),
+        ]
           .filter(Boolean)
           .join(' · ');
         return (
@@ -422,6 +854,30 @@ function fallbackShipment(order: PrintOrder): PrintShipment {
     receiverAddress: order.receiverAddress, expressCode: order.expressCode,
     carrierCode: null, trackingNo: null, lines: [],
   };
+}
+
+function isLongShipment(shipment: PrintShipment): boolean {
+  return [
+    shipment.receiverName,
+    shipment.receiverPhone,
+    shipment.receiverAddress,
+    shipment.expressCode,
+  ].some((value) => Array.from(clean(value) ?? '').length > 80);
+}
+
+function estimateShipmentLines(shipment: PrintShipment): number {
+  const header = [
+    shipment.receiverName,
+    shipment.receiverPhone,
+    shipment.expressCode,
+  ]
+    .map(clean)
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
+  return (
+    estimateTextLines(header, 42) +
+    estimateTextLines(shipment.receiverAddress, 42)
+  );
 }
 
 function buildArtworks(order: PrintOrder): Artwork[] {
@@ -475,57 +931,82 @@ function calculateTotalBags(order: PrintOrder, packaging: Map<string, ItemPackag
   return order.packagingGroups.reduce((sum, group) => sum + group.actualBagCount, 0);
 }
 
-function buildFlowRows(order: PrintOrder, totalQuantity: number, totalBags: number | null): FlowRow[] {
-  const tasks = order.items.flatMap((item) => item.tasks);
-  const rows = tasks.length > 0 ? aggregateTasks(tasks) : derivePlannedSteps(order);
-  if (order.packagingGroups.length > 0 && !rows.some((row) => row.name === '打包')) {
-    rows.push({ key: 'packaging', name: '打包',
-      planned: totalBags === null ? '—' : `${formatNumber(totalBags)} 包`,
-      completed: '', defect: '', completedAt: '' });
-  }
+function buildFlowRows(
+  order: PrintOrder,
+  totalQuantity: number,
+  totalBags: number | null,
+): FlowRow[] {
+  const rows = order.items.flatMap((item) =>
+    item.tasks.length > 0
+      ? buildTaskRows(item)
+      : derivePlannedSteps(item),
+  );
   if (rows.length === 0) {
-    rows.push({ key: 'production', name: '生产', planned: formatNumber(totalQuantity),
-      completed: '', defect: '', completedAt: '' });
+    rows.push({
+      key: 'production-pending',
+      itemSequence: null,
+      itemName: null,
+      name: '工序待确认',
+      worker: null,
+      planned: formatNumber(totalQuantity),
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    });
+  }
+  if (
+    order.packagingGroups.length > 0 &&
+    !rows.some((row) => row.name === '打包')
+  ) {
+    rows.push({
+      key: 'packaging',
+      itemSequence: null,
+      itemName: null,
+      name: '打包',
+      worker: null,
+      planned: totalBags === null ? '—' : `${formatNumber(totalBags)} 包`,
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    });
   }
   return rows;
 }
 
-function aggregateTasks(tasks: PrintTask[]): FlowRow[] {
-  const grouped = new Map<string, PrintTask[]>();
-  for (const task of tasks) grouped.set(task.craftName, [...(grouped.get(task.craftName) ?? []), task]);
-  return [...grouped].map(([name, rows], index) => {
-    const completedDates = rows.map((row) => row.completedAt)
-      .filter((value): value is Date => value instanceof Date)
-      .sort((a, b) => b.getTime() - a.getTime());
-    return {
-      key: `task-${index}-${name}`, name,
-      planned: formatNumber(rows.reduce((sum, row) => sum + row.plannedQty, 0)),
-      completed: formatProgress(rows.reduce((sum, row) => sum + row.completedQty, 0)),
-      defect: formatProgress(rows.reduce((sum, row) => sum + row.defectQty, 0)),
-      completedAt: completedDates[0] ? formatDateInputShanghai(completedDates[0]) : '',
-    };
-  });
+function buildTaskRows(item: PrintOrderItem): FlowRow[] {
+  return item.tasks.map((task) => ({
+    key: `task-${task.id}`,
+    itemSequence: item.sequence,
+    itemName: item.name,
+    name: clean(task.craftName) ?? '工序未填',
+    worker: clean(task.workerDisplayName) ?? '待分配',
+    planned: formatNumber(task.plannedQty),
+    completed: formatProgress(task.completedQty),
+    defect: formatProgress(task.defectQty),
+    completedAt: task.completedAt
+      ? formatDateInputShanghai(task.completedAt)
+      : '',
+    taskQrSvg: task.taskQrSvg,
+  }));
 }
 
-function derivePlannedSteps(order: PrintOrder): FlowRow[] {
-  const plannedByStep = new Map<string, number>();
-  for (const item of order.items) {
-    const names = unique([
-      ...item.craftNames.map(clean).filter((name): name is string => Boolean(name)),
-      PRICING_ROUTE_LABEL[item.pricingRoute],
-    ]).filter((name) => name !== '打包');
-    for (const name of names) {
-      plannedByStep.set(name, (plannedByStep.get(name) ?? 0) + item.quantity);
-    }
-  }
-  return [...plannedByStep].map(([name, planned], index) => ({
-    key: `planned-${index}-${name}`,
-    name,
-    planned: formatNumber(planned),
-    completed: '',
-    defect: '',
-    completedAt: '',
-  }));
+function derivePlannedSteps(item: PrintOrderItem): FlowRow[] {
+  return productionStepNames(item)
+    .filter((name) => name !== '打包')
+    .map((name, index) => ({
+      key: `planned-${item.id}-${index}-${name}`,
+      itemSequence: item.sequence,
+      itemName: item.name,
+      name,
+      worker: null,
+      planned: formatNumber(item.quantity),
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    }));
 }
 
 function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, team: string | null): string[] {
@@ -539,7 +1020,16 @@ function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, te
     const prefix = `图 ${item.sequence}`;
     if (!clean(item.specification)) warnings.push(`${prefix} 规格未填`);
     if (!clean(formatPaper(item))) warnings.push(`${prefix} 纸张未填`);
-    if (item.pricingRoute !== 'COLOR_PRINT' && !clean(formatFoil(item))) warnings.push(`${prefix} 烫金颜色未填`);
+    if (item.tasks.length === 0 && productionStepNames(item).length === 0) {
+      warnings.push(`${prefix} 生产工艺待确认`);
+    }
+    if (
+      item.foilTechnique !== 'NONE' &&
+      item.foilTechnique !== 'UNSPECIFIED' &&
+      foilColorsBySide(item).all.length === 0
+    ) {
+      warnings.push(`${prefix} 烫金颜色未填`);
+    }
     if (!packaging.get(item.id)?.unitsPerBag) warnings.push(`${prefix} 包装数量未填`);
     if (!item.designs.some((design) => design.fileType === 'IMAGE')) warnings.push(`${prefix} 缺设计图`);
   }
@@ -563,13 +1053,115 @@ function formatPaper(item: PrintOrderItem): string | null {
 }
 
 function formatFoil(item: PrintOrderItem): string | null {
-  if (item.pricingRoute === 'COLOR_PRINT') return '不烫金';
+  const { front, back, all } = foilColorsBySide(item);
+  if (
+    item.foilTechnique === 'UNSPECIFIED' &&
+    item.hasLocalFoil === null &&
+    all.length === 0
+  ) {
+    return null;
+  }
+
+  const technique = FOIL_TECHNIQUE_LABEL[item.foilTechnique];
+  const scope =
+    item.foilTechnique === 'NONE'
+      ? ''
+      : item.hasLocalFoil === true
+        ? '局部'
+        : item.hasLocalFoil === false
+          ? '专版'
+          : '';
+  const process = `${scope}${technique}`;
+  if (all.length === 0) return process;
+
+  if (back.length > 0) {
+    return `${process} · 正面 ${front.length > 0 ? front.join('、') : '未填'} / 反面 ${back.join('、')}`;
+  }
+  return `${process} · ${front.length > 0 ? front.join('、') : all.join('、')}`;
+}
+
+function formatColorPrint(item: PrintOrderItem): string | null {
+  const colors = unique(item.printColors.map(externalPriceBusinessText));
+  const hasPrintColors = colors.length > 0;
+  const hasLamination = item.lamination !== 'NONE';
+  if (!hasPrintColors && !hasLamination) {
+    return null;
+  }
+
+  const facts: string[] = [];
+  if (hasPrintColors) {
+    facts.push(`彩印 ${colors.join('、')}`);
+  } else if (!item.printColorsKnown) {
+    facts.push('彩印颜色待确认');
+  }
+  if (hasLamination) {
+    facts.push(LAMINATION_LABEL[item.lamination]);
+  } else if (hasPrintColors) {
+    facts.push(LAMINATION_LABEL.NONE);
+  }
+  return facts.join(' · ');
+}
+
+function formatItemProcess(item: PrintOrderItem): string | null {
+  return joinDistinct([formatColorPrint(item), formatFoil(item)]);
+}
+
+function foilColorsBySide(item: PrintOrderItem): {
+  front: string[];
+  back: string[];
+  all: string[];
+} {
   const front = unique(item.frontFoilColors.map(externalPriceBusinessText));
   const back = unique(item.backFoilColors.map(externalPriceBusinessText));
-  if (back.length > 0) return `正面 ${front.length > 0 ? front.join('、') : '未填'} / 反面 ${back.join('、')}`;
   const legacy = unique(item.foilColors.map(externalPriceBusinessText));
-  const colors = front.length > 0 ? front : legacy;
-  return colors.length > 0 ? colors.join('、') : null;
+  const normalizedFront = front.length > 0 ? front : back.length === 0 ? legacy : front;
+  return {
+    front: normalizedFront,
+    back,
+    all: unique([...normalizedFront, ...back]),
+  };
+}
+
+function formatProductionCrafts(order: PrintOrder): string | null {
+  return joinDistinct(
+    order.items.flatMap((item) =>
+      item.tasks.length > 0
+        ? item.tasks.map((task) => task.craftName)
+        : productionStepNames(item),
+    ),
+  );
+}
+
+function productionStepNames(item: PrintOrderItem): string[] {
+  const persistedCrafts = unique(
+    item.craftNames.map(clean).filter((name): name is string => Boolean(name)),
+  );
+  if (persistedCrafts.length > 0) return persistedCrafts;
+
+  const explicitSteps: string[] = [];
+  if (item.printColors.length > 0) explicitSteps.push('彩印');
+  if (item.lamination !== 'NONE') explicitSteps.push('覆膜');
+  if (
+    item.foilTechnique !== 'NONE' &&
+    (item.foilTechnique !== 'UNSPECIFIED' ||
+      item.hasLocalFoil !== null ||
+      foilColorsBySide(item).all.length > 0)
+  ) {
+    explicitSteps.push(
+      item.hasLocalFoil === true
+        ? '局部烫金'
+        : item.hasLocalFoil === false
+          ? '专版烫金'
+          : '烫金',
+    );
+  }
+  return unique(explicitSteps);
+}
+
+function formatFlowItemLabel(row: FlowRow): string | null {
+  if (row.itemSequence === null) return null;
+  const itemName = clean(row.itemName) ?? `款式 ${row.itemSequence}`;
+  return `图 ${row.itemSequence} · ${itemName}`;
 }
 
 function formatCarrier(shipment: PrintShipment, isSfCollect: boolean): string | null {
@@ -578,12 +1170,69 @@ function formatCarrier(shipment: PrintShipment, isSfCollect: boolean): string | 
   return carrier ? CARRIER_LABEL[carrier] ?? carrier : null;
 }
 
-function artLayout(count: number, onAnnex: boolean): { cols: number; cap: string | null } {
-  if (onAnnex) return { cols: Math.max(1, Math.min(count, 6)), cap: null };
-  if (count <= 1) return { cols: 1, cap: '50mm' };
-  if (count <= 2) return { cols: count, cap: '44mm' };
-  if (count <= 4) return { cols: count, cap: '40mm' };
-  return { cols: count, cap: null };
+function artLayout(count: number, onAnnex: boolean): {
+  cols: number;
+  cap: string | null;
+  maxBoxHeight: string | null;
+  centered: boolean;
+} {
+  if (onAnnex && count <= 1) {
+    // A full-width 3:4 artwork is taller than the annex's printable area once
+    // its repeated header, title, caption, and footer are included. Bound both
+    // dimensions explicitly so Chromium cannot create an undeclared spill page.
+    return {
+      cols: 1,
+      cap: '120mm',
+      maxBoxHeight: '160mm',
+      centered: true,
+    };
+  }
+  if (onAnnex && count === 2) {
+    return {
+      cols: 2,
+      cap: '82mm',
+      maxBoxHeight: '110mm',
+      centered: true,
+    };
+  }
+  if (onAnnex) {
+    return {
+      cols: Math.max(1, Math.min(count, 6)),
+      cap: null,
+      maxBoxHeight: null,
+      centered: false,
+    };
+  }
+  if (count <= 1) {
+    return {
+      cols: 1,
+      cap: '50mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
+  }
+  if (count <= 2) {
+    return {
+      cols: count,
+      cap: '44mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
+  }
+  if (count <= 4) {
+    return {
+      cols: count,
+      cap: '40mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
+  }
+  return {
+    cols: count,
+    cap: null,
+    maxBoxHeight: null,
+    centered: false,
+  };
 }
 
 function formatProgress(value: number): string { return value > 0 ? formatNumber(value) : ''; }
@@ -594,6 +1243,221 @@ function joinDistinct(values: Array<string | null | undefined>): string | null {
 }
 
 function unique<T>(values: T[]): T[] { return [...new Set(values)]; }
+
+function paginateItems(items: PrintOrderItem[]): {
+  mainItems: PrintOrderItem[];
+  itemAnnexPages: PrintOrderItem[][];
+} {
+  const itemUnits = items.map(estimateItemRowUnits);
+  const mainUnitLimit =
+    items.length >= 4 || itemUnits.some((units) => units > 1)
+    ? Math.ceil(MAX_ITEMS_ON_MAIN_PAGE / 2)
+    : MAX_ITEMS_ON_MAIN_PAGE;
+  const mainItems: PrintOrderItem[] = [];
+  let mainUnits = 0;
+  let nextIndex = 0;
+  while (nextIndex < items.length && mainItems.length < MAX_ITEMS_ON_MAIN_PAGE) {
+    const item = items[nextIndex]!;
+    const units = itemUnits[nextIndex]!;
+    if (mainItems.length > 0 && mainUnits + units > mainUnitLimit) {
+      break;
+    }
+    mainItems.push(item);
+    mainUnits += units;
+    nextIndex += 1;
+  }
+  return {
+    mainItems,
+    itemAnnexPages: paginateByWeight(
+      items.slice(nextIndex),
+      MAX_ITEMS_PER_ANNEX_PAGE,
+      estimateItemRowUnits,
+    ),
+  };
+}
+
+function estimateItemRowUnits(item: PrintOrderItem): number {
+  const specificationLines = estimateTextLines(item.specification, 8);
+  const nameLines = estimateTextLines(item.name, 20);
+  const processLines = estimateTextLines(formatItemProcess(item), 24);
+  const estimatedLines = Math.max(
+    specificationLines,
+    nameLines + processLines,
+  );
+  // A normal item uses two short visual lines (name + process) and occupies
+  // one historical row slot. Longer legal values consume extra slots before
+  // the deterministic paginator decides the annex boundary.
+  return Math.max(1, Math.ceil(estimatedLines / 2));
+}
+
+function paginateFlowRows(rows: FlowRow[]): {
+  mainFlowRows: FlowRow[];
+  flowAnnexPages: FlowRow[][];
+} {
+  return {
+    mainFlowRows: rows.slice(0, MAX_FLOW_ROWS_ON_MAIN_PAGE),
+    flowAnnexPages: paginateByWeight(
+      rows.slice(MAX_FLOW_ROWS_ON_MAIN_PAGE),
+      MAX_FLOW_ROWS_PER_ANNEX_PAGE,
+      estimateFlowRowUnits,
+    ),
+  };
+}
+
+function estimateFlowRowUnits(row: FlowRow): number {
+  const itemLabel =
+    row.itemSequence === null
+      ? row.itemName
+      : `图 ${row.itemSequence} · ${clean(row.itemName) ?? ''}`;
+  const estimatedLines =
+    estimateTextLines(itemLabel, 16) +
+    estimateTextLines(row.name, 8) +
+    estimateTextLines(row.worker, 16);
+  // The 15mm task QR already establishes roughly four text-line heights for
+  // a normal task. Only content beyond that baseline consumes another slot.
+  return Math.max(1, Math.ceil(estimatedLines / 4));
+}
+
+function paginateByWeight<T>(
+  values: T[],
+  maxUnits: number,
+  getUnits: (value: T) => number,
+): T[][] {
+  const pages: T[][] = [];
+  let page: T[] = [];
+  let usedUnits = 0;
+  for (const value of values) {
+    const units = Math.max(1, getUnits(value));
+    if (page.length > 0 && usedUnits + units > maxUnits) {
+      pages.push(page);
+      page = [];
+      usedUnits = 0;
+    }
+    page.push(value);
+    usedUnits += units;
+  }
+  if (page.length > 0) pages.push(page);
+  return pages;
+}
+
+function estimateTextLines(
+  value: string | null | undefined,
+  charactersPerLine: number,
+): number {
+  const normalized = clean(value);
+  if (!normalized) return 0;
+  return normalized.split(/\r?\n/).reduce((sum, line) => {
+    const length = Array.from(line).length;
+    return sum + Math.max(1, Math.ceil(length / charactersPerLine));
+  }, 0);
+}
+
+function previewForMain(
+  value: string | null,
+  maxCharacters: number,
+): string | null {
+  if (!value) return null;
+  // Main-sheet summaries are deliberately single-flow text. Explicit line
+  // breaks are preserved verbatim on deterministic supplement pages instead
+  // of being allowed to make the physical first page taller than its model.
+  const compact = value.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(compact);
+  if (characters.length <= maxCharacters) return compact;
+  return `${characters.slice(0, maxCharacters).join('')}…（见附页）`;
+}
+
+function previewForHeader(
+  value: string | null,
+  maxCharacters: number,
+): string | null {
+  if (!value) return null;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(compact);
+  return characters.length <= maxCharacters
+    ? compact
+    : `${characters.slice(0, maxCharacters).join('')}…`;
+}
+
+function buildSupplementPages(
+  sources: Array<{
+    key: string;
+    label: string;
+    value: string | null;
+    mainLimit: number;
+  }>,
+): SupplementPage[] {
+  return sources.flatMap((source) => {
+    if (!source.value) return [];
+    const characters = Array.from(source.value);
+    if (
+      characters.length <= source.mainLimit &&
+      !hasExplicitLineBreak(source.value)
+    ) {
+      return [];
+    }
+    const parts = paginateSupplementText(source.value);
+    return parts.map((value, index) => ({
+      key: source.key,
+      label: source.label,
+      part: index + 1,
+      totalParts: parts.length,
+      value,
+    }));
+  });
+}
+
+function hasExplicitLineBreak(value: string | null | undefined): boolean {
+  return Boolean(value && /\r?\n/.test(value));
+}
+
+function paginateSupplementText(value: string): string[] {
+  const pages: string[] = [];
+  let pageCharacters: string[] = [];
+  let lineCount = 1;
+  let column = 0;
+
+  const flush = () => {
+    if (pageCharacters.length === 0) return;
+    pages.push(pageCharacters.join(''));
+    pageCharacters = [];
+    lineCount = 1;
+    column = 0;
+  };
+
+  for (const character of Array.from(value)) {
+    const isNewline = character === '\n';
+    const wrapsLine = !isNewline && column >= SUPPLEMENT_CHARACTERS_PER_LINE;
+    const additionalLine = isNewline || wrapsLine ? 1 : 0;
+    if (
+      pageCharacters.length >= MAX_SUPPLEMENT_CHARACTERS_PER_PAGE ||
+      (pageCharacters.length > 0 &&
+        lineCount + additionalLine > MAX_SUPPLEMENT_LINES_PER_PAGE)
+    ) {
+      flush();
+    }
+
+    pageCharacters.push(character);
+    if (isNewline) {
+      lineCount += 1;
+      column = 0;
+    } else if (column >= SUPPLEMENT_CHARACTERS_PER_LINE) {
+      lineCount += 1;
+      column = 1;
+    } else if (character !== '\r') {
+      column += 1;
+    }
+  }
+  flush();
+  return pages;
+}
+
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
 
 function clean(value: string | null | undefined): string | null {
   const normalized = value?.trim();
@@ -622,23 +1486,26 @@ body{
   background:#fff; box-shadow:0 2mm 8mm rgba(0,0,0,.3); display:flex;
   flex-direction:column; break-after:page; page-break-after:always;
 }
+.sheet.dense{ padding-top:10mm; padding-bottom:7mm; }
 .sheet:last-child{ break-after:auto; page-break-after:auto; }
 .lbl{ font-size:6pt; font-weight:600; letter-spacing:.18em; color:var(--mute); }
 .l1{ font-size:13.5pt; font-weight:800; line-height:1.2; }
 .l0{ font-size:18pt; font-weight:800; line-height:1.05; letter-spacing:-.015em; }
 .hd{ display:flex; justify-content:space-between; align-items:flex-start; gap:10mm; padding-bottom:4mm; border-bottom:.7mm solid var(--rule); }
-.hd-main{ min-width:0; }
-.cust{ font-size:26pt; font-weight:800; line-height:1; letter-spacing:-.02em; }
-.line{ display:flex; align-items:center; flex-wrap:wrap; gap:1.5mm; font-size:9.5pt; font-weight:600; color:var(--mute); margin-top:2.6mm; }
-.line b{ color:var(--ink); }
+.hd-main{ min-width:0; flex:1 1 auto; overflow:hidden; }
+.factory{ font-size:8pt; font-weight:700; color:var(--mute); letter-spacing:.08em; margin-bottom:1.8mm; }
+.factory,.cust{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cust{ max-width:130mm; font-size:26pt; font-weight:800; line-height:1; letter-spacing:-.02em; }
+.line{ display:flex; align-items:center; flex-wrap:wrap; gap:1.5mm; max-height:2.7em; overflow:hidden; font-size:9.5pt; font-weight:600; color:var(--mute); margin-top:2.6mm; }
+.line b{ max-width:60mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
 .line b.miss{ color:var(--flag); }
 .sep{ color:var(--hair); margin:0 .5mm; }
 .scan{ text-align:right; flex:0 0 auto; }
-.scan .qr{ width:20mm; height:20mm; overflow:hidden; margin-left:auto; }
-.scan svg{ width:20mm !important; height:20mm !important; display:block; }
+.scan .qr{ min-width:25mm; min-height:25mm; margin-left:auto; display:flex; justify-content:flex-end; }
+.scan svg{ min-width:25mm; min-height:25mm; display:block; }
 .scan .no{ font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }
 .sec{ padding:4.5mm 0; border-top:.25mm solid var(--hair); }
-.sheet.dense > .sec{ padding-top:4.2mm; padding-bottom:4.2mm; }
+.sheet.dense > .sec{ padding-top:3mm; padding-bottom:3mm; }
 .sec:first-of-type{ border-top:none; }
 .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:5mm 6mm; align-items:start; }
 .fact{ min-width:0; }
@@ -657,14 +1524,29 @@ tbody td{ border-bottom:.15mm solid var(--hair); font-size:10.5pt; font-weight:6
 .num{ text-align:right; font-weight:800; }
 tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5pt; font-weight:800; padding-top:2.2mm; }
 .items tbody td{ height:7mm; }
+.item-process{ max-width:65mm; color:var(--mute); font-size:7.2pt; font-weight:600; line-height:1.35; margin-top:.7mm; }
 .empty-row{ height:14mm !important; text-align:center; }
 .col-fig{ width:14mm; }.col-spec{ width:26mm; }.col-qty,.col-pack{ width:26mm; }.col-bags{ width:22mm; }
-.flow tbody td{ height:11mm; }.flow .step{ font-size:12.5pt; font-weight:800; }
-.flow-step-col{ width:26mm; }.flow-number-col{ width:28mm; }.flow-defect-col{ width:24mm; }.flow-date-col{ width:30mm; }
+.flow tbody td{ min-height:11mm; }.flow .step{ font-size:11.5pt; font-weight:800; }
+.flow .step small{ display:block; color:var(--mute); font-size:7pt; font-weight:600; }
+.flow .step .flow-item{ margin-bottom:.8mm; }
+.flow .step .flow-worker{ margin-top:.8mm; }
+.flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }.flow-qr-col{ width:32mm; }
+.task-qr-cell{ text-align:right; padding-right:0; vertical-align:middle; }
+.task-qr{ display:inline-flex; min-width:15mm; min-height:15mm; justify-content:flex-end; }
+.task-qr svg{ min-width:15mm; min-height:15mm; display:block; }
+.task-qr-empty{ color:var(--mute); }
+.flow-annex{ flex:1; }
+.annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }
+.item-annex,.warning-annex,.supplement-annex,.shipment-annex{ flex:1; }
+.warning-list{ padding-left:6mm; color:var(--flag); font-size:10pt; font-weight:700; line-height:1.45; }
+.warning-list li{ padding:1.4mm 0; border-bottom:.15mm solid var(--hair); }
+.supplement-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:11pt; font-weight:600; line-height:1.65; }
+.shipment-annex-notice{ font-size:11pt; font-weight:700; color:var(--mute); }
 .badge{ display:inline-flex; align-items:center; justify-content:center; min-width:5.2mm; height:5.2mm; padding:0 1.3mm; background:var(--ink); color:#fff; border-radius:99mm; font-size:8.5pt; font-weight:800; }
-.art{ display:grid; gap:3.5mm; justify-content:start; grid-template-columns:repeat(var(--cols),minmax(0,var(--cap,1fr))); }
+.art{ display:grid; gap:3.5mm; justify-content:var(--art-justify,start); grid-template-columns:repeat(var(--cols),minmax(0,var(--cap,1fr))); }
 .thumb{ min-width:0; }
-.thumb .box{ width:100%; aspect-ratio:3/4; border:.2mm solid var(--hair); display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; background:#fff; }
+.thumb .box{ width:100%; max-height:var(--art-max-box-height,none); aspect-ratio:3/4; border:.2mm solid var(--hair); display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; background:#fff; }
 .thumb .box img{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff; }
 .art-placeholder{ display:none; color:var(--flag); font-size:8pt; font-weight:700; text-align:center; padding:2mm; }
 .image-missing .art-placeholder,.image-failed .art-placeholder{ display:block; }

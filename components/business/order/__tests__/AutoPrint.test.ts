@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  formatArtworkFailureWarning,
   preparePrintDocument,
   PRINT_READY_EVENT,
   PRINT_READY_TIMEOUT_MS,
@@ -174,5 +175,20 @@ describe('preparePrintDocument', () => {
     expect(harness.failedClasses).toContain('image-failed');
     expect(harness.warning.textContent).toBe('设计图加载失败：图 7');
     expect(harness.documentElement.dataset.printReady).toBe('true');
+  });
+
+  it('长失败列表只展示前六个图号，避免动态告警撑破主页', () => {
+    expect(
+      formatArtworkFailureWarning([
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+      ]),
+    ).toBe('设计图加载失败：图 1、2、3、4、5、6 等，共 8 款');
   });
 });

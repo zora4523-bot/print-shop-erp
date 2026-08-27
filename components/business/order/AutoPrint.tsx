@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 export const PRINT_READY_EVENT = 'print-ready';
 export const PRINT_READY_TIMEOUT_MS = 12_000;
 export const PRINT_ASSET_TIMEOUT_MS = 8_000;
+const MAX_FAILED_FIGURES_IN_WARNING = 6;
 
 type PrintReadyDocument = Pick<
   Document,
@@ -79,7 +80,7 @@ export function preparePrintDocument(
   void Promise.all([fontsReady, ...images.map(waitForImage)]).then(() => {
     if (cancelled) return;
     if (failedFigures.size > 0) {
-      const message = `设计图加载失败：图 ${[...failedFigures].join('、')}`;
+      const message = formatArtworkFailureWarning(failedFigures);
       documentTarget
         .querySelectorAll<HTMLElement>('.image-load-warning')
         .forEach((warning) => {
@@ -96,6 +97,18 @@ export function preparePrintDocument(
     cancelled = true;
     cleanups.forEach((cleanup) => cleanup());
   };
+}
+
+export function formatArtworkFailureWarning(figures: Iterable<string>): string {
+  const values = [...figures];
+  const visibleFigures = values
+    .slice(0, MAX_FAILED_FIGURES_IN_WARNING)
+    .join('、');
+  const remaining =
+    values.length > MAX_FAILED_FIGURES_IN_WARNING
+      ? ` 等，共 ${values.length} 款`
+      : '';
+  return `设计图加载失败：图 ${visibleFigures}${remaining}`;
 }
 
 /**

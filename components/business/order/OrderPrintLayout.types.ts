@@ -20,7 +20,24 @@ export type PrintTask = {
   completedQty: number;
   defectQty: number;
   completedAt?: Date | null;
+  // Pre-rendered absolute-URL QR. Keeping this in the DTO makes the browser
+  // print and both PDF paths consume exactly the same task destination.
+  taskQrSvg: string;
 };
+
+export type PrintFoilTechnique =
+  | 'UNSPECIFIED'
+  | 'NONE'
+  | 'FLAT'
+  | 'RELIEF'
+  | 'RAISED';
+
+export type PrintLamination =
+  | 'NONE'
+  | 'MATTE'
+  | 'SOFT_TOUCH'
+  | 'NEW_GLOSS'
+  | 'LASER';
 
 export type PrintShipment = {
   id: string;
@@ -55,6 +72,11 @@ export type PrintOrderItem = {
   frontFoilColors: string[];
   backFoilColors: string[];
   foilColors: string[];
+  foilTechnique: PrintFoilTechnique;
+  hasLocalFoil: boolean | null;
+  lamination: PrintLamination;
+  printColors: string[];
+  printColorsKnown: boolean;
   isDoubleSided: boolean;
   isDoubleColor: boolean;
   craftNames: string[];
