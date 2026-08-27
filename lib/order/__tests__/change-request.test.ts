@@ -1,7 +1,12 @@
+import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
   OrderChangeRequestStatus,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -42,6 +47,7 @@ const { dbMock } = vi.hoisted(() => {
     orderLog: { create: vi.fn() },
     craft: { findMany: vi.fn() },
     product: { findMany: vi.fn() },
+    material: { findMany: vi.fn() },
     priceTier: { findMany: vi.fn() },
     priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
@@ -64,6 +70,12 @@ const { dbMock } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+const { appendPricingRevisionMock } = vi.hoisted(() => ({
+  appendPricingRevisionMock: vi.fn(),
+}));
+vi.mock('@/lib/order/pricing-revision', () => ({
+  appendOrderPricingRevisionInTx: appendPricingRevisionMock,
+}));
 
 import {
   createOrderChangeRequest,
@@ -166,7 +178,10 @@ function externalBaseRule({
     amount,
     minQty,
     maxQty,
-    triggerCondition: null,
+    triggerCondition: {
+      schemaVersion: 1,
+      pricingRoutes: [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL],
+    },
     exclusiveGroup: null,
     priority: 100,
     blocksAutomaticQuote: false,
@@ -194,7 +209,11 @@ function externalAddOnRule({
     name,
     kind: 'ADD_ON',
     calculationType: 'PER_PIECE',
-    triggerCondition,
+    triggerCondition: {
+      schemaVersion: 1,
+      pricingRoutes: [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL],
+      ...triggerCondition,
+    },
     priority: 50,
     category: { code: 'ADD_ON', name: '附加加工费' },
   };
@@ -246,6 +265,8 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
       settlementType: OrderSettlementType.EXTERNAL_SALES,
       billingMode: OrderBillingMode.CHARGE,
       revision: 2,
+      pricingStatus: 'ADMIN_CONFIRMED',
+      priceRevision: 5,
       status: OrderStatus.IN_PRODUCTION,
       isSfCollect: false,
       processingAmount: '1000.00',
@@ -260,10 +281,23 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
           fixedFee: '0',
           subtotal: '1000.00',
           productId: 'product-1',
+          pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+          productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+          artworkVersion: null,
+          plateGroupId: null,
+          pricingGroup: null,
+          manualQuoteReason: null,
           specification: '中号',
+          actualWidthMm: new Decimal(210),
+          actualHeightMm: new Decimal(105),
           paperType: '艳红珠光纸',
+          paperWeightGsm: 160,
           crafts: ['craft-1'],
           foilColors: ['哑金'],
+          foilTechnique: OrderFoilTechnique.FLAT,
+          hasLocalFoil: false,
+          lamination: OrderLamination.NONE,
+          printColors: [],
           isDoubleSided: false,
           isDoubleColor: false,
           suggestedSubtotal: null,
@@ -332,6 +366,15 @@ function reviewOrderItems(count: number) {
   }));
 }
 
+function mockFlatFoilCraftCode(
+  code: 'FLAT_FOIL_SINGLE' | 'FLAT_FOIL_DOUBLE',
+) {
+  dbMock.craft.findMany.mockImplementation(
+    async ({ where }: { where: { id: { in: string[] } } }) =>
+      where.id.in.map((id) => ({ id, code, isActive: true })),
+  );
+}
+
 beforeEach(() => {
   for (const value of Object.values(dbMock)) {
     if (typeof value === 'object' && value !== null) {
@@ -353,17 +396,15 @@ beforeEach(() => {
     {
       id: 'product-1',
       code: 'PRODUCT_1',
+      category: 'CUSTOM_FLAT_FOIL',
       isActive: true,
       baseUnitPrice: '1.0000',
     },
   ]);
-  dbMock.craft.findMany.mockImplementation(
-    async ({ where }: { where: { id: { in: string[] } } }) =>
-      where.id.in.map((id) => ({
-        id,
-        code: `CRAFT_${id}`,
-        isActive: true,
-      })),
+  mockFlatFoilCraftCode('FLAT_FOIL_SINGLE');
+  dbMock.material.findMany.mockImplementation(
+    async ({ where }: { where: { name: { in: string[] } } }) =>
+      where.name.in.map((name) => ({ name })),
   );
   dbMock.priceTier.findMany.mockResolvedValue([]);
   dbMock.priceAdjustment.findMany.mockResolvedValue([]);
@@ -379,6 +420,11 @@ beforeEach(() => {
   dbMock.$transaction.mockReset().mockImplementation(
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
+  appendPricingRevisionMock.mockReset().mockResolvedValue({
+    priceRevision: 6,
+    orderRevision: 3,
+    snapshot: {},
+  });
 });
 
 describe('createOrderChangeRequest', () => {
@@ -561,6 +607,7 @@ describe('previewOrderChangeRequestPricing', () => {
   });
 
   it('withholds the new total and explains every incomplete quote instead of implying a carried price', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     const request = baseReviewRequest({
       order: {
         ...baseReviewRequest().order,
@@ -759,6 +806,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('re-quotes an approved specification/foil change and increments the revision', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());
@@ -813,6 +861,16 @@ describe('reviewOrderChangeRequest', () => {
       },
     });
     expect(dbMock.orderLog.create).toHaveBeenCalledTimes(1);
+    expect(appendPricingRevisionMock).toHaveBeenCalledWith(
+      dbMock,
+      expect.objectContaining({
+        orderId: 'order-1',
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'CHANGE_REQUEST_APPLIED_PENDING',
+        expectedPriceRevision: 5,
+        incrementOrderRevision: false,
+      }),
+    );
   });
 
   it('re-quotes a quantity change across a price tier using one transaction timestamp', async () => {
@@ -1048,6 +1106,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('re-quotes a foil-color change with the per-color multiplier', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());
@@ -1133,7 +1192,11 @@ describe('reviewOrderChangeRequest', () => {
     });
 
     await reviewOrderChangeRequest(
-      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '整单数量超过中通自动报价范围，沿用历史运费待后续确认',
+      },
       adminActor,
     );
 
@@ -1313,6 +1376,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('blocks an incomplete re-quote until the reviewer explicitly explains carrying the old price', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     const request = baseReviewRequest({
       order: {
         ...baseReviewRequest().order,
@@ -1339,6 +1403,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('carries the old price on an incomplete quote only with the explicit review remark', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     const request = baseReviewRequest({
       order: {
         ...baseReviewRequest().order,
@@ -1381,13 +1446,15 @@ describe('reviewOrderChangeRequest', () => {
           requestId: 'request-1',
           source: 'CHANGE_REQUEST_PRICE_CARRY_FORWARD',
           complete: false,
-          previousSnapshot: { version: 1, marker: 'original' },
           actual: expect.objectContaining({
             overrideReason: '客户已确认沿用原成交价',
           }),
         }),
       }),
     });
+    expect(
+      dbMock.orderItem.update.mock.calls[0]![0].data.pricingSnapshot,
+    ).not.toHaveProperty('previousSnapshot');
   });
 
   it('attributes an approved amount change to the order submitter snapshot even if the requester role changed', async () => {
@@ -1566,7 +1633,12 @@ describe('reviewOrderChangeRequest', () => {
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(request);
     dbMock.product.findMany.mockResolvedValue([
-      { id: 'product-1', baseUnitPrice: '2000.0000' },
+      {
+        id: 'product-1',
+        code: 'PRODUCT_1',
+        category: 'CUSTOM_FLAT_FOIL',
+        baseUnitPrice: '2000.0000',
+      },
     ]);
     dbMock.customerPriceRule.findMany.mockResolvedValue([
       externalBaseRule({ amount: '2000.0000' }),
@@ -1583,6 +1655,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('rejects a combined order total that would overflow Decimal(12,2)', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());

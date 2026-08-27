@@ -76,4 +76,12 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
     const errorTag = html.match(new RegExp(`<[^>]*id="${referenced}"[^>]*>`))![0];
     expect(errorTag).not.toContain('role="alert"');
   });
+
+  it('收货地址在普通编辑表单中保持 HTML 与读屏必填语义', () => {
+    const html = render();
+    const tag = html.match(/<textarea[^>]*id="receiverAddress"[^>]*>/)?.[0];
+    expect(tag).toBeDefined();
+    expect(tag).toContain('required=""');
+    expect(tag).toContain('aria-required="true"');
+  });
 });

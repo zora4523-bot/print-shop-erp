@@ -60,7 +60,7 @@ describe('buildOrderDetailTimeline', () => {
 
     expect(steps[0]?.label).toBe('已取消');
     expect(steps[0]?.state).toBe('current');
-    expect(steps[0]?.meta).toContain('CANCELLED');
+    expect(steps[0]?.meta).toBe('已取消');
   });
 });
 

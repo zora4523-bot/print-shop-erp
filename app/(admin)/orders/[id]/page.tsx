@@ -1,11 +1,16 @@
 import Link from 'next/link';
+import Decimal from 'decimal.js';
 import { DESIGN_GRID_WARN_THRESHOLD } from '@/components/business/order/design-grid';
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import {
   OrderChangeRequestStatus,
   OrderCostCategory,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
   OrderKind,
+  OrderPackagingMode,
+  OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
@@ -65,13 +70,22 @@ import {
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
 import { OrderChangeReviewForm } from '@/components/business/order/OrderChangeReviewForm';
+import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
+import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
 import { OrderCostEntryForm } from '@/components/business/bill/OrderCostEntryForm';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
+import {
+  ORDER_PRICING_STATUS,
+  orderPricingStatusLabel,
+} from '@/lib/order/pricing-status';
+import { orderPricingSourceLabel } from '@/lib/order/pricing-source';
+import { ORDER_PRICING_ROUTE_LABELS } from '@/lib/order/pricing-route';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
 import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
@@ -79,6 +93,9 @@ import {
   buildOrderDetailTimeline,
   orderCancelImpact,
 } from '@/components/business/order/order-detail-timeline';
+import { getSetting } from '@/lib/settings';
+import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
+import { TaskDisputeAdminPanel } from '@/components/business/production/TaskDisputeAdminPanel';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -114,7 +131,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     materialEstimate,
     pieceworkSummary,
     reassignmentView,
+    taskDisputes,
     reworkCraftOptions,
+    selfClaimSetting,
   ] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
     user.role === Role.ADMIN
@@ -123,9 +142,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
     user.role === Role.ADMIN
       ? getPendingTaskReassignmentView(order.id)
       : Promise.resolve({ tasks: [] }),
+    user.role === Role.ADMIN
+      ? listOrderTaskDisputes(order.id, { id: user.id, role: user.role })
+      : Promise.resolve([]),
     canCreateRework
       ? getReworkCraftOptions(order.items.flatMap((item) => item.crafts))
       : Promise.resolve([]),
+    user.role === Role.ADMIN
+      ? getSetting('worker_self_claim_enabled')
+      : Promise.resolve({ enabled: false }),
   ]);
 
   const canSubmit =
@@ -138,6 +163,21 @@ export default async function OrderDetailPage({ params }: PageProps) {
   // 仍是真闸口。
   const canShipOrFinish =
     user.role === Role.ADMIN;
+  const isExternalSalesOrder =
+    'settlementType' in order &&
+    order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const pricingStatus: string | null =
+    canViewCommercialAmounts && 'pricingStatus' in order
+      ? String(order.pricingStatus)
+      : null;
+  const priceRevision =
+    canViewCommercialAmounts &&
+    'priceRevision' in order &&
+    typeof order.priceRevision === 'number'
+      ? order.priceRevision
+      : null;
+  const isPricingPending =
+    pricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
   const hasLiveOutsource = order.outsourceOrders.some(
     (row) =>
       row.status === OutsourceStatus.SENT ||
@@ -146,9 +186,12 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canShip =
     canShipOrFinish &&
     order.status === OrderStatus.COMPLETED &&
-    !hasLiveOutsource;
+    !hasLiveOutsource &&
+    !isPricingPending;
   const canFinish =
-    canShipOrFinish && order.status === OrderStatus.SHIPPED;
+    canShipOrFinish &&
+    order.status === OrderStatus.SHIPPED &&
+    !isPricingPending;
 
   // Editing follows SPEC §3.6. Ownership mirrors the action-layer
   // guard: SALES / CUSTOMER_SERVICE only their own; ADMIN
@@ -158,9 +201,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
     (order.submitterId === user.id || user.role === Role.ADMIN);
   // 急单 toggle lives in the FULL fieldset only (DRAFT/SUBMITTED).
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
-  const isExternalSalesOrder =
-    'settlementType' in order &&
-    order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const canAdminReviewPricing =
+    user.role === Role.ADMIN &&
+    isExternalSalesOrder &&
+    order.status !== OrderStatus.FINISHED &&
+    order.status !== OrderStatus.CANCELLED;
   const isFinalizedExternalShipment =
     order.status === OrderStatus.SHIPPED &&
     isExternalSalesOrder;
@@ -233,8 +278,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
     completedTaskCount,
     liveOutsourceCount,
   });
-  const shipDisabledReason = hasLiveOutsource
-    ? '仍有已发出或进行中的外协单'
+  const shipDisabledReason = isPricingPending
+    ? '价格待管理员确认'
+    : hasLiveOutsource
+      ? '仍有已发出或进行中的外协单'
     : incompleteTaskCount > 0
       ? `${incompleteTaskCount} 个任务未完工`
       : order.status !== OrderStatus.COMPLETED
@@ -253,6 +300,11 @@ export default async function OrderDetailPage({ params }: PageProps) {
       charge.shipment
         ? [[`${charge.shipment.id}:${String(charge.category.code)}`, charge] as const]
         : [],
+    ),
+  );
+  const manualCustomerCharges = order.customerCharges.filter((charge) =>
+    ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
+      String(charge.category.code),
     ),
   );
 
@@ -373,6 +425,17 @@ export default async function OrderDetailPage({ params }: PageProps) {
               >
                 确认完工
               </Link>
+            ) : canShipOrFinish &&
+              order.status === OrderStatus.SHIPPED &&
+              isPricingPending ? (
+              <DisabledReason
+                cause="prerequisite"
+                reason="价格待管理员确认"
+              >
+                <Button type="button" disabled size="sm">
+                  确认完工（价格待确认）
+                </Button>
+              </DisabledReason>
             ) : null}
             {canShip ? (
               <Link
@@ -432,6 +495,98 @@ export default async function OrderDetailPage({ params }: PageProps) {
         }
       >
 
+      {isExternalSalesOrder && pricingStatus ? (
+        <section
+          className={
+            isPricingPending
+              ? 'space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 shadow-sm sm:p-6'
+              : 'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6'
+          }
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold">对客价格状态</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {isPricingPending
+                  ? '价格待管理员确认，确认前不可排产。'
+                  : '价格已确认。'}
+              </p>
+            </div>
+            <Badge variant={isPricingPending ? 'destructive' : 'secondary'}>
+              {orderPricingStatusLabel(pricingStatus)}
+            </Badge>
+          </div>
+          <dl className="grid gap-2 text-xs sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">价格修订</dt>
+              <dd>第 {priceRevision ?? '—'} 版</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">确认人</dt>
+              <dd>
+                {'pricingConfirmedBy' in order && order.pricingConfirmedBy
+                  ? order.pricingConfirmedBy.displayName
+                  : pricingStatus === ORDER_PRICING_STATUS.AUTO_CONFIRMED
+                    ? '系统自动报价'
+                    : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">价格来源</dt>
+              <dd>
+                {orderPricingSourceLabel(order.pricingRevisions[0]?.source)}
+              </dd>
+            </div>
+          </dl>
+          {canAdminReviewPricing ? (
+            <div className="border-t pt-4">
+              <OrderPricingReviewForm orderId={order.id} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {canAdminReviewPricing && priceRevision !== null ? (
+        <OrderCommercialDetailsManager
+          orderId={order.id}
+          priceRevision={priceRevision}
+          manualCharges={manualCustomerCharges.map((charge) => ({
+            id: charge.id,
+            status: String(charge.status),
+            description: charge.description,
+            amount: String(charge.amount),
+            overrideReason: charge.overrideReason,
+            approvalReference: charge.approvalReference,
+            category: {
+              code: String(charge.category.code),
+              name: charge.category.name,
+            },
+            finalizedBy: charge.finalizedBy,
+            finalizedAt: charge.finalizedAt,
+          }))}
+          items={order.items.map((item) => ({
+            id: item.id,
+            sequence: item.sequence,
+            name: item.name,
+            plateDetails:
+              'plateDetails' in item
+                ? item.plateDetails.map((detail) => ({
+                    id: detail.id,
+                    sequence: detail.sequence,
+                    name: detail.name,
+                    plateGroupId: detail.plateGroupId,
+                    specification: detail.specification,
+                    quantity: detail.quantity,
+                    unitPrice: String(detail.unitPrice),
+                    amount: String(detail.amount),
+                    remark: detail.remark,
+                    isActive: detail.isActive,
+                  }))
+                : [],
+          }))}
+        />
+      ) : null}
+
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(15rem,16.75rem)_minmax(0,1fr)]">
         <OrderDetailTimeline steps={timelineSteps} />
         <div className="min-w-0 space-y-3">
@@ -481,11 +636,26 @@ export default async function OrderDetailPage({ params }: PageProps) {
           </div>
           {canViewCommercialAmounts &&
           'processingAmount' in order &&
+          'packagingAmount' in order &&
           'totalAmount' in order ? (
             <>
               <Row
-                label="加工费小计"
-                value={String(order.processingAmount)}
+                label="款式加工费"
+                value={formatMoney(
+                  new Decimal(String(order.processingAmount)).minus(
+                    String(order.packagingAmount),
+                  ),
+                )}
+                tabular
+              />
+              <Row
+                label="入袋费"
+                value={formatMoney(String(order.packagingAmount))}
+                tabular
+              />
+              <Row
+                label="加工费合计"
+                value={formatMoney(String(order.processingAmount))}
                 tabular
               />
               <Row
@@ -505,9 +675,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       {canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
-            <h2 className="text-base font-semibold">对客快递与打包耗材费</h2>
+            <h2 className="text-base font-semibold">对客收费明细</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              这些是外部销售应付工厂的收费，不计入工厂内部成本；多地址按每票分别保存。
+              对客收费与工厂成本分开统计。
             </p>
           </div>
           <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
@@ -519,7 +689,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-medium">
-                      地址 {charge.shipment?.sequence ?? '—'} ·{' '}
+                      {charge.shipment
+                        ? `地址 ${charge.shipment.sequence} · `
+                        : ''}
                       {charge.category.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -572,7 +744,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 </dl>
                 {charge.overrideReason ? (
                   <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground">
-                    调整说明：{charge.overrideReason}
+                    原因：{charge.overrideReason}
+                  </p>
+                ) : null}
+                {charge.approvalReference ? (
+                  <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+                    审批信息：{charge.approvalReference}
+                  </p>
+                ) : null}
+                {charge.finalizedBy ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    确认人：{charge.finalizedBy.displayName}
+                    {charge.finalizedAt
+                      ? ` · ${formatDateTimeShanghai(charge.finalizedAt)}`
+                      : ''}
                   </p>
                 ) : null}
               </li>
@@ -745,26 +930,103 @@ export default async function OrderDetailPage({ params }: PageProps) {
                 </dl>
               </div>
               <dl className="mt-3 grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                <Row label="规格" value={item.specification} />
-                <Row label="纸张" value={item.paperType} />
                 <Row
-                  label="烫金色"
-                  value={formatFoilColors(item.foilColors)}
+                  label="计价路线"
+                  value={ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}
+                />
+                <Row
+                  label="产品结构"
+                  value={PRODUCT_STRUCTURE_LABELS[item.productStructure]}
+                />
+                <Row
+                  label="产品 / SKU"
+                  value={
+                    item.product?.name
+                      ? externalPriceBusinessText(item.product.name)
+                      : null
+                  }
+                />
+                <Row
+                  label="规格"
+                  value={
+                    item.specification
+                      ? externalPriceBusinessText(item.specification)
+                      : null
+                  }
+                />
+                <Row
+                  label="实际尺寸"
+                  value={formatActualSize(
+                    item.actualWidthMm,
+                    item.actualHeightMm,
+                  )}
+                  tabular
+                />
+                <Row
+                  label="纸张"
+                  value={
+                    item.paperType
+                      ? externalPriceBusinessText(item.paperType)
+                      : null
+                  }
+                />
+                <Row
+                  label="纸张克重"
+                  value={
+                    item.paperWeightGsm === null
+                      ? null
+                      : `${formatQuantity(item.paperWeightGsm)} g/㎡`
+                  }
+                  tabular
+                />
+                <Row label="稿件版本" value={item.artworkVersion} />
+                <Row label="版组 / 模具组 ID" value={item.plateGroupId} />
+                <Row label="专版计价组" value={item.pricingGroup} />
+                <Row
+                  label="加工面"
+                  value={item.isDoubleSided ? '双面加工' : '单面加工'}
+                />
+                <Row
+                  label="烫金方式"
+                  value={FOIL_TECHNIQUE_LABELS[item.foilTechnique]}
+                />
+                <Row
+                  label="烫金颜色"
+                  value={formatFoilColorFacts(
+                    item.foilColors,
+                    item.foilTechnique,
+                  )}
+                />
+                <Row
+                  label="双色烫金"
+                  value={item.isDoubleColor ? '是' : '否'}
+                />
+                <Row
+                  label="局部烫金"
+                  value={formatNullableBoolean(item.hasLocalFoil)}
+                />
+                <Row
+                  label="彩印颜色"
+                  value={formatPrintColorFacts(
+                    item.printColors,
+                    item.printColorsKnown,
+                  )}
                   full
-                />
-                <Row
-                  label="印刷面"
-                  value={item.isDoubleSided ? '双面' : '单面'}
-                />
-                <Row
-                  label="印刷色数"
-                  value={item.isDoubleColor ? '双色' : '单色'}
                 />
                 <Row
                   label="工艺"
                   value={item.craftNames.length ? item.craftNames.join('、') : '—'}
                   full
                 />
+                {canViewCommercialAmounts &&
+                item.pricingRoute === OrderItemPricingRoute.MANUAL_QUOTE &&
+                'manualQuoteReason' in item ? (
+                  <Row
+                    label="人工报价原因"
+                    value={String(item.manualQuoteReason ?? '')}
+                    full
+                  />
+                ) : null}
                 {canViewCommercialAmounts &&
                 'suggestedSubtotal' in item &&
                 'priceOverrideReason' in item ? (
@@ -799,6 +1061,39 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   full
                 />
               </dl>
+              {canViewCommercialAmounts &&
+              'plateDetails' in item &&
+              item.plateDetails.length > 0 ? (
+                <div className="mt-4 space-y-2 rounded-md border bg-muted/20 p-3">
+                  <h4 className="text-xs font-semibold">制版明细</h4>
+                  <ul className="divide-y text-xs">
+                    {item.plateDetails.map((detail) => (
+                      <li
+                        key={detail.id}
+                        className="grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1.5fr)_1fr_100px_120px]"
+                      >
+                        <span className="admin-wrap-anywhere">
+                          #{detail.sequence} · {detail.name}
+                          {!detail.isActive ? '（已移除）' : ''}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {detail.plateGroupId ?? '未填版组'} ·{' '}
+                          {detail.specification
+                            ? externalPriceBusinessText(detail.specification)
+                            : '未填规格'}
+                        </span>
+                        <span className="font-sans tabular-nums">
+                          {formatQuantity(detail.quantity)} ×{' '}
+                          {formatMoney(String(detail.unitPrice))}
+                        </span>
+                        <span className="font-sans tabular-nums sm:text-right">
+                          {formatMoney(String(detail.amount))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {canViewCommercialAmounts && 'pricingSnapshot' in item ? (
                 <PricingSnapshotBreakdown
                   pricingSnapshot={item.pricingSnapshot}
@@ -837,12 +1132,131 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </ol>
       </section>
 
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <h2 className="text-base font-semibold">
+          包装组（{order.packagingGroups.length}）
+        </h2>
+        {order.packagingGroups.length === 0 ? (
+          <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            暂无包装组。
+          </p>
+        ) : (
+          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            {order.packagingGroups.map((group) => {
+              const unitsPerBag = group.lines.reduce(
+                (sum, line) => sum + line.unitsPerBag,
+                0,
+              );
+              return (
+                <li
+                  key={group.id}
+                  className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="font-medium">
+                        包装组 #{group.sequence}
+                        {group.name ? ` · ${group.name}` : ''}
+                      </h3>
+                      <p className="mt-1 font-sans tabular-nums text-muted-foreground">
+                        实际 {formatQuantity(group.actualBagCount)} 袋
+                        {unitsPerBag > 0
+                          ? ` · 每袋共 ${formatQuantity(unitsPerBag)} 个`
+                          : ''}
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {PACKAGING_MODE_LABELS[group.mode]}
+                    </Badge>
+                  </div>
+                  {canViewCommercialAmounts &&
+                  'unitPrice' in group &&
+                  'subtotal' in group ? (
+                    <>
+                      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/20 p-3 text-xs">
+                        <div>
+                          <dt className="text-muted-foreground">入袋单价</dt>
+                          <dd className="font-sans font-medium tabular-nums">
+                            {formatUnitPrice(String(group.unitPrice))} / 袋
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">入袋小计</dt>
+                          <dd className="font-sans font-medium tabular-nums">
+                            {formatMoney(String(group.subtotal))}
+                          </dd>
+                        </div>
+                        {'suggestedSubtotal' in group ? (
+                          <div>
+                            <dt className="text-muted-foreground">
+                              系统建议小计
+                            </dt>
+                            <dd className="font-sans tabular-nums">
+                              {group.suggestedSubtotal === null
+                                ? '未形成完整建议价'
+                                : formatMoney(String(group.suggestedSubtotal))}
+                            </dd>
+                          </div>
+                        ) : null}
+                        {'priceOverrideReason' in group &&
+                        group.priceOverrideReason ? (
+                          <div className="col-span-2">
+                            <dt className="text-muted-foreground">
+                              入袋费改价说明
+                            </dt>
+                            <dd className="admin-wrap-anywhere mt-0.5">
+                              {String(group.priceOverrideReason)}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                      {'pricingSnapshot' in group ? (
+                        <PricingSnapshotBreakdown
+                          pricingSnapshot={group.pricingSnapshot}
+                          title="入袋计价明细"
+                          className="mt-3"
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+                  {group.lines.length === 0 ? (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      未记录每袋款式组成
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-2">
+                      {group.lines.map((line) => (
+                        <li
+                          key={line.id}
+                          className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 rounded-md bg-muted/40 px-3 py-2"
+                        >
+                          <span className="min-w-0">
+                            #{line.orderItem.sequence} {line.orderItem.name}
+                          </span>
+                          <span className="font-sans text-xs tabular-nums text-muted-foreground">
+                            每袋 {formatQuantity(line.unitsPerBag)} 个 · 全组{' '}
+                            {formatQuantity(
+                              line.unitsPerBag * group.actualBagCount,
+                            )}{' '}
+                            个
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+
       {canRequestChange ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
             <h2 className="text-base font-semibold">申请修改工单</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              管理员批准后，款式、待生产任务和各端显示才会统一更新。
+              管理员批准后才会更新款式和待生产任务。
             </p>
           </div>
           <OrderChangeRequestForm
@@ -911,6 +1325,30 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
+      {user.role === Role.ADMIN ? (
+        <TaskDisputeAdminPanel
+          disputes={taskDisputes.map((dispute) => ({
+            id: dispute.id,
+            status: dispute.status,
+            reason: dispute.reason,
+            resolution: dispute.resolution,
+            resolvedAt: dispute.resolvedAt,
+            createdAt: dispute.createdAt,
+            workerName: dispute.worker.displayName,
+            resolvedByName: dispute.resolvedBy?.displayName ?? null,
+            task: {
+              id: dispute.productionTask.id,
+              itemSequence: dispute.productionTask.orderItem.sequence,
+              itemName: dispute.productionTask.orderItem.name,
+              craftName: dispute.productionTask.craft.name,
+              plannedQty: dispute.productionTask.plannedQty,
+              completedQty: dispute.productionTask.completedQty,
+              pieceworkAmount: String(dispute.productionTask.pieceworkAmount),
+            },
+          }))}
+        />
+      ) : null}
+
       {reassignmentView.tasks.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
@@ -938,6 +1376,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   currentWorkerId={task.currentWorkerId}
                   craftId={task.craftId}
                   eligibleWorkers={task.eligibleWorkers}
+                  selfClaimEnabled={selfClaimSetting.enabled}
                 />
               </li>
             ))}
@@ -953,7 +1392,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <div className="min-w-0">
               <h2 className="text-base font-semibold">计件工资关联</h2>
               <p className="text-xs text-muted-foreground">
-                仅管理员可见；金额来自已生成的日薪任务明细。
+                金额按已生成的日薪明细统计。
               </p>
             </div>
             <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
@@ -996,7 +1435,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <div>
             <h2 className="text-base font-semibold">成本补录与调整</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              计件工资和外协金额会在账单中自动汇总；这里补录材料、{order.isSfCollect ? '' : '物流重量费用、'}伙食费、电费等自定义成本。
+              计件工资和外协金额自动汇总；这里只需补录其他成本。
             </p>
           </div>
           {order.costEntries.length > 0 ? (
@@ -1055,7 +1494,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
             <TableEmptyState
               variant="compact"
               title="尚无人工补录成本"
-              description="如有材料、伙食费、电费等额外成本，可在下方补录。"
             />
           )}
           <div className="border-t pt-4">
@@ -1074,7 +1512,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <TableEmptyState
             variant="compact"
             title="尚无修改记录"
-            description="工单发生变更后，操作人和变更内容会记录在这里。"
           />
         ) : (
           <ul className="divide-y text-sm">
@@ -1130,8 +1567,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <h2 className="text-base font-semibold">标记发货</h2>
           <p className="text-xs text-muted-foreground">
-            所有任务已完工，工单进入 COMPLETED；标记发货后状态切到
-            SHIPPED，可填运单号备查。
+            所有任务已完工；标记发货后可填写运单号。
           </p>
           <ShipOrderForm
             orderId={order.id}
@@ -1181,7 +1617,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
           <h2 className="text-base font-semibold">暂不能完工</h2>
           <p className="text-sm text-muted-foreground">
             以下款式含外协工艺，但外协履约数量不足，或还没有未取消的
-            外协单。内部任务全部报完工后，系统也不会把工单转完工——请先补外协单：
+            外协单。请先创建或补足外协单：
           </p>
           <ul className="list-disc space-y-1 pl-5 text-sm">
             {order.uncoveredOutsourceItems.map((item) => (
@@ -1225,10 +1661,20 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <h2 className="text-base font-semibold">确认完工</h2>
           <p className="text-xs text-muted-foreground">
-            发货确认收件 / 客户对账后点确认完工；状态切到 FINISHED 终态，
-            工单不再活跃，但仍参与月度账单生成。
+            收件或对账后确认完工。工单结案后仍参与账单统计。
           </p>
           <FinishOrderButton orderId={order.id} />
+        </section>
+      ) : null}
+
+      {canShipOrFinish &&
+      order.status === OrderStatus.SHIPPED &&
+      isPricingPending ? (
+        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+          <h2 className="text-base font-semibold">暂不能完工</h2>
+          <p className="text-sm text-muted-foreground">
+            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再确认完工。
+          </p>
         </section>
       ) : null}
 
@@ -1294,6 +1740,62 @@ function Row({
 const QUANTITY_FORMATTER = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 0,
 });
+
+const PRODUCT_STRUCTURE_LABELS: Record<OrderProductStructure, string> = {
+  [OrderProductStructure.UNSPECIFIED]: '未明确',
+  [OrderProductStructure.STANDARD_ENVELOPE]: '普通封',
+  [OrderProductStructure.WESTERN_ENVELOPE]: '西封',
+  [OrderProductStructure.TEN_THOUSAND_ENVELOPE]: '万元封',
+};
+
+const FOIL_TECHNIQUE_LABELS: Record<OrderFoilTechnique, string> = {
+  [OrderFoilTechnique.UNSPECIFIED]: '历史数据未明确',
+  [OrderFoilTechnique.NONE]: '不烫金',
+  [OrderFoilTechnique.FLAT]: '平烫',
+  [OrderFoilTechnique.RELIEF]: '浮雕',
+  [OrderFoilTechnique.RAISED]: '激凸',
+};
+
+const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
+  [OrderPackagingMode.SINGLE_STYLE]: '单款装',
+  [OrderPackagingMode.MIXED_STYLE]: '混装',
+};
+
+function formatActualSize(
+  width: unknown,
+  height: unknown,
+): string {
+  if (width === null || width === undefined || height === null || height === undefined) {
+    return '—';
+  }
+  return `${String(width)} × ${String(height)} mm`;
+}
+
+function formatFoilColorFacts(
+  colors: readonly string[],
+  technique: OrderFoilTechnique,
+): string {
+  if (colors.length > 0) {
+    return `${formatFoilColors(colors)}（${colors.length} 色）`;
+  }
+  if (technique === OrderFoilTechnique.UNSPECIFIED) return '历史数据未明确';
+  if (technique === OrderFoilTechnique.NONE) return '无';
+  return '未填写';
+}
+
+function formatPrintColorFacts(
+  colors: readonly string[],
+  known: boolean,
+): string {
+  if (!known) return '历史数据未明确';
+  if (colors.length === 0) return '无';
+  return `${colors.join('、')}（${colors.length} 色）`;
+}
+
+function formatNullableBoolean(value: boolean | null): string {
+  if (value === null) return '历史数据未明确';
+  return value ? '是' : '否';
+}
 
 function formatQuantity(value: number): string {
   return QUANTITY_FORMATTER.format(value);

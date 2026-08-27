@@ -12,6 +12,7 @@ function input(overrides: Partial<OrderFormGapInput> = {}): OrderFormGapInput {
       {
         name: '外盒',
         productId: 'product-1',
+        paperType: '触感纸',
         quantity: 8000,
         crafts: ['foil'],
         quoteStatus: 'complete',
@@ -23,7 +24,6 @@ function input(overrides: Partial<OrderFormGapInput> = {}): OrderFormGapInput {
     shipping: {
       usesExternalSalesPricing: false,
       isSfCollect: false,
-      quoteStatus: 'missing',
       shipments: [
         {
           key: 'primary',
@@ -46,6 +46,7 @@ describe('collectOrderFormGaps', () => {
           {
             name: '',
             productId: 'product-1',
+            paperType: '触感纸',
             quantity: 1000,
             crafts: [],
             quoteStatus: 'complete',
@@ -53,6 +54,7 @@ describe('collectOrderFormGaps', () => {
           {
             name: '腰封',
             productId: 'product-2',
+            paperType: '触感纸',
             quantity: 0,
             crafts: ['foil'],
             quoteStatus: 'complete',
@@ -81,6 +83,7 @@ describe('collectOrderFormGaps', () => {
           {
             name: '外盒',
             productId: null,
+            paperType: '触感纸',
             quantity: 8000,
             crafts: ['foil'],
             quoteStatus: 'stale',
@@ -101,13 +104,12 @@ describe('collectOrderFormGaps', () => {
     ]);
   });
 
-  it('covers external-sales logistics prerequisites and charge override reason', () => {
+  it('keeps external-sales logistics fact gaps without requiring charge amounts', () => {
     const gaps = collectOrderFormGaps(
       input({
         shipping: {
           usesExternalSalesPricing: true,
           isSfCollect: false,
-          quoteStatus: 'incomplete',
           shipments: [
             {
               key: 'primary',
@@ -117,10 +119,6 @@ describe('collectOrderFormGaps', () => {
               receiverAddress: '',
               province: '',
               billableWeightKg: null,
-              shippingFee: '20.00',
-              packingMaterialFee: null,
-              chargeOverrideRequired: true,
-              chargeOverrideReason: '',
             },
           ],
         },
@@ -131,9 +129,43 @@ describe('collectOrderFormGaps', () => {
       'receiverAddress',
       'primary-province',
       'primary-weight',
-      'primary-packing-fee',
-      'primary-charge-reason',
-      'logistics-quote',
     ]);
+  });
+
+  it('does not ask external sales for hidden manual price or charge fields', () => {
+    const gaps = collectOrderFormGaps(
+      input({
+        items: [
+          {
+            name: '外盒',
+            productId: 'product-1',
+            paperType: '触感纸',
+            quantity: 8000,
+            crafts: ['foil'],
+            quoteStatus: 'incomplete',
+            manualPriceProvided: false,
+            priceOverrideRequired: true,
+            priceOverrideReason: '',
+          },
+        ],
+        shipping: {
+          usesExternalSalesPricing: true,
+          isSfCollect: false,
+          shipments: [
+            {
+              key: 'primary',
+              label: '主地址',
+              idPrefix: 'primary',
+              receiverFieldId: 'receiverAddress',
+              receiverAddress: '张三 13800000000 上海市',
+              province: '上海',
+              billableWeightKg: '12',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(gaps).toEqual([]);
   });
 });

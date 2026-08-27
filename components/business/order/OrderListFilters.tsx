@@ -310,7 +310,7 @@ export function OrderListFilters({
           role="alert"
           className="admin-wrap-anywhere min-w-0 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
         >
-          <p className="font-medium">部分筛选条件无效，已按安全值处理：</p>
+          <p className="font-medium">部分筛选条件无效，已忽略：</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             {issues.map((issue, index) => (
               <li key={`${issue}-${index}`} className="min-w-0">

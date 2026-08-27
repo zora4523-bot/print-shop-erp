@@ -1,3 +1,5 @@
+import type { Prisma } from '../../generated/prisma/client';
+
 // Generates GD-YYMMDD-XXX order numbers (for example GD-260719-001).
 //
 // Concurrency: two sales submitting at the same millisecond must not both
@@ -57,14 +59,8 @@ function formatDateParts(date: Date): {
 // doesn't depend on the lib/account.ts TxClient declaration (different
 // table surfaces).
 export type OrderSeqTxClient = {
-  $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
-  order: {
-    findFirst: (args: {
-      where: unknown;
-      orderBy?: unknown;
-      select?: unknown;
-    }) => Promise<{ orderNo: string } | null>;
-  };
+  $executeRaw: Prisma.TransactionClient['$executeRaw'];
+  order: Pick<Prisma.TransactionClient['order'], 'findFirst'>;
 };
 
 export async function nextOrderNumber(

@@ -68,10 +68,9 @@ export function shipOrderImpactItems({
   return [
     ...shipmentItems,
     isExternalSales
-      ? '当前填写的快递费与打包耗材费会由服务器校验后从估算转为最终收费，并按工单创建时冻结的价目簿重算应收总额。'
-      : '该工单不是外部销售单，本次发货不处理对客快递费或打包耗材费。',
-    '工单会进入 SHIPPED（已发货），这不是终态；收件与对账完成后仍需“确认完工”才进入 FINISHED 终态。',
-    '系统会提交“工单已发货”通知任务；是否送达以通知记录或队列处理结果为准。',
+      ? '发货后，快递费和耗材费将按工单创建时价格核价，转为最终收费并重算应收总额。'
+      : '本次发货不处理对客快递费或耗材费。',
+    '发货后仍需“确认完工”。',
     '本次发货不会扣减库存。',
   ];
 }
@@ -434,8 +433,8 @@ export function ShipOrderForm({
         title={`确认 ${shipments.length} 个地址已发货？`}
         description={
           isExternalSales
-            ? '请核对运单信息和收费影响。对话框仅复述当前输入；服务器会在提交时重新校验工单状态与最终金额。'
-            : '请核对当前运单信息。服务器会在提交时重新校验工单与收货地址状态。'
+            ? '请核对运单信息和最终收费。'
+            : '请核对运单信息。'
         }
         impactItems={confirmationImpactItems}
         confirmLabel={
@@ -443,11 +442,6 @@ export function ShipOrderForm({
         }
         onConfirm={confirmShipment}
       />
-      {isExternalSales ? (
-        <p className="text-xs text-muted-foreground">
-          发货时会用本工单创建时冻结的价目簿重新核算，并将快递费、耗材费从估算转为最终收费。
-        </p>
-      ) : null}
       {visibleState?.status === 'error' ? (
         <p role="alert" className="text-xs text-destructive">
           {visibleState.message}

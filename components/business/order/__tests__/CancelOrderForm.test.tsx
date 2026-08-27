@@ -76,7 +76,7 @@ describe('CancelOrderForm', () => {
     const html = render([]);
 
     expect(html).toContain('暂不能确认取消');
-    expect(html).toContain('订单影响数据未传入');
+    expect(html).toContain('暂时无法确认取消影响');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-slot="alert-dialog-trigger"/);
   });
 

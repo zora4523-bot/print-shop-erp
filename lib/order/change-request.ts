@@ -11,7 +11,6 @@ import {
 } from '../../generated/prisma/client';
 import type {
   CreateOrderChangeRequestInput,
-  QuoteOrderItemsInput,
   ReviewOrderChangeRequestInput,
 } from '../auth/schemas';
 import { db } from '../db';
@@ -19,7 +18,10 @@ import {
   OrderCustomerChargeError,
   resolveExternalOrderChargesForFinalization,
 } from '../price/order-charge-service';
-import { quoteOrderItems } from '../price/quote-service';
+import {
+  quoteOrderItems,
+  type QuoteOrderItemInput,
+} from '../price/quote-service';
 import type { QuoteResult } from '../price/quote';
 import {
   assertCsOrderSalesLedgerReconciledInTx,
@@ -28,6 +30,8 @@ import {
 } from '../salary/cs-sales';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
 import { orderCascadeLockKey } from './locks';
+import { appendOrderPricingRevisionInTx } from './pricing-revision';
+import { ORDER_PRICING_STATUS } from './pricing-status';
 
 const CHANGEABLE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.DRAFT,
@@ -199,7 +203,6 @@ function readProposedChanges(value: Prisma.JsonValue): ProposedItemChange[] {
 type CarriedPrice = {
   unitPrice: Prisma.Decimal;
   fixedFee: Prisma.Decimal;
-  pricingSnapshot: Prisma.JsonValue | null;
 };
 
 function resolveChangeRequestPricing(input: {
@@ -296,7 +299,6 @@ function resolveChangeRequestPricing(input: {
       source: 'CHANGE_REQUEST_PRICE_CARRY_FORWARD',
       requestId,
       quotedAt: quotedAt.toISOString(),
-      previousSnapshot: (carry.pricingSnapshot ?? {}) as Prisma.InputJsonValue,
       actual: {
         quantity,
         unitPrice,
@@ -327,10 +329,13 @@ function storableOrderSubtotal(
   return subtotal.toFixed(2);
 }
 
-function orderTotal(items: Array<{ subtotal: Prisma.Decimal }>): string {
+function orderTotal(
+  items: Array<{ subtotal: Prisma.Decimal }>,
+  packagingAmount: Prisma.Decimal | string | number = 0,
+): string {
   const total = items.reduce(
     (sum, item) => sum.plus(item.subtotal),
-    new Decimal(0),
+    new Decimal(packagingAmount),
   );
   if (!total.isFinite() || total.isNegative() || total.gt(DECIMAL_12_2_MAX)) {
     throw new OrderChangeRequestError(
@@ -541,6 +546,12 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
       },
       priceBookIds[0]!,
       input.reviewedAt,
+      {
+        // Older frozen books marked the otherwise-complete carton table as
+        // advisory. Recalculate the preserved tiers here; changed amounts
+        // still require a per-charge audit reason below.
+        allowLegacyBlockedPackagingRules: true,
+      },
     );
   } catch (error) {
     if (error instanceof OrderCustomerChargeError) {
@@ -613,17 +624,29 @@ type PricingProjectionItem = {
   id: string;
   name: string;
   productId: string | null;
+  pricingRoute: import('../../generated/prisma/client').OrderItemPricingRoute;
+  productStructure: import('../../generated/prisma/client').OrderProductStructure;
+  artworkVersion: string | null;
+  plateGroupId: string | null;
+  pricingGroup: string | null;
+  manualQuoteReason: string | null;
   specification: string | null;
+  actualWidthMm: Prisma.Decimal | null;
+  actualHeightMm: Prisma.Decimal | null;
   paperType: string | null;
+  paperWeightGsm: number | null;
   quantity: number;
   crafts: string[];
   foilColors: string[];
+  foilTechnique: import('../../generated/prisma/client').OrderFoilTechnique;
+  hasLocalFoil: boolean | null;
+  lamination: import('../../generated/prisma/client').OrderLamination;
+  printColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
   unitPrice: Prisma.Decimal;
   fixedFee: Prisma.Decimal;
   subtotal: Prisma.Decimal;
-  pricingSnapshot: Prisma.JsonValue | null;
 };
 
 type ChangeQuoteContext = {
@@ -644,7 +667,7 @@ async function quotePricingAffectingChanges(input: {
   quotedAt: Date;
   client: Prisma.TransactionClient;
 }): Promise<ChangeQuoteContext[]> {
-  const quoteInputs: QuoteOrderItemsInput['items'] = [];
+  const quoteInputs: QuoteOrderItemInput[] = [];
   const contexts: Array<Omit<ChangeQuoteContext, 'quote'>> = [];
 
   for (const [changeIndex, change] of input.changes.entries()) {
@@ -666,11 +689,24 @@ async function quotePricingAffectingChanges(input: {
 
       quoteInputs.push({
         productId: item.productId,
+        pricingRoute: item.pricingRoute,
+        productStructure: item.productStructure,
+        artworkVersion: item.artworkVersion,
+        plateGroupId: item.plateGroupId,
+        pricingGroup: item.pricingGroup,
+        manualQuoteReason: item.manualQuoteReason,
         specification,
+        actualWidthMm: item.actualWidthMm?.toNumber() ?? null,
+        actualHeightMm: item.actualHeightMm?.toNumber() ?? null,
         paperType: item.paperType,
+        paperWeightGsm: item.paperWeightGsm,
         quantity,
         crafts: item.crafts,
         foilColors,
+        foilTechnique: item.foilTechnique,
+        hasLocalFoil: item.hasLocalFoil,
+        lamination: item.lamination,
+        printColors: item.printColors,
         isDoubleSided: item.isDoubleSided,
         isDoubleColor: item.isDoubleColor,
       });
@@ -681,7 +717,6 @@ async function quotePricingAffectingChanges(input: {
         carry: {
           unitPrice: item.unitPrice,
           fixedFee: item.fixedFee,
-          pricingSnapshot: item.pricingSnapshot,
         },
         quantity,
         itemName: change.name ?? item.name,
@@ -695,11 +730,24 @@ async function quotePricingAffectingChanges(input: {
     const foilColors = change.foilColors ?? template.foilColors;
     quoteInputs.push({
       productId: template.productId,
+      pricingRoute: template.pricingRoute,
+      productStructure: template.productStructure,
+      artworkVersion: template.artworkVersion,
+      plateGroupId: template.plateGroupId,
+      pricingGroup: template.pricingGroup,
+      manualQuoteReason: template.manualQuoteReason,
       specification: change.specification ?? template.specification,
+      actualWidthMm: template.actualWidthMm?.toNumber() ?? null,
+      actualHeightMm: template.actualHeightMm?.toNumber() ?? null,
       paperType: template.paperType,
+      paperWeightGsm: template.paperWeightGsm,
       quantity: change.quantity,
       crafts: template.crafts,
       foilColors,
+      foilTechnique: template.foilTechnique,
+      hasLocalFoil: template.hasLocalFoil,
+      lamination: template.lamination,
+      printColors: template.printColors,
       isDoubleSided: template.isDoubleSided,
       isDoubleColor: template.isDoubleColor,
     });
@@ -710,7 +758,6 @@ async function quotePricingAffectingChanges(input: {
       carry: {
         unitPrice: template.unitPrice,
         fixedFee: template.fixedFee,
-        pricingSnapshot: template.pricingSnapshot,
       },
       quantity: change.quantity,
       itemName: change.name,
@@ -728,6 +775,10 @@ async function quotePricingAffectingChanges(input: {
       orderItemCount:
         input.itemById.size +
         input.changes.filter((change) => change.operation === 'ADD').length,
+      // Existing work orders are the immutable anchor for legacy product rows
+      // created before structured catalog dimensions and paper facts existed.
+      // New-order quotes never enable this compatibility path.
+      allowInactiveCatalogFacts: true,
     },
   );
   if (quotes.length !== contexts.length) {
@@ -1247,11 +1298,25 @@ export async function reviewOrderChangeRequest(
           sequence: nextSequence,
           name: change.name,
           productId: template.productId,
+          pricingRoute: template.pricingRoute,
+          productStructure: template.productStructure,
+          artworkVersion: template.artworkVersion,
+          plateGroupId: template.plateGroupId,
+          pricingGroup: template.pricingGroup,
+          manualQuoteReason: template.manualQuoteReason,
           specification: change.specification ?? template.specification,
+          actualWidthMm: template.actualWidthMm,
+          actualHeightMm: template.actualHeightMm,
           paperType: template.paperType,
+          paperWeightGsm: template.paperWeightGsm,
           quantity: change.quantity,
           crafts: template.crafts,
           foilColors: change.foilColors ?? template.foilColors,
+          foilTechnique: template.foilTechnique,
+          hasLocalFoil: template.hasLocalFoil,
+          lamination: template.lamination,
+          printColors: template.printColors,
+          printColorsKnown: true,
           isDoubleSided: template.isDoubleSided,
           isDoubleColor: template.isDoubleColor,
           ...pricing,
@@ -1313,7 +1378,12 @@ export async function reviewOrderChangeRequest(
       select: { subtotal: true },
     });
     const nextRevision = request.order.revision + 1;
-    const nextProcessingAmount = orderTotal(refreshedItems);
+    // 入袋费属于生产加工费，但包装组事实不在本次款式修改申请中变更。
+    // 重新汇总款式时必须保留已锁定的包装组金额，不能静默清零。
+    const nextProcessingAmount = orderTotal(
+      refreshedItems,
+      request.order.packagingAmount ?? 0,
+    );
     const customerChargeTotal = await tx.orderCustomerCharge.aggregate({
       where: { orderId: request.order.id },
       _sum: { amount: true },
@@ -1330,6 +1400,20 @@ export async function reviewOrderChangeRequest(
         totalAmount: nextTotal,
       },
     });
+    const pricingRevision =
+      request.order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ? await appendOrderPricingRevisionInTx(tx, {
+            orderId: request.order.id,
+            status: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+            source: 'CHANGE_REQUEST_APPLIED_PENDING',
+            actorId: actor.id,
+            now: reviewedAt,
+            expectedPriceRevision: request.order.priceRevision,
+            incrementOrderRevision: false,
+            remark: reviewRemark ?? request.reason,
+            metadata: { changeRequestId: request.id },
+          })
+        : null;
     const reviewed = await tx.orderChangeRequest.update({
       where: { id: request.id },
       data: {
@@ -1354,6 +1438,19 @@ export async function reviewOrderChangeRequest(
             before: String(request.order.totalAmount),
             after: nextTotal,
           },
+          ...(pricingRevision
+            ? {
+                pricingStatus: {
+                  before: request.order.pricingStatus,
+                  after:
+                    ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+                },
+                priceRevision: {
+                  before: request.order.priceRevision,
+                  after: pricingRevision.priceRevision,
+                },
+              }
+            : {}),
           requestId: request.id,
         },
         remark: reviewRemark ?? request.reason,

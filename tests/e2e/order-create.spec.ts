@@ -79,8 +79,14 @@ test.describe('创建工单 — golden path', () => {
     await page.getByRole('button', { name: '移除', exact: true }).click();
     await expect(page.getByAltText(/待上传设计图/)).toHaveCount(0);
 
-    // 提交
-    await page.getByRole('button', { name: /创建工单/ }).click();
+    await page.getByRole('tab', { name: /收货与费用/ }).click();
+    await page
+      .getByLabel('收货信息', { exact: true })
+      .fill('E2E 收货人 13800138000 广东省佛山市南海区测试路 1 号');
+
+    // 这条 golden path 故意保留“先存草稿”分支；资料完整时的
+    // “创建并提交”是建单页的另一个明确动作。
+    await page.getByRole('button', { name: '保存草稿', exact: true }).click();
 
     // 成功后会跳到 /orders/[id]。/orders/new 也匹配过宽 [a-z0-9]+
     // ——显式 negative lookahead 排除 new，否则即使提交失败留在

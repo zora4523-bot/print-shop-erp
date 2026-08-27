@@ -14,6 +14,12 @@ import {
   createOrderChangeRequestSchema,
   previewOrderChangeRequestPricingSchema,
   reviewOrderChangeRequestSchema,
+  previewOrderPricingReviewSchema,
+  finalizeOrderPricingSchema,
+  saveOrderManualChargeSchema,
+  deleteOrderManualChargeSchema,
+  saveOrderPlateDetailSchema,
+  deleteOrderPlateDetailSchema,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
@@ -37,15 +43,32 @@ import {
   previewOrderChangeRequestPricing,
   reviewOrderChangeRequest,
 } from '@/lib/order/change-request';
+import {
+  finalizeOrderPricing,
+  OrderPricingReviewError,
+  previewOrderPricingReview,
+  type FinalizeOrderPricingCommand,
+} from '@/lib/order/pricing-review';
+import {
+  deleteOrderManualCharge,
+  deleteOrderPlateDetail,
+  OrderCommercialDetailsError,
+  saveOrderManualCharge,
+  saveOrderPlateDetail,
+} from '@/lib/order/commercial-details';
 import type {
   CreateOrderChangeRequestMutationResult,
   CreateOrderMutationResult,
   CreateReworkOrderMutationResult,
   OrderMutationResult,
   PreviewOrderChangeRequestPricingResult,
+  PreviewOrderPricingReviewResult,
   ReviewOrderChangeRequestMutationResult,
+  FinalizeOrderPricingMutationResult,
+  OrderCommercialDetailMutationResult,
 } from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
+import { FULL_EDITABLE_FIELDS } from '@/lib/order/editable-fields';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
@@ -76,6 +99,7 @@ export async function createOrderAction(
   return {
     status: 'success',
     orderId: created.id,
+    orderNo: created.orderNo,
     itemIds: created.itemIds,
   };
 }
@@ -296,19 +320,7 @@ export async function updateOrderAction(
   const actor = await requirePermission('order:create');
 
   const raw: Record<string, unknown> = {};
-  for (const key of [
-    'customName',
-    'customerRef',
-    'receiverName',
-    'receiverPhone',
-    'receiverAddress',
-    'expressCode',
-    'packageRequirement',
-    'remark',
-    'promisedDate',
-    'isUrgent',
-    'isSfCollect',
-  ] as const) {
+  for (const key of FULL_EDITABLE_FIELDS) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
     // can't slip into fields the schema expects text for.
@@ -511,5 +523,184 @@ export async function previewOrderChangeRequestPricingAction(
       return { status: 'error', message: error.message };
     }
     throw error;
+  }
+}
+
+export async function previewOrderPricingReviewAction(
+  _prev: PreviewOrderPricingReviewResult | null,
+  raw: unknown,
+): Promise<PreviewOrderPricingReviewResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = previewOrderPricingReviewSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const preview = await previewOrderPricingReview(parsed.data.orderId, actor);
+    return { status: 'success', preview };
+  } catch (error) {
+    if (error instanceof OrderPricingReviewError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function finalizeOrderPricingAction(
+  _prev: FinalizeOrderPricingMutationResult | null,
+  raw: unknown,
+): Promise<FinalizeOrderPricingMutationResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = finalizeOrderPricingSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+
+  try {
+    const command: FinalizeOrderPricingCommand = parsed.data;
+    const finalized = await finalizeOrderPricing(command, actor);
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${finalized.orderId}`);
+    revalidatePath('/foreman/scheduling');
+    revalidatePath('/owner/order-changes');
+    return {
+      status: 'success',
+      orderId: finalized.orderId,
+      priceRevision: finalized.priceRevision,
+      packagingAmount: finalized.packagingAmount,
+      processingAmount: finalized.processingAmount,
+      totalAmount: finalized.totalAmount,
+    };
+  } catch (error) {
+    if (error instanceof OrderPricingReviewError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+function commercialMutationFailure(
+  error: unknown,
+): OrderCommercialDetailMutationResult {
+  if (error instanceof OrderCommercialDetailsError) {
+    return { status: 'error', message: error.message };
+  }
+  throw error;
+}
+
+function revalidateOrderCommercialDetail(orderId: string): void {
+  revalidatePath('/orders');
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath('/owner/bills');
+}
+
+export async function saveOrderManualChargeAction(
+  _prev: OrderCommercialDetailMutationResult | null,
+  raw: unknown,
+): Promise<OrderCommercialDetailMutationResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = saveOrderManualChargeSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const saved = await saveOrderManualCharge(parsed.data, actor);
+    revalidateOrderCommercialDetail(parsed.data.orderId);
+    return {
+      status: 'success',
+      entityId: saved.chargeId,
+      priceRevision: saved.priceRevision,
+      totalAmount: saved.totalAmount,
+    };
+  } catch (error) {
+    return commercialMutationFailure(error);
+  }
+}
+
+export async function deleteOrderManualChargeAction(
+  _prev: OrderCommercialDetailMutationResult | null,
+  raw: unknown,
+): Promise<OrderCommercialDetailMutationResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = deleteOrderManualChargeSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const removed = await deleteOrderManualCharge(parsed.data, actor);
+    revalidateOrderCommercialDetail(parsed.data.orderId);
+    return {
+      status: 'success',
+      entityId: removed.chargeId,
+      priceRevision: removed.priceRevision,
+      totalAmount: removed.totalAmount,
+    };
+  } catch (error) {
+    return commercialMutationFailure(error);
+  }
+}
+
+export async function saveOrderPlateDetailAction(
+  _prev: OrderCommercialDetailMutationResult | null,
+  raw: unknown,
+): Promise<OrderCommercialDetailMutationResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = saveOrderPlateDetailSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const saved = await saveOrderPlateDetail(parsed.data, actor);
+    revalidateOrderCommercialDetail(parsed.data.orderId);
+    return {
+      status: 'success',
+      entityId: saved.plateDetailId,
+      priceRevision: saved.priceRevision,
+      totalAmount: saved.totalAmount,
+    };
+  } catch (error) {
+    return commercialMutationFailure(error);
+  }
+}
+
+export async function deleteOrderPlateDetailAction(
+  _prev: OrderCommercialDetailMutationResult | null,
+  raw: unknown,
+): Promise<OrderCommercialDetailMutationResult> {
+  const actor = await requirePermission('order:price:confirm');
+  const parsed = deleteOrderPlateDetailSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+    };
+  }
+  try {
+    const removed = await deleteOrderPlateDetail(parsed.data, actor);
+    revalidateOrderCommercialDetail(parsed.data.orderId);
+    return {
+      status: 'success',
+      entityId: removed.plateDetailId,
+      priceRevision: removed.priceRevision,
+      totalAmount: removed.totalAmount,
+    };
+  } catch (error) {
+    return commercialMutationFailure(error);
   }
 }

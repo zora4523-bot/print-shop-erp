@@ -70,8 +70,8 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(html).toContain('¥960.00');
     expect(html).toContain('-¥40.00');
     expect(html).toContain('建议单价 ¥0.8000');
-    expect(html).toContain('批准时服务器会在事务内按最新规则再次报价');
-    expect(html).toContain('此预览不作为提交金额');
+    expect(html).toContain('批准时会按最新规则重新报价');
+    expect(html).toContain('当前预览仅供核对');
   });
 
   it('withholds incomplete totals and explicitly says carrying the old price is conditional', () => {
@@ -106,8 +106,7 @@ describe('OrderChangePricingPreviewPanel', () => {
 
     expect(html).toContain('待补全价格规则');
     expect(html).toContain('暂无法计算');
-    expect(html).toContain('系统不会自动沿用原成交价');
-    expect(html).toContain('只有填写审核备注并批准后');
+    expect(html).toContain('若需沿用原成交价，请填写原因');
     expect(html).toContain('未找到适用的价格阶梯');
     expect(html).not.toContain('¥960.00');
   });
@@ -140,7 +139,7 @@ describe('OrderChangePricingPreviewPanel', () => {
       '新增款式“红包 B”：1,200 个',
     );
     expect(impact.join('\n')).toContain('¥1000.00 → ¥960.00');
-    expect(impact.join('\n')).toContain('服务器会在事务内按最新规则再次报价');
+    expect(impact.join('\n')).toContain('批准时会按最新规则重新报价');
     expect(impact.join('\n')).toContain('工单应收');
   });
 

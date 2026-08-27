@@ -64,7 +64,7 @@ function compactFileName(fileName: string, extension: string): string {
  */
 export function prepareDesignFile(
   input: File,
-  options: { imagesOnly?: boolean; fallbackStem?: string } = {},
+  options: { fallbackStem?: string } = {},
 ): PrepareDesignFileResult {
   let file = input;
   let extension = extensionOf(file.name);
@@ -75,9 +75,7 @@ export function prepareDesignFile(
     if (!mimeExtension) {
       return {
         ok: false,
-        message: options.imagesOnly
-          ? '仅支持 JPG、PNG、WEBP 图片'
-          : '仅支持 JPG、PNG、WEBP 图片或 CDR 源文件',
+        message: '仅支持 JPG、PNG、WEBP 图片或 CDR 源文件',
       };
     }
 
@@ -93,13 +91,9 @@ export function prepareDesignFile(
     descriptor = EXTENSION_MAP[extension];
   }
 
-  if (options.imagesOnly && descriptor.fileType !== DesignFileType.IMAGE) {
-    return { ok: false, message: '新建工单时仅支持图片；CDR 请在草稿详情页上传' };
-  }
-
   const sizeLimit = FILE_SIZE_LIMITS[descriptor.fileType];
   if (file.size <= 0) {
-    return { ok: false, message: '图片内容为空，无法上传' };
+    return { ok: false, message: '文件内容为空，无法上传' };
   }
   if (file.size > sizeLimit) {
     return {
@@ -165,7 +159,7 @@ export async function uploadOrderItemDesignFile({
     if (!response.ok) {
       return {
         ok: false,
-        message: `上传失败（OSS ${response.status}），请重试`,
+        message: `上传失败，请重试（错误码 ${response.status}）`,
       };
     }
 

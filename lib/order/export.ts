@@ -50,7 +50,7 @@ import {
   orderExportArtifactPath,
 } from './export-artifact';
 
-const EXPORT_SCHEMA_VERSION = 1;
+const EXPORT_SCHEMA_VERSION = 3;
 const EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
 const EXPORT_BATCH_SIZE = 500;
 const EXPORT_CLEANUP_BATCH_SIZE = 100;
@@ -597,6 +597,10 @@ function buildWorkbookSheets(membershipPath: string, rowCounts: RowCounts): Xlsx
   return [
     trackedSheet('工单', orderRows(membershipPath), rowCounts, [18, 22, 12, 12, 12, 18, 12, 12, 12, 18, 18, 18, 18, 18, 18, 18, 18, 14, 12, 14, 18, 22, 20, 20, 20, 20, 20, 20]),
     trackedSheet('款式', itemRows(membershipPath), rowCounts, [18, 8, 20, 16, 16, 14, 16, 14, 12, 24, 20, 10, 10, 14, 14, 14, 28, 20]),
+    trackedSheet('包装组及组成', packagingGroupRows(membershipPath), rowCounts),
+    trackedSheet('制版明细', plateDetailRows(membershipPath), rowCounts),
+    trackedSheet('对客收费', customerChargeRows(membershipPath), rowCounts),
+    trackedSheet('价格修订', pricingRevisionRows(membershipPath), rowCounts),
     trackedSheet('生产任务', taskRows(membershipPath), rowCounts),
     trackedSheet('收货地址', shipmentRows(membershipPath), rowCounts),
     trackedSheet('地址款式分配', shipmentLineRows(membershipPath), rowCounts),
@@ -781,6 +785,295 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
           row.suggestedSubtotal ? decimal(row.suggestedSubtotal, 2) : null,
           row.priceOverrideReason,
           row.remark,
+          dateTime(row.createdAt),
+        ];
+      }
+    }
+  }
+}
+
+async function* packagingGroupRows(
+  membershipPath: string,
+): AsyncGenerator<XlsxRow> {
+  yield [
+    '工单号',
+    '包装组序号',
+    '包装组名称',
+    '组模式',
+    '实际袋数',
+    '每袋单价',
+    '小计',
+    '每袋各款组成',
+  ];
+  for await (const keys of membershipBatches(membershipPath)) {
+    const rows = await db.orderPackagingGroup.findMany({
+      where: { orderId: { in: keys.map((key) => key.id) } },
+      select: {
+        orderId: true,
+        sequence: true,
+        name: true,
+        mode: true,
+        actualBagCount: true,
+        unitPrice: true,
+        subtotal: true,
+        lines: {
+          select: {
+            unitsPerBag: true,
+            orderItem: { select: { sequence: true, name: true } },
+          },
+          orderBy: [{ orderItem: { sequence: 'asc' } }, { id: 'asc' }],
+        },
+      },
+      orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
+    });
+    const grouped = groupBy(rows, (row) => row.orderId);
+    for (const key of keys) {
+      for (const row of grouped.get(key.id) ?? []) {
+        yield [
+          key.orderNo,
+          row.sequence,
+          row.name,
+          PACKAGING_MODE_LABELS[row.mode] ?? row.mode,
+          row.actualBagCount,
+          decimal(row.unitPrice, 4),
+          decimal(row.subtotal, 2),
+          row.lines
+            .map(
+              (line) =>
+                `#${line.orderItem.sequence} ${line.orderItem.name} × ${line.unitsPerBag}`,
+            )
+            .join('；'),
+        ];
+      }
+    }
+  }
+}
+
+async function* plateDetailRows(
+  membershipPath: string,
+): AsyncGenerator<XlsxRow> {
+  yield [
+    '工单号',
+    '款式序号',
+    '款式名称',
+    '制版序号',
+    '制版名称',
+    '版组 ID',
+    '规格',
+    '数量',
+    '单价',
+    '金额',
+    '状态',
+    '备注',
+    '记录人',
+    '移除人',
+    '移除时间',
+    '创建时间',
+  ];
+  for await (const keys of membershipBatches(membershipPath)) {
+    const rows = await db.orderItemPlateDetail.findMany({
+      where: {
+        orderItem: { orderId: { in: keys.map((key) => key.id) } },
+      },
+      select: {
+        sequence: true,
+        name: true,
+        plateGroupId: true,
+        specification: true,
+        quantity: true,
+        unitPrice: true,
+        amount: true,
+        isActive: true,
+        remark: true,
+        removedAt: true,
+        createdAt: true,
+        createdBy: { select: { displayName: true } },
+        removedBy: { select: { displayName: true } },
+        orderItem: {
+          select: { orderId: true, sequence: true, name: true },
+        },
+      },
+      orderBy: [
+        { orderItem: { sequence: 'asc' } },
+        { sequence: 'asc' },
+        { id: 'asc' },
+      ],
+    });
+    const grouped = groupBy(rows, (row) => row.orderItem.orderId);
+    for (const key of keys) {
+      for (const row of grouped.get(key.id) ?? []) {
+        yield [
+          key.orderNo,
+          row.orderItem.sequence,
+          row.orderItem.name,
+          row.sequence,
+          row.name,
+          row.plateGroupId,
+          row.specification,
+          row.quantity,
+          decimal(row.unitPrice, 2),
+          decimal(row.amount, 2),
+          row.isActive ? '有效' : '已移除（保留历史）',
+          row.remark,
+          row.createdBy.displayName,
+          row.removedBy?.displayName,
+          dateTime(row.removedAt),
+          dateTime(row.createdAt),
+        ];
+      }
+    }
+  }
+}
+
+async function* customerChargeRows(
+  membershipPath: string,
+): AsyncGenerator<XlsxRow> {
+  yield [
+    '工单号',
+    '收费类别',
+    '收费类别编码',
+    '业务键',
+    '发货地址序号',
+    '说明',
+    '数量',
+    '单位',
+    '单价',
+    '建议金额',
+    '终价',
+    '状态',
+    '是否调整',
+    '覆盖原因',
+    '审批依据',
+    '价目簿版本',
+    '价目簿来源',
+    '规则来源',
+    '创建人',
+    '创建时间',
+    '终审人',
+    '终审时间',
+  ];
+  for await (const keys of membershipBatches(membershipPath)) {
+    const rows = await db.orderCustomerCharge.findMany({
+      where: { orderId: { in: keys.map((key) => key.id) } },
+      select: {
+        orderId: true,
+        businessKey: true,
+        status: true,
+        description: true,
+        quantity: true,
+        unit: true,
+        unitPrice: true,
+        suggestedAmount: true,
+        amount: true,
+        isAdjustment: true,
+        overrideReason: true,
+        approvalReference: true,
+        finalizedAt: true,
+        createdAt: true,
+        category: { select: { code: true, name: true } },
+        shipment: { select: { sequence: true } },
+        priceBook: {
+          select: {
+            code: true,
+            name: true,
+            version: true,
+            currency: true,
+            sourceName: true,
+          },
+        },
+        sourceRule: {
+          select: {
+            code: true,
+            name: true,
+            sourceName: true,
+            sourceSheet: true,
+            sourceRange: true,
+          },
+        },
+        createdBy: { select: { displayName: true } },
+        finalizedBy: { select: { displayName: true } },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    const grouped = groupBy(rows, (row) => row.orderId);
+    for (const key of keys) {
+      for (const row of grouped.get(key.id) ?? []) {
+        yield [
+          key.orderNo,
+          row.category.name,
+          String(row.category.code),
+          String(row.businessKey),
+          row.shipment?.sequence,
+          row.description,
+          row.quantity ? decimal(row.quantity, 3) : null,
+          row.unit,
+          row.unitPrice ? decimal(row.unitPrice, 4) : null,
+          row.suggestedAmount ? decimal(row.suggestedAmount, 2) : null,
+          decimal(row.amount, 2),
+          CUSTOMER_CHARGE_STATUS_LABELS[row.status] ?? row.status,
+          yesNo(row.isAdjustment),
+          row.overrideReason,
+          row.approvalReference,
+          row.priceBook
+            ? `${row.priceBook.name}（${String(row.priceBook.code)} v${row.priceBook.version}，${row.priceBook.currency}）`
+            : null,
+          row.priceBook?.sourceName,
+          formatCustomerChargeRuleSource(row.sourceRule),
+          row.createdBy.displayName,
+          dateTime(row.createdAt),
+          row.finalizedBy?.displayName,
+          dateTime(row.finalizedAt),
+        ];
+      }
+    }
+  }
+}
+
+async function* pricingRevisionRows(
+  membershipPath: string,
+): AsyncGenerator<XlsxRow> {
+  yield [
+    '工单号',
+    '修订号',
+    '价格状态',
+    '修订来源',
+    '价格标识',
+    '加工费',
+    '入袋费',
+    '工单总额',
+    '规则版本摘要',
+    '创建人',
+    '创建时间',
+  ];
+  for await (const keys of membershipBatches(membershipPath)) {
+    const rows = await db.orderPricingRevision.findMany({
+      where: { orderId: { in: keys.map((key) => key.id) } },
+      select: {
+        orderId: true,
+        revision: true,
+        status: true,
+        source: true,
+        snapshot: true,
+        createdAt: true,
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: [{ revision: 'asc' }, { id: 'asc' }],
+    });
+    const grouped = groupBy(rows, (row) => row.orderId);
+    for (const key of keys) {
+      for (const row of grouped.get(key.id) ?? []) {
+        const summary = summarizePricingRevisionSnapshot(row.snapshot);
+        yield [
+          key.orderNo,
+          row.revision,
+          PRICING_STATUS_LABELS[row.status] ?? row.status,
+          row.source,
+          pricingRevisionKind(row.status, row.source),
+          summary.processingAmount,
+          summary.packagingAmount,
+          summary.totalAmount,
+          summary.ruleVersions,
+          row.createdBy?.displayName,
           dateTime(row.createdAt),
         ];
       }
@@ -1415,6 +1708,130 @@ function yesNo(value: boolean): string {
   return value ? '是' : '否';
 }
 
+function formatCustomerChargeRuleSource(
+  rule:
+    | {
+        code: string;
+        name: string;
+        sourceName: string | null;
+        sourceSheet: string | null;
+        sourceRange: string | null;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!rule) return null;
+  const sourceLocation = [rule.sourceName, rule.sourceSheet, rule.sourceRange]
+    .filter((value): value is string => Boolean(value))
+    .join(' / ');
+  return `${rule.name}（${String(rule.code)}）${sourceLocation ? ` · ${sourceLocation}` : ''}`;
+}
+
+function pricingRevisionKind(status: string, source: string): string {
+  if (status === 'ADMIN_CONFIRMED') return '管理员终价';
+  if (status === 'AUTO_CONFIRMED') return '自动价';
+  if (status === 'PENDING_ADMIN_CONFIRMATION') {
+    return source.includes('AUTO') ? '自动暂定价（待管理员终审）' : '人工暂定价（待管理员终审）';
+  }
+  return '历史确认价';
+}
+
+function summarizePricingRevisionSnapshot(snapshot: Prisma.JsonValue): {
+  processingAmount: ReturnType<typeof xlsxDecimal> | null;
+  packagingAmount: ReturnType<typeof xlsxDecimal> | null;
+  totalAmount: ReturnType<typeof xlsxDecimal> | null;
+  ruleVersions: string | null;
+} {
+  const root = isRecord(snapshot) ? snapshot : {};
+  const order = isRecord(root.order) ? root.order : {};
+  const summaries = new Set<string>();
+  const priceBookFingerprints = new Set<string>();
+
+  const addPriceBook = (value: unknown, scope?: string) => {
+    if (!isRecord(value)) return;
+    const identifier = firstNonEmptyText(value.name, value.code, value.id);
+    if (!identifier) return;
+    const version = scalarText(value.version);
+    const fingerprint = `${identifier}\u0000${version ?? ''}`;
+    if (priceBookFingerprints.has(fingerprint)) return;
+    priceBookFingerprints.add(fingerprint);
+    summaries.add(
+      `${scope ? `${scope}：` : ''}${identifier}${version ? ` v${version}` : ''}`,
+    );
+  };
+  const addRule = (value: unknown) => {
+    if (!isRecord(value)) return;
+    const identifier = firstNonEmptyText(
+      value.ruleCode,
+      value.code,
+      value.name,
+      value.sourceId,
+    );
+    if (identifier) summaries.add(`规则：${identifier}`);
+  };
+  const addPricingSnapshot = (value: unknown) => {
+    if (!isRecord(value)) return;
+    addPriceBook(value.priceBook);
+    addRule(value.rule);
+    addRule(value.base);
+    if (Array.isArray(value.appliedAdjustments)) {
+      value.appliedAdjustments.forEach(addRule);
+    }
+    if (Array.isArray(value.components)) value.components.forEach(addRule);
+    if (isRecord(value.quote)) addRule(value.quote);
+  };
+
+  if (isRecord(root.metadata) && isRecord(root.metadata.priceBooks)) {
+    for (const [scope, value] of Object.entries(root.metadata.priceBooks)) {
+      addPriceBook(value, PRICE_BOOK_SCOPE_LABELS[scope] ?? scope);
+    }
+  }
+  for (const collectionName of [
+    'items',
+    'packagingGroups',
+    'customerCharges',
+  ] as const) {
+    const collection = root[collectionName];
+    if (!Array.isArray(collection)) continue;
+    for (const entry of collection) {
+      if (!isRecord(entry)) continue;
+      addPricingSnapshot(entry.pricingSnapshot);
+    }
+  }
+
+  return {
+    processingAmount: snapshotMoney(order.processingAmount ?? root.processingAmount),
+    packagingAmount: snapshotMoney(order.packagingAmount ?? root.packagingAmount),
+    totalAmount: snapshotMoney(order.totalAmount ?? root.totalAmount),
+    ruleVersions:
+      summaries.size > 0 ? [...summaries].slice(0, 30).join('；') : null,
+  };
+}
+
+function snapshotMoney(value: unknown): ReturnType<typeof xlsxDecimal> | null {
+  const text = scalarText(value);
+  if (text === null) return null;
+  try {
+    return xlsxDecimal(new Prisma.Decimal(text).toFixed(2));
+  } catch {
+    return null;
+  }
+}
+
+function firstNonEmptyText(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = scalarText(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function scalarText(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
 function hashExportParams(params: OrderExportParams): string {
   const stable = Object.entries(params).sort(([left], [right]) => left.localeCompare(right));
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
@@ -1491,6 +1908,25 @@ const ORDER_KIND_LABELS: Record<OrderKind, string> = {
 const BILLING_MODE_LABELS: Record<OrderBillingMode, string> = {
   CHARGE: '计费',
   NO_CHARGE: '不计费',
+};
+const PACKAGING_MODE_LABELS: Record<string, string> = {
+  SINGLE_STYLE: '单款装',
+  MIXED_STYLE: '混装',
+};
+const CUSTOMER_CHARGE_STATUS_LABELS: Record<string, string> = {
+  ESTIMATED: '暂估',
+  FINAL: '已终审',
+  WAIVED: '免收',
+};
+const PRICING_STATUS_LABELS: Record<string, string> = {
+  LEGACY_CONFIRMED: '历史已确认',
+  AUTO_CONFIRMED: '自动价已确认',
+  PENDING_ADMIN_CONFIRMATION: '待管理员终审',
+  ADMIN_CONFIRMED: '管理员终价已确认',
+};
+const PRICE_BOOK_SCOPE_LABELS: Record<string, string> = {
+  processing: '加工',
+  logistics: '物流',
 };
 const REWORK_CAUSE_LABELS: Record<ReworkCause, string> = {
   QUALITY: '质量问题',

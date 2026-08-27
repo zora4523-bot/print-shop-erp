@@ -43,7 +43,7 @@ export default async function EditOrderPage({ params }: PageProps) {
           编辑工单 <span className="font-sans tabular-nums">{order.orderNo}</span>
         </h1>
         <p className="text-sm text-muted-foreground">
-          仅修改本页字段会写入修改日志；款式增删改暂未支持（计划在 P1 补齐）。
+          当前仅支持修改本页字段，暂不支持增删改款式。
         </p>
       </div>
 

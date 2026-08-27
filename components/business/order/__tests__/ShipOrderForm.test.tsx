@@ -73,11 +73,10 @@ describe('ShipOrderForm external-sales charge fields', () => {
     expect(impact).toContain(
       '地址 1（张三）：运单号 ZTO-20260824，对客快递费 ¥21.50，打包耗材费 ¥5.00',
     );
-    expect(impact).toContain('从估算转为最终收费');
+    expect(impact).toContain('转为最终收费');
     expect(impact).toContain('重算应收总额');
-    expect(impact).toContain('SHIPPED（已发货），这不是终态');
-    expect(impact).toContain('提交“工单已发货”通知任务');
-    expect(impact).toContain('是否送达以通知记录或队列处理结果为准');
+    expect(impact).toContain('按工单创建时价格核价');
+    expect(impact).toContain('发货后仍需“确认完工”');
     expect(impact).toContain('不会扣减库存');
   });
 

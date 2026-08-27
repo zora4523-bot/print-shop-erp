@@ -102,9 +102,7 @@ async function generateRealZip(
   context.signal?.throwIfAborted();
   const cfgResult = readOssConfig(env);
   if (!cfgResult.configured) {
-    throw new CdrZipError(
-      `OSS 未配置（缺 ${cfgResult.missing.join(', ')}），无法真实打包`,
-    );
+    throw new CdrZipError('CDR 打包暂不可用，请联系管理员');
   }
   const cfg = cfgResult.cfg;
 

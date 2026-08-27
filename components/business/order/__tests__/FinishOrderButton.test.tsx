@@ -45,11 +45,11 @@ beforeEach(() => {
 });
 
 describe('FinishOrderButton', () => {
-  it('states only the verified SHIPPED to FINISHED terminal effects', () => {
+  it('states only the verified irreversible completion effects', () => {
     expect(finishOrderImpactItems).toEqual([
-      '工单将从 SHIPPED（已发货）进入 FINISHED（已完成）终态；该状态不可回退。',
-      '工单业务台账（ledger）将关闭，不再接受后续生产或发货处理。',
-      '工单将退出活跃工作区；历史金额、状态和审计记录仍会保留。',
+      '确认后工单完成且不能恢复。',
+      '工单不再接受生产或发货操作。',
+      '历史金额、状态和操作记录仍会保留。',
     ]);
   });
 

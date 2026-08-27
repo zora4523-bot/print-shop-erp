@@ -52,7 +52,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
     <form action={formAction} aria-busy={pending} className="space-y-6">
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
-          工单已进入排产 / 生产，仅可修改收货信息与备注（SPEC §3.6）。
+          工单已进入排产 / 生产，仅可修改收货信息与备注。
         </div>
       )}
 
@@ -92,6 +92,7 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             label="收货信息"
             full
             multiline
+            required
             disabled={pending}
             initial={initial.receiverAddress}
             errors={fieldErrors(state, 'receiverAddress')}
@@ -173,6 +174,7 @@ function Field({
   errors,
   full,
   multiline,
+  required,
   disabled,
   type = 'text',
 }: {
@@ -182,6 +184,7 @@ function Field({
   errors: string[];
   full?: boolean;
   multiline?: boolean;
+  required?: boolean;
   disabled?: boolean;
   type?: string;
 }) {
@@ -191,12 +194,19 @@ function Field({
     <div className={full ? 'sm:col-span-2' : undefined}>
       <Label htmlFor={name} className="text-sm text-muted-foreground">
         {label}
+        {required ? (
+          <span aria-hidden="true" className="ml-0.5 text-destructive">
+            *
+          </span>
+        ) : null}
       </Label>
       {multiline ? (
         <textarea
           id={name}
           name={name}
           disabled={disabled}
+          required={required}
+          aria-required={required ? true : undefined}
           defaultValue={initial ?? ''}
           aria-invalid={hasError}
           aria-describedby={hasError ? errorId : undefined}
@@ -209,6 +219,8 @@ function Field({
           name={name}
           type={type}
           disabled={disabled}
+          required={required}
+          aria-required={required ? true : undefined}
           defaultValue={initial ?? ''}
           aria-invalid={hasError}
           aria-describedby={hasError ? errorId : undefined}

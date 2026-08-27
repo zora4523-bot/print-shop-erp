@@ -16,6 +16,7 @@ import {
 } from '@/components/ui-business';
 import { FilePenLine } from 'lucide-react';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export const metadata = {
   title: '工单修改申请 · 红包印刷 ERP',
@@ -169,13 +170,13 @@ function summarizeProposedChanges(value: unknown): string {
         quantity?: number;
       };
       if (change.operation === 'ADD') {
-        return `新增${change.name ? `「${change.name}」` : '款式'}`;
+        return `新增${change.name ? `「${externalPriceBusinessText(change.name)}」` : '款式'}`;
       }
       if (change.operation === 'REMOVE') {
-        return `取消${change.name ? `「${change.name}」` : '款式'}`;
+        return `取消${change.name ? `「${externalPriceBusinessText(change.name)}」` : '款式'}`;
       }
       return change.name
-        ? `修改「${change.name}」${change.quantity ? `数量 ${change.quantity}` : ''}`
+        ? `修改「${externalPriceBusinessText(change.name)}」${change.quantity ? `数量 ${change.quantity}` : ''}`
         : '修改款式';
     })
     .join('；');

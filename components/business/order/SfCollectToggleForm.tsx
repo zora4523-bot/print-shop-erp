@@ -170,7 +170,7 @@ export function SfCollectToggleForm({
                           ? `${prefix}-shipping-error`
                           : `${prefix}-shipping-hint`
                       }
-                      placeholder="留空则按冻结价目自动核价"
+                      placeholder="留空则按创建时价格自动核价"
                     />
                     <FieldError
                       id={`${prefix}-shipping-error`}

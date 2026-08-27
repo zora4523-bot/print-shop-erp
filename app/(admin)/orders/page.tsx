@@ -26,7 +26,6 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="工单"
-        subtitle="销售 / 客服只看自己提交的；管理员看全部；师傅看分配给自己的任务所在工单。"
         actions={
           canCreate ? (
             <Link href="/orders/new" className={buttonVariants()}>

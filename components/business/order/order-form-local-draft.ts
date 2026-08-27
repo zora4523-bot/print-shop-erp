@@ -1,4 +1,9 @@
-const LOCAL_ORDER_DRAFT_VERSION = 1 as const;
+import { OrderItemPricingRoute } from '@/generated/prisma/enums';
+import { isNewOrderPricingRoute } from '@/lib/order/pricing-route';
+
+const LOCAL_ORDER_DRAFT_VERSION = 4 as const;
+
+export type LocalOrderFormDraftPricingScope = 'external-sales' | 'internal';
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | JsonObject;
@@ -6,12 +11,14 @@ export type JsonObject = { [key: string]: JsonValue };
 
 export type LocalOrderFormDraft = {
   version: typeof LOCAL_ORDER_DRAFT_VERSION;
+  pricingScope: LocalOrderFormDraftPricingScope;
   savedAt: string;
   values: JsonObject;
 };
 
-const ROOT_VALUE_KEYS = [
+const ROOT_FACT_KEYS = [
   'customName',
+  'customerPartyId',
   'customerRef',
   'receiverName',
   'receiverPhone',
@@ -19,9 +26,6 @@ const ROOT_VALUE_KEYS = [
   'expressCode',
   'destinationProvince',
   'quotedWeightKg',
-  'shippingFee',
-  'packingMaterialFee',
-  'customerChargeOverrideReason',
   'packageRequirement',
   'remark',
   'promisedDate',
@@ -29,33 +33,53 @@ const ROOT_VALUE_KEYS = [
   'isSfCollect',
 ] as const;
 
-const ITEM_VALUE_KEYS = [
+const ITEM_FACT_KEYS = [
   'name',
   'productId',
+  'pricingRoute',
+  'productStructure',
+  'artworkVersion',
+  'plateGroupId',
+  'pricingGroup',
   'specification',
+  'actualWidthMm',
+  'actualHeightMm',
   'paperType',
+  'paperWeightGsm',
   'quantity',
   'crafts',
+  'frontFoilColors',
+  'backFoilColors',
   'foilColors',
+  'foilTechnique',
+  'hasLocalFoil',
+  'printColors',
   'isDoubleSided',
   'isDoubleColor',
+  'remark',
+] as const;
+
+const ITEM_INTERNAL_PRICE_KEYS = [
   'unitPrice',
   'fixedFee',
   'suggestedSubtotal',
   'priceOverrideReason',
-  'remark',
 ] as const;
 
-const SHIPMENT_VALUE_KEYS = [
+const PACKAGING_GROUP_VALUE_KEYS = [
+  'name',
+  'mode',
+  'actualBagCount',
+  'itemUnitsPerBag',
+] as const;
+
+const SHIPMENT_FACT_KEYS = [
   'receiverName',
   'receiverPhone',
   'receiverAddress',
   'expressCode',
   'destinationProvince',
   'quotedWeightKg',
-  'shippingFee',
-  'packingMaterialFee',
-  'customerChargeOverrideReason',
   'itemQuantities',
 ] as const;
 
@@ -107,33 +131,57 @@ function pickValues(
   return picked;
 }
 
-export function sanitizeOrderFormDraftValues(value: unknown): JsonObject | null {
+export function sanitizeOrderFormDraftValues(
+  value: unknown,
+  pricingScope: LocalOrderFormDraftPricingScope,
+): JsonObject | null {
   if (!isRecord(value)) return null;
   if (!Array.isArray(value.items) || value.items.length === 0) return null;
   if (!Array.isArray(value.additionalShipments)) return null;
+  if (!Array.isArray(value.packagingGroups)) return null;
 
-  const root = pickValues(value, ROOT_VALUE_KEYS);
+  const includeInternalPrices = pricingScope === 'internal';
+  const root = pickValues(value, ROOT_FACT_KEYS);
   if (!root) return null;
-  const items = value.items.map((item) => pickValues(item, ITEM_VALUE_KEYS));
+  const items = value.items.map((item) => {
+    const picked = pickValues(item, [
+      ...ITEM_FACT_KEYS,
+      ...(includeInternalPrices ? ITEM_INTERNAL_PRICE_KEYS : []),
+    ]);
+    if (
+      !picked ||
+      typeof picked.pricingRoute !== 'string' ||
+      !isNewOrderPricingRoute(picked.pricingRoute as OrderItemPricingRoute)
+    )
+      return null;
+    return picked;
+  });
   const shipments = value.additionalShipments.map((shipment) =>
-    pickValues(shipment, SHIPMENT_VALUE_KEYS),
+    pickValues(shipment, SHIPMENT_FACT_KEYS),
+  );
+  const packagingGroups = value.packagingGroups.map((group) =>
+    pickValues(group, PACKAGING_GROUP_VALUE_KEYS),
   );
   if (items.some((item) => item === null)) return null;
   if (shipments.some((shipment) => shipment === null)) return null;
+  if (packagingGroups.some((group) => group === null)) return null;
 
   root.items = items as JsonObject[];
   root.additionalShipments = shipments as JsonObject[];
+  root.packagingGroups = packagingGroups as JsonObject[];
   return root;
 }
 
 export function serializeLocalOrderFormDraft(
   values: unknown,
+  pricingScope: LocalOrderFormDraftPricingScope,
   now: Date = new Date(),
 ): string | null {
-  const sanitized = sanitizeOrderFormDraftValues(values);
+  const sanitized = sanitizeOrderFormDraftValues(values, pricingScope);
   if (!sanitized || Number.isNaN(now.getTime())) return null;
   return JSON.stringify({
     version: LOCAL_ORDER_DRAFT_VERSION,
+    pricingScope,
     savedAt: now.toISOString(),
     values: sanitized,
   } satisfies LocalOrderFormDraft);
@@ -141,22 +189,28 @@ export function serializeLocalOrderFormDraft(
 
 export function parseLocalOrderFormDraft(
   serialized: string,
+  expectedPricingScope: LocalOrderFormDraftPricingScope,
 ): LocalOrderFormDraft | null {
   try {
     const parsed: unknown = JSON.parse(serialized);
     if (!isRecord(parsed) || parsed.version !== LOCAL_ORDER_DRAFT_VERSION) {
       return null;
     }
+    if (parsed.pricingScope !== expectedPricingScope) return null;
     if (
       typeof parsed.savedAt !== 'string' ||
       !Number.isFinite(Date.parse(parsed.savedAt))
     ) {
       return null;
     }
-    const values = sanitizeOrderFormDraftValues(parsed.values);
+    const values = sanitizeOrderFormDraftValues(
+      parsed.values,
+      expectedPricingScope,
+    );
     if (!values) return null;
     return {
       version: LOCAL_ORDER_DRAFT_VERSION,
+      pricingScope: expectedPricingScope,
       savedAt: parsed.savedAt,
       values,
     };
@@ -170,5 +224,5 @@ export function localOrderFormDraftStorageKey(
   usesExternalSalesPricing: boolean,
 ): string {
   const pricingScope = usesExternalSalesPricing ? 'external-sales' : 'internal';
-  return `print-shop-erp:order-form-draft:v1:${encodeURIComponent(userScope)}:${pricingScope}`;
+  return `print-shop-erp:order-form-draft:v4:${encodeURIComponent(userScope)}:${pricingScope}`;
 }

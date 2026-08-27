@@ -20,6 +20,7 @@ import type {
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
 import { Button } from '@/components/ui/button';
 import { ConfirmActionDialog } from '@/components/ui-business';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type Props = {
   requestId: string;
@@ -55,8 +56,8 @@ export function orderChangeApprovalImpactItems(
   const itemChanges = preview.items.map((item) => {
     const itemLabel =
       item.operation === 'ADD'
-        ? `新增款式“${item.name}”`
-        : `修改款式“${item.previousName ?? item.name}”${item.previousName && item.previousName !== item.name ? ` → “${item.name}”` : ''}`;
+        ? `新增款式“${externalPriceBusinessText(item.name)}”`
+        : `修改款式“${externalPriceBusinessText(item.previousName ?? item.name)}”${item.previousName && item.previousName !== item.name ? ` → “${externalPriceBusinessText(item.name)}”` : ''}`;
     const subtotal = `${item.oldSubtotal === null ? '新增' : money(item.oldSubtotal)} → ${item.newSubtotal === null ? '待补全规则' : money(item.newSubtotal)}`;
     const pricingImpact =
       item.priceImpact === 'UNCHANGED'
@@ -74,8 +75,8 @@ export function orderChangeApprovalImpactItems(
   return [
     `申请基于工单第 ${preview.baseRevision} 版，共 ${preview.items.length} 项款式变更${changeSummary ? `（${changeSummary}）` : ''}。`,
     ...itemChanges,
-    `${pricingSummary}批准时服务器会在事务内按最新规则再次报价，不会直接写入预览金额。`,
-    '批准后会同步相关款式、数量、待开工任务计划数量与工单应收，并增加工单修订版本。',
+    `${pricingSummary}批准时会按最新规则重新报价，预览金额可能变化。`,
+    '批准后会更新相关款式、数量、待开工任务和工单应收。',
   ];
 }
 
@@ -100,7 +101,7 @@ export function OrderChangePricingPreviewPanel({
       <div>
         <h3 className="text-sm font-semibold">审批计价预览（只读）</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          批准时服务器会在事务内按最新规则再次报价；此预览不作为提交金额。
+          批准时会按最新规则重新报价，当前预览仅供核对。
         </p>
       </div>
 
@@ -130,7 +131,7 @@ export function OrderChangePricingPreviewPanel({
           role="alert"
           className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
         >
-          当前规则无法得出新价格，因此不展示新总额和差额。系统不会自动沿用原成交价；只有填写审核备注并批准后，服务器再次报价仍不完整时，才会按该备注沿用原成交价。
+          当前规则无法得出新价格。若需沿用原成交价，请填写原因；批准时仍会重新报价。
         </p>
       ) : null}
 
@@ -142,7 +143,8 @@ export function OrderChangePricingPreviewPanel({
           >
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
               <p className="admin-wrap-anywhere min-w-0 font-medium">
-                {item.operation === 'ADD' ? '新增' : '修改'} · {item.name}
+                {item.operation === 'ADD' ? '新增' : '修改'} ·{' '}
+                {externalPriceBusinessText(item.name)}
                 <span className="ml-2 font-normal text-muted-foreground">
                   {item.quantity.toLocaleString('zh-CN')} 个
                 </span>
@@ -291,7 +293,7 @@ export function OrderChangeReviewForm({ requestId }: Props) {
           id={`change-review-remark-help-${requestId}`}
           className="block text-xs text-muted-foreground"
         >
-          拒绝时可选。批准时会重新报价；若届时规则仍不完整、需明确沿用原成交价，此备注必填。
+          拒绝时选填；批准时若需沿用原成交价，此项必填。
         </span>
       </label>
       {error ? (
@@ -313,7 +315,7 @@ export function OrderChangeReviewForm({ requestId }: Props) {
             </Button>
           }
           title="批准这项工单修改申请？"
-          description="请核对当前的只读计价预览和审核备注。确认后服务器会再次校验申请版本、工单状态与最新价格规则。"
+          description="请核对计价预览和审核备注。批准时会按最新规则重新报价。"
           impactItems={approvalImpactItems}
           confirmLabel="确认批准并同步工单"
           onConfirm={() => submit('APPROVE')}

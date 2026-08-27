@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { TableScrollArea } from '@/components/ui-business';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type SnapshotItem = {
   id: string;
@@ -109,7 +110,10 @@ function displayValue(field: string, value: unknown): string {
     return value.toLocaleString('zh-CN');
   }
   if (value === null || value === undefined || value === '') return '空';
-  return String(value);
+  const text = String(value);
+  return field === 'name' || field === 'specification'
+    ? externalPriceBusinessText(text)
+    : text;
 }
 
 function buildDiffGroups(
@@ -136,9 +140,9 @@ function buildDiffGroups(
             rows: [
               {
                 key: `missing-${changeIndex}`,
-                field: '快照校验',
-                before: '申请时快照缺少该款式',
-                after: '无法可靠展示',
+                field: '数据校验',
+                before: '申请中缺少该款式',
+                after: '无法展示',
                 pricingImpact: '不影响计价' as const,
                 productionImpact: '审核前需重新提交申请',
               },
@@ -175,7 +179,7 @@ function buildDiffGroups(
       return [
         {
           key: `update-${changeIndex}`,
-          title: `${sequence}${before.name}`,
+          title: `${sequence}${externalPriceBusinessText(before.name)}`,
           operation: '修改' as const,
           rows,
         },
@@ -204,7 +208,7 @@ function buildDiffGroups(
         ];
       });
       const templateLabel = template
-        ? `参考 #${template.sequence ?? '—'} · ${template.name}`
+        ? `参考 #${template.sequence ?? '—'} · ${externalPriceBusinessText(template.name)}`
         : '参考款式无法识别';
       return [
         {
@@ -249,7 +253,7 @@ export function OrderChangeFieldDiff({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">逐字段差异</h3>
         <p className="text-xs text-muted-foreground">
-          计价影响以审批预览为准；批准时服务器会再次校验生产状态。
+          计价以审批预览为准；批准时会再次检查工单状态。
         </p>
       </div>
       <ol className="space-y-3">

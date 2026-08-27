@@ -159,6 +159,45 @@ describe('quoteExternalOrderChargesAction', () => {
     expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith(validInput);
   });
 
+  it('derives weight from item facts and ignores a browser-supplied weight', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
+    quoteExternalOrderChargesPreviewMock.mockResolvedValue(quote);
+
+    await quoteExternalOrderChargesAction({
+      isSfCollect: false,
+      items: [
+        {
+          itemKey: '1',
+          quantity: 1_000,
+          paperWeightGsm: 200,
+          paperType: '200g触感纸',
+          productStructure: 'STANDARD_ENVELOPE',
+        },
+      ],
+      shipments: [
+        {
+          shipmentKey: '1',
+          province: '广东',
+          billableWeightKg: '0.001',
+          itemQuantity: 1_000,
+          itemQuantities: [1_000],
+        },
+      ],
+    });
+
+    expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith({
+      isSfCollect: false,
+      shipments: [
+        {
+          shipmentKey: '1',
+          province: '广东',
+          billableWeightKg: '8',
+          itemQuantity: 1_000,
+        },
+      ],
+    });
+  });
+
   it('accepts the legal aggregate quantity of all 50 order lines', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
     quoteExternalOrderChargesPreviewMock.mockResolvedValue(quote);
@@ -195,6 +234,24 @@ describe('quoteExternalOrderChargesAction', () => {
       message:
         '物流报价失败：当前没有生效的外部销售快递/耗材价目簿，请联系管理员',
     });
+  });
+
+  it('屏蔽领域错误中的内部规则编号', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
+    quoteExternalOrderChargesPreviewMock.mockRejectedValue(
+      new OrderCustomerChargeErrorMock(
+        '收费规则 REF_ZTO_GUANGDONG 缺少 SHIPPING_FEE 类目',
+      ),
+    );
+
+    const result = await quoteExternalOrderChargesAction(validInput);
+
+    expect(result).toEqual({
+      status: 'error',
+      message: '物流报价失败：物流价目簿配置异常，请联系管理员',
+    });
+    expect(JSON.stringify(result)).not.toContain('REF_ZTO_GUANGDONG');
+    expect(JSON.stringify(result)).not.toContain('SHIPPING_FEE');
   });
 
   it('does not disclose unexpected database errors to the browser', async () => {

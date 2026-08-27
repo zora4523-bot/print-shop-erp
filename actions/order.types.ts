@@ -1,4 +1,5 @@
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
+import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
 
 export type OrderMutationResult =
   | { status: 'success' }
@@ -6,7 +7,12 @@ export type OrderMutationResult =
   | { status: 'error'; message: string };
 
 export type CreateOrderMutationResult =
-  | { status: 'success'; orderId: string; itemIds: string[] }
+  | {
+      status: 'success';
+      orderId: string;
+      orderNo: string;
+      itemIds: string[];
+    }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 
@@ -27,5 +33,32 @@ export type ReviewOrderChangeRequestMutationResult =
 
 export type PreviewOrderChangeRequestPricingResult =
   | { status: 'success'; preview: OrderChangePricingPreview }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type PreviewOrderPricingReviewResult =
+  | { status: 'success'; preview: OrderPricingReviewPreview }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type FinalizeOrderPricingMutationResult =
+  | {
+      status: 'success';
+      orderId: string;
+      priceRevision: number;
+      packagingAmount: string;
+      processingAmount: string;
+      totalAmount: string;
+    }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type OrderCommercialDetailMutationResult =
+  | {
+      status: 'success';
+      entityId: string;
+      priceRevision: number;
+      totalAmount: string;
+    }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { DesignFileType } from '@/generated/prisma/enums';
 import { prepareDesignFile, type PreparedDesignFile } from './design-upload-client';
 
 export type PendingDesignImage = {
@@ -35,14 +36,19 @@ export function PendingDesignImages({
     () =>
       images.map((image) => ({
         ...image,
-        previewUrl: URL.createObjectURL(image.prepared.file),
+        previewUrl:
+          image.prepared.fileType === DesignFileType.IMAGE
+            ? URL.createObjectURL(image.prepared.file)
+            : null,
       })),
     [images],
   );
 
   useEffect(
     () => () => {
-      for (const preview of previews) URL.revokeObjectURL(preview.previewUrl);
+      for (const preview of previews) {
+        if (preview.previewUrl) URL.revokeObjectURL(preview.previewUrl);
+      }
     },
     [previews],
   );
@@ -52,11 +58,10 @@ export function PendingDesignImages({
     const rejected: string[] = [];
     for (const file of files) {
       const prepared = prepareDesignFile(file, {
-        imagesOnly: true,
         fallbackStem: `pasted-design-${Date.now()}-${next.length + 1}`,
       });
       if (!prepared.ok) {
-        rejected.push(`${file.name || '剪贴板图片'}：${prepared.message}`);
+        rejected.push(`${file.name || '剪贴板文件'}：${prepared.message}`);
         continue;
       }
       next.push({
@@ -77,7 +82,7 @@ export function PendingDesignImages({
         tabIndex={disabled ? -1 : 0}
         role="button"
         aria-disabled={disabled}
-        aria-label={`款式 ${itemNumber} 设计图粘贴与拖放区域`}
+        aria-label={`款式 ${itemNumber} 设计文件粘贴与拖放区域`}
         className="rounded-md px-2 py-3 text-center outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
         onPaste={(event) => {
           if (disabled) return;
@@ -104,10 +109,10 @@ export function PendingDesignImages({
         }}
       >
         <p className="font-medium text-foreground">
-          在这里粘贴、拖入或选择设计图
+          在这里粘贴、拖入或选择设计文件
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          支持 JPG / PNG / WEBP，单张不超过 10 MiB；图片会在草稿创建后上传
+          支持 JPG / PNG / WEBP（不超过 10 MiB）和 CDR 源文件（不超过 100 MiB）；工单建立后自动上传
         </p>
       </div>
 
@@ -115,8 +120,8 @@ export function PendingDesignImages({
         <input
           ref={inputRef}
           type="file"
-          aria-label={`款式 ${itemNumber} 选择设计图`}
-          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          aria-label={`款式 ${itemNumber} 选择设计文件`}
+          accept=".jpg,.jpeg,.png,.webp,.cdr,image/jpeg,image/png,image/webp,application/x-cdr,application/octet-stream"
           multiple
           className="sr-only"
           disabled={disabled}
@@ -129,24 +134,33 @@ export function PendingDesignImages({
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >
-          选择图片
+          选择文件
         </Button>
-        <span className="text-xs text-muted-foreground">
-          CDR 源文件可在草稿详情页上传
-        </span>
       </div>
 
       {previews.length > 0 ? (
         <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {previews.map((image) => (
             <li key={image.id} className="min-w-0 rounded-md border bg-card p-2">
-              {/* Blob previews are local and cannot be handled by next/image. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={image.previewUrl}
-                alt={`待上传设计图：${image.prepared.file.name}`}
-                className="aspect-square w-full rounded object-cover"
-              />
+              {image.previewUrl ? (
+                <>
+                  {/* Blob previews are local and cannot be handled by next/image. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={image.previewUrl}
+                    alt={`待上传设计图：${image.prepared.file.name}`}
+                    className="aspect-square w-full rounded object-cover"
+                  />
+                </>
+              ) : (
+                <div
+                  role="img"
+                  aria-label={`CDR 源文件：${image.prepared.file.name}`}
+                  className="flex aspect-square w-full items-center justify-center rounded bg-muted font-mono text-lg font-semibold text-muted-foreground"
+                >
+                  CDR
+                </div>
+              )}
               <p
                 className="mt-1 truncate text-xs text-muted-foreground"
                 title={image.prepared.file.name}

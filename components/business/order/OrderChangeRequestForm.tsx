@@ -13,6 +13,7 @@ import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type ItemOption = {
   id: string;
@@ -25,9 +26,13 @@ type ItemOption = {
 
 type EditableItem = {
   selected: boolean;
+  /** Submitted value; keep the imported matcher text until the user edits it. */
   name: string;
+  displayName: string;
   quantity: number;
+  /** Submitted value; keep the imported matcher text until the user edits it. */
   specification: string;
+  displaySpecification: string;
   foilColors: string;
 };
 
@@ -65,6 +70,21 @@ function splitColors(value: string): string[] {
   ];
 }
 
+export function createOrderChangeEditableItem(item: ItemOption): EditableItem {
+  const specification = item.specification ?? '';
+  return {
+    selected: false,
+    name: item.name,
+    displayName: externalPriceBusinessText(item.name),
+    quantity: item.quantity,
+    specification,
+    displaySpecification: specification
+      ? externalPriceBusinessText(specification)
+      : '',
+    foilColors: item.foilColors.join('、'),
+  };
+}
+
 function StateMessage({
   state,
 }: {
@@ -94,13 +114,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
     Object.fromEntries(
       items.map((item) => [
         item.id,
-        {
-          selected: false,
-          name: item.name,
-          quantity: item.quantity,
-          specification: item.specification ?? '',
-          foilColors: item.foilColors.join('、'),
-        },
+        createOrderChangeEditableItem(item),
       ]),
     ),
   );
@@ -212,7 +226,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                   className="size-4 shrink-0"
                 />
                 <span className="admin-wrap-anywhere min-w-0 font-medium">
-                  #{item.sequence} · {item.name}
+                  #{item.sequence} · {externalPriceBusinessText(item.name)}
                 </span>
               </label>
               {current.selected ? (
@@ -220,12 +234,15 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                   <label className="space-y-1 text-sm">
                     <span>款式名称</span>
                     <Input
-                      value={current.name}
+                      value={current.displayName}
                       maxLength={64}
                       required
                       disabled={pending}
                       onChange={(event) =>
-                        updateItem(item.id, { name: event.target.value })
+                        updateItem(item.id, {
+                          name: event.target.value,
+                          displayName: event.target.value,
+                        })
                       }
                     />
                   </label>
@@ -248,12 +265,13 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                   <label className="space-y-1 text-sm">
                     <span>规格</span>
                     <Input
-                      value={current.specification}
+                      value={current.displaySpecification}
                       maxLength={64}
                       disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
                           specification: event.target.value,
+                          displaySpecification: event.target.value,
                         })
                       }
                     />
@@ -302,7 +320,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
-                    #{item.sequence} · {item.name}
+                    #{item.sequence} · {externalPriceBusinessText(item.name)}
                   </option>
                 ))}
               </select>

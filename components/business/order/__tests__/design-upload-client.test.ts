@@ -26,7 +26,6 @@ describe('prepareDesignFile', () => {
   it('normalizes an unnamed clipboard PNG to an extension-bound file name', () => {
     const clipboardFile = new File(['png'], '', { type: 'image/png' });
     const result = prepareDesignFile(clipboardFile, {
-      imagesOnly: true,
       fallbackStem: 'pasted-design-test',
     });
 
@@ -40,25 +39,23 @@ describe('prepareDesignFile', () => {
   it('rejects GIF clipboard content because the server allowlist does not accept it', () => {
     const result = prepareDesignFile(
       new File(['gif'], 'clipboard.gif', { type: 'image/gif' }),
-      { imagesOnly: true },
     );
 
     expect(result).toEqual({
       ok: false,
-      message: '仅支持 JPG、PNG、WEBP 图片',
+      message: '仅支持 JPG、PNG、WEBP 图片或 CDR 源文件',
     });
   });
 
-  it('rejects CDR in the pre-create image queue', () => {
+  it('accepts CDR in the pre-create design-file queue', () => {
     const result = prepareDesignFile(
       new File(['cdr'], 'source.cdr', { type: 'application/octet-stream' }),
-      { imagesOnly: true },
     );
 
-    expect(result).toEqual({
-      ok: false,
-      message: '新建工单时仅支持图片；CDR 请在草稿详情页上传',
-    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.fileType).toBe(DesignFileType.CDR);
+    expect(result.value.mimeType).toBe('application/octet-stream');
   });
 
   it('uses canonical JPEG MIME when the browser reports an empty type', () => {

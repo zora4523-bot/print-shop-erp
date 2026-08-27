@@ -17,6 +17,7 @@ import { HighlightedRemark } from '@/components/business/order/HighlightedRemark
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
@@ -94,8 +95,14 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               #{item.sequence} · {item.name}
             </h2>
             <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-              {item.specification ?? '未填规格'} ·{' '}
-              {item.paperType ?? '未填纸张'} · 数量{' '}
+              {item.specification
+                ? externalPriceBusinessText(item.specification)
+                : '未填规格'}{' '}
+              ·{' '}
+              {item.paperType
+                ? externalPriceBusinessText(item.paperType)
+                : '未填纸张'}{' '}
+              · 数量{' '}
               {item.quantity.toLocaleString()} ·{' '}
               烫金色 {formatFoilColors(item.foilColors, '未填')} ·{' '}
               {item.isDoubleSided ? '双面' : '单面'} ·{' '}

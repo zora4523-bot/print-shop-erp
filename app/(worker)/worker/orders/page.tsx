@@ -35,7 +35,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
       <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的工单</h1>
         <p className="text-xs text-muted-foreground">
-          只显示至少有一个生产任务分配给你的工单，包含已完成的历史记录，最新的排在最前面。
+          包含已完成记录，最新工单优先。
         </p>
       </header>
 

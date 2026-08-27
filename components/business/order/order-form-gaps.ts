@@ -19,6 +19,7 @@ export type OrderFormQuoteStatus =
 export type OrderFormGapItem = {
   name?: string | null;
   productId?: string | null;
+  paperType?: string | null;
   quantity?: number | null;
   crafts?: string[] | null;
   quoteStatus?: OrderFormQuoteStatus;
@@ -35,10 +36,6 @@ export type OrderFormGapShipment = {
   receiverAddress?: string | null;
   province?: string | null;
   billableWeightKg?: string | null;
-  shippingFee?: string | null;
-  packingMaterialFee?: string | null;
-  chargeOverrideReason?: string | null;
-  chargeOverrideRequired?: boolean;
 };
 
 export type OrderFormGapInput = {
@@ -48,7 +45,6 @@ export type OrderFormGapInput = {
   shipping: {
     usesExternalSalesPricing: boolean;
     isSfCollect: boolean;
-    quoteStatus?: OrderFormQuoteStatus;
     shipments: readonly OrderFormGapShipment[];
   };
 };
@@ -73,8 +69,9 @@ export function collectOrderFormGaps(
   input: OrderFormGapInput,
 ): OrderFormGap[] {
   const gaps: OrderFormGap[] = [];
+  const usesExternalSalesPricing = input.shipping.usesExternalSalesPricing;
 
-  if (!hasText(input.customerRef)) {
+  if (!usesExternalSalesPricing && !hasText(input.customerRef)) {
     gaps.push({
       id: 'customer-ref',
       step: 'customer',
@@ -82,7 +79,7 @@ export function collectOrderFormGaps(
       fieldId: 'customerRef',
     });
   }
-  if (!hasDate(input.promisedDate)) {
+  if (!usesExternalSalesPricing && !hasDate(input.promisedDate)) {
     gaps.push({
       id: 'promised-date',
       step: 'customer',
@@ -111,6 +108,15 @@ export function collectOrderFormGaps(
         fieldId: `items.${index}.productId`,
       });
     }
+    if (!hasText(item.paperType)) {
+      gaps.push({
+        id: `item-${index}-paper`,
+        step: 'items',
+        itemIndex: index,
+        label: `款式 #${n} 未选择纸张`,
+        fieldId: `items.${index}.paperType`,
+      });
+    }
     if (!Number.isInteger(item.quantity) || (item.quantity ?? 0) < 1) {
       gaps.push({
         id: `item-${index}-qty`,
@@ -130,35 +136,41 @@ export function collectOrderFormGaps(
       });
     }
 
-    const hasReason = hasText(item.priceOverrideReason);
-    const manualQuoteResolved = item.manualPriceProvided && hasReason;
-    if (item.quoteStatus !== 'complete' && !manualQuoteResolved) {
-      const stateLabel =
-        item.quoteStatus === 'stale'
-          ? '报价条件已变化，需重新核价'
-          : item.quoteStatus === 'loading'
-            ? '正在核价'
-            : item.quoteStatus === 'incomplete'
-              ? '自动报价不完整，需人工报价'
-              : item.quoteStatus === 'error'
-                ? '自动报价失败，需重试或人工报价'
-                : '尚未核价';
-      gaps.push({
-        id: `item-${index}-quote`,
-        step: 'items',
-        itemIndex: index,
-        label: `款式 #${n} ${stateLabel}`,
-        fieldId: `items.${index}.quote`,
-      });
-    }
-    if (item.priceOverrideRequired && !hasReason) {
-      gaps.push({
-        id: `item-${index}-price-reason`,
-        step: 'items',
-        itemIndex: index,
-        label: `款式 #${n} 缺少人工改价说明`,
-        fieldId: `items.${index}.priceOverrideReason`,
-      });
+    // External sales submit production/quote facts only. The server ignores
+    // browser-supplied amounts and routes an incomplete calculation to the
+    // administrator pricing review, so asking the salesperson for a manual
+    // price or override reason here would point at controls that are hidden.
+    if (!usesExternalSalesPricing) {
+      const hasReason = hasText(item.priceOverrideReason);
+      const manualQuoteResolved = item.manualPriceProvided && hasReason;
+      if (item.quoteStatus !== 'complete' && !manualQuoteResolved) {
+        const stateLabel =
+          item.quoteStatus === 'stale'
+            ? '报价条件已变化，需重新核价'
+            : item.quoteStatus === 'loading'
+              ? '正在核价'
+              : item.quoteStatus === 'incomplete'
+                ? '自动报价不完整，需人工报价'
+                : item.quoteStatus === 'error'
+                  ? '自动报价失败，需重试或人工报价'
+                  : '尚未核价';
+        gaps.push({
+          id: `item-${index}-quote`,
+          step: 'items',
+          itemIndex: index,
+          label: `款式 #${n} ${stateLabel}`,
+          fieldId: `items.${index}.quote`,
+        });
+      }
+      if (item.priceOverrideRequired && !hasReason) {
+        gaps.push({
+          id: `item-${index}-price-reason`,
+          step: 'items',
+          itemIndex: index,
+          label: `款式 #${n} 缺少人工改价说明`,
+          fieldId: `items.${index}.priceOverrideReason`,
+        });
+      }
     }
   });
 
@@ -188,59 +200,6 @@ export function collectOrderFormGaps(
         step: 'shipping',
         label: `${shipment.label}未填承运商计费重量`,
         fieldId: `${shipment.idPrefix}-weight`,
-      });
-    }
-    if (!shipping.isSfCollect && !hasText(shipment.shippingFee)) {
-      gaps.push({
-        id: `shipment-${shipment.key}-shipping-fee`,
-        step: 'shipping',
-        label: `${shipment.label}未确认对客快递费`,
-        fieldId: `${shipment.idPrefix}-shipping-fee`,
-      });
-    }
-    if (!hasText(shipment.packingMaterialFee)) {
-      gaps.push({
-        id: `shipment-${shipment.key}-packing-fee`,
-        step: 'shipping',
-        label: `${shipment.label}未确认打包耗材费`,
-        fieldId: `${shipment.idPrefix}-packing-fee`,
-      });
-    }
-    if (
-      shipment.chargeOverrideRequired &&
-      !hasText(shipment.chargeOverrideReason)
-    ) {
-      gaps.push({
-        id: `shipment-${shipment.key}-charge-reason`,
-        step: 'shipping',
-        label: `${shipment.label}缺少收费调整说明`,
-        fieldId: `${shipment.idPrefix}-charge-reason`,
-      });
-    }
-  }
-
-  if (shipping.usesExternalSalesPricing && shipping.quoteStatus !== 'complete') {
-    const manualChargesResolved = shipping.shipments.every(
-      (shipment) =>
-        (shipping.isSfCollect || hasText(shipment.shippingFee)) &&
-        hasText(shipment.packingMaterialFee) &&
-        hasText(shipment.chargeOverrideReason),
-    );
-    if (!manualChargesResolved) {
-      gaps.push({
-        id: 'logistics-quote',
-        step: 'shipping',
-        label:
-          shipping.quoteStatus === 'stale'
-            ? '物流条件已变化，需重新核价'
-            : shipping.quoteStatus === 'loading'
-              ? '正在计算物流建议费'
-              : shipping.quoteStatus === 'incomplete'
-                ? '物流报价不完整，需人工确认'
-                : shipping.quoteStatus === 'error'
-                  ? '物流报价失败，需重试或人工确认'
-                  : '尚未计算物流建议费',
-        fieldId: 'logistics-quote',
       });
     }
   }

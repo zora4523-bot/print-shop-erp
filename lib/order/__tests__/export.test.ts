@@ -44,6 +44,10 @@ const {
       order: { findMany: vi.fn() },
       craft: { findMany: vi.fn() },
       orderItem: { findMany: vi.fn() },
+      orderPackagingGroup: { findMany: vi.fn() },
+      orderItemPlateDetail: { findMany: vi.fn() },
+      orderCustomerCharge: { findMany: vi.fn() },
+      orderPricingRevision: { findMany: vi.fn() },
       productionTask: { findMany: vi.fn() },
       orderShipment: { findMany: vi.fn() },
       orderShipmentLine: { findMany: vi.fn() },
@@ -122,7 +126,7 @@ function exportRow(
     createdById: actor.id,
     filters: { scope: 'filtered', params: { q: '客户甲' } },
     snapshotAt: NOW,
-    schemaVersion: 1,
+    schemaVersion: 3,
     status: OrderExportStatus.PENDING,
     backgroundJobId: null,
     matchedOrderCount: 0,
@@ -157,6 +161,10 @@ beforeEach(() => {
   dbMock.order.findMany.mockReset().mockResolvedValue([]);
   dbMock.craft.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderItem.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderPackagingGroup.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderItemPlateDetail.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderCustomerCharge.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderPricingRevision.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderShipment.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderShipmentLine.findMany.mockReset().mockResolvedValue([]);
@@ -277,7 +285,7 @@ describe('requestOrderExport', () => {
           filterHash: FILTERED_HASH,
         },
         snapshotAt: NOW,
-        schemaVersion: 1,
+        schemaVersion: 3,
       }),
     });
     expect(enqueueBackgroundJobMock).toHaveBeenCalledExactlyOnceWith(
@@ -303,7 +311,7 @@ describe('requestOrderExport', () => {
     expect(auditInput.action).toBe('ORDER_EXPORT_REQUESTED');
     expect(auditInput.after).toEqual({
       scope: 'filtered',
-      schemaVersion: 1,
+      schemaVersion: 3,
       backgroundJobId: '[QUEUED]',
     });
     expect(JSON.stringify(auditInput.after)).not.toContain('客户甲');
@@ -453,7 +461,7 @@ describe('processQueuedOrderExport', () => {
 
   it('rejects an unsupported schema before querying orders', async () => {
     dbMock.orderExport.findUnique.mockResolvedValue(
-      queuedExportRow({ schemaVersion: 2 }),
+      queuedExportRow({ schemaVersion: 99 }),
     );
 
     await expect(processQueuedOrderExport('export-1')).rejects.toBeInstanceOf(
@@ -513,6 +521,10 @@ describe('processQueuedOrderExport', () => {
     const sheetNames = [
       '工单',
       '款式',
+      '包装组及组成',
+      '制版明细',
+      '对客收费',
+      '价格修订',
       '生产任务',
       '收货地址',
       '地址款式分配',
@@ -523,7 +535,15 @@ describe('processQueuedOrderExport', () => {
       '设计文件',
       '账单关联',
     ];
-    const singleRowSheets = new Set(['工单', '款式', '生产任务', '修改申请']);
+    const singleRowSheets = new Set([
+      '工单',
+      '款式',
+      '包装组及组成',
+      '对客收费',
+      '价格修订',
+      '生产任务',
+      '修改申请',
+    ]);
     const rowCounts = Object.fromEntries(sheetNames.map((name) => [
       name,
       singleRowSheets.has(name) ? 1 : name === '操作记录' ? 2 : 0,
@@ -590,6 +610,85 @@ describe('processQueuedOrderExport', () => {
       remark: '红色高亮',
       createdAt: NOW,
     };
+    const packagingGroup = {
+      orderId: 'order-1',
+      sequence: 1,
+      name: '中秋混装袋',
+      mode: 'MIXED_STYLE',
+      actualBagCount: 500,
+      unitPrice: new Prisma.Decimal('0.2000'),
+      subtotal: new Prisma.Decimal('100.00'),
+      lines: [
+        {
+          unitsPerBag: 2,
+          orderItem: { sequence: 1, name: '款式 A' },
+        },
+      ],
+    };
+    const customerCharge = {
+      orderId: 'order-1',
+      businessKey: 'MANUAL:SAMPLE:1',
+      status: 'FINAL',
+      description: '打样费',
+      quantity: new Prisma.Decimal('1.000'),
+      unit: '次',
+      unitPrice: new Prisma.Decimal('80.0000'),
+      suggestedAmount: new Prisma.Decimal('60.00'),
+      amount: new Prisma.Decimal('80.00'),
+      isAdjustment: true,
+      overrideReason: '客户要求加急打样',
+      approvalReference: '审批单 SP-001',
+      finalizedAt: NOW,
+      createdAt: NOW,
+      category: { code: 'SAMPLE_FEE', name: '打样费' },
+      shipment: null,
+      priceBook: {
+        code: 'EXT-2026',
+        name: '外部销售加工价',
+        version: 4,
+        currency: 'CNY',
+        sourceName: '加工价目表.xlsx',
+      },
+      sourceRule: {
+        code: 'SAMPLE-BASE',
+        name: '基础打样费',
+        sourceName: '加工价目表.xlsx',
+        sourceSheet: '附加费',
+        sourceRange: 'B12',
+      },
+      createdBy: { displayName: '管理员' },
+      finalizedBy: { displayName: '财务甲' },
+    };
+    const pricingRevision = {
+      orderId: 'order-1',
+      revision: 2,
+      status: 'ADMIN_CONFIRMED',
+      source: 'ADMIN_FULL_REPRICE',
+      snapshot: {
+        version: 2,
+        order: {
+          processingAmount: '235.40',
+          packagingAmount: '100.00',
+          totalAmount: '315.40',
+        },
+        metadata: {
+          priceBooks: {
+            processing: { name: '外部销售加工价', version: 4 },
+            logistics: { code: 'LOGISTICS', version: 3 },
+          },
+        },
+        items: [
+          {
+            pricingSnapshot: {
+              priceBook: { name: '外部销售加工价', version: 4 },
+              appliedAdjustments: [{ ruleCode: 'PAPER-OVER-160' }],
+            },
+          },
+        ],
+      },
+      createdBy: { displayName: '管理员' },
+      createdAt: NOW,
+    };
     const task = {
       orderItem: { orderId: 'order-1', sequence: 1, name: '款式 A' },
       craft: { name: '铜版纸彩印+烫金' },
@@ -638,6 +737,9 @@ describe('processQueuedOrderExport', () => {
       async (args: { select?: Record<string, unknown> }) =>
         args.select?.product ? [item] : [],
     );
+    dbMock.orderPackagingGroup.findMany.mockResolvedValue([packagingGroup]);
+    dbMock.orderCustomerCharge.findMany.mockResolvedValue([customerCharge]);
+    dbMock.orderPricingRevision.findMany.mockResolvedValue([pricingRevision]);
     dbMock.productionTask.findMany.mockResolvedValue([task]);
     dbMock.orderChangeRequest.findMany.mockResolvedValue([changeRequest]);
     dbMock.orderLog.findMany.mockResolvedValue([
@@ -741,6 +843,65 @@ describe('processQueuedOrderExport', () => {
       xlsxDecimal('150.00'),
       '客户协议价',
     ]);
+    expect(consumed.get('包装组及组成')).toEqual([
+      [
+        '工单号',
+        '包装组序号',
+        '包装组名称',
+        '组模式',
+        '实际袋数',
+        '每袋单价',
+        '小计',
+        '每袋各款组成',
+      ],
+      [
+        'GD-260807-001',
+        1,
+        '中秋混装袋',
+        '混装',
+        500,
+        xlsxDecimal('0.2000'),
+        xlsxDecimal('100.00'),
+        '#1 款式 A × 2',
+      ],
+    ]);
+    expect(consumed.get('对客收费')?.[1]).toEqual([
+      'GD-260807-001',
+      '打样费',
+      'SAMPLE_FEE',
+      'MANUAL:SAMPLE:1',
+      undefined,
+      '打样费',
+      xlsxDecimal('1.000'),
+      '次',
+      xlsxDecimal('80.0000'),
+      xlsxDecimal('60.00'),
+      xlsxDecimal('80.00'),
+      '已终审',
+      '是',
+      '客户要求加急打样',
+      '审批单 SP-001',
+      '外部销售加工价（EXT-2026 v4，CNY）',
+      '加工价目表.xlsx',
+      '基础打样费（SAMPLE-BASE） · 加工价目表.xlsx / 附加费 / B12',
+      '管理员',
+      '2026/08/07 16:00',
+      '财务甲',
+      '2026/08/07 16:00',
+    ]);
+    expect(consumed.get('价格修订')?.[1]).toEqual([
+      'GD-260807-001',
+      2,
+      '管理员终价已确认',
+      'ADMIN_FULL_REPRICE',
+      '管理员终价',
+      xlsxDecimal('235.40'),
+      xlsxDecimal('100.00'),
+      xlsxDecimal('315.40'),
+      '加工：外部销售加工价 v4；物流：LOGISTICS v3；规则：PAPER-OVER-160',
+      '管理员',
+      '2026/08/07 16:00',
+    ]);
     // 逐格锁死：select 少取一列，对应格会变 undefined，这里当场红。
     expect(consumed.get('生产任务')?.[1]).toEqual([
       'GD-260807-001', 1, '款式 A', '铜版纸彩印+烫金', '师傅甲', '开机师傅', '开机仔',
@@ -756,6 +917,10 @@ describe('processQueuedOrderExport', () => {
     const sheetQueries = [
       dbMock.order.findMany,
       dbMock.orderItem.findMany,
+      dbMock.orderPackagingGroup.findMany,
+      dbMock.orderItemPlateDetail.findMany,
+      dbMock.orderCustomerCharge.findMany,
+      dbMock.orderPricingRevision.findMany,
       dbMock.productionTask.findMany,
       dbMock.orderShipment.findMany,
       dbMock.orderShipmentLine.findMany,
@@ -778,9 +943,30 @@ describe('processQueuedOrderExport', () => {
       .map(([args]) => args.select as Record<string, unknown>)
       .find((select) => select.product);
     expect(itemSelect).not.toHaveProperty('pricingSnapshot');
-    expect(sheetQueries[2].mock.calls[0]?.[0].select)
+    expect(sheetQueries[6].mock.calls[0]?.[0].select)
       .not.toHaveProperty('salaryRuleSnapshot');
-    const changeSelect = sheetQueries[7].mock.calls[0]?.[0].select as Record<string, unknown>;
+    const chargeSelect = sheetQueries[4].mock.calls[0]?.[0].select as Record<
+      string,
+      unknown
+    >;
+    expect(chargeSelect).toMatchObject({
+      isAdjustment: true,
+      approvalReference: true,
+      priceBook: { select: expect.any(Object) },
+      sourceRule: { select: expect.any(Object) },
+    });
+    const revisionSelect = sheetQueries[5].mock.calls[0]?.[0].select as Record<
+      string,
+      unknown
+    >;
+    expect(revisionSelect).toMatchObject({
+      revision: true,
+      status: true,
+      source: true,
+      snapshot: true,
+      createdBy: { select: { displayName: true } },
+    });
+    const changeSelect = sheetQueries[11].mock.calls[0]?.[0].select as Record<string, unknown>;
     expect(changeSelect).not.toHaveProperty('beforeSnapshot');
     expect(changeSelect).not.toHaveProperty('proposedChanges');
     expect(consumed.get('操作记录')).toEqual([
@@ -842,7 +1028,7 @@ describe('processQueuedOrderExport', () => {
         matchedOrderCount: 1,
         rowCounts,
         byteSize: '8192',
-        schemaVersion: 1,
+        schemaVersion: 3,
       },
     });
     expect(deleteArtifactMock).not.toHaveBeenCalled();
@@ -881,7 +1067,7 @@ describe('processQueuedOrderExport', () => {
         }),
       );
     dbMock.order.findMany.mockResolvedValue([]);
-    writeXlsxFileMock.mockResolvedValue({ byteLength: 128, sheetCount: 11 });
+    writeXlsxFileMock.mockResolvedValue({ byteLength: 128, sheetCount: 15 });
     txMock.orderExport.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(processQueuedOrderExport('export-1')).rejects.toBeInstanceOf(
@@ -916,7 +1102,7 @@ describe('processQueuedOrderExport', () => {
     dbMock.order.findMany.mockResolvedValue([]);
     writeXlsxFileMock.mockImplementation(async ({ filePath }: { filePath: string }) => {
       artifactName = filePath.slice('/tmp/'.length);
-      return { byteLength: 128, sheetCount: 11 };
+      return { byteLength: 128, sheetCount: 15 };
     });
     txMock.orderExport.findUniqueOrThrow.mockImplementation(async () =>
       queuedExportRow({
@@ -957,7 +1143,7 @@ describe('processQueuedOrderExport', () => {
       dbMock.order.findMany.mockResolvedValue([]);
       writeXlsxFileMock.mockImplementation(async () => {
         vi.setSystemTime(completedAt);
-        return { byteLength: 128, sheetCount: 11 };
+        return { byteLength: 128, sheetCount: 15 };
       });
 
       await expect(processQueuedOrderExport('export-1')).rejects.toBeInstanceOf(

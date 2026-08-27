@@ -1,11 +1,10 @@
 import { redirect } from 'next/navigation';
-import {
-  OrderSettlementType,
-  Role,
-} from '../../../../generated/prisma/enums';
+import { OrderSettlementType, Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
 import { listActiveProductOrderOptions } from '@/lib/product';
+import { listActivePaperOrderOptions } from '@/lib/material';
+import { listCustomerPartyOptions } from '@/lib/party';
 import { OrderForm } from '@/components/business/order/OrderForm';
 import {
   ORDER_SETTLEMENT_LABELS,
@@ -24,31 +23,34 @@ export default async function NewOrderPage() {
     user.role === Role.ADMIN;
   if (!canCreate) redirect('/orders');
 
-  const [crafts, products] = await Promise.all([
+  const [crafts, products, paperMaterials, customers] = await Promise.all([
     listActiveCraftOrderOptions(),
     listActiveProductOrderOptions(),
+    listActivePaperOrderOptions(),
+    listCustomerPartyOptions(),
   ]);
   const settlementType = settlementTypeForOrderCreator(user.role);
+  const usesExternalSalesPricing =
+    settlementType === OrderSettlementType.EXTERNAL_SALES;
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">新建工单</h1>
-        <p className="text-sm text-muted-foreground">
-          创建后自动生成易读工单号（如 GD-260719-001）并保存为草稿；进入详情页后再点
-          &ldquo;提交工单&rdquo; 进入排产流程。
-        </p>
-      </div>
+      {!usesExternalSalesPricing ? (
+        <div>
+          <h1 className="text-xl font-semibold">新建工单</h1>
+          <p className="text-sm text-muted-foreground">
+            费用随款式参数更新；未匹配价格的款式由管理员终价。
+          </p>
+        </div>
+      ) : null}
       <OrderForm
         draftScope={user.id}
         crafts={crafts}
         products={products}
-        settlementLabel={
-          ORDER_SETTLEMENT_LABELS[settlementType]
-        }
-        usesExternalSalesPricing={
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-        }
+        paperMaterials={paperMaterials}
+        customers={customers}
+        settlementLabel={ORDER_SETTLEMENT_LABELS[settlementType]}
+        usesExternalSalesPricing={usesExternalSalesPricing}
       />
     </div>
   );

@@ -139,14 +139,13 @@ export async function signDesignUpload(
     );
     return {
       status: 'error',
-      message: 'OSS 环境配置无效（OSS_ENDPOINT 格式错误），请联系管理员修正。',
+      message: '上传配置无效，暂不可用；请联系管理员。',
     };
   }
   if (!result.configured) {
     return {
       status: 'not-configured',
-      message:
-        '上传功能尚未配置 OSS 凭证，暂不可用。请联系管理员在服务端环境变量中配置完整后重试。',
+      message: '上传功能暂不可用，请联系管理员。',
       missing: result.missing,
     };
   }
@@ -180,7 +179,7 @@ export async function signDesignUpload(
     return {
       status: 'error',
       message:
-        '上传凭证签发失败，请稍后重试；若持续失败请联系管理员检查 OSS / RAM 配置。',
+        '上传授权失败，请稍后重试；若持续失败请联系管理员。',
     };
   }
 

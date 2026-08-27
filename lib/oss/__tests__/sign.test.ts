@@ -70,7 +70,7 @@ describe('signDesignUpload — not-configured branch', () => {
     expect(r.status).toBe('not-configured');
     if (r.status === 'not-configured') {
       expect(r.missing).toContain('OSS_ACCESS_KEY_ID');
-      expect(r.message).toMatch(/尚未配置/);
+      expect(r.message).toBe('上传功能暂不可用，请联系管理员。');
     }
   });
 
@@ -282,7 +282,9 @@ describe('signDesignUpload — real STS signing', () => {
       OSS_ENDPOINT: 'not a url',
     } as unknown as NodeJS.ProcessEnv);
     expect(r.status).toBe('error');
-    if (r.status === 'error') expect(r.message).toMatch(/OSS_ENDPOINT/);
+    if (r.status === 'error') {
+      expect(r.message).toBe('上传配置无效，暂不可用；请联系管理员。');
+    }
     expect(assumeRoleMock).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
@@ -298,7 +300,9 @@ describe('signDesignUpload — real STS signing', () => {
     expect(r.status).toBe('error');
     if (r.status === 'error') {
       // 用户可见文案不含 SDK 错误正文（可能带 ARN / secret 片段）
-      expect(r.message).toMatch(/凭证签发失败/);
+      expect(r.message).toContain('上传授权失败');
+      expect(r.message).not.toContain('OSS');
+      expect(r.message).not.toContain('RAM');
       expect(r.message).not.toMatch(/super-secret/);
     }
     // 但 ops 日志里有原始错误

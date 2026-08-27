@@ -168,7 +168,7 @@ export function buildOrderDetailTimeline(
   if (input.status === OrderStatus.CANCELLED) {
     const cancelMeta = cancelledLog
       ? stamp(cancelledLog.createdAt, cancelledLog.operatorName)
-      : '已进入 CANCELLED 终态';
+      : '已取消';
     return [
       {
         key: 'cancelled',

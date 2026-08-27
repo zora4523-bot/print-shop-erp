@@ -8,9 +8,9 @@ import { finishOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
 
 export const finishOrderImpactItems = [
-  '工单将从 SHIPPED（已发货）进入 FINISHED（已完成）终态；该状态不可回退。',
-  '工单业务台账（ledger）将关闭，不再接受后续生产或发货处理。',
-  '工单将退出活跃工作区；历史金额、状态和审计记录仍会保留。',
+  '确认后工单完成且不能恢复。',
+  '工单不再接受生产或发货操作。',
+  '历史金额、状态和操作记录仍会保留。',
 ] as const;
 
 // SHIPPED → FINISHED 终态收尾。无额外字段。
@@ -53,7 +53,7 @@ export function FinishOrderButton({ orderId }: { orderId: string }) {
         focusReturnRef={triggerRef}
         disabled={pending}
         title="确认关闭工单并标记为已完成？"
-        description="这是工单生命周期的最终收尾。只有点击下方确认按钮后，系统才会提交终态变更。"
+        description="确认后工单完成且不能恢复。"
         impactItems={finishOrderImpactItems}
         confirmLabel="确认关闭并完成"
         onConfirm={confirmFinish}

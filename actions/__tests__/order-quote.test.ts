@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OrderSettlementType, Role } from '../../generated/prisma/enums';
+import {
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderProductStructure,
+  OrderSettlementType,
+  Role,
+} from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const { requirePermissionMock, quoteOrderItemsPreviewMock } = vi.hoisted(() => ({
@@ -20,11 +27,26 @@ const validInput = {
   items: [
     {
       productId: 'product-1',
+      pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      artworkVersion: null,
+      plateGroupId: null,
+      pricingGroup: null,
+      manualQuoteReason: null,
       specification: '大号',
+      actualWidthMm: 210,
+      actualHeightMm: 105,
       paperType: '艳红珠光纸',
+      paperWeightGsm: 160,
       quantity: 1_000,
       crafts: ['craft-foil'],
+      frontFoilColors: ['哑金'],
+      backFoilColors: [],
       foilColors: ['哑金'],
+      foilTechnique: OrderFoilTechnique.FLAT,
+      hasLocalFoil: false,
+      lamination: OrderLamination.NONE,
+      printColors: [],
       isDoubleSided: false,
       isDoubleColor: false,
     },

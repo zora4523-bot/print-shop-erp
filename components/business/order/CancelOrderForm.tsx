@@ -93,7 +93,7 @@ export function CancelOrderForm({
           </Button>
         }
         title={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'}
-        description="工单会进入 CANCELLED 终态，不再参与排产、生产与账单归集，且不能恢复。已发生的成本与工资不会被冲销。"
+        description="工单取消后不能恢复，也不再参与排产、生产和账单归集；已发生成本与工资不会冲销。"
         impactItems={impactItems}
         confirmLabel="填写原因并取消工单"
         reasonLabel="取消原因"
@@ -104,7 +104,7 @@ export function CancelOrderForm({
         <ActionNotice
           tone="warning"
           title="暂不能确认取消"
-          description="订单影响数据未传入，为避免在未知影响下执行高风险操作，请刷新订单详情后重试。"
+          description="暂时无法确认取消影响，请刷新工单详情后重试。"
           className="mt-2 max-w-sm"
         />
       ) : null}
@@ -126,7 +126,7 @@ export function CancelOrderForm({
         <ActionNotice
           tone="success"
           title="工单已取消"
-          description="终态已更新，取消原因与操作人已留存在修改日志。"
+          description="取消原因和操作人已记录。"
           className="mt-2 max-w-sm"
         />
       ) : null}
