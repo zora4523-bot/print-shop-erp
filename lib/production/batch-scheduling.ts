@@ -14,6 +14,7 @@ import {
 } from '@/lib/production';
 import { transitionOrder } from '@/lib/order/status-machine';
 import { orderCascadeLockKey } from '@/lib/order/locks';
+import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 import { dispatchNotification } from '@/lib/notification/dispatch';
 import { enqueueNotificationInTransaction } from '@/lib/notification/transactional-outbox';
 import type { EnqueueClient } from '@/lib/background-jobs/repository';
@@ -51,6 +52,15 @@ type SelectedWorker = {
   machineType: MachineType | null;
   machineCapabilities: MachineType[];
   craftCapabilities: Array<{ craftId: string }>;
+};
+
+type BatchSchedulingOrder = {
+  id: string;
+  orderNo: string;
+  status: OrderStatus;
+  pricingStatus: string;
+  items: Array<{ id: string; quantity: number; crafts: string[] }>;
+  outsourceOrders: Array<{ id: string }>;
 };
 
 async function requireActiveWorker(workerId: string): Promise<SelectedWorker> {
@@ -95,12 +105,20 @@ async function assignCompatibleTasksForOrder(
         craftCapabilities: { select: { craftId: true } },
       },
     });
-    const order = await tx.order.findUnique({
+    const order = await (
+      tx.order as unknown as {
+        findUnique: (args: {
+          where: { id: string };
+          select: unknown;
+        }) => Promise<BatchSchedulingOrder | null>;
+      }
+    ).findUnique({
       where: { id: orderId },
       select: {
         id: true,
         orderNo: true,
         status: true,
+        pricingStatus: true,
         items: {
           select: { id: true, quantity: true, crafts: true },
           orderBy: { sequence: 'asc' },
@@ -115,6 +133,13 @@ async function assignCompatibleTasksForOrder(
       throw new SchedulingError('师傅不存在、已停用或账号角色不正确');
     }
     if (!order) throw new OrderInvariantError('工单不存在');
+    if (
+      order.pricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+    ) {
+      throw new SchedulingError(
+        '工单价格尚未经确认，不能排产',
+      );
+    }
     if (order.status !== OrderStatus.SUBMITTED) {
       throw new SchedulingError('工单已不在待排产状态，请刷新列表');
     }

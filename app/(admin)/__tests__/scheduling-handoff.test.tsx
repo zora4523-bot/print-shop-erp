@@ -82,7 +82,7 @@ describe('scheduling list handoff', () => {
     });
   });
 
-  it('explains a handoff that no longer has any pending order without writing', async () => {
+  it('states the outcome when a handoff has no pending order', async () => {
     boardMock.mockResolvedValue({ orders: [], workers: [] });
 
     const html = renderToStaticMarkup(
@@ -92,8 +92,9 @@ describe('scheduling list handoff', () => {
     );
 
     expect(html).toContain('交接工单未命中当前待排产');
-    expect(html).toContain('当前命中 0 项');
-    expect(html).toContain('系统未执行任何写入');
+    expect(html).toContain('所选工单当前均不可排产');
+    expect(html).toContain('没有分配任何任务');
+    expect(html).not.toContain('系统未执行任何写入');
     expect(pendingBoardMock).not.toHaveBeenCalled();
   });
 });

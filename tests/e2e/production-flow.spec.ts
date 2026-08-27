@@ -279,10 +279,9 @@ test.describe('生产流程 — golden path', () => {
       const shipDialog = page.getByRole('alertdialog', {
         name: '确认 1 个地址已发货？',
       });
-      await expect(shipDialog).toContainText('从估算转为最终收费');
+      await expect(shipDialog).toContainText('转为最终收费');
       await expect(shipDialog).toContainText('重算应收总额');
-      await expect(shipDialog).toContainText('SHIPPED（已发货），这不是终态');
-      await expect(shipDialog).toContainText('提交“工单已发货”通知任务');
+      await expect(shipDialog).toContainText('发货后仍需“确认完工”');
       await expect(shipDialog).toContainText('本次发货不会扣减库存');
       await shipDialog
         .getByRole('button', { name: '确认发货并重算应收', exact: true })
@@ -321,13 +320,13 @@ test.describe('生产流程 — golden path', () => {
       expect(mine[0]!.messageContent).not.toContain('{trackingNo}');
     });
 
-    await test.step('ADMIN 确认完工 (SHIPPED → FINISHED 终态)', async () => {
-      // 发货后 FinishOrderButton 渲染；终态变更必须先经过 L2 影响确认。
+    await test.step('ADMIN 确认完工', async () => {
+      // 发货后 FinishOrderButton 渲染；完成操作必须先经过 L2 影响确认。
       await page.getByRole('button', { name: /^确认完工$/ }).click();
       const finishDialog = page.getByRole('alertdialog');
-      await expect(finishDialog).toContainText('FINISHED（已完成）终态');
-      await expect(finishDialog).toContainText('业务台账（ledger）将关闭');
-      await expect(finishDialog).toContainText('退出活跃工作区');
+      await expect(finishDialog).toContainText('确认后工单完成且不能恢复');
+      await expect(finishDialog).toContainText('不再接受生产或发货操作');
+      await expect(finishDialog).toContainText('历史金额、状态和操作记录仍会保留');
       await finishDialog
         .getByRole('button', { name: /^确认关闭并完成$/ })
         .click();

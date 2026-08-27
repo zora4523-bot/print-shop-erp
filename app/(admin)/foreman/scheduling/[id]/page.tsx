@@ -9,6 +9,8 @@ import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity'
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { SchedulingForm } from '@/components/business/production/SchedulingForm';
 import { requirePermission } from '@/lib/auth/permissions';
+import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -55,10 +57,25 @@ export default async function SchedulingDetailPage({ params }: PageProps) {
         </p>
       </div>
 
-      <SchedulingForm
-        view={view}
-        machineTypeLabels={MACHINE_TYPE_LABELS as Record<string, string>}
-      />
+      {view.schedulingBlockReason ? (
+        <section className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+          <h2 className="font-semibold">当前不能排产</h2>
+          <p className="text-sm text-destructive">
+            {view.schedulingBlockReason}
+          </p>
+          <Link
+            href={`/orders/${view.orderId}`}
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            返回工单确认价格
+          </Link>
+        </section>
+      ) : (
+        <SchedulingForm
+          view={view}
+          machineTypeLabels={MACHINE_TYPE_LABELS as Record<string, string>}
+        />
+      )}
     </div>
   );
 }

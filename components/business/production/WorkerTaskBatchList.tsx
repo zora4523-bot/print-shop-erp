@@ -12,8 +12,8 @@ import {
   WorkerType,
 } from '@/generated/prisma/enums';
 import {
-  MACHINE_TYPE_LABELS,
-  WORKER_TYPE_LABELS,
+  machineTypeLabel,
+  workerTypeLabel,
 } from '@/lib/auth/role-labels';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,7 @@ import {
 } from '@/components/ui-business';
 import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export type WorkerBatchTaskRow = {
   id: string;
@@ -62,22 +63,20 @@ function compensationImpact(task: WorkerBatchTaskRow): string {
 
   if (workerType === WorkerType.MACHINE) {
     if (!task.machineType) {
-      return '计件影响：缺少机型快照，服务端将拒绝整批提交';
+      return '缺少机型信息，无法整批完工';
     }
-    const machineLabel =
-      MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType;
-    return `计件影响：按提交时生效的“${machineLabel}”薪资规则计算金额并保存规则快照`;
+    const machineLabel = machineTypeLabel(task.machineType);
+    return `计件工资按“${machineLabel}”当前规则计算`;
   }
 
   if (
     workerType === WorkerType.PACKER ||
     workerType === WorkerType.CLEANER
   ) {
-    const workerTypeLabel = WORKER_TYPE_LABELS[workerType] ?? workerType;
-    return `薪资影响：写入“${workerTypeLabel}”时薪岗位快照，本次任务不生成计件金额（¥0.00）`;
+    return `本任务按“${workerTypeLabel(workerType)}”时薪结算，不生成计件工资`;
   }
 
-  return '薪资影响：生产岗位快照缺失或不可用，服务端将拒绝整批提交';
+  return '缺少岗位信息，无法整批完工';
 }
 
 /**
@@ -95,7 +94,7 @@ export function batchCompletionImpactItems({
 }): string[] {
   const impacts = [
     `本次仅完工 ${tasks.length} 个进行中任务；每项按计划数全部记为合格，不良数和返工数均为 0。`,
-    '任务状态、报工数量、薪资快照与可能触发的整单生产完工在同一数据库事务内提交；任一任务在提交时失效，整批全部回滚，不会部分成功。',
+    '任一任务在提交时不符合条件，本批任务都不会完工。',
   ];
 
   if (excludedPendingCount > 0) {
@@ -107,7 +106,7 @@ export function batchCompletionImpactItems({
   return impacts.concat(
     tasks.map(
       (task) =>
-        `工单 ${task.order.orderNo} · 任务 #${task.item.sequence} ${task.item.name} · 工艺 ${task.craft.name} · 计划/合格数量 ${task.plannedQty.toLocaleString()} · 当前师傅 ${workerName} · ${compensationImpact(task)}`,
+        `工单 ${task.order.orderNo} · 任务 #${task.item.sequence} ${externalPriceBusinessText(task.item.name)} · 工艺 ${task.craft.name} · 计划/合格数量 ${task.plannedQty.toLocaleString()} · 当前师傅 ${workerName} · ${compensationImpact(task)}`,
     ),
   );
 }
@@ -125,7 +124,7 @@ export function validateBatchCompletionPreview(
   }
 
   for (const task of tasks) {
-    const taskLabel = `工单 ${task.order.orderNo} 的任务“${task.item.name}”`;
+    const taskLabel = `工单 ${task.order.orderNo} 的任务“${externalPriceBusinessText(task.item.name)}”`;
     if (task.status !== TaskStatus.IN_PROGRESS) {
       return `${taskLabel}不是进行中状态，请刷新后重试`;
     }
@@ -136,14 +135,14 @@ export function validateBatchCompletionPreview(
     const workerType =
       task.workerType ?? (task.machineType ? WorkerType.MACHINE : null);
     if (workerType === WorkerType.MACHINE && !task.machineType) {
-      return `${taskLabel}缺少机型快照，请联系管理员改派`;
+      return `${taskLabel}缺少机型信息，请联系管理员改派`;
     }
     if (
       workerType !== WorkerType.MACHINE &&
       workerType !== WorkerType.PACKER &&
       workerType !== WorkerType.CLEANER
     ) {
-      return `${taskLabel}缺少有效的生产岗位快照，请联系管理员改派`;
+      return `${taskLabel}缺少有效的生产岗位信息，请联系管理员改派`;
     }
   }
 
@@ -284,7 +283,7 @@ export function WorkerTaskBatchList({
         setTransportFailure(true);
         setState({
           status: 'error',
-          message: '未能确认服务器返回结果',
+          message: '未能确认提交结果',
         });
       }
     });
@@ -407,7 +406,7 @@ export function WorkerTaskBatchList({
           focusReturnRef={completionTriggerRef}
           disabled={pending || completionPreview === null}
           title={`确认整批完工 ${completionPreview?.tasks.length ?? 0} 个任务？`}
-          description="确认前请逐项核对工单、工艺、计划数和计薪影响。提交后仍会在服务端重新校验权限与最新状态。"
+          description="请逐项核对工单、工艺、计划数和计薪影响；提交时会再次检查任务状态。"
           impactItems={completionImpactItems}
           confirmLabel="确认整批完工"
           onConfirm={confirmCompletion}
@@ -433,7 +432,7 @@ export function WorkerTaskBatchList({
             }
             description={
               operation === 'report'
-                ? `已在同一事务内完工 ${visibleState.taskIds.length} 个任务。`
+                ? `已完工 ${visibleState.taskIds.length} 个任务。`
                 : `已开始 ${visibleState.taskIds.length} 个任务。`
             }
           />
@@ -448,9 +447,9 @@ export function WorkerTaskBatchList({
             }
             description={
               transportFailure
-                ? `${errorMessage}。提交结果可能已经在服务端生效，请先刷新任务列表核对，避免重复报工。`
+                ? `${errorMessage}。请刷新任务列表，避免重复报工。`
                 : operation === 'report'
-                  ? `${errorMessage}。本次未产生部分成功：服务端已拒绝提交或回滚整批事务。`
+                  ? `${errorMessage}。提交失败，本批任务均未变更。`
                   : errorMessage
             }
             action={
@@ -535,7 +534,7 @@ function WorkerTaskRow({
           checked={checked}
           disabled={disabled}
           onChange={onToggle}
-          label={`选择 ${task.order.orderNo} ${task.item.name}`}
+          label={`选择 ${task.order.orderNo} ${externalPriceBusinessText(task.item.name)}`}
         />
       </label>
       <Link
@@ -554,7 +553,7 @@ function WorkerTaskRow({
               <ProductionTaskStatusBadge status={task.status} />
             </div>
             <div className="worker-wrap-anywhere text-sm font-medium">
-              #{task.item.sequence} · {task.item.name}
+              #{task.item.sequence} · {externalPriceBusinessText(task.item.name)}
             </div>
             {task.order.customName ? (
               <div className="worker-wrap-anywhere text-xs font-medium">
@@ -564,7 +563,7 @@ function WorkerTaskRow({
             <div className="worker-wrap-anywhere text-xs text-muted-foreground">
               {task.craft.name}
               {task.machineType
-                ? ` · ${MACHINE_TYPE_LABELS[task.machineType] ?? task.machineType}`
+                ? ` · ${machineTypeLabel(task.machineType)}`
                 : task.workerType === WorkerType.MACHINE
                   ? ' · 机型未配置'
                   : ' · 时薪任务'}

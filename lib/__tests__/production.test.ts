@@ -7,7 +7,9 @@ import {
   MachineType,
   OutsourceStatus,
   WorkerType,
+  OrderSettlementType,
 } from '../../generated/prisma/enums';
+import { ORDER_PRICING_STATUS } from '../order/pricing-status';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -26,6 +28,7 @@ const { dbMock } = vi.hoisted(() => {
     outsourceOrder: { findMany: ReturnType<typeof vi.fn> };
     productionTask: {
       createMany: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
       findFirst: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
@@ -53,6 +56,7 @@ const { dbMock } = vi.hoisted(() => {
     outsourceOrder: { findMany: vi.fn() },
     productionTask: {
       createMany: vi.fn(),
+      deleteMany: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
@@ -108,13 +112,18 @@ const ownerActor = { id: 'owner-1', role: Role.ADMIN };
 function fixtureOrder(
   overrides: Partial<{
     status: OrderStatus;
+    settlementType: OrderSettlementType;
+    pricingStatus: string;
     items: Array<{ id: string; sequence: number; quantity: number; crafts: string[] }>;
   }> = {},
 ) {
   return {
     id: 'order-1',
+    orderNo: 'GD-order-1',
     status: OrderStatus.SUBMITTED,
     submitterId: 'sales-1',
+    settlementType: OrderSettlementType.INTERNAL_SALES,
+    pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
     items: [
       {
         id: 'item-1',
@@ -204,6 +213,7 @@ beforeEach(() => {
     { id: 'outsource-1', status: OutsourceStatus.SENT },
   ]);
   dbMock.productionTask.createMany.mockReset();
+  dbMock.productionTask.deleteMany.mockReset().mockResolvedValue({ count: 0 });
   dbMock.productionTask.findUnique.mockReset();
   dbMock.productionTask.findFirst.mockReset().mockResolvedValue(null);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
@@ -359,6 +369,75 @@ describe('scheduleOrder', () => {
     ).rejects.toBeInstanceOf(OrderInvariantError);
   });
 
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.NO_CHARGE,
+  ])('拒绝任何尚未确认定价的 %s 工单，且不产生排产写入', async (settlementType) => {
+    dbMock.order.findFirst.mockResolvedValue(
+      fixtureOrder({
+        settlementType,
+        pricingStatus: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+      }),
+    );
+
+    await expect(
+      scheduleOrder(
+        { orderId: 'order-1', assignments: [] },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/价格.*未.*确认.*不能排产/);
+
+    expect(dbMock.craft.findMany).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.createMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.LEGACY_CONFIRMED],
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.ADMIN_CONFIRMED],
+    [OrderSettlementType.INTERNAL_SALES, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+    [OrderSettlementType.NO_CHARGE, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+  ])(
+    '允许 settlementType=%s、pricingStatus=%s 的工单排产',
+    async (settlementType, pricingStatus) => {
+      dbMock.order.findFirst.mockResolvedValue(
+        fixtureOrder({ settlementType, pricingStatus }),
+      );
+      dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+      dbMock.user.findMany.mockResolvedValue([
+        fixtureWorker('worker-1'),
+        fixtureWorker('worker-2'),
+      ]);
+      dbMock.productionTask.createMany.mockResolvedValue({ count: 2 });
+
+      await expect(
+        scheduleOrder(
+          {
+            orderId: 'order-1',
+            assignments: [
+              {
+                orderItemId: 'item-1',
+                craftId: 'craft-foil',
+                workerId: 'worker-1',
+              },
+              {
+                orderItemId: 'item-1',
+                craftId: 'craft-glue',
+                workerId: 'worker-2',
+              },
+            ],
+          },
+          foremanActor,
+        ),
+      ).resolves.toEqual(
+        expect.objectContaining({ status: OrderStatus.SCHEDULING }),
+      );
+    },
+  );
+
   it('throws InvalidOrderTransitionError when the order is not SUBMITTED', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       fixtureOrder({ status: OrderStatus.IN_PRODUCTION }),
@@ -488,6 +567,69 @@ describe('scheduleOrder', () => {
     });
   });
 
+  it('preserves referenced staged task ids and removes a deleted split before scheduling', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      fixtureOrder({
+        items: [
+          {
+            id: 'item-1',
+            sequence: 1,
+            quantity: 5000,
+            crafts: ['craft-foil'],
+          },
+        ],
+      }),
+    );
+    dbMock.craft.findMany.mockResolvedValue([fixtureCrafts()[0]]);
+    dbMock.user.findMany.mockResolvedValue([fixtureWorker('worker-1')]);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      {
+        id: 'task-keep',
+        orderItemId: 'item-1',
+        craftId: 'craft-foil',
+        workerId: 'worker-1',
+        status: TaskStatus.PENDING,
+        plannedQty: 3000,
+      },
+      {
+        id: 'task-remove',
+        orderItemId: 'item-1',
+        craftId: 'craft-foil',
+        workerId: 'worker-3',
+        status: TaskStatus.PENDING,
+        plannedQty: 2000,
+      },
+    ]);
+    dbMock.productionTask.update.mockResolvedValue({ id: 'task-keep' });
+    dbMock.productionTask.deleteMany.mockResolvedValue({ count: 1 });
+
+    await scheduleOrder(
+      {
+        orderId: 'order-1',
+        assignments: [
+          {
+            taskId: 'task-keep',
+            orderItemId: 'item-1',
+            craftId: 'craft-foil',
+            workerId: 'worker-1',
+            plannedQty: 5000,
+          },
+        ],
+      },
+      foremanActor,
+    );
+
+    expect(dbMock.productionTask.update).toHaveBeenCalledWith({
+      where: { id: 'task-keep' },
+      data: expect.objectContaining({ plannedQty: 5000 }),
+      select: { id: true },
+    });
+    expect(dbMock.productionTask.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['task-remove'] } },
+    });
+    expect(dbMock.productionTask.createMany).not.toHaveBeenCalled();
+  });
+
   it('skips outsource crafts silently and notes them on the OrderLog', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       fixtureOrder({
@@ -602,7 +744,61 @@ describe('scheduleOrder', () => {
     ).rejects.toThrow(/外协/);
   });
 
-  it('rejects duplicate assignment of the same (item, craft) pair', async () => {
+  it('splits one item/craft quantity across multiple workers', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    dbMock.user.findMany.mockResolvedValue([
+      fixtureWorker('worker-1'),
+      fixtureWorker('worker-3'),
+      fixtureWorker('worker-2'),
+    ]);
+    dbMock.productionTask.createMany.mockResolvedValue({ count: 3 });
+
+    const result = await scheduleOrder(
+      {
+        orderId: 'order-1',
+        assignments: [
+          {
+            orderItemId: 'item-1',
+            craftId: 'craft-foil',
+            workerId: 'worker-1',
+            plannedQty: 3000,
+          },
+          {
+            orderItemId: 'item-1',
+            craftId: 'craft-foil',
+            workerId: 'worker-3',
+            plannedQty: 2000,
+          },
+          {
+            orderItemId: 'item-1',
+            craftId: 'craft-glue',
+            workerId: 'worker-2',
+            plannedQty: 5000,
+          },
+        ],
+      },
+      foremanActor,
+    );
+
+    expect(result.tasksCreated).toBe(3);
+    expect(dbMock.productionTask.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          craftId: 'craft-foil',
+          workerId: 'worker-1',
+          plannedQty: 3000,
+        }),
+        expect.objectContaining({
+          craftId: 'craft-foil',
+          workerId: 'worker-3',
+          plannedQty: 2000,
+        }),
+      ]),
+    });
+  });
+
+  it('rejects a split whose allocated quantity does not equal the item quantity', async () => {
     dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
     dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
     await expect(
@@ -610,13 +806,57 @@ describe('scheduleOrder', () => {
         {
           orderId: 'order-1',
           assignments: [
-            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-1' },
-            { orderItemId: 'item-1', craftId: 'craft-foil', workerId: 'worker-2' },
+            {
+              orderItemId: 'item-1',
+              craftId: 'craft-foil',
+              workerId: 'worker-1',
+              plannedQty: 3000,
+            },
+            {
+              orderItemId: 'item-1',
+              craftId: 'craft-foil',
+              workerId: 'worker-3',
+              plannedQty: 1500,
+            },
+            {
+              orderItemId: 'item-1',
+              craftId: 'craft-glue',
+              workerId: 'worker-2',
+              plannedQty: 5000,
+            },
           ],
         },
         foremanActor,
       ),
-    ).rejects.toThrow(/重复派工/);
+    ).rejects.toThrow(/合计 4500.*必须等于.*5000/);
+    expect(dbMock.productionTask.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning the same item/craft to the same worker twice', async () => {
+    dbMock.order.findFirst.mockResolvedValue(fixtureOrder());
+    dbMock.craft.findMany.mockResolvedValue(fixtureCrafts());
+    await expect(
+      scheduleOrder(
+        {
+          orderId: 'order-1',
+          assignments: [
+            {
+              orderItemId: 'item-1',
+              craftId: 'craft-foil',
+              workerId: 'worker-1',
+              plannedQty: 3000,
+            },
+            {
+              orderItemId: 'item-1',
+              craftId: 'craft-foil',
+              workerId: 'worker-1',
+              plannedQty: 2000,
+            },
+          ],
+        },
+        foremanActor,
+      ),
+    ).rejects.toThrow(/不能重复派给同一师傅/);
   });
 
   it('rejects partial scheduling — some non-outsource crafts unassigned', async () => {
@@ -1281,6 +1521,10 @@ describe('reassignProductionTask', () => {
         id: 'task-1',
         status: TaskStatus.PENDING,
         workerId: 'worker-old',
+        isSelfClaimable: false,
+        selfClaimOpenedAt: null,
+        selfClaimedAt: null,
+        claimMachineTypes: [],
         orderItem: { orderId: 'order-1', name: '款式 A', sequence: 1 },
         craft: {
           id: 'craft-foil',
@@ -1313,12 +1557,73 @@ describe('reassignProductionTask', () => {
       workerId: 'worker-new',
       workerType: WorkerType.MACHINE,
       machineType: MachineType.WINDMILL,
+      isSelfClaimable: false,
     });
     expect(dbMock.orderLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ action: 'TASK_REASSIGN' }),
       }),
     );
+  });
+
+  it('已自抢未开工任务改派给另一人时清除抢单上下文', async () => {
+    const claimedAt = new Date('2026-08-26T03:00:00.000Z');
+    dbMock.productionTask.findUnique
+      .mockResolvedValueOnce({
+        id: 'task-claimed',
+        orderItem: { orderId: 'order-1' },
+      })
+      .mockResolvedValueOnce({
+        id: 'task-claimed',
+        status: TaskStatus.PENDING,
+        workerId: 'worker-old',
+        isSelfClaimable: false,
+        selfClaimOpenedAt: new Date('2026-08-26T02:00:00.000Z'),
+        selfClaimedAt: claimedAt,
+        claimMachineTypes: [MachineType.WINDMILL],
+        orderItem: { orderId: 'order-1', name: '款式 A', sequence: 1 },
+        craft: {
+          id: 'craft-foil',
+          isOutsource: false,
+          defaultWorkerType: WorkerType.MACHINE,
+          defaultMachineType: MachineType.WINDMILL,
+          inHouseMachineTypes: [],
+        },
+      });
+    dbMock.user.findUnique.mockResolvedValue({
+      id: 'worker-new',
+      displayName: '新师傅',
+      role: Role.WORKER,
+      isActive: true,
+      workerType: WorkerType.MACHINE,
+      machineType: MachineType.WINDMILL,
+    });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-claimed',
+      workerId: 'worker-new',
+      status: TaskStatus.PENDING,
+    });
+
+    await reassignProductionTask(
+      'task-claimed',
+      'worker-new',
+      ownerActor,
+    );
+    expect(dbMock.productionTask.update.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({
+        workerId: 'worker-new',
+        isSelfClaimable: false,
+        selfClaimOpenedAt: null,
+        selfClaimedAt: null,
+        claimMachineTypes: [],
+      }),
+    );
+    expect(dbMock.orderLog.create.mock.calls[0][0].data.changedFields)
+      .toEqual(
+        expect.objectContaining({
+          selfClaimedAt: { before: claimedAt, after: null },
+        }),
+      );
   });
 
   it('refuses to move an already-started task', async () => {
@@ -2236,6 +2541,7 @@ describe('getSchedulingView', () => {
       customName: null,
       isUrgent: false,
       customerRef: null,
+      pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
       submitter: { displayName: '销售 A' },
       items: [
         {
@@ -2248,7 +2554,20 @@ describe('getSchedulingView', () => {
           foilColors: [],
           remark: null,
           crafts: ['craft-foil'],
-          tasks: [{ craftId: 'craft-foil', workerId: 'worker-1' }],
+          tasks: [
+            {
+              id: 'task-staged-1',
+              craftId: 'craft-foil',
+              workerId: 'worker-1',
+              plannedQty: 600,
+            },
+            {
+              id: 'task-staged-2',
+              craftId: 'craft-foil',
+              workerId: 'worker-3',
+              plannedQty: 400,
+            },
+          ],
         },
       ],
     });
@@ -2271,8 +2590,42 @@ describe('getSchedulingView', () => {
     const view = await getSchedulingView('order-1');
 
     expect(view?.items[0]?.crafts[0]).toEqual(
-      expect.objectContaining({ assignedWorkerId: 'worker-1' }),
+      expect.objectContaining({
+        assignedWorkerId: 'worker-1',
+        stagedAssignments: [
+          {
+            taskId: 'task-staged-1',
+            workerId: 'worker-1',
+            plannedQty: 600,
+          },
+          {
+            taskId: 'task-staged-2',
+            workerId: 'worker-3',
+            plannedQty: 400,
+          },
+        ],
+      }),
     );
+    expect(view?.schedulingBlockReason).toBeNull();
+  });
+
+  it('surfaces the pending-price blocker on the single-order scheduling view', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-1',
+      orderNo: 'GD-PENDING-PRICE',
+      customName: null,
+      isUrgent: false,
+      customerRef: null,
+      pricingStatus: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+      submitter: { displayName: '销售 A' },
+      items: [],
+    });
+    dbMock.user.findMany.mockResolvedValue([]);
+    dbMock.productionTask.groupBy.mockResolvedValue([]);
+
+    const view = await getSchedulingView('order-1');
+
+    expect(view?.schedulingBlockReason).toMatch(/价格待管理员确认/);
   });
 });
 
@@ -2285,6 +2638,7 @@ describe('getPendingSchedulingBoard', () => {
         orderNo: 'GD-READY',
         customName: '可批量排产',
         kind: OrderKind.NORMAL,
+        pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
         sourceOrder: null,
         isUrgent: false,
         customerRef: '客户 A',
@@ -2318,6 +2672,7 @@ describe('getPendingSchedulingBoard', () => {
         orderNo: 'GD-HYBRID',
         customName: '缺外协单',
         kind: OrderKind.NORMAL,
+        pricingStatus: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
         sourceOrder: null,
         isUrgent: false,
         customerRef: '客户 B',
@@ -2395,7 +2750,7 @@ describe('getPendingSchedulingBoard', () => {
     expect(board.orders[1]).toEqual(
       expect.objectContaining({
         compatibleWorkerIds: [],
-        batchBlockReason: '请先创建外协单',
+        batchBlockReason: '价格待管理员确认',
         craftSummaries: [
           expect.objectContaining({
             name: '铜版纸彩印+烫金',

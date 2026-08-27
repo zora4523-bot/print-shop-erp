@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MachineType,
+  OrderSettlementType,
   OrderStatus,
   Role,
   TaskStatus,
   WorkerType,
 } from '@/generated/prisma/enums';
+import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 
 const {
   dbMock,
@@ -110,6 +112,8 @@ function order(
     id,
     orderNo: `GD-${id}`,
     status: OrderStatus.SUBMITTED,
+    settlementType: OrderSettlementType.INTERNAL_SALES,
+    pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
     items: [
       {
         id: `${id}-item`,
@@ -153,6 +157,56 @@ beforeEach(() => {
 });
 
 describe('scheduleOrdersToWorker', () => {
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.NO_CHARGE,
+  ])('拒绝任何尚未确认定价的 %s 工单，且不创建分步排产任务', async (settlementType) => {
+    txMock.order.findUnique.mockResolvedValue(
+      order('order-1', {
+        settlementType,
+        pricingStatus: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+      }),
+    );
+
+    const result = await scheduleOrdersToWorker(
+      { orderIds: ['order-1'], workerId: handPressWorker.id },
+      actor,
+    );
+
+    expect(result.assigned).toEqual([]);
+    expect(result.failed[0]?.message).toMatch(/价格.*未.*确认.*不能排产/);
+    expect(txMock.craft.findMany).not.toHaveBeenCalled();
+    expect(txMock.productionTask.createMany).not.toHaveBeenCalled();
+    expect(txMock.order.update).not.toHaveBeenCalled();
+    expect(txMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.LEGACY_CONFIRMED],
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+    [OrderSettlementType.EXTERNAL_SALES, ORDER_PRICING_STATUS.ADMIN_CONFIRMED],
+    [OrderSettlementType.INTERNAL_SALES, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+    [OrderSettlementType.NO_CHARGE, ORDER_PRICING_STATUS.AUTO_CONFIRMED],
+  ])(
+    '允许 settlementType=%s、pricingStatus=%s 的工单进入分步排产',
+    async (settlementType, pricingStatus) => {
+      txMock.order.findUnique.mockResolvedValue(
+        order('order-1', { settlementType, pricingStatus }),
+      );
+
+      const result = await scheduleOrdersToWorker(
+        { orderIds: ['order-1'], workerId: handPressWorker.id },
+        actor,
+      );
+
+      expect(result.failed).toEqual([]);
+      expect(result.assigned).toEqual([
+        expect.objectContaining({ orderId: 'order-1', tasksCreated: 1 }),
+      ]);
+    },
+  );
+
   it('stages only the selected worker compatible tasks and leaves the order submitted', async () => {
     const result = await scheduleOrdersToWorker(
       { orderIds: ['order-1'], workerId: handPressWorker.id },

@@ -127,7 +127,7 @@ export function ReportTaskForm({
 
       {liveAtCap ? (
         <p className="text-sm text-warning-foreground">
-          合计已达到上限 {maxReportQty.toLocaleString()}，提交会被服务端拒绝；请先核对并修改数量。
+          合计已达到上限 {maxReportQty.toLocaleString()}，请修改数量后再提交。
         </p>
       ) : null}
 

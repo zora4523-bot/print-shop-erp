@@ -16,7 +16,7 @@ export type {
 // 补齐 schema、fallback 和写入数据库的 remark。SettingsForm 不能引用本文件：
 // `use client` 会把 Zod 整个带进浏览器依赖图。读写实现仍在 ./index.ts。
 //
-// 背景：Setting 表从建表起就只有 prisma/seed.ts 一个写入方、零个读取方，四个 key
+// 背景：Setting 表初期只有 prisma/seed.ts 一个写入方、零个读取方，早期的 key
 // 全部在别处有硬编码副本。最直观的后果是打印视图的厂名永远是默认值——业主改了
 // 设置没有任何效果。这个模块存在的意义就是把这条链路接通。
 
@@ -89,6 +89,14 @@ export const SETTING_DEFINITIONS = {
     }),
     fallback: { multiple: 3 },
   }),
+
+  worker_self_claim_enabled: define({
+    ...SETTING_METADATA.worker_self_claim_enabled,
+    remark: '师傅自由抢单全局开关',
+    schema: z.object({ enabled: z.boolean() }),
+    // 安全默认：新版代码先于 migration / seed 到位时也不会意外开池。
+    fallback: { enabled: false },
+  }),
 };
 
 export type SettingValue<K extends SettingKey> =
@@ -108,7 +116,7 @@ export const RETIRED_SETTING_KEYS = ['order_no_prefix'] as const;
  * 有效期回到 24 小时，都是能一眼看出来且随时可改的。反过来，让一行手工改坏的
  * 配置把开单、打印、每日推送全部打挂，才是真正的事故。
  *
- * report_qty_max_multiple 是四项里唯一守着「会算出计件金额」那条路径的，但退回
+ * report_qty_max_multiple 是设置项里唯一守着「会算出计件金额」那条路径的，但退回
  * fallback 同样安全，而且方向是对的：它本身不参与任何金额计算，只是一个上界；
  * 库里存了个非法的大值（比如被手工改成 999）时退回 3 反而更严，存了个非法的
  * 小值时退回 3 也仍然把「多打一个零」挡在门外。它绝不会像薪资规则缺失那样
@@ -153,6 +161,11 @@ export function parseSettingInput<K extends SettingKey>(
       return { ok: false, message: `${definition.label}必须是正整数` };
     }
     candidate = { [field.name]: Number.parseInt(trimmed, 10) };
+  } else if (field.kind === 'boolean') {
+    if (trimmed !== 'true' && trimmed !== 'false') {
+      return { ok: false, message: `${definition.label}必须选择开启或关闭` };
+    }
+    candidate = { [field.name]: trimmed === 'true' };
   } else {
     candidate = { [field.name]: trimmed };
   }

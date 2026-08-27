@@ -33,4 +33,22 @@ describe('SchedulingForm status announcements', () => {
       /overrideRows\.length[\s\S]{0,180}?role="alert"/,
     );
   });
+
+  it('未知岗位和机型不回显内部标识', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'production',
+        'SchedulingForm.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain("return labels[machineType] ?? '未识别机型'");
+    expect(source).toContain('workerTypeLabel(r.requiredWorkerType)');
+    expect(source).not.toMatch(/machineTypeLabels\[[^\]]+\]\s*\?\?\s*[^'\n]/);
+    expect(source).not.toMatch(/WORKER_TYPE_LABELS\[[^\]]+\]\s*\?\?/);
+  });
 });

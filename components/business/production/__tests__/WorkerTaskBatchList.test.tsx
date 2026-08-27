@@ -106,6 +106,47 @@ describe('WorkerTaskBatchList groups', () => {
     expect(html).not.toMatch(/bg-destructive[^>]*>急单/);
   });
 
+  it('任务名称与无障碍标签不显示导入坐标', () => {
+    const html = renderToStaticMarkup(
+      <WorkerTaskBatchList
+        workerName="王师傅"
+        tasks={[
+          task(
+            'source-marker-1',
+            TaskStatus.IN_PROGRESS,
+            '现货大号（产品表!C2）',
+          ),
+        ]}
+      />,
+    );
+
+    expect(html).toContain('现货大号');
+    expect(html).not.toContain('产品表!C2');
+    expect(html).toContain('aria-label="选择 PS-source-marker-1 现货大号"');
+  });
+
+  it('未知机型不回显内部标识', () => {
+    const unknownMachineTask = {
+      ...task('unknown-machine', TaskStatus.IN_PROGRESS, '异常机型任务'),
+      machineType: 'RAW_MACHINE' as MachineType,
+    };
+    const html = renderToStaticMarkup(
+      <WorkerTaskBatchList
+        workerName="王师傅"
+        tasks={[unknownMachineTask]}
+      />,
+    );
+    const impacts = batchCompletionImpactItems({
+      workerName: '王师傅',
+      tasks: [unknownMachineTask],
+    }).join('\n');
+
+    expect(html).toContain('未识别机型');
+    expect(impacts).toContain('“未识别机型”当前规则');
+    expect(html).not.toContain('RAW_MACHINE');
+    expect(impacts).not.toContain('RAW_MACHINE');
+  });
+
   it('shows the real promised date and a status-specific navigation CTA', () => {
     const html = renderToStaticMarkup(
       <WorkerTaskBatchList
@@ -215,14 +256,13 @@ describe('WorkerTaskBatchList completion confirmation', () => {
     expect(impacts).toContain('工艺 模切');
     expect(impacts).toContain('计划/合格数量 5,000');
     expect(impacts).toContain('当前师傅 王师傅');
-    expect(impacts).toContain('“开机仔”薪资规则');
-    expect(impacts).toContain('保存规则快照');
+    expect(impacts).toContain('“开机仔”当前规则');
     expect(impacts).toContain(
       '另外选中的 1 个待开始任务不在本次完工范围内',
     );
   });
 
-  it('states the exact all-or-nothing transaction contract', () => {
+  it('states the exact all-or-nothing completion result', () => {
     const impacts = batchCompletionImpactItems({
       workerName: '王师傅',
       tasks: [
@@ -231,10 +271,8 @@ describe('WorkerTaskBatchList completion confirmation', () => {
       ],
     }).join('\n');
 
-    expect(impacts).toContain('同一数据库事务内提交');
-    expect(impacts).toContain('任一任务在提交时失效');
-    expect(impacts).toContain('整批全部回滚');
-    expect(impacts).toContain('不会部分成功');
+    expect(impacts).toContain('任一任务在提交时不符合条件');
+    expect(impacts).toContain('本批任务都不会完工');
     expect(impacts).not.toContain('逐项成功');
   });
 
@@ -249,8 +287,8 @@ describe('WorkerTaskBatchList completion confirmation', () => {
       tasks: [hourlyTask],
     }).join('\n');
 
-    expect(impacts).toContain('“打包工”时薪岗位快照');
-    expect(impacts).toContain('不生成计件金额（¥0.00）');
+    expect(impacts).toContain('按“打包工”时薪结算');
+    expect(impacts).toContain('不生成计件工资');
   });
 
   it('validates the client snapshot before opening confirmation', () => {

@@ -1,6 +1,13 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from 'react';
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -12,10 +19,14 @@ import type {
 } from '@/lib/production';
 import type { MachineType } from '@/generated/prisma/enums';
 import { WorkerType } from '@/generated/prisma/enums';
-import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { workerTypeLabel } from '@/lib/auth/role-labels';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import { DisabledReason } from '@/components/ui-business';
+import {
+  assignmentIssue,
+  type DraftAssignment,
+} from './scheduling-allocation';
 
 type Props = {
   view: SchedulingView;
@@ -24,32 +35,56 @@ type Props = {
 
 type RowKey = `${string}:${string}`;
 
+function schedulingMachineTypeLabel(
+  machineType: string,
+  labels: Record<string, string>,
+): string {
+  return labels[machineType] ?? '未识别机型';
+}
+
 export function SchedulingForm({ view, machineTypeLabels }: Props) {
-  // State: which worker is assigned to which (itemId, craftId) pair.
+  // State: one or more worker/quantity allocations for every
+  // (itemId, craftId) pair. `plannedQty` is this worker's production-task
+  // quantity; all rows in a pair must add up to OrderItem.quantity.
   // Cross-order batch scheduling may already have staged some PENDING tasks.
   // Prefill those assignments so the single-order form can finish or correct
   // the remaining rows before the order enters SCHEDULING.
-  const [assignments, setAssignments] = useState<Record<RowKey, string>>(
+  const [assignments, setAssignments] = useState<
+    Record<RowKey, DraftAssignment[]>
+  >(
     () => {
-      const staged: Record<RowKey, string> = {};
+      const staged: Record<RowKey, DraftAssignment[]> = {};
       for (const item of view.items) {
         for (const craft of item.crafts) {
-          if (craft.assignedWorkerId) {
-            staged[rowKey(item.id, craft.id)] = craft.assignedWorkerId;
-          }
+          const key = rowKey(item.id, craft.id);
+          const saved = craft.stagedAssignments ?? [];
+          staged[key] =
+            saved.length > 0
+              ? saved.map((assignment, index) => ({
+                  clientId: assignment.taskId || `${key}-staged-${index}`,
+                  taskId: assignment.taskId,
+                  workerId: assignment.workerId ?? '',
+                  plannedQty: String(assignment.plannedQty),
+                  overrideReason: '',
+                }))
+              : [
+                  {
+                    clientId: `${key}-new-0`,
+                    workerId: craft.assignedWorkerId ?? '',
+                    plannedQty: String(item.quantity),
+                    overrideReason: '',
+                  },
+                ];
         }
       }
       return staged;
     },
   );
+  const nextAssignmentId = useRef(1);
   const [selectedRows, setSelectedRows] = useState<Set<RowKey>>(
     () => new Set(),
   );
   const [bulkWorkerId, setBulkWorkerId] = useState('');
-  const [overrideReasons, setOverrideReasons] = useState<
-    Record<RowKey, string>
-  >({});
-
   const [state, action] = useActionState<ScheduleOrderResult | null, unknown>(
     scheduleOrderAction,
     null,
@@ -106,23 +141,30 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
   const nonOutsourceRows = rows.filter(
     (row) => !row.isOutsource || row.inHouseMachineTypes.length > 0,
   );
-  const assignmentIndexByKey = new Map(
-    nonOutsourceRows.map((row, index) => [rowKey(row.itemId, row.craftId), index]),
+  const flatAssignments = nonOutsourceRows.flatMap((row) =>
+    (assignments[rowKey(row.itemId, row.craftId)] ?? []).map((assignment) => ({
+      row,
+      assignment,
+    })),
+  );
+  const assignmentIndexByClientId = new Map(
+    flatAssignments.map(({ assignment }, index) => [assignment.clientId, index]),
   );
   const allAssigned = nonOutsourceRows.every(
-    (r) => assignments[rowKey(r.itemId, r.craftId)],
+    (row) =>
+      assignmentIssue(
+        assignments[rowKey(row.itemId, row.craftId)] ?? [],
+        row.itemQuantity,
+      ) === null,
   );
-  const overrideRows = nonOutsourceRows.filter((row) => {
+  const overrideRows = flatAssignments.filter(({ row, assignment }) => {
     const worker = view.workers.find(
-      (candidate) =>
-        candidate.id === assignments[rowKey(row.itemId, row.craftId)],
+      (candidate) => candidate.id === assignment.workerId,
     );
     return worker ? !isWorkerRecommended(worker, row.craftId) : false;
   });
   const allOverridesExplained = overrideRows.every(
-    (row) =>
-      (overrideReasons[rowKey(row.itemId, row.craftId)] ?? '').trim().length >
-      0,
+    ({ assignment }) => assignment.overrideReason.trim().length > 0,
   );
   const missingWorkers = nonOutsourceRows.some(
     (row) => eligibleWorkers(view.workers, row).length === 0,
@@ -171,20 +213,68 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
     if (!effectiveBulkWorkerId || selectedRows.size === 0) return;
     setAssignments((current) => {
       const next = { ...current };
-      for (const key of selectedRows) next[key] = effectiveBulkWorkerId;
+      for (const key of selectedRows) {
+        const group = next[key] ?? [];
+        if (group[0]) {
+          next[key] = [
+            { ...group[0], workerId: effectiveBulkWorkerId, overrideReason: '' },
+            ...group.slice(1),
+          ];
+        }
+      }
       return next;
     });
+  }
+
+  function updateAssignment(
+    key: RowKey,
+    clientId: string,
+    patch: Partial<DraftAssignment>,
+  ) {
+    setAssignments((current) => ({
+      ...current,
+      [key]: (current[key] ?? []).map((assignment) =>
+        assignment.clientId === clientId
+          ? { ...assignment, ...patch }
+          : assignment,
+      ),
+    }));
+  }
+
+  function addAssignment(key: RowKey) {
+    setAssignments((current) => ({
+      ...current,
+      [key]: [
+        ...(current[key] ?? []),
+        {
+          clientId: `${key}-new-${nextAssignmentId.current++}`,
+          workerId: '',
+          plannedQty: '',
+          overrideReason: '',
+        },
+      ],
+    }));
+  }
+
+  function removeAssignment(key: RowKey, clientId: string) {
+    setAssignments((current) => ({
+      ...current,
+      [key]: (current[key] ?? []).filter(
+        (assignment) => assignment.clientId !== clientId,
+      ),
+    }));
   }
 
   function handleSubmit() {
     const payload = {
       orderId: view.orderId,
-      assignments: nonOutsourceRows.map((r) => ({
-        orderItemId: r.itemId,
-        craftId: r.craftId,
-        workerId: assignments[rowKey(r.itemId, r.craftId)]!,
-        overrideReason:
-          overrideReasons[rowKey(r.itemId, r.craftId)] ?? '',
+      assignments: flatAssignments.map(({ row, assignment }) => ({
+        taskId: assignment.taskId,
+        orderItemId: row.itemId,
+        craftId: row.craftId,
+        workerId: assignment.workerId,
+        plannedQty: assignment.plannedQty,
+        overrideReason: assignment.overrideReason,
       })),
     };
     startTransition(() => action(payload));
@@ -268,9 +358,9 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
         <tbody className="divide-y">
           {rows.map((r) => {
             const key = rowKey(r.itemId, r.craftId);
-            const assignmentIndex = assignmentIndexByKey.get(key);
-            const err = fieldError(state, assignmentIndex);
             const candidates = eligibleWorkers(view.workers, r);
+            const group = assignments[key] ?? [];
+            const allocationIssue = assignmentIssue(group, r.itemQuantity);
             const requiresInternalAssignment =
               !r.isOutsource || r.inHouseMachineTypes.length > 0;
             return (
@@ -319,17 +409,19 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                         </span>
                       ) : null}
                       <span>
-                        {WORKER_TYPE_LABELS[r.requiredWorkerType] ??
-                          r.requiredWorkerType}
+                        {workerTypeLabel(r.requiredWorkerType)}
                         {r.inHouseMachineTypes.length > 0
                           ? ` · ${r.inHouseMachineTypes
                               .map(
                                 (machine) =>
-                                  machineTypeLabels[machine] ?? machine,
+                                  schedulingMachineTypeLabel(
+                                    machine,
+                                    machineTypeLabels,
+                                  ),
                               )
                               .join(' / ')}`
                           : r.recommendedMachine
-                            ? ` · ${machineTypeLabels[r.recommendedMachine] ?? r.recommendedMachine}`
+                            ? ` · ${schedulingMachineTypeLabel(r.recommendedMachine, machineTypeLabels)}`
                             : ''}
                       </span>
                     </div>
@@ -343,73 +435,177 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
                       外协单另行处理
                     </span>
                   ) : (
-                    <WorkerSelect
-                      workers={candidates}
-                      craftId={r.craftId}
-                      machineTypeLabels={machineTypeLabels}
-                      recommendedMachine={r.recommendedMachine}
-                      label={`为 #${r.itemSequence} ${r.itemName} · ${r.craftName} 选择师傅`}
-                      value={assignments[key] ?? ''}
-                      onChange={(wid) => {
-                        setAssignments((prev) => ({ ...prev, [key]: wid }));
-                        setOverrideReasons((prev) => ({
-                          ...prev,
-                          [key]: '',
-                        }));
-                      }}
-                      invalid={err.length > 0}
-                      errorId={`worker-${key}-error`}
-                    />
+                    <div className="space-y-3">
+                      {group.map((assignment, splitIndex) => {
+                        const assignmentIndex =
+                          assignmentIndexByClientId.get(assignment.clientId);
+                        const workerErrors = fieldError(
+                          state,
+                          assignmentIndex,
+                          'workerId',
+                        );
+                        const quantityErrors = fieldError(
+                          state,
+                          assignmentIndex,
+                          'plannedQty',
+                        );
+                        const otherWorkerIds = new Set(
+                          group
+                            .filter(
+                              (current) =>
+                                current.clientId !== assignment.clientId,
+                            )
+                            .map((current) => current.workerId)
+                            .filter(Boolean),
+                        );
+                        const splitCandidates = candidates.filter(
+                          (candidate) =>
+                            candidate.id === assignment.workerId ||
+                            !otherWorkerIds.has(candidate.id),
+                        );
+                        const selectedWorker = view.workers.find(
+                          (worker) => worker.id === assignment.workerId,
+                        );
+                        const needsOverride =
+                          Boolean(selectedWorker) &&
+                          !isWorkerRecommended(selectedWorker, r.craftId);
+                        const idSuffix = assignment.clientId;
+                        return (
+                          <section
+                            key={assignment.clientId}
+                            className="space-y-2 rounded-lg border bg-background p-3"
+                            aria-label={`${r.craftName}分配 ${splitIndex + 1}`}
+                          >
+                            <div className="flex flex-wrap items-end justify-between gap-2">
+                              <div className="min-w-36 flex-1">
+                                <label
+                                  htmlFor={`planned-qty-${idSuffix}`}
+                                  className="text-xs font-medium"
+                                >
+                                  分配数量
+                                </label>
+                                <input
+                                  id={`planned-qty-${idSuffix}`}
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={1}
+                                  step={1}
+                                  value={assignment.plannedQty}
+                                  onChange={(event) =>
+                                    updateAssignment(key, assignment.clientId, {
+                                      plannedQty: event.target.value,
+                                    })
+                                  }
+                                  aria-invalid={quantityErrors.length > 0}
+                                  aria-describedby={
+                                    quantityErrors.length > 0
+                                      ? `planned-qty-${idSuffix}-error`
+                                      : undefined
+                                  }
+                                  className="mt-1 min-h-11 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                                />
+                              </div>
+                              {group.length > 1 ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    removeAssignment(key, assignment.clientId)
+                                  }
+                                  className="min-h-11 text-destructive"
+                                >
+                                  移除此拆分
+                                </Button>
+                              ) : null}
+                            </div>
+                            {quantityErrors.length > 0 ? (
+                              <p
+                                id={`planned-qty-${idSuffix}-error`}
+                                className="text-xs text-destructive"
+                              >
+                                {quantityErrors[0]}
+                              </p>
+                            ) : null}
+                            <WorkerSelect
+                              workers={splitCandidates}
+                              craftId={r.craftId}
+                              machineTypeLabels={machineTypeLabels}
+                              recommendedMachine={r.recommendedMachine}
+                              label={`为 #${r.itemSequence} ${r.itemName} · ${r.craftName} 的数量 ${assignment.plannedQty || '未填'} 选择师傅`}
+                              value={assignment.workerId}
+                              onChange={(workerId) =>
+                                updateAssignment(key, assignment.clientId, {
+                                  workerId,
+                                  overrideReason: '',
+                                })
+                              }
+                              invalid={workerErrors.length > 0}
+                              errorId={`worker-${idSuffix}-error`}
+                            />
+                            {needsOverride ? (
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`override-${idSuffix}`}
+                                  className="text-xs font-medium text-warning-foreground"
+                                >
+                                  非推荐派工原因
+                                </label>
+                                <textarea
+                                  id={`override-${idSuffix}`}
+                                  value={assignment.overrideReason}
+                                  onChange={(event) =>
+                                    updateAssignment(key, assignment.clientId, {
+                                      overrideReason: event.target.value,
+                                    })
+                                  }
+                                  maxLength={200}
+                                  rows={2}
+                                  placeholder="例如：临时支援，已确认本人可完成"
+                                  aria-describedby={`override-hint-${idSuffix}`}
+                                  className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
+                                />
+                                <p
+                                  id={`override-hint-${idSuffix}`}
+                                  className="text-xs text-muted-foreground"
+                                >
+                                  将写入工单操作日志，最多 200 字。
+                                </p>
+                              </div>
+                            ) : null}
+                            {workerErrors.length > 0 ? (
+                              <p
+                                id={`worker-${idSuffix}-error`}
+                                className="text-xs text-destructive"
+                              >
+                                {workerErrors[0]}
+                              </p>
+                            ) : null}
+                          </section>
+                        );
+                      })}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => addAssignment(key)}
+                        disabled={group.length >= candidates.length}
+                        className="min-h-11"
+                      >
+                        拆分给另一位师傅
+                      </Button>
+                      {allocationIssue ? (
+                        <p role="alert" className="text-xs text-destructive">
+                          {allocationIssue}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          已完整分配 {r.itemQuantity} 件；每位师傅将生成独立任务。
+                        </p>
+                      )}
+                    </div>
                   )}
                   {requiresInternalAssignment && candidates.length === 0 ? (
                     <p className="mt-1 text-xs text-destructive">
                       没有岗位与机型匹配的启用师傅
-                    </p>
-                  ) : null}
-                  {requiresInternalAssignment &&
-                  assignments[key] &&
-                  !isWorkerRecommended(
-                    view.workers.find(
-                      (worker) => worker.id === assignments[key],
-                    ),
-                    r.craftId,
-                  ) ? (
-                    <div className="mt-2 space-y-1">
-                      <label
-                        htmlFor={`override-${assignmentIndex ?? key}`}
-                        className="text-xs font-medium text-warning-foreground"
-                      >
-                        非推荐派工原因
-                      </label>
-                      <textarea
-                        id={`override-${assignmentIndex ?? key}`}
-                        value={overrideReasons[key] ?? ''}
-                        onChange={(event) =>
-                          setOverrideReasons((current) => ({
-                            ...current,
-                            [key]: event.target.value,
-                          }))
-                        }
-                        maxLength={200}
-                        rows={2}
-                        placeholder="例如：临时支援，已确认本人可完成"
-                        aria-describedby={`override-hint-${assignmentIndex ?? key}`}
-                        className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
-                      />
-                      <p
-                        id={`override-hint-${assignmentIndex ?? key}`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        将写入工单操作日志，最多 200 字。
-                      </p>
-                    </div>
-                  ) : null}
-                  {err.length > 0 ? (
-                    <p
-                      id={`worker-${key}-error`}
-                      className="mt-1 text-xs text-destructive"
-                    >
-                      {err[0]}
                     </p>
                   ) : null}
                 </td>
@@ -422,7 +618,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
 
       {rows.some((row) => row.isOutsource) ? (
         <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
-          该工单包含外协工艺。彩印+烫金会同时创建回厂烫金任务，可选择风车机或机仔师傅；确认排产前仍须创建彩印外协单。
+          彩印加烫金会同时创建回厂烫金任务；排产前请先创建彩印外协单。
           <Link
             href={`/foreman/outsource/new?orderId=${view.orderId}`}
             className="ml-2 font-medium text-primary underline"
@@ -470,7 +666,7 @@ export function SchedulingForm({ view, machineTypeLabels }: Props) {
         </Link>
         {!allAssigned ? (
           <span className="text-xs text-muted-foreground">
-            剩 {nonOutsourceRows.length - nonOutsourceRows.filter((r) => assignments[rowKey(r.itemId, r.craftId)]).length} 项待派
+            请补全师傅并使每组分配数量等于款式数量
           </span>
         ) : null}
       </div>
@@ -485,10 +681,11 @@ function rowKey(itemId: string, craftId: string): RowKey {
 function fieldError(
   state: ScheduleOrderResult | null,
   assignmentIndex: number | undefined,
+  field: 'workerId' | 'plannedQty',
 ): string[] {
   if (!state || state.status !== 'invalid') return [];
   if (assignmentIndex === undefined) return [];
-  return state.fieldErrors[`assignments.${assignmentIndex}.workerId`] ?? [];
+  return state.fieldErrors[`assignments.${assignmentIndex}.${field}`] ?? [];
 }
 
 function firstValidationMessage(errors: Record<string, string[]>): string {
@@ -565,9 +762,9 @@ function WorkerSelect({
       worker.id === value ||
       normalizedSearch.length === 0 ||
       worker.displayName.toLocaleLowerCase('zh-CN').includes(normalizedSearch) ||
-      WORKER_TYPE_LABELS[
-        worker.workerType ?? WorkerType.MACHINE
-      ]?.includes(search.trim()),
+      workerTypeLabel(
+        worker.workerType ?? WorkerType.MACHINE,
+      ).includes(search.trim()),
   );
   return (
     <div className="space-y-2">
@@ -608,9 +805,11 @@ function WorkerSelect({
             >
               <span className="block font-medium">{worker.displayName}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                {WORKER_TYPE_LABELS[worker.workerType ?? WorkerType.MACHINE]}
+                {workerTypeLabel(
+                  worker.workerType ?? WorkerType.MACHINE,
+                )}
                 {worker.machineType
-                  ? ` · ${machineTypeLabels[worker.machineType] ?? worker.machineType}`
+                  ? ` · ${schedulingMachineTypeLabel(worker.machineType, machineTypeLabels)}`
                   : ''}
                 {` · 在制 ${load}`}
                 {recommendedWorker ? ' · 推荐' : ' · 需说明'}

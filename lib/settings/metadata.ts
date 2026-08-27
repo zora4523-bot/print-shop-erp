@@ -8,7 +8,8 @@
 
 export type SettingFieldSpec =
   | { kind: 'text'; name: string; maxLength: number }
-  | { kind: 'int'; name: string; min: number; max: number; unit: string };
+  | { kind: 'int'; name: string; min: number; max: number; unit: string }
+  | { kind: 'boolean'; name: string };
 
 export type SettingMetadata = {
   label: string;
@@ -34,8 +35,13 @@ export const SETTING_METADATA = {
   },
   report_qty_max_multiple: {
     label: '单条报工数量上限倍数',
-    help: '师傅单条报工时，合格 + 不良 + 返工 的合计达到计划数的多少倍就一律拒绝。少报一律放行；超过计划数但未达上限需勾选确认并留痕。批量「一键完工」按计划数报，不受此项影响。',
+    help: '单条报工总数达到计划数量 × 此倍数时拒绝；低于上限的超报需确认并留痕。',
     field: { kind: 'int', name: 'multiple', min: 1, max: 10, unit: '倍' },
+  },
+  worker_self_claim_enabled: {
+    label: '师傅自由抢单',
+    help: '开启后，管理员可将未开工任务释放到抢单池；关闭只停止新的释放和抢单，不撤销已抢任务。',
+    field: { kind: 'boolean', name: 'enabled' },
   },
 } as const satisfies Record<string, SettingMetadata>;
 

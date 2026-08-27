@@ -33,6 +33,11 @@ import type {
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { scheduleOrdersToWorker } from '@/lib/production/batch-scheduling';
 import { UnauthorizedError } from '@/lib/auth/errors';
+import {
+  claimTask,
+  releaseTaskToClaimPool,
+  TaskClaimError,
+} from '@/lib/production/task-claim';
 
 // Accepts a structured payload (the UI assembles { orderId, assignments })
 // rather than FormData because the assignments array would flatten poorly
@@ -131,6 +136,9 @@ function mapTaskError(
   if (err instanceof ReportError) {
     return { status: 'error', message: err.message };
   }
+  if (err instanceof TaskClaimError) {
+    return { status: 'error', message: err.message };
+  }
   if (err instanceof InvalidTaskTransitionError) {
     return { status: 'error', message: err.message };
   }
@@ -182,6 +190,58 @@ export async function beginTaskFormAction(
     return { status: 'error', message: '任务参数缺失，请刷新后重试' };
   }
   return beginTaskAction(taskId);
+}
+
+async function claimTaskForActor(
+  taskId: string,
+  actor: Awaited<ReturnType<typeof requirePermission>>,
+): Promise<TaskMutationResult> {
+  try {
+    const result = await claimTask(taskId, actor);
+    revalidatePath('/worker/tasks');
+    revalidatePath('/worker/orders');
+    revalidatePath(`/worker/tasks/${result.taskId}`);
+    revalidatePath(`/orders/${result.orderId}`);
+    return { status: 'success', taskId: result.taskId };
+  } catch (err) {
+    const mapped = mapTaskError(err);
+    if (mapped) return mapped;
+    throw err;
+  }
+}
+
+export async function claimTaskFormAction(
+  _prev: TaskMutationResult | null,
+  formData: FormData,
+): Promise<TaskMutationResult> {
+  const actor = await requirePermission('task:claim');
+  const taskId = formData.get('taskId');
+  if (typeof taskId !== 'string' || taskId === '') {
+    return { status: 'error', message: '任务参数缺失，请刷新后重试' };
+  }
+  return claimTaskForActor(taskId, actor);
+}
+
+export async function releaseTaskToClaimPoolAction(
+  _prev: TaskMutationResult | null,
+  formData: FormData,
+): Promise<TaskMutationResult> {
+  const actor = await requirePermission('task:assign');
+  const taskId = formData.get('taskId');
+  if (typeof taskId !== 'string' || taskId === '') {
+    return { status: 'error', message: '任务参数缺失，请刷新后重试' };
+  }
+  try {
+    const result = await releaseTaskToClaimPool(taskId, actor);
+    revalidatePath(`/orders/${result.orderId}`);
+    revalidatePath('/worker/tasks');
+    revalidatePath('/worker/orders');
+    return { status: 'success', taskId: result.taskId };
+  } catch (err) {
+    const mapped = mapTaskError(err);
+    if (mapped) return mapped;
+    throw err;
+  }
 }
 
 export async function reassignProductionTaskAction(

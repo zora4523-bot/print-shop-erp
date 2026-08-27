@@ -18,7 +18,7 @@ export async function updateSettingsAction(
   const actor = await requirePermission('setting:manage');
 
   const fieldErrors: Record<string, string[]> = {};
-  // 逐项解析：mapped type 在写入侧会把目标类型收敛成三个 value 类型的交集，
+  // 逐项解析：mapped type 在写入侧会把目标类型收敛成各项 value 类型的交集，
   // 这里用宽松容器收集、末尾一次断言（和 lib/settings/index.ts 的
   // getAllSettings 同样的取舍）。
   const values: Record<string, unknown> = {};
@@ -54,6 +54,6 @@ export async function updateSettingsAction(
 
   // 设置页自己要显示新值；/owner 是超期外协阈值的消费方，阈值改了看板
   // 必须跟着变。打印视图是每次请求现读的，不需要失效。
-  revalidatePaths(['/owner/settings', '/owner']);
+  revalidatePaths(['/owner/settings', '/owner', '/worker/tasks']);
   return { status: 'success', message: '设置已保存' };
 }

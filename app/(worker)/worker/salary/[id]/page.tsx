@@ -138,8 +138,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {MACHINE_TYPE_LABELS[salary.machineType]} ·
-          只展示当前账号自己的计件记录
+          {MACHINE_TYPE_LABELS[salary.machineType]}
         </p>
       </header>
 
@@ -200,6 +199,12 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
                     {item.reworkQty} · 板 {item.boardCount} · 下{' '}
                     {item.pressCount}
                   </p>
+                  <Link
+                    href={`/worker/tasks/${item.productionTaskId}`}
+                    className="mt-2 inline-flex min-h-11 items-center text-xs font-medium text-primary underline"
+                  >
+                    查看任务 / 提出计件异议
+                  </Link>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="font-sans tabular-nums font-medium">
@@ -246,8 +251,7 @@ function HourlySalaryDetail({
           <PaymentStatusBadge isPaid={payroll.isPaid} />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'} ·
-          只展示当前账号自己的月结记录
+          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'}
         </p>
         {payroll.isPaid && payroll.paidAt ? (
           <p className="mt-1 text-xs text-muted-foreground">

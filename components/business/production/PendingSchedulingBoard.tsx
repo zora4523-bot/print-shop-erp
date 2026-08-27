@@ -96,10 +96,10 @@ export function schedulingHandoffNotice(
 ): { tone: 'info' | 'warning'; title: string; description: string } {
   const ignoredParts = [
     ...(resolution.unmatchedCount > 0
-      ? [`${resolution.unmatchedCount} 张未命中当前待排产`]
+      ? [`${resolution.unmatchedCount} 张工单当前不在待排产中`]
       : []),
     ...(resolution.invalidCount > 0
-      ? [`${resolution.invalidCount} 个非法 ID 已忽略`]
+      ? [`${resolution.invalidCount} 项无效记录已忽略`]
       : []),
     ...(resolution.overflowCount > 0
       ? [`${resolution.overflowCount} 张超出单次 30 张限制已忽略`]
@@ -110,7 +110,7 @@ export function schedulingHandoffNotice(
     return {
       tone: ignoredParts.length > 0 ? 'warning' : 'info',
       title: '已接收工单列表交接',
-      description: `当前待排产命中 ${resolution.matchedOrders.length} 张。选择师傅后，只会自动预选该师傅兼容且未被阻断的交接工单${ignoredParts.length > 0 ? `；${ignoredParts.join('；')}` : ''}。`,
+      description: `待排产中找到 ${resolution.matchedOrders.length} 张。选择师傅后，只会预选其可承接且未受阻的工单${ignoredParts.length > 0 ? `；${ignoredParts.join('；')}` : ''}。`,
     };
   }
 
@@ -118,7 +118,7 @@ export function schedulingHandoffNotice(
     ? resolution.incompatibleOrders
         .map(
           (order) =>
-            `${order.orderNo}（${order.batchBlockReason ?? '与当前师傅无兼容工艺'}）`,
+            `${order.orderNo}（${order.batchBlockReason ?? '没有可分配工艺'}）`,
         )
         .join('、')
     : '';
@@ -130,14 +130,14 @@ export function schedulingHandoffNotice(
     tone: hasWarning ? 'warning' : 'info',
     title:
       resolution.compatibleOrderIds.length > 0
-        ? `已为 ${workerName} 自动预选 ${resolution.compatibleOrderIds.length} 张兼容工单`
+        ? `已为 ${workerName} 预选 ${resolution.compatibleOrderIds.length} 张可分配工单`
         : `${workerName} 没有可自动预选的交接工单`,
     description: [
       incompatibleDetail
-        ? `未预选 ${resolution.incompatibleOrders.length} 张不兼容或已阻断工单：${incompatibleDetail}`
+        ? `未预选 ${resolution.incompatibleOrders.length} 张不可分配或已受阻的工单：${incompatibleDetail}`
         : '',
       ...ignoredParts,
-      '仅更新页面勾选；真正分配仍需点击确认，并由服务端重新校验权限、状态与兼容性。',
+      '预选不会立即派工，请点击“确认分配”。',
     ]
       .filter(Boolean)
       .join('；'),
@@ -210,7 +210,7 @@ export function batchScheduleImpactItems({
           `其中 ${overrideTaskCount} 个任务不在该师傅的熟练工艺推荐内，页面已填原因会写入存在非推荐派工项的对应工单操作日志。`,
         ]
       : []),
-    '每张工单使用独立事务；服务器会逐项重新校验并返回成功或失败，单张失败不会回滚其他已成功工单。',
+    '工单将逐张分配；单张失败不影响其他已成功工单。',
   ];
 }
 
@@ -393,7 +393,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
       >
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end">
           <div className="min-w-0 flex-1">
-            <h2 className="font-medium">按师傅兼容工艺批量排产</h2>
+            <h2 className="font-medium">按师傅可承接工艺批量排产</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               先选师傅，再勾选工单。已选 {selectedOrders.length} 张，本次将分配{' '}
               {selectedTaskCount} 个匹配任务，总数量{' '}
@@ -497,7 +497,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
           </div>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          每张工单使用独立事务；只创建该师傅兼容的剩余任务。其他工艺继续留在待排产，全部分配完成后才会开放给师傅开工。单次最多 30 张。
+          其他工艺继续留在待排产；全部分配完成后师傅才能开工。单次最多 30 张。
         </p>
         {state?.status === 'success' ? (
           <p role="status" className="text-sm text-success-foreground">
@@ -528,7 +528,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               ))}
             </ul>
             <p>
-              仍在待排产列表且与当前师傅兼容的失败工单会保留勾选；修正原因或状态后，可再次确认分配。
+              仍可分配给当前师傅的失败工单会保留勾选；修正原因或状态后，可再次确认分配。
             </p>
           </div>
         ) : null}

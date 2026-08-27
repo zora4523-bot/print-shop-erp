@@ -21,6 +21,7 @@ import type {
   ScheduleOrderInput,
 } from './auth/schemas';
 import { orderCascadeLockKey } from './order/locks';
+import { ORDER_PRICING_STATUS } from './order/pricing-status';
 import { getWorkerTaskScopeFilter } from './auth/task-scope';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import {
@@ -63,6 +64,7 @@ type ScheduleTxClient = {
       orderNo: string;
       status: OrderStatus;
       submitterId: string;
+      pricingStatus: string;
       items: Array<{
         id: string;
         sequence: number;
@@ -119,6 +121,9 @@ type ScheduleTxClient = {
     createMany: (args: {
       data: unknown[];
     }) => Promise<{ count: number }>;
+    deleteMany: (args: {
+      where: unknown;
+    }) => Promise<{ count: number }>;
     update: (args: {
       where: { id: string };
       data: unknown;
@@ -134,6 +139,7 @@ type ScheduleTxClient = {
         craftId: string;
         workerId: string | null;
         status: TaskStatus;
+        plannedQty: number;
       }>
     >;
   };
@@ -160,8 +166,9 @@ export type ScheduleOrderResult = {
 //   1. Verify the order is in SUBMITTED (only state that can be scheduled).
 //   2. Derive the expected set of (orderItem × non-outsource craft) pairs
 //      from the order's items + crafts.
-//   3. Match the input assignments against that set exactly — no
-//      missing, no duplicates, no unknowns, no outsource crafts.
+//   3. Match the input assignments against that set exactly. A pair may be
+//      split across multiple workers, but its positive plannedQty values must
+//      sum exactly to OrderItem.quantity.
 //   4. Verify every assigned worker is an active Role.WORKER.
 //   5. Snapshot `machineType` from the craft's defaultMachineType at
 //      schedule time. This is the quantity the salary calc uses.
@@ -194,6 +201,7 @@ export async function scheduleOrder(
         orderNo: true,
         status: true,
         submitterId: true,
+        pricingStatus: true,
         items: {
           select: {
             id: true,
@@ -206,6 +214,13 @@ export async function scheduleOrder(
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在');
+    if (
+      order.pricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+    ) {
+      throw new SchedulingError(
+        '工单价格尚未经确认，不能排产',
+      );
+    }
 
     // Status-machine check up front. We throw the same error type as
     // the order action layer maps to a readable message.
@@ -250,8 +265,9 @@ export async function scheduleOrder(
     }
 
     // Expected set: for each item, for each non-outsource craft on
-    // that item, we need exactly one assignment. Store as
-    // "<itemId>:<craftId>" for fast membership checks.
+    // that item, we need one or more assignments whose plannedQty sum
+    // exactly covers the item quantity. Store as "<itemId>:<craftId>"
+    // for fast membership checks.
     const expectedKeys = new Set<string>();
     const itemQuantityById = new Map<string, number>();
     let skippedOutsourceCrafts = 0;
@@ -291,13 +307,11 @@ export async function scheduleOrder(
         craftId: true,
         workerId: true,
         status: true,
+        plannedQty: true,
       },
     });
-    const existingTaskByKey = new Map(
-      existingTasks.map((task) => [
-        `${task.orderItemId}:${task.craftId}`,
-        task,
-      ]),
+    const existingTaskById = new Map(
+      existingTasks.map((task) => [task.id, task]),
     );
     for (const task of existingTasks) {
       const key = `${task.orderItemId}:${task.craftId}`;
@@ -308,11 +322,14 @@ export async function scheduleOrder(
       }
     }
 
-    // Walk the input assignments:
-    //   - Each must be a non-outsource pair the order actually needs.
-    //   - No duplicates (same orderItemId+craftId twice).
-    //   - Every craft allowed is seen.
-    const seenKeys = new Set<string>();
+    // Walk the input assignments. Repeating a pair is intentional when the
+    // quantity is split, but the same worker cannot appear twice in one pair.
+    // Existing staged task ids are accepted only for their original pair.
+    const assignmentsByKey = new Map<
+      string,
+      Array<(typeof input.assignments)[number]>
+    >();
+    const seenTaskIds = new Set<string>();
     const workerIds = new Set<string>();
     for (const a of input.assignments) {
       const key = `${a.orderItemId}:${a.craftId}`;
@@ -323,21 +340,72 @@ export async function scheduleOrder(
           `款式 ${a.orderItemId} 没有需要内部排产的工艺 ${a.craftId}（纯外协工艺不派师傅）`,
         );
       }
-      if (seenKeys.has(key)) {
+      if (a.taskId) {
+        if (seenTaskIds.has(a.taskId)) {
+          throw new SchedulingError(`生产任务重复提交：${a.taskId}`);
+        }
+        const existing = existingTaskById.get(a.taskId);
+        if (
+          !existing ||
+          existing.orderItemId !== a.orderItemId ||
+          existing.craftId !== a.craftId
+        ) {
+          throw new SchedulingError(`生产任务与款式工艺不匹配：${a.taskId}`);
+        }
+        seenTaskIds.add(a.taskId);
+      }
+      const group = assignmentsByKey.get(key) ?? [];
+      if (group.some((current) => current.workerId === a.workerId)) {
         throw new SchedulingError(
-          `同一工艺在同一款式上重复派工：${a.orderItemId} × ${a.craftId}`,
+          `同一款式同一工艺不能重复派给同一师傅：${a.orderItemId} × ${a.craftId} × ${a.workerId}`,
         );
       }
-      seenKeys.add(key);
+      group.push(a);
+      assignmentsByKey.set(key, group);
       workerIds.add(a.workerId);
     }
-    // Every expected pair must have an assignment — partial scheduling
-    // isn't in scope for Slice A (SPEC "确认所有任务派师傅完毕").
+    // Every expected pair must be fully covered before the order leaves the
+    // scheduling draft boundary.
     for (const key of expectedKeys) {
-      if (!seenKeys.has(key)) {
+      if (!assignmentsByKey.has(key)) {
         throw new SchedulingError(`还有工艺未派师傅：${key}`);
       }
     }
+
+    const normalizedAssignments = [...assignmentsByKey.entries()].flatMap(
+      ([key, group]) => {
+        const [orderItemId] = key.split(':');
+        const itemQuantity = itemQuantityById.get(orderItemId!);
+        if (!itemQuantity) {
+          throw new SchedulingError(`款式数量异常：${orderItemId}`);
+        }
+        const normalized = group.map((assignment) => {
+          const plannedQty =
+            assignment.plannedQty ??
+            (group.length === 1 ? itemQuantity : undefined);
+          if (
+            plannedQty === undefined ||
+            !Number.isSafeInteger(plannedQty) ||
+            plannedQty <= 0
+          ) {
+            throw new SchedulingError(
+              `款式 ${assignment.orderItemId} 工艺 ${assignment.craftId} 拆分多人时必须填写每位师傅的正整数分配数量`,
+            );
+          }
+          return { ...assignment, plannedQty };
+        });
+        const allocatedQty = normalized.reduce(
+          (sum, assignment) => sum + assignment.plannedQty,
+          0,
+        );
+        if (allocatedQty !== itemQuantity) {
+          throw new SchedulingError(
+            `款式 ${orderItemId} 工艺 ${normalized[0]!.craftId} 分配数量合计 ${allocatedQty} 必须等于款式数量 ${itemQuantity}`,
+          );
+        }
+        return normalized;
+      },
+    );
 
     // Verify workers exist + are active + are WORKERs.
     const workers = await txClient.user.findMany({
@@ -361,7 +429,7 @@ export async function scheduleOrder(
       }
       if (!w.isActive) throw new SchedulingError(`师傅已停用：${wid}`);
     }
-    for (const assignment of input.assignments) {
+    for (const assignment of normalizedAssignments) {
       assertWorkerAssignable(
         craftById.get(assignment.craftId)!,
         workerById.get(assignment.workerId)!,
@@ -369,60 +437,59 @@ export async function scheduleOrder(
       );
     }
 
-    // createMany is a single round trip — we assemble the full list
-    // here rather than looping create() so a 50-item order doesn't
-    // fan out to 50 round trips.
-    const assignmentByKey = new Map(
-      input.assignments.map((assignment) => [
-        `${assignment.orderItemId}:${assignment.craftId}`,
-        assignment,
-      ]),
-    );
-    const taskRows = input.assignments
-      .filter(
-        (assignment) =>
-          !existingTaskByKey.has(
-            `${assignment.orderItemId}:${assignment.craftId}`,
-          ),
-      )
-      .map((a) => {
-      const craft = craftById.get(a.craftId)!;
-      return {
-        orderItemId: a.orderItemId,
-        craftId: a.craftId,
-        workerId: a.workerId,
+    // Preserve staged task ids where possible, create additional split rows,
+    // and remove staged rows the administrator deleted in the final form.
+    // All existing rows are PENDING and the order is still SUBMITTED here.
+    const unusedExistingIds = new Set(existingTasks.map((task) => task.id));
+    const newTaskRows: unknown[] = [];
+    for (const assignment of normalizedAssignments) {
+      const key = `${assignment.orderItemId}:${assignment.craftId}`;
+      const reusable = assignment.taskId
+        ? existingTaskById.get(assignment.taskId)
+        : existingTasks.find(
+            (task) =>
+              unusedExistingIds.has(task.id) &&
+              `${task.orderItemId}:${task.craftId}` === key &&
+              task.workerId === assignment.workerId,
+          ) ??
+          existingTasks.find(
+            (task) =>
+              unusedExistingIds.has(task.id) &&
+              `${task.orderItemId}:${task.craftId}` === key,
+          );
+      const craft = craftById.get(assignment.craftId)!;
+      const taskData = {
+        workerId: assignment.workerId,
         workerType: craft.defaultWorkerType,
-        // Snapshot the machine type at assign time. If we change
-        // craft.defaultMachineType later, in-flight tasks keep their
-        // original type — same principle as salaryRuleSnapshot.
         machineType: getWorkerAssignmentEligibility(
           craft,
-          workerById.get(a.workerId)!,
+          workerById.get(assignment.workerId)!,
         ).machineType,
-        status: TaskStatus.PENDING,
-        plannedQty: itemQuantityById.get(a.orderItemId)!,
+        plannedQty: assignment.plannedQty,
       };
+      if (reusable) {
+        unusedExistingIds.delete(reusable.id);
+        await txClient.productionTask.update({
+          where: { id: reusable.id },
+          data: taskData,
+          select: { id: true },
+        });
+      } else {
+        newTaskRows.push({
+          orderItemId: assignment.orderItemId,
+          craftId: assignment.craftId,
+          ...taskData,
+          status: TaskStatus.PENDING,
+        });
+      }
+    }
+    if (unusedExistingIds.size > 0) {
+      await txClient.productionTask.deleteMany({
+        where: { id: { in: [...unusedExistingIds] } },
       });
-    const inserted =
-      taskRows.length > 0
-        ? await txClient.productionTask.createMany({ data: taskRows })
-        : { count: 0 };
-    for (const [key, task] of existingTaskByKey) {
-      const assignment = assignmentByKey.get(key)!;
-      const craft = craftById.get(assignment.craftId)!;
-      await txClient.productionTask.update({
-        where: { id: task.id },
-        data: {
-          workerId: assignment.workerId,
-          workerType: craft.defaultWorkerType,
-          machineType: getWorkerAssignmentEligibility(
-            craft,
-            workerById.get(assignment.workerId)!,
-          ).machineType,
-          plannedQty: itemQuantityById.get(assignment.orderItemId)!,
-        },
-        select: { id: true },
-      });
+    }
+    if (newTaskRows.length > 0) {
+      await txClient.productionTask.createMany({ data: newTaskRows });
     }
 
     // Transition + log. Order goes to SCHEDULING now; the first worker
@@ -437,7 +504,7 @@ export async function scheduleOrder(
       },
       select: { id: true, status: true },
     });
-    const assignmentOverrides = input.assignments.flatMap((assignment) => {
+    const assignmentOverrides = normalizedAssignments.flatMap((assignment) => {
       const eligibility = getWorkerAssignmentEligibility(
         craftById.get(assignment.craftId)!,
         workerById.get(assignment.workerId)!,
@@ -465,7 +532,11 @@ export async function scheduleOrder(
             ? { assignmentOverrides }
             : {}),
         },
-        remark: `排产：确认 ${expectedKeys.size} 个任务${
+        remark: `排产：确认 ${normalizedAssignments.length} 个任务${
+          normalizedAssignments.length > expectedKeys.size
+            ? `（${expectedKeys.size} 个款式工艺组，已拆分多师傅）`
+            : ''
+        }${
           skippedOutsourceCrafts > 0 ? `（外协工艺 ${skippedOutsourceCrafts} 项另行处理）` : ''
         }${
           assignmentOverrides.length > 0
@@ -476,7 +547,7 @@ export async function scheduleOrder(
     });
 
     const orderCompleted =
-      inserted.count === 0 && skippedOutsourceCrafts > 0
+      normalizedAssignments.length === 0 && skippedOutsourceCrafts > 0
         ? (
             await maybeCompleteProductionOrder(
               txClient as unknown as ProductionCompletionTx,
@@ -493,7 +564,7 @@ export async function scheduleOrder(
       {
         orderId: order.id,
         orderNo: order.orderNo,
-        taskCount: expectedKeys.size,
+        taskCount: normalizedAssignments.length,
       },
       { dedupeKey: `notification:ORDER_SCHEDULED:${order.id}` },
     );
@@ -501,7 +572,7 @@ export async function scheduleOrder(
     return {
       orderId: updated.id,
       status: orderCompleted ? OrderStatus.COMPLETED : updated.status,
-      tasksCreated: expectedKeys.size,
+      tasksCreated: normalizedAssignments.length,
       skippedOutsourceCrafts,
       orderCompleted,
     };
@@ -785,6 +856,10 @@ type ReassignTxClient = {
       id: string;
       status: TaskStatus;
       workerId: string | null;
+      isSelfClaimable: boolean;
+      selfClaimOpenedAt: Date | null;
+      selfClaimedAt: Date | null;
+      claimMachineTypes: MachineType[];
       orderItem: { orderId: string; name: string; sequence: number };
       craft: AssignmentCraft;
     } | null>;
@@ -842,6 +917,10 @@ export async function reassignProductionTask(
         id: true,
         status: true,
         workerId: true,
+        isSelfClaimable: true,
+        selfClaimOpenedAt: true,
+        selfClaimedAt: true,
+        claimMachineTypes: true,
         orderItem: { select: { orderId: true, name: true, sequence: true } },
         craft: {
           select: {
@@ -893,6 +972,18 @@ export async function reassignProductionTask(
         workerType: task.craft.defaultWorkerType,
         machineType: getWorkerAssignmentEligibility(task.craft, worker)
           .machineType,
+        // 管理员可以随时把抢单池里的 PENDING 任务直接派回某位师傅。
+        // 池任务直派，或已自抢后改派给另一人，都必须清理抢单上下文。
+        // 否则新 workerId 会看起来像自抢者，claimTask 的幂等重放也会误判。
+        // 原始证据由 TASK_SELF_CLAIM + TASK_REASSIGN 日志保留。
+        isSelfClaimable: false,
+        ...(task.isSelfClaimable || task.selfClaimedAt
+          ? {
+              selfClaimOpenedAt: null,
+              selfClaimedAt: null,
+              claimMachineTypes: [],
+            }
+          : {}),
       },
       select: { id: true, workerId: true, status: true },
     });
@@ -903,6 +994,17 @@ export async function reassignProductionTask(
         action: 'TASK_REASSIGN',
         changedFields: {
           workerId: { before: task.workerId, after: workerId },
+          ...(task.isSelfClaimable
+            ? { isSelfClaimable: { before: true, after: false } }
+            : {}),
+          ...(task.selfClaimedAt
+            ? {
+                selfClaimedAt: {
+                  before: task.selfClaimedAt,
+                  after: null,
+                },
+              }
+            : {}),
           taskId: { before: task.id, after: task.id },
           ...(!getWorkerAssignmentEligibility(task.craft, worker).recommended
             ? {
@@ -2009,6 +2111,10 @@ export async function getWorkerTaskDetail(
 }
 
 export { InvalidTaskTransitionError };
+export {
+  listClaimableTasks,
+  type ClaimableTaskListRow,
+} from './production/task-claim';
 
 // ─────────────────────────────────────────────────────────────────────
 // Read helpers for the scheduling UI
@@ -2028,7 +2134,7 @@ export type PendingSchedulingCraftSummary = {
 
 type PendingSchedulingCraftDefinition = Omit<
   SchedulingViewCraft,
-  'assignedWorkerId'
+  'assignedWorkerId' | 'stagedAssignments'
 > & {
   isActive: boolean;
 };
@@ -2045,6 +2151,7 @@ export type PendingSchedulingOrderView = {
   submittedAt: Date | null;
   createdAt: Date;
   submitter: { displayName: string; role: Role };
+  pricingStatus: string;
   itemCount: number;
   totalQuantity: number;
   internalTaskCount: number;
@@ -2077,6 +2184,7 @@ export async function getPendingSchedulingBoard(): Promise<PendingSchedulingBoar
       promisedDate: true,
       submittedAt: true,
       createdAt: true,
+      pricingStatus: true,
       items: {
         select: {
           id: true,
@@ -2189,8 +2297,15 @@ export async function getPendingSchedulingBoard(): Promise<PendingSchedulingBoar
         (pair) => !existingTaskKeys.has(pair.key),
       );
 
-      let batchBlockReason: string | null = null;
-      if (hasMissingCraft) {
+      let batchBlockReason: string | null =
+        order.pricingStatus ===
+        ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+          ? '价格待管理员确认'
+          : null;
+      if (batchBlockReason !== null) {
+        // 价格确认是排产的最外层闸门；优先显示，避免用户
+        // 先修复次要的工艺/师傅问题后才发现仍不可排产。
+      } else if (hasMissingCraft) {
         batchBlockReason = '包含已删除或缺失的工艺';
       } else if (hasInactiveCraft) {
         batchBlockReason = '包含已停用工艺';
@@ -2253,6 +2368,7 @@ export async function getPendingSchedulingBoard(): Promise<PendingSchedulingBoar
         submittedAt: order.submittedAt,
         createdAt: order.createdAt,
         submitter: order.submitter,
+        pricingStatus: order.pricingStatus,
         itemCount: order.items.length,
         totalQuantity: order.items.reduce(
           (sum, item) => sum + item.quantity,
@@ -2293,6 +2409,13 @@ export type SchedulingViewCraft = {
   defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
   inHouseMachineTypes: MachineType[];
+  stagedAssignments: Array<{
+    taskId: string;
+    workerId: string | null;
+    plannedQty: number;
+  }>;
+  // Compatibility summary for older consumers. New scheduling UI uses all
+  // stagedAssignments so a pair can retain multiple worker splits.
   assignedWorkerId: string | null;
 };
 
@@ -2326,6 +2449,8 @@ export type SchedulingView = {
   isUrgent: boolean;
   customerRef: string | null;
   submitterDisplayName: string;
+  pricingStatus: string;
+  schedulingBlockReason: string | null;
   items: SchedulingViewItem[];
   workers: SchedulingViewCandidate[];
 };
@@ -2403,6 +2528,7 @@ export async function getSchedulingView(
       customName: true,
       isUrgent: true,
       customerRef: true,
+      pricingStatus: true,
       submitter: { select: { displayName: true } },
       items: {
         orderBy: { sequence: 'asc' },
@@ -2418,7 +2544,12 @@ export async function getSchedulingView(
           crafts: true,
           tasks: {
             where: { status: TaskStatus.PENDING },
-            select: { craftId: true, workerId: true },
+            select: {
+              id: true,
+              craftId: true,
+              workerId: true,
+              plannedQty: true,
+            },
           },
         },
       },
@@ -2453,10 +2584,26 @@ export async function getSchedulingView(
     isUrgent: order.isUrgent,
     customerRef: order.customerRef,
     submitterDisplayName: order.submitter.displayName,
+    pricingStatus: order.pricingStatus,
+    schedulingBlockReason:
+      order.pricingStatus ===
+      ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
+        ? '价格待管理员确认，确认终价后才能排产'
+        : null,
     items: order.items.map((item) => {
-      const assignedWorkerByCraft = new Map(
-        item.tasks.map((task) => [task.craftId, task.workerId]),
-      );
+      const stagedAssignmentsByCraft = new Map<
+        string,
+        SchedulingViewCraft['stagedAssignments']
+      >();
+      for (const task of item.tasks) {
+        const current = stagedAssignmentsByCraft.get(task.craftId) ?? [];
+        current.push({
+          taskId: task.id,
+          workerId: task.workerId,
+          plannedQty: task.plannedQty,
+        });
+        stagedAssignmentsByCraft.set(task.craftId, current);
+      }
       return {
         id: item.id,
         sequence: item.sequence,
@@ -2472,8 +2619,10 @@ export async function getSchedulingView(
             return craft
               ? {
                   ...craft,
+                  stagedAssignments:
+                    stagedAssignmentsByCraft.get(cid) ?? [],
                   assignedWorkerId:
-                    assignedWorkerByCraft.get(cid) ?? null,
+                    stagedAssignmentsByCraft.get(cid)?.[0]?.workerId ?? null,
                 }
               : undefined;
           })
@@ -2496,6 +2645,7 @@ export type ReassignmentView = {
     craftId: string;
     currentWorkerId: string | null;
     currentWorkerName: string | null;
+    isSelfClaimable: boolean;
     eligibleWorkers: SchedulingViewCandidate[];
   }>;
 };
@@ -2512,6 +2662,7 @@ export async function getPendingTaskReassignmentView(
       select: {
         id: true,
         workerId: true,
+        isSelfClaimable: true,
         orderItem: { select: { name: true, sequence: true } },
         craft: {
           select: {
@@ -2540,7 +2691,10 @@ export async function getPendingTaskReassignmentView(
       craftName: task.craft.name,
       craftId: task.craft.id,
       currentWorkerId: task.workerId,
-      currentWorkerName: task.worker?.displayName ?? null,
+      currentWorkerName: task.isSelfClaimable
+        ? '抢单池中'
+        : (task.worker?.displayName ?? null),
+      isSelfClaimable: task.isSelfClaimable,
       eligibleWorkers: workers.filter((worker) =>
         isWorkerCompatible(
           {

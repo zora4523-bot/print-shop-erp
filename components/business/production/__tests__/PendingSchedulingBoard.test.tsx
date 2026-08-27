@@ -56,6 +56,7 @@ function order(
     submitter: { displayName: '销售 A', role: Role.SALES },
     itemCount: 1,
     totalQuantity: 5000,
+    pricingStatus: 'AUTO_CONFIRMED',
     internalTaskCount: 3,
     assignedTaskCount: 0,
     remainingTaskCount: 3,
@@ -98,16 +99,15 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     );
   });
 
-  it('keeps the existing per-order transaction and partial-result contract visible', () => {
+  it('keeps the per-order partial-result contract visible', () => {
     const impact = batchScheduleImpactItems({
       worker,
       orders: [order()],
     }).join('\n');
 
     expect(impact).toContain('1 个任务不在该师傅的熟练工艺推荐内');
-    expect(impact).toContain('每张工单使用独立事务');
-    expect(impact).toContain('逐项重新校验并返回成功或失败');
-    expect(impact).toContain('单张失败不会回滚其他已成功工单');
+    expect(impact).toContain('工单将逐张分配');
+    expect(impact).toContain('单张失败不影响其他已成功工单');
   });
 
   it('retains only distinct failed orders for a bounded retry', () => {
@@ -271,15 +271,15 @@ describe('PendingSchedulingBoard batch confirmation', () => {
 
     const notice = schedulingHandoffNotice(resolution, worker.displayName);
     expect(notice.tone).toBe('warning');
-    expect(notice.title).toContain('自动预选 1 张兼容工单');
+    expect(notice.title).toContain('预选 1 张可分配工单');
     expect(notice.description).toContain('PS-20260824-002');
-    expect(notice.description).toContain('与当前师傅无兼容工艺');
+    expect(notice.description).toContain('没有可分配工艺');
     expect(notice.description).toContain('PS-20260824-003');
     expect(notice.description).toContain('工单仍有缺失的工艺配置');
-    expect(notice.description).toContain('1 张未命中当前待排产');
-    expect(notice.description).toContain('1 个非法 ID 已忽略');
+    expect(notice.description).toContain('1 张工单当前不在待排产中');
+    expect(notice.description).toContain('1 项无效记录已忽略');
     expect(notice.description).toContain('2 张超出单次 30 张限制已忽略');
-    expect(notice.description).toContain('服务端重新校验权限');
+    expect(notice.description).toContain('预选不会立即派工');
   });
 
   it('announces handoff scope before a worker is selected', () => {
@@ -297,8 +297,8 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     );
 
     expect(html).toContain('已接收工单列表交接');
-    expect(html).toContain('当前待排产命中 1 张');
-    expect(html).toContain('选择师傅后，只会自动预选');
-    expect(html).toContain('1 张未命中当前待排产');
+    expect(html).toContain('待排产中找到 1 张');
+    expect(html).toContain('选择师傅后，只会预选');
+    expect(html).toContain('1 张工单当前不在待排产中');
   });
 });
