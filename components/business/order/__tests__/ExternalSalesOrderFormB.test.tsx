@@ -252,7 +252,7 @@ describe('ExternalSalesOrderFormB', () => {
     expect(html).toContain('反面');
     expect(html).toContain('＋ 加烫反面');
     expect(html).toContain('常规装');
-    expect(html).toContain('0.1 元/袋');
+    expect(html).not.toMatch(/0\.[12]\s*元\/袋/);
     expect(html).toContain('混装需两款以上');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?混装/);
     expect(html).toContain('共 200 包');

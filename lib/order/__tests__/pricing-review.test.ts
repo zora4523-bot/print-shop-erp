@@ -108,6 +108,8 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         quantity: 1_000,
         crafts: ["craft-1"],
         foilColors: ["金"],
+        frontFoilColors: [],
+        backFoilColors: [],
         isDoubleSided: true,
         isDoubleColor: false,
         unitPrice: "0.0900",
@@ -127,6 +129,8 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         quantity: 100,
         crafts: [],
         foilColors: [],
+        frontFoilColors: [],
+        backFoilColors: [],
         isDoubleSided: false,
         isDoubleColor: false,
         unitPrice: "0.1000",
@@ -143,8 +147,8 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         id: "shipment-1",
         sequence: 1,
         destinationProvince: "广东",
-        quotedWeightKg: "2",
-        weightKg: null,
+        quotedWeightKg: "12.5",
+        weightKg: "2",
         status: "PENDING",
         lines: [{ quantity: 1_100 }],
       },
@@ -200,6 +204,27 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
       },
     ],
     ...overrides,
+  };
+}
+
+function pricingOrderWithExplicitThreePassFoil() {
+  const order = pricingOrder();
+  return {
+    ...order,
+    items: order.items.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            foilColors: ["哑金", "红金"],
+            frontFoilColors: ["哑金", "红金"],
+            backFoilColors: ["哑金"],
+            // Deliberately stale retired columns: explicit side arrays remain
+            // the authoritative three-pass production facts.
+            isDoubleSided: false,
+            isDoubleColor: false,
+          }
+        : item,
+    ),
   };
 }
 
@@ -422,6 +447,132 @@ describe("order pricing review", () => {
         orderItemCount: 2,
         allowInactiveCatalogFacts: true,
       },
+    );
+  });
+
+  it.each([
+    ["preview", () => previewOrderPricingReview("order-1", admin, now)],
+    ["ADMIN_FULL_REPRICE", () => finalizeOrderPricing(command(), admin, now)],
+  ])(
+    "passes the explicit foil sides to %s instead of rebuilding them from retired aggregate fields",
+    async (_label, run) => {
+      dbMock.order.findUnique.mockResolvedValue(
+        pricingOrderWithExplicitThreePassFoil(),
+      );
+
+      await run();
+
+      expect(dbMock.order.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            items: expect.objectContaining({
+              select: expect.objectContaining({
+                frontFoilColors: true,
+                backFoilColors: true,
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(quoteOrderItemsMock).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            foilColors: ["哑金", "红金"],
+            frontFoilColors: ["哑金", "红金"],
+            backFoilColors: ["哑金"],
+            isDoubleSided: false,
+            isDoubleColor: false,
+          }),
+          expect.objectContaining({
+            frontFoilColors: [],
+            backFoilColors: [],
+          }),
+        ],
+        "EXTERNAL_SALES",
+        now,
+        dbMock,
+        {
+          orderItemCount: 2,
+          allowInactiveCatalogFacts: true,
+        },
+      );
+    },
+  );
+
+  it("preserves the explicit three-pass foil facts in an ADMIN_FULL_REPRICE snapshot", async () => {
+    dbMock.order.findUnique.mockResolvedValue(
+      pricingOrderWithExplicitThreePassFoil(),
+    );
+    const [automatic, manual] = processingQuotes();
+    quoteOrderItemsMock.mockResolvedValue([
+      {
+        ...automatic,
+        snapshot: {
+          ...automatic?.snapshot,
+          input: {
+            frontFoilColors: ["哑金", "红金"],
+            backFoilColors: ["哑金"],
+            foilPassCount: 3,
+          },
+        },
+      },
+      manual,
+    ]);
+
+    await finalizeOrderPricing(command(), admin, now);
+
+    expect(dbMock.orderItem.update).toHaveBeenCalledWith({
+      where: { id: "item-auto" },
+      data: expect.objectContaining({
+        pricingSnapshot: expect.objectContaining({
+          source: "ADMIN_FULL_REPRICE",
+          input: {
+            frontFoilColors: ["哑金", "红金"],
+            backFoilColors: ["哑金"],
+            foilPassCount: 3,
+          },
+        }),
+      }),
+    });
+  });
+
+  it("keeps legacy orders without explicit sides on the aggregate fallback path", async () => {
+    await previewOrderPricingReview("order-1", admin, now);
+
+    expect(quoteOrderItemsMock.mock.calls[0]?.[0]?.[0]).toMatchObject({
+      foilColors: ["金"],
+      frontFoilColors: [],
+      backFoilColors: [],
+      isDoubleSided: true,
+    });
+  });
+
+  it("does not treat a legacy quoted weight as a carrier-confirmed fact", async () => {
+    const order = pricingOrder();
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      shipments: order.shipments.map((shipment) => ({
+        ...shipment,
+        quotedWeightKg: "12.5",
+        weightKg: null,
+      })),
+    });
+
+    await previewOrderPricingReview("order-1", admin, now);
+
+    expect(quoteLogisticsMock).toHaveBeenCalledWith(
+      dbMock,
+      {
+        isSfCollect: false,
+        shipments: [
+          expect.objectContaining({
+            shipmentKey: "1",
+            billableWeightKg: null,
+          }),
+        ],
+      },
+      now,
+      { snapshotLockHeld: true },
     );
   });
 

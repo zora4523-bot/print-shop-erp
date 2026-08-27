@@ -6,7 +6,6 @@ import {
   OrderSettlementType,
   OrderStatus,
   Role,
-  ShipmentStatus,
 } from "../../generated/prisma/enums";
 import type { Prisma } from "../../generated/prisma/client";
 import { db } from "../db";
@@ -171,6 +170,8 @@ type PricingOrder = {
     quantity: number;
     crafts: string[];
     foilColors: string[];
+    frontFoilColors: string[];
+    backFoilColors: string[];
     foilTechnique: import('@/generated/prisma/client').OrderFoilTechnique;
     hasLocalFoil: boolean | null;
     lamination: import('@/generated/prisma/client').OrderLamination;
@@ -200,7 +201,6 @@ type PricingOrder = {
     id: string;
     sequence: number;
     destinationProvince: string | null;
-    quotedWeightKg: MoneyLike | null;
     weightKg: MoneyLike | null;
     status: string;
     lines: Array<{ quantity: number }>;
@@ -256,6 +256,8 @@ const pricingOrderSelect = {
       quantity: true,
       crafts: true,
       foilColors: true,
+      frontFoilColors: true,
+      backFoilColors: true,
       foilTechnique: true,
       hasLocalFoil: true,
       lamination: true,
@@ -291,7 +293,6 @@ const pricingOrderSelect = {
       id: true,
       sequence: true,
       destinationProvince: true,
-      quotedWeightKg: true,
       weightKg: true,
       status: true,
       lines: { select: { quantity: true } },
@@ -390,6 +391,8 @@ function itemQuoteInput(order: PricingOrder) {
     quantity: item.quantity,
     crafts: item.crafts,
     foilColors: item.foilColors,
+    frontFoilColors: item.frontFoilColors,
+    backFoilColors: item.backFoilColors,
     foilTechnique: item.foilTechnique,
     hasLocalFoil: item.hasLocalFoil,
     lamination: item.lamination,
@@ -403,12 +406,7 @@ function shipmentFacts(order: PricingOrder) {
   return order.shipments.map((shipment) => ({
     shipmentKey: String(shipment.sequence),
     province: shipment.destinationProvince,
-    billableWeightKg: money(
-      shipment.status === ShipmentStatus.SHIPPED
-        ? shipment.weightKg
-        : (shipment.weightKg ?? shipment.quotedWeightKg),
-      3,
-    ),
+    billableWeightKg: money(shipment.weightKg, 3),
     itemQuantity: shipment.lines.reduce((sum, line) => sum + line.quantity, 0),
   }));
 }
@@ -893,12 +891,7 @@ export async function finalizeOrderPricing(
     }
     for (const shipment of order.shipments) {
       const submitted = submittedByShipmentId.get(shipment.id)!;
-      const currentWeight = money(
-        shipment.status === ShipmentStatus.SHIPPED
-          ? shipment.weightKg
-          : (shipment.weightKg ?? shipment.quotedWeightKg),
-        3,
-      );
+      const currentWeight = money(shipment.weightKg, 3);
       if (
         submitted.expectedDestinationProvince !==
           shipment.destinationProvince ||
@@ -913,12 +906,7 @@ export async function finalizeOrderPricing(
     const currentShipmentFacts = order.shipments.map((shipment) => ({
       shipmentKey: String(shipment.sequence),
       province: shipment.destinationProvince,
-      billableWeightKg: money(
-        shipment.status === ShipmentStatus.SHIPPED
-          ? shipment.weightKg
-          : (shipment.weightKg ?? shipment.quotedWeightKg),
-        3,
-      ),
+      billableWeightKg: money(shipment.weightKg, 3),
       itemQuantity: shipment.lines.reduce(
         (sum, line) => sum + line.quantity,
         0,

@@ -2,19 +2,20 @@ import {
   OrderItemPricingRoute,
   OrderProductStructure,
 } from '@/generated/prisma/enums';
-import { normalizeCatalogPricingText } from '@/lib/order/catalog-pricing-facts';
+import {
+  normalizeCatalogPricingText,
+  parseCatalogPaperWeight,
+} from '@/lib/order/catalog-pricing-facts';
 import { productCategoryMatchesPricingRoute } from '@/lib/order/pricing-route';
 
-export type ExternalOrderPaperKey =
-  | 'PEARL_FLASH'
-  | 'PEARL_RED'
-  | 'RED_CARD'
-  | 'SOFT_TOUCH'
-  | 'VARIEGATED_PEARL'
-  | 'GOLD_GLITTER'
-  | 'LINEN'
-  | 'ICE_WHITE'
-  | 'COATED';
+export type ExternalOrderPaperKey = string;
+
+type ExternalOrderPaperVariant = {
+  route: OrderItemPricingRoute;
+  specification: string;
+  paperType: string;
+  weight: number;
+};
 
 export type ExternalOrderPaper = {
   key: ExternalOrderPaperKey;
@@ -32,135 +33,7 @@ export type ExternalOrderPaper = {
   weights: readonly number[];
   paperTypeByWeight: Readonly<Record<number, string>>;
   routes: readonly OrderItemPricingRoute[];
-};
-
-export const EXTERNAL_ORDER_PAPERS: readonly ExternalOrderPaper[] = [
-  {
-    key: 'PEARL_FLASH',
-    label: '珠光纸艳闪',
-    appearance: 'pearl',
-    weights: [120, 160],
-    paperTypeByWeight: {
-      120: '120g珠光艳闪',
-      160: '160g珠光艳闪',
-    },
-    routes: [
-      OrderItemPricingRoute.STOCK_BLANK,
-      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    ],
-  },
-  {
-    key: 'PEARL_RED',
-    label: '珠光纸闪红',
-    appearance: 'pearl-red',
-    weights: [160],
-    paperTypeByWeight: { 160: '160g珠光闪红' },
-    routes: [OrderItemPricingRoute.STOCK_BLANK],
-  },
-  {
-    key: 'RED_CARD',
-    label: '红卡',
-    appearance: 'solid-red',
-    weights: [160, 180, 230],
-    paperTypeByWeight: {
-      160: '160g红卡',
-      180: '180g红卡',
-      230: '230g红卡',
-    },
-    routes: [
-      OrderItemPricingRoute.STOCK_BLANK,
-      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    ],
-  },
-  {
-    key: 'SOFT_TOUCH',
-    label: '触感纸',
-    appearance: 'matte-red',
-    weights: [200],
-    paperTypeByWeight: { 200: '200g触感纸' },
-    routes: [
-      OrderItemPricingRoute.STOCK_BLANK,
-      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    ],
-  },
-  {
-    key: 'VARIEGATED_PEARL',
-    label: '杂色珠光纸',
-    appearance: 'variegated',
-    weights: [160],
-    paperTypeByWeight: { 160: '160g杂色珠光' },
-    routes: [
-      OrderItemPricingRoute.STOCK_BLANK,
-      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    ],
-  },
-  {
-    key: 'GOLD_GLITTER',
-    label: '金葱',
-    appearance: 'glitter',
-    weights: [230],
-    paperTypeByWeight: { 230: '230g金葱' },
-    routes: [
-      OrderItemPricingRoute.STOCK_BLANK,
-      OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-    ],
-  },
-  {
-    key: 'LINEN',
-    label: '莱尼纹',
-    appearance: 'linen',
-    weights: [150],
-    paperTypeByWeight: { 150: '150g莱尼纹' },
-    routes: [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL],
-  },
-  {
-    key: 'ICE_WHITE',
-    label: '冰白纸',
-    appearance: 'ice-white',
-    weights: [160],
-    paperTypeByWeight: { 160: '160g冰白纸' },
-    routes: [OrderItemPricingRoute.COLOR_PRINT],
-  },
-  {
-    key: 'COATED',
-    label: '铜版纸',
-    appearance: 'coated',
-    weights: [200],
-    paperTypeByWeight: { 200: '200g铜版纸' },
-    routes: [OrderItemPricingRoute.COLOR_PRINT],
-  },
-] as const;
-
-export const EXTERNAL_ORDER_SPECIFICATIONS: Readonly<
-  Record<OrderItemPricingRoute, readonly string[]>
-> = {
-  [OrderItemPricingRoute.STOCK_BLANK]: [
-    '迷你封50×80',
-    '方形88×88',
-    '中号封80×115',
-    '大号封90×165',
-    '西封中号80×120',
-    '西封大号85×165',
-  ],
-  [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL]: [
-    '方形88×88',
-    '中号封80×115',
-    '大号封90×165',
-    '西封中号80×120',
-    '西封大号85×165',
-    '万元封120×220',
-  ],
-  [OrderItemPricingRoute.COLOR_PRINT]: ['大号88×165', '中号80×120'],
-  [OrderItemPricingRoute.MANUAL_QUOTE]: [],
-};
-
-export const EXTERNAL_ORDER_DEFAULT_SPECIFICATION: Readonly<
-  Record<OrderItemPricingRoute, string>
-> = {
-  [OrderItemPricingRoute.STOCK_BLANK]: '大号封90×165',
-  [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL]: '大号封90×165',
-  [OrderItemPricingRoute.COLOR_PRINT]: '大号88×165',
-  [OrderItemPricingRoute.MANUAL_QUOTE]: '',
+  variants: readonly ExternalOrderPaperVariant[];
 };
 
 export type ExternalOrderCatalogProduct = {
@@ -171,6 +44,95 @@ export type ExternalOrderCatalogProduct = {
   paperType: string | null;
 };
 
+const AUTOMATIC_ROUTES = [
+  OrderItemPricingRoute.STOCK_BLANK,
+  OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+  OrderItemPricingRoute.COLOR_PRINT,
+] as const;
+
+function paperFamilyLabel(paperType: string): string {
+  return paperType.replace(/^\s*\d+(?:\.\d+)?\s*g\s*/i, '').trim();
+}
+
+function paperAppearance(
+  label: string,
+): ExternalOrderPaper['appearance'] {
+  if (label.includes('杂色') && label.includes('珠光')) return 'variegated';
+  if (label.includes('珠光') && label.includes('红')) return 'pearl-red';
+  if (label.includes('珠光')) return 'pearl';
+  if (label.includes('触感')) return 'matte-red';
+  if (label.includes('金葱')) return 'glitter';
+  if (label.includes('莱尼')) return 'linen';
+  if (label.includes('冰白')) return 'ice-white';
+  if (label.includes('铜版')) return 'coated';
+  return 'solid-red';
+}
+
+function productPricingRoute(
+  product: ExternalOrderCatalogProduct,
+): OrderItemPricingRoute | null {
+  const routes = AUTOMATIC_ROUTES.filter((route) =>
+    productCategoryMatchesPricingRoute(route, product.category),
+  );
+  return routes.length === 1 ? routes[0] : null;
+}
+
+/**
+ * Build the new-order choices from the active quote products supplied by the
+ * server. Published products are the source of truth; this module only derives
+ * labels and swatch appearance and never invents a priceable combination.
+ */
+export function buildExternalOrderPapers<
+  T extends ExternalOrderCatalogProduct,
+>(products: readonly T[]): ExternalOrderPaper[] {
+  const byKey = new Map<
+    string,
+    {
+      label: string;
+      variants: ExternalOrderPaperVariant[];
+    }
+  >();
+  for (const product of products) {
+    const route = productPricingRoute(product);
+    const paperType = product.paperType?.trim();
+    const specification = product.specification?.trim();
+    const weight = parseCatalogPaperWeight(paperType);
+    if (!route || !paperType || !specification || weight === null) continue;
+    const label = paperFamilyLabel(paperType);
+    if (!label) continue;
+    const key = normalizeCatalogPricingText(label);
+    const entry = byKey.get(key) ?? { label, variants: [] };
+    if (
+      !entry.variants.some(
+        (candidate) =>
+          candidate.route === route &&
+          sameCatalogText(candidate.paperType, paperType) &&
+          sameCatalogText(candidate.specification, specification),
+      )
+    ) {
+      entry.variants.push({ route, specification, paperType, weight });
+    }
+    byKey.set(key, entry);
+  }
+
+  return [...byKey.entries()].map(([key, entry]) => {
+    const routes = [...new Set(entry.variants.map((variant) => variant.route))];
+    const weights = [...new Set(entry.variants.map((variant) => variant.weight))]
+      .sort((left, right) => left - right);
+    return {
+      key,
+      label: entry.label,
+      appearance: paperAppearance(entry.label),
+      weights,
+      paperTypeByWeight: Object.fromEntries(
+        entry.variants.map((variant) => [variant.weight, variant.paperType]),
+      ),
+      routes,
+      variants: entry.variants,
+    };
+  });
+}
+
 function sameCatalogText(left: string | null, right: string | null): boolean {
   return Boolean(
     left &&
@@ -180,9 +142,12 @@ function sameCatalogText(left: string | null, right: string | null): boolean {
 }
 
 export function externalOrderPapersForRoute(
+  products: readonly ExternalOrderCatalogProduct[],
   route: OrderItemPricingRoute,
 ): readonly ExternalOrderPaper[] {
-  return EXTERNAL_ORDER_PAPERS.filter((paper) => paper.routes.includes(route));
+  return buildExternalOrderPapers(products).filter((paper) =>
+    paper.routes.includes(route),
+  );
 }
 
 export function externalOrderWeightsForSelection(
@@ -190,47 +155,77 @@ export function externalOrderWeightsForSelection(
   route: OrderItemPricingRoute,
   specification: string,
 ): readonly number[] {
-  if (paper.key === 'PEARL_FLASH') {
-    return route === OrderItemPricingRoute.STOCK_BLANK &&
-      specification.includes('迷你')
-      ? [120]
-      : [160];
-  }
-  return paper.weights;
+  return [
+    ...new Set(
+      paper.variants
+        .filter(
+          (variant) =>
+            variant.route === route &&
+            sameCatalogText(variant.specification, specification),
+        )
+        .map((variant) => variant.weight),
+    ),
+  ].sort((left, right) => left - right);
 }
 
 export function externalOrderPaperFromType(
+  products: readonly ExternalOrderCatalogProduct[],
   paperType: string | null | undefined,
 ): ExternalOrderPaper | null {
   if (!paperType) return null;
-  const normalizedPaperType = normalizeCatalogPricingText(paperType);
   return (
-    EXTERNAL_ORDER_PAPERS.find((paper) =>
-      Object.values(paper.paperTypeByWeight).some((candidate) =>
-        sameCatalogText(candidate, paperType),
+    buildExternalOrderPapers(products).find((paper) =>
+      paper.variants.some((candidate) =>
+        sameCatalogText(candidate.paperType, paperType),
       ),
-    ) ??
-    EXTERNAL_ORDER_PAPERS.find((paper) =>
-      normalizedPaperType.includes(normalizeCatalogPricingText(paper.label)),
-    ) ??
-    null
+    ) ?? null
   );
 }
 
 export function externalOrderPaperType(
   paper: ExternalOrderPaper,
+  route: OrderItemPricingRoute,
+  specification: string,
   weight: number,
-): string {
-  return paper.paperTypeByWeight[weight] ?? `${weight}g${paper.label}`;
+): string | null {
+  return (
+    paper.variants.find(
+      (variant) =>
+        variant.route === route &&
+        variant.weight === weight &&
+        sameCatalogText(variant.specification, specification),
+    )?.paperType ?? null
+  );
 }
 
-export function canonicalExternalOrderProducts<
-  T extends ExternalOrderCatalogProduct,
->(products: readonly T[]): T[] {
-  const canonical = products.filter((product) =>
-    product.code?.toUpperCase().startsWith('EXT-'),
+export function externalOrderSpecificationsForRoute(
+  products: readonly ExternalOrderCatalogProduct[],
+  route: OrderItemPricingRoute,
+): string[] {
+  return [
+    ...new Set(
+      products
+        .filter(
+          (product) =>
+            product.specification &&
+            productCategoryMatchesPricingRoute(route, product.category),
+        )
+        .map((product) => product.specification!.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+export function externalOrderDefaultSpecification(
+  products: readonly ExternalOrderCatalogProduct[],
+  route: OrderItemPricingRoute,
+): string {
+  const specifications = externalOrderSpecificationsForRoute(products, route);
+  return (
+    specifications.find((specification) => specification.includes('大号')) ??
+    specifications[0] ??
+    ''
   );
-  return canonical.length > 0 ? canonical : [...products];
 }
 
 export function findExternalOrderCatalogProduct<
@@ -241,28 +236,13 @@ export function findExternalOrderCatalogProduct<
   paperType: string,
   specification: string,
 ): T | null {
-  const routeProducts = canonicalExternalOrderProducts(products).filter(
-    (product) => productCategoryMatchesPricingRoute(route, product.category),
-  );
-  if (routeProducts.length === 0) return null;
-
-  const exact = routeProducts.find(
+  const matches = products.filter(
     (product) =>
+      productCategoryMatchesPricingRoute(route, product.category) &&
       sameCatalogText(product.specification, specification) &&
-      (!product.paperType || sameCatalogText(product.paperType, paperType)),
+      sameCatalogText(product.paperType, paperType),
   );
-  if (exact) return exact;
-
-  const samePaper = routeProducts.find((product) =>
-    sameCatalogText(product.paperType, paperType),
-  );
-  if (samePaper) return samePaper;
-
-  return (
-    routeProducts.find((product) =>
-      sameCatalogText(product.specification, specification),
-    ) ?? routeProducts[0] ?? null
-  );
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 export function externalOrderProductStructure(

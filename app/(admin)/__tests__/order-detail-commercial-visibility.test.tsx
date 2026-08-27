@@ -320,7 +320,7 @@ describe('order detail commercial visibility', () => {
     expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
   });
 
-  it('仅向管理员传递已发货外部销售工单的逐票更正事实', async () => {
+  it('仅向管理员传递承运商实际重量，不回退创建时报价重量', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
     });
@@ -348,7 +348,7 @@ describe('order detail commercial visibility', () => {
             id: 'shipment-1',
             sequence: 1,
             destinationProvince: '广东',
-            weightKg: '2.000',
+            weightKg: null,
           }),
         ],
       }),

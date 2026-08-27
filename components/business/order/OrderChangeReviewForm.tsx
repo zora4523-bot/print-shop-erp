@@ -8,7 +8,6 @@ import {
   useTransition,
 } from 'react';
 import type { FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   previewOrderChangeRequestPricingAction,
   reviewOrderChangeRequestAction,
@@ -188,7 +187,6 @@ export function OrderChangePricingPreviewPanel({
 }
 
 export function OrderChangeReviewForm({ requestId }: Props) {
-  const router = useRouter();
   const [state, action] = useActionState<
     ReviewOrderChangeRequestMutationResult | null,
     unknown
@@ -200,10 +198,6 @@ export function OrderChangeReviewForm({ requestId }: Props) {
   const [pending, startTransition] = useTransition();
   const [previewPending, startPreviewTransition] = useTransition();
   const [reviewRemark, setReviewRemark] = useState('');
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
 
   const loadPreview = useCallback(() => {
     startPreviewTransition(() => previewAction({ requestId }));

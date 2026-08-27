@@ -72,6 +72,38 @@ describe('OrderChangeFieldDiff', () => {
     expect(html).toContain('创建对应待生产任务');
   });
 
+  it('分开展示正反面烫金事实', () => {
+    const html = renderToStaticMarkup(
+      <OrderChangeFieldDiff
+        beforeSnapshot={{
+          items: [
+            {
+              ...beforeSnapshot.items[0],
+              frontFoilColors: ['哑金'],
+              backFoilColors: [],
+              isDoubleSided: false,
+            },
+          ],
+        }}
+        proposedChanges={{
+          items: [
+            {
+              operation: 'UPDATE',
+              itemId: 'item-1',
+              frontFoilColors: ['浅金'],
+              backFoilColors: ['红金'],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('正面烫金颜色');
+    expect(html).toContain('反面烫金颜色');
+    expect(html).toContain('浅金');
+    expect(html).toContain('红金');
+  });
+
   it('blocks blind approval when the stored payload cannot be interpreted', () => {
     const html = renderToStaticMarkup(
       <OrderChangeFieldDiff

@@ -950,7 +950,7 @@ describe('createOrder', () => {
     });
   });
 
-  it('uses server-calculated shipment charges and ignores external-sales fee overrides', async () => {
+  it('ignores external-sales weight and fee overrides at order creation', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -972,7 +972,7 @@ describe('createOrder', () => {
         receiverAddress: '广东佛山',
         expressCode: null,
         destinationProvince: '广东',
-        quotedWeightKg: '1',
+        quotedWeightKg: '12.5',
         shippingFee: '2.80',
         packingMaterialFee: '3.00',
         customerChargeOverrideReason: '本票使用加厚纸箱',
@@ -989,7 +989,13 @@ describe('createOrder', () => {
 
     const orderData = dbMock.order.create.mock.calls[0]![0].data;
     expect(orderData.processingAmount).toBe('500.00');
-    expect(orderData.totalAmount).toBe('510.30');
+    expect(orderData.totalAmount).toBe('500.00');
+    expect(orderData.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quotedWeightKg: null }),
+      }),
+    );
     const rows = dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data;
     expect(rows).toEqual(
       expect.arrayContaining([
@@ -998,9 +1004,9 @@ describe('createOrder', () => {
           categoryId: 'shipping-category',
           businessKey: 'SHIPMENT:1:SHIPPING_FEE',
           status: 'ESTIMATED',
-          suggestedAmount: '10.30',
-          amount: '10.30',
-          sourceRuleId: 'zto-guangdong',
+          suggestedAmount: null,
+          amount: '0.00',
+          sourceRuleId: null,
         }),
         expect.objectContaining({
           shipmentId: 'shipment-1',
@@ -1016,7 +1022,59 @@ describe('createOrder', () => {
     );
   });
 
-  it('automatically applies the server quote and stores its immutable snapshot', async () => {
+  it('does not guess a carrier weight when the trusted shipment fact is missing', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        code: 'PRODUCT_1',
+        category: 'BLANK_STOCK',
+        isActive: true,
+        baseUnitPrice: '0.5000',
+      },
+    ]);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({ amount: '0.5000' }),
+    ]);
+
+    await createOrder(
+      {
+        customerRef: '苹果福',
+        receiverName: '张三',
+        receiverPhone: '13800000000',
+        receiverAddress: '广东佛山',
+        expressCode: null,
+        destinationProvince: '广东',
+        quotedWeightKg: null,
+        packageRequirement: null,
+        remark: null,
+        promisedDate: null,
+        isUrgent: false,
+        isSfCollect: false,
+        items: [baseItem({ productId: 'product-1' })],
+      },
+      salesActor,
+      new Date('2026-04-23T09:00:00+08:00'),
+    );
+
+    const orderData = dbMock.order.create.mock.calls[0]![0].data;
+    expect(orderData.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quotedWeightKg: null }),
+      }),
+    );
+    expect(dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+          suggestedAmount: null,
+          amount: '0.00',
+        }),
+      ]),
+    );
+  });
+
+  it('automatically applies processing while leaving untrusted freight pending', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1075,7 +1133,8 @@ describe('createOrder', () => {
     );
 
     const data = dbMock.order.create.mock.calls[0]![0].data;
-    expect(data.totalAmount).toBe('160.30');
+    expect(data.totalAmount).toBe('150.00');
+    expect(data.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(data.items.create[0]).toMatchObject({
       unitPrice: '0.1300',
       fixedFee: '20.00',
@@ -1100,12 +1159,12 @@ describe('createOrder', () => {
       }),
     });
     expect(data.items.create[0]).not.toHaveProperty('suggestedPrice');
-    expect(data.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(data.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         revision: 1,
-        status: 'AUTO_CONFIRMED',
-        source: 'ORDER_CREATED_AUTO',
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'ORDER_CREATED_PROVISIONAL',
       }),
     });
   });
@@ -1149,7 +1208,7 @@ describe('createOrder', () => {
         new Date('2026-04-23T09:00:00+08:00'),
       );
     expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      pricingStatus: 'AUTO_CONFIRMED',
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
       items: {
         create: [
           expect.objectContaining({
@@ -1221,7 +1280,7 @@ describe('createOrder', () => {
         new Date('2026-04-23T09:00:00+08:00'),
       );
     expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      pricingStatus: 'AUTO_CONFIRMED',
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
       items: {
         create: [
           expect.objectContaining({
@@ -1847,7 +1906,7 @@ describe('createOrder', () => {
     );
   });
 
-  it('keeps an unquoted item at zero while adding server-calculated logistics', async () => {
+  it('keeps both an unquoted item and untrusted freight at zero', async () => {
     await createOrder(
       {
         customerRef: null,
@@ -1866,7 +1925,7 @@ describe('createOrder', () => {
       new Date('2026-04-23T09:00:00+08:00'),
     );
     expect(dbMock.order.create.mock.calls[0][0].data.items.create[0].subtotal).toBe('0.00');
-    expect(dbMock.order.create.mock.calls[0][0].data.totalAmount).toBe('5.80');
+    expect(dbMock.order.create.mock.calls[0][0].data.totalAmount).toBe('0.00');
   });
 
   it('records isUrgent and stamps a "创建急单" log remark', async () => {
@@ -2513,7 +2572,7 @@ describe('shipOrder', () => {
     );
   });
 
-  it('finalizes actual shipment facts without accepting a browser override of a complete automatic fee', async () => {
+  it('finalizes administrator-entered actual shipment charges without discarding them', async () => {
     dbMock.order.findUnique
       .mockResolvedValueOnce({
         id: 'o1',
@@ -2578,9 +2637,9 @@ describe('shipOrder', () => {
             trackingNo: 'ZTO001',
             weightKg: '2',
             destinationProvince: '广东',
-            shippingFee: '0.01',
-            packingMaterialFee: '1.00',
-            customerChargeOverrideReason: '发货时确认实际包材',
+            shippingFee: '4.50',
+            packingMaterialFee: '1.25',
+            customerChargeOverrideReason: '承运商与包材实际结算金额',
           },
         ],
       },
@@ -2595,7 +2654,8 @@ describe('shipOrder', () => {
             data: expect.objectContaining({
               status: 'FINAL',
               suggestedAmount: '4.30',
-              amount: '4.30',
+              amount: '4.50',
+              overrideReason: '承运商与包材实际结算金额',
               finalizedById: 'owner-1',
               finalizedAt: clock,
             }),
@@ -2607,8 +2667,8 @@ describe('shipOrder', () => {
             data: expect.objectContaining({
               status: 'FINAL',
               suggestedAmount: '0.00',
-              amount: '0.00',
-              overrideReason: null,
+              amount: '1.25',
+              overrideReason: '承运商与包材实际结算金额',
             }),
           }),
         ],
@@ -2616,7 +2676,7 @@ describe('shipOrder', () => {
     );
     expect(
       dbMock.order.update.mock.calls.find(
-        (call) => call[0]?.data?.totalAmount === '511.30',
+        (call) => call[0]?.data?.totalAmount === '512.75',
       ),
     ).toBeDefined();
     expect(dbMock.orderShipment.update).toHaveBeenCalledWith({
@@ -2640,6 +2700,90 @@ describe('shipOrder', () => {
         incrementOrderRevision: true,
       }),
     );
+  });
+
+  it('preserves a previously recorded carrier weight when SF collect is restored before shipping', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        id: 'o1',
+        status: OrderStatus.COMPLETED,
+        submitterId: 'sales-1',
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        pricingStatus: 'ADMIN_CONFIRMED',
+        priceRevision: 3,
+      })
+      .mockResolvedValueOnce({
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        // The administrator recorded the carrier weight first, then restored
+        // SF collect. Its disabled form field therefore submits null.
+        isSfCollect: true,
+        processingAmount: '500.00',
+        customerCharges: [
+          {
+            id: 'charge-shipping',
+            businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+            amount: '0.00',
+            priceBookId: 'logistics-book-test',
+            category: { code: 'SHIPPING_FEE' },
+          },
+          {
+            id: 'charge-packing',
+            businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+            amount: '0.00',
+            priceBookId: 'logistics-book-test',
+            category: { code: 'PACKING_MATERIAL' },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ id: 'o1', orderNo: 'O-1' });
+    dbMock.orderShipment.findMany.mockResolvedValue([
+      {
+        id: 'shipment-1',
+        sequence: 1,
+        destinationProvince: '广东',
+        weightKg: '2.5',
+        lines: [{ quantity: 1000 }],
+      },
+    ]);
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+    });
+    const clock = new Date('2026-04-25T12:00:00Z');
+
+    await shipOrder(
+      'o1',
+      ownerActor,
+      {
+        trackingNo: null,
+        shipments: [
+          {
+            shipmentId: 'shipment-1',
+            trackingNo: 'SF001',
+            weightKg: null,
+            destinationProvince: null,
+            shippingFee: '0.00',
+            packingMaterialFee: '0.00',
+            customerChargeOverrideReason: null,
+          },
+        ],
+      },
+      clock,
+    );
+
+    expect(dbMock.orderShipment.update).toHaveBeenCalledWith({
+      where: { id: 'shipment-1' },
+      data: {
+        trackingNo: 'SF001',
+        destinationProvince: '广东',
+        status: 'SHIPPED',
+        shippedAt: clock,
+      },
+      select: { id: true },
+    });
+    expect(
+      dbMock.orderShipment.update.mock.calls[0]![0].data,
+    ).not.toHaveProperty('weightKg');
   });
 
   it('rejects shipping while the price is pending administrator confirmation', async () => {
@@ -3858,6 +4002,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
 
   function externalChargeContext(overrides: {
     destinationProvince?: string | null;
+    quotedWeightKg?: string | null;
     weightKg?: string | null;
     shippingAmount?: string;
     otherAmount?: string;
@@ -3869,7 +4014,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
           sequence: 1,
           status: 'SHIPPED',
           destinationProvince: overrides.destinationProvince ?? null,
-          quotedWeightKg: null,
+          quotedWeightKg: overrides.quotedWeightKg ?? null,
           weightKg: overrides.weightKg ?? null,
           lines: [{ quantity: 1000 }],
         },
@@ -4212,6 +4357,82 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     expect(dbMock.orderCustomerCharge.update).not.toHaveBeenCalled();
     expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
     expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('ignores all salesperson-supplied shipment corrections without clearing an actual weight', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(
+        OrderStatus.SUBMITTED,
+        true,
+        'sales-1',
+        OrderSettlementType.EXTERNAL_SALES,
+      ),
+    );
+    const context = externalChargeContext({
+      destinationProvince: '广东',
+      weightKg: '2',
+    });
+    context.shipments[0]!.status = 'PENDING';
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SUBMITTED,
+    });
+
+    await setOrderSfCollect(
+      'order-1',
+      false,
+      salesActor,
+      [
+        {
+          shipmentId: 'shipment-1',
+          destinationProvince: '广东',
+          weightKg: '12.5',
+          shippingFee: null,
+          customerChargeOverrideReason: null,
+        },
+      ],
+    );
+
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changedFields: expect.not.objectContaining({
+          shipmentChargeCorrections: expect.anything(),
+        }),
+      }),
+    });
+  });
+
+  it('never reprices freight from a legacy browser quoted weight', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(
+        OrderStatus.SUBMITTED,
+        true,
+        'sales-1',
+        OrderSettlementType.EXTERNAL_SALES,
+      ),
+    );
+    const context = externalChargeContext({ quotedWeightKg: '12.5' });
+    context.shipments[0]!.status = 'PENDING';
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SUBMITTED,
+    });
+
+    await setOrderSfCollect('order-1', false, salesActor);
+
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: 'charge-shipping' },
+      data: expect.objectContaining({
+        sourceRuleId: null,
+        suggestedAmount: null,
+        amount: '0.00',
+        overrideReason: '取消顺丰到付，快递费待发货时确认',
+      }),
+    });
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
   });
 
   it('forbids sales from changing the charge state of a shipped external order', async () => {

@@ -210,10 +210,110 @@ const PLACEHOLDER_PNG_DATA_URL =
   'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
+const COLOR_ARTWORK_DATA_URL =
+  'data:image/svg+xml;base64,' +
+  Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop stop-color="#c91f37"/><stop offset=".55" stop-color="#f2c14e"/>' +
+      '<stop offset="1" stop-color="#1f7a8c"/></linearGradient></defs>' +
+      '<rect width="900" height="1200" fill="url(#g)"/>' +
+      '<circle cx="450" cy="420" r="230" fill="#fff" fill-opacity=".86"/>' +
+      '<path d="M140 930L450 650l310 280-310 150z" fill="#152238" fill-opacity=".9"/>' +
+      '<rect x="210" y="180" width="480" height="40" rx="20" fill="#fff"/>' +
+      '<rect x="285" y="545" width="330" height="26" rx="13" fill="#c91f37"/>' +
+      '</svg>',
+  ).toString('base64');
+
+export async function seedE2eOrderDesign(opts: {
+  orderId?: string;
+  expectedCustomName: string;
+}): Promise<{ orderId: string; orderNo: string; itemName: string }> {
+  return withDb(async (db) => {
+    const result = await db.query<{
+      orderId: string;
+      orderNo: string;
+      customName: string | null;
+      createdById: string;
+      creatorUsername: string;
+      itemId: string;
+      itemName: string;
+    }>(
+      `SELECT o.id AS "orderId",
+              o."orderNo" AS "orderNo",
+              o."customName" AS "customName",
+              o."createdById" AS "createdById",
+              creator.username AS "creatorUsername",
+              item.id AS "itemId",
+              item.name AS "itemName"
+         FROM "Order" o
+         JOIN "User" creator ON creator.id = o."createdById"
+         JOIN LATERAL (
+           SELECT oi.id, oi.name
+             FROM "OrderItem" oi
+            WHERE oi."orderId" = o.id
+            ORDER BY oi.sequence ASC
+            LIMIT 1
+         ) item ON TRUE
+        WHERE ($1::text IS NULL OR o.id = $1)
+          AND o."customName" = $2
+          AND o.status = 'DRAFT'
+        ORDER BY o."createdAt" DESC
+        LIMIT 2`,
+      [opts.orderId ?? null, opts.expectedCustomName],
+    );
+    const row = result.rows[0];
+    if (
+      result.rows.length !== 1 ||
+      !row ||
+      row.customName !== opts.expectedCustomName ||
+      !row.creatorUsername.startsWith('e2e-') ||
+      !opts.expectedCustomName.startsWith('E2E ')
+    ) {
+      throw new Error(
+        'seedE2eOrderDesign refuses an order outside the exact E2E fixture',
+      );
+    }
+
+    await db.query(
+      `INSERT INTO "OrderItemDesign" (
+         id, "orderItemId", "fileType", "fileUrl", "fileName",
+         "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
+       ) VALUES (
+         $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
+         $5, $3, $6, NOW()
+       )`,
+      [
+        `e2e-design-${randomBytes(8).toString('hex')}`,
+        row.itemId,
+        PLACEHOLDER_PNG_DATA_URL,
+        'e2e-production-design.png',
+        Buffer.byteLength(PLACEHOLDER_PNG_DATA_URL),
+        row.createdById,
+      ],
+    );
+    return {
+      orderId: row.orderId,
+      orderNo: row.orderNo,
+      itemName: row.itemName,
+    };
+  });
+}
+
 export async function seedPrintableOrder(opts: {
   submitterId: string;
   designCount: number;
-  variant?: 'default' | 'rich-context' | 'three-items';
+  variant?:
+    | 'default'
+    | 'rich-context'
+    | 'three-items'
+    | 'task-qr'
+    | 'large-items';
+  taskCount?: number;
+  itemCount?: number;
+  stressText?: boolean;
+  denseBoundary?: boolean;
+  artworkAnnexBoundary?: boolean;
 }): Promise<{
   orderId: string;
   orderNo: string;
@@ -225,10 +325,41 @@ export async function seedPrintableOrder(opts: {
   const variant = opts.variant ?? 'default';
   const richContext =
     variant === 'rich-context' || variant === 'three-items';
-  const itemCount = variant === 'three-items' ? 3 : 1;
-  const customName = richContext
-    ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
-    : null;
+  const itemCount =
+    variant === 'large-items'
+      ? opts.itemCount ?? 20
+      : variant === 'three-items'
+        ? 3
+        : 1;
+  if (!Number.isInteger(itemCount) || itemCount < 1 || itemCount > 50) {
+    throw new Error('seedPrintableOrder itemCount must be an integer from 1 to 50');
+  }
+  const stressText = variant === 'large-items' && opts.stressText === true;
+  const denseBoundary =
+    variant === 'large-items' && opts.denseBoundary === true;
+  const artworkAnnexBoundary =
+    variant === 'large-items' && opts.artworkAnnexBoundary === true;
+  if (
+    Number(stressText) +
+      Number(denseBoundary) +
+      Number(artworkAnnexBoundary) >
+    1
+  ) {
+    throw new Error(
+      'seedPrintableOrder stressText, denseBoundary, and artworkAnnexBoundary are mutually exclusive',
+    );
+  }
+  if (artworkAnnexBoundary && itemCount !== 1) {
+    throw new Error(
+      'seedPrintableOrder artworkAnnexBoundary requires exactly one item',
+    );
+  }
+  const taskCount = variant === 'task-qr' ? opts.taskCount ?? 1 : 0;
+  const customName = stressText
+    ? '单'.repeat(100)
+    : richContext
+      ? '视觉回归自定义工单名称：春节红包VIP客户加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789第二版终稿'
+      : null;
   const itemRemark = richContext
     ? '关键备注：正面品牌标志必须使用红金，背面祝福语使用哑金，潘通 871C 仅用于边框；严格按最终设计稿方向生产，不可镜像、不可漏烫。LONG-CRITICAL-NOTE-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789'
     : null;
@@ -241,21 +372,36 @@ export async function seedPrintableOrder(opts: {
   // same ID across runs also keeps the QR SVG and screenshot bytes stable.
   // CASCADE FKs on Order → OrderItem and OrderItem → OrderItemDesign
   // clean up children automatically.
+  const largeFixtureSuffix = stressText
+    ? '-stress'
+    : denseBoundary
+      ? '-dense'
+      : artworkAnnexBoundary
+        ? '-art-annex'
+        : '';
   const idStem =
-    variant === 'three-items'
-      ? `e2e-vr-three-items-${opts.designCount}`
-      : richContext
-        ? `e2e-vr-rich-${opts.designCount}`
-        : `e2e-vr-${opts.designCount}`;
+    variant === 'large-items'
+      ? `e2e-vr-large-items-${itemCount}-${opts.designCount}${largeFixtureSuffix}`
+      : variant === 'three-items'
+        ? `e2e-vr-three-items-${opts.designCount}`
+        : variant === 'task-qr'
+          ? `e2e-vr-task-qr-${opts.designCount}-${taskCount}`
+          : richContext
+            ? `e2e-vr-rich-${opts.designCount}`
+            : `e2e-vr-${opts.designCount}`;
   // v2 keeps the visual fixture deterministic while avoiding legacy v1 rows
   // that received immutable pricing revisions during the schema backfill.
   const orderId = `${idStem}-v2`;
   const orderNo =
-    variant === 'three-items'
-      ? `E2E-VR2-THREE-${opts.designCount}`
-      : richContext
-        ? `E2E-VR2-RICH-${opts.designCount}`
-        : `E2E-VR2-${opts.designCount}`;
+    variant === 'large-items'
+      ? `E2E-VR2-LARGE-${itemCount}-${opts.designCount}${largeFixtureSuffix.toUpperCase()}`
+      : variant === 'three-items'
+        ? `E2E-VR2-THREE-${opts.designCount}`
+        : variant === 'task-qr'
+          ? `E2E-VR2-TASK-QR-${opts.designCount}-${taskCount}`
+          : richContext
+            ? `E2E-VR2-RICH-${opts.designCount}`
+            : `E2E-VR2-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
   await withDb(async (db) => {
@@ -267,16 +413,20 @@ export async function seedPrintableOrder(opts: {
         id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
         status, "isUrgent", "customerRef", "customName", "receiverName",
         "receiverPhone", "receiverAddress", "isSfCollect",
-        "totalAmount", "submittedAt", "createdAt", "updatedAt"
+        "promisedDate", "packageRequirement", remark, "totalAmount",
+        "submittedAt", "createdAt", "updatedAt"
       ) VALUES (
         $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType", $3,
         'DRAFT'::"OrderStatus", FALSE,
-        'VR-CUSTOMER',
+        $10,
         $4,
         'VR 收件人',
         '13800138000',
         $5,
         $6,
+        $7,
+        $8,
+        $9,
         0,
         TIMESTAMP '2026-01-01 00:00:00',
         TIMESTAMP '2026-01-01 00:00:00',
@@ -288,8 +438,28 @@ export async function seedPrintableOrder(opts: {
         orderNo,
         opts.submitterId,
         customName,
-        variant === 'three-items' ? '佛山市测试主地址 88 号' : null,
+        variant === 'three-items'
+          ? '佛山市测试主地址 88 号'
+          : variant === 'large-items'
+            ? '佛山市大工单打印测试地址 50 号'
+            : null,
         variant === 'three-items',
+        variant === 'large-items' ? '2026-01-10' : null,
+        variant === 'large-items'
+          ? stressText
+            ? '包'.repeat(500)
+            : denseBoundary
+              ? '包'.repeat(36)
+              : '10 个一袋'
+          : null,
+        stressText
+          ? Array.from({ length: 500 }, () => '备').join('\n')
+          : denseBoundary
+            ? '备'.repeat(120)
+            : artworkAnnexBoundary
+              ? Array.from({ length: 20 }, () => '备'.repeat(50)).join('\n')
+              : null,
+        stressText ? '客'.repeat(128) : 'VR-CUSTOMER',
       ],
     );
 
@@ -306,7 +476,7 @@ export async function seedPrintableOrder(opts: {
           $1, $2, $3, $4,
           'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
           'STANDARD_ENVELOPE'::"OrderProductStructure",
-          '9cm × 17cm', $8, $5, $6::text[], 'FLAT'::"OrderFoilTechnique",
+          $10, $8, $5, $6::text[], 'FLAT'::"OrderFoilTechnique",
           TRUE, $9, ARRAY[]::text[], $7, NOW(), NOW()
         )
         `,
@@ -314,16 +484,30 @@ export async function seedPrintableOrder(opts: {
           currentOrderItemId,
           orderId,
           itemIndex + 1,
-          itemCount === 1 ? 'VR 款式' : `VR 款式 ${itemIndex + 1}`,
+          stressText
+            ? `款式 ${itemIndex + 1} ${'款'.repeat(54)}`
+            : itemCount === 1
+              ? 'VR 款式'
+              : `VR 款式 ${itemIndex + 1}`,
           5000 + itemIndex * 1000,
-          foilColors,
+          stressText
+            ? ['金'.repeat(32), '红'.repeat(32), '银'.repeat(32)]
+            : foilColors,
           itemRemark,
-          itemCount === 3 ? '艳红珠光纸' : '珠光纸',
+          stressText
+            ? `纸 ${itemIndex + 1} ${'材'.repeat(46)}`
+            : itemCount === 3
+              ? '艳红珠光纸'
+              : '珠光纸',
           itemCount === 3,
+          stressText ? '规'.repeat(64) : '9cm × 17cm',
         ],
       );
 
       for (let designIndex = 0; designIndex < opts.designCount; designIndex++) {
+        const designUrl = artworkAnnexBoundary
+          ? COLOR_ARTWORK_DATA_URL
+          : PLACEHOLDER_PNG_DATA_URL;
         await db.query(
           `
           INSERT INTO "OrderItemDesign" (
@@ -338,11 +522,123 @@ export async function seedPrintableOrder(opts: {
           [
             `${currentOrderItemId}-design-${designIndex}`,
             currentOrderItemId,
-            PLACEHOLDER_PNG_DATA_URL,
+            designUrl,
             itemCount === 1
               ? `design-${designIndex + 1}.png`
               : `design-${itemIndex + 1}-${designIndex + 1}.png`,
             opts.submitterId,
+          ],
+        );
+      }
+    }
+
+    if (variant === 'large-items' && (stressText || denseBoundary)) {
+      const shipmentCount = stressText ? 10 : 2;
+      for (
+        let shipmentIndex = 0;
+        shipmentIndex < shipmentCount;
+        shipmentIndex++
+      ) {
+        await db.query(
+          `
+          INSERT INTO "OrderShipment" (
+            id, "orderId", sequence, "receiverName", "receiverPhone",
+            "receiverAddress", "expressCode", status, "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, $3, $4, '13800138000', $5, 'SF',
+            'PLANNED'::"ShipmentStatus",
+            TIMESTAMP '2026-01-01 00:00:00',
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          `,
+          [
+            `${orderId}-shipment-${shipmentIndex + 1}`,
+            orderId,
+            shipmentIndex + 1,
+            `收件人 ${shipmentIndex + 1}`,
+            stressText
+              ? `地址 ${shipmentIndex + 1} ${'址'.repeat(246)}`
+              : '址'.repeat(120),
+          ],
+        );
+      }
+    }
+
+    if (variant === 'large-items' && stressText) {
+      const craftId = 'e2e-vr-print-long-team-craft';
+      const firstOrderItemId =
+        itemCount === 1 ? orderItemId : `${orderItemId}-1`;
+      const workers = Array.from({ length: 50 }, (_, index) => {
+        const sequence = String(index + 1).padStart(2, '0');
+        return {
+          id: `e2e-vr-print-long-worker-${sequence}`,
+          username: `e2e-vr-print-long-worker-${sequence}`,
+          displayName: `师傅${sequence}${'长'.repeat(60)}`,
+        };
+      });
+
+      await db.query(
+        `
+        INSERT INTO "Craft" (
+          id, name, code, "isOutsource", "sortOrder", "isActive",
+          "createdAt", "updatedAt"
+        ) VALUES (
+          $1, 'E2E 专版烫金', 'E2E_PRINT_LONG_TEAM', FALSE, 9998, TRUE,
+          TIMESTAMP '2026-01-01 00:00:00',
+          TIMESTAMP '2026-01-01 00:00:00'
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          code = EXCLUDED.code,
+          "isActive" = TRUE,
+          "updatedAt" = EXCLUDED."updatedAt"
+        `,
+        [craftId],
+      );
+
+      for (const worker of workers) {
+        await db.query(
+          `
+          INSERT INTO "User" (
+            id, username, password, role, "workerType", "displayName",
+            "isActive", "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, 'e2e-print-only-password', 'WORKER'::"Role",
+            'PACKER'::"WorkerType", $3, TRUE,
+            TIMESTAMP '2026-01-01 00:00:00',
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            username = EXCLUDED.username,
+            role = EXCLUDED.role,
+            "workerType" = EXCLUDED."workerType",
+            "displayName" = EXCLUDED."displayName",
+            "isActive" = TRUE,
+            "updatedAt" = EXCLUDED."updatedAt"
+          `,
+          [worker.id, worker.username, worker.displayName],
+        );
+      }
+
+      for (const [index, worker] of workers.entries()) {
+        const sequence = String(index + 1).padStart(2, '0');
+        await db.query(
+          `
+          INSERT INTO "ProductionTask" (
+            id, "orderItemId", "craftId", "workerId", "workerType", status,
+            "plannedQty", "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, $3, $4, 'PACKER'::"WorkerType",
+            'PENDING'::"TaskStatus", 100,
+            TIMESTAMP '2026-01-01 00:00:00',
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          `,
+          [
+            `${orderId}-task-${sequence}`,
+            firstOrderItemId,
+            craftId,
+            worker.id,
           ],
         );
       }
@@ -382,6 +678,65 @@ export async function seedPrintableOrder(opts: {
             secondaryShipmentId,
             currentOrderItemId,
             totalQuantity - 100,
+          ],
+        );
+      }
+    }
+
+    if (variant === 'task-qr') {
+      const craftId = 'e2e-vr-print-task-craft';
+      await db.query(
+        `
+        UPDATE "OrderItem"
+        SET
+          "pricingRoute" = 'COLOR_PRINT'::"OrderItemPricingRoute",
+          "frontFoilColors" = ARRAY['哑金']::text[],
+          "backFoilColors" = ARRAY['红金']::text[],
+          "foilColors" = ARRAY[]::text[],
+          "foilTechnique" = 'RELIEF'::"OrderFoilTechnique",
+          "hasLocalFoil" = TRUE,
+          lamination = 'SOFT_TOUCH'::"OrderLamination",
+          "printColors" = ARRAY['C', 'M', 'Y', 'K']::text[],
+          "printColorsKnown" = TRUE,
+          "updatedAt" = NOW()
+        WHERE id = $1
+        `,
+        [orderItemId],
+      );
+      await db.query(
+        `
+        INSERT INTO "Craft" (
+          id, name, code, "isOutsource", "sortOrder", "isActive",
+          "createdAt", "updatedAt"
+        ) VALUES (
+          $1, 'E2E 局部烫金', 'E2E_PRINT_TASK_QR', FALSE, 9999, TRUE,
+          NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          code = EXCLUDED.code,
+          "isActive" = TRUE,
+          "updatedAt" = NOW()
+        `,
+        [craftId],
+      );
+      for (let taskIndex = 0; taskIndex < taskCount; taskIndex++) {
+        await db.query(
+          `
+          INSERT INTO "ProductionTask" (
+            id, "orderItemId", "craftId", "workerId", status,
+            "plannedQty", "createdAt", "updatedAt"
+          ) VALUES (
+            $1, $2, $3, $4, 'PENDING'::"TaskStatus", 5000,
+            TIMESTAMP '2026-01-01 00:00:00',
+            TIMESTAMP '2026-01-01 00:00:00'
+          )
+          `,
+          [
+            `${orderId}-task-${taskIndex + 1}`,
+            orderItemId,
+            craftId,
+            opts.submitterId,
           ],
         );
       }
@@ -1252,7 +1607,7 @@ export async function openFirstOrderItemEditor(page: Page): Promise<void> {
       .first();
     await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
     await expect(
-      externalForm.getByLabel('数量', { exact: true }),
+      externalForm.getByRole('spinbutton', { name: '数量', exact: true }),
     ).toBeVisible();
     return;
   }
@@ -1268,24 +1623,32 @@ export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   await expect(internalEditor).toBeVisible();
 }
 
-// External-sales orders must explicitly confirm both customer-facing logistics
-// charges. Keep this in the visible shipping step so creation-flow tests cover
-// the same prerequisite an operator sees instead of bypassing the domain rule.
-export async function fillExternalSalesOrderCharges(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: /收货与费用/ }).click();
-  const panel = page.locator('#order-step-shipping-panel');
-  await expect(panel).toBeVisible();
-
-  await page
-    .getByLabel('收货信息', { exact: true })
+// The external-sales B form has one visible page and never accepts a browser
+// weight or manual logistics amount. Production-flow E2E uses SF collect,
+// which produces a complete versioned quote without inventing carrier facts.
+// A design row is attached by seedE2eOrderDesign so local tests stay hermetic
+// and do not upload fixtures into the real OSS bucket.
+export async function fillExternalSalesOrderDraft(
+  page: Page,
+  opts: { customName: string; quantity?: number },
+): Promise<void> {
+  const form = page.locator('[data-slot="external-sales-order-form-b"]');
+  await expect(form).toBeVisible();
+  await form
+    .getByRole('textbox', { name: '工单名称', exact: true })
+    .fill(opts.customName);
+  await form
+    .getByRole('spinbutton', { name: '数量', exact: true })
+    .fill(String(opts.quantity ?? 1000));
+  await form
+    .getByRole('textbox', { name: '收货地址', exact: true })
     .fill('E2E 收货人 13800138000 广东省深圳市南山区测试路 1 号');
-  await page.locator('#primary-province').selectOption('广东');
-  await page.locator('#primary-weight').fill('1');
-  await page.locator('#primary-shipping-fee').fill('0.00');
-  await page.locator('#primary-packing-fee').fill('0.00');
-  await page
-    .locator('#primary-charge-reason')
-    .fill('E2E 全链路仅验证工单流程，物流与耗材由测试值人工确认');
+  await form
+    .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
+    .check();
+  await expect(
+    form.getByRole('button', { name: /^提交工单$/ }),
+  ).toBeEnabled();
 }
 
 // The submit button changes to "提交中…" immediately, so asserting that the

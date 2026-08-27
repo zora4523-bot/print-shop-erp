@@ -192,7 +192,29 @@ describe('OrderForm pricing routes', () => {
       <OrderForm
         draftScope="paper-catalog-test"
         crafts={crafts}
-        products={[]}
+        products={[
+          {
+            id: 'stock-touch',
+            name: '触感纸大号现货',
+            category: 'BLANK_STOCK',
+            specification: '大号封90×165',
+            paperType: '200g触感纸',
+          },
+          {
+            id: 'stock-red',
+            name: '红卡大号现货',
+            category: 'BLANK_STOCK',
+            specification: '大号封90×165',
+            paperType: '180g红卡',
+          },
+          {
+            id: 'stock-pearl',
+            name: '珠光纸艳闪大号现货',
+            category: 'BLANK_STOCK',
+            specification: '大号封90×165',
+            paperType: '160g珠光纸艳闪',
+          },
+        ]}
         paperMaterials={[
           { id: 'paper-touch', code: 'PAPER-TOUCH', name: '触感纸' },
           { id: 'paper-linen', code: 'PAPER-LINEN', name: '莱尼纹' },
@@ -268,29 +290,29 @@ describe('OrderForm pricing routes', () => {
             id: 'stock-product',
             name: '触感纸大号现货',
             category: 'BLANK_STOCK',
-            specification: '大号',
-            paperType: '触感纸',
+            specification: '大号封90×165',
+            paperType: '200g触感纸',
           },
           {
             id: 'custom-product',
             name: '专版烫金大号',
             category: 'CUSTOM_FLAT_FOIL',
-            specification: '大号',
-            paperType: '触感纸',
+            specification: '大号封90×165',
+            paperType: '200g触感纸',
           },
           {
             id: 'color-product',
             name: '彩印大号',
             category: 'COLOR_PRINT',
-            specification: '大号',
-            paperType: '铜版纸',
+            specification: '大号封90×165',
+            paperType: '250g铜版纸',
           },
           {
             id: 'legacy-stock-foil-product',
             name: '历史现货加烫 SKU',
             category: 'STOCK_FOIL_ADD',
-            specification: '大号',
-            paperType: '触感纸',
+            specification: '大号封90×165',
+            paperType: '200g触感纸',
           },
         ]}
         settlementLabel="外部销售"

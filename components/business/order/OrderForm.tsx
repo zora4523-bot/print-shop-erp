@@ -77,13 +77,13 @@ import {
   type OrderSubmissionReviewItem,
 } from './order-form-b';
 import {
-  EXTERNAL_ORDER_DEFAULT_SPECIFICATION,
-  EXTERNAL_ORDER_SPECIFICATIONS,
+  externalOrderDefaultSpecification,
   externalOrderDimensions,
   externalOrderPaperFromType,
   externalOrderPapersForRoute,
   externalOrderPaperType,
   externalOrderProductStructure,
+  externalOrderSpecificationsForRoute,
   externalOrderSpecificationLabel,
   externalOrderStyleName,
   externalOrderWeightsForSelection,
@@ -407,8 +407,11 @@ function normalizeExternalOrderItem(args: {
       透明金: '透明色',
     })[color] ?? color;
   const route = args.item.pricingRoute;
-  const routePapers = externalOrderPapersForRoute(route);
-  const inferredPaper = externalOrderPaperFromType(args.item.paperType);
+  const routePapers = externalOrderPapersForRoute(args.products, route);
+  const inferredPaper = externalOrderPaperFromType(
+    args.products,
+    args.item.paperType,
+  );
   const requestedPaper = args.paperKey
     ? routePapers.find((paper) => paper.key === args.paperKey)
     : undefined;
@@ -421,12 +424,17 @@ function normalizeExternalOrderItem(args: {
       : routePapers[0]);
   if (!paper) return args.item;
 
-  const specifications = EXTERNAL_ORDER_SPECIFICATIONS[route];
+  const specifications = externalOrderSpecificationsForRoute(
+    args.products,
+    route,
+  );
   const requestedSpecification = args.item.specification ?? '';
   const specification =
     !args.resetSpecification && specifications.includes(requestedSpecification)
       ? requestedSpecification
-      : EXTERNAL_ORDER_DEFAULT_SPECIFICATION[route] || specifications[0] || '';
+      : externalOrderDefaultSpecification(args.products, route) ||
+        specifications[0] ||
+        '';
   const allowedWeights = [
     ...externalOrderWeightsForSelection(paper, route, specification),
   ];
@@ -437,7 +445,13 @@ function normalizeExternalOrderItem(args: {
     allowedWeights.includes(currentWeight) || allowManualWeight
       ? currentWeight
       : (allowedWeights[0] ?? currentWeight);
-  const paperType = externalOrderPaperType(paper, weight);
+  const paperType = externalOrderPaperType(
+    paper,
+    route,
+    specification,
+    weight,
+  );
+  if (!paperType) return args.item;
 
   let frontFoilColors = args.item.frontFoilColors.map(
     normalizeExternalFoilColor,
@@ -598,7 +612,7 @@ function externalQuoteComponentLabel(
     const passCount =
       item.frontFoilColors.length + item.backFoilColors.length;
     const calculation =
-      item.quantity < 1_000
+      component.adjustmentType === 'FIXED_AMOUNT'
         ? `${passCount}次过版 × ${compactDecimal(component.rate)}元`
         : `${Number(component.units).toLocaleString('zh-CN')}次印刷 × ${compactDecimal(component.rate)}`;
     return `机烫金 ${foilSummary} · ${calculation}`;
@@ -1311,12 +1325,6 @@ export function OrderForm({
     if (!data.receiverPhone?.trim()) issues.push('收货电话必填');
     data.items.forEach((item, index) => {
       const itemLabel = `第 ${index + 1} 款`;
-      if (
-        item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-        item.quantity < 100
-      ) {
-        issues.push(`${itemLabel}：彩印最低 100 个起订`);
-      }
       const fieldId = fieldIds[index];
       const files = fieldId ? queueSnapshot[fieldId] ?? [] : [];
       if (
@@ -1581,7 +1589,10 @@ export function OrderForm({
 
   function changeExternalPaper(index: number, paperKey: ExternalOrderPaperKey) {
     const current = getValues(`items.${index}`);
-    const paper = externalOrderPapersForRoute(current.pricingRoute).find(
+    const paper = externalOrderPapersForRoute(
+      products,
+      current.pricingRoute,
+    ).find(
       (candidate) => candidate.key === paperKey,
     );
     if (!paper) return;
@@ -1590,7 +1601,10 @@ export function OrderForm({
         paper,
         current.pricingRoute,
         current.specification ??
-          EXTERNAL_ORDER_DEFAULT_SPECIFICATION[current.pricingRoute],
+          externalOrderDefaultSpecification(
+            products,
+            current.pricingRoute,
+          ),
       )[0] ?? 160;
     commitExternalItem(
       index,
@@ -2455,7 +2469,7 @@ export function OrderForm({
         );
         const unitsPerBag = packagingGroup?.itemUnitsPerBag[index] ?? 0;
         const quote = railQuoteItems[index];
-        const paper = externalOrderPaperFromType(item.paperType);
+        const paper = externalOrderPaperFromType(products, item.paperType);
         const specification = externalOrderSpecificationLabel(
           item.specification ?? '—',
           item.pricingRoute,
@@ -2554,10 +2568,14 @@ export function OrderForm({
   const activeExternalItem =
     watchedItems[expandedItem] ?? watchedItems[0] ?? initialItem;
   const activeExternalPaper = externalOrderPaperFromType(
+    products,
     activeExternalItem.paperType,
   );
   const externalPaperOptions: OrderPaperSwatchOption[] =
-    externalOrderPapersForRoute(activeExternalItem.pricingRoute).map(
+    externalOrderPapersForRoute(
+      products,
+      activeExternalItem.pricingRoute,
+    ).map(
       (paper) => ({
         value: paper.key,
         label: paper.label,
@@ -2573,9 +2591,10 @@ export function OrderForm({
         ),
       ]
     : [];
-  const externalSpecificationOptions = EXTERNAL_ORDER_SPECIFICATIONS[
-    activeExternalItem.pricingRoute
-  ].map((specification) => ({
+  const externalSpecificationOptions = externalOrderSpecificationsForRoute(
+    products,
+    activeExternalItem.pricingRoute,
+  ).map((specification) => ({
     value: specification,
     label: externalOrderSpecificationLabel(
       specification,
@@ -2628,12 +2647,7 @@ export function OrderForm({
           errors.items?.[index]?.backFoilColors?.message ??
           errors.items?.[index]?.foilColors?.message,
         quantity:
-          quantityMessage ??
-          (externalValidationVisible &&
-          item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-          item.quantity < 100
-            ? '彩印最低 100 个起订'
-            : undefined),
+          quantityMessage,
         designImage:
           externalValidationVisible && !hasImage ? '请上传设计图' : undefined,
       };

@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState, useTransition } from 'react';
 import {
   deleteOrderManualChargeAction,
   deleteOrderPlateDetailAction,
@@ -87,7 +86,6 @@ function ManualChargeEditor({
   priceRevision: number;
   charge: ManualCharge | null;
 }) {
-  const router = useRouter();
   const initialCategory = isManualChargeCode(charge?.category.code)
     ? charge.category.code
     : 'SAMPLE_FEE';
@@ -110,15 +108,6 @@ function ManualChargeEditor({
   >(deleteOrderManualChargeAction, null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
-
-  useEffect(() => {
-    if (saveState?.status !== 'success') return;
-    router.refresh();
-  }, [router, saveState]);
-
-  useEffect(() => {
-    if (deleteState?.status === 'success') router.refresh();
-  }, [deleteState, router]);
 
   const removed = charge?.status === 'WAIVED';
   const ready =
@@ -316,7 +305,6 @@ function PlateDetailEditor({
   priceRevision: number;
   detail: PlateDetail | null;
 }) {
-  const router = useRouter();
   const [name, setName] = useState(detail?.name ?? '');
   const [plateGroupId, setPlateGroupId] = useState(
     detail?.plateGroupId ?? '',
@@ -338,15 +326,6 @@ function PlateDetailEditor({
   >(deleteOrderPlateDetailAction, null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
-
-  useEffect(() => {
-    if (saveState?.status !== 'success') return;
-    router.refresh();
-  }, [router, saveState]);
-
-  useEffect(() => {
-    if (deleteState?.status === 'success') router.refresh();
-  }, [deleteState, router]);
 
   if (detail && !detail.isActive) {
     return (

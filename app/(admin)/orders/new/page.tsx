@@ -2,7 +2,10 @@ import { redirect } from 'next/navigation';
 import { OrderSettlementType, Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
-import { listActiveProductOrderOptions } from '@/lib/product';
+import {
+  listActiveProductOrderOptions,
+  listCurrentExternalSalesProductOrderOptions,
+} from '@/lib/product';
 import { listActivePaperOrderOptions } from '@/lib/material';
 import { listCustomerPartyOptions } from '@/lib/party';
 import { OrderForm } from '@/components/business/order/OrderForm';
@@ -23,15 +26,17 @@ export default async function NewOrderPage() {
     user.role === Role.ADMIN;
   if (!canCreate) redirect('/orders');
 
-  const [crafts, products, paperMaterials, customers] = await Promise.all([
-    listActiveCraftOrderOptions(),
-    listActiveProductOrderOptions(),
-    listActivePaperOrderOptions(),
-    listCustomerPartyOptions(),
-  ]);
   const settlementType = settlementTypeForOrderCreator(user.role);
   const usesExternalSalesPricing =
     settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const [crafts, products, paperMaterials, customers] = await Promise.all([
+    listActiveCraftOrderOptions(),
+    usesExternalSalesPricing
+      ? listCurrentExternalSalesProductOrderOptions()
+      : listActiveProductOrderOptions(),
+    listActivePaperOrderOptions(),
+    listCustomerPartyOptions(),
+  ]);
 
   return (
     <div className="space-y-4">

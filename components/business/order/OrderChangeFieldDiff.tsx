@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { TableScrollArea } from '@/components/ui-business';
+import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type SnapshotItem = {
@@ -8,7 +9,10 @@ type SnapshotItem = {
   name: string;
   quantity: number | null;
   specification: string | null;
+  frontFoilColors: string[];
+  backFoilColors: string[];
   foilColors: string[];
+  isDoubleSided: boolean;
 };
 
 type DiffRow = {
@@ -47,10 +51,16 @@ const FIELD_DEFINITIONS = [
     productionImpact: '同步生产规格',
   },
   {
-    key: 'foilColors',
-    label: '烫金颜色',
+    key: 'frontFoilColors',
+    label: '正面烫金颜色',
     pricingImpact: '需要重新计价',
-    productionImpact: '同步生产颜色要求',
+    productionImpact: '同步正面烫金要求',
+  },
+  {
+    key: 'backFoilColors',
+    label: '反面烫金颜色',
+    pricingImpact: '需要重新计价',
+    productionImpact: '同步反面烫金要求',
   },
 ] as const;
 
@@ -62,6 +72,14 @@ function readSnapshotItems(value: unknown): SnapshotItem[] {
     if (!raw || typeof raw !== 'object') return [];
     const item = raw as Record<string, unknown>;
     if (typeof item.id !== 'string') return [];
+    const foilColors = stringArray(item.foilColors);
+    const isDoubleSided = item.isDoubleSided === true;
+    const foilSides = resolveOrderItemFoilSides({
+      frontFoilColors: stringArray(item.frontFoilColors),
+      backFoilColors: stringArray(item.backFoilColors),
+      foilColors,
+      isDoubleSided,
+    });
     return [
       {
         id: item.id,
@@ -76,11 +94,9 @@ function readSnapshotItems(value: unknown): SnapshotItem[] {
             : null,
         specification:
           typeof item.specification === 'string' ? item.specification : null,
-        foilColors: Array.isArray(item.foilColors)
-          ? item.foilColors.filter(
-              (color): color is string => typeof color === 'string',
-            )
-          : [],
+        ...foilSides,
+        foilColors,
+        isDoubleSided,
       },
     ];
   });
@@ -88,6 +104,38 @@ function readSnapshotItems(value: unknown): SnapshotItem[] {
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
+function foilSidesAfterChange(
+  change: Record<string, unknown>,
+  source: SnapshotItem | undefined,
+): { frontFoilColors: string[]; backFoilColors: string[] } {
+  if (hasOwn(change, 'frontFoilColors') || hasOwn(change, 'backFoilColors')) {
+    return {
+      frontFoilColors: hasOwn(change, 'frontFoilColors')
+        ? stringArray(change.frontFoilColors)
+        : (source?.frontFoilColors ?? []),
+      backFoilColors: hasOwn(change, 'backFoilColors')
+        ? stringArray(change.backFoilColors)
+        : (source?.backFoilColors ?? []),
+    };
+  }
+  if (hasOwn(change, 'foilColors')) {
+    return resolveOrderItemFoilSides({
+      foilColors: stringArray(change.foilColors),
+      isDoubleSided: source?.isDoubleSided ?? false,
+    });
+  }
+  return {
+    frontFoilColors: source?.frontFoilColors ?? [],
+    backFoilColors: source?.backFoilColors ?? [],
+  };
 }
 
 function comparable(value: unknown): string {
@@ -100,7 +148,7 @@ function comparable(value: unknown): string {
 }
 
 function displayValue(field: string, value: unknown): string {
-  if (field === 'foilColors') {
+  if (field === 'frontFoilColors' || field === 'backFoilColors') {
     const colors = Array.isArray(value)
       ? value.filter((color): color is string => typeof color === 'string')
       : [];
@@ -155,12 +203,21 @@ function buildDiffGroups(
         name: before.name,
         quantity: before.quantity,
         specification: before.specification,
-        foilColors: before.foilColors,
+        frontFoilColors: before.frontFoilColors,
+        backFoilColors: before.backFoilColors,
       };
+      const afterRecord: Record<string, unknown> = { ...change };
+      if (
+        hasOwn(change, 'frontFoilColors') ||
+        hasOwn(change, 'backFoilColors') ||
+        hasOwn(change, 'foilColors')
+      ) {
+        Object.assign(afterRecord, foilSidesAfterChange(change, before));
+      }
       const rows = FIELD_DEFINITIONS.flatMap<DiffRow>((definition) => {
-        if (!hasOwn(change, definition.key)) return [];
+        if (!hasOwn(afterRecord, definition.key)) return [];
         const previous = beforeRecord[definition.key];
-        const next = change[definition.key];
+        const next = afterRecord[definition.key];
         if (comparable(previous) === comparable(next)) return [];
         return [
           {
@@ -191,14 +248,18 @@ function buildDiffGroups(
         typeof change.templateItemId === 'string'
           ? itemById.get(change.templateItemId)
           : undefined;
+      const afterRecord: Record<string, unknown> = {
+        ...change,
+        ...foilSidesAfterChange(change, template),
+      };
       const rows = FIELD_DEFINITIONS.flatMap<DiffRow>((definition) => {
-        if (!hasOwn(change, definition.key)) return [];
+        if (!hasOwn(afterRecord, definition.key)) return [];
         return [
           {
             key: `${changeIndex}-${definition.key}`,
             field: definition.label,
             before: '—（新增）',
-            after: displayValue(definition.key, change[definition.key]),
+            after: displayValue(definition.key, afterRecord[definition.key]),
             pricingImpact: '需要重新计价' as const,
             productionImpact:
               definition.key === 'quantity'

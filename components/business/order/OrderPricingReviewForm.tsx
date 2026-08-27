@@ -7,7 +7,6 @@ import {
   useState,
   useTransition,
 } from "react";
-import { useRouter } from "next/navigation";
 import {
   finalizeOrderPricingAction,
   previewOrderPricingReviewAction,
@@ -67,7 +66,6 @@ function priceBookLabel(
 }
 
 export function OrderPricingReviewForm({ orderId }: Props) {
-  const router = useRouter();
   const [previewState, previewAction] = useActionState<
     PreviewOrderPricingReviewResult | null,
     unknown
@@ -100,9 +98,8 @@ export function OrderPricingReviewForm({ orderId }: Props) {
 
   useEffect(() => {
     if (finalizeState?.status !== "success") return;
-    router.refresh();
     loadPreview();
-  }, [finalizeState, loadPreview, router]);
+  }, [finalizeState, loadPreview]);
 
   function submit() {
     if (!preview) return;

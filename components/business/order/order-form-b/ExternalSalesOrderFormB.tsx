@@ -1213,12 +1213,6 @@ export function ExternalSalesOrderFormB({
                   }
                 />
                 <FieldError>{itemErrors?.quantity}</FieldError>
-                {item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT &&
-                !itemErrors?.quantity ? (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    最低 100 个起订
-                  </p>
-                ) : null}
               </div>
               <div>
                 <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
@@ -1262,12 +1256,10 @@ export function ExternalSalesOrderFormB({
                   {
                     value: OrderPackagingMode.SINGLE_STYLE,
                     label: '常规装',
-                    detail: '0.1 元/袋',
                   },
                   {
                     value: OrderPackagingMode.MIXED_STYLE,
                     label: '混装',
-                    detail: '0.2 元/袋',
                     disabled: itemFields.length < 2,
                   },
                 ]}

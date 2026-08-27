@@ -400,10 +400,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   id: shipment.id,
                   sequence: shipment.sequence,
                   destinationProvince: shipment.destinationProvince,
-                  weightKg:
-                    shipment.weightKg?.toString() ??
-                    shipment.quotedWeightKg?.toString() ??
-                    null,
+                  weightKg: shipment.weightKg?.toString() ?? null,
                   shippingFee: null,
                   customerChargeOverrideReason: null,
                 }))}
@@ -796,11 +793,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
               {shipment.destinationProvince ? (
                 <p className="text-muted-foreground">
                   计费省份：{shipment.destinationProvince}
-                </p>
-              ) : null}
-              {shipment.quotedWeightKg ? (
-                <p className="font-sans tabular-nums text-muted-foreground">
-                  创建时计费重量：{String(shipment.quotedWeightKg)} kg
                 </p>
               ) : null}
               {shipment.weightKg ? (
@@ -1267,7 +1259,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
               name: item.name,
               quantity: item.quantity,
               specification: item.specification,
+              frontFoilColors: item.frontFoilColors,
+              backFoilColors: item.backFoilColors,
               foilColors: item.foilColors,
+              isDoubleSided: item.isDoubleSided,
             }))}
           />
         </section>

@@ -639,7 +639,14 @@ export async function createOrder(
         receiverAddress: input.receiverAddress,
         expressCode: input.expressCode,
         destinationProvince: input.destinationProvince ?? null,
-        quotedWeightKg: input.quotedWeightKg ?? null,
+        // External sales create orders from a browser and cannot establish a
+        // carrier billable weight. Only later administrator fulfilment
+        // commands may persist that trusted fact. Non-external domain callers
+        // keep their existing input shape for compatibility.
+        quotedWeightKg:
+          settlementType === OrderSettlementType.EXTERNAL_SALES
+            ? null
+            : input.quotedWeightKg ?? null,
         shippingFee:
           settlementType === OrderSettlementType.EXTERNAL_SALES
             ? null
@@ -657,7 +664,10 @@ export async function createOrder(
       ...additionalShipments.map((shipment) => ({
         ...shipment,
         destinationProvince: shipment.destinationProvince ?? null,
-        quotedWeightKg: shipment.quotedWeightKg ?? null,
+        quotedWeightKg:
+          settlementType === OrderSettlementType.EXTERNAL_SALES
+            ? null
+            : shipment.quotedWeightKg ?? null,
         shippingFee:
           settlementType === OrderSettlementType.EXTERNAL_SALES
             ? null
@@ -680,13 +690,11 @@ export async function createOrder(
             items: items.map((item, index) => ({
               itemKey: String(index + 1),
               quantity: item.quantity,
-              paperWeightGsm: item.paperWeightGsm,
-              paperType: item.paperType,
-              productStructure: item.productStructure,
             })),
             shipments: shipmentInputs.map((shipment, index) => ({
               shipmentKey: String(index + 1),
               province: shipment.destinationProvince,
+              billableWeightKg: shipment.quotedWeightKg,
               itemQuantities: shipment.itemQuantities,
             })),
           })
@@ -1678,7 +1686,7 @@ export async function shipOrder(
               id: true,
               sequence: true,
               destinationProvince: true,
-              quotedWeightKg: true,
+              weightKg: true,
               lines: { select: { quantity: true } },
             },
             orderBy: { sequence: 'asc' },
@@ -1706,17 +1714,25 @@ export async function shipOrder(
               shipment.trackingNo,
             ]),
           );
-          const weightByShipmentId = new Map(
-            requestedShipments.map((shipment) => [
-              shipment.shipmentId,
-              shipment.weightKg,
-            ]),
-          );
           const requestByShipmentId = new Map(
             requestedShipments.map((shipment) => [
               shipment.shipmentId,
               shipment,
             ]),
+          );
+          // A positive weight submitted through this administrator-owned
+          // fulfilment command replaces the stored carrier fact. Omitted/null
+          // values (including the hidden empty field used by SF collect) mean
+          // "no new fact" and preserve the trusted weight already on the
+          // shipment. Browser quotedWeightKg is intentionally never a fallback.
+          const trustedWeightByShipmentId = new Map(
+            storedShipments.map((shipment) => {
+              const submitted = requestByShipmentId.get(shipment.id)?.weightKg;
+              return [
+                shipment.id,
+                submitted ?? shipment.weightKg?.toString() ?? null,
+              ];
+            }),
           );
           const chargeOrder = await prismaTx.order.findUnique({
             where: { id },
@@ -1768,8 +1784,7 @@ export async function shipOrder(
             if (
               !chargeOrder.isSfCollect &&
               storedShipments.some(
-                (shipment) =>
-                  !requestByShipmentId.get(shipment.id)?.weightKg,
+                (shipment) => !trustedWeightByShipmentId.get(shipment.id),
               )
             ) {
               throw new OrderInvariantError(
@@ -1799,7 +1814,7 @@ export async function shipOrder(
                           shipment.destinationProvince,
                         billableWeightKg: chargeOrder.isSfCollect
                           ? null
-                          : requested.weightKg ?? null,
+                          : trustedWeightByShipmentId.get(shipment.id) ?? null,
                         itemQuantity: shipment.lines.reduce(
                           (sum, line) => sum + line.quantity,
                           0,
@@ -1814,7 +1829,6 @@ export async function shipOrder(
                   },
                   priceBookIds[0]!,
                   now,
-                  { forceAutomaticAmounts: true },
                 );
             } catch (error) {
               if (error instanceof OrderCustomerChargeError) {
@@ -1883,14 +1897,16 @@ export async function shipOrder(
           }
           for (const shipment of storedShipments) {
             const requested = requestByShipmentId.get(shipment.id);
+            const submittedWeight = requested?.weightKg;
             await prismaTx.orderShipment.update({
               where: { id: shipment.id },
               data: {
                 trackingNo: trackingByShipmentId.get(shipment.id) ?? null,
-                ...(weightByShipmentId.get(shipment.id) !== undefined
-                  ? {
-                      weightKg: weightByShipmentId.get(shipment.id) ?? null,
-                    }
+                // null/undefined is absence, not an instruction to erase a
+                // carrier-confirmed weight. Clearing requires a dedicated,
+                // audited fulfilment correction rather than the ship action.
+                ...(submittedWeight != null
+                  ? { weightKg: submittedWeight }
                   : {}),
                 ...(requested?.destinationProvince !== undefined
                   ? {
@@ -2371,6 +2387,11 @@ export async function setOrderSfCollect(
       };
     }
     const changedAt = new Date();
+    // Sales may toggle the fulfilment mode on their own order, but shipment
+    // corrections are administrator-owned fulfilment facts. Dropping the
+    // entire payload also prevents an untrusted request from clearing a weight
+    // that an administrator has already recorded.
+    const trustedCorrections = actor.role === Role.ADMIN ? corrections : [];
 
     if (isSfCollect) {
       await assertNoShippingCostBeforeSfCollect(txClient, orderId);
@@ -2390,7 +2411,6 @@ export async function setOrderSfCollect(
               sequence: true,
               status: true,
               destinationProvince: true,
-              quotedWeightKg: true,
               weightKg: true,
               lines: { select: { quantity: true } },
             },
@@ -2439,13 +2459,16 @@ export async function setOrderSfCollect(
         ]),
       );
       const correctionByShipmentId = new Map(
-        corrections.map((correction) => [correction.shipmentId, correction]),
+        trustedCorrections.map((correction) => [
+          correction.shipmentId,
+          correction,
+        ]),
       );
-      if (correctionByShipmentId.size !== corrections.length) {
+      if (correctionByShipmentId.size !== trustedCorrections.length) {
         throw new OrderInvariantError('顺丰到付更正包含重复的发货地址');
       }
       if (
-        corrections.some(
+        trustedCorrections.some(
           (correction) =>
             !chargeContext.shipments.some(
               (shipment) => shipment.id === correction.shipmentId,
@@ -2457,7 +2480,7 @@ export async function setOrderSfCollect(
       if (
         !isSfCollect &&
         order.status === OrderStatus.SHIPPED &&
-        (corrections.length !== chargeContext.shipments.length ||
+        (trustedCorrections.length !== chargeContext.shipments.length ||
           chargeContext.shipments.some(
             (shipment) => !correctionByShipmentId.has(shipment.id),
           ))
@@ -2480,11 +2503,11 @@ export async function setOrderSfCollect(
                 `${shipment.id}:PACKING_MATERIAL`,
               );
               const correction = correctionByShipmentId.get(shipment.id);
-              const storedWeight =
-                shipment.weightKg?.toString() ??
-                (shipment.status === ShipmentStatus.SHIPPED
-                  ? null
-                  : shipment.quotedWeightKg?.toString() ?? null);
+              // quotedWeightKg is a legacy browser-supplied estimate and is
+              // never a carrier-confirmed fulfilment fact. Only the actual
+              // shipment weight or an administrator correction may price
+              // freight.
+              const storedWeight = shipment.weightKg?.toString() ?? null;
               const billableWeightKg = correction?.weightKg ?? storedWeight;
               const allowProvisionalManual =
                 !isSfCollect &&
@@ -2567,7 +2590,7 @@ export async function setOrderSfCollect(
         data: { carrierCode: isSfCollect ? 'SF' : 'ZTO' },
       });
       if (!isSfCollect) {
-        for (const correction of corrections) {
+        for (const correction of trustedCorrections) {
           await prismaTx.orderShipment.update({
             where: { id: correction.shipmentId },
             data: {
@@ -2650,11 +2673,11 @@ export async function setOrderSfCollect(
                   after: nextTotalAmount,
                 },
               }),
-          ...(corrections.length > 0
+          ...(trustedCorrections.length > 0
             ? {
                 shipmentChargeCorrections: {
                   before: null,
-                  after: corrections.map((correction) => ({
+                  after: trustedCorrections.map((correction) => ({
                     shipmentId: correction.shipmentId,
                     destinationProvince: correction.destinationProvince,
                     weightKg: correction.weightKg,
