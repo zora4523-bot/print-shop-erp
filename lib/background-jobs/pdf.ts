@@ -10,7 +10,6 @@ import {
 } from '../../generated/prisma/client';
 import { getOrderForPrint } from '../order/print-view';
 import { buildPrintHtml } from '../order/print-html';
-import { getSetting } from '../settings';
 import { renderHtmlToPdf } from '../pdf/render';
 import { db } from '../db';
 import { enqueueBackgroundJob } from './repository';
@@ -52,8 +51,7 @@ export async function handleOrderPdfJob(
   );
   if (!order) throw new OrderPdfNotFoundError();
 
-  const factory = await getSetting('factory_name');
-  const html = await buildPrintHtml(order, { factoryName: factory.name });
+  const html = await buildPrintHtml(order);
   await job.assertLease?.();
   job.signal?.throwIfAborted();
   const pdf = await renderHtmlToPdf({

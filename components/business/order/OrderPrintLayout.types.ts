@@ -10,22 +10,16 @@ export type PrintDesign = {
   id: string;
   fileType: 'IMAGE' | 'CDR';
   fileUrl: string;
-  fileName: string;
-  thumbnailUrl?: string | null;
-  uploadedAt: Date;
 };
 
 export type PrintTask = {
   id: string;
   craftName: string;
   workerDisplayName?: string | null;
-  // Pre-rendered QR code SVG (from `qrcode` server package). Server-
-  // side pre-render avoids the &ldquo;two React copies&rdquo; hook bug that
-  // qrcode.react triggers when renderToStaticMarkup dynamically pulls
-  // in react-dom/server (Next 16 / Turbopack guard forces dynamic
-  // import; that loads its own React vs the bundled one). String SVG
-  // sidesteps the entire hook ecosystem.
-  qrSvg: string;
+  plannedQty: number;
+  completedQty: number;
+  defectQty: number;
+  completedAt?: Date | null;
 };
 
 export type PrintShipment = {
@@ -35,6 +29,7 @@ export type PrintShipment = {
   receiverPhone?: string | null;
   receiverAddress?: string | null;
   expressCode?: string | null;
+  carrierCode?: string | null;
   trackingNo?: string | null;
   lines: Array<{
     orderItemSequence: number;
@@ -47,9 +42,18 @@ export type PrintOrderItem = {
   id: string;
   sequence: number;
   name: string;
+  pricingRoute:
+    | 'STOCK_BLANK'
+    | 'CUSTOM_SINGLE_FLAT_FOIL'
+    | 'COLOR_PRINT'
+    | 'MANUAL_QUOTE';
+  artworkVersion?: string | null;
   specification?: string | null;
   paperType?: string | null;
+  paperWeightGsm?: number | null;
   quantity: number;
+  frontFoilColors: string[];
+  backFoilColors: string[];
   foilColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
@@ -57,6 +61,19 @@ export type PrintOrderItem = {
   remark?: string | null;
   designs: PrintDesign[];
   tasks: PrintTask[];
+};
+
+export type PrintPackagingGroup = {
+  id: string;
+  sequence: number;
+  name?: string | null;
+  mode: 'SINGLE_STYLE' | 'MIXED_STYLE';
+  actualBagCount: number;
+  lines: Array<{
+    orderItemId: string;
+    orderItemSequence: number;
+    unitsPerBag: number;
+  }>;
 };
 
 export type PrintOrder = {
@@ -68,6 +85,7 @@ export type PrintOrder = {
   isUrgent: boolean;
   isSfCollect: boolean;
   promisedDate?: Date | null;
+  customerName?: string | null;
   customerRef?: string | null;
   receiverName?: string | null;
   receiverPhone?: string | null;
@@ -77,13 +95,10 @@ export type PrintOrder = {
   remark?: string | null;
   submittedAt?: Date | null;
   createdAt: Date;
-  submitterDisplayName: string;
-  // Pre-resolved Chinese label ("销售" / "客服") so the component
-  // doesn't need to import auth/role-labels and stays role-agnostic.
-  submitterRoleLabel: string;
   items: PrintOrderItem[];
+  packagingGroups: PrintPackagingGroup[];
   shipments: PrintShipment[];
-  // Same rationale as PrintTask.qrSvg — pre-rendered to avoid the
-  // qrcode.react / hooks bug under renderToStaticMarkup.
+  // Pre-rendered so the browser print view and renderToStaticMarkup PDF
+  // consume the exact same QR SVG without a client-only QR dependency.
   orderQrSvg: string;
 };

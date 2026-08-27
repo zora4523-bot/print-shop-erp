@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getOrderForPrint } from '@/lib/order/print-view';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
-import { buildPrintHtml } from '@/lib/order/print-html';
-import { getSetting } from '@/lib/settings';
+import {
+  buildOrderPdfFilename,
+  buildPrintHtml,
+} from '@/lib/order/print-html';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import {
@@ -86,8 +88,7 @@ export async function GET(_req: Request, ctx: Params) {
     }
   } else {
     try {
-      const factory = await getSetting('factory_name');
-      const html = await buildPrintHtml(order, { factoryName: factory.name });
+      const html = await buildPrintHtml(order);
       pdf = await renderHtmlToPdf({ html });
     } catch (err) {
       // Most likely cause here is Chromium not yet installed on the
@@ -126,7 +127,7 @@ export async function GET(_req: Request, ctx: Params) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': buildAttachmentHeader(`${order.orderNo}.pdf`),
+      'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
     },
@@ -182,8 +183,8 @@ function escapeHtml(value: string): string {
 
 // RFC 5987 / 6266: ship an ASCII fallback for legacy clients and the
 // UTF-8 spelling via filename*= for anything modern. orderNo is ASCII
-// today (GD-YYMMDD-XXX) but the factory name prefix might leak into
-// future naming, and the extra header is cheap.
+// today (GD-YYMMDD-XXX) but the customer name can contain Chinese, and the
+// extra header is cheap.
 function buildAttachmentHeader(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   const encoded = encodeURIComponent(filename).replace(/['()]/g, escape);

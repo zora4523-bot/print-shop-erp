@@ -247,13 +247,15 @@ export async function seedPrintableOrder(opts: {
       : richContext
         ? `e2e-vr-rich-${opts.designCount}`
         : `e2e-vr-${opts.designCount}`;
-  const orderId = idStem;
+  // v2 keeps the visual fixture deterministic while avoiding legacy v1 rows
+  // that received immutable pricing revisions during the schema backfill.
+  const orderId = `${idStem}-v2`;
   const orderNo =
     variant === 'three-items'
-      ? `E2E-VR-THREE-${opts.designCount}`
+      ? `E2E-VR2-THREE-${opts.designCount}`
       : richContext
-        ? `E2E-VR-RICH-${opts.designCount}`
-        : `E2E-VR-${opts.designCount}`;
+        ? `E2E-VR2-RICH-${opts.designCount}`
+        : `E2E-VR2-${opts.designCount}`;
   const orderItemId = `${orderId}-item`;
 
   await withDb(async (db) => {
@@ -297,13 +299,15 @@ export async function seedPrintableOrder(opts: {
       await db.query(
         `
         INSERT INTO "OrderItem" (
-          id, "orderId", sequence, name, specification, "paperType",
-          quantity, "foilColors", "isDoubleSided", "isDoubleColor",
-          crafts, remark, "createdAt", "updatedAt"
+          id, "orderId", sequence, name, "pricingRoute", "productStructure",
+          specification, "paperType", quantity, "foilColors", "foilTechnique",
+          "isDoubleSided", "isDoubleColor", crafts, remark, "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $3, $4, '9cm × 17cm', $8,
-          $5, $6::text[], TRUE, $9,
-          ARRAY[]::text[], $7, NOW(), NOW()
+          $1, $2, $3, $4,
+          'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+          'STANDARD_ENVELOPE'::"OrderProductStructure",
+          '9cm × 17cm', $8, $5, $6::text[], 'FLAT'::"OrderFoilTechnique",
+          TRUE, $9, ARRAY[]::text[], $7, NOW(), NOW()
         )
         `,
         [
