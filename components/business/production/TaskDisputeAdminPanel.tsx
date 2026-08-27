@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 import { reviewTaskDisputeAction } from '@/actions/task-disputes';
 import type { TaskDisputeMutationResult } from '@/actions/task-disputes.types';
@@ -104,16 +103,11 @@ export function TaskDisputeAdminPanel({
 }
 
 function TaskDisputeReviewForm({ disputeId }: { disputeId: string }) {
-  const router = useRouter();
   const bound = reviewTaskDisputeAction.bind(null, disputeId);
   const [state, action, pending] = useActionState<
     TaskDisputeMutationResult | null,
     FormData
   >(bound, null);
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
 
   const resolutionError =
     state?.status === 'invalid' ? state.fieldErrors.resolution?.[0] : null;

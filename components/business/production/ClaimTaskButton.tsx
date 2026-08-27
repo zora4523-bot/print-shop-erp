@@ -1,21 +1,15 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { claimTaskFormAction } from '@/actions/production';
 import type { TaskMutationResult } from '@/actions/production.types';
 import { Button } from '@/components/ui/button';
 
 export function ClaimTaskButton({ taskId }: { taskId: string }) {
-  const router = useRouter();
   const [state, formAction, pending] = useActionState<
     TaskMutationResult | null,
     FormData
   >(claimTaskFormAction, null);
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
 
   return (
     <form action={formAction} aria-busy={pending}>

@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState } from 'react';
 import {
   reassignProductionTaskAction,
   releaseTaskToClaimPoolAction,
@@ -29,7 +28,6 @@ export function ReassignTaskForm({
   eligibleWorkers: SchedulingViewCandidate[];
   selfClaimEnabled: boolean;
 }) {
-  const router = useRouter();
   const bound = reassignProductionTaskAction.bind(null, taskId, orderId);
   const [state, action, pending] = useActionState<
     TaskMutationResult | null,
@@ -41,12 +39,6 @@ export function ReassignTaskForm({
   >(releaseTaskToClaimPoolAction, null);
   const [workerId, setWorkerId] = useState(currentWorkerId ?? '');
   const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    if (state?.status === 'success' || releaseState?.status === 'success') {
-      router.refresh();
-    }
-  }, [releaseState, router, state]);
 
   const validationError =
     state?.status === 'invalid'

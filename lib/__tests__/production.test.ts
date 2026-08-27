@@ -93,6 +93,7 @@ import {
   beginTask,
   beginTasks,
   reportTask,
+  reportTasks,
   reassignProductionTask,
   getPendingSchedulingBoard,
   getSchedulingView,
@@ -1231,12 +1232,18 @@ function fixtureTask(
     plannedQty: number;
     remark: string | null;
     orderStatus: OrderStatus;
+    frontFoilColors: string[];
+    backFoilColors: string[];
+    foilColors: string[];
     isDoubleSided: boolean;
     isDoubleColor: boolean;
   }> = {},
 ) {
   const {
     orderStatus,
+    frontFoilColors,
+    backFoilColors,
+    foilColors,
     isDoubleSided,
     isDoubleColor,
     ...taskLevel
@@ -1253,6 +1260,9 @@ function fixtureTask(
     orderItem: {
       id: 'item-1',
       orderId: 'order-1',
+      frontFoilColors: frontFoilColors ?? [],
+      backFoilColors: backFoilColors ?? [],
+      foilColors: foilColors ?? [],
       isDoubleSided: isDoubleSided ?? false,
       isDoubleColor: isDoubleColor ?? false,
       name: '款式 A',
@@ -1951,6 +1961,12 @@ describe('reportTask', () => {
 
     await reportTask('task-1', validInput, workerActor);
 
+    const taskQuery = dbMock.productionTask.findUnique.mock.calls[0][0];
+    expect(taskQuery.select.orderItem.select).toMatchObject({
+      frontFoilColors: true,
+      backFoilColors: true,
+      foilColors: true,
+    });
     const update = dbMock.productionTask.update.mock.calls[0][0];
     // totalPressed = 4900 + 50 + 50 = 5000; no multiplier.
     // boardCount = 1 × 1 = 1; pressCount = 5000 × 1 = 5000
@@ -1967,6 +1983,30 @@ describe('reportTask', () => {
       pieceRate: 0.007,
       boardRate: 5,
       multiplierFactors: ['DOUBLE_SIDED', 'DOUBLE_COLOR'],
+      pieceworkCalculation: {
+        schemaVersion: 1,
+        inputs: {
+          plannedQuantity: 5000,
+          reportedQuantity: 5000,
+          completedQuantity: 4900,
+          defectQuantity: 50,
+          reworkQuantity: 50,
+          itemCount: 1,
+          frontFoilColors: [],
+          backFoilColors: [],
+          foilPassCount: 0,
+          isDoubleSided: false,
+          isDoubleColor: false,
+          factsSource: 'LEGACY_FLAGS',
+        },
+        result: {
+          smallOrder: false,
+          multiplier: 1,
+          boardCount: 1,
+          pressCount: 5000,
+          pieceworkAmount: '40.00',
+        },
+      },
     });
     expect(dbMock.$executeRaw.mock.calls.map((call) => call[1])).toContain(
       'print-shop-erp:piecework-rule:worker-1:HAND_PRESS',
@@ -2011,6 +2051,70 @@ describe('reportTask', () => {
     expect(update.data.boardCount).toBe(4);
     expect(update.data.pressCount).toBe(8000);
     expect(update.data.pieceworkAmount).toBe('76.00');
+    expect(update.data.salaryRuleSnapshot).toMatchObject({
+      pieceworkCalculation: {
+        inputs: {
+          isDoubleSided: true,
+          isDoubleColor: true,
+          factsSource: 'LEGACY_FLAGS',
+        },
+        result: { multiplier: 4 },
+      },
+    });
+  });
+
+  it('derives multiplier evidence from structured front/back foil facts', async () => {
+    dbMock.productionTask.findUnique.mockResolvedValue(
+      fixtureTask({
+        status: TaskStatus.IN_PROGRESS,
+        orderStatus: OrderStatus.IN_PRODUCTION,
+        frontFoilColors: ['哑金', '红金'],
+        backFoilColors: ['哑金'],
+        // Retired flags deliberately disagree: structured facts are authoritative.
+        isDoubleSided: false,
+        isDoubleColor: false,
+      }),
+    );
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.COMPLETED },
+      { id: 'task-2', status: TaskStatus.IN_PROGRESS },
+    ]);
+
+    await reportTask(
+      'task-1',
+      { completedQty: 2000, defectQty: 0, reworkQty: 0 },
+      workerActor,
+    );
+
+    const update = dbMock.productionTask.update.mock.calls[0][0];
+    expect(update.data.boardCount).toBe(4);
+    expect(update.data.pressCount).toBe(8000);
+    expect(update.data.pieceworkAmount).toBe('76.00');
+    expect(update.data.salaryRuleSnapshot).toMatchObject({
+      pieceRate: 0.007,
+      boardRate: 5,
+      pieceworkCalculation: {
+        inputs: {
+          frontFoilColors: ['哑金', '红金'],
+          backFoilColors: ['哑金'],
+          foilPassCount: 3,
+          isDoubleSided: true,
+          isDoubleColor: true,
+          factsSource: 'STRUCTURED_FOIL_SIDES',
+        },
+        result: {
+          multiplier: 4,
+          boardCount: 4,
+          pressCount: 8000,
+          pieceworkAmount: '76.00',
+        },
+      },
+    });
   });
 
   it('rejects a legacy rule whose computed amount exceeds Decimal(10,2)', async () => {
@@ -2335,6 +2439,88 @@ describe('reportTask', () => {
       reportTask('task-1', validInput, workerActor),
     ).rejects.toBeInstanceOf(InvalidTaskTransitionError);
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('reportTasks piecework evidence', () => {
+  it('uses structured foil facts and snapshots batch report inputs/results', async () => {
+    dbMock.productionTask.findMany
+      .mockResolvedValueOnce([
+        { id: 'task-1', orderItem: { orderId: 'order-1' } },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'task-1',
+          status: TaskStatus.IN_PROGRESS,
+          workerId: 'worker-1',
+          workerType: WorkerType.MACHINE,
+          machineType: MachineType.HAND_PRESS,
+          plannedQty: 2000,
+          orderItem: {
+            orderId: 'order-1',
+            name: '款式 A',
+            frontFoilColors: ['哑金', '红金'],
+            backFoilColors: [],
+            foilColors: [],
+            isDoubleSided: true,
+            isDoubleColor: false,
+          },
+        },
+      ]);
+    dbMock.salaryRule.findFirst.mockResolvedValue({ ruleValue: HAND_PRESS_RULE });
+    dbMock.productionTask.update.mockResolvedValue({
+      id: 'task-1',
+      status: TaskStatus.COMPLETED,
+    });
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.COMPLETED,
+    });
+
+    await reportTasks(
+      ['task-1'],
+      workerActor,
+      new Date('2026-08-27T08:00:00.000Z'),
+    );
+
+    const taskQuery = dbMock.productionTask.findMany.mock.calls[1]?.[0];
+    expect(taskQuery.select.orderItem.select).toMatchObject({
+      frontFoilColors: true,
+      backFoilColors: true,
+      foilColors: true,
+    });
+    const update = dbMock.productionTask.update.mock.calls[0]?.[0];
+    expect(update.data.boardCount).toBe(2);
+    expect(update.data.pressCount).toBe(4000);
+    expect(update.data.pieceworkAmount).toBe('38.00');
+    expect(update.data.salaryRuleSnapshot).toMatchObject({
+      pieceRate: 0.007,
+      boardRate: 5,
+      pieceworkCalculation: {
+        schemaVersion: 1,
+        inputs: {
+          plannedQuantity: 2000,
+          reportedQuantity: 2000,
+          completedQuantity: 2000,
+          defectQuantity: 0,
+          reworkQuantity: 0,
+          itemCount: 1,
+          frontFoilColors: ['哑金', '红金'],
+          backFoilColors: [],
+          foilPassCount: 2,
+          isDoubleSided: false,
+          isDoubleColor: true,
+          factsSource: 'STRUCTURED_FOIL_SIDES',
+        },
+        result: {
+          smallOrder: false,
+          multiplier: 2,
+          boardCount: 2,
+          pressCount: 4000,
+          pieceworkAmount: '38.00',
+        },
+      },
+    });
   });
 });
 

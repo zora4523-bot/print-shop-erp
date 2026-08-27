@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { createTaskDisputeAction } from '@/actions/task-disputes';
 import type { TaskDisputeMutationResult } from '@/actions/task-disputes.types';
 import type { WorkerTaskDisputeView } from '@/lib/production/task-dispute';
@@ -17,7 +16,6 @@ export function TaskDisputePanel({
   taskId: string;
   disputes: WorkerTaskDisputeView[];
 }) {
-  const router = useRouter();
   const bound = createTaskDisputeAction.bind(null, taskId);
   const [state, action, pending] = useActionState<
     TaskDisputeMutationResult | null,
@@ -26,12 +24,6 @@ export function TaskDisputePanel({
   const hasPending = disputes.some(
     (dispute) => dispute.status === ProductionTaskDisputeStatus.PENDING,
   );
-
-  useEffect(() => {
-    if (state?.status === 'success') {
-      router.refresh();
-    }
-  }, [router, state]);
 
   const reasonError =
     state?.status === 'invalid' ? state.fieldErrors.reason?.[0] : null;

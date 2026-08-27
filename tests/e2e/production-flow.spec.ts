@@ -7,8 +7,9 @@ import {
   E2E_USERS,
   seedNotificationWireFixture,
   readNotificationLogs,
-  fillExternalSalesOrderCharges,
+  fillExternalSalesOrderDraft,
   openFirstOrderItemEditor,
+  seedE2eOrderDesign,
   submitDraftOrderAndWait,
 } from './_helpers';
 
@@ -23,12 +24,11 @@ test.describe('生产流程 — golden path', () => {
   }) => {
     test.setTimeout(60_000); // 多角色切换 + 多次表单提交，给点余量
 
-    const orderRef = `e2e-prod-${uniqueSuffix()}`;
-    // 款式名也带 unique 后缀 —— /worker/tasks 列表里 link 不显示
-    // customerRef，按款式名找最干净。
-    const itemName = `E2E 款式 ${orderRef}`;
+    const customName = `E2E 生产全链路 ${uniqueSuffix()}`;
     let orderUrl = '';
     let orderId = '';
+    let orderNo = '';
+    let itemName = '';
 
     // Slice C wire (P1 #2): 绑定 5 条状态机 rule 到一个 mock channel。
     // 跑完每一步生产链路后就读 NotificationLog，断言 wire 触发。
@@ -36,36 +36,61 @@ test.describe('生产流程 — golden path', () => {
     // 仍写 status=SUCCESS errorMessage='MOCK' 行——这就是 wire 的证据。
     const { channelId: notifyChannelId } = await seedNotificationWireFixture();
 
-    await test.step('SALES 登录并创建工单', async () => {
+    await test.step('SALES 通过可见提交入口创建工单草稿', async () => {
       await login(page, {
         from: '/orders/new',
         username: E2E_USERS.sales.username,
         password: E2E_PASSWORD,
       });
-      await page.locator('input[name="customerRef"]').fill(orderRef);
       await openFirstOrderItemEditor(page);
-      await page.locator('input[name="items.0.name"]').fill(itemName);
-      await page.locator('input[name="items.0.quantity"]').fill('1000');
-      // &ldquo;现货加烫&rdquo; 是 seed 里 defaultMachineType=HAND_PRESS 的工艺，
-      // 和我们的 e2e-worker-hand 师傅匹配 → 排产能选到。
-      await page.getByRole('button', { name: '现货加烫' }).click();
-      await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
-      await page
-        .locator('textarea[name="items.0.priceOverrideReason"]')
-        .fill('E2E 生产全链路人工报价');
-      await fillExternalSalesOrderCharges(page);
-      await page.getByRole('button', { name: /创建工单/ }).click();
-      await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
-        timeout: 10_000,
+      await fillExternalSalesOrderDraft(page, {
+        customName,
+        quantity: 1000,
       });
-      orderUrl = new URL(page.url()).pathname;
-      // /orders/[id] → grab the id; /foreman/scheduling/[id] uses the
-      // same id (it's the Order PK).
-      orderId = orderUrl.split('/').filter(Boolean).pop() ?? '';
+
+      // 浏览器必须走 B 版真实可见的“提交工单 → 提交前复核”入口。
+      // CI 不访问真实 OSS：拦截预签后的 PUT，使表单停在可恢复的服务端
+      // 草稿状态；随后用受控 DB fixture 登记同一张设计图，再从详情页
+      // 完成提交。这样既覆盖 UI 主入口和上传尝试，也不会产生云端孤儿。
+      await page.route('**/*', async (route) => {
+        if (route.request().method() === 'PUT') {
+          await route.fulfill({ status: 503, body: 'E2E upload blocked' });
+          return;
+        }
+        await route.continue();
+      });
+      await page.getByLabel('第 1 款设计图', { exact: true }).setInputFiles({
+        name: 'e2e-production-design.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64',
+        ),
+      });
+      await page.getByRole('button', { name: /^提交工单$/ }).click();
+      await expect(
+        page.getByRole('heading', { name: '提交前复核' }),
+      ).toBeVisible();
+      await page.getByRole('button', { name: '确认无误，提交' }).click();
+
+      await expect(
+        page
+          .getByRole('dialog')
+          .getByText(/草稿已创建，但有 1 个设计文件未上传/),
+      ).toBeVisible({ timeout: 20_000 });
+      const seeded = await seedE2eOrderDesign({
+        expectedCustomName: customName,
+      });
+      orderId = seeded.orderId;
+      orderNo = seeded.orderNo;
+      itemName = seeded.itemName;
+      orderUrl = `/orders/${orderId}`;
       expect(orderId).toMatch(/^[a-z0-9]+$/);
+      await page.unroute('**/*');
     });
 
     await test.step('SALES 提交工单 (DRAFT → PENDING_SCHEDULE)', async () => {
+      await page.goto(orderUrl);
       // Wait for the server-rendered status, not merely the pending button
       // label, so the assertion proves DRAFT → SUBMITTED committed.
       await submitDraftOrderAndWait(page);
@@ -107,9 +132,8 @@ test.describe('生产流程 — golden path', () => {
     await test.step('ADMIN 登录 → 直接到排产详情页', async () => {
       await logout(page);
       // 直接 deep-link 到这个工单的排产页：order id 我们刚捕获了，
-      // /foreman/scheduling/[id] 用同一个 id。比按 customerRef 在
-      // 列表里翻稳得多（列表 link text 是&ldquo;排产&rdquo;两字，customerRef
-      // 在 td 里）。
+      // /foreman/scheduling/[id] 使用同一个 order id；deep-link 不依赖
+      // 列表排序或自动生成的款式名称。
       await login(page, {
         from: `/foreman/scheduling/${orderId}`,
         username: E2E_USERS.foreman.username,
@@ -117,13 +141,12 @@ test.describe('生产流程 — golden path', () => {
       });
       await page.waitForURL(`/foreman/scheduling/${orderId}`);
 
-      // Current scheduling is a per-craft radio group. Select the compatible
-      // hand-press worker in the visible task row and prove the assignment is
-      // accepted before submitting the schedule.
+      // 通版现货在服务端统一归到“局部烫金”工艺，默认机型为手压机。
+      // Select the compatible worker in that row before scheduling.
       const assignmentRow = page
         .getByRole('row')
         .filter({ hasText: itemName })
-        .filter({ hasText: '现货加烫' });
+        .filter({ hasText: '局部烫金' });
       const handPressRadio = assignmentRow
         .getByRole('radio')
         .filter({ hasText: E2E_USERS.workerHandPress.displayName });
@@ -175,11 +198,10 @@ test.describe('生产流程 — golden path', () => {
         username: E2E_USERS.workerHandPress.username,
         password: E2E_PASSWORD,
       });
-      // /worker/tasks 列表里每个 Link 显示 {orderNo}, {item.name},
-      // {craft.name} 等 —— 按 itemName 唯一识别我们这条任务。
+      // /worker/tasks 列表显示工单号；它比自动生成的款式名更适合唯一定位。
       await page
         .getByRole('link')
-        .filter({ hasText: itemName })
+        .filter({ hasText: orderNo })
         .first()
         .click();
       await page.waitForURL(/\/worker\/tasks\/[a-z0-9]+/);
@@ -239,11 +261,8 @@ test.describe('生产流程 — golden path', () => {
         password: E2E_PASSWORD,
       });
       // 详情页 status badge 应显示&ldquo;已完工&rdquo;（OrderStatus.FINISHED）。
-      // 用工单详情页里 Row 渲染状态那一格 + customerRef 双重确认我们看的
-      // 是同一个工单。
-      // orderRef 在 customerRef row、item name、OrderLog 各出现一次
-      // —— first() 避开 strict mode。
-      await expect(page.getByText(orderRef).first()).toBeVisible();
+      // 用自定义工单名称与头部状态共同确认当前工单。
+      await expect(page.getByText(customName).first()).toBeVisible();
 
       // 状态校验：cascade 应把 Order 从 IN_PRODUCTION 推到
       // OrderStatus.COMPLETED（&ldquo;已完工&rdquo;），HANDOFF round 39 fresh-
@@ -272,7 +291,10 @@ test.describe('生产流程 — golden path', () => {
       await page
         .locator('input[name="shipmentTrackingNo"]')
         .fill(trackingNoForLog);
-      await page.locator('input[name="shipmentWeightKg"]').fill('1');
+      // 顺丰到付没有可编辑计费重量；隐藏字段固定提交空值。
+      await expect(
+        page.locator('input[name="shipmentWeightKg"][type="hidden"]'),
+      ).toHaveValue('');
       await page
         .getByRole('button', { name: /^确认 1 个地址已发货$/ })
         .click();

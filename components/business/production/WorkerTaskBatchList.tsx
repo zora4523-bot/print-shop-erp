@@ -275,7 +275,6 @@ export function WorkerTaskBatchList({
         setState(result);
         if (result.status === 'success') {
           setSelected(new Set());
-          router.refresh();
         }
       } catch {
         // Server Action 传输失败时无法知道事务是否已经提交，

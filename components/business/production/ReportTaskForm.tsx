@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,17 +34,6 @@ export function ReportTaskForm({
     ReportTaskMutationResult | null,
     FormData
   >(bound, null);
-  const router = useRouter();
-
-  // On success, kick the router to refresh server state — the task
-  // page itself will re-render showing the completed view. We don't
-  // navigate away since the worker might want to look at the payoff
-  // breakdown.
-  if (state?.status === 'success' && !pending) {
-    // Defer to microtask so React finishes committing before refresh.
-    queueMicrotask(() => router.refresh());
-  }
-
   // 回填。零 JS 下一次提交就是一次整页 POST + 服务端重渲染，浏览器不会保留
   // 输入框里的值。不回填的话「超报被拦下 → 数字被重置回计划数 → 勾确认再
   // 提交」会静默按计划数入库 —— 正好把这个守卫要防的事情做实。

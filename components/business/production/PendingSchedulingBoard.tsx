@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Check } from 'lucide-react';
 import { batchScheduleOrdersAction } from '@/actions/production';
 import type { BatchScheduleOrdersActionResult } from '@/actions/production.types';
@@ -224,7 +223,6 @@ export function failedOrderIdsForRetry(
 }
 
 export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
-  const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [workerId, setWorkerId] = useState('');
   const [workerSearch, setWorkerSearch] = useState('');
@@ -357,10 +355,8 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
       setState(result);
       if (result.status === 'success') {
         setSelected(new Set());
-        router.refresh();
       } else if (result.status === 'partial') {
         setSelected(new Set(failedOrderIdsForRetry(result.failed)));
-        router.refresh();
       }
     });
   }

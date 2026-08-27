@@ -22,6 +22,10 @@ import type {
 } from './auth/schemas';
 import { orderCascadeLockKey } from './order/locks';
 import { ORDER_PRICING_STATUS } from './order/pricing-status';
+import {
+  deriveLegacyOrderItemFoilFacts,
+  resolveOrderItemFoilSides,
+} from './order/pricing-route';
 import { getWorkerTaskScopeFilter } from './auth/task-scope';
 import { calcMachinePieceworkBreakdown } from './salary/machine-piecework';
 import {
@@ -824,6 +828,104 @@ type PieceworkRuleInput = Parameters<
   typeof calcMachinePieceworkBreakdown
 >[1];
 
+type PieceworkOrderItemFacts = {
+  frontFoilColors: string[];
+  backFoilColors: string[];
+  foilColors: string[];
+  isDoubleSided: boolean;
+  isDoubleColor: boolean;
+};
+
+type PieceworkReportFacts = {
+  plannedQuantity: number;
+  completedQuantity: number;
+  defectQuantity: number;
+  reworkQuantity: number;
+};
+
+/**
+ * New order items carry explicit front/back foil facts. Historical rows may
+ * only have the retired foilColors/isDouble* columns, so keep their original
+ * multiplier flags when no explicit side facts exist. This preserves prior
+ * payroll semantics while making new calculations depend on structured facts.
+ */
+function resolvePieceworkOrderItemFacts(
+  orderItem: PieceworkOrderItemFacts,
+): {
+  frontFoilColors: string[];
+  backFoilColors: string[];
+  foilPassCount: number;
+  isDoubleSided: boolean;
+  isDoubleColor: boolean;
+  source: 'STRUCTURED_FOIL_SIDES' | 'LEGACY_FLAGS';
+} {
+  const hasStructuredFoilSides =
+    orderItem.frontFoilColors.length > 0 ||
+    orderItem.backFoilColors.length > 0;
+  const sides = resolveOrderItemFoilSides(orderItem);
+
+  if (!hasStructuredFoilSides) {
+    return {
+      ...sides,
+      foilPassCount:
+        sides.frontFoilColors.length + sides.backFoilColors.length,
+      isDoubleSided: orderItem.isDoubleSided,
+      isDoubleColor: orderItem.isDoubleColor,
+      source: 'LEGACY_FLAGS',
+    };
+  }
+
+  const derived = deriveLegacyOrderItemFoilFacts(orderItem);
+  return {
+    frontFoilColors: derived.frontFoilColors,
+    backFoilColors: derived.backFoilColors,
+    foilPassCount:
+      derived.frontFoilColors.length + derived.backFoilColors.length,
+    isDoubleSided: derived.isDoubleSided,
+    isDoubleColor: derived.isDoubleColor,
+    source: 'STRUCTURED_FOIL_SIDES',
+  };
+}
+
+function machineSalaryRuleSnapshot(
+  rule: PieceworkRuleInput,
+  report: PieceworkReportFacts,
+  itemFacts: ReturnType<typeof resolvePieceworkOrderItemFacts>,
+  breakdown: ReturnType<typeof calcMachinePieceworkBreakdown>,
+): Record<string, unknown> {
+  const reportedQuantity =
+    report.completedQuantity + report.defectQuantity + report.reworkQuantity;
+
+  return {
+    // Keep the rule at the top level for existing salary exports and readers.
+    ...rule,
+    pieceworkCalculation: {
+      schemaVersion: 1,
+      inputs: {
+        plannedQuantity: report.plannedQuantity,
+        reportedQuantity,
+        completedQuantity: report.completedQuantity,
+        defectQuantity: report.defectQuantity,
+        reworkQuantity: report.reworkQuantity,
+        itemCount: 1,
+        frontFoilColors: itemFacts.frontFoilColors,
+        backFoilColors: itemFacts.backFoilColors,
+        foilPassCount: itemFacts.foilPassCount,
+        isDoubleSided: itemFacts.isDoubleSided,
+        isDoubleColor: itemFacts.isDoubleColor,
+        factsSource: itemFacts.source,
+      },
+      result: {
+        smallOrder: breakdown.smallOrder,
+        multiplier: breakdown.multiplier,
+        boardCount: breakdown.boardCount,
+        pressCount: breakdown.pressCount,
+        pieceworkAmount: breakdown.amount.toFixed(2),
+      },
+    },
+  };
+}
+
 function calculateStorablePiecework(
   task: PieceworkTaskInput,
   rule: PieceworkRuleInput,
@@ -1051,6 +1153,9 @@ type TaskTxClient = {
           orderItem: {
             id: string;
             orderId: string;
+            frontFoilColors: string[];
+            backFoilColors: string[];
+            foilColors: string[];
             isDoubleSided: boolean;
             isDoubleColor: boolean;
             name: string;
@@ -1353,6 +1458,9 @@ export async function reportTask(
           select: {
             id: true,
             orderId: true,
+            frontFoilColors: true,
+            backFoilColors: true,
+            foilColors: true,
             isDoubleSided: true,
             isDoubleColor: true,
             name: true,
@@ -1474,19 +1582,30 @@ export async function reportTask(
       }
       const totalPressed =
         input.completedQty + input.defectQty + input.reworkQty;
+      const itemFacts = resolvePieceworkOrderItemFacts(task.orderItem);
       const breakdown = calculateStorablePiecework(
         {
           quantity: totalPressed,
           itemCount: 1,
-          isDoubleSided: task.orderItem.isDoubleSided,
-          isDoubleColor: task.orderItem.isDoubleColor,
+          isDoubleSided: itemFacts.isDoubleSided,
+          isDoubleColor: itemFacts.isDoubleColor,
         },
         rule,
       );
       boardCount = breakdown.boardCount;
       pressCount = breakdown.pressCount;
       pieceworkAmount = breakdown.amount.toFixed(2);
-      salaryRuleSnapshot = rule as unknown as Record<string, unknown>;
+      salaryRuleSnapshot = machineSalaryRuleSnapshot(
+        rule,
+        {
+          plannedQuantity: task.plannedQty,
+          completedQuantity: input.completedQty,
+          defectQuantity: input.defectQty,
+          reworkQuantity: input.reworkQty,
+        },
+        itemFacts,
+        breakdown,
+      );
     } else if (
       taskWorkerType === WorkerType.PACKER ||
       taskWorkerType === WorkerType.CLEANER
@@ -1804,6 +1923,9 @@ export async function reportTasks(
           select: {
             orderId: true,
             name: true,
+            frontFoilColors: true,
+            backFoilColors: true,
+            foilColors: true,
             isDoubleSided: true,
             isDoubleColor: true,
           },
@@ -1860,19 +1982,30 @@ export async function reportTasks(
             `无当前生效的 ${task.machineType} 薪资规则，请联系管理员补规则`,
           );
         }
+        const itemFacts = resolvePieceworkOrderItemFacts(task.orderItem);
         const breakdown = calculateStorablePiecework(
           {
             quantity: task.plannedQty,
             itemCount: 1,
-            isDoubleSided: task.orderItem.isDoubleSided,
-            isDoubleColor: task.orderItem.isDoubleColor,
+            isDoubleSided: itemFacts.isDoubleSided,
+            isDoubleColor: itemFacts.isDoubleColor,
           },
           rule,
         );
         boardCount = breakdown.boardCount;
         pressCount = breakdown.pressCount;
         pieceworkAmount = breakdown.amount.toFixed(2);
-        salaryRuleSnapshot = rule as unknown as Prisma.InputJsonValue;
+        salaryRuleSnapshot = machineSalaryRuleSnapshot(
+          rule,
+          {
+            plannedQuantity: task.plannedQty,
+            completedQuantity: task.plannedQty,
+            defectQuantity: 0,
+            reworkQuantity: 0,
+          },
+          itemFacts,
+          breakdown,
+        ) as Prisma.InputJsonValue;
       } else if (
         taskWorkerType === WorkerType.PACKER ||
         taskWorkerType === WorkerType.CLEANER
