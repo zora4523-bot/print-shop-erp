@@ -1232,28 +1232,40 @@ export async function login(
   });
 }
 
-// The new-order form is a three-step tab interface. Item controls stay in the
-// DOM while hidden so draft values survive step changes; E2E flows must follow
-// the same visible interaction path as an operator instead of filling hidden
-// inputs or using Playwright's force option.
+// Both order-entry variants render the active style inline. External sales use
+// the B single-page form (pressed style buttons); internal users use a tablist
+// whose selected style owns the visible editor. Do not look for the retired
+// three-step "款式" tab — it no longer exists in either flow.
 export async function openFirstOrderItemEditor(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: /款式/ }).click();
-  // During an RSC navigation React can briefly retain the outgoing hidden
-  // tabpanel while mounting the incoming one. Scope all interaction to the
-  // visible panel so the helper follows what the user can actually operate.
-  const panel = page.locator('#order-step-items-panel:visible').first();
-  await expect(panel).toBeVisible();
+  const externalForm = page.locator(
+    '[data-slot="external-sales-order-form-b"]',
+  );
+  const internalEditor = page.locator(
+    'input[name="items.0.name"]:visible',
+  );
+  await expect(externalForm.or(internalEditor)).toBeVisible();
 
-  const editorToggle = panel
-    .locator('ol > li')
-    .first()
-    .getByRole('button')
-    .first();
-  if ((await editorToggle.getAttribute('aria-expanded')) !== 'true') {
-    await editorToggle.click();
+  if (await externalForm.isVisible()) {
+    const firstStyle = externalForm
+      .getByRole('navigation', { name: '款式' })
+      .getByRole('button')
+      .first();
+    await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
+    await expect(
+      externalForm.getByLabel('数量', { exact: true }),
+    ).toBeVisible();
+    return;
   }
-  await expect(editorToggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(panel.locator('input[name="items.0.name"]')).toBeVisible();
+
+  const firstStyle = page
+    .getByRole('tablist', { name: '款式' })
+    .getByRole('tab')
+    .first();
+  if ((await firstStyle.getAttribute('aria-selected')) !== 'true') {
+    await firstStyle.click();
+  }
+  await expect(firstStyle).toHaveAttribute('aria-selected', 'true');
+  await expect(internalEditor).toBeVisible();
 }
 
 // External-sales orders must explicitly confirm both customer-facing logistics

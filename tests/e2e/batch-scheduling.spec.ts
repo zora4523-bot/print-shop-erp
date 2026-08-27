@@ -132,7 +132,9 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await cleanupWorkerUiFixture(fixture);
+  if (fixture) {
+    await cleanupWorkerUiFixture(fixture);
+  }
 });
 
 test('账号在页面打开后失效时提示重新登录且排产事务不落数据', async ({

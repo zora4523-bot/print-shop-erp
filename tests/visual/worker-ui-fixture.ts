@@ -152,10 +152,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById", status,
+           "pricingStatus", "pricingConfirmedAt",
            "isUrgent", "isSfCollect", "customerRef", "customName", "packageRequirement", remark, "promisedDate",
            "totalAmount", "submittedAt", "scheduledAt", "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3, 'IN_PRODUCTION'::"OrderStatus",
+           'LEGACY_CONFIRMED'::"OrderPricingStatus", TIMESTAMP '2026-07-19 08:00:00',
            TRUE, TRUE, $4, $5, $6, $7, DATE '2099-12-31',
            646172.57, TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00',
            TIMESTAMP '2026-07-19 08:00:00', TIMESTAMP '2026-07-19 09:00:00'
@@ -174,11 +176,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
-           'SUBMITTED'::"OrderStatus", '混合机型批量排产客户',
+           'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
+           TIMESTAMP '2026-07-19 08:10:00', '混合机型批量排产客户',
            '手动烫金与风车机分步排产测试',
            TIMESTAMP '2026-07-19 08:10:00',
            TIMESTAMP '2026-07-19 08:10:00',
@@ -192,13 +195,17 @@ export async function seedWorkerUiFixture(
       );
       await db.query(
         `INSERT INTO "OrderItem" (
-           id, "orderId", sequence, name, specification, "paperType",
-           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           id, "orderId", sequence, name, "pricingRoute", "productStructure",
+           specification, "paperType", quantity, crafts, "foilColors", "foilTechnique",
+           "isDoubleSided", "isDoubleColor",
            remark, "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, 1, '混合机型分步派工款式', '大号', '艳红珠光纸',
+           $1, $2, 1, '混合机型分步派工款式',
+           'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+           'STANDARD_ENVELOPE'::"OrderProductStructure", '大号', '艳红珠光纸',
            2600, ARRAY[$3, $4]::text[], ARRAY['哑金', '红金']::text[],
-           FALSE, TRUE, '先手动烫金再走风车机', NOW(), NOW()
+           'FLAT'::"OrderFoilTechnique", FALSE, TRUE,
+           '先手动烫金再走风车机', NOW(), NOW()
          )`,
         [
           fixture.mixedSchedulingItemId,
@@ -211,11 +218,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
-           'SUBMITTED'::"OrderStatus", '非推荐派工测试客户',
+           'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
+           TIMESTAMP '2026-07-19 08:15:00', '非推荐派工测试客户',
            '管理员最终派工原因测试',
            TIMESTAMP '2026-07-19 08:15:00',
            TIMESTAMP '2026-07-19 08:15:00',
@@ -229,12 +237,16 @@ export async function seedWorkerUiFixture(
       );
       await db.query(
         `INSERT INTO "OrderItem" (
-           id, "orderId", sequence, name, specification, "paperType",
-           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           id, "orderId", sequence, name, "pricingRoute", "productStructure",
+           specification, "paperType", quantity, crafts, "foilColors", "foilTechnique",
+           "isDoubleSided", "isDoubleColor",
            remark, "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, 1, '非推荐派工款式', '大号', '艳红珠光纸',
-           1800, ARRAY[$3]::text[], ARRAY['哑金']::text[], FALSE, FALSE,
+           $1, $2, 1, '非推荐派工款式',
+           'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+           'STANDARD_ENVELOPE'::"OrderProductStructure", '大号', '艳红珠光纸',
+           1800, ARRAY[$3]::text[], ARRAY['哑金']::text[],
+           'FLAT'::"OrderFoilTechnique", FALSE, FALSE,
            '必须填写管理员派工原因', NOW(), NOW()
          )`,
         [
@@ -246,14 +258,21 @@ export async function seedWorkerUiFixture(
 
       await db.query(
         `INSERT INTO "OrderItem" (
-           id, "orderId", sequence, name, specification, "paperType", quantity,
-           "unitPrice", subtotal, crafts, "foilColors", "isDoubleSided", "isDoubleColor", remark,
+           id, "orderId", sequence, name, "pricingRoute", "productStructure",
+           specification, "paperType", quantity, "unitPrice", subtotal, crafts,
+           "foilColors", "foilTechnique", "isDoubleSided", "isDoubleColor", remark,
            "createdAt", "updatedAt"
          ) VALUES
-           ($1, $3, 1, $4, $5, $6, 1234567, 0.1234, 152345.57, ARRAY[$7]::text[],
-            ARRAY['哑金', '红金', '潘通 871C']::text[], TRUE, TRUE, $8, NOW(), NOW()),
-           ($2, $3, 2, $9, $5, $6, 987654, 0.5000, 493827.00, ARRAY[$7]::text[],
-            ARRAY['无颜色（纯彩印）']::text[], FALSE, FALSE, $8, NOW(), NOW())`,
+           ($1, $3, 1, $4, 'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+            'STANDARD_ENVELOPE'::"OrderProductStructure", $5, $6, 1234567,
+            0.1234, 152345.57, ARRAY[$7]::text[],
+            ARRAY['哑金', '红金', '潘通 871C']::text[], 'FLAT'::"OrderFoilTechnique",
+            TRUE, TRUE, $8, NOW(), NOW()),
+           ($2, $3, 2, $9, 'COLOR_PRINT'::"OrderItemPricingRoute",
+            'STANDARD_ENVELOPE'::"OrderProductStructure", $5, $6, 987654,
+            0.5000, 493827.00, ARRAY[$7]::text[],
+            ARRAY['无颜色（纯彩印）']::text[], 'NONE'::"OrderFoilTechnique",
+            FALSE, FALSE, $8, NOW(), NOW())`,
         [
           fixture.orderItemActiveId,
           fixture.orderItemCompletedId,
@@ -269,11 +288,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
-           'SUBMITTED'::"OrderStatus", '第二批量排产客户',
+           'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
+           TIMESTAMP '2026-07-19 08:05:00', '第二批量排产客户',
            '第二张跨工单批量排产测试',
            TIMESTAMP '2026-07-19 08:05:00',
            TIMESTAMP '2026-07-19 08:05:00',
@@ -287,12 +307,16 @@ export async function seedWorkerUiFixture(
       );
       await db.query(
         `INSERT INTO "OrderItem" (
-           id, "orderId", sequence, name, specification, "paperType",
-           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           id, "orderId", sequence, name, "pricingRoute", "productStructure",
+           specification, "paperType", quantity, crafts, "foilColors", "foilTechnique",
+           "isDoubleSided", "isDoubleColor",
            remark, "createdAt", "updatedAt"
          ) VALUES (
-           $1, $2, 1, '跨工单批量派工款式', '方形', '暗红珠光纸',
-           3000, ARRAY[$3]::text[], ARRAY['浅金']::text[], FALSE, FALSE,
+           $1, $2, 1, '跨工单批量派工款式',
+           'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+           'STANDARD_ENVELOPE'::"OrderProductStructure", '方形', '暗红珠光纸',
+           3000, ARRAY[$3]::text[], ARRAY['浅金']::text[],
+           'FLAT'::"OrderFoilTechnique", FALSE, FALSE,
            '第二张工单关键备注', NOW(), NOW()
          )`,
         [
@@ -305,11 +329,12 @@ export async function seedWorkerUiFixture(
       await db.query(
         `INSERT INTO "Order" (
            id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-           status, "customerRef", "customName", "submittedAt",
+           status, "pricingStatus", "pricingConfirmedAt", "customerRef", "customName", "submittedAt",
            "createdAt", "updatedAt"
          ) VALUES (
            $1, $2, $3, 'SALES'::"Role", 'EXTERNAL_SALES'::"OrderSettlementType", $3,
-           'SUBMITTED'::"OrderStatus", '批量排产客户',
+           'SUBMITTED'::"OrderStatus", 'LEGACY_CONFIRMED'::"OrderPricingStatus",
+           TIMESTAMP '2026-07-19 08:00:00', '批量排产客户',
            '批量排产响应式与无障碍测试',
            TIMESTAMP '2026-07-19 08:00:00',
            TIMESTAMP '2026-07-19 08:00:00',
@@ -319,15 +344,22 @@ export async function seedWorkerUiFixture(
       );
       await db.query(
         `INSERT INTO "OrderItem" (
-           id, "orderId", sequence, name, specification, "paperType",
-           quantity, crafts, "foilColors", "isDoubleSided", "isDoubleColor",
+           id, "orderId", sequence, name, "pricingRoute", "productStructure",
+           specification, "paperType", quantity, crafts, "foilColors", "foilTechnique",
+           "isDoubleSided", "isDoubleColor",
            remark, "createdAt", "updatedAt"
          ) VALUES
-           ($1, $3, 1, '批量派工款式一', '大号', '艳红珠光纸',
-            1000, ARRAY[$4]::text[], ARRAY['哑金']::text[], FALSE, FALSE,
+           ($1, $3, 1, '批量派工款式一',
+            'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+            'STANDARD_ENVELOPE'::"OrderProductStructure", '大号', '艳红珠光纸',
+            1000, ARRAY[$4]::text[], ARRAY['哑金']::text[],
+            'FLAT'::"OrderFoilTechnique", FALSE, FALSE,
             '批量派工关键备注一', NOW(), NOW()),
-           ($2, $3, 2, '批量派工款式二', '中号', '艳红珠光纸',
-            2000, ARRAY[$4]::text[], ARRAY['红金']::text[], FALSE, FALSE,
+           ($2, $3, 2, '批量派工款式二',
+            'CUSTOM_SINGLE_FLAT_FOIL'::"OrderItemPricingRoute",
+            'STANDARD_ENVELOPE'::"OrderProductStructure", '中号', '艳红珠光纸',
+            2000, ARRAY[$4]::text[], ARRAY['红金']::text[],
+            'FLAT'::"OrderFoilTechnique", FALSE, FALSE,
             '批量派工关键备注二', NOW(), NOW())`,
         [
           fixture.schedulingItemOneId,
