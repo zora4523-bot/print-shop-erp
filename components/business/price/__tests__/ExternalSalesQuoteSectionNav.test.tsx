@@ -14,15 +14,15 @@ describe('ExternalSalesQuoteSectionNav', () => {
       />,
     );
 
-    expect(html).toContain('aria-label="外部销售报价内容"');
+    expect(html).toContain('aria-label="客户计价导航"');
     expect(html).toContain(
-      'href="/owner/prices/external-sales/items?purpose=processing"',
+      'href="/owner/rules/customer-pricing?purpose=processing"',
     );
     expect(html).toContain(
-      'href="/owner/prices/external-sales/items?purpose=logistics"',
+      'href="/owner/rules/customer-pricing?purpose=logistics"',
     );
     expect(html).toContain(
-      'href="/owner/prices/external-sales/versions"',
+      'href="/owner/rules/price-versions"',
     );
     expect(html).toContain('版本与发布');
     expect(html).toContain('aria-current="page"');

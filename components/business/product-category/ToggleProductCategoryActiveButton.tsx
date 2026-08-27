@@ -33,9 +33,8 @@ export function ToggleProductCategoryActiveButton({
         pending={pending}
         formId={formId}
         deactivateImpactItems={[
-          '该分类不再用于新产品和新业务选择',
-          '现有产品、BOM 和历史工单中的分类引用会继续保留',
-          '停用不会移动或删除分类节点',
+          '新建 SKU 和 BOM 不可选择该分类',
+          '已有产品、BOM、工单和分类层级保留',
         ]}
       />
       {error ? (

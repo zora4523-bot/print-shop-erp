@@ -19,8 +19,17 @@ import type {
   CustomerPriceBookDraftPublishPreviewDto,
   CustomerPriceBookVersionAdminDto,
 } from '@/lib/price/customer-price-book-admin';
+import {
+  externalPriceBusinessText,
+  externalPriceRuleDisplayName,
+} from '@/lib/price/external-price-display';
 import { CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
+import {
+  customerPricingHref,
+  priceVersionsHref,
+  type CustomerPricingPurpose,
+} from '@/lib/navigation/rule-center';
 
 type ExternalSalesPriceBookVersionPanelProps = {
   versions: CustomerPriceBookVersionAdminDto[];
@@ -32,10 +41,10 @@ type ExternalSalesPriceBookVersionPanelProps = {
 
 const PURPOSE_LABELS: Record<CustomerPriceBookPurpose, string> = {
   [CustomerPriceBookPurpose.PROCESSING]: '加工费',
-  [CustomerPriceBookPurpose.LOGISTICS]: '快递与打包耗材',
+  [CustomerPriceBookPurpose.LOGISTICS]: '物流费',
 };
 
-const PURPOSE_PARAMS: Record<CustomerPriceBookPurpose, string> = {
+const PURPOSE_PARAMS: Record<CustomerPriceBookPurpose, CustomerPricingPurpose> = {
   [CustomerPriceBookPurpose.PROCESSING]: 'processing',
   [CustomerPriceBookPurpose.LOGISTICS]: 'logistics',
 };
@@ -67,13 +76,47 @@ function PriceBookVersionStatusBadge({
 }
 
 function itemsHref(purpose: CustomerPriceBookPurpose): string {
-  return `/owner/prices/external-sales/items?purpose=${PURPOSE_PARAMS[purpose]}`;
+  return customerPricingHref(PURPOSE_PARAMS[purpose]);
 }
 
 function versionsHref(draftId: string): string {
-  return `/owner/prices/external-sales/versions?draft=${encodeURIComponent(
-    draftId,
-  )}`;
+  return priceVersionsHref(draftId);
+}
+
+/**
+ * Published history can contain validation text produced by an older server.
+ * Keep the release screen business-facing even while that history is being
+ * repaired; technical identifiers remain in server logs and issue metadata,
+ * not in the administrator UI.
+ */
+export function externalPriceBookValidationMessage(message: string): string {
+  return externalPriceBusinessText(message)
+    .replace(/ADD_ON\s*\/\s*PER_BAG/g, '自动按实际袋数计价')
+    .replace(/ADD_ON\s*\/\s*FIXED_AMOUNT/g, '自动固定金额计价')
+    .replace(/\bPACKAGING_GROUP_MODE\b/g, '包装方式')
+    .replace(/\bSINGLE_STYLE\b/g, '单款装')
+    .replace(/\bMIXED_STYLE\b/g, '混装')
+    .replace(/\bZTO_PROVINCE_RATE\b/g, '中通地区费率')
+    .replace(/\bPACKING_MATERIAL_QUANTITY_TIER\b/g, '打包耗材数量范围')
+    .replace(/\bPER_BAG\b/g, '按实际袋数计价')
+    .replace(/\bFIXED_AMOUNT\b/g, '固定金额计价')
+    .replace(/\bADD_ON\b/g, '附加收费')
+    .replace(/\bexclusiveGroup\b/g, '适用范围')
+    .replace(/\bcarrierCode\b/g, '承运商')
+    .replace(/\bprovinces\b/g, '省份')
+    .replace(/\bunitsPerSheet\b/g, '每张成品数')
+    .replace(/\bissue\.path\b/g, '问题位置')
+    .replace(/Unrecognized key:[^。；]*/gi, '存在系统无法识别的适用条件')
+    .replace(/Invalid (?:option|input)[^。；]*/gi, '选项设置无效')
+    .replace(/\b[A-Z][A-Z0-9_]{2,}\b/g, '配置项');
+}
+
+function impactChangeDisplayName(
+  change: CustomerPriceBookDraftImpactChangeDto,
+): string {
+  return change.productName
+    ? externalPriceBusinessText(change.productName)
+    : externalPriceRuleDisplayName(change.name);
 }
 
 function VersionHistory({
@@ -111,7 +154,8 @@ function VersionHistory({
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="admin-wrap-anywhere font-medium">
-                    {version.name} · 第 {version.version} 版
+                    {externalPriceBusinessText(version.name)} · 第{' '}
+                    {version.version} 版
                   </p>
                   <p className="mt-1 font-sans text-xs tabular-nums text-muted-foreground">
                     {version.status === 'DRAFT'
@@ -203,6 +247,7 @@ const CALCULATION_LABELS: Record<CustomerPriceCalculationType, string> = {
   [CustomerPriceCalculationType.PER_SHEET]: '张',
   [CustomerPriceCalculationType.PER_10K]: '万个',
   [CustomerPriceCalculationType.PER_ITEM]: '款',
+  [CustomerPriceCalculationType.PER_BAG]: '袋',
 };
 
 function signed(value: string, suffix = ''): string {
@@ -288,15 +333,15 @@ function DraftChanges({
                         prefetch={false}
                         className="admin-wrap-anywhere font-medium underline-offset-4 hover:underline"
                       >
-                        {change.productName ?? change.name}
+                        {impactChangeDisplayName(change)}
                       </Link>
                     ) : (
                       <p className="admin-wrap-anywhere font-medium">
-                        {change.productName ?? change.name}
+                        {impactChangeDisplayName(change)}
                       </p>
                     )}
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {change.categoryName} · {change.quantityLabel}
+                      {change.quantityLabel}
                     </p>
                   </div>
                   <span className={cn('shrink-0 font-sans text-sm font-medium tabular-nums', deltaTone(change))}>
@@ -337,13 +382,13 @@ function DraftChanges({
                           prefetch={false}
                           className="admin-wrap-anywhere font-medium underline-offset-4 hover:underline"
                         >
-                          {change.productName ?? change.name}
+                          {impactChangeDisplayName(change)}
                         </Link>
                       ) : (
-                        <p className="admin-wrap-anywhere font-medium">{change.productName ?? change.name}</p>
+                        <p className="admin-wrap-anywhere font-medium">{impactChangeDisplayName(change)}</p>
                       )}
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {change.categoryName} · {change.quantityLabel} · {change.changedFields.join('、')}
+                        {change.quantityLabel} · {change.changedFields.join('、')}
                       </p>
                     </td>
                     <td className="px-4 py-3 text-right font-sans text-xs tabular-nums text-muted-foreground">
@@ -376,7 +421,7 @@ function ImpactSummary({ preview }: { preview: CustomerPriceBookDraftPublishPrev
   return (
     <section aria-labelledby="publish-impact-heading" className="rounded-xl border border-destructive/30 bg-card p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="destructive">L3 · 不可逆</Badge>
+        <Badge variant="destructive">发布前请确认</Badge>
         <h3 id="publish-impact-heading" className="font-semibold">发布影响</h3>
       </div>
       <dl className="mt-3 grid gap-2 text-sm">
@@ -387,7 +432,7 @@ function ImpactSummary({ preview }: { preview: CustomerPriceBookDraftPublishPrev
         <div className="flex justify-between gap-3"><dt className="text-muted-foreground">生效时间</dt><dd className="text-destructive">需选择</dd></div>
       </dl>
       <p className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm leading-6 text-warning-foreground">
-        已按旧价开出、尚未结案的工单不会重新计价——金额快照已固定。新价只影响生效时间之后新建或重新报价的工单。
+        已开工单价格不变；新价格仅用于生效后的新建或重新报价工单。
       </p>
     </section>
   );
@@ -402,24 +447,29 @@ function ValidationSummary({
 }) {
   return (
     <section aria-labelledby="publish-validation-heading" className="rounded-xl border bg-card p-4 shadow-sm">
-      <h3 id="publish-validation-heading" className="font-semibold">完整规则集校验</h3>
+      <h3 id="publish-validation-heading" className="font-semibold">发布检查</h3>
       {preview.validation.status === 'PASS' ? (
         <div className="mt-3 flex items-start gap-2 text-sm">
           <Badge variant="outline" className="border-success/40 bg-success/10 text-success-foreground">通过</Badge>
           <p className="leading-6">
-            全部 {preview.totalRuleCount} 个收费规则已通过服务端数量、金额、区间与自动报价冲突校验。
+            全部 {preview.totalRuleCount} 项检查通过。
           </p>
         </div>
       ) : (
         <div className="mt-3 space-y-3">
           <div className="flex items-start gap-2 text-sm">
             <Badge variant="destructive">待修正</Badge>
-            <p>{preview.validation.issues.length} 个问题会阻断整份草稿发布。</p>
+            <p>{preview.validation.issues.length} 个问题待修正，当前不能发布。</p>
           </div>
           <ul className="space-y-2 text-sm">
             {preview.validation.issues.map((issue, index) => (
-              <li key={`${issue.path}-${index}`} className="rounded-lg border border-destructive/30 bg-destructive/5 p-2">
-                <p className="admin-wrap-anywhere">{issue.message}</p>
+              <li
+                key={`${issue.ruleId ?? 'price-book'}-${index}`}
+                className="rounded-lg border border-destructive/30 bg-destructive/5 p-2"
+              >
+                <p className="admin-wrap-anywhere">
+                  {externalPriceBookValidationMessage(issue.message)}
+                </p>
                 {issue.ruleId ? (
                   <Link
                     href={`${itemsHref(purpose)}&item=${encodeURIComponent(issue.ruleId)}#selected-charge-detail`}
@@ -465,7 +515,7 @@ function DraftPublishPanel({
             调价原因：{draft.changeReason}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            基于第 {preview.basedOnVersion} 版 · 共 {preview.totalRuleCount} 个收费规则 · 发布时会再次锁定并校验全部规则。
+            基于第 {preview.basedOnVersion} 版 · 共 {preview.totalRuleCount} 项
           </p>
         </div>
         <Link
@@ -534,7 +584,7 @@ export function ExternalSalesPriceBookVersionPanel({
     >
       {invalidDraftSelection ? (
         <div role="alert" className="rounded-xl border bg-card p-4 text-sm">
-          所选草稿不存在或已不可编辑，已安全返回发布中心。
+          草稿不存在或不可编辑。
         </div>
       ) : null}
 
@@ -546,7 +596,7 @@ export function ExternalSalesPriceBookVersionPanel({
         />
       ) : draft ? (
         <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
-          无法读取草稿基线或发布影响，已阻止发布。请返回收费项目工作台核对当前版本。
+          发布数据读取失败，当前不能发布。
         </div>
       ) : null}
 
@@ -560,21 +610,6 @@ export function ExternalSalesPriceBookVersionPanel({
         ))}
       </div>
 
-      <Disclosure className="min-w-0 rounded-xl border bg-muted/30 p-4">
-        <DisclosureSummary className="justify-between gap-3 font-semibold">
-          <span>版本发布说明</span>
-          <ChevronDown
-            aria-hidden="true"
-            className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
-          />
-        </DisclosureSummary>
-        <ol className="mt-3 list-decimal space-y-2 border-t pt-3 pl-5 text-sm text-muted-foreground">
-          <li>修改价格时建立新草稿，不覆盖已发布版本。</li>
-          <li>发布前校验适用数量、金额和自动计价范围。</li>
-          <li>新版本只影响生效后创建或重新报价的工单。</li>
-          <li>历史工单继续使用创建时冻结的规则与金额快照。</li>
-        </ol>
-      </Disclosure>
     </div>
   );
 }

@@ -54,7 +54,7 @@ describe('PricingSnapshotBreakdown', () => {
     expect(html).toContain('<h4');
     expect(html).toContain('<ol');
     expect(html).toContain('<dl');
-    expect(html).toContain('系统建议收费分项（1）');
+    expect(html).toContain('已保存价格明细（1）');
     expect(html).toContain('基础价格');
     expect(html).toContain('按个');
     expect(html).toContain('¥ 0.1288');
@@ -93,12 +93,38 @@ describe('PricingSnapshotBreakdown', () => {
     const html = renderToStaticMarkup(
       <PricingSnapshotBreakdown pricingSnapshot={snapshot} />,
     );
-    expect(html).toContain('系统建议小计');
+    expect(html).toContain('自动计价小计');
     expect(html).toContain('¥ 128.80');
-    expect(html).toContain('实际成交小计');
+    expect(html).toContain('已保存价格小计');
     expect(html).toContain('¥ 120.00');
     expect(html).toContain('与客户确认后的协议价');
-    expect(html).toContain('下方分项是系统建议的计价依据');
+    expect(html).toContain('收费以“已保存价格小计”为准');
+  });
+
+  it('hides imported coordinates from historical names while retaining provenance', () => {
+    const snapshot = {
+      components: [
+        {
+          source: 'BASE',
+          name: '空封现货基础价（A4:C4）',
+          amount: '100.00',
+          sourceSheet: '烫金',
+          sourceRange: 'A4:C4',
+        },
+      ],
+    };
+    const parsed = parsePricingSnapshotComponents(snapshot);
+    const html = renderToStaticMarkup(
+      <PricingSnapshotBreakdown pricingSnapshot={snapshot} />,
+    );
+
+    expect(parsed[0]).toMatchObject({
+      name: '空封现货基础价',
+      sourceSheet: '烫金',
+      sourceRange: 'A4:C4',
+    });
+    expect(html).toContain('空封现货基础价');
+    expect(html).not.toContain('A4:C4');
   });
 
   it('keeps provenance in the parser but renders only business-facing fields', () => {
@@ -143,5 +169,27 @@ describe('PricingSnapshotBreakdown', () => {
     expect(html).toContain('grid-cols-1');
     expect(html).not.toContain('[object Object]');
     expect(html).not.toContain('NaN');
+  });
+
+  it('does not expose an unknown calculation token', () => {
+    const html = renderToStaticMarkup(
+      <PricingSnapshotBreakdown
+        pricingSnapshot={{
+          components: [
+            {
+              source: 'ADJUSTMENT',
+              name: '历史收费项',
+              adjustmentType: 'RAW_CALCULATION_TYPE',
+              rate: '1.5',
+              units: '2',
+              amount: '3',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('其他计价方式');
+    expect(html).not.toContain('RAW_CALCULATION_TYPE');
   });
 });

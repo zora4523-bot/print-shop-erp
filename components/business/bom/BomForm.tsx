@@ -6,6 +6,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export type BomProductOption = {
   id: string;
@@ -61,7 +63,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="targetType">BOM 目标</Label>
+          <Label htmlFor="targetType">适用对象</Label>
           <select
             id="targetType"
             name="targetType"
@@ -72,8 +74,8 @@ export function BomForm({ action, products, categories, materials }: Props) {
             }
             disabled={pending}
           >
-            <option value="PRODUCT">产品</option>
-            <option value="CATEGORY">产品分类</option>
+            <option value="PRODUCT">报价 SKU</option>
+            <option value="CATEGORY">产品结构分类</option>
           </select>
           {errs.targetType?.[0] ? (
             <p className="text-sm text-destructive">{errs.targetType[0]}</p>
@@ -90,13 +92,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="productId">产品</Label>
+            <Label htmlFor="productId">报价 SKU</Label>
             <PendingLink
-              href="/owner/products/new"
+              href={`${RULE_CENTER_HREFS.stockSkus}/new`}
               pending={pending}
               className="text-xs text-primary hover:underline"
             >
-              新建产品
+              新建报价 SKU
             </PendingLink>
           </div>
           <select
@@ -106,11 +108,12 @@ export function BomForm({ action, products, categories, materials }: Props) {
             defaultValue=""
             disabled={pending || targetType !== 'PRODUCT' || missingProducts}
           >
-            <option value="">请选择产品</option>
+            <option value="">请选择报价 SKU</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.code ? `${product.code} · ` : ''}
-                {product.name}（{product.categoryName}）
+                {externalPriceBusinessText(product.name)}（
+                {externalPriceBusinessText(product.categoryName)}）
               </option>
             ))}
           </select>
@@ -121,9 +124,9 @@ export function BomForm({ action, products, categories, materials }: Props) {
 
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="categoryNodeId">产品分类</Label>
+            <Label htmlFor="categoryNodeId">产品结构分类</Label>
             <PendingLink
-              href="/owner/product-categories/new"
+              href={`${RULE_CENTER_HREFS.productCategories}/new`}
               pending={pending}
               className="text-xs text-primary hover:underline"
             >
@@ -153,8 +156,8 @@ export function BomForm({ action, products, categories, materials }: Props) {
       {missingTarget ? (
         <p className="text-sm text-muted-foreground">
           {targetType === 'PRODUCT'
-            ? '暂无可用产品，请先创建并启用产品。'
-            : '暂无可用产品分类，请先创建并启用分类。'}
+            ? '暂无可用报价 SKU，请先创建并启用。'
+            : '暂无可用产品结构分类，请先创建并启用。'}
         </p>
       ) : null}
 
@@ -238,7 +241,8 @@ export function BomForm({ action, products, categories, materials }: Props) {
                     <option value="">请选择物料</option>
                     {materials.map((material) => (
                       <option key={material.id} value={material.id}>
-                        {material.code} · {material.name}（{material.unit}）
+                        {material.code} · {externalPriceBusinessText(material.name)}（
+                        {material.unit}）
                       </option>
                     ))}
                   </select>

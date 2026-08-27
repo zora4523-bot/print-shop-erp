@@ -61,6 +61,7 @@ import { OutsourceStatus } from '@/generated/prisma/enums';
 import { PROMISE_ALERT_STATUSES } from '@/lib/order/promised-date';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export const metadata = { title: '管理员 Dashboard' };
 
@@ -159,14 +160,14 @@ export default async function OwnerDashboardPage() {
           href="/orders/new"
           icon={PlusCircle}
           label="新建工单"
-          description="创建生产工单"
+          description="填写客户、款式与交期"
           tone="primary"
         />
         <ActionShortcut
-          href="/owner/products"
+          href={RULE_CENTER_HREFS.stockSkus}
           icon={PackageOpen}
-          label="产品库"
-          description="规格、基础价与起订量"
+          label="报价 SKU"
+          description="维护报价规格"
           tone="info"
         />
         <ActionShortcut
@@ -646,7 +647,7 @@ async function EndingPeriodsWatchlist({
     <WatchlistTable
       slot="dashboard-watchlist-cs-periods"
       title="即将结算客服周期"
-      description="7 天内 periodEnd · 含按当前规则预测的提成 / 总收入"
+      description="7 天内到期 · 含按当前规则预测的提成 / 总收入"
       rows={endingPeriods}
       rowKey={(row) => row.id}
       emptyText="未来 7 天内无客服周期到期。"

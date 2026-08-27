@@ -19,13 +19,13 @@ describe('ProductReferenceImpact', () => {
     );
     expect(html).toContain('历史/现有工单');
     expect(html).toContain('BOM 版本');
-    expect(html).toContain('当前外部销售规则');
-    expect(html).toContain('当前内部数量档');
+    expect(html).toContain('当前客户计价规则');
+    expect(html).toContain('当前内部计价档');
   });
 
   it('states the historical-retention invariant in the deactivation impact', () => {
     const items = productActiveChangeImpactItems(impact, false);
-    expect(items).toContain('8 张已有工单继续保留产品、成交价与计价快照。');
+    expect(items).toContain('8 张已有工单的产品和成交价保留。');
     expect(items).toContain('2 个 BOM 版本和已有用料记录继续保留。');
   });
 

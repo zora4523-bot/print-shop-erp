@@ -12,16 +12,22 @@ export function ToggleActiveButton({
   productId,
   currentlyActive,
   impact,
+  action = setProductActiveAction,
 }: {
   productId: string;
   currentlyActive: boolean;
   impact: ProductReferenceImpact;
+  action?: (
+    id: string,
+    isActive: boolean,
+    formData?: FormData,
+  ) => Promise<ProductMutationResult>;
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
     async (_previous, formData) =>
-      setProductActiveAction(productId, nextActive, formData),
+      action(productId, nextActive, formData),
     null,
   );
 
@@ -56,8 +62,8 @@ export function ToggleActiveButton({
         title={currentlyActive ? '停用该产品？' : '重新启用该产品？'}
         description={
           currentlyActive
-            ? '请核对页面加载时的引用数并填写停用理由。提交时服务器会再次查询影响；停用不是删除。'
-            : '请核对恢复选择和报价后的影响。'
+            ? '停用后，该产品不能用于新建工单和新报价。请核对下列引用并填写停用理由。'
+            : '启用后，该产品可重新用于新建工单和新报价。请核对下列影响。'
         }
         impactItems={productActiveChangeImpactItems(impact, nextActive)}
         confirmLabel={currentlyActive ? '确认停用' : '确认启用'}

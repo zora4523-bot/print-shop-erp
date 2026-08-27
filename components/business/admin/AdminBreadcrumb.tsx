@@ -33,10 +33,18 @@ const SEGMENT_LABELS: Record<string, string> = {
   boms: 'BOM/用料',
   materials: '物料',
   warehouses: '仓库/库位',
+  'customer-pricing': '客户计价规则',
+  'pricing-routes': '计价方式',
+  papers: '纸张',
+  'stock-skus': '现货 SKU',
+  'price-versions': '价格版本',
+  'internal-pricing': '内部计价',
+  'worker-piecework': '师傅计件规则',
+  'employee-pay': '员工工资与提成',
   prices: '价格管理',
-  'external-sales': '外部销售收费',
-  items: '收费项目',
-  versions: '发布中心',
+  'external-sales': '客户计价规则',
+  items: '规则工作台',
+  versions: '价格版本',
   quote: '报价查询',
   adjustments: '加价规则',
   tiers: '价格阶梯',
@@ -57,6 +65,24 @@ const SEGMENT_LABELS: Record<string, string> = {
   count: '盘点',
 };
 
+// 有些路由在不同业务下会复用同一末级段名（例如
+// `/owner/rules` 与 `/owner/salary/rules`）。这些标签必须按完整累计路径
+// 解析，不能仅依赖 segment，否则会把旧的工资规则误标为规则中心。
+export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> = {
+  '/owner/rules': '规则配置中心',
+  '/owner/rules/pricing-routes': '计价方式',
+  '/owner/rules/papers': '纸张',
+  '/owner/rules/stock-skus': '报价 SKU',
+  '/owner/rules/product-categories': '产品结构分类',
+  '/owner/rules/crafts': '工艺与参数',
+  '/owner/rules/customer-pricing': '客户计价规则',
+  '/owner/rules/price-versions': '价格版本',
+  '/owner/rules/internal-pricing': '内部计价',
+  '/owner/rules/worker-piecework': '师傅计件规则',
+  '/owner/rules/employee-pay': '员工工资与提成',
+  '/owner/salary/rules': '员工工资规则',
+};
+
 // Routes that are layout-only (no page.tsx) — linking them produces
 // 404s. Render those segments as text instead。
 // Keep this in sync with the file tree in `app/`; if a layout-only
@@ -64,6 +90,10 @@ const SEGMENT_LABELS: Record<string, string> = {
 const LAYOUT_ONLY_PATHS = new Set<string>([
   '/foreman',
   '/sales',
+  '/owner/prices/adjustments',
+  '/owner/prices/tiers',
+  '/owner/rules/internal-pricing/adjustments',
+  '/owner/rules/internal-pricing/tiers',
 ]);
 
 // cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读
@@ -141,11 +171,13 @@ export function AdminBreadcrumb() {
         {segments.map((seg, i) => {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
-          const label = resolveSegmentLabel(
-            seg,
-            entityLabel,
-            isLast ? pageHeading : null,
-          );
+          const label =
+            BREADCRUMB_PATH_LABELS[href] ??
+            resolveSegmentLabel(
+              seg,
+              entityLabel,
+              isLast ? pageHeading : null,
+            );
           // Layout-only paths can't be navigated to (404)；render the
           // label as text not link。
           const isLinkable = !LAYOUT_ONLY_PATHS.has(href);

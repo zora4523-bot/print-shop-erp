@@ -19,8 +19,15 @@ type CategoryInitial = {
 // 暴露给用户）。
 export type ParentCategoryOption = { id: string; label: string };
 
-type Props =
-  | {
+export type ProductCategoryRouteBase =
+  | '/owner/product-categories'
+  | '/owner/rules/product-categories';
+
+type Props = {
+  routeBase?: ProductCategoryRouteBase;
+} &
+  (
+    | {
       mode: 'create';
       action: (
         prev: ProductCategoryNodeMutationResult | null,
@@ -35,7 +42,8 @@ type Props =
         fd: FormData,
       ) => Promise<ProductCategoryNodeMutationResult>;
       initial: CategoryInitial;
-    };
+      }
+  );
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
@@ -50,9 +58,11 @@ export function ProductCategoryForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const routeBase = props.routeBase ?? '/owner/product-categories';
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
+      <input type="hidden" name="routeBase" value={routeBase} />
       {props.mode === 'create' ? (
         <div className="space-y-2">
           <Label htmlFor="parentId">上级分类</Label>
@@ -89,7 +99,7 @@ export function ProductCategoryForm(props: Props) {
       />
 
       <div className="space-y-2">
-        <Label htmlFor="legacyCategory">旧分类快照</Label>
+        <Label htmlFor="legacyCategory">适用计价方式</Label>
         <select
           id="legacyCategory"
           name="legacyCategory"
@@ -111,7 +121,7 @@ export function ProductCategoryForm(props: Props) {
       <TextField
         id="sortOrder"
         label="排序"
-        hint="正整数；建议 10、20、30 递增，便于插入新分类。"
+        hint="正整数。"
         type="number"
         min={1}
         step={1}
@@ -137,7 +147,7 @@ export function ProductCategoryForm(props: Props) {
           {pending ? '提交中…' : props.mode === 'create' ? '创建分类' : '保存修改'}
         </Button>
         <PendingLink
-          href="/owner/product-categories"
+          href={routeBase}
           pending={pending}
           className={buttonVariants({ variant: 'outline' })}
         >

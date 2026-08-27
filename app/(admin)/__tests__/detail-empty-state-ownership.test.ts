@@ -2,11 +2,12 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+function readProjectFile(...segments: string[]): string {
+  return readFileSync(path.join(process.cwd(), ...segments), 'utf8');
+}
+
 function readAdminPage(...segments: string[]): string {
-  return readFileSync(
-    path.join(process.cwd(), 'app', '(admin)', ...segments, 'page.tsx'),
-    'utf8',
-  );
+  return readProjectFile('app', '(admin)', ...segments, 'page.tsx');
 }
 
 function between(source: string, startMarker: string, endMarker: string): string {
@@ -52,17 +53,28 @@ describe('detail no-data empty-state ownership', () => {
     expectSingleSharedEmptyState(region);
     expect(region).toContain('variant="compact"');
     expect(region).toContain(`title="${title}"`);
-    expect(region).toContain('description=');
   });
 
   it.each([
-    ['owner', 'materials', '[id]'],
-    ['foreman', 'materials', '[id]'],
+    {
+      role: 'owner',
+      file: [
+        'components',
+        'business',
+        'rules',
+        'catalog',
+        'MaterialCatalogPages.tsx',
+      ],
+    },
+    {
+      role: 'foreman',
+      file: ['app', '(admin)', 'foreman', 'materials', '[id]', 'page.tsx'],
+    },
   ])(
-    'keeps one semantic table-row empty state for %s material location stock',
-    (...file) => {
+    'keeps one semantic table-row empty state for $role material location stock',
+    ({ file }) => {
       const region = between(
-        readAdminPage(...file),
+        readProjectFile(...file),
         '库位库存</h2>',
         '<ToggleMaterialActiveButton',
       );

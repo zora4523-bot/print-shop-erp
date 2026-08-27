@@ -1,5 +1,9 @@
 import Link from 'next/link';
 import { buttonVariants } from '@/components/ui/button';
+import {
+  RULE_CENTER_HREFS,
+  customerPricingHref,
+} from '@/lib/navigation/rule-center';
 import { cn } from '@/lib/utils';
 
 export type ExternalSalesQuoteSection =
@@ -14,7 +18,7 @@ type ExternalSalesQuoteSectionNavProps = {
 
 const SECTION_LABELS: Record<ExternalSalesQuoteSection, string> = {
   processing: '加工费',
-  logistics: '快递与打包耗材',
+  logistics: '快递费与打包耗材',
   versions: '版本与发布',
 };
 
@@ -39,7 +43,7 @@ export function ExternalSalesQuoteSectionNav({
 
   return (
     <nav
-      aria-label="外部销售报价内容"
+      aria-label="客户计价导航"
       className="grid min-w-0 grid-cols-1 gap-2 rounded-xl border bg-card p-2 shadow-sm sm:grid-cols-2 lg:flex lg:flex-wrap"
     >
       {sections.map((section) => {
@@ -48,8 +52,8 @@ export function ExternalSalesQuoteSectionNav({
           perspective === 'sales'
             ? `/sales/quote?section=${section}`
             : section === 'versions'
-              ? '/owner/prices/external-sales/versions'
-              : `/owner/prices/external-sales/items?purpose=${section}`;
+              ? RULE_CENTER_HREFS.priceVersions
+              : customerPricingHref(section);
         return (
           <Link
             key={section}

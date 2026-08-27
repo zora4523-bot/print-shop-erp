@@ -36,9 +36,8 @@ export function ToggleActiveButton({
         pending={pending}
         formId={formId}
         deactivateImpactItems={[
-          '该工艺不再出现在要求活跃工艺的新工单和排产选择中',
-          '历史生产任务和薪资记录会继续保留',
-          '停用不会删除已有产品或工单中的历史引用',
+          '新工单和排产不可选择该工艺',
+          '已有产品、工单、生产任务和工资记录保留',
         ]}
       />
       {error ? (

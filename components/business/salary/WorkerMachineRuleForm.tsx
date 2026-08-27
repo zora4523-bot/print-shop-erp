@@ -176,7 +176,7 @@ export function WorkerMachineRuleForm({
           {pending ? '保存中…' : '新增规则版本'}
         </Button>
         <span className="text-xs text-muted-foreground">
-          新版本会自动结束上一版本；已报工任务仍保留原规则快照。
+          新版本会自动结束上一版本；已报工任务的计件结果不受影响。
         </span>
       </div>
       {state?.status === 'invalid' ? (

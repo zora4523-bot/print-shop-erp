@@ -1,5 +1,6 @@
 import { Role } from '../../generated/prisma/enums';
 import type { Permission } from '../auth/permissions-dict';
+import { RULE_CENTER_SIDEBAR_ITEMS } from './rule-center';
 
 // 受控的图标名集合。新增图标时同时更新 AppSidebar 的 ICONS map。
 export type IconName =
@@ -26,8 +27,8 @@ export type IconName =
 export type AdminModuleStatus = 'implemented' | 'placeholder';
 
 export type AdminMenuSection =
-  | 'dashboard'
   | 'workflow'
+  | 'rules'
   | 'finance'
   | 'dictionary'
   | 'operations'
@@ -35,6 +36,7 @@ export type AdminMenuSection =
 
 export type AdminModuleMetadata = {
   id: string;
+  menuParentId?: string;
   label: string;
   routeBase: string;
   activeRouteBase?: string;
@@ -48,6 +50,26 @@ export type AdminModuleMetadata = {
   roles?: readonly Role[];
 };
 
+const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
+  RULE_CENTER_SIDEBAR_ITEMS.map((item, index) => ({
+    id: `owner.rules.${item.id}`,
+    menuParentId:
+      'menuParentId' in item
+        ? `owner.rules.${item.menuParentId}`
+        : undefined,
+    label: item.label,
+    routeBase: item.href,
+    activeRouteBase: item.activeRouteBase,
+    iconName: item.iconName,
+    breadcrumbLabel: item.breadcrumbLabel,
+    menuSection: 'rules',
+    status: 'implemented',
+    // 规则组位于业务与财务之间；小数只用于组内稳定排序。
+    menuOrder: 29 + index / 10,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: item.requiredPermission,
+  }));
+
 export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   {
     id: 'owner.dashboard',
@@ -55,7 +77,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/owner',
     iconName: 'LayoutDashboard',
     breadcrumbLabel: 'Dashboard',
-    menuSection: 'dashboard',
+    menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 10,
     menuRoles: [Role.ADMIN],
@@ -97,6 +119,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuRoles: [Role.ADMIN],
     requiredPermission: 'order:change:review',
   },
+  ...RULE_CENTER_ADMIN_MODULES,
   {
     id: 'owner.bills',
     label: '账单',
@@ -134,30 +157,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'salary:view:all',
   },
   {
-    id: 'owner.salary.piecework-rules',
-    label: '开机师傅计件规则',
-    routeBase: '/owner/salary/piecework-rules',
-    iconName: 'Calculator',
-    breadcrumbLabel: '计件规则',
-    menuSection: 'finance',
-    status: 'implemented',
-    menuOrder: 55,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'salary:rule:manage',
-  },
-  {
-    id: 'owner.salary.rules',
-    label: '员工工资规则',
-    routeBase: '/owner/salary/rules',
-    iconName: 'Calculator',
-    breadcrumbLabel: '员工工资规则',
-    menuSection: 'finance',
-    status: 'implemented',
-    menuOrder: 57,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'salary:rule:manage',
-  },
-  {
     id: 'owner.salary.cs',
     label: '客服周期',
     routeBase: '/owner/salary/cs',
@@ -192,67 +191,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 75,
     menuRoles: [Role.ADMIN],
     requiredPermission: 'party:manage',
-  },
-  {
-    id: 'owner.crafts',
-    label: '工艺字典',
-    routeBase: '/owner/crafts',
-    iconName: 'BookOpen',
-    breadcrumbLabel: '工艺字典',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 80,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'dict:craft:manage',
-  },
-  {
-    id: 'owner.products',
-    label: '产品字典',
-    routeBase: '/owner/products',
-    iconName: 'PackageOpen',
-    breadcrumbLabel: '产品字典',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 90,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'dict:product:manage',
-  },
-  {
-    id: 'owner.productCategories',
-    label: '产品分类',
-    routeBase: '/owner/product-categories',
-    iconName: 'PackageOpen',
-    breadcrumbLabel: '产品分类',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 100,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'dict:product:manage',
-  },
-  {
-    id: 'owner.prices.external-sales.items',
-    label: '外部销售收费',
-    routeBase: '/owner/prices/external-sales/items',
-    activeRouteBase: '/owner/prices/external-sales',
-    iconName: 'FileText',
-    breadcrumbLabel: '外部销售收费',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 105,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'dict:price:manage',
-  },
-  {
-    id: 'owner.prices',
-    label: '内部报价（低频）',
-    routeBase: '/owner/prices',
-    iconName: 'FileText',
-    breadcrumbLabel: '内部报价',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 110,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'dict:price:manage',
   },
   {
     id: 'owner.boms',
@@ -411,18 +349,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'design:bundle:create',
   },
   {
-    id: 'sales.dashboard',
-    label: '我的 Dashboard',
-    routeBase: '#',
-    iconName: 'LayoutDashboard',
-    breadcrumbLabel: '我的 Dashboard',
-    menuSection: 'dashboard',
-    status: 'placeholder',
-    menuOrder: 10,
-    menuRoles: [Role.SALES],
-    roles: [Role.SALES],
-  },
-  {
     id: 'sales.orders.new',
     label: '创建工单',
     routeBase: '/orders/new',
@@ -469,18 +395,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 50,
     menuRoles: [Role.SALES],
     requiredPermission: 'order:create',
-  },
-  {
-    id: 'cs.dashboard',
-    label: '我的 Dashboard',
-    routeBase: '#',
-    iconName: 'LayoutDashboard',
-    breadcrumbLabel: '我的 Dashboard',
-    menuSection: 'dashboard',
-    status: 'placeholder',
-    menuOrder: 10,
-    menuRoles: [Role.CUSTOMER_SERVICE],
-    roles: [Role.CUSTOMER_SERVICE],
   },
   {
     id: 'cs.orders.new',

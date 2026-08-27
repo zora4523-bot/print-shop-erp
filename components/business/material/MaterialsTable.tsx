@@ -18,10 +18,14 @@ import {
   type MaterialSummary,
 } from '@/lib/material';
 import type { SortDirection, TableHrefParams } from '@/lib/admin/table';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type Props = {
   materials: MaterialSummary[];
-  editBase: '/owner/materials' | '/foreman/materials';
+  editBase:
+    | '/owner/materials'
+    | '/foreman/materials'
+    | '/owner/rules/papers';
   tableBase?: string;
   queryParams?: TableHrefParams;
   sort?: MaterialListSortKey;
@@ -31,6 +35,10 @@ type Props = {
 function decimal(value: unknown): string {
   if (value === null || value === undefined) return '—';
   return String(value);
+}
+
+function businessText(value: string, fallback: string): string {
+  return externalPriceBusinessText(value) || fallback;
 }
 
 function SortHead({
@@ -124,12 +132,19 @@ export function MaterialsTable({
         {materials.map((m) => (
           <TableRow key={m.id} className={!m.isActive ? 'opacity-60' : undefined}>
             <TableCell className="font-sans tabular-nums text-xs">{m.code}</TableCell>
-            <TableCell>{m.name}</TableCell>
-            <TableCell className="text-muted-foreground">
-              {MATERIAL_CATEGORY_LABELS[m.category]}
+            <TableCell>
+              {businessText(
+                m.name,
+                m.category === 'PAPER' ? '未命名纸张' : '未命名物料',
+              )}
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {m.specification ?? '—'}
+              {MATERIAL_CATEGORY_LABELS[m.category] ?? '未识别分类'}
+            </TableCell>
+            <TableCell className="text-muted-foreground">
+              {m.specification
+                ? businessText(m.specification, '未标注规格')
+                : '—'}
             </TableCell>
             <TableCell>{m.unit}</TableCell>
             <TableCell className="text-right font-sans tabular-nums text-xs">

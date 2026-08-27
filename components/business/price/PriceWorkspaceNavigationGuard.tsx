@@ -40,7 +40,7 @@ const NavigationGuardContext = createContext<NavigationGuardContextValue>({
 });
 
 export function unsavedTierNavigationMessage(tierCount: number): string {
-  return `当前选中组有 ${tierCount.toLocaleString('zh-CN')} 个档位尚未保存。离开后会丢失这些本地修改，仍要离开吗？`;
+  return `当前选中组有 ${tierCount.toLocaleString('zh-CN')} 个档位尚未保存。离开后将丢失这些修改，仍要离开吗？`;
 }
 
 export function PriceWorkspaceNavigationGuardProvider({
@@ -126,7 +126,7 @@ export function PriceWorkspaceUnsavedSummary() {
   if (!unsaved.registered) {
     return (
       <span className="text-xs text-muted-foreground">
-        未保存状态以右侧表单为准
+        当前未编辑价格阶梯
       </span>
     );
   }
@@ -198,8 +198,8 @@ export function PriceWorkspaceLink({
         title="放弃未保存修改并离开？"
         description={unsavedTierNavigationMessage(unsaved.tierCount)}
         impactItems={[
-          `${unsaved.tierCount.toLocaleString('zh-CN')} 个本地档位修改不会保存。`,
-          '服务器上已保存的价目和已发布版本不会改变。',
+          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
+          '已保存的价目和已发布版本保持不变。',
         ]}
         confirmLabel="放弃修改并离开"
         cancelLabel="继续编辑"

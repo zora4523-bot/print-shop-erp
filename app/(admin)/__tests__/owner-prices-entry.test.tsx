@@ -21,7 +21,7 @@ vi.mock('@/lib/price', () => ({
   listPriceTiers: listTiersMock,
 }));
 
-import OwnerPricesPage from '@/app/(admin)/owner/prices/page';
+import InternalPricingPage from '@/app/(admin)/owner/rules/internal-pricing/page';
 
 async function renderToResolvedMarkup(node: React.ReactNode): Promise<string> {
   const stream = await renderToReadableStream(node);
@@ -38,37 +38,44 @@ beforeEach(() => {
   listTiersMock.mockResolvedValue([]);
 });
 
-describe('owner price management entry', () => {
-  it('renders the header and legal entry without waiting for legacy price reads', async () => {
+describe('internal direct-order pricing entry', () => {
+  it('renders the concise header without waiting for price reads', async () => {
     listTiersMock.mockReturnValue(new Promise(() => {}));
     listAdjustmentsMock.mockReturnValue(new Promise(() => {}));
 
     const html = renderToStaticMarkup(
-      await OwnerPricesPage({ searchParams: Promise.resolve({}) }),
+      await InternalPricingPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(html).toContain('报价管理');
-    expect(html).toContain('href="/owner/prices/external-sales/items"');
+    expect(html).toContain('内部直单价格');
+    expect(html).not.toContain('href="/owner/rules/customer-pricing"');
+    expect(html).not.toContain('/owner/prices/external-sales/items');
     expect(html).toContain('正在加载内容');
     expect(listTiersMock).toHaveBeenCalledTimes(1);
     expect(listAdjustmentsMock).toHaveBeenCalledTimes(1);
   });
 
-  it('uses one external-sales entry and collapses legacy internal prices by default', async () => {
+  it('uses canonical rule-center links and collapses price rules by default', async () => {
     const html = await renderToResolvedMarkup(
-      await OwnerPricesPage({ searchParams: Promise.resolve({}) }),
+      await InternalPricingPage({ searchParams: Promise.resolve({}) }),
     );
 
     expect(requirePermissionMock).toHaveBeenCalledWith('dict:price:manage');
-    expect(html).toContain('报价管理');
-    expect(
-      html.match(/href="\/owner\/prices\/external-sales\/items"/g),
-    ).toHaveLength(1);
-    expect(html).not.toContain('/owner/prices/external-sales/logistics');
-    expect(html).toContain('外部销售报价管理');
-    expect(html).toContain('内部销售/工厂直单兼容价格（低频）');
-    expect(html).toContain('内部销售/工厂直单价格阶梯');
-    expect(html).toContain('内部销售/工厂直单加价规则');
+    expect(html).toContain('内部直单价格');
+    expect(html).toContain(
+      'href="/owner/rules/internal-pricing/adjustments/new"',
+    );
+    expect(html).toContain('href="/owner/rules/internal-pricing/tiers/new"');
+    expect(html).not.toContain('href="/owner/rules/employee-pay"');
+    expect(html).not.toContain('href="/owner/rules/worker-piecework"');
+    expect(html).toContain('action="/owner/rules/internal-pricing"');
+    expect(html).not.toContain('/owner/prices/external-sales');
+    expect(html).not.toContain('/owner/salary/rules');
+    expect(html).not.toContain('/owner/salary/piecework-rules');
+    expect(html).toContain('价格规则');
+    expect(html).toContain('价格阶梯');
+    expect(html).toContain('加价规则');
+    expect(html).not.toContain('金额口径');
     expect(listTiersMock).toHaveBeenCalledTimes(1);
     expect(listAdjustmentsMock).toHaveBeenCalledTimes(1);
     expect(requirePermissionMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -86,7 +93,7 @@ describe('owner price management entry', () => {
 
   it('opens the internal compatibility area when an internal-price search is active', async () => {
     const html = await renderToResolvedMarkup(
-      await OwnerPricesPage({
+      await InternalPricingPage({
         searchParams: Promise.resolve({ q: '红包' }),
       }),
     );

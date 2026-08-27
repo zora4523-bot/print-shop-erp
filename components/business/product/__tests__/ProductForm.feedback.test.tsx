@@ -42,6 +42,105 @@ beforeEach(() => {
 });
 
 describe('ProductForm structured feedback contract', () => {
+  it('编辑时只展示业务文案，未修改前保留原始精确匹配值', () => {
+    const html = renderToStaticMarkup(
+      <ProductForm
+        mode="edit"
+        action={vi.fn()}
+        categoryNodes={categoryNodes}
+        initial={{
+          code: 'PRD-1',
+          categoryNodeId: 'category-1',
+          name: '大号触感纸（价格表!B6）',
+          specification: '160g（价格表!B7）',
+          paperType: '触感纸（烫金!B13）',
+          baseUnitPrice: null,
+          minOrderQty: null,
+          isActive: true,
+        }}
+      />,
+    );
+
+    const nameInput = html.match(/<input[^>]*id="name"[^>]*>/)?.[0];
+    const specificationInput = html.match(
+      /<input[^>]*id="specification"[^>]*>/,
+    )?.[0];
+    const paperInput = html.match(/<input[^>]*id="paperType"[^>]*>/)?.[0];
+
+    expect(nameInput).toContain('value="大号触感纸"');
+    expect(specificationInput).toContain('value="160g"');
+    expect(paperInput).toContain('value="触感纸"');
+    expect(nameInput).not.toContain('价格表!B6');
+    expect(specificationInput).not.toContain('价格表!B7');
+    expect(paperInput).not.toContain('烫金!B13');
+    expect(nameInput).not.toMatch(/\sname=/);
+    expect(paperInput).not.toMatch(/\sname=/);
+    expect(html.match(/name="name"/g)).toHaveLength(1);
+    expect(html.match(/name="paperType"/g)).toHaveLength(1);
+    expect(html).toMatch(
+      /<input type="hidden" name="name" value="大号触感纸（价格表!B6）"/,
+    );
+    expect(html).toMatch(
+      /<input type="hidden" name="paperType" value="触感纸（烫金!B13）"/,
+    );
+  });
+
+  it('清洗后无业务文本时显示明确占位而不改写原值', () => {
+    const html = renderToStaticMarkup(
+      <ProductForm
+        mode="edit"
+        action={vi.fn()}
+        categoryNodes={categoryNodes}
+        initial={{
+          code: 'PRD-2',
+          categoryNodeId: 'category-1',
+          name: '（价格表!B6）',
+          specification: '（价格表!B7）',
+          paperType: '（烫金!B13）',
+          baseUnitPrice: null,
+          minOrderQty: null,
+          isActive: true,
+        }}
+      />,
+    );
+
+    expect(html.match(/<input[^>]*id="name"[^>]*>/)?.[0]).toContain(
+      'value="未命名 SKU"',
+    );
+    expect(
+      html.match(/<input[^>]*id="specification"[^>]*>/)?.[0],
+    ).toContain('value="未标注规格"');
+    expect(html.match(/<input[^>]*id="paperType"[^>]*>/)?.[0]).toContain(
+      'value="未标注纸张"',
+    );
+    expect(html).toContain('name="name" value="（价格表!B6）"');
+  });
+
+  it('规则中心不展示也不提交内部直单价', () => {
+    const html = renderToStaticMarkup(
+      <ProductForm
+        mode="edit"
+        action={vi.fn()}
+        categoryNodes={categoryNodes}
+        showInternalPrice={false}
+        initial={{
+          code: 'PRD-3',
+          categoryNodeId: 'category-1',
+          name: '大号现货',
+          specification: '大号',
+          paperType: '160g 艳闪',
+          baseUnitPrice: '12.3456',
+          minOrderQty: 100,
+          isActive: true,
+        }}
+      />,
+    );
+
+    expect(html).not.toContain('内部销售/工厂直单基础单价');
+    expect(html).not.toContain('name="baseUnitPrice"');
+    expect(html).not.toContain('12.3456');
+  });
+
   it('links the summary, select and price input to stable error messages', () => {
     actionState.current = {
       status: 'invalid',
@@ -61,6 +160,18 @@ describe('ProductForm structured feedback contract', () => {
     expect(html).toMatch(
       /id="baseUnitPrice"[^>]*aria-errormessage="baseUnitPrice-message"/,
     );
+  });
+
+  it('does not expose an unknown error field name', () => {
+    actionState.current = {
+      status: 'invalid',
+      fieldErrors: { internalProductField: ['内容无法保存'] },
+    };
+
+    const html = render();
+
+    expect(html).toContain('表单内容：内容无法保存');
+    expect(html).not.toContain('>internalProductField：');
   });
 
   it('explains the disabled prerequisite with a structured warning', () => {

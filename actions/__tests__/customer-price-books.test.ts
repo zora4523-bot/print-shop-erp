@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Role } from '../../generated/prisma/enums';
+import { OrderItemPricingRoute, Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
+import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
+import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '../../lib/price/customer-rule-condition';
 
 const {
   permissionMock,
@@ -75,6 +77,10 @@ const validRule = {
   minQty: 1,
   maxQty: 1_000,
   blocksAutomaticQuote: false,
+  match: {
+    ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+    pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+  },
   isActive: true,
 };
 
@@ -147,6 +153,12 @@ describe('customer price-book Server Actions', () => {
       actor,
     );
     expect(revalidateMock).toHaveBeenCalledWith('/owner/prices/external-sales');
+    expect(revalidateMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.customerPricing,
+    );
+    expect(revalidateMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.priceVersions,
+    );
   });
 
   it('passes only editable business fields to the locked DAL', async () => {
@@ -204,6 +216,49 @@ describe('customer price-book Server Actions', () => {
       }),
       actor,
     );
+  });
+
+  it('将烫金道数条件和按道数乘算完整传入锁定数据层', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.updateCustomerPriceRuleDraft.mockResolvedValue({
+      id: 'rule-v2-a',
+      priceBookId: 'book-v2-draft',
+    });
+
+    const match = {
+      ...validRule.match,
+      foilPassCount: 3,
+      perFoilPass: true,
+    };
+    await expect(
+      updateCustomerPriceRuleDraftAction({ ...validRule, match }),
+    ).resolves.toMatchObject({ status: 'success', ruleId: 'rule-v2-a' });
+
+    expect(adminMock.updateCustomerPriceRuleDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ match }),
+      actor,
+    );
+  });
+
+  it('拒绝同时按烫金颜色数和烫金道数重复乘算', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await updateCustomerPriceRuleDraftAction({
+      ...validRule,
+      match: {
+        ...validRule.match,
+        perFoilColor: true,
+        perFoilPass: true,
+      },
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors['match.perFoilPass']?.join('\n')).toContain(
+        '烫金颜色倍数与烫金道数倍数只能选择一种',
+      );
+    }
+    expect(adminMock.updateCustomerPriceRuleDraft).not.toHaveBeenCalled();
   });
 
   it('saves one complete price ladder with only row amounts and active states', async () => {
@@ -351,6 +406,58 @@ describe('customer price-book Server Actions', () => {
     expect(adminMock.updateCustomerPriceRuleDraft).not.toHaveBeenCalled();
   });
 
+  it('rejects the historical manual route at the draft-write boundary', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await updateCustomerPriceRuleDraftAction({
+      ...validRule,
+      match: {
+        ...validRule.match,
+        pricingRoutes: [OrderItemPricingRoute.MANUAL_QUOTE],
+      },
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(
+        Object.keys(result.fieldErrors).some((path) =>
+          path.startsWith('match.pricingRoutes'),
+        ),
+      ).toBe(true);
+    }
+    expect(adminMock.updateCustomerPriceRuleDraft).not.toHaveBeenCalled();
+  });
+
+  it('篡改的计价与工艺枚举只返回中文业务错误', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await updateCustomerPriceRuleDraftAction({
+      ...validRule,
+      kind: 'INTERNAL_RULE_KIND',
+      calculationType: 'INTERNAL_CALCULATION_TYPE',
+      match: {
+        ...validRule.match,
+        pricingRoutes: ['INTERNAL_ROUTE_TOKEN'],
+        craftMode: 'INTERNAL_MATCH_MODE',
+      },
+      rawField: 'INTERNAL_RAW_VALUE',
+    } as unknown as typeof validRule);
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      const messages = Object.values(result.fieldErrors).flat().join('\n');
+      expect(messages).toContain('请选择有效的计价方式');
+      expect(messages).toContain('请选择有效的多工艺条件');
+      expect(messages).toContain('收费类型设置无效');
+      expect(messages).toContain('计价方式设置无效');
+      expect(messages).toContain('提交内容包含页面不支持的字段');
+      expect(messages).not.toMatch(
+        /INTERNAL_|rawField|STOCK_BLANK|CUSTOM_SINGLE_FLAT_FOIL|COLOR_PRINT|\bANY\b|\bALL\b|BASE|ADD_ON|REFERENCE|PER_PIECE|PER_BAG/,
+      );
+    }
+    expect(adminMock.updateCustomerPriceRuleDraft).not.toHaveBeenCalled();
+  });
+
   it('rejects over-precision prices before calling the DAL', async () => {
     permissionMock.requirePermission.mockResolvedValue(actor);
 
@@ -415,7 +522,7 @@ describe('customer price-book Server Actions', () => {
       fieldErrors: {
         minQty: ['基础报价数量区间重叠'],
         amount: ['基础价金额必须大于零'],
-        'rules.rule-v2-a.triggerCondition': ['当前规则的匹配条件不完整'],
+        match: ['当前规则的匹配条件不完整'],
         'rules.rule-v2-b.maxQty': ['另一条规则的数量区间重叠'],
         rules: ['价目簿至少需要一条启用规则'],
       },

@@ -33,13 +33,13 @@ export function TogglePriceAdjustmentActiveButton({
         pending={pending}
         formId={formId}
         deactivateImpactItems={[
-          '该规则不再参与后续新报价的价格计算',
-          '已保存报价、工单金额和价格快照不会被追溯改写',
-          '规则内容和历史引用会继续保留',
+          '停用后，新报价不再使用该规则',
+          '已保存价格和工单金额不变',
+          '规则及历史记录保留',
         ]}
         activateImpactItems={[
-          '该规则会重新参与后续新报价的价格计算',
-          '已保存报价、工单金额和价格快照不会被追溯改写',
+          '启用后，新报价使用该规则',
+          '已保存价格和工单金额不变',
         ]}
       />
       {error ? (

@@ -51,6 +51,7 @@ import type {
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { getDailySalaryRecomputeImpact } from '@/lib/salary/daily-recompute-impact';
 import { writeAuditLog } from '@/lib/audit-log';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 // Owner kicks the daily-salary computation manually — useful when
 // cron missed, when a worker's late report changes the totals, or
@@ -267,6 +268,7 @@ export async function createWorkerMachineSalaryRuleAction(
       actor,
     });
     revalidatePath('/owner/salary/piecework-rules');
+    revalidatePath(RULE_CENTER_HREFS.workerPiecework);
     return { status: 'success', ruleId: created.id };
   } catch (err) {
     if (err instanceof PieceworkRuleError) {

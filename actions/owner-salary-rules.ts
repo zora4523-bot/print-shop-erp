@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import {
   createSalaryRuleVersion,
   parseSalaryRuleVersionFormData,
@@ -33,6 +34,7 @@ export async function createSalaryRuleVersionAction(
     revalidatePath('/owner/salary/rules');
     revalidatePath('/owner/salary/cs');
     revalidatePath('/owner/salary/hourly');
+    revalidatePath(RULE_CENTER_HREFS.employeePay);
     return { status: 'success', ruleId: created.id };
   } catch (error) {
     if (error instanceof SalaryRuleAdminError) {

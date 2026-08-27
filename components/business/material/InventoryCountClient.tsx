@@ -33,6 +33,7 @@ import {
   type CountEntry,
 } from '@/lib/inventory-count-entries';
 import { MATERIAL_CATEGORY_LABELS } from '@/lib/material-labels';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type ApiResponse = { materials: InventoryCountMaterialRow[] };
 
@@ -491,8 +492,8 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
                             }}
                             className="ml-auto w-28 text-right font-sans tabular-nums text-xs"
                             aria-label={row.locations.length === 1
-                              ? `${row.name} 实盘数`
-                              : `${row.name} ${location.warehouseName}/${location.locationName} 实盘数`}
+                              ? `${externalPriceBusinessText(row.name)} 实盘数`
+                              : `${externalPriceBusinessText(row.name)} ${location.warehouseName}/${location.locationName} 实盘数`}
                           />
                           {staleKeySet.has(key) ? (
                             <div className="mt-1 text-xs text-warning-foreground">
@@ -606,9 +607,13 @@ function MaterialCells({
   return (
     <>
       <td rowSpan={rowSpan} className="px-4 py-3 align-top">
-        <div className="font-medium">{row.name}</div>
+        <div className="font-medium">{externalPriceBusinessText(row.name)}</div>
         <div className="font-sans tabular-nums text-xs text-muted-foreground">{row.code}</div>
-        {row.specification ? <div className="text-xs text-muted-foreground">{row.specification}</div> : null}
+        {row.specification ? (
+          <div className="text-xs text-muted-foreground">
+            {externalPriceBusinessText(row.specification)}
+          </div>
+        ) : null}
       </td>
       <td rowSpan={rowSpan} className="px-4 py-3 align-top">
         <Badge variant={row.isActive ? 'outline' : 'secondary'}>

@@ -10,6 +10,7 @@ import {
 } from '../../generated/prisma/client';
 import { db } from '../db';
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
+import { RULE_CENTER_HREFS } from '../navigation/rule-center';
 import {
   machineRuleLockKey,
   type MachineRuleWithBase,
@@ -57,7 +58,9 @@ function parseShanghaiLocalDateTime(value: string): Date | null {
 export const workerMachineRuleInputSchema = z
   .object({
     workerId: z.string().trim().min(1, '请选择师傅'),
-    machineType: z.nativeEnum(MachineType),
+    machineType: z.nativeEnum(MachineType, {
+      error: '请选择有效的机型',
+    }),
     dailyBase: storedMoneyString,
     pieceRate: moneyString,
     boardRate: moneyString,
@@ -70,7 +73,11 @@ export const workerMachineRuleInputSchema = z
     smallOrderInclusive: z.boolean().default(false),
     largeOrderSetupFee: storedMoneyString.default('0'),
     multiplierFactors: z
-      .array(z.enum(['DOUBLE_SIDED', 'DOUBLE_COLOR']))
+      .array(
+        z.enum(['DOUBLE_SIDED', 'DOUBLE_COLOR'], {
+          error: '请选择有效的计件倍率条件',
+        }),
+      )
       .max(2, '倍率因子最多 2 项')
       .refine(
         (factors) => new Set(factors).size === factors.length,
@@ -340,7 +347,7 @@ export async function createWorkerMachineSalaryRule(input: {
       after: created,
       requestMetadata: {
         source: 'owner-salary.createWorkerMachineSalaryRuleAction',
-        route: '/owner/salary/piecework-rules',
+        route: RULE_CENTER_HREFS.workerPiecework,
       },
     });
     return created;

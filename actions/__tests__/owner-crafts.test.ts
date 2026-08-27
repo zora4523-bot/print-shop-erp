@@ -41,6 +41,7 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createCraftAction,
+  createRuleCenterCraftAction,
   updateCraftAction,
   setCraftActiveAction,
 } from '../owner-crafts';
@@ -56,7 +57,6 @@ const ownerActor = {
 
 const validCreateFields = {
   name: '专版单色平烫',
-  code: 'FLAT_FOIL_SINGLE',
   isOutsource: 'false',
   defaultWorkerType: 'MACHINE',
   defaultMachineType: MachineType.WINDMILL,
@@ -81,12 +81,15 @@ beforeEach(() => {
 });
 
 describe('createCraftAction', () => {
-  it('passes null to the library when code is left for automatic generation', async () => {
+  it('新建工艺始终由服务端生成稳定编号', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
 
     await expect(
-      createCraftAction(null, fd({ ...validCreateFields, code: '' })),
+      createCraftAction(
+        null,
+        fd({ ...validCreateFields, code: 'FORGED_CRAFT_CODE' }),
+      ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(craftMock.createCraft).toHaveBeenCalledWith(
@@ -105,18 +108,7 @@ describe('createCraftAction', () => {
     expect(craftMock.createCraft).not.toHaveBeenCalled();
   });
 
-  it('short-circuits on schema failure (lowercase code)', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const result = await createCraftAction(
-      null,
-      fd({ ...validCreateFields, code: 'lowercase' }),
-    );
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') expect(result.fieldErrors.code).toBeDefined();
-    expect(craftMock.createCraft).not.toHaveBeenCalled();
-  });
-
-  it('maps Prisma P2002 on code to invalid.code field error', async () => {
+  it('自动编号冲突返回可见的业务错误', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('dup', {
@@ -126,10 +118,10 @@ describe('createCraftAction', () => {
       }),
     );
     const result = await createCraftAction(null, fd(validCreateFields));
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.code).toContain('该代码已被占用');
-    }
+    expect(result).toEqual({
+      status: 'error',
+      message: '系统未能生成工艺编号，请重新提交。',
+    });
   });
 
   it('maps P2002 on name to invalid.name field error', async () => {
@@ -158,10 +150,7 @@ describe('createCraftAction', () => {
       }),
     );
     const result = await createCraftAction(null, fd(validCreateFields));
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.code).toContain('该代码已被占用');
-    }
+    expect(result.status).toBe('error');
   });
 
   it('handles P2002 where meta.target is the Prisma default constraint name (Codex round 17 / P2)', async () => {
@@ -177,10 +166,7 @@ describe('createCraftAction', () => {
       }),
     );
     const result = await createCraftAction(null, fd(validCreateFields));
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.code).toContain('该代码已被占用');
-    }
+    expect(result.status).toBe('error');
   });
 
   it("doesn't false-positive on an unrelated index name that contains 'name' as substring", async () => {
@@ -206,6 +192,42 @@ describe('createCraftAction', () => {
     );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
     expect(redirectMock).toHaveBeenCalledWith('/owner/crafts/craft-new');
+  });
+
+  it('keeps rule-center craft creation inside the rule center', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
+
+    await expect(
+      createCraftAction(
+        null,
+        fd({
+          ...validCreateFields,
+          routeBase: '/owner/rules/crafts',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/crafts/craft-new',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts');
+  });
+
+  it('规则中心专用 action 不信任伪造的返回路径', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
+
+    await expect(
+      createRuleCenterCraftAction(
+        null,
+        fd({ ...validCreateFields, routeBase: '/owner/crafts' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/crafts/craft-new',
+    );
   });
 
   it('coerces sortOrder string into int at the schema layer', async () => {
@@ -235,7 +257,6 @@ describe('createCraftAction', () => {
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
     const f = new FormData();
     f.set('name', '粘封');
-    f.set('code', 'GLUING');
     f.set('defaultWorkerType', 'MACHINE');
     f.set('defaultMachineType', MachineType.GLUE);
     f.set('sortOrder', '40');
@@ -272,6 +293,22 @@ describe('updateCraftAction', () => {
     await updateCraftAction('c', null, fd(baseUpdate));
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts/c');
+  });
+
+  it('编辑时忽略篡改的内部编号', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    craftMock.updateCraft.mockResolvedValue({ id: 'c' });
+
+    await updateCraftAction(
+      'c',
+      null,
+      fd({ ...baseUpdate, code: 'FORGED_CRAFT_CODE' }),
+    );
+
+    expect(craftMock.updateCraft).toHaveBeenCalledWith(
+      'c',
+      expect.not.objectContaining({ code: expect.anything() }),
+    );
   });
 });
 

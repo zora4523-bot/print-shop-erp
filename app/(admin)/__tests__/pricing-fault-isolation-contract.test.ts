@@ -2,15 +2,15 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const pricesPage = readFileSync(
-  'app/(admin)/owner/prices/page.tsx',
+  'components/business/rules/pricing/InternalPricingPage.tsx',
   'utf8',
 );
 const itemsPage = readFileSync(
-  'app/(admin)/owner/prices/external-sales/items/page.tsx',
+  'components/business/rules/pricing/CustomerPricingWorkspacePage.tsx',
   'utf8',
 );
 const versionsPage = readFileSync(
-  'app/(admin)/owner/prices/external-sales/versions/page.tsx',
+  'components/business/rules/pricing/PriceVersionsPage.tsx',
   'utf8',
 );
 

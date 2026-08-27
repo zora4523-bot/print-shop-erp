@@ -16,6 +16,7 @@ import {
   mapPrismaUniqueViolation,
   type UniqueViolationMapping,
 } from '@/lib/admin/action-helpers';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 // NB: Next.js strips every non-async-function export from a 'use server'
 // module, so re-exporting the type here would disappear at RSC compile
@@ -35,8 +36,28 @@ const CRAFT_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
   },
 ];
 
+function craftRouteBase(formData: FormData) {
+  return formData.get('routeBase') === RULE_CENTER_HREFS.crafts
+    ? RULE_CENTER_HREFS.crafts
+    : '/owner/crafts';
+}
+
+function revalidateCraftPaths(id: string) {
+  revalidatePath('/owner/crafts');
+  revalidatePath(`/owner/crafts/${id}`);
+  revalidatePath(RULE_CENTER_HREFS.crafts);
+  revalidatePath(`${RULE_CENTER_HREFS.crafts}/${id}`);
+}
+
 function mapPrismaError(err: unknown): CraftMutationResult | null {
-  return mapPrismaUniqueViolation(err, CRAFT_UNIQUE_VIOLATIONS);
+  const mapped = mapPrismaUniqueViolation(err, CRAFT_UNIQUE_VIOLATIONS);
+  if (mapped?.fieldErrors.code) {
+    return {
+      status: 'error',
+      message: '系统未能生成工艺编号，请重新提交。',
+    };
+  }
+  return mapped;
 }
 
 function normalizeFormInput(formData: FormData) {
@@ -46,7 +67,6 @@ function normalizeFormInput(formData: FormData) {
   };
   return {
     name: get('name'),
-    code: get('code'),
     isOutsource: get('isOutsource'),
     defaultWorkerType: get('defaultWorkerType') || '',
     defaultMachineType: get('defaultMachineType') || '',
@@ -58,6 +78,20 @@ function normalizeFormInput(formData: FormData) {
 export async function createCraftAction(
   _prev: CraftMutationResult | null,
   formData: FormData,
+): Promise<CraftMutationResult> {
+  return createCraftWithRoute(formData, craftRouteBase(formData));
+}
+
+export async function createRuleCenterCraftAction(
+  _prev: CraftMutationResult | null,
+  formData: FormData,
+): Promise<CraftMutationResult> {
+  return createCraftWithRoute(formData, RULE_CENTER_HREFS.crafts);
+}
+
+async function createCraftWithRoute(
+  formData: FormData,
+  redirectBase: '/owner/crafts' | '/owner/rules/crafts',
 ): Promise<CraftMutationResult> {
   await requirePermission('dict:craft:manage');
 
@@ -79,8 +113,8 @@ export async function createCraftAction(
     throw err;
   }
 
-  revalidatePath('/owner/crafts');
-  redirect(`/owner/crafts/${createdId}`);
+  revalidateCraftPaths(createdId);
+  redirect(`${redirectBase}/${createdId}`);
 }
 
 export async function updateCraftAction(
@@ -106,8 +140,7 @@ export async function updateCraftAction(
     throw err;
   }
 
-  revalidatePath('/owner/crafts');
-  revalidatePath(`/owner/crafts/${id}`);
+  revalidateCraftPaths(id);
   return { status: 'success' };
 }
 
@@ -126,7 +159,6 @@ export async function setCraftActiveAction(
     throw err;
   }
 
-  revalidatePath('/owner/crafts');
-  revalidatePath(`/owner/crafts/${id}`);
+  revalidateCraftPaths(id);
   return { status: 'success' };
 }

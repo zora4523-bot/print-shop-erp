@@ -9,16 +9,21 @@ import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 export function ToggleMaterialActiveButton({
   materialId,
   currentlyActive,
+  action = setMaterialActiveAction,
 }: {
   materialId: string;
   currentlyActive: boolean;
+  action?: (
+    id: string,
+    isActive: boolean,
+  ) => Promise<MaterialMutationResult>;
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
     MaterialMutationResult | null,
     FormData
-  >(async () => setMaterialActiveAction(materialId, nextActive), null);
+  >(async () => action(materialId, nextActive), null);
 
   const visibleState = pending ? null : state;
   const error = visibleState?.status === 'error' ? visibleState.message : null;

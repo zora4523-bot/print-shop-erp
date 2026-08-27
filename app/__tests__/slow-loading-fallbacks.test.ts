@@ -27,8 +27,8 @@ describe('custom loading fallback slow-loading contract', () => {
   it.each([
     ['app/(worker)/worker/loading.tsx', '正在加载师傅工作台'],
     [
-      'app/(admin)/owner/prices/external-sales/loading.tsx',
-      '正在加载外部销售收费项目',
+      'components/business/rules/pricing/CustomerPricingLoading.tsx',
+      '正在加载客户计价规则',
     ],
   ])('%s has one delayed hint inside its polite live region', (path, label) => {
     const loading = source(path);

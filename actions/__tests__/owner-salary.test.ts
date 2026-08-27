@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
+import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
 
 const {
   permissionsMock,
@@ -125,6 +126,7 @@ import {
   recordCsPayrollPaymentAction,
   recomputeHourlyPayrollAction,
   setHourlyPayrollPaidAction,
+  createWorkerMachineSalaryRuleAction,
 } from '../owner-salary';
 
 const ownerActor = {
@@ -169,7 +171,9 @@ beforeEach(() => {
   salaryMock.computeDailyForAllMachineWorkers.mockReset();
   salaryMock.markDailySalaryPaid.mockReset();
   salaryMock.addDailySalaryAdjustment.mockReset();
+  pieceworkAdminMock.createWorkerMachineSalaryRule.mockReset();
   pieceworkAdminMock.salaryAdjustmentInputSchema.safeParse.mockReset();
+  pieceworkAdminMock.workerMachineRuleInputSchema.safeParse.mockReset();
   auditMock.writeAuditLog.mockReset();
   impactMock.getDailySalaryRecomputeImpact
     .mockReset()
@@ -185,6 +189,48 @@ beforeEach(() => {
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
+  });
+});
+
+describe('createWorkerMachineSalaryRuleAction', () => {
+  it('refreshes both the legacy page and canonical rule-center workspace', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const input = {
+      workerId: 'worker-1',
+      machineType: 'HAND_PRESS',
+      dailyBase: '100.00',
+      pieceRate: '0.0100',
+      boardRate: '0.00',
+      smallOrderThreshold: 100,
+      smallOrderFlatPrice: '10.00',
+      smallOrderInclusive: true,
+      largeOrderSetupFee: '0.00',
+      multiplierFactors: [],
+      effectiveFrom: new Date('2026-08-26T00:00:00.000Z'),
+      remark: null,
+    };
+    pieceworkAdminMock.workerMachineRuleInputSchema.safeParse.mockReturnValue({
+      success: true,
+      data: input,
+    });
+    pieceworkAdminMock.createWorkerMachineSalaryRule.mockResolvedValue({
+      id: 'piecework-rule-1',
+    });
+
+    await expect(
+      createWorkerMachineSalaryRuleAction(null, new FormData()),
+    ).resolves.toEqual({ status: 'success', ruleId: 'piecework-rule-1' });
+
+    expect(pieceworkAdminMock.createWorkerMachineSalaryRule).toHaveBeenCalledWith({
+      ...input,
+      actor: ownerActor,
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/salary/piecework-rules',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.workerPiecework,
+    );
   });
 });
 

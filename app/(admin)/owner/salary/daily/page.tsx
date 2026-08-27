@@ -21,6 +21,7 @@ import {
   StatCard as UiStatCard,
 } from '@/components/ui-business';
 import { getAttendanceSummaries } from '@/lib/attendance';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '计件工资' };
@@ -126,11 +127,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       ) : null}
       <PageHeader
         title="计件工资"
-        subtitle="按上海日历天汇总已完工任务；工资取计件合计与实际工作机型最高保底的较高者，再加人工调整。上班/请假天数仅作考勤展示，不自动扣减计件保底。"
+        subtitle="按上海日历天汇总已完工任务；显示计件、保底、调整和实发金额。"
         actions={
           <div className="flex gap-2">
             <Link
-              href="/owner/salary/piecework-rules"
+              href={RULE_CENTER_HREFS.workerPiecework}
               className={buttonVariants({ variant: 'outline' })}
             >
               <Settings className="mr-2 size-4" />
@@ -215,7 +216,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3">{r.worker.displayName}</td>
                   <td className="px-4 py-3 text-xs">
                     {MACHINE_TYPE_LABELS[r.machineType as MachineType] ??
-                      r.machineType}
+                      '未识别机型'}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(r.totalPieceworkAmount)}

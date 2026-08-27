@@ -11,22 +11,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
 import type { ProductCategoryNodeSummary } from '@/lib/product';
 
 export function ProductCategoryNodesTable({
   nodes,
+  editBase = '/owner/product-categories',
 }: {
   nodes: ProductCategoryNodeSummary[];
+  editBase?: string;
 }) {
   return (
-    <Table label="产品分类树">
+    <Table label="产品结构分类">
       <TableHeader>
         <TableRow>
           <TableHead>分类名</TableHead>
-          <TableHead>旧分类快照</TableHead>
           <TableHead className="text-right">排序</TableHead>
-          <TableHead className="text-right">产品数</TableHead>
+          <TableHead className="text-right">报价 SKU</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
@@ -44,9 +44,6 @@ export function ProductCategoryNodesTable({
                 {prefix}
                 {node.name}
               </TableCell>
-              <TableCell className="text-muted-foreground">
-                {PRODUCT_CATEGORY_LABELS[node.legacyCategory]}
-              </TableCell>
               <TableCell className="text-right font-sans tabular-nums text-xs">
                 {node.sortOrder}
               </TableCell>
@@ -59,7 +56,7 @@ export function ProductCategoryNodesTable({
               <TableCell>
                 <AdminRowActions>
                   <Link
-                    href={`/owner/product-categories/${node.id}`}
+                    href={`${editBase}/${node.id}`}
                     prefetch={false}
                     className="text-sm text-primary underline hover:no-underline"
                   >

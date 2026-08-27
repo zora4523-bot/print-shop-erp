@@ -118,15 +118,15 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('20,000 个');
     expect(html.match(/name="tierAmount-\d"/g)).toHaveLength(7);
     expect(html).toContain('¥295');
-    expect(html).toContain('折合单价会按数量档自动计算');
-    expect(html).toContain('保存本组（0 档待保存）');
+    expect(html).toContain('折合单价自动计算');
+    expect(html).toContain('保存（0 档）');
     expect(html).toContain('aria-label="1,000 个价格档启用"');
     expect(html).toContain('>当前<');
     expect(html).toContain('>草稿<');
     expect(html).toContain('>变化<');
     expect(html).toContain('启用');
     expect(html).toContain('撤销上一步');
-    expect(html).toContain('放弃本地修改');
+    expect(html).toContain('撤销本次修改');
     expect(html).not.toContain('1,000 个草稿总价（元）');
   });
 
@@ -163,9 +163,9 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('当前总价');
     expect(html).toContain('草稿总价（元）');
     expect(html).toContain('¥295 / 批');
-    expect(html).toContain('折合单价会按数量档自动计算');
+    expect(html).toContain('折合单价自动计算');
     expect(html).not.toContain('¥0.31 / 个');
-    expect(html).toContain('修改每档整批总价');
+    expect(html).toContain('修改各数量档总价');
   });
 
   it('按个计价显示元每个，不将 amount 再除以数量', () => {
@@ -182,9 +182,8 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('当前单价');
     expect(html).toContain('草稿单价（元/个）');
     expect(html).toContain('¥0.295 / 个');
-    expect(html).toContain('每个成品');
-    expect(html).toContain('不会将单价再除以数量');
-    expect(html).toContain('保存本组（0 档待保存）');
+    expect(html).toContain('修改各数量档单价');
+    expect(html).toContain('保存（0 档）');
     expect(html).not.toContain('¥0.0003');
     expect(html).not.toContain('折合单价');
     expect(html).not.toContain('当前总价');
@@ -339,7 +338,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
     expect(pendingHtml).toContain('aria-busy="true"');
-    expect(pendingHtml).toContain('正在原子保存本组总价…');
+    expect(pendingHtml).toContain('正在保存总价…');
     expect(pendingHtml).toMatch(/<button[^>]*disabled=""[^>]*>/);
 
     actionStateMock.mockImplementation((action) => {
@@ -356,7 +355,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
     expect(successHtml).toContain('role="status"');
-    expect(successHtml).toContain('这一组总价已全部保存');
+    expect(successHtml).toContain('草稿已保存');
 
     actionStateMock.mockImplementation((action) => {
       capturedAction = action;
@@ -405,7 +404,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     );
 
     expect(html).toContain('¥9,999,999,999.9999');
-    expect(html).toContain('折合单价会按数量档自动计算');
+    expect(html).toContain('折合单价自动计算');
   });
 });
 

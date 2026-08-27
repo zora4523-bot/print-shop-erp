@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useRef } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
@@ -16,8 +16,12 @@ import {
 } from '@/components/ui-business';
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { MaterialSummary } from '@/lib/material';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
-type MaterialRouteBase = '/owner/materials' | '/foreman/materials';
+export type MaterialRouteBase =
+  | '/owner/materials'
+  | '/foreman/materials'
+  | '/owner/rules/papers';
 
 type EditInitial = Pick<
   MaterialSummary,
@@ -31,16 +35,22 @@ type EditInitial = Pick<
   averageCost: string | null;
 };
 
-type Props =
-  | {
+type CommonProps = {
+  categoryScope?: MaterialSummary['category'];
+  excludedCategories?: readonly MaterialSummary['category'][];
+};
+
+type Props = CommonProps &
+  (
+    | {
       mode: 'create';
       action: (
         prev: MaterialMutationResult | null,
         fd: FormData,
       ) => Promise<MaterialMutationResult>;
       routeBase: MaterialRouteBase;
-    }
-  | {
+      }
+    | {
       mode: 'edit';
       action: (
         prev: MaterialMutationResult | null,
@@ -48,7 +58,8 @@ type Props =
       ) => Promise<MaterialMutationResult>;
       initial: EditInitial;
       routeBase: MaterialRouteBase;
-    };
+      }
+  );
 
 const CATEGORY_OPTIONS = [
   { value: 'PAPER', label: '纸张' },
@@ -86,6 +97,9 @@ export function MaterialForm(props: Props) {
   const generalError = visibleState?.status === 'error' ? visibleState.message : null;
   const success = visibleState?.status === 'success';
   const summaryErrors = toMaterialErrorSummary(errs);
+  const selectableCategories = CATEGORY_OPTIONS.filter(
+    (option) => !props.excludedCategories?.includes(option.value),
+  );
 
   return (
     <form
@@ -128,48 +142,96 @@ export function MaterialForm(props: Props) {
         />
       )}
 
-      <TextField
-        id="name"
-        label="物料名称"
-        required
-        disabled={pending}
-        error={errs.name?.[0]}
-        defaultValue={initial?.name ?? ''}
-      />
-
-      <div className="space-y-2">
-        <Label htmlFor="category">分类</Label>
-        <select
-          id="category"
-          name="category"
-          {...(errs.category?.[0]
-            ? formMessageA11yProps('category', 'error')
-            : {})}
-          className={selectClass}
-          defaultValue={initial?.category ?? 'PAPER'}
+      {initial ? (
+        <PreservedBusinessTextField
+          id="name"
+          label="物料名称"
+          fallback={
+            props.categoryScope === 'PAPER' ? '未命名纸张' : '未命名物料'
+          }
+          required
           disabled={pending}
-        >
-          {CATEGORY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        {errs.category?.[0] ? (
-          <FormMessage fieldId="category" tone="error">
-            {errs.category[0]}
-          </FormMessage>
-        ) : null}
-      </div>
+          error={errs.name?.[0]}
+          rawValue={initial.name}
+        />
+      ) : (
+        <TextField
+          id="name"
+          label="物料名称"
+          required
+          disabled={pending}
+          error={errs.name?.[0]}
+        />
+      )}
 
-      <TextField
-        id="specification"
-        label="规格（选填）"
-        hint="例如 250g A4、12cm、红色"
-        disabled={pending}
-        error={errs.specification?.[0]}
-        defaultValue={initial?.specification ?? ''}
-      />
+      {props.categoryScope ? (
+        <div className="space-y-2">
+          <Label htmlFor="category">分类</Label>
+          <input
+            id="category"
+            name="category"
+            type="hidden"
+            value={props.categoryScope}
+          />
+          <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            {CATEGORY_OPTIONS.find(
+              (option) => option.value === props.categoryScope,
+            )?.label ?? '未识别分类'}
+          </p>
+          {errs.category?.[0] ? (
+            <FormMessage fieldId="category" tone="error">
+              {errs.category[0]}
+            </FormMessage>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <Label htmlFor="category">分类</Label>
+          <select
+            id="category"
+            name="category"
+            {...(errs.category?.[0]
+              ? formMessageA11yProps('category', 'error')
+              : {})}
+            className={selectClass}
+            defaultValue={
+              initial?.category ?? selectableCategories[0]?.value ?? 'OTHER'
+            }
+            disabled={pending}
+          >
+            {selectableCategories.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {errs.category?.[0] ? (
+            <FormMessage fieldId="category" tone="error">
+              {errs.category[0]}
+            </FormMessage>
+          ) : null}
+        </div>
+      )}
+
+      {initial ? (
+        <PreservedBusinessTextField
+          id="specification"
+          label="规格（选填）"
+          fallback="未标注规格"
+          hint="例如 250g A4、12cm、红色"
+          disabled={pending}
+          error={errs.specification?.[0]}
+          rawValue={initial.specification ?? ''}
+        />
+      ) : (
+        <TextField
+          id="specification"
+          label="规格（选填）"
+          hint="例如 250g A4、12cm、红色"
+          disabled={pending}
+          error={errs.specification?.[0]}
+        />
+      )}
 
       <TextField
         id="unit"
@@ -183,7 +245,7 @@ export function MaterialForm(props: Props) {
       <TextField
         id="safetyStock"
         label="安全库存（选填）"
-        hint="Decimal(12,2)，低于该值会在库存看板提示。"
+        hint="低于该值时，库存看板会提醒。"
         disabled={pending}
         error={errs.safetyStock?.[0]}
         defaultValue={initial?.safetyStock != null ? String(initial.safetyStock) : ''}
@@ -192,7 +254,7 @@ export function MaterialForm(props: Props) {
       <TextField
         id="averageCost"
         label="参考平均成本（手工维护，选填）"
-        hint="Decimal(10,4)，仅用于库存金额估算；采购入库不会自动改写。"
+        hint="用于库存金额估算；采购入库不会自动更新。"
         disabled={pending}
         error={errs.averageCost?.[0]}
         defaultValue={initial?.averageCost != null ? String(initial.averageCost) : ''}
@@ -265,13 +327,73 @@ function TextField({
   );
 }
 
+function PreservedBusinessTextField({
+  id,
+  label,
+  hint,
+  error,
+  rawValue,
+  fallback,
+  ...inputProps
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  error?: string | undefined;
+  rawValue: string;
+  fallback: string;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  const submittedValueRef = useRef<HTMLInputElement>(null);
+  const businessValue = externalPriceBusinessText(rawValue);
+  const visibleValue = businessValue || (rawValue.trim() ? fallback : '');
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <input
+        ref={submittedValueRef}
+        type="hidden"
+        name={id}
+        defaultValue={rawValue}
+      />
+      <Input
+        id={id}
+        type="text"
+        defaultValue={visibleValue}
+        onInput={(event) => {
+          if (submittedValueRef.current) {
+            submittedValueRef.current.value = event.currentTarget.value;
+          }
+        }}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
+        {...inputProps}
+      />
+      {error ? (
+        <FormMessage fieldId={id} tone="error">
+          {error}
+        </FormMessage>
+      ) : hint ? (
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
+          {hint}
+        </FormMessage>
+      ) : null}
+    </div>
+  );
+}
+
 function toMaterialErrorSummary(
   fieldErrors: Record<string, string[]>,
 ): FormErrorSummaryItem[] {
   return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
     messages.map((message) => ({
       fieldId,
-      label: MATERIAL_FIELD_LABELS[fieldId] ?? fieldId,
+      label: MATERIAL_FIELD_LABELS[fieldId] ?? '表单内容',
       message,
     })),
   );

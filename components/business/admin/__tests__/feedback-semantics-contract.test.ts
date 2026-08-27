@@ -8,14 +8,14 @@ const ROOT = process.cwd();
 const STATIC_PREREQUISITES: ReadonlyArray<
   readonly [relativePath: string, copy: string]
 > = [
-  ['bom/BomForm.tsx', '暂无可用产品，请先创建并启用产品。'],
+  ['bom/BomForm.tsx', '暂无可用报价 SKU，请先创建并启用。'],
   ['bom/BomForm.tsx', '暂无可用物料，请先创建并启用至少一种物料。'],
   [
     'purchase/PurchaseOrderForm.tsx',
     '只有启用的“供应商”或“客户/供应商”主数据可用于采购。',
   ],
   ['purchase/PurchaseOrderForm.tsx', '请先创建并启用至少一种物料。'],
-  ['price/PriceTierForm.tsx', '请先创建并启用至少一个产品，再维护价格阶梯。'],
+  ['price/PriceTierForm.tsx', '请先创建并启用报价 SKU。'],
   [
     'salary/StartCsPeriodForm.tsx',
     '暂无启用的客服账号，请先在用户管理中创建或启用客服。',

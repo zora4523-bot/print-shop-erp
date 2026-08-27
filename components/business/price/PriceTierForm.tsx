@@ -6,6 +6,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import type { ProductOption } from '@/lib/product';
 
 type PriceTierInitial = {
@@ -41,7 +43,7 @@ const selectClass =
 function productLabel(product: ProductOption): string {
   const code = product.code ? `${product.code} · ` : '';
   const inactive = product.isActive ? '' : '（已停用）';
-  return `${code}${product.name} · ${product.categoryNode.name}${inactive}`;
+  return `${code}${externalPriceBusinessText(product.name)} · ${externalPriceBusinessText(product.categoryNode.name)}${inactive}`;
 }
 
 export function PriceTierForm(props: Props) {
@@ -61,13 +63,13 @@ export function PriceTierForm(props: Props) {
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="productId">产品</Label>
+          <Label htmlFor="productId">报价 SKU</Label>
           <PendingLink
-            href="/owner/products/new"
+            href={`${RULE_CENTER_HREFS.stockSkus}/new`}
             pending={pending}
             className="text-xs text-primary hover:underline"
           >
-            新建产品
+            新建报价 SKU
           </PendingLink>
         </div>
         <select
@@ -77,7 +79,7 @@ export function PriceTierForm(props: Props) {
           defaultValue={defaultProductId}
           disabled={pending || missingProducts}
         >
-          {missingProducts ? <option value="">暂无可用产品</option> : null}
+          {missingProducts ? <option value="">暂无可用报价 SKU</option> : null}
           {props.products.map((product) => (
             <option key={product.id} value={product.id}>
               {productLabel(product)}
@@ -89,7 +91,7 @@ export function PriceTierForm(props: Props) {
         ) : null}
         {missingProducts ? (
           <p className="text-sm text-muted-foreground">
-            请先创建并启用至少一个产品，再维护价格阶梯。
+            请先创建并启用报价 SKU。
           </p>
         ) : null}
       </div>
@@ -153,11 +155,11 @@ export function PriceTierForm(props: Props) {
           {pending ? '提交中…' : props.mode === 'create' ? '创建价格阶梯' : '保存修改'}
         </Button>
         <PendingLink
-          href="/owner/prices"
+          href={RULE_CENTER_HREFS.internalPricing}
           pending={pending}
           className={buttonVariants({ variant: 'outline' })}
         >
-          返回报价管理
+          返回内部直单价格
         </PendingLink>
       </div>
     </form>

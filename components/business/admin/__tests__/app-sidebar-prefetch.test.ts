@@ -38,7 +38,41 @@ describe('AppSidebar navigation feedback', () => {
     expect(source).toContain('window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY');
     expect(source).toContain('window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY');
     expect(source).toContain('aria-expanded={!hideItems}');
+    expect(source).toContain(
+      '.filter((group) => group.items.length > 0)',
+    );
     expect(source).toContain('未上线');
     expect(source).not.toContain('window.sessionStorage');
+  });
+
+  it('renders rule modules as accessible child navigation', () => {
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components/business/admin/AppSidebar.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(source).toContain('<SidebarMenuSub');
+    expect(source).toContain('<SidebarMenuSubItem data-menu-level="child">');
+    expect(source).toContain('<SidebarMenuSubButton');
+    expect(source).toContain("aria-current={active ? 'page' : undefined}");
+    expect(source).toContain('data-has-active-child');
+    expect(source).toContain('aria-controls={contentId}');
+  });
+
+  it('keeps icon-only navigation vertically scrollable', () => {
+    const source = readFileSync(
+      path.join(process.cwd(), 'components/ui/sidebar.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain(
+      'group-data-[collapsible=icon]:overflow-y-auto',
+    );
+    expect(source).not.toContain(
+      'group-data-[collapsible=icon]:overflow-hidden',
+    );
   });
 });

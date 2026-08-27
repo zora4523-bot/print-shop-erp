@@ -51,6 +51,34 @@ function validInput() {
 }
 
 describe('workerMachineRuleInputSchema', () => {
+  it('不向管理端暴露机型和倍率的内部枚举', () => {
+    const invalidMachine = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      machineType: 'INTERNAL_MACHINE_TYPE',
+    });
+    const invalidFactor = workerMachineRuleInputSchema.safeParse({
+      ...validInput(),
+      multiplierFactors: ['INTERNAL_MULTIPLIER'],
+    });
+
+    expect(invalidMachine.success).toBe(false);
+    expect(invalidFactor.success).toBe(false);
+    if (!invalidMachine.success && !invalidFactor.success) {
+      const visibleErrors = [
+        ...invalidMachine.error.issues,
+        ...invalidFactor.error.issues,
+      ]
+        .map((issue) => issue.message)
+        .join('\n');
+      expect(visibleErrors).toContain('请选择有效的机型');
+      expect(visibleErrors).toContain('请选择有效的计件倍率条件');
+      expect(visibleErrors).not.toContain('INTERNAL_MACHINE_TYPE');
+      expect(visibleErrors).not.toContain('INTERNAL_MULTIPLIER');
+      expect(visibleErrors).not.toContain('DOUBLE_SIDED');
+      expect(visibleErrors).not.toContain('DOUBLE_COLOR');
+    }
+  });
+
   it('interprets datetime-local as a Shanghai business instant', () => {
     const parsed = workerMachineRuleInputSchema.parse(validInput());
     expect(parsed.effectiveFrom.toISOString()).toBe('2026-07-19T01:30:00.000Z');

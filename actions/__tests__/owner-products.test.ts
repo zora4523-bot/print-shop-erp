@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '../../generated/prisma/client';
+import { ProductCategory } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -14,6 +15,8 @@ const {
     createProduct: vi.fn(),
     updateProduct: vi.fn(),
     setProductActive: vi.fn(),
+    getProductCategoryNodeSummary: vi.fn(),
+    getProductSummary: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   redirectMock: vi.fn((path: string) => {
@@ -34,6 +37,14 @@ vi.mock('@/lib/product', () => ({
   createProduct: productMock.createProduct,
   updateProduct: productMock.updateProduct,
   setProductActive: productMock.setProductActive,
+  getProductCategoryNodeSummary: productMock.getProductCategoryNodeSummary,
+  getProductSummary: productMock.getProductSummary,
+  QUOTE_PRODUCT_CATEGORIES: [
+    'BLANK_STOCK',
+    'GENERIC_STOCK',
+    'CUSTOM_FLAT_FOIL',
+    'COLOR_PRINT',
+  ],
   ProductInvariantError: MockProductInvariantError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
@@ -41,7 +52,10 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createProductAction,
+  createQuoteProductAction,
+  setQuoteProductActiveAction,
   updateProductAction,
+  updateQuoteProductAction,
   setProductActiveAction,
 } from '../owner-products';
 
@@ -75,6 +89,8 @@ beforeEach(() => {
   productMock.createProduct.mockReset();
   productMock.updateProduct.mockReset();
   productMock.setProductActive.mockReset();
+  productMock.getProductCategoryNodeSummary.mockReset();
+  productMock.getProductSummary.mockReset();
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -187,8 +203,80 @@ describe('createProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/tiers/new',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
     expect(redirectMock).toHaveBeenCalledWith('/owner/products/p1');
+  });
+
+  it('keeps rule-center stock SKU creation inside the rule center', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.createProduct.mockResolvedValue({ id: 'p1' });
+
+    await expect(
+      createProductAction(
+        null,
+        fd({
+          ...validCreate,
+          routeBase: '/owner/rules/stock-skus',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+  });
+
+  it('报价 SKU 专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductCategoryNodeSummary.mockResolvedValue({
+      id: 'cat_blank_stock',
+      legacyCategory: ProductCategory.BLANK_STOCK,
+    });
+    productMock.createProduct.mockResolvedValue({ id: 'p1' });
+
+    await expect(
+      createQuoteProductAction(
+        null,
+        fd({ ...validCreate, routeBase: '/owner/products' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
+  });
+
+  it('报价 SKU 创建忽略伪造的内部直单价', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductCategoryNodeSummary.mockResolvedValue({
+      id: 'cat_blank_stock',
+      legacyCategory: ProductCategory.BLANK_STOCK,
+    });
+    productMock.createProduct.mockResolvedValue({ id: 'p1' });
+
+    await expect(
+      createQuoteProductAction(
+        null,
+        fd({ ...validCreate, baseUnitPrice: '9999999.99999' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(productMock.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUnitPrice: null }),
+    );
+  });
+
+  it('报价 SKU 专用 action 拒绝已归并的现货加烫旧分类', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductCategoryNodeSummary.mockResolvedValue({
+      id: 'cat_legacy',
+      legacyCategory: ProductCategory.STOCK_FOIL_ADD,
+    });
+
+    const result = await createQuoteProductAction(null, fd(validCreate));
+
+    expect(result.status).toBe('invalid');
+    expect(productMock.createProduct).not.toHaveBeenCalled();
   });
 });
 
@@ -222,6 +310,44 @@ describe('updateProductAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
+  it('普通产品更新仍可修改内部直单价', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.updateProduct.mockResolvedValue({ id: 'p1' });
+
+    await updateProductAction(
+      'p1',
+      null,
+      fd({ ...baseUpdate, baseUnitPrice: '1.5000' }),
+    );
+
+    expect(productMock.updateProduct).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({ baseUnitPrice: '1.5000' }),
+    );
+  });
+
+  it('报价 SKU 更新忽略伪造价格且省略内部直单价字段', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductCategoryNodeSummary.mockResolvedValue({
+      id: 'cat_blank_stock',
+      legacyCategory: ProductCategory.BLANK_STOCK,
+    });
+    productMock.updateProduct.mockResolvedValue({ id: 'p1' });
+
+    const result = await updateQuoteProductAction(
+      'p1',
+      null,
+      fd({ ...baseUpdate, baseUnitPrice: '9999999.99999' }),
+    );
+
+    expect(result.status).toBe('success');
+    const passed = productMock.updateProduct.mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect('baseUnitPrice' in passed).toBe(false);
+  });
+
   it('revalidates list, item, and all product pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
@@ -231,7 +357,27 @@ describe('updateProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/p1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/tiers/new',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
+  });
+
+  it('报价 SKU 更新不接受自带纸料分类', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductCategoryNodeSummary.mockResolvedValue({
+      id: 'cat_byo',
+      legacyCategory: ProductCategory.BYO_MATERIAL,
+    });
+
+    const result = await updateQuoteProductAction(
+      'p1',
+      null,
+      fd(baseUpdate),
+    );
+
+    expect(result.status).toBe('invalid');
+    expect(productMock.updateProduct).not.toHaveBeenCalled();
   });
 });
 
@@ -292,5 +438,22 @@ describe('setProductActiveAction', () => {
     );
     expect(r.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
+  });
+
+  it('报价 SKU 启停不可操作已排除的历史分类', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.getProductSummary.mockResolvedValue({
+      id: 'p-old',
+      category: ProductCategory.STOCK_FOIL_ADD,
+    });
+
+    const result = await setQuoteProductActiveAction(
+      'p-old',
+      false,
+      fd({ reason: '历史分类清理' }),
+    );
+
+    expect(result.status).toBe('error');
+    expect(productMock.setProductActive).not.toHaveBeenCalled();
   });
 });

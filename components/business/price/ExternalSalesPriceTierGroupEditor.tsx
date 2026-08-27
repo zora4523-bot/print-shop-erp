@@ -117,12 +117,6 @@ function amountLabel(value: string | null): string {
   return amount ? `¥${decimalLabel(amount)}` : '待设置';
 }
 
-function fixedAmountUnitLabel(value: string, quantity: number): string {
-  const amount = parseAmount(value);
-  if (amount === null || quantity <= 0) return '—';
-  return `¥${decimalLabel(amount.div(quantity))} / 个`;
-}
-
 type PricingPresentation = {
   calculationLabel: string;
   currentColumnLabel: string;
@@ -130,7 +124,6 @@ type PricingPresentation = {
   amountSuffix: string;
   valueNoun: string;
   instruction: string;
-  supportingValue: (value: string, quantity: number) => string;
 };
 
 const PRICING_PRESENTATIONS: Record<
@@ -143,9 +136,7 @@ const PRICING_PRESENTATIONS: Record<
     draftColumnLabel: '草稿总价（元）',
     amountSuffix: ' / 批',
     valueNoun: '总价',
-    instruction:
-      '数量档保持不变，只需修改每档整批总价；保存时整组一次更新。',
-    supportingValue: fixedAmountUnitLabel,
+    instruction: '修改各数量档总价；折合单价自动计算。',
   },
   [CustomerPriceCalculationType.PER_PIECE]: {
     calculationLabel: '按个计价',
@@ -153,9 +144,7 @@ const PRICING_PRESENTATIONS: Record<
     draftColumnLabel: '草稿单价（元/个）',
     amountSuffix: ' / 个',
     valueNoun: '单价',
-    instruction:
-      '数量档保持不变，只需修改每档的每个单价；系统不会将单价再除以数量。',
-    supportingValue: () => '每个成品',
+    instruction: '修改各数量档单价。',
   },
   [CustomerPriceCalculationType.PER_SHEET]: {
     calculationLabel: '按张计价',
@@ -163,9 +152,7 @@ const PRICING_PRESENTATIONS: Record<
     draftColumnLabel: '草稿每张价（元/张）',
     amountSuffix: ' / 张',
     valueNoun: '每张价',
-    instruction:
-      '数量档保持不变，只需修改每张价格；保存时整组一次更新。',
-    supportingValue: () => '每张用纸',
+    instruction: '修改各数量档每张价。',
   },
   [CustomerPriceCalculationType.PER_10K]: {
     calculationLabel: '每万个计价',
@@ -173,9 +160,7 @@ const PRICING_PRESENTATIONS: Record<
     draftColumnLabel: '草稿每万个价（元/万个）',
     amountSuffix: ' / 万个',
     valueNoun: '每万个价',
-    instruction:
-      '数量档保持不变，只需修改每万个价格；保存时整组一次更新。',
-    supportingValue: () => '每 10,000 个成品',
+    instruction: '修改各数量档每万个价。',
   },
   [CustomerPriceCalculationType.PER_ITEM]: {
     calculationLabel: '每款一次',
@@ -183,9 +168,15 @@ const PRICING_PRESENTATIONS: Record<
     draftColumnLabel: '草稿每款价（元/款）',
     amountSuffix: ' / 款',
     valueNoun: '每款价',
-    instruction:
-      '数量档保持不变，只需修改每款一次的价格；保存时整组一次更新。',
-    supportingValue: () => '每款一次',
+    instruction: '修改各数量档每款价。',
+  },
+  [CustomerPriceCalculationType.PER_BAG]: {
+    calculationLabel: '按实际袋数',
+    currentColumnLabel: '当前每袋价',
+    draftColumnLabel: '草稿每袋价（元/袋）',
+    amountSuffix: ' / 袋',
+    valueNoun: '每袋价',
+    instruction: '入袋费 = 实际袋数 × 每袋价。',
   },
 };
 
@@ -425,7 +416,7 @@ function TierMutationFeedback({
         className="flex items-center gap-2 text-sm text-success-foreground"
       >
         <Check aria-hidden="true" className="size-4" />
-        这一组{valueNoun}已全部保存到调价草稿。
+        草稿已保存。
       </p>
     );
   }
@@ -481,8 +472,6 @@ export function ExternalSalesPriceTierGroupEditor({
   successHref,
 }: ExternalSalesPriceTierGroupEditorProps) {
   const presentation = PRICING_PRESENTATIONS[calculationType];
-  const isFixedAmount =
-    calculationType === CustomerPriceCalculationType.FIXED_AMOUNT;
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const headingId = useId();
@@ -614,9 +603,6 @@ export function ExternalSalesPriceTierGroupEditor({
         </dl>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {presentation.instruction}
-          {isFixedAmount
-            ? ' 折合单价会按数量档自动计算。'
-            : ` 计价单位：${presentation.supportingValue('', 1)}。`}
         </p>
         <div className="mt-3 flex min-w-0 flex-wrap items-start gap-2">
           <div className="min-w-0 flex-1 space-y-1">
@@ -694,7 +680,7 @@ export function ExternalSalesPriceTierGroupEditor({
             variant="ghost"
             className="min-h-11 text-muted-foreground"
             disabled={pending || locallyChangedTierCount === 0}
-            title="恢复进入本组时的金额和启用状态"
+            title="恢复本次修改前的值"
             onClick={() => {
               setDraftState(cloneTierDraftState(initialDraftState.current));
               setUndoStack([]);
@@ -703,7 +689,7 @@ export function ExternalSalesPriceTierGroupEditor({
             }}
           >
             <RotateCcw aria-hidden="true" />
-            放弃本地修改
+            撤销本次修改
           </Button>
         </div>
       </header>
@@ -881,8 +867,8 @@ export function ExternalSalesPriceTierGroupEditor({
             {!state ? (
               <p className="text-xs text-muted-foreground">
                 {locallyChangedTierCount > 0
-                  ? `1 组 · ${locallyChangedTierCount} 档待保存；任意一行失败时整组都不会保存。`
-                  : '当前组没有本地修改。'}
+                  ? `${locallyChangedTierCount} 档待保存；保存失败时不修改任何档。`
+                  : '暂无修改。'}
               </p>
             ) : null}
           </div>
@@ -895,8 +881,8 @@ export function ExternalSalesPriceTierGroupEditor({
           >
             <Save aria-hidden="true" />
             {pending
-              ? `正在原子保存本组${presentation.valueNoun}…`
-              : `保存本组（${locallyChangedTierCount} 档待保存）`}
+              ? `正在保存${presentation.valueNoun}…`
+              : `保存（${locallyChangedTierCount} 档）`}
           </Button>
         </div>
       </footer>

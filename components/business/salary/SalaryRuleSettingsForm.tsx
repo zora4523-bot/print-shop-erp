@@ -129,7 +129,7 @@ export function SalaryRuleSettingsForm({
         <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           当前版本：{current ? `自 ${formatDateTime(current.effectiveFrom)} 起生效` : '尚未配置'}。
-          已生成工资/提成记录不回写，仍以各自的规则快照为准。
+          已生成的工资和提成不受影响，仍按生成时的规则计算。
         </p>
       </div>
 

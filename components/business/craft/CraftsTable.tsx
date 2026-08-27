@@ -11,7 +11,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { machineTypeLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 
-export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
+export function CraftsTable({
+  crafts,
+  editBase = '/owner/crafts',
+}: {
+  crafts: CraftSummary[];
+  editBase?: string;
+}) {
   if (crafts.length === 0) {
     return null;
   }
@@ -56,7 +62,7 @@ export function CraftsTable({ crafts }: { crafts: CraftSummary[] }) {
             </TableCell>
             <TableCell>
               <Link
-                href={`/owner/crafts/${c.id}`}
+                href={`${editBase}/${c.id}`}
                 prefetch={false}
                 className="text-sm text-primary underline hover:no-underline"
               >

@@ -25,6 +25,11 @@ import {
   updatePriceTier,
 } from '@/lib/price';
 import type { PriceMutationResult } from './owner-prices.types';
+import {
+  RULE_CENTER_HREFS,
+  internalPriceAdjustmentHref,
+  internalPriceTierHref,
+} from '@/lib/navigation/rule-center';
 
 function normalizePriceTierFormInput(formData: FormData) {
   return {
@@ -112,7 +117,7 @@ export async function createPriceTierAction(
   }
 
   revalidatePriceTierPaths(createdId);
-  redirect(`/owner/prices/tiers/${createdId}`);
+  redirect(internalPriceTierHref(createdId));
 }
 
 export async function updatePriceTierAction(
@@ -167,7 +172,7 @@ export async function createPriceAdjustmentAction(
   }
 
   revalidatePriceAdjustmentPaths(createdId);
-  redirect(`/owner/prices/adjustments/${createdId}`);
+  redirect(internalPriceAdjustmentHref(createdId));
 }
 
 export async function updatePriceAdjustmentAction(
@@ -217,9 +222,19 @@ export async function setPriceAdjustmentActiveAction(
 }
 
 function revalidatePriceTierPaths(id: string) {
-  revalidatePaths(['/owner/prices', `/owner/prices/tiers/${id}`]);
+  revalidatePaths([
+    RULE_CENTER_HREFS.internalPricing,
+    internalPriceTierHref(id),
+    '/owner/prices',
+    `/owner/prices/tiers/${id}`,
+  ]);
 }
 
 function revalidatePriceAdjustmentPaths(id: string) {
-  revalidatePaths(['/owner/prices', `/owner/prices/adjustments/${id}`]);
+  revalidatePaths([
+    RULE_CENTER_HREFS.internalPricing,
+    internalPriceAdjustmentHref(id),
+    '/owner/prices',
+    `/owner/prices/adjustments/${id}`,
+  ]);
 }

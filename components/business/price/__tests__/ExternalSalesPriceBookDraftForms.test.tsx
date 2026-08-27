@@ -4,7 +4,10 @@ import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
+  OrderItemPricingRoute,
+  OrderPackagingMode,
 } from '@/generated/prisma/enums';
+import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '@/lib/price/customer-rule-condition';
 import type {
   CustomerPriceRuleDraftEditorDto,
 } from '@/lib/price/customer-price-book-admin';
@@ -76,6 +79,11 @@ function rule(
     kind: CustomerPriceRuleKind.BASE,
     calculationType: CustomerPriceCalculationType.FIXED_AMOUNT,
     unitsPerSheet: null,
+    match: {
+      ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+      pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+    },
+    matchValidationErrors: [],
     amount: '130',
     includedUnits: null,
     incrementUnits: null,
@@ -101,6 +109,13 @@ function ruleContext(
     products:
       purpose === CustomerPriceBookPurpose.PROCESSING
         ? [{ id: 'product-1', name: '彩印红包' }]
+        : [],
+    crafts:
+      purpose === CustomerPriceBookPurpose.PROCESSING
+        ? [
+            { value: 'COLOR_PRINT', label: '彩印' },
+            { value: 'FLAT_FOIL', label: '平烫' },
+          ]
         : [],
   };
 }
@@ -175,7 +190,69 @@ describe('customer price-book draft form bindings', () => {
       minQty: 100,
       maxQty: 500,
       blocksAutomaticQuote: true,
+      match: EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
       isActive: true,
+    });
+  });
+
+  it('保留工艺复选框的全部选中值并去重', () => {
+    const formData = new FormData();
+    for (const [name, value] of Object.entries({
+      priceBookId: 'draft-1',
+      ruleId: 'rule-1',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      name: '组合工艺加价',
+      categoryId: 'category-1',
+      productId: '',
+      kind: CustomerPriceRuleKind.ADD_ON,
+      calculationType: CustomerPriceCalculationType.PER_PIECE,
+      amount: '0.2',
+    })) {
+      formData.set(name, value);
+    }
+    formData.append('match.craftCodes', 'COLOR_PRINT');
+    formData.append('match.craftCodes', 'FLAT_FOIL');
+    formData.append('match.craftCodes', 'COLOR_PRINT');
+    formData.append('match.noneOfCraftCodes', 'UV');
+    formData.append('match.noneOfCraftCodes', 'DIE_CUT');
+    formData.append('match.anyCraftCodeOutside', 'PACKING');
+    formData.append('match.anyCraftCodeOutside', 'GLUING');
+
+    const input = customerPriceRuleInputFromFormData(formData);
+
+    expect(input.match?.craftCodes).toEqual(['COLOR_PRINT', 'FLAT_FOIL']);
+    expect(input.match?.noneOfCraftCodes).toEqual(['UV', 'DIE_CUT']);
+    expect(input.match?.anyCraftCodeOutside).toEqual(['PACKING', 'GLUING']);
+  });
+
+  it('将正反面合计的烫金道数结构化提交', () => {
+    const formData = new FormData();
+    for (const [name, value] of Object.entries({
+      priceBookId: 'draft-1',
+      ruleId: 'rule-1',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      name: '机仔烫金费',
+      categoryId: 'category-1',
+      productId: '',
+      kind: CustomerPriceRuleKind.ADD_ON,
+      calculationType: CustomerPriceCalculationType.PER_PIECE,
+      amount: '0.04',
+      'match.target': 'ITEM',
+      'match.foilPassCount': '3',
+      'match.perFoilPass': 'true',
+    })) {
+      formData.set(name, value);
+    }
+    formData.append(
+      'match.pricingRoutes',
+      OrderItemPricingRoute.STOCK_BLANK,
+    );
+
+    expect(customerPriceRuleInputFromFormData(formData).match).toEqual({
+      ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+      pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+      foilPassCount: 3,
+      perFoilPass: true,
     });
   });
 
@@ -240,18 +317,18 @@ describe('customer price-book draft form bindings', () => {
 });
 
 describe('CreateCustomerPriceBookDraftForm', () => {
-  it('明确说明复制和版本隔离，并将调价原因标为必填', () => {
+  it('简明说明草稿影响，并将调价原因标为必填', () => {
     const html = renderToStaticMarkup(
       <CreateCustomerPriceBookDraftForm
         purpose={CustomerPriceBookPurpose.PROCESSING}
       />,
     );
 
-    expect(html).toContain('从当前生效价目开始调整');
-    expect(html).toContain('草稿发布前不会影响当前报价');
-    expect(html).toContain('历史工单的原结算金额也不会改变');
+    expect(html).toContain('发起调价');
+    expect(html).toContain('草稿发布前不影响当前报价');
     expect(html).toContain('调价原因（必填）');
-    expect(html).toContain('复制当前价目并开始调价');
+    expect(html).toContain('开始调价');
+    expect(html).not.toContain('复制当前价目');
 
     const textarea = html.match(
       /<textarea[^>]*name="changeReason"[^>]*>/,
@@ -359,7 +436,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
 
     expect(html).toContain('收费项目名称');
     expect(html).toContain('value="空封现货基础价"');
-    expect(html).toContain('收费类目');
+    expect(html).toContain('费用分类');
     expect(html).toContain('彩印加工');
     expect(html).toContain('每张含几个');
     expect(html).toContain('name="unitsPerSheet"');
@@ -384,10 +461,71 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).toContain(
       'name="expectedUpdatedAt" value="2026-08-09T00:30:00.000Z"',
     );
-    expect(html).toContain('正在编辑调价草稿');
-    expect(html).toContain('发布前不会改变当前报价或历史工单金额');
+    expect(html).not.toContain('正在编辑调价草稿');
+    expect(html).not.toContain('发布前不会改变当前报价或历史工单金额');
     expect(html).toContain('sticky bottom-0');
-    expect(html).toContain('保存到调价草稿');
+    expect(html).toContain('保存草稿');
+  });
+
+  it('默认收起低频条件，并只向管理员展示中文工艺名称', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          match: {
+            ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+            pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+            craftCodes: ['COLOR_PRINT'],
+            noneOfCraftCodes: ['FLAT_FOIL'],
+            craftMode: 'ALL',
+          },
+        })}
+      />,
+    );
+    const visibleText = html.replace(/<[^>]*>/g, ' ');
+
+    expect(html).toMatch(
+      /<details\b(?![^>]*\bopen(?:=|\s|>))[^>]*>[\s\S]*?<summary[^>]*>[\s\S]*?适用范围/,
+    );
+    expect(visibleText).toContain('适用工艺');
+    expect(visibleText).toContain('彩印');
+    expect(visibleText).toContain('平烫');
+    expect(visibleText).toContain('必须同时包含全部工艺');
+    expect(visibleText).not.toContain('COLOR_PRINT');
+    expect(visibleText).not.toContain('FLAT_FOIL');
+    expect(visibleText).not.toContain('ANY');
+    expect(visibleText).not.toContain('ALL');
+    expect(html).toContain('value="COLOR_PRINT"');
+    expect(html).toContain('value="FLAT_FOIL"');
+  });
+
+  it('展示烫金道数条件与乘算方式，不向管理员暴露内部值', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          match: {
+            ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+            pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+            foilPassCount: 3,
+            perFoilPass: true,
+          },
+        })}
+      />,
+    );
+    const visibleText = html.replace(/<[^>]*>/g, ' ');
+
+    expect(visibleText).toContain('烫金精确道数（正面＋背面）');
+    expect(visibleText).toContain('按实际烫金道数乘算');
+    expect(html).toMatch(
+      /<input[^>]*name="match\.foilPassCount"[^>]*value="3"/,
+    );
+    expect(html).toMatch(
+      /<input[^>]*name="match\.perFoilPass"[^>]*checked=""/,
+    );
+    expect(visibleText).not.toMatch(
+      /STOCK_BLANK|CUSTOM_SINGLE_FLAT_FOIL|COLOR_PRINT|foilPassCount|perFoilPass/,
+    );
   });
 
   it('shows the safe sheet-capacity field without exposing matcher JSON', () => {
@@ -410,6 +548,61 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(input).toContain('step="1"');
     expect(html).toContain('选择“按张”计价时必填');
     expect(html).not.toContain('name="triggerCondition"');
+  });
+
+  it('offers only the three new-order pricing routes and shows historical manual rules read-only', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          match: {
+            ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+            pricingRoutes: [OrderItemPricingRoute.MANUAL_QUOTE],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('局部烫金（通版现货）');
+    expect(html).toContain('专版烫金');
+    expect(html).toContain('彩印');
+    expect(html).not.toContain('空封现货');
+    expect(html).not.toContain('专版单色平烫');
+    expect(html).not.toContain('value="MANUAL_QUOTE"');
+    expect(html).not.toContain('完全人工报价');
+    expect(html).toContain('历史规则仅可查看');
+  });
+
+  it('将包装组规则限定为单款装或混装，不显示款式工艺条件', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          productId: null,
+          kind: CustomerPriceRuleKind.ADD_ON,
+          calculationType: CustomerPriceCalculationType.PER_BAG,
+          amount: '0.1',
+          minQty: null,
+          maxQty: null,
+          match: {
+            ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+            target: 'PACKAGING_GROUP',
+            packagingModes: [OrderPackagingMode.SINGLE_STYLE],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('name="match.target" value="PACKAGING_GROUP"');
+    expect(html).not.toMatch(/<select[^>]*name="match\.target"/);
+    expect(html).toContain('\u5305\u88c5\u6a21\u5f0f\uff08\u5fc5\u9009\uff09');
+    expect(html).toMatch(
+      /<input[^>]*name="match\.packagingModes"[^>]*checked=""[^>]*value="SINGLE_STYLE"/,
+    );
+    expect(html).toContain('\u5355\u6b3e\u88c5');
+    expect(html).toContain('\u6df7\u88c5');
+    expect(html).not.toContain('name="match.pricingRoutes"');
+    expect(html).not.toContain('name="match.foilTechniques"');
   });
 
   it('将编辑错误关联到对应字段并保留业务化编辑器', () => {
@@ -461,6 +654,70 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).not.toContain('SHA-256');
   });
 
+  it('适用条件报错时自动展开高级区域', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: {
+          'match.craftCodes': ['请重新选择适用工艺'],
+        },
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+      />,
+    );
+
+    expect(html).toMatch(
+      /<details\b[^>]*\bopen=""[^>]*>[\s\S]*?适用范围/,
+    );
+    expect(html).toContain('请重新选择适用工艺');
+    expect(html).toContain('id="price-rule-rule-1-craftCodes-error"');
+  });
+
+  it('将高级匹配错误关联到只读计价对象和复选项', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: {
+          'match.target': ['请重新选择计价对象'],
+          'match.packagingModes': ['请选择包装模式'],
+        },
+      },
+      action,
+      false,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule({
+          match: {
+            ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+            target: 'PACKAGING_GROUP',
+            packagingModes: [OrderPackagingMode.SINGLE_STYLE],
+          },
+        })}
+      />,
+    );
+    const packagingCheckbox = html.match(
+      /<input[^>]*name="match\.packagingModes"[^>]*>/,
+    )?.[0];
+
+    expect(html).toContain('name="match.target" value="PACKAGING_GROUP"');
+    expect(html).not.toMatch(/<select[^>]*name="match\.target"/);
+    expect(html).toContain('id="price-rule-rule-1-match.target-error"');
+    expect(packagingCheckbox).toContain('aria-invalid="true"');
+    expect(packagingCheckbox).toContain(
+      'aria-describedby="price-rule-rule-1-packagingModes-error"',
+    );
+  });
+
   it('并发修改冲突时提供刷新恢复入口且不移除版本锁', () => {
     actionStateMock.mockImplementation((action) => [
       {
@@ -501,7 +758,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     );
 
     expect(html).toContain('role="status"');
-    expect(html).toContain('已保存到调价草稿。');
+    expect(html).toContain('草稿已保存。');
   });
 
   it('保存成功后跳到不受旧筛选条件影响的详情地址', () => {

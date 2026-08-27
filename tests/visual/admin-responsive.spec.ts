@@ -15,6 +15,10 @@ import {
   expectA11yGate,
   expectViewportGate,
 } from './ui-gates';
+import {
+  RULE_CENTER_HREFS,
+  customerPricingHref,
+} from '../../lib/navigation/rule-center';
 
 let fixture: WorkerUiFixture;
 
@@ -322,22 +326,42 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
     { name: 'products', path: '/owner/products', readyHeading: '产品字典' },
     {
-      name: 'external-sales-processing-price-book',
-      path: '/owner/prices/external-sales/items?purpose=processing',
-      readyHeading: '外部销售收费',
+      name: 'rule-center',
+      path: RULE_CENTER_HREFS.root,
+      readyHeading: '规则配置中心',
+    },
+    {
+      name: 'rule-center-customer-processing',
+      path: customerPricingHref('processing'),
+      readyHeading: '客户计价规则',
       prepareGateState: preparePriceBookWorkspaceState,
     },
     {
-      name: 'external-sales-logistics-price-book',
-      path: '/owner/prices/external-sales/items?purpose=logistics',
-      readyHeading: '外部销售收费',
+      name: 'rule-center-customer-logistics',
+      path: customerPricingHref('logistics'),
+      readyHeading: '客户计价规则',
       prepareGateState: preparePriceBookWorkspaceState,
     },
     {
-      name: 'external-sales-price-book-versions',
-      path: '/owner/prices/external-sales/versions',
-      readyHeading: '发布中心',
+      name: 'rule-center-price-versions',
+      path: RULE_CENTER_HREFS.priceVersions,
+      readyHeading: '价格版本与发布',
       prepareGateState: preparePriceBookBusinessState,
+    },
+    {
+      name: 'rule-center-internal-pricing',
+      path: RULE_CENTER_HREFS.internalPricing,
+      readyHeading: '内部兼容价格',
+    },
+    {
+      name: 'rule-center-worker-piecework',
+      path: RULE_CENTER_HREFS.workerPiecework,
+      readyHeading: '计件规则',
+    },
+    {
+      name: 'rule-center-employee-pay',
+      path: RULE_CENTER_HREFS.employeePay,
+      readyHeading: '员工工资规则',
     },
     { name: 'bills', path: '/owner/bills', readyHeading: '销售应收账单' },
     {
@@ -346,11 +370,6 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '工单修改申请',
     },
     { name: 'salary', path: '/owner/salary', readyHeading: '薪资总览' },
-    {
-      name: 'piecework-rules',
-      path: '/owner/salary/piecework-rules',
-      readyHeading: '计件规则',
-    },
     { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库作业台' },
     { name: 'pigsty', path: '/owner/pigsty', readyHeading: 'Pigsty 运维' },
     { name: 'settings', path: '/owner/settings', readyHeading: '系统设置' },
