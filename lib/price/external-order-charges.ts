@@ -115,7 +115,7 @@ export type ExternalOrderPackagingRule = {
   minQty: number;
   maxQty: number;
   amount: string;
-  advisory: true;
+  advisory: false;
   source: ExternalOrderChargeSource;
 };
 
@@ -223,7 +223,7 @@ const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
     minQty: 1,
     maxQty: 500,
     amount: '1',
-    advisory: true,
+    advisory: false,
     source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A2:B2' },
   },
   {
@@ -232,7 +232,7 @@ const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
     minQty: 501,
     maxQty: 1_000,
     amount: '3',
-    advisory: true,
+    advisory: false,
     source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A3:B3' },
   },
   {
@@ -241,7 +241,7 @@ const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
     minQty: 1_001,
     maxQty: 2_000,
     amount: '5',
-    advisory: true,
+    advisory: false,
     source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A4:B4' },
   },
   {
@@ -250,7 +250,7 @@ const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
     minQty: 2_001,
     maxQty: 3_000,
     amount: '7',
-    advisory: true,
+    advisory: false,
     source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A5:B5' },
   },
   {
@@ -259,20 +259,13 @@ const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
     minQty: 3_001,
     maxQty: 5_000,
     amount: '8',
-    advisory: true,
+    advisory: false,
     source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A6:B6' },
   },
 ] as const;
 
 export const DEFAULT_EXTERNAL_ORDER_CHARGE_RULES: readonly ExternalOrderChargeRule[] =
   [...ZTO_TARIFF_DEFINITIONS, ...CARTON_TIERS];
-
-function source(
-  base: typeof ZTO_PRICE_SOURCE | typeof CARTON_PRICE_SOURCE,
-  sourceRange: string,
-): ExternalOrderChargeSource {
-  return { ...base, sourceRange };
-}
 
 function money(value: Decimal): string {
   return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
@@ -355,6 +348,7 @@ function incompleteLine(
 
 function quoteShipping(
   shipment: ExternalOrderChargeShipmentInput,
+  orderTotalQuantity: number,
   isSfCollect: boolean,
   rules: readonly ExternalOrderChargeRule[],
 ): ExternalOrderChargeLine {
@@ -379,6 +373,25 @@ function quoteShipping(
       source: null,
       errors: [],
     };
+  }
+
+  if (orderTotalQuantity > 2_000) {
+    return incompleteLine(
+      shipment.shipmentKey,
+      'SHIPPING',
+      '快递费',
+      '物流运费待定',
+      ['整单总数量超过 2000 个，改走物流，运费待定'],
+      {
+        isSfCollect: false,
+        orderTotalQuantity,
+        province: shipment.province?.trim() || null,
+        billableWeightKg:
+          parseFiniteDecimal(shipment.billableWeightKg)?.toString() ?? null,
+      },
+      null,
+      false,
+    );
   }
 
   const tariffView = getZtoTariff(shipment.province, rules);
@@ -411,13 +424,13 @@ function quoteShipping(
   const additionalUnitFee = new Decimal(tariffRule.additionalUnitFee);
   const weight = parseFiniteDecimal(shipment.billableWeightKg);
   const chargeSource = tariffRule.source;
-  if (!weight || weight.lt(firstWeightKg)) {
+  if (!weight || weight.lte(0)) {
     return incompleteLine(
       shipment.shipmentKey,
       'SHIPPING',
       '快递费',
       `${province}中通快递费`,
-      ['请填写不小于 1kg 的承运商计费重量'],
+      ['缺少有效的系统计费重量，请人工确认'],
       {
         isSfCollect: false,
         province,
@@ -429,28 +442,8 @@ function quoteShipping(
     );
   }
 
-  const additionalWeight = weight.minus(firstWeightKg);
-  if (!additionalWeight.mod(additionalUnitKg).isZero()) {
-    return incompleteLine(
-      shipment.shipmentKey,
-      'SHIPPING',
-      '快递费',
-      `${province}中通快递费`,
-      [
-        `计费重量必须与 ${additionalUnitKg.toString()}kg 续重档位对齐；报价表未定义原始重量的进位方式`,
-      ],
-      {
-        isSfCollect: false,
-        province,
-        billableWeightKg: weight.toString(),
-        additionalUnitKg: tariffView.additionalUnitKg,
-      },
-      chargeSource,
-      false,
-    );
-  }
-
-  const additionalUnits = additionalWeight.div(additionalUnitKg);
+  const additionalWeight = Decimal.max(0, weight.minus(firstWeightKg));
+  const additionalUnits = additionalWeight.div(additionalUnitKg).ceil();
   const amount = firstFee.plus(
     additionalUnitFee.times(additionalUnits),
   );
@@ -500,93 +493,132 @@ function quoteShipping(
 
 function quotePackaging(
   shipment: ExternalOrderChargeShipmentInput,
+  orderTotalQuantity: number,
+  isPrimaryShipment: boolean,
   rules: readonly ExternalOrderChargeRule[],
 ): ExternalOrderChargeLine {
-  if (!Number.isSafeInteger(shipment.itemQuantity) || shipment.itemQuantity < 1) {
+  if (!Number.isSafeInteger(orderTotalQuantity) || orderTotalQuantity < 1) {
     return incompleteLine(
       shipment.shipmentKey,
       'PACKAGING',
       '打包耗材费',
-      '纸箱费建议',
-      ['单票分配数量必须是大于 0 的安全整数'],
-      { itemQuantity: shipment.itemQuantity },
+      '纸箱费',
+      ['整单总数量必须是大于 0 的安全整数'],
+      { orderTotalQuantity },
       null,
-      true,
+      false,
     );
   }
 
-  const matchingTiers = rules.filter(
+  const tiers = rules
+    .filter(
     (candidate): candidate is ExternalOrderPackagingRule =>
-      candidate.kind === 'PACKAGING' &&
-      shipment.itemQuantity >= candidate.minQty &&
-      shipment.itemQuantity <= candidate.maxQty,
-  );
-  if (matchingTiers.length > 1) {
+      candidate.kind === 'PACKAGING',
+    )
+    .sort((left, right) => left.maxQty - right.maxQty);
+  let previousMaximum = 0;
+  const hasInvalidTier =
+    tiers.length === 0 ||
+    tiers.some((tier) => {
+      const amount = parseFiniteDecimal(tier.amount);
+      const valid =
+        Number.isSafeInteger(tier.minQty) &&
+        Number.isSafeInteger(tier.maxQty) &&
+        tier.minQty === previousMaximum + 1 &&
+        tier.maxQty >= tier.minQty &&
+        amount !== null &&
+        !amount.isNegative() &&
+        amount.lte(MONEY_MAX);
+      previousMaximum = tier.maxQty;
+      return !valid;
+    });
+  const segmentTier = tiers.at(-1) ?? null;
+  if (hasInvalidTier || !segmentTier) {
     return incompleteLine(
       shipment.shipmentKey,
       'PACKAGING',
       '打包耗材费',
-      '纸箱费建议',
-      ['同时命中多条纸箱数量规则，请管理员修正价目簿'],
-      { itemQuantity: shipment.itemQuantity },
+      '纸箱费',
+      ['纸箱数量档必须从 1 开始连续覆盖且金额有效'],
+      { orderTotalQuantity },
       null,
-      true,
-    );
-  }
-  const tier = matchingTiers.find(
-    (candidate) =>
-      shipment.itemQuantity >= candidate.minQty &&
-      shipment.itemQuantity <= candidate.maxQty,
-  );
-  if (!tier) {
-    return incompleteLine(
-      shipment.shipmentKey,
-      'PACKAGING',
-      '打包耗材费',
-      '纸箱费建议',
-      ['纸箱价格表未覆盖单票 5000 个以上的数量，请人工确认'],
-      { itemQuantity: shipment.itemQuantity },
-      source(CARTON_PRICE_SOURCE, 'A1:B6'),
-      true,
+      false,
     );
   }
 
-  const tierAmount = parseFiniteDecimal(tier.amount);
-  if (!tierAmount || tierAmount.isNegative() || tierAmount.gt(MONEY_MAX)) {
+  const fullSegmentCount =
+    orderTotalQuantity > segmentTier.maxQty
+      ? Math.floor(orderTotalQuantity / segmentTier.maxQty)
+      : 0;
+  const remainderQuantity =
+    fullSegmentCount > 0
+      ? orderTotalQuantity % segmentTier.maxQty
+      : orderTotalQuantity;
+  const remainderTier =
+    remainderQuantity === 0
+      ? null
+      : tiers.find((tier) => remainderQuantity <= tier.maxQty) ?? null;
+  if (remainderQuantity > 0 && !remainderTier) {
     return incompleteLine(
       shipment.shipmentKey,
       'PACKAGING',
       '打包耗材费',
-      '纸箱费建议',
-      ['纸箱费建议超过系统可保存上限，请管理员修正价目簿'],
-      {
-        itemQuantity: shipment.itemQuantity,
-        minQty: tier.minQty,
-        maxQty: tier.maxQty,
-      },
-      tier.source,
-      true,
+      '纸箱费',
+      ['纸箱数量档未覆盖当前整单余量'],
+      { orderTotalQuantity, remainderQuantity },
+      segmentTier.source,
+      false,
     );
   }
+
+  const segmentAmount = parseFiniteDecimal(segmentTier.amount)!;
+  const remainderAmount = remainderTier
+    ? parseFiniteDecimal(remainderTier.amount)!
+    : new Decimal(0);
+  const cartonAmount = segmentAmount
+    .times(fullSegmentCount)
+    .plus(remainderAmount);
+  if (cartonAmount.gt(MONEY_MAX)) {
+    return incompleteLine(
+      shipment.shipmentKey,
+      'PACKAGING',
+      '打包耗材费',
+      '纸箱费',
+      ['纸箱费超过系统可保存上限，请管理员修正价目簿'],
+      {
+        orderTotalQuantity,
+        fullSegmentCount,
+        remainderQuantity,
+      },
+      segmentTier.source,
+      false,
+    );
+  }
+
+  const appliedTier = fullSegmentCount > 0 ? segmentTier : remainderTier!;
+  const amount = isPrimaryShipment ? cartonAmount : new Decimal(0);
 
   return {
     code: `PACKAGING_${shipment.shipmentKey}`,
-    ruleCode: tier.code,
+    ruleCode: isPrimaryShipment ? appliedTier.code : null,
     categoryCode: 'PACKAGING',
     categoryName: '打包耗材费',
     shipmentKey: shipment.shipmentKey,
-    name: '纸箱费建议',
-    amount: money(tierAmount),
+    name: isPrimaryShipment ? '纸箱费' : '纸箱费已计入主地址',
+    amount: money(amount),
     complete: true,
-    advisory: true,
+    advisory: false,
     waived: false,
     basis: {
-      itemQuantity: shipment.itemQuantity,
-      minQty: tier.minQty,
-      maxQty: tier.maxQty,
-      granularity: 'PER_SHIPMENT',
+      orderTotalQuantity,
+      fullSegmentCount,
+      segmentQuantity: segmentTier.maxQty,
+      remainderQuantity,
+      remainderTierMaximumQuantity: remainderTier?.maxQty ?? null,
+      granularity: 'PER_ORDER',
+      allocatedToPrimaryShipment: isPrimaryShipment,
     },
-    source: tier.source,
+    source: isPrimaryShipment ? appliedTier.source : null,
     errors: [],
   };
 }
@@ -678,10 +710,24 @@ export function calculateExternalOrderCharges(
     };
   }
 
-  const shipments = input.shipments.map((shipment) => ({
+  const orderTotalQuantity = input.shipments.reduce(
+    (total, shipment) => total + shipment.itemQuantity,
+    0,
+  );
+  const shipments = input.shipments.map((shipment, index) => ({
     shipmentKey: shipment.shipmentKey,
-    shipping: quoteShipping(shipment, input.isSfCollect, rules),
-    packaging: quotePackaging(shipment, rules),
+    shipping: quoteShipping(
+      shipment,
+      orderTotalQuantity,
+      input.isSfCollect,
+      rules,
+    ),
+    packaging: quotePackaging(
+      shipment,
+      orderTotalQuantity,
+      index === 0,
+      rules,
+    ),
   }));
   const shippingLines = shipments.map((shipment) => shipment.shipping);
   const packagingLines = shipments.map((shipment) => shipment.packaging);

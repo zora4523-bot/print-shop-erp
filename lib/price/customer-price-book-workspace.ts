@@ -628,6 +628,25 @@ function businessScopeLabel(triggerCondition: unknown): string | null {
       : '不限';
     scopes.push(`${minimum}–${maximum} 色烫金`);
   }
+  if (Number.isSafeInteger(triggerCondition.foilPassCount)) {
+    scopes.push(
+      `${Number(triggerCondition.foilPassCount)} 道烫金（正面＋背面）`,
+    );
+  } else if (
+    Number.isSafeInteger(triggerCondition.minFoilPassCount) ||
+    Number.isSafeInteger(triggerCondition.maxFoilPassCount)
+  ) {
+    const minimum = Number.isSafeInteger(triggerCondition.minFoilPassCount)
+      ? Number(triggerCondition.minFoilPassCount)
+      : 0;
+    const maximum = Number.isSafeInteger(triggerCondition.maxFoilPassCount)
+      ? Number(triggerCondition.maxFoilPassCount)
+      : '不限';
+    scopes.push(`${minimum}–${maximum} 道烫金（正面＋背面）`);
+  }
+  if (triggerCondition.perFoilPass === true) {
+    scopes.push('按实际烫金道数乘算');
+  }
   if (triggerCondition.isDoubleSided === true) scopes.push('双面');
   if (triggerCondition.isDoubleSided === false) scopes.push('单面');
   if (triggerCondition.isDoubleColor === true) scopes.push('双色');

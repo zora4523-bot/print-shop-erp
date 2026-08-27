@@ -23,10 +23,14 @@ export const PERMISSIONS = {
   'order:cancel':               [Role.ADMIN],
   'order:change:request':       [Role.SALES, Role.CUSTOMER_SERVICE],
   'order:change:review':        [Role.ADMIN],
+  'order:price:confirm':        [Role.ADMIN],
 
   // 生产任务
   'task:assign':                [Role.ADMIN],
+  'task:claim':                 [Role.WORKER],
   'task:report':                [Role.WORKER],
+  'task:dispute:create':        [Role.WORKER],
+  'task:dispute:review':        [Role.ADMIN],
 
   // 外协
   'outsource:manage':           [Role.ADMIN],

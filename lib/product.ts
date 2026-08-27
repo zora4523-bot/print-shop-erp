@@ -51,6 +51,19 @@ export type ProductSummary = Pick<
 
 export type ProductActiveStatusFilter = 'all' | 'active' | 'inactive';
 
+/**
+ * 工单、BOM 和自动价共用的报价 SKU 范围。
+ *
+ * STOCK_FOIL_ADD 是旧的“现货加烫”同义分类，现已归并到通版现货；
+ * BYO_MATERIAL 需人工确认纸料，不作为新报价 SKU 创建选项。
+ */
+export const QUOTE_PRODUCT_CATEGORIES = [
+  ProductCategory.BLANK_STOCK,
+  ProductCategory.GENERIC_STOCK,
+  ProductCategory.CUSTOM_FLAT_FOIL,
+  ProductCategory.COLOR_PRINT,
+] as const;
+
 export type ProductReferenceImpact = {
   /** Distinct orders, not order-item rows. */
   orderCount: number;
@@ -79,7 +92,7 @@ export type ProductOption = Pick<
 
 export type ProductOrderOption = Pick<
   Product,
-  'id' | 'name' | 'category' | 'specification' | 'paperType'
+  'id' | 'code' | 'name' | 'category' | 'specification' | 'paperType'
 >;
 
 export type ProductCategoryNodeSummary = Pick<
@@ -274,6 +287,7 @@ function normalizeSearchQuery(q?: string | null): string | null {
 function productSearchFilter(
   q?: string | null,
   status: ProductActiveStatusFilter = 'all',
+  categories?: readonly ProductCategory[],
 ): Prisma.ProductWhereInput | undefined {
   const query = normalizeSearchQuery(q);
   const activeFilter =
@@ -282,9 +296,16 @@ function productSearchFilter(
       : status === 'inactive'
         ? { isActive: false }
         : {};
-  if (!query) return Object.keys(activeFilter).length > 0 ? activeFilter : undefined;
+  const categoryFilter =
+    categories && categories.length > 0
+      ? { category: { in: [...categories] } }
+      : {};
+  const baseFilter = { ...activeFilter, ...categoryFilter };
+  if (!query) {
+    return Object.keys(baseFilter).length > 0 ? baseFilter : undefined;
+  }
   return {
-    ...activeFilter,
+    ...baseFilter,
     OR: [
       { name: { contains: query, mode: 'insensitive' } },
       { code: { contains: query, mode: 'insensitive' } },
@@ -298,10 +319,14 @@ function productSearchFilter(
 }
 
 export async function listProducts(
-  opts: { q?: string | null; status?: ProductActiveStatusFilter } = {},
+  opts: {
+    q?: string | null;
+    status?: ProductActiveStatusFilter;
+    categories?: readonly ProductCategory[];
+  } = {},
 ): Promise<ProductSummary[]> {
   const query = normalizeSearchQuery(opts.q);
-  const where = productSearchFilter(query, opts.status);
+  const where = productSearchFilter(query, opts.status, opts.categories);
   const rows = await db.product.findMany({
     where,
     select: SUMMARY_SELECT,
@@ -322,10 +347,11 @@ export async function listProducts(
 export async function listProductsPage(opts: {
   q?: string | null;
   status?: ProductActiveStatusFilter;
+  categories?: readonly ProductCategory[];
   page: number;
   pageSize: number;
 }): Promise<PaginatedResult<ProductListRow>> {
-  const where = productSearchFilter(opts.q, opts.status);
+  const where = productSearchFilter(opts.q, opts.status, opts.categories);
   const total = await db.product.count({ where });
   const window = paginationWindow(total, opts.page, opts.pageSize);
   const rows = await db.product.findMany({
@@ -362,6 +388,7 @@ export async function listActiveProductOrderOptions(): Promise<
     where: { isActive: true },
     select: {
       id: true,
+      code: true,
       name: true,
       category: true,
       specification: true,
@@ -624,7 +651,7 @@ export type UpdateProductData = {
   name: string;
   specification: string | null;
   paperType: string | null;
-  baseUnitPrice: string | null;
+  baseUnitPrice?: string | null;
   minOrderQty?: number;
 };
 
@@ -650,7 +677,9 @@ export async function updateProduct(
         name: data.name,
         specification: data.specification,
         paperType: data.paperType,
-        baseUnitPrice: data.baseUnitPrice,
+        ...(data.baseUnitPrice === undefined
+          ? {}
+          : { baseUnitPrice: data.baseUnitPrice }),
         minOrderQty: data.minOrderQty ?? null,
       },
       select: SUMMARY_SELECT,

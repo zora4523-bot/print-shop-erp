@@ -45,8 +45,26 @@ import {
   updateProduct,
   setProductActive,
   ProductInvariantError,
+  QUOTE_PRODUCT_CATEGORIES,
   orderCategoryNodesAsTree,
 } from '../product';
+
+describe('QUOTE_PRODUCT_CATEGORIES', () => {
+  it('覆盖三条计价路线的 SKU，排除已归并与自带纸料分类', () => {
+    expect(QUOTE_PRODUCT_CATEGORIES).toEqual([
+      ProductCategory.BLANK_STOCK,
+      ProductCategory.GENERIC_STOCK,
+      ProductCategory.CUSTOM_FLAT_FOIL,
+      ProductCategory.COLOR_PRINT,
+    ]);
+    expect(QUOTE_PRODUCT_CATEGORIES).not.toContain(
+      ProductCategory.STOCK_FOIL_ADD,
+    );
+    expect(QUOTE_PRODUCT_CATEGORIES).not.toContain(
+      ProductCategory.BYO_MATERIAL,
+    );
+  });
+});
 
 beforeEach(() => {
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
@@ -222,6 +240,33 @@ describe('listProductsPage', () => {
       currentExternalPriceRuleCount: 4,
       currentInternalPriceTierCount: 1,
     });
+  });
+
+  it('can scope the rule-center list to stock product categories', async () => {
+    dbMock.product.count.mockResolvedValue(0);
+    dbMock.product.findMany.mockResolvedValue([]);
+
+    await listProductsPage({
+      categories: [
+        ProductCategory.BLANK_STOCK,
+        ProductCategory.GENERIC_STOCK,
+      ],
+      page: 1,
+      pageSize: 20,
+    });
+
+    const where = {
+      category: {
+        in: [
+          ProductCategory.BLANK_STOCK,
+          ProductCategory.GENERIC_STOCK,
+        ],
+      },
+    };
+    expect(dbMock.product.count).toHaveBeenCalledWith({ where });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
   });
 });
 
@@ -566,6 +611,25 @@ describe('updateProduct', () => {
     expect(data.categoryNodeId).toBe('cat_color_print');
     expect(data.name).toBe('改名');
     expect(data.baseUnitPrice).toBe('1.5000');
+  });
+
+  it('omits baseUnitPrice so a concurrent internal-price update is preserved', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
+
+    await updateProduct('p1', {
+      code: null,
+      categoryNodeId: 'cat_custom_flat_foil',
+      name: '改名',
+      specification: null,
+      paperType: null,
+    });
+
+    const data = dbMock.product.update.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect('baseUnitPrice' in data).toBe(false);
   });
 
   it('allows saving a product that already uses a disabled category node', async () => {

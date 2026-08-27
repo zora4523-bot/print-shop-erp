@@ -16,6 +16,7 @@ import {
   createCraftSchema,
   updateCraftSchema,
   createProductSchema,
+  createProductCategoryNodeSchema,
   createPartySchema,
   updatePartySchema,
   createMaterialSchema,
@@ -36,6 +37,7 @@ import {
   confirmOutsourceAmountSchema,
   recordOutsourcePaymentSchema,
   batchScheduleOrdersSchema,
+  scheduleOrderSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
   startCsPeriodSchema,
@@ -43,7 +45,88 @@ import {
   recordBillPaymentSchema,
   createOrderCostEntrySchema,
   createOrderChangeRequestSchema,
+  createProductionTaskDisputeSchema,
+  reviewProductionTaskDisputeSchema,
 } from '../schemas';
+
+describe('production task dispute schemas', () => {
+  it('trims and accepts auditable create/review payloads', () => {
+    const created = createProductionTaskDisputeSchema.parse({
+      taskId: 'task-1',
+      reason: '  计件数量与实际合格数不一致  ',
+    });
+    expect(created.reason).toBe('计件数量与实际合格数不一致');
+
+    const reviewed = reviewProductionTaskDisputeSchema.parse({
+      disputeId: 'dispute-1',
+      decision: 'RESOLVED',
+      resolution: '  已核对完成  ',
+    });
+    expect(reviewed).toEqual({
+      disputeId: 'dispute-1',
+      decision: 'RESOLVED',
+      resolution: '已核对完成',
+    });
+  });
+
+  it('rejects short reasons, invalid decisions and empty replies', () => {
+    expect(
+      createProductionTaskDisputeSchema.safeParse({
+        taskId: 'task-1',
+        reason: '太短',
+      }).success,
+    ).toBe(false);
+    expect(
+      reviewProductionTaskDisputeSchema.safeParse({
+        disputeId: 'dispute-1',
+        decision: 'PENDING',
+        resolution: '',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('production scheduling schema', () => {
+  it('accepts task identity and a positive split quantity', () => {
+    const parsed = scheduleOrderSchema.safeParse({
+      orderId: 'order-1',
+      assignments: [
+        {
+          taskId: 'task-1',
+          orderItemId: 'item-1',
+          craftId: 'craft-1',
+          workerId: 'worker-1',
+          plannedQty: '600',
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.assignments[0]?.plannedQty).toBe(600);
+    }
+  });
+
+  it('rejects zero or fractional split quantities', () => {
+    const payload = {
+      orderId: 'order-1',
+      assignments: [
+        {
+          orderItemId: 'item-1',
+          craftId: 'craft-1',
+          workerId: 'worker-1',
+          plannedQty: 0,
+        },
+      ],
+    };
+    expect(scheduleOrderSchema.safeParse(payload).success).toBe(false);
+    expect(
+      scheduleOrderSchema.safeParse({
+        ...payload,
+        assignments: [{ ...payload.assignments[0], plannedQty: 1.5 }],
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('order change request schemas', () => {
   it('rejects duplicate UPDATE entries for one item to avoid approval-order ambiguity', () => {
@@ -777,7 +860,26 @@ describe('createCraftSchema', () => {
         defaultMachineType: 'NOT_A_MACHINE',
       });
       expect(r.success).toBe(false);
+      if (!r.success) {
+        const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
+        expect(visibleErrors).toContain('请选择有效的接单机型');
+        expect(visibleErrors).not.toContain('NOT_A_MACHINE');
+        expect(visibleErrors).not.toContain('HAND_PRESS');
+      }
     });
+  });
+
+  it('不向管理端暴露无效的内部岗位值', () => {
+    const r = createCraftSchema.safeParse({
+      ...validCraft,
+      defaultWorkerType: 'INTERNAL_WORKER_TYPE',
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
+      expect(visibleErrors).toContain('请选择有效的接单岗位');
+      expect(visibleErrors).not.toContain('INTERNAL_WORKER_TYPE');
+    }
   });
 
   describe('sortOrder', () => {
@@ -835,15 +937,10 @@ describe('updateCraftSchema', () => {
     if (r.success) expect('isActive' in r.data).toBe(false);
   });
 
-  it('reuses the code / name regex', () => {
+  it('忽略客户端提交的内部编号', () => {
     const r = updateCraftSchema.safeParse({ ...validUpdate, code: 'bad-code' });
-    expect(r.success).toBe(false);
-  });
-
-  it('still requires the stable code when editing', () => {
-    expect(updateCraftSchema.safeParse({ ...validUpdate, code: '' }).success).toBe(
-      false,
-    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data).not.toHaveProperty('code');
   });
 });
 
@@ -1132,6 +1229,34 @@ describe('auto-generated master-data code schemas', () => {
   it('keeps material code required on edit', () => {
     expect(updateMaterialSchema.safeParse(material).success).toBe(false);
   });
+
+  it('字典枚举异常时只返回业务文案', () => {
+    const categoryResult = createProductCategoryNodeSchema.safeParse({
+      parentId: '',
+      name: '测试分类',
+      legacyCategory: 'INTERNAL_PRODUCT_CATEGORY',
+      sortOrder: '10',
+    });
+    const materialResult = createMaterialSchema.safeParse({
+      ...material,
+      category: 'INTERNAL_MATERIAL_CATEGORY',
+    });
+
+    expect(categoryResult.success).toBe(false);
+    expect(materialResult.success).toBe(false);
+    if (!categoryResult.success && !materialResult.success) {
+      const visibleErrors = [
+        ...categoryResult.error.issues,
+        ...materialResult.error.issues,
+      ]
+        .map((issue) => issue.message)
+        .join('\n');
+      expect(visibleErrors).toContain('请选择有效的产品分类');
+      expect(visibleErrors).toContain('请选择有效的物料分类');
+      expect(visibleErrors).not.toContain('INTERNAL_PRODUCT_CATEGORY');
+      expect(visibleErrors).not.toContain('INTERNAL_MATERIAL_CATEGORY');
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1315,7 +1440,7 @@ describe('createOrderSchema foil colors', () => {
     customerRef: null,
     receiverName: null,
     receiverPhone: null,
-    receiverAddress: null,
+    receiverAddress: '佛山市南海区测试路 1 号',
     expressCode: null,
     packageRequirement: null,
     remark: null,
@@ -1325,12 +1450,19 @@ describe('createOrderSchema foil colors', () => {
     items: [
       {
         name: '多色烫金款',
-        productId: null,
+        productId: 'product-1',
+        pricingRoute: 'STOCK_BLANK',
+        productStructure: 'STANDARD_ENVELOPE',
+        manualQuoteReason: null,
         specification: '大号',
-        paperType: '艳红珠光纸',
+        paperType: '160g珠光艳闪',
+        paperWeightGsm: 160,
         quantity: 1000,
         crafts: ['craft-1'],
         foilColors: ['哑金', '红金', ' 古铜金 '],
+        foilTechnique: 'FLAT',
+        hasLocalFoil: true,
+        printColors: [],
         isDoubleSided: false,
         isDoubleColor: false,
         unitPrice: null,
@@ -1340,7 +1472,7 @@ describe('createOrderSchema foil colors', () => {
     ],
   };
 
-  it('accepts and trims up to five preset or custom colors', () => {
+  it('accepts and trims up to three foil colors on one side', () => {
     const result = createOrderSchema.safeParse(order);
     expect(result.success).toBe(true);
     if (result.success) {
@@ -1352,12 +1484,60 @@ describe('createOrderSchema foil colors', () => {
     }
   });
 
+  it('保留选中的客户主数据编号，并将空选择规范为 null', () => {
+    const selected = createOrderSchema.parse({
+      ...order,
+      customerPartyId: '  customer-1  ',
+    });
+    const temporary = createOrderSchema.parse({
+      ...order,
+      customerPartyId: '',
+    });
+
+    expect(selected.customerPartyId).toBe('customer-1');
+    expect(temporary.customerPartyId).toBeNull();
+  });
+
   it('defaults an omitted color array to empty for compatibility', () => {
-    const item = { ...order.items[0] };
+    const item = {
+      ...order.items[0],
+      pricingRoute: 'COLOR_PRINT' as const,
+      actualWidthMm: 90,
+      actualHeightMm: 165,
+      paperType: '200g铜版纸',
+      paperWeightGsm: 200,
+      foilTechnique: 'NONE' as const,
+      hasLocalFoil: false,
+      printColors: ['C', 'M', 'Y', 'K'],
+    };
     delete (item as Partial<typeof item>).foilColors;
     const result = createOrderSchema.safeParse({ ...order, items: [item] });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.items[0]?.foilColors).toEqual([]);
+  });
+
+  it.each([
+    ['缺失', undefined],
+    ['null', null],
+    ['空字符串', ''],
+    ['纯空格', '   '],
+  ])('拒绝%s的主收货地址', (_label, receiverAddress) => {
+    const result = createOrderSchema.safeParse({
+      ...order,
+      receiverAddress,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['receiverAddress'],
+            message: '请填写收货地址',
+          }),
+        ]),
+      );
+    }
   });
 
   it('accepts a multi-address quantity split and keeps the primary remainder', () => {
@@ -1451,7 +1631,7 @@ describe('createOrderSchema foil colors', () => {
     if (checked.success) expect(checked.data.isSfCollect).toBe(true);
 
     const omitted = updateEditableOrderSchema.parse({ remark: '保持其他字段' });
-    expect('isSfCollect' in omitted).toBe(false);
+    expect('receiverAddress' in omitted).toBe(false);
     expect(setOrderSfCollectSchema.parse({ isSfCollect: 'false' })).toEqual({
       isSfCollect: false,
       shipments: [],
@@ -1460,6 +1640,30 @@ describe('createOrderSchema foil colors', () => {
       setOrderSfCollectSchema.safeParse({}).success,
       '独立切换必须携带明确目标值',
     ).toBe(false);
+  });
+
+  it.each([null, '', '   '])(
+    '普通编辑只要携带收货地址，就拒绝空值 %#',
+    (receiverAddress) => {
+      const result = updateEditableOrderSchema.safeParse({ receiverAddress });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: ['receiverAddress'] }),
+          ]),
+        );
+      }
+    },
+  );
+
+  it('普通编辑修剪地址，且不再解析专用的 isSfCollect 字段', () => {
+    const parsed = updateEditableOrderSchema.parse({
+      receiverAddress: '  佛山市南海区测试路 1 号  ',
+      isSfCollect: 'true',
+    });
+    expect(parsed.receiverAddress).toBe('佛山市南海区测试路 1 号');
+    expect(parsed).not.toHaveProperty('isSfCollect');
   });
 
   it('校验已发货顺丰取消时的逐票快递费更正', () => {
@@ -1516,7 +1720,7 @@ describe('createOrderSchema foil colors', () => {
     }
   });
 
-  it('rejects duplicate colors, more than five colors, and no-color mixtures', () => {
+  it('rejects duplicate colors, more than three colors per side, and no-color mixtures', () => {
     for (const foilColors of [
       ['哑金', '哑金'],
       ['1', '2', '3', '4', '5', '6'],
@@ -1674,7 +1878,7 @@ describe('external-sales shipment charge schemas', () => {
       customerRef: null,
       receiverName: null,
       receiverPhone: null,
-      receiverAddress: null,
+      receiverAddress: '佛山市南海区测试路 1 号',
       expressCode: null,
       packageRequirement: null,
       remark: null,
@@ -1684,12 +1888,18 @@ describe('external-sales shipment charge schemas', () => {
       items: [
         {
           name: '测试款',
-          productId: null,
+          productId: 'product-1',
+          pricingRoute: 'COLOR_PRINT',
+          productStructure: 'STANDARD_ENVELOPE',
+          manualQuoteReason: null,
           specification: null,
-          paperType: null,
+          paperType: '艳红珠光纸',
           quantity: 500,
           crafts: ['craft-1'],
           foilColors: [],
+          foilTechnique: 'NONE',
+          hasLocalFoil: false,
+          printColors: ['C', 'M', 'Y', 'K'],
           isDoubleSided: false,
           isDoubleColor: false,
           unitPrice: '0.1000',

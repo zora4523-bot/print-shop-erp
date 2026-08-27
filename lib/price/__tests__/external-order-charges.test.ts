@@ -127,29 +127,42 @@ describe('calculateExternalOrderCharges · 中通计费重量', () => {
   });
 
   it.each([
-    ['广东', null],
-    ['广东', '0'],
-    ['广东', '0.5'],
-    ['广东', '1.001'],
-    ['广东', '1.5'],
-    ['新疆', '1.001'],
-    ['新疆', '1.25'],
-    ['新疆', '1.501'],
+    ['广东', '0.5', '2.80'],
+    ['广东', '1.001', '4.30'],
+    ['广东', '1.5', '4.30'],
+    ['新疆', '1.001', '17.30'],
+    ['新疆', '1.25', '17.30'],
+    ['新疆', '1.501', '22.60'],
   ])(
-    '不替承运商猜测原始重量的进位：%s %s',
-    (province, billableWeightKg) => {
+    '按报价续重单位向上进位：%s %skg => ¥%s',
+    (province, billableWeightKg, expected) => {
       const result = calculateExternalOrderCharges({
         isSfCollect: false,
         shipments: [oneShipment({ province, billableWeightKg })],
       });
 
-      expect(result.complete).toBe(false);
-      expect(result.suggestedShippingTotal).toBeNull();
-      expect(result.suggestedTotal).toBeNull();
-      expect(result.shipments[0]?.shipping.amount).toBeNull();
-      expect(result.errors.join('；')).toMatch(/1kg|0\.5kg|续重档位/);
+      expect(result.complete).toBe(true);
+      expect(result.suggestedShippingTotal).toBe(expected);
+      expect(result.shipments[0]?.shipping).toMatchObject({
+        amount: expected,
+        complete: true,
+        basis: expect.objectContaining({ billableWeightKg }),
+      });
     },
   );
+
+  it.each([null, '0'])('缺少有效重量时失败关闭：%s', (billableWeightKg) => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [oneShipment({ billableWeightKg })],
+    });
+
+    expect(result.complete).toBe(false);
+    expect(result.suggestedShippingTotal).toBeNull();
+    expect(result.suggestedTotal).toBeNull();
+    expect(result.shipments[0]?.shipping.amount).toBeNull();
+    expect(result.errors.join('；')).toContain('缺少有效的系统计费重量');
+  });
 
   it('fails closed for an unknown province while retaining the independent carton suggestion', () => {
     const result = calculateExternalOrderCharges({
@@ -186,7 +199,7 @@ describe('calculateExternalOrderCharges · 中通计费重量', () => {
   });
 });
 
-describe('calculateExternalOrderCharges · 纸箱建议', () => {
+describe('calculateExternalOrderCharges · 整单纸箱费', () => {
   it.each([
     [1, '1.00'],
     [500, '1.00'],
@@ -198,7 +211,13 @@ describe('calculateExternalOrderCharges · 纸箱建议', () => {
     [3_000, '7.00'],
     [3_001, '8.00'],
     [5_000, '8.00'],
-  ])('单票 %i 个建议纸箱费 %s', (itemQuantity, expected) => {
+    [5_001, '9.00'],
+    [6_000, '11.00'],
+    [8_000, '15.00'],
+    [10_000, '16.00'],
+    [12_000, '21.00'],
+    [20_000, '32.00'],
+  ])('整单 %i 个纸箱费 %s', (itemQuantity, expected) => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
       shipments: [oneShipment({ itemQuantity })],
@@ -207,11 +226,12 @@ describe('calculateExternalOrderCharges · 纸箱建议', () => {
     expect(result.shipments[0]?.packaging).toMatchObject({
       amount: expected,
       complete: true,
-      advisory: true,
+      advisory: false,
       waived: false,
       basis: expect.objectContaining({
-        itemQuantity,
-        granularity: 'PER_SHIPMENT',
+        orderTotalQuantity: itemQuantity,
+        granularity: 'PER_ORDER',
+        allocatedToPrimaryShipment: true,
       }),
       source: expect.objectContaining({
         fileName: CARTON_PRICE_SOURCE.fileName,
@@ -221,7 +241,7 @@ describe('calculateExternalOrderCharges · 纸箱建议', () => {
   });
 
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
-    '拒绝非法单票数量：%s',
+    '拒绝非法整单数量：%s',
     (itemQuantity) => {
       const result = calculateExternalOrderCharges({
         isSfCollect: false,
@@ -231,34 +251,34 @@ describe('calculateExternalOrderCharges · 纸箱建议', () => {
       expect(result.complete).toBe(false);
       expect(result.suggestedPackagingTotal).toBeNull();
       expect(result.shipments[0]?.packaging.errors).toContain(
-        '单票分配数量必须是大于 0 的安全整数',
+        '整单总数量必须是大于 0 的安全整数',
       );
     },
   );
 
-  it('5000 以上不外推也不拆单，快递建议仍可独立展示', () => {
+  it('整单超过 2000 个时物流待定，纸箱费仍自动计算', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
-      shipments: [oneShipment({ itemQuantity: 5_001 })],
+      shipments: [oneShipment({ itemQuantity: 2_001 })],
     });
 
     expect(result).toMatchObject({
       complete: false,
-      suggestedShippingTotal: '2.80',
-      suggestedPackagingTotal: null,
+      suggestedShippingTotal: null,
+      suggestedPackagingTotal: '7.00',
       suggestedTotal: null,
     });
-    expect(result.shipments[0]?.packaging).toMatchObject({
+    expect(result.shipments[0]?.shipping).toMatchObject({
       amount: null,
       complete: false,
-      advisory: true,
-      source: expect.objectContaining({ sourceRange: 'A1:B6' }),
+      name: '物流运费待定',
+      errors: ['整单总数量超过 2000 个，改走物流，运费待定'],
     });
   });
 });
 
 describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
-  it('每个 shipment 分别收首重并按该票分配总数匹配纸箱档', () => {
+  it('每个地址分别收首重，纸箱按整单数量仅归集到主地址', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
       shipments: [
@@ -280,8 +300,8 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
     expect(result).toMatchObject({
       complete: true,
       suggestedShippingTotal: '20.10',
-      suggestedPackagingTotal: '4.00',
-      suggestedTotal: '24.10',
+      suggestedPackagingTotal: '5.00',
+      suggestedTotal: '25.10',
     });
     expect(result.components.map((component) => [
       component.shipmentKey,
@@ -289,13 +309,21 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
       component.amount,
     ])).toEqual([
       ['primary', 'SHIPPING', '2.80'],
-      ['primary', 'PACKAGING', '1.00'],
+      ['primary', 'PACKAGING', '5.00'],
       ['extra', 'SHIPPING', '17.30'],
-      ['extra', 'PACKAGING', '3.00'],
+      ['extra', 'PACKAGING', '0.00'],
     ]);
+    expect(result.shipments[1]?.packaging).toMatchObject({
+      name: '纸箱费已计入主地址',
+      ruleCode: null,
+      basis: expect.objectContaining({
+        granularity: 'PER_ORDER',
+        allocatedToPrimaryShipment: false,
+      }),
+    });
   });
 
-  it('两票各收一次首重，不把重量或数量先合并', () => {
+  it('两票各收一次首重，但纸箱数量先合并且只收一次', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
       shipments: [
@@ -305,11 +333,11 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
     });
 
     expect(result.suggestedShippingTotal).toBe('5.60');
-    expect(result.suggestedPackagingTotal).toBe('2.00');
-    expect(result.suggestedTotal).toBe('7.60');
+    expect(result.suggestedPackagingTotal).toBe('1.00');
+    expect(result.suggestedTotal).toBe('6.60');
   });
 
-  it('顺丰到付不要求中通地区或重量，但仍逐票给出纸箱建议', () => {
+  it('顺丰到付不要求中通地区或重量，但仍按整单收取纸箱费', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: true,
       shipments: [
@@ -331,8 +359,8 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
     expect(result).toMatchObject({
       complete: true,
       suggestedShippingTotal: '0.00',
-      suggestedPackagingTotal: '4.00',
-      suggestedTotal: '4.00',
+      suggestedPackagingTotal: '5.00',
+      suggestedTotal: '5.00',
       errors: [],
     });
     expect(result.shipments.map((shipment) => shipment.shipping)).toEqual([
@@ -359,14 +387,14 @@ describe('calculateExternalOrderCharges · 多地址与顺丰到付', () => {
         oneShipment({
           shipmentKey: 'invalid',
           province: '广东',
-          billableWeightKg: '1.2',
+          billableWeightKg: null,
         }),
       ],
     });
 
     expect(result.complete).toBe(false);
     expect(result.suggestedShippingTotal).toBeNull();
-    expect(result.suggestedPackagingTotal).toBe('2.00');
+    expect(result.suggestedPackagingTotal).toBe('3.00');
     expect(result.suggestedTotal).toBeNull();
     expect(result.errors).toEqual([
       expect.stringContaining('发货记录 invalid·快递费'),
@@ -441,7 +469,7 @@ describe('calculateExternalOrderCharges · 规则注入与快照', () => {
         minQty: 1,
         maxQty: 1_000,
         amount: '6',
-        advisory: true,
+        advisory: false,
         source: { ...customSource, sourceRange: 'B3:F3' },
       },
     ];
@@ -507,7 +535,7 @@ describe('calculateExternalOrderCharges · 规则注入与快照', () => {
         minQty: 1,
         maxQty: 500,
         amount: '99',
-        advisory: true,
+        advisory: false,
         source: {
           ...CARTON_PRICE_SOURCE,
           sourceRange: 'Z1:Z1',
@@ -524,7 +552,7 @@ describe('calculateExternalOrderCharges · 规则注入与快照', () => {
     expect(result.suggestedPackagingTotal).toBeNull();
     expect(result.suggestedTotal).toBeNull();
     expect(result.shipments[0]?.packaging.errors).toContain(
-      '同时命中多条纸箱数量规则，请管理员修正价目簿',
+      '纸箱数量档必须从 1 开始连续覆盖且金额有效',
     );
   });
 });

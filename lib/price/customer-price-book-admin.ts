@@ -21,6 +21,12 @@ import {
   acquirePriceRuleSnapshotReadLock,
   acquirePriceRuleSnapshotWriteLock,
 } from './rule-snapshot-lock';
+import {
+  buildCustomerRuleCondition,
+  customerRuleConditionEditorInput,
+  parseCustomerRuleCondition,
+  type CustomerRuleConditionEditorInput,
+} from './customer-rule-condition';
 
 const EXTERNAL_SETTLEMENT = OrderSettlementType.EXTERNAL_SALES;
 
@@ -158,8 +164,8 @@ export type CustomerPriceRuleDraftEditorMode =
   | 'PACKAGING';
 
 /**
- * Safe DTO for the client-side rule editor. Imported provenance and matching
- * internals deliberately never cross the React Server Component boundary.
+ * Safe DTO for the client-side rule editor. Imported provenance and raw JSON
+ * never cross the boundary; matching is projected into a closed typed shape.
  */
 export type CustomerPriceRuleDraftEditorDto = {
   context: {
@@ -167,6 +173,7 @@ export type CustomerPriceRuleDraftEditorDto = {
     purpose: CustomerPriceBookPurpose;
     categories: Array<{ id: string; name: string }>;
     products: Array<{ id: string; name: string }>;
+    crafts: Array<{ value: string; label: string }>;
   };
   rule: {
     id: string;
@@ -177,6 +184,8 @@ export type CustomerPriceRuleDraftEditorDto = {
     kind: CustomerPriceRuleKind;
     calculationType: CustomerPriceCalculationType | null;
     unitsPerSheet: number | null;
+    match: CustomerRuleConditionEditorInput;
+    matchValidationErrors: string[];
     amount: string | null;
     includedUnits: string | null;
     incrementUnits: string | null;
@@ -211,6 +220,7 @@ export type UpdateCustomerPriceRuleDraftInput = {
   minQty?: number | null;
   maxQty?: number | null;
   blocksAutomaticQuote?: boolean;
+  match?: CustomerRuleConditionEditorInput;
   includedUnits?: string | null;
   incrementUnits?: string | null;
   incrementAmount?: string | null;
@@ -435,7 +445,7 @@ const RULE_VALIDATION_SELECT = {
     select: { code: true, name: true, isActive: true },
   },
   product: {
-    select: { code: true, isActive: true },
+    select: { code: true, category: true, isActive: true },
   },
 } as const;
 
@@ -579,8 +589,8 @@ const IMPACT_FIELD_LABELS = {
   minQty: '最小数量',
   maxQty: '最大数量',
   triggerCondition: '适用条件',
-  exclusiveGroup: '互斥组',
-  priority: '优先级',
+  exclusiveGroup: '适用范围',
+  priority: '应用顺序',
   note: '说明',
   blocksAutomaticQuote: '自动报价方式',
   isActive: '启用状态',
@@ -1071,6 +1081,14 @@ export async function getCustomerPriceBookDraftPublishPreview(
   });
 }
 
+function businessConditionValidationErrors(errors: readonly string[]): string[] {
+  return [
+    ...new Set(
+      errors.map((error) => error.trim()).filter(Boolean),
+    ),
+  ];
+}
+
 function shippingScopeLabel(condition: unknown): string {
   const record = isRecord(condition) ? condition : null;
   const carrier = record?.carrierCode === 'ZTO' ? '中通' : '指定承运商';
@@ -1136,7 +1154,15 @@ export async function getCustomerPriceBookDraftRuleEditor(
 
     const isProcessing =
       rule.priceBook.purpose === CustomerPriceBookPurpose.PROCESSING;
-    const [categories, products] = isProcessing
+    const editableCondition = customerRuleConditionEditorInput(
+      rule.triggerCondition,
+    );
+    const referencedCraftCodes = [
+      ...editableCondition.value.craftCodes,
+      ...editableCondition.value.noneOfCraftCodes,
+      ...editableCondition.value.anyCraftCodeOutside,
+    ];
+    const [categories, products, crafts] = isProcessing
       ? await Promise.all([
           tx.customerChargeCategory.findMany({
             where: {
@@ -1163,8 +1189,20 @@ export async function getCustomerPriceBookDraftRuleEditor(
             select: { id: true, name: true },
             orderBy: [{ code: 'asc' }, { name: 'asc' }],
           }),
+          tx.craft.findMany({
+            where: {
+              OR: [
+                { isActive: true },
+                ...(referencedCraftCodes.length > 0
+                  ? [{ code: { in: referencedCraftCodes } }]
+                  : []),
+              ],
+            },
+            select: { code: true, name: true },
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+          }),
         ])
-      : [[], []];
+      : [[], [], []];
 
     const categoryCode = String(rule.category.code);
     if (
@@ -1185,6 +1223,10 @@ export async function getCustomerPriceBookDraftRuleEditor(
         purpose: rule.priceBook.purpose,
         categories,
         products,
+        crafts: crafts.map((craft) => ({
+          value: craft.code,
+          label: craft.name,
+        })),
       },
       rule: {
         id: rule.id,
@@ -1197,6 +1239,10 @@ export async function getCustomerPriceBookDraftRuleEditor(
         unitsPerSheet: positiveIntegerConditionValue(
           rule.triggerCondition,
           'unitsPerSheet',
+        ),
+        match: editableCondition.value,
+        matchValidationErrors: businessConditionValidationErrors(
+          editableCondition.errors,
         ),
         amount: rule.amount?.toString() ?? null,
         includedUnits: rule.includedUnits?.toString() ?? null,
@@ -1491,7 +1537,8 @@ export async function updateCustomerPriceRuleDraft(
           input.unitsPerSheet === undefined ||
           input.minQty === undefined ||
           input.maxQty === undefined ||
-          input.blocksAutomaticQuote === undefined)
+          input.blocksAutomaticQuote === undefined ||
+          input.match === undefined)
       ) {
         throw new CustomerPriceBookAdminError(
           '加工费编辑字段不完整，请刷新后重试',
@@ -1516,8 +1563,18 @@ export async function updateCustomerPriceRuleDraft(
           '打包耗材编辑字段不完整，请刷新后重试',
         );
       }
+      if (isProcessing) {
+        const existingTarget = customerRuleConditionEditorInput(
+          existing.triggerCondition,
+        ).value.target;
+        if (input.match!.target !== existingTarget) {
+          throw new CustomerPriceBookAdminError(
+            '计价对象不能直接变更，请刷新后重试',
+          );
+        }
+      }
 
-      let targetProductCode: string | null = null;
+      let targetProductCodes: string[] = [];
       if (isProcessing) {
         const category = await tx.customerChargeCategory.findUnique({
           where: { id: input.categoryId! },
@@ -1536,20 +1593,20 @@ export async function updateCustomerPriceRuleDraft(
             select: { id: true, code: true },
           });
           if (!product) throw new CustomerPriceBookAdminError('报价产品不存在');
-          targetProductCode = String(product.code);
+          targetProductCodes = [String(product.code)];
+        } else if (existing.productId === null) {
+          // 历史附加规则可能通过多个 productCodes 限定范围，
+          // 这组稳定编号不向管理端暴露。只改金额/名称时必须原样
+          // 保留；只有用户明确从单产品规则清空产品时才移除。
+          targetProductCodes =
+            parseCustomerRuleCondition(existing.triggerCondition).condition
+              ?.productCodes ?? [];
         }
       }
 
       let triggerCondition = existing.triggerCondition;
       if (isProcessing) {
-        const synchronizedCondition = isRecord(triggerCondition)
-          ? { ...triggerCondition }
-          : {};
-        if (targetProductCode) {
-          synchronizedCondition.productCodes = [targetProductCode];
-        } else {
-          delete synchronizedCondition.productCodes;
-        }
+        let unitsPerSheet: number | null = null;
         if (input.calculationType === 'PER_SHEET') {
           if (
             !Number.isSafeInteger(input.unitsPerSheet) ||
@@ -1559,11 +1616,12 @@ export async function updateCustomerPriceRuleDraft(
               '按张计价必须填写正整数的每张含几个',
             );
           }
-          synchronizedCondition.unitsPerSheet = input.unitsPerSheet;
-        } else {
-          delete synchronizedCondition.unitsPerSheet;
+          unitsPerSheet = input.unitsPerSheet!;
         }
-        triggerCondition = synchronizedCondition;
+        triggerCondition = buildCustomerRuleCondition(input.match!, {
+          productCodes: targetProductCodes,
+          unitsPerSheet,
+        });
       }
 
       const editableData = isProcessing

@@ -17,6 +17,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 import {
   quoteExternalOrderChargesPreview,
   resolveExternalOrderChargesForFinalization,
+  resolveExternalOrderChargesForProvisionalCreation,
 } from '../order-charge-service';
 
 const now = new Date('2026-08-08T00:00:00.000Z');
@@ -68,19 +69,19 @@ function activeBook({
       },
       {
         id: `packing-rule-${version}`,
-        code: 'CARTON_Q501_1000',
+        code: 'CARTON_Q1_1000',
         amount: packingFee,
         includedUnits: null,
         incrementUnits: null,
         incrementAmount: null,
-        minQty: 501,
+        minQty: 1,
         maxQty: 1_000,
         triggerCondition: null,
         sourceSheet: 'Sheet1',
         sourceRange: 'A3:B3',
         sourceName: '纸箱价格表.xlsx',
         sourceSha256: `hash-${version}`,
-        blocksAutomaticQuote: true,
+        blocksAutomaticQuote: false,
         category: { id: 'packing-category', code: 'PACKING_MATERIAL' },
       },
     ],
@@ -129,6 +130,43 @@ describe('quoteExternalOrderChargesPreview', () => {
       suggestedPackagingTotal: '3.00',
       suggestedTotal: '5.80',
     });
+  });
+
+  it('keeps automatic shipping and carton charges confirmed', async () => {
+    const resolved = await resolveExternalOrderChargesForProvisionalCreation(
+      dbMock as never,
+      {
+        isSfCollect: false,
+        shipments: [
+          {
+            ...input.shipments[0]!,
+            shippingFee: null,
+            packingMaterialFee: null,
+            overrideReason: null,
+          },
+        ],
+      },
+      now,
+    );
+
+    expect(resolved.requiresAdminConfirmation).toBe(false);
+    const byCode = new Map(
+      resolved.charges.map((charge) => [charge.categoryCode, charge]),
+    );
+    expect(
+      (
+        byCode.get('SHIPPING_FEE')!.pricingSnapshot.actual as {
+          provisional: boolean;
+        }
+      ).provisional,
+    ).toBe(false);
+    expect(
+      (
+        byCode.get('PACKING_MATERIAL')!.pricingSnapshot.actual as {
+          provisional: boolean;
+        }
+      ).provisional,
+    ).toBe(false);
   });
 
   it('uses an updated active price book on the next request, not bundled defaults', async () => {
@@ -196,6 +234,41 @@ describe('quoteExternalOrderChargesPreview', () => {
     );
   });
 
+  it('forces complete automatic shipping and carton fees', async () => {
+    const resolved = await resolveExternalOrderChargesForFinalization(
+      dbMock as never,
+      {
+        isSfCollect: false,
+        shipments: [
+          {
+            ...input.shipments[0]!,
+            shippingFee: '0.01',
+            packingMaterialFee: '4.25',
+            overrideReason: '浏览器尝试覆盖自动费用',
+          },
+        ],
+      },
+      'logistics-book-1',
+      now,
+      { forceAutomaticAmounts: true },
+    );
+
+    const byCode = new Map(
+      resolved.charges.map((charge) => [charge.categoryCode, charge]),
+    );
+    expect(byCode.get('SHIPPING_FEE')).toMatchObject({
+      suggestedAmount: '2.80',
+      amount: '2.80',
+      overrideReason: null,
+    });
+    expect(byCode.get('PACKING_MATERIAL')).toMatchObject({
+      suggestedAmount: '3.00',
+      amount: '3.00',
+      overrideReason: null,
+    });
+    expect(resolved.totalAmount).toBe('5.80');
+  });
+
   it('fails closed when no active LOGISTICS book exists', async () => {
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([]);
 
@@ -217,6 +290,27 @@ describe('quoteExternalOrderChargesPreview', () => {
     ).rejects.toThrow(
       '同时存在多个生效的外部销售快递/耗材价目簿，请管理员修正有效期',
     );
+  });
+
+  it('价目簿异常时不在业务错误中暴露规则编号', async () => {
+    const malformed = activeBook({
+      version: 1,
+      shippingFee: '2.80',
+      packingFee: '3.00',
+    });
+    malformed.rules[1]!.code = malformed.rules[0]!.code;
+    dbMock.customerPriceBook.findMany.mockResolvedValueOnce([malformed]);
+
+    let visibleMessage = '';
+    try {
+      await quoteExternalOrderChargesPreview(input, now);
+    } catch (error) {
+      visibleMessage = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(visibleMessage).toBe('物流价目簿中存在重复的收费规则');
+    expect(visibleMessage).not.toContain('ZTO_GUANGDONG');
+    expect(visibleMessage).not.toContain('SHIPPING_FEE');
   });
 
   it('fails closed on a zero weight increment instead of undercharging', async () => {
@@ -246,8 +340,8 @@ describe('quoteExternalOrderChargesPreview', () => {
 
     expect(quote.complete).toBe(false);
     expect(quote.shipments[0]?.packaging.amount).toBeNull();
-    expect(quote.errors).toContain(
-      '发货记录 1·打包耗材费：纸箱费建议超过系统可保存上限，请管理员修正价目簿',
+    expect(quote.errors.join('；')).toContain(
+      '纸箱数量档必须从 1 开始连续覆盖且金额有效',
     );
   });
 });

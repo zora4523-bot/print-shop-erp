@@ -372,14 +372,14 @@ describe('calculateQuote', () => {
   });
 
   it.each([
-    [{ futureField: true }, 'PER_ORDER', '未知字段'],
-    [{ productIds: 'product-1' }, 'PER_ORDER', 'productIds必须'],
-    [{ craftMode: 'SOME' }, 'PER_ORDER', 'craftMode 只能'],
-    [{ craftMode: 'ALL' }, 'PER_ORDER', 'craftMode 必须与 craftIds'],
-    [{ minQty: 2_000, maxQty: 1_000 }, 'PER_ORDER', 'minQty 不能大于 maxQty'],
-    [{ perFoilColor: 2 }, 'PER_ORDER', 'perFoilColor必须是布尔值'],
-    [null, 'PER_SHEET', '按张计价必须提供'],
-    [{ unitsPerSheet: 0 }, 'PER_SHEET', 'unitsPerSheet必须是正整数'],
+    [{ futureField: true }, 'PER_ORDER', '页面不支持的设置'],
+    [{ productIds: 'product-1' }, 'PER_ORDER', '限定产品'],
+    [{ craftMode: 'SOME' }, 'PER_ORDER', '多工艺匹配方式无效'],
+    [{ craftMode: 'ALL' }, 'PER_ORDER', '请先选择至少一项工艺'],
+    [{ minQty: 2_000, maxQty: 1_000 }, 'PER_ORDER', '最小数量不能大于最大数量'],
+    [{ perFoilColor: 2 }, 'PER_ORDER', '按烫金颜色数量计费'],
+    [null, 'PER_SHEET', '按张计价必须填写'],
+    [{ unitsPerSheet: 0 }, 'PER_SHEET', '每张可生产数量'],
   ] as const)(
     'marks an unknown or invalid trigger condition incomplete: %j',
     (triggerCondition, adjustmentType, message) => {

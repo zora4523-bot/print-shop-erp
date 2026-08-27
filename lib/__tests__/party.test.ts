@@ -52,6 +52,7 @@ import {
   formatPartyAddress,
   listParties,
   listPartiesPage,
+  listCustomerPartyOptions,
   listSupplierPartyOptions,
   PartyInvariantError,
   setPartyActive,
@@ -224,6 +225,31 @@ describe('listSupplierPartyOptions', () => {
       name: '纸张供应商',
       contactName: '王小姐',
       contactPhone: '13800000000',
+    });
+  });
+});
+
+describe('listCustomerPartyOptions', () => {
+  it('only asks for active CUSTOMER/BOTH rows and maps the default delivery facts', async () => {
+    dbMock.party.findMany.mockResolvedValue([makeParty()]);
+
+    const options = await listCustomerPartyOptions();
+
+    expect(dbMock.party.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          isActive: true,
+          OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
+        },
+      }),
+    );
+    expect(options[0]).toMatchObject({
+      code: 'CUST_001',
+      name: '苹果福',
+      shortName: '苹果',
+      receiverName: '王小姐',
+      receiverPhone: '13800000000',
+      receiverAddress: '广东广州番禺市桥街道 1 号',
     });
   });
 });

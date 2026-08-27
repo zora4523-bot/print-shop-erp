@@ -47,6 +47,12 @@ export type MaterialSummary = Pick<
   | 'updatedAt'
 >;
 
+/** 新建工单纸张选择器的稳定、最小返回结构。 */
+export type PaperOrderOption = Pick<
+  Material,
+  'id' | 'code' | 'name' | 'specification' | 'unit'
+>;
+
 export type MaterialTransactionSummary = Pick<
   MaterialTransaction,
   | 'id'
@@ -105,10 +111,22 @@ function normalizeSearchQuery(q?: string | null): string | null {
   return trimmed ? trimmed.slice(0, 80) : null;
 }
 
-function materialSearchFilter(q?: string | null) {
+function materialSearchFilter(
+  q?: string | null,
+  category?: MaterialCategory,
+  excludeCategory?: MaterialCategory,
+): Prisma.MaterialWhereInput | undefined {
   const query = normalizeSearchQuery(q);
-  if (!query) return undefined;
+  const categoryFilter: Prisma.MaterialWhereInput = category
+    ? { category }
+    : excludeCategory
+      ? { category: { not: excludeCategory } }
+      : {};
+  if (!query) {
+    return category || excludeCategory ? categoryFilter : undefined;
+  }
   return {
+    ...categoryFilter,
     OR: [
       { code: { contains: query, mode: 'insensitive' as const } },
       { name: { contains: query, mode: 'insensitive' as const } },
@@ -121,11 +139,11 @@ function materialSearchFilter(q?: string | null) {
 }
 
 export async function listMaterials(
-  opts: { q?: string | null } = {},
+  opts: { q?: string | null; category?: MaterialCategory } = {},
 ): Promise<MaterialSummary[]> {
   const query = normalizeSearchQuery(opts.q);
   const rows = await db.material.findMany({
-    where: materialSearchFilter(query),
+    where: materialSearchFilter(query, opts.category),
     select: MATERIAL_SELECT,
     orderBy: [{ isActive: 'desc' }, { category: 'asc' }, { name: 'asc' }],
   });
@@ -162,12 +180,18 @@ function materialListOrderBy(
 
 export async function listMaterialsPage(opts: {
   q?: string | null;
+  category?: MaterialCategory;
+  excludeCategory?: MaterialCategory;
   page: number;
   pageSize: number;
   sort: MaterialListSortKey;
   direction: SortDirection;
 }): Promise<PaginatedResult<MaterialSummary>> {
-  const where = materialSearchFilter(opts.q);
+  const where = materialSearchFilter(
+    opts.q,
+    opts.category,
+    opts.excludeCategory,
+  );
   const total = await db.material.count({ where });
   const window = paginationWindow(total, opts.page, opts.pageSize);
   const rows = await db.material.findMany({
@@ -178,6 +202,22 @@ export async function listMaterialsPage(opts: {
     take: window.take,
   });
   return paginatedResult(rows, total, window);
+}
+
+export async function listActivePaperOrderOptions(): Promise<
+  PaperOrderOption[]
+> {
+  return db.material.findMany({
+    where: { category: MaterialCategory.PAPER, isActive: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      specification: true,
+      unit: true,
+    },
+    orderBy: [{ name: 'asc' }, { specification: 'asc' }, { id: 'asc' }],
+  });
 }
 
 export async function getMaterialSummary(

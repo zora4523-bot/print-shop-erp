@@ -49,8 +49,12 @@ describe('PERMISSIONS map', () => {
       'order:cancel',
       'order:change:request',
       'order:change:review',
+      'order:price:confirm',
       'task:assign',
+      'task:claim',
       'task:report',
+      'task:dispute:create',
+      'task:dispute:review',
       'outsource:manage',
       'design:upload',
       'design:bundle:create',
@@ -94,7 +98,9 @@ describe('PERMISSIONS map', () => {
     const adminOnly: Permission[] = [
       'order:cancel',
       'order:change:review',
+      'order:price:confirm',
       'order:export:all',
+      'task:dispute:review',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
@@ -118,8 +124,10 @@ describe('PERMISSIONS map', () => {
     }
   });
 
-  it('worker-only permission task:report is [WORKER]', () => {
+  it('worker-only task permissions are [WORKER]', () => {
+    expect(PERMISSIONS['task:claim']).toEqual([Role.WORKER]);
     expect(PERMISSIONS['task:report']).toEqual([Role.WORKER]);
+    expect(PERMISSIONS['task:dispute:create']).toEqual([Role.WORKER]);
   });
 
   it('external-sales self billing is SALES-only', () => {
@@ -144,6 +152,7 @@ describe('requirePermission', () => {
     [Role.ADMIN, 'account:manage'],
     [Role.ADMIN, 'order:export:all'],
     [Role.SALES, 'bill:view:self'],
+    [Role.WORKER, 'task:claim'],
     [Role.WORKER, 'task:report'],
     [Role.WORKER, 'order:view:self'],
     [Role.WORKER, 'salary:view:self'],
@@ -162,6 +171,7 @@ describe('requirePermission', () => {
     [Role.WORKER, 'order:view:all'],
     [Role.SALES, 'order:export:all'],
     [Role.CUSTOMER_SERVICE, 'bill:view:self'],
+    [Role.SALES, 'task:claim'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
     mockedRequireSession.mockResolvedValue(session(role));

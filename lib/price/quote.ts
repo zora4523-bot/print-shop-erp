@@ -38,6 +38,7 @@ export type QuoteInput = {
   craftIds: string[];
   specification: string | null;
   paperType: string | null;
+  lamination?: string;
   foilColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
@@ -86,11 +87,14 @@ type NormalizedTriggerCondition = {
 
 export type QuoteSnapshot = {
   version: 1;
+  quotedAt?: string;
   priceBook: {
     id: string;
     code: string;
     name: string;
     version: number;
+    currency?: string;
+    effectiveFrom?: string | null;
     sourceName: string | null;
     sourceSha256: string | null;
   } | null;
@@ -102,7 +106,27 @@ export type QuoteSnapshot = {
     craftCodes: string[];
     specification: string | null;
     paperType: string | null;
+    lamination?: string;
+    pricingRoute?: string;
+    productStructure?: string;
+    artworkVersion?: string | null;
+    plateGroupId?: string | null;
+    pricingGroup?: string | null;
+    actualWidthMm?: number | null;
+    actualHeightMm?: number | null;
+    paperWeightGsm?: number | null;
+    catalogSpecification?: string | null;
+    catalogPaperType?: string | null;
+    catalogSpecificationMatched?: boolean | null;
+    catalogDimensionsMatched?: boolean | null;
+    catalogPaperWeightMatched?: boolean | null;
+    frontFoilColors?: string[];
+    backFoilColors?: string[];
+    foilPassCount?: number;
     foilColors: string[];
+    foilTechnique?: string;
+    hasLocalFoil?: boolean | null;
+    printColors?: string[];
     isDoubleSided: boolean;
     isDoubleColor: boolean;
     settlementType: string;
@@ -637,6 +661,7 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
       craftCodes: [],
       specification: input.specification,
       paperType: input.paperType,
+      lamination: input.lamination,
       foilColors: [...input.foilColors],
       isDoubleSided: input.isDoubleSided,
       isDoubleColor: input.isDoubleColor,

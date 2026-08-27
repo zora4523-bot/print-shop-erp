@@ -3,6 +3,8 @@ import { MachineType, WorkerType } from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
     businessCodeSequence: {
       upsert: vi.fn(),
     },
@@ -52,6 +54,12 @@ const makeCraft = (over: Partial<{
 });
 
 beforeEach(() => {
+  dbMock.$executeRaw.mockReset().mockResolvedValue(0);
+  dbMock.$transaction
+    .mockReset()
+    .mockImplementation(async (callback: (tx: typeof dbMock) => unknown) =>
+      callback(dbMock),
+    );
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.craft)) fn.mockReset();
 });
@@ -96,12 +104,14 @@ describe('listActiveCraftOrderOptions', () => {
     dbMock.craft.findMany.mockResolvedValue([
       {
         id: 'craft-1',
+        code: 'FLAT_FOIL_PARTIAL',
         name: '局部烫金',
         isOutsource: false,
         sortOrder: 10,
       },
       {
         id: 'craft-2',
+        code: 'STOCK_FOIL',
         name: '现货加烫',
         isOutsource: false,
         sortOrder: 900,
@@ -114,6 +124,7 @@ describe('listActiveCraftOrderOptions', () => {
       where: { isActive: true },
       select: {
         id: true,
+        code: true,
         name: true,
         isOutsource: true,
         sortOrder: true,
@@ -123,12 +134,14 @@ describe('listActiveCraftOrderOptions', () => {
     expect(result).toEqual([
       {
         id: 'craft-1',
+        code: 'FLAT_FOIL_PARTIAL',
         name: '局部烫金',
         isOutsource: false,
         isLowFrequency: false,
       },
       {
         id: 'craft-2',
+        code: 'STOCK_FOIL',
         name: '现货加烫',
         isOutsource: false,
         isLowFrequency: true,
@@ -165,6 +178,14 @@ describe('createCraft', () => {
       sortOrder: 20,
     });
     expect(dbMock.craft.create.mock.calls[0][0].data.isActive).toBe(true);
+    const sql = (
+      dbMock.$executeRaw.mock.calls[0]?.[0] as TemplateStringsArray
+    ).join('?');
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(sql).not.toContain('pg_advisory_xact_lock_shared');
+    expect(dbMock.craft.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('persists defaultMachineType=null for an outsource craft when supplied', async () => {
@@ -203,7 +224,6 @@ describe('updateCraft', () => {
     await expect(
       updateCraft('nope', {
         name: 'X',
-        code: 'XX',
         isOutsource: false,
         defaultWorkerType: WorkerType.PACKER,
         defaultMachineType: null,
@@ -218,7 +238,6 @@ describe('updateCraft', () => {
     dbMock.craft.update.mockResolvedValue(makeCraft({ name: '现货加烫(改名)' }));
     await updateCraft('craft-1', {
       name: '现货加烫(改名)',
-      code: 'STOCK_FOIL',
       isOutsource: false,
       defaultWorkerType: WorkerType.MACHINE,
       defaultMachineType: MachineType.HAND_PRESS,
@@ -226,6 +245,10 @@ describe('updateCraft', () => {
     });
     const data = dbMock.craft.update.mock.calls[0][0].data;
     expect(data.name).toBe('现货加烫(改名)');
+    expect(data).not.toHaveProperty('code');
+    expect(dbMock.craft.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('never writes isActive through the update path', async () => {
@@ -233,7 +256,6 @@ describe('updateCraft', () => {
     dbMock.craft.update.mockResolvedValue(makeCraft());
     await updateCraft('craft-1', {
       name: 'x',
-      code: 'XX',
       isOutsource: false,
       defaultWorkerType: WorkerType.PACKER,
       defaultMachineType: null,
@@ -258,6 +280,9 @@ describe('setCraftActive', () => {
     dbMock.craft.update.mockResolvedValue(makeCraft({ isActive: false }));
     await setCraftActive('craft-1', false);
     expect(dbMock.craft.update.mock.calls[0][0].data).toEqual({ isActive: false });
+    expect(dbMock.craft.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
+      dbMock.$executeRaw.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('throws when the target is missing', async () => {
