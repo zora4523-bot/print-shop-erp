@@ -1,7 +1,7 @@
 ---
 status: maintained
 owner: project-maintainers
-last_verified: 2026-08-24
+last_verified: 2026-08-26
 applies_to: repository source at last_verified
 ---
 
@@ -60,6 +60,8 @@ App Router 页面
   -> PostgreSQL
   -> Server Component + Client Component 组合
 ```
+
+领域数据进入业务 UI 前必须投影为 presentation DTO：底层枚举、内部 ID、规则条件和诊断元数据不能直接成为默认可见文案，具体边界以 [UI-SYSTEM.md](./UI-SYSTEM.md)“业务语言与技术标识可见性”为准。
 
 ### 业务写入
 

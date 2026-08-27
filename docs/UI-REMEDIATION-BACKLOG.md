@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: engineering
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 applies_to: repository source at last_verified
 ---
 
@@ -55,6 +55,7 @@ applies_to: repository source at last_verified
 | 21 | UI-L03 | S2 | C3 | `FormPageShell` | UI-P01、UI-S01 | 表单统一分区、草稿/保存状态、摘要/缺口、错误摘要与 sticky actions；先迁移主数据表单 | 部分完成；关键表单已有 pending 快照与离页导航保护，全量页面壳迁移仍待完成 |
 | 22 | UI-Q01 | S2 | C3 | 核心页真实视觉基线 | UI-L01–03 | showcase 与核心流程在 393/1280、light/dark 使用稳定 fixture 做 `toHaveScreenshot`；继续保留 axe/溢出/触控门禁 | 待开始 |
 | 23 | UI-Q02 | S3 | C2 | 防回退静态门禁 | UI-F03、UI-F11、UI-F12 | ESLint/结构测试禁止业务层新增调色板字面量、原生 confirm/alert、本地状态徽章、无原因禁用和重复空态 | 部分完成；已有颜色、原生弹窗、状态消费者、pending busy、快照锁和 pending 导航门禁 |
+| 24 | UI-F15 | S2 | C3 | 管理后台业务语言与技术标识隔离 | UI-S01 | 默认页面不显示内部枚举、规则 code、JSON/DSL、内部 ID 或导入坐标；统一中文映射；低频条件渐进披露；保留工单号、SKU 等业务编码 | 部分完成；规则中心与客户计价工作台已收口，其他页面家族按本约束继续审查 |
 
 ## 并行边界
 
