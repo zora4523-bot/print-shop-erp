@@ -14,6 +14,7 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
+import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 export const metadata = { title: '员工考勤' };
 
@@ -24,14 +25,6 @@ type PageProps = {
     workerType?: string;
   }>;
 };
-
-function currentShanghaiMonth(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(new Date());
-}
 
 // [start, end) → array of YYYY-MM-DD strings
 function monthDates(month: string): string[] {

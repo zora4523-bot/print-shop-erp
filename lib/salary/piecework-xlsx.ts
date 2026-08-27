@@ -8,6 +8,7 @@ import {
 import { db } from '../db';
 import { parseStrictYmd } from '../auth/schemas';
 import { MACHINE_TYPE_LABELS } from '../auth/role-labels';
+import { xlsxColumnName } from '../export/xlsx-column';
 import type { MachineRuleWithBase } from './rules';
 
 export type PieceworkExportFilter = {
@@ -71,19 +72,8 @@ function xmlEscape(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
-function columnName(index: number): string {
-  let value = index + 1;
-  let result = '';
-  while (value > 0) {
-    value -= 1;
-    result = String.fromCharCode(65 + (value % 26)) + result;
-    value = Math.floor(value / 26);
-  }
-  return result;
-}
-
 function cellXml(value: CellValue, row: number, column: number): string {
-  const ref = `${columnName(column)}${row}`;
+  const ref = `${xlsxColumnName(column)}${row}`;
   if (value === null || value === undefined) return `<c r="${ref}"/>`;
   if (typeof value === 'number' && Number.isFinite(value)) {
     return `<c r="${ref}" s="2"><v>${value}</v></c>`;
@@ -116,7 +106,7 @@ function sheetXml(rows: CellValue[][]): string {
         .join('')}</row>`;
     })
     .join('');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${columns}</cols><sheetData>${rowXml}</sheetData><autoFilter ref="A1:${columnName(Math.max(0, (rows[0]?.length ?? 1) - 1))}${Math.max(1, rows.length)}"/></worksheet>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${columns}</cols><sheetData>${rowXml}</sheetData><autoFilter ref="A1:${xlsxColumnName(Math.max(0, (rows[0]?.length ?? 1) - 1))}${Math.max(1, rows.length)}"/></worksheet>`;
 }
 
 function dateYmd(date: Date): string {

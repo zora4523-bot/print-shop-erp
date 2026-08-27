@@ -19,6 +19,7 @@ import type {
   CustomerPriceBookDraftPublishPreviewDto,
   CustomerPriceBookVersionAdminDto,
 } from '@/lib/price/customer-price-book-admin';
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
   externalPriceBusinessText,
   externalPriceRuleDisplayName,
@@ -50,16 +51,7 @@ const PURPOSE_PARAMS: Record<CustomerPriceBookPurpose, CustomerPricingPurpose> =
 };
 
 function formatShanghaiDateTime(value: string | null): string {
-  if (!value) return '长期';
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value));
+  return formatDateTimeShanghai(value ? new Date(value) : null, '长期');
 }
 
 function PriceBookVersionStatusBadge({

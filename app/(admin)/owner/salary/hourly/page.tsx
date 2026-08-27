@@ -20,6 +20,7 @@ import {
   getAttendanceSummaries,
   parseShanghaiMonth,
 } from '@/lib/attendance';
+import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
@@ -33,16 +34,6 @@ type PageProps = {
     markedPaid?: string;
   }>;
 };
-
-function currentShanghaiMonth(): string {
-  const ymd = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-  return ymd.slice(0, 7);
-}
 
 export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate

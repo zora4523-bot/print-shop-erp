@@ -22,6 +22,7 @@ import {
 } from '@/components/ui-business';
 import { getAttendanceSummaries } from '@/lib/attendance';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '计件工资' };
@@ -38,18 +39,6 @@ type PageProps = {
     markedPaid?: string;
   }>;
 };
-
-function todayShanghai(): string {
-  // Intl is the cheapest way to get YYYY-MM-DD in a timezone — we just
-  // build the parts explicitly so the format doesn't drift on locale.
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-  return parts;
-}
 
 export default async function DailySalaryPage({ searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate

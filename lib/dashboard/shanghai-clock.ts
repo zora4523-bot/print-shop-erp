@@ -1,28 +1,16 @@
 import { parseStrictYmd } from '../auth/schemas';
+import { formatDateInputShanghai } from '../format/dates';
 
 // Shanghai-calendar helpers for the owner dashboard. Same pattern as
 // `lib/salary/daily.ts:shanghaiDayRange` — `Asia/Shanghai` is UTC+8 with
 // no DST so a calendar day is a fixed [-08h, +16h) window around UTC
 // midnight.
 //
-// Why duplicate instead of importing from lib/salary/daily? Two reasons:
-//   1. lib/salary/daily.ts pulls Prisma + decimal.js. Dashboard helpers
-//      should stay free of that so they're cheap to import in pages /
-//      tests / future client-side helpers.
-//   2. The 3 callsites that hand-roll `todayShanghai()` (summary.ts,
-//      daily/page.tsx, hourly/page.tsx) aren't being refactored here
-//      (Slice A scope). Once those are moved over we'll delete the
-//      private copies — but not in this slice.
+// Keep these helpers free of Prisma and decimal.js so pages, tests and other
+// pure date utilities can import one canonical Shanghai wall-clock source.
 
 const SHANGHAI_OFFSET_HOURS = 8;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-const YMD_FMT = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
 
 /**
  * Returns the YYYY-MM-DD calendar date at `now` in Asia/Shanghai.
@@ -30,7 +18,7 @@ const YMD_FMT = new Intl.DateTimeFormat('en-CA', {
  * that need a deterministic boundary.
  */
 export function todayShanghai(now: Date = new Date()): string {
-  return YMD_FMT.format(now);
+  return formatDateInputShanghai(now);
 }
 
 /**

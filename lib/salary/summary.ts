@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { SalaryPeriodStatus } from '../../generated/prisma/enums';
 import { db } from '../db';
+import { currentShanghaiMonth, todayShanghai } from '../dashboard/shanghai-clock';
 import { shanghaiDayRange } from './daily';
 
 // Read-only aggregates for the owner's salary index page. Every query
@@ -43,19 +44,6 @@ export type SalaryIndexSummary = {
     totalSalary: string;
   };
 };
-
-function todayShanghai(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
-}
-
-function currentShanghaiMonth(now: Date = new Date()): string {
-  return todayShanghai(now).slice(0, 7);
-}
 
 export async function getSalaryIndexSummary(
   now: Date = new Date(),

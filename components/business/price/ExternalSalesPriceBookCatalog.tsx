@@ -2,6 +2,7 @@ import { TriangleAlert } from 'lucide-react';
 import { AdminTableCard } from '@/components/business/admin/AdminDataTable';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, TableScrollArea } from '@/components/ui-business';
+import { formatDateShanghai } from '@/lib/format/dates';
 import type { CustomerPriceBookCatalog } from '@/lib/price/customer-price-book';
 import {
   externalPriceBusinessText,
@@ -16,12 +17,7 @@ export type ExternalSalesPriceBookCatalogProps = {
 function formatEffectiveDate(value: Date | string | null | undefined): string {
   if (!value) return '长期';
   if (typeof value === 'string') return value;
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(value);
+  return formatDateShanghai(value);
 }
 
 function itemSubject(
