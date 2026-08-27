@@ -23,6 +23,7 @@ import {
   CustomerPriceRuleKind,
   OrderFoilTechnique,
   OrderItemPricingRoute,
+  OrderLamination,
   OrderPackagingMode,
   OrderProductStructure,
 } from '@/generated/prisma/enums';
@@ -83,6 +84,14 @@ const FOIL_TECHNIQUE_LABELS: Record<OrderFoilTechnique, string> = {
   [OrderFoilTechnique.FLAT]: '平烫',
   [OrderFoilTechnique.RELIEF]: '浮雕',
   [OrderFoilTechnique.RAISED]: '激凸',
+};
+
+const LAMINATION_LABELS: Record<OrderLamination, string> = {
+  [OrderLamination.NONE]: '无覆膜',
+  [OrderLamination.MATTE]: '亚膜',
+  [OrderLamination.SOFT_TOUCH]: '触感膜',
+  [OrderLamination.NEW_GLOSS]: '新式光膜',
+  [OrderLamination.LASER]: '激光膜',
 };
 
 const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
@@ -233,6 +242,10 @@ export function customerPriceRuleInputFromFormData(
             foilTechniques: enumListValue<OrderFoilTechnique>(
               formData,
               'match.foilTechniques',
+            ),
+            laminations: enumListValue<OrderLamination>(
+              formData,
+              'match.laminations',
             ),
             specifications: listValue(formData, 'match.specifications'),
             paperTypes: listValue(formData, 'match.paperTypes'),
@@ -1414,6 +1427,14 @@ export function CustomerPriceBookDraftRuleForm({
               defaultValues={rule.match.foilTechniques}
               errors={errors['match.foilTechniques']}
               errorId={`${prefix}-foilTechniques-error`}
+            />
+            <MatchCheckboxGroup
+              legend="覆膜方式"
+              name="match.laminations"
+              labels={LAMINATION_LABELS}
+              defaultValues={rule.match.laminations}
+              errors={errors['match.laminations']}
+              errorId={`${prefix}-laminations-error`}
             />
 
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">

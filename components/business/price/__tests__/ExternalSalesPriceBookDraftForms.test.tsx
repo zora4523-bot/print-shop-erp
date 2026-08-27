@@ -5,6 +5,7 @@ import {
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
   OrderItemPricingRoute,
+  OrderLamination,
   OrderPackagingMode,
 } from '@/generated/prisma/enums';
 import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '@/lib/price/customer-rule-condition';
@@ -475,6 +476,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
           match: {
             ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
             pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+            laminations: [OrderLamination.MATTE, OrderLamination.SOFT_TOUCH],
             craftCodes: ['COLOR_PRINT'],
             noneOfCraftCodes: ['FLAT_FOIL'],
             craftMode: 'ALL',
@@ -490,13 +492,18 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(visibleText).toContain('适用工艺');
     expect(visibleText).toContain('彩印');
     expect(visibleText).toContain('平烫');
+    expect(visibleText).toContain('覆膜方式');
+    expect(visibleText).toContain('亚膜');
+    expect(visibleText).toContain('触感膜');
     expect(visibleText).toContain('必须同时包含全部工艺');
     expect(visibleText).not.toContain('COLOR_PRINT');
     expect(visibleText).not.toContain('FLAT_FOIL');
     expect(visibleText).not.toContain('ANY');
     expect(visibleText).not.toContain('ALL');
+    expect(visibleText).not.toContain('SOFT_TOUCH');
     expect(html).toContain('value="COLOR_PRINT"');
     expect(html).toContain('value="FLAT_FOIL"');
+    expect(html).toContain('value="SOFT_TOUCH"');
   });
 
   it('展示烫金道数条件与乘算方式，不向管理员暴露内部值', () => {

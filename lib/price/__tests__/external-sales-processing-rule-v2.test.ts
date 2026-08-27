@@ -119,6 +119,39 @@ const customRules = customLargeTiers.map(([minQty, maxQty, amount]) =>
   }),
 );
 
+const customManualRules = [
+  rule({
+    id: 'custom-three-plus-colors',
+    code: 'CUSTOM_THREE_PLUS_COLORS_MANUAL',
+    name: '专版三色及以上',
+    kind: 'REFERENCE',
+    calculationType: null,
+    amount: null,
+    blocksAutomaticQuote: true,
+    triggerCondition: {
+      schemaVersion: 1,
+      target: 'ITEM',
+      pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+      minFoilColorCount: 3,
+    },
+  }),
+  rule({
+    id: 'custom-ten-thousand-envelope',
+    code: 'CUSTOM_TEN_THOUSAND_MANUAL',
+    name: '万元封专版',
+    kind: 'REFERENCE',
+    calculationType: null,
+    amount: null,
+    blocksAutomaticQuote: true,
+    triggerCondition: {
+      schemaVersion: 1,
+      target: 'ITEM',
+      pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+      productStructures: ['TEN_THOUSAND_ENVELOPE'],
+    },
+  }),
+];
+
 describe('外部销售加工费规则 v2 黄金用例', () => {
   it.each([
     [1, '0.5200'],
@@ -226,12 +259,14 @@ describe('外部销售加工费规则 v2 黄金用例', () => {
     const result = calculateExternalSalesQuote({
       input: input(overrides),
       priceBook,
-      rules: customRules,
+      rules: [...customRules, ...customManualRules],
     });
 
     expect(result.complete).toBe(false);
     expect(result.suggestedSubtotal).toBeNull();
-    expect(result.errors.join('；')).toContain('MANUAL_PRICING_REQUIRED');
+    expect(result.errors.join('；')).toMatch(
+      /MANUAL_PRICING_REQUIRED|需人工报价/u,
+    );
   });
 
   const colorBaseRules = [

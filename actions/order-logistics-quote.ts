@@ -42,20 +42,35 @@ export async function quoteExternalOrderChargesAction(
   }
 
   try {
+    // This action is exposed to external sales accounts. A carrier billable
+    // weight only becomes trusted when an administrator records fulfilment;
+    // accepting a browser value here would let the salesperson choose the
+    // shipping charge. Keep the schema tolerant for old clients, then erase
+    // the untrusted field at this role-aware server boundary.
+    const shipmentsWithoutTrustedWeight = parsed.data.shipments.map(
+      (shipment) => ({
+        ...shipment,
+        billableWeightKg: null,
+      }),
+    );
     const quoteInput = parsed.data.items
       ? {
           isSfCollect: parsed.data.isSfCollect,
           shipments: deriveExternalOrderChargeShipments({
             isSfCollect: parsed.data.isSfCollect,
             items: parsed.data.items,
-            shipments: parsed.data.shipments.map((shipment) => ({
+            shipments: shipmentsWithoutTrustedWeight.map((shipment) => ({
               shipmentKey: shipment.shipmentKey,
               province: shipment.province,
+              billableWeightKg: shipment.billableWeightKg,
               itemQuantities: shipment.itemQuantities ?? [],
             })),
           }),
         }
-      : parsed.data;
+      : {
+          isSfCollect: parsed.data.isSfCollect,
+          shipments: shipmentsWithoutTrustedWeight,
+        };
     const quote = await quoteExternalOrderChargesPreview(quoteInput);
     return { status: 'success', quote };
   } catch (error) {

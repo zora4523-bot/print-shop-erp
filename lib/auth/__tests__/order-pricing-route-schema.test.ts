@@ -71,13 +71,97 @@ describe('new-order pricing route schema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects a back-side custom foil fact', () => {
+  it('accepts double-sided custom foil facts for versioned manual-pricing rules', () => {
+    const doubleSided = item({
+      frontFoilColors: ['哑金'],
+      backFoilColors: ['红金'],
+      foilColors: ['哑金', '红金'],
+      isDoubleSided: true,
+      isDoubleColor: true,
+    });
+    const created = createOrderSchema.safeParse(
+      order({ items: [doubleSided] }),
+    );
+    const previewed = quoteOrderItemsSchema.safeParse({
+      items: [doubleSided],
+    });
+
+    expect(created.success).toBe(true);
+    expect(previewed.success).toBe(true);
+  });
+
+  it('显式正反面各三色时允许六色聚合兼容字段', () => {
+    const sixColors = item({
+      frontFoilColors: ['哑金', '红金', '银色'],
+      backFoilColors: ['蓝金', '浅金', '古铜金'],
+      foilColors: ['哑金', '红金', '银色', '蓝金', '浅金', '古铜金'],
+      isDoubleSided: true,
+      isDoubleColor: true,
+    });
+
+    expect(
+      createOrderSchema.safeParse(order({ items: [sixColors] })).success,
+    ).toBe(true);
+    expect(
+      quoteOrderItemsSchema.safeParse({ items: [sixColors] }).success,
+    ).toBe(true);
+  });
+
+  it('没有正反面事实时不把旧聚合字段放宽为单面六色', () => {
+    const legacySixColors = item({
+      frontFoilColors: [],
+      backFoilColors: [],
+      foilColors: ['哑金', '红金', '银色', '蓝金', '浅金', '古铜金'],
+      isDoubleSided: false,
+      isDoubleColor: true,
+    });
+    const result = createOrderSchema.safeParse(
+      order({ items: [legacySixColors] }),
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.arrayContaining(['foilColors']),
+            message: expect.stringContaining('未按正反面填写'),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('accepts back-side color-print foil facts for versioned manual-pricing rules', () => {
+    const doubleSidedColorPrint = item({
+      pricingRoute: 'COLOR_PRINT',
+      frontFoilColors: ['哑金'],
+      backFoilColors: ['哑金'],
+      foilColors: ['哑金'],
+      foilTechnique: 'FLAT',
+      hasLocalFoil: true,
+      printColors: ['C', 'M', 'Y', 'K'],
+      isDoubleSided: true,
+      isDoubleColor: false,
+    });
+    const created = createOrderSchema.safeParse(
+      order({ items: [doubleSidedColorPrint] }),
+    );
+    const previewed = quoteOrderItemsSchema.safeParse({
+      items: [doubleSidedColorPrint],
+    });
+
+    expect(created.success).toBe(true);
+    expect(previewed.success).toBe(true);
+  });
+
+  it('still rejects more than three foil colors on either side', () => {
     const result = createOrderSchema.safeParse(
       order({
         items: [
           item({
-            frontFoilColors: ['哑金'],
-            backFoilColors: ['哑金'],
+            frontFoilColors: ['哑金', '红金', '银', '蓝金'],
+            backFoilColors: [],
           }),
         ],
       }),
@@ -85,8 +169,13 @@ describe('new-order pricing route schema', () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.message)).toContain(
-        '专版烫金不支持反面烫金，请转管理员核价',
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.arrayContaining(['frontFoilColors']),
+            message: expect.stringContaining('每面烫金颜色不超过 3 种'),
+          }),
+        ]),
       );
     }
   });

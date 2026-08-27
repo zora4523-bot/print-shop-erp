@@ -129,6 +129,51 @@ describe('production scheduling schema', () => {
 });
 
 describe('order change request schemas', () => {
+  it('接收正反面烫金明细且不要求旧聚合字段', () => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      reason: '客户改为双面烫金',
+      items: [
+        {
+          operation: 'UPDATE',
+          itemId: 'item-1',
+          frontFoilColors: [' 哑金 '],
+          backFoilColors: ['红金'],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.items[0]).toMatchObject({
+        frontFoilColors: ['哑金'],
+        backFoilColors: ['红金'],
+      });
+      expect(result.data.items[0]).not.toHaveProperty('foilColors');
+    }
+  });
+
+  it('仅为历史客户端保留聚合烫金颜色入参', () => {
+    const result = createOrderChangeRequestSchema.safeParse({
+      orderId: 'order-1',
+      reason: '历史客户端修改颜色',
+      items: [
+        {
+          operation: 'UPDATE',
+          itemId: 'item-1',
+          foilColors: ['浅金', '红金', '银色', '蓝金', '古铜金'],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.items[0]).toMatchObject({
+        foilColors: ['浅金', '红金', '银色', '蓝金', '古铜金'],
+      });
+    }
+  });
+
   it('rejects duplicate UPDATE entries for one item to avoid approval-order ambiguity', () => {
     const result = createOrderChangeRequestSchema.safeParse({
       orderId: 'order-1',

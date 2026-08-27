@@ -180,7 +180,12 @@ function conditionsCanOverlap(aRaw: unknown, bRaw: unknown): boolean {
   const a = isRecord(aRaw) ? aRaw : {};
   const b = isRecord(bRaw) ? bRaw : {};
 
-  for (const key of ['productCodes', 'specifications', 'paperTypes'] as const) {
+  for (const key of [
+    'productCodes',
+    'specifications',
+    'paperTypes',
+    'laminations',
+  ] as const) {
     if (arraysAreDisjoint(a[key], b[key])) return false;
   }
   for (const key of ['isDoubleSided', 'isDoubleColor'] as const) {

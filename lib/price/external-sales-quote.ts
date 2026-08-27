@@ -142,22 +142,15 @@ function foilPassCount(input: ExternalSalesQuoteInput): number {
   return orderItemFoilPassCount(input);
 }
 
-function isCoatedPaper(input: ExternalSalesQuoteInput): boolean {
-  return [input.paperType, input.catalogPaperType, input.productCode].some(
-    (value) =>
-      value?.includes('铜版') ||
-      value?.includes('双铜') ||
-      value?.toUpperCase().includes('COATED'),
-  );
-}
-
 function matchesCondition(
   input: ExternalSalesQuoteInput,
   condition: CustomerRuleConditionV1,
+  options: { productBound: boolean },
 ): boolean {
   const inputCraftCodes = canonicalizePricingCraftCodes(input.craftCodes);
   if (condition.target !== 'ITEM') return false;
   if (
+    !options.productBound &&
     condition.productCodes &&
     (!input.productCode || !condition.productCodes.includes(input.productCode))
   ) {
@@ -220,6 +213,12 @@ function matchesCondition(
   if (
     condition.foilTechniques &&
     !condition.foilTechniques.includes(input.foilTechnique)
+  ) {
+    return false;
+  }
+  if (
+    condition.laminations &&
+    !condition.laminations.includes(input.lamination)
   ) {
     return false;
   }
@@ -637,17 +636,6 @@ export function calculateExternalSalesQuote(args: {
     ) {
       errors.push('浮雕与激凸只能选择一种');
     }
-    if (input.pricingRoute === 'CUSTOM_SINGLE_FLAT_FOIL') {
-      if (sides.backFoilColors.length > 0) {
-        errors.push('专版烫金不支持反面烫金');
-      }
-      if (actualFoilColors(input).length >= 3) {
-        errors.push('MANUAL_PRICING_REQUIRED：专版三色及以上需管理员核价');
-      }
-      if (input.productStructure === 'TEN_THOUSAND_ENVELOPE') {
-        errors.push('MANUAL_PRICING_REQUIRED：万元封专版没有自动阶梯价');
-      }
-    }
     if (input.pricingRoute === 'COLOR_PRINT' && input.printColors.length === 0) {
       errors.push('彩印自动计价必须填写彩印颜色');
     }
@@ -658,28 +646,7 @@ export function calculateExternalSalesQuote(args: {
       errors.push('非彩印款式的覆膜方式必须为“无覆膜”');
     }
     if (input.pricingRoute === 'COLOR_PRINT') {
-      const coatedPaper = isCoatedPaper(input);
-      if (
-        input.lamination === 'SOFT_TOUCH' ||
-        input.lamination === 'NEW_GLOSS' ||
-        input.lamination === 'LASER'
-      ) {
-        errors.push(
-          'MANUAL_PRICING_REQUIRED：彩印非标准覆膜加价待定，需管理员核价',
-        );
-      } else if (coatedPaper && input.lamination !== 'MATTE') {
-        errors.push(
-          'MANUAL_PRICING_REQUIRED：铜版纸彩印自动价仅适用于覆亚膜',
-        );
-      } else if (!coatedPaper && input.lamination !== 'NONE') {
-        errors.push(
-          'MANUAL_PRICING_REQUIRED：非铜版纸覆膜尚未定价',
-        );
-      }
       const foilColorCount = actualFoilColors(input).length;
-      if (sides.backFoilColors.length > 0 || sides.frontFoilColors.length > 1) {
-        errors.push('MANUAL_PRICING_REQUIRED：彩印只支持正面单色烫金');
-      }
       if (foilColorCount === 0) {
         if (input.foilTechnique !== 'NONE') {
           errors.push('纯彩印未选烫金颜色时，烫金方式必须为“无烫金”');
@@ -690,9 +657,6 @@ export function calculateExternalSalesQuote(args: {
       } else {
         if (input.foilTechnique === 'NONE') {
           errors.push('彩印加烫金时必须选择烫金方式');
-        }
-        if (input.foilTechnique !== 'FLAT') {
-          errors.push('MANUAL_PRICING_REQUIRED：彩印非平烫工艺需管理员核价');
         }
       }
     }
@@ -720,7 +684,9 @@ export function calculateExternalSalesQuote(args: {
     ({ rule, condition }) =>
       appliesToProduct(input, rule) &&
       quantityMatches(input, rule) &&
-      matchesCondition(input, condition),
+      matchesCondition(input, condition, {
+        productBound: rule.productId !== null,
+      }),
   );
 
   const blockingReferences = matched.filter(

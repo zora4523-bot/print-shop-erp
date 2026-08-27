@@ -1431,7 +1431,7 @@ const craftIdSchema = z
   .min(1, '工艺 id 不能为空')
   .max(32, '工艺 id 过长');
 
-const orderItemFoilColorsField = z
+const orderItemFoilColorsArray = (maximum: number, message: string) => z
   .array(
     z
       .string()
@@ -1439,10 +1439,7 @@ const orderItemFoilColorsField = z
       .min(1, '烫金颜色不能为空')
       .max(32, '烫金颜色过长（最多 32 个字符）'),
   )
-  .max(
-    MAX_ORDER_ITEM_FOIL_COLORS,
-    `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
-  )
+  .max(maximum, message)
   .superRefine((colors, ctx) => {
     if (new Set(colors).size !== colors.length) {
       ctx.addIssue({ code: 'custom', message: '烫金颜色不能重复' });
@@ -1454,6 +1451,20 @@ const orderItemFoilColorsField = z
       });
     }
   });
+
+const orderItemFoilColorsField = orderItemFoilColorsArray(
+  MAX_ORDER_ITEM_FOIL_COLORS,
+  `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
+);
+
+// A new command can carry three explicit colors per side. The retired
+// aggregate may therefore contain six distinct colors, but only when the side
+// arrays prove that split; validateOrderItemPricingFacts keeps a legacy
+// aggregate without side evidence at the historical five-color ceiling.
+const orderItemFoilColorsWithExplicitSidesField = orderItemFoilColorsArray(
+  MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE * 2,
+  `正反面烫金颜色合计不超过 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE * 2} 种`,
+);
 
 const orderItemFoilSideColorsField = z
   .array(
@@ -1528,7 +1539,7 @@ const orderItemBaseSchema = z.object({
   backFoilColors: orderItemFoilSideColorsField.default([]),
   // Retired aggregate facts remain accepted for old clients. The domain
   // write path always derives them from the two side arrays for new rows.
-  foilColors: orderItemFoilColorsField.default([]),
+  foilColors: orderItemFoilColorsWithExplicitSidesField.default([]),
   foilTechnique: z
     .enum(OrderFoilTechnique)
     .default(OrderFoilTechnique.UNSPECIFIED),
@@ -1565,7 +1576,6 @@ type OrderItemPricingFactsForValidation = Pick<
   z.infer<typeof orderItemBaseSchema>,
   | 'productId'
   | 'pricingRoute'
-  | 'manualQuoteReason'
   | 'paperType'
   | 'actualWidthMm'
   | 'actualHeightMm'
@@ -1615,6 +1625,18 @@ function validateOrderItemPricingFacts(
     });
   }
 
+  if (
+    item.foilColors.length > MAX_ORDER_ITEM_FOIL_COLORS &&
+    item.frontFoilColors.length === 0 &&
+    item.backFoilColors.length === 0
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['foilColors'],
+      message: `未按正反面填写时，烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
+    });
+  }
+
   const { frontFoilColors, backFoilColors } = resolveOrderItemFoilSides(item);
   const actualFoilColors = [...frontFoilColors, ...backFoilColors];
   if (
@@ -1642,13 +1664,6 @@ function validateOrderItemPricingFacts(
   }
 
   if (item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL) {
-    if (backFoilColors.length > 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['backFoilColors'],
-        message: '专版烫金不支持反面烫金，请转管理员核价',
-      });
-    }
     if (
       item.foilTechnique === OrderFoilTechnique.NONE ||
       item.foilTechnique === OrderFoilTechnique.UNSPECIFIED
@@ -1696,16 +1711,6 @@ function validateOrderItemPricingFacts(
   }
 
   if (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT) {
-    if (backFoilColors.length > 0 || frontFoilColors.length > 1) {
-      ctx.addIssue({
-        code: 'custom',
-        path:
-          backFoilColors.length > 0
-            ? ['backFoilColors']
-            : ['frontFoilColors'],
-        message: '彩印只支持可选的正面单色烫金，其他组合请转管理员核价',
-      });
-    }
     if (item.printColors.length === 0) {
       ctx.addIssue({
         code: 'custom',
@@ -1749,6 +1754,30 @@ function validateOrderItemPricingFacts(
     }
   }
 }
+
+/**
+ * Shared command-boundary validation for a fully merged set of pricing
+ * facts. Change requests use this schema after combining a proposal with the
+ * persisted item, so they cannot bypass the same route invariants enforced
+ * when an order is first created.
+ */
+export const orderItemPricingFactsSchema = orderItemBaseSchema
+  .pick({
+    productId: true,
+    pricingRoute: true,
+    paperType: true,
+    actualWidthMm: true,
+    actualHeightMm: true,
+    frontFoilColors: true,
+    backFoilColors: true,
+    foilColors: true,
+    foilTechnique: true,
+    hasLocalFoil: true,
+    lamination: true,
+    printColors: true,
+    isDoubleSided: true,
+  })
+  .superRefine(validateOrderItemPricingFacts);
 
 const orderItemSchema = orderItemBaseSchema.superRefine(
   validateOrderItemPricingFacts,
@@ -1895,10 +1924,11 @@ const shipmentChargeMoneyField = z.preprocess(
   ]),
 );
 
-// These fields were added after the original order command shipped.  Treat a
+// These fields were added after the original order command shipped. Treat a
 // missing key exactly like an empty form field so legacy API/domain callers
-// still normalize to null; external-sales business rules decide later whether
-// the facts are sufficient to quote safely.
+// still normalize to null. This schema validates shape, not trust: role-aware
+// server commands decide whether a submitted weight may be used or must be
+// ignored (external-sales create/preview always ignore it).
 const optionalShipmentText = (label: string, max: number) =>
   z.preprocess(
     (value) => (value === undefined ? null : value),
@@ -2458,6 +2488,11 @@ const updateOrderItemChangeSchema = z
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
+    frontFoilColors: orderItemFoilSideColorsField.optional(),
+    backFoilColors: orderItemFoilSideColorsField.optional(),
+    // Historical clients only submitted one aggregate array. It remains
+    // readable at the command boundary, but the domain layer immediately
+    // projects it into explicit front/back facts before persisting.
     foilColors: orderItemFoilColorsField.optional(),
   })
   .refine(
@@ -2465,6 +2500,8 @@ const updateOrderItemChangeSchema = z
       value.name !== undefined ||
       value.quantity !== undefined ||
       value.specification !== undefined ||
+      value.frontFoilColors !== undefined ||
+      value.backFoilColors !== undefined ||
       value.foilColors !== undefined,
     '至少修改一个款式字段',
   );
@@ -2474,42 +2511,45 @@ const addOrderItemChangeSchema = z.object({
   templateItemId: orderChangeId,
   name: z.string().trim().min(1, '请填写新增款式名').max(64),
   quantity: orderItemQuantityField,
-  specification: optionalTrimmedText('规格', 64),
-  foilColors: orderItemFoilColorsField.default([]),
+  specification: optionalTrimmedText('规格', 64).optional(),
+  frontFoilColors: orderItemFoilSideColorsField.optional(),
+  backFoilColors: orderItemFoilSideColorsField.optional(),
+  foilColors: orderItemFoilColorsField.optional(),
 });
 
-export const createOrderChangeRequestSchema = z
-  .object({
-    orderId: orderChangeId,
-    reason: z
-      .string()
-      .trim()
-      .min(1, '请填写修改原因')
-      .max(500, '修改原因过长'),
-    items: z
-      .array(
-        z.discriminatedUnion('operation', [
-          updateOrderItemChangeSchema,
-          addOrderItemChangeSchema,
-        ]),
-      )
-      .min(1, '至少填写一项修改')
-      .max(50, '单次修改不超过 50 项'),
-  })
+export const orderChangeRequestItemsSchema = z
+  .array(
+    z.discriminatedUnion('operation', [
+      updateOrderItemChangeSchema,
+      addOrderItemChangeSchema,
+    ]),
+  )
+  .min(1, '至少填写一项修改')
+  .max(50, '单次修改不超过 50 项')
   .superRefine((value, ctx) => {
     const updatedItemIds = new Set<string>();
-    value.items.forEach((item, index) => {
+    value.forEach((item, index) => {
       if (item.operation !== 'UPDATE') return;
       if (updatedItemIds.has(item.itemId)) {
         ctx.addIssue({
           code: 'custom',
-          path: ['items', index, 'itemId'],
+          path: [index, 'itemId'],
           message: '同一款式不能重复提交修改',
         });
       }
       updatedItemIds.add(item.itemId);
     });
   });
+
+export const createOrderChangeRequestSchema = z.object({
+  orderId: orderChangeId,
+  reason: z
+    .string()
+    .trim()
+    .min(1, '请填写修改原因')
+    .max(500, '修改原因过长'),
+  items: orderChangeRequestItemsSchema,
+});
 
 export type CreateOrderChangeRequestInput = z.infer<
   typeof createOrderChangeRequestSchema

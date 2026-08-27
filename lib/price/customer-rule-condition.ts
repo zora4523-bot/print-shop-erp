@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
+  OrderLamination,
   OrderPackagingMode,
   OrderProductStructure,
 } from '@/generated/prisma/enums';
@@ -38,6 +39,7 @@ export const customerRuleConditionV1Schema = z
       .min(1)
       .optional(),
     foilTechniques: z.array(z.enum(OrderFoilTechnique)).min(1).optional(),
+    laminations: z.array(z.enum(OrderLamination)).min(1).optional(),
     specifications: nonEmptyStringList.optional(),
     paperTypes: nonEmptyStringList.optional(),
     foilColors: nonEmptyStringList.optional(),
@@ -98,6 +100,7 @@ export const customerRuleConditionV1Schema = z
       'pricingRoutes',
       'productStructures',
       'foilTechniques',
+      'laminations',
       'specifications',
       'paperTypes',
       'foilColors',
@@ -188,6 +191,7 @@ const CONDITION_FIELD_LABELS: Readonly<Record<string, string>> = {
   pricingRoutes: '适用计价路线',
   productStructures: '产品结构',
   foilTechniques: '烫金方式',
+  laminations: '覆膜方式',
   specifications: '尺寸规格',
   paperTypes: '纸张',
   foilColors: '烫金颜色',
@@ -244,6 +248,7 @@ export type CustomerRuleConditionEditorInput = {
   pricingRoutes: OrderItemPricingRoute[];
   productStructures: OrderProductStructure[];
   foilTechniques: OrderFoilTechnique[];
+  laminations: OrderLamination[];
   specifications: string[];
   paperTypes: string[];
   craftCodes: string[];
@@ -283,6 +288,7 @@ export const EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT: CustomerRuleConditionEd
   pricingRoutes: [],
   productStructures: [],
   foilTechniques: [],
+  laminations: [],
   specifications: [],
   paperTypes: [],
   craftCodes: [],
@@ -351,6 +357,7 @@ export function customerRuleConditionEditorInput(
       pricingRoutes: condition.pricingRoutes ?? [],
       productStructures: condition.productStructures ?? [],
       foilTechniques: condition.foilTechniques ?? [],
+      laminations: condition.laminations ?? [],
       specifications: condition.specifications ?? [],
       paperTypes: condition.paperTypes ?? [],
       craftCodes: condition.craftCodes ?? [],
@@ -414,6 +421,7 @@ export function buildCustomerRuleCondition(
     pricingRoutes: nonEmpty(editor.pricingRoutes),
     productStructures: nonEmpty(editor.productStructures),
     foilTechniques: nonEmpty(editor.foilTechniques),
+    laminations: nonEmpty(editor.laminations),
     specifications: nonEmpty(editor.specifications),
     paperTypes: nonEmpty(editor.paperTypes),
     craftCodes: nonEmpty(editor.craftCodes),

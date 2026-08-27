@@ -384,7 +384,6 @@ function resolveAmount(params: {
   label: string;
   requireExplicitConfirmation: boolean;
   allowPending: boolean;
-  forceAutomaticAmount: boolean;
 }): {
   amount: string;
   suggestedAmount: string | null;
@@ -402,22 +401,6 @@ function resolveAmount(params: {
     return {
       amount: '0.00',
       suggestedAmount: '0.00',
-      overrideReason: null,
-      requiresAdminConfirmation: false,
-    };
-  }
-  // Final shipment facts do not reopen a complete automatic rule for manual
-  // override. Browser amounts are ignored here; only incomplete/advisory
-  // lines remain administrator-confirmed inputs.
-  if (
-    params.forceAutomaticAmount &&
-    params.line.complete &&
-    !params.line.advisory &&
-    suggested
-  ) {
-    return {
-      amount: suggested.toFixed(2),
-      suggestedAmount: suggested.toFixed(2),
       overrideReason: null,
       requiresAdminConfirmation: false,
     };
@@ -461,8 +444,11 @@ function resolveAmount(params: {
   return {
     amount: amount.toFixed(2),
     suggestedAmount: suggested?.toFixed(2) ?? null,
-    overrideReason: differs || !params.line.complete
-      ? params.overrideReason?.trim() ?? null
+    // An explicit final amount is an administrator-confirmed business fact.
+    // Keep any accompanying note for the audit trail even when the amount
+    // happens to equal the automatic suggestion.
+    overrideReason: submitted !== null
+      ? params.overrideReason?.trim() || null
       : null,
     requiresAdminConfirmation: false,
   };
@@ -531,7 +517,6 @@ export async function resolveExternalOrderChargesForFinalization(
   priceBookId: string,
   now: Date,
   options: {
-    forceAutomaticAmounts?: boolean;
     allowLegacyBlockedPackagingRules?: boolean;
   } = {},
 ): Promise<{
@@ -547,7 +532,6 @@ export async function resolveExternalOrderChargesForFinalization(
     priceBookId,
     false,
     false,
-    options.forceAutomaticAmounts ?? false,
     options.allowLegacyBlockedPackagingRules ?? false,
   );
 }
@@ -562,7 +546,6 @@ async function resolveExternalOrderCharges(
   priceBookId?: string,
   snapshotLockHeld = false,
   allowPending = false,
-  forceAutomaticAmounts = false,
   allowLegacyBlockedPackagingRules = false,
 ): Promise<{
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
@@ -605,7 +588,6 @@ async function resolveExternalOrderCharges(
       label: `地址 ${shipmentQuote.shipmentKey} 快递费`,
       requireExplicitConfirmation: false,
       allowPending,
-      forceAutomaticAmount: forceAutomaticAmounts,
     });
     const packaging = resolveAmount({
       line: shipmentQuote.packaging,
@@ -614,7 +596,6 @@ async function resolveExternalOrderCharges(
       label: `地址 ${shipmentQuote.shipmentKey} 纸箱费`,
       requireExplicitConfirmation: false,
       allowPending,
-      forceAutomaticAmount: forceAutomaticAmounts,
     });
 
     for (const [categoryCode, line, resolved] of [

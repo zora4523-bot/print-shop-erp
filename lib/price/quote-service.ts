@@ -398,8 +398,12 @@ async function quoteExternalSalesItems(
         hasLocalFoil: item.hasLocalFoil,
         lamination: item.lamination,
         printColors: [...item.printColors],
-        isDoubleSided: item.isDoubleSided,
-        isDoubleColor: item.isDoubleColor,
+        // Explicit side arrays are the authoritative facts for new orders.
+        // Derive the retired booleans here as well as on the create path so a
+        // stale or forged legacy field cannot bypass a versioned matcher in
+        // the customer-facing preview.
+        isDoubleSided: foilFacts.isDoubleSided,
+        isDoubleColor: foilFacts.isDoubleColor,
         settlementType,
         orderItemCount,
       },

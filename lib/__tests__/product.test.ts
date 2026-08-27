@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProductCategory, Role } from '../../generated/prisma/enums';
+import {
+  CustomerPriceBookPurpose,
+  CustomerPriceRuleKind,
+  OrderSettlementType,
+  ProductCategory,
+  Role,
+} from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
@@ -19,6 +25,13 @@ const { dbMock } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    customerPriceRule: {
+      count: vi.fn(),
+      findMany: vi.fn(),
+    },
+    customerPriceBook: {
+      findMany: vi.fn(),
+    },
     productCategoryNode: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -31,6 +44,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   listActiveProductOrderOptions,
+  listCurrentExternalSalesProductOrderOptions,
   listProducts,
   listProductsPage,
   listProductCategoryOptions,
@@ -77,6 +91,9 @@ beforeEach(() => {
     );
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
+  dbMock.customerPriceRule.count.mockReset().mockResolvedValue(0);
+  dbMock.customerPriceRule.findMany.mockReset().mockResolvedValue([]);
+  dbMock.customerPriceBook.findMany.mockReset().mockResolvedValue([]);
   for (const fn of Object.values(dbMock.productCategoryNode)) fn.mockReset();
 });
 
@@ -297,6 +314,82 @@ describe('listActiveProductOrderOptions', () => {
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     });
+  });
+});
+
+describe('listCurrentExternalSalesProductOrderOptions', () => {
+  const now = new Date('2026-08-27T02:00:00.000Z');
+  const referencedProduct = {
+    id: 'product-priced',
+    code: 'PRD-000042',
+    name: '管理员新建报价 SKU',
+    category: ProductCategory.CUSTOM_FLAT_FOIL,
+    specification: '大号封90×165',
+    paperType: '160g珠光艳闪',
+  };
+
+  it('仅返回当前加工费价目启用基础规则引用的 SKU，不依赖 EXT- 编码', async () => {
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      { id: 'processing-book-current' },
+    ]);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      { product: referencedProduct },
+      { product: referencedProduct },
+    ]);
+
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).resolves.toEqual([referencedProduct]);
+
+    expect(dbMock.customerPriceBook.findMany).toHaveBeenCalledWith({
+      where: {
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        purpose: CustomerPriceBookPurpose.PROCESSING,
+        isActive: true,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      select: { id: true },
+      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+      take: 2,
+    });
+    expect(dbMock.customerPriceRule.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          priceBookId: 'processing-book-current',
+          kind: CustomerPriceRuleKind.BASE,
+          isActive: true,
+          category: { isActive: true },
+          product: { is: { isActive: true } },
+          NOT: {
+            triggerCondition: {
+              path: ['target'],
+              equals: 'PACKAGING_GROUP',
+            },
+          },
+        },
+      }),
+    );
+    expect(dbMock.product.findMany).not.toHaveBeenCalled();
+  });
+
+  it('没有当前加工费价目时关闭报价 SKU 目录', async () => {
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).resolves.toEqual([]);
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it('当前加工费价目不唯一时拒绝猜测 SKU 集合', async () => {
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      { id: 'processing-book-a' },
+      { id: 'processing-book-b' },
+    ]);
+
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).rejects.toThrow('同时存在多个生效加工费价目簿');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -615,6 +708,41 @@ describe('updateProduct', () => {
     expect(data.baseUnitPrice).toBe('1.5000');
   });
 
+  it('protects SKU matching facts referenced by a current or scheduled price book', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+
+    await expect(
+      updateProduct('p1', {
+        code: 'NEW001',
+        categoryNodeId: 'cat_custom_flat_foil',
+        name: '只改展示名',
+        specification: '100×200',
+        paperType: '铜版纸',
+        baseUnitPrice: '0.5000',
+      }),
+    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+
+  it('allows display-name changes without rewriting protected pricing facts', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '新展示名' }));
+
+    await updateProduct('p1', {
+      code: 'HB001',
+      categoryNodeId: 'cat_custom_flat_foil',
+      name: '新展示名',
+      specification: '100×200',
+      paperType: '铜版纸',
+      baseUnitPrice: '0.5000',
+      minOrderQty: 1000,
+    });
+
+    expect(dbMock.product.update).toHaveBeenCalledOnce();
+  });
+
   it('omits baseUnitPrice so a concurrent internal-price update is preserved', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
     dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
@@ -707,6 +835,17 @@ describe('setProductActive', () => {
         }),
       }),
     );
+  });
+
+  it('rejects deactivation while a current or scheduled price version references the SKU', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+
+    await expect(
+      setProductActive('p1', false, activeChangeContext),
+    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('requires a reason for deactivation inside the domain transaction', async () => {

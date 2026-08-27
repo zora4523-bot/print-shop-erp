@@ -1,21 +1,14 @@
 import type { ExternalOrderChargeShipmentInput } from './external-order-charges';
-import { calculateOrderBillableWeight } from './external-order-charge-calculation';
 
 export type ExternalOrderChargeItemFacts = {
   itemKey?: string;
   quantity: number;
-  paperWeightGsm: number | null;
-  paperType?: string | null;
-  productStructure:
-    | 'STANDARD_ENVELOPE'
-    | 'WESTERN_ENVELOPE'
-    | 'TEN_THOUSAND_ENVELOPE'
-    | 'UNSPECIFIED';
 };
 
 export type ExternalOrderChargeShipmentFacts = {
   shipmentKey: string;
   province: string | null;
+  billableWeightKg: string | null;
   itemQuantities: readonly number[];
 };
 
@@ -26,15 +19,16 @@ export type DerivedExternalOrderChargeShipment = Omit<
   billableWeightKg: string | null;
 };
 
-function canonicalPaperWeightGsm(item: ExternalOrderChargeItemFacts): number | null {
-  if (item.paperWeightGsm !== null) return item.paperWeightGsm;
-  const match = item.paperType?.trim().match(/^(\d{2,4})\s*g/i);
-  return match ? Number.parseInt(match[1] as string, 10) : null;
+function carrierBillableWeight(value: string | null): string | null {
+  const normalized = value?.trim() ?? '';
+  if (!/^\d{1,6}(?:\.\d{1,3})?$/.test(normalized)) return null;
+  return Number(normalized) > 0 ? normalized : null;
 }
 
 /**
- * Converts persisted order facts into the narrow input accepted by the
- * versioned logistics calculator. Browser-entered weights are never used.
+ * Converts validated order/shipment facts into the narrow input accepted by
+ * the versioned logistics calculator. Billable weight is a carrier-confirmed
+ * fact: paper and quantity are never used to guess it.
  */
 export function deriveExternalOrderChargeShipments(args: {
   items: readonly ExternalOrderChargeItemFacts[];
@@ -48,23 +42,18 @@ export function deriveExternalOrderChargeShipments(args: {
       return [{
         key: item.itemKey?.trim() || String(itemIndex + 1),
         quantity,
-        paperWeightGsm: canonicalPaperWeightGsm(item),
-        productStructure: item.productStructure,
       }];
     });
     const itemQuantity = allocatedItems.reduce(
       (sum, item) => sum + item.quantity,
       0,
     );
-    const weight = args.isSfCollect
-      ? null
-      : calculateOrderBillableWeight(allocatedItems);
-
     return {
       shipmentKey: shipment.shipmentKey,
       province: shipment.province,
-      billableWeightKg:
-        weight?.status === 'CALCULATED' ? weight.billableWeightKg : null,
+      billableWeightKg: args.isSfCollect
+        ? null
+        : carrierBillableWeight(shipment.billableWeightKg),
       itemQuantity,
     };
   });

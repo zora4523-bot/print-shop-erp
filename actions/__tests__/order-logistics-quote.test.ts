@@ -35,6 +35,14 @@ const validInput = {
   ],
 };
 
+const sanitizedExternalSalesInput = {
+  ...validInput,
+  shipments: validInput.shipments.map((shipment) => ({
+    ...shipment,
+    billableWeightKg: null,
+  })),
+};
+
 const quote = {
   complete: true,
   suggestedShippingTotal: '4.30',
@@ -145,7 +153,7 @@ describe('quoteExternalOrderChargesAction', () => {
     });
 
     expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith(
-      validInput,
+      sanitizedExternalSalesInput,
     );
   });
 
@@ -156,14 +164,23 @@ describe('quoteExternalOrderChargesAction', () => {
     const result = await quoteExternalOrderChargesAction(validInput);
 
     expect(result).toEqual({ status: 'success', quote });
-    expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith(validInput);
+    expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith(
+      sanitizedExternalSalesInput,
+    );
   });
 
-  it('derives weight from item facts and ignores a browser-supplied weight', async () => {
+  it('ignores a browser-supplied carrier weight and leaves freight pending', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
-    quoteExternalOrderChargesPreviewMock.mockResolvedValue(quote);
+    const pendingWeightQuote = {
+      ...quote,
+      complete: false,
+      suggestedShippingTotal: null,
+      suggestedTotal: null,
+      errors: ['发货 1：缺少承运商计费重量，快递费待管理员确认'],
+    };
+    quoteExternalOrderChargesPreviewMock.mockResolvedValue(pendingWeightQuote);
 
-    await quoteExternalOrderChargesAction({
+    const result = await quoteExternalOrderChargesAction({
       isSfCollect: false,
       items: [
         {
@@ -178,12 +195,14 @@ describe('quoteExternalOrderChargesAction', () => {
         {
           shipmentKey: '1',
           province: '广东',
-          billableWeightKg: '0.001',
+          billableWeightKg: '12.5',
           itemQuantity: 1_000,
           itemQuantities: [1_000],
         },
       ],
     });
+
+    expect(result).toEqual({ status: 'success', quote: pendingWeightQuote });
 
     expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith({
       isSfCollect: false,
@@ -191,7 +210,7 @@ describe('quoteExternalOrderChargesAction', () => {
         {
           shipmentKey: '1',
           province: '广东',
-          billableWeightKg: '8',
+          billableWeightKg: null,
           itemQuantity: 1_000,
         },
       ],
@@ -215,7 +234,13 @@ describe('quoteExternalOrderChargesAction', () => {
 
     expect(result.status).toBe('success');
     expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith(
-      largeInput,
+      {
+        ...largeInput,
+        shipments: largeInput.shipments.map((shipment) => ({
+          ...shipment,
+          billableWeightKg: null,
+        })),
+      },
     );
   });
 

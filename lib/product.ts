@@ -5,6 +5,11 @@ import {
   type Product,
   type ProductCategoryNode,
 } from '../generated/prisma/client';
+import {
+  CustomerPriceBookPurpose,
+  CustomerPriceRuleKind,
+  OrderSettlementType,
+} from '../generated/prisma/enums';
 import { db } from './db';
 import {
   paginatedResult,
@@ -12,7 +17,10 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { resolveBusinessCode } from './business-code';
-import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
+import {
+  acquirePriceRuleSnapshotReadLock,
+  acquirePriceRuleSnapshotWriteLock,
+} from './price/rule-snapshot-lock';
 import { sortBySearchRelevance } from './search-ranking';
 import {
   writeAuditLogInTx,
@@ -398,6 +406,81 @@ export async function listActiveProductOrderOptions(): Promise<
   });
 }
 
+/**
+ * Return only products that can anchor a quote in the unique currently active
+ * external-sales processing price book.
+ *
+ * Product codes are internal identifiers, not catalog membership flags. The
+ * published BASE-rule productId is the authoritative binding used by the quote
+ * engine, so the new-order catalog must be derived from the same snapshot.
+ */
+export async function listCurrentExternalSalesProductOrderOptions(
+  now: Date = new Date(),
+): Promise<ProductOrderOption[]> {
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotReadLock(tx);
+    const books = await tx.customerPriceBook.findMany({
+      where: {
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        purpose: CustomerPriceBookPurpose.PROCESSING,
+        isActive: true,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      select: { id: true },
+      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+      take: 2,
+    });
+    if (books.length === 0) return [];
+    if (books.length > 1) {
+      throw new ProductInvariantError(
+        '同一结算方向同时存在多个生效加工费价目簿，请管理员修正有效期',
+      );
+    }
+
+    const rules = await tx.customerPriceRule.findMany({
+      where: {
+        priceBookId: books[0]!.id,
+        kind: CustomerPriceRuleKind.BASE,
+        isActive: true,
+        category: { isActive: true },
+        product: { is: { isActive: true } },
+        NOT: {
+          triggerCondition: {
+            path: ['target'],
+            equals: 'PACKAGING_GROUP',
+          },
+        },
+      },
+      select: {
+        product: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            category: true,
+            specification: true,
+            paperType: true,
+          },
+        },
+      },
+      orderBy: [
+        { product: { category: 'asc' } },
+        { product: { name: 'asc' } },
+        { product: { id: 'asc' } },
+        { minQty: 'asc' },
+        { id: 'asc' },
+      ],
+    });
+
+    const products = new Map<string, ProductOrderOption>();
+    for (const rule of rules) {
+      if (rule.product) products.set(rule.product.id, rule.product);
+    }
+    return [...products.values()];
+  });
+}
+
 export async function listProductCategoryOptions(
   opts: { includeInactiveIds?: readonly string[] } = {},
 ): Promise<ProductCategoryOption[]> {
@@ -655,6 +738,43 @@ export type UpdateProductData = {
   minOrderQty?: number;
 };
 
+async function countProtectedExternalPriceRules(
+  tx: Prisma.TransactionClient,
+  productId: string,
+  now: Date,
+): Promise<number> {
+  return tx.customerPriceRule.count({
+    where: {
+      productId,
+      isActive: true,
+      priceBook: {
+        is: {
+          isActive: true,
+          settlementType: 'EXTERNAL_SALES',
+          purpose: 'PROCESSING',
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+        },
+      },
+    },
+  });
+}
+
+function externalPricingFactsChanged(
+  target: ProductSummary,
+  data: UpdateProductData,
+): boolean {
+  return (
+    target.code !== data.code ||
+    target.categoryNodeId !== data.categoryNodeId ||
+    target.specification !== data.specification ||
+    target.paperType !== data.paperType
+  );
+}
+
+function protectedExternalPricingFactsMessage(): string {
+  return '该报价 SKU 已被当前或计划生效的客户价格版本引用；请新建 SKU 并在新价格版本中配置，不能改写已发布的计价事实';
+}
+
 export async function updateProduct(
   id: string,
   data: UpdateProductData,
@@ -663,6 +783,12 @@ export async function updateProduct(
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
+    if (
+      externalPricingFactsChanged(target, data) &&
+      (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
+    ) {
+      throw new ProductInvariantError(protectedExternalPricingFactsMessage());
+    }
     const categoryNode =
       data.categoryNodeId === target.categoryNodeId
         ? { id: target.categoryNodeId, legacyCategory: target.category }
@@ -721,6 +847,13 @@ export async function setProductActive(
       (
         await readProductReferenceImpacts(tx, [id], new Date())
       ).get(id) ?? emptyProductReferenceImpact();
+
+    if (
+      !isActive &&
+      (await countProtectedExternalPriceRules(tx, id, new Date())) > 0
+    ) {
+      throw new ProductInvariantError(protectedExternalPricingFactsMessage());
+    }
 
     const updated = await tx.product.update({
       where: { id },

@@ -89,6 +89,37 @@ function rule(
 }
 
 describe('calculateExternalSalesQuote', () => {
+  it('uses the stable product binding when a published rule retains an older SKU code', () => {
+    const result = calculateExternalSalesQuote({
+      input: input({ productCode: 'RENAMED-SKU' }),
+      priceBook,
+      rules: [
+        rule({
+          triggerCondition: { productCodes: ['EXT-FOIL-MEDIUM'] },
+        }),
+      ],
+    });
+
+    expect(result.complete).toBe(true);
+    expect(result.suggestedSubtotal).toBe('310.00');
+  });
+
+  it('still enforces SKU conditions for cross-product rules without a product binding', () => {
+    const result = calculateExternalSalesQuote({
+      input: input({ productCode: 'RENAMED-SKU' }),
+      priceBook,
+      rules: [
+        rule({
+          productId: null,
+          triggerCondition: { productCodes: ['EXT-FOIL-MEDIUM'] },
+        }),
+      ],
+    });
+
+    expect(result.complete).toBe(false);
+    expect(result.suggestedSubtotal).toBeNull();
+  });
+
   it('calculates a documented per-piece anchor and preserves source evidence', () => {
     const paper = rule({
       id: 'paper-surcharge',
@@ -343,6 +374,24 @@ describe('calculateExternalSalesQuote', () => {
         productCodes: ['EXT-COLOR-COATED-LARGE'],
         specifications: ['大号'],
         paperTypes: ['200g铜版纸'],
+        laminations: ['MATTE'],
+      },
+    });
+    const nonstandardLaminationGuard = rule({
+      id: 'color-nonstandard-lamination',
+      code: 'COLOR_NONSTANDARD_LAMINATION_MANUAL',
+      name: '彩印未定价覆膜',
+      kind: 'REFERENCE',
+      calculationType: null,
+      amount: null,
+      minQty: null,
+      maxQty: null,
+      productId: null,
+      blocksAutomaticQuote: true,
+      note: '当前价格版本未配置自动价',
+      triggerCondition: {
+        pricingRoutes: ['COLOR_PRINT'],
+        laminations: ['SOFT_TOUCH', 'NEW_GLOSS', 'LASER'],
       },
     });
 
@@ -387,13 +436,13 @@ describe('calculateExternalSalesQuote', () => {
         const result = calculateExternalSalesQuote({
           input: coatedColorInput(lamination),
           priceBook,
-          rules: [coatedColorBase],
+          rules: [coatedColorBase, nonstandardLaminationGuard],
         });
 
         expect(result.complete).toBe(false);
         expect(result.suggestedSubtotal).toBeNull();
         expect(result.errors).toContain(
-          'MANUAL_PRICING_REQUIRED：彩印非标准覆膜加价待定，需管理员核价',
+          '需人工报价：彩印未定价覆膜（当前价格版本未配置自动价）',
         );
       },
     );
@@ -407,8 +456,37 @@ describe('calculateExternalSalesQuote', () => {
 
       expect(result.complete).toBe(false);
       expect(result.errors).toContain(
-        'MANUAL_PRICING_REQUIRED：铜版纸彩印自动价仅适用于覆亚膜',
+        '报价单未覆盖当前产品、规格、纸张或数量，请联系管理员人工报价',
       );
+    });
+
+    it('新价格版本可以显式配置触感膜自动价', () => {
+      const configuredBase = rule({
+        id: 'coated-color-soft-touch-base',
+        code: 'COATED_COLOR_SOFT_TOUCH_BASE',
+        name: '铜版纸彩印触感膜',
+        calculationType: 'FIXED_AMOUNT',
+        amount: '330.0000',
+        minQty: 1_000,
+        maxQty: 1_000,
+        productId: 'coated-color-large',
+        triggerCondition: {
+          pricingRoutes: ['COLOR_PRINT'],
+          productCodes: ['EXT-COLOR-COATED-LARGE'],
+          specifications: ['大号'],
+          paperTypes: ['200g铜版纸'],
+          laminations: ['SOFT_TOUCH'],
+        },
+      });
+
+      const result = calculateExternalSalesQuote({
+        input: coatedColorInput('SOFT_TOUCH'),
+        priceBook,
+        rules: [configuredBase],
+      });
+
+      expect(result.complete).toBe(true);
+      expect(result.suggestedSubtotal).toBe('330.00');
     });
 
     it('非彩印路线只能持久化无覆膜', () => {
@@ -657,6 +735,94 @@ describe('calculateExternalSalesQuote', () => {
       expect(customResult.complete).toBe(true);
       expect(customResult.errors).toEqual([]);
       expect(customResult.suggestedSubtotal).toBe('450.00');
+    });
+
+    it('彩印正反面同色烫金也会命中反面烫金阻断规则', () => {
+      const colorBase = exactColorBase();
+      const foilColorBase: ExternalSalesPriceRule = {
+        ...colorBase,
+        triggerCondition: {
+          ...(colorBase.triggerCondition as Record<string, unknown>),
+          foilTechniques: ['FLAT'],
+          hasLocalFoil: true,
+        },
+      };
+      const backSideGuard = rule({
+        id: 'color-back-side-foil',
+        code: 'COLOR_BACK_SIDE_FOIL_MANUAL',
+        name: '彩印反面烫金',
+        kind: 'REFERENCE',
+        calculationType: null,
+        amount: null,
+        minQty: null,
+        maxQty: null,
+        productId: null,
+        blocksAutomaticQuote: true,
+        triggerCondition: {
+          pricingRoutes: ['COLOR_PRINT'],
+          isDoubleSided: true,
+        },
+      });
+      const twoSided = colorInput({
+        frontFoilColors: ['哑金'],
+        backFoilColors: ['哑金'],
+        foilColors: ['哑金'],
+        foilTechnique: 'FLAT',
+        hasLocalFoil: true,
+        isDoubleSided: true,
+      });
+
+      const withoutGuard = calculateExternalSalesQuote({
+        input: twoSided,
+        priceBook,
+        rules: [foilColorBase],
+      });
+      const guarded = calculateExternalSalesQuote({
+        input: twoSided,
+        priceBook,
+        rules: [foilColorBase, backSideGuard],
+      });
+
+      expect(withoutGuard.complete).toBe(true);
+      expect(guarded.complete).toBe(false);
+      expect(guarded.errors).toContain('需人工报价：彩印反面烫金');
+    });
+
+    it('专版双面烫金由当前价格版本阻断自动价', () => {
+      const doubleSidedGuard = rule({
+        id: 'custom-double-sided',
+        code: 'CUSTOM_DOUBLE_SIDED_MANUAL',
+        name: '专版双面烫金',
+        kind: 'REFERENCE',
+        calculationType: null,
+        amount: null,
+        minQty: null,
+        maxQty: null,
+        productId: null,
+        blocksAutomaticQuote: true,
+        note: '专版双面暂无自动价',
+        triggerCondition: {
+          pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+          isDoubleSided: true,
+        },
+      });
+      const result = calculateExternalSalesQuote({
+        input: input({
+          frontFoilColors: ['哑金'],
+          backFoilColors: ['红金'],
+          foilColors: ['哑金', '红金'],
+          isDoubleSided: true,
+          isDoubleColor: true,
+        }),
+        priceBook,
+        rules: [rule(), doubleSidedGuard],
+      });
+
+      expect(result.complete).toBe(false);
+      expect(result.suggestedSubtotal).toBeNull();
+      expect(result.errors).toContain(
+        '需人工报价：专版双面烫金（专版双面暂无自动价）',
+      );
     });
   });
 

@@ -234,7 +234,7 @@ describe('quoteExternalOrderChargesPreview', () => {
     );
   });
 
-  it('forces complete automatic shipping and carton fees', async () => {
+  it('keeps administrator-confirmed final amounts and their reason', async () => {
     const resolved = await resolveExternalOrderChargesForFinalization(
       dbMock as never,
       {
@@ -242,15 +242,14 @@ describe('quoteExternalOrderChargesPreview', () => {
         shipments: [
           {
             ...input.shipments[0]!,
-            shippingFee: '0.01',
+            shippingFee: '3.10',
             packingMaterialFee: '4.25',
-            overrideReason: '浏览器尝试覆盖自动费用',
+            overrideReason: '承运商与包材实际结算金额',
           },
         ],
       },
       'logistics-book-1',
       now,
-      { forceAutomaticAmounts: true },
     );
 
     const byCode = new Map(
@@ -258,15 +257,49 @@ describe('quoteExternalOrderChargesPreview', () => {
     );
     expect(byCode.get('SHIPPING_FEE')).toMatchObject({
       suggestedAmount: '2.80',
-      amount: '2.80',
-      overrideReason: null,
+      amount: '3.10',
+      overrideReason: '承运商与包材实际结算金额',
     });
     expect(byCode.get('PACKING_MATERIAL')).toMatchObject({
       suggestedAmount: '3.00',
-      amount: '3.00',
-      overrideReason: null,
+      amount: '4.25',
+      overrideReason: '承运商与包材实际结算金额',
     });
-    expect(resolved.totalAmount).toBe('5.80');
+    expect(resolved.totalAmount).toBe('7.35');
+  });
+
+  it('keeps an administrator note when the confirmed amount equals the suggestion', async () => {
+    const resolved = await resolveExternalOrderChargesForFinalization(
+      dbMock as never,
+      {
+        isSfCollect: false,
+        shipments: [
+          {
+            ...input.shipments[0]!,
+            shippingFee: '2.80',
+            packingMaterialFee: '3.00',
+            overrideReason: '已核对承运商与包材凭证',
+          },
+        ],
+      },
+      'logistics-book-1',
+      now,
+    );
+
+    expect(resolved.charges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          categoryCode: 'SHIPPING_FEE',
+          amount: '2.80',
+          overrideReason: '已核对承运商与包材凭证',
+        }),
+        expect.objectContaining({
+          categoryCode: 'PACKING_MATERIAL',
+          amount: '3.00',
+          overrideReason: '已核对承运商与包材凭证',
+        }),
+      ]),
+    );
   });
 
   it('fails closed when no active LOGISTICS book exists', async () => {

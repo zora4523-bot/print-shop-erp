@@ -412,6 +412,109 @@ describe('quoteOrderItems', () => {
     ).rejects.toThrow('必须包含“彩印”生产工艺');
   });
 
+  it('derives side facts before applying versioned manual-pricing guards', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([
+      {
+        id: 'product-1',
+        code: 'PRD-CUSTOM-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+      },
+    ]);
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      { id: 'craft-foil', code: 'FLAT_FOIL_DOUBLE' },
+    ]);
+    dbMock.material.findMany.mockResolvedValueOnce([
+      { name: '160g珠光艳闪' },
+    ]);
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([
+      {
+        id: 'custom-base',
+        code: 'CUSTOM_BASE_100',
+        name: '专版基础价',
+        kind: 'BASE',
+        calculationType: 'FIXED_AMOUNT',
+        amount: '100.0000',
+        minQty: 100,
+        maxQty: 100,
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+        },
+        exclusiveGroup: null,
+        priority: 100,
+        blocksAutomaticQuote: false,
+        sourceSheet: '烫金',
+        sourceRange: 'A1',
+        note: null,
+        productId: 'product-1',
+        category: { code: 'BASE_PROCESSING', name: '基础加工费' },
+      },
+      {
+        id: 'custom-double-sided-guard',
+        code: 'CUSTOM_DOUBLE_SIDED_MANUAL',
+        name: '专版双面烫金',
+        kind: 'REFERENCE',
+        calculationType: null,
+        amount: null,
+        minQty: null,
+        maxQty: null,
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+          isDoubleSided: true,
+        },
+        exclusiveGroup: null,
+        priority: 500,
+        blocksAutomaticQuote: true,
+        sourceSheet: '烫金',
+        sourceRange: 'A2',
+        note: '暂无自动价',
+        productId: null,
+        category: { code: 'REFERENCE', name: '人工参考' },
+      },
+    ]);
+
+    const [quote] = await quoteOrderItemsPreview(
+      [
+        {
+          ...item,
+          pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+          specification: '大号封90×165',
+          actualWidthMm: 90,
+          actualHeightMm: 165,
+          paperType: '160g珠光艳闪',
+          paperWeightGsm: 160,
+          frontFoilColors: ['哑金'],
+          backFoilColors: ['红金'],
+          foilColors: ['哑金', '红金'],
+          hasLocalFoil: false,
+          // Simulate a stale legacy client. The explicit side arrays above
+          // remain authoritative and must not be overridden by these flags.
+          isDoubleSided: false,
+          isDoubleColor: false,
+        },
+      ],
+      OrderSettlementType.EXTERNAL_SALES,
+      1,
+      new Date('2026-08-07T08:00:00.000Z'),
+    );
+
+    expect(quote).toMatchObject({
+      complete: false,
+      suggestedSubtotal: null,
+      snapshot: {
+        input: { isDoubleSided: true, isDoubleColor: true },
+      },
+    });
+    expect(quote?.errors).toContain(
+      '需人工报价：专版双面烫金（暂无自动价）',
+    );
+  });
+
   it('keeps ordinary previews closed to a deactivated craft', async () => {
     dbMock.craft.findMany.mockResolvedValueOnce([]);
 

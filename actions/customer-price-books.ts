@@ -7,6 +7,7 @@ import {
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
   OrderFoilTechnique,
+  OrderLamination,
   OrderPackagingMode,
   OrderProductStructure,
 } from '../generated/prisma/enums';
@@ -49,6 +50,7 @@ const VALIDATION_FIELD_LABELS: Readonly<Record<string, string>> = {
   pricingRoutes: '计价方式',
   productStructures: '产品结构',
   foilTechniques: '烫金方式',
+  laminations: '覆膜方式',
   craftMode: '多工艺条件',
   isActive: '启用状态',
   blocksAutomaticQuote: '自动计价设置',
@@ -161,6 +163,13 @@ const processingRuleMatchSchema = z
         }),
       )
       .max(20),
+    laminations: z
+      .array(
+        z.enum(OrderLamination, {
+          error: '请选择有效的覆膜方式',
+        }),
+      )
+      .max(20),
     specifications: matcherStringList,
     paperTypes: matcherStringList,
     craftCodes: matcherStringList,
@@ -226,6 +235,7 @@ const processingRuleMatchSchema = z
         match.pricingRoutes,
         match.productStructures,
         match.foilTechniques,
+        match.laminations,
         match.specifications,
         match.paperTypes,
         match.craftCodes,
