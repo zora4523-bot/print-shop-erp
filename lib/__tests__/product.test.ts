@@ -275,6 +275,7 @@ describe('listActiveProductOrderOptions', () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'p1',
+        code: 'HB001',
         name: '专版红包',
         category: ProductCategory.CUSTOM_FLAT_FOIL,
         specification: '中号',
@@ -288,6 +289,7 @@ describe('listActiveProductOrderOptions', () => {
       where: { isActive: true },
       select: {
         id: true,
+        code: true,
         name: true,
         category: true,
         specification: true,

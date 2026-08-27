@@ -445,8 +445,9 @@ function DesignFileBox({
           </div>
         </div>
       ) : (
-        <button
+        <Button
           type="button"
+          variant="outline"
           disabled={disabled}
           data-invalid={Boolean(error)}
           aria-label={
@@ -455,7 +456,7 @@ function DesignFileBox({
               : '拖放或选择 CDR 文件'
           }
           className={cn(
-            'flex min-h-[5.375rem] w-full cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed bg-card p-3.5 text-left outline-none transition-colors hover:border-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'flex min-h-[5.375rem] w-full cursor-pointer items-center justify-start gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-card p-3.5 text-left outline-none transition-colors hover:border-foreground hover:bg-card hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
             error && 'border-destructive bg-destructive/5',
           )}
           onClick={openFilePicker}
@@ -477,7 +478,7 @@ function DesignFileBox({
           <span className="shrink-0 rounded-md border bg-card px-2.5 py-1.5 text-[0.71875rem] font-bold">
             选择文件
           </span>
-        </button>
+        </Button>
       )}
       <FieldError>{error}</FieldError>
     </div>
@@ -991,13 +992,14 @@ export function ExternalSalesOrderFormB({
               <ul className="mt-2 space-y-0.5 text-xs font-semibold">
                 {fieldErrors.summary.map((message, index) => (
                   <li key={`${message}-${index}`}>
-                    <button
+                    <Button
                       type="button"
-                      className="h-auto! min-h-0! min-w-0! py-1 text-left underline underline-offset-2 hover:opacity-70"
+                      variant="link"
+                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
                       onClick={() => focusIssue(message)}
                     >
                       {message}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>

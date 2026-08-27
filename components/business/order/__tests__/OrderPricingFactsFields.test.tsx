@@ -13,6 +13,9 @@ vi.mock('@/actions/order-quote', () => ({ quoteOrderItemsAction: vi.fn() }));
 vi.mock('@/actions/order-logistics-quote', () => ({
   quoteExternalOrderChargesAction: vi.fn(),
 }));
+vi.mock('@/actions/order-packaging-quote', () => ({
+  quoteOrderPackagingGroupsAction: vi.fn(),
+}));
 vi.mock('../PendingDesignImages', () => ({
   PendingDesignImages: () => null,
 }));

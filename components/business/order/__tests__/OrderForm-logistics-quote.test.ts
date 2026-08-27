@@ -93,8 +93,8 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).toMatch(
       /type="submit"[\s\S]{0,180}disabled=\{[\s\S]{0,180}logisticsQuoting/,
     );
-    expect(source).toContain(
-      'if (createdDraft || quoting || logisticsQuoting) return;',
+    expect(source).toMatch(
+      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*logisticsQuoting\s*\|\|\s*packagingQuoting\s*\)\s*\{\s*return;\s*\}/,
     );
   });
 
