@@ -36,6 +36,7 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
         frontFoilColors: ['gold'],
         backFoilColors: [],
         hasLocalFoil: false,
+        crafts: [],
       },
     ],
     packagingGroups: [
@@ -47,12 +48,17 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
       },
     ],
     productionOperations: [],
+    productionProgressSteps: [],
     ...overrides,
   };
 }
 
-function transactionMock(order = orderFixture()) {
+function transactionMock(
+  order = orderFixture(),
+  crafts: Array<Record<string, unknown>> = [],
+) {
   let operationCounter = 0;
+  let progressCounter = 0;
   return {
     $executeRaw: vi.fn().mockResolvedValue(0),
     order: {
@@ -64,6 +70,12 @@ function transactionMock(order = orderFixture()) {
         id: `operation-${++operationCounter}`,
       })),
     },
+    productionProgressStep: {
+      create: vi.fn().mockImplementation(async () => ({
+        id: `progress-${++progressCounter}`,
+      })),
+    },
+    craft: { findMany: vi.fn().mockResolvedValue(crafts) },
     orderLog: { create: vi.fn().mockResolvedValue({ id: 'log-1' }) },
   };
 }
@@ -82,6 +94,8 @@ describe('activateProductionOperationsInTx', () => {
       orderStatus: OrderStatus.SCHEDULING,
       operationIds: ['operation-1', 'operation-2'],
       operationsCreated: 2,
+      progressStepIds: [],
+      progressStepsCreated: 0,
       idempotentReplay: false,
     });
     expect(tx.$executeRaw).toHaveBeenCalledOnce();
@@ -161,6 +175,7 @@ describe('activateProductionOperationsInTx', () => {
             ],
           },
         ],
+        productionProgressSteps: [],
       }),
     );
     await expect(
@@ -200,6 +215,7 @@ describe('activateProductionOperationsInTx', () => {
             ],
           },
         ],
+        productionProgressSteps: [],
       }),
     );
     await expect(
@@ -231,5 +247,104 @@ describe('activateProductionOperationsInTx', () => {
         AT,
       ),
     ).rejects.toMatchObject({ code });
+  });
+
+  it('物化活跃内制非计件工艺，跳过计件白名单与外协工艺', async () => {
+    const tx = transactionMock(
+      orderFixture({
+        items: [
+          {
+            id: 'item-1',
+            sequence: 1,
+            craft: OrderCraft.FULL,
+            quantity: 100,
+            frontFoilColors: ['gold'],
+            backFoilColors: [],
+            hasLocalFoil: false,
+            crafts: ['craft-full', 'craft-gluing', 'craft-uv'],
+          },
+        ],
+      }),
+      [
+        {
+          id: 'craft-full',
+          code: 'FLAT_FOIL_SINGLE',
+          name: '专版单色平烫',
+          isActive: true,
+          isOutsource: false,
+        },
+        {
+          id: 'craft-gluing',
+          code: 'GLUING',
+          name: '粘封',
+          isActive: true,
+          isOutsource: false,
+        },
+        {
+          id: 'craft-uv',
+          code: 'UV',
+          name: 'UV',
+          isActive: true,
+          isOutsource: true,
+        },
+      ],
+    );
+
+    await expect(
+      activateProductionOperationsInTx(
+        tx as never,
+        'order-1',
+        { id: 'admin-1' },
+        AT,
+      ),
+    ).resolves.toMatchObject({
+      progressStepIds: ['progress-1'],
+      progressStepsCreated: 1,
+    });
+    expect(tx.productionProgressStep.create).toHaveBeenCalledWith({
+      data: {
+        orderId: 'order-1',
+        orderItemId: 'item-1',
+        craftId: 'craft-gluing',
+        craftCode: 'GLUING',
+        craftName: '粘封',
+        status: ProductionOperationStatus.PENDING,
+        plannedQty: '100',
+      },
+      select: { id: true },
+    });
+  });
+
+  it('历史已停用工艺拒绝自动物化', async () => {
+    const tx = transactionMock(
+      orderFixture({
+        items: [
+          {
+            ...orderFixture().items[0],
+            crafts: ['craft-retired'],
+          },
+        ],
+      }),
+      [
+        {
+          id: 'craft-retired',
+          code: 'STOCK_FOIL',
+          name: '现货加烫',
+          isActive: false,
+          isOutsource: false,
+        },
+      ],
+    );
+
+    await expect(
+      activateProductionOperationsInTx(
+        tx as never,
+        'order-1',
+        { id: 'admin-1' },
+        AT,
+      ),
+    ).rejects.toMatchObject({ code: 'CRAFT_FACTS_INCOMPLETE' });
+    expect(tx.productionOperation.create).not.toHaveBeenCalled();
+    expect(tx.productionProgressStep.create).not.toHaveBeenCalled();
   });
 });

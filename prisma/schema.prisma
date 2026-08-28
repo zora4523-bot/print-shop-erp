@@ -115,6 +115,7 @@ model User {
   createdPricingRevisions   OrderPricingRevision[]      @relation("OrderPricingRevisionCreator")
   publishedPieceworkBooks   PieceworkPriceBook[]        @relation("PieceworkPriceBookPublisher")
   productionReports         ProductionReport[]          @relation("ProductionReportReporter")
+  productionProgressReports ProductionProgressReport[]  @relation("ProductionProgressReportReporter")
   pieceworkSettlements      PieceworkSettlement[]       @relation("PieceworkSettlementReporter")
 
   @@index([role])
@@ -379,25 +380,26 @@ model Order {
   createdAt               DateTime                    @default(now())
   updatedAt               DateTime                    @updatedAt
 
-  submitter             User                   @relation("OrderSubmitter", fields: [submitterId], references: [id])
-  createdBy             User                   @relation("OrderCreator", fields: [createdById], references: [id])
-  pricingConfirmedBy    User?                  @relation("OrderPricingConfirmer", fields: [pricingConfirmedById], references: [id], onDelete: Restrict)
-  customerParty         Party?                 @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
-  sourceOrder           Order?                 @relation("OrderReworkLineage", fields: [sourceOrderId], references: [id], onDelete: SetNull)
-  reworkOrders          Order[]                @relation("OrderReworkLineage")
-  items                 OrderItem[]
-  packagingGroups       OrderPackagingGroup[]
-  shipments             OrderShipment[]
-  outsourceOrders       OutsourceOrder[]
-  logs                  OrderLog[]
-  billItems             BillItem[]
-  changeRequests        OrderChangeRequest[]
-  costEntries           OrderCostEntry[]
-  customerCharges       OrderCustomerCharge[]
-  csSalesEntries        CsSalesEntry[]
-  pricingRevisions      OrderPricingRevision[] @relation("OrderPricingRevisions")
-  quotedPricingRevision OrderPricingRevision?  @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
-  productionOperations ProductionOperation[]
+  submitter               User                     @relation("OrderSubmitter", fields: [submitterId], references: [id])
+  createdBy               User                     @relation("OrderCreator", fields: [createdById], references: [id])
+  pricingConfirmedBy      User?                    @relation("OrderPricingConfirmer", fields: [pricingConfirmedById], references: [id], onDelete: Restrict)
+  customerParty           Party?                   @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
+  sourceOrder             Order?                   @relation("OrderReworkLineage", fields: [sourceOrderId], references: [id], onDelete: SetNull)
+  reworkOrders            Order[]                  @relation("OrderReworkLineage")
+  items                   OrderItem[]
+  packagingGroups         OrderPackagingGroup[]
+  shipments               OrderShipment[]
+  outsourceOrders         OutsourceOrder[]
+  logs                    OrderLog[]
+  billItems               BillItem[]
+  changeRequests          OrderChangeRequest[]
+  costEntries             OrderCostEntry[]
+  customerCharges         OrderCustomerCharge[]
+  csSalesEntries          CsSalesEntry[]
+  pricingRevisions        OrderPricingRevision[]   @relation("OrderPricingRevisions")
+  quotedPricingRevision   OrderPricingRevision?    @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
+  productionOperations    ProductionOperation[]
+  productionProgressSteps ProductionProgressStep[]
 
   @@index([submitterId])
   @@index([customerPartyId])
@@ -494,15 +496,16 @@ model OrderItem {
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
 
-  order               Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product             Product?                     @relation(fields: [productId], references: [id])
-  designs             OrderItemDesign[]
-  tasks               ProductionTask[]
-  shipmentLines       OrderShipmentLine[]
-  packagingGroupLines OrderPackagingGroupLine[]
-  outsourceSnapshots  OutsourceOrderItemSnapshot[]
-  plateDetails        OrderItemPlateDetail[]
-  operationSources    ProductionOperationSource[]
+  order                   Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product                 Product?                     @relation(fields: [productId], references: [id])
+  designs                 OrderItemDesign[]
+  tasks                   ProductionTask[]
+  shipmentLines           OrderShipmentLine[]
+  packagingGroupLines     OrderPackagingGroupLine[]
+  outsourceSnapshots      OutsourceOrderItemSnapshot[]
+  plateDetails            OrderItemPlateDetail[]
+  operationSources        ProductionOperationSource[]
+  productionProgressSteps ProductionProgressStep[]
 
   @@unique([orderId, sequence])
   @@unique([orderId, fig])
@@ -559,8 +562,8 @@ model OrderPackagingGroup {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
-  order Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  lines OrderPackagingGroupLine[]
+  order            Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lines            OrderPackagingGroupLine[]
   operationSources ProductionOperationSource[]
 
   @@unique([orderId, sequence])
@@ -923,7 +926,7 @@ model ProductionOperationSource {
   createdAt        DateTime                      @default(now()) @db.Timestamptz(3)
 
   operation      ProductionOperation  @relation(fields: [operationId], references: [id], onDelete: Restrict)
-  orderItem      OrderItem?            @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  orderItem      OrderItem?           @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   packagingGroup OrderPackagingGroup? @relation(fields: [packagingGroupId], references: [id], onDelete: Restrict)
 
   @@unique([operationId, orderItemId])
@@ -940,7 +943,7 @@ model ProductionReport {
   reporterId           String
   entryType            ProductionReportEntryType @default(REPORT)
   source               ProductionReportSource    @default(LIVE)
-  reversalOfId         String?                    @unique
+  reversalOfId         String?                   @unique
   reportedCompletedQty Decimal                   @db.Decimal(14, 3)
   defectQty            Decimal                   @default(0) @db.Decimal(14, 3)
   reworkQty            Decimal                   @default(0) @db.Decimal(14, 3)
@@ -956,16 +959,59 @@ model ProductionReport {
   reportedAt           DateTime                  @default(now()) @db.Timestamptz(3)
   createdAt            DateTime                  @default(now()) @db.Timestamptz(3)
 
-  operation ProductionOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
-  reporter  User                @relation("ProductionReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
-  priceBook PieceworkPriceBook  @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
-  reversalOf ProductionReport?  @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversedBy ProductionReport?  @relation("ProductionReportReversal")
+  operation      ProductionOperation      @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  reporter       User                     @relation("ProductionReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  priceBook      PieceworkPriceBook       @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+  reversalOf     ProductionReport?        @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     ProductionReport?        @relation("ProductionReportReversal")
   settlementItem PieceworkSettlementItem?
 
   @@index([operationId, reportedAt])
   @@index([reporterId, reportedAt])
   @@index([priceBookId])
+}
+
+// 三类计件工序之外的内制工艺只保留生产进度，不存人员/机型/
+// 工价。工艺编码和名称在投产时冻结，字典后续改名不改变历史。
+model ProductionProgressStep {
+  id          String                    @id @default(cuid())
+  orderId     String
+  orderItemId String
+  craftId     String
+  craftCode   String                    @db.VarChar(64)
+  craftName   String                    @db.VarChar(128)
+  status      ProductionOperationStatus @default(PENDING)
+  plannedQty  Decimal                   @db.Decimal(14, 3)
+  createdAt   DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime                  @updatedAt @db.Timestamptz(3)
+
+  order     Order                      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem OrderItem                  @relation(fields: [orderId, orderItemId], references: [orderId, id], onDelete: Restrict)
+  reports   ProductionProgressReport[]
+
+  @@unique([orderItemId, craftId])
+  @@index([orderId, status])
+  @@index([craftId, status])
+}
+
+// 无计件进度的每次扫码也是只追加事实。质量数量只记录，
+// 没有 rate / amount / priceBook 字段，因此不可能被计入工资。
+model ProductionProgressReport {
+  id             String   @id @default(cuid())
+  progressStepId String
+  reporterId     String
+  completedQty   Decimal  @db.Decimal(14, 3)
+  defectQty      Decimal  @default(0) @db.Decimal(14, 3)
+  reworkQty      Decimal  @default(0) @db.Decimal(14, 3)
+  idempotencyKey String   @unique @db.VarChar(128)
+  reportedAt     DateTime @default(now()) @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  progressStep ProductionProgressStep @relation(fields: [progressStepId], references: [id], onDelete: Restrict)
+  reporter     User                   @relation("ProductionProgressReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+
+  @@index([progressStepId, reportedAt])
+  @@index([reporterId, reportedAt])
 }
 
 // 新 ledger 拥有独立结算边界，不与 DailyWorkerSalaryItem 相加或共用键。

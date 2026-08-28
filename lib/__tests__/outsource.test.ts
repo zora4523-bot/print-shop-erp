@@ -12,6 +12,8 @@ const { dbMock } = vi.hoisted(() => {
     orderItem: { findMany: vi.fn() },
     craft: { findMany: vi.fn() },
     productionTask: { findMany: vi.fn() },
+    productionOperation: { findMany: vi.fn() },
+    productionProgressStep: { findMany: vi.fn() },
     orderLog: { create: vi.fn() },
     outsourceOrder: {
       findUnique: vi.fn(),
@@ -84,6 +86,8 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue([{ id: 'craft-uv', isOutsource: true }]);
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionOperation.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionProgressStep.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
   dbMock.outsourceOrder.findUnique.mockReset().mockResolvedValue(null);
   dbMock.outsourceOrder.findMany.mockReset();

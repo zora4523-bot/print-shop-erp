@@ -13,6 +13,10 @@ import {
   deriveProductionOperationPlan,
   type ProductionOperationSpec,
 } from './operation-materializer';
+import {
+  deriveProductionProgressPlan,
+  type ProductionProgressStepSpec,
+} from './progress-materializer';
 
 export class ProductionOperationMaterializationError extends Error {
   constructor(
@@ -22,6 +26,7 @@ export class ProductionOperationMaterializationError extends Error {
       | 'PRICING_NOT_CONFIRMED'
       | 'ORDER_STATUS_NOT_ACTIVATABLE'
       | 'CANONICAL_FACTS_INCOMPLETE'
+      | 'CRAFT_FACTS_INCOMPLETE'
       | 'EXISTING_OPERATION_MISMATCH',
     message: string,
     public readonly detail: unknown = null,
@@ -47,6 +52,7 @@ const ORDER_FACTS_SELECT = {
       frontFoilColors: true,
       backFoilColors: true,
       hasLocalFoil: true,
+      crafts: true,
     },
     orderBy: { sequence: 'asc' as const },
   },
@@ -77,6 +83,17 @@ const ORDER_FACTS_SELECT = {
           sourceQty: true,
         },
       },
+    },
+  },
+  productionProgressSteps: {
+    select: {
+      id: true,
+      orderItemId: true,
+      craftId: true,
+      craftCode: true,
+      craftName: true,
+      status: true,
+      plannedQty: true,
     },
   },
 } satisfies Prisma.OrderSelect;
@@ -119,6 +136,28 @@ function storedOperationSignature(
   ].join('|');
 }
 
+function progressSpecSignature(spec: ProductionProgressStepSpec): string {
+  return [
+    spec.orderItemId,
+    spec.craftId,
+    spec.craftCode,
+    spec.craftName,
+    spec.plannedQty,
+  ].join('|');
+}
+
+function storedProgressSignature(
+  step: MaterializationOrder['productionProgressSteps'][number],
+): string {
+  return [
+    step.orderItemId,
+    step.craftId,
+    step.craftCode,
+    step.craftName,
+    step.plannedQty.toString(),
+  ].join('|');
+}
+
 function assertExistingOperationsMatch(
   expected: readonly ProductionOperationSpec[],
   actual: MaterializationOrder['productionOperations'],
@@ -139,6 +178,26 @@ function assertExistingOperationsMatch(
   }
 }
 
+function assertExistingProgressMatches(
+  expected: readonly ProductionProgressStepSpec[],
+  actual: MaterializationOrder['productionProgressSteps'],
+): void {
+  const expectedSignatures = expected.map(progressSpecSignature).sort();
+  const actualSignatures = actual.map(storedProgressSignature).sort();
+  if (
+    expectedSignatures.length !== actualSignatures.length ||
+    expectedSignatures.some(
+      (signature, index) => signature !== actualSignatures[index],
+    )
+  ) {
+    throw new ProductionOperationMaterializationError(
+      'EXISTING_OPERATION_MISMATCH',
+      '已有无计件进度步骤与当前 canonical 工单事实不一致，拒绝补写或覆盖',
+      { expectedSignatures, actualSignatures },
+    );
+  }
+}
+
 function isConfirmedPricing(status: OrderPricingStatus): boolean {
   // LEGACY_CONFIRMED orders belong to the explicit legacy preflight path. This
   // activation API is deliberately incapable of silently converting them.
@@ -153,6 +212,8 @@ export type ActivateProductionOperationsResult = {
   orderStatus: OrderStatus;
   operationIds: string[];
   operationsCreated: number;
+  progressStepIds: string[];
+  progressStepsCreated: number;
   idempotentReplay: boolean;
 };
 
@@ -207,13 +268,48 @@ export async function activateProductionOperationsInTx(
     );
   }
 
-  if (order.productionOperations.length > 0) {
+  const craftIds = [...new Set(order.items.flatMap((item) => item.crafts))];
+  const craftFacts =
+    craftIds.length === 0
+      ? []
+      : await tx.craft.findMany({
+          where: { id: { in: craftIds } },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            isActive: true,
+            isOutsource: true,
+          },
+        });
+  const progressPlan = deriveProductionProgressPlan({
+    items: order.items,
+    crafts: craftFacts,
+  });
+  if (!progressPlan.ok) {
+    throw new ProductionOperationMaterializationError(
+      'CRAFT_FACTS_INCOMPLETE',
+      '工单工艺字典事实不完整，不能自动生成生产进度',
+      progressPlan.issues,
+    );
+  }
+
+  if (
+    order.productionOperations.length > 0 ||
+    order.productionProgressSteps.length > 0
+  ) {
     assertExistingOperationsMatch(plan.specs, order.productionOperations);
+    assertExistingProgressMatches(
+      progressPlan.specs,
+      order.productionProgressSteps,
+    );
     return {
       orderId,
       orderStatus: order.status,
       operationIds: order.productionOperations.map((operation) => operation.id),
       operationsCreated: 0,
+      progressStepIds: order.productionProgressSteps.map((step) => step.id),
+      progressStepsCreated: 0,
       idempotentReplay: true,
     };
   }
@@ -252,6 +348,23 @@ export async function activateProductionOperationsInTx(
     operationIds.push(created.id);
   }
 
+  const progressStepIds: string[] = [];
+  for (const spec of progressPlan.specs) {
+    const created = await tx.productionProgressStep.create({
+      data: {
+        orderId,
+        orderItemId: spec.orderItemId,
+        craftId: spec.craftId,
+        craftCode: spec.craftCode,
+        craftName: spec.craftName,
+        status: ProductionOperationStatus.PENDING,
+        plannedQty: spec.plannedQty,
+      },
+      select: { id: true },
+    });
+    progressStepIds.push(created.id);
+  }
+
   const activatedAt = at ?? (await databaseNow(tx));
   await tx.order.update({
     where: { id: orderId },
@@ -276,8 +389,18 @@ export async function activateProductionOperationsInTx(
             sourceCount: spec.sources.length,
           })),
         },
+        productionProgressSteps: {
+          before: 0,
+          after: progressPlan.specs.map((spec) => ({
+            orderItemId: spec.orderItemId,
+            craftId: spec.craftId,
+            craftCode: spec.craftCode,
+            plannedQty: spec.plannedQty,
+          })),
+        },
       },
-      remark: '价格确认后自动物化生产工序，未进行人员或机器匹配',
+      remark:
+        '价格确认后自动物化计件工序与无计件进度步骤，未进行人员或机器匹配',
     },
   });
 
@@ -286,6 +409,8 @@ export async function activateProductionOperationsInTx(
     orderStatus: OrderStatus.SCHEDULING,
     operationIds,
     operationsCreated: operationIds.length,
+    progressStepIds,
+    progressStepsCreated: progressStepIds.length,
     idempotentReplay: false,
   };
 }
