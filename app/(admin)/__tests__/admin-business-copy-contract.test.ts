@@ -75,11 +75,11 @@ describe('admin business copy contract', () => {
     expect(attendance).toContain('workerTypeLabel(selectedWorker.workerType)');
     expect(attendance).toContain('workerTypeLabel(w.workerType)');
     expect(attendance).not.toContain('?? w.workerType');
-    expect(workerTasks).toContain('machineTypeLabel(machine)');
-    expect(workerTasks).toContain('workerTypeLabel(task.workerType)');
-    expect(workerTasks).not.toContain('?? machine');
-    expect(workerTasks).not.toContain('?? task.workerType');
-    expect(workerTaskDetail).toContain('machineTypeLabel(task.machineType)');
-    expect(workerTaskDetail).not.toContain('?? task.machineType');
+    expect(workerTasks).toContain('OPERATION_LABELS[operation.operationType]');
+    expect(workerTasks).toContain('step.craftName');
+    expect(workerTasks).not.toContain('task.workerType');
+    expect(workerTasks).not.toContain('task.machineType');
+    expect(workerTaskDetail).toContain('此记录来自旧派工流程，仅供查阅');
+    expect(workerTaskDetail).not.toContain('task.machineType');
   });
 });

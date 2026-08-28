@@ -6,7 +6,7 @@ import { ClipboardList, ListTodo, WalletCards } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const WORKER_NAV_ITEMS = [
-  { href: '/worker/tasks', label: '生产工序', icon: ListTodo },
+  { href: '/worker/tasks', label: '我的任务', icon: ListTodo },
   { href: '/worker/orders', label: '我的工单', icon: ClipboardList },
   { href: '/worker/salary', label: '我的工资', icon: WalletCards },
 ] as const;
