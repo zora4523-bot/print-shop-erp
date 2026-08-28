@@ -16,6 +16,7 @@ const {
   quotePackagingSpy,
   quoteChargesSpy,
   resolveChargesSpy,
+  activateOperationsMock,
 } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
@@ -39,12 +40,16 @@ const {
     quotePackagingSpy: vi.fn(),
     quoteChargesSpy: vi.fn(),
     resolveChargesSpy: vi.fn(),
+    activateOperationsMock: vi.fn(),
   };
 });
 
 vi.mock("@/lib/db", () => ({ db: dbMock }));
 vi.mock("@/lib/order/pricing-revision", () => ({
   appendOrderPricingRevisionInTx: appendPricingRevisionMock,
+}));
+vi.mock("@/lib/production/operation-materialization-service", () => ({
+  activateProductionOperationsInTx: activateOperationsMock,
 }));
 // These mocks are deliberately present as tripwires. The review service must
 // neither import nor call any calculator after the snapshot-only cutover.
@@ -194,6 +199,7 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         priceOverrideReason: null,
       },
     ],
+    orderCharges: [],
     shipments: [
       {
         id: "shipment-1",
@@ -309,6 +315,7 @@ function command(
         reason: "工厂确认特殊混装",
       },
     ],
+    orderCharges: [],
     shipments: [
       {
         shipmentId: "shipment-1",
@@ -355,6 +362,13 @@ beforeEach(() => {
     priceRevision: 4,
     orderRevision: 9,
     snapshot: {},
+  });
+  activateOperationsMock.mockResolvedValue({
+    orderId: "order-1",
+    orderStatus: OrderStatus.SCHEDULING,
+    operationIds: ["operation-1"],
+    operationsCreated: 1,
+    idempotentReplay: false,
   });
 });
 
@@ -417,6 +431,7 @@ describe("snapshot-only order pricing review", () => {
         complete: false,
       }),
     ]);
+    expect(preview.orderCharges).toEqual([]);
     expect(preview.shipments[0]).toMatchObject({
       billableWeightKg: "2.000",
       itemQuantity: 1_100,
@@ -487,6 +502,130 @@ describe("snapshot-only order pricing review", () => {
     await expect(finalizeOrderPricing(command(), admin, now)).resolves.toMatchObject({
       confirmedFee: "155.00",
     });
+  });
+
+  it("confirms an order-level pending plate fee and activates operations in the same transaction", async () => {
+    const order = pricingOrder({ status: OrderStatus.SUBMITTED });
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      customerCharges: [
+        ...order.customerCharges,
+        {
+          id: "plate-pending",
+          shipmentId: null,
+          businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
+          description: "制版费",
+          quantity: null,
+          unit: null,
+          suggestedAmount: null,
+          amount: null,
+          pricingSnapshot: {
+            schemaVersion: 2,
+            status: "PENDING_AMOUNT",
+            pendingReasons: ["制版费待工厂确认"],
+            actual: {
+              amount: null,
+              provisional: true,
+              requiresAdminConfirmation: true,
+            },
+          },
+          overrideReason: null,
+          status: "PENDING_AMOUNT",
+          priceBookId: null,
+          sourceRuleId: null,
+          category: { code: "PLATE_MAKING_FEE", name: "制版费" },
+        },
+      ],
+    });
+
+    const preview = await previewOrderPricingReview("order-1", admin, now);
+    expect(preview.orderCharges).toEqual([
+      expect.objectContaining({
+        chargeId: "plate-pending",
+        businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
+        categoryCode: "PLATE_MAKING_FEE",
+        complete: false,
+      }),
+    ]);
+
+    const result = await finalizeOrderPricing(
+      command({
+        orderCharges: [
+          {
+            chargeId: "plate-pending",
+            expectedBusinessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
+            amount: "30.00",
+            reason: "工厂确认制版成本",
+          },
+        ],
+      }),
+      admin,
+      now,
+    );
+
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: "plate-pending" },
+      data: expect.objectContaining({
+        amount: "30.00",
+        status: "ESTIMATED",
+        overrideReason: "工厂确认制版成本",
+        pricingSnapshot: expect.objectContaining({
+          source: "ADMIN_SNAPSHOT_CONFIRMATION",
+          status: "ADMIN_CONFIRMED",
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(result.confirmedFee).toBe("185.00");
+    expect(activateOperationsMock).toHaveBeenCalledWith(
+      dbMock,
+      "order-1",
+      admin,
+      now,
+    );
+  });
+
+  it("fails closed when a pending order-level charge is omitted or its business key changed", async () => {
+    const order = pricingOrder();
+    const plate = {
+      ...order.customerCharges[2]!,
+      id: "plate-pending",
+      businessKey: "ORDER:PLATE_MAKING_FEE:PENDING",
+      description: "制版费",
+      amount: null,
+      overrideReason: null,
+      status: "PENDING_AMOUNT",
+      pricingSnapshot: {
+        status: "PENDING_AMOUNT",
+        actual: { amount: null, provisional: true },
+      },
+      category: { code: "PLATE_MAKING_FEE", name: "制版费" },
+    };
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      customerCharges: [...order.customerCharges, plate],
+    });
+
+    await expect(finalizeOrderPricing(command(), admin, now)).rejects.toThrow(
+      /完整确认每一项订单级待核价费用/,
+    );
+    await expect(
+      finalizeOrderPricing(
+        command({
+          orderCharges: [
+            {
+              chargeId: plate.id,
+              expectedBusinessKey: "ORDER:CHANGED",
+              amount: "0",
+              reason: "确认免收",
+            },
+          ],
+        }),
+        admin,
+        now,
+      ),
+    ).rejects.toThrow(/已变更/);
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
   });
 
   it.each(["preview", "finalize"])(

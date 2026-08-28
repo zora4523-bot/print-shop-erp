@@ -43,6 +43,11 @@ type PackagingGroupDraft = {
   reason: string;
 };
 
+type OrderChargeDraft = {
+  amount: string;
+  reason: string;
+};
+
 const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
   [OrderPackagingMode.SINGLE_STYLE]: "单款装",
   [OrderPackagingMode.MIXED_STYLE]: "混装",
@@ -84,6 +89,9 @@ export function OrderPricingReviewForm({ orderId }: Props) {
   >({});
   const [packagingGroupDrafts, setPackagingGroupDrafts] = useState<
     Record<string, PackagingGroupDraft>
+  >({});
+  const [orderChargeDrafts, setOrderChargeDrafts] = useState<
+    Record<string, OrderChargeDraft>
   >({});
   const [remark, setRemark] = useState("");
 
@@ -131,6 +139,19 @@ export function OrderPricingReviewForm({ orderId }: Props) {
           reason:
             packagingGroupDrafts[group.packagingGroupId]?.reason ??
             group.currentReason ??
+            "",
+        })),
+        orderCharges: preview.orderCharges.map((charge) => ({
+          chargeId: charge.chargeId,
+          expectedBusinessKey: charge.businessKey,
+          amount:
+            orderChargeDrafts[charge.chargeId]?.amount ??
+            charge.currentAmount ??
+            charge.suggestedAmount ??
+            "",
+          reason:
+            orderChargeDrafts[charge.chargeId]?.reason ??
+            charge.currentReason ??
             "",
         })),
         shipments: preview.shipments.map((shipment) => ({
@@ -181,6 +202,18 @@ export function OrderPricingReviewForm({ orderId }: Props) {
         )?.trim() &&
           (group.complete ||
             (draft?.reason ?? group.currentReason ?? "").trim()),
+      );
+    }) &&
+    preview.orderCharges.every((charge) => {
+      const draft = orderChargeDrafts[charge.chargeId];
+      return Boolean(
+        (
+          draft?.amount ??
+          charge.currentAmount ??
+          charge.suggestedAmount ??
+          ""
+        ).trim() &&
+          (draft?.reason ?? charge.currentReason ?? "").trim(),
       );
     }) &&
     preview.shipments.every((shipment) => {
@@ -493,6 +526,80 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                           />
                         </label>
                       ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ) : null}
+
+          {preview.orderCharges.length > 0 ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">订单级待核价费用</h3>
+                <Badge variant="destructive">
+                  {preview.orderCharges.length} 项待人工终价
+                </Badge>
+              </div>
+              <ol className="space-y-2">
+                {preview.orderCharges.map((charge) => {
+                  const defaultDraft: OrderChargeDraft = {
+                    amount:
+                      charge.currentAmount ?? charge.suggestedAmount ?? "",
+                    reason: charge.currentReason ?? "",
+                  };
+                  const draft =
+                    orderChargeDrafts[charge.chargeId] ?? defaultDraft;
+                  return (
+                    <li
+                      key={charge.chargeId}
+                      className="space-y-3 rounded-md border p-3 text-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="font-medium">{charge.description}</p>
+                        <Badge variant="destructive">待人工核价</Badge>
+                      </div>
+                      {charge.errors.length > 0 ? (
+                        <p className="text-xs text-destructive">
+                          {charge.errors.join("；")}
+                        </p>
+                      ) : null}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1 text-xs">
+                          <span>确认金额（元）</span>
+                          <Input
+                            required
+                            inputMode="decimal"
+                            value={draft.amount}
+                            onChange={(event) =>
+                              setOrderChargeDrafts((current) => ({
+                                ...current,
+                                [charge.chargeId]: {
+                                  ...(current[charge.chargeId] ?? defaultDraft),
+                                  amount: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span>定价依据</span>
+                          <Textarea
+                            required
+                            maxLength={500}
+                            value={draft.reason}
+                            onChange={(event) =>
+                              setOrderChargeDrafts((current) => ({
+                                ...current,
+                                [charge.chargeId]: {
+                                  ...(current[charge.chargeId] ?? defaultDraft),
+                                  reason: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
                     </li>
                   );
                 })}

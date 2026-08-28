@@ -13,6 +13,7 @@ import { db } from "../db";
 import { orderCascadeLockKey } from "./locks";
 import { ORDER_PRICING_STATUS } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
+import { activateProductionOperationsInTx } from "../production/operation-materialization-service";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
 const DECIMAL_12_2_MAX = new Decimal("9999999999.99");
@@ -44,6 +45,12 @@ export type FinalizeOrderPricingCommand = {
     expectedMode: OrderPackagingMode;
     expectedActualBagCount: number;
     unitPrice?: string | null;
+    reason?: string | null;
+  }>;
+  orderCharges: Array<{
+    chargeId: string;
+    expectedBusinessKey: string;
+    amount: string;
     reason?: string | null;
   }>;
   shipments: Array<{
@@ -113,6 +120,17 @@ export type OrderPricingReviewPreview = {
     currentSubtotal: string;
     suggestedUnitPrice: string | null;
     suggestedSubtotal: string | null;
+    currentReason: string | null;
+  }>;
+  orderCharges: Array<{
+    chargeId: string;
+    businessKey: string;
+    categoryCode: string;
+    description: string;
+    complete: false;
+    errors: string[];
+    suggestedAmount: string | null;
+    currentAmount: string | null;
     currentReason: string | null;
   }>;
   shipments: Array<{
@@ -684,6 +702,28 @@ export async function previewOrderPricingReview(
           currentReason: group.priceOverrideReason,
         };
       }),
+      orderCharges: order.customerCharges
+        .filter(
+          (charge) =>
+            charge.shipmentId === null && chargeRequiresManual(charge),
+        )
+        .map((charge) => {
+          const errors = snapshotErrors(charge.pricingSnapshot);
+          if (errors.length === 0) {
+            errors.push("该订单级收费快照标记为待人工核价");
+          }
+          return {
+            chargeId: charge.id,
+            businessKey: charge.businessKey,
+            categoryCode: charge.category.code,
+            description: charge.description,
+            complete: false as const,
+            errors,
+            suggestedAmount: money(charge.suggestedAmount),
+            currentAmount: money(charge.amount),
+            currentReason: charge.overrideReason,
+          };
+        }),
       shipments: order.shipments.map((shipment) => {
         const shipping = chargeByShipmentAndCode(
           order,
@@ -837,6 +877,31 @@ export async function finalizeOrderPricing(
       }
     }
 
+    const expectedOrderCharges = order.customerCharges.filter(
+      (charge) => charge.shipmentId === null && chargeRequiresManual(charge),
+    );
+    const submittedOrderCharges = validateUniqueIds(
+      input.orderCharges,
+      (charge) => charge.chargeId,
+      "同一订单级待核价费用不能重复提交",
+    );
+    if (
+      submittedOrderCharges.size !== expectedOrderCharges.length ||
+      expectedOrderCharges.some(
+        (charge) => !submittedOrderCharges.has(charge.id),
+      )
+    ) {
+      throw new OrderPricingReviewError("请完整确认每一项订单级待核价费用");
+    }
+    for (const charge of expectedOrderCharges) {
+      const submitted = submittedOrderCharges.get(charge.id)!;
+      if (submitted.expectedBusinessKey !== charge.businessKey) {
+        throw new OrderPricingReviewError(
+          `订单级收费“${charge.description}”已变更，请刷新后重新核价`,
+        );
+      }
+    }
+
     const manualItems = order.items.flatMap((item) => {
       if (!itemRequiresManual(item)) return [];
       const submitted = submittedItems.get(item.id);
@@ -909,6 +974,23 @@ export async function finalizeOrderPricing(
       }];
     });
 
+    const manualOrderCharges = expectedOrderCharges.map((charge) => {
+      const submitted = submittedOrderCharges.get(charge.id)!;
+      return {
+        charge,
+        amount: parseManualMoney(
+          submitted.amount,
+          `订单级收费“${charge.description}”`,
+          DECIMAL_12_2_MAX,
+          2,
+        ).toFixed(2),
+        reason: requiredReason(
+          submitted.reason,
+          `订单级收费“${charge.description}”需人工核价`,
+        ),
+      };
+    });
+
     type ManualCharge = {
       shipment: PricingShipment;
       code: ShipmentChargeCode;
@@ -962,9 +1044,14 @@ export async function finalizeOrderPricing(
       new Decimal(0),
     );
     const chargeAmountById = new Map(
-      manualCharges
-        .filter((charge) => charge.previous)
-        .map((charge) => [charge.previous!.id, charge.amount]),
+      [
+        ...manualCharges
+          .filter((charge) => charge.previous)
+          .map((charge) => [charge.previous!.id, charge.amount] as const),
+        ...manualOrderCharges.map(
+          ({ charge, amount }) => [charge.id, amount] as const,
+        ),
+      ],
     );
     const existingChargeTotal = order.customerCharges.reduce((sum, charge) => {
       const amount = chargeAmountById.get(charge.id) ?? money(charge.amount);
@@ -1026,6 +1113,33 @@ export async function finalizeOrderPricing(
             },
           }),
         },
+      });
+    }
+
+    for (const manual of manualOrderCharges) {
+      const isShipped = order.status === OrderStatus.SHIPPED;
+      await tx.orderCustomerCharge.update({
+        where: { id: manual.charge.id },
+        data: {
+          amount: manual.amount,
+          status: isShipped
+            ? OrderCustomerChargeStatus.FINAL
+            : OrderCustomerChargeStatus.ESTIMATED,
+          overrideReason: manual.reason,
+          pricingSnapshot: confirmedSnapshot({
+            previous: manual.charge.pricingSnapshot,
+            now,
+            actorId: actor.id,
+            previousPriceRevision: order.priceRevision,
+            actual: {
+              amount: manual.amount,
+              overrideReason: manual.reason,
+            },
+          }),
+          finalizedById: isShipped ? actor.id : null,
+          finalizedAt: isShipped ? now : null,
+        },
+        select: { id: true },
       });
     }
 
@@ -1152,13 +1266,22 @@ export async function finalizeOrderPricing(
         },
         manualItemIds: manualItems.map(({ item }) => item.id),
         manualPackagingGroupIds: manualGroups.map(({ group }) => group.id),
-        manualCustomerChargeKeys: manualCharges.map(({ shipment, code }) =>
-          shipmentChargeKey(shipment.sequence, code),
-        ),
+        manualCustomerChargeKeys: [
+          ...manualOrderCharges.map(({ charge }) => charge.businessKey),
+          ...manualCharges.map(({ shipment, code }) =>
+            shipmentChargeKey(shipment.sequence, code),
+          ),
+        ],
         packagingAmount,
         customerChargeAmount: customerChargeTotal.toFixed(2),
       },
     });
+    if (
+      order.status === OrderStatus.PENDING_FACTORY ||
+      order.status === OrderStatus.SUBMITTED
+    ) {
+      await activateProductionOperationsInTx(tx, order.id, actor, now);
+    }
     await tx.orderLog.create({
       data: {
         orderId: order.id,

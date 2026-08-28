@@ -124,6 +124,19 @@ function preview(): OrderPricingReviewPreview {
         currentReason: '管理员按混装工艺确认',
       },
     ],
+    orderCharges: [
+      {
+        chargeId: 'plate-pending',
+        businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+        categoryCode: 'PLATE_MAKING_FEE',
+        description: '制版费',
+        complete: false,
+        errors: ['制版费待工厂确认'],
+        suggestedAmount: null,
+        currentAmount: '30.00',
+        currentReason: '工厂确认制版成本',
+      },
+    ],
     shipments: [],
   };
 }
@@ -171,6 +184,14 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
             reason: '管理员按混装工艺确认',
           },
         ],
+        orderCharges: [
+          {
+            chargeId: 'plate-pending',
+            expectedBusinessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+            amount: '30.00',
+            reason: '工厂确认制版成本',
+          },
+        ],
       }),
     );
   });
@@ -182,6 +203,8 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     expect(html).toContain('仅核对工单已保存的报价快照');
     expect(html).toContain('已锁定快照价');
     expect(html).toContain('建单转人工原因：客户自带纸，建单时转人工');
+    expect(html).toContain('订单级待核价费用');
+    expect(html).toContain('制版费待工厂确认');
     expect(html).not.toContain('按最新价格');
     expect(html).not.toContain('最新规则自动价');
   });

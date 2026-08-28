@@ -2682,8 +2682,8 @@ export type PreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
 >;
 
-// 外部销售终价只接收管理员的确认值；价目簿 id、建议价和小计
-// 一律由领域层按最新有效版本重算，不信任浏览器快照。
+// 工厂终价只接收管理员对待定行的确认值；价目簿 id、自动价和小计
+// 一律读取工单已经锁定的快照，不信任浏览器金额或当前价表。
 const orderPricingRevisionField = z.preprocess(
   (value) => {
     if (typeof value === 'number') return value;
@@ -2750,6 +2750,21 @@ export const finalizeOrderPricingSchema = z
       )
       .max(20, '单工单包装组不超过 20 组')
       .default([]),
+    orderCharges: z
+      .array(
+        z.object({
+          chargeId: orderChangeId,
+          expectedBusinessKey: z
+            .string()
+            .trim()
+            .min(1, '订单级收费业务键不能为空')
+            .max(128, '订单级收费业务键过长'),
+          amount: confirmedShipmentChargeMoneyField,
+          reason: optionalTrimmedText('订单级收费定价依据', 500),
+        }),
+      )
+      .max(50, '单工单订单级待核价费用不超过 50 项')
+      .default([]),
     shipments: z
       .array(
         z.object({
@@ -2787,6 +2802,18 @@ export const finalizeOrderPricingSchema = z
         });
       }
       shipmentIds.add(shipment.shipmentId);
+    });
+
+    const orderChargeIds = new Set<string>();
+    input.orderCharges.forEach((charge, index) => {
+      if (orderChargeIds.has(charge.chargeId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['orderCharges', index, 'chargeId'],
+          message: '同一订单级待核价费用不能重复提交',
+        });
+      }
+      orderChargeIds.add(charge.chargeId);
     });
 
     const packagingGroupIds = new Set<string>();
