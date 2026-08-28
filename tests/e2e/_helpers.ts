@@ -1702,7 +1702,8 @@ export async function fillExternalSalesOrderDraft(
 // it verifies the prerequisite and seeds only e2e-* order/operation facts.
 // A successful report is append-only by database contract, so the fixture is
 // one deterministic order with a very large plan. Re-runs reuse it and append
-// another small report instead of leaking one order per run.
+// another small report instead of leaking one order per run. It is forbidden
+// outside the explicitly isolated E2E database selected by playwright.config.
 
 const E2E_PRODUCTION_ORDER_ID = 'e2e-production-order-main';
 const E2E_PRODUCTION_ORDER_NO = 'E2E-PRODUCTION-MAIN';
@@ -1730,6 +1731,25 @@ export type E2eProductionOperationCleanupResult = {
   deleted: boolean;
   immutableReportCount: number;
 };
+
+export function productionOperationE2eIsolationFailure(): string | null {
+  const requestedDatabaseUrl = process.env.E2E_DATABASE_URL?.trim();
+  if (!requestedDatabaseUrl) {
+    return 'ProductionOperation E2E skipped: set an isolated E2E_DATABASE_URL before creating append-only report facts.';
+  }
+  if (
+    process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1' ||
+    process.env.DATABASE_URL?.trim() !== requestedDatabaseUrl
+  ) {
+    if (process.env.E2E_APPEND_ONLY_DATABASE_REASON === 'INVALID') {
+      return 'ProductionOperation E2E skipped: E2E_DATABASE_URL is not a valid PostgreSQL database URL.';
+    }
+    return process.env.E2E_APPEND_ONLY_DATABASE_REASON === 'SAME_AS_DEFAULT'
+      ? 'ProductionOperation E2E skipped: E2E_DATABASE_URL points at the normal application database.'
+      : 'ProductionOperation E2E skipped: the isolated E2E database was not activated by Playwright config.';
+  }
+  return null;
+}
 
 type E2eProductionFixtureRow = {
   orderId: string;
@@ -1862,6 +1882,10 @@ async function readE2eProductionFixture(
 }
 
 export async function seedE2eProductionOperationFixture(): Promise<E2eProductionOperationSeedResult> {
+  const isolationFailure = productionOperationE2eIsolationFailure();
+  if (isolationFailure) {
+    return { ready: false, reason: isolationFailure };
+  }
   return withDb(async (db) => {
     const activeBooks = await db.query<{
       priceBookId: string;

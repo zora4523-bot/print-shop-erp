@@ -6,6 +6,7 @@ import {
   E2E_USERS,
   expectNoNextErrorOverlay,
   login,
+  productionOperationE2eIsolationFailure,
   seedE2eProductionOperationFixture,
 } from './_helpers';
 
@@ -16,6 +17,12 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
     page,
   }) => {
     test.setTimeout(120_000);
+
+    const isolationFailure = productionOperationE2eIsolationFailure();
+    if (isolationFailure) {
+      test.skip(true, isolationFailure);
+      return;
+    }
 
     const seeded = await seedE2eProductionOperationFixture();
     if (!seeded.ready) {
