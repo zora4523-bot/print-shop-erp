@@ -183,6 +183,27 @@ describe('calculateOrderCostBreakdown', () => {
     expect(result.totalCost.toFixed(2)).toBe('0.00');
   });
 
+  it('uses the operation-report generation exclusively and includes PACKING', () => {
+    const result = calculateOrderCostBreakdown({
+      productionOperations: [
+        { reports: [{ amount: '12.00' }, { amount: '-2.00' }] },
+        { reports: [{ amount: '0.50' }] },
+      ],
+      // Transitional legacy evidence may coexist, but must never be added.
+      items: [{ tasks: [{ pieceworkAmount: '99.00' }] }],
+      outsourceOrders: [],
+      costEntries: [
+        { category: OrderCostCategory.PIECEWORK, amount: '88.00' },
+      ],
+      reworkOrders: [],
+    });
+
+    expect(result.piecework.toFixed(2)).toBe('10.50');
+    expect(result.pieceworkSource).toBe('automatic');
+    expect(result.manual.toFixed(2)).toBe('0.00');
+    expect(result.totalCost.toFixed(2)).toBe('10.50');
+  });
+
   it('falls back to a legacy outsource row until an automatic amount is posted', () => {
     const withoutPostedAmount = calculateOrderCostBreakdown({
       items: [],
