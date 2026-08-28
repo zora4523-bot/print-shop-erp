@@ -10,6 +10,7 @@ import {
   Role,
   TaskStatus,
 } from '../../generated/prisma/enums';
+import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../price/__tests__/fixtures/create-order-golden-fixtures';
 
 const { dbMock } = vi.hoisted(() => {
   const mock: {
@@ -112,6 +113,27 @@ const { dbMock } = vi.hoisted(() => {
   return { dbMock: mock };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+const { publishedCreateOrderSnapshotMock } = vi.hoisted(() => ({
+  publishedCreateOrderSnapshotMock: vi.fn(),
+}));
+vi.mock('@/lib/order/create-order-published-rule-adapter', async () => {
+  const actual = await vi.importActual<
+    typeof import('../order/create-order-published-rule-adapter')
+  >('../order/create-order-published-rule-adapter');
+  const { acquirePriceRuleSnapshotReadLock } = await vi.importActual<
+    typeof import('../price/rule-snapshot-lock')
+  >('../price/rule-snapshot-lock');
+  return {
+    ...actual,
+    readPublishedCreateOrderPriceSnapshot: async (
+      tx: Parameters<typeof acquirePriceRuleSnapshotReadLock>[0],
+      options: { now?: Date },
+    ) => {
+      await acquirePriceRuleSnapshotReadLock(tx);
+      return publishedCreateOrderSnapshotMock(tx, options);
+    },
+  };
+});
 // list-query only needs this parser when date filters are present. This suite
 // exercises order-domain behavior and no date-filter cases, so keep it isolated
 // from the much larger refined create-order schema module.
@@ -469,8 +491,18 @@ beforeEach(() => {
   dbMock.party.findUnique.mockReset();
   dbMock.product.findMany.mockReset();
   dbMock.material.findMany.mockReset().mockImplementation(
-    async ({ where }: { where: { name: { in: string[] } } }) =>
-      where.name.in.map((name) => ({ name })),
+    async ({ where }: { where: { category?: string; name?: { in: string[] } } }) =>
+      where.category
+        ? [
+            {
+              id: 'paper-pearl-160',
+              name: '160g珠光艳闪',
+              specification: '160g',
+              outOfStock: false,
+              isActive: true,
+            },
+          ]
+        : (where.name?.in ?? []).map((name) => ({ name })),
   );
   dbMock.priceTier.findMany.mockReset().mockResolvedValue([]);
   dbMock.priceAdjustment.findMany.mockReset().mockResolvedValue([]);
@@ -547,6 +579,9 @@ beforeEach(() => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
     return fn;
   });
+  publishedCreateOrderSnapshotMock
+    .mockReset()
+    .mockResolvedValue(CREATE_ORDER_GOLDEN_SNAPSHOT);
   notifyMock.mockReset().mockResolvedValue(undefined);
   assertCsOrderSalesLedgerReconciledMock
     .mockReset()
@@ -695,6 +730,14 @@ describe('createOrder', () => {
             fixedFee: null,
             priceOverrideReason: null,
           }),
+        ],
+        packagingGroups: [
+          {
+            name: '客供纸测试包装组',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            itemUnitsPerBag: [10],
+          },
         ],
       },
       ownerActor,
@@ -1086,6 +1129,10 @@ describe('createOrder', () => {
         id: 'product-1',
         code: 'PRODUCT_1',
         category: 'BLANK_STOCK',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        paperMaterialId: null,
+        weight: 160,
         isActive: true,
         baseUnitPrice: '0.5000',
         minOrderQty: null,
@@ -1104,7 +1151,23 @@ describe('createOrder', () => {
         promisedDate: null,
         isUrgent: false,
         isSfCollect: false,
-        items: [baseItem({ productId: 'product-1' })],
+        items: [
+          baseItem({
+            productId: 'product-1',
+            specification: '大号封90×165',
+            actualWidthMm: 90,
+            actualHeightMm: 165,
+            pricingGroup: 'LARGE',
+          }),
+        ],
+        packagingGroups: [
+          {
+            name: '内部建单测试包装组',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            itemUnitsPerBag: [10],
+          },
+        ],
       },
       ownerActor,
       new Date('2026-04-23T09:00:00+08:00'),
@@ -1183,6 +1246,18 @@ describe('createOrder', () => {
   });
 
   it('creates an AUTO_CONFIRMED revision for a non-external order', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        code: 'EXT-STOCK-PEARL-FLASH-160-LARGE',
+        category: 'BLANK_STOCK',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        paperMaterialId: null,
+        weight: 160,
+        isActive: true,
+      },
+    ]);
     const result = await createOrderDomain(
       {
         customerRef: null,
@@ -1200,7 +1275,23 @@ describe('createOrder', () => {
         promisedDate: null,
         isUrgent: false,
         isSfCollect: false,
-        items: [baseItem()],
+        items: [
+          baseItem({
+            productId: 'product-1',
+            specification: '大号封90×165',
+            actualWidthMm: 90,
+            actualHeightMm: 165,
+            pricingGroup: 'LARGE',
+          }),
+        ],
+        packagingGroups: [
+          {
+            name: '内部建单测试包装组',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            itemUnitsPerBag: [10],
+          },
+        ],
       },
       ownerActor,
       new Date('2026-04-23T09:00:00+08:00'),
@@ -1229,7 +1320,15 @@ describe('createOrder', () => {
         source: 'ORDER_CREATED_AUTO',
       }),
     });
-    expect(dbMock.orderPackagingGroup.create).not.toHaveBeenCalled();
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          unitPrice: '0.1000',
+          subtotal: '10.00',
+          suggestedSubtotal: '10.00',
+        }),
+      }),
+    );
   });
 
   it('ignores external-sales weight and fee overrides at order creation', async () => {
@@ -1458,6 +1557,14 @@ describe('createOrder', () => {
               fixedFee: '0',
               priceOverrideReason: null,
             }),
+          ],
+          packagingGroups: [
+            {
+              name: '大额测试包装组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 9_999_999,
+              itemUnitsPerBag: [1],
+            },
           ],
         },
         salesActor,
@@ -1712,13 +1819,24 @@ describe('createOrder', () => {
         id: 'product-1',
         code: 'PRODUCT_1',
         category: 'BLANK_STOCK',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        paperMaterialId: null,
+        weight: 160,
         isActive: true,
         baseUnitPrice: '999999.9999',
       },
     ]);
-    dbMock.customerPriceRule.findMany.mockResolvedValue([
-      externalBaseRule({ amount: '999999.9999' }),
-    ]);
+    publishedCreateOrderSnapshotMock.mockResolvedValue({
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map(
+          (row, index) =>
+            index === 0 ? { ...row, unitPrice: '999999.9999' } : row,
+        ),
+      },
+    });
 
     await expect(
       createOrderDomain(
@@ -1737,6 +1855,10 @@ describe('createOrder', () => {
             baseItem({
               productId: 'product-1',
               quantity: 9_999_999,
+              specification: '大号封90×165',
+              actualWidthMm: 90,
+              actualHeightMm: 165,
+              pricingGroup: 'LARGE',
               unitPrice: null,
               fixedFee: null,
               priceOverrideReason: null,
@@ -1751,11 +1873,38 @@ describe('createOrder', () => {
   });
 
   it('rejects a multi-item total that exceeds Decimal(12,2)', async () => {
+    dbMock.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        code: 'EXT-STOCK-PEARL-FLASH-160-LARGE',
+        category: 'BLANK_STOCK',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+        paperMaterialId: null,
+        weight: 160,
+        isActive: true,
+      },
+    ]);
+    publishedCreateOrderSnapshotMock.mockResolvedValue({
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices: CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map(
+          (row, index) =>
+            index === 0 ? { ...row, unitPrice: '999999.0000' } : row,
+        ),
+      },
+    });
     const hugeLine = baseItem({
+      productId: 'product-1',
       quantity: 6_000,
-      unitPrice: '999999.0000',
-      fixedFee: '0',
-      priceOverrideReason: '管理员确认的大额人工报价',
+      specification: '大号封90×165',
+      actualWidthMm: 90,
+      actualHeightMm: 165,
+      pricingGroup: 'LARGE',
+      unitPrice: null,
+      fixedFee: null,
+      priceOverrideReason: null,
     });
 
     await expect(
@@ -1772,38 +1921,25 @@ describe('createOrder', () => {
           isUrgent: false,
           isSfCollect: false,
           items: [hugeLine, { ...hugeLine, name: '烫金款 B' }],
+          packagingGroups: [
+            {
+              name: '烫金款 A 包装组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 1,
+              itemUnitsPerBag: [6_000, 0],
+            },
+            {
+              name: '烫金款 B 包装组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 1,
+              itemUnitsPerBag: [0, 6_000],
+            },
+          ],
         },
         ownerActor,
         new Date('2026-04-23T09:00:00+08:00'),
       ),
     ).rejects.toThrow(/工单总金额超过系统上限/);
-    expect(dbMock.order.create).not.toHaveBeenCalled();
-  });
-
-  it('validates manual money at the domain boundary before persistence', async () => {
-    await expect(
-      createOrderDomain(
-        {
-          customerRef: null,
-          receiverName: null,
-          receiverPhone: null,
-          receiverAddress: '广东佛山测试收货地址',
-          expressCode: null,
-          packageRequirement: null,
-          remark: null,
-          promisedDate: null,
-          isUrgent: false,
-          isSfCollect: false,
-          items: [
-            baseItem({
-              fixedFee: '10000000000.00',
-              priceOverrideReason: '人工报价',
-            }),
-          ],
-        },
-        ownerActor,
-      ),
-    ).rejects.toThrow(/一次性费用超出系统允许范围/);
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 

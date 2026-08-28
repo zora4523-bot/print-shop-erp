@@ -198,7 +198,7 @@ function quotePartialProcessing(
       amount: null,
       unitPrice: null,
       manualReasons: [],
-      errors: ['局部烫金金额超过可保存上限'],
+      errors: ['局部烫金建议金额超过系统上限，无法保存'],
     };
   }
   return {
