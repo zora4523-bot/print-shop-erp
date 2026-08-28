@@ -124,6 +124,12 @@ vi.mock('@/lib/production/operation-order-view', () => ({
 }));
 vi.mock('@/lib/order/rework', () => ({
   getReworkCraftOptions: reworkCraftOptionsMock,
+  reworkItemRequiresUnitsPerBagInput: (
+    membershipCount: number,
+    pack: number | null | undefined,
+  ) =>
+    membershipCount === 0 &&
+    (!Number.isSafeInteger(pack) || (pack ?? 0) <= 0),
 }));
 vi.mock('@/lib/oss/read-url', () => ({
   signDesignReadUrl: vi.fn((value: string) => value),
