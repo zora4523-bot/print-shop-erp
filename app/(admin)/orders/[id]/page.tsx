@@ -87,6 +87,7 @@ import { ORDER_PRICING_ROUTE_LABELS } from '@/lib/order/pricing-route';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
+import { selectOrderCustomerFee } from '@/lib/order/customer-fee';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
 import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
 import {
@@ -136,6 +137,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
   );
   if (!order) notFound();
   const canViewCommercialAmounts = user.role !== Role.WORKER;
+  const displayedCustomerFee =
+    canViewCommercialAmounts && 'totalAmount' in order
+      ? selectOrderCustomerFee(order)
+      : null;
   const canCreateRework =
     user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
@@ -180,6 +185,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const isChargeableOrder =
+    'settlementType' in order &&
+    order.settlementType !== OrderSettlementType.NO_CHARGE;
   const pricingStatus: string | null =
     canViewCommercialAmounts && 'pricingStatus' in order
       ? String(order.pricingStatus)
@@ -217,7 +225,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
   const canAdminReviewPricing =
     user.role === Role.ADMIN &&
-    isExternalSalesOrder &&
+    isChargeableOrder &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
   const isFinalizedExternalShipment =
@@ -509,7 +517,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         }
       >
 
-      {isExternalSalesOrder && pricingStatus ? (
+      {isChargeableOrder && pricingStatus ? (
         <section
           className={
             isPricingPending
@@ -519,7 +527,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="text-base font-semibold">对客价格状态</h2>
+              <h2 className="text-base font-semibold">工单价格状态</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
                   ? '价格待管理员确认，确认前不可排产。'
@@ -560,7 +568,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canAdminReviewPricing && priceRevision !== null ? (
+      {canAdminReviewPricing && isExternalSalesOrder && priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
           priceRevision={priceRevision}
@@ -680,7 +688,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     ? '对客应收总额（不含快递费，含耗材费）'
                     : '对客应收总额'
                 }
-                value={String(order.totalAmount)}
+                value={displayedCustomerFee?.amount ?? String(order.totalAmount)}
                 tabular
               />
             </>

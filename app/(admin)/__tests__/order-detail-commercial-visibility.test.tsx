@@ -109,7 +109,7 @@ vi.mock('@/components/business/order/OrderChangeReviewForm', () => ({
   OrderChangeReviewForm: () => null,
 }));
 vi.mock('@/components/business/order/OrderPricingReviewForm', () => ({
-  OrderPricingReviewForm: () => null,
+  OrderPricingReviewForm: () => <div>factory-pricing-review</div>,
 }));
 vi.mock('@/components/business/order/OrderCommercialDetailsManager', () => ({
   OrderCommercialDetailsManager: () => null,
@@ -158,6 +158,52 @@ beforeEach(() => {
 });
 
 describe('order detail commercial visibility', () => {
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])('管理员可为收费结算路径 %s 进入工厂核价', async (settlementType) => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: OrderStatus.IN_PRODUCTION,
+      settlementType,
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 2,
+      pricingRevisions: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('工单价格状态');
+    expect(html).toContain('factory-pricing-review');
+  });
+
+  it('免费工单不显示工厂核价入口', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: OrderStatus.IN_PRODUCTION,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 2,
+      pricingRevisions: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).not.toContain('factory-pricing-review');
+    expect(html).not.toContain('工单价格状态');
+  });
+
   it('does not render customer charges, overrides, or internal costs for WORKER', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'worker-1', role: Role.WORKER },

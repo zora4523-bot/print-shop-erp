@@ -68,6 +68,7 @@ export type FinalizeOrderPricingMutationResult =
       packagingAmount: string;
       processingAmount: string;
       totalAmount: string;
+      confirmedFee: string;
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

@@ -1433,6 +1433,7 @@ describe('order pricing review actions', () => {
       packagingAmount: '40.00',
       processingAmount: '590.00',
       totalAmount: '645.00',
+      confirmedFee: '645.00',
     });
 
     const result = await finalizeOrderPricingAction(null, {
@@ -1483,6 +1484,7 @@ describe('order pricing review actions', () => {
       packagingAmount: '40.00',
       processingAmount: '590.00',
       totalAmount: '645.00',
+      confirmedFee: '645.00',
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');

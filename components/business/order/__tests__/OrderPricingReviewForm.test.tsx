@@ -166,6 +166,7 @@ describe('OrderPricingReviewForm packaging pricing contract', () => {
       packagingAmount: '20.00',
       processingAmount: '150.00',
       totalAmount: '185.00',
+      confirmedFee: '185.00',
     };
 
     const html = render();

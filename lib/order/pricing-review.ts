@@ -152,6 +152,9 @@ type PricingOrder = {
   processingAmount: MoneyLike;
   packagingAmount: MoneyLike;
   totalAmount: MoneyLike;
+  quotedFee: MoneyLike | null;
+  confirmedFee: MoneyLike | null;
+  settledFee: MoneyLike | null;
   items: Array<{
     id: string;
     sequence: number;
@@ -236,6 +239,9 @@ const pricingOrderSelect = {
   processingAmount: true,
   packagingAmount: true,
   totalAmount: true,
+  quotedFee: true,
+  confirmedFee: true,
+  settledFee: true,
   items: {
     orderBy: { sequence: "asc" },
     select: {
@@ -323,21 +329,21 @@ const pricingOrderSelect = {
 function assertAdmin(actor: { id: string; role: Role }): void {
   if (actor.role !== Role.ADMIN) {
     throw new OrderPricingReviewError(
-      "只有管理员可以确认或重算外部销售工单价格",
+      "只有管理员可以确认工单终价",
     );
   }
 }
 
 function assertReviewable(order: PricingOrder): void {
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
-    throw new OrderPricingReviewError("只有外部销售工单需要进行对客价格终审");
+  if (order.settlementType === OrderSettlementType.NO_CHARGE) {
+    throw new OrderPricingReviewError("免费工单不进入工厂核价流程");
   }
   if (
     order.status === OrderStatus.FINISHED ||
     order.status === OrderStatus.CANCELLED
   ) {
     throw new OrderPricingReviewError(
-      "工单已完成结算或已取消，不能再重算对客价格",
+      "工单已完成结算或已取消，不能再重算或确认终价",
     );
   }
 }
@@ -673,6 +679,7 @@ export async function finalizeOrderPricing(
   packagingAmount: string;
   processingAmount: string;
   totalAmount: string;
+  confirmedFee: string;
   processingPriceBookVersion: number;
   logisticsPriceBookVersion: number;
 }> {
@@ -1135,6 +1142,7 @@ export async function finalizeOrderPricing(
         packagingAmount,
         processingAmount,
         totalAmount,
+        confirmedFee: totalAmount,
       },
       select: { id: true },
     });
@@ -1199,6 +1207,10 @@ export async function finalizeOrderPricing(
             before: money(order.totalAmount),
             after: totalAmount,
           },
+          confirmedFee: {
+            before: money(order.confirmedFee),
+            after: totalAmount,
+          },
           priceBooks: {
             before: null,
             after: {
@@ -1224,6 +1236,7 @@ export async function finalizeOrderPricing(
       packagingAmount,
       processingAmount,
       totalAmount,
+      confirmedFee: totalAmount,
       processingPriceBookVersion: processingPriceBook.version,
       logisticsPriceBookVersion: logistics.priceBook.version,
     };

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OrderPackagingMode,
+  OrderSettlementType,
   OrderStatus,
   Role,
 } from "../../../generated/prisma/enums";
@@ -97,6 +98,9 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
     processingAmount: "130.00",
     packagingAmount: "0.00",
     totalAmount: "145.00",
+    quotedFee: null,
+    confirmedFee: null,
+    settledFee: null,
     items: [
       {
         id: "item-auto",
@@ -441,6 +445,29 @@ describe("order pricing review", () => {
       previewOrderPricingReview("order-1", sales, now),
     ).rejects.toThrow(/只有管理员/);
     expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    OrderSettlementType.EXTERNAL_SALES,
+    OrderSettlementType.INTERNAL_SALES,
+    OrderSettlementType.FACTORY_DIRECT,
+  ])("allows factory confirmation for chargeable %s orders", async (settlementType) => {
+    dbMock.order.findUnique.mockResolvedValue(pricingOrder({ settlementType }));
+
+    await expect(
+      previewOrderPricingReview("order-1", admin, now),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+  });
+
+  it("keeps free orders out of the factory confirmation flow", async () => {
+    dbMock.order.findUnique.mockResolvedValue(
+      pricingOrder({ settlementType: OrderSettlementType.NO_CHARGE }),
+    );
+
+    await expect(
+      previewOrderPricingReview("order-1", admin, now),
+    ).rejects.toThrow(/免费工单/);
+    expect(quoteOrderItemsMock).not.toHaveBeenCalled();
   });
 
   it("enables inactive catalog facts only for the authorized historical preview", async () => {
@@ -893,6 +920,7 @@ describe("order pricing review", () => {
     expect(dbMock.order.update).toHaveBeenCalledWith({
       where: { id: "order-1" },
       data: {
+        confirmedFee: "154.30",
         packagingAmount: "0.00",
         processingAmount: "135.00",
         totalAmount: "154.30",
@@ -919,6 +947,7 @@ describe("order pricing review", () => {
       packagingAmount: "0.00",
       processingAmount: "135.00",
       totalAmount: "154.30",
+      confirmedFee: "154.30",
       processingPriceBookVersion: 3,
       logisticsPriceBookVersion: 2,
     });
