@@ -188,7 +188,7 @@ export function SalaryRuleSettingsForm({
           </Button>
         </fieldset>
       ) : null}
-      {selectedKey === 'PACKER_HOURLY' || selectedKey === 'CLEANER_HOURLY' || selectedKey === 'COOK_SPARE_HOURLY' ? (
+      {selectedKey === 'CLEANER_HOURLY' || selectedKey === 'COOK_SPARE_HOURLY' ? (
         <Field label="时薪（元/小时）">
           <Input name="hourlyRate" inputMode="decimal" defaultValue={defaults.hourlyRate} required disabled={pending} />
         </Field>

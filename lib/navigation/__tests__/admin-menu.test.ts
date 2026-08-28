@@ -51,11 +51,11 @@ describe('getAdminMenuItems', () => {
       '产品结构',
       '工艺参数',
       '内部计价',
-      '师傅计件',
       '工资提成',
       '账单',
       '薪资总览',
-      '计件工资',
+      '工序计件结算',
+      '历史日薪档案',
       '客服周期',
       '时薪工月结',
       '客户/供应商',
@@ -189,11 +189,6 @@ describe('getAdminMenuItems', () => {
         requiredPermission: 'dict:price:manage',
       },
       {
-        label: '师傅计件',
-        href: '/owner/rules/worker-piecework',
-        requiredPermission: 'salary:rule:manage',
-      },
-      {
         label: '工资提成',
         href: '/owner/rules/employee-pay',
         requiredPermission: 'salary:rule:manage',
@@ -294,11 +289,6 @@ describe('getAdminMenuItems', () => {
         '/owner/rules/internal-pricing/tiers/new',
         '',
         '/owner/rules/internal-pricing',
-      ],
-      [
-        '/owner/rules/worker-piecework',
-        '',
-        '/owner/rules/worker-piecework',
       ],
       [
         '/owner/rules/employee-pay',

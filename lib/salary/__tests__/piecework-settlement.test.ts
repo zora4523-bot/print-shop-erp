@@ -10,6 +10,8 @@ const { dbMock, databaseNowMock } = vi.hoisted(() => ({
   dbMock: {
     pieceworkSettlement: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -28,6 +30,9 @@ vi.mock('@/lib/background-jobs/clock', () => ({
 
 import {
   aggregatePieceworkSettlementReports,
+  getPieceworkSettlementDay,
+  getPieceworkSettlementDetail,
+  listWorkerPieceworkSettlements,
   lockPieceworkSettlement,
   markPieceworkSettlementPaid,
   PieceworkSettlementError,
@@ -136,6 +141,67 @@ describe('aggregatePieceworkSettlementReports', () => {
         report('same', '1.00', 'FULL'),
       ]),
     ).toThrow(PieceworkSettlementError);
+  });
+});
+
+describe('piecework settlement read models', () => {
+  it('keeps unlocked candidates separate from finance-of-record settlements', async () => {
+    dbMock.pieceworkSettlement.findMany.mockResolvedValue([
+      {
+        ...settlementRow(),
+        lockedAt: NOW,
+        paidAt: null,
+        reporter: { displayName: '张师傅', username: 'zhang' },
+      },
+    ]);
+    dbMock.productionReport.findMany.mockResolvedValue([
+      {
+        id: 'report-1',
+        reporterId: 'worker-2',
+        amount: new Decimal('2.50'),
+        reporter: { displayName: '李师傅', username: 'li' },
+        operation: { orderId: 'order-1', operationType: 'PACKING' },
+      },
+      {
+        id: 'report-2',
+        reporterId: 'worker-2',
+        amount: new Decimal('1.50'),
+        reporter: { displayName: '李师傅', username: 'li' },
+        operation: { orderId: 'order-1', operationType: 'PACKING' },
+      },
+    ]);
+
+    const result = await getPieceworkSettlementDay({
+      workDate: '2026-08-27',
+    });
+
+    expect(result.settlements).toHaveLength(1);
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        reporterId: 'worker-2',
+        reportAmount: '4.00',
+        reportCount: 2,
+        orderCount: 1,
+        operationCounts: { PACKING: 2 },
+      }),
+    ]);
+  });
+
+  it('scopes worker list and detail reads by reporter id', async () => {
+    dbMock.pieceworkSettlement.findMany.mockResolvedValue([]);
+    dbMock.pieceworkSettlement.findFirst.mockResolvedValue(null);
+
+    await listWorkerPieceworkSettlements({ reporterId: 'worker-1' });
+    await getPieceworkSettlementDetail('settlement-1', 'worker-1');
+
+    expect(dbMock.pieceworkSettlement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { reporterId: 'worker-1' } }),
+    );
+    expect(dbMock.pieceworkSettlement.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'settlement-1', reporterId: 'worker-1' },
+      }),
+    );
   });
 });
 

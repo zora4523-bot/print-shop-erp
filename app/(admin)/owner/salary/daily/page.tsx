@@ -1,70 +1,40 @@
 import Decimal from 'decimal.js';
-import { Calculator, Download, FileText, Settings } from 'lucide-react';
+import Link from 'next/link';
+import { Archive, Calculator, Download, FileText } from 'lucide-react';
+import { MachineType } from '@/generated/prisma/enums';
+import { requirePermission } from '@/lib/auth/permissions';
+import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { parseStrictYmd } from '@/lib/auth/schemas';
+import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
+import { formatMoney } from '@/lib/dashboard/format';
+import { formatDateShanghai } from '@/lib/format/dates';
 import {
   listDailyWorkerSalaries,
   listMachineWorkersForSalary,
 } from '@/lib/salary/daily';
-import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { MachineType } from '@/generated/prisma/enums';
-import { parseStrictYmd } from '@/lib/auth/schemas';
+import { getAttendanceSummaries } from '@/lib/attendance';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import Link from 'next/link';
-import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
-import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
-import { formatDateShanghai } from '@/lib/format/dates';
-import { requirePermission } from '@/lib/auth/permissions';
-import {
-  EmptyState,
-  PageHeader,
-  StatCard as UiStatCard,
-} from '@/components/ui-business';
-import { getAttendanceSummaries } from '@/lib/attendance';
-import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
-import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
+import { EmptyState, PageHeader, StatCard } from '@/components/ui-business';
 
-import { formatMoney } from '@/lib/dashboard/format';
-export const metadata = { title: '计件工资' };
+export const metadata = { title: '历史日薪档案' };
 
-// URL filters travel as plain query params. `date` defaults to today's
-// Shanghai calendar date; `paid` accepts "paid" | "unpaid" | anything
-// else (show all).
 type PageProps = {
   searchParams: Promise<{
     date?: string;
     paid?: string;
     workerId?: string;
-    marked?: string;
-    markedPaid?: string;
   }>;
 };
 
 export default async function DailySalaryPage({ searchParams }: PageProps) {
-  // Page-level server-side authz (defense-in-depth: layout gate
-  // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('salary:view:all');
   const sp = await searchParams;
-  // Strict calendar validation on the filter path: `?date=2026-02-31`
-  // must not silently normalize to March 3 .
-  // Fall back to today when the query is malformed.
   const selectedDate =
     sp.date && parseStrictYmd(sp.date) ? sp.date : todayShanghai();
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
-
-  // 标记已发/撤销后 action 会 redirect 回这个 URL 并附上确认信息。
-  // 只保留筛选参数，不要把上一次的 marked 带进去，否则确认条会一直挂着。
-  const filterQuery = new URLSearchParams();
-  if (sp.date) filterQuery.set('date', sp.date);
-  if (sp.paid) filterQuery.set('paid', sp.paid);
-  if (sp.workerId) filterQuery.set('workerId', sp.workerId);
-  const returnTo = filterQuery.size
-    ? `/owner/salary/daily?${filterQuery.toString()}`
-    : '/owner/salary/daily';
-  const markedName = sp.marked?.trim();
-  const markedPaid = sp.markedPaid === '1';
-
   const [rows, workers] = await Promise.all([
     listDailyWorkerSalaries({
       date: selectedDate,
@@ -80,81 +50,63 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
     rows.map((row) => row.workerId),
     { start: attendanceStart, end: attendanceEnd },
   );
-
-  // Aggregate in Decimal — rows are Prisma Decimal, and JS float
-  // addition can drift by cents when summing 50+ rows.
   const totalActual = rows
     .reduce(
-      (acc, r) => acc.plus(new Decimal(r.actualSalary as unknown as string)),
+      (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
       new Decimal(0),
     )
     .toFixed(2);
   const unpaidActual = rows
-    .filter((r) => !r.isPaid)
+    .filter((row) => !row.isPaid)
     .reduce(
-      (acc, r) => acc.plus(new Decimal(r.actualSalary as unknown as string)),
+      (sum, row) => sum.plus(new Decimal(row.actualSalary as Decimal.Value)),
       new Decimal(0),
     )
     .toFixed(2);
 
   return (
     <div className="space-y-6">
-      {/* 发钱操作的回执。「仅未发」筛选下被标记的那一行会立刻从列表消失，
-          此前用户点完什么反馈都没有——这是最需要确认的一步。 */}
-      {markedName ? (
-        <p
-          role="status"
-          className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success-foreground"
-        >
-          已{markedPaid ? '标记' : '撤销'}
-          <strong className="mx-1">{markedName}</strong>
-          的日薪{markedPaid ? '为已发放' : '发放'}。
-          <Link href={returnTo} className="ml-2 underline underline-offset-2">
-            关闭
-          </Link>
-        </p>
-      ) : null}
       <PageHeader
-        title="计件工资"
-        subtitle="按上海日历天汇总已完工任务；显示计件、保底、调整和实发金额。"
+        title="历史开机师傅日薪档案"
+        subtitle="只读展示切换前 DailyWorkerSalary 与任务快照；不重算、不修改、不与新工序结算叠加。"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link
-              href={RULE_CENTER_HREFS.workerPiecework}
+              href="/owner/salary/piecework"
               className={buttonVariants({ variant: 'outline' })}
             >
-              <Settings className="mr-2 size-4" />
-              计件规则
+              <Archive className="mr-2 size-4" />
+              新工序计件
             </Link>
             <Link
               href={`/api/salary/piecework/export?date=${selectedDate}${sp.workerId ? `&workerId=${encodeURIComponent(sp.workerId)}` : ''}`}
               className={buttonVariants({ variant: 'outline' })}
             >
               <Download className="mr-2 size-4" />
-              导出 Excel
+              导出历史快照
             </Link>
           </div>
         }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <UiStatCard
-          label="记录数"
-          value={rows.length.toString()}
+        <StatCard
+          label="历史记录"
+          value={`${rows.length} 条`}
           icon={FileText}
-          tone="info"
+          tone="neutral"
         />
-        <UiStatCard
-          label="当日实发合计"
+        <StatCard
+          label="快照实发合计"
           value={`¥ ${totalActual}`}
           icon={Calculator}
-          tone="primary"
+          tone="neutral"
         />
-        <UiStatCard
-          label="未发合计"
+        <StatCard
+          label="历史未发合计"
           value={`¥ ${unpaidActual}`}
           icon={Calculator}
-          tone="warning"
+          tone="neutral"
         />
       </div>
 
@@ -163,21 +115,19 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
         paid={sp.paid}
         workerId={sp.workerId}
         workers={workers}
-        recomputeDate={selectedDate}
-        recomputeMaxDate={todayShanghai()}
       />
 
       {rows.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title={`${selectedDate} 暂无日薪记录`}
-          description="先点击上方&ldquo;重算该日全员日薪&rdquo;生成数据。"
+          title={`${selectedDate} 暂无历史日薪快照`}
+          description="该页不再生成或重算日薪。"
         />
       ) : (
         <div
           className="overflow-x-auto rounded-xl border bg-card shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           role="region"
-          aria-label="日薪记录列表"
+          aria-label="历史日薪记录"
           tabIndex={0}
         >
           <table className="w-full min-w-[960px] text-sm">
@@ -185,7 +135,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">日期</th>
                 <th className="px-4 py-2 text-left">师傅</th>
-                <th className="px-4 py-2 text-left">保底机型</th>
+                <th className="px-4 py-2 text-left">快照机型</th>
                 <th className="px-4 py-2 text-right">计件合计</th>
                 <th className="px-4 py-2 text-right">保底</th>
                 <th className="px-4 py-2 text-right">调整</th>
@@ -193,68 +143,59 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                 <th className="px-4 py-2 text-center">任务 / 工单</th>
                 <th className="px-4 py-2 text-center">上班 / 请假</th>
                 <th className="px-4 py-2 text-center">状态</th>
-                <th className="px-4 py-2"></th>
+                <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y">
-              {rows.map((r) => (
-                <tr key={r.id}>
+              {rows.map((row) => (
+                <tr key={row.id}>
                   <td className="px-4 py-3 font-sans tabular-nums text-xs">
-                    {formatDateShanghai(r.date)}
+                    {formatDateShanghai(row.date)}
                   </td>
-                  <td className="px-4 py-3">{r.worker.displayName}</td>
+                  <td className="px-4 py-3">{row.worker.displayName}</td>
                   <td className="px-4 py-3 text-xs">
-                    {MACHINE_TYPE_LABELS[r.machineType as MachineType] ??
+                    {MACHINE_TYPE_LABELS[row.machineType as MachineType] ??
                       '未识别机型'}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    {String(r.totalPieceworkAmount)}
+                    {String(row.totalPieceworkAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums text-xs text-muted-foreground">
-                    {String(r.baseSalary)}
+                    {String(row.baseSalary)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
-                    {Number(r.adjustmentAmount) > 0 ? '+' : ''}
-                    {String(r.adjustmentAmount)}
+                    {Number(row.adjustmentAmount) > 0 ? '+' : ''}
+                    {String(row.adjustmentAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                    {formatMoney(r.actualSalary)}
+                    {formatMoney(row.actualSalary)}
                   </td>
-                  <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
-                    {r.taskCount} / {r.orderCount}
+                  <td className="px-4 py-3 text-center font-sans tabular-nums text-xs">
+                    {row.taskCount} / {row.orderCount}
                   </td>
-                  <td className="px-4 py-3 text-center text-xs font-sans tabular-nums">
-                    {attendanceSummaries.get(r.workerId)?.workUnits ?? '0'} /{' '}
-                    {attendanceSummaries.get(r.workerId)?.leaveUnits ?? '0'} 天
+                  <td className="px-4 py-3 text-center font-sans tabular-nums text-xs">
+                    {attendanceSummaries.get(row.workerId)?.workUnits ?? '0'} /{' '}
+                    {attendanceSummaries.get(row.workerId)?.leaveUnits ?? '0'} 天
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
-                      <PaymentStatusBadge isPaid={r.isPaid} />
+                      <PaymentStatusBadge isPaid={row.isPaid} />
                       {salaryFloorBadge(
-                        new Decimal(
-                          r.totalPieceworkAmount as unknown as string,
-                        ),
-                        new Decimal(r.baseSalary as unknown as string),
+                        new Decimal(row.totalPieceworkAmount as Decimal.Value),
+                        new Decimal(row.baseSalary as Decimal.Value),
                       )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Link
-                        href={`/owner/salary/daily/${r.id}`}
-                        className={buttonVariants({ size: 'sm', variant: 'outline' })}
-                      >
-                        核对明细
-                      </Link>
-                      <MarkPaidForm
-                        id={r.id}
-                        currentPaid={r.isPaid}
-                        workerName={r.worker.displayName}
-                        salaryDate={formatDateShanghai(r.date)}
-                        amount={String(r.actualSalary)}
-                        returnTo={returnTo}
-                      />
-                    </div>
+                    <Link
+                      href={`/owner/salary/daily/${row.id}`}
+                      className={buttonVariants({
+                        size: 'sm',
+                        variant: 'outline',
+                      })}
+                    >
+                      核对快照
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -267,12 +208,8 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
 }
 
 function salaryFloorBadge(piecework: Decimal, base: Decimal) {
-  if (piecework.gt(base)) {
-    return <Badge variant="secondary">计件高于保底</Badge>;
-  }
-  if (piecework.eq(base)) {
-    return <Badge variant="outline">计件等于保底</Badge>;
-  }
+  if (piecework.gt(base)) return <Badge variant="secondary">计件高于保底</Badge>;
+  if (piecework.eq(base)) return <Badge variant="outline">计件等于保底</Badge>;
   return <Badge variant="outline">按保底补足</Badge>;
 }
 
@@ -281,36 +218,26 @@ function FilterBar({
   paid,
   workerId,
   workers,
-  recomputeDate,
-  recomputeMaxDate,
 }: {
   selectedDate: string;
-  paid: string | undefined;
-  workerId: string | undefined;
+  paid?: string;
+  workerId?: string;
   workers: Array<{ id: string; displayName: string; username: string }>;
-  recomputeDate: string;
-  recomputeMaxDate: string;
 }) {
-  // Plain GET form — the searchParams round-trip is server-rendered
-  // so filtering doesn't need any client JS. No form action attribute
-  // means "submit to the same URL", exactly what we want.
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm lg:flex-row lg:items-end">
-    <form className="flex min-w-0 flex-wrap items-end gap-3">
-      <div className="flex flex-col">
-        <label htmlFor="daily-date" className="text-xs text-muted-foreground">日期</label>
+    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+      <label className="space-y-1">
+        <span className="block text-xs text-muted-foreground">日期</span>
         <input
-          id="daily-date"
           type="date"
           name="date"
           defaultValue={selectedDate}
           className="rounded-md border bg-background px-3 py-1 text-sm"
         />
-      </div>
-      <div className="flex flex-col">
-        <label htmlFor="daily-paid" className="text-xs text-muted-foreground">状态</label>
+      </label>
+      <label className="space-y-1">
+        <span className="block text-xs text-muted-foreground">历史发放状态</span>
         <select
-          id="daily-paid"
           name="paid"
           defaultValue={paid ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -319,11 +246,10 @@ function FilterBar({
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
         </select>
-      </div>
-      <div className="flex flex-col">
-        <label htmlFor="daily-workerId" className="text-xs text-muted-foreground">师傅</label>
+      </label>
+      <label className="space-y-1">
+        <span className="block text-xs text-muted-foreground">师傅</span>
         <select
-          id="daily-workerId"
           name="workerId"
           defaultValue={workerId ?? ''}
           className="rounded-md border bg-background px-3 py-1 text-sm"
@@ -335,7 +261,7 @@ function FilterBar({
             </option>
           ))}
         </select>
-      </div>
+      </label>
       <Button type="submit" size="sm">
         筛选
       </Button>
@@ -346,15 +272,5 @@ function FilterBar({
         清除
       </Link>
     </form>
-      <div className="min-w-0 border-t pt-3 lg:ml-auto lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-        <p className="mb-1 text-xs font-medium text-destructive">
-          L3 · 重算会覆盖该日未发放记录
-        </p>
-        <RecomputeDailyForm
-          defaultDate={recomputeDate}
-          maxDate={recomputeMaxDate}
-        />
-      </div>
-    </div>
   );
 }

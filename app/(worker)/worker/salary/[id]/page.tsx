@@ -5,12 +5,16 @@ import { cache } from 'react';
 import {
   Role,
   SalaryAdjustmentType,
+  PieceworkOperationType,
+  ProductionReportEntryType,
+  PieceworkSettlementStatus,
   WorkerType,
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getSession } from '@/lib/auth/session';
 import {
   getWorkerHourlyPayrollDetail,
+  getWorkerPieceworkSettlementDetail,
   getWorkerSalaryDetail,
 } from '@/lib/worker-portal';
 import {
@@ -44,6 +48,15 @@ const getWorkerHourlySalaryPageData = cache(
     }),
 );
 
+const getWorkerOperationSettlementPageData = cache(
+  (id: string, actorId: string, actorRole: Role, workerType: WorkerType) =>
+    getWorkerPieceworkSettlementDetail(id, {
+      id: actorId,
+      role: actorRole,
+      workerType,
+    }),
+);
+
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   BONUS: '奖金',
   DEDUCTION: '扣款',
@@ -58,6 +71,22 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 
   const { id } = await params;
+  if (
+    user.workerType === WorkerType.MACHINE ||
+    user.workerType === WorkerType.PACKER
+  ) {
+    const settlement = await getWorkerOperationSettlementPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
+    if (settlement) {
+      return {
+        title: `${formatDateShanghai(settlement.workDate)} · 我的工序计件`,
+      };
+    }
+  }
   if (user.workerType === WorkerType.MACHINE) {
     const salary = await getWorkerPieceworkSalaryPageData(
       id,
@@ -87,6 +116,21 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   const user = await requirePermission('salary:view:self');
   if (user.role !== Role.WORKER || !user.workerType) notFound();
   const { id } = await params;
+
+  if (
+    user.workerType === WorkerType.MACHINE ||
+    user.workerType === WorkerType.PACKER
+  ) {
+    const settlement = await getWorkerOperationSettlementPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
+    if (settlement) {
+      return <OperationSettlementDetail settlement={settlement} />;
+    }
+  }
 
   if (user.workerType !== WorkerType.MACHINE) {
     const payroll = await getWorkerHourlySalaryPageData(
@@ -224,6 +268,101 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           ) : null}
         </ul>
       </section>
+    </div>
+  );
+}
+
+type OperationSettlementDetailData = NonNullable<
+  Awaited<ReturnType<typeof getWorkerPieceworkSettlementDetail>>
+>;
+
+const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  PARTIAL: '局部烫金',
+  FULL: '专版烫金',
+  PACKING: '打包入袋',
+};
+
+function OperationSettlementDetail({
+  settlement,
+}: {
+  settlement: OperationSettlementDetailData;
+}) {
+  return (
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
+            {formatDateShanghai(settlement.workDate)} 工序计件明细
+          </h1>
+          <PaymentStatusBadge
+            isPaid={settlement.status === PieceworkSettlementStatus.PAID}
+          />
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          金额来自报工时已锁定的工价版本，本页不重算。
+        </p>
+        {settlement.paidAt ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            发放时间：{formatDateTimeShanghai(settlement.paidAt)}
+          </p>
+        ) : null}
+      </header>
+
+      <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
+        <Money label="报工金额" value={settlement.reportAmount} />
+        <Money label="调整" value={settlement.adjustmentAmount} />
+        <Money label="应发工资" value={settlement.payableAmount} strong />
+        <Metric label="报工明细" value={`${settlement.items.length} 条`} />
+      </section>
+
+      <section className="rounded-xl border bg-card p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">工序报工（{settlement.items.length}）</h2>
+        <ul className="mt-2 divide-y">
+          {settlement.items.map(({ report }) => (
+            <li key={report.id} className="py-3 text-sm">
+              <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/worker/orders/${report.operation.order.id}`}
+                    className="worker-wrap-anywhere inline-flex min-h-11 min-w-11 items-center font-sans tabular-nums text-foreground underline decoration-primary"
+                  >
+                    {report.operation.order.orderNo}
+                  </Link>
+                  <p className="worker-wrap-anywhere mt-1">
+                    {OPERATION_LABELS[report.operation.operationType]}
+                    {report.entryType === ProductionReportEntryType.REVERSAL
+                      ? ' · 冲正'
+                      : ''}
+                  </p>
+                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    合格 {String(report.reportedCompletedQty)} · 缺陷{' '}
+                    {String(report.defectQty)} · 返工 {String(report.reworkQty)}
+                  </p>
+                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    计薪 {String(report.chargeableQty)} {report.unit} × ¥{' '}
+                    {String(report.rate)} · 工价 v{report.priceBookVersion}
+                  </p>
+                </div>
+                <div className="ml-auto shrink-0 text-right">
+                  <p className="font-sans tabular-nums font-medium">
+                    {formatMoney(report.amount)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTimeShanghai(report.reportedAt)}
+                  </p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <Link
+        href="/worker/salary"
+        className="inline-flex min-h-11 items-center text-sm underline decoration-primary"
+      >
+        返回我的工资
+      </Link>
     </div>
   );
 }

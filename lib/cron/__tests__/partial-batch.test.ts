@@ -2,17 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   generateBillsMock,
-  computeDailyMock,
+  lockPieceworkMock,
+  readPieceworkDayMock,
   computeHourlyMock,
   settleReadyCsMock,
   dispatchMock,
-  checkpointMock,
-  rosterMock,
-  prepareDailySummaryMock,
   MockBillGenerationUnexpectedError,
-  MockDailyBatchUnexpectedError,
   MockHourlyBatchUnexpectedError,
-  MockCsBatchUnexpectedError,
 } = vi.hoisted(() => {
   class PartialResultError extends Error {
     readonly partialResult: unknown;
@@ -26,31 +22,19 @@ const {
 
   return {
     generateBillsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-    computeDailyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+    lockPieceworkMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+    readPieceworkDayMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     computeHourlyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     dispatchMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
-    checkpointMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-    rosterMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-    prepareDailySummaryMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
     MockBillGenerationUnexpectedError: class extends PartialResultError {
       constructor(partialResult: unknown) {
         super('BillGenerationUnexpectedError', partialResult);
       }
     },
-    MockDailyBatchUnexpectedError: class extends PartialResultError {
-      constructor(partialResult: unknown) {
-        super('DailyBatchUnexpectedError', partialResult);
-      }
-    },
     MockHourlyBatchUnexpectedError: class extends PartialResultError {
       constructor(partialResult: unknown) {
         super('HourlyBatchUnexpectedError', partialResult);
-      }
-    },
-    MockCsBatchUnexpectedError: class extends PartialResultError {
-      constructor(partialResult: unknown) {
-        super('CsBatchUnexpectedError', partialResult);
       }
     },
   };
@@ -60,9 +44,9 @@ vi.mock('@/lib/bill', () => ({
   generateBillsForPeriod: generateBillsMock,
   BillGenerationUnexpectedError: MockBillGenerationUnexpectedError,
 }));
-vi.mock('@/lib/salary/daily', () => ({
-  computeDailyForAllMachineWorkers: computeDailyMock,
-  DailyBatchUnexpectedError: MockDailyBatchUnexpectedError,
+vi.mock('@/lib/salary/piecework-settlement', () => ({
+  lockPieceworkSettlementsForDate: lockPieceworkMock,
+  getPieceworkSettlementDay: readPieceworkDayMock,
 }));
 vi.mock('@/lib/salary/hourly-aggregate', () => ({
   computeHourlyForAllInMonth: computeHourlyMock,
@@ -70,7 +54,7 @@ vi.mock('@/lib/salary/hourly-aggregate', () => ({
 }));
 vi.mock('@/lib/salary/cs', () => ({
   settleReadyCsPeriods: settleReadyCsMock,
-  CsBatchUnexpectedError: MockCsBatchUnexpectedError,
+  CsBatchUnexpectedError: class extends Error {},
 }));
 vi.mock('@/lib/db', () => ({
   db: { user: { findMany: vi.fn() } },
@@ -82,13 +66,6 @@ vi.mock('@/lib/dashboard/owner-watchlist', () => ({
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: dispatchMock,
 }));
-vi.mock('../daily-salary-summary', () => ({
-  dailySalaryNotificationKey: (date: string) =>
-    `notification:DAILY_WORKER_SALARY:v2:${date}`,
-  readDailySalaryRunCheckpoint: checkpointMock,
-  getOrCreateDailySalaryRoster: rosterMock,
-  prepareDailySalarySummary: prepareDailySummaryMock,
-}));
 
 import {
   runDailySalaryTask,
@@ -99,24 +76,17 @@ import {
 
 beforeEach(() => {
   generateBillsMock.mockReset();
-  computeDailyMock.mockReset();
+  lockPieceworkMock.mockReset().mockResolvedValue({
+    settled: [],
+    errors: [],
+  });
+  readPieceworkDayMock.mockReset().mockResolvedValue({
+    settlements: [],
+    candidates: [],
+  });
   computeHourlyMock.mockReset();
   settleReadyCsMock.mockReset();
   dispatchMock.mockReset().mockResolvedValue(undefined);
-  checkpointMock.mockReset().mockResolvedValue(null);
-  rosterMock.mockReset().mockResolvedValue([
-    {
-      workerId: 'w1',
-      workerName: '师傅一',
-      eligibleMachineType: 'HAND_PRESS',
-    },
-  ]);
-  prepareDailySummaryMock.mockReset().mockResolvedValue({
-    date: '2026-07-31',
-    workerCount: 2,
-    totalAmount: '250.00',
-    notificationQueued: false,
-  });
 });
 
 afterEach(() => {
@@ -124,51 +94,31 @@ afterEach(() => {
 });
 
 describe('cron task partial batch failures', () => {
-  it('does not consume the daily aggregate notification key before retry', async () => {
-    const error = new MockDailyBatchUnexpectedError({
-      settled: [{ workerId: 'w1', actualSalary: '100.00' }],
-      errors: [],
-    });
-    computeDailyMock.mockRejectedValue(error);
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
-    await expect(runDailySalaryTask('2026-07-31')).rejects.toBe(error);
-
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(prepareDailySummaryMock).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalledWith(
-      '[cron:daily-salary] unexpected failure after partial progress:',
-      { committedCount: 1, businessErrorCount: 0 },
-    );
-  });
-
-  it('fails loudly and does not announce completion when any worker has a business error', async () => {
-    computeDailyMock.mockResolvedValue({
-      settled: [{ workerId: 'w1', actualSalary: '100.00' }],
-      errors: [{ workerId: 'w2', workerName: '师傅二', message: '缺薪资规则' }],
+  it('does not announce a piecework day with unresolved reporter errors', async () => {
+    lockPieceworkMock.mockResolvedValue({
+      settled: [{ reporterId: 'w1' }],
+      errors: [{ reporterId: 'w2', reporterName: '师傅二', message: '报工损坏' }],
     });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await expect(runDailySalaryTask('2026-07-31')).rejects.toBeInstanceOf(
       DailySalaryBatchIncompleteError,
     );
-
-    expect(prepareDailySummaryMock).not.toHaveBeenCalled();
+    expect(readPieceworkDayMock).not.toHaveBeenCalled();
     expect(dispatchMock).not.toHaveBeenCalled();
   });
 
-  it('uses the authoritative post-batch snapshot instead of attempt-local rows', async () => {
-    computeDailyMock.mockResolvedValue({
-      settled: [{ workerId: 'w1', actualSalary: '100.00' }],
+  it('notifies from the authoritative settlement snapshot, never attempt-local rows', async () => {
+    lockPieceworkMock.mockResolvedValue({
+      settled: [{ reporterId: 'w1' }],
       errors: [],
     });
-    prepareDailySummaryMock.mockResolvedValue({
-      date: '2026-07-31',
-      workerCount: 2,
-      totalAmount: '250.00',
-      notificationQueued: false,
+    readPieceworkDayMock.mockResolvedValue({
+      settlements: [
+        { payableAmount: '100.00' },
+        { payableAmount: '150.00' },
+      ],
+      candidates: [],
     });
 
     await expect(runDailySalaryTask('2026-07-31')).resolves.toEqual({
@@ -177,57 +127,18 @@ describe('cron task partial batch failures', () => {
       workerCount: 2,
       errorCount: 0,
     });
-    expect(computeDailyMock).toHaveBeenCalledWith(
-      '2026-07-31',
-      undefined,
-      undefined,
-      true,
-      [
-        {
-          workerId: 'w1',
-          workerName: '师傅一',
-          eligibleMachineType: 'HAND_PRESS',
-        },
-      ],
-    );
+    expect(lockPieceworkMock).toHaveBeenCalledWith({
+      workDate: '2026-07-31',
+      actor: expect.objectContaining({ id: 'system' }),
+    });
     expect(dispatchMock).toHaveBeenCalledExactlyOnceWith(
       'DAILY_WORKER_SALARY',
       { date: '2026-07-31', workerCount: 2, totalAmount: '250.00' },
-      { dedupeKey: 'notification:DAILY_WORKER_SALARY:v2:2026-07-31' },
+      {
+        dedupeKey:
+          'notification:DAILY_WORKER_SALARY:piecework-v1:2026-07-31',
+      },
     );
-  });
-
-  it('does not recompute after the durable notification checkpoint exists', async () => {
-    checkpointMock.mockResolvedValue({
-      date: '2026-07-31',
-      workerCount: 2,
-      totalAmount: '250.00',
-    });
-
-    await expect(runDailySalaryTask('2026-07-31')).resolves.toEqual({
-      status: 'ok',
-      date: '2026-07-31',
-      workerCount: 2,
-      errorCount: 0,
-    });
-    expect(computeDailyMock).not.toHaveBeenCalled();
-    expect(rosterMock).not.toHaveBeenCalled();
-    expect(prepareDailySummaryMock).not.toHaveBeenCalled();
-    expect(dispatchMock).not.toHaveBeenCalled();
-  });
-
-  it('does not inline-dispatch when the summary transaction queued the outbox row', async () => {
-    computeDailyMock.mockResolvedValue({ settled: [], errors: [] });
-    prepareDailySummaryMock.mockResolvedValue({
-      date: '2026-07-31',
-      workerCount: 1,
-      totalAmount: '150.00',
-      notificationQueued: true,
-    });
-
-    await runDailySalaryTask('2026-07-31');
-
-    expect(dispatchMock).not.toHaveBeenCalled();
   });
 
   it('reports hourly committed counts and rethrows for durable retry', async () => {
@@ -241,7 +152,6 @@ describe('cron task partial batch failures', () => {
       .mockImplementation(() => undefined);
 
     await expect(runHourlyPayrollTask('2026-07')).rejects.toBe(error);
-
     expect(consoleError).toHaveBeenCalledWith(
       '[cron:hourly-payroll] unexpected failure after partial progress:',
       { committedCount: 2, businessErrorCount: 1 },
@@ -260,7 +170,6 @@ describe('cron task partial batch failures', () => {
       .mockImplementation(() => undefined);
 
     await expect(runGenerateBillsTask('2026-07')).rejects.toBe(error);
-
     expect(consoleError).toHaveBeenCalledWith(
       '[cron:generate-bills] unexpected failure after partial progress:',
       { committedCount: 1, businessErrorCount: 1 },

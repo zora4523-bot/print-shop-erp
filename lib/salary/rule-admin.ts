@@ -88,7 +88,6 @@ const RULE_TYPE_BY_KEY: Record<SalaryRuleKey, SalaryRuleType> = {
   CS_BASE_SALARY: SalaryRuleType.CS_COMMISSION,
   CS_PERIOD_LENGTH: SalaryRuleType.CS_COMMISSION,
   CS_TIERS: SalaryRuleType.CS_COMMISSION,
-  PACKER_HOURLY: SalaryRuleType.WORKER_HOURLY,
   CLEANER_HOURLY: SalaryRuleType.WORKER_HOURLY,
   COOK_SPARE_HOURLY: SalaryRuleType.WORKER_HOURLY,
   OT_MULTIPLIER: SalaryRuleType.WORKER_HOURLY,
@@ -142,7 +141,6 @@ const salaryRuleVersionRawSchema = z.discriminatedUnion('ruleKey', [
     tierMinSales: z.array(moneyText).min(1, '至少需要一个提成档位').max(20),
     tierRate: z.array(rateText).min(1, '至少需要一个提成档位').max(20),
   }),
-  baseInput.extend({ ruleKey: z.literal('PACKER_HOURLY'), hourlyRate: moneyText }),
   baseInput.extend({ ruleKey: z.literal('CLEANER_HOURLY'), hourlyRate: moneyText }),
   baseInput.extend({ ruleKey: z.literal('COOK_SPARE_HOURLY'), hourlyRate: moneyText }),
   baseInput.extend({
@@ -227,7 +225,6 @@ export const salaryRuleVersionInputSchema = salaryRuleVersionRawSchema
             })),
           },
         };
-      case 'PACKER_HOURLY':
       case 'CLEANER_HOURLY':
       case 'COOK_SPARE_HOURLY':
         return { ...common, ruleValue: { hourlyRate: numeric(input.hourlyRate) } };

@@ -38,7 +38,6 @@ const SEGMENT_LABELS: Record<string, string> = {
   'stock-skus': '现货 SKU',
   'price-versions': '价格版本',
   'internal-pricing': '内部计价',
-  'worker-piecework': '师傅计件规则',
   'employee-pay': '员工工资与提成',
   prices: '价格管理',
   'external-sales': '客户计价规则',

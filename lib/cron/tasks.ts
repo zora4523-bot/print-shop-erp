@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { Role } from '../../generated/prisma/enums';
 import {
   BillGenerationUnexpectedError,
@@ -12,12 +13,6 @@ import {
 } from '../dashboard/owner-watchlist';
 import { formatDateShanghai } from '../format/dates';
 import { dispatchNotification } from '../notification/dispatch';
-import {
-  dailySalaryNotificationKey,
-  getOrCreateDailySalaryRoster,
-  prepareDailySalarySummary,
-  readDailySalaryRunCheckpoint,
-} from './daily-salary-summary';
 import {
   assertExecutionFence,
   type ExecutionFence,
@@ -36,10 +31,10 @@ import {
   type SettledCommission,
 } from '../salary/cs';
 import {
-  computeDailyForAllMachineWorkers,
-  DailyBatchUnexpectedError,
-  type BatchDailyResult,
-} from '../salary/daily';
+  getPieceworkSettlementDay,
+  lockPieceworkSettlementsForDate,
+  type PieceworkSettlementBatchResult,
+} from '../salary/piecework-settlement';
 import {
   computeHourlyForAllInMonth,
   HourlyBatchUnexpectedError,
@@ -63,71 +58,53 @@ export async function runDailySalaryTask(
   date: string,
   fence?: ExecutionFence,
 ) {
-  const checkpoint = await readDailySalaryRunCheckpoint(date);
-  if (checkpoint) {
-    return {
-      status: 'ok' as const,
-      date,
-      workerCount: checkpoint.workerCount,
-      errorCount: 0,
-    };
-  }
-
-  const roster = await getOrCreateDailySalaryRoster(date, fence);
-
-  let unexpected: DailyBatchUnexpectedError | null = null;
-  let result: BatchDailyResult;
-  try {
-    result = await computeDailyForAllMachineWorkers(
-      date,
-      undefined,
-      fence,
-      true,
-      roster,
-    );
-  } catch (error) {
-    if (!(error instanceof DailyBatchUnexpectedError)) throw error;
-    unexpected = error;
-    result = error.partialResult;
-  }
+  await assertExecutionFence(fence);
+  const result = await lockPieceworkSettlementsForDate({
+    workDate: date,
+    actor: {
+      id: 'system',
+      role: Role.ADMIN,
+      username: 'system',
+      displayName: '系统日结',
+    },
+  });
   const { settled, errors } = result;
-  if (unexpected) {
-    logPartialBatchProgress('daily-salary', settled.length, errors.length);
-    // DAILY_WORKER_SALARY is one aggregate notification per date. Enqueuing a
-    // partial aggregate would consume its dedupe key and suppress the complete
-    // summary on retry, so leave partial progress to counts-only observability.
-    throw unexpected;
-  }
   if (errors.length > 0) {
     logPartialBatchProgress('daily-salary', settled.length, errors.length);
     throw new DailySalaryBatchIncompleteError(result);
   }
-
-  const summary = await prepareDailySalarySummary(date, roster, fence);
-  if (summary.workerCount > 0 && !summary.notificationQueued) {
+  await assertExecutionFence(fence);
+  const day = await getPieceworkSettlementDay({ workDate: date });
+  const totalAmount = day.settlements
+    .reduce(
+      (sum, row) => sum.plus(new Decimal(row.payableAmount)),
+      new Decimal(0),
+    )
+    .toFixed(2);
+  if (day.settlements.length > 0) {
     await dispatchNotification(
       'DAILY_WORKER_SALARY',
       {
         date,
-        workerCount: summary.workerCount,
-        totalAmount: summary.totalAmount,
+        workerCount: day.settlements.length,
+        totalAmount,
       },
-      { dedupeKey: dailySalaryNotificationKey(date) },
+      { dedupeKey: `notification:DAILY_WORKER_SALARY:piecework-v1:${date}` },
     );
   }
   return {
     status: 'ok' as const,
     date,
-    workerCount: summary.workerCount,
+    workerCount: day.settlements.length,
     errorCount: 0,
   };
 }
 
 export class DailySalaryBatchIncompleteError extends Error {
-  readonly partialResult: BatchDailyResult;
+  readonly partialResult: PieceworkSettlementBatchResult;
 
-  constructor(partialResult: BatchDailyResult) {
-    super('daily salary batch contains unresolved worker errors');
+  constructor(partialResult: PieceworkSettlementBatchResult) {
+    super('piecework settlement batch contains unresolved reporter errors');
     this.name = 'DailySalaryBatchIncompleteError';
     this.partialResult = partialResult;
   }

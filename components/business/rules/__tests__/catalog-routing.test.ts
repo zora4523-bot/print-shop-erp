@@ -36,7 +36,6 @@ const CANONICAL_RULE_ROUTES = [
     'app/(admin)/owner/rules/internal-pricing/adjustments/[id]/page.tsx',
     '/pricing/',
   ],
-  ['app/(admin)/owner/rules/worker-piecework/page.tsx', '/salary/'],
   ['app/(admin)/owner/rules/employee-pay/page.tsx', '/salary/'],
 ] as const;
 

@@ -58,7 +58,7 @@ describe('工单核心重构验收契约', () => {
     );
   });
 
-  it('规则中心在同一路由树下管理可维护的计价对象与师傅计件', () => {
+  it('规则中心在同一路由树下管理可维护的计价对象', () => {
     const requiredModules = [
       ['papers', '纸张', '/owner/rules/papers'],
       ['stockSkus', '报价产品', '/owner/rules/stock-skus'],
@@ -68,7 +68,6 @@ describe('工单核心重构验收契约', () => {
         '/owner/rules/product-categories',
       ],
       ['crafts', '工艺参数', '/owner/rules/crafts'],
-      ['workerPiecework', '师傅计件', '/owner/rules/worker-piecework'],
     ] as const;
 
     expect(
@@ -82,7 +81,7 @@ describe('工单核心重构验收契约', () => {
       href: RULE_CENTER_HREFS.root,
       requiredPermission: 'dict:price:manage',
     });
-    expect(childItems).toHaveLength(14);
+    expect(childItems).toHaveLength(13);
     expect(
       childItems.every(
         (item) =>
@@ -98,7 +97,7 @@ describe('工单核心重构验收契约', () => {
       label: '规则配置中心',
       href: RULE_CENTER_HREFS.root,
     });
-    expect(rulesGroup?.items[0]?.children).toHaveLength(14);
+    expect(rulesGroup?.items[0]?.children).toHaveLength(13);
 
     for (const [key, label, href] of requiredModules) {
       expect(RULE_CENTER_HREFS[key]).toBe(href);

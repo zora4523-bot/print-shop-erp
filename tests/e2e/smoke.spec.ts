@@ -202,12 +202,6 @@ test.describe('automation smoke', () => {
         heading: '内部直单价格',
       },
       {
-        label: '师傅计件',
-        path: RULE_CENTER_HREFS.workerPiecework,
-        navPath: RULE_CENTER_HREFS.workerPiecework,
-        heading: '计件规则',
-      },
-      {
         label: '工资提成',
         path: RULE_CENTER_HREFS.employeePay,
         navPath: RULE_CENTER_HREFS.employeePay,

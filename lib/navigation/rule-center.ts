@@ -9,7 +9,6 @@ export const RULE_CENTER_HREFS = {
   customerPricing: '/owner/rules/customer-pricing',
   priceVersions: '/owner/rules/price-versions',
   internalPricing: '/owner/rules/internal-pricing',
-  workerPiecework: '/owner/rules/worker-piecework',
   employeePay: '/owner/rules/employee-pay',
 } as const;
 
@@ -228,19 +227,6 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     iconName: 'Calculator',
     breadcrumbLabel: '内部计价',
     requiredPermission: 'dict:price:manage',
-  },
-  {
-    id: 'workerPiecework',
-    menuParentId: 'overview',
-    label: '师傅计件',
-    description: '维护机型默认标准与师傅个人计件版本。',
-    impact: '后续报工与计件工资',
-    effect: 'effective-dated',
-    href: RULE_CENTER_HREFS.workerPiecework,
-    activeRouteBase: RULE_CENTER_HREFS.workerPiecework,
-    iconName: 'Calculator',
-    breadcrumbLabel: '师傅计件规则',
-    requiredPermission: 'salary:rule:manage',
   },
   {
     id: 'employeePay',

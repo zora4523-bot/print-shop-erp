@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Calculator, CalendarClock, Clock } from 'lucide-react';
+import { Archive, Calculator, CalendarClock, Clock } from 'lucide-react';
 import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
@@ -31,48 +31,71 @@ export default async function SalaryIndexPage() {
             >
               设置员工工资规则
             </Link>
-            <Link
-              href={RULE_CENTER_HREFS.workerPiecework}
-              className={buttonVariants({ variant: 'outline' })}
-            >
-              设置开机师傅计件规则
-            </Link>
           </div>
         }
       />
 
       <section className="space-y-3">
-        <h2 className="text-base font-semibold">生产师傅计件工资</h2>
+        <h2 className="text-base font-semibold">工序计件结算</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
-            label="今日记录"
-            value={`${s.dailyToday.count} 条`}
+            label="今日已锁定"
+            value={`${s.pieceworkToday.count} 条`}
             icon={Calculator}
             tone="info"
-            hint={`合计 ¥${s.dailyToday.actualTotal}`}
+            hint={`合计 ¥${s.pieceworkToday.payableTotal}`}
           />
           <StatCard
             label="今日未发"
-            value={`¥${s.dailyToday.unpaidTotal}`}
+            value={`¥${s.pieceworkToday.unpaidTotal}`}
             icon={Calculator}
             tone="warning"
           />
           <StatCard
             label="累计未发（所有日期）"
-            value={`¥${s.dailyUnpaidAllTime.actualTotal}`}
+            value={`¥${s.pieceworkUnpaidAllTime.payableTotal}`}
             icon={Calculator}
             tone="primary"
-            hint={`${s.dailyUnpaidAllTime.count} 条`}
+            hint={`${s.pieceworkUnpaidAllTime.count} 条`}
           />
         </div>
         <div>
           <Link
-            href="/owner/salary/daily"
+            href="/owner/salary/piecework"
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
-            查看计件工资明细 →
+            查看工序计件结算 →
           </Link>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold">历史开机师傅日薪档案</h2>
+        <p className="text-sm text-muted-foreground">
+          仅读展示切换前 DailyWorkerSalary 快照；不与新工序账本合并或重算。
+        </p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <StatCard
+            label="今日历史记录"
+            value={`${s.dailyToday.count} 条`}
+            icon={Archive}
+            tone="neutral"
+            hint={`快照合计 ¥${s.dailyToday.actualTotal}`}
+          />
+          <StatCard
+            label="历史累计未发"
+            value={`¥${s.dailyUnpaidAllTime.actualTotal}`}
+            icon={Archive}
+            tone="neutral"
+            hint={`${s.dailyUnpaidAllTime.count} 条`}
+          />
+        </div>
+        <Link
+          href="/owner/salary/daily"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          查看历史日薪档案 →
+        </Link>
       </section>
 
       <section className="space-y-3">
@@ -112,7 +135,7 @@ export default async function SalaryIndexPage() {
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold">
-          时薪工月结（打包 / 清废 / 厨师）
+          时薪工月结（清废 / 厨师）
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <StatCard
@@ -144,6 +167,9 @@ export default async function SalaryIndexPage() {
             查看时薪工月结 →
           </Link>
         </div>
+        <p className="text-xs text-muted-foreground">
+          切换前已生成的打包时薪快照仍在历史列表中只读可见；新打包报工只进入工序计件结算。
+        </p>
       </section>
     </div>
   );

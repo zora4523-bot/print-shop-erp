@@ -51,7 +51,7 @@ describe('createSalaryRuleVersionAction', () => {
 
   it('writes a version and invalidates all affected salary pages', async () => {
     permissionMock.requirePermission.mockResolvedValue(actor);
-    const input = { ruleKey: 'PACKER_HOURLY', effectiveFrom: new Date(), remark: null, ruleValue: { hourlyRate: 12 } };
+    const input = { ruleKey: 'CLEANER_HOURLY', effectiveFrom: new Date(), remark: null, ruleValue: { hourlyRate: 12 } };
     ruleAdminMock.parseSalaryRuleVersionFormData.mockReturnValue({ success: true, data: input });
     ruleAdminMock.createSalaryRuleVersion.mockResolvedValue({ id: 'rule-1' });
     await expect(createSalaryRuleVersionAction(null, new FormData())).resolves.toEqual({ status: 'success', ruleId: 'rule-1' });

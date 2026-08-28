@@ -31,10 +31,8 @@ const PENDING_FORM_CONTRACTS: ReadonlyArray<
   ['product-category/ProductCategoryForm.tsx', 'pending'],
   ['production/OperationReportForm.tsx', 'pending'],
   ['purchase/PurchaseOrderForm.tsx', 'pending'],
-  ['salary/AddSalaryAdjustmentForm.tsx', 'pending'],
   ['salary/SalaryRuleSettingsForm.tsx', 'pending'],
   ['salary/StartCsPeriodForm.tsx', 'pending'],
-  ['salary/WorkerMachineRuleForm.tsx', 'pending'],
   ['setting/SettingsForm.tsx', 'pending'],
 ];
 

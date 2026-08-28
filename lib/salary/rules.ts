@@ -1,18 +1,6 @@
-import { MachineType, SalaryRuleType } from '../../generated/prisma/enums';
+import { SalaryRuleType } from '../../generated/prisma/enums';
 import { db } from '../db';
-import type { MachineSalaryRule } from './machine-piecework';
 import type { CsTiersConfig } from './cs-commission';
-
-// Picks the currently-effective WORKER_MACHINE rule for a given
-// MachineType. Rules are versioned via (ruleType, ruleKey, effectiveFrom);
-// "currently effective" = latest effectiveFrom <= now, and either
-// effectiveTo is null or > now.
-//
-// Returns null if no active rule exists — the caller (e.g. reportTask)
-// should refuse to proceed rather than default to zero, since that
-// silently pays the worker nothing.
-
-export type MachineRuleWithBase = MachineSalaryRule & { dailyBase: string | number };
 
 // 最小客户端面：既接全局 db，也接 $transaction 的 tx（结算类调用必须
 // 传 tx，让规则读参与结算快照的事务隔离——见 settleCsPeriod）。直接复用
@@ -54,23 +42,6 @@ export async function acquireSalaryRuleSnapshotWriteLock(
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SALARY_RULE_SNAPSHOT_LOCK_KEY}))`;
 }
 
-export type MachineRuleClient = SalaryRuleClient & {
-  workerMachineSalaryRule: Pick<
-    typeof db.workerMachineSalaryRule,
-    'findFirst'
-  >;
-};
-
-// Shared by personal-rule writes and every finance-of-record read. Taking the
-// same transaction-scoped advisory lock guarantees a report/daily snapshot
-// sees either the complete old version or the complete new version.
-export function machineRuleLockKey(
-  workerId: string,
-  machineType: string,
-): string {
-  return `print-shop-erp:piecework-rule:${workerId}:${machineType}`;
-}
-
 // 版本化规则"当前生效"查询的**唯一实现**（此前同形 findFirst 复制
 // 6 处：machine/cs/hourly/cook + cs.ts 的 tx 版）。语义：effectiveFrom
 // <= now 中最新一条，且 effectiveTo 为 null 或 > now。
@@ -94,35 +65,6 @@ export async function getActiveRuleValue<T>(
   });
   if (!rule) return null;
   return rule.ruleValue as unknown as T;
-}
-
-export async function getActiveMachineRule(
-  machineType: string,
-  now: Date = new Date(),
-  workerId?: string,
-  client: MachineRuleClient = db as unknown as MachineRuleClient,
-): Promise<MachineRuleWithBase | null> {
-  if (workerId) {
-    const workerRule = await client.workerMachineSalaryRule.findFirst({
-      where: {
-        workerId,
-        machineType: machineType as MachineType,
-        effectiveFrom: { lte: now },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-      },
-      orderBy: { effectiveFrom: 'desc' },
-      select: { ruleValue: true },
-    });
-    if (workerRule) {
-      return workerRule.ruleValue as unknown as MachineRuleWithBase;
-    }
-  }
-  return getActiveRuleValue<MachineRuleWithBase>(
-    SalaryRuleType.WORKER_MACHINE,
-    machineType,
-    now,
-    client,
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -170,11 +112,10 @@ export async function getActiveCsTiers(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 时薪工 (PACKER / CLEANER / COOK) rules — SPEC §5.4
+// 时薪工 (CLEANER / COOK) rules — PACKER 已切换工序计件
 // ─────────────────────────────────────────────────────────────────────
 //
 // Rule keys under WORKER_HOURLY:
-//   - PACKER_HOURLY:    { hourlyRate }
 //   - CLEANER_HOURLY:   { hourlyRate }
 //   - COOK_SPARE_HOURLY:{ hourlyRate }  // = PACKER rate per SPEC §5.4
 //   - OT_MULTIPLIER:    { multiplier }
@@ -194,18 +135,6 @@ async function getActiveHourlyRule<T>(
     now,
     client,
   );
-}
-
-export async function getActivePackerHourlyRate(
-  now: Date = new Date(),
-  client: SalaryRuleClient = db as unknown as SalaryRuleClient,
-): Promise<number | null> {
-  const v = await getActiveHourlyRule<{ hourlyRate: number }>(
-    'PACKER_HOURLY',
-    now,
-    client,
-  );
-  return v?.hourlyRate ?? null;
 }
 
 export async function getActiveCleanerHourlyRate(

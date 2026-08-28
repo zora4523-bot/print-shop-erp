@@ -9,7 +9,7 @@ import { db } from '../db';
 import { parseStrictYmd } from '../auth/schemas';
 import { MACHINE_TYPE_LABELS } from '../auth/role-labels';
 import { xlsxColumnName } from '../export/xlsx-column';
-import type { MachineRuleWithBase } from './rules';
+import type { LegacyMachineRuleSnapshot } from './legacy-machine-snapshot';
 
 export type PieceworkExportFilter = {
   from: string;
@@ -127,7 +127,7 @@ function dateTimeShanghai(date: Date): string {
 }
 
 export function machineRuleAuditValues(snapshot: unknown) {
-  const rule = snapshot as Partial<MachineRuleWithBase>;
+  const rule = snapshot as LegacyMachineRuleSnapshot;
   return {
     dailyBase: numericCell(rule.dailyBase),
     pieceRate: numericCell(rule.pieceRate),

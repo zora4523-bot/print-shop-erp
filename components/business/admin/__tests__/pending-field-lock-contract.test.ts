@@ -7,7 +7,6 @@ const ROOT = process.cwd();
 const LOCKED_FORM_FILES = [
   'production/OperationReportForm.tsx',
   'salary/StartCsPeriodForm.tsx',
-  'salary/WorkerMachineRuleForm.tsx',
   'setting/SettingsForm.tsx',
 ] as const;
 const LOCKED_NAVIGATION_FORM_FILES = [

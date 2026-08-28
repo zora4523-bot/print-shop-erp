@@ -467,11 +467,6 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '内部直单价格',
     },
     {
-      name: 'rule-center-worker-piecework',
-      path: RULE_CENTER_HREFS.workerPiecework,
-      readyHeading: '计件规则',
-    },
-    {
       name: 'rule-center-employee-pay',
       path: RULE_CENTER_HREFS.employeePay,
       readyHeading: '员工工资规则',

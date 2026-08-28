@@ -25,9 +25,7 @@ const STATIC_PREREQUISITES: ReadonlyArray<
 const SUCCESS_FEEDBACK: ReadonlyArray<
   readonly [relativePath: string, copy: string]
 > = [
-  ['salary/AddSalaryAdjustmentForm.tsx', '调整已记账。'],
   ['salary/SalaryRuleSettingsForm.tsx', '工资规则新版本已保存。'],
-  ['salary/WorkerMachineRuleForm.tsx', '规则版本已生效。'],
 ];
 
 describe('business feedback semantics', () => {

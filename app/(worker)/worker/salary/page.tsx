@@ -2,10 +2,15 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { WalletCards } from 'lucide-react';
-import { Role, WorkerType } from '@/generated/prisma/enums';
+import {
+  PieceworkSettlementStatus,
+  Role,
+  WorkerType,
+} from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   listWorkerHourlyPayrolls,
+  listWorkerPieceworkSettlementsForPortal,
   listWorkerSalaries,
   type WorkerSalaryActor,
 } from '@/lib/worker-portal';
@@ -45,7 +50,25 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   const sp = await searchParams;
 
   if (user.workerType === WorkerType.MACHINE) {
-    return <PieceworkSalaryContent actor={actor} searchParams={sp} />;
+    return (
+      <div className="min-w-0 space-y-8">
+        <OperationPieceworkSalaryContent actor={actor} searchParams={sp} />
+        <PieceworkSalaryContent actor={actor} searchParams={sp} historical />
+      </div>
+    );
+  }
+  if (user.workerType === WorkerType.PACKER) {
+    return (
+      <div className="min-w-0 space-y-8">
+        <OperationPieceworkSalaryContent actor={actor} searchParams={sp} />
+        <HourlySalaryContent
+          actor={actor}
+          workerType={user.workerType}
+          searchParams={sp}
+          historical
+        />
+      </div>
+    );
   }
   if (HOURLY_WORKER_TYPES.has(user.workerType)) {
     return (
@@ -59,12 +82,92 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
   notFound();
 }
 
-async function PieceworkSalaryContent({
+async function OperationPieceworkSalaryContent({
   actor,
   searchParams: sp,
 }: {
   actor: WorkerSalaryActor;
   searchParams: { from?: string; to?: string };
+}) {
+  const from = sp.from ? parseStrictYmd(sp.from) : null;
+  const to = sp.to ? parseStrictYmd(sp.to) : null;
+  const settlements = await listWorkerPieceworkSettlementsForPortal(actor, {
+    from: from ?? undefined,
+    to: to ?? undefined,
+  });
+  const total = settlements.reduce(
+    (sum, row) => sum.plus(new Decimal(row.payableAmount as Decimal.Value)),
+    new Decimal(0),
+  );
+  const unpaid = settlements
+    .filter((row) => row.status !== PieceworkSettlementStatus.PAID)
+    .reduce(
+      (sum, row) => sum.plus(new Decimal(row.payableAmount as Decimal.Value)),
+      new Decimal(0),
+    );
+
+  return (
+    <section className="min-w-0 space-y-4">
+      <SalaryHeader description="新工序报工账本 · 按日锁定，点击日期查看报工和工价快照。" />
+      <SalarySummary total={total} unpaid={unpaid} />
+      <SalaryRangeFilter
+        inputType="date"
+        fromLabel="开始日期"
+        toLabel="结束日期"
+        from={from ? sp.from : undefined}
+        to={to ? sp.to : undefined}
+      />
+      {settlements.length === 0 ? (
+        <EmptyState
+          icon={WalletCards}
+          title="暂无已锁定的工序计件"
+          description="管理员按日锁定报工后，结算会显示在这里。"
+        />
+      ) : (
+        <ul className="space-y-3">
+          {settlements.map((settlement) => (
+            <li key={settlement.id}>
+              <Link
+                href={`/worker/salary/${settlement.id}`}
+                className="block min-h-11 min-w-0 rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+              >
+                <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <strong>{formatDateShanghai(settlement.workDate)}</strong>
+                      <PaymentStatusBadge
+                        isPaid={
+                          settlement.status === PieceworkSettlementStatus.PAID
+                        }
+                      />
+                      <Badge variant="outline">
+                        {settlement._count.items} 条报工
+                      </Badge>
+                    </div>
+                    <p className="worker-wrap-anywhere mt-2 text-xs text-muted-foreground">
+                      报工金额 {formatMoney(settlement.reportAmount)} · 调整{' '}
+                      {formatMoney(settlement.adjustmentAmount)}
+                    </p>
+                  </div>
+                  <SalaryAmount value={settlement.payableAmount} />
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+async function PieceworkSalaryContent({
+  actor,
+  searchParams: sp,
+  historical = false,
+}: {
+  actor: WorkerSalaryActor;
+  searchParams: { from?: string; to?: string };
+  historical?: boolean;
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
   const to = sp.to ? parseStrictYmd(sp.to) : null;
@@ -76,7 +179,14 @@ async function PieceworkSalaryContent({
 
   return (
     <div className="min-w-0 space-y-4">
-      <SalaryHeader description="开机师傅 · 点击日期查看工单和计件明细。" />
+      <SalaryHeader
+        title={historical ? '历史日薪档案' : undefined}
+        description={
+          historical
+            ? '切换前已生成的 DailyWorkerSalary 只读快照，不与上方新账本合并。'
+            : '开机师傅 · 点击日期查看工单和计件明细。'
+        }
+      />
       <SalarySummary total={total} unpaid={unpaid} />
       <SalaryRangeFilter
         inputType="date"
@@ -144,10 +254,12 @@ async function HourlySalaryContent({
   actor,
   workerType,
   searchParams: sp,
+  historical = false,
 }: {
   actor: WorkerSalaryActor;
   workerType: WorkerType;
   searchParams: { from?: string; to?: string };
+  historical?: boolean;
 }) {
   const fromMonth = validMonth(sp.from) ? sp.from : undefined;
   const toMonth = validMonth(sp.to) ? sp.to : undefined;
@@ -160,7 +272,12 @@ async function HourlySalaryContent({
   return (
     <div className="min-w-0 space-y-4">
       <SalaryHeader
-        description={`${WORKER_TYPE_LABELS[workerType]} · 点击月份查看工时和计薪明细。`}
+        title={historical ? '历史打包时薪档案' : undefined}
+        description={
+          historical
+            ? '切换前已生成的 HourlyWorkerPayroll 只读快照，不与上方新账本合并。'
+            : `${WORKER_TYPE_LABELS[workerType]} · 点击月份查看工时和计薪明细。`
+        }
       />
       <SalarySummary total={total} unpaid={unpaid} />
       <SalaryRangeFilter
@@ -224,10 +341,16 @@ async function HourlySalaryContent({
   );
 }
 
-function SalaryHeader({ description }: { description: string }) {
+function SalaryHeader({
+  title = '我的工资',
+  description,
+}: {
+  title?: string;
+  description: string;
+}) {
   return (
     <header className="worker-wrap-anywhere">
-      <h1 className="text-lg font-semibold">我的工资</h1>
+      <h1 className="text-lg font-semibold">{title}</h1>
       <p className="text-xs text-muted-foreground">{description}</p>
     </header>
   );

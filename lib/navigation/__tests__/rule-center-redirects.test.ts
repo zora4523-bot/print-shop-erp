@@ -60,10 +60,6 @@ describe('legacy rule management redirects', () => {
           destination: '/owner/rules/internal-pricing/adjustments/:id',
         }),
         expect.objectContaining({
-          source: '/owner/salary/piecework-rules',
-          destination: '/owner/rules/worker-piecework',
-        }),
-        expect.objectContaining({
           source: '/owner/salary/rules',
           destination: '/owner/rules/employee-pay',
         }),

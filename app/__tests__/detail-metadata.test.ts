@@ -7,6 +7,7 @@ const {
   getDailySalaryMock,
   getWorkerOrderMock,
   getWorkerPieceworkSalaryMock,
+  getWorkerPieceworkSettlementMock,
   getWorkerHourlySalaryMock,
 } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
@@ -14,6 +15,7 @@ const {
   getDailySalaryMock: vi.fn(),
   getWorkerOrderMock: vi.fn(),
   getWorkerPieceworkSalaryMock: vi.fn(),
+  getWorkerPieceworkSettlementMock: vi.fn(),
   getWorkerHourlySalaryMock: vi.fn(),
 }));
 
@@ -32,16 +34,11 @@ vi.mock('@/lib/salary/daily', () => ({
 vi.mock('@/lib/worker-portal', () => ({
   getWorkerOrderDetail: getWorkerOrderMock,
   getWorkerSalaryDetail: getWorkerPieceworkSalaryMock,
+  getWorkerPieceworkSettlementDetail: getWorkerPieceworkSettlementMock,
   getWorkerHourlyPayrollDetail: getWorkerHourlySalaryMock,
 }));
 vi.mock('@/lib/attendance', () => ({
   getAttendanceSummaries: vi.fn(),
-}));
-vi.mock('@/components/business/salary/AddSalaryAdjustmentForm', () => ({
-  AddSalaryAdjustmentForm: () => null,
-}));
-vi.mock('@/components/business/salary/MarkPaidForm', () => ({
-  MarkPaidForm: () => null,
 }));
 
 import { generateMetadata as generateDailySalaryMetadata } from '@/app/(admin)/owner/salary/daily/[id]/page';
@@ -64,6 +61,7 @@ beforeEach(() => {
   getDailySalaryMock.mockReset();
   getWorkerOrderMock.mockReset();
   getWorkerPieceworkSalaryMock.mockReset();
+  getWorkerPieceworkSettlementMock.mockReset().mockResolvedValue(null);
   getWorkerHourlySalaryMock.mockReset();
   hasPermissionMock.mockImplementation(
     (permission: string, role: Role) =>

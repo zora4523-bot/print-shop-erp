@@ -43,6 +43,11 @@ export type PieceworkSettlementReceipt = {
   idempotentReplay: boolean;
 };
 
+export type PieceworkSettlementBatchResult = {
+  settled: PieceworkSettlementReceipt[];
+  errors: Array<{ reporterId: string; reporterName: string; message: string }>;
+};
+
 export class PieceworkSettlementError extends Error {
   constructor(
     public readonly code:
@@ -86,6 +91,204 @@ export function pieceworkSettlementLockKey(
   workDate: string,
 ): string {
   return `print-shop-erp:piecework-settlement:${reporterId}:${workDate}`;
+}
+
+function settlementDateKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+/**
+ * Read model for the owner list. Candidate reports and frozen settlements are
+ * intentionally returned as separate collections: a candidate amount is not
+ * finance-of-record until the immutable settlement row exists.
+ */
+export async function getPieceworkSettlementDay(input: {
+  workDate: string;
+  reporterId?: string;
+  status?: PieceworkSettlementStatus;
+}) {
+  const dateCol = parseStrictYmd(input.workDate);
+  if (!dateCol) {
+    throw new PieceworkSettlementError(
+      'SETTLEMENT_STATE_CONFLICT',
+      `日期格式非法或非法日历日期（应为合法 YYYY-MM-DD）：${input.workDate}`,
+    );
+  }
+  const { start, end } = shanghaiDayRange(input.workDate);
+  const [settlements, reports] = await Promise.all([
+    db.pieceworkSettlement.findMany({
+      where: {
+        workDate: dateCol,
+        ...(input.reporterId ? { reporterId: input.reporterId } : {}),
+        ...(input.status ? { status: input.status } : {}),
+      },
+      orderBy: [{ reporter: { displayName: 'asc' } }, { id: 'asc' }],
+      select: {
+        id: true,
+        reporterId: true,
+        workDate: true,
+        status: true,
+        reportAmount: true,
+        adjustmentAmount: true,
+        payableAmount: true,
+        lockedAt: true,
+        paidAt: true,
+        reporter: { select: { displayName: true, username: true } },
+        _count: { select: { items: true } },
+      },
+    }),
+    db.productionReport.findMany({
+      where: {
+        reportedAt: { gte: start, lt: end },
+        settlementItem: null,
+        ...(input.reporterId ? { reporterId: input.reporterId } : {}),
+      },
+      orderBy: [{ reporter: { displayName: 'asc' } }, { reportedAt: 'asc' }],
+      select: {
+        id: true,
+        reporterId: true,
+        amount: true,
+        reporter: { select: { displayName: true, username: true } },
+        operation: {
+          select: { orderId: true, operationType: true },
+        },
+      },
+    }),
+  ]);
+
+  const candidates = new Map<
+    string,
+    {
+      reporterId: string;
+      reporterName: string;
+      username: string;
+      reportAmount: Decimal;
+      reportCount: number;
+      orderIds: Set<string>;
+      operationCounts: Record<string, number>;
+    }
+  >();
+  for (const report of reports) {
+    const current = candidates.get(report.reporterId) ?? {
+      reporterId: report.reporterId,
+      reporterName: report.reporter.displayName,
+      username: report.reporter.username,
+      reportAmount: new Decimal(0),
+      reportCount: 0,
+      orderIds: new Set<string>(),
+      operationCounts: {},
+    };
+    current.reportAmount = current.reportAmount.plus(report.amount);
+    current.reportCount += 1;
+    current.orderIds.add(report.operation.orderId);
+    current.operationCounts[report.operation.operationType] =
+      (current.operationCounts[report.operation.operationType] ?? 0) + 1;
+    candidates.set(report.reporterId, current);
+  }
+
+  return {
+    workDate: input.workDate,
+    settlements: settlements.map((row) => ({
+      ...row,
+      workDate: settlementDateKey(row.workDate),
+    })),
+    candidates: [...candidates.values()].map((row) => ({
+      reporterId: row.reporterId,
+      reporterName: row.reporterName,
+      username: row.username,
+      reportAmount: row.reportAmount.toFixed(2),
+      reportCount: row.reportCount,
+      orderCount: row.orderIds.size,
+      operationCounts: row.operationCounts,
+    })),
+  };
+}
+
+export async function getPieceworkSettlementDetail(
+  settlementId: string,
+  reporterId?: string,
+) {
+  return db.pieceworkSettlement.findFirst({
+    where: {
+      id: settlementId,
+      ...(reporterId ? { reporterId } : {}),
+    },
+    select: {
+      id: true,
+      reporterId: true,
+      workDate: true,
+      status: true,
+      reportAmount: true,
+      adjustmentAmount: true,
+      payableAmount: true,
+      snapshot: true,
+      lockedAt: true,
+      paidAt: true,
+      createdAt: true,
+      reporter: { select: { displayName: true, username: true } },
+      items: {
+        orderBy: [{ report: { reportedAt: 'asc' } }, { id: 'asc' }],
+        select: {
+          id: true,
+          amount: true,
+          snapshot: true,
+          report: {
+            select: {
+              id: true,
+              entryType: true,
+              reportedCompletedQty: true,
+              defectQty: true,
+              reworkQty: true,
+              chargeableQty: true,
+              unit: true,
+              rate: true,
+              amount: true,
+              priceBookVersion: true,
+              ruleSetSha256: true,
+              reportedAt: true,
+              operation: {
+                select: {
+                  id: true,
+                  operationType: true,
+                  order: {
+                    select: { id: true, orderNo: true, customName: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+export async function listWorkerPieceworkSettlements(input: {
+  reporterId: string;
+  from?: Date;
+  to?: Date;
+}) {
+  return db.pieceworkSettlement.findMany({
+    where: {
+      reporterId: input.reporterId,
+      workDate:
+        input.from || input.to
+          ? { gte: input.from, lte: input.to }
+          : undefined,
+    },
+    orderBy: [{ workDate: 'desc' }, { id: 'desc' }],
+    select: {
+      id: true,
+      workDate: true,
+      status: true,
+      reportAmount: true,
+      adjustmentAmount: true,
+      payableAmount: true,
+      lockedAt: true,
+      paidAt: true,
+      _count: { select: { items: true } },
+    },
+  });
 }
 
 /**
@@ -331,6 +534,68 @@ export async function lockPieceworkSettlement(input: {
     });
     return toReceipt(created, false);
   });
+}
+
+/**
+ * Locks every reporter that still has an unsettled report on one closed day.
+ * Each reporter keeps its own transaction and advisory lock, so one malformed
+ * ledger cannot roll back settlements already frozen for other reporters.
+ */
+export async function lockPieceworkSettlementsForDate(input: {
+  workDate: string;
+  actor: AuditActor;
+  now?: Date;
+}): Promise<PieceworkSettlementBatchResult> {
+  assertAdmin(input.actor);
+  const now = input.now ?? new Date();
+  assertClosedWorkDate(input.workDate, now);
+  const { start, end } = shanghaiDayRange(input.workDate);
+  const reporters = await db.productionReport.findMany({
+    where: {
+      reportedAt: { gte: start, lt: end },
+      settlementItem: null,
+    },
+    distinct: ['reporterId'],
+    orderBy: { reporterId: 'asc' },
+    select: {
+      reporterId: true,
+      reporter: { select: { displayName: true } },
+    },
+  });
+  const settled: PieceworkSettlementReceipt[] = [];
+  const errors: PieceworkSettlementBatchResult['errors'] = [];
+  for (const reporter of reporters) {
+    try {
+      settled.push(
+        await lockPieceworkSettlement({
+          reporterId: reporter.reporterId,
+          workDate: input.workDate,
+          actor: input.actor,
+          now,
+        }),
+      );
+    } catch (error) {
+      // Another concurrent locker may consume the final candidate report
+      // between the distinct scan and the per-reporter lock. That is a clean
+      // idempotent outcome, not a failed payroll.
+      if (
+        error instanceof PieceworkSettlementError &&
+        error.code === 'NO_REPORTS'
+      ) {
+        continue;
+      }
+      if (error instanceof PieceworkSettlementError) {
+        errors.push({
+          reporterId: reporter.reporterId,
+          reporterName: reporter.reporter.displayName,
+          message: error.message,
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { settled, errors };
 }
 
 /** Mark a locked settlement paid. PAID rows are database-protected forever. */

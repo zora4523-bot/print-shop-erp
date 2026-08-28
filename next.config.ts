@@ -88,11 +88,6 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: '/owner/salary/piecework-rules',
-        destination: '/owner/rules/worker-piecework',
-        permanent: false,
-      },
-      {
         source: '/owner/salary/rules',
         destination: '/owner/rules/employee-pay',
         permanent: false,
