@@ -24,33 +24,13 @@ function quotedItemLine(args: {
   return {
     layer: 'ITEM',
     itemKey: args.itemKey,
+    groupKey: null,
     code: args.code,
     label: args.label,
     status: 'QUOTED',
     amount: args.amount,
     includedInKnownTotal: true,
     basis: args.basis,
-    errors: [],
-  };
-}
-
-function pendingBaggingLine(
-  item: CreateOrderQuoteItemInput,
-): CreateOrderQuoteLine {
-  return {
-    layer: 'ITEM',
-    itemKey: item.itemKey,
-    code: 'BAGGING',
-    label: '入袋',
-    status: 'PENDING',
-    amount: null,
-    includedInKnownTotal: false,
-    basis: {
-      quantity: item.quantity,
-      pack: null,
-      packRaw: item.packRaw,
-      displayAmount: '—',
-    },
     errors: [],
   };
 }
@@ -91,12 +71,6 @@ function validateItem(item: CreateOrderQuoteItemInput): string[] {
     errors.push('纸张克重必须是正数');
   }
   if (
-    item.pack !== null &&
-    (!Number.isSafeInteger(item.pack) || item.pack < 1)
-  ) {
-    errors.push('每包数量必须为正整数或留空');
-  }
-  if (
     (item.craft === 'PARTIAL' || item.craft === 'FULL') &&
     item.frontColors.length === 0
   ) {
@@ -126,69 +100,19 @@ function commonManualReasons(
   item: CreateOrderQuoteItemInput,
 ): CreateOrderManualReason[] {
   return [
-    ...(item.customPaper
+    ...(item.configuration.paper === 'CUSTOM'
       ? [manualReason('CUSTOM_PAPER', '自定义纸张需人工核价')]
       : []),
-    ...(item.paperWeightSource === 'MANUAL'
+    ...(item.configuration.craft === 'CUSTOM'
+      ? [manualReason('CUSTOM_CRAFT', '配置外工艺需人工核价')]
+      : []),
+    ...(item.configuration.paperWeight === 'MANUAL'
       ? [manualReason('MANUAL_PAPER_WEIGHT', '手动输入克重需人工核价')]
       : []),
-    ...(item.isResized
+    ...(item.configuration.specification === 'RESIZED'
       ? [manualReason('RESIZED', '改尺寸需人工核价')]
       : []),
   ];
-}
-
-function quoteBagging(
-  item: CreateOrderQuoteItemInput,
-  snapshot: CreateOrderPriceSnapshot,
-): { line: CreateOrderQuoteLine; amount: string | null; error: string | null } {
-  if (item.pack === null) {
-    return { line: pendingBaggingLine(item), amount: null, error: null };
-  }
-  const rate = decimalValue(
-    item.packagingMode === 'MIXED'
-      ? snapshot.bagging.mixedPerBag
-      : snapshot.bagging.standardPerBag,
-  );
-  if (!rate) {
-    const error = '入袋费率配置无效';
-    return {
-      line: {
-        ...pendingBaggingLine(item),
-        errors: [error],
-      },
-      amount: null,
-      error,
-    };
-  }
-  const bagCount = Math.ceil(item.quantity / item.pack);
-  const amount = safeMoney(rate.times(bagCount));
-  if (amount === null) {
-    const error = '入袋费超过可保存上限';
-    return {
-      line: { ...pendingBaggingLine(item), errors: [error] },
-      amount: null,
-      error,
-    };
-  }
-  return {
-    amount,
-    error: null,
-    line: quotedItemLine({
-      itemKey: item.itemKey,
-      code: 'BAGGING',
-      label: item.packagingMode === 'MIXED' ? '混装入袋' : '常规入袋',
-      amount,
-      basis: {
-        quantity: item.quantity,
-        pack: item.pack,
-        packRaw: item.packRaw,
-        bagCount,
-        rate: unitPrice(rate),
-        mode: item.packagingMode,
-      },
-    }),
-  };
 }
 
 function quotePartialProcessing(
@@ -201,6 +125,20 @@ function quotePartialProcessing(
   manualReasons: CreateOrderManualReason[];
   errors: string[];
 } {
+  if (item.productStructure === 'TEN_THOUSAND_ENVELOPE') {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [
+        manualReason(
+          'PARTIAL_TEN_THOUSAND_ENVELOPE',
+          '万元封局部烫金未纳入当前结构化规格表',
+        ),
+      ],
+      errors: [],
+    };
+  }
   const selected = selectPartialUnitPrice(item, snapshot.partial);
   if (!selected) {
     return {
@@ -216,14 +154,29 @@ function quotePartialProcessing(
       errors: [],
     };
   }
-  const blankRate = decimalValue(selected.unitPrice);
+  const blankRate =
+    selected.unitPrice === null ? null : decimalValue(selected.unitPrice);
   const fixedPerPass = decimalValue(
     snapshot.partial.machineFee.fixedFeePerPass,
   );
   const perPiecePerPass = decimalValue(
     snapshot.partial.machineFee.perPiecePerPass,
   );
-  if (!blankRate || !fixedPerPass || !perPiecePerPass) {
+  if (!blankRate) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [
+        manualReason(
+          'PARTIAL_BLANK_PRICE_NOT_FOUND',
+          '局部烫金空白封组合已配置为无报价',
+        ),
+      ],
+      errors: [],
+    };
+  }
+  if (!fixedPerPass || !perPiecePerPass) {
     return {
       lines: [],
       amount: null,
@@ -313,37 +266,56 @@ function quoteFullProcessing(
     );
   }
   const selected = selectFullUnitPrice(item, snapshot.full);
-  if (!selected) {
+  if (!selected || selected.unitPrice === null) {
     manualReasons.push(
       manualReason('FULL_PRICE_NOT_FOUND', '专版烫金实际数量区间没有配置价格'),
     );
   }
-  if (manualReasons.length > 0 || !selected) {
-    return {
-      lines: [],
-      amount: null,
-      unitPrice: null,
-      manualReasons,
-      errors: [],
-    };
-  }
 
-  const baseRate = decimalValue(selected.unitPrice);
-  const secondColorRate =
-    item.frontColors.length === 2
-      ? decimalValue(snapshot.full.secondColorUnitSurcharge)
-      : new Decimal(0);
   const paperMatches = snapshot.full.paperSurcharges.filter(
     (candidate) =>
       candidate.paperType.trim() === item.paperType.trim() &&
       candidate.paperWeightGsm === item.paperWeightGsm,
   );
-  const paperRate =
-    paperMatches.length === 0
-      ? new Decimal(0)
-      : paperMatches.length === 1
-        ? decimalValue(paperMatches[0]!.unitSurcharge)
-        : null;
+  const basePaperMatches = snapshot.full.basePapers.filter(
+    (candidate) =>
+      candidate.paperType.trim() === item.paperType.trim() &&
+      candidate.paperWeightGsm === item.paperWeightGsm,
+  );
+  if (
+    paperMatches.length > 1 ||
+    basePaperMatches.length > 1 ||
+    (paperMatches.length === 0 && basePaperMatches.length !== 1) ||
+    paperMatches[0]?.unitSurcharge === null
+  ) {
+    manualReasons.push(
+      manualReason(
+        'FULL_PAPER_SURCHARGE_NOT_FOUND',
+        '专版烫金非基准纸张没有唯一有效的加价行',
+      ),
+    );
+  }
+
+  const needsSecondColor = item.frontColors.length === 2;
+  if (needsSecondColor && snapshot.full.secondColorUnitSurcharge === null) {
+    manualReasons.push(
+      manualReason(
+        'FULL_SECOND_COLOR_SURCHARGE_NOT_FOUND',
+        '专版双色没有配置加价',
+      ),
+    );
+  }
+
+  const needsWestEnvelope = item.productStructure === 'WESTERN_ENVELOPE';
+  if (needsWestEnvelope && snapshot.full.westEnvelopeUnitSurcharge === null) {
+    manualReasons.push(
+      manualReason(
+        'FULL_WEST_ENVELOPE_SURCHARGE_NOT_FOUND',
+        '专版西封没有配置加价',
+      ),
+    );
+  }
+
   const effect = item.specialEffect ?? 'NONE';
   const effectMatches = snapshot.full.specialEffects.filter(
     (candidate) => candidate.effect === effect,
@@ -354,19 +326,58 @@ function quoteFullProcessing(
       : effectMatches.length === 1
         ? effectMatches[0]!
         : undefined;
+  if (
+    effect !== 'NONE' &&
+    (effectPrice == null ||
+      effectPrice.unitSurcharge === null ||
+      effectPrice.setupFee === null)
+  ) {
+    manualReasons.push(
+      manualReason(
+        'FULL_SPECIAL_EFFECT_PRICE_NOT_FOUND',
+        '专版特殊工艺没有唯一有效的加价和调版费',
+      ),
+    );
+  }
+
+  if (manualReasons.length > 0 || !selected || selected.unitPrice === null) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons,
+      errors: [],
+    };
+  }
+
+  const baseRate = decimalValue(selected.unitPrice);
+  const secondColorRate = needsSecondColor
+    ? decimalValue(snapshot.full.secondColorUnitSurcharge!)
+    : new Decimal(0);
+  const westEnvelopeRate = needsWestEnvelope
+    ? decimalValue(snapshot.full.westEnvelopeUnitSurcharge!)
+    : new Decimal(0);
+  const hasConfiguredPaperSurcharge = paperMatches.length === 1;
+  const paperRate =
+    hasConfiguredPaperSurcharge
+      ? decimalValue(paperMatches[0]!.unitSurcharge!)
+      : new Decimal(0);
   const effectRate =
     effectPrice === null
       ? new Decimal(0)
-      : effectPrice === undefined
-        ? null
-        : decimalValue(effectPrice.unitSurcharge);
+      : decimalValue(effectPrice!.unitSurcharge!);
   const setupFee =
     effectPrice === null
       ? new Decimal(0)
-      : effectPrice === undefined
-        ? null
-        : decimalValue(effectPrice.setupFee);
-  if (!baseRate || !secondColorRate || !paperRate || !effectRate || !setupFee) {
+      : decimalValue(effectPrice!.setupFee!);
+  if (
+    !baseRate ||
+    !secondColorRate ||
+    !westEnvelopeRate ||
+    !paperRate ||
+    !effectRate ||
+    !setupFee
+  ) {
     return {
       lines: [],
       amount: null,
@@ -377,6 +388,7 @@ function quoteFullProcessing(
   }
   const combinedUnitRate = baseRate
     .plus(secondColorRate)
+    .plus(westEnvelopeRate)
     .plus(paperRate)
     .plus(effectRate);
   const lines: CreateOrderQuoteLine[] = [];
@@ -404,12 +416,23 @@ function quoteFullProcessing(
       },
     }),
   );
-  for (const [code, label, rate] of [
-    ['FULL_SECOND_COLOR', '专版双色加价', secondColorRate],
-    ['FULL_PAPER_SURCHARGE', '专版纸张加价', paperRate],
-    ['FULL_SPECIAL_EFFECT', '专版特殊工艺', effectRate],
+  for (const [active, code, label, rate] of [
+    [needsSecondColor, 'FULL_SECOND_COLOR', '专版双色加价', secondColorRate],
+    [
+      hasConfiguredPaperSurcharge,
+      'FULL_PAPER_SURCHARGE',
+      '专版纸张加价',
+      paperRate,
+    ],
+    [
+      needsWestEnvelope,
+      'FULL_WEST_ENVELOPE',
+      '专版西封加价',
+      westEnvelopeRate,
+    ],
+    [effect !== 'NONE', 'FULL_SPECIAL_EFFECT', '专版特殊工艺', effectRate],
   ] as const) {
-    if (rate.isZero()) continue;
+    if (!active) continue;
     const amount = safeMoney(rate.times(item.quantity));
     if (amount === null) {
       return {
@@ -430,7 +453,7 @@ function quoteFullProcessing(
       }),
     );
   }
-  if (!setupFee.isZero()) {
+  if (effect !== 'NONE') {
     lines.push(
       quotedItemLine({
         itemKey: item.itemKey,
@@ -460,6 +483,21 @@ function quotePrintProcessing(
   manualReasons: CreateOrderManualReason[];
   errors: string[];
 } {
+  const finishing = item.printFinishing ?? 'MATTE';
+  if (finishing !== 'MATTE') {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [
+        manualReason(
+          'PRINT_FINISHING_PRICE_NOT_FOUND',
+          '彩印触感膜、新光膜或雷射膜加价待定',
+        ),
+      ],
+      errors: [],
+    };
+  }
   if (item.quantity > 20_000) {
     return {
       lines: [],
@@ -528,7 +566,10 @@ function quotePrintProcessing(
         candidate.foilPassCount === passCount &&
         candidate.tierQuantity === tierQuantity,
     );
-    const addOn = matches.length === 1 ? decimalValue(matches[0]!.amount) : null;
+    const addOn =
+      matches.length === 1 && matches[0]!.amount !== null
+        ? decimalValue(matches[0]!.amount!)
+        : null;
     if (!addOn) {
       return {
         lines,
@@ -582,7 +623,6 @@ export function quoteCreateOrderItem(
   snapshot: CreateOrderPriceSnapshot,
 ): CreateOrderItemQuote {
   const validationErrors = validateItem(item);
-  const bagging = quoteBagging(item, snapshot);
   if (validationErrors.length > 0) {
     return {
       itemKey: item.itemKey,
@@ -590,12 +630,11 @@ export function quoteCreateOrderItem(
       status: 'INVALID_INPUT',
       unitPrice: null,
       processingAmount: null,
-      baggingAmount: null,
       amount: null,
       knownAmount: '0.00',
-      lines: excludedManualLines([bagging.line]),
+      lines: [],
       manualReasons: [],
-      errors: [...validationErrors, ...(bagging.error ? [bagging.error] : [])],
+      errors: validationErrors,
     };
   }
 
@@ -612,9 +651,8 @@ export function quoteCreateOrderItem(
   ];
   const errors = [
     ...processing.errors,
-    ...(bagging.error ? [bagging.error] : []),
   ];
-  const rawLines = [...processing.lines, bagging.line];
+  const rawLines = [...processing.lines];
 
   if (errors.length > 0) {
     return {
@@ -623,7 +661,6 @@ export function quoteCreateOrderItem(
       status: 'INVALID_INPUT',
       unitPrice: null,
       processingAmount: null,
-      baggingAmount: null,
       amount: null,
       knownAmount: '0.00',
       lines: excludedManualLines(rawLines),
@@ -639,7 +676,6 @@ export function quoteCreateOrderItem(
       status: 'MANUAL_PRICING_REQUIRED',
       unitPrice: null,
       processingAmount: null,
-      baggingAmount: bagging.amount,
       amount: null,
       knownAmount: '0.00',
       lines: excludedManualLines(rawLines),
@@ -648,21 +684,14 @@ export function quoteCreateOrderItem(
     };
   }
 
-  const complete = processing.amount !== null && bagging.amount !== null;
   return {
     itemKey: item.itemKey,
     fig: item.fig,
-    status: complete ? 'QUOTED' : 'PARTIAL',
+    status: processing.amount === null ? 'PARTIAL' : 'QUOTED',
     unitPrice: processing.unitPrice,
     processingAmount: processing.amount,
-    baggingAmount: bagging.amount,
-    amount: complete
-      ? sumMoney([processing.amount, bagging.amount])
-      : null,
-    knownAmount: sumMoney([
-      processing.amount,
-      bagging.amount,
-    ]),
+    amount: processing.amount,
+    knownAmount: sumMoney([processing.amount]),
     lines: rawLines,
     manualReasons: [],
     errors: [],

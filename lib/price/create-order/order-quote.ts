@@ -1,6 +1,7 @@
 import { calculateExternalOrderCharges } from '../external-order-charges';
 import { quoteCreateOrderItem } from './item-quote';
 import { sumMoney } from './money';
+import { quoteCreateOrderPackagingGroups } from './packaging-quote';
 import type {
   CreateOrderOrderQuote,
   CreateOrderPriceSnapshot,
@@ -25,6 +26,29 @@ function validateOrderInput(input: CreateOrderQuoteInput): string[] {
   const duplicateFigs = figs.filter((fig, index) => figs.indexOf(fig) !== index);
   if (duplicateFigs.length > 0) {
     errors.push(`款式 fig 重复：${[...new Set(duplicateFigs)].join('、')}`);
+  }
+
+  const groupKeys = input.packagingGroups.map((group) => group.groupKey);
+  const duplicateGroupKeys = groupKeys.filter(
+    (key, index) => groupKeys.indexOf(key) !== index,
+  );
+  if (duplicateGroupKeys.length > 0) {
+    errors.push(
+      `包装组标识重复：${[...new Set(duplicateGroupKeys)].join('、')}`,
+    );
+  }
+  const packagedItemKeys = input.packagingGroups.flatMap((group) =>
+    group.items.map((item) => item.itemKey),
+  );
+  const multiplyPackagedItemKeys = packagedItemKeys.filter(
+    (key, index) => packagedItemKeys.indexOf(key) !== index,
+  );
+  if (multiplyPackagedItemKeys.length > 0) {
+    errors.push(
+      `款式只能归入一个包装组：${[
+        ...new Set(multiplyPackagedItemKeys),
+      ].join('、')}`,
+    );
   }
 
   const knownItemKeys = new Set(itemKeys);
@@ -56,9 +80,10 @@ function pendingPlateLine(snapshot: CreateOrderPriceSnapshot): CreateOrderQuoteL
   return {
     layer: 'ORDER',
     itemKey: null,
+    groupKey: null,
     code: 'PLATE_FEE',
     label: snapshot.plate.label,
-    status: 'PENDING',
+    status: 'PENDING_AMOUNT',
     amount: null,
     includedInKnownTotal: false,
     basis: { displayAmount: '待定', granularity: 'PER_ORDER' },
@@ -110,10 +135,13 @@ function quoteOrderLayer(
   const carton: CreateOrderQuoteLine = {
     layer: 'ORDER',
     itemKey: null,
+    groupKey: null,
     code: 'CARTON',
     label: '纸箱耗材',
     status:
-      chargeQuote.suggestedPackagingTotal === null ? 'PENDING' : 'QUOTED',
+      chargeQuote.suggestedPackagingTotal === null
+        ? 'PENDING_AMOUNT'
+        : 'QUOTED',
     amount: chargeQuote.suggestedPackagingTotal,
     includedInKnownTotal: chargeQuote.suggestedPackagingTotal !== null,
     basis: {
@@ -131,9 +159,10 @@ function quoteOrderLayer(
     (shipment) => ({
       layer: 'ORDER',
       itemKey: null,
+      groupKey: null,
       code: `SHIPPING:${shipment.shipmentKey}`,
       label: shipment.shipping.name,
-      status: shipment.shipping.complete ? 'QUOTED' : 'PENDING',
+      status: shipment.shipping.complete ? 'QUOTED' : 'PENDING_AMOUNT',
       amount: shipment.shipping.amount,
       includedInKnownTotal:
         shipment.shipping.complete && shipment.shipping.amount !== null,
@@ -164,12 +193,27 @@ export function calculateCreateOrderQuote(
 ): CreateOrderQuoteResult {
   const orderInputErrors = validateOrderInput(input);
   const items = input.items.map((item) => quoteCreateOrderItem(item, snapshot));
+  const manualItemKeySet = new Set(
+    items
+      .filter((item) => item.status === 'MANUAL_PRICING_REQUIRED')
+      .map((item) => item.itemKey),
+  );
+  const packagingGroups = quoteCreateOrderPackagingGroups({
+    items: input.items,
+    groups: input.packagingGroups,
+    manualItemKeys: manualItemKeySet,
+    snapshot,
+  });
   const invalidItemErrors = items.flatMap((item) =>
     item.errors.map((error) => `款式 ${item.itemKey}：${error}`),
   );
+  const invalidPackagingErrors = packagingGroups.flatMap((group) =>
+    group.errors.map((error) => `包装组 ${group.groupKey}：${error}`),
+  );
   const hasInvalidInput =
     orderInputErrors.length > 0 ||
-    items.some((item) => item.status === 'INVALID_INPUT');
+    items.some((item) => item.status === 'INVALID_INPUT') ||
+    packagingGroups.some((group) => group.status === 'INVALID_INPUT');
 
   const order =
     orderInputErrors.length === 0
@@ -189,16 +233,43 @@ export function calculateCreateOrderQuote(
   const pendingLineCodes = [
     ...items.flatMap((item) =>
       item.lines
-        .filter((line) => line.status === 'PENDING')
+        .filter((line) => line.status === 'PENDING_AMOUNT')
         .map((line) => `${item.itemKey}:${line.code}`),
     ),
+    ...packagingGroups
+      .filter((group) => group.line.status === 'PENDING_AMOUNT')
+      .map((group) => `${group.groupKey}:${group.line.code}`),
     ...order.lines
-      .filter((line) => line.status === 'PENDING')
+      .filter((line) => line.status === 'PENDING_AMOUNT')
       .map((line) => line.code),
+  ];
+  const pendingReasons = [
+    ...packagingGroups
+      .filter((group) => group.status === 'PENDING_AMOUNT')
+      .map((group) => ({
+        code: 'BAGGING_INPUT_PENDING' as const,
+        message: '入袋每包组成未完整，入袋金额待定',
+        groupKey: group.groupKey,
+      })),
+    ...order.lines
+      .filter(
+        (line) =>
+          line.status === 'PENDING_AMOUNT' && line.code.startsWith('SHIPPING:'),
+      )
+      .map((line) => ({
+        code: 'FREIGHT_QUOTE_PENDING' as const,
+        message: '快递或物流金额待定',
+        shipmentKey: line.code.slice('SHIPPING:'.length),
+      })),
+    {
+      code: 'PLATE_AMOUNT_PENDING' as const,
+      message: '制烫金版费金额待定',
+    },
   ];
   const hasManual = manualReasons.length > 0;
   const hasBlockingPending =
     items.some((item) => item.status === 'PARTIAL') ||
+    packagingGroups.some((group) => group.status === 'PENDING_AMOUNT') ||
     order.amount === null;
   const status = hasInvalidInput
     ? 'INVALID_INPUT'
@@ -209,6 +280,7 @@ export function calculateCreateOrderQuote(
         : 'QUOTED';
   const knownTotal = sumMoney([
     ...items.map((item) => item.knownAmount),
+    ...packagingGroups.map((group) => group.knownAmount),
     order.knownAmount,
   ]);
   const total = status === 'QUOTED' ? knownTotal : null;
@@ -218,12 +290,19 @@ export function calculateCreateOrderQuote(
     status,
     submittable: !hasInvalidInput,
     items,
+    packagingGroups,
     order,
     total,
     knownTotal,
     excludedManualItemKeys,
     pendingLineCodes,
     manualReasons,
-    errors: [...orderInputErrors, ...invalidItemErrors, ...order.errors],
+    pendingReasons,
+    errors: [
+      ...orderInputErrors,
+      ...invalidItemErrors,
+      ...invalidPackagingErrors,
+      ...order.errors,
+    ],
   };
 }
