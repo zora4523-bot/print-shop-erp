@@ -26,3 +26,32 @@ export async function listOrderProductionOperations(orderId: string) {
     orderBy: [{ operationType: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
   });
 }
+
+/** Read-only no-pay progress for admin and normal order detail pages. */
+export async function listOrderProductionProgressSteps(orderId: string) {
+  return db.productionProgressStep.findMany({
+    where: { orderId },
+    select: {
+      id: true,
+      craftCode: true,
+      craftName: true,
+      status: true,
+      plannedQty: true,
+      orderItemId: true,
+      orderItem: { select: { sequence: true, name: true } },
+      reports: {
+        select: {
+          completedQty: true,
+          defectQty: true,
+          reworkQty: true,
+        },
+        orderBy: { reportedAt: 'asc' },
+      },
+    },
+    orderBy: [
+      { orderItem: { sequence: 'asc' } },
+      { craftCode: 'asc' },
+      { id: 'asc' },
+    ],
+  });
+}

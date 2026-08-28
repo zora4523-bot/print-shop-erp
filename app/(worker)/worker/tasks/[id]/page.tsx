@@ -8,10 +8,16 @@ import {
   WorkerType,
 } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
-import { getProductionOperationForReporter } from '@/lib/production/operation-portal';
+import {
+  getProductionOperationForReporter,
+  getProductionProgressForReporter,
+} from '@/lib/production/operation-portal';
 import { getLegacyProductionTaskDetail } from '@/lib/production/legacy-task-reader';
 import { OperationReportingError } from '@/lib/production/operation-reporting';
-import { OperationReportForm } from '@/components/business/production/OperationReportForm';
+import {
+  OperationReportForm,
+  ProgressReportForm,
+} from '@/components/business/production/OperationReportForm';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
@@ -181,6 +187,111 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             ),
           )}
         </section>
+      </div>
+    );
+  }
+
+  const progress = await getProductionProgressForReporter(id, actor);
+  if (progress) {
+    const remainingQty = Decimal.max(
+      new Decimal(progress.plannedQty).minus(progress.completedQty),
+      0,
+    ).toString();
+    return (
+      <div className="min-w-0 space-y-5">
+        <header className="worker-wrap-anywhere min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-sans text-sm tabular-nums">
+              {progress.orderNo}
+            </span>
+            {progress.isUrgent ? <UrgentBadge /> : null}
+            <OperationStatusBadge status={progress.status} />
+            <StatusBadge tone="neutral">进度·不计薪</StatusBadge>
+          </div>
+          <h1 className="text-lg font-semibold">{progress.craftName}</h1>
+          <p className="text-sm">
+            #{progress.orderItemSequence} · {progress.orderItemName}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            计划 {progress.plannedQty} 个
+            {progress.promisedDate
+              ? ` · 交期 ${formatDateShanghai(progress.promisedDate)}`
+              : ''}
+          </p>
+        </header>
+
+        {progress.status === ProductionOperationStatus.PENDING ||
+        progress.status === ProductionOperationStatus.IN_PROGRESS ? (
+          <section className="rounded-xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 text-sm font-semibold">扫码报进度</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              累计合格 {progress.completedQty} / {progress.plannedQty}
+            </p>
+            <ProgressReportForm
+              progressStepId={progress.id}
+              idempotencyKey={randomUUID()}
+              remainingQty={remainingQty}
+            />
+          </section>
+        ) : null}
+
+        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+          <h2 className="font-semibold">工序进度</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-3">
+            <Metric label="合格完成" value={progress.completedQty} />
+            <Metric label="计划数量" value={progress.plannedQty} />
+            <Metric label="缺陷记录" value={progress.defectQty} />
+            <Metric label="返工记录" value={progress.reworkQty} />
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">
+            此步骤仅推进生产进度，不产生计件工资。
+          </p>
+        </section>
+
+        {progress.packageRequirement || progress.orderRemark ? (
+          <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+            <h2 className="font-semibold">包装与工单备注</h2>
+            <dl className="mt-3 space-y-2">
+              <div>
+                <dt className="text-xs text-muted-foreground">包装要求</dt>
+                <dd className="break-words">
+                  {progress.packageRequirement ?? '—'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">工单备注</dt>
+                <dd className="break-words">{progress.orderRemark ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+
+        <article className="rounded-xl border bg-card p-4 shadow-sm">
+          <h2 className="font-semibold">
+            #{progress.item.sequence} · {progress.item.name}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {progress.item.specification
+              ? externalPriceBusinessText(progress.item.specification)
+              : '未填规格'}
+            {' · '}
+            {progress.item.paperType
+              ? externalPriceBusinessText(progress.item.paperType)
+              : '未填纸张'}
+            {' · '}款式数量 {progress.item.quantity}
+          </p>
+          {progress.item.remark ? (
+            <HighlightedRemark className="mt-3">
+              {progress.item.remark}
+            </HighlightedRemark>
+          ) : null}
+          <DesignImageGallery
+            images={progress.item.designs.map((design) => ({
+              ...design,
+              fileUrl: signDesignReadUrl(design.fileUrl),
+            }))}
+          />
+        </article>
       </div>
     );
   }

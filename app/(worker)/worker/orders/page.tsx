@@ -35,7 +35,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
       <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的工单</h1>
         <p className="text-xs text-muted-foreground">
-          展示与你固定工序岗位对应的工单，包含已完成记录。
+          展示与你固定计件岗位或共享无计件进度相关的工单。
         </p>
       </header>
 
@@ -74,7 +74,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
                       </p>
                     ) : null}
                     <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                      本岗位工序 {order.completedOperationCount}/
+                      可见生产步骤 {order.completedOperationCount}/
                       {order.operationCount} 已完成
                       {order.promisedDate
                         ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`

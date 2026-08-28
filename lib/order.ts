@@ -1341,6 +1341,22 @@ type CascadeTxClient = {
       data: { status: ProductionOperationStatus };
     }) => Promise<{ count: number }>;
   };
+  productionProgressStep: {
+    findMany: (args: {
+      where: { orderId: string };
+      select: unknown;
+    }) => Promise<
+      Array<{
+        id: string;
+        status: ProductionOperationStatus;
+        _count: { reports: number };
+      }>
+    >;
+    updateMany: (args: {
+      where: unknown;
+      data: { status: ProductionOperationStatus };
+    }) => Promise<{ count: number }>;
+  };
   productionTask: {
     findMany: (args: {
       where: unknown;
@@ -1813,6 +1829,19 @@ export async function cancelOrder(
           _count: { select: { reports: true } },
         },
       });
+      const progressSteps = await tx.productionProgressStep.findMany({
+        where: { orderId: id },
+        select: {
+          id: true,
+          status: true,
+          _count: { select: { reports: true } },
+        },
+      });
+      if (operations.length === 0 && progressSteps.length > 0) {
+        throw new OrderInvariantError(
+          '工单存在孤立的无计件进度步骤，生产 ledger 不完整，拒绝取消',
+        );
+      }
       const hasReportedOperation = operations.some(
         (operation) =>
           operation._count.reports > 0 ||
@@ -1824,6 +1853,17 @@ export async function cancelOrder(
           '该工单存在已报工的生产工序，不能直接取消，请先处理生产记录',
         );
       }
+      const hasReportedProgress = progressSteps.some(
+        (step) =>
+          step._count.reports > 0 ||
+          step.status === ProductionOperationStatus.IN_PROGRESS ||
+          step.status === ProductionOperationStatus.COMPLETED,
+      );
+      if (hasReportedProgress) {
+        throw new OrderInvariantError(
+          '该工单存在已报工的无计件进度，不能直接取消，请先处理生产记录',
+        );
+      }
       if (
         operations.length > 0 &&
         operations.some(
@@ -1833,6 +1873,16 @@ export async function cancelOrder(
       ) {
         throw new OrderInvariantError(
           '该工单存在非待处理的生产工序，只能整单取消全部待处理工序',
+        );
+      }
+      if (
+        operations.length > 0 &&
+        progressSteps.some(
+          (step) => step.status !== ProductionOperationStatus.PENDING,
+        )
+      ) {
+        throw new OrderInvariantError(
+          '该工单存在非待处理的无计件进度，只能整单取消全部待处理步骤',
         );
       }
 
@@ -1879,6 +1929,7 @@ export async function cancelOrder(
 
       if (operations.length > 0) {
         const pendingOperationCount = operations.length;
+        const pendingProgressCount = progressSteps.length;
         if (pendingOperationCount > 0) {
           await tx.productionOperation.updateMany({
             where: {
@@ -1899,6 +1950,29 @@ export async function cancelOrder(
                 },
               },
               remark: `随工单取消 ${pendingOperationCount} 个未报工工序`,
+            },
+          });
+        }
+        if (pendingProgressCount > 0) {
+          await tx.productionProgressStep.updateMany({
+            where: {
+              orderId: id,
+              status: ProductionOperationStatus.PENDING,
+            },
+            data: { status: ProductionOperationStatus.CANCELLED },
+          });
+          await tx.orderLog.create({
+            data: {
+              orderId: id,
+              operatorId: actor.id,
+              action: 'STATUS_CHANGE',
+              changedFields: {
+                cancelledProgressSteps: {
+                  before: pendingProgressCount,
+                  after: 0,
+                },
+              },
+              remark: `随工单取消 ${pendingProgressCount} 个未报工无计件进度步骤`,
             },
           });
         }

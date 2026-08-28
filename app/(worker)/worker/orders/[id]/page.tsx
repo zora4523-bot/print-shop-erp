@@ -86,11 +86,12 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      <section className="space-y-3" aria-labelledby="operation-heading">
-        <h2 id="operation-heading" className="text-sm font-semibold">
-          本岗位工序
-        </h2>
-        {order.productionOperations.map((operation) => {
+      {order.productionOperations.length > 0 ? (
+        <section className="space-y-3" aria-labelledby="operation-heading">
+          <h2 id="operation-heading" className="text-sm font-semibold">
+            本岗位计件工序
+          </h2>
+          {order.productionOperations.map((operation) => {
           const completed = operation.reports.reduce(
             (sum, report) => sum.plus(report.reportedCompletedQty),
             new Decimal(0),
@@ -120,8 +121,45 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               </p>
             </Link>
           );
-        })}
-      </section>
+          })}
+        </section>
+      ) : null}
+
+      {order.productionProgressSteps.length > 0 ? (
+        <section className="space-y-3" aria-labelledby="progress-heading">
+          <div>
+            <h2 id="progress-heading" className="text-sm font-semibold">
+              共享生产进度
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              所有师傅可报，仅推进进度，不计入工资。
+            </p>
+          </div>
+          {order.productionProgressSteps.map((step) => {
+            const completed = step.reports.reduce(
+              (sum, report) => sum.plus(report.completedQty),
+              new Decimal(0),
+            );
+            return (
+              <Link
+                key={step.id}
+                href={`/worker/tasks/${step.id}`}
+                className="block min-h-11 rounded-xl border bg-card p-4 shadow-sm hover:bg-muted/40"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <strong>{step.craftName}</strong>
+                  <OperationStatusBadge status={step.status} />
+                  <Badge variant="outline">不计薪</Badge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  #{step.orderItem.sequence} · {step.orderItem.name} · 已报合格{' '}
+                  {completed.toString()} / {step.plannedQty.toString()}
+                </p>
+              </Link>
+            );
+          })}
+        </section>
+      ) : null}
 
       <div className="space-y-3">
         {order.items.map((item) => (

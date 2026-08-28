@@ -6,6 +6,9 @@ import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
   OrderPackagingMode,
+  PieceworkOperationType,
+  PieceworkRateUnit,
+  ProductionOperationStatus,
   OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
@@ -23,6 +26,7 @@ const {
   taskDisputesMock,
   reworkCraftOptionsMock,
   productionOperationsMock,
+  productionProgressStepsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   getSalesOrderDetailByIdMock: vi.fn(),
@@ -33,6 +37,7 @@ const {
   taskDisputesMock: vi.fn(),
   reworkCraftOptionsMock: vi.fn(),
   productionOperationsMock: vi.fn(),
+  productionProgressStepsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -115,6 +120,7 @@ vi.mock('@/lib/production/task-dispute', () => ({
 }));
 vi.mock('@/lib/production/operation-order-view', () => ({
   listOrderProductionOperations: productionOperationsMock,
+  listOrderProductionProgressSteps: productionProgressStepsMock,
 }));
 vi.mock('@/lib/order/rework', () => ({
   getReworkCraftOptions: reworkCraftOptionsMock,
@@ -140,6 +146,7 @@ beforeEach(() => {
   taskDisputesMock.mockReset().mockResolvedValue([]);
   reworkCraftOptionsMock.mockReset().mockResolvedValue([]);
   productionOperationsMock.mockReset().mockResolvedValue([]);
+  productionProgressStepsMock.mockReset().mockResolvedValue([]);
 });
 
 describe('order detail commercial visibility', () => {
@@ -389,6 +396,55 @@ describe('order detail commercial visibility', () => {
         ],
       }),
     );
+  });
+
+  it('管理员工单详情只读展示无计件进度及完成数', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      status: OrderStatus.IN_PRODUCTION,
+    });
+    productionOperationsMock.mockResolvedValue([
+      {
+        id: 'operation-1',
+        operationType: PieceworkOperationType.PARTIAL,
+        unit: PieceworkRateUnit.PER_PASS,
+        status: ProductionOperationStatus.IN_PROGRESS,
+        plannedQty: '100',
+        sources: [
+          {
+            orderItemId: 'item-1',
+            packagingGroupId: null,
+            sourceQty: '100',
+          },
+        ],
+      },
+    ]);
+    productionProgressStepsMock.mockResolvedValue([
+      {
+        id: 'progress-1',
+        craftCode: 'CLEANING',
+        craftName: '清废',
+        status: ProductionOperationStatus.IN_PROGRESS,
+        plannedQty: '100',
+        orderItemId: 'item-1',
+        orderItem: { sequence: 1, name: '礼盒款' },
+        reports: [
+          { completedQty: '40', defectQty: '2', reworkQty: '1' },
+        ],
+      },
+    ]);
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('无计件生产进度');
+    expect(html).toContain('无计件进度（不计薪）');
+    expect(html).toContain('清废：进行中（40/100）');
+    expect(html).not.toContain('提交扫码报工');
   });
 
 });

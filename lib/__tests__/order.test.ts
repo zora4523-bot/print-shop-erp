@@ -34,6 +34,10 @@ const { dbMock } = vi.hoisted(() => {
       findMany: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
+    productionProgressStep: {
+      findMany: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+    };
     productionTask: {
       findMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
@@ -78,6 +82,7 @@ const { dbMock } = vi.hoisted(() => {
     customerPriceBook: { findMany: vi.fn() },
     customerPriceRule: { findMany: vi.fn() },
     productionOperation: { findMany: vi.fn(), updateMany: vi.fn() },
+    productionProgressStep: { findMany: vi.fn(), updateMany: vi.fn() },
     productionTask: { findMany: vi.fn(), update: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
     orderShipment: {
@@ -498,6 +503,10 @@ beforeEach(() => {
   // Default: pre-cutover order with neither operations nor production tasks.
   dbMock.productionOperation.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionOperation.updateMany
+    .mockReset()
+    .mockResolvedValue({ count: 0 });
+  dbMock.productionProgressStep.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionProgressStep.updateMany
     .mockReset()
     .mockResolvedValue({ count: 0 });
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
@@ -2535,6 +2544,130 @@ describe('cancelOrder', () => {
     expect(
       dbMock.orderLog.create.mock.calls.map((call) => call[0].data.remark),
     ).toContain('随工单取消 2 个未报工工序');
+  });
+
+  it('bulk-cancels PENDING no-pay progress with new operations in the same tx', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+    dbMock.productionProgressStep.findMany.mockResolvedValue([
+      {
+        id: 'progress-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+      {
+        id: 'progress-2',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    await cancelOrder('o1', ownerActor, '客户取消');
+
+    expect(dbMock.productionProgressStep.updateMany).toHaveBeenCalledWith({
+      where: {
+        orderId: 'o1',
+        status: ProductionOperationStatus.PENDING,
+      },
+      data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(
+      dbMock.orderLog.create.mock.calls.map((call) => call[0].data.remark),
+    ).toContain('随工单取消 2 个未报工无计件进度步骤');
+  });
+
+  it('fails closed when no-pay progress exists without a new operation generation', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionProgressStep.findMany.mockResolvedValue([
+      {
+        id: 'progress-orphan',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /孤立的无计件进度步骤/,
+    );
+    expect(dbMock.productionProgressStep.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks cancellation when a no-pay progress step has any report', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+    dbMock.productionProgressStep.findMany.mockResolvedValue([
+      {
+        id: 'progress-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 1 },
+      },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /已报工的无计件进度/,
+    );
+    expect(dbMock.productionProgressStep.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ProductionOperationStatus.IN_PROGRESS,
+    ProductionOperationStatus.COMPLETED,
+  ])('blocks cancellation for a %s no-pay progress step', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+    dbMock.productionProgressStep.findMany.mockResolvedValue([
+      { id: 'progress-1', status, _count: { reports: 0 } },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /已报工的无计件进度/,
+    );
+    expect(dbMock.productionProgressStep.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
   it('blocks cancellation when a new operation has any report', async () => {

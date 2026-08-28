@@ -96,7 +96,10 @@ import {
 } from '@/components/business/order/order-detail-timeline';
 import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputeAdminPanel } from '@/components/business/production/TaskDisputeAdminPanel';
-import { listOrderProductionOperations } from '@/lib/production/operation-order-view';
+import {
+  listOrderProductionOperations,
+  listOrderProductionProgressSteps,
+} from '@/lib/production/operation-order-view';
 import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 
@@ -152,6 +155,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
     taskDisputes,
     reworkCraftOptions,
     productionOperations,
+    productionProgressSteps,
   ] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
     user.role === Role.ADMIN
@@ -164,6 +168,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       ? getReworkCraftOptions(order.items.flatMap((item) => item.crafts))
       : Promise.resolve([]),
     listOrderProductionOperations(order.id),
+    listOrderProductionProgressSteps(order.id),
   ]);
 
   const canSubmit =
@@ -252,7 +257,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const allTasks = order.items.flatMap((item) => item.tasks);
   const hasProductionOperations = productionOperations.length > 0;
   const productionUnits = hasProductionOperations
-    ? productionOperations
+    ? [...productionOperations, ...productionProgressSteps]
     : allTasks;
   const pendingProductionCount = productionUnits.filter(
     (unit) => unit.status === 'PENDING',
@@ -274,6 +279,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
       current.push(operation);
       operationsByOrderItemId.set(source.orderItemId, current);
     }
+  }
+  const progressByOrderItemId = new Map<
+    string,
+    typeof productionProgressSteps
+  >();
+  for (const step of productionProgressSteps) {
+    const current = progressByOrderItemId.get(step.orderItemId) ?? [];
+    current.push(step);
+    progressByOrderItemId.set(step.orderItemId, current);
   }
   const liveOutsourceCount = order.outsourceOrders.filter(
     (row) =>
@@ -632,15 +646,31 @@ export default async function OrderDetailPage({ params }: PageProps) {
             value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
           />
           {hasProductionOperations ? (
-            <Row
-              label="生产工序"
-              value={productionOperations
-                .map(
-                  (operation) =>
-                    `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
-                )
-                .join('；')}
-            />
+            <>
+              <Row
+                label="计件生产工序"
+                value={productionOperations
+                  .map(
+                    (operation) =>
+                      `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
+                  )
+                  .join('；')}
+              />
+              <Row
+                label="无计件生产进度"
+                value={
+                  productionProgressSteps.length > 0
+                    ? productionProgressSteps
+                        .map(
+                          (step) =>
+                            `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
+                        )
+                        .join('；')
+                    : '无'
+                }
+                full
+              />
+            </>
           ) : assignedWorkerNames.length > 0 ? (
             <Row label="历史派工" value={assignedWorkerNames.join('、')} />
           ) : (
@@ -1117,6 +1147,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   }
                   full
                 />
+                {hasProductionOperations ? (
+                  <Row
+                    label="无计件进度（不计薪）"
+                    value={
+                      (progressByOrderItemId.get(item.id) ?? [])
+                        .map((step) => {
+                          const completed = step.reports.reduce(
+                            (sum, report) => sum.plus(report.completedQty),
+                            new Decimal(0),
+                          );
+                          return `${step.craftName}：${productionOperationStatusLabel(step.status)}（${completed.toString()}/${step.plannedQty.toString()}）`;
+                        })
+                        .join('；') || '该款式无无计件进度步骤'
+                    }
+                    full
+                  />
+                ) : null}
               </dl>
               {canViewCommercialAmounts &&
               'plateDetails' in item &&

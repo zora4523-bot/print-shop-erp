@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '../../generated/prisma/enums';
 
-const { requirePermissionMock, reportMock, revalidatePathMock } = vi.hoisted(
+const {
+  requirePermissionMock,
+  reportMock,
+  progressReportMock,
+  revalidatePathMock,
+} = vi.hoisted(
   () => ({
     requirePermissionMock: vi.fn(),
     reportMock: vi.fn(),
+    progressReportMock: vi.fn(),
     revalidatePathMock: vi.fn(),
   }),
 );
@@ -16,9 +22,24 @@ vi.mock('@/lib/production/operation-reporting', () => ({
   OperationReportingError: class OperationReportingError extends Error {},
   reportProductionOperation: reportMock,
 }));
+vi.mock('@/lib/production/progress-reporting', () => ({
+  ProgressReportingError: class ProgressReportingError extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
+  reportProductionProgress: progressReportMock,
+}));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
-import { reportProductionOperationAction } from '../production-operations';
+import {
+  reportProductionOperationAction,
+  reportProductionProgressAction,
+} from '../production-operations';
+import { ProgressReportingError } from '@/lib/production/progress-reporting';
 
 function formData() {
   const data = new FormData();
@@ -43,7 +64,82 @@ beforeEach(() => {
     amount: '1.50',
     idempotentReplay: false,
   });
+  progressReportMock.mockReset().mockResolvedValue({
+    reportId: 'progress-report-1',
+    progressStepId: 'progress-1',
+    orderId: 'order-1',
+    idempotentReplay: false,
+  });
   revalidatePathMock.mockReset();
+});
+
+describe('reportProductionProgressAction', () => {
+  it('用 task:report 会话账号提交无计件进度并刷新必要页面', async () => {
+    await expect(
+      reportProductionProgressAction('progress-1', null, formData()),
+    ).resolves.toEqual({
+      status: 'success',
+      reportId: 'progress-report-1',
+      progressStepId: 'progress-1',
+      orderId: 'order-1',
+      idempotentReplay: false,
+    });
+    expect(requirePermissionMock).toHaveBeenCalledWith('task:report');
+    expect(progressReportMock).toHaveBeenCalledWith(
+      {
+        progressStepId: 'progress-1',
+        completedQty: 100,
+        defectQty: 2,
+        reworkQty: 1,
+        idempotencyKey: 'scan-request-0001',
+      },
+      { id: 'session-worker', role: Role.WORKER },
+    );
+    expect(JSON.stringify(progressReportMock.mock.calls[0])).not.toContain(
+      'attacker-selected-worker',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/worker/tasks/progress-1',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/orders');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+  });
+
+  it('权限拒绝时不解析也不写入进度', async () => {
+    requirePermissionMock.mockRejectedValue(new Error('unauthorized'));
+    await expect(
+      reportProductionProgressAction('progress-1', null, formData()),
+    ).rejects.toThrow('unauthorized');
+    expect(progressReportMock).not.toHaveBeenCalled();
+  });
+
+  it('把预期的数量与幂等冲突转成可读表单错误', async () => {
+    progressReportMock.mockRejectedValue(
+      new ProgressReportingError('OVER_REPORT', '合格完成数超过剩余数量'),
+    );
+
+    await expect(
+      reportProductionProgressAction('progress-1', null, formData()),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '合格完成数超过剩余数量',
+    });
+  });
+
+  it('拒绝非整数进度数量且不调用服务', async () => {
+    const data = formData();
+    data.set('completedQty', '1.5');
+
+    await expect(
+      reportProductionProgressAction('progress-1', null, data),
+    ).resolves.toEqual({
+      status: 'invalid',
+      message: '报工数量或请求标识不合法',
+    });
+    expect(progressReportMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('reportProductionOperationAction', () => {
