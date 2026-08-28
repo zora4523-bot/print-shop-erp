@@ -947,6 +947,9 @@ export async function finalizeExternalOrderQuoteInTx(
           priceOverrideReason: null,
           pricingSnapshot: {
             ...itemPresentation.snapshot,
+            // Keep the pure-engine schemaVersion while satisfying the legacy
+            // OrderItem snapshot compatibility envelope at persistence time.
+            version: 1,
             source: 'EXTERNAL_SUBMIT_QUOTE',
             actual: {
               unitPrice,
@@ -978,6 +981,7 @@ export async function finalizeExternalOrderQuoteInTx(
           // a fabricated zero; disposition + quotedAmount are authoritative.
           pricingSnapshot: {
             ...itemPresentation.snapshot,
+            version: 1,
             source: 'EXTERNAL_SUBMIT_MANUAL_REQUIRED',
             actual: {
               amount: null,

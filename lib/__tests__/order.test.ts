@@ -761,6 +761,13 @@ describe('createOrder', () => {
             fixedFee: '0',
             subtotal: '0.00',
             quoteDisposition: 'MANUAL_PRICING_REQUIRED',
+            pricingSnapshot: expect.objectContaining({
+              version: 1,
+              schemaVersion: 2,
+              complete: false,
+              suggestedSubtotal: null,
+              source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
+            }),
             priceOverrideReason: null,
           }),
         ],
@@ -1300,6 +1307,16 @@ describe('createOrder', () => {
     expect(dbMock.order.create.mock.calls[0]![0].data.pricingStatus).toBe(
       'AUTO_CONFIRMED',
     );
+    expect(
+      dbMock.order.create.mock.calls[0]![0].data.items.create[0]
+        .pricingSnapshot,
+    ).toMatchObject({
+      version: 1,
+      schemaVersion: 2,
+      complete: true,
+      suggestedSubtotal: '170.00',
+      source: 'INTERNAL_CREATE_AUTO',
+    });
     expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
     expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 10_000,

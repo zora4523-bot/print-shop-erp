@@ -680,6 +680,10 @@ export async function createOrder(
           requiresAdminConfirmation: true,
           pricingSnapshot: {
             ...presentation.snapshot,
+            // Compatibility fence for OrderItem_suggested_snapshot_consistent.
+            // The pure-engine schemaVersion remains unchanged; `version` is
+            // the legacy persistence envelope expected by the database.
+            version: 1,
             source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
             quotedAt: now.toISOString(),
             actual: {
@@ -748,6 +752,7 @@ export async function createOrder(
         requiresAdminConfirmation: false,
         pricingSnapshot: {
           ...presentation.snapshot,
+          version: 1,
           source: 'INTERNAL_CREATE_AUTO',
           quotedAt: now.toISOString(),
           actual: {

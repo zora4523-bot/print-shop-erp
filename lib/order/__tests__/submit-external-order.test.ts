@@ -574,8 +574,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         data: expect.objectContaining({
           quotedAmount: '170.00',
           pricingSnapshot: expect.objectContaining({
+            version: 1,
             schemaVersion: 2,
             engineVersion: 'CREATE_ORDER_PURE_V1',
+            source: 'EXTERNAL_SUBMIT_QUOTE',
           }),
         }),
       }),
@@ -742,7 +744,12 @@ describe('finalizeExternalOrderQuoteInTx', () => {
             OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
           quotedAmount: null,
           pricingSnapshot: expect.objectContaining({
+            version: 1,
+            schemaVersion: 2,
+            complete: false,
+            suggestedSubtotal: null,
             engineVersion: 'CREATE_ORDER_PURE_V1',
+            source: 'EXTERNAL_SUBMIT_MANUAL_REQUIRED',
             actual: expect.objectContaining({ amount: null }),
           }),
         }),
