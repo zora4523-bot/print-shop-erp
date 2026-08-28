@@ -2,52 +2,50 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '../../../generated/prisma/client';
 import {
   CustomerPriceBookPurpose,
+  OrderCustomerChargeStatus,
+  OrderFoilTechnique,
   OrderItemQuoteDisposition,
+  OrderItemPricingRoute,
+  OrderLamination,
   OrderPackagingMode,
+  OrderProductStructure,
   OrderQuotedFeeCompleteness,
   OrderSettlementType,
   OrderStatus,
 } from '../../../generated/prisma/enums';
+import type { CreateOrderPriceSnapshot } from '../../price/create-order';
+import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 
-const {
-  appendRevisionMock,
-  priceSnapshotMock,
-  quoteItemsMock,
-  quoteLogisticsMock,
-  quotePackagingMock,
-  resolveLogisticsMock,
-} = vi.hoisted(() => ({
-  appendRevisionMock: vi.fn(),
-  priceSnapshotMock: vi.fn(),
-  quoteItemsMock: vi.fn(),
-  quoteLogisticsMock: vi.fn(),
-  quotePackagingMock: vi.fn(),
-  resolveLogisticsMock: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  appendRevision: vi.fn(),
+  readPublishedSnapshot: vi.fn(),
+  resolveLogistics: vi.fn(),
+  productFindMany: vi.fn(),
+  craftFindMany: vi.fn(),
+  materialFindMany: vi.fn(),
+  transaction: vi.fn(),
+  PublishedCreateOrderPriceAdapterError: class extends Error {},
+}));
+
+vi.mock('@/lib/db', () => ({
+  db: { $transaction: mocks.transaction },
 }));
 
 vi.mock('../pricing-revision', () => ({
-  appendOrderPricingRevisionInTx: appendRevisionMock,
+  appendOrderPricingRevisionInTx: mocks.appendRevision,
 }));
 
-vi.mock('../create-order-price-snapshot', () => ({
-  readExternalCreateOrderPriceSnapshot: priceSnapshotMock,
-}));
-
-vi.mock('../../price/quote-service', () => {
-  class QuoteCatalogInvariantError extends Error {}
-  return { QuoteCatalogInvariantError, quoteOrderItems: quoteItemsMock };
-});
-
-vi.mock('../../price/order-packaging-quote', () => ({
-  quoteOrderPackagingGroups: quotePackagingMock,
+vi.mock('../create-order-published-rule-adapter', () => ({
+  PublishedCreateOrderPriceAdapterError:
+    mocks.PublishedCreateOrderPriceAdapterError,
+  readPublishedCreateOrderPriceSnapshot: mocks.readPublishedSnapshot,
 }));
 
 vi.mock('../../price/order-charge-service', () => {
   class OrderCustomerChargeError extends Error {}
   return {
     OrderCustomerChargeError,
-    quoteExternalOrderChargesInTransaction: quoteLogisticsMock,
-    resolveExternalOrderChargesForProvisionalCreation: resolveLogisticsMock,
+    resolveExternalOrderChargesForProvisionalCreation: mocks.resolveLogistics,
   };
 });
 
@@ -55,29 +53,10 @@ import {
   ExternalOrderQuoteChangedError,
   finalizeExternalOrderQuoteInTx,
 } from '../submit-external-order';
+import { quoteExternalCreateOrder } from '../create-order-quote-service';
 
 const NOW = new Date('2026-08-28T02:00:00.000Z');
-const PROCESSING_SHA = 'a'.repeat(64);
-const LOGISTICS_SHA = 'b'.repeat(64);
-
-const priceSnapshot = {
-  processing: {
-    purpose: CustomerPriceBookPurpose.PROCESSING,
-    id: 'processing-v7',
-    code: 'EXTERNAL_PROCESSING',
-    name: '外部销售加工费',
-    version: 7,
-    sourceSha256: PROCESSING_SHA,
-  },
-  logistics: {
-    purpose: CustomerPriceBookPurpose.LOGISTICS,
-    id: 'logistics-v3',
-    code: 'EXTERNAL_LOGISTICS',
-    name: '外部销售物流',
-    version: 3,
-    sourceSha256: LOGISTICS_SHA,
-  },
-} as const;
+const PRICE_VERSION = CREATE_ORDER_GOLDEN_SNAPSHOT.priceVersion;
 
 function item(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,22 +64,22 @@ function item(overrides: Record<string, unknown> = {}) {
     sequence: 1,
     fig: 1,
     name: '款式 1',
-    productId: 'product-1',
+    productId: 'product-stock-large-1',
     pricingRoute: 'STOCK_BLANK',
-    productStructure: 'STANDARD',
+    productStructure: 'STANDARD_ENVELOPE',
     artworkVersion: null,
     plateGroupId: null,
-    pricingGroup: 'MID',
+    pricingGroup: 'LARGE',
     manualQuoteReason: null,
-    specification: '中号',
-    actualWidthMm: '170.00',
-    actualHeightMm: '90.00',
-    paperType: '珠光纸',
+    specification: '大号封90×165',
+    actualWidthMm: '90.00',
+    actualHeightMm: '165.00',
+    paperType: '160g珠光艳闪',
     paperWeightGsm: 160,
     quantity: 1_000,
-    crafts: ['craft-local-foil'],
-    foilColors: ['金'],
-    frontFoilColors: ['金'],
+    crafts: ['craft-partial'],
+    foilColors: ['哑金'],
+    frontFoilColors: ['哑金'],
     backFoilColors: [],
     foilTechnique: 'FLAT',
     hasLocalFoil: true,
@@ -109,9 +88,7 @@ function item(overrides: Record<string, unknown> = {}) {
     isDoubleSided: false,
     isDoubleColor: false,
     quoteDisposition: null,
-    product: {
-      paperMaterialId: 'paper-1',
-    },
+    product: { paperMaterialId: 'paper-pearl-160' },
     ...overrides,
   };
 }
@@ -124,7 +101,7 @@ function draftOrder(overrides: Record<string, unknown> = {}) {
       sequence: 2,
       fig: 2,
       name: '款式 2',
-      productId: 'product-2',
+      productId: 'product-stock-large-2',
       quantity: 500,
     }),
   ];
@@ -150,6 +127,10 @@ function draftOrder(overrides: Record<string, unknown> = {}) {
         name: '混装',
         mode: OrderPackagingMode.MIXED_STYLE,
         actualBagCount: 125,
+        lines: [
+          { orderItemId: 'item-1', unitsPerBag: 8 },
+          { orderItemId: 'item-2', unitsPerBag: 4 },
+        ],
       },
     ],
     shipments: [
@@ -169,61 +150,27 @@ function draftOrder(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function itemQuote(amount: string, overrides: Record<string, unknown> = {}) {
+function catalogProduct(overrides: Record<string, unknown> = {}) {
   return {
-    complete: true,
-    errors: [],
-    suggestedUnitPrice: '0.1000',
-    suggestedFixedFee: '0.00',
-    suggestedSubtotal: amount,
-    components: [],
-    snapshot: {
-      version: 1,
-      priceBook: {
-        id: priceSnapshot.processing.id,
-        code: priceSnapshot.processing.code,
-        name: priceSnapshot.processing.name,
-        version: priceSnapshot.processing.version,
-        sourceName: 'processing.xlsx',
-        sourceSha256: PROCESSING_SHA,
-      },
-      input: {},
-      base: {},
-      appliedAdjustments: [],
-      components: [],
-      suggestedUnitPrice: '0.1000',
-      suggestedFixedFee: '0.00',
-      suggestedSubtotal: amount,
-      complete: true,
-      errors: [],
-    },
+    id: 'product-stock-large-1',
+    code: 'EXT-STOCK-PEARL-FLASH-160-LARGE-1',
+    category: 'BLANK_STOCK',
+    specification: '大号封90×165',
+    paperType: '160g珠光艳闪',
+    paperMaterialId: 'paper-pearl-160',
+    weight: 160,
+    isActive: true,
     ...overrides,
   };
 }
 
-function packagingQuote(overrides: Record<string, unknown> = {}) {
+function catalogPaper(overrides: Record<string, unknown> = {}) {
   return {
-    priceBook: {
-      id: priceSnapshot.processing.id,
-      code: priceSnapshot.processing.code,
-      name: priceSnapshot.processing.name,
-      version: priceSnapshot.processing.version,
-      sourceName: 'processing.xlsx',
-      sourceSha256: PROCESSING_SHA,
-    },
-    groups: [
-      {
-        groupKey: 'pack-1',
-        complete: true,
-        errors: [],
-        suggestedUnitPrice: '0.2000',
-        suggestedSubtotal: '25.00',
-        snapshot: { version: 1, complete: true, errors: [] },
-      },
-    ],
-    suggestedTotal: '25.00',
-    requiresAdminConfirmation: false,
-    errors: [],
+    id: 'paper-pearl-160',
+    name: '160g珠光艳闪',
+    specification: null,
+    outOfStock: false,
+    isActive: true,
     ...overrides,
   };
 }
@@ -232,23 +179,40 @@ function resolvedCharge(args: {
   code: 'SHIPPING_FEE' | 'PACKING_MATERIAL';
   amount: string;
   requiresAdmin?: boolean;
+  ruleCode?: string | null;
+  waived?: boolean;
 }) {
   const shipping = args.code === 'SHIPPING_FEE';
+  const ruleCode =
+    args.ruleCode === undefined
+      ? shipping
+        ? 'ZTO_STANDARD_3_5'
+        : 'CARTON_1001_2000'
+      : args.ruleCode;
   return {
     shipmentKey: '1',
     categoryCode: args.code,
     categoryId: shipping ? 'cat-shipping' : 'cat-packing',
-    priceBookId: priceSnapshot.logistics.id,
-    sourceRuleId: shipping ? 'rule-shipping' : 'rule-packing',
+    priceBookId: PRICE_VERSION.logistics.id,
+    sourceRuleId: ruleCode ? `rule-${ruleCode}` : null,
     businessKey: `SHIPMENT:1:${args.code}`,
-    status: 'ESTIMATED',
+    status: args.waived
+      ? OrderCustomerChargeStatus.WAIVED
+      : OrderCustomerChargeStatus.ESTIMATED,
     description: shipping ? '快递费' : '纸箱耗材',
-    quantity: shipping ? '12.000' : '1500',
+    quantity: shipping ? '12' : '1500',
     unit: shipping ? 'kg' : '个',
     suggestedAmount: args.requiresAdmin ? null : args.amount,
     amount: args.amount,
     pricingSnapshot: {
       version: 1,
+      priceBook: {
+        id: PRICE_VERSION.logistics.id,
+        version: PRICE_VERSION.logistics.version,
+        sourceSha256: PRICE_VERSION.logistics.sourceSha256,
+        policy: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.logisticsPolicy,
+      },
+      quote: { ruleCode },
       actual: {
         amount: args.amount,
         provisional: Boolean(args.requiresAdmin),
@@ -259,29 +223,22 @@ function resolvedCharge(args: {
   };
 }
 
-function logisticsQuote(
+function resolvedLogistics(
   charges = [
-    resolvedCharge({ code: 'SHIPPING_FEE', amount: '21.30' }),
-    resolvedCharge({ code: 'PACKING_MATERIAL', amount: '20.00' }),
+    resolvedCharge({ code: 'SHIPPING_FEE', amount: '41.30' }),
+    resolvedCharge({ code: 'PACKING_MATERIAL', amount: '5.00' }),
   ],
+  overrides: Record<string, unknown> = {},
 ) {
   return {
     priceBook: {
-      ...priceSnapshot.logistics,
+      id: PRICE_VERSION.logistics.id,
+      code: PRICE_VERSION.logistics.code,
+      name: '外部销售物流',
+      version: PRICE_VERSION.logistics.version,
       sourceName: 'logistics.xlsx',
-      policy: {
-        ruleVersion: 'v3',
-        billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
-        weightResolutionOrder: [
-          'ACTUAL_FULFILLMENT_WEIGHT',
-          'SERVER_ESTIMATE',
-        ],
-        maxOrderQuantity: 50_000,
-        billableWeightRounding: 'CEIL_KG',
-        minimumBillableWeightKg: '1',
-        gramsPerItemByPaperWeightGsm: { '160': '8' },
-        tenThousandEnvelopeGramsPerItem: '12',
-      },
+      sourceSha256: PRICE_VERSION.logistics.sourceSha256,
+      policy: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.logisticsPolicy,
     },
     charges,
     totalAmount: charges
@@ -291,104 +248,29 @@ function logisticsQuote(
       (charge) =>
         charge.pricingSnapshot.actual.requiresAdminConfirmation === true,
     ),
+    ...overrides,
   };
 }
 
-function logisticsPreview(overrides: Record<string, unknown> = {}) {
-  const shipping = {
-    code: 'SHIPPING_FEE',
-    ruleCode: 'ZTO',
-    categoryCode: 'SHIPPING',
-    categoryName: '快递费',
-    shipmentKey: '1',
-    name: '快递费',
-    amount: '21.30',
-    complete: true,
-    advisory: false,
-    waived: false,
-    basis: { billableWeightKg: '12' },
-    source: null,
-    errors: [],
-  } as const;
-  const packaging = {
-    code: 'PACKING_MATERIAL',
-    ruleCode: 'CARTON',
-    categoryCode: 'PACKAGING',
-    categoryName: '纸箱耗材',
-    shipmentKey: '1',
-    name: '纸箱耗材',
-    amount: '20.00',
-    complete: true,
-    advisory: false,
-    waived: false,
-    basis: { itemQuantity: 1_500 },
-    source: null,
-    errors: [],
-  } as const;
-  const quote = {
-    complete: true,
-    suggestedShippingTotal: '21.30',
-    suggestedPackagingTotal: '20.00',
-    suggestedTotal: '41.30',
-    shipments: [{ shipmentKey: '1', shipping, packaging }],
-    components: [shipping, packaging],
-    errors: [],
-    snapshot: {
-      version: 2 as const,
-      policy: {
-        ruleVersion: 'v3',
-        billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE' as const,
-        weightResolutionOrder: [
-          'ACTUAL_FULFILLMENT_WEIGHT',
-          'SERVER_ESTIMATE',
-        ],
-        maxOrderQuantity: 50_000,
-        billableWeightRounding: 'CEIL_KG' as const,
-      },
-      input: {
-        isSfCollect: false,
-        shipments: [],
-      },
-      suggestedShippingTotal: '21.30',
-      suggestedPackagingTotal: '20.00',
-      suggestedTotal: '41.30',
-      components: [shipping, packaging],
-      complete: true,
-      errors: [],
-    },
-    ...overrides,
-  };
-  return {
-    priceBook: {
-      ...priceSnapshot.logistics,
-      sourceName: 'logistics.xlsx',
-    },
-    quote,
-  };
+function availabilityRows(order: ReturnType<typeof draftOrder>) {
+  return order.items.map((orderItem) => ({
+    id: orderItem.product?.paperMaterialId ?? `fallback-${orderItem.id}`,
+    name: orderItem.paperType ?? '未知纸张',
+    normalizedName: String(
+      orderItem.paperType ?? '未知纸张',
+    ).toLocaleLowerCase('zh-CN'),
+    isActive: true,
+    outOfStock: false,
+  }));
 }
 
 function txFor(
   order = draftOrder(),
-  paperRows?: Array<{
-    id: string;
-    name: string;
-    normalizedName: string;
-    isActive: boolean;
-    outOfStock: boolean;
-  }>,
+  paperRows = availabilityRows(order),
 ) {
-  const defaultPaperRows = order.items.map((orderItem) => ({
-    id: orderItem.product?.paperMaterialId ?? `fallback-${orderItem.id}`,
-    name: orderItem.paperType ?? '未知纸张',
-    normalizedName: String(orderItem.paperType ?? '未知纸张').toLocaleLowerCase(
-      'zh-CN',
-    ),
-    isActive: true,
-    outOfStock: false,
-  }));
   return {
     $executeRaw: vi.fn().mockResolvedValue(1),
-    $queryRaw: vi.fn().mockResolvedValue(paperRows ?? defaultPaperRows),
+    $queryRaw: vi.fn().mockResolvedValue(paperRows),
     order: {
       findUnique: vi.fn().mockResolvedValue(order),
       update: vi.fn().mockResolvedValue({ id: order.id }),
@@ -400,23 +282,39 @@ function txFor(
     orderCustomerCharge: {
       upsert: vi.fn().mockResolvedValue({ id: 'charge' }),
     },
+    customerChargeCategory: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: 'cat-plate',
+        isActive: true,
+      }),
+    },
     orderPriceVersionLock: {
       createMany: vi.fn().mockResolvedValue({ count: 2 }),
     },
+    product: { findMany: mocks.productFindMany },
+    craft: { findMany: mocks.craftFindMany },
+    material: { findMany: mocks.materialFindMany },
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  priceSnapshotMock.mockResolvedValue(priceSnapshot);
-  quoteItemsMock.mockResolvedValue([
-    itemQuote('400.00'),
-    itemQuote('100.00'),
+  mocks.readPublishedSnapshot.mockResolvedValue(
+    CREATE_ORDER_GOLDEN_SNAPSHOT,
+  );
+  mocks.resolveLogistics.mockResolvedValue(resolvedLogistics());
+  mocks.productFindMany.mockResolvedValue([
+    catalogProduct(),
+    catalogProduct({
+      id: 'product-stock-large-2',
+      code: 'EXT-STOCK-PEARL-FLASH-160-LARGE-2',
+    }),
   ]);
-  quotePackagingMock.mockResolvedValue(packagingQuote());
-  quoteLogisticsMock.mockResolvedValue(logisticsPreview());
-  resolveLogisticsMock.mockResolvedValue(logisticsQuote());
-  appendRevisionMock.mockResolvedValue({
+  mocks.craftFindMany.mockResolvedValue([
+    { id: 'craft-partial', code: 'FLAT_FOIL_PARTIAL', isActive: true },
+  ]);
+  mocks.materialFindMany.mockResolvedValue([catalogPaper()]);
+  mocks.appendRevision.mockResolvedValue({
     pricingRevisionId: 'revision-2',
     priceRevision: 2,
     orderRevision: 1,
@@ -437,11 +335,11 @@ async function currentQuoteToken(order = draftOrder()): Promise<string> {
   } catch (error) {
     if (error instanceof ExternalOrderQuoteChangedError) {
       for (const mock of [
-        priceSnapshotMock,
-        quoteItemsMock,
-        quotePackagingMock,
-        quoteLogisticsMock,
-        resolveLogisticsMock,
+        mocks.readPublishedSnapshot,
+        mocks.resolveLogistics,
+        mocks.productFindMany,
+        mocks.craftFindMany,
+        mocks.materialFindMany,
       ]) {
         mock.mockClear();
       }
@@ -453,40 +351,154 @@ async function currentQuoteToken(order = draftOrder()): Promise<string> {
 }
 
 describe('finalizeExternalOrderQuoteInTx', () => {
-  it('报价 token 缺失或过期时返回最新摘要且不写任何财务事实', async () => {
+  it('预览与提交使用同一组 canonical 事实时 token 可直接验证', async () => {
+    const order = draftOrder({
+      shipments: [
+        {
+          id: 'shipment-1',
+          sequence: 1,
+          destinationProvince: '上海',
+          // A newly-created draft has no trusted fulfilment weight. Browser
+          // quotedWeightKg is not persisted into this field.
+          weightKg: null,
+          lines: [
+            { orderItemId: 'item-1', quantity: 1_000 },
+            { orderItemId: 'item-2', quantity: 500 },
+          ],
+        },
+      ],
+    });
+    const previewTx = txFor(order);
+    mocks.transaction.mockImplementation(async (run) => run(previewTx));
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
+        resolvedCharge({ code: 'SHIPPING_FEE', amount: '30.80' }),
+        resolvedCharge({ code: 'PACKING_MATERIAL', amount: '5.00' }),
+      ]),
+    );
+    const preview = await quoteExternalCreateOrder(
+      {
+        factsKey: 'browser-facts-key',
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        items: [
+          {
+            productId: 'product-stock-large-1',
+            pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+            productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+            artworkVersion: null,
+            plateGroupId: null,
+            pricingGroup: 'LARGE',
+            specification: '大号封90×165',
+            actualWidthMm: 90,
+            actualHeightMm: 165,
+            paperType: '160g珠光艳闪',
+            paperWeightGsm: 160,
+            quantity: 1_000,
+            crafts: ['craft-partial'],
+            frontFoilColors: ['哑金'],
+            backFoilColors: [],
+            foilColors: ['哑金'],
+            foilTechnique: OrderFoilTechnique.FLAT,
+            hasLocalFoil: true,
+            lamination: OrderLamination.NONE,
+            printColors: [],
+            isDoubleSided: false,
+            isDoubleColor: false,
+          },
+          {
+            productId: 'product-stock-large-2',
+            pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+            productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+            artworkVersion: null,
+            plateGroupId: null,
+            pricingGroup: 'LARGE',
+            specification: '大号封90×165',
+            actualWidthMm: 90,
+            actualHeightMm: 165,
+            paperType: '160g珠光艳闪',
+            paperWeightGsm: 160,
+            quantity: 500,
+            crafts: ['craft-partial'],
+            frontFoilColors: ['哑金'],
+            backFoilColors: [],
+            foilColors: ['哑金'],
+            foilTechnique: OrderFoilTechnique.FLAT,
+            hasLocalFoil: true,
+            lamination: OrderLamination.NONE,
+            printColors: [],
+            isDoubleSided: false,
+            isDoubleColor: false,
+          },
+        ],
+        orderItemCount: 2,
+        packagingGroups: [
+          {
+            groupKey: '1',
+            mode: OrderPackagingMode.MIXED_STYLE,
+            actualBagCount: 125,
+            itemUnitsPerBag: [8, 4],
+          },
+        ],
+        logistics: {
+          isSfCollect: false,
+          items: [],
+          shipments: [
+            {
+              shipmentKey: '1',
+              province: '上海',
+              billableWeightKg: '999',
+              itemQuantity: 1_500,
+              itemQuantities: [1_000, 500],
+            },
+          ],
+        },
+      },
+      NOW,
+    );
+    const submitTx = txFor(order);
+
+    const result = await finalizeExternalOrderQuoteInTx(
+      submitTx as unknown as Prisma.TransactionClient,
+      order.id,
+      'sales-1',
+      NOW,
+      preview.quoteToken,
+    );
+
+    expect(result).toMatchObject({
+      quotedFee: '335.80',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      reused: false,
+    });
+  });
+
+  it('报价 token 缺失或过期时返回纯引擎最新摘要且不写财务事实', async () => {
     const tx = txFor();
 
-    let changed: ExternalOrderQuoteChangedError | null = null;
-    try {
-      await finalizeExternalOrderQuoteInTx(
+    await expect(
+      finalizeExternalOrderQuoteInTx(
         tx as unknown as Prisma.TransactionClient,
         'order-1',
         'sales-1',
         NOW,
         'create-order-quote-v2:'.concat('0'.repeat(64)),
-      );
-    } catch (error) {
-      if (error instanceof ExternalOrderQuoteChangedError) changed = error;
-      else throw error;
-    }
-
-    expect(changed).toMatchObject({
-      quotedFee: '566.30',
+      ),
+    ).rejects.toMatchObject({
+      quotedFee: '346.30',
       quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
     });
-    expect(changed?.quoteToken).toMatch(
-      /^create-order-quote-v2:[a-f\d]{64}$/u,
-    );
-    expect(resolveLogisticsMock).not.toHaveBeenCalled();
+
+    expect(mocks.resolveLogistics).not.toHaveBeenCalled();
+    expect(tx.customerChargeCategory.findUnique).not.toHaveBeenCalled();
     expect(tx.orderItem.update).not.toHaveBeenCalled();
     expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
     expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
-    expect(appendRevisionMock).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
     expect(tx.orderPriceVersionLock.createMany).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
   });
 
-  it('re-quotes only from persisted facts and atomically locks both price versions', async () => {
+  it('只从持久化事实重算，写入 v2 明细并同时锁定双价目版本', async () => {
     const expectedQuoteToken = await currentQuoteToken();
     const tx = txFor();
 
@@ -501,25 +513,26 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(result).toMatchObject({
       pricingRevisionId: 'revision-2',
       priceRevision: 2,
-      quotedFee: '566.30',
+      quotedFee: '346.30',
       quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
-      processingAmount: '525.00',
+      processingAmount: '300.00',
       packagingAmount: '25.00',
-      logisticsAmount: '41.30',
-      totalAmount: '566.30',
+      logisticsAmount: '46.30',
+      totalAmount: '346.30',
       manualItemIds: [],
       reused: false,
     });
-    expect(quoteItemsMock).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ productId: 'product-1', quantity: 1_000 }),
-      ]),
-      OrderSettlementType.EXTERNAL_SALES,
-      NOW,
-      tx,
-      { orderItemCount: 2 },
+    expect(mocks.readPublishedSnapshot).toHaveBeenCalledWith(tx, { now: NOW });
+    expect(mocks.productFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: {
+            in: ['product-stock-large-1', 'product-stock-large-2'],
+          },
+        },
+      }),
     );
-    expect(resolveLogisticsMock).toHaveBeenCalledWith(
+    expect(mocks.resolveLogistics).toHaveBeenCalledWith(
       tx,
       {
         isSfCollect: false,
@@ -527,37 +540,110 @@ describe('finalizeExternalOrderQuoteInTx', () => {
           expect.objectContaining({
             shipmentKey: '1',
             province: '上海',
-            billableWeightKg: '12.000',
+            billableWeightKg: '12',
             itemQuantity: 1_500,
             shippingFee: null,
             packingMaterialFee: null,
             overrideReason: null,
+            weightItems: [
+              expect.objectContaining({ itemKey: '1', quantity: 1_000 }),
+              expect.objectContaining({ itemKey: '2', quantity: 500 }),
+            ],
           }),
         ],
       },
       NOW,
       { snapshotLockHeld: true },
     );
+    expect(tx.order.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          packagingGroups: expect.objectContaining({
+            select: expect.objectContaining({
+              lines: expect.objectContaining({
+                select: { orderItemId: true, unitsPerBag: true },
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(tx.orderItem.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          quotedAmount: '170.00',
+          pricingSnapshot: expect.objectContaining({
+            schemaVersion: 2,
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+          }),
+        }),
+      }),
+    );
+    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: '25.00',
+          pricingSnapshot: expect.objectContaining({
+            schemaVersion: 2,
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+            bagCount: 125,
+          }),
+        }),
+      }),
+    );
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        where: {
+          orderId_businessKey: {
+            orderId: 'order-1',
+            businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+          },
+        },
+        create: expect.objectContaining({
+          categoryId: 'cat-plate',
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+          amount: null,
+          suggestedAmount: null,
+          pricingSnapshot: expect.objectContaining({
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+            pendingReason: expect.objectContaining({
+              code: 'PLATE_AMOUNT_PENDING',
+            }),
+          }),
+        }),
+      }),
+    );
     expect(tx.orderPriceVersionLock.createMany).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
           purpose: CustomerPriceBookPurpose.PROCESSING,
-          priceBookId: 'processing-v7',
-          priceBookVersion: 7,
-          sourceSha256: PROCESSING_SHA,
+          priceBookId: PRICE_VERSION.processing.id,
+          priceBookVersion: PRICE_VERSION.processing.version,
+          sourceSha256: PRICE_VERSION.processing.sourceSha256,
         }),
         expect.objectContaining({
           purpose: CustomerPriceBookPurpose.LOGISTICS,
-          priceBookId: 'logistics-v3',
-          priceBookVersion: 3,
-          sourceSha256: LOGISTICS_SHA,
+          priceBookId: PRICE_VERSION.logistics.id,
+          priceBookVersion: PRICE_VERSION.logistics.version,
+          sourceSha256: PRICE_VERSION.logistics.sourceSha256,
         }),
       ],
     });
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          engineVersion: 'CREATE_ORDER_PURE_V1',
+          priceBooks: PRICE_VERSION,
+        }),
+      }),
+    );
     expect(tx.order.update).toHaveBeenNthCalledWith(2, {
       where: { id: 'order-1' },
       data: {
-        quotedFee: '566.30',
+        quotedFee: '346.30',
         quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
         quotedPricingRevisionId: 'revision-2',
       },
@@ -565,71 +651,71 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     });
   });
 
-  it('marks missing item, packaging and logistics prices as manual and excludes them from the known total', async () => {
-    const tx = txFor();
-    quoteItemsMock.mockResolvedValue([
-      itemQuote('100.00'),
-      itemQuote('0.00', {
-        complete: false,
-        errors: ['价表未覆盖'],
-        suggestedUnitPrice: null,
-        suggestedFixedFee: null,
-        suggestedSubtotal: null,
-        snapshot: {
-          ...itemQuote('0.00').snapshot,
-          complete: false,
-          errors: ['价表未覆盖'],
-          suggestedUnitPrice: null,
-          suggestedFixedFee: null,
-          suggestedSubtotal: null,
-        },
+  it('查不到价时款式、包装和物流均转人工，不把 0 元当作报价', async () => {
+    const order = draftOrder({
+      items: [
+        item(),
+        item({
+          id: 'item-2',
+          sequence: 2,
+          fig: 2,
+          name: '款式 2',
+          productId: 'product-red-large',
+          paperType: '180g红卡',
+          paperWeightGsm: 180,
+          quantity: 500,
+          product: { paperMaterialId: 'paper-red-180' },
+        }),
+      ],
+    });
+    const manualSnapshot: CreateOrderPriceSnapshot = {
+      ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      partial: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial,
+        blankUnitPrices:
+          CREATE_ORDER_GOLDEN_SNAPSHOT.partial.blankUnitPrices.map((row) =>
+            row.paperType === '红卡' ? { ...row, unitPrice: null } : row,
+          ),
+      },
+      orderCharges: {
+        ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges,
+        rules: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.rules.filter(
+          (rule) => rule.kind !== 'PACKAGING',
+        ),
+      },
+    };
+    mocks.readPublishedSnapshot.mockResolvedValue(manualSnapshot);
+    mocks.productFindMany.mockResolvedValue([
+      catalogProduct(),
+      catalogProduct({
+        id: 'product-red-large',
+        code: 'EXT-STOCK-RED-180-LARGE',
+        paperType: '180g红卡',
+        paperMaterialId: 'paper-red-180',
+        weight: 180,
       }),
     ]);
-    quotePackagingMock.mockResolvedValue(
-      packagingQuote({
-        groups: [
-          {
-            groupKey: 'pack-1',
-            complete: false,
-            errors: ['包装模式缺价'],
-            suggestedUnitPrice: null,
-            suggestedSubtotal: null,
-            snapshot: { version: 1, complete: false },
-          },
-        ],
-        suggestedTotal: null,
-        requiresAdminConfirmation: true,
+    mocks.materialFindMany.mockResolvedValue([
+      catalogPaper(),
+      catalogPaper({
+        id: 'paper-red-180',
+        name: '180g红卡',
       }),
-    );
-    resolveLogisticsMock.mockResolvedValue(
-      logisticsQuote([
+    ]);
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
         resolvedCharge({ code: 'SHIPPING_FEE', amount: '41.30' }),
         resolvedCharge({
           code: 'PACKING_MATERIAL',
           amount: '0.00',
           requiresAdmin: true,
+          ruleCode: null,
         }),
       ]),
     );
-    quoteLogisticsMock.mockResolvedValue(
-      logisticsPreview({
-        complete: false,
-        suggestedPackagingTotal: null,
-        suggestedTotal: null,
-        components: [
-          logisticsPreview().quote.components[0],
-          {
-            ...logisticsPreview().quote.components[1],
-            amount: null,
-            complete: false,
-            errors: ['纸箱耗材需要人工确认'],
-          },
-        ],
-        errors: ['纸箱耗材需要人工确认'],
-      }),
-    );
 
-    const expectedQuoteToken = await currentQuoteToken();
+    const expectedQuoteToken = await currentQuoteToken(order);
+    const tx = txFor(order);
     const result = await finalizeExternalOrderQuoteInTx(
       tx as unknown as Prisma.TransactionClient,
       'order-1',
@@ -639,10 +725,10 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
 
     expect(result).toMatchObject({
-      quotedFee: '141.30',
+      quotedFee: '211.30',
       quotedFeeCompleteness:
         OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
-      processingAmount: '100.00',
+      processingAmount: '170.00',
       packagingAmount: '0.00',
       logisticsAmount: '41.30',
       manualItemIds: ['item-2'],
@@ -655,25 +741,39 @@ describe('finalizeExternalOrderQuoteInTx', () => {
           quoteDisposition:
             OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
           quotedAmount: null,
+          pricingSnapshot: expect.objectContaining({
+            engineVersion: 'CREATE_ORDER_PURE_V1',
+            actual: expect.objectContaining({ amount: null }),
+          }),
         }),
       }),
     );
-    const manualItemWrite = tx.orderItem.update.mock.calls[1]?.[0].data;
-    expect(manualItemWrite).not.toHaveProperty('subtotal');
+    expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          suggestedSubtotal: null,
+          pricingSnapshot: expect.objectContaining({
+            actual: expect.objectContaining({ amount: null }),
+          }),
+        }),
+      }),
+    );
     expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         create: expect.objectContaining({
-          status: 'PENDING_AMOUNT',
+          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+          suggestedAmount: null,
           amount: null,
         }),
         update: expect.objectContaining({
-          status: 'PENDING_AMOUNT',
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
           amount: null,
         }),
       }),
     );
-    expect(appendRevisionMock).toHaveBeenCalledWith(
+    expect(mocks.appendRevision).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
         status: 'PENDING_ADMIN_CONFIRMATION',
@@ -682,39 +782,159 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     );
   });
 
-  it('rejects an out-of-stock selected paper before writing fees, versions or quote state', async () => {
+  it('明确保留已报价 0 元与制版费未报价 null 的区别', async () => {
+    const order = draftOrder({ isSfCollect: true });
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
+        resolvedCharge({
+          code: 'SHIPPING_FEE',
+          amount: '0.00',
+          ruleCode: null,
+          waived: true,
+        }),
+        resolvedCharge({ code: 'PACKING_MATERIAL', amount: '5.00' }),
+      ]),
+    );
+    const token = await currentQuoteToken(order);
+    const tx = txFor(order);
+
+    const result = await finalizeExternalOrderQuoteInTx(
+      tx as unknown as Prisma.TransactionClient,
+      order.id,
+      'sales-1',
+      NOW,
+      token,
+    );
+
+    expect(result).toMatchObject({
+      quotedFee: '305.00',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: OrderCustomerChargeStatus.WAIVED,
+          amount: '0.00',
+        }),
+      }),
+    );
+    expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: OrderCustomerChargeStatus.PENDING_AMOUNT,
+          amount: null,
+        }),
+      }),
+    );
+  });
+
+  it('物流持久化金额与纯引擎不一致时拒绝任何财务写入', async () => {
+    const token = await currentQuoteToken();
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics([
+        resolvedCharge({ code: 'SHIPPING_FEE', amount: '40.00' }),
+        resolvedCharge({ code: 'PACKING_MATERIAL', amount: '5.00' }),
+      ]),
+    );
+    const tx = txFor();
+
+    await expect(
+      finalizeExternalOrderQuoteInTx(
+        tx as unknown as Prisma.TransactionClient,
+        'order-1',
+        'sales-1',
+        NOW,
+        token,
+      ),
+    ).rejects.toThrow('物流持久化金额与纯引擎结果不一致');
+    expect(tx.customerChargeCategory.findUnique).not.toHaveBeenCalled();
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('物流持久化规则版本与纯引擎不一致时拒绝写入', async () => {
+    const token = await currentQuoteToken();
+    mocks.resolveLogistics.mockResolvedValue(
+      resolvedLogistics(undefined, {
+        priceBook: {
+          ...resolvedLogistics().priceBook,
+          policy: {
+            ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.logisticsPolicy,
+            ruleVersion: 'forged-rule-version',
+          },
+        },
+      }),
+    );
+    const tx = txFor();
+
+    await expect(
+      finalizeExternalOrderQuoteInTx(
+        tx as unknown as Prisma.TransactionClient,
+        'order-1',
+        'sales-1',
+        NOW,
+        token,
+      ),
+    ).rejects.toThrow('物流持久化的计费规则版本与纯引擎不一致');
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('制版费类目缺失时失败关闭，不在提交端创建或改配置', async () => {
+    const token = await currentQuoteToken();
+    const tx = txFor();
+    tx.customerChargeCategory.findUnique.mockResolvedValue(null);
+
+    await expect(
+      finalizeExternalOrderQuoteInTx(
+        tx as unknown as Prisma.TransactionClient,
+        'order-1',
+        'sales-1',
+        NOW,
+        token,
+      ),
+    ).rejects.toThrow('制版费收费类目不存在或已停用');
+    expect(tx.orderItem.update).not.toHaveBeenCalled();
+    expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('纸张缺货时在读价目前拒绝提交', async () => {
     const order = draftOrder({
       items: [
         item({
-          product: {
-            paperMaterialId: 'paper-out-of-stock',
-          },
-          paperType: '160g珠光纸',
+          product: { paperMaterialId: 'paper-out-of-stock' },
+          paperType: '160g珠光艳闪',
         }),
-        item({
-          id: 'item-2',
-          sequence: 2,
-          fig: 2,
-          name: '款式 2',
-          productId: 'product-2',
-          quantity: 500,
-        }),
+      ],
+      packagingGroups: [
+        {
+          id: 'pack-1',
+          sequence: 1,
+          name: '单款',
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: 125,
+          lines: [{ orderItemId: 'item-1', unitsPerBag: 8 }],
+        },
+      ],
+      shipments: [
+        {
+          id: 'shipment-1',
+          sequence: 1,
+          destinationProvince: '上海',
+          weightKg: null,
+          lines: [{ orderItemId: 'item-1', quantity: 1_000 }],
+        },
       ],
     });
     const tx = txFor(order, [
       {
         id: 'paper-out-of-stock',
-        name: '160g珠光纸',
-        normalizedName: '160g珠光纸',
+        name: '160g珠光艳闪',
+        normalizedName: '160g珠光艳闪',
         isActive: true,
         outOfStock: true,
-      },
-      {
-        id: 'paper-1',
-        name: '珠光纸',
-        normalizedName: '珠光纸',
-        isActive: true,
-        outOfStock: false,
       },
     ]);
 
@@ -726,35 +946,12 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         NOW,
       ),
     ).rejects.toThrow(
-      '第 1 款纸张“160g珠光纸”已缺货或停用，请重新选择纸张后再提交',
+      '第 1 款纸张“160g珠光艳闪”已缺货或停用，请重新选择纸张后再提交',
     );
-
-    expect(tx.order.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: expect.objectContaining({
-          items: expect.objectContaining({
-            select: expect.objectContaining({
-              product: {
-                select: {
-                  paperMaterialId: true,
-                },
-              },
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(priceSnapshotMock).not.toHaveBeenCalled();
-    expect(quoteItemsMock).not.toHaveBeenCalled();
-    expect(quotePackagingMock).not.toHaveBeenCalled();
-    expect(resolveLogisticsMock).not.toHaveBeenCalled();
-    expect(quoteLogisticsMock).not.toHaveBeenCalled();
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
+    expect(mocks.productFindMany).not.toHaveBeenCalled();
     expect(tx.orderItem.update).not.toHaveBeenCalled();
-    expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
     expect(tx.orderCustomerCharge.upsert).not.toHaveBeenCalled();
-    expect(appendRevisionMock).not.toHaveBeenCalled();
-    expect(tx.orderPriceVersionLock.createMany).not.toHaveBeenCalled();
-    expect(tx.order.update).not.toHaveBeenCalled();
   });
 
   it('兼容未回填 paperMaterialId 的旧产品，按规范化纸名复核停用态', async () => {
@@ -763,15 +960,15 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         item({
           fig: 7,
           product: { paperMaterialId: null },
-          paperType: '  珠光纸  ',
+          paperType: '  160g珠光艳闪  ',
         }),
       ],
     });
     const tx = txFor(order, [
       {
         id: 'legacy-paper',
-        name: '珠光纸',
-        normalizedName: '珠光纸',
+        name: '160g珠光艳闪',
+        normalizedName: '160g珠光艳闪',
         isActive: false,
         outOfStock: false,
       },
@@ -785,19 +982,19 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         NOW,
         null,
       ),
-    ).rejects.toThrow('第 7 款纸张“珠光纸”已缺货或停用');
+    ).rejects.toThrow('第 7 款纸张“160g珠光艳闪”已缺货或停用');
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(priceSnapshotMock).not.toHaveBeenCalled();
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
   });
 
-  it('returns the existing immutable quote without re-running any calculator', async () => {
+  it('历史已报价工单只读不可变快照，不重跑任何引擎', async () => {
     const order = draftOrder({
       status: OrderStatus.PENDING_FACTORY,
-      processingAmount: '525.00',
+      processingAmount: '300.00',
       packagingAmount: '25.00',
-      totalAmount: '566.30',
-      quotedFee: '566.30',
+      totalAmount: '346.30',
+      quotedFee: '346.30',
       quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
       quotedPricingRevisionId: 'revision-2',
       quotedPricingRevision: {
@@ -806,21 +1003,22 @@ describe('finalizeExternalOrderQuoteInTx', () => {
         priceVersionLocks: [
           {
             purpose: CustomerPriceBookPurpose.PROCESSING,
-            priceBookId: 'processing-v7',
-            priceBookVersion: 7,
-            sourceSha256: PROCESSING_SHA,
+            priceBookId: PRICE_VERSION.processing.id,
+            priceBookVersion: PRICE_VERSION.processing.version,
+            sourceSha256: PRICE_VERSION.processing.sourceSha256,
           },
           {
             purpose: CustomerPriceBookPurpose.LOGISTICS,
-            priceBookId: 'logistics-v3',
-            priceBookVersion: 3,
-            sourceSha256: LOGISTICS_SHA,
+            priceBookId: PRICE_VERSION.logistics.id,
+            priceBookVersion: PRICE_VERSION.logistics.version,
+            sourceSha256: PRICE_VERSION.logistics.sourceSha256,
           },
         ],
       },
       customerCharges: [
-        { amount: '21.30', category: { code: 'SHIPPING_FEE' } },
-        { amount: '20.00', category: { code: 'PACKING_MATERIAL' } },
+        { amount: '41.30', category: { code: 'SHIPPING_FEE' } },
+        { amount: '5.00', category: { code: 'PACKING_MATERIAL' } },
+        { amount: null, category: { code: 'PLATE_MAKING_FEE' } },
       ],
     });
     const tx = txFor(order);
@@ -834,12 +1032,13 @@ describe('finalizeExternalOrderQuoteInTx', () => {
 
     expect(result).toMatchObject({
       pricingRevisionId: 'revision-2',
-      quotedFee: '566.30',
-      logisticsAmount: '41.30',
+      quotedFee: '346.30',
+      logisticsAmount: '46.30',
       reused: true,
     });
-    expect(priceSnapshotMock).not.toHaveBeenCalled();
-    expect(quoteItemsMock).not.toHaveBeenCalled();
+    expect(mocks.readPublishedSnapshot).not.toHaveBeenCalled();
+    expect(mocks.productFindMany).not.toHaveBeenCalled();
+    expect(mocks.resolveLogistics).not.toHaveBeenCalled();
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.orderPriceVersionLock.createMany).not.toHaveBeenCalled();
   });
