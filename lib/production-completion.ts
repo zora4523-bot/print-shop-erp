@@ -240,8 +240,8 @@ export async function maybeCompleteProductionOrder(
     });
     const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
     // 按 id 取字典再在 JS 里筛 isOutsource（而不是 where isOutsource:
-    // true 扫全表），与 lib/production.ts scheduleOrder 的取法一致：in
-    // 列表被本工单的工艺数收敛住。**不加 isActive 过滤**——历史工单引用的
+    // true 扫全表）：in 列表被本工单的工艺数收敛住。
+    // **不加 isActive 过滤**——历史工单引用的
     // 已停用工艺仍然要参与判定，同 getOrderDetail 解析工艺名的理由。
     const crafts =
       craftIds.length === 0

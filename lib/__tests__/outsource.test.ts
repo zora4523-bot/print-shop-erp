@@ -274,8 +274,8 @@ describe('createOutsourceOrder', () => {
       '?',
     );
     expect(sql).toMatch(/pg_advisory_xact_lock/);
-    // Same key as transitionWithLog + scheduleOrder so all writers
-    // serialize through one lock per order.
+    // Same key as transitionWithLog + operation materialization so all
+    // writers serialize through one lock per order.
     expect(dbMock.$executeRaw.mock.calls[0]![1]).toBe(
       `print-shop-erp:order-cascade:${baseInput.orderId}`,
     );

@@ -43,6 +43,7 @@ const ORDER_FACTS_SELECT = {
   settlementType: true,
   pricingStatus: true,
   scheduledAt: true,
+  requiresOutsource: true,
   items: {
     select: {
       id: true,
@@ -293,6 +294,7 @@ export async function activateProductionOperationsInTx(
       progressPlan.issues,
     );
   }
+  const requiresOutsource = craftFacts.some((craft) => craft.isOutsource);
 
   if (
     order.productionOperations.length > 0 ||
@@ -371,6 +373,7 @@ export async function activateProductionOperationsInTx(
     data: {
       status: OrderStatus.SCHEDULING,
       scheduledAt: order.scheduledAt ?? activatedAt,
+      requiresOutsource,
     },
   });
   await tx.orderLog.create({
@@ -380,6 +383,10 @@ export async function activateProductionOperationsInTx(
       action: 'OPERATIONS_MATERIALIZED',
       changedFields: {
         status: { before: order.status, after: OrderStatus.SCHEDULING },
+        requiresOutsource: {
+          before: order.requiresOutsource,
+          after: requiresOutsource,
+        },
         productionOperations: {
           before: 0,
           after: plan.specs.map((spec) => ({

@@ -17,8 +17,7 @@ describe('collectOutsourceCraftIds', () => {
   });
 
   it('混合工艺（isOutsource=true 且有自产机台）同样收入', () => {
-    // 混合工艺在 scheduleOrder 里既计入 skippedOutsourceCrafts、又生成
-    // 内部任务，语义上就是「一部分发出去」，必须参与覆盖判定。
+    // 混合工艺语义上就是「一部分发出去」，必须参与覆盖判定。
     const ids = collectOutsourceCraftIds([
       { id: 'craft-mixed', isOutsource: true },
     ]);

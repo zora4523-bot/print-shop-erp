@@ -27,6 +27,7 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
     settlementType: OrderSettlementType.EXTERNAL_SALES,
     pricingStatus: OrderPricingStatus.AUTO_CONFIRMED,
     scheduledAt: null,
+    requiresOutsource: false,
     items: [
       {
         id: 'item-1',
@@ -135,7 +136,11 @@ describe('activateProductionOperationsInTx', () => {
     ]);
     expect(tx.order.update).toHaveBeenCalledWith({
       where: { id: 'order-1' },
-      data: { status: OrderStatus.SCHEDULING, scheduledAt: AT },
+      data: {
+        status: OrderStatus.SCHEDULING,
+        scheduledAt: AT,
+        requiresOutsource: false,
+      },
     });
   });
 
@@ -312,6 +317,14 @@ describe('activateProductionOperationsInTx', () => {
         plannedQty: '100',
       },
       select: { id: true },
+    });
+    expect(tx.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        status: OrderStatus.SCHEDULING,
+        scheduledAt: AT,
+        requiresOutsource: true,
+      },
     });
   });
 
