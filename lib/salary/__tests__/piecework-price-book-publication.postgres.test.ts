@@ -127,7 +127,8 @@ postgresDescribe('piecework v1 publication · PostgreSQL concurrency', () => {
       await second.query('ROLLBACK');
 
       await first.query(`
-        INSERT INTO "Order" ("id") VALUES ('order-1');
+        INSERT INTO "Order" ("id", "settlementType")
+        VALUES ('order-1', 'FACTORY_DIRECT');
         INSERT INTO "ProductionOperation" (
           "id", "orderId", "operationType", "unit", "status",
           "plannedQty", "createdAt", "updatedAt"

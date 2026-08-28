@@ -110,7 +110,12 @@ export default async function PieceworkSettlementDetailPage({
 
       <section className="space-y-3">
         <h2 className="font-semibold">报工明细</h2>
-        <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+        <div
+          role="region"
+          aria-label="计件结算报工明细"
+          tabIndex={0}
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm"
+        >
           <table className="w-full min-w-[1080px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>

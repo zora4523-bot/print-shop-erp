@@ -158,7 +158,12 @@ export default async function PieceworkSettlementPage({
               description="无需操作，或当日报工已全部锁定。"
             />
           ) : (
-            <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+            <div
+              role="region"
+              aria-label="待锁定报工明细"
+              tabIndex={0}
+              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
+            >
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                   <tr>
@@ -220,7 +225,12 @@ export default async function PieceworkSettlementPage({
             description="锁定报工后，记录会显示在这里。"
           />
         ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+          <div
+            role="region"
+            aria-label="已锁定计件结算"
+            tabIndex={0}
+            className="overflow-x-auto rounded-xl border bg-card shadow-sm"
+          >
             <table className="w-full min-w-[860px] text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
