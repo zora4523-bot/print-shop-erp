@@ -56,12 +56,6 @@ export function outsourceTitle(
     : `${ref.supplierName} · 外协单`;
 }
 
-export function schedulingTitle(orderNo: string | null): string {
-  // 排产页在「工单已不是 SUBMITTED」时 redirect 回列表，不是 notFound，
-  // 所以回落到模块名而不是「不存在」。
-  return orderNo ? `${orderNo} · 排产` : '排产';
-}
-
 export function workerTaskTitle(
   ref: { orderNo: string; sequence: number } | null,
 ): string {

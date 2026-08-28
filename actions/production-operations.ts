@@ -61,7 +61,7 @@ export async function reportProductionOperationAction(
       actor,
     );
     revalidatePath('/worker/tasks');
-    revalidatePath(`/worker/operations/${operationId}`);
+    revalidatePath(`/worker/tasks/${operationId}`);
     revalidatePath(`/orders/${result.orderId}`);
     return {
       status: 'success',

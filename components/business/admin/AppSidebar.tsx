@@ -136,7 +136,6 @@ const PINNED_HREFS = new Set([
   '/owner',
   '/orders',
   '/orders/new',
-  '/foreman/scheduling',
 ]);
 
 type AppSidebarProps = {

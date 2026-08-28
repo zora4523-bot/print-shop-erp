@@ -76,7 +76,7 @@ export async function CraftCatalogList({
       <RuleCenterPageHeader
         title="工艺与参数"
         effect="immediate"
-        subtitle="维护建单、排产与计价共用的工艺能力和基础参数。"
+        subtitle="维护建单、计价与历史展示共用的工艺字典。"
         actions={
           <Link
             href={`${routeBase}/new`}
@@ -116,7 +116,7 @@ export async function NewCraftCatalogItem({
       <RuleCenterPageHeader
         title="新建工艺"
         effect="immediate"
-        subtitle="启用后会进入新工单、新规则与排产能力选择器。"
+        subtitle="启用后会进入新工单与新规则的工艺选择器。"
         actions={
           <Link
             href={routeBase}

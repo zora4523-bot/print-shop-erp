@@ -1,23 +1,16 @@
 'use client';
 
 import { useActionState } from 'react';
-import { MachineType, WorkerType } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
-import {
-  MACHINE_TYPE_LABELS,
-  WORKER_TYPE_LABELS,
-} from '@/lib/auth/role-labels';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 type EditInitial = {
   name: string;
   isOutsource: boolean;
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
   sortOrder: number;
   isActive: boolean;
 };
@@ -45,21 +38,6 @@ type Props = CommonProps &
       }
   );
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
-
-const MACHINE_TYPE_OPTIONS = [
-  MachineType.HAND_PRESS,
-  MachineType.WINDMILL,
-  MachineType.GLUE,
-] as const;
-
-const PRODUCTION_WORKER_TYPE_OPTIONS = [
-  WorkerType.MACHINE,
-  WorkerType.PACKER,
-  WorkerType.CLEANER,
-] as const;
-
 export function CraftForm(props: Props) {
   const [state, formAction, pending] = useActionState<CraftMutationResult | null, FormData>(
     props.action,
@@ -74,12 +52,7 @@ export function CraftForm(props: Props) {
   const routeBase = props.routeBase ?? RULE_CENTER_HREFS.crafts;
   const hasUnassignedFieldError = Object.entries(errs).some(
     ([field, messages]) =>
-      ![
-        'name',
-        'defaultWorkerType',
-        'defaultMachineType',
-        'sortOrder',
-      ].includes(field) && Boolean(messages?.length),
+      !['name', 'sortOrder'].includes(field) && Boolean(messages?.length),
   );
 
   return (
@@ -105,55 +78,10 @@ export function CraftForm(props: Props) {
         <span className="space-y-1">
           <span className="block">外协工艺</span>
           <span className="block text-xs text-muted-foreground">
-            勾选后，该工艺不创建内部生产任务，只加入外协清单。
+            勾选后，该工艺进入外协清单；内部工序由工单收费项固定生成。
           </span>
         </span>
       </label>
-
-      <div className="space-y-2">
-        <Label htmlFor="defaultWorkerType">接单岗位</Label>
-        <select
-          id="defaultWorkerType"
-          name="defaultWorkerType"
-          className={selectClass}
-          defaultValue={initial?.defaultWorkerType ?? ''}
-          disabled={pending}
-        >
-          <option value="">— 外协工艺无需选择 —</option>
-          {PRODUCTION_WORKER_TYPE_OPTIONS.map((workerType) => (
-            <option key={workerType} value={workerType}>
-              {WORKER_TYPE_LABELS[workerType]}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          自产工艺必选，排产时只会显示岗位匹配的师傅。
-        </p>
-        {errs.defaultWorkerType?.[0] ? (
-          <p className="text-sm text-destructive">{errs.defaultWorkerType[0]}</p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="defaultMachineType">机型（开机岗位 / 外协参考）</Label>
-        <select
-          id="defaultMachineType"
-          name="defaultMachineType"
-          className={selectClass}
-          defaultValue={initial?.defaultMachineType ?? ''}
-          disabled={pending}
-        >
-          <option value="">— 非开机工艺无需选择 —</option>
-          {MACHINE_TYPE_OPTIONS.map((m) => (
-            <option key={m} value={m}>
-              {MACHINE_TYPE_LABELS[m]}
-            </option>
-          ))}
-        </select>
-        {errs.defaultMachineType?.[0] ? (
-          <p className="text-sm text-destructive">{errs.defaultMachineType[0]}</p>
-        ) : null}
-      </div>
 
       <TextField
         id="sortOrder"

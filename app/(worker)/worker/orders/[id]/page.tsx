@@ -2,25 +2,35 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
-import { Role, TaskStatus, WorkerType } from '@/generated/prisma/enums';
+import Decimal from 'decimal.js';
+import {
+  PieceworkOperationType,
+  ProductionOperationStatus,
+  Role,
+} from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getSession } from '@/lib/auth/session';
 import { getWorkerOrderDetail } from '@/lib/worker-portal';
 import { orderStatusZh } from '@/lib/order/log-format';
-import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
+import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
-import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatFoilColors } from '@/lib/order/foil-colors';
-import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
-
 import { formatMoney } from '@/lib/dashboard/format';
+import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+
 type PageProps = { params: Promise<{ id: string }> };
+
+const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  [PieceworkOperationType.PARTIAL]: '局部烫金',
+  [PieceworkOperationType.FULL]: '专版烫金',
+  [PieceworkOperationType.PACKING]: '打包入袋',
+};
 
 const getWorkerOrderPageData = cache(
   (id: string, actorId: string, actorRole: Role) =>
@@ -32,16 +42,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!session || session.user.role !== Role.WORKER) {
     return { title: '我的工单' };
   }
-
   const { id } = await params;
   const order = await getWorkerOrderPageData(
     id,
     session.user.id,
     session.user.role,
   );
-  return {
-    title: order ? `${order.orderNo} · 我的工单` : '工单不存在',
-  };
+  return { title: order ? `${order.orderNo} · 我的工单` : '工单不存在' };
 }
 
 export default async function WorkerOrderDetailPage({ params }: PageProps) {
@@ -54,36 +61,67 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
     <div className="min-w-0 space-y-5">
       <header className="worker-wrap-anywhere min-w-0 space-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
-            {order.orderNo}
-          </span>
+          <span className="font-sans text-sm tabular-nums">{order.orderNo}</span>
           <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
           {order.isUrgent ? <UrgentBadge /> : null}
         </div>
-        <h1 className="text-lg font-semibold">我的工单任务</h1>
+        <h1 className="text-lg font-semibold">工序工单</h1>
         {order.customName ? (
-          <p className="worker-wrap-anywhere text-sm font-semibold">
-            {order.customName}
-          </p>
+          <p className="text-sm font-semibold">{order.customName}</p>
         ) : null}
         <p className="text-xs text-muted-foreground">
           客户名称/简称：{order.customerRef ?? '—'}
-          {order.promisedDate ? ` · 交期 ${formatDateShanghai(order.promisedDate)}` : ''}
+          {order.promisedDate
+            ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
+            : ''}
           {' · '}接单人：{order.submitter.displayName}
         </p>
       </header>
 
-      {(order.packageRequirement || order.remark) ? (
+      {order.packageRequirement || order.remark ? (
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
           <h2 className="mb-2 font-semibold">生产备注</h2>
-          <p className="worker-wrap-anywhere">
-            包装要求：{order.packageRequirement ?? '—'}
-          </p>
-          <p className="worker-wrap-anywhere mt-1">
-            工单备注：{order.remark ?? '—'}
-          </p>
+          <p>包装要求：{order.packageRequirement ?? '—'}</p>
+          <p className="mt-1">工单备注：{order.remark ?? '—'}</p>
         </section>
       ) : null}
+
+      <section className="space-y-3" aria-labelledby="operation-heading">
+        <h2 id="operation-heading" className="text-sm font-semibold">
+          本岗位工序
+        </h2>
+        {order.productionOperations.map((operation) => {
+          const completed = operation.reports.reduce(
+            (sum, report) => sum.plus(report.reportedCompletedQty),
+            new Decimal(0),
+          );
+          const myAmount = operation.reports
+            .filter((report) => report.reporterId === user.id)
+            .reduce(
+              (sum, report) => sum.plus(report.amount),
+              new Decimal(0),
+            );
+          return (
+            <Link
+              key={operation.id}
+              href={`/worker/tasks/${operation.id}`}
+              className="block min-h-11 rounded-xl border bg-card p-4 shadow-sm hover:bg-muted/40"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <strong>{OPERATION_LABELS[operation.operationType]}</strong>
+                <OperationStatusBadge status={operation.status} />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                已报合格 {completed.toString()} · 计划计价单位{' '}
+                {operation.plannedQty.toString()}
+              </p>
+              <p className="mt-1 font-sans text-sm tabular-nums">
+                我的已报计件 {formatMoney(myAmount)}
+              </p>
+            </Link>
+          );
+        })}
+      </section>
 
       <div className="space-y-3">
         {order.items.map((item) => (
@@ -97,21 +135,18 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
             <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
               {item.specification
                 ? externalPriceBusinessText(item.specification)
-                : '未填规格'}{' '}
-              ·{' '}
+                : '未填规格'}
+              {' · '}
               {item.paperType
                 ? externalPriceBusinessText(item.paperType)
-                : '未填纸张'}{' '}
-              · 数量{' '}
-              {item.quantity.toLocaleString()} ·{' '}
-              烫金色 {formatFoilColors(item.foilColors, '未填')} ·{' '}
+                : '未填纸张'}
+              {' · '}数量 {item.quantity.toLocaleString()} · 烫金色{' '}
+              {formatFoilColors(item.foilColors, '未填')} ·{' '}
               {item.isDoubleSided ? '双面' : '单面'} ·{' '}
               {item.isDoubleColor ? '双色' : '单色'}
             </p>
             {item.remark ? (
-              <HighlightedRemark className="worker-wrap-anywhere mt-3">
-                {item.remark}
-              </HighlightedRemark>
+              <HighlightedRemark className="mt-3">{item.remark}</HighlightedRemark>
             ) : null}
             <DesignImageGallery
               images={item.designs.map((design) => ({
@@ -119,70 +154,6 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
                 fileUrl: signDesignReadUrl(design.fileUrl),
               }))}
             />
-            <ul className="mt-3 divide-y border-t">
-              {item.tasks.map((task) => (
-                <li key={task.id} className="py-3 text-sm">
-                  <div className="flex min-w-0 flex-wrap items-start gap-3 sm:flex-nowrap">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <strong className="worker-wrap-anywhere min-w-0">
-                          {task.craft.name}
-                        </strong>
-                        <TaskStatusBadge status={task.status} />
-                      </div>
-                      <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                        {task.machineType
-                          ? MACHINE_TYPE_LABELS[task.machineType]
-                          : '无机型'}{' '}
-                        · 计划 {task.plannedQty.toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="ml-auto shrink-0 text-right">
-                      {task.workerType === WorkerType.MACHINE ? (
-                        <>
-                          <p className="text-xs text-muted-foreground">计件金额</p>
-                          <p className="font-sans tabular-nums font-medium">
-                            {formatMoney(task.pieceworkAmount)}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="worker-wrap-anywhere text-xs text-muted-foreground">
-                          按考勤时薪结算
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {task.status === TaskStatus.COMPLETED ? (
-                    <dl className="mt-3 grid min-w-0 grid-cols-2 gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-3">
-                      <Metric label="良品" value={task.completedQty} />
-                      <Metric label="次品" value={task.defectQty} />
-                      <Metric label="返工" value={task.reworkQty} />
-                      {task.workerType === WorkerType.MACHINE ? (
-                        <>
-                          <Metric label="板数" value={task.boardCount} />
-                          <Metric label="下数" value={task.pressCount} />
-                        </>
-                      ) : null}
-                      <Metric
-                        label="完工"
-                        value={
-                          task.completedAt
-                            ? formatDateTimeShanghai(task.completedAt)
-                            : '—'
-                        }
-                      />
-                    </dl>
-                  ) : (
-                    <Link
-                      href={`/worker/tasks/${task.id}`}
-                      className="mt-3 inline-flex min-h-11 min-w-11 items-center text-sm text-foreground underline decoration-primary"
-                    >
-                      前往处理任务
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
           </section>
         ))}
       </div>
@@ -190,22 +161,15 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
   );
 }
 
-function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
+function OperationStatusBadge({
+  status,
+}: {
+  status: ProductionOperationStatus;
+}) {
+  const definition = PRODUCTION_OPERATION_STATUS_REGISTRY[status];
   return (
-    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
       {definition.label}
-    </UiStatusBadge>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="worker-wrap-anywhere font-sans tabular-nums">
-        {value}
-      </dd>
-    </div>
+    </StatusBadge>
   );
 }

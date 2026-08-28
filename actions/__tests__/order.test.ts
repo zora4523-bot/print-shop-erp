@@ -582,7 +582,7 @@ describe('createReworkOrderAction', () => {
     ],
   };
 
-  it("first-line requirePermission('order:schedule')", async () => {
+  it("first-line requirePermission('order:change:review')", async () => {
     permissionsMock.requirePermission.mockRejectedValue(
       new UnauthorizedError('未登录'),
     );
@@ -590,7 +590,7 @@ describe('createReworkOrderAction', () => {
       createReworkOrderAction(null, input),
     ).rejects.toBeInstanceOf(UnauthorizedError);
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
-      'order:schedule',
+      'order:change:review',
     );
     expect(reworkMock.createReworkOrder).not.toHaveBeenCalled();
   });
@@ -605,7 +605,7 @@ describe('createReworkOrderAction', () => {
     expect(reworkMock.createReworkOrder).not.toHaveBeenCalled();
   });
 
-  it('maps domain errors and revalidates the source, list, and scheduling views', async () => {
+  it('maps domain errors and revalidates the source and order list views', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     reworkMock.createReworkOrder.mockRejectedValueOnce(
       new MockReworkOrderError('只有已发货或已完成工单可以发起重做'),
@@ -623,7 +623,6 @@ describe('createReworkOrderAction', () => {
     const success = await createReworkOrderAction(null, input);
     expect(success).toEqual({ status: 'success', orderId: 'rework-1' });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/scheduling');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/source-1');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/rework-1');
   });
@@ -1488,7 +1487,6 @@ describe('order pricing review actions', () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/scheduling');
   });
 });
 

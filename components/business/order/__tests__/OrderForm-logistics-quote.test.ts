@@ -33,17 +33,6 @@ const formBSource = readFileSync(
   ),
   'utf8',
 );
-const schedulingSource = readFileSync(
-  path.join(
-    process.cwd(),
-    'components',
-    'business',
-    'production',
-    'SchedulingForm.tsx',
-  ),
-  'utf8',
-);
-
 describe('OrderForm logistics quote authority', () => {
   it('requests one authoritative server quote for items, packaging, and logistics', () => {
     expect(source).toContain(
@@ -246,6 +235,5 @@ describe('OrderForm B style navigation and shared controls', () => {
     expect(source).not.toContain('<button');
     expect(railSource).not.toContain('<button');
     expect(formBSource).not.toContain('<button');
-    expect(schedulingSource).not.toContain('<button');
   });
 });

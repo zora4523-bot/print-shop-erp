@@ -9,6 +9,7 @@ import {
   OutsourceStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
+  ProductionOperationStatus,
   SalaryPeriodStatus,
   ShipmentStatus,
   TaskStatus,
@@ -247,6 +248,27 @@ export const PRODUCTION_TASK_STATUS_REGISTRY: StatusRegistry<TaskStatus> = {
     tone: 'success',
   },
   [TaskStatus.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
+  },
+};
+
+export const PRODUCTION_OPERATION_STATUS_REGISTRY: StatusRegistry<ProductionOperationStatus> = {
+  [ProductionOperationStatus.PENDING]: {
+    label: '待报工',
+    tone: 'neutral',
+    dot: true,
+  },
+  [ProductionOperationStatus.IN_PROGRESS]: {
+    label: '进行中',
+    tone: 'warning',
+    dot: true,
+  },
+  [ProductionOperationStatus.COMPLETED]: {
+    label: '已完工',
+    tone: 'success',
+  },
+  [ProductionOperationStatus.CANCELLED]: {
     label: '已取消',
     tone: 'danger',
   },

@@ -2,12 +2,13 @@ import Decimal from 'decimal.js';
 import {
   DesignFileType,
   OrderStatus,
+  ProductionOperationStatus,
   Role,
-  TaskStatus,
   WorkerType,
 } from '../generated/prisma/enums';
 import { paginatedResult, paginationWindow } from './admin/table';
 import { db } from './db';
+import { getReporterOperationType } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
 
 // 师傅端 H5 一屏能承受的卡片数。取值与 lib/order/list-query.ts 的
@@ -51,16 +52,13 @@ function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
   }
 }
 
-// 师傅工单的唯一可见性定义：工单中至少一个 ProductionTask.workerId
-// 等于当前登录用户。列表与详情复用同一形状，避免页面层漏加归属条件。
-function ownOrderWhere(workerId: string) {
+// 新工单按账号固定工序 lane 可见，不建立人员与工单的绑定关系。
+function operationOrderWhere(
+  operationType: Awaited<ReturnType<typeof getReporterOperationType>>,
+) {
   return {
     status: { not: OrderStatus.SUBMITTED },
-    items: {
-      some: {
-        tasks: { some: { workerId } },
-      },
-    },
+    productionOperations: { some: { operationType } },
   } as const;
 }
 
@@ -69,8 +67,9 @@ export async function listWorkerOrders(
   options?: { page?: number },
 ) {
   requireWorkerActor(actor);
+  const operationType = await getReporterOperationType(actor);
   // 计数与取行必须共用同一个 where，否则页码会指向不存在的行。
-  const where = ownOrderWhere(actor.id);
+  const where = operationOrderWhere(operationType);
   const total = await db.order.count({ where });
   const window = paginationWindow(
     total,
@@ -80,9 +79,8 @@ export async function listWorkerOrders(
 
   const orders = await db.order.findMany({
     where,
-    // 最新的工单排最前。这个页面是归档/查询视图，不是待办队列——待办队列
-    // 是 /worker/tasks（listWorkerTasks 仍按急单分组、旧单在前，且天然被
-    // PENDING/IN_PROGRESS 收窄）。急单在这里只作为徽标呈现：如果继续把
+    // 最新的工单排最前。这个页面是归档/查询视图，不是待办队列。急单只
+    // 作为徽标呈现：如果继续把
     // isUrgent 当第一排序键，老员工的历史急单会长期霸占第一页，今天的新单
     // 反而翻不到。id 是稳定 tiebreaker，既保证翻页不重不漏，也命中 Order
     // 上已有的 @@index([createdAt(sort: Desc), id(sort: Desc)])。
@@ -99,17 +97,15 @@ export async function listWorkerOrders(
       promisedDate: true,
       createdAt: true,
       submitter: { select: { displayName: true } },
-      items: {
-        where: { tasks: { some: { workerId: actor.id } } },
+      productionOperations: {
+        where: { operationType },
         select: {
           id: true,
-          tasks: {
-            where: { workerId: actor.id },
+          status: true,
+          reports: {
+            where: { reporterId: actor.id },
             select: {
-              id: true,
-              status: true,
-              workerType: true,
-              pieceworkAmount: true,
+              amount: true,
             },
           },
         },
@@ -119,7 +115,7 @@ export async function listWorkerOrders(
 
   return paginatedResult(
     orders.map((order) => {
-      const tasks = order.items.flatMap((item) => item.tasks);
+      const operations = order.productionOperations;
       return {
         id: order.id,
         orderNo: order.orderNo,
@@ -130,20 +126,19 @@ export async function listWorkerOrders(
         promisedDate: order.promisedDate,
         createdAt: order.createdAt,
         submitterName: order.submitter?.displayName ?? '未记录',
-        taskCount: tasks.length,
-        completedTaskCount: tasks.filter(
-          (task) => task.status === TaskStatus.COMPLETED,
+        operationCount: operations.length,
+        completedOperationCount: operations.filter(
+          (operation) =>
+            operation.status === ProductionOperationStatus.COMPLETED,
         ).length,
-        pieceworkAmount: tasks
+        pieceworkAmount: operations
+          .flatMap((operation) => operation.reports)
           .reduce(
-            (sum, task) =>
-              sum.plus(new Decimal(task.pieceworkAmount as Decimal.Value)),
+            (sum, report) =>
+              sum.plus(new Decimal(report.amount as Decimal.Value)),
             new Decimal(0),
           )
           .toFixed(2),
-        hasPieceworkTasks: tasks.some(
-          (task) => task.workerType === WorkerType.MACHINE,
-        ),
       };
     }),
     total,
@@ -156,8 +151,9 @@ export async function getWorkerOrderDetail(
   actor: WorkerActor,
 ) {
   requireWorkerActor(actor);
+  const operationType = await getReporterOperationType(actor);
   return db.order.findFirst({
-    where: { id: orderId, ...ownOrderWhere(actor.id) },
+    where: { id: orderId, ...operationOrderWhere(operationType) },
     select: {
       id: true,
       orderNo: true,
@@ -171,7 +167,6 @@ export async function getWorkerOrderDetail(
       createdAt: true,
       submitter: { select: { displayName: true } },
       items: {
-        where: { tasks: { some: { workerId: actor.id } } },
         orderBy: { sequence: 'asc' },
         select: {
           id: true,
@@ -193,24 +188,33 @@ export async function getWorkerOrderDetail(
               fileUrl: true,
             },
           },
-          tasks: {
-            where: { workerId: actor.id },
+        },
+      },
+      productionOperations: {
+        where: { operationType },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          operationType: true,
+          unit: true,
+          status: true,
+          plannedQty: true,
+          sources: {
             orderBy: { createdAt: 'asc' },
             select: {
-              id: true,
-              status: true,
-              workerType: true,
-              machineType: true,
-              plannedQty: true,
-              completedQty: true,
+              sourceQty: true,
+              orderItemId: true,
+              packagingGroupId: true,
+            },
+          },
+          reports: {
+            select: {
+              reporterId: true,
+              reportedCompletedQty: true,
               defectQty: true,
               reworkQty: true,
-              boardCount: true,
-              pressCount: true,
-              pieceworkAmount: true,
-              startedAt: true,
-              completedAt: true,
-              craft: { select: { name: true } },
+              amount: true,
+              reportedAt: true,
             },
           },
         },

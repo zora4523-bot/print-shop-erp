@@ -36,8 +36,6 @@ import {
   createOutsourceSchema,
   confirmOutsourceAmountSchema,
   recordOutsourcePaymentSchema,
-  batchScheduleOrdersSchema,
-  scheduleOrderSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
   startCsPeriodSchema,
@@ -81,48 +79,6 @@ describe('production task dispute schemas', () => {
         disputeId: 'dispute-1',
         decision: 'PENDING',
         resolution: '',
-      }).success,
-    ).toBe(false);
-  });
-});
-
-describe('production scheduling schema', () => {
-  it('accepts task identity and a positive split quantity', () => {
-    const parsed = scheduleOrderSchema.safeParse({
-      orderId: 'order-1',
-      assignments: [
-        {
-          taskId: 'task-1',
-          orderItemId: 'item-1',
-          craftId: 'craft-1',
-          workerId: 'worker-1',
-          plannedQty: '600',
-        },
-      ],
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.assignments[0]?.plannedQty).toBe(600);
-    }
-  });
-
-  it('rejects zero or fractional split quantities', () => {
-    const payload = {
-      orderId: 'order-1',
-      assignments: [
-        {
-          orderItemId: 'item-1',
-          craftId: 'craft-1',
-          workerId: 'worker-1',
-          plannedQty: 0,
-        },
-      ],
-    };
-    expect(scheduleOrderSchema.safeParse(payload).success).toBe(false);
-    expect(
-      scheduleOrderSchema.safeParse({
-        ...payload,
-        assignments: [{ ...payload.assignments[0], plannedQty: 1.5 }],
       }).success,
     ).toBe(false);
   });
@@ -667,44 +623,8 @@ describe('createUserSchema', () => {
         employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [MachineType.HAND_PRESS],
       });
       expect(r.success).toBe(true);
-    });
-
-    it('accepts multiple machine capabilities when they include the primary machine', () => {
-      const r = createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.WORKER,
-        employmentType: EmploymentType.FULL_TIME,
-        workerType: WorkerType.MACHINE,
-        machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [
-          MachineType.HAND_PRESS,
-          MachineType.WINDMILL,
-        ],
-        craftCapabilities: ['craft-foil', 'craft-color-foil'],
-      });
-      expect(r.success).toBe(true);
-    });
-
-    it('rejects machine capabilities that omit the primary machine', () => {
-      const r = createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.WORKER,
-        employmentType: EmploymentType.FULL_TIME,
-        workerType: WorkerType.MACHINE,
-        machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [MachineType.WINDMILL],
-      });
-      expect(r.success).toBe(false);
-      if (!r.success) {
-        expect(
-          r.error.issues.find(
-            (issue) => issue.path[0] === 'machineCapabilities',
-          )?.message,
-        ).toMatch(/包含主机型/);
-      }
     });
 
     it('accepts WORKER + PACKER without machineType', () => {
@@ -830,8 +750,6 @@ const validCraft = {
   name: '专版单色平烫',
   code: 'FLAT_FOIL_SINGLE',
   isOutsource: 'false',
-  defaultWorkerType: WorkerType.MACHINE,
-  defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
 
@@ -876,55 +794,6 @@ describe('createCraftSchema', () => {
       const r = createCraftSchema.safeParse({ ...validCraft, code: 'A' });
       expect(r.success).toBe(false);
     });
-  });
-
-  describe('defaultMachineType', () => {
-    it('accepts null / empty string (outsource with no machine)', () => {
-      for (const v of ['', null, undefined]) {
-        const r = createCraftSchema.safeParse({
-          ...validCraft,
-          isOutsource: 'true',
-          defaultWorkerType: '',
-          defaultMachineType: v,
-        });
-        expect(r.success).toBe(true);
-        if (r.success) expect(r.data.defaultMachineType).toBeNull();
-      }
-    });
-    it('accepts a MachineType value', () => {
-      const r = createCraftSchema.safeParse({
-        ...validCraft,
-        defaultMachineType: MachineType.HAND_PRESS,
-      });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.defaultMachineType).toBe(MachineType.HAND_PRESS);
-    });
-    it('rejects an unknown string', () => {
-      const r = createCraftSchema.safeParse({
-        ...validCraft,
-        defaultMachineType: 'NOT_A_MACHINE',
-      });
-      expect(r.success).toBe(false);
-      if (!r.success) {
-        const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
-        expect(visibleErrors).toContain('请选择有效的接单机型');
-        expect(visibleErrors).not.toContain('NOT_A_MACHINE');
-        expect(visibleErrors).not.toContain('HAND_PRESS');
-      }
-    });
-  });
-
-  it('不向管理端暴露无效的内部岗位值', () => {
-    const r = createCraftSchema.safeParse({
-      ...validCraft,
-      defaultWorkerType: 'INTERNAL_WORKER_TYPE',
-    });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
-      expect(visibleErrors).toContain('请选择有效的接单岗位');
-      expect(visibleErrors).not.toContain('INTERNAL_WORKER_TYPE');
-    }
   });
 
   describe('sortOrder', () => {
@@ -2267,35 +2136,5 @@ describe('createReworkOrderSchema', () => {
       items: [{ ...input.items[0], craftIds: ['craft-1', 'craft-1'] }],
     });
     expect(result.success).toBe(false);
-  });
-});
-
-describe('batchScheduleOrdersSchema', () => {
-  it('accepts unique order ids and one worker id', () => {
-    expect(
-      batchScheduleOrdersSchema.parse({
-        orderIds: ['order-1', 'order-2'],
-        workerId: 'worker-1',
-      }),
-    ).toEqual({
-      orderIds: ['order-1', 'order-2'],
-      workerId: 'worker-1',
-    });
-  });
-
-  it('rejects empty, duplicate, oversized and unsafe order selections', () => {
-    for (const orderIds of [
-      [],
-      ['order-1', 'order-1'],
-      Array.from({ length: 31 }, (_, index) => `order-${index}`),
-      ['../order-1'],
-    ]) {
-      expect(
-        batchScheduleOrdersSchema.safeParse({
-          orderIds,
-          workerId: 'worker-1',
-        }).success,
-      ).toBe(false);
-    }
   });
 });

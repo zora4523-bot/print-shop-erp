@@ -5,8 +5,6 @@ import {
   SalaryPeriodStatus,
   SalaryRuleType,
   WorkerType,
-  type Craft,
-  type MachineType,
   type User,
 } from '../generated/prisma/client';
 import { db } from './db';
@@ -47,12 +45,6 @@ type TxClient = {
     create: (args: { data: unknown; select?: unknown }) => Promise<AccountSummary>;
     update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<AccountSummary>;
     count: (args?: { where?: unknown }) => Promise<number>;
-  };
-  craft: {
-    findMany: (args: {
-      where: unknown;
-      select?: unknown;
-    }) => Promise<WorkerCapabilityCraft[]>;
   };
   salaryRule: SalaryRuleClient['salaryRule'];
   salaryPeriod: {
@@ -180,26 +172,12 @@ export type AccountSummary = Pick<
   | 'role'
   | 'workerType'
   | 'machineType'
-  | 'machineCapabilities'
   | 'isActive'
   | 'employmentType'
   | 'employmentStartDate'
   | 'employmentEndDate'
   | 'createdAt'
   | 'updatedAt'
-> & {
-  craftCapabilities: Array<{ craftId: string }>;
-};
-
-export type WorkerCapabilityCraft = Pick<
-  Craft,
-  | 'id'
-  | 'name'
-  | 'isActive'
-  | 'isOutsource'
-  | 'defaultWorkerType'
-  | 'defaultMachineType'
-  | 'inHouseMachineTypes'
 >;
 
 const SUMMARY_SELECT = {
@@ -210,8 +188,6 @@ const SUMMARY_SELECT = {
   role: true,
   workerType: true,
   machineType: true,
-  machineCapabilities: true,
-  craftCapabilities: { select: { craftId: true } },
   isActive: true,
   employmentType: true,
   employmentStartDate: true,
@@ -229,32 +205,6 @@ export async function listUsers(): Promise<AccountSummary[]> {
 
 export async function getUserSummary(id: string): Promise<AccountSummary | null> {
   return db.user.findUnique({ where: { id }, select: SUMMARY_SELECT });
-}
-
-export async function listWorkerCapabilityCrafts(): Promise<
-  WorkerCapabilityCraft[]
-> {
-  return db.craft.findMany({
-    where: {
-      isActive: true,
-      defaultWorkerType: { not: null },
-      NOT: { defaultWorkerType: WorkerType.COOK },
-      OR: [
-        { isOutsource: false },
-        { inHouseMachineTypes: { isEmpty: false } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      isActive: true,
-      isOutsource: true,
-      defaultWorkerType: true,
-      defaultMachineType: true,
-      inHouseMachineTypes: true,
-    },
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -320,8 +270,6 @@ export type CreateUserData = {
   role: Role;
   workerType?: User['workerType'];
   machineType?: User['machineType'];
-  machineCapabilities?: MachineType[];
-  craftCapabilities?: string[];
   employmentType?: User['employmentType'];
   employmentStartDate?: User['employmentStartDate'];
   employmentEndDate?: User['employmentEndDate'];
@@ -331,18 +279,6 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
   const hashed = await bcrypt.hash(data.password, 10);
   return db.$transaction(async (tx) => {
     const txClient = tx as unknown as TxClient;
-    const capabilityCraftIds =
-      data.role === Role.WORKER ? (data.craftCapabilities ?? []) : [];
-    await assertWorkerCapabilitiesInTx(txClient, {
-      workerType:
-        data.role === Role.WORKER ? (data.workerType ?? null) : null,
-      machineCapabilities:
-        data.role === Role.WORKER &&
-        data.workerType === WorkerType.MACHINE
-          ? (data.machineCapabilities ?? [])
-          : [],
-      craftIds: capabilityCraftIds,
-    });
     const created = await txClient.user.create({
       data: {
         username: data.username,
@@ -357,14 +293,6 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
           data.workerType === WorkerType.MACHINE
             ? (data.machineType ?? null)
             : null,
-        machineCapabilities:
-          data.role === Role.WORKER &&
-          data.workerType === WorkerType.MACHINE
-            ? (data.machineCapabilities ?? [])
-            : [],
-        craftCapabilities: {
-          create: capabilityCraftIds.map((craftId) => ({ craftId })),
-        },
         isActive: true,
         employmentType:
           data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
@@ -396,8 +324,6 @@ export type UpdateUserData = {
   role: Role;
   workerType?: User['workerType'];
   machineType?: User['machineType'];
-  machineCapabilities?: MachineType[];
-  craftCapabilities?: string[];
   employmentType?: User['employmentType'];
   employmentStartDate?: User['employmentStartDate'];
   employmentEndDate?: User['employmentEndDate'];
@@ -441,20 +367,6 @@ export async function updateUser(
         id,
       )}))`;
     }
-    const capabilityCraftIds =
-      data.role === Role.WORKER ? (data.craftCapabilities ?? []) : [];
-    const machineCapabilities =
-      data.role === Role.WORKER &&
-      data.workerType === WorkerType.MACHINE
-        ? (data.machineCapabilities ?? [])
-        : [];
-    await assertWorkerCapabilitiesInTx(txClient, {
-      workerType:
-        data.role === Role.WORKER ? (data.workerType ?? null) : null,
-      machineCapabilities,
-      craftIds: capabilityCraftIds,
-    });
-
     const updated = await txClient.user.update({
       where: { id },
       data: {
@@ -467,11 +379,6 @@ export async function updateUser(
           data.workerType === WorkerType.MACHINE
             ? (data.machineType ?? null)
             : null,
-        machineCapabilities,
-        craftCapabilities: {
-          deleteMany: {},
-          create: capabilityCraftIds.map((craftId) => ({ craftId })),
-        },
         employmentType:
           data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
             ? (data.employmentType ?? null)
@@ -496,66 +403,6 @@ export async function updateUser(
     }
     return updated;
   });
-}
-
-async function assertWorkerCapabilitiesInTx(
-  tx: TxClient,
-  input: {
-    workerType: WorkerType | null;
-    machineCapabilities: MachineType[];
-    craftIds: string[];
-  },
-): Promise<void> {
-  if (input.craftIds.length === 0) return;
-  const crafts = await tx.craft.findMany({
-    where: { id: { in: input.craftIds } },
-    select: {
-      id: true,
-      name: true,
-      isActive: true,
-      isOutsource: true,
-      defaultWorkerType: true,
-      defaultMachineType: true,
-      inHouseMachineTypes: true,
-    },
-  });
-  if (crafts.length !== input.craftIds.length) {
-    throw new AccountInvariantError('所选工艺能力包含不存在的工艺');
-  }
-  for (const craft of crafts) {
-    if (!craft.isActive) {
-      throw new AccountInvariantError(`工艺“${craft.name}”已停用`);
-    }
-    if (craft.isOutsource && craft.inHouseMachineTypes.length === 0) {
-      throw new AccountInvariantError(`纯外协工艺“${craft.name}”不能设为师傅能力`);
-    }
-    if (
-      !craft.defaultWorkerType ||
-      craft.defaultWorkerType === WorkerType.COOK ||
-      craft.defaultWorkerType !== input.workerType
-    ) {
-      throw new AccountInvariantError(
-        `工艺“${craft.name}”与当前岗位不匹配`,
-      );
-    }
-    if (craft.defaultWorkerType === WorkerType.MACHINE) {
-      const allowedMachines =
-        craft.inHouseMachineTypes.length > 0
-          ? craft.inHouseMachineTypes
-          : craft.defaultMachineType
-            ? [craft.defaultMachineType]
-            : [];
-      if (
-        !input.machineCapabilities.some((machine) =>
-          allowedMachines.includes(machine),
-        )
-      ) {
-        throw new AccountInvariantError(
-          `工艺“${craft.name}”与所选机器能力不匹配`,
-        );
-      }
-    }
-  }
 }
 
 export async function setUserActive(

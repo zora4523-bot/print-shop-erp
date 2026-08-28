@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MachineType, WorkerType } from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
@@ -36,8 +35,6 @@ const makeCraft = (over: Partial<{
   name: string;
   code: string;
   isOutsource: boolean;
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
   sortOrder: number;
   isActive: boolean;
 }> = {}) => ({
@@ -45,8 +42,6 @@ const makeCraft = (over: Partial<{
   name: '局部烫金',
   code: 'FLAT_FOIL_PARTIAL',
   isOutsource: false,
-  defaultWorkerType: WorkerType.MACHINE,
-  defaultMachineType: MachineType.HAND_PRESS,
   sortOrder: 10,
   isActive: true,
   createdAt: new Date('2026-04-23T00:00:00Z'),
@@ -147,8 +142,6 @@ describe('createCraft', () => {
         name: '现货加烫',
         code: 'STOCK_FOIL',
         isOutsource: false,
-        defaultWorkerType: WorkerType.MACHINE,
-        defaultMachineType: MachineType.HAND_PRESS,
         sortOrder: 900,
       }),
     ).rejects.toThrow(/历史工艺已退役.*不能新建/u);
@@ -164,8 +157,6 @@ describe('createCraft', () => {
       name: '新工艺',
       code: null,
       isOutsource: false,
-      defaultWorkerType: WorkerType.PACKER,
-      defaultMachineType: null,
       sortOrder: 80,
     });
 
@@ -178,8 +169,6 @@ describe('createCraft', () => {
       name: '专版单色平烫',
       code: 'FLAT_FOIL_SINGLE',
       isOutsource: false,
-      defaultWorkerType: WorkerType.MACHINE,
-      defaultMachineType: MachineType.WINDMILL,
       sortOrder: 20,
     });
     expect(dbMock.craft.create.mock.calls[0][0].data.isActive).toBe(true);
@@ -193,33 +182,17 @@ describe('createCraft', () => {
     );
   });
 
-  it('persists defaultMachineType=null for an outsource craft when supplied', async () => {
+  it('does not write retired assignment metadata for a new craft', async () => {
     dbMock.craft.create.mockResolvedValue(makeCraft());
     await createCraft({
       name: 'UV',
       code: 'UV',
       isOutsource: true,
-      defaultWorkerType: null,
-      defaultMachineType: null,
       sortOrder: 60,
     });
-    expect(dbMock.craft.create.mock.calls[0][0].data.defaultMachineType).toBeNull();
-  });
-
-  it('clears the internal worker type but preserves an outsource reference machine', async () => {
-    dbMock.craft.create.mockResolvedValue(makeCraft());
-    await createCraft({
-      name: '冰白彩印（印刷+烫金）',
-      code: 'COLOR_PRINT_FOIL',
-      isOutsource: true,
-      defaultWorkerType: WorkerType.MACHINE,
-      defaultMachineType: MachineType.WINDMILL,
-      sortOrder: 71,
-    });
     const data = dbMock.craft.create.mock.calls[0][0].data;
-    expect(data.isOutsource).toBe(true);
-    expect(data.defaultWorkerType).toBeNull();
-    expect(data.defaultMachineType).toBe(MachineType.WINDMILL);
+    expect(data).not.toHaveProperty('defaultWorkerType');
+    expect(data).not.toHaveProperty('defaultMachineType');
   });
 });
 
@@ -230,8 +203,6 @@ describe('updateCraft', () => {
       updateCraft('nope', {
         name: 'X',
         isOutsource: false,
-        defaultWorkerType: WorkerType.PACKER,
-        defaultMachineType: null,
         sortOrder: 10,
       }),
     ).rejects.toBeInstanceOf(CraftInvariantError);
@@ -244,13 +215,13 @@ describe('updateCraft', () => {
     await updateCraft('craft-1', {
       name: '现货加烫(改名)',
       isOutsource: false,
-      defaultWorkerType: WorkerType.MACHINE,
-      defaultMachineType: MachineType.HAND_PRESS,
       sortOrder: 10,
     });
     const data = dbMock.craft.update.mock.calls[0][0].data;
     expect(data.name).toBe('现货加烫(改名)');
     expect(data).not.toHaveProperty('code');
+    expect(data).not.toHaveProperty('defaultWorkerType');
+    expect(data).not.toHaveProperty('defaultMachineType');
     expect(dbMock.craft.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(
       dbMock.$executeRaw.mock.invocationCallOrder[0]!,
     );
@@ -262,8 +233,6 @@ describe('updateCraft', () => {
     await updateCraft('craft-1', {
       name: 'x',
       isOutsource: false,
-      defaultWorkerType: WorkerType.PACKER,
-      defaultMachineType: null,
       sortOrder: 10,
     });
     const data = dbMock.craft.update.mock.calls[0][0].data as Record<string, unknown>;

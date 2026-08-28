@@ -11,13 +11,16 @@ import {
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     user: { findUnique: vi.fn() },
-    productionOperation: { findMany: vi.fn() },
+    productionOperation: { findMany: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-import { listProductionOperationsForReporter } from '../operation-portal';
+import {
+  getProductionOperationForReporter,
+  listProductionOperationsForReporter,
+} from '../operation-portal';
 
 beforeEach(() => {
   dbMock.user.findUnique.mockReset().mockResolvedValue({
@@ -36,7 +39,12 @@ beforeEach(() => {
       status: ProductionOperationStatus.IN_PROGRESS,
       plannedQty: new Decimal(12),
       createdAt: new Date('2026-08-28T00:00:00.000Z'),
-      order: { orderNo: 'GD-1', customName: null, isUrgent: true },
+      order: {
+        orderNo: 'GD-1',
+        customName: null,
+        isUrgent: true,
+        promisedDate: null,
+      },
       sources: [{ orderItem: null }],
       reports: [
         {
@@ -47,6 +55,47 @@ beforeEach(() => {
       ],
     },
   ]);
+  dbMock.productionOperation.findFirst.mockReset().mockResolvedValue(null);
+});
+
+describe('getProductionOperationForReporter', () => {
+  it('scopes detail to the fixed operation lane without worker assignment', async () => {
+    dbMock.productionOperation.findFirst.mockResolvedValue({
+      id: 'packing-1',
+      orderId: 'order-1',
+      operationType: PieceworkOperationType.PACKING,
+      unit: PieceworkRateUnit.PER_BAG,
+      status: ProductionOperationStatus.IN_PROGRESS,
+      plannedQty: new Decimal(12),
+      order: {
+        orderNo: 'GD-1',
+        customName: null,
+        isUrgent: false,
+        promisedDate: null,
+        packageRequirement: null,
+        remark: null,
+      },
+      sources: [],
+      reports: [],
+    });
+
+    await expect(
+      getProductionOperationForReporter('packing-1', {
+        id: 'packer-1',
+        role: Role.WORKER,
+      }),
+    ).resolves.toMatchObject({
+      id: 'packing-1',
+      operationType: PieceworkOperationType.PACKING,
+      plannedCompletedQty: '12',
+    });
+    const where = dbMock.productionOperation.findFirst.mock.calls[0]![0].where;
+    expect(where).toEqual({
+      id: 'packing-1',
+      operationType: PieceworkOperationType.PACKING,
+    });
+    expect(JSON.stringify(where)).not.toContain('workerId');
+  });
 });
 
 describe('listProductionOperationsForReporter', () => {

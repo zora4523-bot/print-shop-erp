@@ -136,8 +136,7 @@ const ACTION_LABELS: Record<string, string> = {
   UPDATE: '编辑',
   STATUS_CHANGE: '状态变更',
   DELETE: '删除',
-  // lib/production.ts 写这两个 action；此前它们没有标签，时间线上直接
-  // 显示英文枚举串。
+  // 旧派工/抢单写入器已移除；这些标签仅供历史 OrderLog 时间线解读。
   TASK_REASSIGN: '任务改派',
   TASK_OVER_REPORT: '超计划报工',
   TASK_RELEASE_TO_POOL: '释放到抢单池',

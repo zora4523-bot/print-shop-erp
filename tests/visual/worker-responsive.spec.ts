@@ -93,18 +93,18 @@ type WorkerRoute = {
 
 function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
   return [
-    { name: 'tasks', path: '/worker/tasks', readyHeading: '我的任务' },
+    { name: 'tasks', path: '/worker/tasks', readyHeading: '生产工序' },
     {
       name: 'task-detail-reporting',
       path: `/worker/tasks/${data.activeTaskId}`,
-      readyHeading: '报工',
+      readyHeading: '局部烫金',
       assertGateState: assertTaskProductionContext,
     },
     { name: 'orders', path: '/worker/orders', readyHeading: '我的工单' },
     {
       name: 'order-detail',
       path: `/worker/orders/${data.orderId}`,
-      readyHeading: '我的工单任务',
+      readyHeading: '工序工单',
       assertGateState: assertProductionContext,
     },
     { name: 'salary', path: '/worker/salary', readyHeading: '我的工资' },
@@ -122,22 +122,22 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
 }
 
 async function assertTaskProductionContext(page: Page) {
-  const details = page.locator('details').filter({
-    has: page.locator('summary', { hasText: '任务规格与设计图' }),
-  });
-  await details.locator('summary').click();
-  await expect(details).toHaveAttribute('open', '');
-  await assertProductionContext(page);
+  await assertProductionContext(page, { expectFoilColors: false });
 }
 
-async function assertProductionContext(page: Page) {
+async function assertProductionContext(
+  page: Page,
+  options: { expectFoilColors?: boolean } = {},
+) {
   await expect(
     page.getByText(
       '自定义工单名称：七夕红包加急批次ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(page.getByText(/哑金、红金、潘通 871C/).first()).toBeVisible();
+  if (options.expectFoilColors !== false) {
+    await expect(page.getByText(/哑金、红金、潘通 871C/).first()).toBeVisible();
+  }
   await expect(
     page.getByText(
       '款式备注包含连续文本ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789防止隐式裁切',

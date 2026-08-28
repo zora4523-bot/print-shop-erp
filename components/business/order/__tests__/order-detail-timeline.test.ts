@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  OrderStatus,
-  TaskStatus,
-} from '../../../../generated/prisma/enums';
+import { OrderStatus } from '../../../../generated/prisma/enums';
 import {
   buildOrderDetailTimeline,
   orderCancelImpact,
@@ -18,8 +15,7 @@ describe('buildOrderDetailTimeline', () => {
       promisedDate: null,
       submitterName: 'E2E 销售',
       logs: [],
-      tasks: [],
-      assignedWorkerCount: 0,
+      productionUnits: [],
       uncoveredOutsourceNames: [],
       hasLiveOutsource: false,
       pendingChangeRequest: false,
@@ -41,13 +37,12 @@ describe('buildOrderDetailTimeline', () => {
       promisedDate: new Date('2026-09-12T00:00:00.000Z'),
       submitterName: 'E2E 销售',
       logs: [],
-      tasks: [
-        { status: TaskStatus.COMPLETED },
-        { status: TaskStatus.COMPLETED },
-        { status: TaskStatus.IN_PROGRESS },
-        { status: TaskStatus.PENDING },
+      productionUnits: [
+        { status: 'COMPLETED' },
+        { status: 'COMPLETED' },
+        { status: 'IN_PROGRESS' },
+        { status: 'PENDING' },
       ],
-      assignedWorkerCount: 3,
       uncoveredOutsourceNames: ['#1 外盒'],
       hasLiveOutsource: true,
       pendingChangeRequest: false,
@@ -64,7 +59,7 @@ describe('buildOrderDetailTimeline', () => {
     ]);
     expect(steps[3]?.block).toContain('#1 外盒');
     expect(steps[3]?.label).toBe('生产中');
-    expect(steps[2]?.meta).toContain('已分派 3 名师傅');
+    expect(steps[2]?.meta).toContain('已生成 4 个生产工序');
   });
 
   it('renders cancelled as the current terminal step without inventing later stamps', () => {
@@ -75,8 +70,7 @@ describe('buildOrderDetailTimeline', () => {
       promisedDate: null,
       submitterName: 'E2E 销售',
       logs: [],
-      tasks: [],
-      assignedWorkerCount: 0,
+      productionUnits: [],
       uncoveredOutsourceNames: [],
       hasLiveOutsource: false,
       pendingChangeRequest: false,
@@ -92,15 +86,15 @@ describe('orderCancelImpact', () => {
   it('lists already-loaded task and outsource counts', () => {
     expect(
       orderCancelImpact({
-        pendingTaskCount: 2,
-        inProgressTaskCount: 1,
-        completedTaskCount: 3,
+        pendingProductionCount: 2,
+        inProgressProductionCount: 1,
+        completedProductionCount: 3,
         liveOutsourceCount: 1,
       }),
     ).toEqual([
-      { label: '取消未开工的生产任务', value: '2 个' },
-      { label: '进行中任务需人工收尾', value: '1 个' },
-      { label: '已完工任务保留计件工资', value: '3 个' },
+      { label: '取消未开工的生产工序', value: '2 个' },
+      { label: '进行中工序需人工收尾', value: '1 个' },
+      { label: '已报工记录保留金额快照', value: '3 个' },
       { label: '外协单需人工处理', value: '1 单已发出或进行中' },
     ]);
   });

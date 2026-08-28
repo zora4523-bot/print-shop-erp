@@ -89,42 +89,28 @@ function SettingField({
         {definition.help}
       </p>
       <div className="flex items-center gap-2">
-        {field.kind === 'boolean' ? (
-          <select
-            id={settingKey}
-            name={settingKey}
-            defaultValue={defaultValue}
-            aria-invalid={hasError}
-            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
-            className="min-h-10 min-w-32 rounded-md border bg-background px-3 py-2 text-sm"
-          >
-            <option value="false">关闭</option>
-            <option value="true">开启</option>
-          </select>
-        ) : (
-          <Input
-            id={settingKey}
-            name={settingKey}
-            defaultValue={defaultValue}
-            aria-invalid={hasError}
-            // 说明文字始终关联，出错时把错误排在前面先读
-            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
-            {...(field.kind === 'int'
-              ? {
-                  type: 'number',
-                  inputMode: 'numeric' as const,
-                  min: field.min,
-                  max: field.max,
-                  step: 1,
-                  className: 'max-w-32',
-                }
-              : {
-                  type: 'text',
-                  maxLength: field.maxLength,
-                  className: 'max-w-md',
-                })}
-          />
-        )}
+        <Input
+          id={settingKey}
+          name={settingKey}
+          defaultValue={defaultValue}
+          aria-invalid={hasError}
+          // 说明文字始终关联，出错时把错误排在前面先读
+          aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+          {...(field.kind === 'int'
+            ? {
+                type: 'number',
+                inputMode: 'numeric' as const,
+                min: field.min,
+                max: field.max,
+                step: 1,
+                className: 'max-w-32',
+              }
+            : {
+                type: 'text',
+                maxLength: field.maxLength,
+                className: 'max-w-md',
+              })}
+        />
         {field.kind === 'int' ? (
           <span className="text-sm text-muted-foreground">{field.unit}</span>
         ) : null}

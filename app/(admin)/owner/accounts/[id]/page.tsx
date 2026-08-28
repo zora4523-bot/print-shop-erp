@@ -1,8 +1,5 @@
 import { notFound } from 'next/navigation';
-import {
-  getUserSummary,
-  listWorkerCapabilityCrafts,
-} from '@/lib/account';
+import { getUserSummary } from '@/lib/account';
 import { updateUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
 import { ResetPasswordForm } from '@/components/business/account/ResetPasswordForm';
@@ -26,10 +23,7 @@ export default async function EditAccountPage({ params }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('account:manage');
   const { id } = await params;
-  const [account, capabilityCrafts] = await Promise.all([
-    getUserSummary(id),
-    listWorkerCapabilityCrafts(),
-  ]);
+  const account = await getUserSummary(id);
   if (!account) notFound();
 
   // Bind the id once so the form only has to pass (prev, fd).
@@ -64,7 +58,6 @@ export default async function EditAccountPage({ params }: PageProps) {
           mode="edit"
           action={boundUpdate}
           initial={account}
-          capabilityCrafts={capabilityCrafts}
         />
       </section>
 

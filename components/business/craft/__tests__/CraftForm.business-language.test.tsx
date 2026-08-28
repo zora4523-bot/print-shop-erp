@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
-import { MachineType, WorkerType } from '@/generated/prisma/enums';
 
 const { actionState } = vi.hoisted(() => ({
   actionState: { current: null as CraftMutationResult | null },
@@ -47,8 +46,6 @@ describe('CraftForm business language', () => {
         initial={{
           name: '局部烫金',
           isOutsource: false,
-          defaultWorkerType: WorkerType.MACHINE,
-          defaultMachineType: MachineType.HAND_PRESS,
           sortOrder: 10,
           isActive: true,
         }}
@@ -59,6 +56,17 @@ describe('CraftForm business language', () => {
     expect(text).not.toContain('工艺代码');
     expect(text).not.toContain(internalCode);
     expect(html).not.toContain('name="code"');
+  });
+
+  it('does not expose retired assignment or capacity controls', () => {
+    const html = renderToStaticMarkup(
+      <CraftForm mode="create" action={action} />,
+    );
+
+    expect(html).not.toContain('name="defaultWorkerType"');
+    expect(html).not.toContain('name="defaultMachineType"');
+    expect(visibleText(html)).not.toContain('接单岗位');
+    expect(visibleText(html)).not.toContain('排产');
   });
 
   it('历史服务端返回未归属字段错误时仍给出可见反馈', () => {

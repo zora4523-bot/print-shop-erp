@@ -3,8 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 
 // Idempotent E2E user fixture. Runs once before the test suite.
-// Inserts (or updates) one user per role we need for production-flow
-// E2E. Passwords are deterministic and known to the test helpers so
+// Inserts (or updates) one user per role needed by the E2E suite. Passwords
+// are deterministic and known to the test helpers so
 // any spec can `login()` as the right role without going through the
 // /owner/accounts UI first.
 //
@@ -65,9 +65,7 @@ export const E2E_USERS: Record<string, E2EUser> = {
     displayName: 'E2E 管理员 2',
     role: 'ADMIN',
   },
-  // Machine worker on HAND_PRESS so 现货加烫 (defaultMachineType =
-  // HAND_PRESS, per seed.ts) shows up as "推荐" in the scheduling
-  // form's worker picker for that craft.
+  // Fixed production lane: HAND_PRESS accounts report PARTIAL operations.
   workerHandPress: {
     username: 'e2e-worker-hand',
     displayName: 'E2E 开机仔',
@@ -121,14 +119,10 @@ export default async function globalSetup(): Promise<void> {
         `
         INSERT INTO "User" (
           id, username, "displayName", password,
-          role, "workerType", "machineType", "machineCapabilities", "employmentType", "isActive",
+          role, "workerType", "machineType", "employmentType", "isActive",
           "createdAt", "updatedAt"
         ) VALUES (
           $1, $2, $3, $4, $5::"Role", $6::"WorkerType", $7::"MachineType",
-          CASE
-            WHEN $7::"MachineType" IS NULL THEN ARRAY[]::"MachineType"[]
-            ELSE ARRAY[$7::"MachineType"]::"MachineType"[]
-          END,
           $8::"EmploymentType", TRUE, NOW(), NOW()
         )
         ON CONFLICT (username) DO UPDATE SET
@@ -137,7 +131,6 @@ export default async function globalSetup(): Promise<void> {
           role = EXCLUDED.role,
           "workerType" = EXCLUDED."workerType",
           "machineType" = EXCLUDED."machineType",
-          "machineCapabilities" = EXCLUDED."machineCapabilities",
           "employmentType" = EXCLUDED."employmentType",
           "isActive" = TRUE,
           "updatedAt" = NOW()
@@ -155,43 +148,6 @@ export default async function globalSetup(): Promise<void> {
       );
     }
 
-    const e2eUsernames = Object.values(E2E_USERS).map(
-      (user) => user.username,
-    );
-    await client.query(
-      `DELETE FROM "WorkerCraftCapability"
-       WHERE "workerId" IN (
-         SELECT id FROM "User" WHERE username = ANY($1::citext[])
-       )`,
-      [e2eUsernames],
-    );
-    await client.query(
-      `INSERT INTO "WorkerCraftCapability" ("workerId", "craftId")
-       SELECT worker.id, craft.id
-       FROM "User" worker
-       CROSS JOIN "Craft" craft
-       WHERE worker.username = ANY($1::citext[])
-         AND worker.role = 'WORKER'
-         AND worker."workerType" = craft."defaultWorkerType"
-         AND craft."isActive" = TRUE
-         AND (
-           craft."isOutsource" = FALSE
-           OR cardinality(craft."inHouseMachineTypes") > 0
-         )
-         AND (
-           craft."defaultWorkerType" <> 'MACHINE'
-           OR (
-             cardinality(craft."inHouseMachineTypes") > 0
-             AND worker."machineType" = ANY(craft."inHouseMachineTypes")
-           )
-           OR (
-             cardinality(craft."inHouseMachineTypes") = 0
-             AND worker."machineType" = craft."defaultMachineType"
-           )
-         )
-       ON CONFLICT DO NOTHING`,
-      [e2eUsernames],
-    );
   } finally {
     await client.end();
   }

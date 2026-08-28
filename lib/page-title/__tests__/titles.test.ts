@@ -7,7 +7,6 @@ import {
   orderPrintTitle,
   outsourceTitle,
   salesBillTitle,
-  schedulingTitle,
   workerTaskTitle,
 } from '../titles';
 
@@ -39,10 +38,6 @@ describe('详情页标题：业务编号在前', () => {
 
   it('外部销售账单只留账期（自己的账单，姓名是冗余信息）', () => {
     expect(salesBillTitle('2026-08')).toBe('2026-08 · 账单');
-  });
-
-  it('排产', () => {
-    expect(schedulingTitle('GD-260821-001')).toBe('GD-260821-001 · 排产');
   });
 
   it('师傅任务：工单号 + 款式序号', () => {
@@ -94,10 +89,8 @@ describe('取不到实体时的回落', () => {
     expect(workerTaskTitle(null)).toBe('任务不存在');
   });
 
-  it('redirect / 打印视图只回落到模块名，不说「不存在」', () => {
-    // 排产页在工单已离开 SUBMITTED 时 redirect 回列表，不是 notFound；
+  it('打印视图只回落到模块名，不说「不存在」', () => {
     // 打印视图的标题还会当作另存 PDF 的默认文件名。
-    expect(schedulingTitle(null)).toBe('排产');
     expect(orderPrintTitle(null)).toBe('工单打印');
   });
 });

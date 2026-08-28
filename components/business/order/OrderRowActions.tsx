@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Download, MoreHorizontal, Printer, Workflow } from 'lucide-react';
+import { Download, MoreHorizontal, Printer } from 'lucide-react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,16 +12,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export type OrderRowSecondaryAction = {
-  id: 'schedule' | 'print' | 'pdf';
+  id: 'print' | 'pdf';
   label: string;
   href: string;
   newTab?: boolean;
 };
 
 /**
- * Read-only destinations are always safe for a row already inside the actor's
- * server-scoped result set. Scheduling is both role- and state-gated here; the
- * destination repeats the permission/status checks and remains authoritative.
+ * Read-only destinations are safe for a row already inside the actor's
+ * server-scoped result set.
  */
 export function orderRowSecondaryActions(input: {
   orderId: string;
@@ -29,15 +28,6 @@ export function orderRowSecondaryActions(input: {
   canSchedule: boolean;
 }): OrderRowSecondaryAction[] {
   return [
-    ...(input.canSchedule && input.status === OrderStatus.SUBMITTED
-      ? [
-          {
-            id: 'schedule' as const,
-            label: '去排产',
-            href: `/foreman/scheduling/${input.orderId}`,
-          },
-        ]
-      : []),
     {
       id: 'print',
       label: '打印工单',
@@ -93,9 +83,7 @@ export function OrderRowMoreActions({
               />
             }
           >
-            {action.id === 'schedule' ? (
-              <Workflow aria-hidden="true" />
-            ) : action.id === 'print' ? (
+            {action.id === 'print' ? (
               <Printer aria-hidden="true" />
             ) : (
               <Download aria-hidden="true" />

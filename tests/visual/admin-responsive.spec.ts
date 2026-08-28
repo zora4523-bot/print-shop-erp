@@ -393,23 +393,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       prepareGateState: prepareOrderCreationComponentState,
     },
     {
-      name: 'scheduling',
-      path: '/foreman/scheduling',
-      readyHeading: '待排产',
-      prepareGateState: (page) =>
-        preparePendingSchedulingListState(page, data),
-    },
-    {
       name: 'attendance',
       path: '/foreman/attendance',
       readyHeading: '员工考勤',
       prepareGateState: prepareAttendanceState,
-    },
-    {
-      name: 'scheduling-detail',
-      path: `/foreman/scheduling/${data.schedulingOrderId}`,
-      readyHeading: `排产 ${data.schedulingOrderNo}`,
-      prepareGateState: prepareBulkSchedulingState,
     },
     { name: 'inventory', path: '/foreman/materials', readyHeading: '物料库存' },
     { name: 'outsource', path: '/foreman/outsource', readyHeading: '外协单' },
@@ -1123,82 +1110,6 @@ async function prepareOrderDetailDesignPreview(
 
   const box = await previewImage.boundingBox();
   expect(box?.height).toBeGreaterThanOrEqual(280);
-}
-
-async function prepareBulkSchedulingState(page: Page) {
-  await page
-    .getByRole('checkbox', { name: '选择全部内部工艺', exact: true })
-    .check();
-  await expect(page.getByText('已选 2 项', { exact: false })).toBeVisible();
-
-  const bulkWorker = page.getByLabel('批量派给同一位师傅', {
-    exact: true,
-  });
-  const workerOption = bulkWorker.locator('option').filter({
-    hasText: E2E_USERS.workerHandPress!.displayName,
-  });
-  const workerId = await workerOption.getAttribute('value');
-  expect(workerId).toBeTruthy();
-  await bulkWorker.selectOption(workerId!);
-  await page.getByRole('button', { name: '应用到已选', exact: true }).click();
-
-  for (const itemName of ['批量派工款式一', '批量派工款式二']) {
-    const row = page.getByRole('row').filter({ hasText: itemName });
-    const selectedWorker = row
-      .getByRole('radio')
-      .filter({ hasText: E2E_USERS.workerHandPress!.displayName });
-    await expect(selectedWorker).toHaveCount(1);
-    await expect(selectedWorker).toHaveAttribute('aria-checked', 'true');
-  }
-}
-
-async function preparePendingSchedulingListState(
-  page: Page,
-  data: WorkerUiFixture,
-) {
-  const batchRegion = page.getByRole('region', {
-    name: '跨工单批量排产',
-  });
-  const batchControls = batchRegion.locator(':scope > div.flex.min-w-0');
-  const batchSummary = batchControls.locator(':scope > div').first();
-  if ((page.viewportSize()?.width ?? 0) >= 1024) {
-    const [controlsBox, summaryBox] = await Promise.all([
-      batchControls.boundingBox(),
-      batchSummary.boundingBox(),
-    ]);
-    expect(controlsBox).not.toBeNull();
-    expect(summaryBox).not.toBeNull();
-    expect(summaryBox!.width).toBeGreaterThanOrEqual(160);
-    expect(controlsBox!.height).toBeLessThanOrEqual(240);
-  }
-
-  const workerSelect = page.getByLabel('接单师傅', { exact: true });
-  const workerOption = workerSelect
-    .locator('option')
-    .filter({ hasText: E2E_USERS.workerHandPress!.displayName });
-  const workerId = await workerOption.getAttribute('value');
-  expect(workerId).toBeTruthy();
-  await workerSelect.selectOption(workerId!);
-  await page
-    .getByRole('checkbox', {
-      name: `选择工单 ${data.schedulingOrderNo}`,
-      exact: true,
-    })
-    .check();
-  await page
-    .getByRole('checkbox', {
-      name: `选择工单 ${data.schedulingOrderTwoNo}`,
-      exact: true,
-    })
-    .check();
-  await expect(page.getByText('已选 2 张', { exact: false })).toBeVisible();
-  await expect(workerSelect).not.toHaveValue('');
-  await expect(
-    page.getByRole('button', {
-      name: '确认分配所选工艺',
-      exact: true,
-    }),
-  ).toBeEnabled();
 }
 
 async function prepareOrderCreationComponentState(page: Page) {

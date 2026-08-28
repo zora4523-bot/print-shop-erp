@@ -20,11 +20,9 @@ const {
   estimateMaterialUsageMock,
   sfCollectTogglePropsMock,
   pieceworkSummaryMock,
-  reassignmentViewMock,
   taskDisputesMock,
   reworkCraftOptionsMock,
-  getSettingMock,
-  reassignTaskFormPropsMock,
+  productionOperationsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   getSalesOrderDetailByIdMock: vi.fn(),
@@ -32,11 +30,9 @@ const {
   estimateMaterialUsageMock: vi.fn(),
   sfCollectTogglePropsMock: vi.fn(),
   pieceworkSummaryMock: vi.fn(),
-  reassignmentViewMock: vi.fn(),
   taskDisputesMock: vi.fn(),
   reworkCraftOptionsMock: vi.fn(),
-  getSettingMock: vi.fn(),
-  reassignTaskFormPropsMock: vi.fn(),
+  productionOperationsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -90,12 +86,6 @@ vi.mock('@/components/business/order/SfCollectToggleForm', () => ({
     return <span data-testid="sf-collect-toggle" />;
   },
 }));
-vi.mock('@/components/business/production/ReassignTaskForm', () => ({
-  ReassignTaskForm: (props: unknown) => {
-    reassignTaskFormPropsMock(props);
-    return null;
-  },
-}));
 vi.mock('@/components/business/production/TaskDisputeAdminPanel', () => ({
   TaskDisputeAdminPanel: () => null,
 }));
@@ -120,17 +110,14 @@ vi.mock('@/components/business/bill/OrderCostEntryForm', () => ({
 vi.mock('@/lib/salary/daily', () => ({
   getOrderPieceworkSummary: pieceworkSummaryMock,
 }));
-vi.mock('@/lib/production', () => ({
-  getPendingTaskReassignmentView: reassignmentViewMock,
-}));
 vi.mock('@/lib/production/task-dispute', () => ({
   listOrderTaskDisputes: taskDisputesMock,
 }));
+vi.mock('@/lib/production/operation-order-view', () => ({
+  listOrderProductionOperations: productionOperationsMock,
+}));
 vi.mock('@/lib/order/rework', () => ({
   getReworkCraftOptions: reworkCraftOptionsMock,
-}));
-vi.mock('@/lib/settings', () => ({
-  getSetting: getSettingMock,
 }));
 vi.mock('@/lib/oss/read-url', () => ({
   signDesignReadUrl: vi.fn((value: string) => value),
@@ -150,11 +137,9 @@ beforeEach(() => {
   estimateMaterialUsageMock.mockReset().mockResolvedValue(null);
   sfCollectTogglePropsMock.mockReset();
   pieceworkSummaryMock.mockReset().mockResolvedValue(null);
-  reassignmentViewMock.mockReset().mockResolvedValue({ tasks: [] });
   taskDisputesMock.mockReset().mockResolvedValue([]);
   reworkCraftOptionsMock.mockReset().mockResolvedValue([]);
-  getSettingMock.mockReset().mockResolvedValue({ enabled: false });
-  reassignTaskFormPropsMock.mockReset();
+  productionOperationsMock.mockReset().mockResolvedValue([]);
 });
 
 describe('order detail commercial visibility', () => {
@@ -246,7 +231,7 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('内部材料成本秘密');
     expect(html).not.toContain('沿用原价 87654.32');
     expect(html).not.toContain('日志沿用原价 76543.21');
-    expect(html).toContain('生产安排');
+    expect(html).toContain('历史生产记录');
     expect(html).toContain('张师傅');
     expect(html).toContain('top:var(--admin-header-offset)');
     expect(html).toContain('z-[9]');
@@ -406,39 +391,6 @@ describe('order detail commercial visibility', () => {
     );
   });
 
-  it('管理员改派区读取自由抢单开关并传入任务组件', async () => {
-    requireSessionMock.mockResolvedValue({
-      user: { id: 'admin-1', role: Role.ADMIN },
-    });
-    getOrderDetailMock.mockResolvedValue(orderFixture());
-    getSettingMock.mockResolvedValue({ enabled: true });
-    reassignmentViewMock.mockResolvedValue({
-      tasks: [
-        {
-          id: 'task-1',
-          itemSequence: 1,
-          itemName: '礼盒款',
-          craftId: 'craft-1',
-          craftName: '局部烫金',
-          currentWorkerId: null,
-          currentWorkerName: null,
-          eligibleWorkers: [],
-        },
-      ],
-    });
-
-    renderToStaticMarkup(
-      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
-    );
-
-    expect(getSettingMock).toHaveBeenCalledWith('worker_self_claim_enabled');
-    expect(reassignTaskFormPropsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-1',
-        selfClaimEnabled: true,
-      }),
-    );
-  });
 });
 
 // 「暂不能完工」横幅。放在这个文件是因为它已经把 OrderDetailPage 的

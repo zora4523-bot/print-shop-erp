@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MachineType, Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -57,8 +57,6 @@ const ownerActor = {
 const validCreateFields = {
   name: '专版单色平烫',
   isOutsource: 'false',
-  defaultWorkerType: 'MACHINE',
-  defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
 
@@ -261,8 +259,6 @@ describe('createRuleCenterCraftAction', () => {
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
     const f = new FormData();
     f.set('name', '粘封');
-    f.set('defaultWorkerType', 'MACHINE');
-    f.set('defaultMachineType', MachineType.GLUE);
     f.set('sortOrder', '40');
     // isOutsource deliberately absent
     await expect(createRuleCenterCraftAction(null, f)).rejects.toThrow(/NEXT_REDIRECT/);

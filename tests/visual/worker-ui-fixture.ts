@@ -111,22 +111,21 @@ export async function seedWorkerUiFixture(
         `SELECT id, name FROM "Craft"
          WHERE "isActive" = TRUE
            AND "isOutsource" = FALSE
-           AND "defaultWorkerType" = 'MACHINE'::"WorkerType"
-           AND "defaultMachineType" = 'HAND_PRESS'::"MachineType"
+           AND code = 'FLAT_FOIL_PARTIAL'
          ORDER BY "sortOrder", name
          LIMIT 1`,
       );
-      if (!craft.rows[0]) throw new Error('Worker UI E2E requires at least one active in-house craft');
+      if (!craft.rows[0]) throw new Error('Worker UI E2E requires the active partial-foil craft');
       fixture.craftId = craft.rows[0].id;
       fixture.craftName = craft.rows[0].name;
       const windmillCraft = await db.query<{ id: string; name: string }>(
         `SELECT id, name FROM "Craft"
          WHERE "isActive" = TRUE
            AND "isOutsource" = FALSE
-           AND "defaultWorkerType" = 'MACHINE'::"WorkerType"
-           AND "defaultMachineType" = 'WINDMILL'::"MachineType"
+           AND id <> $1
          ORDER BY "sortOrder", name
          LIMIT 1`,
+        [craft.rows[0].id],
       );
       if (!windmillCraft.rows[0]) {
         throw new Error(
@@ -135,6 +134,14 @@ export async function seedWorkerUiFixture(
       }
 
       await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
+      await db.query(
+        `DELETE FROM "ProductionOperationSource" WHERE "operationId" = ANY($1::text[])`,
+        [[fixture.activeTaskId, fixture.completedTaskId]],
+      );
+      await db.query(
+        `DELETE FROM "ProductionOperation" WHERE id = ANY($1::text[])`,
+        [[fixture.activeTaskId, fixture.completedTaskId]],
+      );
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [fixture.orderId]);
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [
         fixture.schedulingOrderId,
@@ -439,6 +446,32 @@ export async function seedWorkerUiFixture(
       );
 
       await db.query(
+        `INSERT INTO "ProductionOperation" (
+           id, "orderId", "operationType", unit, status, "plannedQty", "createdAt", "updatedAt"
+         ) VALUES
+           ($1, $3, 'PARTIAL'::"PieceworkOperationType", 'PER_PASS'::"PieceworkRateUnit",
+            'IN_PROGRESS'::"ProductionOperationStatus", 1234567, NOW(), NOW()),
+           ($2, $3, 'PARTIAL'::"PieceworkOperationType", 'PER_PASS'::"PieceworkRateUnit",
+            'COMPLETED'::"ProductionOperationStatus", 987654, NOW(), NOW())`,
+        [fixture.activeTaskId, fixture.completedTaskId, fixture.orderId],
+      );
+      await db.query(
+        `INSERT INTO "ProductionOperationSource" (
+           id, "operationId", "sourceType", "orderItemId", "sourceQty", "createdAt"
+         ) VALUES
+           ($1, $3, 'ORDER_ITEM'::"ProductionOperationSourceType", $5, 1234567, NOW()),
+           ($2, $4, 'ORDER_ITEM'::"ProductionOperationSourceType", $6, 987654, NOW())`,
+        [
+          `${fixture.activeTaskId}-source`,
+          `${fixture.completedTaskId}-source`,
+          fixture.activeTaskId,
+          fixture.completedTaskId,
+          fixture.orderItemActiveId,
+          fixture.orderItemCompletedId,
+        ],
+      );
+
+      await db.query(
         `INSERT INTO "DailyWorkerSalary" (
            id, "workerId", date, "machineType", "baseSalary", "totalPieceworkAmount",
            "adjustmentAmount", "actualSalary", "taskCount", "orderCount",
@@ -514,6 +547,14 @@ export async function cleanupWorkerUiFixture(
     await db.query('BEGIN');
     try {
       await db.query(`DELETE FROM "DailyWorkerSalary" WHERE id = $1`, [fixture.salaryId]);
+      await db.query(
+        `DELETE FROM "ProductionOperationSource" WHERE "operationId" = ANY($1::text[])`,
+        [[fixture.activeTaskId, fixture.completedTaskId]],
+      );
+      await db.query(
+        `DELETE FROM "ProductionOperation" WHERE id = ANY($1::text[])`,
+        [[fixture.activeTaskId, fixture.completedTaskId]],
+      );
       await db.query(`DELETE FROM "Order" WHERE id = $1`, [
         fixture.schedulingOrderId,
       ]);

@@ -136,7 +136,7 @@ export async function createReworkOrderAction(
   _prev: CreateReworkOrderMutationResult | null,
   raw: unknown,
 ): Promise<CreateReworkOrderMutationResult> {
-  const actor = await requirePermission('order:schedule');
+  const actor = await requirePermission('order:change:review');
 
   const parsed = createReworkOrderSchema.safeParse(raw);
   if (!parsed.success) {
@@ -149,7 +149,6 @@ export async function createReworkOrderAction(
   try {
     const created = await createReworkOrder(parsed.data, actor);
     revalidatePath('/orders');
-    revalidatePath('/foreman/scheduling');
     revalidatePath(`/orders/${parsed.data.sourceOrderId}`);
     revalidatePath(`/orders/${created.id}`);
     return { status: 'success', orderId: created.id };
@@ -625,7 +624,6 @@ export async function finalizeOrderPricingAction(
     const finalized = await finalizeOrderPricing(command, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${finalized.orderId}`);
-    revalidatePath('/foreman/scheduling');
     revalidatePath('/owner/order-changes');
     return {
       status: 'success',

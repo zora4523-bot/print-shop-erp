@@ -29,13 +29,12 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(38);
+    expect(items).toHaveLength(37);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
       '采购单',
       '工单修改申请',
-      '排产',
       '外协',
       '车间用料',
       '工时录入',
@@ -231,7 +230,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('产品字典');
     expect(labels).not.toContain('产品分类');
     expect(labels).toContain('Dashboard');
-    expect(labels).toContain('排产');
+    expect(labels).not.toContain('排产');
     expect(labels).toContain('外协');
     expect(labels).toContain('物料');
     expect(labels).toContain('车间用料');
@@ -241,6 +240,10 @@ describe('getAdminMenuItems', () => {
     );
     expect(workshopMaterials?.href).toBe('/foreman/materials');
     expect(workshopMaterials?.requiredPermission).toBe('material:manage');
+    const attendance = flatten(getAdminMenuItems({ role: Role.ADMIN })).find(
+      (i) => i.label === '工时录入',
+    );
+    expect(attendance?.requiredPermission).toBe('attendance:manage');
     const cdr = flatten(getAdminMenuItems({ role: Role.ADMIN })).find(
       (i) => i.label === 'CDR 汇总',
     );

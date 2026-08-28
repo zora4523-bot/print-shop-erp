@@ -7,7 +7,6 @@ import {
   type SettingKey,
   type SettingValue,
 } from './definitions';
-import { acquireWorkerSelfClaimSettingWriteLock } from './locks';
 
 export {
   SETTING_DEFINITIONS,
@@ -102,11 +101,6 @@ export async function updateSettings(
   // 一个事务：几项配置要么一起生效要么都不动，避免业主看到「厂名改了、阈值没改」
   // 这种半截状态。用 callback 形式（不是数组形式）才能把审计写在同一个 tx 里。
   await db.$transaction(async (tx) => {
-    // 表单整体提交；只要包含抢单开关就先拿排他锁。即使本次值
-    // 未变，短暂串行也比“关闭已返回但又成功抢入一单”更容易解释。
-    if (entries.some(([key]) => key === 'worker_self_claim_enabled')) {
-      await acquireWorkerSelfClaimSettingWriteLock(tx);
-    }
     const existing = await tx.setting.findMany({
       where: { key: { in: entries.map(([key]) => key) } },
       select: { key: true, value: true },

@@ -206,7 +206,6 @@ describe('createUserAction', () => {
           role: Role.WORKER,
           workerType: WorkerType.MACHINE,
           machineType: MachineType.WINDMILL,
-          machineCapabilities: MachineType.WINDMILL,
           employmentType: EmploymentType.FULL_TIME,
           password: 'plain-pass-1',
           phone: '',
@@ -216,10 +215,6 @@ describe('createUserAction', () => {
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs/new');
-    expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/foreman/scheduling/[id]',
-      'page',
-    );
     expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1');
   });
 });

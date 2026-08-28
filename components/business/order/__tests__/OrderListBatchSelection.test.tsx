@@ -2,7 +2,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderStatus } from '@/generated/prisma/enums';
 import {
-  buildBatchSchedulingHref,
   OrderListBatchBar,
   OrderListBatchFeedback,
   reduceOrderListSelection,
@@ -31,7 +30,7 @@ describe('order-list page selection contract', () => {
     ).toEqual([]);
   });
 
-  it('renders a named bulk region, reserves its height and scopes scheduling handoff', () => {
+  it('renders a named bulk region and preserves copy/selection utilities', () => {
     const html = renderToStaticMarkup(
       <OrderListBatchBar
         selectedItems={[
@@ -59,68 +58,13 @@ describe('order-list page selection contract', () => {
     expect(html.indexOf('order-list-batch-placeholder')).toBeLessThan(
       html.indexOf('aria-label="工单批量操作"'),
     );
-    expect(html).toContain('去批量排产（1）');
-    const schedulingHref = html.match(/href="([^"]+)"/)?.[1]?.replaceAll(
-      '&amp;',
-      '&',
-    );
-    expect(
-      new URL(schedulingHref!, 'https://erp.example.test').searchParams.getAll(
-        'orderIds',
-      ),
-    ).toEqual(['order-1']);
+    expect(html).not.toContain('排产');
     expect(html).toContain('复制工单号');
     expect(html).toContain('取消选择');
     expect(html).not.toContain('批量取消');
     expect(html).not.toContain('批量发货');
     expect(html).not.toContain('批量付款');
     expect(html).not.toContain('导出所选');
-  });
-
-  it('uses repeated orderIds and excludes unauthorized or non-submitted rows', () => {
-    const href = buildBatchSchedulingHref([
-      {
-        id: 'submitted-1',
-        orderNo: 'GD-001',
-        status: OrderStatus.SUBMITTED,
-        canSchedule: true,
-      },
-      {
-        id: 'submitted-2',
-        orderNo: 'GD-002',
-        status: OrderStatus.SUBMITTED,
-        canSchedule: true,
-      },
-      {
-        id: 'role-denied',
-        orderNo: 'GD-003',
-        status: OrderStatus.SUBMITTED,
-        canSchedule: false,
-      },
-      {
-        id: 'already-producing',
-        orderNo: 'GD-004',
-        status: OrderStatus.IN_PRODUCTION,
-        canSchedule: true,
-      },
-    ]);
-
-    const url = new URL(href!, 'https://erp.example.test');
-    expect(url.pathname).toBe('/foreman/scheduling');
-    expect(url.searchParams.getAll('orderIds')).toEqual([
-      'submitted-1',
-      'submitted-2',
-    ]);
-    expect(
-      buildBatchSchedulingHref([
-        {
-          id: 'role-denied',
-          orderNo: 'GD-003',
-          status: OrderStatus.SUBMITTED,
-          canSchedule: false,
-        },
-      ]),
-    ).toBeNull();
   });
 
   it.each([
@@ -149,7 +93,7 @@ describe('order-list page selection contract', () => {
 });
 
 describe('order row secondary action contract', () => {
-  it('shows scheduling only to an authorized actor on a submitted order', () => {
+  it('keeps row actions read-only in every role and order state', () => {
     const allowed = orderRowSecondaryActions({
       orderId: 'order-1',
       status: OrderStatus.SUBMITTED,
@@ -166,14 +110,10 @@ describe('order row secondary action contract', () => {
       canSchedule: true,
     });
 
-    expect(allowed.map((action) => action.id)).toEqual([
-      'schedule',
-      'print',
-      'pdf',
-    ]);
+    expect(allowed.map((action) => action.id)).toEqual(['print', 'pdf']);
     expect(roleDenied.map((action) => action.id)).toEqual(['print', 'pdf']);
     expect(terminal.map((action) => action.id)).toEqual(['print', 'pdf']);
-    expect(allowed[0]?.href).toBe('/foreman/scheduling/order-1');
+    expect(allowed.some((action) => action.href.includes('scheduling'))).toBe(false);
   });
 
   it('uses the existing scoped print and PDF destinations', () => {

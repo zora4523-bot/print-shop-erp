@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MachineType, WorkerType } from '@/generated/prisma/enums';
 
 const { getCraftSummaryMock, requirePermissionMock } = vi.hoisted(() => ({
   getCraftSummaryMock: vi.fn(),
@@ -44,8 +43,6 @@ describe('craft catalog business language', () => {
       name: '局部烫金',
       code: internalCode,
       isOutsource: false,
-      defaultWorkerType: WorkerType.MACHINE,
-      defaultMachineType: MachineType.HAND_PRESS,
       sortOrder: 10,
       isActive: true,
       createdAt: new Date('2026-08-01T00:00:00.000Z'),
@@ -69,8 +66,6 @@ describe('craft catalog business language', () => {
       name: '历史现货加烫',
       code: 'STOCK_FOIL',
       isOutsource: false,
-      defaultWorkerType: WorkerType.MACHINE,
-      defaultMachineType: MachineType.HAND_PRESS,
       sortOrder: 10,
       isActive: false,
       createdAt: new Date('2026-08-01T00:00:00.000Z'),

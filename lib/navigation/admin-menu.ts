@@ -213,7 +213,7 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
   const preferredByRole: Partial<Record<Role, readonly string[]>> = {
     [Role.ADMIN]: [
       '/orders',
-      '/foreman/scheduling',
+      '/foreman/outsource',
       '/owner/purchases',
       '/owner/warehouses',
     ],

@@ -40,11 +40,11 @@ export function ToggleActiveButton({
         deactivateImpactItems={[
           '该账号将无法继续登录系统',
           '历史工单、任务、薪资与操作记录会继续保留',
-          '已有业务归属不会因为停用而自动改派',
+          '已有业务记录不会因为停用而改变',
         ]}
         activateImpactItems={[
           '该账号可重新登录系统',
-          '历史业务记录和现有归属不会改变',
+          '历史业务记录不会改变',
         ]}
       />
       {error ? (

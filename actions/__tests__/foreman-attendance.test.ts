@@ -54,7 +54,7 @@ beforeEach(() => {
 });
 
 describe('recordAttendanceAction', () => {
-  it("first-line requirePermission('task:assign')", async () => {
+  it("first-line requirePermission('attendance:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
@@ -67,7 +67,7 @@ describe('recordAttendanceAction', () => {
         spareHours: '0',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedError);
-    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:assign');
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('attendance:manage');
   });
 
   it('rejects bad date (calendar-invalid)', async () => {
@@ -196,7 +196,7 @@ describe('recordAttendanceAction', () => {
 });
 
 describe('removeAttendanceAction', () => {
-  it("first-line requirePermission('task:assign')", async () => {
+  it("first-line requirePermission('attendance:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });

@@ -6,6 +6,7 @@ import {
   OrderSettlementType,
   OrderStatus,
   PartyType,
+  ProductionOperationStatus,
   Role,
   TaskStatus,
 } from '../../generated/prisma/enums';
@@ -29,6 +30,10 @@ const { dbMock } = vi.hoisted(() => {
     priceAdjustment: { findMany: ReturnType<typeof vi.fn> };
     customerPriceBook: { findMany: ReturnType<typeof vi.fn> };
     customerPriceRule: { findMany: ReturnType<typeof vi.fn> };
+    productionOperation: {
+      findMany: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
+    };
     productionTask: {
       findMany: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
@@ -72,6 +77,7 @@ const { dbMock } = vi.hoisted(() => {
     priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
     customerPriceRule: { findMany: vi.fn() },
+    productionOperation: { findMany: vi.fn(), updateMany: vi.fn() },
     productionTask: { findMany: vi.fn(), update: vi.fn() },
     outsourceOrder: { findMany: vi.fn() },
     orderShipment: {
@@ -489,7 +495,11 @@ beforeEach(() => {
           ? [externalPackagingRule('SINGLE_STYLE', '0.0000')]
           : [externalBaseRule()],
     );
-  // Default: order has no production tasks (cancelOrder cascade reads []).
+  // Default: pre-cutover order with neither operations nor production tasks.
+  dbMock.productionOperation.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionOperation.updateMany
+    .mockReset()
+    .mockResolvedValue({ count: 0 });
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionTask.update.mockReset().mockResolvedValue({});
   // Default: order has no in-flight outsource orders.
@@ -2488,7 +2498,116 @@ describe('cancelOrder', () => {
     );
   });
 
-  // ── A1 (DECISIONS 2026-07-09): cancel cascades to ProductionTask ──
+  it('bulk-cancels new PENDING operations without reading legacy tasks', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+      {
+        id: 'op-2',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+    ]);
+    dbMock.productionOperation.updateMany.mockResolvedValue({ count: 2 });
+    dbMock.order.update.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    await cancelOrder('o1', ownerActor, '客户取消');
+
+    expect(dbMock.productionOperation.updateMany).toHaveBeenCalledWith({
+      where: {
+        orderId: 'o1',
+        status: ProductionOperationStatus.PENDING,
+      },
+      data: { status: ProductionOperationStatus.CANCELLED },
+    });
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(
+      dbMock.orderLog.create.mock.calls.map((call) => call[0].data.remark),
+    ).toContain('随工单取消 2 个未报工工序');
+  });
+
+  it('blocks cancellation when a new operation has any report', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 1 },
+      },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /已报工的生产工序/,
+    );
+    expect(dbMock.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ProductionOperationStatus.IN_PROGRESS,
+    ProductionOperationStatus.COMPLETED,
+  ])('blocks cancellation for a %s new operation', async (status) => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.IN_PRODUCTION,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      { id: 'op-1', status, _count: { reports: 0 } },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /已报工的生产工序/,
+    );
+    expect(dbMock.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks cancellation unless every new operation is still PENDING', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SCHEDULING,
+      submitterId: 'sales-1',
+    });
+    dbMock.productionOperation.findMany.mockResolvedValue([
+      {
+        id: 'op-1',
+        status: ProductionOperationStatus.PENDING,
+        _count: { reports: 0 },
+      },
+      {
+        id: 'op-2',
+        status: ProductionOperationStatus.CANCELLED,
+        _count: { reports: 0 },
+      },
+    ]);
+
+    await expect(cancelOrder('o1', ownerActor, '测试取消')).rejects.toThrow(
+      /只能整单取消全部待处理工序/,
+    );
+    expect(dbMock.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.productionTask.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  // Historical compatibility: orders without operations still close their
+  // legacy ProductionTask rows in the same transaction.
 
   it('voids every PENDING task to CANCELLED in the same cancel tx', async () => {
     dbMock.order.findUnique.mockResolvedValue({
@@ -2517,7 +2636,7 @@ describe('cancelOrder', () => {
 
     // An audit log records how many tasks were voided.
     const remarks = dbMock.orderLog.create.mock.calls.map((c) => c[0].data.remark);
-    expect(remarks).toContain('随工单取消 2 个未开工任务');
+    expect(remarks).toContain('随历史工单取消 2 个未开工任务');
   });
 
   it('取消工单时清理仍在抢单池的任务上下文', async () => {

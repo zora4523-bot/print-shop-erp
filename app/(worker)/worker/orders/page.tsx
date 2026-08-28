@@ -35,15 +35,15 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
       <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的工单</h1>
         <p className="text-xs text-muted-foreground">
-          包含已完成记录，最新工单优先。
+          展示与你固定工序岗位对应的工单，包含已完成记录。
         </p>
       </header>
 
       {orders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title="暂无关联工单"
-          description="管理员将生产任务分配给你后，对应工单才会显示在这里。"
+          title="暂无工序工单"
+          description="价格确认并生成对应工序后，工单会自动显示。"
         />
       ) : (
         <ul className="space-y-3">
@@ -74,7 +74,8 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
                       </p>
                     ) : null}
                     <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                      我的任务 {order.completedTaskCount}/{order.taskCount} 已完成
+                      本岗位工序 {order.completedOperationCount}/
+                      {order.operationCount} 已完成
                       {order.promisedDate
                         ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
                         : ''}
@@ -84,18 +85,10 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
                     </p>
                   </div>
                   <div className="ml-auto shrink-0 text-right">
-                    {order.hasPieceworkTasks ? (
-                      <>
-                        <p className="text-xs text-muted-foreground">我的计件</p>
-                        <p className="font-sans tabular-nums font-medium">
-                          ¥ {order.pieceworkAmount}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="worker-wrap-anywhere text-xs text-muted-foreground">
-                        按考勤时薪结算
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground">我的已报计件</p>
+                    <p className="font-sans tabular-nums font-medium">
+                      ¥ {order.pieceworkAmount}
+                    </p>
                   </div>
                 </div>
               </Link>

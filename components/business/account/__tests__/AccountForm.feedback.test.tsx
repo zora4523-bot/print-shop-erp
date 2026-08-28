@@ -21,11 +21,7 @@ import { AccountForm } from '../AccountForm';
 
 function render() {
   return renderToStaticMarkup(
-    <AccountForm
-      mode="create"
-      action={vi.fn()}
-      capabilityCrafts={[]}
-    />,
+    <AccountForm mode="create" action={vi.fn()} />,
   );
 }
 

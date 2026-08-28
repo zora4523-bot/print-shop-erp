@@ -291,18 +291,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'ops:jobs:manage',
   },
   {
-    id: 'foreman.scheduling',
-    label: '排产',
-    routeBase: '/foreman/scheduling',
-    iconName: 'CalendarDays',
-    breadcrumbLabel: '排产',
-    menuSection: 'workflow',
-    status: 'implemented',
-    menuOrder: 30,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'order:schedule',
-  },
-  {
     id: 'foreman.outsource',
     label: '外协',
     routeBase: '/foreman/outsource',
@@ -336,7 +324,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     status: 'implemented',
     menuOrder: 50,
     menuRoles: [Role.ADMIN],
-    requiredPermission: 'task:assign',
+    requiredPermission: 'attendance:manage',
   },
   {
     id: 'foreman.cdr',

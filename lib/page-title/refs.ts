@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { OrderStatus, Role } from '../../generated/prisma/enums';
+import { Role } from '../../generated/prisma/enums';
 import { db } from '../db';
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { getWorkerTaskScopeFilter } from '../auth/task-scope';
@@ -28,14 +28,6 @@ export const getOrderTitleRef = cache(
       where: { id, ...getOrderScopeFilter({ id: viewerId, role: viewerRole }) },
       select: { orderNo: true },
     }),
-);
-
-export const getSchedulingTitleRef = cache(async (orderId: string) =>
-  // 与 getSchedulingView 同一个前置条件：只有 SUBMITTED 的工单在排产台上。
-  db.order.findFirst({
-    where: { id: orderId, status: OrderStatus.SUBMITTED },
-    select: { orderNo: true },
-  }),
 );
 
 export const getWorkerTaskTitleRef = cache(

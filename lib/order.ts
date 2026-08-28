@@ -15,6 +15,7 @@ import {
   OutsourceStatus,
   PartyType,
   Prisma,
+  ProductionOperationStatus,
   Role,
   ShipmentStatus,
   TaskStatus,
@@ -1320,11 +1321,26 @@ type StatusTxClient = {
   };
 };
 
-// Minimal tx surface for the cancelOrder → ProductionTask cascade
-// (A1, DECISIONS 2026-07-09). Runs on the SAME tx as the order
-// transition, so the task reads/writes participate in the same
-// advisory lock + rollback boundary — no half-cancel possible.
+// Minimal tx surface for cancelOrder's production cascade. The new operation
+// ledger is authoritative when present; ProductionTask remains a read/write
+// compatibility path only for orders created before the operation cutover.
 type CascadeTxClient = {
+  productionOperation: {
+    findMany: (args: {
+      where: { orderId: string };
+      select: unknown;
+    }) => Promise<
+      Array<{
+        id: string;
+        status: ProductionOperationStatus;
+        _count: { reports: number };
+      }>
+    >;
+    updateMany: (args: {
+      where: unknown;
+      data: { status: ProductionOperationStatus };
+    }) => Promise<{ count: number }>;
+  };
   productionTask: {
     findMany: (args: {
       where: unknown;
@@ -1361,11 +1377,9 @@ type CascadeTxClient = {
   };
 };
 
-// Per-order advisory lock for status-transition writes. We share the
-// SAME namespace as production.ts orderCascadeLockKey
-// (`print-shop-erp:order-cascade:<id>`) so worker reportTask's
-// auto-cascade can't race a manual ship/cancel/submit on the same
-// order — both paths touch Order.status .
+// Per-order advisory lock for status-transition writes. We share the same
+// namespace as operation reporting (`print-shop-erp:order-cascade:<id>`) so
+// scanner reports cannot race a manual ship/cancel/submit on Order.status.
 
 type TransitionOptions = {
   remark: string | null;
@@ -1787,28 +1801,56 @@ export async function cancelOrder(
   return transitionWithLog(orderId, OrderStatus.CANCELLED, actor, {
     remark: `取消：${normalizedReason}`,
     now,
-    // A1 (owner ruling, DECISIONS 2026-07-09): cancelling an order must
-    // dispose of its ProductionTasks in the SAME tx — otherwise cancelled
-    // orders leave live tasks the worker can still begin/report on and
-    // get paid for.
+    // Cancelling must close unstarted production in the SAME transaction.
+    // Once any report exists we refuse to erase payroll facts; an operator
+    // must handle those records explicitly before cancelling the order.
     cascade: async (tx, id) => {
-      const tasks = await tx.productionTask.findMany({
-        where: { orderItem: { orderId: id } },
-        select: { id: true, status: true, isSelfClaimable: true },
+      const operations = await tx.productionOperation.findMany({
+        where: { orderId: id },
+        select: {
+          id: true,
+          status: true,
+          _count: { select: { reports: true } },
+        },
       });
-
-      // Block if ANY task is already in-flight or finished. We refuse to
-      // silently reverse piecework/payroll — the operator must handle the
-      // production records first. This covers 已开工(IN_PROGRESS) /
-      // 已报工·已完成·已产生计件金额·已结算(COMPLETED).
-      const hasInFlight = tasks.some(
-        (t) =>
-          t.status === TaskStatus.IN_PROGRESS ||
-          t.status === TaskStatus.COMPLETED,
+      const hasReportedOperation = operations.some(
+        (operation) =>
+          operation._count.reports > 0 ||
+          operation.status === ProductionOperationStatus.IN_PROGRESS ||
+          operation.status === ProductionOperationStatus.COMPLETED,
       );
-      if (hasInFlight) {
+      if (hasReportedOperation) {
         throw new OrderInvariantError(
-          '该工单存在已开工/已报工任务，不能直接取消，请先处理生产记录',
+          '该工单存在已报工的生产工序，不能直接取消，请先处理生产记录',
+        );
+      }
+      if (
+        operations.length > 0 &&
+        operations.some(
+          (operation) =>
+            operation.status !== ProductionOperationStatus.PENDING,
+        )
+      ) {
+        throw new OrderInvariantError(
+          '该工单存在非待处理的生产工序，只能整单取消全部待处理工序',
+        );
+      }
+
+      const legacyTasks =
+        operations.length === 0
+          ? await tx.productionTask.findMany({
+              where: { orderItem: { orderId: id } },
+              select: { id: true, status: true, isSelfClaimable: true },
+            })
+          : [];
+      const hasInFlightLegacyTask = legacyTasks.some(
+        (task) =>
+          task.status === TaskStatus.IN_PROGRESS ||
+          task.status === TaskStatus.COMPLETED,
+      );
+      if (hasInFlightLegacyTask) {
+        throw new OrderInvariantError(
+          '该历史工单存在已开工/已报工任务，不能直接取消，请先处理生产记录',
         );
       }
 
@@ -1835,43 +1877,71 @@ export async function cancelOrder(
         );
       }
 
-      // Only 未开工 (PENDING) tasks are safe to void. Already-CANCELLED
-      // tasks are left as-is (idempotent re-cancel / partial history).
-      const pending = tasks.filter((t) => t.status === TaskStatus.PENDING);
-      for (const t of pending) {
-        // Route through the status machine so PENDING → CANCELLED stays
-        // the single source of transition truth (CLAUDE.md §4.5).
-        transitionProductionTask(t.status, TaskStatus.CANCELLED);
-        await tx.productionTask.update({
-          where: { id: t.id },
-          data: {
-            status: TaskStatus.CANCELLED,
-            // 未抢的池任务也是 PENDING。取消工单时一并关闭抢单标记，
-            // 否则会遗留“已取消但仍标记可抢”的自相矛盾历史行。
-            isSelfClaimable: false,
-            ...(t.isSelfClaimable
-              ? {
-                  selfClaimOpenedAt: null,
-                  selfClaimedAt: null,
-                  claimMachineTypes: [],
-                }
-              : {}),
-          },
-          select: { id: true },
-        });
-      }
-      if (pending.length > 0) {
-        await tx.orderLog.create({
-          data: {
-            orderId: id,
-            operatorId: actor.id,
-            action: 'STATUS_CHANGE',
-            changedFields: {
-              cancelledTasks: { before: pending.length, after: 0 },
+      if (operations.length > 0) {
+        const pendingOperationCount = operations.length;
+        if (pendingOperationCount > 0) {
+          await tx.productionOperation.updateMany({
+            where: {
+              orderId: id,
+              status: ProductionOperationStatus.PENDING,
             },
-            remark: `随工单取消 ${pending.length} 个未开工任务`,
-          },
-        });
+            data: { status: ProductionOperationStatus.CANCELLED },
+          });
+          await tx.orderLog.create({
+            data: {
+              orderId: id,
+              operatorId: actor.id,
+              action: 'STATUS_CHANGE',
+              changedFields: {
+                cancelledOperations: {
+                  before: pendingOperationCount,
+                  after: 0,
+                },
+              },
+              remark: `随工单取消 ${pendingOperationCount} 个未报工工序`,
+            },
+          });
+        }
+      } else {
+        // Historical orders have no ProductionOperation rows. Preserve their
+        // prior cancellation behavior without using tasks for new orders.
+        const pendingLegacyTasks = legacyTasks.filter(
+          (task) => task.status === TaskStatus.PENDING,
+        );
+        for (const task of pendingLegacyTasks) {
+          transitionProductionTask(task.status, TaskStatus.CANCELLED);
+          await tx.productionTask.update({
+            where: { id: task.id },
+            data: {
+              status: TaskStatus.CANCELLED,
+              isSelfClaimable: false,
+              ...(task.isSelfClaimable
+                ? {
+                    selfClaimOpenedAt: null,
+                    selfClaimedAt: null,
+                    claimMachineTypes: [],
+                  }
+                : {}),
+            },
+            select: { id: true },
+          });
+        }
+        if (pendingLegacyTasks.length > 0) {
+          await tx.orderLog.create({
+            data: {
+              orderId: id,
+              operatorId: actor.id,
+              action: 'STATUS_CHANGE',
+              changedFields: {
+                cancelledLegacyTasks: {
+                  before: pendingLegacyTasks.length,
+                  after: 0,
+                },
+              },
+              remark: `随历史工单取消 ${pendingLegacyTasks.length} 个未开工任务`,
+            },
+          });
+        }
       }
       const prismaTx = tx as unknown as Prisma.TransactionClient;
       const cancelledOrder = await prismaTx.order.findUnique({
