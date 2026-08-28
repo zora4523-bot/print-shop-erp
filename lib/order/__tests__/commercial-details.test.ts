@@ -21,6 +21,7 @@ const { dbMock, appendRevisionMock } = vi.hoisted(() => {
     customerChargeCategory: { findUnique: vi.fn() },
     orderCustomerCharge: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       upsert: vi.fn(),
@@ -74,6 +75,7 @@ beforeEach(() => {
     id: 'category-1',
     isActive: true,
   });
+  dbMock.tx.orderCustomerCharge.findUnique.mockResolvedValue(null);
   dbMock.tx.orderCustomerCharge.aggregate.mockResolvedValue({
     _sum: { amount: { toString: () => '0.00' } },
   });
@@ -194,6 +196,63 @@ describe('order plate details', () => {
       }),
     );
     expect(result).toMatchObject({ priceRevision: 3, totalAmount: '135.00' });
+  });
+
+  it('waives the aggregate pending plate fee before structured plate rows become authoritative', async () => {
+    dbMock.tx.orderItem.findFirst.mockResolvedValue({
+      id: 'item-1',
+      name: '款式 A',
+    });
+    dbMock.tx.orderItemPlateDetail.aggregate.mockResolvedValue({
+      _max: { sequence: 0 },
+    });
+    dbMock.tx.orderItemPlateDetail.create.mockResolvedValue({ id: 'plate-1' });
+    dbMock.tx.orderCustomerCharge.findUnique.mockResolvedValue({
+      id: 'aggregate-plate',
+      status: OrderCustomerChargeStatus.ESTIMATED,
+      amount: { toString: () => '30.00' },
+      pricingSnapshot: { source: 'ADMIN_SNAPSHOT_CONFIRMATION' },
+    });
+    dbMock.tx.orderCustomerCharge.update.mockResolvedValue({
+      id: 'aggregate-plate',
+    });
+    dbMock.tx.orderCustomerCharge.upsert.mockResolvedValue({ id: 'charge-1' });
+
+    await saveOrderPlateDetail(
+      {
+        orderId: 'order-1',
+        orderItemId: 'item-1',
+        plateDetailId: null,
+        expectedPriceRevision: 2,
+        name: '烫金版',
+        plateGroupId: null,
+        specification: null,
+        quantity: 1,
+        unitPrice: '35.00',
+        remark: null,
+      },
+      actor,
+      new Date('2026-08-26T10:00:00.000Z'),
+    );
+
+    expect(dbMock.tx.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: 'aggregate-plate' },
+      data: expect.objectContaining({
+        status: OrderCustomerChargeStatus.WAIVED,
+        amount: '0.00',
+        pricingSnapshot: expect.objectContaining({
+          source: 'PLATE_DETAIL_BREAKDOWN_SUPERSEDES_AGGREGATE',
+          previousAmount: '30.00',
+          previousSnapshot: { source: 'ADMIN_SNAPSHOT_CONFIRMATION' },
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.tx.orderCustomerCharge.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ amount: '35.00' }),
+      }),
+    );
   });
 
   it('soft-removes a plate row and waives its linked customer charge', async () => {
