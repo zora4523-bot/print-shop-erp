@@ -34,8 +34,12 @@ postgresDescribe('piecework v1 publication · PostgreSQL concurrency', () => {
       await first.query(`SET search_path TO ${quotedSchema}, public`);
       await first.query(`
         CREATE TYPE "Role" AS ENUM ('ADMIN');
+        CREATE TYPE "OrderSettlementType" AS ENUM ('FACTORY_DIRECT');
         CREATE TABLE "User" ("id" TEXT PRIMARY KEY);
-        CREATE TABLE "Order" ("id" TEXT PRIMARY KEY);
+        CREATE TABLE "Order" (
+          "id" TEXT PRIMARY KEY,
+          "settlementType" "OrderSettlementType" NOT NULL
+        );
         CREATE TABLE "OrderItem" ("id" TEXT PRIMARY KEY);
         CREATE TABLE "OrderPackagingGroup" ("id" TEXT PRIMARY KEY);
       `);
