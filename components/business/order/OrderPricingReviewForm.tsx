@@ -62,7 +62,9 @@ function resultError(
 function priceBookLabel(
   book: OrderPricingReviewPreview["processingPriceBook"],
 ): string {
-  return book ? `${book.name} · 第 ${book.version} 版` : "暂无生效价格";
+  return book
+    ? `${book.name} · 第 ${book.version} 版`
+    : "历史金额（无版本快照）";
 }
 
 export function OrderPricingReviewForm({ orderId }: Props) {
@@ -123,7 +125,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
           expectedActualBagCount: group.actualBagCount,
           unitPrice:
             group.complete
-              ? group.suggestedUnitPrice
+              ? group.currentUnitPrice
               : (packagingGroupDrafts[group.packagingGroupId]?.unitPrice ??
                 group.currentUnitPrice),
           reason:
@@ -137,13 +139,13 @@ export function OrderPricingReviewForm({ orderId }: Props) {
           expectedBillableWeightKg: shipment.billableWeightKg,
           shippingFee:
             shipmentDrafts[shipment.shipmentId]?.shippingFee ??
-            shipment.shipping.suggestedAmount ??
             shipment.shipping.currentAmount ??
+            shipment.shipping.suggestedAmount ??
             "0.00",
           packingMaterialFee:
             shipmentDrafts[shipment.shipmentId]?.packingMaterialFee ??
-            shipment.packaging.suggestedAmount ??
             shipment.packaging.currentAmount ??
+            shipment.packaging.suggestedAmount ??
             "0.00",
           reason:
             shipmentDrafts[shipment.shipmentId]?.reason ??
@@ -191,14 +193,14 @@ export function OrderPricingReviewForm({ orderId }: Props) {
       return Boolean(
         (
           draft?.shippingFee ??
-          shipment.shipping.suggestedAmount ??
           shipment.shipping.currentAmount ??
+          shipment.shipping.suggestedAmount ??
           ""
         ).trim() &&
         (
           draft?.packingMaterialFee ??
-          shipment.packaging.suggestedAmount ??
           shipment.packaging.currentAmount ??
+          shipment.packaging.suggestedAmount ??
           ""
         ).trim() &&
         (!needsReason ||
@@ -216,15 +218,15 @@ export function OrderPricingReviewForm({ orderId }: Props) {
       aria-busy={previewPending || finalizePending}
     >
       <div>
-        <h2 className="text-base font-semibold">管理员整单重算与终价</h2>
+        <h2 className="text-base font-semibold">工厂核价确认</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          确认时会按最新价格规则重新计算。
+          仅核对工单已保存的报价快照；已锁定金额不会重新计算。
         </p>
       </div>
 
       {previewPending && !preview ? (
         <p role="status" className="text-sm text-muted-foreground">
-          正在加载最新价格…
+          正在读取工单报价快照…
         </p>
       ) : null}
       {previewError ? (
@@ -247,16 +249,15 @@ export function OrderPricingReviewForm({ orderId }: Props) {
         <>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div className="rounded-md border p-3">
-              <dt className="text-xs text-muted-foreground">加工费价格版本</dt>
+              <dt className="text-xs text-muted-foreground">加工费报价快照</dt>
               <dd className="mt-1 font-medium">
                 {priceBookLabel(preview.processingPriceBook)}
               </dd>
             </div>
             <div className="rounded-md border p-3">
-              <dt className="text-xs text-muted-foreground">物流价格版本</dt>
+              <dt className="text-xs text-muted-foreground">物流报价快照</dt>
               <dd className="mt-1 font-medium">
-                {preview.logisticsPriceBook.name} · 第{" "}
-                {preview.logisticsPriceBook.version} 版
+                {priceBookLabel(preview.logisticsPriceBook)}
               </dd>
             </div>
           </dl>
@@ -269,7 +270,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
               >
                 {incompleteItemCount > 0
                   ? `${incompleteItemCount} 款需人工终价`
-                  : "全部可自动计价"}
+                  : "全部已有锁定金额"}
               </Badge>
             </div>
             <ol className="space-y-2">
@@ -283,17 +284,21 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                     <Badge
                       variant={item.complete ? "secondary" : "destructive"}
                     >
-                      {item.complete ? "最新规则自动价" : "管理员终价"}
+                      {item.complete ? "已锁定快照价" : "待人工核价"}
                     </Badge>
                   </div>
                   {item.complete ? (
                     <p className="mt-2 font-sans text-xs tabular-nums text-muted-foreground">
-                      提交时强制使用最新建议：单价 {item.suggestedUnitPrice} ·
-                      一次性费用 {item.suggestedFixedFee} · 小计{" "}
-                      {item.suggestedSubtotal}
+                      保持已有金额不变：单价 {item.currentUnitPrice} · 一次性费用{" "}
+                      {item.currentFixedFee} · 小计 {item.currentSubtotal}
                     </p>
                   ) : (
                     <div className="mt-3 space-y-3">
+                      {item.manualQuoteReason ? (
+                        <p className="text-xs text-muted-foreground">
+                          建单转人工原因：{item.manualQuoteReason}
+                        </p>
+                      ) : null}
                       {item.errors.length > 0 ? (
                         <p className="text-xs text-destructive">
                           {item.errors.join("；")}
@@ -403,7 +408,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                 >
                   {incompletePackagingGroupCount > 0
                     ? `${incompletePackagingGroupCount} 组需人工终价`
-                    : "全部按袋自动计价"}
+                    : "全部已有锁定金额"}
                 </Badge>
               </div>
               <ol className="space-y-2">
@@ -428,7 +433,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                         <Badge
                           variant={group.complete ? "secondary" : "destructive"}
                         >
-                          {group.complete ? "最新规则自动价" : "管理员终价"}
+                          {group.complete ? "已锁定快照价" : "待人工核价"}
                         </Badge>
                       </div>
                       {group.errors.length > 0 ? (
@@ -446,7 +451,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                             aria-readonly={group.complete}
                             value={
                               group.complete
-                                ? (group.suggestedUnitPrice ?? "")
+                                ? group.currentUnitPrice
                                 : draft.unitPrice
                             }
                             onChange={(event) =>
@@ -464,9 +469,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                         <div className="space-y-1 text-xs">
                           <span>入袋费小计</span>
                           <p className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 font-sans tabular-nums">
-                            {group.complete
-                              ? group.suggestedSubtotal
-                              : group.currentSubtotal}
+                            {group.currentSubtotal}
                           </p>
                         </div>
                       </div>
@@ -503,12 +506,12 @@ export function OrderPricingReviewForm({ orderId }: Props) {
               {preview.shipments.map((shipment) => {
                 const defaultDraft: ShipmentDraft = {
                   shippingFee:
-                    shipment.shipping.suggestedAmount ??
                     shipment.shipping.currentAmount ??
+                    shipment.shipping.suggestedAmount ??
                     "0.00",
                   packingMaterialFee:
-                    shipment.packaging.suggestedAmount ??
                     shipment.packaging.currentAmount ??
+                    shipment.packaging.suggestedAmount ??
                     "0.00",
                   reason: shipment.currentReason ?? "",
                 };
@@ -528,6 +531,21 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                       地址 {shipment.sequence} ·{" "}
                       {shipment.itemQuantity.toLocaleString("zh-CN")} 个
                     </p>
+                    {[
+                      ...shipment.shipping.errors,
+                      ...shipment.packaging.errors,
+                    ].length > 0 ? (
+                      <p className="text-xs text-destructive">
+                        {[
+                          ...shipment.shipping.errors,
+                          ...shipment.packaging.errors,
+                        ]
+                          .filter((value, index, values) =>
+                            values.indexOf(value) === index,
+                          )
+                          .join("；")}
+                      </p>
+                    ) : null}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="space-y-1 text-xs">
                         <span>计费省份</span>
@@ -548,7 +566,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                       </label>
                       <label className="space-y-1 text-xs">
                         <span>
-                          快递费（建议{" "}
+                          快递费（快照建议{" "}
                           {shipment.shipping.suggestedAmount ?? "无"}）
                         </span>
                         <Input
@@ -571,7 +589,7 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                       </label>
                       <label className="space-y-1 text-xs">
                         <span>
-                          打包耗材费（参考{" "}
+                          打包耗材费（快照参考{" "}
                           {shipment.packaging.suggestedAmount ?? "无"}）
                         </span>
                         <Input
@@ -650,19 +668,19 @@ export function OrderPricingReviewForm({ orderId }: Props) {
                 disabled={!draftsReady || finalizePending || previewPending}
               >
                 {finalizePending
-                  ? "正在整单重算…"
-                  : "按最新价格重算并确认终价"}
+                  ? "正在确认报价快照…"
+                  : "确认工厂核价"}
               </Button>
             }
-            title="确认整单重算并锁定本次终价？"
-            description="确认时按最新规则重算，页面旧金额不会被沿用。"
+            title="确认工厂核价并锁定终价？"
+            description="确认仅使用工单已有报价快照；只会补录待人工核价金额。"
             impactItems={[
               '若工单或价格已变化，本次操作会停止并提示刷新。',
-              `自动价 ${preview.items.length - incompleteItemCount} 款将强制使用最新建议，${incompleteItemCount} 款使用管理员终价。`,
-              `将按实际袋数重算 ${preview.packagingGroups.length} 个包装组，${incompletePackagingGroupCount} 组需管理员终价。`,
-              `将重算 ${preview.shipments.length} 票快递/耗材费，更新整单金额并保留本次价格记录。`,
+              `已有快照价 ${preview.items.length - incompleteItemCount} 款保持不变，${incompleteItemCount} 款需录入人工核价。`,
+              `${preview.packagingGroups.length - incompletePackagingGroupCount} 个包装组保持已有金额，${incompletePackagingGroupCount} 组需录入人工核价。`,
+              `${preview.shipments.length} 票快递/耗材费仅确认已有快照或补录待核价金额。`,
             ]}
-            confirmLabel="确认重算与终价"
+            confirmLabel="确认工厂核价"
             onConfirm={submit}
           />
         </>
