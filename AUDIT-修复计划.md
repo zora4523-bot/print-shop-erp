@@ -76,6 +76,8 @@
 | SALES-003 | P1 | 默认动作不是“再来一单”，也没有“清 IMAGE、保留 CDR”的复制领域服务 |
 | SALES-004 | P1 | 原因对应动作、按 fig 跳纸张/文件区和撤回申请均缺失 |
 | SALES-005 | P2 | 首图会取第一个有图的款而非严格首款；超期样式也不是白字红底 |
+| TOOL-001 | P2 | `@vitest/coverage-v8` 的 manifest/lockfile specifier 漂移，干净 checkout 无法 frozen install |
+| TOOL-002 | P1 | 现有基线依赖 dirty worktree、既有服务器和共享开发库，无法由标注 commit 重放 |
 
 已确认的正例：
 
@@ -90,7 +92,8 @@
 | 批次 | 依赖 | 目标 | 覆盖报告项 |
 |---|---|---|---|
 | B0 | 无 | 真值入库和勘误决策 | STATE-001、DOC-TRUTH-001、TRUTH-* |
-| B1 | B0 | 数据盘点与 expand 迁移骨架 | STATE-002、STATE-006、AMOUNT-001 |
+| B0a | 无 | 恢复依赖与测试基线可复现性 | TOOL-001、TOOL-002 |
+| B1 | B0、B0a | 数据盘点与 expand 迁移骨架 | STATE-002、STATE-006、AMOUNT-001 |
 | B2 | B1 | 11 态领域状态机和兼容投影 | STATE-002～005 |
 | B3 | B1、B2 | 工单驳回/暂停原因 | REJECT-001 |
 | B4 | B1、B2 | MODIFY 申请与版本作废闭环 | CHANGE-*、VERSION-* |
@@ -113,6 +116,20 @@
 
 - docs(truth): intake work-order change rules [STATE-001][DOC-TRUTH-001]
 - docs(decision): approve work-order migration matrix [TRUTH-ERRATA-001]
+
+### B0a：依赖安装与测试基线可复现性
+
+1. 先由维护者确认 `@vitest/coverage-v8` 应保持精确 pin 还是跟随同组 Vitest 的 semver range。
+2. 只更新 importer 中与该决策对应的 specifier，不夹带依赖升级。
+3. 在全新 checkout 执行 `pnpm install --frozen-lockfile`。
+4. 为 Playwright 提供专用测试数据库或可还原快照，记录 migration head/schema hash；不得与并行开发流共享数据库。
+5. 由本批 checkout 在独立端口启动受控服务，不复用来源不明的已有开发服务器。
+6. 归档 commit、tracked diff、未跟踪测试清单、Node/pnpm/browser 版本、数据库指纹和 `playwright test --list`；再运行 lint、typecheck、全量 Vitest 和 Playwright，生成新的可重放基线。
+
+建议提交边界：
+
+- chore(deps): synchronize frozen lockfile metadata [TOOL-001]
+- test(audit): establish reproducible full-suite baseline [TOOL-002]
 
 ### B1：盘点与前向数据迁移
 
@@ -244,6 +261,8 @@
 |---:|---|---|---|
 | 1 | B0 | `docs(truth): intake work-order change rules [STATE-001][DOC-TRUTH-001]` | 原文、索引、SHA；不勘误 |
 | 2 | B0 | `docs(decision): resolve work-order truth conflicts [TRUTH-ERRATA-001][TRUTH-AMB-001][TRUTH-AMB-002]` | 只记录已批准决策 |
+| 2a | B0a | `chore(deps): synchronize frozen lockfile metadata [TOOL-001]` | 只同步已批准的 specifier 策略，不升级版本 |
+| 2b | B0a | `test(audit): establish reproducible full-suite baseline [TOOL-002]` | 专用数据库、受控服务器、清单指纹和基线归档 |
 | 3 | B1 | `chore(audit): inventory legacy order facts [STATE-002][AMOUNT-001]` | 只读盘点脚本与结果 |
 | 4 | B1 | `feat(schema): expand canonical order states [STATE-002][STATE-006]` | 状态 schema/migration/generated 与兼容读；不改 UI |
 | 5 | B2 | `feat(order): enforce approved work-order transitions [STATE-003][STATE-005]` | 纯状态机与写入守卫 |
@@ -283,9 +302,10 @@
 
 1. 不删除断言、不加任意 sleep、不盲目更新截图。
 2. lint、typecheck、全部 Vitest、全部 Playwright。
-3. 与归档基线比较；不得出现基线 37 项之外的新失败。
+3. 与 B0a 重新建立的可复现基线比较；不得出现其已归档失败集合之外的新失败。现有 37 项 dirty-worktree 基线只保留为历史证据，不再作为行为批次门禁。
 4. 新增合同 fixture，不通过修改测试来掩盖行为破坏。
 5. 若旧测试明确编码已被人工裁决取代的旧真值，先在决策记录中列出，再在独立合同提交中替换；不能顺手放宽。
+6. 依赖或锁文件批次必须从干净 checkout 先通过 `pnpm install --frozen-lockfile`，不能复用已有 `node_modules` 掩盖漂移。
 
 schema 批次额外执行：
 
