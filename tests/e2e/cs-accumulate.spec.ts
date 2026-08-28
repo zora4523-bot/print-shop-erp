@@ -15,6 +15,7 @@ import {
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
   openFirstOrderItemEditor,
+  readE2eOrderPricingSnapshot,
   submitDraftOrderAndWait,
 } from './_helpers';
 
@@ -28,15 +29,18 @@ import {
 // Unit tests can mock either side independently; this flow proves the real
 // browser actions and PostgreSQL transactions preserve that separation.
 test.describe('客服业绩事件账本与外部销售应收分离', () => {
-  test('客服提交计入业绩，外部销售两次回款均不改写客服业绩', async ({ page }) => {
+  test('客服自动计价提交计入业绩，外部销售两次回款均不改写客服业绩', async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
 
     const suffix = uniqueSuffix();
     const submittedCustomerRef = `e2e-cs-submit-${suffix}`;
     const internalFinishedCustomerRef = `e2e-bill-cs-internal-${suffix}`;
     const externalBilledCustomerRef = `e2e-bill-sales-${suffix}`;
-    const totalAmount = '3000.00';
-    const halfAmount = '1500.00';
+    const billingFixtureAmount = '3000.00';
+    const halfBillingPayment = '1500.00';
+    let submittedCsOrderAmount = '';
     const csUserId = await getUserIdByUsername(
       E2E_USERS.customerService.username,
     );
@@ -56,31 +60,74 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
     expect(before?.periodId).toBe(periodId);
     expect(Number(before!.totalSales)).toBe(0);
 
-    await test.step('客服创建并提交 3000 元工单，提交事件立即计入业绩', async () => {
+    await test.step('客服创建并提交自动计价工单，提交事件按工单金额计入业绩', async () => {
       await login(page, {
         from: '/orders/new',
         username: E2E_USERS.customerService.username,
         password: E2E_PASSWORD,
       });
-      await page
-        .locator('input[name="customerRef"]')
-        .fill(submittedCustomerRef);
       await openFirstOrderItemEditor(page);
-      await page.locator('input[name="items.0.name"]').fill('E2E 客服业绩款');
-      await page.locator('input[name="items.0.quantity"]').fill('1000');
-      await page.locator('input[name="items.0.unitPrice"]').fill('3.00');
-      await page
-        .locator('textarea[name="items.0.priceOverrideReason"]')
-        .fill('E2E 客服业绩固定测试价');
-      await page
+      const form = page.locator('[data-slot="order-form-b"]');
+      await form
+        .getByRole('textbox', { name: '工单名称', exact: true })
+        .fill(`E2E 客服自动计价 ${suffix}`);
+      await form
+        .getByRole('textbox', { name: '客户名称/简称', exact: true })
+        .fill(submittedCustomerRef);
+
+      await form
+        .getByRole('group', { name: '工艺类型' })
+        .getByRole('button', { name: '局部烫金', exact: true })
+        .click();
+      await form
+        .getByRole('group', { name: '纸张材质' })
+        .getByRole('button', { name: '珠光艳闪', exact: true })
+        .click();
+      await form
+        .getByRole('group', { name: '规格' })
+        .getByRole('button', { name: '大号封', exact: true })
+        .click();
+      await form
+        .getByRole('group', { name: '克重' })
+        .getByRole('button', { name: '160g', exact: true })
+        .click();
+      await form
+        .getByRole('textbox', { name: '款式名', exact: true })
+        .fill('E2E 客服业绩款');
+      await form
+        .getByRole('spinbutton', { name: '数量', exact: true })
+        .fill('1000');
+      await form
         .getByRole('textbox', { name: '收货地址', exact: true })
         .fill('E2E 收货人 13800138000 广东省佛山市南海区测试路 1 号');
-      await page
+      await form
+        .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
+        .check();
+      await expect(
+        form.getByRole('textbox', { name: '成交单价' }),
+      ).toHaveCount(0);
+      await expect(
+        form.getByRole('textbox', { name: '人工改价说明' }),
+      ).toHaveCount(0);
+      await form
         .getByRole('button', { name: '保存草稿', exact: true })
         .click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
-        timeout: 10_000,
+        timeout: 45_000,
       });
+      const orderId = new URL(page.url()).pathname
+        .split('/')
+        .filter(Boolean)
+        .pop()!;
+      const pricing = await readE2eOrderPricingSnapshot({
+        orderId,
+        customerRef: submittedCustomerRef,
+      });
+      expect(pricing).not.toBeNull();
+      expect(pricing!.settlementType).toBe('INTERNAL_SALES');
+      expect(pricing!.pricingStatus).toBe('AUTO_CONFIRMED');
+      expect(Number(pricing!.totalAmount)).toBeGreaterThan(0);
+      submittedCsOrderAmount = pricing!.totalAmount;
 
       await submitDraftOrderAndWait(page);
 
@@ -93,7 +140,7 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
           },
           { timeout: 10_000 },
         )
-        .toBe(Number(totalAmount));
+        .toBe(Number(submittedCsOrderAmount));
     });
 
     await logout(page);
@@ -106,14 +153,14 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
       submitterId: csUserId,
       submitterRole: 'CUSTOMER_SERVICE',
       customerRef: internalFinishedCustomerRef,
-      totalAmount,
+      totalAmount: billingFixtureAmount,
       finishedAt: midShanghaiMonth(),
     });
     await seedFinishedOrder({
       submitterId: salesUserId,
       submitterRole: 'SALES',
       customerRef: externalBilledCustomerRef,
-      totalAmount,
+      totalAmount: billingFixtureAmount,
       finishedAt: midShanghaiMonth(),
     });
 
@@ -144,36 +191,67 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
       await page
         .getByRole('button', { name: /^发单给销售 \/ 客服$/ })
         .click();
+      const publishDialog = page.getByRole('alertdialog', {
+        name: /^确认发布 .* 账单？$/,
+      });
+      await expect(publishDialog).toBeVisible();
+      await publishDialog
+        .getByRole('button', { name: '确认发单', exact: true })
+        .click();
       await expect(page.locator('input[name="amount"]')).toBeVisible({
         timeout: 10_000,
       });
     });
 
-    await test.step('第一笔客户付款只更新应收，业绩仍为 3000', async () => {
-      await page.locator('input[name="amount"]').fill(halfAmount);
-      await page.getByRole('button', { name: /^录入付款流水$/ }).click();
+    await test.step('第一笔客户付款只更新应收，客服提交业绩保持不变', async () => {
+      await page.locator('input[name="amount"]').fill(halfBillingPayment);
+      await page
+        .getByRole('button', { name: '核对并录入付款', exact: true })
+        .click();
+      const paymentDialog = page.getByRole('alertdialog', {
+        name: '确认录入这笔收款？',
+        exact: true,
+      });
+      await expect(paymentDialog).toBeVisible();
+      await paymentDialog
+        .getByRole('button', { name: '确认录入付款', exact: true })
+        .click();
       await expect(
         page.locator('[data-slot="badge"]').filter({ hasText: /^部分结清$/ }),
       ).toBeVisible({ timeout: 10_000 });
 
       const afterFirstPayment = await readActiveCsTotalSales(csUserId);
       expect(afterFirstPayment?.periodId).toBe(periodId);
-      expect(Number(afterFirstPayment!.totalSales)).toBe(Number(totalAmount));
+      expect(Number(afterFirstPayment!.totalSales)).toBe(
+        Number(submittedCsOrderAmount),
+      );
     });
 
-    await test.step('第二笔客户付款结清账单，业绩仍不变', async () => {
+    await test.step('第二笔客户付款结清账单，客服提交业绩仍不变', async () => {
       await expect(page.locator('input[name="amount"]')).toBeVisible({
         timeout: 5_000,
       });
-      await page.locator('input[name="amount"]').fill(halfAmount);
-      await page.getByRole('button', { name: /^录入付款流水$/ }).click();
+      await page.locator('input[name="amount"]').fill(halfBillingPayment);
+      await page
+        .getByRole('button', { name: '核对并录入付款', exact: true })
+        .click();
+      const paymentDialog = page.getByRole('alertdialog', {
+        name: '确认录入这笔收款？',
+        exact: true,
+      });
+      await expect(paymentDialog).toBeVisible();
+      await paymentDialog
+        .getByRole('button', { name: '确认录入付款', exact: true })
+        .click();
       await expect(
         page.locator('[data-slot="badge"]').filter({ hasText: /^已结清$/ }),
       ).toBeVisible({ timeout: 10_000 });
 
       const afterSecondPayment = await readActiveCsTotalSales(csUserId);
       expect(afterSecondPayment?.periodId).toBe(periodId);
-      expect(Number(afterSecondPayment!.totalSales)).toBe(Number(totalAmount));
+      expect(Number(afterSecondPayment!.totalSales)).toBe(
+        Number(submittedCsOrderAmount),
+      );
     });
   });
 });

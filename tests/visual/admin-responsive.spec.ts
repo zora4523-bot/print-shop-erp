@@ -3,7 +3,6 @@ import {
   E2E_PASSWORD,
   E2E_USERS,
   login,
-  openFirstOrderItemEditor,
 } from '../e2e/_helpers';
 import {
   cleanupWorkerUiFixture,
@@ -390,7 +389,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'order-new',
       path: '/orders/new',
       readyHeading: '新建工单',
-      prepareGateState: prepareOrderCreationComponentState,
+      prepareGateState: prepareAdminOrderCreationState,
     },
     {
       name: 'attendance',
@@ -404,12 +403,20 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
     // 路由表，避免再次退化。
     { name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结' },
-    { name: 'salary-daily', path: '/owner/salary/daily', readyHeading: '计件工资' },
+    {
+      name: 'salary-daily',
+      path: '/owner/salary/daily',
+      readyHeading: '历史开机师傅日薪档案',
+    },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
     { name: 'cs-period-new', path: '/owner/salary/cs/new', readyHeading: '新建客服周期' },
     { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
-    { name: 'products', path: '/owner/products', readyHeading: '产品字典' },
+    {
+      name: 'stock-skus',
+      path: RULE_CENTER_HREFS.stockSkus,
+      readyHeading: '报价产品',
+    },
     {
       name: 'rule-center',
       path: RULE_CENTER_HREFS.root,
@@ -591,7 +598,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'sales-order-new',
       path: '/orders/new',
       readyHeading: '新建工单',
-      prepareGateState: prepareOrderCreationComponentState,
+      prepareGateState: prepareSalesOrderCreationState,
     },
     {
       name: 'sales-bills',
@@ -1083,9 +1090,9 @@ async function prepareOrderDetailDesignPreview(
   await expect(itemCard.getByText('¥ 0.1234', { exact: true })).toBeVisible();
   await expect(itemCard.getByText('¥ 152,345.57', { exact: true })).toBeVisible();
   await expect(definition('工艺')).toHaveText(data.craftName);
-  await expect(definition('印刷面')).toHaveText('双面');
-  await expect(definition('印刷色数')).toHaveText('双色');
-  await expect(definition('生产安排')).toContainText(data.craftName);
+  await expect(definition('加工面')).toHaveText('双面加工');
+  await expect(definition('双色烫金')).toHaveText('是');
+  await expect(definition('生产工序')).toContainText('局部烫金：进行中');
   await expect(itemCard).not.toContainText(data.craftId);
 
   const fileName =
@@ -1107,82 +1114,150 @@ async function prepareOrderDetailDesignPreview(
   expect(box?.height).toBeGreaterThanOrEqual(280);
 }
 
-async function prepareOrderCreationComponentState(page: Page) {
-  await openFirstOrderItemEditor(page);
-  await page
-    .getByRole('button', {
-      name: '非标定制（自定义尺寸）',
+async function prepareConfiguredLocalFoilStyle(page: Page) {
+  const form = page.locator('[data-slot="order-form-b"]:visible');
+  await expect(form).toBeVisible();
+  await expect(
+    form
+      .getByRole('navigation', { name: '款式' })
+      .getByRole('button')
+      .first(),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  const routePicker = form.getByRole('group', { name: '工艺类型' });
+  for (const route of ['局部烫金', '专版烫金', '彩印']) {
+    await expect(
+      routePicker.getByRole('button', { name: route, exact: true }),
+    ).toBeVisible();
+  }
+  await routePicker
+    .getByRole('button', { name: '局部烫金', exact: true })
+    .click();
+
+  const paperPicker = form.getByRole('group', { name: '纸张材质' });
+  await paperPicker
+    .getByRole('button', { name: '珠光艳闪', exact: true })
+    .click();
+  const specificationPicker = form.getByRole('group', { name: '规格' });
+  await specificationPicker
+    .getByRole('button', { name: '大号封', exact: true })
+    .click();
+  const weightPicker = form.getByRole('group', { name: '克重' });
+  await weightPicker
+    .getByRole('button', { name: '160g', exact: true })
+    .click();
+
+  await expect(
+    routePicker.getByRole('button', {
+      name: '局部烫金',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    paperPicker.getByRole('button', {
+      name: '珠光艳闪',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    specificationPicker.getByRole('button', {
+      name: '大号封',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    weightPicker.getByRole('button', {
+      name: '160g',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  for (const retiredField of ['报价产品', '成交单价', '人工改价说明']) {
+    await expect(form.getByLabel(retiredField, { exact: true })).toHaveCount(0);
+  }
+
+  return form;
+}
+
+async function prepareAdminOrderCreationState(page: Page) {
+  const form = await prepareConfiguredLocalFoilStyle(page);
+  await form
+    .getByRole('textbox', { name: '工单名称', exact: true })
+    .fill('管理员内部建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .getByRole('textbox', { name: '客户名称/简称', exact: true })
+    .fill('超长客户名称用于验证小屏换行与表单容器不溢出');
+  await form
+    .getByRole('textbox', { name: '款式名', exact: true })
+    .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
+  await form
+    .getByRole('textbox', {
+      name: '配置外项目说明（转人工核价）',
       exact: true,
     })
-    .click();
-  await page
-    .getByLabel('自定义尺寸 / 规格', { exact: true })
-    .fill('超长非标尺寸 123.45 × 678.90 mm / 横向折叠');
+    .fill('客户要求追加配置外特殊工艺，请工厂确认环节人工核价并保留完整客需说明。');
 
-  await page
-    .getByRole('button', { name: '其他纸张（自定义）', exact: true })
+  await form
+    .getByRole('button', { name: '增加收货地址', exact: true })
     .click();
-  await page
-    .getByLabel('自定义纸张', { exact: true })
-    .fill('客户指定超长纸张名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .locator('textarea[name="additionalShipments.0.receiverAddress"]')
+    .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .locator('input[name="additionalShipments.0.itemQuantities.0"]')
+    .fill('100');
+  await expect(
+    form.getByRole('heading', { name: '额外地址 1', exact: true }),
+  ).toBeVisible();
+}
 
-  await page.getByRole('button', { name: '哑金', exact: true }).click();
-  await page.getByRole('button', { name: '红金', exact: true }).click();
-  await page
-    .getByRole('button', { name: '添加其他色', exact: true })
-    .click();
-  await page
-    .getByLabel('自定义烫金色 / 色号', { exact: true })
-    .fill('潘通 871C');
-  await page
-    .getByRole('button', { name: '添加颜色', exact: true })
-    .click();
+async function prepareSalesOrderCreationState(page: Page) {
+  const form = await prepareConfiguredLocalFoilStyle(page);
+  // 销售端款式名由已选计价事实生成，不提供人工命名入口。
+  await expect(
+    form.getByRole('textbox', { name: '款式名', exact: true }),
+  ).toHaveCount(0);
+  await form
+    .getByRole('textbox', { name: '工单名称', exact: true })
+    .fill('外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .getByRole('spinbutton', { name: '数量', exact: true })
+    .fill('1234567');
+  await form
+    .getByRole('textbox', { name: '收货地址', exact: true })
+    .fill('张三 13800138000 广东省深圳市南山区科技园超长地址压力测试大厦A座12345678901234567890');
 
-  await page.getByLabel('款式 1 选择设计图', { exact: true }).setInputFiles({
-    name: '超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
+  const foilPicker = form.getByRole('group', { name: '烫金颜色' }).first();
+  const selectedFoilCount = await foilPicker
+    .getByRole('button', { pressed: true })
+    .count();
+  const configuredFoil = foilPicker
+    .getByRole('button', { pressed: false })
+    .first();
+  await expect(configuredFoil).toBeVisible();
+  await configuredFoil.click();
+  await expect(
+    foilPicker.getByRole('button', { pressed: true }),
+  ).toHaveCount(selectedFoilCount + 1);
+
+  const fileName =
+    '超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789最终确认版.png';
+  await form.getByLabel('第 1 款 设计图', { exact: true }).setInputFiles({
+    name: fileName,
     mimeType: 'image/png',
     buffer: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
       'base64',
     ),
   });
-
   await expect(
-    page.getByRole('button', {
-      name: '非标定制（自定义尺寸）',
+    form.getByRole('img', {
+      name: `第 1 款设计图预览：${fileName}`,
       exact: true,
-      pressed: true,
     }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('button', {
-      name: '其他纸张（自定义）',
-      exact: true,
-      pressed: true,
-    }),
-  ).toBeVisible();
-  await expect(page.getByText('已选 3 色：哑金、红金、潘通 871C')).toBeVisible();
-  await expect(
-    page.getByAltText(
-      '待上传设计图：超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
-    ),
-  ).toBeVisible();
-
-  await page.getByRole('tab', { name: /收货与费用/ }).click();
-  await page
-    .getByRole('button', { name: '增加收货地址', exact: true })
-    .click();
-  await page
-    .locator(
-      'textarea[name="additionalShipments.0.receiverAddress"]',
-    )
-    .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-  await page
-    .locator(
-      'input[name="additionalShipments.0.itemQuantities.0"]',
-    )
-    .fill('100');
-  await expect(
-    page.getByRole('heading', { name: '额外地址 1', exact: true }),
-  ).toBeVisible();
+  await expect(form.getByText(fileName, { exact: false })).toBeVisible();
 }

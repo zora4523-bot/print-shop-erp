@@ -24,7 +24,7 @@ test.describe('notification urgent wire — golden path', () => {
   test('ADMIN 创建急单 → 提交 → ORDER_SUBMITTED + URGENT_ORDER 两条 log', async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     const orderRef = `e2e-urgent-${uniqueSuffix()}`;
     const customName = `E2E 急单通知 ${orderRef}`;
@@ -38,31 +38,62 @@ test.describe('notification urgent wire — golden path', () => {
       password: E2E_PASSWORD,
     });
 
-    // 创建工单 + 勾"急单"复选框
-    await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
-    await page.locator('input[name="customerRef"]').fill(orderRef);
-    await page.locator('input[name="isUrgent"]').check();
+    // 新版内部建单按三条计价路线 + 纸张 / 规格选项创建，不再暴露
+    // 报价产品或人工金额输入；这里仍只关注急单通知的业务边界。
     await openFirstOrderItemEditor(page);
-    await page.locator('input[name="items.0.name"]').fill(itemName);
-    await page.locator('input[name="items.0.quantity"]').fill('1000');
-    await page
-      .getByRole('combobox', { name: '报价产品' })
-      .selectOption({ label: '珠光艳闪 160g · 大号封' });
-    await page
+    const form = page.locator('[data-slot="order-form-b"]');
+    await form
+      .getByRole('textbox', { name: '工单名称', exact: true })
+      .fill(customName);
+    await form
+      .getByRole('textbox', { name: '客户名称/简称', exact: true })
+      .fill(orderRef);
+    await form
+      .getByRole('checkbox', {
+        name: '急单（提交后会推送至排产群）',
+        exact: true,
+      })
+      .check();
+
+    const routes = form.getByRole('group', { name: '工艺类型' });
+    await routes
+      .getByRole('button', { name: '局部烫金', exact: true })
+      .click();
+    await form
+      .getByRole('group', { name: '纸张材质' })
+      .getByRole('button', { name: '珠光艳闪', exact: true })
+      .click();
+    await form
+      .getByRole('group', { name: '规格' })
+      .getByRole('button', { name: '大号封', exact: true })
+      .click();
+    await form
+      .getByRole('group', { name: '克重' })
+      .getByRole('button', { name: '160g', exact: true })
+      .click();
+    await form
+      .getByRole('textbox', { name: '款式名', exact: true })
+      .fill(itemName);
+    await form
+      .getByRole('spinbutton', { name: '数量', exact: true })
+      .fill('1000');
+    await form
       .getByRole('textbox', { name: '承诺交期' })
       .fill('2026-12-31');
-    await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
-    await page
-      .locator('textarea[name="items.0.priceOverrideReason"]')
-      .fill('E2E 急单通知链路人工报价');
-    await page
+    await form
       .getByRole('textbox', { name: '收货地址', exact: true })
       .fill('E2E 收货人 13800138000 广东省佛山市测试路 1 号');
-    await page
+    await expect(
+      form.getByRole('combobox', { name: '报价产品' }),
+    ).toHaveCount(0);
+    await expect(
+      form.getByRole('textbox', { name: '成交单价' }),
+    ).toHaveCount(0);
+    await form
       .getByRole('button', { name: '保存草稿', exact: true })
       .click();
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
-      timeout: 10_000,
+      timeout: 45_000,
     });
     const orderId = new URL(page.url()).pathname.split('/').filter(Boolean).pop()!;
 
