@@ -2,60 +2,48 @@ import { OrderSettlementType } from '../../generated/prisma/enums';
 import type {
   QuoteExternalOrderChargesInput,
   QuoteOrderItemsInput,
-  QuoteOrderPackagingGroupsInput,
+  QuoteCreateOrderPackagingGroupsInput,
 } from '../auth/schemas';
 import { db } from '../db';
-import { deriveExternalOrderChargeShipments } from '../price/external-order-charge-facts';
-import type { ExternalOrderChargeQuote } from '../price/external-order-charges';
 import {
-  quoteExternalOrderChargesInTransaction,
-} from '../price/order-charge-service';
+  calculateExternalOrderCharges,
+  type ExternalOrderChargeQuote,
+} from '../price/external-order-charges';
+import { calculateCreateOrderQuote } from '../price/create-order';
+import type { CreateOrderQuoteInput as PureCreateOrderQuoteInput } from '../price/create-order/types';
 import {
-  quoteOrderPackagingGroups,
-  type OrderPackagingQuoteResult,
-} from '../price/order-packaging-quote';
-import { quoteOrderItems } from '../price/quote-service';
-import type { QuoteResult } from '../price/quote';
+  buildCreateOrderQuoteInputFromCatalog,
+  CreateOrderQuoteFactsAdapterError,
+} from './create-order-quote-facts-adapter';
 import {
-  readExternalCreateOrderPriceSnapshot,
-  type ExternalCreateOrderPriceSnapshot,
-} from './create-order-price-snapshot';
+  type CreateOrderQuotePresentation,
+  presentCreateOrderQuote,
+} from './create-order-quote-presentation';
 import { createExternalOrderQuoteToken } from './create-order-quote-token';
-import { summarizeExternalCreateOrderQuote } from './create-order-quote-summary';
+import {
+  PublishedCreateOrderPriceAdapterError,
+  readPublishedCreateOrderPriceSnapshot,
+} from './create-order-published-rule-adapter';
+import { isNewOrderPricingRoute } from './pricing-route';
+
+export type CreateOrderQuoteItemInput = Omit<
+  QuoteOrderItemsInput['items'][number],
+  'manualQuoteReason'
+> & {
+  manualQuoteReason?: string | null;
+};
 
 export type CreateOrderQuoteInput = {
   factsKey: string;
   settlementType: typeof OrderSettlementType.EXTERNAL_SALES;
-  items: QuoteOrderItemsInput['items'];
+  items: CreateOrderQuoteItemInput[];
   orderItemCount: number;
-  packagingGroups: QuoteOrderPackagingGroupsInput['groups'];
+  packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
   logistics: QuoteExternalOrderChargesInput;
 };
 
-export type CreateOrderQuoteTotalSemantics =
-  | 'COMPLETE'
-  | 'EXCLUDES_MANUAL_ITEMS';
-
-export type CreateOrderPendingPlateFee = {
-  status: 'PENDING';
-  amount: null;
-  displayAmount: '待定';
-  label: '制版费';
-};
-
-export type CreateOrderQuoteResult = {
-  factsKey: string;
-  items: QuoteResult[];
-  packaging: OrderPackagingQuoteResult;
-  logistics: ExternalOrderChargeQuote;
-  priceVersion: ExternalCreateOrderPriceSnapshot;
-  knownTotal: string;
-  total: string | null;
-  hasManualPricing: boolean;
-  totalSemantics: CreateOrderQuoteTotalSemantics;
-  plateFee: CreateOrderPendingPlateFee;
-  quoteToken: string;
-};
+export type CreateOrderQuoteResult = CreateOrderQuotePresentation;
+export type { CreateOrderItemQuotePreview } from './create-order-quote-presentation';
 
 export class CreateOrderQuoteError extends Error {
   constructor(message: string) {
@@ -64,56 +52,84 @@ export class CreateOrderQuoteError extends Error {
   }
 }
 
-const PENDING_PLATE_FEE: CreateOrderPendingPlateFee = {
-  status: 'PENDING',
-  amount: null,
-  displayAmount: '待定',
-  label: '制版费',
-};
+function trustedChargeQuote(
+  input: PureCreateOrderQuoteInput,
+  snapshot: Parameters<typeof calculateCreateOrderQuote>[1],
+): ExternalOrderChargeQuote {
+  const itemsByKey = new Map(input.items.map((item) => [item.itemKey, item]));
+  return calculateExternalOrderCharges(
+    {
+      isSfCollect: input.isSfCollect,
+      shipments: input.shipments.map((shipment) => {
+        const allocations = Object.entries(shipment.itemQuantities).filter(
+          ([, quantity]) => quantity > 0,
+        );
+        return {
+          shipmentKey: shipment.shipmentKey,
+          province: shipment.province,
+          billableWeightKg: shipment.trustedBillableWeightKg ?? null,
+          itemQuantity: allocations.reduce(
+            (sum, [, quantity]) => sum + quantity,
+            0,
+          ),
+          weightItems: allocations.flatMap(([itemKey, quantity]) => {
+            const item = itemsByKey.get(itemKey);
+            return item
+              ? [
+                  {
+                    itemKey,
+                    quantity,
+                    paperWeightGsm: item.paperWeightGsm,
+                    paperType: item.paperType,
+                    productStructure: item.productStructure,
+                  },
+                ]
+              : [];
+          }),
+        };
+      }),
+    },
+    snapshot.orderCharges.rules,
+    snapshot.orderCharges.logisticsPolicy,
+  );
+}
 
-function assertPriceVersions(
-  priceVersion: ExternalCreateOrderPriceSnapshot,
-  items: readonly QuoteResult[],
-  packaging: OrderPackagingQuoteResult,
-  logisticsBook: { id: string; version: number; sourceSha256: string | null },
-): void {
-  if (
-    items.some(
-      (item) =>
-        item.snapshot.priceBook?.id !== priceVersion.processing.id ||
-        item.snapshot.priceBook.version !== priceVersion.processing.version ||
-        item.snapshot.priceBook.sourceSha256 !==
-          priceVersion.processing.sourceSha256,
-    )
-  ) {
-    throw new CreateOrderQuoteError(
-      '款式加工费未使用当前唯一生效的价目版本',
-    );
-  }
-  if (
-    packaging.priceBook?.id !== priceVersion.processing.id ||
-    packaging.priceBook.version !== priceVersion.processing.version ||
-    packaging.priceBook.sourceSha256 !== priceVersion.processing.sourceSha256
-  ) {
-    throw new CreateOrderQuoteError(
-      '入袋费与款式加工费未使用同一价目版本',
-    );
-  }
-  if (
-    logisticsBook.id !== priceVersion.logistics.id ||
-    logisticsBook.version !== priceVersion.logistics.version ||
-    logisticsBook.sourceSha256 !== priceVersion.logistics.sourceSha256
-  ) {
-    throw new CreateOrderQuoteError(
-      '纸箱与快递费未使用当前唯一生效的物流价目版本',
-    );
-  }
+function packagingFacts(
+  groups: CreateOrderQuoteInput['packagingGroups'],
+  itemKeys: readonly string[],
+) {
+  return groups.map((group) => ({
+    groupKey: group.groupKey,
+    mode: group.mode,
+    actualBagCount: group.actualBagCount,
+    items: group.itemUnitsPerBag.flatMap((unitsPerBag, index) => {
+      const itemKey = itemKeys[index];
+      return itemKey && unitsPerBag > 0 ? [{ itemKey, unitsPerBag }] : [];
+    }),
+  }));
+}
+
+function shipmentFacts(input: CreateOrderQuoteInput) {
+  const itemKeys = input.items.map((_, index) => String(index + 1));
+  return input.logistics.shipments.map((shipment) => ({
+    shipmentKey: shipment.shipmentKey,
+    province: shipment.province,
+    // Browser-authored billableWeightKg is deliberately ignored. Preview has
+    // no trusted fulfilment measurement and therefore uses server estimation.
+    browserBillableWeightKg: shipment.billableWeightKg,
+    trustedFulfilmentWeightKg: null,
+    itemQuantities: Object.fromEntries(
+      itemKeys.map((itemKey, index) => [
+        itemKey,
+        shipment.itemQuantities?.[index] ?? 0,
+      ]),
+    ),
+  }));
 }
 
 /**
- * Quotes one external-sales order from one database transaction and one
- * processing/logistics snapshot. Browser-supplied billable weights are never
- * trusted: the logistics quote is rebuilt from validated item allocations.
+ * Quote one external-sales create command from one immutable, dual-version
+ * published snapshot. IO ends before the pure calculator is called.
  */
 export async function quoteExternalCreateOrder(
   input: CreateOrderQuoteInput,
@@ -126,84 +142,73 @@ export async function quoteExternalCreateOrder(
     throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
   }
 
-  return db.$transaction(async (tx) => {
-    const priceVersion = await readExternalCreateOrderPriceSnapshot(tx, {
-      now,
-    });
-    const items = await quoteOrderItems(
-      input.items,
-      OrderSettlementType.EXTERNAL_SALES,
-      now,
-      tx,
-      { orderItemCount: input.orderItemCount },
-    );
-    const packaging = await quoteOrderPackagingGroups(
-      input.packagingGroups,
-      OrderSettlementType.EXTERNAL_SALES,
-      now,
-      tx,
-      { snapshotLockHeld: true },
-    );
-
-    const shipments = deriveExternalOrderChargeShipments({
-      isSfCollect: input.logistics.isSfCollect,
-      items: input.items.map((item, index) => ({
-        itemKey: String(index + 1),
-        quantity: item.quantity,
-        paperWeightGsm: item.paperWeightGsm,
-        paperType: item.paperType,
-        productStructure: item.productStructure,
-      })),
-      shipments: input.logistics.shipments.map((shipment) => ({
-        shipmentKey: shipment.shipmentKey,
-        province: shipment.province,
-        // The action schema remains backward compatible with old browsers,
-        // but a SALES preview must never trust their chosen charge weight.
-        billableWeightKg: null,
-        itemQuantities: shipment.itemQuantities ?? [],
-      })),
-    });
-    const logisticsResult = await quoteExternalOrderChargesInTransaction(
-      tx,
-      { isSfCollect: input.logistics.isSfCollect, shipments },
-      now,
-      { snapshotLockHeld: true },
-    );
-
-    assertPriceVersions(
-      priceVersion,
-      items,
-      packaging,
-      logisticsResult.priceBook,
-    );
-
-    const summary = summarizeExternalCreateOrderQuote({
-      items,
-      packaging,
-      logistics: logisticsResult.quote,
-    });
-    const resultWithoutToken = {
-      factsKey: input.factsKey,
-      items,
-      packaging,
-      logistics: logisticsResult.quote,
-      priceVersion,
-      ...summary,
-      plateFee: PENDING_PLATE_FEE,
-    };
-
-    return {
-      ...resultWithoutToken,
-      quoteToken: createExternalOrderQuoteToken({
-        items: input.items,
-        packagingGroups: input.packagingGroups,
+  try {
+    return await db.$transaction(async (tx) => {
+      const snapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
+        now,
+      });
+      const itemKeys = input.items.map((_, index) => String(index + 1));
+      const catalogItems = input.items.map((item, index) => {
+        if (item.manualQuoteReason?.trim()) {
+          throw new CreateOrderQuoteError(
+            `款式 ${index + 1}：外部销售建单不接受配置外备注`,
+          );
+        }
+        if (!isNewOrderPricingRoute(item.pricingRoute)) {
+          throw new CreateOrderQuoteError(
+            `款式 ${index + 1}：新建工单必须选择有效计价路线`,
+          );
+        }
+        return {
+          ...item,
+          pricingRoute: item.pricingRoute,
+          itemKey: itemKeys[index]!,
+          fig: index + 1,
+        };
+      });
+      const pureInput = await buildCreateOrderQuoteInputFromCatalog(tx, {
+        items: catalogItems,
+        packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
+        isSfCollect: input.logistics.isSfCollect,
+        shipments: shipmentFacts(input),
+      });
+      const quote = calculateCreateOrderQuote(pureInput, snapshot);
+      if (!quote.submittable) {
+        throw new CreateOrderQuoteError(
+          quote.errors.join('；') || '报价业务事实无效',
+        );
+      }
+      const logistics = trustedChargeQuote(pureInput, snapshot);
+      const quoteToken = createExternalOrderQuoteToken({
+        items: pureInput.items,
+        packagingGroups: pureInput.packagingGroups,
         logistics: {
-          isSfCollect: input.logistics.isSfCollect,
-          shipments,
+          isSfCollect: pureInput.isSfCollect,
+          shipments: pureInput.shipments,
         },
-        priceVersion,
-        result: { items, packaging, logistics: logisticsResult.quote },
-      }),
-    };
-  });
+        priceVersion: quote.priceVersion,
+        result: {
+          items: quote.items,
+          packaging: quote.packagingGroups,
+          logistics: quote.order,
+        },
+      });
+      return presentCreateOrderQuote({
+        factsKey: input.factsKey,
+        input: pureInput,
+        quote,
+        logistics,
+        quoteToken,
+      });
+    });
+  } catch (error) {
+    if (error instanceof CreateOrderQuoteError) throw error;
+    if (
+      error instanceof CreateOrderQuoteFactsAdapterError ||
+      error instanceof PublishedCreateOrderPriceAdapterError
+    ) {
+      throw new CreateOrderQuoteError(error.message);
+    }
+    throw error;
+  }
 }

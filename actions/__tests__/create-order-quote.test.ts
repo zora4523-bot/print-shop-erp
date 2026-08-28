@@ -36,7 +36,6 @@ const validRaw = {
       artworkVersion: null,
       plateGroupId: null,
       pricingGroup: null,
-      manualQuoteReason: null,
       specification: '大号',
       actualWidthMm: 210,
       actualHeightMm: 105,
@@ -61,6 +60,7 @@ const validRaw = {
       groupKey: 'bag-1',
       mode: OrderPackagingMode.SINGLE_STYLE,
       actualBagCount: 20,
+      itemUnitsPerBag: [100],
     },
   ],
   logistics: {
@@ -133,6 +133,16 @@ describe('quoteExternalCreateOrderAction', () => {
         ]),
       );
     }
+    expect(mocks.quoteExternalCreateOrder).not.toHaveBeenCalled();
+  });
+
+  it('拒绝外部销售用配置外备注绕过结构化报价', async () => {
+    const result = await quoteExternalCreateOrderAction({
+      ...validRaw,
+      items: [{ ...validRaw.items[0], manualQuoteReason: '人工给价' }],
+    });
+
+    expect(result).toMatchObject({ status: 'invalid' });
     expect(mocks.quoteExternalCreateOrder).not.toHaveBeenCalled();
   });
 

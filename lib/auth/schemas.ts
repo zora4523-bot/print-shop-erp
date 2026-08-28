@@ -1822,11 +1822,11 @@ export const quoteOrderItemsSchema = z.object({
           specification: true,
           paperType: true,
           pricingRoute: true,
+          manualQuoteReason: true,
           productStructure: true,
           artworkVersion: true,
           plateGroupId: true,
           pricingGroup: true,
-          manualQuoteReason: true,
           actualWidthMm: true,
           actualHeightMm: true,
           paperWeightGsm: true,
@@ -2101,6 +2101,21 @@ export type QuoteExternalOrderChargesInput = z.infer<
 
 // 创建页包装组预报价只接收可验证的业务事实。袋数由浏览器根据
 // 每袋组成实时计算，服务端仍严格校验类型和范围，并按当前生效价目重算金额。
+const quotePackagingUnitsPerBagField = z.preprocess(
+  (value) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+      return Number.parseInt(value.trim(), 10);
+    }
+    return value;
+  },
+  z
+    .number({ message: '每袋数量必须是非负整数' })
+    .int('每袋数量必须是整数')
+    .min(0, '每袋数量不能小于 0')
+    .max(9_999_999, '每袋数量过大'),
+);
+
 const orderPackagingQuoteGroupSchema = z.object({
   groupKey: z
     .string({ error: '包装组标识不能为空' })
@@ -2141,6 +2156,45 @@ export const quoteOrderPackagingGroupsSchema = z
 
 export type QuoteOrderPackagingGroupsInput = z.infer<
   typeof quoteOrderPackagingGroupsSchema
+>;
+
+// 统一建单报价还需要每袋的款式组成，用来验证混装与计算袋数。
+// 保留上面的独立包装报价 schema 边界，避免改变它的旧请求合同。
+const createOrderPackagingQuoteGroupSchema =
+  orderPackagingQuoteGroupSchema.extend({
+    itemUnitsPerBag: z
+      .array(quotePackagingUnitsPerBagField, {
+        error: '包装组款式组成格式非法',
+      })
+      .min(1, '包装组至少需要一个款式组成')
+      .max(MAX_ORDER_ITEMS_PER_ORDER, '包装组款式组成过多'),
+  });
+
+export const quoteCreateOrderPackagingGroupsSchema = z
+  .object({
+    groups: z
+      .array(createOrderPackagingQuoteGroupSchema, {
+        error: '包装组数据格式非法',
+      })
+      .min(1, '至少需要一个包装组')
+      .max(20, '单工单包装组不超过 20 组'),
+  })
+  .superRefine((input, ctx) => {
+    const seen = new Set<string>();
+    input.groups.forEach((group, index) => {
+      if (seen.has(group.groupKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', index, 'groupKey'],
+          message: '包装组标识不能重复',
+        });
+      }
+      seen.add(group.groupKey);
+    });
+  });
+
+export type QuoteCreateOrderPackagingGroupsInput = z.infer<
+  typeof quoteCreateOrderPackagingGroupsSchema
 >;
 
 const additionalShipmentSchema = z.object({

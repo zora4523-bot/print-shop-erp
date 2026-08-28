@@ -39,7 +39,10 @@ import { quoteOrderItemsAction } from '@/actions/order-quote';
 import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
 import type { OrderPackagingQuotePreview } from '@/actions/order-packaging-quote.types';
-import type { CreateOrderQuoteResult } from '@/lib/order/create-order-quote-service';
+import type {
+  CreateOrderItemQuotePreview,
+  CreateOrderQuoteResult,
+} from '@/lib/order/create-order-quote-service';
 import type { CustomerPartyOption } from '@/lib/party';
 import type { QuoteResult } from '@/lib/price/quote';
 import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
@@ -151,7 +154,7 @@ type Props = {
 
 type QuoteViewState = {
   inputKey: string;
-  result?: QuoteResult;
+  result?: QuoteResult | CreateOrderItemQuotePreview;
   error?: string;
 };
 
@@ -547,7 +550,9 @@ function compactDecimal(value: string): string {
 
 function externalQuoteComponentLabel(
   item: CreateOrderInput['items'][number],
-  component: QuoteResult['components'][number],
+  component:
+    | QuoteResult['components'][number]
+    | CreateOrderItemQuotePreview['components'][number],
 ): string {
   const displayName = externalPriceRuleDisplayName(component.name);
   if (
@@ -754,7 +759,6 @@ function orderItemQuoteFacts(
     artworkVersion: item.artworkVersion,
     plateGroupId: item.plateGroupId,
     pricingGroup: item.pricingGroup,
-    manualQuoteReason: item.manualQuoteReason,
     specification: item.specification,
     actualWidthMm: item.actualWidthMm,
     actualHeightMm: item.actualHeightMm,
@@ -2248,6 +2252,7 @@ export function OrderForm({
         groupKey: String(index + 1),
         mode: group.mode,
         actualBagCount: group.actualBagCount,
+        itemUnitsPerBag: group.itemUnitsPerBag,
       })),
     }),
     [getValues],
@@ -2257,6 +2262,7 @@ export function OrderForm({
       groupKey: String(index + 1),
       mode: group.mode,
       actualBagCount: group.actualBagCount,
+      itemUnitsPerBag: group.itemUnitsPerBag,
     })),
   });
 

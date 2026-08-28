@@ -1,17 +1,19 @@
 import { OrderSettlementType } from '@/generated/prisma/enums';
 import type {
   QuoteExternalOrderChargesInput,
-  QuoteOrderItemsInput,
-  QuoteOrderPackagingGroupsInput,
+  QuoteCreateOrderPackagingGroupsInput,
 } from '@/lib/auth/schemas';
-import type { CreateOrderQuoteResult } from '@/lib/order/create-order-quote-service';
+import type {
+  CreateOrderQuoteItemInput,
+  CreateOrderQuoteResult,
+} from '@/lib/order/create-order-quote-service';
 
 export type CreateOrderQuoteActionInput = {
   factsKey: string;
   settlementType: typeof OrderSettlementType.EXTERNAL_SALES;
-  items: QuoteOrderItemsInput['items'];
+  items: CreateOrderQuoteItemInput[];
   orderItemCount: number;
-  packagingGroups: QuoteOrderPackagingGroupsInput['groups'];
+  packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
   logistics: QuoteExternalOrderChargesInput;
 };
 

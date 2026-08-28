@@ -11,8 +11,8 @@ import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   quoteExternalOrderChargesSchema,
+  quoteCreateOrderPackagingGroupsSchema,
   quoteOrderItemsSchema,
-  quoteOrderPackagingGroupsSchema,
 } from '@/lib/auth/schemas';
 import {
   CreateOrderQuoteError,
@@ -70,9 +70,22 @@ export async function quoteExternalCreateOrderAction(
     items: raw.items,
     orderItemCount: raw.orderItemCount,
   });
-  const packaging = quoteOrderPackagingGroupsSchema.safeParse({
+  const packaging = quoteCreateOrderPackagingGroupsSchema.safeParse({
     groups: raw.packagingGroups,
   });
+  const forbiddenManualPricingIssues = Array.isArray(raw.items)
+    ? raw.items.flatMap((item, index) =>
+        isRecord(item) &&
+        Object.prototype.hasOwnProperty.call(item, 'manualQuoteReason')
+          ? [
+              {
+                path: ['items', index, 'manualQuoteReason'],
+                message: '外部销售建单不接受配置外备注',
+              },
+            ]
+          : [],
+      )
+    : [];
 
   const logisticsRaw = isRecord(raw.logistics) ? raw.logistics : {};
   const authoritativeChargeItems = items.success
@@ -100,6 +113,7 @@ export async function quoteExternalCreateOrderAction(
       ? []
       : prefixedIssues('orderItemCount', orderItemCount.error.issues)),
     ...(items.success ? [] : items.error.issues),
+    ...forbiddenManualPricingIssues,
     ...(packaging.success
       ? []
       : packaging.error.issues.map((issue) => ({
