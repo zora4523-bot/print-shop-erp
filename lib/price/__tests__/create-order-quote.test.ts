@@ -160,6 +160,32 @@ describe('calculateCreateOrderQuote · 专版烫金黄金用例', () => {
     },
   );
 
+  it.each([
+    ['MID', '中号封', 40_000, 'FULL_30000', '0.1700', '6800.00'],
+    ['MID', '中号封', 40_001, 'FULL_50000', '0.1600', '6400.16'],
+    ['MID', '中号封', 100_000, 'FULL_50000', '0.1600', '16000.00'],
+    ['LARGE', '大号封', 40_000, 'FULL_30000', '0.1900', '7600.00'],
+    ['LARGE', '大号封', 40_001, 'FULL_50000', '0.1800', '7200.18'],
+    ['LARGE', '大号封', 100_000, 'FULL_50000', '0.1800', '18000.00'],
+  ] as const)(
+    '5万档 %s %s %i 个命中 %s / %s',
+    (pricingGroup, specification, quantity, tierCode, unitPrice, processing) => {
+      const item = fullItem({ pricingGroup, specification, quantity });
+      const selected = selectFullUnitPrice(
+        item,
+        CREATE_ORDER_GOLDEN_SNAPSHOT.full,
+      );
+      const result = quoteSingle(item);
+
+      expect(selected).toMatchObject({ tierCode, unitPrice });
+      expect(result.items[0]).toMatchObject({
+        status: 'QUOTED',
+        unitPrice,
+        processingAmount: processing,
+      });
+    },
+  );
+
   it('纸张与浮雕分项独立，调版费整款只收一次', () => {
     const paper = quoteSingle(
       fullItem({ paperType: '触感纸', paperWeightGsm: 200 }),

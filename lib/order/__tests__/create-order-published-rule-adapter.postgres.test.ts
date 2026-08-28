@@ -2,6 +2,11 @@ import 'dotenv/config';
 
 import { describe, expect, it } from 'vitest';
 import { db } from '../../db';
+import { calculateCreateOrderQuote } from '../../price/create-order';
+import {
+  createGoldenOrderInput,
+  createGoldenOrderItem,
+} from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 import { ZTO_PROVINCE_OPTIONS } from '../../price/external-order-charges';
 import {
   projectPublishedCreateOrderPriceSnapshot,
@@ -14,9 +19,13 @@ import { readExternalCreateOrderPriceSnapshot } from '../create-order-price-snap
 const databaseDescribe = process.env.DATABASE_URL ? describe : describe.skip;
 const FIXED_CURRENT_TIME = new Date('2026-08-28T08:00:00.000Z');
 const PROCESSING_BOOK_ID = 'cpb_external_processing_rule_v3';
+const FIVE_TIER_PROCESSING_BOOK_ID =
+  'cpb_external_processing_rule_v4_five_tier';
 const LOGISTICS_BOOK_ID = 'cpb_external_logistics_weight_policy_v3';
 const PROCESSING_SOURCE_SHA =
   '3596993e283d1d06f01dd7048b6ccf2f1c0e4b27394541e004a37419c856d817';
+const FIVE_TIER_PROCESSING_SOURCE_SHA =
+  '8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852';
 const LOGISTICS_SOURCE_SHA =
   '7d3d0b6dddb2ee910046b3bc80f1d7fc8e35aa94dd25d5cf14f23c58a6ab8a69';
 const SHIPPING_SOURCE_SHA =
@@ -156,6 +165,93 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
     expect(audit.logisticsRuleCodes).toEqual(
       expect.arrayContaining(['ZTO_GUANGDONG', 'CARTON_Q3001_5000']),
     );
+  });
+
+  it('projects the published five-tier successor across the retired schedule boundary', async () => {
+    const repairedBook = await db.customerPriceBook.findUniqueOrThrow({
+      where: { id: FIVE_TIER_PROCESSING_BOOK_ID },
+      select: { effectiveFrom: true },
+    });
+    const repairedAt = new Date(repairedBook.effectiveFrom.getTime() + 1);
+    const projected = await db.$transaction((tx) =>
+      readPublishedCreateOrderPriceProjection(tx, { now: repairedAt }),
+    );
+    const afterRetiredSchedule = await db.$transaction((tx) =>
+      readPublishedCreateOrderPriceProjection(tx, {
+        now: new Date('2026-08-29T09:59:00.000Z'),
+      }),
+    );
+
+    expect(projected.snapshot.priceVersion.processing).toEqual({
+      id: FIVE_TIER_PROCESSING_BOOK_ID,
+      code: 'EXTERNAL_SALES_PROCESSING_RULES',
+      version: 4,
+      sourceSha256: FIVE_TIER_PROCESSING_SOURCE_SHA,
+    });
+    expect(afterRetiredSchedule.snapshot.priceVersion.processing.id).toBe(
+      FIVE_TIER_PROCESSING_BOOK_ID,
+    );
+    expect(projected.audit.processingRuleCount).toBe(145);
+    expect(projected.audit.projectedRuleCodes.fullTiers).toHaveLength(50);
+    expect(projected.snapshot.full.unitPrices).toHaveLength(20);
+    expect(projected.snapshot.full.unitPrices.slice(-4)).toEqual([
+      {
+        tierCode: 'BASE_CUSTOM-MID_25001_40000',
+        pricingGroup: 'MID',
+        minQuantity: 25_001,
+        maxQuantity: 40_000,
+        unitPrice: '0.17',
+      },
+      {
+        tierCode: 'BASE_CUSTOM-LARGE_25001_40000',
+        pricingGroup: 'LARGE',
+        minQuantity: 25_001,
+        maxQuantity: 40_000,
+        unitPrice: '0.19',
+      },
+      {
+        tierCode: 'BASE_CUSTOM-MID_GTE_40001',
+        pricingGroup: 'MID',
+        minQuantity: 40_001,
+        maxQuantity: null,
+        unitPrice: '0.16',
+      },
+      {
+        tierCode: 'BASE_CUSTOM-LARGE_GTE_40001',
+        pricingGroup: 'LARGE',
+        minQuantity: 40_001,
+        maxQuantity: null,
+        unitPrice: '0.18',
+      },
+    ]);
+
+    const quote = (pricingGroup: 'MID' | 'LARGE', specification: string) =>
+      calculateCreateOrderQuote(
+        createGoldenOrderInput([
+          createGoldenOrderItem({
+            craft: 'FULL',
+            paperType: '珠光艳闪',
+            paperWeightGsm: 160,
+            specification,
+            pricingGroup,
+            quantity: 40_001,
+            frontColors: ['哑金'],
+            backColors: [],
+          }),
+        ]),
+        projected.snapshot,
+      ).items[0];
+
+    expect(quote('MID', '中号封')).toMatchObject({
+      status: 'QUOTED',
+      unitPrice: '0.1600',
+      processingAmount: '6400.16',
+    });
+    expect(quote('LARGE', '大号封')).toMatchObject({
+      status: 'QUOTED',
+      unitPrice: '0.1800',
+      processingAmount: '7200.18',
+    });
   });
 
   it('preserves null versus zero and fails closed on duplicate or missing rules', async () => {
