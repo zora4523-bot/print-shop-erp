@@ -233,7 +233,7 @@ export function deriveProductionOperationPlan(
   }
 
   const packagingIds = new Set<string>();
-  const packagedPiecesByItem = new Map<string, number>();
+  const packagingMembershipCountByItem = new Map<string, number>();
   const packingSpecs: ProductionOperationSpec[] = [];
   for (const [index, group] of facts.packagingGroups.entries()) {
     const path = `packagingGroups[${index}]`;
@@ -297,11 +297,22 @@ export function deriveProductionOperationPlan(
         );
         continue;
       }
-      packagedPiecesByItem.set(
+      packagingMembershipCountByItem.set(
         line.orderItemId,
-        (packagedPiecesByItem.get(line.orderItemId) ?? 0) +
-          group.actualBagCount * line.unitsPerBag,
+        (packagingMembershipCountByItem.get(line.orderItemId) ?? 0) + 1,
       );
+      const itemQuantity = itemQuantityById.get(line.orderItemId);
+      if (
+        itemQuantity !== undefined &&
+        Math.ceil(itemQuantity / line.unitsPerBag) !== group.actualBagCount
+      ) {
+        issue(
+          issues,
+          'PACKAGING_QUANTITY_MISMATCH',
+          `${linePath}.unitsPerBag`,
+          `款式 ${line.orderItemId} 按每袋 ${line.unitsPerBag} 个应为 ${Math.ceil(itemQuantity / line.unitsPerBag)} 袋，与包装组 #${group.sequence} 的 ${group.actualBagCount} 袋不一致`,
+        );
+      }
     }
 
     packingSpecs.push({
@@ -326,13 +337,15 @@ export function deriveProductionOperationPlan(
   for (const item of facts.items) {
     const expected = itemQuantityById.get(item.id);
     if (expected === undefined) continue;
-    const actual = packagedPiecesByItem.get(item.id) ?? 0;
-    if (actual !== expected) {
+    const membershipCount = packagingMembershipCountByItem.get(item.id) ?? 0;
+    if (membershipCount !== 1) {
       issue(
         issues,
         'PACKAGING_QUANTITY_MISMATCH',
         `items[${item.sequence}].packaging`,
-        `款式 #${item.sequence} 包装覆盖 ${actual} 个，与款式数量 ${expected} 不一致`,
+        membershipCount === 0
+          ? `款式 #${item.sequence} 未加入任一包装组`
+          : `款式 #${item.sequence} 同时加入 ${membershipCount} 个包装组，只允许唯一归属`,
       );
     }
   }

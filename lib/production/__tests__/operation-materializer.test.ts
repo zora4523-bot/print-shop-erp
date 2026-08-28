@@ -189,6 +189,72 @@ describe('deriveProductionOperationPlan', () => {
     });
   });
 
+  it('allows a partially filled final bag using the canonical ceil rule', () => {
+    const plan = deriveProductionOperationPlan(
+      orderFacts({
+        items: [
+          {
+            id: 'item-1',
+            sequence: 1,
+            craft: OrderCraft.PRINT,
+            quantity: 1_001,
+            frontFoilColors: [],
+            backFoilColors: [],
+            hasLocalFoil: false,
+          },
+        ],
+        packagingGroups: [
+          {
+            id: 'group-1',
+            sequence: 1,
+            actualBagCount: 11,
+            lines: [{ orderItemId: 'item-1', unitsPerBag: 100 }],
+          },
+        ],
+      }),
+    );
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.specs).toEqual([
+      expect.objectContaining({
+        operationType: 'PACKING',
+        unit: 'PER_BAG',
+        plannedQty: '11',
+      }),
+    ]);
+  });
+
+  it('rejects the same item appearing in more than one packaging group', () => {
+    const plan = deriveProductionOperationPlan(
+      orderFacts({
+        packagingGroups: [
+          {
+            id: 'group-1',
+            sequence: 1,
+            actualBagCount: 10,
+            lines: [{ orderItemId: 'item-1', unitsPerBag: 100 }],
+          },
+          {
+            id: 'group-2',
+            sequence: 2,
+            actualBagCount: 10,
+            lines: [{ orderItemId: 'item-1', unitsPerBag: 100 }],
+          },
+        ],
+      }),
+    );
+
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'PACKAGING_QUANTITY_MISMATCH',
+        path: 'items[1].packaging',
+      }),
+    );
+  });
+
   it('fails closed instead of guessing incomplete legacy facts', () => {
     const plan = deriveProductionOperationPlan(
       orderFacts({

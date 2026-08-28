@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   OrderCraft,
+  OrderKind,
   OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
@@ -23,6 +24,7 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
   return {
     id: 'order-1',
     orderNo: 'GD-1',
+    kind: OrderKind.NORMAL,
     status: OrderStatus.PENDING_FACTORY,
     settlementType: OrderSettlementType.EXTERNAL_SALES,
     pricingStatus: OrderPricingStatus.AUTO_CONFIRMED,
@@ -252,6 +254,36 @@ describe('activateProductionOperationsInTx', () => {
         AT,
       ),
     ).rejects.toMatchObject({ code });
+  });
+
+  it('materializes a confirmed free rework without changing customer fees', async () => {
+    const tx = transactionMock(
+      orderFixture({
+        kind: OrderKind.REWORK,
+        settlementType: OrderSettlementType.NO_CHARGE,
+      }),
+    );
+
+    await expect(
+      activateProductionOperationsInTx(
+        tx as never,
+        'order-1',
+        { id: 'admin-1' },
+        AT,
+      ),
+    ).resolves.toMatchObject({
+      orderStatus: OrderStatus.SCHEDULING,
+      operationsCreated: 2,
+      idempotentReplay: false,
+    });
+    expect(tx.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        status: OrderStatus.SCHEDULING,
+        scheduledAt: AT,
+        requiresOutsource: false,
+      },
+    });
   });
 
   it('物化活跃内制非计件工艺，跳过计件白名单与外协工艺', async () => {

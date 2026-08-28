@@ -1,5 +1,6 @@
 import type { Prisma } from '../../generated/prisma/client';
 import {
+  OrderKind,
   OrderPricingStatus,
   OrderSettlementType,
   OrderStatus,
@@ -39,6 +40,7 @@ export class ProductionOperationMaterializationError extends Error {
 const ORDER_FACTS_SELECT = {
   id: true,
   orderNo: true,
+  kind: true,
   status: true,
   settlementType: true,
   pricingStatus: true,
@@ -219,7 +221,9 @@ export type ActivateProductionOperationsResult = {
 };
 
 /**
- * Transactional cutover entry for newly submitted, chargeable orders.
+ * Transactional cutover entry for newly submitted chargeable orders and
+ * explicitly free rework orders. Customer pricing remains orthogonal to the
+ * production/piecework ledger: a free rework still consumes real operations.
  * The per-order advisory lock makes the absence check and inserts atomic;
  * exact replays are no-ops and partial/mismatched ledgers fail closed.
  */
@@ -243,10 +247,13 @@ export async function activateProductionOperationsInTx(
       '工单不存在',
     );
   }
-  if (order.settlementType === OrderSettlementType.NO_CHARGE) {
+  if (
+    order.settlementType === OrderSettlementType.NO_CHARGE &&
+    order.kind !== OrderKind.REWORK
+  ) {
     throw new ProductionOperationMaterializationError(
       'ORDER_NOT_CHARGEABLE',
-      '本入口只物化已确认价格的收费工单',
+      '本入口只物化已确认价格的收费工单或免费重做单',
     );
   }
   if (!isConfirmedPricing(order.pricingStatus)) {

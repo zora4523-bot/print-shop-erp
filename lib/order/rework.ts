@@ -1,6 +1,9 @@
 import {
   OrderBillingMode,
+  OrderCraft,
+  OrderFoilTechnique,
   OrderKind,
+  OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -18,6 +21,11 @@ import { enqueueNotificationInTransaction } from '../notification/transactional-
 import type { EnqueueClient } from '../background-jobs/repository';
 import { backgroundJobsMode } from '../background-jobs/mode';
 import { ORDER_PRICING_STATUS } from './pricing-status';
+import { deriveLegacyOrderItemFoilFacts } from './pricing-route';
+import {
+  activateProductionOperationsInTx,
+  ProductionOperationMaterializationError,
+} from '../production/operation-materialization-service';
 
 export class ReworkOrderError extends Error {
   constructor(message: string) {
@@ -86,6 +94,12 @@ export async function createReworkOrder(
         shipments: {
           orderBy: { sequence: 'asc' },
         },
+        packagingGroups: {
+          orderBy: { sequence: 'asc' },
+          include: {
+            lines: { orderBy: { orderItemId: 'asc' } },
+          },
+        },
       },
     });
     if (!source) throw new ReworkOrderError('原工单不存在');
@@ -142,11 +156,203 @@ export async function createReworkOrder(
     }
     const activeCrafts = await tx.craft.findMany({
       where: { id: { in: [...requestedCraftIds] }, isActive: true },
-      select: { id: true },
+      select: { id: true, code: true },
     });
     if (activeCrafts.length !== requestedCraftIds.size) {
       throw new ReworkOrderError('所选重做工艺不存在或已停用');
     }
+
+    const craftCodeById = new Map(
+      activeCrafts.map((craft) => [craft.id, craft.code]),
+    );
+    const partialFoilCodes = new Set(['FLAT_FOIL_PARTIAL', 'STOCK_FOIL']);
+    const fullFoilCodes = new Set([
+      'FLAT_FOIL_SINGLE',
+      'FLAT_FOIL_DOUBLE',
+      'FLAT_FOIL_TRIPLE',
+    ]);
+    const printFoilCodes = new Set([
+      'COATED_COLOR_PRINT_FOIL',
+      'COLOR_PRINT_FOIL',
+    ]);
+    const productionFactsBySourceItemId = new Map<
+      string,
+      ReturnType<typeof deriveLegacyOrderItemFoilFacts> & {
+        craft: OrderCraft;
+        hasLocalFoil: boolean;
+        foilTechnique: (typeof source.items)[number]['foilTechnique'];
+      }
+    >();
+    for (const requested of input.items) {
+      const sourceItem = sourceItemById.get(requested.sourceOrderItemId)!;
+      const foilFacts = deriveLegacyOrderItemFoilFacts(sourceItem);
+      const selectedFoilCodes = requested.craftIds.flatMap((craftId) => {
+        const code = craftCodeById.get(craftId);
+        return code &&
+          (partialFoilCodes.has(code) ||
+            fullFoilCodes.has(code) ||
+            printFoilCodes.has(code))
+          ? [code]
+          : [];
+      });
+      if (selectedFoilCodes.length > 1) {
+        throw new ReworkOrderError(
+          `款式“${sourceItem.name}”同时选中多个烫金主工艺，无法唯一确定重做计件口径`,
+        );
+      }
+      const selectedFoilCode = selectedFoilCodes[0] ?? null;
+      let reworkCraft: OrderCraft = OrderCraft.PRINT;
+      let reworkHasLocalFoil = false;
+      if (selectedFoilCode && partialFoilCodes.has(selectedFoilCode)) {
+        reworkCraft = OrderCraft.PARTIAL;
+        reworkHasLocalFoil = true;
+      } else if (selectedFoilCode && fullFoilCodes.has(selectedFoilCode)) {
+        reworkCraft = OrderCraft.FULL;
+      } else if (selectedFoilCode && printFoilCodes.has(selectedFoilCode)) {
+        if (sourceItem.hasLocalFoil === null) {
+          throw new ReworkOrderError(
+            `款式“${sourceItem.name}”的彩印叠加烫金未标明局部或专版，不能猜测重做工序`,
+          );
+        }
+        reworkCraft = sourceItem.hasLocalFoil
+          ? OrderCraft.PARTIAL
+          : OrderCraft.FULL;
+        reworkHasLocalFoil = sourceItem.hasLocalFoil;
+      }
+      if (
+        reworkCraft === OrderCraft.PARTIAL &&
+        foilFacts.frontFoilColors.length + foilFacts.backFoilColors.length === 0
+      ) {
+        throw new ReworkOrderError(
+          `款式“${sourceItem.name}”缺少局部烫金正反面颜色次数，不能猜测重做计件数`,
+        );
+      }
+      productionFactsBySourceItemId.set(
+        sourceItem.id,
+        selectedFoilCode
+          ? {
+              ...foilFacts,
+              craft: reworkCraft,
+              hasLocalFoil: reworkHasLocalFoil,
+              foilTechnique: sourceItem.foilTechnique,
+            }
+          : {
+              frontFoilColors: [],
+              backFoilColors: [],
+              foilColors: [],
+              isDoubleSided: false,
+              isDoubleColor: false,
+              craft: OrderCraft.PRINT,
+              hasLocalFoil: false,
+              foilTechnique: OrderFoilTechnique.NONE,
+            },
+      );
+    }
+
+    const packagingMemberships = new Map<
+      string,
+      Array<{
+        sourceGroupId: string;
+        sourceGroupSequence: number;
+        sourceGroupName: string | null;
+        sourceGroupActualBagCount: number;
+        unitsPerBag: number;
+      }>
+    >();
+    for (const group of source.packagingGroups) {
+      for (const line of group.lines) {
+        const memberships = packagingMemberships.get(line.orderItemId) ?? [];
+        memberships.push({
+          sourceGroupId: group.id,
+          sourceGroupSequence: group.sequence,
+          sourceGroupName: group.name,
+          sourceGroupActualBagCount: group.actualBagCount,
+          unitsPerBag: line.unitsPerBag,
+        });
+        packagingMemberships.set(line.orderItemId, memberships);
+      }
+    }
+
+    const packagingPlanBySourceGroupId = new Map<
+      string,
+      {
+        sourceSequence: number;
+        sourceName: string | null;
+        members: Array<{
+          requestedIndex: number;
+          sourceOrderItemId: string;
+          unitsPerBag: number;
+          bagCount: number;
+        }>;
+      }
+    >();
+    for (const [requestedIndex, requested] of input.items.entries()) {
+      const sourceItem = sourceItemById.get(requested.sourceOrderItemId)!;
+      const memberships = packagingMemberships.get(sourceItem.id) ?? [];
+      if (memberships.length !== 1) {
+        throw new ReworkOrderError(
+          memberships.length === 0
+            ? `款式“${sourceItem.name}”在原单没有唯一包装组，无法确定重做入袋数`
+            : `款式“${sourceItem.name}”在原单同时属于 ${memberships.length} 个包装组，拒绝猜测重做包装口径`,
+        );
+      }
+      const membership = memberships[0]!;
+      if (
+        !Number.isSafeInteger(membership.unitsPerBag) ||
+        membership.unitsPerBag <= 0 ||
+        !Number.isSafeInteger(membership.sourceGroupActualBagCount) ||
+        membership.sourceGroupActualBagCount <= 0 ||
+        Math.ceil(sourceItem.quantity / membership.unitsPerBag) !==
+          membership.sourceGroupActualBagCount
+      ) {
+        throw new ReworkOrderError(
+          `款式“${sourceItem.name}”的原单每袋数与实际袋数不一致，请先修复原单包装事实`,
+        );
+      }
+      const bagCount = Math.ceil(requested.quantity / membership.unitsPerBag);
+      const plan = packagingPlanBySourceGroupId.get(
+        membership.sourceGroupId,
+      ) ?? {
+        sourceSequence: membership.sourceGroupSequence,
+        sourceName: membership.sourceGroupName,
+        members: [],
+      };
+      plan.members.push({
+        requestedIndex,
+        sourceOrderItemId: sourceItem.id,
+        unitsPerBag: membership.unitsPerBag,
+        bagCount,
+      });
+      packagingPlanBySourceGroupId.set(membership.sourceGroupId, plan);
+    }
+    const packagingPlans = [...packagingPlanBySourceGroupId.values()]
+      .sort((left, right) => left.sourceSequence - right.sourceSequence)
+      .map((plan, index) => {
+        const bagCounts = [...new Set(plan.members.map((member) => member.bagCount))];
+        if (bagCounts.length !== 1) {
+          throw new ReworkOrderError(
+            `原包装组 #${plan.sourceSequence} 的重做数量无法沿用同一混装袋数，请调整重做数量或先拆分原单包装事实`,
+          );
+        }
+        return {
+          sequence: index + 1,
+          name: plan.sourceName,
+          mode:
+            plan.members.length === 1
+              ? OrderPackagingMode.SINGLE_STYLE
+              : OrderPackagingMode.MIXED_STYLE,
+          actualBagCount: bagCounts[0]!,
+          members: plan.members,
+        };
+      });
+    const unitsPerBagBySourceItemId = new Map(
+      packagingPlans.flatMap((plan) =>
+        plan.members.map(
+          (member) =>
+            [member.sourceOrderItemId, member.unitsPerBag] as const,
+        ),
+      ),
+    );
 
     const orderNo = await nextOrderNumber(
       tx as unknown as OrderSeqTxClient,
@@ -190,18 +396,38 @@ export async function createReworkOrder(
             const sourceItem = sourceItemById.get(
               requested.sourceOrderItemId,
             )!;
+            const productionFacts = productionFactsBySourceItemId.get(
+              sourceItem.id,
+            )!;
             return {
               sequence: index + 1,
               name: sourceItem.name,
               productId: sourceItem.productId,
+              pricingRoute: sourceItem.pricingRoute,
+              craft: productionFacts.craft,
+              productStructure: sourceItem.productStructure,
+              artworkVersion: sourceItem.artworkVersion,
+              plateGroupId: sourceItem.plateGroupId,
+              pricingGroup: sourceItem.pricingGroup,
+              manualQuoteReason: sourceItem.manualQuoteReason,
               specification: sourceItem.specification,
+              actualWidthMm: sourceItem.actualWidthMm,
+              actualHeightMm: sourceItem.actualHeightMm,
               paperType: sourceItem.paperType,
+              paperWeightGsm: sourceItem.paperWeightGsm,
               quantity: requested.quantity,
+              pack: unitsPerBagBySourceItemId.get(sourceItem.id),
               crafts: requested.craftIds,
-              foilColors: sourceItem.foilColors,
+              frontFoilColors: productionFacts.frontFoilColors,
+              backFoilColors: productionFacts.backFoilColors,
+              foilColors: productionFacts.foilColors,
+              foilTechnique: productionFacts.foilTechnique,
+              hasLocalFoil: productionFacts.hasLocalFoil,
               lamination: sourceItem.lamination,
-              isDoubleSided: sourceItem.isDoubleSided,
-              isDoubleColor: sourceItem.isDoubleColor,
+              printColors: sourceItem.printColors,
+              printColorsKnown: sourceItem.printColorsKnown,
+              isDoubleSided: productionFacts.isDoubleSided,
+              isDoubleColor: productionFacts.isDoubleColor,
               unitPrice: '0',
               fixedFee: '0',
               subtotal: '0',
@@ -264,13 +490,80 @@ export async function createReworkOrder(
       },
       select: { id: true },
     });
+    const createdItemIdBySequence = new Map(
+      createdOrder.items.map((item) => [item.sequence, item.id]),
+    );
     await tx.orderShipmentLine.createMany({
-      data: createdOrder.items.map((item, index) => ({
-        shipmentId: shipment.id,
-        orderItemId: item.id,
-        quantity: input.items[index]!.quantity,
-      })),
+      data: input.items.map((item, index) => {
+        const orderItemId = createdItemIdBySequence.get(index + 1);
+        if (!orderItemId) {
+          throw new ReworkOrderError(
+            `重做单缺少款式 #${index + 1} 的持久化记录`,
+          );
+        }
+        return {
+          shipmentId: shipment.id,
+          orderItemId,
+          quantity: item.quantity,
+        };
+      }),
     });
+    const persistedPackagingGroups: Array<{
+      sequence: number;
+      name: string | null;
+      mode: OrderPackagingMode;
+      actualBagCount: number;
+      itemUnitsPerBag: Array<{ orderItemId: string; unitsPerBag: number }>;
+    }> = [];
+    for (const plan of packagingPlans) {
+      const createdGroup = await tx.orderPackagingGroup.create({
+        data: {
+          orderId: createdOrder.id,
+          sequence: plan.sequence,
+          name: plan.name,
+          mode: plan.mode,
+          actualBagCount: plan.actualBagCount,
+          unitPrice: '0',
+          subtotal: '0',
+          suggestedSubtotal: null,
+          pricingSnapshot: {
+            version: 1,
+            source: 'FREE_REWORK',
+            sourceOrderId: source.id,
+            actualBagCount: plan.actualBagCount,
+          },
+          priceOverrideReason: '免费重做，不计入客户收费',
+        },
+        select: { id: true },
+      });
+      const lines = plan.members.map((member) => {
+        const orderItemId = createdItemIdBySequence.get(
+          member.requestedIndex + 1,
+        );
+        if (!orderItemId) {
+          throw new ReworkOrderError(
+            `重做包装组 #${plan.sequence} 找不到对应款式`,
+          );
+        }
+        return {
+          orderId: createdOrder.id,
+          packagingGroupId: createdGroup.id,
+          orderItemId,
+          unitsPerBag: member.unitsPerBag,
+        };
+      });
+      await tx.orderPackagingGroupLine.createMany({ data: lines });
+      persistedPackagingGroups.push({
+        sequence: plan.sequence,
+        name: plan.name,
+        mode: plan.mode,
+        actualBagCount: plan.actualBagCount,
+        itemUnitsPerBag: lines.map((line) => ({
+          orderItemId: line.orderItemId,
+          unitsPerBag: line.unitsPerBag,
+        })),
+      });
+    }
     await pricingTx.orderPricingRevision.create({
       data: {
         orderId: createdOrder.id,
@@ -297,7 +590,7 @@ export async function createReworkOrder(
               requested.sourceOrderItemId,
             )!;
             return {
-              id: createdOrder.items[index]?.id ?? null,
+              id: createdItemIdBySequence.get(index + 1) ?? null,
               sequence: index + 1,
               name: sourceItem.name,
               quantity: requested.quantity,
@@ -315,6 +608,14 @@ export async function createReworkOrder(
               },
             };
           }),
+          packagingGroups: persistedPackagingGroups.map((group) => ({
+            ...group,
+            unitPrice: '0',
+            subtotal: '0',
+            suggestedSubtotal: null,
+            priceOverrideReason: '免费重做，不计入客户收费',
+            requiresAdminConfirmation: false,
+          })),
           customerCharges: [],
         },
       },
@@ -330,6 +631,19 @@ export async function createReworkOrder(
         remark: `创建重做工单 ${createdOrder.orderNo}：${input.reason}`,
       },
     });
+    try {
+      await activateProductionOperationsInTx(
+        tx,
+        createdOrder.id,
+        actor,
+        now,
+      );
+    } catch (error) {
+      if (error instanceof ProductionOperationMaterializationError) {
+        throw new ReworkOrderError(`重做单无法投产：${error.message}`);
+      }
+      throw error;
+    }
 
     if (backgroundJobsMode() === 'durable') {
       const payload = await tx.order.findUniqueOrThrow({
