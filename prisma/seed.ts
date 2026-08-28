@@ -7,6 +7,7 @@
  * 1. 默认管理员账号
  * 2. 工艺字典默认项
  * 3. 薪资规则默认值（三套体系）
+ * 3A. 新工序计件价簿占位（DRAFT / null）
  * 4. 推送事件类型预置
  * 5. 系统配置
  *
@@ -27,6 +28,7 @@ import {
   SETTING_DEFINITIONS,
   SETTING_KEYS,
 } from '../lib/settings/definitions';
+import { seedPieceworkPriceBookV1Placeholder } from '../lib/salary/piecework-price-book-seed';
 
 // Prisma 7 要求显式指定 adapter
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
@@ -38,6 +40,7 @@ async function main() {
   await seedAdmin();
   await seedCrafts();
   await seedSalaryRules();
+  await seedPieceworkPriceBook();
   await seedNotificationEvents();
   await seedSettings();
 
@@ -356,6 +359,17 @@ async function seedSalaryRules() {
 
   console.log(
     `  ✓ 薪资规则 ${rules.length} 条（新建 ${created}，保留已有 ${rules.length - created}）`,
+  );
+}
+
+// ============================================================
+// 3A. 新工序计件价簿占位（仅 DRAFT）
+// ============================================================
+async function seedPieceworkPriceBook() {
+  const result = await seedPieceworkPriceBookV1Placeholder(db);
+  console.log(
+    `  ✓ 工序计件价簿 v1 ${result.status}` +
+      `（新建价簿 ${result.createdBook ? 1 : 0}，补齐占位规则 ${result.createdRules}）`,
   );
 }
 

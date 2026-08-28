@@ -113,6 +113,9 @@ model User {
   resolvedTaskDisputes      ProductionTaskDispute[]     @relation("ProductionTaskDisputeResolver")
   confirmedOrderPricing     Order[]                     @relation("OrderPricingConfirmer")
   createdPricingRevisions   OrderPricingRevision[]      @relation("OrderPricingRevisionCreator")
+  publishedPieceworkBooks   PieceworkPriceBook[]        @relation("PieceworkPriceBookPublisher")
+  productionReports         ProductionReport[]          @relation("ProductionReportReporter")
+  pieceworkSettlements      PieceworkSettlement[]       @relation("PieceworkSettlementReporter")
 
   @@index([role])
   @@index([workerType])
@@ -394,6 +397,7 @@ model Order {
   csSalesEntries        CsSalesEntry[]
   pricingRevisions      OrderPricingRevision[] @relation("OrderPricingRevisions")
   quotedPricingRevision OrderPricingRevision?  @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
+  productionOperations ProductionOperation[]
 
   @@index([submitterId])
   @@index([customerPartyId])
@@ -498,6 +502,7 @@ model OrderItem {
   packagingGroupLines OrderPackagingGroupLine[]
   outsourceSnapshots  OutsourceOrderItemSnapshot[]
   plateDetails        OrderItemPlateDetail[]
+  operationSources    ProductionOperationSource[]
 
   @@unique([orderId, sequence])
   @@unique([orderId, fig])
@@ -556,6 +561,7 @@ model OrderPackagingGroup {
 
   order Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   lines OrderPackagingGroupLine[]
+  operationSources ProductionOperationSource[]
 
   @@unique([orderId, sequence])
   @@unique([orderId, id])
@@ -794,6 +800,208 @@ model ProductionTaskDispute {
   @@index([workerId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@index([resolvedById])
+}
+
+// ============================================================
+// 新工序计件域（与旧 ProductionTask / SalaryRule 完全隔离）
+// ============================================================
+
+enum PieceworkOperationType {
+  PARTIAL
+  FULL
+  PACKING
+}
+
+enum PieceworkRateUnit {
+  PER_PASS
+  PER_PIECE
+  PER_BAG
+}
+
+enum PieceworkPriceBookStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ProductionOperationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductionOperationSourceType {
+  ORDER_ITEM
+  PACKAGING_GROUP
+}
+
+enum ProductionReportSource {
+  LIVE
+  LEGACY_IMPORT
+}
+
+enum ProductionReportEntryType {
+  REPORT
+  REVERSAL
+}
+
+enum PieceworkSettlementStatus {
+  DRAFT
+  LOCKED
+  PAID
+}
+
+// 对内工价簿独立版本化。DRAFT 可补金额，PUBLISHED 一旦发布后
+// 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
+model PieceworkPriceBook {
+  id             String                   @id @default(cuid())
+  version        Int                      @unique
+  status         PieceworkPriceBookStatus @default(DRAFT)
+  effectiveFrom  DateTime?                @db.Timestamptz(3)
+  effectiveTo    DateTime?                @db.Timestamptz(3)
+  sourceName     String?                  @db.Text
+  sourceSha256   String?                  @db.VarChar(64)
+  manifestSha256 String?                  @db.VarChar(64)
+  ruleSetSha256  String?                  @db.VarChar(64)
+  publishNote    String?                  @db.Text
+  publishedById  String?
+  publishedAt    DateTime?                @db.Timestamptz(3)
+  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+
+  publishedBy User?                @relation("PieceworkPriceBookPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+  rules       PieceworkPriceRule[]
+  reports     ProductionReport[]
+
+  @@index([status, effectiveFrom])
+  @@index([publishedById])
+  @@index([sourceSha256])
+}
+
+model PieceworkPriceRule {
+  id            String                 @id @default(cuid())
+  priceBookId   String
+  operationType PieceworkOperationType
+  unit          PieceworkRateUnit
+  amount        Decimal?               @db.Decimal(14, 4)
+  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime               @updatedAt @db.Timestamptz(3)
+
+  priceBook PieceworkPriceBook @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+
+  @@unique([priceBookId, operationType])
+  @@index([operationType])
+}
+
+// 生产工序只记业务类型和计划数，不记工人或机型。来源行只用于
+// 追溯数量事实，不参与工价键的选择。
+model ProductionOperation {
+  id            String                    @id @default(cuid())
+  orderId       String
+  operationType PieceworkOperationType
+  unit          PieceworkRateUnit
+  status        ProductionOperationStatus @default(PENDING)
+  plannedQty    Decimal                   @db.Decimal(14, 3)
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime                  @updatedAt @db.Timestamptz(3)
+
+  order   Order                       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  sources ProductionOperationSource[]
+  reports ProductionReport[]
+
+  @@index([orderId, status])
+  @@index([operationType, status])
+}
+
+model ProductionOperationSource {
+  id               String                        @id @default(cuid())
+  operationId      String
+  sourceType       ProductionOperationSourceType
+  orderItemId      String?
+  packagingGroupId String?
+  sourceQty        Decimal                       @db.Decimal(14, 3)
+  createdAt        DateTime                      @default(now()) @db.Timestamptz(3)
+
+  operation      ProductionOperation  @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  orderItem      OrderItem?            @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  packagingGroup OrderPackagingGroup? @relation(fields: [packagingGroupId], references: [id], onDelete: Restrict)
+
+  @@unique([operationId, orderItemId])
+  @@unique([operationId, packagingGroupId])
+  @@index([orderItemId])
+  @@index([packagingGroupId])
+}
+
+// 每次扫码都追加一行。报工人、工价版本和金额快照同行锁定；
+// 更正只能追加一条 REVERSAL，数据库触发器禁止 UPDATE / DELETE。
+model ProductionReport {
+  id                   String                    @id @default(cuid())
+  operationId          String
+  reporterId           String
+  entryType            ProductionReportEntryType @default(REPORT)
+  source               ProductionReportSource    @default(LIVE)
+  reversalOfId         String?                    @unique
+  reportedCompletedQty Decimal                   @db.Decimal(14, 3)
+  defectQty            Decimal                   @default(0) @db.Decimal(14, 3)
+  reworkQty            Decimal                   @default(0) @db.Decimal(14, 3)
+  chargeableQty        Decimal                   @db.Decimal(14, 3)
+  unit                 PieceworkRateUnit
+  rate                 Decimal                   @db.Decimal(14, 4)
+  amount               Decimal                   @db.Decimal(14, 2)
+  priceBookId          String
+  priceBookVersion     Int
+  ruleSetSha256        String                    @db.VarChar(64)
+  snapshot             Json
+  idempotencyKey       String                    @unique @db.VarChar(128)
+  reportedAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(3)
+
+  operation ProductionOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  reporter  User                @relation("ProductionReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  priceBook PieceworkPriceBook  @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+  reversalOf ProductionReport?  @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy ProductionReport?  @relation("ProductionReportReversal")
+  settlementItem PieceworkSettlementItem?
+
+  @@index([operationId, reportedAt])
+  @@index([reporterId, reportedAt])
+  @@index([priceBookId])
+}
+
+// 新 ledger 拥有独立结算边界，不与 DailyWorkerSalaryItem 相加或共用键。
+model PieceworkSettlement {
+  id               String                    @id @default(cuid())
+  reporterId       String
+  workDate         DateTime                  @db.Date
+  status           PieceworkSettlementStatus @default(DRAFT)
+  reportAmount     Decimal                   @db.Decimal(14, 2)
+  adjustmentAmount Decimal                   @default(0) @db.Decimal(14, 2)
+  payableAmount    Decimal                   @db.Decimal(14, 2)
+  snapshot         Json
+  lockedAt         DateTime?                 @db.Timestamptz(3)
+  paidAt           DateTime?                 @db.Timestamptz(3)
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                  @updatedAt @db.Timestamptz(3)
+
+  reporter User                      @relation("PieceworkSettlementReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  items    PieceworkSettlementItem[]
+
+  @@unique([reporterId, workDate])
+  @@index([status, workDate])
+}
+
+model PieceworkSettlementItem {
+  id           String   @id @default(cuid())
+  settlementId String
+  reportId     String   @unique
+  amount       Decimal  @db.Decimal(14, 2)
+  snapshot     Json
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  settlement PieceworkSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  report     ProductionReport    @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([settlementId])
 }
 
 // ============================================================
