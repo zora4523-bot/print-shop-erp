@@ -605,6 +605,35 @@ describe('createReworkOrderAction', () => {
     expect(reworkMock.createReworkOrder).not.toHaveBeenCalled();
   });
 
+  it('passes explicit legacy packaging evidence through to the domain layer', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    reworkMock.createReworkOrder.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+    });
+
+    await createReworkOrderAction(null, {
+      ...input,
+      cause: ReworkCause.LOGISTICS_DAMAGE,
+      items: [
+        {
+          ...input.items[0],
+          craftIds: [],
+          unitsPerBag: '40',
+        },
+      ],
+    });
+
+    expect(reworkMock.createReworkOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({ craftIds: [], unitsPerBag: 40 }),
+        ],
+      }),
+      salesActor,
+    );
+  });
+
   it('maps domain errors and revalidates the source and order list views', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     reworkMock.createReworkOrder.mockRejectedValueOnce(

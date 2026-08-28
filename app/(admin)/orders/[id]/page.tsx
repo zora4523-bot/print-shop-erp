@@ -66,6 +66,7 @@ import { HighlightedRemark } from '@/components/business/order/HighlightedRemark
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import {
   getReworkCraftOptions,
+  reworkItemRequiresUnitsPerBagInput,
 } from '@/lib/order/rework';
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
@@ -1766,6 +1767,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
               sequence: item.sequence,
               name: item.name,
               quantity: item.quantity,
+              requiresUnitsPerBagInput:
+                reworkItemRequiresUnitsPerBagInput(
+                  order.packagingGroups.filter((group) =>
+                    group.lines.some(
+                      (line) => line.orderItem.id === item.id,
+                    ),
+                  ).length,
+                  item.pack,
+                ),
               crafts: reworkCraftOptions.filter((craft) =>
                 item.crafts.includes(craft.id),
               ),

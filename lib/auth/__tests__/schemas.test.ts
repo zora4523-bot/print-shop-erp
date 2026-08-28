@@ -2137,4 +2137,36 @@ describe('createReworkOrderSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('allows packing-only rework and normalizes an explicit legacy pack value', () => {
+    const result = createReworkOrderSchema.safeParse({
+      ...input,
+      cause: 'LOGISTICS_DAMAGE',
+      items: [
+        {
+          ...input.items[0],
+          craftIds: [],
+          unitsPerBag: '50',
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.items[0]).toMatchObject({
+      craftIds: [],
+      unitsPerBag: 50,
+    });
+  });
+
+  it.each([0, -1, 1.5, 10_000_000, 'abc'])(
+    'rejects invalid explicit units per bag: %s',
+    (unitsPerBag) => {
+      const result = createReworkOrderSchema.safeParse({
+        ...input,
+        items: [{ ...input.items[0], unitsPerBag }],
+      });
+      expect(result.success).toBe(false);
+    },
+  );
 });

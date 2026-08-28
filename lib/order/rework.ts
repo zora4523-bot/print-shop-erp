@@ -40,6 +40,59 @@ export type ReworkCraftOption = {
   isOutsource: boolean;
 };
 
+export const REWORK_PACKAGING_FACT_SOURCES = {
+  SOURCE_GROUP: 'SOURCE_GROUP',
+  SOURCE_ITEM_PACK: 'SOURCE_ITEM_PACK',
+  ADMIN_INPUT: 'ADMIN_INPUT',
+} as const;
+
+export type ReworkPackagingFactSource =
+  (typeof REWORK_PACKAGING_FACT_SOURCES)[keyof typeof REWORK_PACKAGING_FACT_SOURCES];
+
+const MAX_PACKAGING_UNITS_PER_BAG = 9_999_999;
+
+function isValidPackagingUnitsPerBag(
+  value: number | null | undefined,
+): value is number {
+  return (
+    value !== null &&
+    value !== undefined &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAX_PACKAGING_UNITS_PER_BAG
+  );
+}
+
+/**
+ * The admin form only asks for missing per-style legacy evidence. One
+ * structured membership is canonical; duplicate memberships fail closed in
+ * the domain and therefore must not expose an override field either.
+ */
+export function reworkItemRequiresUnitsPerBagInput(
+  structuredPackagingMembershipCount: number,
+  sourceItemPack: number | null | undefined,
+): boolean {
+  return (
+    structuredPackagingMembershipCount === 0 &&
+    !isValidPackagingUnitsPerBag(sourceItemPack)
+  );
+}
+
+type ReworkPackagingPlan = {
+  sequence: number;
+  name: string | null;
+  mode: OrderPackagingMode;
+  actualBagCount: number;
+  factSource: ReworkPackagingFactSource;
+  sourcePackagingGroupId: string | null;
+  members: Array<{
+    requestedIndex: number;
+    sourceOrderItemId: string;
+    unitsPerBag: number;
+    bagCount: number;
+  }>;
+};
+
 type ReworkPricingRevisionTxClient = {
   order: {
     create: (args: {
@@ -139,6 +192,14 @@ export async function createReworkOrder(
     for (const item of input.items) {
       const sourceItem = sourceItemById.get(item.sourceOrderItemId);
       if (!sourceItem) throw new ReworkOrderError('所选款式不属于原工单');
+      if (
+        item.unitsPerBag !== undefined &&
+        !isValidPackagingUnitsPerBag(item.unitsPerBag)
+      ) {
+        throw new ReworkOrderError(
+          `款式“${sourceItem.name}”的每袋数量必须是 1 至 ${MAX_PACKAGING_UNITS_PER_BAG} 的整数`,
+        );
+      }
       if (item.quantity > sourceItem.quantity) {
         throw new ReworkOrderError(
           `款式“${sourceItem.name}”重做数量不能超过原数量 ${sourceItem.quantity}`,
@@ -154,10 +215,13 @@ export async function createReworkOrder(
         requestedCraftIds.add(craftId);
       }
     }
-    const activeCrafts = await tx.craft.findMany({
-      where: { id: { in: [...requestedCraftIds] }, isActive: true },
-      select: { id: true, code: true },
-    });
+    const activeCrafts =
+      requestedCraftIds.size === 0
+        ? []
+        : await tx.craft.findMany({
+            where: { id: { in: [...requestedCraftIds] }, isActive: true },
+            select: { id: true, code: true },
+          });
     if (activeCrafts.length !== requestedCraftIds.size) {
       throw new ReworkOrderError('所选重做工艺不存在或已停用');
     }
@@ -249,74 +313,172 @@ export async function createReworkOrder(
       );
     }
 
+    type SourcePackagingMembership = {
+      sourceGroupId: string;
+      sourceGroupSequence: number;
+      sourceGroupName: string | null;
+      unitsPerBag: number;
+    };
     const packagingMemberships = new Map<
       string,
-      Array<{
-        sourceGroupId: string;
-        sourceGroupSequence: number;
-        sourceGroupName: string | null;
-        sourceGroupActualBagCount: number;
-        unitsPerBag: number;
-      }>
+      SourcePackagingMembership[]
     >();
+    const sourcePackagingGroupById = new Map<
+      string,
+      (typeof source.packagingGroups)[number]
+    >();
+    const duplicateSourcePackagingGroupIds = new Set<string>();
     for (const group of source.packagingGroups) {
+      if (sourcePackagingGroupById.has(group.id)) {
+        duplicateSourcePackagingGroupIds.add(group.id);
+      }
+      sourcePackagingGroupById.set(group.id, group);
       for (const line of group.lines) {
         const memberships = packagingMemberships.get(line.orderItemId) ?? [];
         memberships.push({
           sourceGroupId: group.id,
           sourceGroupSequence: group.sequence,
           sourceGroupName: group.name,
-          sourceGroupActualBagCount: group.actualBagCount,
           unitsPerBag: line.unitsPerBag,
         });
         packagingMemberships.set(line.orderItemId, memberships);
       }
     }
 
+    const validatedSourceGroupIds = new Set<string>();
+    const validateRelevantSourceGroup = (
+      group: (typeof source.packagingGroups)[number],
+    ) => {
+      if (validatedSourceGroupIds.has(group.id)) return;
+      if (duplicateSourcePackagingGroupIds.has(group.id)) {
+        throw new ReworkOrderError(
+          `原单包装组 ${group.id} 重复，请先修复原单包装事实`,
+        );
+      }
+      if (
+        !Number.isSafeInteger(group.actualBagCount) ||
+        group.actualBagCount <= 0
+      ) {
+        throw new ReworkOrderError(
+          `原包装组 #${group.sequence} 的实际袋数非法，请先修复原单包装事实`,
+        );
+      }
+      if (group.lines.length === 0) {
+        throw new ReworkOrderError(
+          `原包装组 #${group.sequence} 没有款式明细，请先修复原单包装事实`,
+        );
+      }
+      if (
+        (group.mode === OrderPackagingMode.SINGLE_STYLE &&
+          group.lines.length !== 1) ||
+        (group.mode === OrderPackagingMode.MIXED_STYLE &&
+          group.lines.length < 2)
+      ) {
+        throw new ReworkOrderError(
+          `原包装组 #${group.sequence} 的包装方式与款式明细不一致，请先修复原单包装事实`,
+        );
+      }
+      const itemIdsInGroup = new Set<string>();
+      for (const line of group.lines) {
+        const sourceItem = sourceItemById.get(line.orderItemId);
+        if (!sourceItem) {
+          throw new ReworkOrderError(
+            `原包装组 #${group.sequence} 引用了不属于原单的款式，请先修复原单包装事实`,
+          );
+        }
+        if (itemIdsInGroup.has(sourceItem.id)) {
+          throw new ReworkOrderError(
+            `款式“${sourceItem.name}”在原包装组 #${group.sequence} 重复，请先修复原单包装事实`,
+          );
+        }
+        itemIdsInGroup.add(sourceItem.id);
+        if (
+          !isValidPackagingUnitsPerBag(line.unitsPerBag) ||
+          Math.ceil(sourceItem.quantity / line.unitsPerBag) !==
+            group.actualBagCount
+        ) {
+          throw new ReworkOrderError(
+            `款式“${sourceItem.name}”的原单每袋数与实际袋数不一致，请先修复原单包装事实`,
+          );
+        }
+      }
+      validatedSourceGroupIds.add(group.id);
+    };
+
     const packagingPlanBySourceGroupId = new Map<
       string,
       {
         sourceSequence: number;
         sourceName: string | null;
-        members: Array<{
-          requestedIndex: number;
-          sourceOrderItemId: string;
-          unitsPerBag: number;
-          bagCount: number;
-        }>;
+        firstRequestedIndex: number;
+        members: ReworkPackagingPlan['members'];
       }
     >();
+    const fallbackPlans: Array<
+      ReworkPackagingPlan & { firstRequestedIndex: number }
+    > = [];
     for (const [requestedIndex, requested] of input.items.entries()) {
       const sourceItem = sourceItemById.get(requested.sourceOrderItemId)!;
       const memberships = packagingMemberships.get(sourceItem.id) ?? [];
-      if (memberships.length !== 1) {
+      if (memberships.length > 1) {
         throw new ReworkOrderError(
-          memberships.length === 0
-            ? `款式“${sourceItem.name}”在原单没有唯一包装组，无法确定重做入袋数`
-            : `款式“${sourceItem.name}”在原单同时属于 ${memberships.length} 个包装组，拒绝猜测重做包装口径`,
+          `款式“${sourceItem.name}”在原单同时属于 ${memberships.length} 个包装组，拒绝猜测重做包装口径`,
         );
       }
-      const membership = memberships[0]!;
-      if (
-        !Number.isSafeInteger(membership.unitsPerBag) ||
-        membership.unitsPerBag <= 0 ||
-        !Number.isSafeInteger(membership.sourceGroupActualBagCount) ||
-        membership.sourceGroupActualBagCount <= 0 ||
-        Math.ceil(sourceItem.quantity / membership.unitsPerBag) !==
-          membership.sourceGroupActualBagCount
-      ) {
-        throw new ReworkOrderError(
-          `款式“${sourceItem.name}”的原单每袋数与实际袋数不一致，请先修复原单包装事实`,
-        );
+      const membership = memberships[0];
+      if (!membership) {
+        const usesSourceItemPack = isValidPackagingUnitsPerBag(sourceItem.pack);
+        const unitsPerBag = usesSourceItemPack
+          ? sourceItem.pack
+          : requested.unitsPerBag;
+        if (!isValidPackagingUnitsPerBag(unitsPerBag)) {
+          throw new ReworkOrderError(
+            `款式“${sourceItem.name}”的原单未记录每袋数量，请由管理员显式填写“每袋数量（原单未记录）”`,
+          );
+        }
+        const bagCount = Math.ceil(requested.quantity / unitsPerBag);
+        fallbackPlans.push({
+          sequence: 0,
+          name: `重做 · ${sourceItem.name}`,
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: bagCount,
+          factSource: usesSourceItemPack
+            ? REWORK_PACKAGING_FACT_SOURCES.SOURCE_ITEM_PACK
+            : REWORK_PACKAGING_FACT_SOURCES.ADMIN_INPUT,
+          sourcePackagingGroupId: null,
+          firstRequestedIndex: requestedIndex,
+          members: [
+            {
+              requestedIndex,
+              sourceOrderItemId: sourceItem.id,
+              unitsPerBag,
+              bagCount,
+            },
+          ],
+        });
+        continue;
       }
-      const bagCount = Math.ceil(requested.quantity / membership.unitsPerBag);
-      const plan = packagingPlanBySourceGroupId.get(
+
+      const sourceGroup = sourcePackagingGroupById.get(
         membership.sourceGroupId,
-      ) ?? {
+      );
+      if (!sourceGroup) {
+        throw new ReworkOrderError(
+          `款式“${sourceItem.name}”的原单包装组不存在，请先修复原单包装事实`,
+        );
+      }
+      validateRelevantSourceGroup(sourceGroup);
+      const bagCount = Math.ceil(requested.quantity / membership.unitsPerBag);
+      const plan = packagingPlanBySourceGroupId.get(membership.sourceGroupId) ?? {
         sourceSequence: membership.sourceGroupSequence,
         sourceName: membership.sourceGroupName,
+        firstRequestedIndex: requestedIndex,
         members: [],
       };
+      plan.firstRequestedIndex = Math.min(
+        plan.firstRequestedIndex,
+        requestedIndex,
+      );
       plan.members.push({
         requestedIndex,
         sourceOrderItemId: sourceItem.id,
@@ -325,26 +487,48 @@ export async function createReworkOrder(
       });
       packagingPlanBySourceGroupId.set(membership.sourceGroupId, plan);
     }
-    const packagingPlans = [...packagingPlanBySourceGroupId.values()]
-      .sort((left, right) => left.sourceSequence - right.sourceSequence)
-      .map((plan, index) => {
-        const bagCounts = [...new Set(plan.members.map((member) => member.bagCount))];
+
+    const canonicalPlans = [...packagingPlanBySourceGroupId.entries()].map(
+      ([sourcePackagingGroupId, plan]) => {
+        const bagCounts = [
+          ...new Set(plan.members.map((member) => member.bagCount)),
+        ];
         if (bagCounts.length !== 1) {
           throw new ReworkOrderError(
             `原包装组 #${plan.sourceSequence} 的重做数量无法沿用同一混装袋数，请调整重做数量或先拆分原单包装事实`,
           );
         }
         return {
-          sequence: index + 1,
+          sequence: 0,
           name: plan.sourceName,
           mode:
             plan.members.length === 1
               ? OrderPackagingMode.SINGLE_STYLE
               : OrderPackagingMode.MIXED_STYLE,
           actualBagCount: bagCounts[0]!,
+          factSource: REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+          sourcePackagingGroupId,
+          firstRequestedIndex: plan.firstRequestedIndex,
           members: plan.members,
         };
-      });
+      },
+    );
+    const packagingPlans: ReworkPackagingPlan[] = [
+      ...canonicalPlans,
+      ...fallbackPlans,
+    ]
+      .sort(
+        (left, right) => left.firstRequestedIndex - right.firstRequestedIndex,
+      )
+      .map((plan, index) => ({
+        sequence: index + 1,
+        name: plan.name,
+        mode: plan.mode,
+        actualBagCount: plan.actualBagCount,
+        factSource: plan.factSource,
+        sourcePackagingGroupId: plan.sourcePackagingGroupId,
+        members: plan.members,
+      }));
     const unitsPerBagBySourceItemId = new Map(
       packagingPlans.flatMap((plan) =>
         plan.members.map(
@@ -353,6 +537,23 @@ export async function createReworkOrder(
         ),
       ),
     );
+    const packagingFactSourceBySourceItemId = new Map(
+      packagingPlans.flatMap((plan) =>
+        plan.members.map(
+          (member) => [member.sourceOrderItemId, plan.factSource] as const,
+        ),
+      ),
+    );
+    const packagingFactEvidence = packagingPlans.map((plan) => ({
+      sequence: plan.sequence,
+      source: plan.factSource,
+      sourcePackagingGroupId: plan.sourcePackagingGroupId,
+      members: plan.members.map((member) => ({
+        sourceOrderItemId: member.sourceOrderItemId,
+        unitsPerBag: member.unitsPerBag,
+        bagCount: member.bagCount,
+      })),
+    }));
 
     const orderNo = await nextOrderNumber(
       tx as unknown as OrderSeqTxClient,
@@ -390,6 +591,9 @@ export async function createReworkOrder(
         promisedDate: null,
         processingAmount: '0.00',
         totalAmount: '0.00',
+        quotedFee: null,
+        confirmedFee: '0.00',
+        settledFee: null,
         submittedAt: now,
         items: {
           create: input.items.map((requested, index) => {
@@ -437,6 +641,8 @@ export async function createReworkOrder(
                 source: 'FREE_REWORK',
                 sourceOrderId: source.id,
                 sourceOrderItemId: sourceItem.id,
+                packagingFactSource:
+                  packagingFactSourceBySourceItemId.get(sourceItem.id),
               },
               priceOverrideReason: '免费重做，不计加工费',
               remark: sourceItem.remark,
@@ -463,6 +669,10 @@ export async function createReworkOrder(
               billingMode: {
                 before: null,
                 after: OrderBillingMode.NO_CHARGE,
+              },
+              packagingFactSources: {
+                before: null,
+                after: packagingFactEvidence,
               },
             },
             remark: `由原工单 ${source.orderNo} 创建重做单：${input.reason}`,
@@ -513,6 +723,8 @@ export async function createReworkOrder(
       name: string | null;
       mode: OrderPackagingMode;
       actualBagCount: number;
+      packagingFactSource: ReworkPackagingFactSource;
+      sourcePackagingGroupId: string | null;
       itemUnitsPerBag: Array<{ orderItemId: string; unitsPerBag: number }>;
     }> = [];
     for (const plan of packagingPlans) {
@@ -531,6 +743,8 @@ export async function createReworkOrder(
             source: 'FREE_REWORK',
             sourceOrderId: source.id,
             actualBagCount: plan.actualBagCount,
+            packagingFactSource: plan.factSource,
+            sourcePackagingGroupId: plan.sourcePackagingGroupId,
           },
           priceOverrideReason: '免费重做，不计入客户收费',
         },
@@ -558,6 +772,8 @@ export async function createReworkOrder(
         name: plan.name,
         mode: plan.mode,
         actualBagCount: plan.actualBagCount,
+        packagingFactSource: plan.factSource,
+        sourcePackagingGroupId: plan.sourcePackagingGroupId,
         itemUnitsPerBag: lines.map((line) => ({
           orderItemId: line.orderItemId,
           unitsPerBag: line.unitsPerBag,
@@ -584,6 +800,9 @@ export async function createReworkOrder(
             priceRevision: 1,
             processingAmount: '0.00',
             totalAmount: '0.00',
+            quotedFee: null,
+            confirmedFee: '0.00',
+            settledFee: null,
           },
           items: input.items.map((requested, index) => {
             const sourceItem = sourceItemById.get(
@@ -605,6 +824,8 @@ export async function createReworkOrder(
                 source: 'FREE_REWORK',
                 sourceOrderId: source.id,
                 sourceOrderItemId: sourceItem.id,
+                packagingFactSource:
+                  packagingFactSourceBySourceItemId.get(sourceItem.id),
               },
             };
           }),
@@ -627,6 +848,10 @@ export async function createReworkOrder(
         action: 'CREATE_REWORK',
         changedFields: {
           reworkOrderId: { before: null, after: createdOrder.id },
+          packagingFactSources: {
+            before: null,
+            after: packagingFactEvidence,
+          },
         },
         remark: `创建重做工单 ${createdOrder.orderNo}：${input.reason}`,
       },

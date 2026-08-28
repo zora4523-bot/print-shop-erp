@@ -2390,6 +2390,22 @@ const reworkEntityId = z
   .trim()
   .regex(/^[A-Za-z0-9_-]+$/, '记录 id 格式非法');
 
+const optionalReworkUnitsPerBagField = z.preprocess(
+  (value) => {
+    if (value === '' || value === null || value === undefined) return undefined;
+    if (typeof value === 'string' && /^\d+$/u.test(value.trim())) {
+      return Number.parseInt(value.trim(), 10);
+    }
+    return value;
+  },
+  z
+    .number({ message: '每袋数量必须是数字' })
+    .int('每袋数量必须是整数')
+    .min(1, '每袋数量必须大于 0')
+    .max(9_999_999, '每袋数量过大')
+    .optional(),
+);
+
 export const createReworkOrderSchema = z.object({
   sourceOrderId: reworkEntityId,
   cause: z.enum(ReworkCause),
@@ -2399,9 +2415,11 @@ export const createReworkOrderSchema = z.object({
       z.object({
         sourceOrderItemId: reworkEntityId,
         quantity: orderItemQuantityField,
+        // 只有历史原单无结构化包装组且该款 pack 也缺失时，
+        // 域层才会采用管理员显式补录的每袋数；不得覆盖 canonical 包装组。
+        unitsPerBag: optionalReworkUnitsPerBagField,
         craftIds: z
           .array(craftIdSchema)
-          .min(1, '至少选择一项重做工艺')
           .max(10)
           .refine(
             (craftIds) => new Set(craftIds).size === craftIds.length,
