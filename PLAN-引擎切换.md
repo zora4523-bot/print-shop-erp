@@ -2,20 +2,22 @@
 
 > 状态：**第一阶段方案，未执行**
 >
-> 审查基线：2026-08-28，工作树 `Review@b7f0210f3e1bf24d71f9a35693c91044f8b31fbd`
+> 审查/修订基线：2026-08-28，`Review@2c74f2c3f65b823b1f77a14a94e13284887033ff`
 >
 > 审查对象：当前工作树（含未提交改动），不是只看 `HEAD`
 >
-> 本阶段唯一写入：本文件。未删除路由、代码、测试或数据，未修改任何规则配置。
+> 唯一真值版本：`docs/加工费计费规则.md`，由 `/Users/zhixing/Downloads/加工费计费规则 (1).md` 同步；SHA-256 `8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852`（两文件逐字相同）。它取代 repo 旧文档 hash `3596993e283d1d06f01dd7048b6ccf2f1c0e4b27394541e004a37419c856d817`。
+>
+> 本次方案修订只同步上述真值文档并修改本 PLAN；未删除路由、业务代码、测试或数据，未修改任何规则配置。
 
 ## 1. 结论先行
 
 1. `/sales/quote` 是独立的销售只读查价页，不是建单必经链，也没有专属 API。它的页面、专属展示组件、只读目录 DAL 与专属测试可以整块删除。
 2. 仓库中已经有 `calculateCreateOrderQuote` 纯函数雏形，但**生产零调用**；当前预览、提交、复核和改单仍由旧的款式、包装、物流三条链拼接。它不能直接切流。
-3. 当前新引擎测试是 `1 file / 65 tests passed`，但 fixture 本身含错误：偷用了未确认的专版 40,001 档、把彩印 7,001 错放进 1 万档、虚构了一个不存在的 180g SKU，并漏掉专版西封加价。因此“现有测试全绿”不能作为验收证据。
+3. 当前新引擎测试是 `1 file / 65 tests passed`。按上述最新版真值复核后，`40,001 → 5万档 0.16/0.18` 是正确黄金边界，`7,001 → 1万档` 也是 §9 指定的当前默认，两项旧指控撤销。仍成立的是 fixture 虚构“珠光艳闪 180g SKU”和引擎漏算专版西封 `+0.06/个`；此外 2万/3万等价档被合并，弱化了“配置可改”的区间身份验证。
 4. “工艺参数”不应整页删除。`Craft` 仍是工艺字典、外协识别和历史任务关联；应收窄为字典，删除接单岗位、默认机型、熟练工艺等人员匹配职责。
-5. 现有计件与目标相反：按“个人 + 机型”找规则，缺陷数和返工数也参与计薪；打包报工反而计件为 0、转时薪。目标应是三种工序统一扫码报工、按工序版本价结算。
-6. 内部建单当前仍有“报价产品、自定义纸张/规格/尺寸、人工单价、一次性费用、人工改价说明”等维护面。目标是复用外部结构化建单字段，只保留一个现有的 `manualQuoteReason` 配置外备注出口。
+5. 现有计件与目标相反：按“个人 + 机型”找规则，缺陷数和返工数也参与计薪；打包报工反而计件为 0、转时薪。目标应是三种工序统一扫码报工、按工序版本价结算；“缺陷/返工退出计薪”属于薪酬语义变更，已单列第 13 节待拍板，确认前不是既定事实。
+6. 内部建单当前仍有“报价产品、自定义纸张/规格/尺寸、人工单价、一次性费用、人工改价说明”等维护面。目标是复用外部结构化建单字段，创建时只保留一个 `manualQuoteReason` 配置外备注；人工单价、一次性费用、定价依据不是消失，而是搬到现有工单详情 `OrderPricingReviewForm` 的工厂确认环节，并补齐 `confirmedFee` 落库。
 
 本方案确认后才进入第二阶段。确认即接受第 13 节列出的默认值；三类工价金额仍可后补，不阻塞代码与测试开发，但没有完整已发布工价时不启用生产工资结算。
 
@@ -77,7 +79,7 @@ rg -n --hidden --glob '!node_modules/**' --glob '!.git/**' --glob '!.next/**' \
 
 本计划把删除证据按四类记录在第 4、5、7、9 节：目标本身、全部生产入站、测试/路由/文档字符串入站、迁移后的零引用门禁。第二阶段只整删这些已列目标；若移除调用后新出现某个零引用 helper/type，但本计划没有列明，默认**保留并写入 REPORT 的待拍板残留**，不凭“看起来没用”扩大删除。历史 migration 永不删除，构建产物不算引用证据。
 
-审查开始时工作树已有 **221 个 tracked 改动、80 个既有 untracked 文件**；加上本计划后是 302 项。多个待改共享文件已含用户改动。第二阶段必须逐文件/逐 hunk 修改与暂存；每个 commit 前检查 `git diff --cached --name-only`，禁止 `git add .`、reset、checkout 覆盖或清理用户文件。
+用户已在 `2c74f2c` 建立当前工作树 checkpoint；本次修订开始前工作树干净。当前未提交范围应只有同步后的真值文档和本 PLAN。第二阶段仍须逐文件/逐 hunk 修改与暂存；每个 commit 前检查 `git diff --cached --name-only`，禁止 `git add .`、reset、checkout 覆盖或清理用户文件。
 
 ## 4. 移除 A：销售前端报价 / 询价入口
 
@@ -230,29 +232,30 @@ rg -n 'quoteOrderItemsAction|quoteOrderItems|calculateQuote|actions/order-quote|
 
 ### 6.5 `docs/加工费计费规则.md` 第 8 节黄金 fixture 门禁
 
-把文档 40 个场景全部变成带 `caseId` 和章节号的数据 fixture：
+把最新版文档 42 个场景全部变成带 `caseId` 和章节号的数据 fixture：
 
 | 组 | 数量 | 必须覆盖 |
 |---|---:|---|
 | 局部烫金 | 5 | 999/1000 边界、正 1/2/3 色、正 1 反 1、空白封/机烫/入袋分项。 |
-| 专版烫金 | 13 | 基准、触感、浮雕、三色 manual；1/750/751、4500/4501、7500/7501、25000/25001 全部边界。 |
+| 专版烫金 | 15 | 基准、触感、浮雕、三色 manual；1/750/751、4500/4501、7500/7501、25000/25001、40000/40001 全部边界。 |
 | 彩印 | 3 | 1000 整单价不乘数量、6000 取 5 千档、冰白中号 2000 空格 manual。 |
 | 纸箱 | 11 | 500 至 20000 的全部文档值，并补 6 款 ×1000 只按整单 6000 收一次。 |
 | 快递 | 8 | 五个区域、180g 向上进位、2001 待定、顺丰到付但纸箱照收。 |
 
-另加结构 fixture：西封加价、双色、激凸、全部纸张加价、彩印单色烫金、空格与 0 元、重复行、mixed group、服务端配置外派生、双版本证据，以及真值第 9 节的触感纸方形、万元封局部烫金、彩印覆膜、150g 莱尼纹重量与公斤进位口径。
+另加结构 fixture：西封加价、双色、激凸、全部纸张加价、彩印单色烫金、空格与 0 元、重复行、mixed group、服务端配置外派生、双版本证据，以及触感纸方形明确无规格、万元封局部烫金、彩印覆膜、150g 莱尼纹重量与公斤进位口径。
 
 现有 fixture/engine 必须修复：
 
-| 现状缺陷 | 证据 | 修复口径 |
+| 现状缺陷 / 覆盖缺口 | 证据 | 修复口径 |
 |---|---|---|
-| 专版 40,001 起使用 `.16/.18` | fixture `:22-32`、test `:240-243`。 | 删除该硬编码；文档表与已发布规则均为 `>=25001` 继续 `.17/.19`；真值 §9 的内部备注冲突按第 13 节默认值显式拍板。 |
-| 彩印 7,001 进入 1 万档 | `selectors.ts:42-58`、test `:289-299`。 | snapshot 保留价表 `minQty/maxQty` 并按区间命中：5000-7999、8000-14999、15000-20000；不在 selector 复制区间。 |
-| 虚构“珠光艳闪 180g 大号 0.13” | fixture `:59-65`。 | 删除虚构 SKU；180g 快递用例与加工价解耦，或使用真值中存在的红卡 180g 行。 |
-| 漏算专版西封 `+0.06/个` | `CreateOrderPriceSnapshot.full` 无该字段，`quoteFullProcessing` 无计算。 | 从现有规则行编译西封加价并新增分项 fixture。 |
+| 2万档与3万档被合并 | `create-order-golden-fixtures.ts:22-32` 用一行 `[15001,40000,.17,.19]`；金额暂同所以未算错，但丢失可独立配置的档位身份。 | 拆回 `15001-25000` 与 `25001-40000` 两条 snapshot fixture；保留正确的 `>=40001 → .16/.18`，断言边界按快照而非硬编码。 |
+| 虚构“珠光艳闪 180g 大号 0.13” | 最新真值 `:30-43` 只有艳闪 120/160g，180g 只有红卡；fixture `create-order-golden-fixtures.ts:52-65` 却新增艳闪 180g，基础 item `:274-296` 又固定艳闪，物流测试 `create-order-quote.test.ts:409-423` 只改 GSM。 | 删除虚构 SKU；180g 快递用例与加工价解耦，或显式改用真值存在的红卡 180g。REPORT 必须贴出这些 fixture/test 行号和修复 diff。 |
+| 漏算专版西封 `+0.06/个` | 最新真值 `:99-109` 明确西封加价；fixture full `create-order-golden-fixtures.ts:72-109`、`types.ts:112-127` 都无该字段，`item-quote.ts:331-381,407-430` 只合成 base/双色/纸张/特效。 | 从现有规则行编译西封加价并新增分项 fixture。REPORT 必须贴出这些 fixture/type/engine 行号和修复 diff。 |
 | 缺纸张加价行一律当 0 | `item-quote.ts:336-346`。 | 仅文档明确的 160g 艳闪/红卡基准纸可为显式 0；其他缺行一律 manual。 |
 | 彩印单色烫金零覆盖 | fixture 的 `foilPerOrderPrices=[]`。 | 用已发布行构造 fixture，覆盖整单附加价且不乘数量。 |
-| 新引擎只在测试运行 | `calculateCreateOrderQuote` 全仓生产零引用。 | 40 个黄金 case 和结构 case 全绿后，按下列调用点一次切完。 |
+| 新引擎只在测试运行 | `calculateCreateOrderQuote` 全仓生产零引用。 | 42 个黄金 case 和结构 case 全绿后，按下列调用点一次切完。 |
+
+两项已撤销的误判不再进入修复清单：`create-order-golden-fixtures.ts:22-32`、`create-order-quote.test.ts:230-254` 的 40,001 档符合最新版；`selectors.ts:42-59` 与 `create-order-quote.test.ts:289-311` 的 7,001→1万档符合最新版 §9 的当前默认。后者仍列第 13 节待拍板，但确认前不得改成 5千档。
 
 ### 6.6 全部调用点切换
 
@@ -260,7 +263,7 @@ rg -n 'quoteOrderItemsAction|quoteOrderItems|calculateQuote|actions/order-quote|
 2. **提交**：`finalizeExternalOrderQuoteInTx` 从持久化事实再次调用同一纯函数，写 item/group/charge line snapshot、plate pending、`quotedFee=knownTotal`、completeness、不可变 revision 和 PROCESSING/LOGISTICS 两条 lock；不接受客户端金额或版本。
 3. **复核**：删除 `pricing-review.ts:454-477` 的 `quoteHistoricalOrderItems` 静默历史重算。新引擎版本的新工单按已锁快照复核；管理员补人工价时写 `confirmedFee` 和新 revision，不覆盖 quotedFee。若保留“重新报价”，只能作用于 `engineVersion >= cutover` 的新工单，必须显式触发并追加 revision；切换前历史单只能读既有快照或追加人工确认 revision，绝不调用新引擎。
 4. **变更申请**：`change-request.ts:753,1404` 的包装/款式旧重算迁到新引擎；只有事实变更获批时才形成新 revision，被动查看不重算。
-5. **内部建单**：第 8 节所述共享校验与纯函数接管后，再删除旧 internal `calculateQuote/quoteOrderItemsAction` 路径，最终不是“外部新、内部旧”。
+5. **内部建单**：本计划第 9 节的共享校验与纯函数接管后，再删除旧 internal `calculateQuote/quoteOrderItemsAction` 路径，最终不是“外部新、内部旧”。
 6. **详情与列表**：统一阶段金额选择 `settled → confirmed → quoted`；迁移前历史三字段全 null 时只 fallback 到原 `totalAmount` 展示，不计算。销售列表、销售详情、管理员详情全部使用同一 selector。
 7. **snapshot 展示**：新 snapshot 带 schema/engine version；`PricingSnapshotBreakdown` 兼容读旧 `components[]` 与新 lines。旧 decoder 只读，不能调用引擎。
 
@@ -392,7 +395,7 @@ rg -n 'machineCapabilities|craftCapabilities|WorkerCraftCapability|defaultWorker
 
 | 订单事实 | 生成工序 | 计薪数量 |
 |---|---|---|
-| 局部烫金单 | PARTIAL + 每个包装组的 PACKING | 默认按过版次：本人扫码的合格完成个数 × 正反面颜色次数。 |
+| 局部烫金单 | PARTIAL + 每个包装组的 PACKING | 按第 13 节默认值：本人扫码的合格完成个数 × 正反面颜色次数；确认后才采用。 |
 | 专版烫金单 | FULL + 每个包装组的 PACKING | 本人扫码的合格完成个数。 |
 | 纯彩印 | 仅 PACKING | 包装组实际袋数；不产生 PARTIAL/FULL。 |
 | 彩印 + 局部烫金 | PARTIAL + PACKING | 烫金按 PARTIAL，包装按袋。 |
@@ -411,7 +414,7 @@ PACKING 是“一包装组一工序”，不是“一款一任务”。`OrderPac
 - 价格已确认后，用一个“投产”动作自动物化工序并进入生产，不展示候选、负载、机型或人员选择；可复用现有状态过渡，但不保留 capacity scheduling UI。
 - 任意具备对应固定工序岗位的登录账号可扫该工序 QR；服务端从 session 写 reporterId，客户端不能传 workerId。
 - 每次扫码报工追加 `ProductionReport`；同一工序可以由多人分别报工，不把首个扫码人变成“工单匹配关系”。
-- 聚合合格完成数控制工序完成；缺陷/返工仍记录质量事实，但不自动计薪。
+- 聚合合格完成数控制工序完成；按第 13 节待拍板默认值，缺陷/返工仍记录质量事实但不进入本期计薪；只有本计划获确认后才采用该薪酬口径。
 - 报工事务读取当时唯一 PUBLISHED 工价版本，调用无 IO 纯函数 `chargeableQty × rate`，把版本、单位、单价和金额锁进 report snapshot。
 - 无已发布规则、重复规则或 amount=null 时 fail closed，不按 0、不找个人覆盖、不找机型默认。
 - 工资结算只聚合本人 report ledger：`Σ report.amount`。不再套 `max(计件, 每日保底)`，PACKER 也不再叠加未来时薪。
@@ -426,11 +429,20 @@ seed 只创建一个 DRAFT v1 和三条规则：
 | FULL | `PER_PIECE` | null |
 | PACKING | `PER_BAG`（待拍板） | null |
 
-不得用 0 代替待补金额；发布校验拒绝 null。单元/集成测试使用测试专用非零 fixture，不污染 seed。代码、schema、migration、纯函数和测试可完成；正式生产结算必须等三项金额补齐并发布。
+不得用 0 代替待补金额；发布校验拒绝 null。seed 重跑只保证这一个 DRAFT/三条 placeholder 存在，不覆盖后来填入的金额，也绝不自动改成 PUBLISHED。单元/集成测试使用测试专用非零 fixture，不污染 seed。代码、schema、migration、纯函数和测试可完成；正式生产结算必须等三项金额补齐并发布。
 
-本期不新增工价配置 UI。金额补齐后通过受版本控制、可审计的 seed/管理脚本调用同一发布服务生成 PUBLISHED 版本；不能直接 SQL 改已发布行。
+### 8.5 无配置 UI 时的一次性 v1 发布闭环
 
-### 8.5 迁移与原子切换
+本期明确采用**一次性脚本发布 v1**，不再写“seed/脚本二选一”。现有 `publishCustomerPriceBookDraft`（`lib/price/customer-price-book-admin.ts:2359-2520`）硬编码 CustomerPriceBook/Rule、EXTERNAL_SALES 和外部规则校验，且首版要求已有 current，不能直接复用；只借鉴它的锁、乐观并发、hash 和审计模式。
+
+- 新增独立 `lib/salary/piecework-price-book-admin.ts`，不改 `customer-price-book-admin.ts` 或任何 CustomerPrice* 模型/数据；发布使用 advisory lock、`expectedDraftUpdatedAt`、半开有效期、规范化 rule-set SHA，并与 `BusinessAuditLog(PUBLISH_VERSION)` 同事务。
+- 新增版本化 v1 JSON manifest 和 `scripts/publish-piecework-price-book-v1.ts`（含 package script）。manifest 只含三类 operationType/unit/amount、effectiveFrom、source/publishNote；默认 dry-run，只有显式 `--apply` 才写入，并要求一个 active ADMIN 作为 audit actor。
+- apply 在一个事务内锁定并重读 canonical DRAFT v1，只允许 amount 从 null 写为 manifest 显式值或与已填值完全一致；校验正好三类、unit 合法、amount 非 null/非负/精度合法、无重复，再计算 manifest/rule-set SHA 并发布首个 v1。
+- 相同 manifest 重跑返回 already-published receipt；金额、hash、effectiveFrom 或 draft revision 不同一律 fail closed，不能覆盖已发布版本。
+- receipt 输出 book id/version/effectiveFrom、三条 unit/rate、manifestSha、ruleSetSha、auditLogId，完整贴入 REPORT。没有 PUBLISHED 版本前，扫码报工和结算继续 fail closed。
+- 新增 `piecework-price-book-admin.test.ts`、migration contract、并发 Postgres publication test、脚本 dry-run/apply/idempotency test 和 seed 双跑 contract；发布前后再核对全部既有对外价表 count/hash 不变。
+
+### 8.6 迁移与原子切换
 
 1. 在目标数据库只读统计 task 状态/工艺/worker、工资 paid/unpaid、包装组覆盖和账号类别；任何无法唯一映射的记录都阻断切换。
 2. 新表/枚举先落地；DRAFT placeholder 不自动发布。
@@ -450,7 +462,7 @@ seed 只创建一个 DRAFT v1 和三条规则：
 |---|---|---|
 | `:3305-3405` “报价产品”下拉及选中后自动回填 | 删除 | 外部 B 已直接选工艺/纸张/规格；内部共享同一输入后不再需要 product 先导路由。`Product`/options 仍被 `lib/order/create-order-options.ts:86-170` 使用，因此只删该控件，不删除配置中心 Product 数据。 |
 | `:3406-3523` 自定义产品结构、规格、纸张、GSM、宽高 | 删除内部专属动态面 | 配置外统一进入一个备注 + manual；真值明确支持的外部手动克重/改尺寸仍在共享 B 中保留。 |
-| `:3558-3655` 重新核价、成交单价、一次性费用、人工改价说明 | 从创建页删除 | 人工金额只能在复核层形成 confirmed revision，建单人不在配置外项目里造临时价格。 |
+| `:3558-3655` 重新核价、成交单价、一次性费用、人工改价说明 | 从创建页移到工厂确认 | 现有 `OrderPricingReviewForm.tsx:264-389` 已有客户单价、每款一次性费用、定价依据输入；本期保留并扩展该入口，建单人不再造临时价格。 |
 | `:3657-3666` 通用款式备注 | 保留 | 它是生产说明，不与配置外核价原因混用。 |
 | `manualQuoteReason` | 改成唯一“配置外项目说明” textarea | 字段已存在；当前 submit 分支 `:1354-1369` 反而清空它，需要修正持久化。 |
 | `components/business/order/order-form-gaps.ts:120-180` | 改写 shared validation | 当前强制 product/paper/craft，并以“手填价格 + 原因”解除缺口；目标是内部缺配置 + 非空说明 → manual，外部不能用说明绕过。 |
@@ -474,6 +486,34 @@ seed 只创建一个 DRAFT v1 和三条规则：
 | 结构化事实存在，但缺价/空格/规则冲突 | `MANUAL_PRICING_REQUIRED`、amount=null、禁止任何 fallback。 | 同左。 |
 | 规则配置完全没有的项目 | 不允许用自由备注伪装成结构化选项，拒绝配置外结构创建。 | `manualQuoteReason` 非空可放行创建为 `MANUAL_PRICING_REQUIRED`；为空拒绝。 |
 | 人工金额 | 创建页不填，复核层追加 confirmed revision。 | 同左。 |
+
+### 9.3 `MANUAL_PRICING_REQUIRED` 的工厂确认闭环
+
+不另造一套页面，迁移并补全现有链路：
+
+```text
+工单详情 → OrderPricingReviewForm
+         → previewOrderPricingReviewAction / finalizeOrderPricingAction
+         → 锁定报价快照 + 人工金额/依据
+         → confirmedFee + ADMIN_CONFIRMED revision
+```
+
+现有能力与缺口证据：
+
+- `app/(admin)/orders/[id]/page.tsx:218-222,512-560` 只给 ADMIN + EXTERNAL_SALES 展示复核入口；`pricing-review.ts:331-343` 也拒绝非 EXTERNAL_SALES，所以内部/工厂直单目前进不去。
+- `OrderPricingReviewForm.tsx:264-389` 已给不完整款提供 unitPrice、fixedFee、reason，`:393-497` 提供人工包装价，`:500-618` 提供物流/耗材值；schema 在 `lib/auth/schemas.ts:2645-2701`，权限是 `order:price:confirm`。
+- `pricing-review.ts:771-840` 已校验人工款金额、依据并形成行 snapshot，`:1154-1172` 已追加 `ADMIN_CONFIRMED` revision；但 `:1129-1140` 只更新 processing/packaging/total，生产代码没有任何 `confirmedFee:` 写入，因此当前终价后 `confirmedFee` 仍为 null。
+- preview/finalize 当前在 `pricing-review.ts:513-664,666+` 调旧引擎按最新规则重算，文案也写“按最新价格重算”；这与历史不重算红线冲突。
+
+目标闭环：
+
+1. 保留并改名/改文案为“工厂核价与确认终价”；扩大到所有使用共享新引擎且收费的 EXTERNAL_SALES、INTERNAL_SALES、FACTORY_DIRECT，NO_CHARGE 不显示。
+2. 新引擎切换后的工单只读取创建时锁定的双 priceVersion 和 quoted line snapshots；自动价只读展示，只有 `MANUAL_PRICING_REQUIRED` / typed pending 行录入人工金额与依据。切换前历史单不调用任何引擎。
+3. 内部配置外 `manualQuoteReason` 在确认页显示并作为原因上下文，但管理员仍须明确提交终价依据；创建页的通用生产备注不能替代它。
+4. finalize 在一个事务内写人工行/包装/物流快照，计算并写 `confirmedFee=整单确认总额`；`quotedFee` 与 `settledFee` 原样不动；追加且只追加一条 `ADMIN_CONFIRMED` revision，记录 confirmer/time 和人工明细。
+5. 详情/列表按 `settledFee → confirmedFee → quotedFee → legacy totalAmount` 选择；quoted 显示“估”，没有 confirmedFee 的 manual 单显示“待工厂核价”。
+
+新增/加强测试：创建页不再出现人工金额但确认页仍有三字段；内部/工厂直单可见、NO_CHARGE 不可见；非管理员拒绝；金额精度/范围/必填依据；stale revision 与并发只允许一次成功；事务失败全回滚；明确断言 confirmedFee 写入且 quotedFee/settledFee 未覆盖；revision snapshot 含金额、依据、操作者；切换前历史预览/详情不调用引擎。
 
 ## 10. 历史十单验收
 
@@ -508,7 +548,7 @@ seed 只创建一个 DRAFT v1 和三条规则：
 1. `refactor(sales): remove standalone quote inquiry feature`
    - 第 4 节完整删除；独立可回滚。
 2. `test+feat(pricing): align section-8 fixtures and pure quote contract`
-   - 修正 40 个 fixture、双版本、包装组、西封和 no-fallback；尚不部署切流。
+   - 对齐 42 个 fixture、双版本、包装组、西封和 no-fallback；尚不部署切流。
 3. `refactor(pricing): add read-only published-rule snapshot adapter`
    - 不改配置模型/数据/reader 签名。
 4. `refactor(order): switch preview and submit to the pure engine`
@@ -520,7 +560,7 @@ seed 只创建一个 DRAFT v1 和三条规则：
 7. `refactor(pricing): delete all superseded quote calculators and actions`
    - 此时做最终零引用检索；最终制品无双轨。
 8. `feat(piecework): add versioned operation rates and immutable report ledger`
-   - 新表、纯函数、发布门禁与 DRAFT seed 留位，尚不切旧生产流。
+   - 新表、纯函数、发布门禁与 DRAFT seed 留位；同时交付独立发布服务、版本化 v1 manifest、默认 dry-run/显式 `--apply` 的一次性发布脚本及其幂等/并发测试，尚不切旧生产流。
 9. `refactor(production): migrate active work to operation-based reporting`
    - 跑 preflight、确定性迁移非终态任务、自动物化工序，切 QR/扫码/完成级联。
 10. `refactor(production): remove personnel scheduling and claiming`
@@ -549,7 +589,7 @@ seed 只创建一个 DRAFT v1 和三条规则：
 
 ### 12.2 切流前总门禁
 
-- `docs/加工费计费规则.md` 第 8 节 40 个 fixture 全绿，结构补充 fixture 全绿；
+- `docs/加工费计费规则.md` 第 8 节 42 个 fixture 全绿，结构补充 fixture 全绿；
 - adapter 对当前已发布规则的行数、区间、rule code/source hash 投影一致；
 - 同一 canonical facts 的 preview、submit 重算和 token 完全一致；
 - 没有未列明的分币差异、manual/pending 分类变化或邻近档 fallback；
@@ -570,13 +610,13 @@ seed 只创建一个 DRAFT v1 和三条规则：
 | 客服侧 `cs.quote` 占位菜单 | `admin-modules.ts:450-459` 仅有 `href:'#'` placeholder；无页面、API、action，唯一专属断言在 `admin-menu.test.ts:390-393`。它不属于严格 SALES 路由，但同样表达“询价”。 | **一并移除。** |
 | 同一账号是否可跨 PARTIAL / FULL | 当前 `WorkerType + machineType` 是单一身份；多值 `machineCapabilities/craftCapabilities` 只服务将删除的推荐匹配。业务文字没有说明一人兼任两类。 | **每账号一个主工序：HAND_PRESS→PARTIAL、WINDMILL→FULL、PACKER→PACKING；保留 workerType/machineType 作历史兼容与迁移来源。若以后确有跨类人员，再加只用于扫码鉴权的 `UserOperationPermission`，绝不用于候选/负载/派工。** |
 | 三类之外的工艺是否仍作为完工步骤 | seed 仍有 GLUING/CLEANING/UV 等真实生产步骤，但本次只定义三类计件，不能把它们静默映射到 FULL/PACKING。 | **保留为无计件、无人员匹配的生产/外协进度步骤；若原流程要求扫码，继续作为完工闸口，但不生成 PieceworkReport 金额。** |
-| 专版 5 万及以上档 | 真值 §2 表写 `>=25001 → 0.17/0.19`，§9 又记录“5万档是否仍为 0.16/0.18”，文档内部存在冲突；当前已发布规则与 §2 表一致。 | **不新增 5 万档、不硬编码 0.16/0.18；继续读取已发布 `>=25001` 行（当前 0.17/0.19）。** |
-| 触感纸 200g 方形局部烫金价 | 真值 §9 写“现沿用原表 0.22，最新一版未再列出”；规则配置又是不能改的读取源。 | **只有当前已发布快照存在显式 0.22 行时按该行计算；没有、为空或冲突即 `MANUAL_PRICING_REQUIRED`，不在代码补默认。** |
+| 缺陷/返工是否计薪 | 旧实现 `lib/production.ts:1420-1424,1583-1597` 按 `completed+defect+rework` 计薪，`lib/__tests__/production.test.ts:1971-1979` 固化 4900+50+50=5000；这是既有薪酬语义，不能随引擎切换静默改变。 | **本期只按本人扫码的合格 `completedQty` 计件；defect/rework 继续记录质量事实但不进入本期工价，另立薪酬规则。历史工资快照不重算。** |
+| 彩印 7001～7999 档位 | 最新真值 §3 的区间文字没有完全闭合，§9 明确“现按 1万档实现”；当前 `selectors.ts:42-59` 与测试 `:289-311` 正是此行为。 | **本期维持 7001～7999 → 1万档；不把现有正确 fixture 改成 5千档。区间仍由价表 snapshot 提供，未来配置发布可改。** |
 | 万元封局部烫金 | 真值 §9 只记录旧表 0.38/0.42，但当前规格列表未纳入，结构支持范围不明确。 | **本期不扩展结构化选项；若输入/历史事实出现则 `MANUAL_PRICING_REQUIRED`，不复活旧表 fallback。历史单仍只读已有快照。** |
 | 彩印覆膜加价 | 真值 §3/§9 明确触感膜、新光膜、雷射金额待定。 | **选择这些膜时该款 `MANUAL_PRICING_REQUIRED`；标准铜版纸默认覆亚膜不额外收费。** |
 | 150g 莱尼纹单重 | 真值 §6.1 当前表值为 6g，§9 说明按比例会是 5.625g。 | **沿用文档当前可执行值 6g；不在引擎自行按比例换算。** |
 
-以下已由文档和代码证据消歧，不上榜：彩印 7001/7999/8000/15000 区间；公斤重量一律向上进位；plate 与 >2000 物流的显式 pending；Craft 字典保留；“完成数”只指本人扫码的合格完成数，defect/rework 是质量事实而非可重复计薪数量；多人扫码用 append-only report；旧历史金额不重算。
+以下已由最新版文档和代码证据消歧，不上榜：专版 40000/40001 边界；触感纸无方形规格；公斤重量一律向上进位；plate 与 >2000 物流的显式 pending；Craft 字典保留；多人扫码用 append-only report；旧历史金额不重算。
 
 ## 14. 数据待补但不阻塞开发
 
@@ -584,15 +624,15 @@ seed 只创建一个 DRAFT v1 和三条规则：
 - FULL：元 / 个；
 - PACKING：元 / 袋。
 
-代码完成时 DRAFT seed 三项 amount 都为 null。提供金额后，用发布流程形成唯一生效版本；没有发布版本前工资报工/结算 fail closed，不会把 null 当 0。
+代码完成时 DRAFT seed 三项 amount 都为 null。提供金额后，由 `scripts/publish-piecework-price-book-v1.ts --apply` 按已审阅的版本化 manifest 一次性发布 v1，并把 receipt 收进 REPORT；没有发布版本前工资报工/结算 fail closed，不会把 null 当 0。
 
 ## 15. 风险与回滚
 
 | 风险 | 控制 |
 |---|---|
-| 当前工作树原有 301 项改动与本任务重叠 | 逐 hunk 编辑/暂存，每 commit 检查 staged diff；禁止 reset/覆盖。 |
+| checkpoint 后本次真值文档与 PLAN 修订可能和第二阶段改动交叉 | 当前未提交范围必须保持仅这两份文档；第二阶段逐 hunk 编辑/暂存，每 commit 检查 staged diff，禁止 reset/覆盖。若出现其他用户改动，先隔离并报告。 |
 | 配置行能发布但无法投影为文档结构 | adapter fail closed 并报告 rule id/code；不改配置、不找旧版。 |
-| 新纯函数 fixture 先前自证错误 | 40 个 case ID 与文档逐条对照，增加 adapter row fixture 和 no-fallback 契约。 |
+| 新纯函数 fixture 先前自证不足 | 42 个 case ID 与已锁 hash 的最新版文档逐条对照，增加 adapter row fixture 和 no-fallback 契约；撤销的两项不得误改。 |
 | mixed packaging 被重复计费/计件 | 报价与生产都以 packaging group 为主体；同一算法推导 bag count。 |
 | 复核打开页面就重算历史 | 删除 `quoteHistoricalOrderItems`；历史读面测试禁止 quote import/call。 |
 | 三段费用展示漂移 | 单一阶段金额 selector；十单三页面逐字符对照。 |
@@ -610,10 +650,11 @@ seed 只创建一个 DRAFT v1 和三条规则：
 1. 每个 commit hash 与功能块；
 2. 已删除文件/共享片段/测试清单，以及最终零引用命令输出；
 3. 全部既有配置 schema/行/legacy seed 段、已发布规则 hash、双 priceVersion 前后对比，以及 additive migration 审计；
-4. `docs/加工费计费规则.md` 第 8 节 40 个 case 逐项结果和结构补充 fixture 结果；
-5. 旧实现与真值不一致的修复清单；
+4. `docs/加工费计费规则.md` 第 8 节 42 个 case 逐项结果和结构补充 fixture 结果；其中“虚构珠光艳闪 180g SKU”和“漏专版西封 +0.06/个”必须逐项贴出原 fixture/type/engine 的具体文件行号、修复 diff 和回归结果；
+5. 旧实现与真值不一致的修复清单，并明确记录已撤销的两项旧误判：`40001 → 5万档` 与 `7001 → 1万档` 不得列为缺陷；
 6. preview / submit / review / change / detail 的切换证据；
 7. 10 张历史单逐单数据库与页面金额对照；
 8. 新工序生成、纯彩印 only-PACKING、多人扫码、三类计件结果；
-9. seed 留位与仍待提供的三项金额；
-10. 本计划待拍板项采用的最终值；若执行中新出现未列明的疑似孤儿，附检索证据、默认保留并列残留，不擅自扩大删除。
+9. seed 留位、仍待提供的三项金额，以及一次性 v1 发布脚本的 dry-run/apply/idempotency 结果与完整 publication receipt；
+10. 缺陷/返工计薪、PARTIAL 单位、PACKING 单位等本计划待拍板项采用的最终值；
+11. 若执行中新出现未列明的疑似孤儿，附检索证据、默认保留并列残留，不擅自扩大删除。
