@@ -1,26 +1,44 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderStatus,
+  PieceworkOperationType,
+  ProductionOperationStatus,
   Role,
-  TaskStatus,
   WorkerType,
 } from '../../generated/prisma/enums';
 
-const { dbMock } = vi.hoisted(() => ({
+const {
+  dbMock,
+  operationTypeMock,
+  listSettlementMock,
+  getSettlementMock,
+} = vi.hoisted(() => ({
   dbMock: {
     order: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     dailyWorkerSalary: { findMany: vi.fn(), findFirst: vi.fn() },
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
+  operationTypeMock: vi.fn(),
+  listSettlementMock: vi.fn(),
+  getSettlementMock: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/production/operation-portal', () => ({
+  getReporterOperationTypeOrNull: operationTypeMock,
+}));
+vi.mock('@/lib/salary/piecework-settlement', () => ({
+  listWorkerPieceworkSettlements: listSettlementMock,
+  getPieceworkSettlementDetail: getSettlementMock,
+}));
 
 import {
   getWorkerOrderDetail,
   getWorkerHourlyPayrollDetail,
+  getWorkerPieceworkSettlementDetail,
   getWorkerSalaryDetail,
   listWorkerHourlyPayrolls,
   listWorkerOrders,
+  listWorkerPieceworkSettlementsForPortal,
   listWorkerSalaries,
   WORKER_ORDER_PAGE_SIZE,
   WorkerPortalError,
@@ -45,10 +63,15 @@ beforeEach(() => {
   dbMock.dailyWorkerSalary.findFirst.mockReset().mockResolvedValue(null);
   dbMock.hourlyWorkerPayroll.findMany.mockReset().mockResolvedValue([]);
   dbMock.hourlyWorkerPayroll.findFirst.mockReset().mockResolvedValue(null);
+  operationTypeMock
+    .mockReset()
+    .mockResolvedValue(PieceworkOperationType.PARTIAL);
+  listSettlementMock.mockReset().mockResolvedValue([]);
+  getSettlementMock.mockReset().mockResolvedValue(null);
 });
 
 describe('worker order visibility', () => {
-  it('filters both the order and every nested item/task by the session worker id', async () => {
+  it('shows the account lane plus shared no-pay progress without personnel matching', async () => {
     dbMock.order.findMany.mockResolvedValue([
       {
         id: 'order-1',
@@ -60,12 +83,17 @@ describe('worker order visibility', () => {
         promisedDate: null,
         createdAt: new Date(),
         submitter: { displayName: '销售 A' },
-        items: [
+        productionOperations: [
           {
-            id: 'item-1',
-            tasks: [
-              { id: 'task-1', status: TaskStatus.COMPLETED, pieceworkAmount: '12' },
-            ],
+            id: 'operation-1',
+            status: ProductionOperationStatus.COMPLETED,
+            reports: [{ amount: '12' }],
+          },
+        ],
+        productionProgressSteps: [
+          {
+            id: 'progress-1',
+            status: ProductionOperationStatus.PENDING,
           },
         ],
       },
@@ -77,41 +105,72 @@ describe('worker order visibility', () => {
     const query = dbMock.order.findMany.mock.calls[0][0];
     expect(query.where).toEqual({
       status: { not: OrderStatus.SUBMITTED },
-      items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
+      OR: [
+        {
+          productionOperations: {
+            some: { operationType: PieceworkOperationType.PARTIAL },
+          },
+        },
+        { productionProgressSteps: { some: {} } },
+      ],
     });
-    expect(query.select.items.where).toEqual({
-      tasks: { some: { workerId: 'worker-a' } },
+    expect(query.select.productionOperations.where).toEqual({
+      operationType: PieceworkOperationType.PARTIAL,
     });
-    expect(query.select.items.select.tasks.where).toEqual({
-      workerId: 'worker-a',
+    expect(query.select.productionOperations.select.reports.where).toEqual({
+      reporterId: 'worker-a',
     });
+    expect(query.select.productionProgressSteps.where).toBeUndefined();
     expect(result.rows[0]).toMatchObject({
-      taskCount: 1,
-      completedTaskCount: 1,
+      operationCount: 2,
+      completedOperationCount: 1,
       pieceworkAmount: '12.00',
     });
   });
 
-  it('uses id + worker ownership in the detail query (other workers receive null/404)', async () => {
+  it('uses id plus lane-or-shared-progress in the detail query', async () => {
     await expect(getWorkerOrderDetail('order-other', worker)).resolves.toBeNull();
     expect(dbMock.order.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           id: 'order-other',
           status: { not: OrderStatus.SUBMITTED },
-          items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
+          OR: [
+            {
+              productionOperations: {
+                some: { operationType: PieceworkOperationType.PARTIAL },
+              },
+            },
+            { productionProgressSteps: { some: {} } },
+          ],
         },
       }),
     );
     const detailQuery = dbMock.order.findFirst.mock.calls[0][0];
-    expect(detailQuery.select.items.where).toEqual({
-      tasks: { some: { workerId: 'worker-a' } },
-    });
-    expect(detailQuery.select.items.select.tasks.where).toEqual({
-      workerId: 'worker-a',
+    expect(detailQuery.select.productionOperations.where).toEqual({
+      operationType: PieceworkOperationType.PARTIAL,
     });
     expect(detailQuery.select.items.select.designs.where).toEqual({
       fileType: 'IMAGE',
+    });
+    expect(detailQuery.select.productionProgressSteps.where).toBeUndefined();
+  });
+
+  it('lets an active worker without a paid lane see only shared progress orders', async () => {
+    operationTypeMock.mockResolvedValue(null);
+
+    await listWorkerOrders({
+      id: 'cleaner-a',
+      role: Role.WORKER,
+    });
+
+    const query = dbMock.order.findMany.mock.calls[0][0];
+    expect(query.where).toEqual({
+      status: { not: OrderStatus.SUBMITTED },
+      OR: [{ productionProgressSteps: { some: {} } }],
+    });
+    expect(query.select.productionOperations.where).toEqual({
+      operationType: { in: [] },
     });
   });
 });
@@ -146,7 +205,14 @@ describe('worker order list pagination', () => {
     expect(dbMock.order.count).toHaveBeenCalledWith({ where: rowWhere });
     expect(rowWhere).toEqual({
       status: { not: OrderStatus.SUBMITTED },
-      items: { some: { tasks: { some: { workerId: 'worker-a' } } } },
+      OR: [
+        {
+          productionOperations: {
+            some: { operationType: PieceworkOperationType.PARTIAL },
+          },
+        },
+        { productionProgressSteps: { some: {} } },
+      ],
     });
   });
 
@@ -183,6 +249,35 @@ describe('worker order list pagination', () => {
 });
 
 describe('worker salary visibility', () => {
+  it.each([worker, packer])(
+    'scopes new operation-settlement reads to $id',
+    async (actor) => {
+      await listWorkerPieceworkSettlementsForPortal(actor, {
+        from: new Date('2026-08-01T00:00:00.000Z'),
+      });
+      await getWorkerPieceworkSettlementDetail('settlement-1', actor);
+
+      expect(listSettlementMock).toHaveBeenCalledWith(
+        expect.objectContaining({ reporterId: actor.id }),
+      );
+      expect(getSettlementMock).toHaveBeenCalledWith(
+        'settlement-1',
+        actor.id,
+      );
+    },
+  );
+
+  it('rejects non-operation workers before querying the new ledger', async () => {
+    await expect(
+      listWorkerPieceworkSettlementsForPortal({
+        id: 'cleaner-1',
+        role: Role.WORKER,
+        workerType: WorkerType.CLEANER,
+      }),
+    ).rejects.toBeInstanceOf(WorkerPortalError);
+    expect(listSettlementMock).not.toHaveBeenCalled();
+  });
+
   it('lists daily salaries only for the current machine worker', async () => {
     await listWorkerSalaries(worker);
     expect(dbMock.dailyWorkerSalary.findMany).toHaveBeenCalledWith(

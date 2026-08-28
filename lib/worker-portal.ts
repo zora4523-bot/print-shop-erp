@@ -1,15 +1,21 @@
 import Decimal from 'decimal.js';
+import type { Prisma } from '../generated/prisma/client';
 import {
   DesignFileType,
   OrderStatus,
+  PieceworkOperationType,
   ProductionOperationStatus,
   Role,
   WorkerType,
 } from '../generated/prisma/enums';
 import { paginatedResult, paginationWindow } from './admin/table';
 import { db } from './db';
-import { getReporterOperationType } from './production/operation-portal';
+import { getReporterOperationTypeOrNull } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
+import {
+  getPieceworkSettlementDetail,
+  listWorkerPieceworkSettlements,
+} from './salary/piecework-settlement';
 
 // 师傅端 H5 一屏能承受的卡片数。取值与 lib/order/list-query.ts 的
 // ORDER_LIST_DEFAULT_PAGE_SIZE 一致，两端口径对齐。
@@ -41,6 +47,16 @@ function requireMachineSalaryActor(actor: WorkerSalaryActor): void {
   }
 }
 
+function requireOperationSalaryActor(actor: WorkerSalaryActor): void {
+  requireWorkerActor(actor);
+  if (
+    actor.workerType !== WorkerType.MACHINE &&
+    actor.workerType !== WorkerType.PACKER
+  ) {
+    throw new WorkerPortalError('仅烫金师傅或打包员可访问工序计件结算');
+  }
+}
+
 function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
   requireWorkerActor(actor);
   if (
@@ -54,12 +70,17 @@ function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
 
 // 新工单按账号固定工序 lane 可见，不建立人员与工单的绑定关系。
 function operationOrderWhere(
-  operationType: Awaited<ReturnType<typeof getReporterOperationType>>,
-) {
+  operationType: PieceworkOperationType | null,
+): Prisma.OrderWhereInput {
   return {
     status: { not: OrderStatus.SUBMITTED },
-    productionOperations: { some: { operationType } },
-  } as const;
+    OR: [
+      ...(operationType
+        ? [{ productionOperations: { some: { operationType } } }]
+        : []),
+      { productionProgressSteps: { some: {} } },
+    ],
+  };
 }
 
 export async function listWorkerOrders(
@@ -67,7 +88,7 @@ export async function listWorkerOrders(
   options?: { page?: number },
 ) {
   requireWorkerActor(actor);
-  const operationType = await getReporterOperationType(actor);
+  const operationType = await getReporterOperationTypeOrNull(actor);
   // 计数与取行必须共用同一个 where，否则页码会指向不存在的行。
   const where = operationOrderWhere(operationType);
   const total = await db.order.count({ where });
@@ -98,7 +119,9 @@ export async function listWorkerOrders(
       createdAt: true,
       submitter: { select: { displayName: true } },
       productionOperations: {
-        where: { operationType },
+        where: {
+          operationType: operationType ?? { in: [] },
+        },
         select: {
           id: true,
           status: true,
@@ -110,12 +133,16 @@ export async function listWorkerOrders(
           },
         },
       },
+      productionProgressSteps: {
+        select: { id: true, status: true },
+      },
     },
   });
 
   return paginatedResult(
     orders.map((order) => {
       const operations = order.productionOperations;
+      const progressSteps = order.productionProgressSteps;
       return {
         id: order.id,
         orderNo: order.orderNo,
@@ -126,11 +153,15 @@ export async function listWorkerOrders(
         promisedDate: order.promisedDate,
         createdAt: order.createdAt,
         submitterName: order.submitter?.displayName ?? '未记录',
-        operationCount: operations.length,
-        completedOperationCount: operations.filter(
-          (operation) =>
-            operation.status === ProductionOperationStatus.COMPLETED,
-        ).length,
+        operationCount: operations.length + progressSteps.length,
+        completedOperationCount:
+          operations.filter(
+            (operation) =>
+              operation.status === ProductionOperationStatus.COMPLETED,
+          ).length +
+          progressSteps.filter(
+            (step) => step.status === ProductionOperationStatus.COMPLETED,
+          ).length,
         pieceworkAmount: operations
           .flatMap((operation) => operation.reports)
           .reduce(
@@ -151,7 +182,7 @@ export async function getWorkerOrderDetail(
   actor: WorkerActor,
 ) {
   requireWorkerActor(actor);
-  const operationType = await getReporterOperationType(actor);
+  const operationType = await getReporterOperationTypeOrNull(actor);
   return db.order.findFirst({
     where: { id: orderId, ...operationOrderWhere(operationType) },
     select: {
@@ -191,7 +222,9 @@ export async function getWorkerOrderDetail(
         },
       },
       productionOperations: {
-        where: { operationType },
+        where: {
+          operationType: operationType ?? { in: [] },
+        },
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -214,6 +247,29 @@ export async function getWorkerOrderDetail(
               defectQty: true,
               reworkQty: true,
               amount: true,
+              reportedAt: true,
+            },
+          },
+        },
+      },
+      productionProgressSteps: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          craftCode: true,
+          craftName: true,
+          status: true,
+          plannedQty: true,
+          orderItemId: true,
+          orderItem: {
+            select: { sequence: true, name: true },
+          },
+          reports: {
+            select: {
+              reporterId: true,
+              completedQty: true,
+              defectQty: true,
+              reworkQty: true,
               reportedAt: true,
             },
           },
@@ -254,6 +310,26 @@ export async function listWorkerSalaries(
       paidAt: true,
     },
   });
+}
+
+export async function listWorkerPieceworkSettlementsForPortal(
+  actor: WorkerSalaryActor,
+  filters?: { from?: Date; to?: Date },
+) {
+  requireOperationSalaryActor(actor);
+  return listWorkerPieceworkSettlements({
+    reporterId: actor.id,
+    from: filters?.from,
+    to: filters?.to,
+  });
+}
+
+export async function getWorkerPieceworkSettlementDetail(
+  settlementId: string,
+  actor: WorkerSalaryActor,
+) {
+  requireOperationSalaryActor(actor);
+  return getPieceworkSettlementDetail(settlementId, actor.id);
 }
 
 export async function getWorkerSalaryDetail(
