@@ -16,7 +16,7 @@ token_implementation: ../app/globals.css
 - 金额、计费、状态、权限和打印首先服从对应业务真值文档。
 - 本文与 `UI-SYSTEM.md` 冲突时，以后者为准并登记冲突。
 - 代码与已确认文档冲突时修代码；文档疑似笔误或同级文档冲突时只报告，等待人工裁决。
-- `docs/工单变更与版本规则.md` 在 2026-08-28 审查快照中缺失，因此不得在 UI 层猜测工单 11 态、8 个对外词或驳回原因。
+- 2026-08-28 续审已取得工单规则外部原文，但 `docs/工单变更与版本规则.md` 尚未纳入仓库，且 §6 的“8 个词”与表格 9 个唯一词相互冲突。裁决前不得在 UI 层擅自合并或发明销售状态。
 - 本规范适用于 `app/`、`components/ui/`、`components/ui-business/` 与 `components/business/`。打印、导出和外部协议有专门契约时，以专门契约为准。
 
 ## 2. 组件分层
@@ -127,18 +127,18 @@ primary | warning | info | success | danger | neutral
 |---|---|---|---|
 | 已确认 | `confirmedFee` | 共享 formatter 产出的金额 | 正常前景、主金额权重，不加“估” |
 | 报价 | `quotedFee` | 格式化金额 + 可见“估” | “估”紧邻金额，不能只靠颜色或 Tooltip |
-| 待核价 | 两者均无 | `待核价` | 朱红品牌强调，例如 `text-primary`；不得显示零金额 |
+| 待工厂核价 | 两者均无 | `待工厂核价` | 朱红品牌强调，例如 `text-primary`；不得显示零金额 |
 
 规则：
 
 - `confirmedFee` 存在时不得按 quoted 状态展示。
 - UI 不得从金额是否为零、空字符串或本地枚举猜测三态。
-- 待核价不是技术失败；没有真实失败时不用 `destructive`。
+- 待工厂核价不是技术失败；没有真实失败时不用 `destructive`。
 - UI 只消费服务端提供的金额和状态，不计算最终金额。
 
 ### 当前实施缺口
 
-本轮未发现统一的 `confirmedFee` / `quotedFee` 数据契约。现有页面主要依赖 `pricingStatus`、`totalAmount` 与多类费用字段；销售专用列表/详情已部分表达“估”和朱红待核价，但通用列表、创建侧栏和确认层仍未统一。
+基线没有统一的 `confirmedFee` / `quotedFee` 数据契约；续审期间 dirty schema 虽出现了两字段，当前查询和页面仍主要依赖 `pricingStatus`、`totalAmount` 与多类费用字段，不计完成。销售专用列表/详情已部分表达“估”和待价强调，但文案、DTO、通用列表、创建侧栏和确认层仍未统一。
 
 因此上表是目标展示契约，不代表仓库已经实现。闭合前须人工确认 DTO、历史数据映射、列表/详情/打印/导出范围及允许提交的状态；不得由 UI 临时推断，也不得顺手修改 schema、计费或状态流转。
 
@@ -152,7 +152,7 @@ primary | warning | info | success | danger | neutral
 - 熄灭不是改成零、透明、只改变颜色或静默删除历史值。
 - 新报价返回后恢复 quoted 样式和“估”；确认价返回后才切换为 confirmed。
 
-具体文案需与恢复后的金额和状态真值统一。
+具体文案需与工单真值的勘误裁决和金额词表统一。
 
 ## 8. 状态药丸
 
@@ -161,7 +161,7 @@ primary | warning | info | success | danger | neutral
 - 未识别值显示“未识别配置”。
 - `danger` 只用于失败、取消等非正常终态；正常终态使用 `success` 或 `neutral`。
 - 页面不得定义私有 `StatusBadge` 或本地 tone class map。
-- 工单状态必须等待 `docs/工单变更与版本规则.md` 恢复后逐项核对。
+- 工单状态必须在原文入库、销售词 8/9 冲突裁决和服务端投影稳定后逐项核对。
 
 ## 9. 确认弹窗：写后果，不写“确定吗”
 
@@ -252,7 +252,7 @@ primary | warning | info | success | danger | neutral
 - 表格撑破 viewport 或静默裁字。
 - 同一复制事件在多个 live region 重复播报。
 - UI 自行计算或推断最终金额、薪资、报价、状态流转。
-- 用零代替未知金额，用颜色代替“估”或“待核价”文字。
+- 用零代替未知金额，用颜色代替“估”或“待工厂核价”文字。
 - 显示数据库枚举、字段名、规则 code、JSON key 或内部 ID。
 - 为通过测试删除断言、排除 axe 节点、增加任意 sleep 或盲目更新截图。
 
@@ -261,7 +261,7 @@ primary | warning | info | success | danger | neutral
 | 反例 / 缺口 | 证据 | 处置 |
 |---|---|---|
 | 通用业务组件 deep import | `components/business/rules/pricing/PriceDataBoundary.tsx` | 本轮已改从 barrel 引用 |
-| 页面私建状态药丸 | 工单、账单、通知、生产、薪资等多处本地 `*StatusBadge` | 状态正源恢复后逐域迁移 |
+| 页面私建状态药丸 | 工单、账单、通知、生产、薪资等多处本地 `*StatusBadge` | 状态真值入库并完成勘误裁决后逐域迁移 |
 | 复制反馈重复播报 | `SalesOrdersList.tsx` 页面根部和 Sheet 内各有 live region | 保留单一反馈出口 |
 | 金额三态没有统一数据契约 | 无统一 `confirmedFee` / `quotedFee` | 人工确认 DTO 与历史映射 |
 | 报价失效仍可能保持旧金额 | 包装组成清空时存在旧袋数/旧报价路径 | 先补 fixture，再修报价行为 |
@@ -272,6 +272,6 @@ primary | warning | info | success | danger | neutral
 | 独立页面未使用统一动态视口高度 | `app/(auth)/login/layout.tsx`、`app/account/password/page.tsx` 只有 `min-h-screen` | 迁移到统一 viewport shell 并补移动端视觉门禁 |
 | 高风险业务仍使用 L2 | 主数据启停、部分薪资动作、工单修改审批 | 先确认服务端理由/审计契约 |
 | 工单详情职责过重 | `app/(admin)/orders/[id]/page.tsx` 超过 1800 行 | 仅作架构重构建议 |
-| 工单状态无法按正源核对 | `docs/工单变更与版本规则.md` 缺失 | 恢复文档后核对 11 态、8 词和驳回原因 |
+| 工单状态暂不能冻结 UI 映射 | 原文已取得，但 canonical 路径未入库且 §6 的 8/9 词冲突待裁决 | 先入库原文与批准勘误，再核对 11 态、销售词和驳回原因 |
 
 当前可保留的正例：销售工单列表 Sheet 以只读明细为主，编辑和业务操作通过链接进入独立页面；后续不得退回抽屉编辑。

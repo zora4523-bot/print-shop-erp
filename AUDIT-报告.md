@@ -3,6 +3,9 @@
 - 审查日期：2026-08-28
 - 审查基线：`fcbf001866586be630eab2a798a7609d14fc51e4`
 - 基线归档：[`docs/audits/2026-08-28-print-shop-erp-baseline.md`](docs/audits/2026-08-28-print-shop-erp-baseline.md)
+- 续审真值：`/Users/zhixing/Downloads/工单变更与版本规则 (1).md`（145 行，SHA-256 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`）
+- 续审代码快照：2026-08-28 10:22 CST（dirty worktree；并行建单改动非本轮产出）
+- 修复路线：[`AUDIT-修复计划.md`](AUDIT-修复计划.md)
 
 ## 结论
 
@@ -16,9 +19,13 @@
 4. `a42d9ca` — 扁平化报价缺口标签嵌套。
 5. `5b8fb8c` — 新增 UI 规范与编码规范。
 
-最高优先级人工阻断项是：任务指定的《工单变更与版本规则.md》在当前工作树及可达 Git 历史中均不存在。仓库当前 schema、状态机和旧冻结 SPEC 均为 8 态，不能据此自行推导任务要求的 11 态、8 个对外词及 §5 驳回原因。
+原报告的“真值内容缺失”阻断已因用户提供原文而解除；治理阻断仍在：仓库 canonical 路径尚未纳入该文件，且原文自身存在“8 个销售词/表格实际 9 个”、`ADDRESS` 直改/申请双重归属、`settleFee/settledFee` 三处待裁决冲突。不能自行勘误后实施。
+
+续审后的最高风险变为：旧纸二维码无法识别版本、已发货仍可取消、生产中取消没有已产结算和对账闭环、改单契约与真值不一致，以及 11 态旧数据迁移无法机械推断。
 
 金额三态并非全仓缺失：销售专用列表和详情已有待确认、估价“估”和确认金额的结构，但待价文案与 tone 仍不符合统一规范；通用工单列表、创建侧栏、提交审查和底层字段契约也尚未统一。
+
+本轮只继续审查并产出修复计划，没有修改状态机、计费、schema、迁移、API 或测试。审查期间另一条工作流在 dirty worktree 中加入了 `PENDING_FACTORY`、三段金额字段及未提交 migration；到 10:22 快照，`PENDING_FACTORY` 已同步到 migration、generated Prisma、状态机和部分消费者，但仍是保留旧态且缺 7 个真值态的 9 态兼容草案，不计入“已修”。
 
 ## 基线与复测
 
@@ -52,7 +59,7 @@
 - [UI 结构][P1·留人工] components/business/salary/MarkPaidForm.tsx:74 — 标记已发、重算与结算等薪资高风险动作仍使用 L2 — 服务端只持久化支付事实，没有理由字段 — 动作：留人工；先统一高风险动作审计契约（UI-INT-002）。
 - [UI 结构][P1·留人工] components/business/order/OrderChangeReviewForm.tsx:299 — 工单变更批准与驳回均使用 L2 — 操作可能重报价或拒绝申请，且 reviewRemark 当前可选 — 动作：留人工；与驳回原因真值一并设计（UI-INT-003）。
 - [UI 结构][P2·留人工] components/business/order/OrderListBatchSelection.tsx:192 — 批量复制与销售列表复制各自实现 Clipboard、反馈状态及 live region — `SalesOrdersList` 还有重复播报出口 — 动作：留人工；抽共享交互并保留单一 `aria-live`，补可访问性测试（UI-INT-004）。
-- [UI 结构][P2·留人工] components/business/order/SalesOrdersList.tsx:406 — 销售列表自建 `SalesStatusBadge`，未统一公共状态药丸 — 标签和 tone 仍受缺失的状态真值约束 — 动作：留人工；恢复状态真值后统一（UI-COMP-001）。
+- [UI 结构][P2·留人工] components/business/order/SalesOrdersList.tsx:406 — 销售列表自建 `SalesStatusBadge`，未统一公共状态药丸 — 标签和 tone 受 §6 的 8/9 词勘误与 11 态迁移约束 — 动作：留人工；勘误与状态 API 投影确认后统一（UI-COMP-001）。
 - [UI 结构][P2·留人工] components/business/order/SalesOrdersList.tsx:657 — 同一次复制反馈在页面根部和 Sheet 内均有 live region — 可能重复读屏播报 — 动作：留人工；保留单一反馈出口（UI-A11Y-001）。
 - [UI 结构][P2·留人工] app/(auth)/login/layout.tsx:10 — 登录和改密页面只使用 `min-h-screen` — 移动浏览器动态视口下可能裁切 — 动作：留人工；补移动端门禁后统一 `dvh/svh` token（UI-RESP-001）。
 - [UI 结构][P2·留人工] components/business/order/order-form-b/OrderFoilSwatchPicker.tsx:42 — 烫金与纸张材质色板包含内联 HEX/渐变 — 可能是材质仿真资产，也可能是游离 token — 动作：留人工；确认后收口为命名材质 token 或登记例外（UI-TOK-001）。
@@ -65,20 +72,62 @@
 
 ## 2. 一致性与真值文档
 
-- [一致性][P0·留人工] docs/工单变更与版本规则.md:1 — 任务指定的状态机与驳回原因真值文档不存在 — 当前工作树及可达 Git 历史均无该文件，无法逐项裁决 11 态、8 个对外词和 §5 原因枚举 — 动作：留人工；先恢复经确认原文（STATE-001）。
-- [一致性][P1·留人工] prisma/schema.prisma:218 — 当前 `OrderStatus` 只有 8 态，与任务指定 11 态不一致 — schema、`SPEC-v1.2.md:424` 与状态机均支持当前 8 态，缺少依据推断另 3 态 — 动作：留人工；恢复真值后设计迁移、兼容映射和 fixture（STATE-002）。
-- [一致性][P1·留人工] lib/order/status-machine.ts:17 — 状态流转表以 8 态链路为唯一实现 — 类型与既有测试共同锁定 — 动作：留人工；与 schema 迁移同批处理（STATE-003）。
-- [一致性][P1·留人工] lib/order/sales-list-presentation.ts:9 — 8 个内部状态只产生 6 个唯一标签 — `SCHEDULING`、`IN_PRODUCTION`、`COMPLETED` 均显示“生产中” — 动作：留人工；恢复 §6 后建立穷举 registry（STATE-004）。
-- [一致性][P1·留人工] prisma/schema.prisma:541 — 驳回只保存可选自由文本 `reviewRemark`，没有 §5 原因枚举 — 改变涉及 schema、API 和历史数据 — 动作：留人工；恢复 §5 后新增枚举及兼容迁移（REJECT-001）。
-- [一致性][已符合] prisma/schema.prisma:551 — 全仓未发现“分辨率不足”或伪造的结构化驳回原因类型 — 检索只命中自由文本 `reviewRemark` — 动作：无需修改（REJECT-002）。
-- [一致性][P1·留人工] prisma/schema.prisma:926 — 当前工艺是动态 `Craft` 表及 ID 数组，不是固定 enum — 《加工费计费规则》未列出 craft code，无法按该文档逐项比对 — 动作：留人工；先补齐或确认 craft 真值（CRAFT-001）。
+- [一致性][P0·留人工] docs/工单变更与版本规则.md:1 — 真值原文已从下载路径收到，但仓库 canonical 路径仍缺失 — 外部原文 145 行，SHA-256 为 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9` — 动作：留人工；确认后按字节不变入库，不在入库提交中静默勘误（STATE-001）。
+- [一致性][P0·留人工] prisma/schema.prisma:218 — 真值要求 11 态，基线是旧 8 态，10:22 dirty schema 与生成物则是只添加 `PENDING_FACTORY` 的 9 态混合集 — `generated/prisma/enums.ts:59` 已含新态，但仍保留 `SUBMITTED / SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED` 且缺 7 个真值态 — 动作：留人工；先审批旧数据映射，再做 expand/contract 迁移（STATE-002）。
+- [一致性][P0·留人工] lib/order/status-machine.ts:17 — 运行时已把 `PENDING_FACTORY` 接入旧链，但仍是 9 态兼容流转表 — 真值只列状态和部分能力，未定义 `ON_HOLD` 恢复、`REJECTED` 重提、无烫金跳转等完整边 — 动作：留人工；先批准完整转换矩阵，再与 schema 迁移同批实施（STATE-003）。
+- [一致性][P0·留人工] lib/order/sales-list-presentation.ts:9 — 当前 9 态兼容集仅产生 6 个唯一销售词 — 外部真值 §6 表格给出 9 个唯一词，但正文又称 8 个 — 动作：留人工；勘误裁决后建立服务端穷举投影（STATE-004）。
+- [一致性][P0·留人工] prisma/schema.prisma:579 — 仓库没有工单 `REJECTED / ON_HOLD` 的结构化原因记录 — 现有 `OrderChangeRequest.reviewRemark` 属于另一概念，不能替代 §5 的 `PAPER_OUT / DESIGN_ERROR / PRICE_PENDING + reasonNote + fig[]` — 动作：留人工；单独设计原因模型、关联款校验和兼容迁移（REJECT-001）。
+- [一致性][已符合] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:110 — 全仓未发现被明确禁止的“分辨率不足”类型或界面文案 — 应用、schema、生成物及测试全仓检索无命中 — 动作：无需修改（REJECT-002）。
+
+### 2.1 续审：真值内部冲突与状态漂移
+
+- [一致性][P0·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:114 — §6 声称销售端映射为 8 个词，但 118–128 行表格实际产生 9 个唯一词 — 11 态只合并 `RELEASED / FOILING / PACKING` 三态，数学上也是 9 组 — 动作：留人工；文档负责人确认“8”是笔误还是漏了一组合并（TRUTH-ERRATA-001）。
+- [一致性][P0·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:25 — `ADDRESS` 在能力矩阵中是直接轻变更，却又在 40 行被定义为 `modifyKind` — 未说明状态、贴唛节点或其他分界 — 动作：留人工；确认直改/申请的精确边界（TRUTH-AMB-001）。
+- [一致性][P1·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:45 — ChangeRequest 使用 `settleFee`，而 91、94、128 行的最终工单/对账字段使用 `settledFee` — 对象边界可能是有意区分，也可能是命名漂移 — 动作：留人工；确认申请参考/裁决值与工单最终值的唯一字段契约（TRUTH-AMB-002）。
+- [一致性][P0·留人工] lib/order/status-machine.ts:44 — 9 态兼容状态机仍允许 `SHIPPED → CANCELLED` — 真值 §1 明确已发货不可取消、应转售后 — 动作：留人工；与 11 态迁移、服务端守卫和旧测试契约同批修正（STATE-005）。
+- [一致性][P0·留人工] prisma/migrations/20260828100000_create_order_c_expand/migration.sql:3 — 并行草案已将 `PENDING_FACTORY` 同步到 schema、migration、generated 和部分 runtime，但其自述为保留旧值的兼容扩展，不是 11 态迁移 — `lib/order/sales-list-query.ts:109` 的活动/需处理集合仍漏新态，展示层却已接入 — 动作：留人工；将此视为建单兼容草案而非真值完成，后续 11 态批次再统一查询、迁移和流转（STATE-006）。
+
+### 2.2 续审：ChangeRequest 与轻变更
+
+- [一致性][P0·留人工] lib/order/change-request.ts:48 — 当前 `DRAFT / SUBMITTED / SCHEDULING / IN_PRODUCTION` 都能提交修改申请 — 真值总原则是 `CONFIRMED` 之后才将修改建模为 ChangeRequest，草稿应直改 — 动作：留人工；依批准的 11 态能力矩阵重建入口守卫（CHANGE-001）。
+- [一致性][P0·留人工] prisma/schema.prisma:313 — ChangeRequest 只有 `PENDING / APPROVED / REJECTED / CANCELLED / STALE`，且模型缺 `type / modifyKind / denyReason / producedQty / settleFee / woVersionAfter` — 与 §2 对象及终态契约不一致 — 动作：留人工；先决定历史 `CANCELLED / STALE` 映射，再做 additive schema 和前向迁移（CHANGE-002）。
+- [一致性][P0·留人工] lib/order/change-request.ts:2124 — 当前拒绝备注可空并写为 `REJECTED`，也没有销售写入 `WITHDRAWN` 的服务 — 真值要求 `DENIED` 必填 `denyReason`、`PENDING` 可由销售撤回 — 动作：留人工；增加服务端必填、权限、并发和撤回测试（CHANGE-003）。
+- [一致性][P1·留人工] lib/notification/events.ts:17 — 通知事件集没有生产影响申请或轻变更事件，批准流程也不生成“重新打印”任务 — §1–3 要求通知工厂、影响生产申请置顶和换纸闭环 — 动作：留人工；先确认收件人、幂等键与重打任务完成条件（CHANGE-004）。
+- [一致性][P1·留人工] lib/order/editable-fields.ts:45 — 当前 `PENDING_FACTORY` 和兼容 `SUBMITTED` 都可原地全量编辑，没有“撤回 → 改 → 重新提交”显式闭环 — 与 §1 的 `PENDING_FACTORY` 能力不符 — 动作：留人工；与状态迁移、操作审计和重提并发一起实施（CHANGE-005）。
+- [一致性][P1·留人工] lib/order/editable-fields.ts:33 — 生产态轻变更只按状态开放收货与备注字段，没有“贴唛前”持久事实和工厂通知 — §1 明确要求两个闸口 — 动作：留人工；人工确认何种打包事实证明未贴唛，再在服务端强制（CHANGE-006）。
+- [一致性][P1·留人工] lib/order/editable-fields.ts:78 — 顺丰到付专用入口在 `SHIPPED` 仍可修改 — 真值对已发货工单的直改和申请列均为禁止 — 动作：留人工；确认该特例是售后流程还是违规旧口，不机械删除（CHANGE-007）。
+- [一致性][P1·留人工] app/(admin)/orders/[id]/edit/page.tsx:47 — `DRAFT` 编辑页明确不支持款式增删改 — 真值对草稿定义为全部字段可直改 — 动作：留人工；评估复用建单表单或新建款级编辑 DTO（CHANGE-008）。
+- [一致性][P1·留人工] lib/order/change-request.ts:1537 — 当前服务按已开工/完工任务事实直接阻断数量、规格或烫金修改 — 真值要求影响生产的申请可提交，是否停线由工厂裁决 — 动作：留人工；区分“允许提交”和“允许批准/应如何调整”两层规则（CHANGE-009）。
+
+### 2.3 续审：版本、取消与对账闭环
+
+- [一致性][P0·留人工] lib/order/print-view.ts:99 — 工单二维码仍是 `/wo/{woNo}`，扫码路由忽略 `v` 且不显示旧版红色作废页 — 与 §3 的纸质工单作废闭环直接冲突 — 动作：留人工；实现带版本短链、服务端比对和不泄露旧内容的作废页（VERSION-001）。
+- [一致性][P0·留人工] components/business/order/OrderPrintLayout.types.ts:101 — 打印 DTO 不含工单版本，PDF/页眉也没有 `vN` 契约 — 肉眼无法在二维码不可用时识别旧纸 — 动作：留人工；让 DTO、页眉、文件名与二维码共用同一版本（VERSION-002）。
+- [一致性][P0·留人工] lib/background-jobs/pdf.ts:21 — PDF durable job 的 payload、result 和领取校验只绑定工单/操作人，未绑定版本 — 排队期间升版后仍可领到旧产物 — 动作：留人工；在生成、存储和领取三处校验当前版本，补旧 `jobId` 竞态测试（VERSION-003）。
+- [一致性][P1·留人工] prisma/schema.prisma:426 — 不可变价格修订以独立 `priceRevision` 为键，不是完整的 WorkOrder 版本快照 — 尚不能证明每一版工单与锁定金额及全部打印事实一对一 — 动作：留人工；定义不可变工单版本快照边界（VERSION-004）。
+- [一致性][P0·留人工] lib/order/change-request.ts:2401 — 当前 `Order.revision` 不是纯纸质工单版本，核价、发货物流终审和顺丰到付变更也会递增 — `lib/order/pricing-review.ts:1154` 与 `lib/order.ts:2060,2816` 证明非纸质变更也占用版本号 — 动作：留人工；确认新增独立 `workOrderVersion` 或重定义全部递增语义（VERSION-005）。
+- [一致性][P0·留人工] lib/order/print-view.ts:145 — 纸上的任务二维码仍是 `/worker/tasks/{id}` 且不带工单版本 — 即使工单 QR 作废，师傅仍可从旧纸任务 QR 进入报工 — 动作：留人工；确认任务 QR 契约并在报工写服务做版本校验（VERSION-006）。
+- [一致性][P0·留人工] lib/order.ts:1582 — 当前确认后/生产中取消是管理员直接切 `CANCELLED`，遇已开工任务反而整体阻断 — 真值要求 `type=CANCEL` 申请及工厂核已产数量 — 动作：留人工；拆分未确认直接零费用取消与确认后申请取消（CANCEL-001）。
+- [一致性][P0·留人工] prisma/schema.prisma:357 — dirty schema 虽出现 `settledFee`，但没有 `producedQty`、参考计价、调整理由或裁决原子事务 — 多款工单只有单一总量也无法证明款级费用 — 动作：留人工；先裁决逐款数量结构和 `settleFee/settledFee`，再实现 fail-closed 取消计价（CANCEL-002）。
+- [一致性][P0·留人工] lib/bill.ts:161 — 月账单只扫描 `FINISHED` 并使用 `totalAmount` — 有 `settledFee` 的 `CANCELLED` 工单会从对账流程消失 — 动作：留人工；在取消裁决闭环完成后再扩展账期、冻结金额和幂等重跑（BILL-001）。
+
+### 2.4 续审：销售端 §7
+
+- [一致性][P0·留人工] lib/order/sales-list-query.ts:49 — 销售 DTO 直接暴露内部 `OrderStatus`，再由客户端解释为销售词 — §6 明确这张映射是销售 API 契约 — 动作：留人工；勘误后由服务端输出穷举销售状态投影（SALES-001）。
+- [一致性][P1·留人工] lib/order/sales-list-query.ts:120 — “需处理”只覆盖旧活动态内的待管理员核价和最新改单被拒，甚至没有纳入 dirty 契约已接入的 `PENDING_FACTORY` — 同时缺 `REJECTED / ON_HOLD`，不等于 §7 的四类并集 — 动作：留人工；把谓词收口为服务端唯一实现并覆盖排序×分页边界（SALES-002）。
+- [一致性][P1·留人工] lib/order/sales-list-presentation.ts:60 — 每行默认动作是“查看详情”而非“再来一单”，也没有“清 IMAGE、保留 CDR”的领域复制服务 — 直接复制数据还会涉及价格、任务、审计和幂等取舍 — 动作：留人工；先定义复制白名单和重置策略（SALES-003）。
+- [一致性][P1·留人工] components/business/order/SalesOrdersList.tsx:623 — 抽屉 footer 只提供泛化“处理此工单”并跳 `#change-request` — 缺按 `PAPER_OUT / DESIGN_ERROR + fig` 定位纸张/文件区、申请撤回和无动作 `PRICE_PENDING` 规则 — 动作：留人工；保持抽屉只读，在独立编辑页实现可寻址定位（SALES-004）。
+- [一致性][P2·留人工] lib/order/sales-list-query.ts:541 — 缩略图选“第一个有图的款”而非严格首款；`components/business/order/SalesOrdersList.tsx:392` 的超期样式也是淡红底朱红字而非白字红底 — 与 §7 的逐字视觉契约不符 — 动作：留人工；在状态/原因 DTO 稳定后做独立 UI 修正与视觉回归（SALES-005）。
+
+续审同时确认了可保留的基础：一单一个 `PENDING` 已有事务检查和数据库部分唯一索引；销售明细 Sheet 为右侧、`#wo=` 可寻址且正文只读；销售查询使用白名单，未下发任务、师傅、audit、成本和外协细节。这些项在后续修复中必须保持。
+- [一致性][P1·留人工] prisma/schema.prisma:260 — dirty schema 新增 `OrderCraft.PARTIAL / FULL / PRINT`，同时款式仍保留 `crafts: String[]` 和动态 `Craft` 表 — 《加工费计费规则》未列出 canonical craft code，无法证明新 enum、生产工艺 ID 和计费语义的对应 — 动作：留人工；先确认 craft 真值和双模型过渡边界（CRAFT-001）。
 - [一致性][P1·留人工] prisma/seed.ts:160 — 工艺种子与冻结 SPEC 清单漂移 — `SPEC-v1.2.md:610` 含 `STOCK_FOIL` 且不含 `FLAT_FOIL_TRIPLE`；当前种子新增/停用了不同项 — 动作：留人工；确认后续决策的取代关系，不自行回退 seed（CRAFT-002）。
 - [一致性][P1·留人工] prisma/schema.prisma:435 — 缺少真值要求的 `frontColors[]/backColors[]`；当前使用扁平 `printColors[]` 与烫金专用 `frontFoilColors[]/backFoilColors[]`，并保留 `foilColors/isDoubleSided/isDoubleColor` — 《加工费计费规则》:63 要求以正反面数组表达过版且禁止面数字段 — 动作：留人工；设计 schema、API 与历史数据迁移（COLOR-001）。
 - [一致性][P1·留人工] components/business/order/OrderForm.tsx:458 — 被标为历史兼容的聚合颜色/单双面字段仍由新表单写入并被规则条件读取 — 与 schema 注释不一致 — 动作：留人工；先停止新写入并设计历史回填（COLOR-002）。
 - [一致性][P1·留人工] SPEC-v1.2.md:390 — 冻结 SPEC 与专用计费真值在颜色结构上直接冲突 — 前者要求聚合字段，后者声明自己为计费唯一真值并禁止该结构 — 动作：留人工；按任务规则由专用计费文档裁决，并显式记录冲突（COLOR-003）。
 - [一致性][P1·留人工] docs/加工费计费规则.md:108 — “专版没有反面”与实施契约及迁移冲突 — `ORDER-PRICING-AND-DISPATCH-V2.md:14,168` 将专版双面定义为合法待确认事实，迁移还创建 `CUSTOM_DOUBLE_SIDED_MANUAL` — 动作：留人工；业务确认哪份文档有误（CUSTOM-SIDE-001）。
-- [一致性][P1·留人工] prisma/schema.prisma:333 — 金额底层没有 `confirmedFee/quotedFee`，使用 `totalAmount`、`pricingStatus` 与收费行 `ESTIMATED/FINAL` 的替代模型 — 与任务指定字段契约不一致，但不能断言三态完全缺失 — 动作：留人工；确认最终数据契约和历史兼容（AMOUNT-001）。
-- [一致性][P2·留人工] components/business/order/SalesOrdersList.tsx:333 — 销售专用列表与详情只部分表达金额三态 — 估价有可见“估”，但 pending 使用“待管理员确认价格”及 `text-destructive`，未统一为“待核价”与品牌朱红语义 — 动作：留人工；统一金额 DTO、文案与共享展示组件后迁移（AMOUNT-002）。
+- [一致性][P1·留人工] prisma/schema.prisma:357 — 10:08 dirty schema 已加 `quotedFee/confirmedFee/settledFee`，但基线无该字段，当前销售查询仍读 `totalAmount/pricingStatus` 并从费用行猜三态 — 并行 schema 草案尚未贯通 DTO、回填和显示 — 动作：留人工；先确认历史回填矩阵和 tagged-union DTO，再切换全部出口（AMOUNT-001）。
+- [一致性][P2·留人工] components/business/order/SalesOrdersList.tsx:333 — 销售专用列表与详情只部分表达金额三态 — 估价有可见“估”，但 pending 使用“待管理员确认价格”及 `text-destructive`，未统一为“待工厂核价”与品牌朱红语义 — 动作：留人工；统一金额 DTO、文案与共享展示组件后迁移（AMOUNT-002）。
 - [一致性][P1·留人工] lib/order/list-query.ts:129 — 通用工单列表 DTO 与查询没有 `pricingStatus` — `OrdersTable` 只能直接输出 `totalAmount`，无法表达金额三态 — 动作：留人工；调整查询契约及多角色消费面（AMOUNT-003）。
 - [一致性][P1·留人工] components/business/order/ExternalSalesOrderFormRail.tsx:281 — 创建侧栏和提交审查把 complete quote 当普通金额显示，没有“估” — `OrderForm` 与 review dialog 同样直接显示 amountLabel — 动作：留人工；先确认 quote 与 confirmed 的业务边界（AMOUNT-004）。
 - [一致性][P2·留人工] components/business/order/ExternalSalesOrderFormRail.tsx:37 — 同一待价概念存在“待核价”“待重新核价”“待管理员终价”“待管理员确认价格”等文案 — 含义并不完全相同，机械替换会吞掉差异 — 动作：留人工；建立唯一金额状态词表（AMOUNT-005）。
@@ -93,7 +142,7 @@
 
 - [文档][P2·已修] docs/ui-规范.md:1 — 仓库原先没有任务要求路径的 UI 规范 — 已补 token 表、通用组件、金额三态、确认后果、款级校验、价格熄灭、状态药丸、复制反馈和禁用模式 — 动作：已修 `5b8fb8c`（DOC-UI-001）。
 - [文档][P2·已修] docs/编码规范.md:1 — 仓库原先没有统一编码规范与真值索引 — 已补目录、命名、计费纯函数边界、禁止兜底、fixture 和冲突优先级 — 动作：已修 `5b8fb8c`（DOC-CODE-001）。
-- [文档][P0·留人工] docs/编码规范.md:39 — 状态与驳回真值只能登记为“应存在但当前缺失” — 审查不得依据同期计划稿重建业务真值 — 动作：留人工；取得原始《工单变更与版本规则.md》后补齐（DOC-TRUTH-001）。
+- [文档][P0·留人工] docs/编码规范.md:39 — 外部原文已获取，但 canonical 仓库路径、来源记录和三个勘误裁决尚未完成 — 不得把审查报告或当前代码反向当成真值 — 动作：留人工；按 `AUDIT-修复计划.md` B0 原文入库后，以独立决策记录处理勘误（DOC-TRUTH-001）。
 
 ## 4. 功能重复
 
@@ -145,20 +194,30 @@
 
 | 风险 | 编号 | 待处理事项 | 建议处置 |
 |---|---|---|---|
-| P0 | STATE-001 / DOC-TRUTH-001 | 11 态、8 对外词和驳回原因真值缺失 | 恢复经确认原文；恢复前冻结状态及驳回修改 |
-| P1 | STATE-002～004 | 当前实现和旧 SPEC 均为 8 态 | 联合设计 schema 迁移、流转、兼容映射与 fixture |
+| P0 | STATE-001 / DOC-TRUTH-001 | 外部原文已收到，但 canonical 路径未入库 | 先按字节不变入库并记录 SHA；勘误用独立决策处理 |
+| P0 | TRUTH-ERRATA-001 / TRUTH-AMB-001 | 销售词 8/9 冲突；`ADDRESS` 直改/申请边界不明 | 文档负责人先裁决，冻结相关 API、UI 和迁移 |
+| P0 | STATE-002～006 | 11 态与旧数据无完整映射；并行草案只做了保留旧值的 9 态兼容扩展 | 批准迁移表与完整转换矩阵，再做 expand/contract；已发货禁止取消 |
+| P0 | CHANGE-001～003 | ChangeRequest 入口、对象字段、终态、拒绝必填和撤回均不符真值 | 先决定历史状态映射，再以 additive schema + 服务端并发守卫实施 |
+| P0 | VERSION-001～003 / 005～006 | 旧纸、任务 QR 和异步 PDF 无版本作废闭环，`Order.revision` 也非纯工单版本 | 确认独立 `workOrderVersion`，让快照、QR、报工、PDF 和重打任务共用同一版本 |
+| P0 | CANCEL-001 / 002 / BILL-001 | 生产中取消没有已产数量、参考计价、调整留痕和对账 | 先裁决多款已产数据结构，再做原子裁决和冻结账单金额 |
+| P0 | REJECT-001 | 工单驳回/暂停没有三值原因、备注和涉及款记录 | 与变更申请 `denyReason` 分建模型，补跨工单 fig 拒绝和行动投影 |
+| P0 | SALES-001 | 销售 API 直接暴露内部状态，未固化 §6 契约 | 8/9 词裁决后建立服务端穷举投影 |
+| P1 | TRUTH-AMB-002 | `settleFee/settledFee` 字段边界不明 | 确认申请裁决值与工单最终值的持久命名 |
+| P1 | CHANGE-004～009 | 通知/置顶/重打、撤回重提、贴唛闸口、草稿全编辑等未闭合 | 依赖状态与版本批次分别实施，不在 UI 临时猜规则 |
+| P1 | VERSION-004 | 价格修订不是完整工单版本快照 | 定义快照包含的打印事实与确认金额关联 |
+| P1 | SALES-002～004 | 需处理谓词、再来一单和原因定位/撤回动作缺失 | 状态、原因、金额 DTO 稳定后保持只读抽屉并补独立领域服务 |
 | P1 | CUSTOM-SIDE-001 | “专版无反面”与“双面合法待核价”冲突 | 业务负责人书面裁决，不由代码反推真值 |
 | P1 | COLOR-001～003 | 禁用的聚合颜色/单双面字段仍在新写入与规则匹配 | 制定停止新写、历史回填和迁移删除顺序 |
 | P1 | AMOUNT-001 / 003 / 004 | 金额字段契约、通用列表和创建链路未统一 | 定义 quote/confirmed/pending DTO 后统一全部出口 |
 | P1 | PACK-001 | 清空包装组成可能保留旧袋数及报价 | 先加清空与竞态 fixture，再修报价失效 |
-| P1 | REJECT-001 | 驳回原因无枚举 | 恢复 §5 后设计枚举、历史兼容及审计必填 |
 | P1 | CRAFT-001 / 002 | craft 真值缺口及种子漂移 | 明确后续决策取代关系再调整 |
 | P1 | FALLBACK-001 | 旧 SPEC 与外部销售专用真值作用域不清 | 明确旧 fallback 仅供内部/直单兼容路径 |
 | P1 | UI-INT-001～003 | 高风险动作缺持久理由契约 | 先补后端审计字段/API，再升级确认层 |
 | P1 | UI-IA-001 | 导航信息架构与原型不一致 | 产品确认分组和角色入口后统一改 |
 | P2 | AMOUNT-002 / 005、FMT-001 / 003、PACK-002 | 金额三态、尺寸、包装及待价术语未全仓统一 | 冻结 DTO、格式和词表后分批迁移 |
+| P2 | SALES-005 | 首款缩略图和超期视觉不符 §7 | 在销售 DTO 稳定后单独修 UI 并补视觉回归 |
 | P2 | UI-INT-004 / UI-A11Y-001 | 复制交互重复且有双 live region | 抽共享交互，保留单一播报出口并补无障碍测试 |
-| P2 | UI-COMP-001 / 002 | 私有状态药丸及原生表单控件未收口 | 状态真值恢复后迁移药丸；控件先补焦点与提交契约测试 |
+| P2 | UI-COMP-001 / 002 | 私有状态药丸及原生表单控件未收口 | 状态勘误和 API 投影稳定后迁移药丸；控件先补焦点与提交契约测试 |
 | P2 | UI-RESP-001 / UI-TOK-001 | 动态视口与材质颜色 token 边界未统一 | 补移动视觉门禁；确认材料色是否登记为例外 |
 | P2 | DUP-DATETIME-001 / DUP-ADDRESS-001 / DUP-CRON-001 / DUP-PAPER-001 / DUP-BILL-001 | 行为敏感的重复实现 | 先补契约测试，再合并 |
 | P2 | NEST-002 | 工单表单仍含行为敏感的深层条件 | 按功能区补 fixture 后逐段早返回 |
