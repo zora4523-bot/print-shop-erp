@@ -2,7 +2,7 @@
  * 盘点过账的返回类型（'use server' 模块不能导出类型，CLAUDE.md §15.3）。
  *
  * 状态集合不变（success | invalid | error），只是给 success / error 挂一个可选
- * 负载——和 actions/order-quote.types.ts 给 'success' 挂 items 是同一个路数。
+ * 负载——成功分支携带本次更新后的完整行数据。
  *
  * · staleKeys —— 账面数在盘点期间被别人改过、**没有过账**的行，形如
  *   `${materialId}:${locationId}`，和 InventoryCountClient 那张表的行 key 同构，

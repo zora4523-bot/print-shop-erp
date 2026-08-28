@@ -39,8 +39,6 @@ describe('OrderForm logistics quote authority', () => {
       "import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';",
     );
     expect(source).toContain('quoteExternalCreateOrderAction(input)');
-    expect(source).not.toContain('quoteExternalOrderChargesAction');
-    expect(source).not.toContain('quoteOrderPackagingGroupsAction');
     expect(source).not.toContain('calculateExternalOrderCharges(input)');
     expect(source).not.toContain('DEFAULT_EXTERNAL_ORDER_CHARGE_RULES');
   });
@@ -163,10 +161,8 @@ describe('unified create-order quote request gate', () => {
 
 describe('OrderForm processing quote concurrency', () => {
   it('rejects an older request and never writes preview money into create fields', () => {
-    expect(source).toContain(
-      'latestQuoteRequestByField.current[fieldId] !== requestId',
-    );
-    expect(source).toContain('if (!sameRow) {');
+    expect(source).toContain('beginOrderQuoteRequest(');
+    expect(source).toContain('isCurrentOrderQuoteResponse({');
     expect(source).not.toContain(
       'setValue(`items.${index}.unitPrice`, result.suggestedUnitPrice',
     );
@@ -176,9 +172,11 @@ describe('OrderForm processing quote concurrency', () => {
   });
 
   it('invalidates all dependent quotes and immediately saves structural changes', () => {
-    expect(source).toContain('latestQuoteRequestByField.current = {};');
     expect(source).toContain(
       'invalidateOrderQuoteRequests(externalQuoteRequestGate.current);',
+    );
+    expect(source).toContain(
+      'invalidateOrderQuoteRequests(internalQuoteRequestGate.current);',
     );
     expect(source).toContain('setQuoteViews({});');
     expect(source).toContain('setLogisticsQuote(null);');

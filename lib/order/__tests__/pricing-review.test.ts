@@ -12,10 +12,6 @@ import type { FinalizeOrderPricingCommand } from "../pricing-review";
 const {
   dbMock,
   appendPricingRevisionMock,
-  quoteItemsSpy,
-  quotePackagingSpy,
-  quoteChargesSpy,
-  resolveChargesSpy,
   activateOperationsMock,
 } = vi.hoisted(() => {
   const tx = {
@@ -36,10 +32,6 @@ const {
       ),
     },
     appendPricingRevisionMock: vi.fn(),
-    quoteItemsSpy: vi.fn(),
-    quotePackagingSpy: vi.fn(),
-    quoteChargesSpy: vi.fn(),
-    resolveChargesSpy: vi.fn(),
     activateOperationsMock: vi.fn(),
   };
 });
@@ -51,19 +43,6 @@ vi.mock("@/lib/order/pricing-revision", () => ({
 vi.mock("@/lib/production/operation-materialization-service", () => ({
   activateProductionOperationsInTx: activateOperationsMock,
 }));
-// These mocks are deliberately present as tripwires. The review service must
-// neither import nor call any calculator after the snapshot-only cutover.
-vi.mock("@/lib/price/quote-service", () => ({
-  quoteOrderItems: quoteItemsSpy,
-}));
-vi.mock("@/lib/price/order-packaging-quote", () => ({
-  quoteOrderPackagingGroups: quotePackagingSpy,
-}));
-vi.mock("@/lib/price/order-charge-service", () => ({
-  quoteExternalOrderChargesInTransaction: quoteChargesSpy,
-  resolveExternalOrderChargesForCreation: resolveChargesSpy,
-}));
-
 import {
   finalizeOrderPricing,
   OrderPricingReviewError,
@@ -331,13 +310,6 @@ function command(
   };
 }
 
-function expectNoCalculatorCalls() {
-  expect(quoteItemsSpy).not.toHaveBeenCalled();
-  expect(quotePackagingSpy).not.toHaveBeenCalled();
-  expect(quoteChargesSpy).not.toHaveBeenCalled();
-  expect(resolveChargesSpy).not.toHaveBeenCalled();
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   dbMock.$executeRaw.mockResolvedValue(undefined);
@@ -373,26 +345,18 @@ beforeEach(() => {
 });
 
 describe("snapshot-only order pricing review", () => {
-  it("has no quote engine or price-rule dependency and never calls calculator tripwires", async () => {
+  it("has no quote engine or price-rule dependency", async () => {
     const source = readFileSync(
       new URL("../pricing-review.ts", import.meta.url),
       "utf8",
     );
     for (const forbidden of [
-      "quoteOrderItems",
-      "quoteOrderPackagingGroups",
-      "quoteExternalOrderChargesInTransaction",
-      "resolveExternalOrderChargesForCreation",
       "CustomerPriceRule",
       "customerPriceRule",
     ]) {
       expect(source).not.toContain(forbidden);
     }
 
-    await previewOrderPricingReview("order-1", admin, now);
-    await finalizeOrderPricing(command(), admin, now);
-
-    expectNoCalculatorCalls();
   });
 
   it("reads pure and legacy snapshots, exposes manual context, and preserves explicit zero", async () => {
@@ -449,7 +413,6 @@ describe("snapshot-only order pricing review", () => {
         currentAmount: null,
       },
     });
-    expectNoCalculatorCalls();
   });
 
   it("treats snapshot-less legacy persisted amounts as complete without recomputing", async () => {
@@ -486,7 +449,6 @@ describe("snapshot-only order pricing review", () => {
       suggestedSubtotal: "110.00",
     });
     expect(preview.packagingGroups.every((group) => group.complete)).toBe(true);
-    expectNoCalculatorCalls();
   });
 
   it.each([
@@ -639,7 +601,6 @@ describe("snapshot-only order pricing review", () => {
           ? previewOrderPricingReview("order-1", admin, now)
           : finalizeOrderPricing(command(), admin, now);
       await expect(run).rejects.toThrow(/免费工单/);
-      expectNoCalculatorCalls();
     },
   );
 
@@ -897,7 +858,6 @@ describe("snapshot-only order pricing review", () => {
       }),
       select: { id: true },
     });
-    expectNoCalculatorCalls();
   });
 
   it("propagates revision failure so the database transaction rolls back", async () => {

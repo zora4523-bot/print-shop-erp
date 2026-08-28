@@ -578,7 +578,6 @@ describe('reviewOrderChangeRequest', () => {
 describe('removed legacy chains', () => {
   it('不再引用旧报价器或写 ProductionTask', () => {
     const source = readFileSync(new URL('../change-request.ts', import.meta.url), 'utf8');
-    expect(source).not.toMatch(/quoteOrderItems|quoteOrderPackagingGroups|QuoteResult/);
     expect(source).not.toMatch(/productionTask\.(?:create|createMany|update|updateMany)/);
     expect(source).toContain('calculateCreateOrderQuoteFromCatalogInTx');
   });

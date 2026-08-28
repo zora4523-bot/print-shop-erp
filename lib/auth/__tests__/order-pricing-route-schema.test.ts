@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createOrderSchema, quoteOrderItemsSchema } from '../schemas';
+import {
+  createOrderQuoteItemsSchema,
+  createOrderSchema,
+} from '../schemas';
 
 function item(overrides: Record<string, unknown> = {}) {
   return {
@@ -82,7 +85,7 @@ describe('new-order pricing route schema', () => {
     const created = createOrderSchema.safeParse(
       order({ items: [doubleSided] }),
     );
-    const previewed = quoteOrderItemsSchema.safeParse({
+    const previewed = createOrderQuoteItemsSchema.safeParse({
       items: [doubleSided],
     });
 
@@ -103,7 +106,7 @@ describe('new-order pricing route schema', () => {
       createOrderSchema.safeParse(order({ items: [sixColors] })).success,
     ).toBe(true);
     expect(
-      quoteOrderItemsSchema.safeParse({ items: [sixColors] }).success,
+      createOrderQuoteItemsSchema.safeParse({ items: [sixColors] }).success,
     ).toBe(true);
   });
 
@@ -147,7 +150,7 @@ describe('new-order pricing route schema', () => {
     const created = createOrderSchema.safeParse(
       order({ items: [doubleSidedColorPrint] }),
     );
-    const previewed = quoteOrderItemsSchema.safeParse({
+    const previewed = createOrderQuoteItemsSchema.safeParse({
       items: [doubleSidedColorPrint],
     });
 
@@ -186,7 +189,7 @@ describe('new-order pricing route schema', () => {
       manualQuoteReason: '非标需人工',
     });
     const created = createOrderSchema.safeParse(order({ items: [manual] }));
-    const previewed = quoteOrderItemsSchema.safeParse({ items: [manual] });
+    const previewed = createOrderQuoteItemsSchema.safeParse({ items: [manual] });
 
     expect(created.success).toBe(false);
     expect(previewed.success).toBe(false);
@@ -215,7 +218,7 @@ describe('new-order pricing route schema', () => {
     const created = createOrderSchema.safeParse(
       order({ items: [configurationOutside] }),
     );
-    const previewed = quoteOrderItemsSchema.safeParse({
+    const previewed = createOrderQuoteItemsSchema.safeParse({
       items: [configurationOutside],
     });
 
@@ -286,7 +289,7 @@ describe('new-order pricing route schema', () => {
       lamination: undefined,
     });
     const created = createOrderSchema.parse(order({ items: [legacyItem] }));
-    const previewed = quoteOrderItemsSchema.parse({ items: [legacyItem] });
+    const previewed = createOrderQuoteItemsSchema.parse({ items: [legacyItem] });
 
     expect(created.items[0]?.lamination).toBe('NONE');
     expect(previewed.items[0]?.lamination).toBe('NONE');
@@ -297,7 +300,7 @@ describe('new-order pricing route schema', () => {
     const created = createOrderSchema.safeParse(
       order({ items: [laminatedFoilItem] }),
     );
-    const previewed = quoteOrderItemsSchema.safeParse({
+    const previewed = createOrderQuoteItemsSchema.safeParse({
       items: [laminatedFoilItem],
     });
 
@@ -328,7 +331,7 @@ describe('new-order pricing route schema', () => {
       printColors: ['C', 'M', 'Y', 'K'],
     });
     const created = createOrderSchema.safeParse(order({ items: [colorItem] }));
-    const previewed = quoteOrderItemsSchema.safeParse({ items: [colorItem] });
+    const previewed = createOrderQuoteItemsSchema.safeParse({ items: [colorItem] });
 
     expect(created.success).toBe(true);
     expect(previewed.success).toBe(true);

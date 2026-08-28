@@ -7,18 +7,15 @@ import {
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     $executeRaw: vi.fn(),
-    $transaction: vi.fn(),
     customerPriceBook: { findMany: vi.fn() },
   },
 }));
 
-vi.mock('@/lib/db', () => ({ db: dbMock }));
-
 import {
-  quoteExternalOrderChargesPreview,
   resolveExternalOrderChargesForFinalization,
   resolveExternalOrderChargesForProvisionalCreation,
 } from '../order-charge-service';
+import type { ExternalOrderChargeInput } from '../external-order-charges';
 
 const now = new Date('2026-08-08T00:00:00.000Z');
 const input = {
@@ -121,12 +118,6 @@ function activeBook({
 
 beforeEach(() => {
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
-  dbMock.$transaction
-    .mockReset()
-    .mockImplementation(
-      async (callback: (tx: typeof dbMock) => Promise<unknown>) =>
-        callback(dbMock),
-    );
   dbMock.customerPriceBook.findMany
     .mockReset()
     .mockResolvedValue([
@@ -134,11 +125,36 @@ beforeEach(() => {
     ]);
 });
 
-describe('quoteExternalOrderChargesPreview', () => {
-  it('reads the current active LOGISTICS book under one snapshot transaction', async () => {
-    const quote = await quoteExternalOrderChargesPreview(input, now);
+async function resolveProvisional(
+  facts: ExternalOrderChargeInput = input,
+  at: Date = now,
+) {
+  return resolveExternalOrderChargesForProvisionalCreation(
+    dbMock as never,
+    {
+      isSfCollect: facts.isSfCollect,
+      shipments: facts.shipments.map((shipment) => ({
+        shipmentKey: shipment.shipmentKey,
+        province: shipment.province,
+        billableWeightKg:
+          shipment.billableWeightKg === null
+            ? null
+            : String(shipment.billableWeightKg),
+        weightItems: shipment.weightItems,
+        itemQuantity: shipment.itemQuantity,
+        shippingFee: null,
+        packingMaterialFee: null,
+        overrideReason: null,
+      })),
+    },
+    at,
+  );
+}
 
-    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+describe('external order charge persistence', () => {
+  it('reads the current active LOGISTICS book under the shared snapshot lock', async () => {
+    const resolved = await resolveProvisional();
+
     expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
     expect(dbMock.customerPriceBook.findMany).toHaveBeenCalledWith({
       where: {
@@ -155,12 +171,8 @@ describe('quoteExternalOrderChargesPreview', () => {
     expect(
       dbMock.customerPriceBook.findMany.mock.invocationCallOrder[0],
     ).toBeGreaterThan(dbMock.$executeRaw.mock.invocationCallOrder[0]!);
-    expect(quote).toMatchObject({
-      complete: true,
-      suggestedShippingTotal: '2.80',
-      suggestedPackagingTotal: '3.00',
-      suggestedTotal: '5.80',
-    });
+    expect(resolved.totalAmount).toBe('5.80');
+    expect(resolved.requiresAdminConfirmation).toBe(false);
   });
 
   it('keeps automatic shipping and carton charges confirmed', async () => {
@@ -201,24 +213,19 @@ describe('quoteExternalOrderChargesPreview', () => {
   });
 
   it('uses an updated active price book on the next request, not bundled defaults', async () => {
-    const beforeUpdate = await quoteExternalOrderChargesPreview(input, now);
+    const beforeUpdate = await resolveProvisional(input, now);
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([
       activeBook({ version: 2, shippingFee: '6.60', packingFee: '4.50' }),
     ]);
 
-    const afterUpdate = await quoteExternalOrderChargesPreview(
+    const afterUpdate = await resolveProvisional(
       input,
       new Date('2026-08-09T00:00:00.000Z'),
     );
 
-    expect(beforeUpdate.suggestedTotal).toBe('5.80');
-    expect(afterUpdate).toMatchObject({
-      complete: true,
-      suggestedShippingTotal: '6.60',
-      suggestedPackagingTotal: '4.50',
-      suggestedTotal: '11.10',
-    });
-    expect(afterUpdate.shipments[0]?.shipping.source?.sha256).toBe('hash-2');
+    expect(beforeUpdate.totalAmount).toBe('5.80');
+    expect(afterUpdate.totalAmount).toBe('11.10');
+    expect(afterUpdate.priceBook.sourceSha256).toBe('hash-2');
     expect(dbMock.customerPriceBook.findMany).toHaveBeenCalledTimes(2);
   });
 
@@ -233,7 +240,7 @@ describe('quoteExternalOrderChargesPreview', () => {
       }),
     ]);
 
-    const quote = await quoteExternalOrderChargesPreview(
+    const resolved = await resolveProvisional(
       {
         isSfCollect: false,
         shipments: [
@@ -257,18 +264,21 @@ describe('quoteExternalOrderChargesPreview', () => {
       now,
     );
 
-    expect(quote).toMatchObject({
-      complete: true,
-      suggestedShippingTotal: '41.30',
-      snapshot: {
-        version: 2,
+    const shipping = resolved.charges.find(
+      (charge) => charge.categoryCode === 'SHIPPING_FEE',
+    );
+    expect(shipping?.amount).toBe('41.30');
+    expect(shipping?.pricingSnapshot.priceBook).toEqual(
+      expect.objectContaining({
         policy: expect.objectContaining({
           ruleVersion: '2026-08-27',
           maxOrderQuantity: 2_000,
         }),
-      },
-    });
-    expect(quote.shipments[0]?.shipping.basis).toMatchObject({
+      }),
+    );
+    expect(
+      (shipping?.pricingSnapshot.quote as { basis: unknown }).basis,
+    ).toMatchObject({
       weightSource: 'SERVER_ESTIMATE',
       netWeightGrams: '12000',
       billableWeightKg: '12',
@@ -380,12 +390,10 @@ describe('quoteExternalOrderChargesPreview', () => {
     malformed.notes = notes as typeof malformed.notes;
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([malformed]);
 
-    await expect(quoteExternalOrderChargesPreview(input, now)).rejects.toThrow(
-      expected,
-    );
+    await expect(resolveProvisional(input, now)).rejects.toThrow(expected);
   });
 
-  it('当前 preview 不允许退回历史 CARRIER_CONFIRMED 策略', async () => {
+  it('新工单临时费用不允许退回历史 CARRIER_CONFIRMED 策略', async () => {
     const legacy = activeBook({
       version: 1,
       shippingFee: '2.80',
@@ -400,7 +408,7 @@ describe('quoteExternalOrderChargesPreview', () => {
     } as unknown as typeof legacy.notes;
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([legacy]);
 
-    await expect(quoteExternalOrderChargesPreview(input, now)).rejects.toThrow(
+    await expect(resolveProvisional(input, now)).rejects.toThrow(
       '当前物流价目簿不支持服务端重量估算',
     );
   });
@@ -732,9 +740,7 @@ describe('quoteExternalOrderChargesPreview', () => {
   it('fails closed when no active LOGISTICS book exists', async () => {
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([]);
 
-    await expect(
-      quoteExternalOrderChargesPreview(input, now),
-    ).rejects.toThrow(
+    await expect(resolveProvisional(input, now)).rejects.toThrow(
       '当前没有生效的外部销售快递/耗材价目簿，请联系管理员',
     );
   });
@@ -745,9 +751,7 @@ describe('quoteExternalOrderChargesPreview', () => {
       activeBook({ version: 2, shippingFee: '6.60', packingFee: '4.50' }),
     ]);
 
-    await expect(
-      quoteExternalOrderChargesPreview(input, now),
-    ).rejects.toThrow(
+    await expect(resolveProvisional(input, now)).rejects.toThrow(
       '同时存在多个生效的外部销售快递/耗材价目簿，请管理员修正有效期',
     );
   });
@@ -763,7 +767,7 @@ describe('quoteExternalOrderChargesPreview', () => {
 
     let visibleMessage = '';
     try {
-      await quoteExternalOrderChargesPreview(input, now);
+      await resolveProvisional(input, now);
     } catch (error) {
       visibleMessage = error instanceof Error ? error.message : String(error);
     }
@@ -782,9 +786,9 @@ describe('quoteExternalOrderChargesPreview', () => {
     malformed.rules[0]!.incrementUnits = '0';
     dbMock.customerPriceBook.findMany.mockResolvedValueOnce([malformed]);
 
-    await expect(
-      quoteExternalOrderChargesPreview(input, now),
-    ).rejects.toThrow('物流价目簿规则续重单位必须大于 0');
+    await expect(resolveProvisional(input, now)).rejects.toThrow(
+      '物流价目簿规则续重单位必须大于 0',
+    );
   });
 
   it('fails closed when a packaging suggestion exceeds the money column', async () => {
@@ -796,12 +800,18 @@ describe('quoteExternalOrderChargesPreview', () => {
       }),
     ]);
 
-    const quote = await quoteExternalOrderChargesPreview(input, now);
-
-    expect(quote.complete).toBe(false);
-    expect(quote.shipments[0]?.packaging.amount).toBeNull();
-    expect(quote.errors.join('；')).toContain(
-      '纸箱数量档必须从 1 开始连续覆盖且金额有效',
+    const resolved = await resolveProvisional(input, now);
+    const packaging = resolved.charges.find(
+      (charge) => charge.categoryCode === 'PACKING_MATERIAL',
     );
+
+    expect(resolved.requiresAdminConfirmation).toBe(true);
+    expect(packaging?.suggestedAmount).toBeNull();
+    expect(packaging?.amount).toBe('0.00');
+    expect(
+      (packaging?.pricingSnapshot.quote as { errors: string[] }).errors.join(
+        '；',
+      ),
+    ).toContain('纸箱数量档必须从 1 开始连续覆盖且金额有效');
   });
 });

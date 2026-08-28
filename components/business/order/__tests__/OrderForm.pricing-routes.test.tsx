@@ -9,15 +9,8 @@ vi.mock('@/actions/order', () => ({
   createOrderAction: vi.fn(),
   submitOrderAction: vi.fn(),
 }));
-vi.mock('@/actions/order-quote', () => ({ quoteOrderItemsAction: vi.fn() }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
-}));
-vi.mock('@/actions/order-logistics-quote', () => ({
-  quoteExternalOrderChargesAction: vi.fn(),
-}));
-vi.mock('@/actions/order-packaging-quote', () => ({
-  quoteOrderPackagingGroupsAction: vi.fn(),
 }));
 vi.mock('../design-upload-client', () => ({
   uploadOrderItemDesignFile: vi.fn(),

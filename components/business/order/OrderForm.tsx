@@ -38,7 +38,7 @@ import { createOrderAction, submitOrderAction } from '@/actions/order';
 import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
 import { quoteInternalCreateOrderAction } from '@/actions/create-order-quote';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
-import type { OrderPackagingQuotePreview } from '@/actions/order-packaging-quote.types';
+import type { CreateOrderPackagingQuotePreview } from '@/lib/order/create-order-quote-presentation';
 import type {
   CreateOrderItemQuotePreview,
   CreateOrderQuoteResult,
@@ -166,7 +166,7 @@ type LogisticsQuoteViewState = {
 
 type PackagingQuoteViewState = {
   inputKey: string;
-  result?: OrderPackagingQuotePreview;
+  result?: CreateOrderPackagingQuotePreview;
   error?: string;
 };
 

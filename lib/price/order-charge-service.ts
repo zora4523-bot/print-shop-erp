@@ -9,7 +9,6 @@ import {
   calculateExternalOrderCharges,
   type ExternalOrderChargeInput,
   type ExternalOrderChargeLine,
-  type ExternalOrderChargeQuote,
   type ExternalOrderChargeRule,
   type ExternalOrderChargeWeightItem,
   type ExternalOrderEstimateLogisticsPolicy,
@@ -19,7 +18,6 @@ import {
   type ExternalOrderShippingRule,
 } from './external-order-charges';
 import { acquirePriceRuleSnapshotReadLock } from './rule-snapshot-lock';
-import { db } from '../db';
 
 export class OrderCustomerChargeError extends Error {
   constructor(message: string) {
@@ -91,11 +89,6 @@ export type ExternalOrderChargePriceBookSnapshot = Omit<
   LoadedLogisticsPriceBook,
   'rules' | 'ruleRowsByCode' | 'categoryIdByCode'
 >;
-
-export type ExternalOrderChargeBookQuote = {
-  priceBook: ExternalOrderChargePriceBookSnapshot;
-  quote: ExternalOrderChargeQuote;
-};
 
 function requiredDecimal(value: unknown, label: string): string {
   if (value === null || value === undefined) {
@@ -495,55 +488,6 @@ function parseSubmittedAmount(value: string | null, label: string): Decimal | nu
   return amount;
 }
 
-/**
- * Read-only logistics preview for the order creation screen.
- *
- * The browser sends shipment facts only. Every call opens a short transaction,
- * takes the shared price-rule snapshot lock, and loads the currently-effective
- * LOGISTICS book. There is deliberately no fallback to the engine's bundled
- * reference rules: a missing or malformed database book must fail closed.
- */
-export async function quoteExternalOrderChargesPreview(
-  input: ExternalOrderChargeInput,
-  now: Date = new Date(),
-): Promise<ExternalOrderChargeQuote> {
-  return db.$transaction(async (client) => {
-    const result = await quoteExternalOrderChargesInTransaction(client, input, now);
-    return result.quote;
-  });
-}
-
-/**
- * Transaction-aware quote used by the administrator's whole-order pricing
- * review. It returns the selected version as well as the calculation, and it
- * never accepts a browser supplied price-book id.
- */
-export async function quoteExternalOrderChargesInTransaction(
-  client: Prisma.TransactionClient,
-  input: ExternalOrderChargeInput,
-  now: Date,
-  options: { snapshotLockHeld?: boolean } = {},
-): Promise<ExternalOrderChargeBookQuote> {
-  const book = await loadLogisticsPriceBook(
-    client,
-    now,
-    undefined,
-    options.snapshotLockHeld ?? false,
-  );
-  return {
-    priceBook: {
-      id: book.id,
-      code: book.code,
-      name: book.name,
-      version: book.version,
-      sourceName: book.sourceName,
-      sourceSha256: book.sourceSha256,
-      policy: book.policy,
-    },
-    quote: calculateExternalOrderCharges(input, book.rules, book.policy),
-  };
-}
-
 function resolveAmount(params: {
   line: ExternalOrderChargeLine;
   submitted: string | null;
@@ -619,30 +563,6 @@ function resolveAmount(params: {
       : null,
     requiresAdminConfirmation: false,
   };
-}
-
-export async function resolveExternalOrderChargesForCreation(
-  client: Prisma.TransactionClient,
-  input: {
-    isSfCollect: boolean;
-    shipments: SubmittedShipmentCustomerCharges[];
-  },
-  now: Date,
-  options: { snapshotLockHeld?: boolean } = {},
-): Promise<{
-  priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
-  charges: ResolvedOrderCustomerCharge[];
-  totalAmount: string;
-  requiresAdminConfirmation: boolean;
-}> {
-  return resolveExternalOrderCharges(
-    client,
-    input,
-    now,
-    undefined,
-    options.snapshotLockHeld ?? false,
-    false,
-  );
 }
 
 /**

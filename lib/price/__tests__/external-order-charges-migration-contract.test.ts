@@ -16,8 +16,8 @@ const schema = readFileSync(
   path.join(process.cwd(), 'prisma', 'schema.prisma'),
   'utf8',
 );
-const quoteService = readFileSync(
-  path.join(process.cwd(), 'lib', 'price', 'quote-service.ts'),
+const priceSnapshotReader = readFileSync(
+  path.join(process.cwd(), 'lib', 'order', 'create-order-price-snapshot.ts'),
   'utf8',
 );
 
@@ -39,8 +39,8 @@ describe('external-sales logistics charge migration contract', () => {
       'CustomerPriceBook_settlementType_purpose_isActive_effectiveFrom_idx',
     );
     expect(schema).toContain('purpose        CustomerPriceBookPurpose');
-    expect(quoteService).toContain(
-      'purpose: CustomerPriceBookPurpose.PROCESSING',
+    expect(priceSnapshotReader).toContain(
+      'CustomerPriceBookPurpose.PROCESSING',
     );
   });
 

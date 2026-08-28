@@ -12,7 +12,6 @@ vi.mock('@/actions/order', () => ({
   createOrderAction: vi.fn(),
   submitOrderAction: vi.fn(),
 }));
-vi.mock('@/actions/order-quote', () => ({ quoteOrderItemsAction: vi.fn() }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
 }));
@@ -153,8 +152,6 @@ describe('OrderForm B unified external-sales quote', () => {
     expect(orderFormSource).toContain('setPackagingQuote({');
     expect(orderFormSource).toContain('setLogisticsQuote({');
     expect(orderFormSource).toContain('setExternalOrderQuote({');
-    expect(orderFormSource).not.toContain('quoteOrderPackagingGroupsAction');
-    expect(orderFormSource).not.toContain('quoteExternalOrderChargesAction');
     expect(orderFormSource).toContain('<OrderFormB');
     expect(orderFormSource).not.toContain('<OrderFormC');
     expect(orderFormSource).toContain(

@@ -2,7 +2,7 @@ import { OrderSettlementType } from '../../generated/prisma/enums';
 import type { Prisma } from '../../generated/prisma/client';
 import type {
   QuoteExternalOrderChargesInput,
-  QuoteOrderItemsInput,
+  CreateOrderQuoteItemsInput,
   QuoteCreateOrderPackagingGroupsInput,
 } from '../auth/schemas';
 import { db } from '../db';
@@ -35,7 +35,7 @@ import {
 import { isNewOrderPricingRoute } from './pricing-route';
 
 export type CreateOrderQuoteItemInput = Omit<
-  QuoteOrderItemsInput['items'][number],
+  CreateOrderQuoteItemsInput['items'][number],
   'manualQuoteReason'
 > & {
   manualQuoteReason?: string | null;

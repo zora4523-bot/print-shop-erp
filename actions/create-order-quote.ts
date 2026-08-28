@@ -14,7 +14,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import {
   quoteExternalOrderChargesSchema,
   quoteCreateOrderPackagingGroupsSchema,
-  quoteOrderItemsSchema,
+  createOrderQuoteItemsSchema,
 } from '@/lib/auth/schemas';
 import {
   CreateOrderQuoteError,
@@ -69,7 +69,7 @@ export async function quoteExternalCreateOrderAction(
       error: '仅支持外部销售建单报价',
     })
     .safeParse(raw.settlementType);
-  const items = quoteOrderItemsSchema.safeParse({
+  const items = createOrderQuoteItemsSchema.safeParse({
     items: raw.items,
     orderItemCount: raw.orderItemCount,
   });
@@ -189,7 +189,7 @@ export async function quoteInternalCreateOrderAction(
     ])
     .refine((value) => value === actorSettlementType, '建单结算方向与当前账号不一致')
     .safeParse(raw.settlementType);
-  const items = quoteOrderItemsSchema.safeParse({
+  const items = createOrderQuoteItemsSchema.safeParse({
     items: raw.items,
     orderItemCount: raw.orderItemCount,
   });

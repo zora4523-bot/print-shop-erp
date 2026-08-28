@@ -1668,7 +1668,7 @@ export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
 // 建议价由服务端根据当前生效规则计算。客户端只传业务事实，
 // 不传价格或规则快照，避免直接 POST 伪造报价结果。
-export const quoteOrderItemsSchema = z.object({
+export const createOrderQuoteItemsSchema = z.object({
   items: z
     .array(
       orderItemBaseSchema
@@ -1713,7 +1713,9 @@ export const quoteOrderItemsSchema = z.object({
     .optional(),
 });
 
-export type QuoteOrderItemsInput = z.infer<typeof quoteOrderItemsSchema>;
+export type CreateOrderQuoteItemsInput = z.infer<
+  typeof createOrderQuoteItemsSchema
+>;
 
 // OrderItem.subtotal and Order.totalAmount are Decimal(12,2): at most
 // 9,999,999,999.99 yuan. lib/order.ts persists each line as
@@ -1986,35 +1988,7 @@ const orderPackagingQuoteGroupSchema = z.object({
     .max(9_999_999, '袋数过大'),
 });
 
-export const quoteOrderPackagingGroupsSchema = z
-  .object({
-    groups: z
-      .array(orderPackagingQuoteGroupSchema, {
-        error: '包装组数据格式非法',
-      })
-      .min(1, '至少需要一个包装组')
-      .max(20, '单工单包装组不超过 20 组'),
-  })
-  .superRefine((input, ctx) => {
-    const seen = new Set<string>();
-    input.groups.forEach((group, index) => {
-      if (seen.has(group.groupKey)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['groups', index, 'groupKey'],
-          message: '包装组标识不能重复',
-        });
-      }
-      seen.add(group.groupKey);
-    });
-  });
-
-export type QuoteOrderPackagingGroupsInput = z.infer<
-  typeof quoteOrderPackagingGroupsSchema
->;
-
 // 统一建单报价还需要每袋的款式组成，用来验证混装与计算袋数。
-// 保留上面的独立包装报价 schema 边界，避免改变它的旧请求合同。
 const createOrderPackagingQuoteGroupSchema =
   orderPackagingQuoteGroupSchema.extend({
     itemUnitsPerBag: z

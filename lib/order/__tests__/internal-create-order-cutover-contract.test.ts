@@ -13,8 +13,6 @@ const formSource = readFileSync(
 
 describe('internal create engine cutover source contract', () => {
   it('has no old create-time item quote runtime call', () => {
-    expect(orderSource).not.toMatch(/\bquoteOrderItems\b/u);
-    expect(formSource).not.toMatch(/\bquoteOrderItemsAction\b/u);
     expect(orderSource).toContain('calculateCreateOrderQuoteFromCatalogInTx');
     expect(formSource).toContain('quoteInternalCreateOrderAction');
     expect(formSource).toContain(
