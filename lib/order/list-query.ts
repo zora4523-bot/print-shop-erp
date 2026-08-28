@@ -23,6 +23,7 @@ import {
   decodeFoilColorFilterValues,
   encodeFoilColorFilterValues,
 } from './foil-color-filter-codec';
+import { selectOrderCustomerFee } from './customer-fee';
 
 export const ORDER_LIST_DEFAULT_PAGE_SIZE = 20;
 export const ORDER_LIST_MAX_PAGE_SIZE = 100;
@@ -900,7 +901,14 @@ export async function listOrdersPage(
       receiverAddress: true,
       trackingNo: true,
       expressCode: true,
-      ...(actor.role === Role.WORKER ? {} : { totalAmount: true }),
+      ...(actor.role === Role.WORKER
+        ? {}
+        : {
+            totalAmount: true,
+            quotedFee: true,
+            confirmedFee: true,
+            settledFee: true,
+          }),
       submitterId: true,
       promisedDate: true,
       submitter: { select: { displayName: true } },
@@ -955,16 +963,34 @@ export async function listOrdersPage(
 
   return paginatedResult(
     rows.map((row) => {
-      const {
-        submitter,
-        sourceOrder,
-        _count,
-        totalAmount,
-        ...orderFields
-      } = row;
+      const { submitter, sourceOrder, _count } = row;
       return {
-        ...orderFields,
-        totalAmount: actor.role === Role.WORKER ? null : totalAmount,
+        id: row.id,
+        orderNo: row.orderNo,
+        customName: row.customName,
+        status: row.status,
+        kind: row.kind,
+        isUrgent: row.isUrgent,
+        isSfCollect: row.isSfCollect,
+        customerRef: row.customerRef,
+        receiverName: row.receiverName,
+        receiverPhone: row.receiverPhone,
+        receiverAddress: row.receiverAddress,
+        trackingNo: row.trackingNo,
+        expressCode: row.expressCode,
+        submitterId: row.submitterId,
+        promisedDate: row.promisedDate,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        totalAmount:
+          actor.role === Role.WORKER
+            ? null
+            : selectOrderCustomerFee({
+                totalAmount: 'totalAmount' in row ? row.totalAmount : '0',
+                quotedFee: 'quotedFee' in row ? row.quotedFee : null,
+                confirmedFee: 'confirmedFee' in row ? row.confirmedFee : null,
+                settledFee: 'settledFee' in row ? row.settledFee : null,
+              }).amount,
         sourceOrderNo: sourceOrder?.orderNo ?? null,
         shipmentCount: _count.shipments,
         submitterName: submitter.displayName,

@@ -15,6 +15,7 @@ import {
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { db } from '../db';
 import { signDesignReadUrl } from '../oss/read-url';
+import { selectOrderCustomerFee } from './customer-fee';
 
 export type SalesOrderDetail = {
   id: string;
@@ -109,6 +110,9 @@ export const salesOrderDetailSelect = {
   processingAmount: true,
   packagingAmount: true,
   totalAmount: true,
+  quotedFee: true,
+  confirmedFee: true,
+  settledFee: true,
   promisedDate: true,
   expressCode: true,
   packageRequirement: true,
@@ -256,7 +260,7 @@ function mapSalesOrderDetail(row: SalesOrderDetailRecord): SalesOrderDetail {
     isSfCollect: row.isSfCollect,
     revision: row.revision,
     pricingStatus: row.pricingStatus,
-    totalAmount: money(row.totalAmount),
+    totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
     expressCode: row.expressCode,
     packageRequirement: row.packageRequirement,

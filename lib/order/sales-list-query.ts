@@ -25,6 +25,7 @@ import {
   type OrderListQuery,
   type OrderListViewKey,
 } from './list-query';
+import { selectOrderCustomerFee } from './customer-fee';
 
 export const SALES_ORDER_LIST_VIEWS = [
   'todo',
@@ -149,6 +150,9 @@ const salesOrderSelect = {
   processingAmount: true,
   packagingAmount: true,
   totalAmount: true,
+  quotedFee: true,
+  confirmedFee: true,
+  settledFee: true,
   promisedDate: true,
   updatedAt: true,
   receiverName: true,
@@ -573,7 +577,7 @@ function mapSalesOrderRow(
     isUrgent: row.isUrgent,
     revision: row.revision,
     pricingStatus: row.pricingStatus,
-    totalAmount: money(row.totalAmount),
+    totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
     dueAlert,
     updatedAt: row.updatedAt.toISOString(),
