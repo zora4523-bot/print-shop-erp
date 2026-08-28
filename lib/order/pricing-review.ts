@@ -18,6 +18,7 @@ import {
   quoteExternalOrderChargesInTransaction,
   resolveExternalOrderChargesForCreation,
 } from "../price/order-charge-service";
+import { deriveExternalOrderChargeShipments } from "../price/external-order-charge-facts";
 import { quoteOrderPackagingGroups } from "../price/order-packaging-quote";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
@@ -203,7 +204,7 @@ type PricingOrder = {
     destinationProvince: string | null;
     weightKg: MoneyLike | null;
     status: string;
-    lines: Array<{ quantity: number }>;
+    lines: Array<{ orderItemId: string; quantity: number }>;
   }>;
   customerCharges: Array<{
     id: string;
@@ -295,7 +296,7 @@ const pricingOrderSelect = {
       destinationProvince: true,
       weightKg: true,
       status: true,
-      lines: { select: { quantity: true } },
+      lines: { select: { orderItemId: true, quantity: true } },
     },
   },
   customerCharges: {
@@ -403,12 +404,43 @@ function itemQuoteInput(order: PricingOrder) {
 }
 
 function shipmentFacts(order: PricingOrder) {
-  return order.shipments.map((shipment) => ({
-    shipmentKey: String(shipment.sequence),
-    province: shipment.destinationProvince,
-    billableWeightKg: money(shipment.weightKg, 3),
-    itemQuantity: shipment.lines.reduce((sum, line) => sum + line.quantity, 0),
-  }));
+  return deriveExternalOrderChargeShipments({
+    isSfCollect: order.isSfCollect,
+    items: order.items.map((item) => ({
+      itemKey: item.id,
+      quantity: item.quantity,
+      paperWeightGsm: item.paperWeightGsm,
+      paperType: item.paperType,
+      productStructure: item.productStructure,
+    })),
+    shipments: order.shipments.map((shipment) => ({
+      shipmentKey: String(shipment.sequence),
+      province: shipment.destinationProvince,
+      // Persisted fulfilment weight is a trusted actual fact and therefore
+      // takes precedence over the item-based estimate in the shared helper.
+      billableWeightKg: money(shipment.weightKg, 3),
+      itemQuantities: order.items.map((item) =>
+        shipment.lines.reduce(
+          (sum, line) =>
+            line.orderItemId === item.id ? sum + line.quantity : sum,
+          0,
+        ),
+      ),
+    })),
+  });
+}
+
+function quotedBillableWeightKg(
+  basis: Record<string, string | number | boolean | null>,
+): string | null {
+  const value = basis.billableWeightKg;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  try {
+    const parsed = new Decimal(value);
+    return parsed.isFinite() && parsed.gt(0) ? parsed.toFixed(3) : null;
+  } catch {
+    return null;
+  }
 }
 
 function packagingGroupFacts(order: PricingOrder) {
@@ -603,7 +635,9 @@ export async function previewOrderPricingReview(
           shipmentId: shipment.id,
           sequence: shipment.sequence,
           destinationProvince: fact.province,
-          billableWeightKg: fact.billableWeightKg,
+          billableWeightKg: quotedBillableWeightKg(
+            quotedShipment.shipping.basis,
+          ),
           itemQuantity: fact.itemQuantity,
           shipping: {
             complete: quotedShipment.shipping.complete,
@@ -889,29 +923,7 @@ export async function finalizeOrderPricing(
         "请完整确认每一个发货地址的快递费和打包耗材费",
       );
     }
-    for (const shipment of order.shipments) {
-      const submitted = submittedByShipmentId.get(shipment.id)!;
-      const currentWeight = money(shipment.weightKg, 3);
-      if (
-        submitted.expectedDestinationProvince !==
-          shipment.destinationProvince ||
-        submitted.expectedBillableWeightKg !== currentWeight
-      ) {
-        throw new OrderPricingReviewError(
-          `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按最新事实重新核价`,
-        );
-      }
-    }
-
-    const currentShipmentFacts = order.shipments.map((shipment) => ({
-      shipmentKey: String(shipment.sequence),
-      province: shipment.destinationProvince,
-      billableWeightKg: money(shipment.weightKg, 3),
-      itemQuantity: shipment.lines.reduce(
-        (sum, line) => sum + line.quantity,
-        0,
-      ),
-    }));
+    const currentShipmentFacts = shipmentFacts(order);
     let latestLogisticsQuote: Awaited<
       ReturnType<typeof quoteExternalOrderChargesInTransaction>
     >;
@@ -931,6 +943,23 @@ export async function finalizeOrderPricing(
           shipment,
         ]),
       );
+      for (const shipment of order.shipments) {
+        const submitted = submittedByShipmentId.get(shipment.id)!;
+        const quoted = quoteByShipmentKey.get(String(shipment.sequence));
+        if (!quoted) {
+          throw new OrderPricingReviewError("物流报价与工单发货地址不一致");
+        }
+        const currentWeight = quotedBillableWeightKg(quoted.shipping.basis);
+        if (
+          submitted.expectedDestinationProvince !==
+            shipment.destinationProvince ||
+          submitted.expectedBillableWeightKg !== currentWeight
+        ) {
+          throw new OrderPricingReviewError(
+            `地址 ${shipment.sequence} 的计费省份或重量已变更，请刷新后按最新事实重新核价`,
+          );
+        }
+      }
       logistics = await resolveExternalOrderChargesForCreation(
         tx,
         {

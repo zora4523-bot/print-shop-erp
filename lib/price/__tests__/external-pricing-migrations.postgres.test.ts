@@ -25,6 +25,14 @@ const v3Migration = readFileSync(
   'utf8',
 );
 
+const logisticsWeightV3Migration = readFileSync(
+  path.join(
+    process.cwd(),
+    'prisma/migrations/20260827104000_external_logistics_weight_policy_v3/migration.sql',
+  ),
+  'utf8',
+);
+
 function quotedIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
@@ -455,6 +463,256 @@ postgresDescribe('external pricing migrations · PostgreSQL timeline', () => {
         overlapCount: 0,
       });
       expect(colorRule.rows[0]?.laminations).toEqual(['MATTE']);
+    });
+  });
+
+  it('publishes compatible logistics successors for current and future versions', async () => {
+    await withIsolatedSchema(async (client) => {
+      await createPriceBookTimelineSchema(client);
+      await createV3RuleSchema(client);
+      await client.query(`
+        CREATE EXTENSION IF NOT EXISTS btree_gist;
+        ALTER TABLE "CustomerPriceBook"
+          ADD CONSTRAINT "test_price_book_code_version_unique"
+          UNIQUE ("code", "version");
+        ALTER TABLE "CustomerPriceBook"
+          ADD CONSTRAINT "test_active_settlement_purpose_no_overlap"
+          EXCLUDE USING gist (
+            "settlementType" WITH =,
+            "purpose" WITH =,
+            tsrange(
+              "effectiveFrom",
+              COALESCE("effectiveTo", 'infinity'::TIMESTAMP),
+              '[)'
+            ) WITH &&
+          )
+          WHERE ("isActive");
+
+        WITH clock AS (
+          SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3) AS now
+        )
+        INSERT INTO "CustomerPriceBook" (
+          "id", "code", "name", "settlementType", "purpose", "version",
+          "currency", "sourceName", "sourceSha256", "effectiveFrom",
+          "effectiveTo", "isActive", "notes", "createdAt", "updatedAt"
+        )
+        SELECT seed.*
+        FROM clock
+        CROSS JOIN LATERAL (
+          VALUES
+            (
+              'cpb_external_logistics_rule_v2',
+              'EXTERNAL_SALES_LOGISTICS_RULES', '当前物流版',
+              'EXTERNAL_SALES'::"OrderSettlementType",
+              'LOGISTICS'::"CustomerPriceBookPurpose", 1, 'CNY',
+              '长昆中通报价表(1).xlsx + 纸箱价格表1(1).xlsx',
+              '7d3d0b6dddb2ee910046b3bc80f1d7fc8e35aa94dd25d5cf14f23c58a6ab8a69',
+              clock.now - INTERVAL '1 day', clock.now + INTERVAL '1 day',
+              TRUE,
+              '{
+                "sources":[{"fileName":"长昆中通报价表(1).xlsx"}],
+                "shipping":{"billableWeightInput":"CARRIER_CONFIRMED"},
+                "workflow":{"status":"SYSTEM_RELEASE"}
+              }'::JSONB,
+              clock.now - INTERVAL '1 day', clock.now - INTERVAL '1 day'
+            ),
+            (
+              'scheduled_logistics_v2',
+              'EXTERNAL_SALES_LOGISTICS_RULES', '未来物流版',
+              'EXTERNAL_SALES'::"OrderSettlementType",
+              'LOGISTICS'::"CustomerPriceBookPurpose", 2, 'CNY',
+              'future.xlsx',
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              clock.now + INTERVAL '1 day', NULL, TRUE,
+              '{"workflow":{"status":"PUBLISHED"}}'::JSONB,
+              clock.now - INTERVAL '2 days', clock.now - INTERVAL '2 days'
+            )
+        ) AS seed(
+          "id", "code", "name", "settlementType", "purpose", "version",
+          "currency", "sourceName", "sourceSha256", "effectiveFrom",
+          "effectiveTo", "isActive", "notes", "createdAt", "updatedAt"
+        );
+
+        INSERT INTO "CustomerPriceRule" (
+          "id", "priceBookId", "categoryId", "code", "name", "kind",
+          "calculationType", "amount", "triggerCondition", "priority",
+          "sourceSheet", "sourceRange", "sourceName", "sourceSha256", "note",
+          "blocksAutomaticQuote", "isActive", "createdAt", "updatedAt"
+        ) VALUES
+          (
+            'source_shipping', 'cpb_external_logistics_rule_v2',
+            'shipping_category', 'SHANGHAI', '上海', 'BASE', 'FIXED_AMOUNT',
+            3.5, '{"province":"上海"}', 10, '中通', 'A1:D29',
+            '长昆中通报价表(1).xlsx',
+            'a92088a9ba0093afcbb96c6b3b182ab29e4f7d675cacf929c6745987bf4d6060',
+            NULL, FALSE, TRUE, CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+            CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+          ),
+          (
+            'source_inactive_carton', 'cpb_external_logistics_rule_v2',
+            'carton_category', 'CARTON_OLD', '历史纸箱档', 'ADD_ON',
+            'FIXED_AMOUNT', 8, '{"maxQty":5000}', 20, 'Sheet1', 'A1:B6',
+            '纸箱价格表1(1).xlsx',
+            '9f0c30333a737ab9d36398b8af2c84ece599317f9df21af5dacb8f365fa5401b',
+            '停用但仍需复制', FALSE, FALSE,
+            CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+            CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+          ),
+          (
+            'future_shipping', 'scheduled_logistics_v2',
+            'shipping_category', 'SHANGHAI', '未来上海', 'BASE', 'FIXED_AMOUNT',
+            9.5, '{"province":"上海"}', 10, '中通', 'A1:D29',
+            'future.xlsx',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            '未来费率必须保留', FALSE, TRUE,
+            CURRENT_TIMESTAMP AT TIME ZONE 'UTC',
+            CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+          );
+      `);
+
+      await client.query(logisticsWeightV3Migration);
+
+      const timeline = await client.query<{
+        currentCount: number;
+        oldFutureActive: boolean;
+        futureSuccessorActive: boolean;
+        predecessorToV3: boolean;
+        v3ToFuture: boolean;
+        currentVersion: number;
+        futureVersion: number;
+        futureCompatibleCount: number;
+      }>(`
+        SELECT
+          future."isActive" AS "oldFutureActive",
+          future_successor."isActive" AS "futureSuccessorActive",
+          predecessor."effectiveTo" = target."effectiveFrom"
+            AS "predecessorToV3",
+          target."effectiveTo" = future_successor."effectiveFrom"
+            AS "v3ToFuture",
+          target."version" AS "currentVersion",
+          future_successor."version" AS "futureVersion",
+          (
+            SELECT COUNT(*)::INT
+            FROM "CustomerPriceBook" current_book
+            WHERE current_book."settlementType" = 'EXTERNAL_SALES'
+              AND current_book."purpose" = 'LOGISTICS'
+              AND current_book."isActive" = TRUE
+              AND current_book."effectiveFrom" <=
+                (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3)
+              AND (
+                current_book."effectiveTo" IS NULL
+                OR current_book."effectiveTo" >
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3)
+              )
+          ) AS "currentCount",
+          (
+            SELECT COUNT(*)::INT
+            FROM "CustomerPriceBook" selected
+            WHERE selected."settlementType" = 'EXTERNAL_SALES'
+              AND selected."purpose" = 'LOGISTICS'
+              AND selected."isActive" = TRUE
+              AND selected."effectiveFrom" <=
+                future."effectiveFrom" + INTERVAL '1 hour'
+              AND (
+                selected."effectiveTo" IS NULL
+                OR selected."effectiveTo" >
+                  future."effectiveFrom" + INTERVAL '1 hour'
+              )
+              AND selected."notes"->'shipping'->>'billableWeightInput' =
+                'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE'
+          ) AS "futureCompatibleCount"
+        FROM "CustomerPriceBook" predecessor
+        CROSS JOIN "CustomerPriceBook" target
+        CROSS JOIN "CustomerPriceBook" future
+        CROSS JOIN "CustomerPriceBook" future_successor
+        WHERE predecessor."id" = 'cpb_external_logistics_rule_v2'
+          AND target."id" = 'cpb_external_logistics_weight_policy_v3'
+          AND future."id" = 'scheduled_logistics_v2'
+          AND future_successor."notes"->>'supersedesPriceBookId' =
+            future."id"
+      `);
+      const rules = await client.query<{
+        inactiveCount: number;
+        sourceCount: number;
+        targetCount: number;
+        futureSourceCount: number;
+        futureTargetCount: number;
+      }>(`
+        SELECT
+          COUNT(*) FILTER (
+            WHERE "priceBookId" = 'cpb_external_logistics_rule_v2'
+          )::INT AS "sourceCount",
+          COUNT(*) FILTER (
+            WHERE "priceBookId" = 'cpb_external_logistics_weight_policy_v3'
+          )::INT AS "targetCount",
+          COUNT(*) FILTER (
+            WHERE "priceBookId" = 'cpb_external_logistics_weight_policy_v3'
+              AND "isActive" = FALSE
+          )::INT AS "inactiveCount",
+          COUNT(*) FILTER (
+            WHERE "priceBookId" = 'scheduled_logistics_v2'
+          )::INT AS "futureSourceCount",
+          COUNT(*) FILTER (
+            WHERE "priceBookId" = (
+              SELECT "id"
+              FROM "CustomerPriceBook"
+              WHERE "notes"->>'supersedesPriceBookId' =
+                'scheduled_logistics_v2'
+            )
+          )::INT AS "futureTargetCount"
+        FROM "CustomerPriceRule"
+      `);
+      const policies = await client.query<{ shipping: unknown }>(`
+        SELECT "notes"->'shipping' AS shipping
+        FROM "CustomerPriceBook"
+        WHERE "notes"->>'ruleVersion' = '2026-08-27-logistics-weight-v3'
+        ORDER BY "effectiveFrom"
+      `);
+
+      expect(timeline.rows[0]).toEqual({
+        currentCount: 1,
+        oldFutureActive: false,
+        futureSuccessorActive: true,
+        predecessorToV3: true,
+        v3ToFuture: true,
+        currentVersion: 3,
+        futureVersion: 4,
+        futureCompatibleCount: 1,
+      });
+      expect(rules.rows[0]).toEqual({
+        inactiveCount: 1,
+        sourceCount: 2,
+        targetCount: 2,
+        futureSourceCount: 1,
+        futureTargetCount: 1,
+      });
+      expect(policies.rows).toHaveLength(2);
+      for (const policy of policies.rows) {
+        expect(policy.shipping).toMatchObject({
+          billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+          billableWeightRounding: 'CEIL_KG',
+          gramsPerItemByPaperWeightGsm: {
+            '120': 4.5,
+            '150': 6,
+            '160': 6,
+            '180': 6.75,
+            '200': 8,
+            '230': 10,
+          },
+          maxOrderQuantity: 2000,
+          minimumBillableWeightKg: 1,
+          source: {
+            fileName: '加工费计费规则.md',
+            sha256:
+              '3596993e283d1d06f01dd7048b6ccf2f1c0e4b27394541e004a37419c856d817',
+          },
+          tenThousandEnvelopeGramsPerItem: 10,
+          weightResolutionOrder: [
+            'ACTUAL_FULFILLMENT_WEIGHT',
+            'SERVER_ESTIMATE',
+          ],
+        });
+      }
     });
   });
 });

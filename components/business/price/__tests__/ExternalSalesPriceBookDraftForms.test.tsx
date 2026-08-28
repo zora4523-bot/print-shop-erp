@@ -12,6 +12,7 @@ import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '@/lib/price/customer
 import type {
   CustomerPriceRuleDraftEditorDto,
 } from '@/lib/price/customer-price-book-admin';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 const {
   actionStateMock,
@@ -775,8 +776,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
       false,
     ]);
     effectMock.mockImplementation((effect: () => void) => effect());
-    const successHref =
-      '/owner/prices/external-sales/items?purpose=processing&item=rule-1#selected-charge-detail';
+    const successHref = `${RULE_CENTER_HREFS.customerPricing}?purpose=processing&item=rule-1#selected-charge-detail`;
 
     renderToStaticMarkup(
       <CustomerPriceBookDraftRuleForm

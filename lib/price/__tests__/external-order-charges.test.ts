@@ -1,18 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calculateExternalOrderCharges,
+  calculateExternalOrderCharges as calculateExternalOrderChargesWithRules,
+  getZtoTariff as getZtoTariffWithRules,
+  type ExternalOrderChargeInput,
+  type ExternalOrderChargeRule,
+  type ExternalOrderChargeWeightItem,
+  type ExternalOrderLogisticsPolicy,
+} from '../external-order-charges';
+import {
   CARTON_PRICE_SOURCE,
   DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
-  getZtoTariff,
-  type ExternalOrderChargeRule,
+  DEFAULT_EXTERNAL_ORDER_LOGISTICS_POLICY,
   ZTO_PRICE_SOURCE,
-} from '../external-order-charges';
+} from './fixtures/external-order-charge-fixtures';
+
+function calculateExternalOrderCharges(
+  input: ExternalOrderChargeInput,
+  rules: readonly ExternalOrderChargeRule[] =
+    DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+  policy: ExternalOrderLogisticsPolicy =
+    DEFAULT_EXTERNAL_ORDER_LOGISTICS_POLICY,
+) {
+  return calculateExternalOrderChargesWithRules(input, rules, policy);
+}
+
+function getZtoTariff(
+  province: string | null,
+  rules: readonly ExternalOrderChargeRule[] =
+    DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+) {
+  return getZtoTariffWithRules(province, rules);
+}
 
 function oneShipment(
   overrides: Partial<{
     shipmentKey: string;
     province: string | null;
     billableWeightKg: string | null;
+    weightItems: readonly ExternalOrderChargeWeightItem[];
     itemQuantity: number;
   }> = {},
 ) {
@@ -151,17 +176,45 @@ describe('calculateExternalOrderCharges · 中通计费重量', () => {
     },
   );
 
-  it.each([null, '0'])('缺少有效重量时失败关闭：%s', (billableWeightKg) => {
+  it('缺少实际重量与可估算事实时失败关闭', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
-      shipments: [oneShipment({ billableWeightKg })],
+      shipments: [oneShipment({ billableWeightKg: null })],
     });
 
     expect(result.complete).toBe(false);
     expect(result.suggestedShippingTotal).toBeNull();
     expect(result.suggestedTotal).toBeNull();
     expect(result.shipments[0]?.shipping.amount).toBeNull();
-    expect(result.errors.join('；')).toContain('缺少有效的系统计费重量');
+    expect(result.errors.join('；')).toContain('缺少可用于估算的款式重量事实');
+  });
+
+  it.each(['0', '-1', '1.2345', 'unknown'])('非空实际重量无效时不回退到估算：%s', (
+    billableWeightKg,
+  ) => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({
+          billableWeightKg,
+          weightItems: [
+            {
+              itemKey: '1',
+              quantity: 500,
+              paperWeightGsm: 160,
+              paperType: null,
+              productStructure: 'STANDARD_ENVELOPE',
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.complete).toBe(false);
+    expect(result.shipments[0]?.shipping.basis.weightSource).toBe(
+      'ACTUAL_FULFILLMENT_WEIGHT',
+    );
+    expect(result.errors.join('；')).toContain('实际计费重量无效');
   });
 
   it('fails closed for an unknown province while retaining the independent carton suggestion', () => {
@@ -182,19 +235,178 @@ describe('calculateExternalOrderCharges · 中通计费重量', () => {
   });
 
   it('fails closed before a calculated fee can overflow the stored money column', () => {
+    const rules = DEFAULT_EXTERNAL_ORDER_CHARGE_RULES.map((rule) =>
+      rule.kind === 'SHIPPING' && rule.code === 'ZTO_STANDARD_4_5'
+        ? { ...rule, additionalUnitFee: '10000000000' }
+        : rule,
+    );
+    const result = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [
+          oneShipment({
+            province: '云南',
+            billableWeightKg: '2',
+          }),
+        ],
+      },
+      rules,
+    );
+
+    expect(result.complete).toBe(false);
+    expect(result.shipments[0]?.shipping.errors).toContain(
+      '快递费超过系统可保存上限，请人工确认',
+    );
+  });
+});
+
+describe('calculateExternalOrderCharges · 服务端重量估算', () => {
+  const standard160gItem: ExternalOrderChargeWeightItem = {
+    itemKey: 'style-1',
+    quantity: 1_000,
+    paperWeightGsm: 160,
+    paperType: '160g触感纸',
+    productStructure: 'STANDARD_ENVELOPE',
+  };
+
+  it('按版本策略汇总单重并向上取整到公斤', () => {
     const result = calculateExternalOrderCharges({
       isSfCollect: false,
       shipments: [
         oneShipment({
-          province: '云南',
-          billableWeightKg: '9999999999999',
+          province: '上海',
+          billableWeightKg: null,
+          itemQuantity: 1_000,
+          weightItems: [standard160gItem],
+        }),
+      ],
+    });
+
+    expect(result).toMatchObject({
+      complete: true,
+      suggestedShippingTotal: '20.30',
+    });
+    expect(result.shipments[0]?.shipping.basis).toMatchObject({
+      weightSource: 'SERVER_ESTIMATE',
+      netWeightGrams: '6000',
+      billableWeightKg: '6',
+      policyVersion: DEFAULT_EXTERNAL_ORDER_LOGISTICS_POLICY.ruleVersion,
+      billableWeightRounding: 'CEIL_KG',
+    });
+  });
+
+  it('万元封优先使用产品结构的 10g 单重', () => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({
+          billableWeightKg: null,
+          itemQuantity: 101,
+          weightItems: [
+            {
+              ...standard160gItem,
+              quantity: 101,
+              paperWeightGsm: null,
+              productStructure: 'TEN_THOUSAND_ENVELOPE',
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(result.shipments[0]?.shipping.basis).toMatchObject({
+      weightSource: 'SERVER_ESTIMATE',
+      netWeightGrams: '1010',
+      billableWeightKg: '2',
+    });
+  });
+
+  it('已确认实际重量优先于服务端估算', () => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({
+          billableWeightKg: '2',
+          itemQuantity: 1_000,
+          weightItems: [standard160gItem],
+        }),
+      ],
+    });
+
+    expect(result.suggestedShippingTotal).toBe('4.30');
+    expect(result.shipments[0]?.shipping.basis).toMatchObject({
+      weightSource: 'ACTUAL_FULFILLMENT_WEIGHT',
+      netWeightGrams: null,
+      billableWeightKg: '2',
+    });
+  });
+
+  it.each([
+    {
+      label: '未配置克重',
+      item: { ...standard160gItem, paperWeightGsm: 170 },
+      expected: '没有物流单重配置',
+    },
+    {
+      label: '产品结构未确定',
+      item: { ...standard160gItem, productStructure: 'UNSPECIFIED' as const },
+      expected: '产品结构未确定',
+    },
+    {
+      label: '非法分配数量',
+      item: { ...standard160gItem, quantity: -1 },
+      expected: '分配数量无效',
+    },
+  ])('$label 时不会猜测重量', ({ item, expected }) => {
+    const result = calculateExternalOrderCharges({
+      isSfCollect: false,
+      shipments: [
+        oneShipment({
+          billableWeightKg: null,
+          weightItems: [item],
         }),
       ],
     });
 
     expect(result.complete).toBe(false);
-    expect(result.shipments[0]?.shipping.errors).toContain(
-      '快递费超过系统可保存上限，请人工确认',
+    expect(result.suggestedShippingTotal).toBeNull();
+    expect(result.errors.join('；')).toContain(expected);
+  });
+
+  it('冻结历史策略只接受实际重量', () => {
+    const legacyPolicy: ExternalOrderLogisticsPolicy = {
+      ruleVersion: 'historical:v1',
+      billableWeightInput: 'CARRIER_CONFIRMED',
+      weightResolutionOrder: ['ACTUAL_FULFILLMENT_WEIGHT'],
+      maxOrderQuantity: 2_000,
+    };
+    const estimated = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [
+          oneShipment({
+            billableWeightKg: null,
+            weightItems: [standard160gItem],
+          }),
+        ],
+      },
+      DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+      legacyPolicy,
+    );
+    const actual = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [oneShipment({ billableWeightKg: '2' })],
+      },
+      DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+      legacyPolicy,
+    );
+
+    expect(estimated.complete).toBe(false);
+    expect(estimated.errors.join('；')).toContain('缺少已确认的实际计费重量');
+    expect(actual.suggestedShippingTotal).toBe('4.30');
+    expect(actual.shipments[0]?.shipping.basis.weightSource).toBe(
+      'ACTUAL_FULFILLMENT_WEIGHT',
     );
   });
 });
@@ -273,6 +485,31 @@ describe('calculateExternalOrderCharges · 整单纸箱费', () => {
       complete: false,
       name: '物流运费待定',
       errors: ['整单总数量超过 2000 个，改走物流，运费待定'],
+    });
+  });
+
+  it('数量上限由当前价目策略提供', () => {
+    const policy: ExternalOrderLogisticsPolicy = {
+      ...DEFAULT_EXTERNAL_ORDER_LOGISTICS_POLICY,
+      ruleVersion: 'test-limit-100',
+      maxOrderQuantity: 100,
+    };
+    const result = calculateExternalOrderCharges(
+      {
+        isSfCollect: false,
+        shipments: [oneShipment({ itemQuantity: 101 })],
+      },
+      DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+      policy,
+    );
+
+    expect(result.shipments[0]?.shipping).toMatchObject({
+      complete: false,
+      errors: ['整单总数量超过 100 个，改走物流，运费待定'],
+      basis: expect.objectContaining({
+        maxOrderQuantity: 100,
+        policyVersion: 'test-limit-100',
+      }),
     });
   });
 });
@@ -505,7 +742,17 @@ describe('calculateExternalOrderCharges · 规则注入与快照', () => {
       }),
     ]);
     expect(result.snapshot).toEqual({
-      version: 1,
+      version: 2,
+      policy: {
+        ruleVersion: DEFAULT_EXTERNAL_ORDER_LOGISTICS_POLICY.ruleVersion,
+        billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+        weightResolutionOrder: [
+          'ACTUAL_FULFILLMENT_WEIGHT',
+          'SERVER_ESTIMATE',
+        ],
+        maxOrderQuantity: 2_000,
+        billableWeightRounding: 'CEIL_KG',
+      },
       input: {
         isSfCollect: false,
         shipments: [

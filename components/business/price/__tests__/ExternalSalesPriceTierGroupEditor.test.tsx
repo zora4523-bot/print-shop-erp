@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomerPriceCalculationType } from '@/generated/prisma/enums';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 const {
   actionStateMock,
@@ -81,8 +82,7 @@ function props(
     saveAction: vi
       .fn()
       .mockResolvedValue({ status: 'success', priceBookId: 'private-draft-book' }),
-    successHref:
-      '/owner/prices/external-sales/items?purpose=processing&item=selected',
+    successHref: `${RULE_CENTER_HREFS.customerPricing}?purpose=processing&item=selected`,
     ...overrides,
   };
 }

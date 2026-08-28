@@ -25,7 +25,9 @@ vi.mock('@/lib/bom', () => ({
   getBomDetail: getBomDetailMock,
 }));
 vi.mock('@/actions/owner-products', () => ({
-  updateProductAction: vi.fn(),
+  createQuoteProductAction: vi.fn(),
+  setQuoteProductActiveAction: vi.fn(),
+  updateQuoteProductAction: vi.fn(),
 }));
 vi.mock('@/components/business/product/ProductForm', () => ({
   ProductForm: () => null,
@@ -46,7 +48,7 @@ vi.mock('next/navigation', () => ({
   notFound: vi.fn(),
 }));
 
-import { generateMetadata as generateProductMetadata } from '@/app/(admin)/owner/products/[id]/page';
+import { generateMetadata as generateProductMetadata } from '@/app/(admin)/owner/rules/stock-skus/[id]/page';
 import { generateMetadata as generateBomMetadata } from '@/app/(admin)/owner/boms/[id]/page';
 
 function session(role: Role) {
@@ -72,7 +74,7 @@ describe('owner 详情页 metadata 权限边界', () => {
       generateProductMetadata({
         params: Promise.resolve({ id: 'product-private' }),
       }),
-    ).resolves.toEqual({ title: '产品字典' });
+    ).resolves.toEqual({ title: '报价产品' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
     ).resolves.toEqual({ title: 'BOM/用料' });
@@ -88,7 +90,7 @@ describe('owner 详情页 metadata 权限边界', () => {
       generateProductMetadata({
         params: Promise.resolve({ id: 'product-private' }),
       }),
-    ).resolves.toEqual({ title: '产品字典' });
+    ).resolves.toEqual({ title: '报价产品' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
     ).resolves.toEqual({ title: 'BOM/用料' });
@@ -103,7 +105,7 @@ describe('owner 详情页 metadata 权限边界', () => {
 
     await expect(
       generateProductMetadata({ params: Promise.resolve({ id: 'product-1' }) }),
-    ).resolves.toEqual({ title: '编辑 烫金红包 · 产品字典' });
+    ).resolves.toEqual({ title: '编辑 烫金红包 · 报价产品' });
     expect(getProductSummaryMock).toHaveBeenCalledOnce();
     expect(getProductSummaryMock).toHaveBeenCalledWith('product-1');
   });

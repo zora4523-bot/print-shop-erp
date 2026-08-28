@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
-  createProductCategoryNodeAction,
   createRuleCenterProductCategoryNodeAction,
   updateProductCategoryNodeAction,
 } from '@/actions/owner-product-categories';
@@ -13,15 +12,16 @@ import {
 import { ProductCategoryNodesTable } from '@/components/business/product-category/ProductCategoryNodesTable';
 import { ToggleProductCategoryActiveButton } from '@/components/business/product-category/ToggleProductCategoryActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, StatusBadge } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
 import {
   getProductCategoryNodeSummary,
+  isRetiredProductCategory,
   listProductCategoryNodes,
 } from '@/lib/product';
-import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export type ProductCategoryCatalogDetailProps = {
   params: Promise<{ id: string }>;
@@ -56,8 +56,10 @@ export async function ProductCategoryCatalogList({
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="产品结构分类"
+        effect="immediate"
+        subtitle="分类树同时服务报价产品与 BOM；历史引用不会因停用而删除。"
         actions={
           <Link href={`${routeBase}/new`} className={buttonVariants()}>
             新建产品结构分类
@@ -83,17 +85,16 @@ export async function NewProductCategoryCatalogItem({
   await requirePermission('dict:product:manage');
   const nodes = await listProductCategoryNodes();
   const parentOptions = nodes
-    .filter((node) => node.isActive)
+    .filter((node) => node.isActive && !isRetiredProductCategory(node))
     .map((node) => {
       const depth = Math.max(0, node.path.split('.').length - 2);
       return { id: node.id, label: `${'　'.repeat(depth)}${node.name}` };
     });
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.productCategories;
-
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="新建产品结构分类"
+        effect="immediate"
         actions={
           <Link
             href={routeBase}
@@ -107,11 +108,7 @@ export async function NewProductCategoryCatalogItem({
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductCategoryForm
           mode="create"
-          action={
-            inRuleCenter
-              ? createRuleCenterProductCategoryNodeAction
-              : createProductCategoryNodeAction
-          }
+          action={createRuleCenterProductCategoryNodeAction}
           parentOptions={parentOptions}
           routeBase={routeBase}
         />
@@ -128,6 +125,7 @@ export async function EditProductCategoryCatalogItem({
   const { id } = await params;
   const node = await getProductCategoryNodeSummary(id);
   if (!node) notFound();
+  const isRetired = isRetiredProductCategory(node);
 
   const boundUpdate = updateProductCategoryNodeAction.bind(null, id);
   const formInitial = {
@@ -138,13 +136,19 @@ export async function EditProductCategoryCatalogItem({
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title={`编辑产品结构分类：${node.name}`}
-        subtitle={`${node._count.products} 个报价 SKU`}
+        effect="immediate"
+        subtitle={`${node._count.products} 个报价产品`}
         actions={
-          <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>
-            {node.isActive ? '启用' : '停用'}
-          </StatusBadge>
+          <div className="flex items-center gap-2">
+            <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>
+              {node.isActive ? '启用' : '停用'}
+            </StatusBadge>
+            {isRetired ? (
+              <StatusBadge tone="warning">历史 / 已退役</StatusBadge>
+            ) : null}
+          </div>
         }
       />
 
@@ -159,20 +163,22 @@ export async function EditProductCategoryCatalogItem({
         />
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <h2 className="mb-2 text-base font-semibold">
-          {node.isActive ? '停用分类' : '启用分类'}
-        </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          {node.isActive
-            ? '停用后，新建 SKU 和 BOM 不可选择；已有引用保留。'
-            : '启用后会重新进入新 SKU 和新 BOM 的分类选择器。'}
-        </p>
-        <ToggleProductCategoryActiveButton
-          nodeId={node.id}
-          currentlyActive={node.isActive}
-        />
-      </section>
+      {node.isActive || !isRetired ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="mb-2 text-base font-semibold">
+            {node.isActive ? '停用分类' : '启用分类'}
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {node.isActive
+              ? '停用后，新建 SKU 和 BOM 不可选择；已有引用保留。'
+              : '启用后会重新进入新 SKU 和新 BOM 的分类选择器。'}
+          </p>
+          <ToggleProductCategoryActiveButton
+            nodeId={node.id}
+            currentlyActive={node.isActive}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

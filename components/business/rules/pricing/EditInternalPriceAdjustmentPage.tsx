@@ -1,9 +1,13 @@
+import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { updatePriceAdjustmentAction } from '@/actions/owner-prices';
 import { PriceAdjustmentForm } from '@/components/business/price/PriceAdjustmentForm';
 import { TogglePriceAdjustmentActiveButton } from '@/components/business/price/TogglePriceAdjustmentActiveButton';
-import { PageHeader, StatusBadge } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';
 import { getPriceAdjustmentSummary } from '@/lib/price';
 import { listProductOptions } from '@/lib/product';
@@ -14,6 +18,8 @@ import {
 } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
+
+const loadPriceAdjustment = cache(getPriceAdjustmentSummary);
 
 function conditionInput(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -29,8 +35,13 @@ function conditionStringIds(value: unknown, key: string): string[] {
 }
 
 export async function generateMetadata({ params }: PageProps) {
+  const session = await getSession();
+  if (!session || !hasPermission('dict:price:manage', session.user.role)) {
+    return { title: '加价规则' };
+  }
+
   const { id } = await params;
-  const adjustment = await getPriceAdjustmentSummary(id);
+  const adjustment = await loadPriceAdjustment(id);
   return {
     title: adjustment
       ? `编辑 ${externalPriceRuleDisplayName(adjustment.name)} · 加价规则`
@@ -41,7 +52,7 @@ export async function generateMetadata({ params }: PageProps) {
 export default async function EditInternalPriceAdjustmentPage({ params }: PageProps) {
   await requirePermission('dict:price:manage');
   const { id } = await params;
-  const adjustment = await getPriceAdjustmentSummary(id);
+  const adjustment = await loadPriceAdjustment(id);
   if (!adjustment) notFound();
 
   const currentProductIds = conditionStringIds(
@@ -66,8 +77,9 @@ export default async function EditInternalPriceAdjustmentPage({ params }: PagePr
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title={`编辑加价规则：${externalPriceRuleDisplayName(adjustment.name)}`}
+        effect="effective-dated"
         subtitle={`${ADJUSTMENT_TYPE_LABELS[adjustment.adjustmentType]} · ${String(adjustment.amount)}`}
         actions={
           <StatusBadge tone={adjustment.isActive ? 'success' : 'neutral'}>

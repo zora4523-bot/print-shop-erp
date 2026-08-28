@@ -15,11 +15,22 @@ export class InvalidOrderTransitionError extends Error {
 }
 
 // Canonical transitions (SPEC §4.3):
-//   DRAFT → SUBMITTED → SCHEDULING → IN_PRODUCTION → COMPLETED → SHIPPED → FINISHED
+//   DRAFT → PENDING_FACTORY → SCHEDULING → IN_PRODUCTION → COMPLETED → SHIPPED → FINISHED
+// SUBMITTED remains a compatibility state for orders created before the
+// external-sales submission cutover and follows the same outbound path as
+// PENDING_FACTORY.
 // Any non-terminal state can also transition to CANCELLED.
 // FINISHED and CANCELLED are terminal — no outbound transitions.
 export const ORDER_TRANSITIONS = {
-  [OrderStatus.DRAFT]: [OrderStatus.SUBMITTED, OrderStatus.CANCELLED],
+  [OrderStatus.DRAFT]: [
+    OrderStatus.PENDING_FACTORY,
+    OrderStatus.SUBMITTED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.PENDING_FACTORY]: [
+    OrderStatus.SCHEDULING,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.SUBMITTED]: [OrderStatus.SCHEDULING, OrderStatus.CANCELLED],
   // Pure-outsource orders have no internal task to trigger IN_PRODUCTION;
   // receiving the last outsource order completes them directly.
@@ -64,6 +75,7 @@ export function isTerminalOrderStatus(status: OrderStatus): boolean {
 export function canAttachOutsource(status: OrderStatus): boolean {
   switch (status) {
     case OrderStatus.DRAFT:
+    case OrderStatus.PENDING_FACTORY:
     case OrderStatus.SUBMITTED:
     case OrderStatus.SCHEDULING:
     case OrderStatus.IN_PRODUCTION:

@@ -47,7 +47,8 @@ export function statusFilterLabel(definition: StatusDefinition): string {
 
 export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
-  [OrderStatus.SUBMITTED]: { label: '已提交', tone: 'info' },
+  [OrderStatus.PENDING_FACTORY]: { label: '待工厂确认', tone: 'info' },
+  [OrderStatus.SUBMITTED]: { label: '待工厂确认', tone: 'info' },
   [OrderStatus.SCHEDULING]: { label: '排产中', tone: 'info', dot: true },
   [OrderStatus.IN_PRODUCTION]: {
     label: '生产中',

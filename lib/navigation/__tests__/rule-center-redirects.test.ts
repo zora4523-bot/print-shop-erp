@@ -8,6 +8,10 @@ describe('legacy rule management redirects', () => {
     expect(redirects).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          source: '/owner/rules/pricing-routes',
+          destination: '/owner/rules',
+        }),
+        expect.objectContaining({
           source: '/owner/products',
           destination: '/owner/rules/stock-skus',
         }),

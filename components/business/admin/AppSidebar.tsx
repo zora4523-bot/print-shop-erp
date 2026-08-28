@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Link, { useLinkStatus } from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Bell,
   BookOpen,
@@ -141,6 +146,7 @@ type AppSidebarProps = {
 
 export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { setOpenMobile } = useSidebar();
   // The sidebar can contain dozens of dynamic routes. Letting every visible
   // Link auto-prefetch floods the server with authenticated RSC requests.
@@ -159,7 +165,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const allItems = flattenAdminMenuItems(
     menuGroups.flatMap((group) => group.items),
   );
-  const activeHref = getActiveAdminMenuHref(pathname, allItems);
+  const activeHref = getActiveAdminMenuHref(pathname, allItems, searchParams);
   const intentHref = intent?.pathname === pathname ? intent.href : null;
 
   function cancelIntentPrefetch(href?: string) {

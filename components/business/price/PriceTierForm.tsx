@@ -63,13 +63,13 @@ export function PriceTierForm(props: Props) {
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="productId">报价 SKU</Label>
+          <Label htmlFor="productId">报价产品</Label>
           <PendingLink
             href={`${RULE_CENTER_HREFS.stockSkus}/new`}
             pending={pending}
             className="text-xs text-primary hover:underline"
           >
-            新建报价 SKU
+            新建报价产品
           </PendingLink>
         </div>
         <select
@@ -79,7 +79,7 @@ export function PriceTierForm(props: Props) {
           defaultValue={defaultProductId}
           disabled={pending || missingProducts}
         >
-          {missingProducts ? <option value="">暂无可用报价 SKU</option> : null}
+          {missingProducts ? <option value="">暂无可用报价产品</option> : null}
           {props.products.map((product) => (
             <option key={product.id} value={product.id}>
               {productLabel(product)}
@@ -91,7 +91,7 @@ export function PriceTierForm(props: Props) {
         ) : null}
         {missingProducts ? (
           <p className="text-sm text-muted-foreground">
-            请先创建并启用报价 SKU。
+            请先创建并启用报价产品。
           </p>
         ) : null}
       </div>

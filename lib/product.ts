@@ -26,6 +26,9 @@ import {
   writeAuditLogInTx,
   type AuditActor,
 } from './audit-log';
+import { isRetiredProductCategory } from './rules/retired-catalog';
+
+export { isRetiredProductCategory } from './rules/retired-catalog';
 
 export class ProductInvariantError extends Error {
   constructor(message: string) {
@@ -103,6 +106,27 @@ export type ProductOrderOption = Pick<
   'id' | 'code' | 'name' | 'category' | 'specification' | 'paperType'
 >;
 
+/**
+ * 外部销售建单的产品配置事实。产品目录与是否存在自动价格规则解耦；
+ * 缺价由计费引擎返回 MANUAL_PRICING_REQUIRED，而不是在这里隐藏选项。
+ */
+export type ExternalCreateOrderProductOption = Pick<
+  Product,
+  | 'id'
+  | 'code'
+  | 'name'
+  | 'category'
+  | 'specification'
+  | 'paperType'
+  | 'paperMaterialId'
+  | 'weight'
+>;
+
+export type CreateOrderProductReadClient = Pick<
+  Prisma.TransactionClient,
+  'product'
+>;
+
 export type ProductCategoryNodeSummary = Pick<
   ProductCategoryNode,
   | 'id'
@@ -116,6 +140,12 @@ export type ProductCategoryNodeSummary = Pick<
 > & {
   _count: { products: number };
 };
+
+const RETIRED_PRODUCT_LEGACY_CATEGORIES: ReadonlySet<ProductCategory> = new Set([
+  ProductCategory.GENERIC_STOCK,
+  ProductCategory.STOCK_FOIL_ADD,
+  ProductCategory.BYO_MATERIAL,
+]);
 
 const SUMMARY_SELECT = {
   id: true,
@@ -406,6 +436,51 @@ export async function listActiveProductOrderOptions(): Promise<
   });
 }
 
+const EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES = [
+  ProductCategory.BLANK_STOCK,
+  ProductCategory.CUSTOM_FLAT_FOIL,
+  ProductCategory.COLOR_PRINT,
+] as const;
+
+/**
+ * 返回所有启用、分类有效且属于三条新建单路线的产品配置。
+ *
+ * 这里刻意不读取 CustomerPriceRule：合法配置即使暂时缺价也必须可以
+ * 建单，随后由纯函数引擎明确转人工核价。
+ */
+export async function listExternalCreateOrderProductOptions(
+  client: CreateOrderProductReadClient = db,
+): Promise<ExternalCreateOrderProductOption[]> {
+  const rows = await client.product.findMany({
+    where: {
+      isActive: true,
+      category: { in: [...EXTERNAL_CREATE_ORDER_PRODUCT_CATEGORIES] },
+      categoryNode: { is: { isActive: true } },
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      category: true,
+      specification: true,
+      paperType: true,
+      paperMaterialId: true,
+      weight: true,
+      categoryNode: {
+        select: {
+          path: true,
+          legacyCategory: true,
+        },
+      },
+    },
+    orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  });
+
+  return rows.flatMap(({ categoryNode, ...product }) =>
+    isRetiredProductCategory(categoryNode) ? [] : [product],
+  );
+}
+
 /**
  * Return only products that can anchor a quote in the unique currently active
  * external-sales processing price book.
@@ -491,11 +566,17 @@ export async function listProductCategoryOptions(
     includeInactiveIds.length > 0
       ? { OR: [{ isActive: true }, { id: { in: includeInactiveIds } }] }
       : { isActive: true };
-  return db.productCategoryNode.findMany({
+  const rows = await db.productCategoryNode.findMany({
     where,
     select: CATEGORY_OPTION_SELECT,
     orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
   });
+  const explicitlyIncludedIds = new Set(includeInactiveIds);
+  return rows.filter(
+    (node) =>
+      explicitlyIncludedIds.has(node.id) ||
+      !isRetiredProductCategory(node),
+  );
 }
 
 export async function listProductOptions(
@@ -592,13 +673,16 @@ export async function getProductCategoryNodeSummary(
 async function requireActiveCategoryNode(
   client: Prisma.TransactionClient,
   categoryNodeId: string,
-): Promise<Pick<ProductCategoryNode, 'id' | 'legacyCategory'>> {
+): Promise<Pick<ProductCategoryNode, 'id' | 'path' | 'legacyCategory'>> {
   const node = await client.productCategoryNode.findUnique({
     where: { id: categoryNodeId },
-    select: { id: true, legacyCategory: true, isActive: true },
+    select: { id: true, path: true, legacyCategory: true, isActive: true },
   });
   if (!node || !node.isActive) {
     throw new ProductInvariantError('产品分类不存在或已停用');
+  }
+  if (isRetiredProductCategory(node)) {
+    throw new ProductInvariantError('历史产品分类已退役，不能用于新业务');
   }
   return node;
 }
@@ -630,15 +714,22 @@ function generateCategoryPathSegment(): string {
 export async function createProductCategoryNode(
   data: CreateProductCategoryNodeData,
 ): Promise<ProductCategoryNodeSummary> {
+  if (RETIRED_PRODUCT_LEGACY_CATEGORIES.has(data.legacyCategory)) {
+    throw new ProductInvariantError('历史产品分类已退役，不能新建或重新启用');
+  }
+
   let parentPath = 'product';
   if (data.parentId) {
     const parent = await db.productCategoryNode.findUnique({
       where: { id: data.parentId },
-      select: { path: true, isActive: true },
+      select: { path: true, legacyCategory: true, isActive: true },
     });
     if (!parent) throw new ProductInvariantError('上级分类不存在');
     if (!parent.isActive) {
       throw new ProductInvariantError('上级分类已停用，不能在其下新建子分类');
+    }
+    if (isRetiredProductCategory(parent)) {
+      throw new ProductInvariantError('历史产品分类已退役，不能在其下新建子分类');
     }
     parentPath = parent.path;
   }
@@ -662,6 +753,19 @@ export async function updateProductCategoryNode(
   const target = await getProductCategoryNodeSummary(id);
   if (!target) throw new ProductInvariantError('目标产品分类不存在');
 
+  if (
+    isRetiredProductCategory(target) &&
+    data.legacyCategory !== target.legacyCategory
+  ) {
+    throw new ProductInvariantError('历史产品分类已退役，不能改变其兼容分类');
+  }
+  if (
+    !isRetiredProductCategory(target) &&
+    RETIRED_PRODUCT_LEGACY_CATEGORIES.has(data.legacyCategory)
+  ) {
+    throw new ProductInvariantError('不能将现行产品分类改为已退役分类');
+  }
+
   // 刻意不允许改 path：移动子树需要级联改所有后代 path + 迁移产品
   // 归属，属独立功能；这里只改展示属性。
   return db.productCategoryNode.update({
@@ -681,6 +785,9 @@ export async function setProductCategoryNodeActive(
 ): Promise<ProductCategoryNodeSummary> {
   const target = await getProductCategoryNodeSummary(id);
   if (!target) throw new ProductInvariantError('目标产品分类不存在');
+  if (isActive && isRetiredProductCategory(target)) {
+    throw new ProductInvariantError('历史产品分类已退役，不能重新启用');
+  }
   if (target.isActive === isActive) return target;
 
   return db.productCategoryNode.update({
@@ -828,6 +935,9 @@ export async function setProductActive(
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
+    if (isActive && isRetiredProductCategory(target.categoryNode)) {
+      throw new ProductInvariantError('该报价 SKU 属于已退役历史分类，不能重新启用');
+    }
     if (target.isActive === isActive) return target;
 
     const reason = context.reason?.trim() || null;

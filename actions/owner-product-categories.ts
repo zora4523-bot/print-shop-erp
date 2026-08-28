@@ -41,13 +41,6 @@ function normalizeProductCategoryUpdateInput(formData: FormData) {
   };
 }
 
-function productCategoryRouteBase(formData: FormData) {
-  return getFormString(formData, 'routeBase') ===
-    RULE_CENTER_HREFS.productCategories
-    ? RULE_CENTER_HREFS.productCategories
-    : '/owner/product-categories';
-}
-
 // path 由服务端自动生成（随机段名），撞唯一键的概率可忽略；万一发生
 // （或 DB 侧 ltree 约束拒绝）给"重试"级别的一般错误——表单里没有
 // path 字段可指，挂到具体字段上会误导用户改错东西。
@@ -78,31 +71,9 @@ function mapCategoryDbError(
   return null;
 }
 
-export async function createProductCategoryNodeAction(
-  _prev: ProductCategoryNodeMutationResult | null,
-  formData: FormData,
-): Promise<ProductCategoryNodeMutationResult> {
-  return createProductCategoryNodeWithRoute(
-    formData,
-    productCategoryRouteBase(formData),
-  );
-}
-
 export async function createRuleCenterProductCategoryNodeAction(
   _prev: ProductCategoryNodeMutationResult | null,
   formData: FormData,
-): Promise<ProductCategoryNodeMutationResult> {
-  return createProductCategoryNodeWithRoute(
-    formData,
-    RULE_CENTER_HREFS.productCategories,
-  );
-}
-
-async function createProductCategoryNodeWithRoute(
-  formData: FormData,
-  redirectBase:
-    | '/owner/product-categories'
-    | '/owner/rules/product-categories',
 ): Promise<ProductCategoryNodeMutationResult> {
   await requirePermission('dict:product:manage');
 
@@ -124,7 +95,7 @@ async function createProductCategoryNodeWithRoute(
   }
 
   revalidateProductCategoryPaths(createdId);
-  redirect(`${redirectBase}/${createdId}`);
+  redirect(`${RULE_CENTER_HREFS.productCategories}/${createdId}`);
 }
 
 export async function updateProductCategoryNodeAction(
@@ -173,12 +144,10 @@ export async function setProductCategoryNodeActiveAction(
 
 function revalidateProductCategoryPaths(id: string) {
   revalidatePaths([
-    '/owner/product-categories',
-    `/owner/product-categories/${id}`,
     RULE_CENTER_HREFS.productCategories,
     `${RULE_CENTER_HREFS.productCategories}/${id}`,
-    '/owner/products',
-    '/owner/products/new',
+    RULE_CENTER_HREFS.stockSkus,
+    `${RULE_CENTER_HREFS.stockSkus}/new`,
     '/owner/boms/new',
   ]);
 }

@@ -104,6 +104,26 @@ export type CustomerPriceRuleWorkspaceGroupDto = {
   tiers: CustomerPriceRuleGroupTierDto[];
 };
 
+type CustomerPriceRuleTechnicalMeta = {
+  code: string;
+  exclusiveGroup: string | null;
+  productCode: string | null;
+  productSpecification: string | null;
+  productPaperType: string | null;
+};
+
+const CUSTOMER_PRICE_RULE_TECHNICAL_META = new WeakMap<
+  CustomerPriceRuleBusinessDto,
+  CustomerPriceRuleTechnicalMeta
+>();
+
+/** Server-only metadata used by the dedicated business projections. */
+export function getCustomerPriceRuleTechnicalMeta(
+  rule: CustomerPriceRuleBusinessDto,
+): CustomerPriceRuleTechnicalMeta | null {
+  return CUSTOMER_PRICE_RULE_TECHNICAL_META.get(rule) ?? null;
+}
+
 export type CustomerPriceBookWorkspaceSummaryDto = {
   id: string;
   name: string;
@@ -236,6 +256,7 @@ const INTERNAL_RULE_SELECT = {
   product: {
     select: {
       id: true,
+      code: true,
       name: true,
       specification: true,
       paperType: true,
@@ -663,7 +684,7 @@ function businessUnitsPerSheet(triggerCondition: unknown): number | null {
 }
 
 function businessRule(rule: InternalRuleRow): CustomerPriceRuleBusinessDto {
-  return {
+  const business: CustomerPriceRuleBusinessDto = {
     id: rule.id,
     name: rule.name,
     category: { id: rule.category.id, name: rule.category.name },
@@ -684,6 +705,14 @@ function businessRule(rule: InternalRuleRow): CustomerPriceRuleBusinessDto {
     blocksAutomaticQuote: rule.blocksAutomaticQuote,
     isActive: rule.isActive,
   };
+  CUSTOMER_PRICE_RULE_TECHNICAL_META.set(business, {
+    code: String(rule.code),
+    exclusiveGroup: rule.exclusiveGroup,
+    productCode: rule.product ? String(rule.product.code) : null,
+    productSpecification: rule.product?.specification ?? null,
+    productPaperType: rule.product?.paperType ?? null,
+  });
+  return business;
 }
 
 type InternalRuleGroup = {

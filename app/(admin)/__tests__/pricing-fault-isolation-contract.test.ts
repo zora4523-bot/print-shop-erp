@@ -28,19 +28,21 @@ describe('pricing fault-isolation contract', () => {
     expect(pricesPage).toContain('加价规则暂时无法加载');
   });
 
-  it('shares one workspace read and preserves the list around detail/editor reads', () => {
+  it('isolates the design-native customer pricing section behind one read', () => {
     expect(itemsPage.indexOf("await requirePermission('dict:price:manage')"))
       .toBeLessThan(
         itemsPage.indexOf(
-          'const workspacePromise = getCustomerPriceRuleGroupWorkspacePage',
+          'const workspacePromise = getCustomerPriceSectionWorkspace',
         ),
       );
     expect(itemsPage).toContain('workspacePromise={workspacePromise}');
-    expect(itemsPage).toContain('preservedContent={preservedWorkspace}');
-    expect(itemsPage).toContain('preservedContent={editorUnavailableWorkspace}');
-    expect(itemsPage).toContain('收费项目详情暂时无法加载');
-    expect(itemsPage).toContain('收费项目编辑器暂时无法加载');
-    expect(itemsPage).toContain('<ChargeWorkspaceSkeleton />');
+    expect(itemsPage).toContain('<DedicatedSectionSkeleton />');
+    expect(itemsPage).toContain('价格业务板块暂时无法加载');
+    expect(itemsPage).toContain(
+      'redirect(`${RULE_CENTER_HREFS.customerPricing}?section=blank`)',
+    );
+    expect(itemsPage).not.toContain('RulePriceWorkbench');
+    expect(itemsPage).not.toContain('getCustomerPriceRuleGroupWorkspacePage');
   });
 
   it('keeps version history when a selected draft preview fails', () => {

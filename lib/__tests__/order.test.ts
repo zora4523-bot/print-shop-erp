@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   DesignFileType,
   OrderCostCategory,
+  OrderPackagingMode,
   OrderSettlementType,
   OrderStatus,
   PartyType,
@@ -105,12 +106,12 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 // from the much larger refined create-order schema module.
 vi.mock('@/lib/auth/schemas', () => ({ parseStrictYmd: vi.fn() }));
 
-// Slice C：spy dispatchNotification() 验证 wire 点 fire 正确事件 +
+// Notification wire：用 spy 验证 dispatchNotification() 的事件与
 // payload。模块整体替换成 spy；formatMoney 不 mock（lib/dashboard/
 // format 是纯函数，测试要看真实输出）。typed as accepting any args
 // so vi.fn 推断的 `[][]` 不阻 mock.calls[0]![1] 这类下标访问。
 //
-// dispatchNotification 是 Slice C wire 用的实际入口（封装 Next 16
+// dispatchNotification 是通知 wire 的实际入口（封装 Next 16
 // `after()` + 单测降级 void）；spy 这里 = spy 整条 dispatch chain。
 const { notifyMock } = vi.hoisted(() => ({
   notifyMock: vi.fn<(...args: unknown[]) => void>(() => undefined),
@@ -141,6 +142,29 @@ const { appendPricingRevisionMock } = vi.hoisted(() => ({
 vi.mock('@/lib/order/pricing-revision', () => ({
   appendOrderPricingRevisionInTx: appendPricingRevisionMock,
 }));
+const {
+  finalizeExternalOrderQuoteMock,
+  MockExternalOrderQuoteChangedError,
+  MockExternalOrderQuoteFinalizeError,
+} = vi.hoisted(() => ({
+  finalizeExternalOrderQuoteMock: vi.fn<
+    (...args: unknown[]) => Promise<unknown>
+  >(),
+  MockExternalOrderQuoteChangedError: class extends Error {
+    readonly quoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
+    readonly quotedFee = '566.30';
+    readonly quotedFeeCompleteness = 'COMPLETE';
+    constructor(message = '报价已变化') {
+      super(message);
+    }
+  },
+  MockExternalOrderQuoteFinalizeError: class extends Error {},
+}));
+vi.mock('@/lib/order/submit-external-order', () => ({
+  finalizeExternalOrderQuoteInTx: finalizeExternalOrderQuoteMock,
+  ExternalOrderQuoteChangedError: MockExternalOrderQuoteChangedError,
+  ExternalOrderQuoteFinalizeError: MockExternalOrderQuoteFinalizeError,
+}));
 
 import {
   createOrder as createOrderDomain,
@@ -154,6 +178,7 @@ import {
   setOrderUrgent,
   setOrderSfCollect,
   OrderInvariantError,
+  OrderQuoteChangedError,
 } from '../order';
 import { InvalidOrderTransitionError } from '../order/status-machine';
 
@@ -165,6 +190,29 @@ const testLogisticsSource = {
   sourceName: '测试物流报价表.xlsx',
   sourceSha256: 'c'.repeat(64),
   sourceSheet: '测试',
+};
+
+const testLogisticsNotes = {
+  ruleVersion: '2026-08-27',
+  shipping: {
+    billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+    weightResolutionOrder: [
+      'ACTUAL_FULFILLMENT_WEIGHT',
+      'SERVER_ESTIMATE',
+    ],
+    maxOrderQuantity: 2_000,
+    billableWeightRounding: 'CEIL_KG',
+    minimumBillableWeightKg: 1,
+    gramsPerItemByPaperWeightGsm: {
+      '120': 4.5,
+      '150': 6,
+      '160': 6,
+      '180': 6.75,
+      '200': 8,
+      '230': 10,
+    },
+    tenThousandEnvelopeGramsPerItem: 10,
+  },
 };
 
 const testLogisticsRules = [
@@ -208,6 +256,17 @@ async function createOrder(
   actor: Parameters<typeof createOrderDomain>[1],
   now?: Date,
 ) {
+  const packagingGroups =
+    actor.role === Role.SALES && input.packagingGroups === undefined
+      ? input.items.map((item, itemIndex) => ({
+          name: `测试包装组 ${itemIndex + 1}`,
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          actualBagCount: 1,
+          itemUnitsPerBag: input.items.map((_, candidateIndex) =>
+            candidateIndex === itemIndex ? item.quantity : 0,
+          ),
+        }))
+      : input.packagingGroups;
   return createOrderDomain(
     {
       destinationProvince: '广东',
@@ -216,6 +275,7 @@ async function createOrder(
       packingMaterialFee: '0.00',
       customerChargeOverrideReason: '测试用例仅验证加工费语义',
       ...input,
+      packagingGroups,
       receiverAddress: input.receiverAddress ?? '广东佛山测试收货地址',
       additionalShipments: input.additionalShipments?.map((shipment) => ({
         destinationProvince: '广东',
@@ -415,6 +475,7 @@ beforeEach(() => {
               version: 1,
               sourceName: testLogisticsSource.sourceName,
               sourceSha256: testLogisticsSource.sourceSha256,
+              notes: testLogisticsNotes,
               rules: testLogisticsRules,
             },
           ]
@@ -422,7 +483,12 @@ beforeEach(() => {
     );
   dbMock.customerPriceRule.findMany
     .mockReset()
-    .mockResolvedValue([externalBaseRule()]);
+    .mockImplementation(
+      async (args: { where?: { triggerCondition?: { equals?: string } } }) =>
+        args.where?.triggerCondition?.equals === 'PACKAGING_GROUP'
+          ? [externalPackagingRule('SINGLE_STYLE', '0.0000')]
+          : [externalBaseRule()],
+    );
   // Default: order has no production tasks (cancelOrder cascade reads []).
   dbMock.productionTask.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionTask.update.mockReset().mockResolvedValue({});
@@ -468,9 +534,15 @@ beforeEach(() => {
     .mockResolvedValue(undefined);
   recordCsSalesEntryMock.mockReset().mockResolvedValue(null);
   appendPricingRevisionMock.mockReset().mockResolvedValue({
+    pricingRevisionId: 'pricing-revision-2',
     priceRevision: 2,
     orderRevision: 2,
     snapshot: {},
+  });
+  finalizeExternalOrderQuoteMock.mockReset().mockResolvedValue({
+    pricingRevisionId: 'pricing-revision-2',
+    quotedFee: '566.30',
+    quotedFeeCompleteness: 'COMPLETE',
   });
 
   // Default: no existing orders for today (fresh serial), every craft
@@ -577,6 +649,127 @@ describe('createOrder', () => {
     });
   });
 
+  it('在服务边界拒绝没有任何包装组的外部销售工单', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [],
+          items: [baseItem()],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow('外部销售工单必须为每个款式设置一个包装组');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('在服务边界拒绝不包含款式的外部销售包装组', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [
+            {
+              name: '空包装组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 1,
+              itemUnitsPerBag: [0],
+            },
+          ],
+          items: [baseItem()],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow('包装组 1 未包含任何款式');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('在服务边界拒绝外部销售包装组遗漏款式', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [
+            {
+              name: '只包含第一款',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [1, 0],
+            },
+          ],
+          items: [baseItem(), baseItem({ name: '烫金款 B' })],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow('款式 2 未加入包装组，无法计算入袋费');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('在服务边界拒绝外部销售款式重复归入多个包装组', async () => {
+    await expect(
+      createOrder(
+        {
+          customerRef: null,
+          receiverName: null,
+          receiverPhone: null,
+          receiverAddress: '广东佛山测试收货地址',
+          expressCode: null,
+          packageRequirement: null,
+          remark: null,
+          promisedDate: null,
+          isUrgent: false,
+          isSfCollect: false,
+          packagingGroups: [
+            {
+              name: '第一组',
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [1, 0],
+            },
+            {
+              name: '重复包含第一款',
+              mode: OrderPackagingMode.MIXED_STYLE,
+              actualBagCount: 10,
+              itemUnitsPerBag: [1, 1],
+            },
+          ],
+          items: [baseItem(), baseItem({ name: '烫金款 B' })],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(
+      '款式 1 同时属于多个包装组，不能重复计算入袋费',
+    );
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+
   it('拒绝将供应商当作客户绑定到工单', async () => {
     dbMock.party.findUnique.mockResolvedValue({
       id: 'supplier-1',
@@ -631,7 +824,7 @@ describe('createOrder', () => {
     expect(firstSql).toMatch(/pg_advisory_xact_lock/);
   });
 
-  it('按包装组模式与系统袋数应用结构化 0.1/0.2 元每袋规则', async () => {
+  it('外部销售 DRAFT 只保存包装组事实与服务端袋数，不提前报价', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -690,9 +883,14 @@ describe('createOrder', () => {
       new Date('2026-08-26T09:00:00+08:00'),
     );
 
+    // 旧断言把预览的 0.1/0.2 元入袋费当成 DRAFT 财务记录；
+    // 现在必须等提交 finalizer 在同一价格快照下锁价。
     expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
-      packagingAmount: '5.00',
-      processingAmount: '85.00',
+      packagingAmount: '0.00',
+      processingAmount: '0.00',
+      totalAmount: '0.00',
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 0,
     });
     expect(dbMock.orderPackagingGroup.create.mock.calls).toEqual([
       [
@@ -701,8 +899,9 @@ describe('createOrder', () => {
             sequence: 1,
             mode: 'SINGLE_STYLE',
             actualBagCount: 20,
-            unitPrice: '0.1000',
-            subtotal: '2.00',
+            unitPrice: '0.0000',
+            subtotal: '0.00',
+            suggestedSubtotal: null,
             priceOverrideReason: null,
           }),
         }),
@@ -713,42 +912,27 @@ describe('createOrder', () => {
             sequence: 2,
             mode: 'MIXED_STYLE',
             actualBagCount: 15,
-            unitPrice: '0.2000',
-            subtotal: '3.00',
+            unitPrice: '0.0000',
+            subtotal: '0.00',
+            suggestedSubtotal: null,
             priceOverrideReason: null,
           }),
         }),
       ],
     ]);
-    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          snapshot: expect.objectContaining({
-            version: 2,
-            order: expect.objectContaining({ packagingAmount: '5.00' }),
-            packagingGroups: [
-              expect.objectContaining({
-                mode: 'SINGLE_STYLE',
-                unitPrice: '0.1000',
-                subtotal: '2.00',
-                priceOverrideReason: null,
-                requiresAdminConfirmation: false,
-              }),
-              expect.objectContaining({
-                mode: 'MIXED_STYLE',
-                unitPrice: '0.2000',
-                subtotal: '3.00',
-                priceOverrideReason: null,
-                requiresAdminConfirmation: false,
-              }),
-            ],
-          }),
-        }),
-      }),
-    );
+    expect(
+      dbMock.orderPackagingGroup.create.mock.calls[0]![0].data,
+    ).not.toHaveProperty('pricingSnapshot');
+    expect(
+      dbMock.orderPackagingGroup.create.mock.calls[1]![0].data,
+    ).not.toHaveProperty('pricingSnapshot');
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('入袋规则缺失时失败关闭并转管理员终价，不猜测金额', async () => {
+  it('外部销售建 DRAFT 不读取入袋规则，缺价也不写临时快照', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -798,8 +982,10 @@ describe('createOrder', () => {
 
     expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
       packagingAmount: '0.00',
-      processingAmount: '60.00',
+      processingAmount: '0.00',
+      totalAmount: '0.00',
       pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      priceRevision: 0,
     });
     expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -808,13 +994,14 @@ describe('createOrder', () => {
           subtotal: '0.00',
           suggestedSubtotal: null,
           priceOverrideReason: null,
-          pricingSnapshot: expect.objectContaining({
-            complete: false,
-            actual: expect.objectContaining({ provisional: true }),
-          }),
         }),
       }),
     );
+    expect(
+      dbMock.orderPackagingGroup.create.mock.calls[0]![0].data,
+    ).not.toHaveProperty('pricingSnapshot');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
   it('acquires the shared price-rule lock exactly once before every product read', async () => {
@@ -829,12 +1016,12 @@ describe('createOrder', () => {
       },
     ]);
 
-    await createOrder(
+    await createOrderDomain(
       {
         customerRef: null,
         receiverName: null,
         receiverPhone: null,
-        receiverAddress: null,
+        receiverAddress: '广东佛山测试收货地址',
         expressCode: null,
         packageRequirement: null,
         remark: null,
@@ -843,7 +1030,7 @@ describe('createOrder', () => {
         isSfCollect: false,
         items: [baseItem({ productId: 'product-1' })],
       },
-      salesActor,
+      ownerActor,
       new Date('2026-04-23T09:00:00+08:00'),
     );
 
@@ -920,13 +1107,18 @@ describe('createOrder', () => {
   });
 
   it('creates an AUTO_CONFIRMED revision for a non-external order', async () => {
-    await createOrderDomain(
+    const result = await createOrderDomain(
       {
         customerRef: null,
         receiverName: null,
         receiverPhone: null,
         receiverAddress: '广东佛山测试收货地址',
         expressCode: null,
+        destinationProvince: '广东',
+        quotedWeightKg: '1',
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
         packageRequirement: null,
         remark: null,
         promisedDate: null,
@@ -941,6 +1133,19 @@ describe('createOrder', () => {
     expect(dbMock.order.create.mock.calls[0]![0].data.pricingStatus).toBe(
       'AUTO_CONFIRMED',
     );
+    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
+    expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          destinationProvince: '广东',
+          quotedWeightKg: '1',
+        }),
+      }),
+    );
     expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         revision: 1,
@@ -948,6 +1153,7 @@ describe('createOrder', () => {
         source: 'ORDER_CREATED_AUTO',
       }),
     });
+    expect(dbMock.orderPackagingGroup.create).not.toHaveBeenCalled();
   });
 
   it('ignores external-sales weight and fee overrides at order creation', async () => {
@@ -964,7 +1170,7 @@ describe('createOrder', () => {
       externalBaseRule({ amount: '0.5000' }),
     ]);
 
-    await createOrder(
+    const result = await createOrder(
       {
         customerRef: '苹果福',
         receiverName: '张三',
@@ -988,41 +1194,22 @@ describe('createOrder', () => {
     );
 
     const orderData = dbMock.order.create.mock.calls[0]![0].data;
-    expect(orderData.processingAmount).toBe('500.00');
-    expect(orderData.totalAmount).toBe('500.00');
+    expect(orderData.processingAmount).toBe('0.00');
+    expect(orderData.totalAmount).toBe('0.00');
+    expect(orderData.priceRevision).toBe(0);
     expect(orderData.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(result.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ quotedWeightKg: null }),
       }),
     );
-    const rows = dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data;
-    expect(rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          shipmentId: 'shipment-1',
-          categoryId: 'shipping-category',
-          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
-          status: 'ESTIMATED',
-          suggestedAmount: null,
-          amount: '0.00',
-          sourceRuleId: null,
-        }),
-        expect.objectContaining({
-          shipmentId: 'shipment-1',
-          categoryId: 'packing-category',
-          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
-          status: 'ESTIMATED',
-          suggestedAmount: '0.00',
-          amount: '0.00',
-          overrideReason: null,
-          sourceRuleId: 'packing-test',
-        }),
-      ]),
-    );
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
   });
 
-  it('does not guess a carrier weight when the trusted shipment fact is missing', async () => {
+  it('款式重量事实不完整时仍只存 DRAFT 事实，不伪造物流费', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1036,7 +1223,7 @@ describe('createOrder', () => {
       externalBaseRule({ amount: '0.5000' }),
     ]);
 
-    await createOrder(
+    const pendingResult = await createOrder(
       {
         customerRef: '苹果福',
         receiverName: '张三',
@@ -1050,7 +1237,13 @@ describe('createOrder', () => {
         promisedDate: null,
         isUrgent: false,
         isSfCollect: false,
-        items: [baseItem({ productId: 'product-1' })],
+        items: [
+          baseItem({
+            productId: 'product-1',
+            paperWeightGsm: null,
+            productStructure: 'UNSPECIFIED',
+          }),
+        ],
       },
       salesActor,
       new Date('2026-04-23T09:00:00+08:00'),
@@ -1058,23 +1251,27 @@ describe('createOrder', () => {
 
     const orderData = dbMock.order.create.mock.calls[0]![0].data;
     expect(orderData.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(orderData.totalAmount).toBe('0.00');
+    expect(orderData.items.create[0]).toMatchObject({
+      paperWeightGsm: null,
+      productStructure: 'UNSPECIFIED',
+      unitPrice: '0',
+      fixedFee: '0',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
+    });
+    expect(orderData.items.create[0]).not.toHaveProperty('pricingSnapshot');
+    expect(pendingResult.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ quotedWeightKg: null }),
       }),
     );
-    expect(dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
-          suggestedAmount: null,
-          amount: '0.00',
-        }),
-      ]),
-    );
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('automatically applies processing while leaving untrusted freight pending', async () => {
+  it('完整价表存在时也不把预览报价落入外部销售 DRAFT', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1133,43 +1330,26 @@ describe('createOrder', () => {
     );
 
     const data = dbMock.order.create.mock.calls[0]![0].data;
-    expect(data.totalAmount).toBe('150.00');
+    expect(data.totalAmount).toBe('0.00');
+    expect(data.processingAmount).toBe('0.00');
+    expect(data.packagingAmount).toBe('0.00');
+    expect(data.priceRevision).toBe(0);
     expect(data.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
     expect(data.items.create[0]).toMatchObject({
-      unitPrice: '0.1300',
-      fixedFee: '20.00',
-      subtotal: '150.00',
-      suggestedSubtotal: '150.00',
+      unitPrice: '0',
+      fixedFee: '0',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
       priceOverrideReason: null,
-      pricingSnapshot: expect.objectContaining({
-        complete: true,
-        priceBook: expect.objectContaining({ id: 'external-book-test' }),
-        components: expect.arrayContaining([
-          expect.objectContaining({ sourceId: 'tier-1', amount: '120.00' }),
-          expect.objectContaining({ sourceId: 'piece-1', amount: '10.00' }),
-          expect.objectContaining({ sourceId: 'order-1', amount: '20.00' }),
-        ]),
-        actual: {
-          unitPrice: '0.1300',
-          fixedFee: '20.00',
-          subtotal: '150.00',
-          overrideReason: null,
-          provisional: false,
-        },
-      }),
     });
+    expect(data.items.create[0]).not.toHaveProperty('pricingSnapshot');
     expect(data.items.create[0]).not.toHaveProperty('suggestedPrice');
-    expect(data.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
-    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        revision: 1,
-        status: 'PENDING_ADMIN_CONFIRMATION',
-        source: 'ORDER_CREATED_PROVISIONAL',
-      }),
-    });
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('ignores an external-sales manual price and persists the server quote', async () => {
+  it('ignores an external-sales manual price and leaves all DRAFT price columns empty', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1212,27 +1392,21 @@ describe('createOrder', () => {
       items: {
         create: [
           expect.objectContaining({
-            unitPrice: '0.1000',
-            fixedFee: '0.00',
-            subtotal: '100.00',
+            unitPrice: '0',
+            fixedFee: '0',
+            subtotal: '0.00',
+            suggestedSubtotal: null,
             priceOverrideReason: null,
-            pricingSnapshot: expect.objectContaining({
-              complete: true,
-              actual: expect.objectContaining({
-                unitPrice: '0.1000',
-                fixedFee: '0.00',
-                subtotal: '100.00',
-                overrideReason: null,
-                provisional: false,
-              }),
-            }),
           }),
         ],
       },
     });
+    expect(
+      dbMock.order.create.mock.calls[0]![0].data.items.create[0],
+    ).not.toHaveProperty('pricingSnapshot');
   });
 
-  it('does not let external sales reallocate server price components', async () => {
+  it('does not persist external-sales client price component allocation', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1284,21 +1458,21 @@ describe('createOrder', () => {
       items: {
         create: [
           expect.objectContaining({
-            unitPrice: '1.0000',
-            fixedFee: '10.00',
-            subtotal: '1010.00',
+            unitPrice: '0',
+            fixedFee: '0',
+            subtotal: '0.00',
+            suggestedSubtotal: null,
             priceOverrideReason: null,
-            pricingSnapshot: expect.objectContaining({
-              complete: true,
-              actual: expect.objectContaining({ provisional: false }),
-            }),
           }),
         ],
       },
     });
+    expect(
+      dbMock.order.create.mock.calls[0]![0].data.items.create[0],
+    ).not.toHaveProperty('pricingSnapshot');
   });
 
-  it('treats differently formatted but numerically equal price components as the suggestion', async () => {
+  it('does not compare browser price formatting while creating an external DRAFT', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1347,12 +1521,16 @@ describe('createOrder', () => {
     );
 
     expect(dbMock.order.create.mock.calls[0]![0].data.items.create[0]).toMatchObject({
-      unitPrice: '1.0000',
-      fixedFee: '10.00',
-      subtotal: '1010.00',
-      suggestedSubtotal: '1010.00',
+      unitPrice: '0',
+      fixedFee: '0',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
       priceOverrideReason: null,
     });
+    expect(
+      dbMock.order.create.mock.calls[0]![0].data.items.create[0],
+    ).not.toHaveProperty('pricingSnapshot');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
   });
 
   it('keeps an unmatched below-MOQ style at zero until an admin sets the final price', async () => {
@@ -1444,14 +1622,12 @@ describe('createOrder', () => {
       unitPrice: '0',
       fixedFee: '0',
       subtotal: '0.00',
+      suggestedSubtotal: null,
       priceOverrideReason: null,
-      pricingSnapshot: expect.objectContaining({
-        complete: false,
-        errors: expect.arrayContaining([
-          expect.stringMatching(/数量低于产品最小起订量 2000/),
-        ]),
-      }),
     });
+    expect(createdItem).not.toHaveProperty('pricingSnapshot');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
   it('rejects an automatically derived subtotal that exceeds Decimal(12,2)', async () => {
@@ -1469,12 +1645,12 @@ describe('createOrder', () => {
     ]);
 
     await expect(
-      createOrder(
+      createOrderDomain(
         {
           customerRef: null,
           receiverName: null,
           receiverPhone: null,
-          receiverAddress: null,
+          receiverAddress: '广东佛山测试收货地址',
           expressCode: null,
           packageRequirement: null,
           remark: null,
@@ -1491,10 +1667,10 @@ describe('createOrder', () => {
             }),
           ],
         },
-        salesActor,
+        ownerActor,
         new Date('2026-04-23T09:00:00+08:00'),
       ),
-    ).rejects.toThrow(/建议金额超过系统上限/);
+    ).rejects.toThrow(/建议(?:金额|小计)超过系统上限/);
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 
@@ -1651,26 +1827,8 @@ describe('createOrder', () => {
         quantity: 100,
       },
     ]);
-    expect(dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          shipmentId: 'shipment-primary',
-          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
-        }),
-        expect.objectContaining({
-          shipmentId: 'shipment-primary',
-          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
-        }),
-        expect.objectContaining({
-          shipmentId: 'shipment-extra',
-          businessKey: 'SHIPMENT:2:SHIPPING_FEE',
-        }),
-        expect.objectContaining({
-          shipmentId: 'shipment-extra',
-          businessKey: 'SHIPMENT:2:PACKING_MATERIAL',
-        }),
-      ]),
-    );
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
   it('refuses when a referenced craft id does not exist or is inactive', async () => {
@@ -1770,11 +1928,8 @@ describe('createOrder', () => {
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 
-  it('refuses when the selected product is absent from the active quote dictionary', async () => {
-    dbMock.product.findMany
-      // The external-sales quote is deliberately active-only and fails before
-      // a stale product selection can be priced or persisted.
-      .mockResolvedValueOnce([]);
+  it('refuses an absent product through direct fact validation without running a quote', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([]);
     let caught: unknown;
     try {
       await createOrder(
@@ -1799,12 +1954,14 @@ describe('createOrder', () => {
     }
     expect(caught).toBeInstanceOf(OrderInvariantError);
     expect(caught).toMatchObject({
-      message: expect.stringMatching(/报价产品字典已变化/),
+      message: '产品不存在：p1',
     });
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 
-  it('顺丰到付只免快递费，仍把打包耗材费计入 totalAmount', async () => {
+  it('顺丰到付只作为 DRAFT 物流事实，不提前生成快递或纸箱费', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1844,6 +2001,7 @@ describe('createOrder', () => {
                 version: 1,
                 sourceName: testLogisticsSource.sourceName,
                 sourceSha256: testLogisticsSource.sourceSha256,
+                notes: testLogisticsNotes,
                 rules: testLogisticsRules.map((rule) =>
                   rule.id === 'packing-test'
                     ? { ...rule, amount: '3.00' }
@@ -1882,31 +2040,26 @@ describe('createOrder', () => {
       new Date('2026-04-23T09:00:00+08:00'),
     );
     const createArg = dbMock.order.create.mock.calls[0][0];
-    // 3 × 0.1 = 0.30
-    expect(createArg.data.items.create[0].subtotal).toBe('0.30');
-    // 2 × 0.2 = 0.40
-    expect(createArg.data.items.create[1].subtotal).toBe('0.40');
-    // 加工费 0.70 + 打包耗材费 3.00；顺丰到付快递费为 0。
-    expect(createArg.data.processingAmount).toBe('0.70');
-    expect(createArg.data.totalAmount).toBe('3.70');
+    expect(createArg.data.items.create[0].subtotal).toBe('0.00');
+    expect(createArg.data.items.create[1].subtotal).toBe('0.00');
+    expect(createArg.data.processingAmount).toBe('0.00');
+    expect(createArg.data.totalAmount).toBe('0.00');
+    expect(createArg.data.priceRevision).toBe(0);
     expect(createArg.data.isSfCollect).toBe(true);
-    expect(dbMock.orderCustomerCharge.createMany.mock.calls[0]![0].data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
-          status: 'WAIVED',
-          amount: '0.00',
+    expect(dbMock.orderShipment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          carrierCode: 'SF',
+          quotedWeightKg: null,
         }),
-        expect.objectContaining({
-          businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
-          status: 'ESTIMATED',
-          amount: '3.00',
-        }),
-      ]),
+      }),
     );
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPricingRevision.create).not.toHaveBeenCalled();
   });
 
-  it('keeps both an unquoted item and untrusted freight at zero', async () => {
+  it('加工费待定时保留可验证款式与分配事实，留给提交时报价', async () => {
     await createOrder(
       {
         customerRef: null,
@@ -1926,6 +2079,16 @@ describe('createOrder', () => {
     );
     expect(dbMock.order.create.mock.calls[0][0].data.items.create[0].subtotal).toBe('0.00');
     expect(dbMock.order.create.mock.calls[0][0].data.totalAmount).toBe('0.00');
+    expect(dbMock.orderShipmentLine.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          shipmentId: 'shipment-1',
+          orderItemId: 'item-1',
+          quantity: 500,
+        },
+      ],
+    });
+    expect(dbMock.orderCustomerCharge.createMany).not.toHaveBeenCalled();
   });
 
   it('records isUrgent and stamps a "创建急单" log remark', async () => {
@@ -1953,7 +2116,7 @@ describe('createOrder', () => {
 });
 
 describe('submitOrder', () => {
-  // Slice C wire 后 submitOrder 走两次 findUnique：
+  // 通知 wire 接入后 submitOrder 走两次 findUnique：
   //   1. tx 内取 { id, status, submitterId } 走状态机
   //   2. tx 后取 { id, orderNo, customerRef, totalAmount, isUrgent,
   //              submitter.displayName } 喂 notify
@@ -2068,13 +2231,60 @@ describe('submitOrder', () => {
     });
     dbMock.order.update.mockResolvedValue({
       id: 'o1',
-      status: OrderStatus.SUBMITTED,
+      status: OrderStatus.PENDING_FACTORY,
     });
 
     await expect(submitOrder('o1', salesActor)).resolves.toMatchObject({
-      status: OrderStatus.SUBMITTED,
+      status: OrderStatus.PENDING_FACTORY,
     });
+    expect(finalizeExternalOrderQuoteMock).toHaveBeenCalledWith(
+      dbMock,
+      'o1',
+      'sales-1',
+      expect.any(Date),
+      null,
+    );
     expect(dbMock.order.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('外部提交重算失败时保持草稿并返回可理解的业务错误', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      ...submittedRichRow,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      receiverPhone: '13800000000',
+    });
+    finalizeExternalOrderQuoteMock.mockRejectedValue(
+      new MockExternalOrderQuoteFinalizeError('当前纸张已缺货，请重新选择'),
+    );
+
+    await expect(submitOrder('o1', salesActor)).rejects.toThrow(
+      '当前纸张已缺货，请重新选择',
+    );
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('外部报价已变化时保持草稿并上抛可结构化复核的错误', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      ...submittedRichRow,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      receiverPhone: '13800000000',
+    });
+    finalizeExternalOrderQuoteMock.mockRejectedValue(
+      new MockExternalOrderQuoteChangedError('报价已变化'),
+    );
+
+    await expect(
+      submitOrder(
+        'o1',
+        salesActor,
+        new Date('2026-08-28T00:00:00.000Z'),
+        `create-order-quote-v2:${'0'.repeat(64)}`,
+      ),
+    ).rejects.toBeInstanceOf(OrderQuoteChangedError);
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('内部工单保持既有流程，不要求手机号或设计图片', async () => {
@@ -2131,7 +2341,7 @@ describe('submitOrder', () => {
     await expect(submitOrder('nope', salesActor)).rejects.toBeInstanceOf(OrderInvariantError);
   });
 
-  // ─── Slice C wire spec ───
+  // ─── Notification wire spec ───
   it('submitOrder fires notify("ORDER_SUBMITTED") with rendered payload', async () => {
     dbMock.order.findUnique.mockResolvedValue(submittedRichRow);
     dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
@@ -2983,7 +3193,7 @@ describe('shipOrder', () => {
     expect(notifyMock).not.toHaveBeenCalled();
   });
 
-  // ─── Slice C wire spec ───
+  // ─── Notification wire spec ───
   it('shipOrder fires notify("ORDER_SHIPPED") with provided trackingNo', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
@@ -3007,7 +3217,7 @@ describe('shipOrder', () => {
 
   // **Round 102 P1 wire-side regression**: trackingNo: null/undefined/blank
   // 必须在传给 notify 前映射成 '未填'，否则 renderTemplate 会让模板里
-  // 的 `{trackingNo}` 留 raw 字面量流到群消息（HANDOFF Slice C TODO）。
+  // 的 `{trackingNo}` 留 raw 字面量流到群消息。
   it('shipOrder null trackingNo → notify payload trackingNo="未填"（不漏 raw {trackingNo}）', async () => {
     dbMock.order.findUnique.mockResolvedValue({
       id: 'o1',
@@ -4008,6 +4218,15 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     otherAmount?: string;
   } = {}) {
     return {
+      items: [
+        {
+          id: 'item-1',
+          quantity: 1_000,
+          paperWeightGsm: 160,
+          paperType: '160g珠光艳闪',
+          productStructure: 'STANDARD_ENVELOPE',
+        },
+      ],
       shipments: [
         {
           id: 'shipment-1',
@@ -4016,7 +4235,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
           destinationProvince: overrides.destinationProvince ?? null,
           quotedWeightKg: overrides.quotedWeightKg ?? null,
           weightKg: overrides.weightKg ?? null,
-          lines: [{ quantity: 1000 }],
+          lines: [{ orderItemId: 'item-1', quantity: 1000 }],
         },
       ],
       customerCharges: [
@@ -4404,7 +4623,7 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     });
   });
 
-  it('never reprices freight from a legacy browser quoted weight', async () => {
+  it('忽略历史浏览器重量并按服务端款式事实估算运费', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(
         OrderStatus.SUBMITTED,
@@ -4413,8 +4632,62 @@ describe('setOrderSfCollect — 后期履约标识', () => {
         OrderSettlementType.EXTERNAL_SALES,
       ),
     );
-    const context = externalChargeContext({ quotedWeightKg: '12.5' });
+    const context = externalChargeContext({
+      quotedWeightKg: '12.5',
+      destinationProvince: '广东',
+    });
     context.shipments[0]!.status = 'PENDING';
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.SUBMITTED,
+    });
+
+    await setOrderSfCollect('order-1', false, salesActor);
+
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: 'charge-shipping' },
+      data: expect.objectContaining({
+        sourceRuleId: 'zto-guangdong',
+        quantity: '6',
+        suggestedAmount: '10.30',
+        amount: '10.30',
+        overrideReason: null,
+        pricingSnapshot: expect.objectContaining({
+          quote: expect.objectContaining({
+            basis: expect.objectContaining({
+              billableWeightKg: '6',
+              weightSource: 'SERVER_ESTIMATE',
+            }),
+          }),
+        }),
+      }),
+    });
+    expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+  });
+
+  it('取消顺丰到付时款式重量事实不完整则保持待终价', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      sfSnapshot(
+        OrderStatus.SUBMITTED,
+        true,
+        'sales-1',
+        OrderSettlementType.EXTERNAL_SALES,
+      ),
+    );
+    const baseContext = externalChargeContext({ quotedWeightKg: '12.5' });
+    const context = {
+      ...baseContext,
+      items: baseContext.items.map((item) => ({
+        ...item,
+        paperWeightGsm: null,
+        productStructure: 'UNSPECIFIED',
+      })),
+      shipments: baseContext.shipments.map((shipment) => ({
+        ...shipment,
+        status: 'PENDING',
+      })),
+    };
     dbMock.order.findUnique.mockResolvedValue(context);
     dbMock.order.update.mockResolvedValue({
       id: 'order-1',

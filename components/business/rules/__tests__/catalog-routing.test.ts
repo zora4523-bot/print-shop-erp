@@ -85,6 +85,10 @@ describe('rule-center feature routing', () => {
       join(ROOT, 'components/business/rules/catalog/CraftCatalogPages.tsx'),
       'utf8',
     );
+    const productToggle = readFileSync(
+      join(ROOT, 'components/business/product/ToggleActiveButton.tsx'),
+      'utf8',
+    );
 
     expect(materialCatalog).toContain('createPaperAction');
     expect(materialCatalog).toContain('createNonPaperMaterialAction');
@@ -92,8 +96,64 @@ describe('rule-center feature routing', () => {
     expect(materialCatalog).toContain('setPaperActiveAction');
     expect(productCatalog).toContain('createQuoteProductAction');
     expect(productCatalog).toContain('updateQuoteProductAction');
-    expect(productCatalog).toContain('setQuoteProductActiveAction');
+    expect(productToggle).toContain('setQuoteProductActiveAction');
     expect(craftCatalog).toContain('createRuleCenterCraftAction');
+  });
+
+  it('纸张规则列表使用独立工作台，通用物料列表保留旧表格', () => {
+    const materialCatalog = readFileSync(
+      join(
+        ROOT,
+        'components/business/rules/catalog/MaterialCatalogPages.tsx',
+      ),
+      'utf8',
+    );
+    const paperWorkspace = readFileSync(
+      join(
+        ROOT,
+        'components/business/rules/catalog/RulePaperWorkspace.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(materialCatalog).toMatch(
+      /paperOnly \? \(\s*<RulePaperWorkspace/,
+    );
+    expect(materialCatalog).toContain('<AdminListToolbar');
+    expect(materialCatalog).toContain('<MaterialsTable');
+    expect(paperWorkspace).not.toContain('AdminListToolbar');
+    expect(paperWorkspace).not.toContain('AdminTableCard');
+    expect(paperWorkspace).not.toContain('MaterialsTable');
+  });
+
+  it('规格分区使用独立工作台，默认 SKU 列表保留通用表格', () => {
+    const productCatalog = readFileSync(
+      join(
+        ROOT,
+        'components/business/rules/catalog/ProductCatalogPages.tsx',
+      ),
+      'utf8',
+    );
+    const specWorkspace = readFileSync(
+      join(
+        ROOT,
+        'components/business/rules/catalog/RuleSpecWorkspace.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(productCatalog).toContain(
+      'routeBase === RULE_CENTER_HREFS.stockSkus',
+    );
+    expect(productCatalog).toContain("firstSearchParam(sp.section) === 'specs'");
+    expect(productCatalog).toMatch(
+      /specWorkspace \? \(\s*<RuleSpecWorkspace/,
+    );
+    expect(productCatalog).toContain('<AdminListToolbar');
+    expect(productCatalog).toContain('<ProductsTable');
+    expect(specWorkspace).not.toContain('AdminListToolbar');
+    expect(specWorkspace).not.toContain('AdminTableCard');
+    expect(specWorkspace).not.toContain('ProductsTable');
   });
 
   it('BOM creates products and categories through canonical rule-center editors', () => {
@@ -106,18 +166,6 @@ describe('rule-center feature routing', () => {
     expect(bomForm).toContain('RULE_CENTER_HREFS.productCategories');
     expect(bomForm).not.toContain('/owner/products/new');
     expect(bomForm).not.toContain('/owner/product-categories/new');
-  });
-
-  it('计价方式只陈述参与计价的结构化事实', () => {
-    const pricingRoutes = readFileSync(
-      join(ROOT, 'app/(admin)/owner/rules/pricing-routes/page.tsx'),
-      'utf8',
-    );
-
-    expect(pricingRoutes).toContain('现货规格、数量、单双面。');
-    expect(pricingRoutes).not.toContain('通版现货统一按局部烫金处理');
-    expect(pricingRoutes).not.toContain('可选局部烫金');
-    expect(pricingRoutes).not.toContain('现货加烫');
   });
 
   it('旧物料字典排除纸张，首页报价规格直达规则中心', () => {

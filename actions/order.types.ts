@@ -1,8 +1,26 @@
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
 import type { OrderPricingReviewPreview } from '@/lib/order/pricing-review';
+import type { OrderPricingStatusValue } from '@/lib/order/pricing-status';
+import type { OrderQuotedFeeCompleteness } from '@/generated/prisma/enums';
 
 export type OrderMutationResult =
   | { status: 'success' }
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { status: 'error'; message: string };
+
+export type SubmitOrderMutationResult =
+  | {
+      status: 'success';
+      quotedFee: string | null;
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness | null;
+    }
+  | {
+      status: 'quote_changed';
+      quoteToken: string;
+      quotedFee: string;
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness;
+      message: string;
+    }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };
 
@@ -12,6 +30,7 @@ export type CreateOrderMutationResult =
       orderId: string;
       orderNo: string;
       itemIds: string[];
+      pricingStatus: OrderPricingStatusValue;
     }
   | { status: 'invalid'; fieldErrors: Record<string, string[]> }
   | { status: 'error'; message: string };

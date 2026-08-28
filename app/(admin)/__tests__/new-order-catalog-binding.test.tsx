@@ -4,19 +4,17 @@ import { ProductCategory, Role } from '@/generated/prisma/enums';
 
 const {
   activeProductsMock,
-  currentExternalProductsMock,
+  externalBootstrapMock,
   listCraftsMock,
   listCustomersMock,
-  listPapersMock,
   orderFormPropsMock,
   redirectMock,
   requireSessionMock,
 } = vi.hoisted(() => ({
   activeProductsMock: vi.fn(),
-  currentExternalProductsMock: vi.fn(),
+  externalBootstrapMock: vi.fn(),
   listCraftsMock: vi.fn(),
   listCustomersMock: vi.fn(),
-  listPapersMock: vi.fn(),
   orderFormPropsMock: vi.fn(),
   redirectMock: vi.fn(),
   requireSessionMock: vi.fn(),
@@ -28,10 +26,9 @@ vi.mock('@/lib/craft', () => ({
 }));
 vi.mock('@/lib/product', () => ({
   listActiveProductOrderOptions: activeProductsMock,
-  listCurrentExternalSalesProductOrderOptions: currentExternalProductsMock,
 }));
-vi.mock('@/lib/material', () => ({
-  listActivePaperOrderOptions: listPapersMock,
+vi.mock('@/lib/order/create-order-bootstrap', () => ({
+  loadExternalCreateOrderBootstrap: externalBootstrapMock,
 }));
 vi.mock('@/lib/party', () => ({
   listCustomerPartyOptions: listCustomersMock,
@@ -69,25 +66,42 @@ describe('new-order price catalog binding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listCraftsMock.mockResolvedValue([]);
-    listPapersMock.mockResolvedValue([]);
     listCustomersMock.mockResolvedValue([]);
     activeProductsMock.mockResolvedValue(unreferencedProducts);
-    currentExternalProductsMock.mockResolvedValue(currentPriceBookProducts);
+    externalBootstrapMock.mockResolvedValue({
+      options: {
+        products: currentPriceBookProducts,
+        papers: [],
+        specifications: [],
+        foilColors: [],
+      },
+      priceSnapshot: {
+        processing: { purpose: 'PROCESSING', id: 'p', code: 'P', name: '加工', version: 2, sourceSha256: 'a'.repeat(64) },
+        logistics: { purpose: 'LOGISTICS', id: 'l', code: 'L', name: '物流', version: 3, sourceSha256: 'b'.repeat(64) },
+      },
+    });
   });
 
-  it('外部销售建单只传入当前加工费价目引用的 SKU', async () => {
+  it('外部销售建单使用同一快照下的全部合法配置选项与双价目版本', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'sales-1', role: Role.SALES },
     });
 
     renderToStaticMarkup(await NewOrderPage());
 
-    expect(currentExternalProductsMock).toHaveBeenCalledOnce();
+    expect(externalBootstrapMock).toHaveBeenCalledOnce();
     expect(activeProductsMock).not.toHaveBeenCalled();
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         products: currentPriceBookProducts,
-        usesExternalSalesPricing: true,
+        settlementType: 'EXTERNAL_SALES',
+        externalCreateOrderOptions: expect.objectContaining({
+          products: currentPriceBookProducts,
+        }),
+        initialExternalPriceSnapshot: expect.objectContaining({
+          processing: expect.objectContaining({ version: 2 }),
+          logistics: expect.objectContaining({ version: 3 }),
+        }),
       }),
     );
   });
@@ -100,11 +114,11 @@ describe('new-order price catalog binding', () => {
     renderToStaticMarkup(await NewOrderPage());
 
     expect(activeProductsMock).toHaveBeenCalledOnce();
-    expect(currentExternalProductsMock).not.toHaveBeenCalled();
+    expect(externalBootstrapMock).not.toHaveBeenCalled();
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         products: unreferencedProducts,
-        usesExternalSalesPricing: false,
+        settlementType: 'FACTORY_DIRECT',
       }),
     );
   });

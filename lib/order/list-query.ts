@@ -102,11 +102,22 @@ export type OrderListQuery = {
   view?: OrderListViewKey;
 };
 
-export const ORDER_LIST_VIEW_KEYS = [
+export const ORDER_LIST_ADMIN_VIEW_KEYS = [
   'urgent',
   'due-today',
   'scheduling',
   'saved',
+] as const;
+export const ORDER_LIST_SALES_VIEW_KEYS = [
+  'todo',
+  'doing',
+  'shipped',
+  'done',
+  'draft',
+] as const;
+export const ORDER_LIST_VIEW_KEYS = [
+  ...ORDER_LIST_ADMIN_VIEW_KEYS,
+  ...ORDER_LIST_SALES_VIEW_KEYS,
 ] as const;
 export type OrderListViewKey = (typeof ORDER_LIST_VIEW_KEYS)[number];
 
@@ -154,18 +165,25 @@ export function sanitizeOrderListQueryForActor(
   actor: { role: Role },
   query: OrderListQuery,
 ): OrderListQuery {
-  if (actor.role !== Role.WORKER) return query;
+  const roleScopedQuery =
+    actor.role !== Role.SALES &&
+    ORDER_LIST_SALES_VIEW_KEYS.includes(
+      query.view as (typeof ORDER_LIST_SALES_VIEW_KEYS)[number],
+    )
+      ? { ...query, view: undefined }
+      : query;
+  if (actor.role !== Role.WORKER) return roleScopedQuery;
 
-  const requestedCommercialSort = query.sort === 'totalAmount';
+  const requestedCommercialSort = roleScopedQuery.sort === 'totalAmount';
   return {
-    ...query,
+    ...roleScopedQuery,
     filters: {
-      ...query.filters,
+      ...roleScopedQuery.filters,
       amountMin: undefined,
       amountMax: undefined,
     },
-    sort: requestedCommercialSort ? 'createdAt' : query.sort,
-    dir: requestedCommercialSort ? 'desc' : query.dir,
+    sort: requestedCommercialSort ? 'createdAt' : roleScopedQuery.sort,
+    dir: requestedCommercialSort ? 'desc' : roleScopedQuery.dir,
   };
 }
 

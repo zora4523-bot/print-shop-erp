@@ -96,6 +96,8 @@ import {
 import { getSetting } from '@/lib/settings';
 import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputeAdminPanel } from '@/components/business/production/TaskDisputeAdminPanel';
+import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
+import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -113,6 +115,18 @@ export async function generateMetadata({ params }: PageProps) {
 export default async function OrderDetailPage({ params }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  // SALES uses a narrow, customer-facing query and operation page. The legacy
+  // shared detail includes production tasks/workers, audit logs, plate data,
+  // pricing snapshots and internal costs, so SALES must branch before that
+  // query runs. Keep real draft/design/change actions on the safe surface.
+  if (user.role === Role.SALES) {
+    const salesOrder = await getSalesOrderDetailById(
+      { id: user.id, role: user.role },
+      id,
+    );
+    if (!salesOrder) notFound();
+    return <SalesOrderDetailView order={salesOrder} />;
+  }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
   // 不是整单累加。
@@ -288,7 +302,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         ? '完工后才可发货'
         : null;
   const canRequestChange =
-    (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) &&
+    user.role === Role.CUSTOMER_SERVICE &&
     order.submitterId === user.id &&
     (order.status === OrderStatus.DRAFT ||
       order.status === OrderStatus.SUBMITTED ||
@@ -306,6 +320,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
     ),
+  );
+  const hasPendingCustomerChargeAmount = order.customerCharges.some(
+    (charge) => charge.amount === null,
   );
 
   return (
@@ -657,7 +674,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
               <Row
                 label={
-                  order.isSfCollect
+                  hasPendingCustomerChargeAmount
+                    ? '对客已知应收总额（不含待定费用）'
+                    : order.isSfCollect
                     ? '对客应收总额（不含快递费，含耗材费）'
                     : '对客应收总额'
                 }
@@ -704,6 +723,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       ? '已确认'
                       : charge.status === 'WAIVED'
                         ? '已免收'
+                        : charge.status === 'PENDING_AMOUNT'
+                          ? '金额待定'
                         : '创建时估算'}
                   </Badge>
                 </div>
@@ -711,14 +732,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   <div>
                     <dt className="text-muted-foreground">实际收费</dt>
                     <dd className="font-sans font-medium tabular-nums">
-                      {formatMoney(charge.amount)}
+                      {charge.amount === null
+                        ? '待定'
+                        : formatMoney(charge.amount)}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">报价表建议</dt>
                     <dd className="font-sans tabular-nums">
                       {charge.suggestedAmount === null
-                        ? '人工确认'
+                        ? charge.status === 'PENDING_AMOUNT'
+                          ? '待定'
+                          : '人工确认'
                         : formatMoney(charge.suggestedAmount)}
                     </dd>
                   </div>

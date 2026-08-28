@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createPriceAdjustmentAction } from '@/actions/owner-prices';
 import { PriceAdjustmentForm } from '@/components/business/price/PriceAdjustmentForm';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listProductOptions } from '@/lib/product';
 import { listCrafts } from '@/lib/craft';
@@ -22,8 +22,9 @@ export default async function NewInternalPriceAdjustmentPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="新建加价规则"
+        effect="effective-dated"
         subtitle="新规则默认启用。"
         actions={
           <Link

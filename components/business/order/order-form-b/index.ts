@@ -28,8 +28,8 @@ export {
   type OrderSubmissionSuccessProps,
 } from './OrderSubmissionSuccess';
 export {
-  ExternalSalesOrderFormB,
+  OrderFormB,
   replacePendingDesignKind,
-  type ExternalSalesOrderFormBErrors,
-  type ExternalSalesOrderFormBProps,
+  type OrderFormBErrors,
+  type OrderFormBProps,
 } from './ExternalSalesOrderFormB';

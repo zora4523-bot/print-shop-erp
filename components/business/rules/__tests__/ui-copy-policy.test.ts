@@ -32,7 +32,7 @@ describe('UI 只陈述事实和后果', () => {
 
   it('收费项目不恢复泛化类目和重复状态说明', () => {
     const workspace = source(
-      'components/business/price/ExternalSalesChargeWorkspace.tsx',
+      'components/business/price/RulePriceWorkbench.tsx',
     );
 
     expect(workspace).not.toContain('（使用时展开）');

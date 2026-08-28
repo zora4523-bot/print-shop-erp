@@ -3,7 +3,7 @@ import { OrderStatus } from '../../generated/prisma/enums';
 // Which subset of top-level Order fields is editable at each status,
 // per SPEC §3.6:
 //
-//   DRAFT / SUBMITTED              → 全部可改  (FULL)
+//   DRAFT / PENDING_FACTORY / SUBMITTED → 全部可改  (FULL)
 //   SCHEDULING / IN_PRODUCTION     → 仅改收货信息/备注 (SHIPPING_ONLY)
 //   COMPLETED / SHIPPED / FINISHED → 不可改 (NONE)
 //   CANCELLED                      → 不可改 (NONE) — terminal
@@ -45,6 +45,7 @@ export type ShippingEditableField = (typeof SHIPPING_EDITABLE_FIELDS)[number];
 export function editableFieldsetForStatus(status: OrderStatus): EditableFieldset {
   switch (status) {
     case OrderStatus.DRAFT:
+    case OrderStatus.PENDING_FACTORY:
     case OrderStatus.SUBMITTED:
       return 'FULL';
     case OrderStatus.SCHEDULING:

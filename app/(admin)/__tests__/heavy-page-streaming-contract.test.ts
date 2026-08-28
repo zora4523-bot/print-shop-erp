@@ -36,8 +36,8 @@ describe('heavy admin page streaming boundaries', () => {
     expect(content).toContain(
       'const filterOptionsPromise = getOrderListFilterOptions(actor)',
     );
-    expect(content.match(/<ErrorBoundary/g)).toHaveLength(3);
-    expect(content.match(/<Suspense/g)).toHaveLength(3);
+    expect(content.match(/<ErrorBoundary/g)).toHaveLength(5);
+    expect(content.match(/<Suspense/g)).toHaveLength(5);
     expect(content).toContain('orderPagePromise={orderPagePromise}');
     expect(content).toContain(
       'orderListPageWindowPromise={orderListPageWindowPromise}',

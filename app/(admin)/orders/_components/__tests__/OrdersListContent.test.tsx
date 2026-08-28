@@ -10,6 +10,12 @@ const {
   orderExportControlsMock,
   orderListFiltersMock,
   ordersTableMock,
+  getSalesOrderListPageWindowMock,
+  getSalesOrderListSummaryMock,
+  getSalesLatestRejectedOrderIdsMock,
+  listSalesOrdersPageMock,
+  salesOrderListFiltersMock,
+  salesOrdersListMock,
 } = vi.hoisted(() => ({
   getOrderListFilterOptionsMock: vi.fn(),
   getOrderListPageWindowMock: vi.fn(),
@@ -18,6 +24,12 @@ const {
   orderExportControlsMock: vi.fn(() => null),
   orderListFiltersMock: vi.fn(() => null),
   ordersTableMock: vi.fn(() => null),
+  getSalesOrderListPageWindowMock: vi.fn(),
+  getSalesOrderListSummaryMock: vi.fn(),
+  getSalesLatestRejectedOrderIdsMock: vi.fn(),
+  listSalesOrdersPageMock: vi.fn(),
+  salesOrderListFiltersMock: vi.fn(() => null),
+  salesOrdersListMock: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/order/list-query', () => ({
@@ -47,6 +59,14 @@ vi.mock('@/lib/order/list-query', () => ({
   serializeOrderListQuery: vi.fn(() => ({})),
 }));
 
+vi.mock('@/lib/order/sales-list-query', () => ({
+  getSalesOrderListPageWindow: getSalesOrderListPageWindowMock,
+  getSalesOrderListSummary: getSalesOrderListSummaryMock,
+  getSalesLatestRejectedOrderIds: getSalesLatestRejectedOrderIdsMock,
+  listSalesOrdersPage: listSalesOrdersPageMock,
+  sanitizeSalesOrderListQuery: vi.fn((query) => query),
+}));
+
 vi.mock('@/lib/order/export', () => ({
   listRecentOrderExports: listRecentOrderExportsMock,
   orderExportParamsFromQuery: vi.fn(() => ({})),
@@ -68,11 +88,22 @@ vi.mock('@/components/business/order/OrdersTable', () => ({
   OrdersTable: ordersTableMock,
 }));
 
+vi.mock('@/components/business/order/SalesOrderListFilters', () => ({
+  SalesOrderListFilters: salesOrderListFiltersMock,
+}));
+
+vi.mock('@/components/business/order/SalesOrdersList', () => ({
+  SalesOrdersList: salesOrdersListMock,
+}));
+
 import {
   OrderExportsSection,
   OrdersListContent,
   OrdersListFiltersSection,
   OrdersListTableSection,
+  SalesOrdersListContent,
+  SalesOrdersListFiltersSection,
+  SalesOrdersListSection,
 } from '../OrdersListContent';
 
 beforeEach(() => {
@@ -97,6 +128,32 @@ beforeEach(() => {
     crafts: [],
   });
   listRecentOrderExportsMock.mockReset().mockResolvedValue([]);
+  getSalesOrderListPageWindowMock.mockReset().mockResolvedValue({
+    total: 0,
+    page: 1,
+    pageCount: 1,
+    pageSize: 20,
+    skip: 0,
+    take: 20,
+    latestRejectedOrderIds: [],
+  });
+  getSalesLatestRejectedOrderIdsMock.mockReset().mockResolvedValue([]);
+  listSalesOrdersPageMock.mockReset().mockResolvedValue({
+    rows: [],
+    total: 0,
+    page: 1,
+    pageCount: 1,
+    pageSize: 20,
+  });
+  getSalesOrderListSummaryMock.mockReset().mockResolvedValue({
+    all: 0,
+    todo: 0,
+    doing: 0,
+    shipped: 0,
+    done: 0,
+    draft: 0,
+    shippedThisMonth: 0,
+  });
 });
 
 describe('OrdersListContent', () => {
@@ -151,21 +208,47 @@ describe('OrdersListContent', () => {
     expect(tableElement?.props.footer).toBeDefined();
   });
 
-  it('does not start an admin export read for non-admin users', async () => {
+  it('routes SALES through the role-specific safe query and card workspace', async () => {
     const node = await OrdersListContent({
       searchParams: Promise.resolve({}),
       user: { id: 'sales-1', role: Role.SALES },
     });
 
-    expect(listOrdersPageMock).toHaveBeenCalledTimes(1);
-    expect(getOrderListFilterOptionsMock).toHaveBeenCalledTimes(1);
+    expect(listOrdersPageMock).not.toHaveBeenCalled();
+    expect(getOrderListPageWindowMock).not.toHaveBeenCalled();
+    expect(getOrderListFilterOptionsMock).not.toHaveBeenCalled();
     expect(listRecentOrderExportsMock).not.toHaveBeenCalled();
-    const tableSectionElement = findElement(node, OrdersListTableSection);
-    const tableSection = await OrdersListTableSection(
-      tableSectionElement!.props as Parameters<typeof OrdersListTableSection>[0],
+    const salesContentElement = findElement(node, SalesOrdersListContent);
+    expect(salesContentElement).not.toBeNull();
+    const salesContent = await SalesOrdersListContent(
+      salesContentElement!.props as Parameters<typeof SalesOrdersListContent>[0],
     );
-    const tableElement = findElement(tableSection, ordersTableMock);
-    expect(tableElement?.props).toMatchObject({ canSchedule: false });
+    expect(getSalesOrderListPageWindowMock).toHaveBeenCalledTimes(1);
+    expect(getSalesLatestRejectedOrderIdsMock).toHaveBeenCalledTimes(1);
+    expect(listSalesOrdersPageMock).toHaveBeenCalledTimes(1);
+    expect(listSalesOrdersPageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'sales-1', role: Role.SALES }),
+      expect.any(Object),
+      getSalesOrderListPageWindowMock.mock.results[0]?.value,
+    );
+    expect(getSalesOrderListSummaryMock).toHaveBeenCalledTimes(1);
+
+    const filterSectionElement = findElement(
+      salesContent,
+      SalesOrdersListFiltersSection,
+    );
+    const filterSection = await SalesOrdersListFiltersSection(
+      filterSectionElement!.props as Parameters<
+        typeof SalesOrdersListFiltersSection
+      >[0],
+    );
+    expect(findElement(filterSection, salesOrderListFiltersMock)).not.toBeNull();
+
+    const listSectionElement = findElement(salesContent, SalesOrdersListSection);
+    const listSection = await SalesOrdersListSection(
+      listSectionElement!.props as Parameters<typeof SalesOrdersListSection>[0],
+    );
+    expect(findElement(listSection, salesOrdersListMock)).not.toBeNull();
   });
 
   it('keeps filters available when the independent order-row read fails', async () => {

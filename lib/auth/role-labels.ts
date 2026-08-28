@@ -42,7 +42,7 @@ export function machineTypeLabel(machineType: MachineType | null | undefined): s
 }
 
 // TODO: 需业主确认 —— 这些中文标签是根据 enum 名猜的，Prisma schema 里没有
-// 文字说明。业主过一眼 /owner/products 列表后告知更准的命名。
+// 文字说明。业主过一眼 /owner/rules/stock-skus 列表后告知更准的命名。
 export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
   [ProductCategory.BLANK_STOCK]: '空白现货',
   [ProductCategory.GENERIC_STOCK]: '通版现货',

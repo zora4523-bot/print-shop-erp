@@ -6,7 +6,8 @@ import type { MachineRuleWithBase } from '@/lib/salary/rules';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { WorkerMachineRuleForm } from '@/components/business/salary/WorkerMachineRuleForm';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader, TableEmptyState } from '@/components/ui-business';
+import { TableEmptyState } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 
 export const metadata = { title: '计件规则' };
 
@@ -82,8 +83,9 @@ export default async function WorkerPieceworkRulesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="计件规则"
+        effect="effective-dated"
         subtitle="个人规则优先；新规则按生效时间用于后续报工。"
       />
 

@@ -191,8 +191,7 @@ describe('updatePriceTierAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/tiers/tier1',
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/tier1');
+    expect(revalidatePathMock).not.toHaveBeenCalledWith('/owner/prices');
   });
 });
 
@@ -401,9 +400,6 @@ describe('setPriceAdjustmentActiveAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/adjustments/adj1',
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices');
-    expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/prices/adjustments/adj1',
-    );
+    expect(revalidatePathMock).not.toHaveBeenCalledWith('/owner/prices');
   });
 });

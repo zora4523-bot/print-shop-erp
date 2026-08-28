@@ -28,6 +28,8 @@ import {
   StatusBadge,
   TableEmptyState,
 } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
+import { RulePaperWorkspace } from '@/components/business/rules/catalog/RulePaperWorkspace';
 import { MaterialCategory } from '@/generated/prisma/enums';
 import {
   firstSearchParam,
@@ -139,65 +141,96 @@ export async function MaterialCatalogList({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={paperOnly ? '纸张' : '物料字典'}
-        actions={
-          <>
-            {!paperOnly ? (
-              <Link
-                href="/owner/materials/count"
-                className={buttonVariants({ variant: 'outline' })}
-              >
-                库存盘点
-              </Link>
-            ) : null}
+      {paperOnly ? (
+        <RuleCenterPageHeader
+          title="纸张"
+          effect="immediate"
+          subtitle="维护建单可选纸张与库存运营状态；历史工单引用保留。"
+          actions={
             <Link href={`${routeBase}/new`} className={buttonVariants()}>
-              {paperOnly ? '新建纸张' : '新建物料'}
+              新建纸张
+            </Link>
+          }
+        />
+      ) : (
+        <PageHeader
+          title="物料字典"
+          actions={
+          <>
+            <Link
+              href="/owner/materials/count"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              库存盘点
+            </Link>
+            <Link href={`${routeBase}/new`} className={buttonVariants()}>
+              新建物料
             </Link>
           </>
-        }
-      />
-
-      <AdminListToolbar
-        action={routeBase}
-        query={q}
-        placeholder={
-          paperOnly
-            ? '搜索纸张编码、名称、规格、单位、拼音'
-            : '搜索物料编码、名称、规格、单位、拼音'
-        }
-        clearHref={routeBase}
-        hiddenParams={{
-          pageSize,
-          sort: sort === 'default' ? undefined : sort,
-          dir: sort === 'default' ? undefined : direction,
-        }}
-      />
-
-      <AdminTableCard
-        isEmpty={materialPage.rows.length === 0}
-        emptyTitle={paperOnly ? '暂无纸张' : '暂无物料'}
-        emptyDescription={q ? '没有匹配当前搜索条件的记录。' : undefined}
-        footer={
-          <AdminPagination
-            basePath={routeBase}
-            page={materialPage.page}
-            pageCount={materialPage.pageCount}
-            total={materialPage.total}
-            pageSize={materialPage.pageSize}
-            queryParams={queryParams}
-          />
-        }
-      >
-        <MaterialsTable
-          materials={materialPage.rows}
-          editBase={routeBase}
-          tableBase={routeBase}
-          queryParams={queryParams}
-          sort={sort}
-          direction={direction}
+          }
         />
-      </AdminTableCard>
+      )}
+
+      {paperOnly ? (
+        <RulePaperWorkspace
+          papers={materialPage.rows}
+          routeBase={routeBase}
+          query={q}
+          hiddenSearchParams={{
+            pageSize,
+            sort: sort === 'default' ? undefined : sort,
+            dir: sort === 'default' ? undefined : direction,
+          }}
+          pagination={{
+            page: materialPage.page,
+            pageCount: materialPage.pageCount,
+            total: materialPage.total,
+            pageSize: materialPage.pageSize,
+            queryParams,
+          }}
+        />
+      ) : (
+        <>
+          <AdminListToolbar
+            action={routeBase}
+            query={q}
+            placeholder="搜索物料编码、名称、规格、单位、拼音"
+            clearHref={routeBase}
+            hiddenParams={{
+              pageSize,
+              sort: sort === 'default' ? undefined : sort,
+              dir: sort === 'default' ? undefined : direction,
+            }}
+          />
+
+          <AdminTableCard
+            isEmpty={materialPage.rows.length === 0}
+            emptyTitle="暂无物料"
+            emptyDescription={
+              q ? '没有匹配当前搜索条件的记录。' : undefined
+            }
+            footer={
+              <AdminPagination
+                basePath={routeBase}
+                page={materialPage.page}
+                pageCount={materialPage.pageCount}
+                total={materialPage.total}
+                pageSize={materialPage.pageSize}
+                queryParams={queryParams}
+              />
+            }
+          >
+            <MaterialsTable
+              materials={materialPage.rows}
+              editBase={routeBase}
+              tableBase={routeBase}
+              queryParams={queryParams}
+              sort={sort}
+              direction={direction}
+            />
+          </AdminTableCard>
+        </>
+      )}
     </div>
   );
 }
@@ -215,18 +248,34 @@ export async function NewMaterialCatalogItem({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={paperOnly ? '新建纸张' : '新建物料'}
-        subtitle="默认启用；库存通过出入库维护。"
-        actions={
+      {paperOnly ? (
+        <RuleCenterPageHeader
+          title="新建纸张"
+          effect="immediate"
+          subtitle="默认启用；库存通过出入库维护。"
+          actions={
+            <Link
+              href={routeBase}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              返回列表
+            </Link>
+          }
+        />
+      ) : (
+        <PageHeader
+          title="新建物料"
+          subtitle="默认启用；库存通过出入库维护。"
+          actions={
           <Link
             href={routeBase}
             className={buttonVariants({ variant: 'outline' })}
           >
             返回列表
           </Link>
-        }
-      />
+          }
+        />
+      )}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <MaterialForm
@@ -295,10 +344,24 @@ export async function EditMaterialCatalogItem({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={`编辑${paperOnly ? '纸张' : '物料'}：${
+      {paperOnly ? (
+        <RuleCenterPageHeader
+          title={`编辑纸张：${
+            externalPriceBusinessText(material.name) || '未命名纸张'
+          }`}
+          effect="immediate"
+          subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
+          actions={
+            <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>
+              {material.isActive ? '启用' : '停用'}
+            </StatusBadge>
+          }
+        />
+      ) : (
+        <PageHeader
+          title={`编辑物料：${
           externalPriceBusinessText(material.name) ||
-          (paperOnly ? '未命名纸张' : '未命名物料')
+          '未命名物料'
         }`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         actions={
@@ -306,7 +369,8 @@ export async function EditMaterialCatalogItem({
             {material.isActive ? '启用' : '停用'}
           </StatusBadge>
         }
-      />
+        />
+      )}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>

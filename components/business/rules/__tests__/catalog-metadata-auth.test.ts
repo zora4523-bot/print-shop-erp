@@ -36,10 +36,12 @@ vi.mock('@/lib/material', () => ({
 }));
 vi.mock('@/lib/craft', () => ({
   getCraftSummary: getCraftSummaryMock,
+  isRetiredCraft: vi.fn(() => false),
   listCraftsPage: vi.fn(),
 }));
 vi.mock('@/lib/product', () => ({
   getProductCategoryNodeSummary: getProductCategoryNodeSummaryMock,
+  isRetiredProductCategory: vi.fn(() => false),
   listProductCategoryNodes: vi.fn(),
 }));
 vi.mock('@/actions/owner-materials', () => ({
@@ -53,12 +55,10 @@ vi.mock('@/actions/owner-materials', () => ({
   updatePaperAction: vi.fn(),
 }));
 vi.mock('@/actions/owner-crafts', () => ({
-  createCraftAction: vi.fn(),
   createRuleCenterCraftAction: vi.fn(),
   updateCraftAction: vi.fn(),
 }));
 vi.mock('@/actions/owner-product-categories', () => ({
-  createProductCategoryNodeAction: vi.fn(),
   createRuleCenterProductCategoryNodeAction: vi.fn(),
   updateProductCategoryNodeAction: vi.fn(),
 }));

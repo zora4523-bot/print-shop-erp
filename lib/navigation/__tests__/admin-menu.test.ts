@@ -29,7 +29,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(33);
+    expect(items).toHaveLength(38);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -40,12 +40,17 @@ describe('getAdminMenuItems', () => {
       '车间用料',
       '工时录入',
       '规则配置中心',
-      '客户计价',
+      '空白封单价',
+      '局部烫金机烫费',
+      '专版烫金单价',
+      '专版烫金加价',
+      '彩印阶梯价',
+      '包装与快递',
+      '价格版本',
       '纸张',
-      '报价 SKU',
+      '报价产品',
       '产品结构',
       '工艺参数',
-      '价格版本',
       '内部计价',
       '师傅计件',
       '工资提成',
@@ -124,8 +129,39 @@ describe('getAdminMenuItems', () => {
       ),
     ).toEqual([
       {
-        label: '客户计价',
-        href: '/owner/rules/customer-pricing',
+        label: '空白封单价',
+        href: '/owner/rules/customer-pricing?section=blank',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '局部烫金机烫费',
+        href: '/owner/rules/customer-pricing?section=machine',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '专版烫金单价',
+        href: '/owner/rules/customer-pricing?section=tiers',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '专版烫金加价',
+        href: '/owner/rules/customer-pricing?section=adds',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '彩印阶梯价',
+        href: '/owner/rules/customer-pricing?section=print',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '包装与快递',
+        href:
+          '/owner/rules/customer-pricing?purpose=logistics&section=ship',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '价格版本',
+        href: '/owner/rules/price-versions',
         requiredPermission: 'dict:price:manage',
       },
       {
@@ -134,7 +170,7 @@ describe('getAdminMenuItems', () => {
         requiredPermission: 'material:manage',
       },
       {
-        label: '报价 SKU',
+        label: '报价产品',
         href: '/owner/rules/stock-skus',
         requiredPermission: 'dict:product:manage',
       },
@@ -147,11 +183,6 @@ describe('getAdminMenuItems', () => {
         label: '工艺参数',
         href: '/owner/rules/crafts',
         requiredPermission: 'dict:craft:manage',
-      },
-      {
-        label: '价格版本',
-        href: '/owner/rules/price-versions',
-        requiredPermission: 'dict:price:manage',
       },
       {
         label: '内部计价',
@@ -224,27 +255,96 @@ describe('getAdminMenuItems', () => {
       (group) => group.items,
     );
 
-    const expectations = {
-      '/owner/rules': '/owner/rules',
-      '/owner/rules/pricing-routes': '/owner/rules',
-      '/owner/rules/papers': '/owner/rules/papers',
-      '/owner/rules/papers/new': '/owner/rules/papers',
-      '/owner/rules/stock-skus': '/owner/rules/stock-skus',
-      '/owner/rules/stock-skus/sku-1': '/owner/rules/stock-skus',
-      '/owner/rules/product-categories': '/owner/rules/product-categories',
-      '/owner/rules/product-categories/new': '/owner/rules/product-categories',
-      '/owner/rules/crafts': '/owner/rules/crafts',
-      '/owner/rules/customer-pricing': '/owner/rules/customer-pricing',
-      '/owner/rules/price-versions': '/owner/rules/price-versions',
-      '/owner/rules/internal-pricing': '/owner/rules/internal-pricing',
-      '/owner/rules/internal-pricing/tiers/new':
+    const expectations = [
+      ['/owner/rules', '', '/owner/rules'],
+      ['/owner/rules/papers', '', '/owner/rules/papers'],
+      ['/owner/rules/papers/new', '', '/owner/rules/papers'],
+      ['/owner/rules/stock-skus', '', '/owner/rules/stock-skus'],
+      ['/owner/rules/stock-skus/sku-1', '', '/owner/rules/stock-skus'],
+      [
+        '/owner/rules/product-categories',
+        '',
+        '/owner/rules/product-categories',
+      ],
+      [
+        '/owner/rules/product-categories/new',
+        '',
+        '/owner/rules/product-categories',
+      ],
+      ['/owner/rules/crafts', '', '/owner/rules/crafts'],
+      [
+        '/owner/rules/customer-pricing',
+        '',
+        '/owner/rules/customer-pricing?section=blank',
+      ],
+      [
+        '/owner/rules/price-versions',
+        '',
+        '/owner/rules/price-versions',
+      ],
+      [
         '/owner/rules/internal-pricing',
-      '/owner/rules/worker-piecework': '/owner/rules/worker-piecework',
-      '/owner/rules/employee-pay': '/owner/rules/employee-pay',
-    } as const;
+        '',
+        '/owner/rules/internal-pricing',
+      ],
+      [
+        '/owner/rules/internal-pricing/tiers/new',
+        '',
+        '/owner/rules/internal-pricing',
+      ],
+      [
+        '/owner/rules/worker-piecework',
+        '',
+        '/owner/rules/worker-piecework',
+      ],
+      [
+        '/owner/rules/employee-pay',
+        '',
+        '/owner/rules/employee-pay',
+      ],
+    ] as const;
 
-    for (const [pathname, expectedHref] of Object.entries(expectations)) {
-      expect(getActiveAdminMenuHref(pathname, items)).toBe(expectedHref);
+    for (const [pathname, query, expectedHref] of expectations) {
+      expect(
+        getActiveAdminMenuHref(pathname, items, new URLSearchParams(query)),
+      ).toBe(expectedHref);
+    }
+  });
+
+  it('客户计价的六个入口按稳定 query 唯一高亮', () => {
+    const items = getAdminMenuItems({ role: Role.ADMIN }).flatMap(
+      (group) => group.items,
+    );
+    const pathname = '/owner/rules/customer-pricing';
+    const cases = [
+      ['', '/owner/rules/customer-pricing?section=blank'],
+      ['purpose=processing', '/owner/rules/customer-pricing?section=blank'],
+      ['purpose=unknown', '/owner/rules/customer-pricing?section=blank'],
+      [
+        'section=blank&q=珠光纸&page=3',
+        '/owner/rules/customer-pricing?section=blank',
+      ],
+      [
+        'section=machine&item=rule-1',
+        '/owner/rules/customer-pricing?section=machine',
+      ],
+      ['section=tiers', '/owner/rules/customer-pricing?section=tiers'],
+      ['section=adds', '/owner/rules/customer-pricing?section=adds'],
+      ['section=print', '/owner/rules/customer-pricing?section=print'],
+      [
+        'purpose=logistics',
+        '/owner/rules/customer-pricing?purpose=logistics&section=ship',
+      ],
+      [
+        'purpose=logistics&section=ship&page=2',
+        '/owner/rules/customer-pricing?purpose=logistics&section=ship',
+      ],
+    ] as const;
+
+    for (const [query, expectedHref] of cases) {
+      expect(
+        getActiveAdminMenuHref(pathname, items, new URLSearchParams(query)),
+      ).toBe(expectedHref);
     }
   });
 
@@ -380,7 +480,11 @@ describe('ADMIN_MODULES registry', () => {
     const root = process.cwd();
     for (const adminModule of ADMIN_MODULES) {
       if (adminModule.status !== 'implemented') continue;
-      const relativeRoute = adminModule.routeBase.replace(/^\//, '');
+      const routePathname = new URL(
+        adminModule.routeBase,
+        'https://print-shop.local',
+      ).pathname;
+      const relativeRoute = routePathname.replace(/^\//, '');
       const candidates = [
         join(root, 'app', '(admin)', relativeRoute, 'page.tsx'),
         join(root, 'app', relativeRoute, 'page.tsx'),

@@ -10,6 +10,9 @@ describe('deriveExternalOrderChargeShipments', () => {
           {
             itemKey: 'touch-paper',
             quantity: 2_000,
+            paperWeightGsm: 160,
+            paperType: '160g触感纸',
+            productStructure: 'STANDARD_ENVELOPE',
           },
         ],
         shipments: [
@@ -26,6 +29,15 @@ describe('deriveExternalOrderChargeShipments', () => {
         shipmentKey: '1',
         province: '广东',
         billableWeightKg: '12.5',
+        weightItems: [
+          {
+            itemKey: 'touch-paper',
+            quantity: 2_000,
+            paperWeightGsm: 160,
+            paperType: '160g触感纸',
+            productStructure: 'STANDARD_ENVELOPE',
+          },
+        ],
         itemQuantity: 2_000,
       },
     ]);
@@ -37,6 +49,8 @@ describe('deriveExternalOrderChargeShipments', () => {
       items: [
         {
           quantity: 150,
+          paperWeightGsm: 160,
+          productStructure: 'STANDARD_ENVELOPE',
         },
       ],
       shipments: [
@@ -60,6 +74,10 @@ describe('deriveExternalOrderChargeShipments', () => {
       '2',
     ]);
     expect(result.map((shipment) => shipment.itemQuantity)).toEqual([50, 100]);
+    expect(result.map((shipment) => shipment.weightItems[0]?.quantity)).toEqual([
+      50,
+      100,
+    ]);
   });
 
   it('does not require a weight for SF collect', () => {
@@ -69,6 +87,8 @@ describe('deriveExternalOrderChargeShipments', () => {
         items: [
           {
             quantity: 500,
+            paperWeightGsm: 160,
+            productStructure: 'STANDARD_ENVELOPE',
           },
         ],
         shipments: [
@@ -83,27 +103,59 @@ describe('deriveExternalOrderChargeShipments', () => {
     ).toBeNull();
   });
 
-  it.each([null, '', '0', '-1', '1.2345', 'unknown'])(
-    'fails closed to a null weight for untrusted input %j',
-    (billableWeightKg) => {
-      expect(
-        deriveExternalOrderChargeShipments({
-          isSfCollect: false,
-          items: [
-            {
-              quantity: 500,
-            },
-          ],
-          shipments: [
-            {
-              shipmentKey: '1',
-              province: '广东',
-              billableWeightKg,
-              itemQuantities: [500],
-            },
-          ],
-        })[0]?.billableWeightKg,
-      ).toBeNull();
-    },
-  );
+  it.each([
+    [null, null],
+    ['', null],
+    ['0', '0'],
+    ['-1', '-1'],
+    ['1.2345', '1.2345'],
+    ['unknown', 'unknown'],
+  ])('preserves a non-empty actual-weight fact for fail-closed validation: %j', (
+    billableWeightKg,
+    expected,
+  ) => {
+    expect(
+      deriveExternalOrderChargeShipments({
+        isSfCollect: false,
+        items: [
+          {
+            quantity: 500,
+            paperWeightGsm: 160,
+            productStructure: 'STANDARD_ENVELOPE',
+          },
+        ],
+        shipments: [
+          {
+            shipmentKey: '1',
+            province: '广东',
+            billableWeightKg,
+            itemQuantities: [500],
+          },
+        ],
+      })[0]?.billableWeightKg,
+    ).toBe(expected);
+  });
+
+  it('keeps unknown structure and grams as explicit fail-closed facts', () => {
+    const shipment = deriveExternalOrderChargeShipments({
+      isSfCollect: false,
+      items: [{ quantity: 500 }],
+      shipments: [
+        {
+          shipmentKey: '1',
+          province: '广东',
+          billableWeightKg: null,
+          itemQuantities: [500],
+        },
+      ],
+    })[0];
+
+    expect(shipment?.weightItems).toEqual([
+      expect.objectContaining({
+        quantity: 500,
+        paperWeightGsm: null,
+        productStructure: 'UNSPECIFIED',
+      }),
+    ]);
+  });
 });

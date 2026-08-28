@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   OrderPackagingMode,
+  OrderQuotedFeeCompleteness,
   OrderStatus,
   ReworkCause,
   Role,
@@ -17,6 +18,7 @@ const {
   revalidatePathMock,
   redirectMock,
   MockOrderInvariantError,
+  MockOrderQuoteChangedError,
   MockInvalidOrderTransitionError,
   MockReworkOrderError,
   MockOrderChangeRequestError,
@@ -59,6 +61,18 @@ const {
     constructor(message: string) {
       super(message);
       this.name = 'OrderInvariantError';
+    }
+  },
+  MockOrderQuoteChangedError: class extends Error {
+    readonly quoteToken: string;
+    readonly quotedFee: string;
+    readonly quotedFeeCompleteness: OrderQuotedFeeCompleteness;
+    constructor() {
+      super('报价已变化，请再次复核');
+      this.name = 'OrderQuoteChangedError';
+      this.quoteToken = `create-order-quote-v2:${'a'.repeat(64)}`;
+      this.quotedFee = '566.30';
+      this.quotedFeeCompleteness = OrderQuotedFeeCompleteness.COMPLETE;
     }
   },
   MockInvalidOrderTransitionError: class extends Error {
@@ -104,6 +118,7 @@ vi.mock('@/lib/order', () => ({
   shipOrder: orderMock.shipOrder,
   finishOrder: orderMock.finishOrder,
   OrderInvariantError: MockOrderInvariantError,
+  OrderQuoteChangedError: MockOrderQuoteChangedError,
   InvalidOrderTransitionError: MockInvalidOrderTransitionError,
 }));
 vi.mock('@/lib/order/rework', () => ({
@@ -153,6 +168,12 @@ const salesActor = {
   machineType: null,
 };
 
+const internalSalesActor = {
+  ...salesActor,
+  id: 'internal-sales-1',
+  role: Role.CUSTOMER_SERVICE,
+};
+
 function baseOrderInput(over: Record<string, unknown> = {}) {
   return {
     customerRef: '苹果福',
@@ -164,6 +185,14 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
     remark: null,
     isUrgent: false,
     isSfCollect: false,
+    packagingGroups: [
+      {
+        name: '单款装',
+        mode: 'SINGLE_STYLE',
+        actualBagCount: 1,
+        itemUnitsPerBag: [1000],
+      },
+    ],
     items: [
       {
         name: '烫金款 A',
@@ -183,6 +212,63 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
         isDoubleColor: false,
         unitPrice: '0.5',
         suggestedSubtotal: null,
+        remark: null,
+      },
+    ],
+    ...over,
+  };
+}
+
+function externalOrderInput(over: Record<string, unknown> = {}) {
+  return {
+    clientSubmissionId: '7f26a5c0-21b7-4eef-8f11-0ae59d2c2339',
+    nextItemFig: 8,
+    customName: '王总中秋信封',
+    customerPartyId: null,
+    customerRef: '王总',
+    receiverName: '王先生',
+    receiverPhone: '13800138000',
+    receiverAddress: '上海市浦东新区测试路 1 号',
+    destinationProvince: '上海',
+    expressCode: null,
+    packageRequirement: '客户原话：每包 1000 个',
+    remark: null,
+    promisedDate: null,
+    isUrgent: false,
+    isSfCollect: false,
+    additionalShipments: [],
+    packagingGroups: [
+      {
+        name: '第 7 款单款装',
+        mode: 'SINGLE_STYLE',
+        actualBagCount: 1,
+        itemUnitsPerBag: [1000],
+      },
+    ],
+    items: [
+      {
+        fig: 7,
+        name: '第 7 款',
+        productId: 'product-1',
+        pricingRoute: 'STOCK_BLANK',
+        productStructure: 'STANDARD_ENVELOPE',
+        specification: '西封中号',
+        actualWidthMm: 110,
+        actualHeightMm: 220,
+        paperType: '艳红珠光纸',
+        paperWeightGsm: 160,
+        quantity: 1000,
+        pack: 1000,
+        crafts: ['craft-1'],
+        frontFoilColors: ['亚金'],
+        backFoilColors: [],
+        foilColors: ['亚金'],
+        foilTechnique: 'FLAT',
+        hasLocalFoil: true,
+        lamination: 'NONE',
+        printColors: [],
+        isDoubleSided: false,
+        isDoubleColor: false,
         remark: null,
       },
     ],
@@ -234,8 +320,94 @@ describe('createOrderAction', () => {
     expect(orderMock.createOrder).not.toHaveBeenCalled();
   });
 
-  it('short-circuits on schema failure (empty items)', async () => {
+  it('权限失败时不读取或解析原始 payload', async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+    const raw = Object.defineProperty({}, 'items', {
+      enumerable: true,
+      get() {
+        throw new Error('payload 不应被读取');
+      },
+    });
+
+    await expect(createOrderAction(null, raw)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('外部销售显式提交 null 价格也被拒绝', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const input = externalOrderInput();
+    const result = await createOrderAction(null, {
+      ...input,
+      quotedFee: null,
+      items: [{ ...input.items[0], unitPrice: null }],
+    });
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        quotedFee: [expect.stringContaining('服务端生成')],
+        'items.0.unitPrice': [expect.stringContaining('服务端生成')],
+      },
+    });
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('外部 FULL 反面错误定位到款式字段', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    const input = externalOrderInput();
+    const result = await createOrderAction(null, {
+      ...input,
+      items: [
+        {
+          ...input.items[0],
+          pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+          frontFoilColors: ['亚金'],
+          backFoilColors: ['红色'],
+          foilColors: ['亚金', '红色'],
+          hasLocalFoil: false,
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        'items.0.backFoilColors': ['专版烫金只允许正面'],
+      },
+    });
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('内部销售保持原 schema，兼容现有价格字段', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
+    orderMock.createOrder.mockResolvedValue({
+      id: 'order-internal',
+      orderNo: '20260423-0002',
+      itemIds: ['item-1'],
+      pricingStatus: 'AUTO_CONFIRMED',
+    });
+
+    const result = await createOrderAction(
+      null,
+      baseOrderInput({ shippingFee: '12.30' }),
+    );
+
+    expect(result.status).toBe('success');
+    expect(orderMock.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shippingFee: '12.30',
+        items: [expect.objectContaining({ unitPrice: '0.5' })],
+      }),
+      internalSalesActor,
+    );
+  });
+
+  it('short-circuits on schema failure (empty items)', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     const result = await createOrderAction(null, baseOrderInput({ items: [] }));
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
@@ -250,7 +422,7 @@ describe('createOrderAction', () => {
     ['纯空格', '   '],
     ['缺失', undefined],
   ])('主收货地址为%s时不进入领域创建', async (_label, receiverAddress) => {
-    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
 
     const result = await createOrderAction(
       null,
@@ -265,7 +437,7 @@ describe('createOrderAction', () => {
   });
 
   it('flattens nested error paths (items.0.quantity) into dotted keys', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     const input = baseOrderInput();
     // Tamper: quantity = 0, which fails min(1) inside an item.
     const badItems = input.items.map((it) => ({ ...it, quantity: 0 }));
@@ -279,11 +451,12 @@ describe('createOrderAction', () => {
   });
 
   it('trims a custom name and rejects names longer than 100 characters', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     orderMock.createOrder.mockResolvedValue({
       id: 'order-new',
       orderNo: '20260423-0001',
       itemIds: ['item-1'],
+      pricingStatus: 'AUTO_CONFIRMED',
     });
 
     await createOrderAction(
@@ -292,7 +465,7 @@ describe('createOrderAction', () => {
     );
     expect(orderMock.createOrder).toHaveBeenCalledWith(
       expect.objectContaining({ customName: '王总中秋礼盒首批' }),
-      salesActor,
+      internalSalesActor,
     );
 
     orderMock.createOrder.mockClear();
@@ -305,7 +478,7 @@ describe('createOrderAction', () => {
   });
 
   it('maps OrderInvariantError → error status', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     orderMock.createOrder.mockRejectedValueOnce(
       new MockOrderInvariantError('工艺不存在：craft-X'),
     );
@@ -316,8 +489,31 @@ describe('createOrderAction', () => {
     }
   });
 
-  it('returns a catalog-route invariant as a create error instead of an unhandled failure', async () => {
+  it('返回外部销售包装覆盖的服务边界错误', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.createOrder.mockRejectedValueOnce(
+      new MockOrderInvariantError(
+        '外部销售工单必须为每个款式设置一个包装组',
+      ),
+    );
+
+    const result = await createOrderAction(
+      null,
+      externalOrderInput({ packagingGroups: [] }),
+    );
+
+    expect(orderMock.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ packagingGroups: [] }),
+      salesActor,
+    );
+    expect(result).toEqual({
+      status: 'error',
+      message: '外部销售工单必须为每个款式设置一个包装组',
+    });
+  });
+
+  it('returns a catalog-route invariant as a create error instead of an unhandled failure', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     orderMock.createOrder.mockRejectedValueOnce(
       new MockOrderInvariantError(
         '报价产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
@@ -334,11 +530,12 @@ describe('createOrderAction', () => {
   });
 
   it('revalidates and returns ordered item ids for post-create design uploads', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     orderMock.createOrder.mockResolvedValue({
       id: 'order-new',
       orderNo: '20260423-0001',
       itemIds: ['item-1'],
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
     });
 
     const result = await createOrderAction(null, baseOrderInput());
@@ -348,6 +545,7 @@ describe('createOrderAction', () => {
       orderId: 'order-new',
       orderNo: '20260423-0001',
       itemIds: ['item-1'],
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(redirectMock).not.toHaveBeenCalled();
@@ -359,9 +557,10 @@ describe('createOrderAction', () => {
       id: 'order-new',
       orderNo: '20260423-0001',
       itemIds: ['item-1'],
+      pricingStatus: 'AUTO_CONFIRMED',
     });
 
-    await createOrderAction(null, baseOrderInput());
+    await createOrderAction(null, externalOrderInput());
     expect(orderMock.createOrder).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ id: 'sales-1', role: Role.SALES }),
@@ -466,11 +665,55 @@ describe('submitOrderAction', () => {
 
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
-    orderMock.submitOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.SUBMITTED });
-    const r = await submitOrderAction('o1');
-    expect(r.status).toBe('success');
+    orderMock.submitOrder.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.PENDING_FACTORY,
+      quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    const token = `create-order-quote-v2:${'b'.repeat(64)}`;
+    const r = await submitOrderAction('o1', token);
+    expect(r).toEqual({
+      status: 'success',
+      quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    expect(orderMock.submitOrder).toHaveBeenCalledWith(
+      'o1',
+      salesActor,
+      expect.any(Date),
+      token,
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
+  });
+
+  it('报价变化时返回稳定 QUOTE_CHANGED 结果且不刷新路由', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.submitOrder.mockRejectedValueOnce(
+      new MockOrderQuoteChangedError(),
+    );
+
+    const r = await submitOrderAction('o1', null);
+
+    expect(r).toMatchObject({
+      status: 'quote_changed',
+      quotedFee: '566.30',
+      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('在进入提交事务前拒绝非法报价 token', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+
+    const r = await submitOrderAction('o1', 'forged');
+
+    expect(r).toEqual({
+      status: 'invalid',
+      fieldErrors: { quoteToken: ['报价确认标识格式非法'] },
+    });
+    expect(orderMock.submitOrder).not.toHaveBeenCalled();
   });
 });
 

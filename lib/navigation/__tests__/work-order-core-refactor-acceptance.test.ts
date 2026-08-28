@@ -136,7 +136,7 @@ describe('工单核心重构验收契约', () => {
   it('规则中心在同一路由树下管理可维护的计价对象与师傅计件', () => {
     const requiredModules = [
       ['papers', '纸张', '/owner/rules/papers'],
-      ['stockSkus', '报价 SKU', '/owner/rules/stock-skus'],
+      ['stockSkus', '报价产品', '/owner/rules/stock-skus'],
       [
         'productCategories',
         '产品结构',
@@ -157,7 +157,7 @@ describe('工单核心重构验收契约', () => {
       href: RULE_CENTER_HREFS.root,
       requiredPermission: 'dict:price:manage',
     });
-    expect(childItems).toHaveLength(9);
+    expect(childItems).toHaveLength(14);
     expect(
       childItems.every(
         (item) =>
@@ -173,7 +173,7 @@ describe('工单核心重构验收契约', () => {
       label: '规则配置中心',
       href: RULE_CENTER_HREFS.root,
     });
-    expect(rulesGroup?.items[0]?.children).toHaveLength(9);
+    expect(rulesGroup?.items[0]?.children).toHaveLength(14);
 
     for (const [key, label, href] of requiredModules) {
       expect(RULE_CENTER_HREFS[key]).toBe(href);
@@ -195,26 +195,7 @@ describe('工单核心重构验收契约', () => {
       ).toBe(true);
     }
 
-    expect(RULE_CENTER_HREFS.pricingRoutes).toBe(
-      '/owner/rules/pricing-routes',
-    );
-    expect(RULE_CENTER_SIDEBAR_ITEMS.map((item) => item.href)).not.toContain(
-      RULE_CENTER_HREFS.pricingRoutes,
-    );
-    expect(
-      existsSync(
-        join(
-          process.cwd(),
-          'app',
-          '(admin)',
-          'owner',
-          'rules',
-          'pricing-routes',
-          'page.tsx',
-        ),
-      ),
-      '旧链接应继续打开精简后的计价方式说明页',
-    ).toBe(true);
+    expect(RULE_CENTER_HREFS).not.toHaveProperty('pricingRoutes');
   });
 
   it('旧字典地址仅作兼容入口，统一转到规则中心', async () => {
@@ -222,6 +203,11 @@ describe('工单核心重构验收契约', () => {
 
     expect(redirects).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          source: '/owner/rules/pricing-routes',
+          destination: RULE_CENTER_HREFS.root,
+          permanent: false,
+        }),
         expect.objectContaining({
           source: '/owner/products',
           destination: RULE_CENTER_HREFS.stockSkus,

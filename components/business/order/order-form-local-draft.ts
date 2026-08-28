@@ -1,7 +1,8 @@
 import { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import { isNewOrderPricingRoute } from '@/lib/order/pricing-route';
 
-const LOCAL_ORDER_DRAFT_VERSION = 4 as const;
+const LOCAL_ORDER_DRAFT_VERSION = 5 as const;
+const LEGACY_LOCAL_ORDER_DRAFT_VERSION = 4 as const;
 
 export type LocalOrderFormDraftPricingScope = 'external-sales' | 'internal';
 
@@ -31,9 +32,11 @@ const ROOT_FACT_KEYS = [
   'promisedDate',
   'isUrgent',
   'isSfCollect',
+  'nextItemFig',
 ] as const;
 
 const ITEM_FACT_KEYS = [
+  'fig',
   'name',
   'productId',
   'pricingRoute',
@@ -47,6 +50,7 @@ const ITEM_FACT_KEYS = [
   'paperType',
   'paperWeightGsm',
   'quantity',
+  'pack',
   'crafts',
   'frontFoilColors',
   'backFoilColors',
@@ -85,6 +89,21 @@ const SHIPMENT_FACT_KEYS = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function resolveNextOrderItemFig(value: unknown): number {
+  if (!isRecord(value) || !Array.isArray(value.items)) return 1;
+  const maximumFig = value.items.reduce((maximum, item, index) => {
+    if (!isRecord(item)) return Math.max(maximum, index + 1);
+    const fig = item.fig;
+    return Number.isSafeInteger(fig) && Number(fig) > 0
+      ? Math.max(maximum, Number(fig))
+      : Math.max(maximum, index + 1);
+  }, 0);
+  const savedCounter = value.nextItemFig;
+  return Number.isSafeInteger(savedCounter) && Number(savedCounter) > maximumFig
+    ? Number(savedCounter)
+    : maximumFig + 1;
 }
 
 function dateToYmd(value: Date): string | null {
@@ -139,11 +158,12 @@ export function sanitizeOrderFormDraftValues(
   if (!Array.isArray(value.items) || value.items.length === 0) return null;
   if (!Array.isArray(value.additionalShipments)) return null;
   if (!Array.isArray(value.packagingGroups)) return null;
+  const packagingGroupValues = value.packagingGroups as unknown[];
 
   const includeInternalPrices = pricingScope === 'internal';
   const root = pickValues(value, ROOT_FACT_KEYS);
   if (!root) return null;
-  const items = value.items.map((item) => {
+  const items = value.items.map((item, itemIndex) => {
     const picked = pickValues(item, [
       ...ITEM_FACT_KEYS,
       ...(includeInternalPrices ? ITEM_INTERNAL_PRICE_KEYS : []),
@@ -154,18 +174,34 @@ export function sanitizeOrderFormDraftValues(
       !isNewOrderPricingRoute(picked.pricingRoute as OrderItemPricingRoute)
     )
       return null;
+    if (!Number.isSafeInteger(picked.fig) || Number(picked.fig) < 1) {
+      picked.fig = itemIndex + 1;
+    }
+    if (!Number.isSafeInteger(picked.pack) || Number(picked.pack) < 1) {
+      const legacyPack = packagingGroupValues
+        .filter(isRecord)
+        .map((group) => group.itemUnitsPerBag)
+        .filter(Array.isArray)
+        .map((units) => units[itemIndex])
+        .find((units) => Number.isSafeInteger(units) && Number(units) > 0);
+      picked.pack = legacyPack === undefined ? null : Number(legacyPack);
+    }
     return picked;
   });
   const shipments = value.additionalShipments.map((shipment) =>
     pickValues(shipment, SHIPMENT_FACT_KEYS),
   );
-  const packagingGroups = value.packagingGroups.map((group) =>
+  const packagingGroups = packagingGroupValues.map((group) =>
     pickValues(group, PACKAGING_GROUP_VALUE_KEYS),
   );
   if (items.some((item) => item === null)) return null;
   if (shipments.some((shipment) => shipment === null)) return null;
   if (packagingGroups.some((group) => group === null)) return null;
 
+  root.nextItemFig = resolveNextOrderItemFig({
+    ...root,
+    items,
+  });
   root.items = items as JsonObject[];
   root.additionalShipments = shipments as JsonObject[];
   root.packagingGroups = packagingGroups as JsonObject[];
@@ -193,7 +229,11 @@ export function parseLocalOrderFormDraft(
 ): LocalOrderFormDraft | null {
   try {
     const parsed: unknown = JSON.parse(serialized);
-    if (!isRecord(parsed) || parsed.version !== LOCAL_ORDER_DRAFT_VERSION) {
+    if (
+      !isRecord(parsed) ||
+      (parsed.version !== LOCAL_ORDER_DRAFT_VERSION &&
+        parsed.version !== LEGACY_LOCAL_ORDER_DRAFT_VERSION)
+    ) {
       return null;
     }
     if (parsed.pricingScope !== expectedPricingScope) return null;

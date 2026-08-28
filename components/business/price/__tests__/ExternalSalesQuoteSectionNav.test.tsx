@@ -16,10 +16,10 @@ describe('ExternalSalesQuoteSectionNav', () => {
 
     expect(html).toContain('aria-label="客户计价导航"');
     expect(html).toContain(
-      'href="/owner/rules/customer-pricing?purpose=processing"',
+      'href="/owner/rules/customer-pricing?section=blank"',
     );
     expect(html).toContain(
-      'href="/owner/rules/customer-pricing?purpose=logistics"',
+      'href="/owner/rules/customer-pricing?purpose=logistics&amp;section=ship"',
     );
     expect(html).toContain(
       'href="/owner/rules/price-versions"',

@@ -101,7 +101,6 @@ print-shop-erp/
 ├── deploy/                       # PM2 ecosystem、nginx、crontab 样例、update.sh
 ├── tests/{e2e,visual,integration}/
 ├── docs/                         # 运维 runbook、admin 框架计划、agent backlog
-├── _reference/                   # 只读样板，已被 eslint/vitest/tsc 排除
 ├── SPEC-v1.2.md  CLAUDE.md  AGENTS.md  HANDOFF.md  PROGRESS.md  DECISIONS.md
 └── package.json
 ```
@@ -765,8 +764,6 @@ export async function createProductAction(
 - 打印/PDF：生产固定用系统 Chromium（`PUPPETEER_EXECUTABLE_PATH`），发布检查要复用真实运行时。
 - OSS / 通知 / Sentry 都是「配置齐全才启用」：缺变量时返回 `not-configured` 或自动 mock，
   不要为了让本地跑通去改这些降级分支。
-- `_reference/` 是只读样板，已被 eslint / vitest / tsconfig 排除，不要在那里改代码。
-
 ### 15.8 零 JS 降级：三条路径是硬约束，其余只是写法偏好
 
 **别再把「渐进增强」当全仓铁律援引**（DECISIONS 2026-08-17 已就此拍板）。

@@ -8,6 +8,7 @@ import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 type CategoryInitial = {
   name: string;
@@ -20,8 +21,7 @@ type CategoryInitial = {
 export type ParentCategoryOption = { id: string; label: string };
 
 export type ProductCategoryRouteBase =
-  | '/owner/product-categories'
-  | '/owner/rules/product-categories';
+  typeof RULE_CENTER_HREFS.productCategories;
 
 type Props = {
   routeBase?: ProductCategoryRouteBase;
@@ -48,6 +48,12 @@ type Props = {
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
+const RETIRED_PRODUCT_CATEGORIES: ReadonlySet<ProductCategory> = new Set([
+  ProductCategory.GENERIC_STOCK,
+  ProductCategory.STOCK_FOIL_ADD,
+  ProductCategory.BYO_MATERIAL,
+]);
+
 export function ProductCategoryForm(props: Props) {
   const [state, formAction, pending] = useActionState<
     ProductCategoryNodeMutationResult | null,
@@ -58,11 +64,15 @@ export function ProductCategoryForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? '/owner/product-categories';
+  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.productCategories;
+  const categoryOptions = Object.values(ProductCategory).filter(
+    (category) =>
+      !RETIRED_PRODUCT_CATEGORIES.has(category) ||
+      category === initial?.legacyCategory,
+  );
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
-      <input type="hidden" name="routeBase" value={routeBase} />
       {props.mode === 'create' ? (
         <div className="space-y-2">
           <Label htmlFor="parentId">上级分类</Label>
@@ -107,7 +117,7 @@ export function ProductCategoryForm(props: Props) {
           defaultValue={initial?.legacyCategory ?? ProductCategory.BLANK_STOCK}
           disabled={pending}
         >
-          {Object.values(ProductCategory).map((category) => (
+          {categoryOptions.map((category) => (
             <option key={category} value={category}>
               {PRODUCT_CATEGORY_LABELS[category]}
             </option>

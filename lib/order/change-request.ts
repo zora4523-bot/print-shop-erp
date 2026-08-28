@@ -26,6 +26,7 @@ import {
   OrderCustomerChargeError,
   resolveExternalOrderChargesForFinalization,
 } from '../price/order-charge-service';
+import { deriveExternalOrderChargeShipments } from '../price/external-order-charge-facts';
 import {
   quoteOrderItems,
   type QuoteOrderItemInput,
@@ -929,6 +930,9 @@ type LogisticsProjectionShipment = {
 type LogisticsProjectionItem = {
   id: string;
   quantity: number;
+  paperWeightGsm: number | null;
+  paperType: string | null;
+  productStructure: import('../../generated/prisma/client').OrderProductStructure;
   shipmentLines: Array<{
     quantity: number;
     shipment: { id: string; sequence: number };
@@ -940,61 +944,104 @@ type LogisticsProjectionCharge = {
   shipmentId: string | null;
   businessKey: string;
   priceBookId: string | null;
-  amount: Prisma.Decimal;
+  amount: Prisma.Decimal | null;
   overrideReason: string | null;
   category: { code: string };
 };
 
-function projectShipmentItemQuantities(input: {
+function projectShipmentChargeFacts(input: {
   shipments: LogisticsProjectionShipment[];
   items: LogisticsProjectionItem[];
   changes: ProposedItemChange[];
   primaryShipmentId: string;
-}): Map<string, number> {
-  const totals = new Map(
-    input.shipments.map((shipment) => [shipment.id, 0]),
+  isSfCollect: boolean;
+}) {
+  const allocationByItemKey = new Map<
+    string,
+    Map<string, number>
+  >(
+    input.items.map((item) => [
+      item.id,
+      new Map(
+        item.shipmentLines.map((line) => [line.shipment.id, line.quantity]),
+      ),
+    ]),
   );
   const itemById = new Map(input.items.map((item) => [item.id, item]));
+  const projectedItems = input.items.map((item) => ({
+    itemKey: item.id,
+    quantity: item.quantity,
+    paperWeightGsm: item.paperWeightGsm,
+    paperType: item.paperType,
+    productStructure: item.productStructure,
+  }));
 
-  for (const item of input.items) {
-    for (const line of item.shipmentLines) {
-      const current = totals.get(line.shipment.id);
-      if (current === undefined) {
-        throw new OrderChangeRequestError(
-          '工单的款式分货记录与收货地址不一致',
-        );
-      }
-      totals.set(line.shipment.id, current + line.quantity);
-    }
-  }
-
-  for (const change of input.changes) {
+  for (const [changeIndex, change] of input.changes.entries()) {
     if (change.operation === 'ADD') {
-      totals.set(
-        input.primaryShipmentId,
-        (totals.get(input.primaryShipmentId) ?? 0) + change.quantity,
+      const template = itemById.get(change.templateItemId);
+      if (!template) {
+        throw new OrderChangeRequestError('参考款式已不存在，无法刷新物流收费');
+      }
+      const itemKey = `ADD:${changeIndex + 1}`;
+      projectedItems.push({
+        itemKey,
+        quantity: change.quantity,
+        paperWeightGsm: template.paperWeightGsm,
+        paperType: template.paperType,
+        productStructure: template.productStructure,
+      });
+      allocationByItemKey.set(
+        itemKey,
+        new Map([[input.primaryShipmentId, change.quantity]]),
       );
       continue;
     }
     if (change.quantity === undefined) continue;
     const item = itemById.get(change.itemId);
     if (!item) throw new OrderChangeRequestError('原款式已不存在，请重新申请');
-    totals.set(
+    const allocation = allocationByItemKey.get(item.id)!;
+    allocation.set(
       input.primaryShipmentId,
-      (totals.get(input.primaryShipmentId) ?? 0) +
-        change.quantity -
-        item.quantity,
+      (allocation.get(input.primaryShipmentId) ?? 0) +
+        change.quantity - item.quantity,
     );
+    const projected = projectedItems.find(
+      (candidate) => candidate.itemKey === item.id,
+    )!;
+    projected.quantity = change.quantity;
   }
 
-  for (const [shipmentId, quantity] of totals) {
-    if (!Number.isSafeInteger(quantity) || quantity < 0) {
-      throw new OrderChangeRequestError(
-        `收货地址 ${shipmentId} 的分货数量非法，无法刷新物流收费`,
-      );
+  const knownShipmentIds = new Set(
+    input.shipments.map((shipment) => shipment.id),
+  );
+  for (const allocation of allocationByItemKey.values()) {
+    for (const [shipmentId, quantity] of allocation) {
+      if (!knownShipmentIds.has(shipmentId)) {
+        throw new OrderChangeRequestError(
+          '工单的款式分货记录与收货地址不一致',
+        );
+      }
+      if (!Number.isSafeInteger(quantity) || quantity < 0) {
+        throw new OrderChangeRequestError(
+          `收货地址 ${shipmentId} 的分货数量非法，无法刷新物流收费`,
+        );
+      }
     }
   }
-  return totals;
+
+  return deriveExternalOrderChargeShipments({
+    isSfCollect: input.isSfCollect,
+    items: projectedItems,
+    shipments: input.shipments.map((shipment) => ({
+      shipmentKey: String(shipment.sequence),
+      province: shipment.destinationProvince,
+      billableWeightKg: shipment.weightKg?.toString() ?? null,
+      itemQuantities: projectedItems.map(
+        (item) =>
+          allocationByItemKey.get(item.itemKey)?.get(shipment.id) ?? 0,
+      ),
+    })),
+  });
 }
 
 function refreshedChargeSnapshot(
@@ -1047,9 +1094,20 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
       '外部销售工单的快递/耗材收费明细不完整，无法批准数量修改',
     );
   }
+  if (standardCharges.some((charge) => charge.amount === null)) {
+    throw new OrderChangeRequestError(
+      '快递/耗材收费金额待定，无法批准数量修改',
+    );
+  }
+  const knownStandardCharges = standardCharges.filter(
+    (
+      charge,
+    ): charge is LogisticsProjectionCharge & { amount: Prisma.Decimal } =>
+      charge.amount !== null,
+  );
   const priceBookIds = [
     ...new Set(
-      standardCharges.flatMap((charge) =>
+      knownStandardCharges.flatMap((charge) =>
         charge.priceBookId ? [charge.priceBookId] : [],
       ),
     ),
@@ -1061,17 +1119,21 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
   }
 
   const chargeByShipmentAndCategory = new Map(
-    standardCharges.map((charge) => [
+    knownStandardCharges.map((charge) => [
       `${charge.shipmentId}:${String(charge.category.code)}`,
       charge,
     ]),
   );
-  const itemQuantityByShipmentId = projectShipmentItemQuantities({
+  const projectedShipmentFacts = projectShipmentChargeFacts({
     shipments: input.shipments,
     items: input.items,
     changes: input.changes,
     primaryShipmentId: input.primaryShipmentId,
+    isSfCollect: input.isSfCollect,
   });
+  const projectedFactBySequence = new Map(
+    projectedShipmentFacts.map((fact) => [fact.shipmentKey, fact]),
+  );
 
   let refreshed: Awaited<
     ReturnType<typeof resolveExternalOrderChargesForFinalization>
@@ -1093,11 +1155,14 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
               `收货地址 ${shipment.sequence} 缺少快递费或打包耗材费明细`,
             );
           }
+          const fact = projectedFactBySequence.get(String(shipment.sequence));
+          if (!fact) {
+            throw new OrderChangeRequestError(
+              `收货地址 ${shipment.sequence} 缺少可计价的分货事实`,
+            );
+          }
           return {
-            shipmentKey: String(shipment.sequence),
-            province: shipment.destinationProvince,
-            billableWeightKg: shipment.weightKg?.toString() ?? null,
-            itemQuantity: itemQuantityByShipmentId.get(shipment.id) ?? 0,
+            ...fact,
             shippingFee: shipping.amount.toString(),
             packingMaterialFee: packaging.amount.toString(),
             // The resolver validates incomplete/different quotes. Use a
@@ -1113,12 +1178,6 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
       },
       priceBookIds[0]!,
       input.reviewedAt,
-      {
-        // Older frozen books marked the otherwise-complete carton table as
-        // advisory. Recalculate the preserved tiers here; changed amounts
-        // still require a per-charge audit reason below.
-        allowLegacyBlockedPackagingRules: true,
-      },
     );
   } catch (error) {
     if (error instanceof OrderCustomerChargeError) {
@@ -1128,7 +1187,7 @@ async function refreshExternalLogisticsChargesAfterQuantityChange(input: {
   }
 
   const existingByBusinessKey = new Map(
-    standardCharges.map((charge) => [String(charge.businessKey), charge]),
+    knownStandardCharges.map((charge) => [String(charge.businessKey), charge]),
   );
   const updatePlans = refreshed.charges.map((charge) => {
     const existing = existingByBusinessKey.get(charge.businessKey);

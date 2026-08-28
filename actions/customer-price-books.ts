@@ -24,6 +24,7 @@ import {
   publishCustomerPriceBookDraft,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
+  updateCustomerPriceSectionDraft,
 } from '@/lib/price/customer-price-book-admin';
 import type {
   CreateCustomerPriceBookDraftActionInput,
@@ -32,6 +33,7 @@ import type {
   PublishCustomerPriceBookDraftActionInput,
   UpdateCustomerPriceRuleDraftActionInput,
   UpdateCustomerPriceRuleDraftGroupActionInput,
+  UpdateCustomerPriceSectionDraftActionInput,
 } from './customer-price-books.types';
 
 const safeId = z
@@ -505,6 +507,43 @@ const updateDraftRuleGroupSchema = z
     }
   });
 
+const updatePriceSectionDraftSchema = z
+  .object({
+    priceBookId: safeId,
+    section: z.enum(['blank', 'machine', 'tiers', 'adds', 'print', 'ship']),
+    rows: z
+      .array(
+        z
+          .object({
+            ruleId: safeId,
+            expectedUpdatedAt: strictIsoInstant,
+            amount: nullableDecimal('金额', 10, 4),
+            minQty: nullableQuantity,
+            maxQty: nullableQuantity,
+            includedUnits: nullableDecimal('首重', 7, 3),
+            incrementUnits: nullableDecimal('续重单位', 7, 3),
+            incrementAmount: nullableDecimal('续重金额', 10, 4),
+          })
+          .strict(),
+      )
+      .min(1, '当前业务板块没有可保存规则')
+      .max(100, '一次最多保存 100 条规则'),
+  })
+  .strict()
+  .superRefine((input, ctx) => {
+    const seen = new Set<string>();
+    input.rows.forEach((row, index) => {
+      if (seen.has(row.ruleId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['rows', index, 'ruleId'],
+          message: '收费项重复，请刷新后重试',
+        });
+      }
+      seen.add(row.ruleId);
+    });
+  });
+
 const publishDraftSchema = z
   .object({
     priceBookId: safeId,
@@ -609,7 +648,13 @@ function invalidGroupUpdateFromDomain(
       segments.length === 3 &&
       segments[0] === 'rules' &&
       rowIndex !== undefined &&
-      (fieldName === 'amount' || fieldName === 'isActive')
+      (fieldName === 'amount' ||
+        fieldName === 'isActive' ||
+        fieldName === 'minQty' ||
+        fieldName === 'maxQty' ||
+        fieldName === 'includedUnits' ||
+        fieldName === 'incrementUnits' ||
+        fieldName === 'incrementAmount')
         ? `rows.${rowIndex}.${fieldName}`
         : issue.path;
     (fieldErrors[path] ??= []).push(issue.message);
@@ -621,11 +666,6 @@ function revalidatePriceBookPaths(): void {
   for (const path of [
     RULE_CENTER_HREFS.customerPricing,
     RULE_CENTER_HREFS.priceVersions,
-    '/owner/prices',
-    '/owner/prices/external-sales',
-    '/owner/prices/external-sales/items',
-    '/owner/prices/external-sales/versions',
-    '/owner/prices/external-sales/logistics',
     '/sales/quote',
     '/sales/quote/logistics',
     '/orders/new',
@@ -723,6 +763,140 @@ export async function updateCustomerPriceRuleDraftGroupAction(
     }
     throw error;
   }
+}
+
+export async function updateCustomerPriceSectionDraftAction(
+  raw: UpdateCustomerPriceSectionDraftActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = updatePriceSectionDraftSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const updated = await updateCustomerPriceSectionDraft(parsed.data, actor);
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: updated.priceBookId,
+      ruleIds: updated.ruleIds,
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookValidationError) {
+      return invalidGroupUpdateFromDomain(error, parsed.data.rows);
+    }
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+type CustomerPriceSectionFormField =
+  | 'amount'
+  | 'minQty'
+  | 'maxQty'
+  | 'includedUnits'
+  | 'incrementUnits'
+  | 'incrementAmount';
+
+export type CustomerPriceSectionFormBinding = {
+  inputName: string;
+  targets: Array<{
+    rowIndex: number;
+    field: CustomerPriceSectionFormField;
+    /** Used for inferred adjacent quantity boundaries. */
+    integerOffset?: number;
+  }>;
+};
+
+export type CustomerPriceSectionFormContext = {
+  section: UpdateCustomerPriceSectionDraftActionInput['section'];
+  rows: Array<
+    UpdateCustomerPriceSectionDraftActionInput['rows'][number] & {
+      priceBookId: string;
+    }
+  >;
+  bindings: CustomerPriceSectionFormBinding[];
+};
+
+function formDecimal(value: FormDataEntryValue): string | null {
+  return typeof value === 'string' && value.trim() !== ''
+    ? value.trim()
+    : null;
+}
+
+/**
+ * Bound-form adapter for the design-native matrices. Rule identities and the
+ * field-to-row propagation map are supplied by the authenticated server page;
+ * the locked DAL still re-derives complete section membership before writing.
+ */
+export async function updateCustomerPriceSectionDraftFormAction(
+  context: CustomerPriceSectionFormContext,
+  _previousState: CustomerPriceBookMutationResult | null,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  const rows = context.rows.map((row) => ({ ...row }));
+  for (const binding of context.bindings) {
+    const value = formData.get(binding.inputName);
+    if (value === null) continue;
+    for (const target of binding.targets) {
+      const row = rows[target.rowIndex];
+      if (!row) {
+        return {
+          status: 'invalid',
+          fieldErrors: {
+            [binding.inputName]: ['页面价格定位已失效，请刷新后重试'],
+          },
+        };
+      }
+      if (target.field === 'minQty' || target.field === 'maxQty') {
+        const text = typeof value === 'string' ? value.trim() : '';
+        const parsed = Number(text);
+        row[target.field] =
+          text === ''
+            ? null
+            : parsed + (target.integerOffset ?? 0);
+      } else {
+        row[target.field] = formDecimal(value);
+      }
+    }
+  }
+
+  const byBook = new Map<string, typeof rows>();
+  rows.forEach((row) => {
+    const bookRows = byBook.get(row.priceBookId) ?? [];
+    bookRows.push(row);
+    byBook.set(row.priceBookId, bookRows);
+  });
+
+  const allRuleIds: string[] = [];
+  for (const [priceBookId, bookRows] of byBook) {
+    const result = await updateCustomerPriceSectionDraftAction({
+      priceBookId,
+      section: context.section,
+      rows: bookRows.map((row) => ({
+        ruleId: row.ruleId,
+        expectedUpdatedAt: row.expectedUpdatedAt,
+        amount: row.amount,
+        minQty: row.minQty,
+        maxQty: row.maxQty,
+        includedUnits: row.includedUnits,
+        incrementUnits: row.incrementUnits,
+        incrementAmount: row.incrementAmount,
+      })),
+    });
+    if (result.status !== 'success') return result;
+    allRuleIds.push(...(result.ruleIds ?? []));
+  }
+  return {
+    status: 'success',
+    priceBookId: [...byBook.keys()].join(','),
+    ruleIds: allRuleIds,
+  };
 }
 
 export async function publishCustomerPriceBookDraftAction(

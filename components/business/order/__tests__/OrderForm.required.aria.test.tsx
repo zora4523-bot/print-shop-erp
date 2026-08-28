@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { OrderSettlementType } from '@/generated/prisma/enums';
 
 // TextField 曾经把 required 解构出来「只拿去画红星」，没有透传给 <Input>。
 // 读屏器于是把「款式名」「数量」念成普通选填输入框。tests/visual 的 axe 门禁
@@ -13,14 +14,14 @@ vi.mock('@/actions/order', () => ({
   submitOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/order-quote', () => ({ quoteOrderItemsAction: vi.fn() }));
+vi.mock('@/actions/create-order-quote', () => ({
+  quoteExternalCreateOrderAction: vi.fn(),
+}));
 vi.mock('@/actions/order-logistics-quote', () => ({
   quoteExternalOrderChargesAction: vi.fn(),
 }));
 vi.mock('@/actions/order-packaging-quote', () => ({
   quoteOrderPackagingGroupsAction: vi.fn(),
-}));
-vi.mock('../PendingDesignImages', () => ({
-  PendingDesignImages: () => null,
 }));
 vi.mock('../design-upload-client', () => ({
   uploadOrderItemDesignFile: vi.fn(),
@@ -38,14 +39,37 @@ const crafts: CraftOption[] = [
   { id: 'craft-2', name: '击凸', isOutsource: true, isLowFrequency: true },
 ];
 
-function render() {
+function render(usesExternalSalesPricing = true) {
   return renderToStaticMarkup(
     <OrderForm
       draftScope="test-user"
       crafts={crafts}
       products={[]}
       settlementLabel="内部结算"
-      usesExternalSalesPricing
+      settlementType={
+        usesExternalSalesPricing
+          ? OrderSettlementType.EXTERNAL_SALES
+          : OrderSettlementType.FACTORY_DIRECT
+      }
+      externalCreateOrderOptions={
+        usesExternalSalesPricing
+          ? {
+              products: [],
+              papers: [],
+              specifications: [],
+              foilColors: [
+                {
+                  id: 'foil-1',
+                  code: 'MATTE_GOLD',
+                  name: '品牌金',
+                  displayColor: '#b98f2c',
+                  displayImage: null,
+                  sortOrder: 1,
+                },
+              ],
+            }
+          : undefined
+      }
     />,
   );
 }
@@ -100,6 +124,16 @@ describe('OrderForm 必填字段的 required 语义', () => {
 
     expect(html).not.toContain('id="customerRef"');
     expect(html).not.toContain('id="expressCode"');
+  });
+
+  it('管理员端同样渲染 B 表单，并提供内部结算专属字段', () => {
+    const html = render(false);
+
+    expect(html).toContain('data-slot="order-form-b"');
+    expect(html).toContain('内部结算');
+    expect(html).toContain('id="customerRef"');
+    expect(html).toContain('id="expressCode"');
+    expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
   });
 
   it('外部销售表单不渲染任何手工价格或物流金额控件', () => {

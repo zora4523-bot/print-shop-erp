@@ -42,7 +42,7 @@ export type OrderTimelineStep = {
 
 const FLOW: Array<{ key: string; label: string }> = [
   { key: 'created', label: '已创建' },
-  { key: 'submitted', label: '已提交' },
+  { key: 'submitted', label: '待工厂确认' },
   { key: 'scheduled', label: '排产完成' },
   { key: 'producing', label: '生产中' },
   { key: 'complete', label: '等待完工' },
@@ -52,6 +52,7 @@ const FLOW: Array<{ key: string; label: string }> = [
 
 const FLOW_INDEX: Record<OrderStatus, number> = {
   [OrderStatus.DRAFT]: 0,
+  [OrderStatus.PENDING_FACTORY]: 1,
   [OrderStatus.SUBMITTED]: 1,
   [OrderStatus.SCHEDULING]: 2,
   [OrderStatus.IN_PRODUCTION]: 3,
@@ -93,7 +94,9 @@ export function buildOrderDetailTimeline(
       task.status === TaskStatus.PENDING ||
       task.status === TaskStatus.IN_PROGRESS,
   ).length;
-  const submittedLog = logForStatus(input.logs, OrderStatus.SUBMITTED);
+  const submittedLog =
+    logForStatus(input.logs, OrderStatus.PENDING_FACTORY) ??
+    logForStatus(input.logs, OrderStatus.SUBMITTED);
   const scheduledLog = logForStatus(input.logs, OrderStatus.SCHEDULING);
   const productionLog = logForStatus(input.logs, OrderStatus.IN_PRODUCTION);
   const completedLog = logForStatus(input.logs, OrderStatus.COMPLETED);

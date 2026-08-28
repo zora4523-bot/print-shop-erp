@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createPriceTierAction } from '@/actions/owner-prices';
 import { PriceTierForm } from '@/components/business/price/PriceTierForm';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listProductOptions } from '@/lib/product';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
@@ -17,9 +17,10 @@ export default async function NewInternalPriceTierPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="新建价格阶梯"
-        subtitle="同一报价 SKU、同一起订量的有效期不能重叠。"
+        effect="effective-dated"
+        subtitle="同一报价产品、同一起订量的有效期不能重叠。"
         actions={
           <Link
             href={RULE_CENTER_HREFS.internalPricing}

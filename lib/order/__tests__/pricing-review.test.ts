@@ -103,8 +103,10 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         sequence: 1,
         name: "自动价款",
         productId: "product-1",
+        productStructure: "STANDARD_ENVELOPE",
         specification: "大号",
         paperType: "触感纸",
+        paperWeightGsm: 160,
         quantity: 1_000,
         crafts: ["craft-1"],
         foilColors: ["金"],
@@ -124,8 +126,10 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         sequence: 2,
         name: "人工价款",
         productId: "product-2",
+        productStructure: "STANDARD_ENVELOPE",
         specification: "特殊",
         paperType: "特种纸",
+        paperWeightGsm: 200,
         quantity: 100,
         crafts: [],
         foilColors: [],
@@ -150,7 +154,10 @@ function pricingOrder(overrides: Record<string, unknown> = {}) {
         quotedWeightKg: "12.5",
         weightKg: "2",
         status: "PENDING",
-        lines: [{ quantity: 1_100 }],
+        lines: [
+          { orderItemId: "item-auto", quantity: 1_000 },
+          { orderItemId: "item-manual", quantity: 100 },
+        ],
       },
     ],
     customerCharges: [
@@ -296,6 +303,7 @@ function logisticsQuote(overrides: Record<string, unknown> = {}) {
             waived: false,
             advisory: false,
             amount: "4.30",
+            basis: { billableWeightKg: "2" },
             errors: [],
           },
           packaging: {
@@ -547,7 +555,7 @@ describe("order pricing review", () => {
     });
   });
 
-  it("does not treat a legacy quoted weight as a carrier-confirmed fact", async () => {
+  it("ignores a legacy quoted weight and sends server-owned item facts for estimation", async () => {
     const order = pricingOrder();
     dbMock.order.findUnique.mockResolvedValue({
       ...order,
@@ -557,8 +565,37 @@ describe("order pricing review", () => {
         weightKg: null,
       })),
     });
+    quoteLogisticsMock.mockResolvedValue(
+      logisticsQuote({
+        quote: {
+          shipments: [
+            {
+              shipmentKey: "1",
+              shipping: {
+                complete: true,
+                waived: false,
+                advisory: false,
+                amount: "11.80",
+                basis: {
+                  billableWeightKg: "7",
+                  weightSource: "SERVER_ESTIMATE",
+                },
+                errors: [],
+              },
+              packaging: {
+                complete: true,
+                waived: false,
+                advisory: false,
+                amount: "0.00",
+                errors: [],
+              },
+            },
+          ],
+        },
+      }),
+    );
 
-    await previewOrderPricingReview("order-1", admin, now);
+    const preview = await previewOrderPricingReview("order-1", admin, now);
 
     expect(quoteLogisticsMock).toHaveBeenCalledWith(
       dbMock,
@@ -568,12 +605,64 @@ describe("order pricing review", () => {
           expect.objectContaining({
             shipmentKey: "1",
             billableWeightKg: null,
+            itemQuantity: 1_100,
+            weightItems: [
+              expect.objectContaining({
+                itemKey: "item-auto",
+                quantity: 1_000,
+                paperWeightGsm: 160,
+                productStructure: "STANDARD_ENVELOPE",
+              }),
+              expect.objectContaining({
+                itemKey: "item-manual",
+                quantity: 100,
+                paperWeightGsm: 200,
+                productStructure: "STANDARD_ENVELOPE",
+              }),
+            ],
           }),
         ],
       },
       now,
       { snapshotLockHeld: true },
     );
+    expect(preview.shipments[0]?.billableWeightKg).toBe("7.000");
+  });
+
+  it("compares finalization against the current server-estimated weight", async () => {
+    const order = pricingOrder();
+    dbMock.order.findUnique.mockResolvedValue({
+      ...order,
+      shipments: order.shipments.map((shipment) => ({
+        ...shipment,
+        weightKg: null,
+      })),
+    });
+    const estimateQuote = logisticsQuote();
+    estimateQuote.quote.shipments[0]!.shipping.basis = {
+      billableWeightKg: "7",
+    };
+    quoteLogisticsMock.mockResolvedValue(estimateQuote);
+
+    await expect(
+      finalizeOrderPricing(
+        command({
+          shipments: [
+            {
+              shipmentId: "shipment-1",
+              expectedDestinationProvince: "广东",
+              expectedBillableWeightKg: "6.000",
+              shippingFee: "11.80",
+              packingMaterialFee: "8.00",
+            },
+          ],
+        }),
+        admin,
+        now,
+      ),
+    ).rejects.toThrow(/计费省份或重量已变更/);
+
+    expect(resolveChargesMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -855,6 +944,7 @@ describe("order pricing review", () => {
                 waived: true,
                 advisory: false,
                 amount: "0.00",
+                basis: { billableWeightKg: null },
                 errors: [],
               },
               packaging: {
@@ -896,7 +986,7 @@ describe("order pricing review", () => {
           {
             shipmentId: "shipment-1",
             expectedDestinationProvince: "广东",
-            expectedBillableWeightKg: "2.000",
+            expectedBillableWeightKg: null,
             shippingFee: "0.00",
             packingMaterialFee: "0.00",
           },

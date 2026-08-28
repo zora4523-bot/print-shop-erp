@@ -1,6 +1,6 @@
 import type {
   CreateOrderMutationResult,
-  OrderMutationResult,
+  SubmitOrderMutationResult,
 } from '@/actions/order.types';
 
 export const ORDER_CREATE_RETRY_MESSAGE =
@@ -21,8 +21,8 @@ export async function runCreateOrderAction(
 }
 
 export async function runSubmitOrderAction(
-  invoke: () => Promise<OrderMutationResult>,
-): Promise<OrderMutationResult> {
+  invoke: () => Promise<SubmitOrderMutationResult>,
+): Promise<SubmitOrderMutationResult> {
   try {
     return await invoke();
   } catch {

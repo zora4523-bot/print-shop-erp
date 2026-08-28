@@ -99,7 +99,11 @@ describe("appendOrderPricingRevisionInTx", () => {
       },
     );
 
-    expect(result).toMatchObject({ priceRevision: 5, orderRevision: 8 });
+    expect(result).toMatchObject({
+      pricingRevisionId: "pricing-revision-5",
+      priceRevision: 5,
+      orderRevision: 8,
+    });
     expect(tx.order.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         select: expect.objectContaining({
@@ -191,6 +195,41 @@ describe("appendOrderPricingRevisionInTx", () => {
     ).rejects.toThrow(/价格修订已变更/);
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.orderPricingRevision.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unknown customer charge as null in the immutable snapshot", async () => {
+    const base = freshOrder();
+    const tx = txFor(
+      freshOrder({
+        customerCharges: [
+          {
+            ...base.customerCharges[0],
+            status: "PENDING_AMOUNT",
+            suggestedAmount: null,
+            amount: null,
+          },
+        ],
+      }),
+    );
+
+    const result = await appendOrderPricingRevisionInTx(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        orderId: "order-1",
+        status: ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+        source: "EXTERNAL_SUBMIT_QUOTE",
+        actorId: "sales-1",
+        now: new Date("2026-08-28T02:00:00.000Z"),
+      },
+    );
+
+    expect(result.snapshot.customerCharges).toEqual([
+      expect.objectContaining({
+        status: "PENDING_AMOUNT",
+        suggestedAmount: null,
+        amount: null,
+      }),
+    ]);
   });
 
   it("requires an actor for an administrator-confirmed revision", async () => {

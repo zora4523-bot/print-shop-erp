@@ -225,8 +225,6 @@ function revalidatePriceTierPaths(id: string) {
   revalidatePaths([
     RULE_CENTER_HREFS.internalPricing,
     internalPriceTierHref(id),
-    '/owner/prices',
-    `/owner/prices/tiers/${id}`,
   ]);
 }
 
@@ -234,7 +232,5 @@ function revalidatePriceAdjustmentPaths(id: string) {
   revalidatePaths([
     RULE_CENTER_HREFS.internalPricing,
     internalPriceAdjustmentHref(id),
-    '/owner/prices',
-    `/owner/prices/adjustments/${id}`,
   ]);
 }

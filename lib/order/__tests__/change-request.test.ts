@@ -127,7 +127,7 @@ function frozenLogisticsPriceBook() {
     ...source,
     sourceSheet: 'Sheet1',
     sourceRange: `A${minQty}:B${maxQty}`,
-    blocksAutomaticQuote: true,
+    blocksAutomaticQuote: false,
     category: { id: 'packing-category', code: 'PACKING_MATERIAL' },
   });
   return {
@@ -137,6 +137,28 @@ function frozenLogisticsPriceBook() {
     version: 1,
     sourceName: '物流价目簿.xlsx',
     sourceSha256,
+    notes: {
+      ruleVersion: '2026-08-27',
+      shipping: {
+        billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+        weightResolutionOrder: [
+          'ACTUAL_FULFILLMENT_WEIGHT',
+          'SERVER_ESTIMATE',
+        ],
+        maxOrderQuantity: 2_000,
+        billableWeightRounding: 'CEIL_KG',
+        minimumBillableWeightKg: 1,
+        gramsPerItemByPaperWeightGsm: {
+          '120': 4.5,
+          '150': 6,
+          '160': 6,
+          '180': 6.75,
+          '200': 8,
+          '230': 10,
+        },
+        tenThousandEnvelopeGramsPerItem: 10,
+      },
+    },
     rules: [
       {
         id: 'shipping-guangdong',
@@ -1876,6 +1898,73 @@ describe('reviewOrderChangeRequest', () => {
           requestId: 'request-1',
           source: 'CHANGE_REQUEST_REQUOTE',
           base: expect.objectContaining({ sourceId: 'tier-1200' }),
+        }),
+      }),
+    });
+  });
+
+  it('数量修改后在无实际重量时按变更后款式事实重算快递重量', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            quantity: 1_200,
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        shipments: base.order.shipments.map((shipment) => ({
+          ...shipment,
+          weightKg: null,
+        })),
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({
+        id: 'tier-1200',
+        amount: '0.8000',
+        minQty: 1_200,
+      }),
+    ]);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '960.00' }]);
+    dbMock.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: '9.30' },
+    });
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '已按变更后款式重量重新核对物流费',
+      },
+      adminActor,
+    );
+
+    expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith({
+      where: { id: 'charge-shipping-1' },
+      data: expect.objectContaining({
+        quantity: '8',
+        suggestedAmount: '13.30',
+        overrideReason: '已按变更后款式重量重新核对物流费',
+        pricingSnapshot: expect.objectContaining({
+          quote: expect.objectContaining({
+            basis: expect.objectContaining({
+              billableWeightKg: '8',
+              weightSource: 'SERVER_ESTIMATE',
+            }),
+          }),
         }),
       }),
     });

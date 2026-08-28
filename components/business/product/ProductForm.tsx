@@ -16,6 +16,7 @@ import {
 } from '@/components/ui-business';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductCategoryOption } from '@/lib/product';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type EditInitial = {
@@ -24,19 +25,15 @@ type EditInitial = {
   name: string;
   specification: string | null;
   paperType: string | null;
-  baseUnitPrice: unknown;
   minOrderQty: number | null;
   isActive: boolean;
 };
 
-export type ProductRouteBase =
-  | '/owner/products'
-  | '/owner/rules/stock-skus';
+export type ProductRouteBase = typeof RULE_CENTER_HREFS.stockSkus;
 
 type CommonProps = {
   routeBase?: ProductRouteBase;
   categoryManagementHref?: string;
-  showInternalPrice?: boolean;
 };
 
 type Props = CommonProps &
@@ -69,7 +66,6 @@ const PRODUCT_FIELD_LABELS: Record<string, string> = {
   name: '产品名',
   specification: '规格',
   paperType: '纸张',
-  baseUnitPrice: '内部销售/工厂直单基础单价',
   minOrderQty: '最小起订量',
 };
 
@@ -88,15 +84,9 @@ export function ProductForm(props: Props) {
   const summaryErrors = toProductErrorSummary(errs);
   const missingCategoryNodes = props.categoryNodes.length === 0;
   const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
-  const routeBase = props.routeBase ?? '/owner/products';
+  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.stockSkus;
   const categoryManagementHref =
-    props.categoryManagementHref ?? '/owner/product-categories';
-  const showInternalPrice = props.showInternalPrice ?? true;
-
-  const priceDefault =
-    initial?.baseUnitPrice === null || initial?.baseUnitPrice === undefined
-      ? ''
-      : String(initial.baseUnitPrice);
+    props.categoryManagementHref ?? RULE_CENTER_HREFS.productCategories;
 
   return (
     <form
@@ -105,8 +95,6 @@ export function ProductForm(props: Props) {
       className="space-y-5"
       noValidate
     >
-      <input type="hidden" name="routeBase" value={routeBase} />
-
       <FormErrorSummary errors={summaryErrors} />
 
       {isCreate ? (
@@ -245,18 +233,6 @@ export function ProductForm(props: Props) {
           error={errs.paperType?.[0]}
         />
       )}
-
-      {showInternalPrice ? (
-        <TextField
-          id="baseUnitPrice"
-          label="内部销售/工厂直单基础单价（选填）"
-          hint="最多 6 位整数、4 位小数。"
-          type="text"
-          disabled={pending}
-          error={errs.baseUnitPrice?.[0]}
-          defaultValue={priceDefault}
-        />
-      ) : null}
 
       <TextField
         id="minOrderQty"

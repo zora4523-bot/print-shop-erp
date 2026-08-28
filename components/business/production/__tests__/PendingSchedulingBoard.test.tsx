@@ -189,6 +189,25 @@ describe('PendingSchedulingBoard batch confirmation', () => {
     );
   });
 
+  it('bounds the worker picker so long worker names cannot collapse the batch summary', () => {
+    const html = renderToStaticMarkup(
+      <PendingSchedulingBoard
+        orders={[order()]}
+        workers={[
+          {
+            ...worker,
+            displayName: `王师傅${'超长姓名'.repeat(30)}`,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain(
+      'min-w-0 max-w-full text-sm lg:w-80 lg:flex-none',
+    );
+    expect(html).not.toContain('min-w-0 text-sm lg:min-w-72');
+  });
+
   it('locks every request-snapshot control while batch scheduling is pending', () => {
     const source = readFileSync(
       path.join(

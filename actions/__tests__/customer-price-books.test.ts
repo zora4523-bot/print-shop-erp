@@ -152,7 +152,9 @@ describe('customer price-book Server Actions', () => {
       { purpose: 'PROCESSING', changeReason: '调整加工费' },
       actor,
     );
-    expect(revalidateMock).toHaveBeenCalledWith('/owner/prices/external-sales');
+    expect(revalidateMock).not.toHaveBeenCalledWith(
+      '/owner/prices/external-sales',
+    );
     expect(revalidateMock).toHaveBeenCalledWith(
       RULE_CENTER_HREFS.customerPricing,
     );
@@ -298,6 +300,9 @@ describe('customer price-book Server Actions', () => {
       actor,
     );
     expect(revalidateMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.customerPricing,
+    );
+    expect(revalidateMock).not.toHaveBeenCalledWith(
       '/owner/prices/external-sales/items',
     );
   });

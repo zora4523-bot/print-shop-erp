@@ -9,6 +9,30 @@ import {
 } from '../order-detail-timeline';
 
 describe('buildOrderDetailTimeline', () => {
+  it('renders the new pending-factory state at the submission step', () => {
+    const submittedAt = new Date('2026-08-07T01:40:00.000Z');
+    const steps = buildOrderDetailTimeline({
+      status: OrderStatus.PENDING_FACTORY,
+      createdAt: new Date('2026-08-07T01:12:00.000Z'),
+      submittedAt,
+      promisedDate: null,
+      submitterName: 'E2E 销售',
+      logs: [],
+      tasks: [],
+      assignedWorkerCount: 0,
+      uncoveredOutsourceNames: [],
+      hasLiveOutsource: false,
+      pendingChangeRequest: false,
+    });
+
+    expect(steps[0]?.state).toBe('done');
+    expect(steps[1]).toMatchObject({
+      label: '待工厂确认',
+      state: 'current',
+    });
+    expect(steps[1]?.meta).toContain('E2E 销售');
+  });
+
   it('marks the current production step and surfaces uncovered outsource as a blocker', () => {
     const steps = buildOrderDetailTimeline({
       status: OrderStatus.IN_PRODUCTION,

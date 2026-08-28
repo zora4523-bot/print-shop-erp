@@ -63,7 +63,7 @@ type FreshPricingOrder = {
     priceBookId: string | null;
     sourceRuleId: string | null;
     suggestedAmount: { toString(): string } | string | null;
-    amount: { toString(): string } | string;
+    amount: { toString(): string } | string | null;
     overrideReason: string | null;
     pricingSnapshot: unknown;
     category: { code: string };
@@ -103,6 +103,7 @@ export async function appendOrderPricingRevisionInTx(
   tx: RevisionTx,
   input: AppendOrderPricingRevisionInput,
 ): Promise<{
+  pricingRevisionId: string;
   priceRevision: number;
   orderRevision: number;
   snapshot: Prisma.InputJsonObject;
@@ -298,9 +299,11 @@ export async function appendOrderPricingRevisionInTx(
     select: { id: true },
   });
   const revisionModel = tx as unknown as {
-    orderPricingRevision: { create(args: unknown): Promise<unknown> };
+    orderPricingRevision: {
+      create(args: unknown): Promise<{ id: string }>;
+    };
   };
-  await revisionModel.orderPricingRevision.create({
+  const createdRevision = await revisionModel.orderPricingRevision.create({
     data: {
       orderId: order.id,
       revision: nextPriceRevision,
@@ -313,6 +316,7 @@ export async function appendOrderPricingRevisionInTx(
   });
 
   return {
+    pricingRevisionId: createdRevision.id,
     priceRevision: nextPriceRevision,
     orderRevision: nextOrderRevision,
     snapshot,

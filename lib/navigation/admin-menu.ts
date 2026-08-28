@@ -16,6 +16,7 @@ export type AdminMenuItem = {
   label: string;
   href: string;
   activeRouteBase?: string;
+  activeQuery?: readonly Readonly<Record<string, string | null>>[];
   iconName: IconName;
   breadcrumbLabel: string;
   status: AdminModuleStatus;
@@ -69,6 +70,7 @@ function toMenuItem(
     label: module.label,
     href: module.routeBase,
     activeRouteBase: module.activeRouteBase,
+    activeQuery: module.activeQuery,
     iconName: module.iconName,
     breadcrumbLabel: module.breadcrumbLabel,
     status: module.status,
@@ -150,29 +152,61 @@ export function flattenAdminMenuItems(
 }
 
 /**
- * 返回当前 pathname 应唯一高亮的菜单 href。
+ * 返回当前 URL 应唯一高亮的菜单 href。
  *
  * `activeRouteBase` 可以把多个同属一个业务模块的页面归到同一入口，
- * 但点击仍跳转到 `href`。有多个匹配时使用最长路径，避免父子入口同时高亮。
+ * `activeQuery` 只声明区分稳定视图所需的 query 条件，不会被搜索、
+ * 分页等临时参数干扰。条件中的 `null` 表示该 query 必须缺省。
+ * 有多个匹配时使用最长路径，避免父子入口同时高亮。
  */
 export function getActiveAdminMenuHref(
   pathname: string,
   items: readonly AdminMenuItem[],
+  searchParams?: Pick<URLSearchParams, 'get'>,
 ): string | null {
   let bestHref: string | null = null;
   let bestMatchLength = -1;
+  let bestQuerySpecificity = -1;
 
   for (const item of flattenAdminMenuItems(items)) {
     const matchBase = item.activeRouteBase ?? item.href;
     if (matchBase === '#' || matchBase === '/') continue;
     const matches =
       pathname === matchBase || pathname.startsWith(`${matchBase}/`);
-    if (!matches || matchBase.length <= bestMatchLength) continue;
+    const querySpecificity = activeQuerySpecificity(item, searchParams);
+    if (
+      !matches ||
+      querySpecificity === null ||
+      matchBase.length < bestMatchLength ||
+      (matchBase.length === bestMatchLength &&
+        querySpecificity <= bestQuerySpecificity)
+    ) {
+      continue;
+    }
     bestHref = item.href;
     bestMatchLength = matchBase.length;
+    bestQuerySpecificity = querySpecificity;
   }
 
   return bestHref;
+}
+
+function activeQuerySpecificity(
+  item: AdminMenuItem,
+  searchParams?: Pick<URLSearchParams, 'get'>,
+): number | null {
+  if (!item.activeQuery?.length) return 0;
+  if (!searchParams) return null;
+
+  const matchingConditions = item.activeQuery.filter((condition) =>
+    Object.entries(condition).every(
+      ([key, expected]) => searchParams.get(key) === expected,
+    ),
+  );
+  if (matchingConditions.length === 0) return null;
+  return Math.max(
+    ...matchingConditions.map((condition) => Object.keys(condition).length),
+  );
 }
 
 export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {

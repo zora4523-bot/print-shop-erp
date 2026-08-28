@@ -1491,6 +1491,12 @@ const orderItemFoilSideColorsField = z
   });
 
 const orderItemBaseSchema = z.object({
+  fig: z
+    .number({ message: '款式编号必须是正整数' })
+    .int('款式编号必须是整数')
+    .min(1, '款式编号必须大于 0')
+    .max(999_999, '款式编号过大')
+    .optional(),
   name: z.string().trim().min(1, '请填写款式名').max(64, '款式名过长（最多 64 个字符）'),
   productId: optionalTrimmedText('产品 id', 32),
   pricingRoute: z.enum(OrderItemPricingRoute),
@@ -1531,6 +1537,15 @@ const orderItemBaseSchema = z.object({
       .nullable(),
   ),
   quantity: orderItemQuantityField,
+  pack: z.preprocess(
+    (value) => (value === '' || value === undefined ? null : value),
+    z
+      .number({ message: '每包数量必须是数字' })
+      .int('每包数量必须是整数')
+      .min(1, '每包数量必须大于 0')
+      .max(9_999_999, '每包数量过大')
+      .nullable(),
+  ).optional(),
   crafts: z
     .array(craftIdSchema)
     .min(1, '至少选择一项工艺')
@@ -2194,6 +2209,12 @@ const optionalDateFieldPartial = z.preprocess((v) => {
 
 export const createOrderSchema = z
   .object({
+    clientSubmissionId: z.string().uuid('提交标识无效').optional(),
+    nextItemFig: z
+      .number()
+      .int('下一款式编号必须是整数')
+      .min(1, '下一款式编号必须大于 0')
+      .optional(),
     customName: optionalTrimmedText('工单名称', 100).optional(),
     customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
     customerRef: optionalTrimmedText('客户名称/简称', 64),
@@ -2229,6 +2250,30 @@ export const createOrderSchema = z
       ),
   })
   .superRefine((input, ctx) => {
+    const seenFigs = new Set<number>();
+    let maximumFig = 0;
+    input.items.forEach((item, itemIndex) => {
+      const fig = item.fig ?? itemIndex + 1;
+      maximumFig = Math.max(maximumFig, fig);
+      if (seenFigs.has(fig)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', itemIndex, 'fig'],
+          message: `款式编号 ${fig} 重复`,
+        });
+      }
+      seenFigs.add(fig);
+    });
+    if (
+      input.nextItemFig !== undefined &&
+      input.nextItemFig <= maximumFig
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['nextItemFig'],
+        message: '下一款式编号必须大于已有款式编号',
+      });
+    }
     let orderTotalCents = BigInt(0);
     for (const [itemIndex, item] of input.items.entries()) {
       const subtotalCents = orderItemSubtotalCents(

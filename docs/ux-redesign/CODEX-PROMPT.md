@@ -34,7 +34,7 @@
 
 ## 必须保持的业务契约（违反即回退）
 
-- **角色与权限**：`_reference/permissions.ts` 是准。SALES 与 CS 在工单三页上权限完全相同（`order:create` / `order:update:pre-schedule` / `order:view:self` / `order:mark-urgent` / `design:upload`）——共用页面按 scope 裁数据范围，**不裁动作**。差异只在侧栏：SALES 出「我的账单」，CS 出「我的工资」。
+- **角色与权限**：`lib/auth/permissions.ts` 是准。SALES 与 CS 在工单三页上权限完全相同（`order:create` / `order:update:pre-schedule` / `order:view:self` / `order:mark-urgent` / `design:upload`）——共用页面按 scope 裁数据范围，**不裁动作**。差异只在侧栏：SALES 出「我的账单」，CS 出「我的工资」。
 - **状态机不变**：工单 `DRAFT → SUBMITTED → SCHEDULING → IN_PRODUCTION → COMPLETED → SHIPPED → FINISHED`，`CANCELLED` 为终态；生产任务 `PENDING → IN_PROGRESS → COMPLETED`。不新增、不合并、不让界面执行状态机不允许的跳转。
 - **通知四态语义不得合并**：`SENDING` / `RETRYING` / `UNKNOWN` / `FAILED`。`UNKNOWN` 不得改成自动重试；`RETRYING + job DEAD` 是合法组合，必须在告警条、徽章、未解决队列三处可见，**禁止为了让红色更整齐把 RETRYING 改写成 FAILED**。
 - **外协覆盖保持 max 口径**，不得改 sum，指标名不重命名。

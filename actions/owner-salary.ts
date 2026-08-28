@@ -267,7 +267,6 @@ export async function createWorkerMachineSalaryRuleAction(
       ...parsed.data,
       actor,
     });
-    revalidatePath('/owner/salary/piecework-rules');
     revalidatePath(RULE_CENTER_HREFS.workerPiecework);
     return { status: 'success', ruleId: created.id };
   } catch (err) {

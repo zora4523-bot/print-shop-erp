@@ -14,8 +14,8 @@ import {
 import {
   ContentSkeleton,
   ErrorBoundary,
-  PageHeader,
 } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listPriceAdjustments, listPriceTiers } from '@/lib/price';
@@ -46,13 +46,15 @@ export default async function InternalPricingPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="内部直单价格"
+        effect="effective-dated"
+        subtitle="价格阶梯与加价规则分开管理，并保留历史有效期记录。"
       />
 
       <Disclosure
         className="group min-w-0 rounded-xl border bg-card p-4 shadow-sm"
-        open={q ? true : undefined}
+        open
       >
         <DisclosureSummary className="justify-between gap-3 font-semibold">
           <span className="admin-wrap-anywhere min-w-0">

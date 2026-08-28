@@ -2,8 +2,16 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Codex and local browser previews open the dev server through 127.0.0.1.
+  // Next 16 otherwise blocks the dev-only client bootstrap/HMR endpoints.
+  allowedDevOrigins: ['127.0.0.1'],
   async redirects() {
     return [
+      {
+        source: '/owner/rules/pricing-routes',
+        destination: '/owner/rules',
+        permanent: false,
+      },
       {
         source: '/owner/products',
         destination: '/owner/rules/stock-skus',

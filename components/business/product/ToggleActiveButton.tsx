@@ -3,7 +3,7 @@
 import { useActionState, useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
-import { setProductActiveAction } from '@/actions/owner-products';
+import { setQuoteProductActiveAction } from '@/actions/owner-products';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductReferenceImpact } from '@/lib/product';
 import { productActiveChangeImpactItems } from './ProductReferenceImpact';
@@ -12,22 +12,16 @@ export function ToggleActiveButton({
   productId,
   currentlyActive,
   impact,
-  action = setProductActiveAction,
 }: {
   productId: string;
   currentlyActive: boolean;
   impact: ProductReferenceImpact;
-  action?: (
-    id: string,
-    isActive: boolean,
-    formData?: FormData,
-  ) => Promise<ProductMutationResult>;
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
     async (_previous, formData) =>
-      action(productId, nextActive, formData),
+      setQuoteProductActiveAction(productId, nextActive, formData),
     null,
   );
 

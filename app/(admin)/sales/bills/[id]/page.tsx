@@ -64,19 +64,21 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
   );
   const orderRows = bill.items.map((item) => {
     const chargeAmount = (categoryCode: string) =>
-      item.order.customerCharges
-        .filter((charge) => String(charge.category.code) === categoryCode)
-        .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+      summarizeCustomerCharges(
+        item.order.customerCharges.filter(
+          (charge) => String(charge.category.code) === categoryCode,
+        ),
+      );
     const shipping = chargeAmount('SHIPPING_FEE');
     const packing = chargeAmount('PACKING_MATERIAL');
-    const otherCharges = item.order.customerCharges
-      .filter(
+    const otherCharges = summarizeCustomerCharges(
+      item.order.customerCharges.filter(
         (charge) =>
           !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
             String(charge.category.code),
           ),
-      )
-      .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+      ),
+    );
     return { ...item, shipping, packing, otherCharges };
   });
 
@@ -229,13 +231,13 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
                     {formatMoney(it.order.processingAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {it.shipping.toFixed(2)}
+                    {formatCustomerChargeSummary(it.shipping)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {it.packing.toFixed(2)}
+                    {formatCustomerChargeSummary(it.packing)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {it.otherCharges.toFixed(2)}
+                    {formatCustomerChargeSummary(it.otherCharges)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
                     {formatMoney(it.orderAmount)}
@@ -302,6 +304,32 @@ export default async function SalesBillDetailPage({ params }: PageProps) {
       </Link>
     </div>
   );
+}
+
+type CustomerChargeAmount = {
+  amount: Decimal.Value | null;
+};
+
+function summarizeCustomerCharges(
+  charges: readonly CustomerChargeAmount[],
+): { knownAmount: Decimal; hasPendingAmount: boolean } {
+  return {
+    knownAmount: charges.reduce(
+      (sum, charge) =>
+        charge.amount === null ? sum : sum.plus(charge.amount),
+      new Decimal(0),
+    ),
+    hasPendingAmount: charges.some((charge) => charge.amount === null),
+  };
+}
+
+function formatCustomerChargeSummary(summary: {
+  knownAmount: Decimal;
+  hasPendingAmount: boolean;
+}): string {
+  if (!summary.hasPendingAmount) return `¥ ${summary.knownAmount.toFixed(2)}`;
+  if (summary.knownAmount.isZero()) return '待定';
+  return `¥ ${summary.knownAmount.toFixed(2)}（另有待定）`;
 }
 
 function Row({

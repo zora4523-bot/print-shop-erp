@@ -3,24 +3,54 @@ import Decimal from 'decimal.js';
 export const EXTERNAL_ORDER_CHARGE_MONEY_MAX = '9999999999.99';
 const MONEY_MAX = new Decimal(EXTERNAL_ORDER_CHARGE_MONEY_MAX);
 
-export const ZTO_PRICE_SOURCE = {
-  fileName: '长昆中通报价表(1).xlsx',
-  sha256: 'a92088a9ba0093afcbb96c6b3b182ab29e4f7d675cacf929c6745987bf4d6060',
-  sheetName: '中通',
-} as const;
-
-export const CARTON_PRICE_SOURCE = {
-  fileName: '纸箱价格表1(1).xlsx',
-  sha256: '9f0c30333a737ab9d36398b8af2c84ece599317f9df21af5dacb8f365fa5401b',
-  sheetName: 'Sheet1',
-} as const;
-
 export type ExternalOrderChargeSource = {
   fileName: string;
   sha256: string;
   sheetName: string;
   sourceRange: string;
 };
+
+export type ExternalOrderProductStructure =
+  | 'STANDARD_ENVELOPE'
+  | 'WESTERN_ENVELOPE'
+  | 'TEN_THOUSAND_ENVELOPE'
+  | 'UNSPECIFIED';
+
+export type ExternalOrderChargeWeightItem = {
+  itemKey: string | null;
+  quantity: number;
+  paperWeightGsm: number | null;
+  paperType: string | null;
+  productStructure: ExternalOrderProductStructure;
+};
+
+type ExternalOrderLogisticsPolicyBase = {
+  ruleVersion: string;
+  maxOrderQuantity: number;
+};
+
+export type ExternalOrderEstimateLogisticsPolicy =
+  ExternalOrderLogisticsPolicyBase & {
+  billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE';
+  weightResolutionOrder: readonly [
+    'ACTUAL_FULFILLMENT_WEIGHT',
+    'SERVER_ESTIMATE',
+  ];
+  billableWeightRounding: 'CEIL_KG';
+  minimumBillableWeightKg: string;
+  gramsPerItemByPaperWeightGsm: Readonly<Record<string, string>>;
+  tenThousandEnvelopeGramsPerItem: string;
+};
+
+export type ExternalOrderLegacyLogisticsPolicy =
+  ExternalOrderLogisticsPolicyBase & {
+  billableWeightInput: 'CARRIER_CONFIRMED';
+  weightResolutionOrder: readonly ['ACTUAL_FULFILLMENT_WEIGHT'];
+};
+
+export type ExternalOrderLogisticsPolicy =
+  | ExternalOrderEstimateLogisticsPolicy
+  | ExternalOrderLegacyLogisticsPolicy;
 
 export type ExternalOrderChargeShipmentInput = {
   /**
@@ -31,10 +61,12 @@ export type ExternalOrderChargeShipmentInput = {
   /** Structured province selection. Free-form receiver addresses must not be passed here. */
   province: string | null;
   /**
-   * Carrier-confirmed billable weight, already rounded by the carrier. The
-   * workbook does not define how a raw scale weight should be rounded.
+   * Trusted fulfilment weight supplied by the server. When absent, the
+   * versioned logistics policy may estimate weight from `weightItems`.
    */
   billableWeightKg: Decimal.Value | null;
+  /** Server-validated item facts allocated to this shipment for weight estimation. */
+  weightItems?: readonly ExternalOrderChargeWeightItem[];
   /** Sum of all style quantities allocated to this shipment. */
   itemQuantity: number;
 };
@@ -80,13 +112,23 @@ export type ExternalOrderChargeQuote = {
 };
 
 export type ExternalOrderChargeSnapshot = {
-  version: 1;
+  version: 2;
+  policy: {
+    ruleVersion: string;
+    billableWeightInput:
+      | 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE'
+      | 'CARRIER_CONFIRMED';
+    weightResolutionOrder: readonly string[];
+    maxOrderQuantity: number;
+    billableWeightRounding: 'CEIL_KG' | null;
+  };
   input: {
     isSfCollect: boolean;
     shipments: Array<{
       shipmentKey: string;
       province: string | null;
       billableWeightKg: string | null;
+      weightItems?: ExternalOrderChargeWeightItem[];
       itemQuantity: number;
     }>;
   };
@@ -123,79 +165,45 @@ export type ExternalOrderChargeRule =
   | ExternalOrderShippingRule
   | ExternalOrderPackagingRule;
 
-const ZTO_TARIFF_DEFINITIONS: readonly ExternalOrderShippingRule[] = [
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_GUANGDONG',
-    provinces: ['广东'],
-    firstWeightKg: '1',
-    firstFee: '2.8',
-    additionalUnitKg: '1',
-    additionalUnitFee: '1.5',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A3:D3' },
-  },
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_STANDARD_2_8',
-    provinces: ['江西', '江苏', '安徽', '湖南', '湖北', '广西', '浙江', '福建'],
-    firstWeightKg: '1',
-    firstFee: '2.8',
-    additionalUnitKg: '1',
-    additionalUnitFee: '2.8',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A4:D11' },
-  },
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_STANDARD_3_5',
-    provinces: ['天津', '上海', '北京', '河南', '河北', '四川', '重庆', '贵州', '山东'],
-    firstWeightKg: '1',
-    firstFee: '2.8',
-    additionalUnitKg: '1',
-    additionalUnitFee: '3.5',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A12:D20' },
-  },
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_STANDARD_4_5',
-    provinces: ['云南', '山西', '陕西', '黑龙江', '吉林', '辽宁', '海南'],
-    firstWeightKg: '1',
-    firstFee: '2.8',
-    additionalUnitKg: '1',
-    additionalUnitFee: '4.5',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A21:D27' },
-  },
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_REMOTE_FIRST_12',
-    provinces: ['新疆', '西藏'],
-    firstWeightKg: '1',
-    firstFee: '12',
-    additionalUnitKg: '0.5',
-    additionalUnitFee: '5.3',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A28:D28' },
-  },
-  {
-    kind: 'SHIPPING',
-    code: 'ZTO_REMOTE_FIRST_10',
-    provinces: ['甘肃', '青海', '宁夏', '内蒙古'],
-    firstWeightKg: '1',
-    firstFee: '10',
-    additionalUnitKg: '0.5',
-    additionalUnitFee: '5.3',
-    source: { ...ZTO_PRICE_SOURCE, sourceRange: 'A29:D29' },
-  },
-] as const;
-
-export const ZTO_PROVINCE_OPTIONS: readonly string[] =
-  ZTO_TARIFF_DEFINITIONS.flatMap((definition) => [...definition.provinces]);
+export const ZTO_PROVINCE_OPTIONS: readonly string[] = [
+  '广东',
+  '江西',
+  '江苏',
+  '安徽',
+  '湖南',
+  '湖北',
+  '广西',
+  '浙江',
+  '福建',
+  '天津',
+  '上海',
+  '北京',
+  '河南',
+  '河北',
+  '四川',
+  '重庆',
+  '贵州',
+  '山东',
+  '云南',
+  '山西',
+  '陕西',
+  '黑龙江',
+  '吉林',
+  '辽宁',
+  '海南',
+  '新疆',
+  '西藏',
+  '甘肃',
+  '青海',
+  '宁夏',
+  '内蒙古',
+];
 
 const PROVINCE_ALIASES = new Map<string, string>([
-  ...ZTO_TARIFF_DEFINITIONS.flatMap((definition) =>
-    definition.provinces.flatMap((province) => [
-      [province, province] as const,
-      [`${province}省`, province] as const,
-    ]),
-  ),
+  ...ZTO_PROVINCE_OPTIONS.flatMap((province) => [
+    [province, province] as const,
+    [`${province}省`, province] as const,
+  ]),
   ['北京市', '北京'],
   ['天津市', '天津'],
   ['上海市', '上海'],
@@ -216,57 +224,6 @@ for (const invalidAlias of ['北京省', '天津省', '上海省', '重庆省'])
   PROVINCE_ALIASES.delete(invalidAlias);
 }
 
-const CARTON_TIERS: readonly ExternalOrderPackagingRule[] = [
-  {
-    kind: 'PACKAGING',
-    code: 'CARTON_Q1_500',
-    minQty: 1,
-    maxQty: 500,
-    amount: '1',
-    advisory: false,
-    source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A2:B2' },
-  },
-  {
-    kind: 'PACKAGING',
-    code: 'CARTON_Q501_1000',
-    minQty: 501,
-    maxQty: 1_000,
-    amount: '3',
-    advisory: false,
-    source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A3:B3' },
-  },
-  {
-    kind: 'PACKAGING',
-    code: 'CARTON_Q1001_2000',
-    minQty: 1_001,
-    maxQty: 2_000,
-    amount: '5',
-    advisory: false,
-    source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A4:B4' },
-  },
-  {
-    kind: 'PACKAGING',
-    code: 'CARTON_Q2001_3000',
-    minQty: 2_001,
-    maxQty: 3_000,
-    amount: '7',
-    advisory: false,
-    source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A5:B5' },
-  },
-  {
-    kind: 'PACKAGING',
-    code: 'CARTON_Q3001_5000',
-    minQty: 3_001,
-    maxQty: 5_000,
-    amount: '8',
-    advisory: false,
-    source: { ...CARTON_PRICE_SOURCE, sourceRange: 'A6:B6' },
-  },
-] as const;
-
-export const DEFAULT_EXTERNAL_ORDER_CHARGE_RULES: readonly ExternalOrderChargeRule[] =
-  [...ZTO_TARIFF_DEFINITIONS, ...CARTON_TIERS];
-
 function money(value: Decimal): string {
   return value.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2);
 }
@@ -281,6 +238,188 @@ function parseFiniteDecimal(value: Decimal.Value | null): Decimal | null {
   }
 }
 
+export type ExternalOrderShipmentWeightResolution =
+  | {
+      status: 'RESOLVED';
+      source: 'ACTUAL_FULFILLMENT_WEIGHT' | 'SERVER_ESTIMATE';
+      billableWeightKg: string;
+      netWeightGrams: string | null;
+      weightItemCount: number;
+    }
+  | {
+      status: 'INCOMPLETE';
+      source: 'ACTUAL_FULFILLMENT_WEIGHT' | 'SERVER_ESTIMATE';
+      billableWeightKg: null;
+      netWeightGrams: null;
+      weightItemCount: number;
+      error: string;
+    };
+
+function weightItemLabel(
+  item: ExternalOrderChargeWeightItem,
+  index: number,
+): string {
+  return item.itemKey?.trim() || `第 ${index + 1} 款`;
+}
+
+/**
+ * Resolves trusted fulfilment weight first, then estimates from server-owned
+ * item facts. Browser input must be removed by the caller before it reaches
+ * this function.
+ */
+export function resolveExternalOrderShipmentWeight(
+  shipment: ExternalOrderChargeShipmentInput,
+  policy: ExternalOrderLogisticsPolicy,
+): ExternalOrderShipmentWeightResolution {
+  const normalizedActualWeight =
+    shipment.billableWeightKg === null ||
+    shipment.billableWeightKg === undefined
+      ? ''
+      : String(shipment.billableWeightKg).trim();
+  const hasActualWeightFact = normalizedActualWeight !== '';
+  const actualWeight = parseFiniteDecimal(shipment.billableWeightKg);
+  if (
+    hasActualWeightFact &&
+    /^\d{1,6}(?:\.\d{1,3})?$/.test(normalizedActualWeight) &&
+    actualWeight?.gt(0)
+  ) {
+    return {
+      status: 'RESOLVED',
+      source: 'ACTUAL_FULFILLMENT_WEIGHT',
+      billableWeightKg: actualWeight.toString(),
+      netWeightGrams: null,
+      weightItemCount: shipment.weightItems?.length ?? 0,
+    };
+  }
+  if (hasActualWeightFact) {
+    return {
+      status: 'INCOMPLETE',
+      source: 'ACTUAL_FULFILLMENT_WEIGHT',
+      billableWeightKg: null,
+      netWeightGrams: null,
+      weightItemCount: shipment.weightItems?.length ?? 0,
+      error: '实际计费重量无效，请核对履约重量',
+    };
+  }
+
+  if (policy.billableWeightInput === 'CARRIER_CONFIRMED') {
+    return {
+      status: 'INCOMPLETE',
+      source: 'SERVER_ESTIMATE',
+      billableWeightKg: null,
+      netWeightGrams: null,
+      weightItemCount: shipment.weightItems?.length ?? 0,
+      error: '缺少已确认的实际计费重量，请人工确认',
+    };
+  }
+
+  const weightItems = shipment.weightItems ?? [];
+  if (weightItems.length === 0) {
+    return {
+      status: 'INCOMPLETE',
+      source: 'SERVER_ESTIMATE',
+      billableWeightKg: null,
+      netWeightGrams: null,
+      weightItemCount: 0,
+      error: '缺少可用于估算的款式重量事实，请人工确认',
+    };
+  }
+
+  const minimumBillableWeightKg = parseFiniteDecimal(
+    policy.minimumBillableWeightKg,
+  );
+  const tenThousandEnvelopeGramsPerItem = parseFiniteDecimal(
+    policy.tenThousandEnvelopeGramsPerItem,
+  );
+  if (
+    policy.billableWeightRounding !== 'CEIL_KG' ||
+    policy.weightResolutionOrder.length !== 2 ||
+    policy.weightResolutionOrder[0] !== 'ACTUAL_FULFILLMENT_WEIGHT' ||
+    policy.weightResolutionOrder[1] !== 'SERVER_ESTIMATE' ||
+    !minimumBillableWeightKg?.gt(0) ||
+    !tenThousandEnvelopeGramsPerItem?.gt(0)
+  ) {
+    return {
+      status: 'INCOMPLETE',
+      source: 'SERVER_ESTIMATE',
+      billableWeightKg: null,
+      netWeightGrams: null,
+      weightItemCount: weightItems.length,
+      error: '物流重量估算策略无效，请管理员检查价目版本',
+    };
+  }
+
+  let netWeightGrams = new Decimal(0);
+  for (let index = 0; index < weightItems.length; index += 1) {
+    const item = weightItems[index] as ExternalOrderChargeWeightItem;
+    const label = weightItemLabel(item, index);
+    if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
+      return {
+        status: 'INCOMPLETE',
+        source: 'SERVER_ESTIMATE',
+        billableWeightKg: null,
+        netWeightGrams: null,
+        weightItemCount: weightItems.length,
+        error: `${label}分配数量无效，物流重量需人工确认`,
+      };
+    }
+
+    let gramsPerItem: Decimal | null = null;
+    if (item.productStructure === 'TEN_THOUSAND_ENVELOPE') {
+      gramsPerItem = tenThousandEnvelopeGramsPerItem;
+    } else if (
+      item.productStructure === 'STANDARD_ENVELOPE' ||
+      item.productStructure === 'WESTERN_ENVELOPE'
+    ) {
+      const configuredGrams =
+        item.paperWeightGsm === null || !Number.isFinite(item.paperWeightGsm)
+          ? undefined
+          : policy.gramsPerItemByPaperWeightGsm[String(item.paperWeightGsm)];
+      gramsPerItem =
+        configuredGrams === undefined
+          ? null
+          : parseFiniteDecimal(configuredGrams);
+      if (!gramsPerItem?.gt(0)) {
+        const paperWeight =
+          item.paperWeightGsm === null ? '未填写' : `${item.paperWeightGsm}g`;
+        return {
+          status: 'INCOMPLETE',
+          source: 'SERVER_ESTIMATE',
+          billableWeightKg: null,
+          netWeightGrams: null,
+          weightItemCount: weightItems.length,
+          error: `${label}的纸张克重（${paperWeight}）没有物流单重配置，请人工确认`,
+        };
+      }
+    } else {
+      return {
+        status: 'INCOMPLETE',
+        source: 'SERVER_ESTIMATE',
+        billableWeightKg: null,
+        netWeightGrams: null,
+        weightItemCount: weightItems.length,
+        error: `${label}的产品结构未确定，物流重量需人工确认`,
+      };
+    }
+
+    netWeightGrams = netWeightGrams.plus(
+      gramsPerItem.times(item.quantity),
+    );
+  }
+
+  const estimatedWeightKg = Decimal.max(
+    minimumBillableWeightKg,
+    netWeightGrams.div(1_000).ceil(),
+  );
+  return {
+    status: 'RESOLVED',
+    source: 'SERVER_ESTIMATE',
+    billableWeightKg: estimatedWeightKg.toString(),
+    netWeightGrams: netWeightGrams.toString(),
+    weightItemCount: weightItems.length,
+  };
+}
+
 export function normalizeZtoProvince(value: string | null): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
@@ -289,7 +428,7 @@ export function normalizeZtoProvince(value: string | null): string | null {
 
 export function getZtoTariff(
   provinceInput: string | null,
-  rules: readonly ExternalOrderChargeRule[] = DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+  rules: readonly ExternalOrderChargeRule[],
 ): {
   ruleCode: string;
   province: string;
@@ -351,6 +490,7 @@ function quoteShipping(
   orderTotalQuantity: number,
   isSfCollect: boolean,
   rules: readonly ExternalOrderChargeRule[],
+  policy: ExternalOrderLogisticsPolicy,
 ): ExternalOrderChargeLine {
   if (isSfCollect) {
     return {
@@ -375,16 +515,41 @@ function quoteShipping(
     };
   }
 
-  if (orderTotalQuantity > 2_000) {
+  if (
+    !Number.isSafeInteger(policy.maxOrderQuantity) ||
+    policy.maxOrderQuantity < 1
+  ) {
+    return incompleteLine(
+      shipment.shipmentKey,
+      'SHIPPING',
+      '快递费',
+      '中通快递费',
+      ['物流数量边界策略无效，请管理员检查价目版本'],
+      {
+        isSfCollect: false,
+        orderTotalQuantity,
+        maxOrderQuantity: policy.maxOrderQuantity,
+        policyVersion: policy.ruleVersion,
+      },
+      null,
+      false,
+    );
+  }
+
+  if (orderTotalQuantity > policy.maxOrderQuantity) {
     return incompleteLine(
       shipment.shipmentKey,
       'SHIPPING',
       '快递费',
       '物流运费待定',
-      ['整单总数量超过 2000 个，改走物流，运费待定'],
+      [
+        `整单总数量超过 ${policy.maxOrderQuantity} 个，改走物流，运费待定`,
+      ],
       {
         isSfCollect: false,
         orderTotalQuantity,
+        maxOrderQuantity: policy.maxOrderQuantity,
+        policyVersion: policy.ruleVersion,
         province: shipment.province?.trim() || null,
         billableWeightKg:
           parseFiniteDecimal(shipment.billableWeightKg)?.toString() ?? null,
@@ -422,25 +587,35 @@ function quoteShipping(
   const firstFee = new Decimal(tariffRule.firstFee);
   const additionalUnitKg = new Decimal(tariffRule.additionalUnitKg);
   const additionalUnitFee = new Decimal(tariffRule.additionalUnitFee);
-  const weight = parseFiniteDecimal(shipment.billableWeightKg);
+  const weightResolution = resolveExternalOrderShipmentWeight(shipment, policy);
   const chargeSource = tariffRule.source;
-  if (!weight || weight.lte(0)) {
+  if (weightResolution.status === 'INCOMPLETE') {
     return incompleteLine(
       shipment.shipmentKey,
       'SHIPPING',
       '快递费',
       `${province}中通快递费`,
-      ['缺少有效的系统计费重量，请人工确认'],
+      [weightResolution.error],
       {
         isSfCollect: false,
         province,
-        billableWeightKg: weight?.toString() ?? null,
+        billableWeightKg: null,
+        weightSource: weightResolution.source,
+        weightItemCount: weightResolution.weightItemCount,
+        netWeightGrams: weightResolution.netWeightGrams,
+        policyVersion: policy.ruleVersion,
+        billableWeightRounding:
+          policy.billableWeightInput === 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE'
+            ? policy.billableWeightRounding
+            : null,
         additionalUnitKg: tariffView.additionalUnitKg,
       },
       chargeSource,
       false,
     );
   }
+
+  const weight = new Decimal(weightResolution.billableWeightKg);
 
   const additionalWeight = Decimal.max(0, weight.minus(firstWeightKg));
   const additionalUnits = additionalWeight.div(additionalUnitKg).ceil();
@@ -458,6 +633,10 @@ function quoteShipping(
         isSfCollect: false,
         province,
         billableWeightKg: weight.toString(),
+        weightSource: weightResolution.source,
+        weightItemCount: weightResolution.weightItemCount,
+        netWeightGrams: weightResolution.netWeightGrams,
+        policyVersion: policy.ruleVersion,
         additionalUnitKg: tariffView.additionalUnitKg,
       },
       chargeSource,
@@ -480,6 +659,14 @@ function quoteShipping(
       isSfCollect: false,
       province,
       billableWeightKg: weight.toString(),
+      weightSource: weightResolution.source,
+      weightItemCount: weightResolution.weightItemCount,
+      netWeightGrams: weightResolution.netWeightGrams,
+      policyVersion: policy.ruleVersion,
+      billableWeightRounding:
+        policy.billableWeightInput === 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE'
+          ? policy.billableWeightRounding
+          : null,
       firstWeightKg: tariffView.firstWeightKg,
       firstFee: tariffView.firstFee,
       additionalUnitKg: tariffView.additionalUnitKg,
@@ -635,14 +822,29 @@ function sumCompleteLines(
   );
 }
 
+function logisticsPolicySnapshot(policy: ExternalOrderLogisticsPolicy) {
+  return {
+    ruleVersion: policy.ruleVersion,
+    billableWeightInput: policy.billableWeightInput,
+    weightResolutionOrder: [...policy.weightResolutionOrder],
+    maxOrderQuantity: policy.maxOrderQuantity,
+    billableWeightRounding:
+      policy.billableWeightInput === 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE'
+        ? policy.billableWeightRounding
+        : null,
+  } as const;
+}
+
 export function calculateExternalOrderCharges(
   input: ExternalOrderChargeInput,
-  rules: readonly ExternalOrderChargeRule[] = DEFAULT_EXTERNAL_ORDER_CHARGE_RULES,
+  rules: readonly ExternalOrderChargeRule[],
+  policy: ExternalOrderLogisticsPolicy,
 ): ExternalOrderChargeQuote {
   if (input.shipments.length === 0) {
     const errors = ['至少需要一个发货地址才能计算快递与打包耗材费'];
     const snapshot: ExternalOrderChargeSnapshot = {
-      version: 1,
+      version: 2,
+      policy: logisticsPolicySnapshot(policy),
       input: { isSfCollect: input.isSfCollect, shipments: [] },
       suggestedShippingTotal: null,
       suggestedPackagingTotal: null,
@@ -686,10 +888,14 @@ export function calculateExternalOrderCharges(
       province: shipment.province?.trim() || null,
       billableWeightKg:
         parseFiniteDecimal(shipment.billableWeightKg)?.toString() ?? null,
+      ...(shipment.weightItems
+        ? { weightItems: shipment.weightItems.map((item) => ({ ...item })) }
+        : {}),
       itemQuantity: shipment.itemQuantity,
     }));
     const snapshot: ExternalOrderChargeSnapshot = {
-      version: 1,
+      version: 2,
+      policy: logisticsPolicySnapshot(policy),
       input: { isSfCollect: input.isSfCollect, shipments: snapshotInput },
       suggestedShippingTotal: null,
       suggestedPackagingTotal: null,
@@ -721,6 +927,7 @@ export function calculateExternalOrderCharges(
       orderTotalQuantity,
       input.isSfCollect,
       rules,
+      policy,
     ),
     packaging: quotePackaging(
       shipment,
@@ -756,10 +963,14 @@ export function calculateExternalOrderCharges(
     province: shipment.province?.trim() || null,
     billableWeightKg:
       parseFiniteDecimal(shipment.billableWeightKg)?.toString() ?? null,
+    ...(shipment.weightItems
+      ? { weightItems: shipment.weightItems.map((item) => ({ ...item })) }
+      : {}),
     itemQuantity: shipment.itemQuantity,
   }));
   const snapshot: ExternalOrderChargeSnapshot = {
-    version: 1,
+    version: 2,
+    policy: logisticsPolicySnapshot(policy),
     input: { isSfCollect: input.isSfCollect, shipments: snapshotInput },
     suggestedShippingTotal,
     suggestedPackagingTotal,

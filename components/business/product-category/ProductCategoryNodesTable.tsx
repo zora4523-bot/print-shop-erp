@@ -12,10 +12,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { ProductCategoryNodeSummary } from '@/lib/product';
+import { isRetiredProductCategory } from '@/lib/rules/retired-catalog';
+import { Badge } from '@/components/ui/badge';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export function ProductCategoryNodesTable({
   nodes,
-  editBase = '/owner/product-categories',
+  editBase = RULE_CENTER_HREFS.productCategories,
 }: {
   nodes: ProductCategoryNodeSummary[];
   editBase?: string;
@@ -51,7 +54,12 @@ export function ProductCategoryNodesTable({
                 {node._count.products}
               </TableCell>
               <TableCell>
-                <AdminStatusBadge active={node.isActive} />
+                <div className="flex flex-wrap gap-1">
+                  <AdminStatusBadge active={node.isActive} />
+                  {isRetiredProductCategory(node) ? (
+                    <Badge variant="secondary">历史 / 已退役</Badge>
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell>
                 <AdminRowActions>

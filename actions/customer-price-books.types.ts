@@ -4,6 +4,7 @@ import type {
   CustomerPriceRuleKind,
 } from '../generated/prisma/enums';
 import type { CustomerRuleConditionEditorInput } from '../lib/price/customer-rule-condition';
+import type { CustomerPriceSection } from '../lib/price/customer-price-section-membership';
 
 export type CreateCustomerPriceBookDraftActionInput = {
   purpose: CustomerPriceBookPurpose;
@@ -50,6 +51,27 @@ export type UpdateCustomerPriceRuleDraftGroupActionInput = {
     expectedUpdatedAt: string;
     amount: string;
     isActive: boolean;
+  }>;
+};
+
+export type CustomerPricingSectionId = CustomerPriceSection;
+
+/**
+ * Saves a complete dedicated rule-center section. The server derives the
+ * section membership again and rejects partial or cross-section payloads.
+ */
+export type UpdateCustomerPriceSectionDraftActionInput = {
+  priceBookId: string;
+  section: CustomerPricingSectionId;
+  rows: Array<{
+    ruleId: string;
+    expectedUpdatedAt: string;
+    amount: string | null;
+    minQty: number | null;
+    maxQty: number | null;
+    includedUnits: string | null;
+    incrementUnits: string | null;
+    incrementAmount: string | null;
   }>;
 };
 

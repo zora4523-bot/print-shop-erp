@@ -45,8 +45,9 @@ export async function quoteExternalOrderChargesAction(
     // This action is exposed to external sales accounts. A carrier billable
     // weight only becomes trusted when an administrator records fulfilment;
     // accepting a browser value here would let the salesperson choose the
-    // shipping charge. Keep the schema tolerant for old clients, then erase
-    // the untrusted field at this role-aware server boundary.
+    // shipping charge. Keep the schema tolerant for old clients, erase the
+    // untrusted field here, and let the price-book service estimate from the
+    // validated item facts below.
     const shipmentsWithoutTrustedWeight = parsed.data.shipments.map(
       (shipment) => ({
         ...shipment,

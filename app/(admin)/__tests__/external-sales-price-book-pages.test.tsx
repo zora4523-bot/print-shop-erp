@@ -24,6 +24,7 @@ const {
   getDraftMock,
   getPublishPreviewMock,
   getRuleEditorMock,
+  getSectionWorkspaceMock,
   getWorkspaceMock,
   getWorkspaceDetailMock,
   listVersionsMock,
@@ -35,6 +36,7 @@ const {
   requirePermissionMock,
   updateRuleActionMock,
   updateRuleGroupActionMock,
+  dedicatedSectionPropsMock,
 } = vi.hoisted(() => ({
   createDraftActionMock: vi.fn(),
   createDraftFormPropsMock: vi.fn(),
@@ -45,6 +47,7 @@ const {
   getDraftMock: vi.fn(),
   getPublishPreviewMock: vi.fn(),
   getRuleEditorMock: vi.fn(),
+  getSectionWorkspaceMock: vi.fn(),
   getWorkspaceMock: vi.fn(),
   getWorkspaceDetailMock: vi.fn(),
   listVersionsMock: vi.fn(),
@@ -56,6 +59,7 @@ const {
   requirePermissionMock: vi.fn(),
   updateRuleActionMock: vi.fn(),
   updateRuleGroupActionMock: vi.fn(),
+  dedicatedSectionPropsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/price/customer-price-book', () => ({
@@ -73,6 +77,35 @@ vi.mock('@/lib/price/customer-price-book-workspace', () => ({
   getCustomerPriceRuleGroupWorkspacePage: getWorkspaceMock,
   getCustomerPriceRuleGroupWorkspaceDetail: getWorkspaceDetailMock,
 }));
+
+vi.mock('@/lib/price/customer-price-section-workspace', () => ({
+  CUSTOMER_PRICE_SECTIONS: [
+    'blank',
+    'machine',
+    'tiers',
+    'adds',
+    'print',
+    'ship',
+  ],
+  getCustomerPriceSectionWorkspace: getSectionWorkspaceMock,
+}));
+
+vi.mock(
+  '@/components/business/rules/pricing/CustomerPricingDedicatedSection',
+  () => ({
+    CustomerPricingDedicatedSection: (props: {
+      workspace: { section: string };
+      createDraftOpen: boolean;
+    }) => {
+      dedicatedSectionPropsMock(props);
+      return (
+        <div data-dedicated-price-section={props.workspace.section}>
+          {props.workspace.section} 专用价格编辑器
+        </div>
+      );
+    },
+  }),
+);
 
 vi.mock('@/actions/customer-price-books', () => ({
   createCustomerPriceBookDraftAction: createDraftActionMock,
@@ -130,12 +163,11 @@ vi.mock('next/navigation', () => ({
 }));
 
 import LegacyOwnerExternalSalesPriceBookPage from '@/app/(admin)/owner/prices/external-sales/page';
-import OwnerExternalSalesChargeItemsPage from '@/app/(admin)/owner/prices/external-sales/items/page';
-import OwnerExternalSalesLogisticsPriceBookPage from '@/app/(admin)/owner/prices/external-sales/logistics/page';
-import OwnerExternalSalesPriceBookVersionsPage from '@/app/(admin)/owner/prices/external-sales/versions/page';
 import OwnerExternalSalesPriceVisualFixturePage from '@/app/(admin)/owner/prices/external-sales/visual-fixture/page';
 import SalesQuotePage from '@/app/(admin)/sales/quote/page';
 import SalesLogisticsQuotePage from '@/app/(admin)/sales/quote/logistics/page';
+import OwnerExternalSalesChargeItemsPage from '@/components/business/rules/pricing/CustomerPricingWorkspacePage';
+import OwnerExternalSalesPriceBookVersionsPage from '@/components/business/rules/pricing/PriceVersionsPage';
 
 async function renderToResolvedMarkup(node: ReactNode): Promise<string> {
   const stream = await renderToReadableStream(node);
@@ -587,47 +619,6 @@ function workspace(purpose: CustomerPriceBookPurpose) {
   };
 }
 
-function processingWorkspaceWithoutDraft() {
-  const result = workspace(CustomerPriceBookPurpose.PROCESSING);
-  const current = result.groups[0]?.tiers[0]?.current;
-  if (!current) throw new Error('测试工作区缺少当前收费项目');
-  return {
-    ...result,
-    draft: null,
-    draftCreation: { allowed: true, blockedReason: null },
-    groups: [
-      {
-        id: current.id,
-        name: current.product?.name ?? current.name,
-        category: current.category,
-        product: current.product,
-        kind: current.kind,
-        calculationType: current.calculationType,
-        unitsPerSheet: current.unitsPerSheet,
-        scopeLabel: current.scopeLabel,
-        automation: current.automation,
-        blocksAutomaticQuote: current.blocksAutomaticQuote,
-        tierCount: 1,
-        activeTierCount: 1,
-        changed: false,
-        tiers: [
-          {
-            id: current.id,
-            current,
-            draft: null,
-            changed: false,
-            expectedUpdatedAt: null,
-          },
-        ],
-      },
-    ],
-    filters: {
-      ...result.filters,
-      changedAvailable: false,
-    },
-  };
-}
-
 function htmlHref(href: string): string {
   return `href="${href.replaceAll('&', '&amp;')}"`;
 }
@@ -641,6 +632,7 @@ beforeEach(() => {
   getDraftMock.mockReset();
   getPublishPreviewMock.mockReset();
   getRuleEditorMock.mockReset();
+  getSectionWorkspaceMock.mockReset();
   getWorkspaceMock.mockReset();
   getWorkspaceDetailMock.mockReset();
   listVersionsMock.mockReset();
@@ -653,6 +645,7 @@ beforeEach(() => {
   publishDraftActionMock.mockReset();
   updateRuleActionMock.mockReset();
   updateRuleGroupActionMock.mockReset();
+  dedicatedSectionPropsMock.mockReset();
   getCatalogMock.mockImplementation(
     (_settlementType: OrderSettlementType, purpose: CustomerPriceBookPurpose) =>
       Promise.resolve(catalog(purpose)),
@@ -665,6 +658,14 @@ beforeEach(() => {
   getWorkspaceMock.mockImplementation(
     ({ purpose }: { purpose: CustomerPriceBookPurpose }) =>
       Promise.resolve(workspace(purpose)),
+  );
+  getSectionWorkspaceMock.mockImplementation((section: string) =>
+    Promise.resolve({
+      section,
+      sources: [],
+      rules: [],
+      shippingWeightPolicy: null,
+    }),
   );
 });
 
@@ -722,508 +723,63 @@ describe('external sales price book pages', () => {
     expect(logisticsHtml).not.toContain('SHA-256');
   });
 
-  it('renders separate processing and logistics charge workspaces for ADMIN', async () => {
+  it('maps every rule-center section onto its dedicated business editor', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
 
-    const processingHtml = await renderToResolvedMarkup(
+    const blankHtml = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({ purpose: 'processing' }),
+        searchParams: Promise.resolve({ section: 'blank' }),
       }),
     );
-    const logisticsHtml = await renderToResolvedMarkup(
+    const addsHtml = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'logistics',
-          subject: '广东省',
-        }),
+        searchParams: Promise.resolve({ section: 'adds' }),
       }),
     );
-
-    expect(requirePermissionMock).toHaveBeenCalledWith('dict:price:manage');
-    expect(processingHtml).toContain('客户计价规则');
-    expect(processingHtml).toContain('加工费与调价');
-    expect(processingHtml).toContain('收费项目');
-    expect(processingHtml).toContain('当前价区间');
-    expect(processingHtml).toContain('整批 ¥120');
-    expect(processingHtml).toContain('本次调整');
-    expect(processingHtml).toContain('1/1 档已调整');
-    expect(processingHtml).not.toContain('已补全');
-    expect(processingHtml).toContain('1 项修改');
-    expect(processingHtml).toContain('搜索收费项目');
-    expect(processingHtml).toContain('更多筛选');
-    expect(processingHtml).toContain('href="/owner/rules/price-versions"');
-    expect(logisticsHtml).toContain('快递费、打包耗材与调价');
-    expect(logisticsHtml).toContain('中通 · 广东');
-    expect(logisticsHtml).toContain('value="广东" selected=""');
-    expect(logisticsHtml).toContain('首重 1kg ¥5；续重每 1kg ¥1');
-    expect(logisticsHtml).toContain('发起调价');
-    expect(logisticsHtml).not.toContain('SHA-256');
-    expect(logisticsHtml).not.toContain('ZTO-GUANGDONG');
-    expect(logisticsHtml).not.toContain('A3:D3');
-    expect(getWorkspaceMock).toHaveBeenCalledWith(
-      expect.objectContaining({ purpose: CustomerPriceBookPurpose.PROCESSING }),
-    );
-    expect(getWorkspaceMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        purpose: CustomerPriceBookPurpose.LOGISTICS,
-        province: '广东',
-      }),
-    );
-    expect(getWorkspaceMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('工作台和规则编辑器隐藏来源坐标，同时保留原始匹配提交值', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const baseWorkspace = workspace(CustomerPriceBookPurpose.PROCESSING);
-    const baseGroup = baseWorkspace.groups[0];
-    const baseTier = baseGroup?.tiers[0];
-    if (!baseGroup || !baseTier?.current || !baseTier.draft) {
-      throw new Error('测试工作区缺少可编辑收费项目');
-    }
-
-    const product = {
-      id: 'product-1',
-      name: '空封现货 大号（纸张未标）（产品表!C2/C3）',
-      paperType: '纸张未标（烫金!B13/B7/B6）',
-      specification: '大号（规格表!A2/A3）',
-    };
-    const current = { ...baseTier.current, product };
-    const draft = { ...baseTier.draft, product };
-    const productGroup = {
-      ...baseGroup,
-      name: product.name,
-      product,
-      tiers: [{ ...baseTier, current, draft }],
-    };
-    const scopeCurrent = {
-      ...current,
-      id: 'scope-current',
-      name: '局部烫金（规则表!D4/D5）',
-      product: null,
-      scopeLabel: '局部烫金（规则表!D4/D5）',
-      kind: CustomerPriceRuleKind.ADD_ON,
-    };
-    const scopeDraft = { ...scopeCurrent, id: 'scope-draft' };
-    const scopeGroup = {
-      ...productGroup,
-      id: 'scope-group',
-      name: scopeCurrent.name,
-      product: null,
-      scopeLabel: scopeCurrent.scopeLabel,
-      kind: CustomerPriceRuleKind.ADD_ON,
-      changed: false,
-      tiers: [
-        {
-          id: scopeDraft.id,
-          current: scopeCurrent,
-          draft: scopeDraft,
-          changed: false,
-          expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
-        },
-      ],
-    };
-    getWorkspaceMock.mockResolvedValue({
-      ...baseWorkspace,
-      groups: [productGroup, scopeGroup],
-      total: 2,
-      filters: { ...baseWorkspace.filters, products: [product] },
-    });
-    getRuleEditorMock.mockResolvedValue({
-      ...processingRuleEditor,
-      context: {
-        ...processingRuleEditor.context,
-        products: [{ id: product.id, name: product.name }],
-      },
-      rule: {
-        ...processingRuleEditor.rule,
-        match: {
-          ...processingRuleEditor.rule.match,
-          paperTypes: ['纸张未标（烫金!B6）'],
-          specifications: ['A4', '大号（烫金!B13/B7/B6）'],
-        },
-      },
-    });
-
-    const html = await renderToResolvedMarkup(
+    const shipHtml = await renderToResolvedMarkup(
       await OwnerExternalSalesChargeItemsPage({
         searchParams: Promise.resolve({
           purpose: 'processing',
-          item: productGroup.id,
+          section: 'ship',
         }),
       }),
     );
 
-    expect(html).toContain('空封现货 · 大号');
-    expect(html).toContain('纸张未标');
-    expect(html).toContain('局部烫金');
-    expect(html).not.toContain('空封现货 大号（ ）');
-    expect(html).not.toMatch(/产品表!|规格表!|规则表!/);
-    expect(html).toMatch(
-      /id="price-rule-rule-1-paperTypes"[^>]*value="纸张未标"/,
-    );
-    expect(html).toMatch(
-      /id="price-rule-rule-1-specifications"[^>]*value="A4、大号"/,
-    );
-    expect(html).toContain(
-      'type="hidden" name="match.paperTypes" value="纸张未标（烫金!B6）"',
-    );
-    expect(html).toContain(
-      'type="hidden" name="match.specifications" value="A4、大号（烫金!B13/B7/B6）"',
-    );
+    expect(getSectionWorkspaceMock).toHaveBeenNthCalledWith(1, 'blank');
+    expect(getSectionWorkspaceMock).toHaveBeenNthCalledWith(2, 'adds');
+    expect(getSectionWorkspaceMock).toHaveBeenNthCalledWith(3, 'ship');
+    expect(getWorkspaceMock).not.toHaveBeenCalled();
+    expect(blankHtml).toContain('data-dedicated-price-section="blank"');
+    expect(addsHtml).toContain('data-dedicated-price-section="adds"');
+    expect(shipHtml).toContain('data-dedicated-price-section="ship"');
+    expect(blankHtml).not.toContain('价格规则矩阵');
+    expect(addsHtml).not.toContain('搜索收费项目');
+    expect(shipHtml).not.toContain('价格规则矩阵');
   });
 
-  it('keeps the charge-workspace header and publish entry while data is pending', async () => {
+  it('将无参数和旧版深链统一收敛到空白封业务编辑器', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    getWorkspaceMock.mockReturnValue(new Promise(() => {}));
+    redirectMock.mockImplementation((href: string) => {
+      throw new Error(`REDIRECT:${href}`);
+    });
 
-    const html = renderToStaticMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({ purpose: 'processing' }),
+    await expect(
+      OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({}),
       }),
+    ).rejects.toThrow(
+      'REDIRECT:/owner/rules/customer-pricing?section=blank',
     );
-
-    expect(html).toContain('客户计价规则');
-    expect(html).toContain('href="/owner/rules/price-versions"');
-    expect(html).toContain('正在加载收费项目工作台');
-    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('preserves the selected current item and normalized filters when starting a draft', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    getWorkspaceMock.mockResolvedValue({
-      ...processingWorkspaceWithoutDraft(),
-      total: 75,
-      page: 2,
-      pageCount: 3,
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          q: '彩印',
-          category: 'category-1',
-          subject: 'product-1',
-          kind: CustomerPriceRuleKind.BASE,
-          calculation: CustomerPriceCalculationType.FIXED_AMOUNT,
-          quantity: '1000',
-          automation: 'AUTO',
-          status: 'ACTIVE',
-          page: '2',
-          item: 'current-rule-1',
-          start: '1',
-        }),
+    await expect(
+      OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({ section: 'legacy-matrix' }),
       }),
-    );
-    const expectedQuery = new URLSearchParams({
-      purpose: 'processing',
-      q: '彩印',
-      category: 'category-1',
-      subject: 'product-1',
-      kind: CustomerPriceRuleKind.BASE,
-      calculation: CustomerPriceCalculationType.FIXED_AMOUNT,
-      quantity: '1000',
-      automation: 'AUTO',
-      status: 'ACTIVE',
-      page: '2',
-      item: 'current-rule-1',
-      start: '1',
-    });
-    const expectedReturnQuery = new URLSearchParams(expectedQuery);
-    expectedReturnQuery.delete('start');
-
-    expect(createDraftFormPropsMock).toHaveBeenCalledWith({
-      purpose: CustomerPriceBookPurpose.PROCESSING,
-      returnHref: `/owner/rules/customer-pricing?${expectedReturnQuery.toString()}`,
-    });
-    expect(html).not.toContain(
-      htmlHref(
-        `/owner/rules/customer-pricing?${expectedQuery.toString()}`,
-      ),
-    );
-    expect(html).toContain('open=""');
-    expect(html).toContain(
-      'href="/owner/rules/customer-pricing?purpose=logistics"',
-    );
-    expect(html).not.toContain('name="item"');
-    expect(html).not.toContain('name="start"');
-    expect(html).not.toContain('name="page"');
-  });
-
-  it('drops invalid filter and item parameters instead of carrying them into write flows', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    getWorkspaceMock.mockResolvedValue(processingWorkspaceWithoutDraft());
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          automation: 'ROOT',
-          status: 'DELETED',
-          item: '../../another-price-book',
-          start: '1',
-        }),
-      }),
+    ).rejects.toThrow(
+      'REDIRECT:/owner/rules/customer-pricing?section=blank',
     );
 
-    expect(getRuleEditorMock).not.toHaveBeenCalled();
-    expect(createDraftFormPropsMock).toHaveBeenCalledWith({
-      purpose: CustomerPriceBookPurpose.PROCESSING,
-      returnHref: '/owner/rules/customer-pricing?purpose=processing&page=1',
-    });
-    expect(html).not.toContain('ROOT');
-    expect(html).not.toContain('DELETED');
-    expect(html).not.toContain('another-price-book');
-  });
-
-  it('clears a stale changed-only filter after the draft is gone', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    getWorkspaceMock.mockResolvedValue(processingWorkspaceWithoutDraft());
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          changed: '1',
-        }),
-      }),
-    );
-
-    expect(getWorkspaceMock).toHaveBeenCalledWith(
-      expect.objectContaining({ changed: true }),
-    );
-    expect(html).toContain('筛选结果 1 项');
-    expect(html).not.toContain('changed=1');
-    expect(html).not.toContain('name="changed"');
-    expect(createDraftFormPropsMock).toHaveBeenCalledWith({
-      purpose: CustomerPriceBookPurpose.PROCESSING,
-      returnHref:
-        '/owner/rules/customer-pricing?purpose=processing&page=1',
-    });
-  });
-
-  it('describes logistics base and increment price changes separately', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const logisticsWorkspace = workspace(CustomerPriceBookPurpose.LOGISTICS);
-    const logisticsGroup = logisticsWorkspace.groups[0];
-    const current = logisticsGroup?.tiers[0]?.current;
-    if (!logisticsGroup || !current) {
-      throw new Error('测试工作区缺少物流当前规则');
-    }
-    const draft = {
-      ...current,
-      id: 'logistics-draft-rule-1',
-      incrementAmount: '1.5',
-    };
-    getWorkspaceMock.mockResolvedValue({
-      ...logisticsWorkspace,
-      draft: {
-        id: 'logistics-draft',
-        name: '外部销售快递耗材报价单',
-        purpose: CustomerPriceBookPurpose.LOGISTICS,
-        version: 3,
-        basedOnVersion: 2,
-        changeReason: '快递续重调价',
-        changedCount: 1,
-        updatedAt: '2026-08-09T00:30:00.000Z',
-      },
-      draftCreation: { allowed: false, blockedReason: '已有未发布调价草稿' },
-      groups: [
-        {
-          ...logisticsGroup,
-          changed: true,
-          tiers: [
-            {
-              id: draft.id,
-              current,
-              draft,
-              changed: true,
-              expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
-            },
-          ],
-        },
-      ],
-      filters: {
-        ...logisticsWorkspace.filters,
-        changedAvailable: true,
-      },
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'logistics',
-          item: logisticsGroup.id,
-        }),
-      }),
-    );
-
-    expect(html).toContain('续重 +¥0.5（+50%）');
-    expect(html).not.toContain('¥0（0%）');
-  });
-
-  it('shows current-to-draft business changes even when the amount is unchanged', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const processingWorkspace = workspace(CustomerPriceBookPurpose.PROCESSING);
-    const processingGroup = processingWorkspace.groups[0];
-    const current = processingGroup?.tiers[0]?.current;
-    const draft = processingGroup?.tiers[0]?.draft;
-    if (!processingGroup || !current || !draft) {
-      throw new Error('测试工作区缺少收费项目');
-    }
-    const changedDraft = {
-      ...draft,
-      name: '彩印加急 200 个',
-      minQty: 200,
-      maxQty: 200,
-      amount: current.amount,
-      isActive: false,
-    };
-    getWorkspaceMock.mockResolvedValue({
-      ...processingWorkspace,
-      groups: [
-        {
-          ...processingGroup,
-          activeTierCount: 0,
-          changed: true,
-          tiers: [
-            {
-              ...processingGroup?.tiers[0],
-              current,
-              draft: changedDraft,
-              changed: true,
-            },
-          ],
-        },
-      ],
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          item: processingGroup.id,
-        }),
-      }),
-    );
-
-    expect(html).toContain('价格未变');
-    expect(html).toContain('名称：彩印 100 个 → 彩印加急 200 个');
-    expect(html).toContain('数量范围：仅 100 个 → 仅 200 个');
-    expect(html).toContain('状态：已启用 → 已停用');
-    expect(html).toContain('1/1 档已调整');
-  });
-
-  it('shows sheet capacity and rule semantics when the per-sheet amount is unchanged', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const processingWorkspace = workspace(CustomerPriceBookPurpose.PROCESSING);
-    const processingGroup = processingWorkspace.groups[0];
-    const current = processingGroup?.tiers[0]?.current;
-    const draft = processingGroup?.tiers[0]?.draft;
-    if (!processingGroup || !current || !draft) {
-      throw new Error('测试工作区缺少收费项目');
-    }
-    const currentPerSheet = {
-      ...current,
-      kind: CustomerPriceRuleKind.BASE,
-      calculationType: CustomerPriceCalculationType.PER_SHEET,
-      unitsPerSheet: 2,
-      amount: '0.18',
-      blocksAutomaticQuote: false,
-    };
-    const draftPerSheet = {
-      ...draft,
-      kind: CustomerPriceRuleKind.REFERENCE,
-      calculationType: CustomerPriceCalculationType.PER_SHEET,
-      unitsPerSheet: 4,
-      amount: '0.18',
-      automation: 'MANUAL' as const,
-      blocksAutomaticQuote: true,
-    };
-    getWorkspaceMock.mockResolvedValue({
-      ...processingWorkspace,
-      groups: [
-        {
-          ...processingGroup,
-          kind: draftPerSheet.kind,
-          calculationType: draftPerSheet.calculationType,
-          unitsPerSheet: draftPerSheet.unitsPerSheet,
-          automation: draftPerSheet.automation,
-          blocksAutomaticQuote: draftPerSheet.blocksAutomaticQuote,
-          changed: true,
-          tiers: [
-            {
-              ...processingGroup?.tiers[0],
-              current: currentPerSheet,
-              draft: draftPerSheet,
-              changed: true,
-            },
-          ],
-        },
-      ],
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          item: processingGroup.id,
-        }),
-      }),
-    );
-
-    expect(html).toContain('aria-label="彩印 · 大号价格对比"');
-    expect(html).toContain('>当前<');
-    expect(html).toContain('>草稿<');
-    expect(html).toContain('¥0.18 / 张');
-    expect(html).toContain('折算单价 ¥0.09/个 → ¥0.045/个（-50%）');
-    expect(html).not.toContain('价格未变');
-    expect(html).toContain('每张含几个：2 个 → 4 个');
-    expect(html).toContain('收费类型：基础价 → 人工参考');
-    expect(html).toContain('处理方式：自动计价 → 需人工确认');
-    expect(html).toContain(
-      '自动报价限制：不阻止自动报价 → 阻止自动报价',
-    );
-    expect(html).not.toContain('触发条件（JSON）');
-  });
-
-  it('fails closed while a scheduled version is waiting to become effective', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const scheduledWorkspace = processingWorkspaceWithoutDraft();
-    getWorkspaceMock.mockResolvedValue({
-      ...scheduledWorkspace,
-      scheduledBook: {
-        id: 'processing-scheduled',
-        name: '外部销售加工费报价单',
-        purpose: CustomerPriceBookPurpose.PROCESSING,
-        version: 4,
-        effectiveFrom: '2026-09-01T00:00:00.000Z',
-        effectiveTo: null,
-      },
-      // Page rendering must remain read-only even if an upstream DTO regresses.
-      draftCreation: { allowed: true, blockedReason: null },
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          item: 'current-rule-1',
-          start: '1',
-        }),
-      }),
-    );
-
-    expect(html).toContain('查看计划生效版本');
-    expect(html).toContain('等待生效');
-    expect(html).not.toContain('当前生效');
-    expect(html).toContain(
-      'href="/owner/rules/price-versions#price-book-history-PROCESSING"',
-    );
-    expect(html).toContain('生效前不能再发起新调价');
-    expect(createDraftFormPropsMock).not.toHaveBeenCalled();
-    expect(html).not.toContain('start=1');
-    expect(getRuleEditorMock).not.toHaveBeenCalled();
+    expect(getWorkspaceMock).not.toHaveBeenCalled();
+    expect(getSectionWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it('keeps publishing and version history in a dedicated ADMIN page', async () => {
@@ -1256,6 +812,89 @@ describe('external sales price book pages', () => {
     expect(getPublishPreviewMock).not.toHaveBeenCalled();
   });
 
+  it('builds the gaps section from real processing and logistics version streams', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+
+    const html = await renderToResolvedMarkup(
+      await OwnerExternalSalesPriceBookVersionsPage({
+        searchParams: Promise.resolve({ section: 'gaps' }),
+      }),
+    );
+
+    expect(html).toContain('缺口清单与版本历史');
+    expect(html).toContain('待处理工作队列');
+    expect(html).toContain('加工费独立版本流');
+    expect(html).toContain('物流费独立版本流');
+    expect(html).toContain('版本号互不绑定');
+    expect(html).toContain('1 份草稿待审阅');
+    expect(html).toContain('2 个收费项 · 2 条规则');
+    expect(html).toContain('1 / 1 条');
+    expect(html).toContain('真实规则校验已通过');
+    expect(html).toContain('计划第 3 版已经排期');
+    expect(html).toContain(
+      htmlHref(
+        '/owner/rules/price-versions?section=gaps&draft=processing-draft#external-sales-price-book-version-manager',
+      ),
+    );
+    expect(html).toContain('href="#price-book-history-PROCESSING"');
+    expect(html).toContain('href="#price-book-history-LOGISTICS"');
+    expect(html).not.toContain('黄金用例');
+    expect(listVersionsMock).toHaveBeenCalledTimes(1);
+    expect(getDraftMock).toHaveBeenCalledTimes(1);
+    expect(getDraftMock).toHaveBeenCalledWith('processing-draft');
+    expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
+    expect(getPublishPreviewMock).toHaveBeenCalledWith('processing-draft');
+  });
+
+  it('shows real validation gaps without leaking technical rule tokens', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+    getPublishPreviewMock.mockResolvedValue({
+      ...processingPublishPreview,
+      validation: {
+        status: 'FAIL',
+        issues: [
+          {
+            path: 'rules[0].calculationType',
+            message: 'ADD_ON / PER_BAG 配置无效',
+            ruleId: 'rule-1',
+          },
+        ],
+      },
+    });
+
+    const html = await renderToResolvedMarkup(
+      await OwnerExternalSalesPriceBookVersionsPage({
+        searchParams: Promise.resolve({ section: 'gaps' }),
+      }),
+    );
+
+    expect(html).toContain('1 个阻断问题');
+    expect(html).toContain('校验未通过，当前不能发布');
+    expect(html).toContain('按实际袋数计价');
+    expect(html).not.toContain('ADD_ON');
+    expect(html).not.toContain('PER_BAG');
+  });
+
+  it('reuses the gaps preview when opening its full publish panel', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+
+    const html = await renderToResolvedMarkup(
+      await OwnerExternalSalesPriceBookVersionsPage({
+        searchParams: Promise.resolve({
+          section: 'gaps',
+          draft: 'processing-draft',
+        }),
+      }),
+    );
+
+    expect(html).toContain('待处理工作队列');
+    expect(html).toContain('发布加工费草稿 · 第 4 版');
+    expect(html).toContain('本次修改');
+    expect(html).toContain('发布影响');
+    expect(getDraftMock).toHaveBeenCalledTimes(1);
+    expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the publish-center header available while version history is pending', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
     listVersionsMock.mockReturnValue(new Promise(() => {}));
@@ -1267,239 +906,11 @@ describe('external sales price book pages', () => {
     );
 
     expect(html).toContain('价格版本与发布');
-    expect(html).toContain('href="/owner/rules/customer-pricing"');
+    expect(html).toContain(
+      'href="/owner/rules/customer-pricing?section=blank"',
+    );
     expect(html).toContain('正在加载内容');
     expect(listVersionsMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('maps a selected current rule to its cloned draft rule editor', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          item: 'current-rule-1',
-        }),
-      }),
-    );
-
-    expect(getRuleEditorMock).toHaveBeenCalledWith(
-      'processing-draft',
-      'rule-1',
-    );
-    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(getRuleEditorMock).toHaveBeenCalledTimes(1);
-    expect(getDraftMock).not.toHaveBeenCalled();
-    expect(draftRuleFormPropsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        successHref:
-          '/owner/rules/customer-pricing?purpose=processing&item=current-rule-1#selected-charge-detail',
-      }),
-    );
-    expect(html).toContain('aria-label="正在编辑：彩印 · 大号"');
-    expect(html).toContain('aria-label="编辑收费项目：彩印 100 个"');
-    expect(html).toContain('aria-label="彩印 · 大号价格对比"');
-    expect(html).toContain('>当前<');
-    expect(html).toContain('整批 ¥120');
-    expect(html).toContain('>草稿<');
-    expect(html).toContain('整批 ¥130');
-    expect(html).toContain('>变化<');
-    expect(html).toContain('+¥10（+8.33%）');
-    expect(html).toContain('启用此规则');
-    expect(html).toContain('#selected-charge-detail');
-    expect(html.match(/保存草稿/g)).toHaveLength(1);
-    expect(html).toContain('费用分类');
-    expect(html).toContain('适用产品');
-    expect(html).toContain('金额（元）');
-    expect(html).not.toContain('高级条件与审计信息');
-    expect(html).not.toContain('SHA-256');
-    expect(html).not.toContain('触发条件（JSON）');
-    expect(html).not.toContain('name="triggerCondition"');
-    expect(html).not.toContain('name="exclusiveGroup"');
-    expect(html).not.toContain('name="priority"');
-    expect(html).not.toContain('source-hash');
-    expect(html).not.toContain('COLOR-100');
-  });
-
-  it('groups matching paper products and opens all exact quantity tiers in one editor', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const baseWorkspace = workspace(CustomerPriceBookPurpose.PROCESSING);
-    const makeGroup = (
-      processName: string,
-      productId: string,
-      quantities: number[],
-      calculationType: CustomerPriceCalculationType =
-        CustomerPriceCalculationType.FIXED_AMOUNT,
-      amounts?: string[],
-    ) => {
-      const product = {
-        id: productId,
-        name: `157克双铜纸${processName} 大号`,
-        specification: '大号',
-        paperType: '157克双铜纸',
-      };
-      const tiers = quantities.map((quantity, index) => {
-        const current = {
-          ...businessRule(
-            `current-${productId}-${quantity}`,
-            CustomerPriceBookPurpose.PROCESSING,
-            amounts?.[index] ?? String(295 + index * 100),
-          ),
-          name: `${product.name} ${quantity}个固定总额`,
-          product,
-          calculationType,
-          minQty: quantity,
-          maxQty: quantity,
-        };
-        const draft = {
-          ...current,
-          id: `draft-${productId}-${quantity}`,
-          amount: index === 1 ? String(300 + index * 100) : current.amount,
-        };
-        return {
-          id: draft.id,
-          current,
-          draft,
-          changed: draft.amount !== current.amount,
-          expectedUpdatedAt: `2026-08-09T00:30:${String(index).padStart(
-            2,
-            '0',
-          )}.000Z`,
-        };
-      });
-      return {
-        id: tiers[0]!.current.id,
-        name: product.name,
-        category: tiers[0]!.current.category,
-        product,
-        kind: CustomerPriceRuleKind.BASE,
-        calculationType,
-        unitsPerSheet: null,
-        scopeLabel: null,
-        automation: 'AUTOMATIC' as const,
-        blocksAutomaticQuote: false,
-        tierCount: tiers.length,
-        activeTierCount: tiers.length,
-        changed: tiers.some((tier) => tier.changed),
-        tiers,
-      };
-    };
-    const colorGroup = makeGroup(
-      '彩印',
-      'product-157-color',
-      [1_000, 2_000, 3_000, 4_000, 5_000, 10_000, 20_000],
-    );
-    const foilGroup = makeGroup(
-      '专版单色平烫',
-      'product-157-color-foil',
-      [500, 1_000],
-      CustomerPriceCalculationType.PER_PIECE,
-      ['0.52', '0.325'],
-    );
-    getWorkspaceMock.mockResolvedValue({
-      ...baseWorkspace,
-      groups: [colorGroup, foilGroup],
-      total: 2,
-      filters: {
-        ...baseWorkspace.filters,
-        products: [colorGroup.product, foilGroup.product],
-      },
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          item: colorGroup.id,
-        }),
-      }),
-    );
-
-    expect(html).toContain('aria-label="正在编辑：彩印 · 大号"');
-    expect(html).toContain('aria-label="编辑收费项目：专版单色平烫 · 大号"');
-    expect(html).toContain('7 档');
-    expect(html).toContain('当前价区间');
-    expect(html).toContain('¥295–¥895');
-    expect(html).toContain('1/7 档已调整');
-    expect(html).toContain('2 档');
-    expect(html).toContain('¥0.325–¥0.52');
-    expect(html).toContain('data-tier-group-editor="true"');
-    expect(getRuleEditorMock).not.toHaveBeenCalled();
-    expect(tierGroupEditorPropsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        productTitle: '157克双铜纸彩印 大号',
-        paperLabel: '157克双铜纸',
-        sizeLabel: '大号',
-        calculationType: CustomerPriceCalculationType.FIXED_AMOUNT,
-        priceBookId: 'processing-draft',
-        anchorRuleId: 'draft-product-157-color-1000',
-        tiers: expect.arrayContaining([
-          expect.objectContaining({ quantity: 1_000 }),
-          expect.objectContaining({ quantity: 20_000 }),
-        ]),
-        saveAction: updateRuleGroupActionMock,
-        successHref:
-          `/owner/rules/customer-pricing?purpose=processing&item=${colorGroup.id}#selected-charge-detail`,
-      }),
-    );
-  });
-
-  it('keeps a saved rule detail reachable after it no longer matches list filters', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-    const filteredWorkspace = workspace(CustomerPriceBookPurpose.PROCESSING);
-    const selectedGroup = filteredWorkspace.groups[0];
-    const selected = selectedGroup?.tiers[0];
-    if (!selectedGroup || !selected?.current || !selected.draft) {
-      throw new Error('测试工作区缺少可编辑收费项目');
-    }
-    getWorkspaceMock.mockResolvedValue({
-      ...filteredWorkspace,
-      groups: [],
-      total: 0,
-      page: 1,
-      pageCount: 0,
-    });
-    getWorkspaceDetailMock.mockResolvedValue({
-      purpose: CustomerPriceBookPurpose.PROCESSING,
-      priceBookId: filteredWorkspace.draft?.id ?? 'processing-draft',
-      editable: true,
-      group: selectedGroup,
-      categories: filteredWorkspace.filters.categories,
-      products: filteredWorkspace.filters.products,
-    });
-
-    const html = await renderToResolvedMarkup(
-      await OwnerExternalSalesChargeItemsPage({
-        searchParams: Promise.resolve({
-          purpose: 'processing',
-          q: '修改前名称',
-          status: 'ACTIVE',
-          page: '4',
-          item: selected.draft.id,
-        }),
-      }),
-    );
-
-    expect(getWorkspaceDetailMock).toHaveBeenCalledWith({
-      purpose: CustomerPriceBookPurpose.PROCESSING,
-      groupId: selected.draft.id,
-    });
-    expect(getWorkspaceMock).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceDetailMock).toHaveBeenCalledTimes(1);
-    expect(getRuleEditorMock).toHaveBeenCalledWith(
-      filteredWorkspace.draft?.id,
-      selected.draft.id,
-    );
-    expect(getRuleEditorMock).toHaveBeenCalledTimes(1);
-    expect(draftRuleFormPropsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        successHref:
-          `/owner/rules/customer-pricing?purpose=processing&item=${selectedGroup.id}#selected-charge-detail`,
-      }),
-    );
-    expect(html).toContain('aria-label="编辑收费项目：彩印 100 个"');
-    expect(html).toContain('没有符合条件的收费项目');
   });
 
   it('publishes only a listed draft and keeps destructive actions secondary', async () => {
@@ -1575,7 +986,7 @@ describe('external sales price book pages', () => {
         searchParams: Promise.resolve({ section: 'processing' }),
       }),
     ).rejects.toThrow(
-      'REDIRECT:/owner/rules/customer-pricing?purpose=processing',
+      'REDIRECT:/owner/rules/customer-pricing?section=blank',
     );
     await expect(
       LegacyOwnerExternalSalesPriceBookPage({
@@ -1586,9 +997,6 @@ describe('external sales price book pages', () => {
       }),
     ).rejects.toThrow(
       'REDIRECT:/owner/rules/price-versions?draft=processing-draft',
-    );
-    expect(() => OwnerExternalSalesLogisticsPriceBookPage()).toThrow(
-      'REDIRECT:/owner/rules/customer-pricing?purpose=logistics',
     );
     expect(() => SalesLogisticsQuotePage()).toThrow(
       'REDIRECT:/sales/quote?section=logistics',

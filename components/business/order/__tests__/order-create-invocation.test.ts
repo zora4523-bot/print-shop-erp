@@ -13,6 +13,7 @@ describe('runCreateOrderAction', () => {
       orderId: 'order-1',
       orderNo: 'GD-260827-001',
       itemIds: ['item-1'],
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
     }));
 
     expect(result).toEqual({
@@ -20,6 +21,7 @@ describe('runCreateOrderAction', () => {
       orderId: 'order-1',
       orderNo: 'GD-260827-001',
       itemIds: ['item-1'],
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
     });
   });
 
@@ -37,8 +39,16 @@ describe('runCreateOrderAction', () => {
 describe('runSubmitOrderAction', () => {
   it('keeps the structured result returned by the server action', async () => {
     await expect(
-      runSubmitOrderAction(async () => ({ status: 'success' })),
-    ).resolves.toEqual({ status: 'success' });
+      runSubmitOrderAction(async () => ({
+        status: 'success',
+        quotedFee: null,
+        quotedFeeCompleteness: null,
+      })),
+    ).resolves.toEqual({
+      status: 'success',
+      quotedFee: null,
+      quotedFeeCompleteness: null,
+    });
   });
 
   it('maps a rejected invocation to a recoverable inline error', async () => {

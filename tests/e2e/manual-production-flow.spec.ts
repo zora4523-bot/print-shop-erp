@@ -24,7 +24,7 @@ test.describe('非机台生产任务', () => {
       username: E2E_USERS.foreman.username,
       password: E2E_PASSWORD,
     });
-    await page.getByLabel('工单自定义名称').fill(customName);
+    await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
     await page.locator('input[name="customerRef"]').fill(orderRef);
     await openFirstOrderItemEditor(page);
     await page.locator('input[name="items.0.name"]').fill(itemName);
@@ -43,10 +43,7 @@ test.describe('非机台生产任务', () => {
       .locator('textarea[name="items.0.priceOverrideReason"]')
       .fill('E2E 非机台任务人工报价');
     await page
-      .getByRole('textbox', {
-        name: '详细地址 / 粘贴完整收货信息',
-        exact: true,
-      })
+      .getByRole('textbox', { name: '收货地址', exact: true })
       .fill('E2E 收货人 13800138000 广东省佛山市测试路 1 号');
     await page
       .getByRole('button', { name: '保存草稿', exact: true })

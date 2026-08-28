@@ -1587,40 +1587,19 @@ export async function login(
   });
 }
 
-// Both order-entry variants render the active style inline. External sales use
-// the B single-page form (pressed style buttons); internal users use a tablist
-// whose selected style owns the visible editor. Do not look for the retired
-// three-step "款式" tab — it no longer exists in either flow.
+// Every settlement mode now renders the B single-page form. The active style
+// is represented by a pressed button in the shared style navigation.
 export async function openFirstOrderItemEditor(page: Page): Promise<void> {
-  const externalForm = page.locator(
-    '[data-slot="external-sales-order-form-b"]',
-  );
-  const internalEditor = page.locator(
-    'input[name="items.0.name"]:visible',
-  );
-  await expect(externalForm.or(internalEditor)).toBeVisible();
-
-  if (await externalForm.isVisible()) {
-    const firstStyle = externalForm
-      .getByRole('navigation', { name: '款式' })
-      .getByRole('button')
-      .first();
-    await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
-    await expect(
-      externalForm.getByRole('spinbutton', { name: '数量', exact: true }),
-    ).toBeVisible();
-    return;
-  }
-
-  const firstStyle = page
-    .getByRole('tablist', { name: '款式' })
-    .getByRole('tab')
+  const form = page.locator('[data-slot="order-form-b"]');
+  await expect(form).toBeVisible();
+  const firstStyle = form
+    .getByRole('navigation', { name: '款式' })
+    .getByRole('button')
     .first();
-  if ((await firstStyle.getAttribute('aria-selected')) !== 'true') {
-    await firstStyle.click();
-  }
-  await expect(firstStyle).toHaveAttribute('aria-selected', 'true');
-  await expect(internalEditor).toBeVisible();
+  await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    form.getByRole('spinbutton', { name: '数量', exact: true }),
+  ).toBeVisible();
 }
 
 // The external-sales B form has one visible page and never accepts a browser
@@ -1632,7 +1611,7 @@ export async function fillExternalSalesOrderDraft(
   page: Page,
   opts: { customName: string; quantity?: number },
 ): Promise<void> {
-  const form = page.locator('[data-slot="external-sales-order-form-b"]');
+  const form = page.locator('[data-slot="order-form-b"]');
   await expect(form).toBeVisible();
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
@@ -1647,7 +1626,9 @@ export async function fillExternalSalesOrderDraft(
     .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
     .check();
   await expect(
-    form.getByRole('button', { name: /^提交工单$/ }),
+    form.getByRole('button', {
+      name: /^(创建并提交|提交并申请管理员终价)$/,
+    }),
   ).toBeEnabled();
 }
 
@@ -1717,6 +1698,9 @@ export async function cleanupAutoCodePartyFixture(opts: {
 // owner-only Pigsty readiness, and the three search surfaces render against a
 // real dev database. Fixtures are idempotent and use fixed CODX/E2E values so
 // failed runs are easy to inspect manually.
+const SEARCH_SMOKE_PRODUCT_CODE = 'CODX-E2E-PROD-001';
+const SEARCH_SMOKE_MATERIAL_CODE = 'CODX-E2E-MAT-001';
+
 export async function seedSearchSmokeFixtures(opts: {
   ownerId: string;
 }): Promise<{
@@ -1738,12 +1722,12 @@ export async function seedSearchSmokeFixtures(opts: {
   supplierPartyCode: string;
   supplierPartyName: string;
 }> {
-  const productCode = 'CODX-E2E-PROD-001';
+  const productCode = SEARCH_SMOKE_PRODUCT_CODE;
   const productName = 'Codex E2E 测试红包';
   const orderId = 'codx_e2e_order_search_001';
   const orderNo = 'CODX-E2E-ORDER-001';
   const customerRef = 'CODX-E2E客户代号';
-  const materialCode = 'CODX-E2E-MAT-001';
+  const materialCode = SEARCH_SMOKE_MATERIAL_CODE;
   const materialName = 'Codex E2E 测试铜版纸';
   const partyId = 'codx_e2e_party_search_001';
   const partyCode = 'CODX_E2E_CUST_001';
@@ -1934,13 +1918,16 @@ export async function seedSearchSmokeFixtures(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, "productId", specification,
-        "paperType", quantity, crafts, "unitPrice", subtotal,
+        id, "orderId", sequence, name, "productId", "pricingRoute",
+        "productStructure", specification, "paperType", quantity, crafts,
+        "foilTechnique", "unitPrice", subtotal,
         "createdAt", "updatedAt"
       ) VALUES (
         'codx_e2e_order_item_search_001', $1, 1, 'Codex E2E 款式',
-        'codx_e2e_product_search_001', '7寸 单色', '铜版纸',
-        2000, ARRAY[]::text[], 0.1200, 240.00, NOW(), NOW()
+        'codx_e2e_product_search_001', 'MANUAL_QUOTE'::"OrderItemPricingRoute",
+        'UNSPECIFIED'::"OrderProductStructure", '7寸 单色', '铜版纸',
+        2000, ARRAY[]::text[], 'FLAT'::"OrderFoilTechnique",
+        0.1200, 240.00, NOW(), NOW()
       )
       `,
       [orderId],
@@ -2073,6 +2060,46 @@ export async function seedSearchSmokeFixtures(opts: {
     supplierPartyCode,
     supplierPartyName,
   };
+}
+
+/**
+ * Retire searchable catalog fixtures without deleting rows referenced by the
+ * smoke order/BOM. A later seed reactivates the same fixed records, so cleanup
+ * remains safe and idempotent after both successful and interrupted runs.
+ */
+export async function cleanupSearchSmokeFixtures(): Promise<void> {
+  await withDb(async (db) => {
+    const errors: unknown[] = [];
+
+    try {
+      await db.query(
+        `UPDATE "Product"
+            SET "isActive" = false, "updatedAt" = NOW()
+          WHERE code = $1`,
+        [SEARCH_SMOKE_PRODUCT_CODE],
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+
+    try {
+      await db.query(
+        `UPDATE "Material"
+            SET "isActive" = false, "updatedAt" = NOW()
+          WHERE code = $1`,
+        [SEARCH_SMOKE_MATERIAL_CODE],
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        'cleanupSearchSmokeFixtures could not retire every fixture',
+      );
+    }
+  });
 }
 
 // Logs out the currently signed-in user via the header UserMenu dropdown

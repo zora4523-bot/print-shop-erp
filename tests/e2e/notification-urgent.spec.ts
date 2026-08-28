@@ -39,7 +39,7 @@ test.describe('notification urgent wire — golden path', () => {
     });
 
     // 创建工单 + 勾"急单"复选框
-    await page.getByLabel('工单自定义名称').fill(customName);
+    await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
     await page.locator('input[name="customerRef"]').fill(orderRef);
     await page.locator('input[name="isUrgent"]').check();
     await openFirstOrderItemEditor(page);
@@ -49,17 +49,14 @@ test.describe('notification urgent wire — golden path', () => {
       .getByRole('combobox', { name: '报价产品' })
       .selectOption({ label: '珠光艳闪 160g · 大号封' });
     await page
-      .getByRole('textbox', { name: '承诺交期（提交前必填）' })
+      .getByRole('textbox', { name: '承诺交期' })
       .fill('2026-12-31');
     await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
     await page
       .locator('textarea[name="items.0.priceOverrideReason"]')
       .fill('E2E 急单通知链路人工报价');
     await page
-      .getByRole('textbox', {
-        name: '详细地址 / 粘贴完整收货信息',
-        exact: true,
-      })
+      .getByRole('textbox', { name: '收货地址', exact: true })
       .fill('E2E 收货人 13800138000 广东省佛山市测试路 1 号');
     await page
       .getByRole('button', { name: '保存草稿', exact: true })

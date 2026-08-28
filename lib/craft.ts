@@ -11,6 +11,12 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
+import {
+  isRetiredCraft,
+  RETIRED_CRAFT_CODES,
+} from './rules/retired-catalog';
+
+export { isRetiredCraft } from './rules/retired-catalog';
 
 // Thrown when a mutation is refused for a reason the UI should surface,
 // not a generic 500. Same pattern as AccountInvariantError in lib/account.ts.
@@ -92,7 +98,10 @@ export async function listActiveCraftOrderOptions(): Promise<
   CraftOrderOption[]
 > {
   const rows = await db.craft.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      code: { notIn: [...RETIRED_CRAFT_CODES] },
+    },
     select: {
       id: true,
       name: true,
@@ -123,6 +132,9 @@ export type CreateCraftData = {
 
 export async function createCraft(data: CreateCraftData): Promise<CraftSummary> {
   const code = await resolveBusinessCode('CRAFT', data.code);
+  if (isRetiredCraft({ code })) {
+    throw new CraftInvariantError('历史工艺已退役，不能新建或重新启用');
+  }
   const assignment = normalizeCraftAssignment(data);
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
@@ -232,6 +244,9 @@ export async function setCraftActive(
       select: SUMMARY_SELECT,
     });
     if (!target) throw new CraftInvariantError('目标工艺不存在');
+    if (isActive && isRetiredCraft(target)) {
+      throw new CraftInvariantError('历史工艺已退役，不能重新启用');
+    }
     if (target.isActive === isActive) return target;
 
     return tx.craft.update({

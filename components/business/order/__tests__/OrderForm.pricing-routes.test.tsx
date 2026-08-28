@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { OrderSettlementType } from '@/generated/prisma/enums';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -9,22 +10,20 @@ vi.mock('@/actions/order', () => ({
   submitOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/order-quote', () => ({ quoteOrderItemsAction: vi.fn() }));
+vi.mock('@/actions/create-order-quote', () => ({
+  quoteExternalCreateOrderAction: vi.fn(),
+}));
 vi.mock('@/actions/order-logistics-quote', () => ({
   quoteExternalOrderChargesAction: vi.fn(),
 }));
 vi.mock('@/actions/order-packaging-quote', () => ({
   quoteOrderPackagingGroupsAction: vi.fn(),
 }));
-vi.mock('../PendingDesignImages', () => ({
-  PendingDesignImages: () => null,
-}));
 vi.mock('../design-upload-client', () => ({
   uploadOrderItemDesignFile: vi.fn(),
 }));
 
 import {
-  buildRouteSpecificationOptions,
-  buildStandardPaperOptions,
   OrderForm,
   parsePastedReceiverAddress,
   type CraftOption,
@@ -53,6 +52,30 @@ const crafts: CraftOption[] = [
     isLowFrequency: false,
   },
 ];
+
+const externalCreateOrderOptions = {
+  products: [],
+  papers: [],
+  specifications: [],
+  foilColors: [
+    {
+      id: 'foil-brand-gold',
+      code: 'BRAND_GOLD',
+      name: '品牌金',
+      displayColor: '#b98f2c',
+      displayImage: '/images/order/foil/brand-gold.png',
+      sortOrder: 1,
+    },
+    {
+      id: 'foil-clear',
+      code: 'CLEAR',
+      name: '透明色',
+      displayColor: null,
+      displayImage: null,
+      sortOrder: 2,
+    },
+  ],
+} as const;
 
 describe('OrderForm pricing routes', () => {
   it('parses pasted receiver facts for shipping quotes', () => {
@@ -88,50 +111,6 @@ describe('OrderForm pricing routes', () => {
     });
   });
 
-  it('uses exact catalog specifications as standard choices for the selected route', () => {
-    expect(
-      buildRouteSpecificationOptions(
-        [
-          {
-            id: 'stock-large',
-            name: '触感纸大号',
-            category: 'BLANK_STOCK',
-            specification: '大号封90×165',
-            paperType: '200g触感纸',
-          },
-          {
-            id: 'custom-large',
-            name: '专版大号',
-            category: 'CUSTOM_FLAT_FOIL',
-            specification: '大号封90×165',
-            paperType: null,
-          },
-        ],
-        'STOCK_BLANK',
-      ),
-    ).toEqual([{ value: '大号封90×165', label: '大号封90×165' }]);
-  });
-
-  it('turns a combined SKU into explicit specification choices', () => {
-    expect(
-      buildRouteSpecificationOptions(
-        [
-          {
-            id: 'stock-combined',
-            name: '现货大号/西封中号',
-            category: 'BLANK_STOCK',
-            specification: '大号90×165 / 西封中号80×120',
-            paperType: '纸张未标',
-          },
-        ],
-        'STOCK_BLANK',
-      ),
-    ).toEqual([
-      { value: '大号90×165', label: '大号90×165' },
-      { value: '西封中号80×120', label: '西封中号80×120' },
-    ]);
-  });
-
   it('renders only the three business routes and no manual-quote choice', () => {
     const html = renderToStaticMarkup(
       <OrderForm
@@ -139,11 +118,12 @@ describe('OrderForm pricing routes', () => {
         crafts={crafts}
         products={[]}
         settlementLabel="外部销售"
-        usesExternalSalesPricing
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
 
-    expect(html).toContain('局部烫金（通版现货）');
+    expect(html).toContain('局部烫金');
     expect(html).toContain('专版烫金');
     expect(html).toContain('彩印');
     expect(html).not.toContain('空封现货');
@@ -159,7 +139,8 @@ describe('OrderForm pricing routes', () => {
         crafts={crafts}
         products={[]}
         settlementLabel="外部销售"
-        usesExternalSalesPricing
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
 
@@ -178,13 +159,42 @@ describe('OrderForm pricing routes', () => {
         crafts={crafts}
         products={[]}
         settlementLabel="外部销售"
-        usesExternalSalesPricing
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
 
     expect(html).toContain('局部烫金');
     expect(html).not.toContain('现货加烫');
     expect(html).toMatch(/aria-pressed="true"[^>]*>[\s\S]*?局部烫金/);
+  });
+
+  it('renders configured FOIL images and keeps a non-image fallback', () => {
+    const html = renderToStaticMarkup(
+      <OrderForm
+        draftScope="configured-foil-catalog-test"
+        crafts={crafts}
+        products={[]}
+        settlementLabel="外部销售"
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
+      />,
+    );
+
+    expect(html).toContain('品牌金');
+    const brandGoldButton = html.match(
+      /<button[^>]*aria-label="品牌金(?:，第 \d+ 色)?"[\s\S]*?<\/button>/,
+    )?.[0];
+    const clearButton = html.match(
+      /<button[^>]*aria-label="透明色"[\s\S]*?<\/button>/,
+    )?.[0];
+
+    expect(brandGoldButton).toMatch(
+      /<img[^>]*\ssrc="\/_next\/image\?url=%2Fimages%2Forder%2Ffoil%2Fbrand-gold\.png(?:&amp;[^\"]*)?"/,
+    );
+    expect(clearButton).toContain('background-image:linear-gradient');
+    expect(clearButton).not.toContain('<img');
+    expect(html).not.toContain('亚金');
   });
 
   it('uses the B visual paper catalog without exposing import-source labels', () => {
@@ -215,17 +225,9 @@ describe('OrderForm pricing routes', () => {
             paperType: '160g珠光纸艳闪',
           },
         ]}
-        paperMaterials={[
-          { id: 'paper-touch', code: 'PAPER-TOUCH', name: '触感纸' },
-          { id: 'paper-linen', code: 'PAPER-LINEN', name: '莱尼纹' },
-          {
-            id: 'paper-imported',
-            code: 'PAPER-IMPORTED',
-            name: '纸张未标（烫金!B13）',
-          },
-        ]}
         settlementLabel="外部销售"
-        usesExternalSalesPricing
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
 
@@ -234,50 +236,6 @@ describe('OrderForm pricing routes', () => {
     expect(html).toContain('珠光纸艳闪');
     expect(html).not.toContain('纸张未标（烫金!B13）');
     expect(html).not.toContain('自定义纸张');
-  });
-
-  it('uses related SKU specifications to distinguish imported papers with the same business name', () => {
-    const options = buildStandardPaperOptions(
-      [
-        { id: 'paper-b6', name: '纸张未标（烫金!B6）' },
-        { id: 'paper-b7', name: '纸张未标（烫金!B7）' },
-        { id: 'paper-b13', name: '纸张未标（烫金!B13）' },
-      ],
-      [
-        {
-          id: 'product-b6',
-          name: '现货大号/西封中号',
-          category: 'BLANK_STOCK',
-          specification: '大号90×165 / 西封中号80×120',
-          paperType: '纸张未标（烫金!B6）',
-        },
-        {
-          id: 'product-b7',
-          name: '西封大号',
-          category: 'BLANK_STOCK',
-          specification: '西封大号85×165',
-          paperType: '纸张未标（烫金!B7）',
-        },
-        {
-          id: 'product-b13',
-          name: '现货大号',
-          category: 'BLANK_STOCK',
-          specification: '大号90×165',
-          paperType: '纸张未标（烫金!B13）',
-        },
-      ],
-    );
-
-    expect(options.map((option) => option.label)).toEqual([
-      '纸张未标（大号90×165 / 西封中号80×120）',
-      '纸张未标（西封大号85×165）',
-      '纸张未标（大号90×165）',
-    ]);
-    expect(options.map((option) => option.value)).toEqual([
-      '纸张未标（烫金!B6）',
-      '纸张未标（烫金!B7）',
-      '纸张未标（烫金!B13）',
-    ]);
   });
 
   it('does not expose quote SKU names in the B sales-entry UI', () => {
@@ -316,7 +274,8 @@ describe('OrderForm pricing routes', () => {
           },
         ]}
         settlementLabel="外部销售"
-        usesExternalSalesPricing
+        settlementType={OrderSettlementType.EXTERNAL_SALES}
+        externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
 

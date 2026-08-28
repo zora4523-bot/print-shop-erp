@@ -48,7 +48,7 @@ test.describe('生产流程 — golden path', () => {
         quantity: 1000,
       });
 
-      // 浏览器必须走 B 版真实可见的“提交工单 → 提交前复核”入口。
+      // 浏览器必须走 B 版真实可见的“创建并提交 → 提交前复核”入口。
       // CI 不访问真实 OSS：拦截预签后的 PUT，使表单停在可恢复的服务端
       // 草稿状态；随后用受控 DB fixture 登记同一张设计图，再从详情页
       // 完成提交。这样既覆盖 UI 主入口和上传尝试，也不会产生云端孤儿。
@@ -67,7 +67,11 @@ test.describe('生产流程 — golden path', () => {
           'base64',
         ),
       });
-      await page.getByRole('button', { name: /^提交工单$/ }).click();
+      await page
+        .getByRole('button', {
+          name: /^(创建并提交|提交并申请管理员终价)$/,
+        })
+        .click();
       await expect(
         page.getByRole('heading', { name: '提交前复核' }),
       ).toBeVisible();

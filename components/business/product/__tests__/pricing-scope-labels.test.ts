@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const projectRoot = process.cwd();
 
 describe('product pricing scope labels', () => {
-  it('does not present the internal fallback price as an external-sales price', () => {
+  it('keeps pricing fields out of the canonical quote SKU catalog', () => {
     const form = readFileSync(
       join(projectRoot, 'components/business/product/ProductForm.tsx'),
       'utf8',
@@ -26,8 +26,9 @@ describe('product pricing scope labels', () => {
       'utf8',
     );
 
-    expect(form).toContain('内部销售/工厂直单基础单价');
-    expect(table).toContain('内部/直单基础单价');
+    expect(form).not.toContain('内部销售/工厂直单基础单价');
+    expect(table).not.toContain('内部/直单基础单价');
+    expect(form).not.toContain('name="baseUnitPrice"');
     expect(form).not.toContain('外部销售不读取此价格');
     expect(catalogWorkspace).not.toContain('此处基础单价仅供内部直单兼容使用');
     expect(catalogWorkspace).not.toContain('统一维护通版现货');

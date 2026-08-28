@@ -4,15 +4,14 @@ import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
 import {
   listActiveProductOrderOptions,
-  listCurrentExternalSalesProductOrderOptions,
 } from '@/lib/product';
-import { listActivePaperOrderOptions } from '@/lib/material';
 import { listCustomerPartyOptions } from '@/lib/party';
 import { OrderForm } from '@/components/business/order/OrderForm';
 import {
   ORDER_SETTLEMENT_LABELS,
   settlementTypeForOrderCreator,
 } from '@/lib/order/settlement';
+import { loadExternalCreateOrderBootstrap } from '@/lib/order/create-order-bootstrap';
 
 export const metadata = {
   title: '新建工单 · 红包印刷 ERP',
@@ -29,33 +28,30 @@ export default async function NewOrderPage() {
   const settlementType = settlementTypeForOrderCreator(user.role);
   const usesExternalSalesPricing =
     settlementType === OrderSettlementType.EXTERNAL_SALES;
-  const [crafts, products, paperMaterials, customers] = await Promise.all([
+  const [crafts, customers, externalBootstrap, internalProducts] =
+    await Promise.all([
     listActiveCraftOrderOptions(),
-    usesExternalSalesPricing
-      ? listCurrentExternalSalesProductOrderOptions()
-      : listActiveProductOrderOptions(),
-    listActivePaperOrderOptions(),
     listCustomerPartyOptions(),
+    usesExternalSalesPricing
+      ? loadExternalCreateOrderBootstrap()
+      : Promise.resolve(null),
+    usesExternalSalesPricing
+      ? Promise.resolve([])
+      : listActiveProductOrderOptions(),
   ]);
+  const products = externalBootstrap?.options.products ?? internalProducts;
 
   return (
     <div className="space-y-4">
-      {!usesExternalSalesPricing ? (
-        <div>
-          <h1 className="text-xl font-semibold">新建工单</h1>
-          <p className="text-sm text-muted-foreground">
-            费用随款式参数更新；未匹配价格的款式由管理员终价。
-          </p>
-        </div>
-      ) : null}
       <OrderForm
         draftScope={user.id}
         crafts={crafts}
         products={products}
-        paperMaterials={paperMaterials}
         customers={customers}
         settlementLabel={ORDER_SETTLEMENT_LABELS[settlementType]}
-        usesExternalSalesPricing={usesExternalSalesPricing}
+        settlementType={settlementType}
+        externalCreateOrderOptions={externalBootstrap?.options}
+        initialExternalPriceSnapshot={externalBootstrap?.priceSnapshot}
       />
     </div>
   );

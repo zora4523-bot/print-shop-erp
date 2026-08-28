@@ -60,6 +60,11 @@ describe('AppSidebar navigation feedback', () => {
     expect(source).toContain("aria-current={active ? 'page' : undefined}");
     expect(source).toContain('data-has-active-child');
     expect(source).toContain('aria-controls={contentId}');
+    expect(source).toContain('useSearchParams');
+    expect(source).toContain(
+      'getActiveAdminMenuHref(pathname, allItems, searchParams)',
+    );
+    expect(source).not.toContain('data-menu-level="child-group"');
   });
 
   it('keeps icon-only navigation vertically scrollable', () => {

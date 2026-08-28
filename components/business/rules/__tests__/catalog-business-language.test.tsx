@@ -18,6 +18,14 @@ vi.mock('@/lib/material', () => ({
     OTHER: '其他',
   },
 }));
+vi.mock('@/lib/product', () => ({
+  isRetiredProductCategory: (category: {
+    path: string;
+    legacyCategory: ProductCategory;
+  }) =>
+    category.path === 'product.generic_stock' ||
+    category.legacyCategory === ProductCategory.GENERIC_STOCK,
+}));
 
 describe('规则中心目录业务语言投影', () => {
   it('报价 SKU 列表隐藏导入表坐标', () => {
@@ -125,11 +133,44 @@ describe('规则中心目录业务语言投影', () => {
     } as unknown as ProductListRow;
 
     const html = renderToStaticMarkup(
-      <ProductsTable products={[product]} showInternalPrice={false} />,
+      <ProductsTable products={[product]} />,
     );
 
     expect(html).not.toContain('内部/直单基础单价');
     expect(html).not.toContain('123.4567');
+  });
+
+  it('报价 SKU 列表明确标记退役分类下的历史记录', () => {
+    const product = {
+      id: 'product-retired',
+      code: 'PRD-RETIRED',
+      category: ProductCategory.GENERIC_STOCK,
+      categoryNodeId: 'generic-stock',
+      name: '历史现货',
+      specification: null,
+      paperType: null,
+      baseUnitPrice: null,
+      minOrderQty: null,
+      isActive: false,
+      categoryNode: {
+        id: 'generic-stock',
+        path: 'product.generic_stock',
+        name: '历史通用现货',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+        isActive: false,
+      },
+      referenceImpact: {
+        orderCount: 1,
+        bomCount: 0,
+        currentExternalPriceRuleCount: 0,
+        currentInternalPriceTierCount: 0,
+      },
+    } as unknown as ProductListRow;
+
+    const html = renderToStaticMarkup(<ProductsTable products={[product]} />);
+
+    expect(html).toContain('历史 / 已退役');
+    expect(html).toContain('停用');
   });
 
   it('纸张列表隐藏导入表坐标', () => {

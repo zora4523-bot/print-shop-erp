@@ -56,7 +56,7 @@ describe('createSalaryRuleVersionAction', () => {
     ruleAdminMock.createSalaryRuleVersion.mockResolvedValue({ id: 'rule-1' });
     await expect(createSalaryRuleVersionAction(null, new FormData())).resolves.toEqual({ status: 'success', ruleId: 'rule-1' });
     expect(ruleAdminMock.createSalaryRuleVersion).toHaveBeenCalledWith(input, actor);
-    expect(revalidateMock).toHaveBeenCalledWith('/owner/salary/rules');
+    expect(revalidateMock).not.toHaveBeenCalledWith('/owner/salary/rules');
     expect(revalidateMock).toHaveBeenCalledWith('/owner/salary/hourly');
     expect(revalidateMock).toHaveBeenCalledWith(
       RULE_CENTER_HREFS.employeePay,

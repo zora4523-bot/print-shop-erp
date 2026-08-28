@@ -21,6 +21,9 @@ const { dbMock, txMock, auditMock } = vi.hoisted(() => {
     auditMock: { writeAuditLogInTx: vi.fn() },
     dbMock: {
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+      user: { findMany: vi.fn() },
+      salaryRule: { findMany: vi.fn() },
+      workerMachineSalaryRule: { findMany: vi.fn() },
     },
   };
 });
@@ -31,6 +34,7 @@ vi.mock('@/lib/audit-log', () => ({
 
 import {
   createWorkerMachineSalaryRule,
+  listPieceworkRuleManagementData,
   salaryAdjustmentInputSchema,
   workerMachineRuleInputSchema,
 } from '../piecework-admin';
@@ -229,6 +233,40 @@ describe('salaryAdjustmentInputSchema', () => {
         idempotencyKey: 'not-a-uuid',
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('listPieceworkRuleManagementData', () => {
+  it('includes an active machine worker registered only through machine capabilities', async () => {
+    const capabilityOnlyWorker = {
+      id: 'worker-capability-only',
+      displayName: '多能机师傅',
+      username: 'capability-only',
+      machineType: null,
+      machineCapabilities: [MachineType.WINDMILL],
+    };
+    dbMock.user.findMany.mockResolvedValue([capabilityOnlyWorker]);
+    dbMock.salaryRule.findMany.mockResolvedValue([]);
+    dbMock.workerMachineSalaryRule.findMany.mockResolvedValue([]);
+
+    const result = await listPieceworkRuleManagementData(
+      new Date('2026-07-19T01:30:00Z'),
+    );
+
+    expect(dbMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          role: Role.WORKER,
+          workerType: WorkerType.MACHINE,
+          isActive: true,
+          OR: [
+            { machineType: { not: null } },
+            { machineCapabilities: { isEmpty: false } },
+          ],
+        },
+      }),
+    );
+    expect(result.workers).toEqual([capabilityOnlyWorker]);
   });
 });
 

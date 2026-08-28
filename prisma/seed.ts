@@ -5,7 +5,7 @@
  *
  * 包含：
  * 1. 默认管理员账号
- * 2. 工艺字典（12种工艺）
+ * 2. 工艺字典默认项
  * 3. 薪资规则默认值（三套体系）
  * 4. 推送事件类型预置
  * 5. 系统配置
@@ -173,20 +173,21 @@ async function seedCrafts() {
     { name: '冰白彩印（印刷+烫金）', code: 'COLOR_PRINT_FOIL', isOutsource: true, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.WINDMILL, inHouseMachineTypes: [MachineType.HAND_PRESS, MachineType.WINDMILL], sortOrder: 71 },
 
     // 低频工艺：录单页固定归到末尾分组
-    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900 },
+    { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900, isActive: false },
     { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 901 },
     { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 902 },
     { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 903 },
   ];
 
-  for (const craft of crafts) {
-    await db.craft.upsert({
-      where: { code: craft.code },
-      update: craft,
-      create: craft,
-    });
-  }
-  console.log(`  ✓ 工艺字典 ${crafts.length} 条`);
+  // Seed 只补齐缺失的初始字典。名称、岗位、机型、排序和启用状态都可在
+  // 规则中心维护，重跑 seed 不得把这些字段改回代码默认值。
+  const { count: created } = await db.craft.createMany({
+    data: crafts,
+    skipDuplicates: true,
+  });
+  console.log(
+    `  ✓ 工艺字典 ${crafts.length} 条（新建 ${created}，保留已有 ${crafts.length - created}）`,
+  );
 }
 
 // ============================================================
@@ -318,58 +319,44 @@ async function seedSalaryRules() {
     },
   ];
 
-  // 幂等策略 + 旧污染库修复：
-  // 每条 (ruleType, ruleKey) 应当至多对应 1 行 effectiveTo=null 的"有效规则"。
-  // 先前版本以 effectiveFrom=now 作 upsert 键，同一键会随每次 seed 累积多份 active 行，
-  // 仅 findFirst+update 只能修好"新库"，老库里遗留的多份 active 仍违反不变量。
-  //
-  // 这里改为 findMany 拿出所有 active 行：
-  //   - 0 行：按 effectiveFrom=now 新建；
-  //   - ≥1 行：取最早创建的一行更新 value/remark；其余多余的 active 行收尾为
-  //     effectiveTo=now，把它们降级为"历史规则"，让不变量恢复到 1 条 active。
-  let collapsed = 0;
-  for (const rule of rules) {
-    const active = await db.salaryRule.findMany({
-      where: {
-        ruleType: rule.ruleType,
-        ruleKey: rule.ruleKey,
-        effectiveTo: null,
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+  // 只有该 (ruleType, ruleKey) 在整个版本库中从未出现时，才写入首次
+  // 部署默认值。即使仅剩已关闭的历史版本，也不在 seed 中自动“修复”；
+  // 否则会绕过规则中心的版本、审计和生效时间语义。
+  const created = await db.$transaction(async (tx) => {
+    // 与规则中心写入使用同一把事务锁，防止首次部署时并发 seed
+    // 或管理员创建版本导致同一默认键被初始化两次。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:salary-rules:snapshot'))`;
 
-    if (active.length === 0) {
-      await db.salaryRule.create({
-        data: {
+    const existing = await tx.salaryRule.findMany({
+      where: {
+        OR: rules.map((rule) => ({
           ruleType: rule.ruleType,
           ruleKey: rule.ruleKey,
-          ruleValue: rule.ruleValue,
-          effectiveFrom: now,
-          remark: rule.remark,
-        },
-      });
-      continue;
-    }
-
-    const [keep, ...extras] = active;
-    await db.salaryRule.update({
-      where: { id: keep.id },
-      data: { ruleValue: rule.ruleValue, remark: rule.remark },
+        })),
+      },
+      select: { ruleType: true, ruleKey: true },
     });
+    const existingKeys = new Set(
+      existing.map((rule) => `${rule.ruleType}:${rule.ruleKey}`),
+    );
+    const missing = rules.filter(
+      (rule) => !existingKeys.has(`${rule.ruleType}:${rule.ruleKey}`),
+    );
+    if (missing.length === 0) return 0;
 
-    if (extras.length > 0) {
-      await db.salaryRule.updateMany({
-        where: { id: { in: extras.map((r) => r.id) } },
-        data: { effectiveTo: now },
-      });
-      collapsed += extras.length;
-    }
-  }
+    const result = await tx.salaryRule.createMany({
+      data: missing.map((rule) => ({
+        ...rule,
+        effectiveFrom: now,
+      })),
+      skipDuplicates: true,
+    });
+    return result.count;
+  });
 
-  if (collapsed > 0) {
-    console.log(`  ⚠  发现 ${collapsed} 条重复的 active 薪资规则，已收尾为历史记录（effectiveTo=now）`);
-  }
-  console.log(`  ✓ 薪资规则 ${rules.length} 条`);
+  console.log(
+    `  ✓ 薪资规则 ${rules.length} 条（新建 ${created}，保留已有 ${rules.length - created}）`,
+  );
 }
 
 // ============================================================

@@ -398,7 +398,7 @@ export function PendingSchedulingBoard({ orders, workers, handoff }: Props) {
               {selectedOverrideTaskCount} 项。
             </p>
           </div>
-          <div className="min-w-0 text-sm lg:min-w-72">
+          <div className="min-w-0 max-w-full text-sm lg:w-80 lg:flex-none">
             <label htmlFor="batch-schedule-worker" className="font-medium">
               接单师傅
             </label>

@@ -349,7 +349,7 @@ export async function deleteOrderManualCharge(
           version: 1,
           source: 'ADMIN_MANUAL_CHARGE_REMOVED',
           removedAt: now.toISOString(),
-          previousAmount: existing.amount.toString(),
+          previousAmount: existing.amount?.toString() ?? null,
         },
         overrideReason: input.reason,
         finalizedById: actor.id,

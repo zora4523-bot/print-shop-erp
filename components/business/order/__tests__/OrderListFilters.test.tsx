@@ -374,10 +374,10 @@ describe('OrderListFilters', () => {
     );
 
     expect(html).toContain('aria-label="已启用的筛选条件"');
-    expect(html).toContain('aria-label="清除筛选：状态：已提交"');
+    expect(html).toContain('aria-label="清除筛选：状态：待工厂确认"');
     expect(html).toContain('aria-label="清除筛选：烫金色：哑金"');
 
-    const statusHref = anchorHref(html, '清除筛选：状态：已提交');
+    const statusHref = anchorHref(html, '清除筛选：状态：待工厂确认');
     const statusUrl = new URL(statusHref, 'https://erp.example.test');
     expect(statusUrl.pathname).toBe('/orders');
     expect(statusUrl.searchParams.get('status')).toBe(OrderStatus.IN_PRODUCTION);

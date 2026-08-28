@@ -79,8 +79,6 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Prisma 7 rust-free client output (regenerated).
     "generated/**",
-    // Skeleton files preserved for onboarding; moved into place by P0 features.
-    "_reference/**",
     // Vitest coverage report output (gitignored, but eslint would still lint it).
     "coverage/**",
     // Read-only UX design exports include their own bundled browser runtime.

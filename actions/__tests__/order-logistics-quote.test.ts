@@ -52,7 +52,18 @@ const quote = {
   components: [],
   errors: [],
   snapshot: {
-    version: 1 as const,
+    version: 2 as const,
+    policy: {
+      ruleVersion: 'test-logistics-weight-v3',
+      billableWeightInput:
+        'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE' as const,
+      weightResolutionOrder: [
+        'ACTUAL_FULFILLMENT_WEIGHT',
+        'SERVER_ESTIMATE',
+      ],
+      maxOrderQuantity: 2_000,
+      billableWeightRounding: 'CEIL_KG' as const,
+    },
     input: validInput,
     suggestedShippingTotal: '4.30',
     suggestedPackagingTotal: '3.00',
@@ -169,7 +180,7 @@ describe('quoteExternalOrderChargesAction', () => {
     );
   });
 
-  it('ignores a browser-supplied carrier weight and leaves freight pending', async () => {
+  it('ignores browser weight and passes validated item facts for a server estimate', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
     const pendingWeightQuote = {
       ...quote,
@@ -211,8 +222,67 @@ describe('quoteExternalOrderChargesAction', () => {
           shipmentKey: '1',
           province: '广东',
           billableWeightKg: null,
+          weightItems: [
+            {
+              itemKey: '1',
+              quantity: 1_000,
+              paperWeightGsm: 200,
+              paperType: '200g触感纸',
+              productStructure: 'STANDARD_ENVELOPE',
+            },
+          ],
           itemQuantity: 1_000,
         },
+      ],
+    });
+  });
+
+  it('keeps incomplete item weight facts pending instead of inventing a weight', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
+    const pendingQuote = {
+      ...quote,
+      complete: false,
+      suggestedShippingTotal: null,
+      suggestedTotal: null,
+      errors: ['款式 1 的产品结构未确定，物流重量需人工确认'],
+    };
+    quoteExternalOrderChargesPreviewMock.mockResolvedValue(pendingQuote);
+
+    const result = await quoteExternalOrderChargesAction({
+      isSfCollect: false,
+      items: [
+        {
+          itemKey: '1',
+          quantity: 1_000,
+          paperWeightGsm: null,
+          paperType: null,
+          productStructure: 'UNSPECIFIED',
+        },
+      ],
+      shipments: [
+        {
+          shipmentKey: '1',
+          province: '广东',
+          billableWeightKg: '99',
+          itemQuantity: 1_000,
+          itemQuantities: [1_000],
+        },
+      ],
+    });
+
+    expect(result).toEqual({ status: 'success', quote: pendingQuote });
+    expect(quoteExternalOrderChargesPreviewMock).toHaveBeenCalledWith({
+      isSfCollect: false,
+      shipments: [
+        expect.objectContaining({
+          billableWeightKg: null,
+          weightItems: [
+            expect.objectContaining({
+              paperWeightGsm: null,
+              productStructure: 'UNSPECIFIED',
+            }),
+          ],
+        }),
       ],
     });
   });

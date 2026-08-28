@@ -15,6 +15,7 @@ import {
 
 const {
   getOrderDetailMock,
+  getSalesOrderDetailByIdMock,
   requireSessionMock,
   estimateMaterialUsageMock,
   sfCollectTogglePropsMock,
@@ -26,6 +27,7 @@ const {
   reassignTaskFormPropsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
+  getSalesOrderDetailByIdMock: vi.fn(),
   requireSessionMock: vi.fn(),
   estimateMaterialUsageMock: vi.fn(),
   sfCollectTogglePropsMock: vi.fn(),
@@ -43,6 +45,9 @@ vi.mock('@/lib/auth/session', () => ({
 }));
 vi.mock('@/lib/order', () => ({
   getOrderDetail: getOrderDetailMock,
+}));
+vi.mock('@/lib/order/sales-detail-query', () => ({
+  getSalesOrderDetailById: getSalesOrderDetailByIdMock,
 }));
 // 标题取数模块直连 Prisma；不 mock 的话 import 链会拉起 lib/db，
 // 在没有 DATABASE_URL 的 node 测试环境里模块加载即抛。
@@ -140,6 +145,7 @@ import OrderDetailPage from '@/app/(admin)/orders/[id]/page';
 
 beforeEach(() => {
   getOrderDetailMock.mockReset();
+  getSalesOrderDetailByIdMock.mockReset();
   requireSessionMock.mockReset();
   estimateMaterialUsageMock.mockReset().mockResolvedValue(null);
   sfCollectTogglePropsMock.mockReset();
@@ -200,11 +206,11 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('z-[9]');
   });
 
-  it('keeps customer charge details for SALES without exposing internal costs', async () => {
+  it('routes SALES through the narrow detail contract without exposing factory data', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'sales-1', role: Role.SALES },
     });
-    getOrderDetailMock.mockResolvedValue(orderFixture());
+    getSalesOrderDetailByIdMock.mockResolvedValue(salesDetailFixture());
 
     const html = renderToStaticMarkup(
       await OrderDetailPage({
@@ -212,36 +218,36 @@ describe('order detail commercial visibility', () => {
       }),
     );
 
-    expect(html).toContain('结算路径');
-    expect(html).toContain('对客应收总额');
+    expect(getSalesOrderDetailByIdMock).toHaveBeenCalledWith(
+      { id: 'sales-1', role: Role.SALES },
+      'order-1',
+    );
+    expect(getOrderDetailMock).not.toHaveBeenCalled();
     expect(html).toContain('款式加工费');
-    expect(html).toContain('入袋费');
-    expect(html).toContain('加工费合计');
-    expect(html).toContain('¥ 98728.43');
-    expect(html).toContain('¥ 98753.43');
-    expect(html).toContain('对客收费明细');
+    expect(html).toContain('入袋加工费');
     expect(html).toContain('外部销售快递费');
     expect(html).toContain('外部销售打包耗材费');
-    expect(html).toContain('¥ 8.00');
-    expect(html).toContain('¥ 4.00');
-    expect(html).toContain('原因：物流人工改价秘密');
-    expect(html).toContain('一次性费用');
-    expect(html).toContain('系统建议小计');
-    expect(html).toContain('人工改价说明');
-    expect(html).toContain('98765.43');
-    expect(html).toContain('87654.32');
-    expect(html).toContain('协议改价机密说明');
-    expect(html).toContain('收费项目明细（1）');
-    expect(html).not.toContain('外部销售专属收费项');
-    expect(html).toContain('¥ 888.00');
-    expect(html).toContain('沿用原价 87654.32');
-    expect(html).toContain('日志沿用原价 76543.21');
+    expect(html).toContain('制烫金版费');
+    expect(html).toContain('待定');
+    expect(html).toContain('已知合计（不含待定）');
+    expect(html).not.toContain('¥ 待定');
+    expect(html).toContain('申请修改工单');
+    expect(html).toContain('返回工单列表');
+    expect(html.match(/>估<\/span>/g)).toHaveLength(2);
+    expect(html).not.toContain('师傅');
+    expect(html).not.toContain('生产安排');
+    expect(html).not.toContain('修改日志');
+    expect(html).not.toContain('制版明细');
+    expect(html).not.toContain('系统建议小计');
+    expect(html).not.toContain('人工改价说明');
+    expect(html).not.toContain('协议改价机密说明');
+    expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).not.toContain('内部材料成本秘密');
   });
 
   it('清晰展示结构化款式事实与包装组组成', async () => {
     requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.SALES },
+      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
     });
     getOrderDetailMock.mockResolvedValue(orderFixture());
 
@@ -281,7 +287,7 @@ describe('order detail commercial visibility', () => {
 
   it('价格状态和来源不回显未知内部标识', async () => {
     requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.SALES },
+      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
     });
     getOrderDetailMock.mockResolvedValue({
       ...orderFixture(),
@@ -304,12 +310,11 @@ describe('order detail commercial visibility', () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'sales-1', role: Role.SALES },
     });
-    const order = {
-      ...orderFixture(),
+    getSalesOrderDetailByIdMock.mockResolvedValue({
+      ...salesDetailFixture(),
       status: OrderStatus.SHIPPED,
       isSfCollect: true,
-    };
-    getOrderDetailMock.mockResolvedValue(order);
+    });
 
     renderToStaticMarkup(
       await OrderDetailPage({
@@ -437,7 +442,7 @@ describe('order detail — 暂不能完工横幅', () => {
 
   it('非 ADMIN 看不到横幅（只有他们能建外协单）', async () => {
     requireSessionMock.mockResolvedValue({
-      user: { id: 'sales-1', role: Role.SALES },
+      user: { id: 'sales-1', role: Role.CUSTOMER_SERVICE },
     });
     getOrderDetailMock.mockResolvedValue(inProductionWithGap());
 
@@ -448,6 +453,101 @@ describe('order detail — 暂不能完工横幅', () => {
     expect(html).not.toContain('暂不能完工');
   });
 });
+
+function salesDetailFixture() {
+  return {
+    id: 'order-1',
+    orderNo: 'GD-260807-001',
+    customName: '中秋礼盒',
+    customerRef: '客户甲',
+    status: OrderStatus.IN_PRODUCTION,
+    settlementType: OrderSettlementType.EXTERNAL_SALES,
+    isUrgent: false,
+    isSfCollect: false,
+    revision: 2,
+    pricingStatus: 'AUTO_CONFIRMED',
+    totalAmount: '98765.43',
+    promisedDate: '2026-08-30',
+    expressCode: null,
+    packageRequirement: '注意防潮',
+    remark: '客户等待收货',
+    receiver: {
+      name: '李先生',
+      phone: '13800000000',
+      address: '佛山市',
+    },
+    feeLines: [
+      {
+        id: 'processing',
+        label: '款式加工费',
+        amount: '98728.43',
+        estimated: false,
+      },
+      {
+        id: 'packaging',
+        label: '入袋加工费',
+        amount: '25.00',
+        estimated: false,
+      },
+      {
+        id: 'shipping',
+        label: '外部销售快递费',
+        amount: '8.00',
+        estimated: false,
+      },
+      {
+        id: 'packing-material',
+        label: '外部销售打包耗材费',
+        amount: '4.00',
+        estimated: true,
+      },
+      {
+        id: 'plate',
+        label: '制烫金版费',
+        amount: null,
+        estimated: false,
+      },
+    ],
+    items: [
+      {
+        id: 'item-1',
+        sequence: 1,
+        name: '礼盒款',
+        quantity: 1000,
+        specification: '大号',
+        paper: '艳红珠光纸 200g',
+        frontFoilColors: ['哑金'],
+        backFoilColors: [],
+        foilColors: ['哑金'],
+        isDoubleSided: false,
+        remark: null,
+        designs: [],
+      },
+    ],
+    shipments: [
+      {
+        id: 'shipment-1',
+        sequence: 1,
+        status: 'PLANNED',
+        receiverName: '李先生',
+        receiverPhone: '13800000000',
+        receiverAddress: '佛山市',
+        expressCode: null,
+        destinationProvince: '广东',
+        trackingNo: null,
+        lines: [
+          {
+            id: 'shipment-line-1',
+            itemSequence: 1,
+            itemName: '礼盒款',
+            quantity: 1000,
+          },
+        ],
+      },
+    ],
+    changeRequests: [],
+  };
+}
 
 function orderFixture() {
   const createdAt = new Date('2026-08-07T08:00:00.000Z');

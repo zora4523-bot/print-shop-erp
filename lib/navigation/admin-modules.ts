@@ -40,6 +40,7 @@ export type AdminModuleMetadata = {
   label: string;
   routeBase: string;
   activeRouteBase?: string;
+  activeQuery?: readonly Readonly<Record<string, string | null>>[];
   iconName: IconName;
   breadcrumbLabel: string;
   menuSection: AdminMenuSection;
@@ -60,6 +61,7 @@ const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
     label: item.label,
     routeBase: item.href,
     activeRouteBase: item.activeRouteBase,
+    activeQuery: 'activeQuery' in item ? item.activeQuery : undefined,
     iconName: item.iconName,
     breadcrumbLabel: item.breadcrumbLabel,
     menuSection: 'rules',

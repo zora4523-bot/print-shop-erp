@@ -36,15 +36,7 @@ const CRAFT_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
   },
 ];
 
-function craftRouteBase(formData: FormData) {
-  return formData.get('routeBase') === RULE_CENTER_HREFS.crafts
-    ? RULE_CENTER_HREFS.crafts
-    : '/owner/crafts';
-}
-
 function revalidateCraftPaths(id: string) {
-  revalidatePath('/owner/crafts');
-  revalidatePath(`/owner/crafts/${id}`);
   revalidatePath(RULE_CENTER_HREFS.crafts);
   revalidatePath(`${RULE_CENTER_HREFS.crafts}/${id}`);
 }
@@ -75,23 +67,9 @@ function normalizeFormInput(formData: FormData) {
   };
 }
 
-export async function createCraftAction(
-  _prev: CraftMutationResult | null,
-  formData: FormData,
-): Promise<CraftMutationResult> {
-  return createCraftWithRoute(formData, craftRouteBase(formData));
-}
-
 export async function createRuleCenterCraftAction(
   _prev: CraftMutationResult | null,
   formData: FormData,
-): Promise<CraftMutationResult> {
-  return createCraftWithRoute(formData, RULE_CENTER_HREFS.crafts);
-}
-
-async function createCraftWithRoute(
-  formData: FormData,
-  redirectBase: '/owner/crafts' | '/owner/rules/crafts',
 ): Promise<CraftMutationResult> {
   await requirePermission('dict:craft:manage');
 
@@ -114,7 +92,7 @@ async function createCraftWithRoute(
   }
 
   revalidateCraftPaths(createdId);
-  redirect(`${redirectBase}/${createdId}`);
+  redirect(`${RULE_CENTER_HREFS.crafts}/${createdId}`);
 }
 
 export async function updateCraftAction(

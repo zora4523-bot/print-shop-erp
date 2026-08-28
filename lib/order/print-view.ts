@@ -12,11 +12,12 @@ import type {
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
 
-// Loads the narrow shape the print layout needs. Scope filter mirrors
-// getOrderDetail so SALES / CUSTOMER_SERVICE only print their own,
-// ADMIN sees everything. WORKER sees only assigned orders that have left
-// the SUBMITTED scheduling-draft state. Returns null when the actor can't
-// see the order — the page
+// Loads the narrow shape the production print layout needs. SALES uses the
+// customer-facing list drawer and must not receive a production sheet (it
+// contains task, worker and internal process details). CUSTOMER_SERVICE can
+// print its own submissions, ADMIN sees everything, and WORKER sees only
+// assigned orders that have left the SUBMITTED scheduling-draft state.
+// Returns null when the actor can't see the order — the page
 // maps that to notFound() so there's no "this order exists but you
 // can't print it" disclosure.
 export async function getOrderForPrint(
@@ -27,6 +28,8 @@ export async function getOrderForPrint(
   // （未登录先登录再回跳），不需要专用扫码器。
   baseUrl: string,
 ): Promise<PrintOrder | null> {
+  if (user.role === Role.SALES) return null;
+
   const order = await db.order.findFirst({
     where: {
       id,

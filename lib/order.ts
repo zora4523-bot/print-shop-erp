@@ -3,9 +3,11 @@ import {
   CsSalesEntryType,
   DesignFileType,
   OrderBillingMode,
+  OrderCraft,
   OrderCustomerChargeStatus,
   OrderCostCategory,
   OrderKind,
+  OrderQuotedFeeCompleteness,
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
@@ -56,14 +58,15 @@ import {
   QuoteCatalogInvariantError,
   quoteOrderItems,
 } from './price/quote-service';
-import { quoteOrderPackagingGroups } from './price/order-packaging-quote';
 import {
   OrderCustomerChargeError,
-  resolveExternalOrderChargesForProvisionalCreation,
   resolveExternalOrderChargesForFinalization,
 } from './price/order-charge-service';
 import { deriveExternalOrderChargeShipments } from './price/external-order-charge-facts';
-import { ORDER_PRICING_STATUS } from './order/pricing-status';
+import {
+  ORDER_PRICING_STATUS,
+  type OrderPricingStatusValue,
+} from './order/pricing-status';
 import { appendOrderPricingRevisionInTx } from './order/pricing-revision';
 import {
   LEGACY_STOCK_FOIL_CRAFT_CODE,
@@ -71,6 +74,11 @@ import {
   deriveLegacyOrderItemFoilFacts,
 } from './order/pricing-route';
 import { calculatePackagingBagCount } from './order/packaging-bag-count';
+import {
+  ExternalOrderQuoteChangedError,
+  ExternalOrderQuoteFinalizeError,
+  finalizeExternalOrderQuoteInTx,
+} from './order/submit-external-order';
 
 export {
   listOrders,
@@ -82,6 +90,18 @@ export class OrderInvariantError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'OrderInvariantError';
+  }
+}
+
+export class OrderQuoteChangedError extends Error {
+  constructor(
+    readonly quoteToken: string,
+    readonly quotedFee: string,
+    readonly quotedFeeCompleteness: OrderQuotedFeeCompleteness,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'OrderQuoteChangedError';
   }
 }
 
@@ -162,10 +182,76 @@ function sumTotals(subtotals: string[]): string {
     .toFixed(2);
 }
 
+function assertExternalSalesPackagingCoverage(
+  settlementType: OrderSettlementType,
+  itemCount: number,
+  packagingGroups: readonly {
+    itemUnitsPerBag: readonly number[];
+  }[],
+): void {
+  if (settlementType !== OrderSettlementType.EXTERNAL_SALES) return;
+
+  if (packagingGroups.length === 0) {
+    throw new OrderInvariantError(
+      '外部销售工单必须为每个款式设置一个包装组',
+    );
+  }
+
+  const membershipCountByItem = Array.from(
+    { length: itemCount },
+    () => 0,
+  );
+  for (const [groupIndex, group] of packagingGroups.entries()) {
+    const hasItem = group.itemUnitsPerBag.some(
+      (unitsPerBag, itemIndex) =>
+        itemIndex < itemCount && unitsPerBag > 0,
+    );
+    if (!hasItem) {
+      throw new OrderInvariantError(
+        `包装组 ${groupIndex + 1} 未包含任何款式`,
+      );
+    }
+    group.itemUnitsPerBag.forEach((unitsPerBag, itemIndex) => {
+      if (itemIndex < itemCount && unitsPerBag > 0) {
+        membershipCountByItem[itemIndex] += 1;
+      }
+    });
+  }
+
+  membershipCountByItem.forEach((membershipCount, itemIndex) => {
+    if (membershipCount === 0) {
+      throw new OrderInvariantError(
+        `款式 ${itemIndex + 1} 未加入包装组，无法计算入袋费`,
+      );
+    }
+    if (membershipCount > 1) {
+      throw new OrderInvariantError(
+        `款式 ${itemIndex + 1} 同时属于多个包装组，不能重复计算入袋费`,
+      );
+    }
+  });
+}
+
+function canonicalCraftForPricingRoute(
+  route: CreateOrderInput['items'][number]['pricingRoute'],
+): OrderCraft | null {
+  switch (route) {
+    case 'STOCK_BLANK':
+      return OrderCraft.PARTIAL;
+    case 'CUSTOM_SINGLE_FLAT_FOIL':
+      return OrderCraft.FULL;
+    case 'COLOR_PRINT':
+      return OrderCraft.PRINT;
+    case 'MANUAL_QUOTE':
+      return null;
+  }
+}
+
 export type CreatedOrderSummary = {
   id: string;
   orderNo: string;
   itemIds: string[];
+  pricingStatus: OrderPricingStatusValue;
 };
 
 // Keep the library boundary compatible with callers that predate the
@@ -254,6 +340,9 @@ export async function createOrder(
 ): Promise<CreatedOrderSummary> {
   const additionalShipments = input.additionalShipments ?? [];
   const packagingGroupInputs = input.packagingGroups ?? [];
+  const settlementType = settlementTypeForOrderCreator(actor.role);
+  const isExternalSalesDraft =
+    settlementType === OrderSettlementType.EXTERNAL_SALES;
   if (!input.receiverAddress?.trim()) {
     throw new OrderInvariantError('请填写收货地址');
   }
@@ -265,13 +354,59 @@ export async function createOrder(
       `请填写额外地址 ${missingAdditionalAddress + 1} 的收货地址`,
     );
   }
+  assertExternalSalesPackagingCoverage(
+    settlementType,
+    input.items.length,
+    packagingGroupInputs,
+  );
+  const resolvedItemFigs = input.items.map(
+    (item, index) => item.fig ?? index + 1,
+  );
+  if (new Set(resolvedItemFigs).size !== resolvedItemFigs.length) {
+    throw new OrderInvariantError('款式编号不能重复');
+  }
+  const minimumNextItemFig = Math.max(...resolvedItemFigs) + 1;
+  if (
+    input.nextItemFig !== undefined &&
+    input.nextItemFig < minimumNextItemFig
+  ) {
+    throw new OrderInvariantError('下一款式编号不能复用已分配编号');
+  }
+  const nextItemFig = input.nextItemFig ?? minimumNextItemFig;
 
-  return db.$transaction(async (tx) => {
+  const createOnce = () => db.$transaction(async (tx) => {
     // Keep the real generated transaction type here. A hand-written
     // `data: unknown` facade previously hid schema/client drift from
     // TypeScript and allowed an obsolete Prisma runtime to reach production
     // code before failing on the first nested write.
     const txClient = tx;
+
+    if (input.clientSubmissionId) {
+      const existing = await txClient.order.findUnique({
+        where: { clientSubmissionId: input.clientSubmissionId },
+        select: {
+          id: true,
+          orderNo: true,
+          submitterId: true,
+          pricingStatus: true,
+          items: {
+            select: { id: true },
+            orderBy: { sequence: 'asc' },
+          },
+        },
+      });
+      if (existing) {
+        if (existing.submitterId !== actor.id) {
+          throw new OrderInvariantError('提交标识已被其他账号使用');
+        }
+        return {
+          id: existing.id,
+          orderNo: existing.orderNo,
+          itemIds: existing.items.map((item) => item.id),
+          pricingStatus: existing.pricingStatus,
+        };
+      }
+    }
 
     // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
@@ -362,15 +497,13 @@ export async function createOrder(
       return { ...group, actualBagCount: count.bagCount };
     });
 
-    // (3) Quote first: quoteOrderItems acquires the transaction-scoped shared
-    // price-rule lock before reading products/rules. PostgreSQL holds that lock
-    // through commit, so the active-product validation below cannot race an
-    // administrator's exclusive-lock deactivation. Do not acquire it again
-    // here: one quote call is the single lock owner for this transaction.
+    // External sales create only a production-facts DRAFT. Their browser quote
+    // is a review aid, not a financial write: the submit finalizer re-quotes
+    // persisted facts, locks price versions and creates revision 1 atomically.
+    // Internal settlement keeps its existing create-time quote behavior.
     for (const item of items) {
       assertOrderQuantity(item.quantity, item.name);
     }
-    const settlementType = settlementTypeForOrderCreator(actor.role);
     const customerPartyId = input.customerPartyId ?? null;
     if (customerPartyId) {
       const customer = await txClient.party.findUnique({
@@ -387,30 +520,17 @@ export async function createOrder(
         throw new OrderInvariantError('所选往来单位不是客户');
       }
     }
-    let quotes: Awaited<ReturnType<typeof quoteOrderItems>>;
-    try {
-      quotes = await quoteOrderItems(items, settlementType, now, tx);
-    } catch (error) {
-      if (error instanceof QuoteCatalogInvariantError) {
-        throw new OrderInvariantError(error.message);
+    let quotes: Awaited<ReturnType<typeof quoteOrderItems>> | null = null;
+    if (!isExternalSalesDraft) {
+      try {
+        quotes = await quoteOrderItems(items, settlementType, now, tx);
+      } catch (error) {
+        if (error instanceof QuoteCatalogInvariantError) {
+          throw new OrderInvariantError(error.message);
+        }
+        throw error;
       }
-      throw error;
     }
-    const packagingQuote =
-      settlementType === OrderSettlementType.EXTERNAL_SALES &&
-      packagingGroups.length > 0
-        ? await quoteOrderPackagingGroups(
-            packagingGroups.map((group, index) => ({
-              groupKey: String(index + 1),
-              mode: group.mode,
-              actualBagCount: group.actualBagCount,
-            })),
-            settlementType,
-            now,
-            tx,
-            { snapshotLockHeld: true },
-          )
-        : null;
 
     // (4) product FK check — one batch findMany over the distinct ids
     // (was per-item findUnique: a 10-item order paid up to 10 round
@@ -442,30 +562,29 @@ export async function createOrder(
 
     // (5) processing totals and per-shipment allocation facts.
     const itemsWithSubtotals = items.map((it, index) => {
-      const quote = quotes[index]!;
-      // External sales submit production facts only. Browser-supplied amounts
-      // are deliberately ignored at this trust boundary; a complete rule set
-      // is authoritative and an incomplete rule set is finalized only in the
-      // administrator pricing-review command.
-      const hasManualPrice =
-        settlementType !== OrderSettlementType.EXTERNAL_SALES &&
-        (it.unitPrice !== null || it.fixedFee != null);
+      if (isExternalSalesDraft) {
+        return {
+          ...it,
+          priceOverrideReason: null,
+          unitPrice: '0',
+          fixedFee: '0',
+          subtotal: '0.00',
+          suggestedSubtotal: null,
+          requiresAdminConfirmation: true,
+          pricingSnapshot: null,
+        };
+      }
+
+      const quote = quotes![index]!;
+      const hasManualPrice = it.unitPrice !== null || it.fixedFee != null;
       const unitPrice =
-        settlementType === OrderSettlementType.EXTERNAL_SALES
-          ? quote.complete
-            ? quote.suggestedUnitPrice
-            : '0'
-          : !hasManualPrice && quote.complete
-            ? quote.suggestedUnitPrice
-            : (it.unitPrice ?? '0');
+        !hasManualPrice && quote.complete
+          ? quote.suggestedUnitPrice
+          : (it.unitPrice ?? '0');
       const fixedFee =
-        settlementType === OrderSettlementType.EXTERNAL_SALES
-          ? quote.complete
-            ? quote.suggestedFixedFee
-            : '0'
-          : !hasManualPrice && quote.complete
-            ? quote.suggestedFixedFee
-            : (it.fixedFee ?? '0');
+        !hasManualPrice && quote.complete
+          ? quote.suggestedFixedFee
+          : (it.fixedFee ?? '0');
       if (unitPrice === null || fixedFee === null) {
         throw new OrderInvariantError(`款式“${it.name}”报价结果不完整`);
       }
@@ -475,14 +594,7 @@ export async function createOrder(
       if (!hasManualPrice && fatalQuoteError) {
         throw new OrderInvariantError(`款式“${it.name}”${fatalQuoteError}`);
       }
-      // External sales may save an incomplete calculation as a provisional
-      // DRAFT. Zero is a visible placeholder, never a confirmed customer price;
-      // the scheduling gate below this workflow refuses it until ADMIN review.
-      if (
-        settlementType !== OrderSettlementType.EXTERNAL_SALES &&
-        !quote.complete &&
-        !hasManualPrice
-      ) {
+      if (!quote.complete && !hasManualPrice) {
         const details = quote.errors.join('；');
         throw new OrderInvariantError(
           `款式“${it.name}”无法自动报价${details ? `：${details}` : ''}，请填写成交单价或一次性费用，并说明原因`,
@@ -515,7 +627,6 @@ export async function createOrder(
       // between per-piece and one-time charges. Reallocating those components
       // is an audited manual override even when the resulting subtotal matches.
       const priceDiffersFromSuggestion =
-        settlementType !== OrderSettlementType.EXTERNAL_SALES &&
         quote.complete &&
         (quote.suggestedUnitPrice === null ||
           quote.suggestedFixedFee === null ||
@@ -523,11 +634,8 @@ export async function createOrder(
           !new Decimal(unitPrice).equals(quote.suggestedUnitPrice) ||
           !new Decimal(fixedFee).equals(quote.suggestedFixedFee) ||
           !new Decimal(subtotal).equals(quote.suggestedSubtotal));
-      const requiresAdminConfirmation =
-        settlementType === OrderSettlementType.EXTERNAL_SALES &&
-        (!quote.complete || priceDiffersFromSuggestion);
+      const requiresAdminConfirmation = false;
       if (
-        settlementType !== OrderSettlementType.EXTERNAL_SALES &&
         (!quote.complete || priceDiffersFromSuggestion) &&
         !it.priceOverrideReason
       ) {
@@ -540,10 +648,7 @@ export async function createOrder(
       }
       return {
         ...it,
-        priceOverrideReason:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : it.priceOverrideReason,
+        priceOverrideReason: it.priceOverrideReason,
         unitPrice,
         fixedFee,
         subtotal,
@@ -559,10 +664,7 @@ export async function createOrder(
             unitPrice,
             fixedFee,
             subtotal,
-            overrideReason:
-              settlementType === OrderSettlementType.EXTERNAL_SALES
-                ? null
-                : it.priceOverrideReason ?? null,
+            overrideReason: it.priceOverrideReason ?? null,
             provisional: requiresAdminConfirmation,
           },
         } satisfies Prisma.InputJsonObject,
@@ -571,50 +673,17 @@ export async function createOrder(
     const itemProcessingAmount = sumTotals(
       itemsWithSubtotals.map((i) => i.subtotal),
     );
-    const packagingGroupsWithPrices = packagingGroups.map((group, index) => {
-      const quote = packagingQuote?.groups[index] ?? null;
-      const complete = Boolean(
-        quote?.complete &&
-          quote.suggestedUnitPrice !== null &&
-          quote.suggestedSubtotal !== null,
-      );
-      const unitPrice = complete ? quote!.suggestedUnitPrice! : '0.0000';
-      const subtotal = complete ? quote!.suggestedSubtotal! : '0.00';
-      assertStorableMoney(
-        unitPrice,
-        group.name?.trim() || `包装组 ${index + 1}`,
-        '每袋入袋费',
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      assertStorableMoney(
-        subtotal,
-        group.name?.trim() || `包装组 ${index + 1}`,
-        '入袋费小计',
-        DECIMAL_12_2_MAX,
-        2,
-      );
+    // Packaging composition and server-derived bag count are business facts.
+    // Its price remains blank until external submit finalization. Internal
+    // create behavior is unchanged: packaging was never quoted there.
+    const packagingGroupsWithPrices = packagingGroups.map((group) => {
       return {
         ...group,
-        unitPrice,
-        subtotal,
-        suggestedSubtotal: quote?.suggestedSubtotal ?? null,
-        complete,
-        pricingSnapshot: quote
-          ? ({
-              ...quote.snapshot,
-              source: complete
-                ? 'ORDER_CREATE_AUTO'
-                : 'ORDER_CREATE_PROVISIONAL',
-              quotedAt: now.toISOString(),
-              actual: {
-                unitPrice,
-                subtotal,
-                overrideReason: null,
-                provisional: !complete,
-              },
-            } satisfies Prisma.InputJsonObject)
-          : null,
+        unitPrice: '0.0000',
+        subtotal: '0.00',
+        suggestedSubtotal: null,
+        complete: false,
+        pricingSnapshot: null,
       };
     });
     const packagingAmount = sumTotals(
@@ -640,9 +709,9 @@ export async function createOrder(
         expressCode: input.expressCode,
         destinationProvince: input.destinationProvince ?? null,
         // External sales create orders from a browser and cannot establish a
-        // carrier billable weight. Only later administrator fulfilment
-        // commands may persist that trusted fact. Non-external domain callers
-        // keep their existing input shape for compatibility.
+        // carrier billable weight. The browser value is discarded here; only
+        // validated item/allocation facts are kept for the submit finalizer's
+        // server-owned weight policy. Non-external callers keep their shape.
         quotedWeightKg:
           settlementType === OrderSettlementType.EXTERNAL_SALES
             ? null
@@ -690,6 +759,9 @@ export async function createOrder(
             items: items.map((item, index) => ({
               itemKey: String(index + 1),
               quantity: item.quantity,
+              paperWeightGsm: item.paperWeightGsm,
+              paperType: item.paperType,
+              productStructure: item.productStructure,
             })),
             shipments: shipmentInputs.map((shipment, index) => ({
               shipmentKey: String(index + 1),
@@ -709,8 +781,6 @@ export async function createOrder(
 
     const suppliedCustomerChargeFacts = shipmentInputs.some(
       (shipment) =>
-        shipment.destinationProvince != null ||
-        shipment.quotedWeightKg != null ||
         shipment.shippingFee != null ||
         shipment.packingMaterialFee != null ||
         shipment.customerChargeOverrideReason != null,
@@ -724,49 +794,11 @@ export async function createOrder(
       );
     }
 
-    let resolvedCustomerCharges: Awaited<
-      ReturnType<typeof resolveExternalOrderChargesForProvisionalCreation>
-    > | null = null;
-    if (settlementType === OrderSettlementType.EXTERNAL_SALES) {
-      try {
-        resolvedCustomerCharges =
-          await resolveExternalOrderChargesForProvisionalCreation(
-          tx,
-          {
-            isSfCollect: input.isSfCollect,
-            shipments: (externalChargeShipments ?? []).map(
-              (shipment, index) => ({
-                ...shipment,
-                shippingFee: shipmentInputs[index]?.shippingFee ?? null,
-                packingMaterialFee:
-                  shipmentInputs[index]?.packingMaterialFee ?? null,
-                overrideReason:
-                  shipmentInputs[index]?.customerChargeOverrideReason ?? null,
-              }),
-            ),
-          },
-          now,
-          // quoteOrderItems above already acquired the same transaction-level
-          // snapshot lock. Avoid a redundant PostgreSQL round trip while
-          // keeping standalone logistics finalization self-locking.
-          { snapshotLockHeld: true },
-          );
-      } catch (error) {
-        if (error instanceof OrderCustomerChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
-    const totalAmount = new Decimal(processingAmount)
-      .plus(resolvedCustomerCharges?.totalAmount ?? 0)
-      .toFixed(2);
+    // No customer charge is materialized for an external DRAFT. The submit
+    // finalizer prices these persisted shipment/item facts under one snapshot.
+    const totalAmount = processingAmount;
     assertStorableOrderTotal(totalAmount);
-    const requiresAdminPricing =
-      settlementType === OrderSettlementType.EXTERNAL_SALES &&
-      (itemsWithSubtotals.some((item) => item.requiresAdminConfirmation) ||
-        Boolean(resolvedCustomerCharges?.requiresAdminConfirmation) ||
-        Boolean(packagingQuote?.requiresAdminConfirmation));
+    const requiresAdminPricing = isExternalSalesDraft;
     const pricingStatus = requiresAdminPricing
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
       : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
@@ -783,6 +815,8 @@ export async function createOrder(
         kind: OrderKind.NORMAL,
         billingMode: OrderBillingMode.CHARGE,
         settlementType,
+        clientSubmissionId: input.clientSubmissionId ?? null,
+        nextItemFig,
         isUrgent: input.isUrgent,
         isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
@@ -798,15 +832,17 @@ export async function createOrder(
         processingAmount,
         totalAmount,
         pricingStatus,
-        priceRevision: 1,
+        priceRevision: isExternalSalesDraft ? 0 : 1,
         pricingConfirmedAt: requiresAdminPricing ? null : now,
         pricingConfirmedById: null,
         items: {
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
+            fig: resolvedItemFigs[idx],
             name: it.name,
             productId: it.productId ?? null,
             pricingRoute: it.pricingRoute,
+            craft: canonicalCraftForPricingRoute(it.pricingRoute),
             productStructure: it.productStructure,
             artworkVersion: it.artworkVersion ?? null,
             plateGroupId: it.plateGroupId ?? null,
@@ -818,6 +854,12 @@ export async function createOrder(
             paperType: it.paperType ?? null,
             paperWeightGsm: it.paperWeightGsm,
             quantity: it.quantity,
+            pack:
+              it.pack ??
+              packagingGroupsWithPrices.find(
+                (group) => (group.itemUnitsPerBag[idx] ?? 0) > 0,
+              )?.itemUnitsPerBag[idx] ??
+              null,
             crafts: it.crafts,
             frontFoilColors: it.frontFoilColors,
             backFoilColors: it.backFoilColors,
@@ -832,8 +874,12 @@ export async function createOrder(
             unitPrice: it.unitPrice ?? '0',
             fixedFee: it.fixedFee ?? '0',
             subtotal: it.subtotal,
+            quoteDisposition: null,
+            quotedAmount: null,
             suggestedSubtotal: it.suggestedSubtotal,
-            pricingSnapshot: it.pricingSnapshot,
+            ...(it.pricingSnapshot === null
+              ? {}
+              : { pricingSnapshot: it.pricingSnapshot }),
             priceOverrideReason:
               settlementType === OrderSettlementType.EXTERNAL_SALES
                 ? null
@@ -868,7 +914,6 @@ export async function createOrder(
     const itemBySequence = new Map(
       created.items.map((item) => [item.sequence, item.id]),
     );
-    const shipmentIdByKey = new Map<string, string>();
     for (const [groupIndex, group] of packagingGroupsWithPrices.entries()) {
       const createdGroup = await txClient.orderPackagingGroup.create({
         data: {
@@ -923,7 +968,6 @@ export async function createOrder(
         },
         select: { id: true },
       });
-      shipmentIdByKey.set(String(shipmentIndex + 1), createdShipment.id);
       const lines = shipment.itemQuantities.flatMap((quantity, itemIndex) => {
         if (quantity <= 0) return [];
         const orderItemId = itemBySequence.get(itemIndex + 1);
@@ -939,116 +983,118 @@ export async function createOrder(
       }
     }
 
-    if (resolvedCustomerCharges) {
-      await txClient.orderCustomerCharge.createMany({
-        data: resolvedCustomerCharges.charges.map((charge) => {
-          const shipmentId = shipmentIdByKey.get(charge.shipmentKey);
-          if (!shipmentId) {
-            throw new OrderInvariantError(
-              `创建对客收费时找不到发货地址 ${charge.shipmentKey}`,
-            );
-          }
-          const finalized = charge.status === 'WAIVED';
-          return {
-            orderId: created.id,
-            shipmentId,
-            categoryId: charge.categoryId,
-            priceBookId: charge.priceBookId,
-            sourceRuleId: charge.sourceRuleId,
-            businessKey: charge.businessKey,
-            status: charge.status,
-            description: charge.description,
-            quantity: charge.quantity,
-            unit: charge.unit,
-            suggestedAmount: charge.suggestedAmount,
-            amount: charge.amount,
-            pricingSnapshot: charge.pricingSnapshot,
-            overrideReason: charge.overrideReason,
-            createdById: actor.id,
-            finalizedById: finalized ? actor.id : null,
-            finalizedAt: finalized ? now : null,
-          };
-        }),
-      });
-    }
-
-    await txClient.orderPricingRevision.create({
-      data: {
-        orderId: created.id,
-        revision: 1,
-        status: pricingStatus,
-        source: requiresAdminPricing
-          ? 'ORDER_CREATED_PROVISIONAL'
-          : 'ORDER_CREATED_AUTO',
-        createdById: actor.id,
-        createdAt: now,
-        snapshot: {
-          version: 2,
+    if (!isExternalSalesDraft) {
+      await txClient.orderPricingRevision.create({
+        data: {
+          orderId: created.id,
+          revision: 1,
+          status: pricingStatus,
           source: requiresAdminPricing
             ? 'ORDER_CREATED_PROVISIONAL'
             : 'ORDER_CREATED_AUTO',
-          pricedAt: now.toISOString(),
-          order: {
-            id: created.id,
-            orderNo: created.orderNo,
-            settlementType,
-            pricingStatus,
-            priceRevision: 1,
-            packagingAmount,
-            processingAmount,
-            totalAmount,
+          createdById: actor.id,
+          createdAt: now,
+          snapshot: {
+            version: 2,
+            source: requiresAdminPricing
+              ? 'ORDER_CREATED_PROVISIONAL'
+              : 'ORDER_CREATED_AUTO',
+            pricedAt: now.toISOString(),
+            order: {
+              id: created.id,
+              orderNo: created.orderNo,
+              settlementType,
+              pricingStatus,
+              priceRevision: 1,
+              packagingAmount,
+              processingAmount,
+              totalAmount,
+            },
+            items: itemsWithSubtotals.map((item, index) => ({
+              id: created.items[index]?.id ?? null,
+              sequence: index + 1,
+              fig: resolvedItemFigs[index],
+              name: item.name,
+              pricingRoute: item.pricingRoute,
+              craft: canonicalCraftForPricingRoute(item.pricingRoute),
+              pack:
+                item.pack ??
+                packagingGroupsWithPrices.find(
+                  (group) => (group.itemUnitsPerBag[index] ?? 0) > 0,
+                )?.itemUnitsPerBag[index] ??
+                null,
+              manualQuoteReason: item.manualQuoteReason ?? null,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              fixedFee: item.fixedFee,
+              subtotal: item.subtotal,
+              suggestedSubtotal: item.suggestedSubtotal,
+              priceOverrideReason: item.priceOverrideReason ?? null,
+              requiresAdminConfirmation: item.requiresAdminConfirmation,
+              pricingSnapshot: item.pricingSnapshot,
+            })),
+            packagingGroups: packagingGroupsWithPrices.map((group, index) => ({
+              sequence: index + 1,
+              name: group.name ?? null,
+              mode: group.mode,
+              actualBagCount: group.actualBagCount,
+              itemUnitsPerBag: [...group.itemUnitsPerBag],
+              unitPrice: group.unitPrice,
+              subtotal: group.subtotal,
+              suggestedSubtotal: group.suggestedSubtotal,
+              priceOverrideReason: null,
+              requiresAdminConfirmation: !group.complete,
+              pricingSnapshot: group.pricingSnapshot,
+            })),
+            customerCharges: [],
           },
-          items: itemsWithSubtotals.map((item, index) => ({
-            id: created.items[index]?.id ?? null,
-            sequence: index + 1,
-            name: item.name,
-            pricingRoute: item.pricingRoute,
-            manualQuoteReason: item.manualQuoteReason ?? null,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            fixedFee: item.fixedFee,
-            subtotal: item.subtotal,
-            suggestedSubtotal: item.suggestedSubtotal,
-            priceOverrideReason: item.priceOverrideReason ?? null,
-            requiresAdminConfirmation: item.requiresAdminConfirmation,
-            pricingSnapshot: item.pricingSnapshot,
-          })),
-          packagingGroups: packagingGroupsWithPrices.map((group, index) => ({
-            sequence: index + 1,
-            name: group.name ?? null,
-            mode: group.mode,
-            actualBagCount: group.actualBagCount,
-            itemUnitsPerBag: [...group.itemUnitsPerBag],
-            unitPrice: group.unitPrice,
-            subtotal: group.subtotal,
-            suggestedSubtotal: group.suggestedSubtotal,
-            priceOverrideReason: null,
-            requiresAdminConfirmation: !group.complete,
-            pricingSnapshot: group.pricingSnapshot,
-          })),
-          customerCharges:
-            resolvedCustomerCharges?.charges.map((charge) => ({
-              shipmentKey: charge.shipmentKey,
-              businessKey: charge.businessKey,
-              categoryCode: charge.categoryCode,
-              priceBookId: charge.priceBookId,
-              sourceRuleId: charge.sourceRuleId,
-              status: charge.status,
-              suggestedAmount: charge.suggestedAmount,
-              amount: charge.amount,
-              overrideReason: charge.overrideReason,
-              pricingSnapshot: charge.pricingSnapshot,
-            })) ?? [],
         },
-      },
-    });
+      });
+    }
 
     return {
       id: created.id,
       orderNo: created.orderNo,
       itemIds: created.items.map((item) => item.id),
+      pricingStatus,
     };
+  }, {
+    maxWait: 10_000,
+    timeout: 30_000,
   });
+
+  try {
+    return await createOnce();
+  } catch (error) {
+    if (
+      input.clientSubmissionId &&
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      const existing = await db.order.findUnique({
+        where: { clientSubmissionId: input.clientSubmissionId },
+        select: {
+          id: true,
+          orderNo: true,
+          submitterId: true,
+          pricingStatus: true,
+          items: {
+            select: { id: true },
+            orderBy: { sequence: 'asc' },
+          },
+        },
+      });
+      if (existing?.submitterId === actor.id) {
+        return {
+          id: existing.id,
+          orderNo: existing.orderNo,
+          itemIds: existing.items.map((item) => item.id),
+          pricingStatus: existing.pricingStatus,
+        };
+      }
+    }
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1181,9 +1227,13 @@ type TransitionOptions = {
   ) => Promise<void>;
 };
 
+type TransitionTarget =
+  | OrderStatus
+  | ((order: { settlementType: OrderSettlementType }) => OrderStatus);
+
 async function transitionWithLog(
   orderId: string,
-  target: OrderStatus,
+  target: TransitionTarget,
   actor: { id: string; role: Role },
   opts: TransitionOptions,
 ): Promise<{ id: string; status: OrderStatus }> {
@@ -1217,12 +1267,15 @@ async function transitionWithLog(
     if (!target_order) throw new OrderInvariantError('工单不存在');
 
     if (opts.authz) opts.authz(target_order);
+    const resolvedTarget =
+      typeof target === 'function' ? target(target_order) : target;
 
     // status-machine.ts throws InvalidOrderTransitionError on bad moves —
     // we let it propagate (action layer maps to a generic error result).
-    transitionOrder(target_order.status, target);
+    transitionOrder(target_order.status, resolvedTarget);
     if (
-      (target === OrderStatus.SHIPPED || target === OrderStatus.FINISHED) &&
+      (resolvedTarget === OrderStatus.SHIPPED ||
+        resolvedTarget === OrderStatus.FINISHED) &&
       target_order.pricingStatus ===
         ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
     ) {
@@ -1241,10 +1294,14 @@ async function transitionWithLog(
     const updated = await txClient.order.update({
       where: { id: orderId },
       data: {
-        status: target,
-        submittedAt: target === OrderStatus.SUBMITTED ? now : undefined,
-        shippedAt: target === OrderStatus.SHIPPED ? now : undefined,
-        finishedAt: target === OrderStatus.FINISHED ? now : undefined,
+        status: resolvedTarget,
+        submittedAt:
+          resolvedTarget === OrderStatus.SUBMITTED ||
+          resolvedTarget === OrderStatus.PENDING_FACTORY
+            ? now
+            : undefined,
+        shippedAt: resolvedTarget === OrderStatus.SHIPPED ? now : undefined,
+        finishedAt: resolvedTarget === OrderStatus.FINISHED ? now : undefined,
         // trackingNo flows through opts.extraData below if provided
         // (ship action sets it; other transitions don't touch it).
         ...(opts.extraData ?? {}),
@@ -1258,7 +1315,7 @@ async function transitionWithLog(
         operatorId: actor.id,
         action: 'STATUS_CHANGE',
         changedFields: {
-          status: { before: target_order.status, after: target },
+          status: { before: target_order.status, after: resolvedTarget },
         },
         remark: opts.remark,
       },
@@ -1274,9 +1331,27 @@ export async function submitOrder(
   orderId: string,
   actor: { id: string; role: Role },
   now: Date = new Date(),
-): Promise<{ id: string; status: OrderStatus }> {
+  expectedQuoteToken: string | null = null,
+): Promise<{
+  id: string;
+  status: OrderStatus;
+  quotedFee: string | null;
+  quotedFeeCompleteness: OrderQuotedFeeCompleteness | null;
+}> {
   let notificationsQueued = false;
-  const result = await transitionWithLog(orderId, OrderStatus.SUBMITTED, actor, {
+  const finalizedExternalQuote: {
+    current: Awaited<
+      ReturnType<typeof finalizeExternalOrderQuoteInTx>
+    > | null;
+  } = { current: null };
+  const result = await transitionWithLog(
+    orderId,
+    (order) =>
+      order.settlementType === OrderSettlementType.EXTERNAL_SALES
+        ? OrderStatus.PENDING_FACTORY
+        : OrderStatus.SUBMITTED,
+    actor,
+    {
     remark: '提交工单',
     now,
     authz: (order) => {
@@ -1297,7 +1372,6 @@ export async function submitOrder(
             '工单缺少收货人手机号，请先补全再提交',
           );
         }
-
       }
     },
     cascade: async (tx, lockedOrderId, lockedOrder) => {
@@ -1315,6 +1389,28 @@ export async function submitOrder(
           throw new OrderInvariantError(
             `第 ${itemWithoutImage.sequence} 款缺少设计图片，请上传后再提交`,
           );
+        }
+        try {
+          finalizedExternalQuote.current = await finalizeExternalOrderQuoteInTx(
+            prismaTx,
+            lockedOrderId,
+            actor.id,
+            now,
+            expectedQuoteToken,
+          );
+        } catch (error) {
+          if (error instanceof ExternalOrderQuoteChangedError) {
+            throw new OrderQuoteChangedError(
+              error.quoteToken,
+              error.quotedFee,
+              error.quotedFeeCompleteness,
+              error.message,
+            );
+          }
+          if (error instanceof ExternalOrderQuoteFinalizeError) {
+            throw new OrderInvariantError(error.message);
+          }
+          throw error;
         }
       }
 
@@ -1395,10 +1491,11 @@ export async function submitOrder(
         );
         notificationsQueued = notificationsQueued && urgentQueued;
       }
+      },
     },
-  });
+  );
 
-  // Slice C wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit）。
+  // Notification wire ─ ORDER_SUBMITTED + URGENT_ORDER（tx 已 commit）。
   // 生产只 await 快速入库，webhook 由 LIGHT worker 重试；dev/test
   // 降级到 Next `after()`。详见 lib/notification/dispatch.ts。
   const payload = notificationsQueued ? null : await db.order.findUnique({
@@ -1448,7 +1545,12 @@ export async function submitOrder(
     }
   }
 
-  return result;
+  return {
+    ...result,
+    quotedFee: finalizedExternalQuote.current?.quotedFee ?? null,
+    quotedFeeCompleteness:
+      finalizedExternalQuote.current?.quotedFeeCompleteness ?? null,
+  };
 }
 
 export async function cancelOrder(
@@ -1884,7 +1986,8 @@ export async function shipOrder(
                       ),
                   )
                   .reduce(
-                    (sum, charge) => sum.plus(charge.amount),
+                    (sum, charge) =>
+                      charge.amount === null ? sum : sum.plus(charge.amount),
                     new Decimal(0),
                   ),
               )
@@ -1958,10 +2061,10 @@ export async function shipOrder(
     },
   );
 
-  // Slice C wire ─ ORDER_SHIPPED（tx 已 commit；生产入持久化队列）。
+  // Notification wire ─ ORDER_SHIPPED（tx 已 commit；生产入持久化队列）。
   // **关键 null 映射**：events.ts:ORDER_SHIPPED.trackingNo 必填 string，
   // 如果传入 null/undefined，renderTemplate 会把 `{trackingNo}` 留成
-  // raw 字面量流到群消息（HANDOFF round 102 Slice C TODO）。这里映射
+  // raw 字面量流到群消息。这里映射
   // null → '未填'。
   const payload = notificationQueued ? null : await db.order.findUnique({
     where: { id: orderId },
@@ -2404,6 +2507,16 @@ export async function setOrderSfCollect(
       const chargeContext = await prismaTx.order.findUnique({
         where: { id: orderId },
         select: {
+          items: {
+            orderBy: { sequence: 'asc' },
+            select: {
+              id: true,
+              quantity: true,
+              paperWeightGsm: true,
+              paperType: true,
+              productStructure: true,
+            },
+          },
           shipments: {
             orderBy: { sequence: 'asc' },
             select: {
@@ -2412,7 +2525,7 @@ export async function setOrderSfCollect(
               status: true,
               destinationProvince: true,
               weightKg: true,
-              lines: { select: { quantity: true } },
+              lines: { select: { orderItemId: true, quantity: true } },
             },
           },
           customerCharges: {
@@ -2494,44 +2607,73 @@ export async function setOrderSfCollect(
         ReturnType<typeof resolveExternalOrderChargesForFinalization>
       >;
       try {
+        const shipmentChargeFacts = deriveExternalOrderChargeShipments({
+          isSfCollect,
+          items: chargeContext.items.map((item) => ({
+            itemKey: item.id,
+            quantity: item.quantity,
+            paperWeightGsm: item.paperWeightGsm,
+            paperType: item.paperType,
+            productStructure: item.productStructure,
+          })),
+          shipments: chargeContext.shipments.map((shipment) => {
+            const correction = correctionByShipmentId.get(shipment.id);
+            return {
+              shipmentKey: String(shipment.sequence),
+              province:
+                correction?.destinationProvince ??
+                shipment.destinationProvince,
+              // Browser quote fields are deliberately absent. An explicit
+              // administrator correction wins over the persisted actual;
+              // otherwise the shared calculator estimates from item facts.
+              billableWeightKg: isSfCollect
+                ? null
+                : correction?.weightKg ??
+                  shipment.weightKg?.toString() ??
+                  null,
+              itemQuantities: chargeContext.items.map((item) =>
+                shipment.lines.reduce(
+                  (sum, line) =>
+                    line.orderItemId === item.id
+                      ? sum + line.quantity
+                      : sum,
+                  0,
+                ),
+              ),
+            };
+          }),
+        });
+        const shipmentBySequence = new Map(
+          chargeContext.shipments.map((shipment) => [
+            String(shipment.sequence),
+            shipment,
+          ]),
+        );
         repriced = await resolveExternalOrderChargesForFinalization(
           prismaTx,
           {
             isSfCollect,
-            shipments: chargeContext.shipments.map((shipment) => {
+            shipments: shipmentChargeFacts.map((fact) => {
+              const shipment = shipmentBySequence.get(fact.shipmentKey);
+              if (!shipment) {
+                throw new OrderInvariantError(
+                  '物流计价事实与工单发货地址不一致',
+                );
+              }
               const packing = chargeByShipmentAndCategory.get(
                 `${shipment.id}:PACKING_MATERIAL`,
               );
               const correction = correctionByShipmentId.get(shipment.id);
-              // quotedWeightKg is a legacy browser-supplied estimate and is
-              // never a carrier-confirmed fulfilment fact. Only the actual
-              // shipment weight or an administrator correction may price
-              // freight.
-              const storedWeight = shipment.weightKg?.toString() ?? null;
-              const billableWeightKg = correction?.weightKg ?? storedWeight;
-              const allowProvisionalManual =
-                !isSfCollect &&
-                shipment.status !== ShipmentStatus.SHIPPED &&
-                !billableWeightKg;
               return {
-                shipmentKey: String(shipment.sequence),
-                province:
-                  correction?.destinationProvince ??
-                  shipment.destinationProvince,
-                billableWeightKg: isSfCollect ? null : billableWeightKg,
-                itemQuantity: shipment.lines.reduce(
-                  (sum, line) => sum + line.quantity,
-                  0,
-                ),
+                ...fact,
                 shippingFee: isSfCollect
                   ? '0.00'
-                  : correction?.shippingFee ??
-                    (allowProvisionalManual ? '0.00' : null),
-                packingMaterialFee: packing?.amount.toString() ?? null,
+                  : correction?.shippingFee ?? null,
+                packingMaterialFee: packing?.amount?.toString() ?? null,
                 overrideReason: isSfCollect
                   ? packing?.overrideReason ?? null
                   : correction?.customerChargeOverrideReason ??
-                    (allowProvisionalManual
+                    (shipment.status !== ShipmentStatus.SHIPPED
                       ? '取消顺丰到付，快递费待发货时确认'
                       : packing?.overrideReason ?? null),
               };
@@ -2539,6 +2681,10 @@ export async function setOrderSfCollect(
           },
           priceBookIds[0]!,
           chargeChangedAt,
+          {
+            allowPending:
+              !isSfCollect && order.status !== OrderStatus.SHIPPED,
+          },
         );
       } catch (error) {
         if (error instanceof OrderCustomerChargeError) {
@@ -2610,7 +2756,8 @@ export async function setOrderSfCollect(
             ),
         )
         .reduce(
-          (sum, charge) => sum.plus(charge.amount),
+          (sum, charge) =>
+            charge.amount === null ? sum : sum.plus(charge.amount),
           new Decimal(0),
         );
       if (isSfCollect) {
@@ -2619,7 +2766,8 @@ export async function setOrderSfCollect(
             (charge) => String(charge.category.code) !== 'SHIPPING_FEE',
           )
           .reduce(
-            (sum, charge) => sum.plus(charge.amount),
+            (sum, charge) =>
+              charge.amount === null ? sum : sum.plus(charge.amount),
             new Decimal(0),
           );
         nextTotalAmount = new Decimal(order.processingAmount)

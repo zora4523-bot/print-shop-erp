@@ -202,12 +202,16 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-4">
+    <form
+      onSubmit={handleSubmit}
+      aria-busy={pending}
+      className="min-w-0 space-y-4"
+    >
       <p className="text-xs text-muted-foreground">
         勾选要修改的款式；可改款式名、数量和正反面烫金颜色。已开工款式不能改数量。
         新增款式继承规格、纸张、工艺和计价参数。
       </p>
-      <fieldset className="space-y-3">
+      <fieldset className="min-w-0 space-y-3">
         <legend className="sr-only">选择并修改现有款式</legend>
         {items.map((item) => {
           const current = editable[item.id];
@@ -228,8 +232,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 </span>
               </label>
               {current.selected ? (
-                <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
-                  <label className="space-y-1 text-sm">
+                <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
+                  <label className="min-w-0 space-y-1 text-sm">
                     <span>款式名称</span>
                     <Input
                       value={current.displayName}
@@ -244,7 +248,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       }
                     />
                   </label>
-                  <label className="space-y-1 text-sm">
+                  <label className="min-w-0 space-y-1 text-sm">
                     <span>数量</span>
                     <Input
                       type="number"
@@ -260,13 +264,13 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       }
                     />
                   </label>
-                  <div className="space-y-1 text-sm">
+                  <div className="min-w-0 space-y-1 text-sm">
                     <span>规格</span>
-                    <p className="min-h-11 rounded-md border bg-muted/30 px-3 py-2.5">
+                    <p className="admin-wrap-anywhere min-h-11 min-w-0 rounded-md border bg-muted/30 px-3 py-2.5">
                       {current.displaySpecification || '未填'}
                     </p>
                   </div>
-                  <label className="space-y-1 text-sm">
+                  <label className="min-w-0 space-y-1 text-sm">
                     <span>正面烫金颜色（多个用顿号分隔）</span>
                     <Input
                       value={current.frontFoilColors}
@@ -279,7 +283,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       }
                     />
                   </label>
-                  <label className="space-y-1 text-sm">
+                  <label className="min-w-0 space-y-1 text-sm">
                     <span>反面烫金颜色（多个用顿号分隔）</span>
                     <Input
                       value={current.backFoilColors}
@@ -299,7 +303,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         })}
       </fieldset>
 
-      <fieldset className="rounded-lg border p-3">
+      <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
         <label className="flex min-h-11 items-center gap-3">
           <input
@@ -312,14 +316,14 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           <span className="text-sm">本次申请需要新增一款</span>
         </label>
         {addEnabled ? (
-          <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
-            <label className="space-y-1 text-sm">
+          <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
+            <label className="min-w-0 space-y-1 text-sm">
               <span>参考现有款式（继承规格、纸张、工艺和计价参数）</span>
               <select
                 value={templateItemId}
                 disabled={pending}
                 onChange={(event) => setTemplateItemId(event.target.value)}
-                className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+                className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -328,7 +332,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 ))}
               </select>
             </label>
-            <label className="space-y-1 text-sm">
+            <label className="min-w-0 space-y-1 text-sm">
               <span>新款式名称</span>
               <Input
                 value={newName}
@@ -338,7 +342,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 onChange={(event) => setNewName(event.target.value)}
               />
             </label>
-            <label className="space-y-1 text-sm">
+            <label className="min-w-0 space-y-1 text-sm">
               <span>数量</span>
               <Input
                 type="number"
@@ -350,7 +354,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 onChange={(event) => setNewQuantity(Number(event.target.value))}
               />
             </label>
-            <label className="space-y-1 text-sm sm:col-span-2">
+            <label className="min-w-0 space-y-1 text-sm lg:col-span-2">
               <span>正面烫金颜色（可多色）</span>
               <Input
                 value={newFrontFoilColors}
@@ -359,7 +363,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 onChange={(event) => setNewFrontFoilColors(event.target.value)}
               />
             </label>
-            <label className="space-y-1 text-sm sm:col-span-2">
+            <label className="min-w-0 space-y-1 text-sm lg:col-span-2">
               <span>反面烫金颜色（可多色）</span>
               <Input
                 value={newBackFoilColors}
@@ -372,7 +376,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         ) : null}
       </fieldset>
 
-      <label className="block space-y-1 text-sm">
+      <label className="block min-w-0 space-y-1 text-sm">
         <span className="font-medium">修改原因</span>
         <textarea
           value={reason}
@@ -381,7 +385,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           maxLength={500}
           required
           disabled={pending}
-          className="w-full rounded-md border bg-background px-3 py-2"
+          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
           placeholder="写明客户要求、交期影响等，方便管理员审核"
         />
       </label>

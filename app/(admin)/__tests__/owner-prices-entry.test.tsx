@@ -55,7 +55,7 @@ describe('internal direct-order pricing entry', () => {
     expect(listAdjustmentsMock).toHaveBeenCalledTimes(1);
   });
 
-  it('uses canonical rule-center links and collapses price rules by default', async () => {
+  it('uses canonical rule-center links and exposes price rules by default', async () => {
     const html = await renderToResolvedMarkup(
       await InternalPricingPage({ searchParams: Promise.resolve({}) }),
     );
@@ -84,10 +84,10 @@ describe('internal direct-order pricing entry', () => {
     expect(requirePermissionMock.mock.invocationCallOrder[0]).toBeLessThan(
       listAdjustmentsMock.mock.invocationCallOrder[0]!,
     );
-    const lowFrequencyDetails = html.match(/<details\b[^>]*>/)?.[0];
-    expect(lowFrequencyDetails).toBeDefined();
-    expect(lowFrequencyDetails).not.toMatch(/\sopen(?:=|\s|>)/);
-    expect(lowFrequencyDetails).toContain('group');
+    const priceRuleDetails = html.match(/<details\b[^>]*>/)?.[0];
+    expect(priceRuleDetails).toBeDefined();
+    expect(priceRuleDetails).toMatch(/\sopen=""/);
+    expect(priceRuleDetails).toContain('group');
     expect(html).toContain('min-h-11');
   });
 

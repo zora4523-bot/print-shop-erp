@@ -18,7 +18,7 @@ vi.mock('react', async (importOriginal) => {
 });
 
 vi.mock('@/actions/owner-products', () => ({
-  setProductActiveAction: vi.fn(),
+  setQuoteProductActiveAction: vi.fn(),
 }));
 
 import { ToggleActiveButton } from '../ToggleActiveButton';

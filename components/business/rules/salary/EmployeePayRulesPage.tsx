@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listSalaryRuleSettings } from '@/lib/salary/rule-admin';
 import { SalaryRuleSettingsForm } from '@/components/business/salary/SalaryRuleSettingsForm';
-import { PageHeader } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { buttonVariants } from '@/components/ui/button';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
@@ -22,8 +22,10 @@ export default async function EmployeePayRulesPage() {
   const rules = await listSalaryRuleSettings();
   return (
     <div className="space-y-6">
-      <PageHeader
+      <RuleCenterPageHeader
         title="员工工资规则"
+        effect="effective-dated"
+        subtitle="新版本按生效时间用于后续工资快照，不回算已结算记录。"
         actions={<Link href={RULE_CENTER_HREFS.workerPiecework} className={buttonVariants({ variant: 'outline' })}>师傅计件规则</Link>}
       />
       <section className="rounded-xl border bg-card p-5 shadow-sm">

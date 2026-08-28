@@ -79,9 +79,11 @@ export default async function OwnerBillDetailPage({
   const costingRows = bill.items.map((item) => {
     const costs = calculateOrderCostBreakdown(item.order);
     const customerChargeAmount = (categoryCode: string) =>
-      item.order.customerCharges
-        .filter((charge) => String(charge.category.code) === categoryCode)
-        .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+      summarizeCustomerCharges(
+        item.order.customerCharges.filter(
+          (charge) => String(charge.category.code) === categoryCode,
+        ),
+      );
     return {
       ...item,
       ...costs,
@@ -381,10 +383,10 @@ export default async function OwnerBillDetailPage({
                     {formatMoney(it.order.processingAmount)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {it.shippingReceivable.toFixed(2)}
+                    {formatCustomerChargeSummary(it.shippingReceivable)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
-                    ¥ {it.packingReceivable.toFixed(2)}
+                    {formatCustomerChargeSummary(it.packingReceivable)}
                   </td>
                   <td className="px-4 py-3 text-right font-sans font-medium tabular-nums">
                     {formatMoney(it.orderAmount)}
@@ -434,6 +436,32 @@ export default async function OwnerBillDetailPage({
       </Link>
     </div>
   );
+}
+
+type CustomerChargeAmount = {
+  amount: Decimal.Value | null;
+};
+
+function summarizeCustomerCharges(
+  charges: readonly CustomerChargeAmount[],
+): { knownAmount: Decimal; hasPendingAmount: boolean } {
+  return {
+    knownAmount: charges.reduce(
+      (sum, charge) =>
+        charge.amount === null ? sum : sum.plus(charge.amount),
+      new Decimal(0),
+    ),
+    hasPendingAmount: charges.some((charge) => charge.amount === null),
+  };
+}
+
+function formatCustomerChargeSummary(summary: {
+  knownAmount: Decimal;
+  hasPendingAmount: boolean;
+}): string {
+  if (!summary.hasPendingAmount) return `¥ ${summary.knownAmount.toFixed(2)}`;
+  if (summary.knownAmount.isZero()) return '待定';
+  return `¥ ${summary.knownAmount.toFixed(2)}（另有待定）`;
 }
 
 function Row({

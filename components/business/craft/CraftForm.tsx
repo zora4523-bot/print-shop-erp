@@ -11,6 +11,7 @@ import {
   MACHINE_TYPE_LABELS,
   WORKER_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 type EditInitial = {
   name: string;
@@ -21,7 +22,7 @@ type EditInitial = {
   isActive: boolean;
 };
 
-export type CraftRouteBase = '/owner/crafts' | '/owner/rules/crafts';
+export type CraftRouteBase = typeof RULE_CENTER_HREFS.crafts;
 
 type CommonProps = { routeBase?: CraftRouteBase };
 
@@ -70,7 +71,7 @@ export function CraftForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? '/owner/crafts';
+  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.crafts;
   const hasUnassignedFieldError = Object.entries(errs).some(
     ([field, messages]) =>
       ![
@@ -83,7 +84,6 @@ export function CraftForm(props: Props) {
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
-      <input type="hidden" name="routeBase" value={routeBase} />
       <TextField
         id="name"
         label="工艺名"

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   localOrderFormDraftStorageKey,
   parseLocalOrderFormDraft,
+  resolveNextOrderItemFig,
   serializeLocalOrderFormDraft,
 } from '../order-form-local-draft';
 
 function formValues() {
   return {
+    nextItemFig: 7,
     customerRef: '星河礼品',
     promisedDate: new Date('2026-09-01T00:00:00.000Z'),
     isUrgent: false,
@@ -86,6 +88,7 @@ describe('order form local draft', () => {
     const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
     expect(parsed?.savedAt).toBe('2026-08-24T03:00:00.000Z');
     expect(parsed?.values.promisedDate).toBe('2026-09-01');
+    expect(parsed?.values.nextItemFig).toBe(7);
     expect(parsed?.values.items).toEqual([
       expect.objectContaining({
         name: '外盒',
@@ -203,5 +206,20 @@ describe('order form local draft', () => {
     expect(localOrderFormDraftStorageKey('user/1', true)).not.toBe(
       localOrderFormDraftStorageKey('user/1', false),
     );
+  });
+
+  it('keeps a monotonic fig counter even after the highest card was deleted', () => {
+    expect(
+      resolveNextOrderItemFig({
+        nextItemFig: 8,
+        items: [{ fig: 1 }, { fig: 3 }],
+      }),
+    ).toBe(8);
+    expect(
+      resolveNextOrderItemFig({
+        nextItemFig: 2,
+        items: [{ fig: 1 }, { fig: 3 }],
+      }),
+    ).toBe(4);
   });
 });

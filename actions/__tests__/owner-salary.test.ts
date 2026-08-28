@@ -193,7 +193,7 @@ beforeEach(() => {
 });
 
 describe('createWorkerMachineSalaryRuleAction', () => {
-  it('refreshes both the legacy page and canonical rule-center workspace', async () => {
+  it('refreshes the canonical rule-center workspace', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     const input = {
       workerId: 'worker-1',
@@ -226,10 +226,10 @@ describe('createWorkerMachineSalaryRuleAction', () => {
       actor: ownerActor,
     });
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/salary/piecework-rules',
-    );
-    expect(revalidatePathMock).toHaveBeenCalledWith(
       RULE_CENTER_HREFS.workerPiecework,
+    );
+    expect(revalidatePathMock).not.toHaveBeenCalledWith(
+      '/owner/salary/piecework-rules',
     );
   });
 });

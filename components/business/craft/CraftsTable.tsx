@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { CraftSummary } from '@/lib/craft';
+import { isRetiredCraft } from '@/lib/rules/retired-catalog';
 import {
   Table,
   TableBody,
@@ -10,10 +11,11 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { machineTypeLabel, workerTypeLabel } from '@/lib/auth/role-labels';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export function CraftsTable({
   crafts,
-  editBase = '/owner/crafts',
+  editBase = RULE_CENTER_HREFS.crafts,
 }: {
   crafts: CraftSummary[];
   editBase?: string;
@@ -54,11 +56,16 @@ export function CraftsTable({
               {machineTypeLabel(c.defaultMachineType) || '—'}
             </TableCell>
             <TableCell>
-              {c.isActive ? (
-                <Badge variant="outline">启用</Badge>
-              ) : (
-                <Badge variant="secondary">停用</Badge>
-              )}
+              <div className="flex flex-wrap gap-1">
+                {c.isActive ? (
+                  <Badge variant="outline">启用</Badge>
+                ) : (
+                  <Badge variant="secondary">停用</Badge>
+                )}
+                {isRetiredCraft(c) ? (
+                  <Badge variant="secondary">历史 / 已退役</Badge>
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <Link

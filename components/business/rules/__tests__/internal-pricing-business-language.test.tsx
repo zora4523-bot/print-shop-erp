@@ -17,6 +17,7 @@ const {
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: requirePermissionMock,
 }));
+vi.mock('@/lib/auth/session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/craft', () => ({ listCrafts: listCraftsMock }));
 vi.mock('@/lib/product', () => ({
   listProductOptions: listProductOptionsMock,

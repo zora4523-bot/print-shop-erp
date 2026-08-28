@@ -180,7 +180,10 @@ export async function listPieceworkRuleManagementData(now = new Date()) {
         role: Role.WORKER,
         workerType: WorkerType.MACHINE,
         isActive: true,
-        machineType: { not: null },
+        OR: [
+          { machineType: { not: null } },
+          { machineCapabilities: { isEmpty: false } },
+        ],
       },
       orderBy: { displayName: 'asc' },
       select: {
