@@ -103,6 +103,8 @@ export type OrderFormBProps = {
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
   afterShipping?: ReactNode;
+  allowManualWeight?: boolean;
+  allowCustomSize?: boolean;
   items: CreateOrderInput['items'];
   itemFields: readonly { id: string }[];
   activeIndex: number;
@@ -764,6 +766,8 @@ export function OrderFormB({
   pricingExtras,
   shippingExtras,
   afterShipping,
+  allowManualWeight = true,
+  allowCustomSize = true,
   items,
   itemFields,
   activeIndex,
@@ -1175,8 +1179,9 @@ export function OrderFormB({
                 error={itemErrors?.weight}
                 onChange={onWeightChange}
               />
-              {item.pricingRoute ===
-              OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
+              {allowManualWeight &&
+              item.pricingRoute ===
+                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
                 <div className="mt-2">
                   <div className="flex max-w-[11rem] items-center gap-2">
                     <Input
@@ -1225,8 +1230,9 @@ export function OrderFormB({
                   迷你封仅珠光纸艳闪可做
                 </p>
               ) : null}
-              {item.pricingRoute ===
-              OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
+              {allowCustomSize &&
+              item.pricingRoute ===
+                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
                 <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.8125rem] font-semibold">
                   <input
                     type="checkbox"

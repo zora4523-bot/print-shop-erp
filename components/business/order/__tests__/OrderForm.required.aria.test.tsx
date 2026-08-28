@@ -133,7 +133,29 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(html).toContain('内部结算');
     expect(html).toContain('id="customerRef"');
     expect(html).toContain('id="expressCode"');
+    expect(html).toContain('id="items.0.manualQuoteReason"');
+    expect(html).toContain('配置外项目说明（转人工核价）');
+    expect(html).toContain('id="items.0.artworkVersion"');
+    expect(html).toContain('id="items.0.plateGroupId"');
+    expect(html).toContain('id="items.0.remark"');
     expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
+  });
+
+  it('内部建单不再渲染报价 SKU、动态材料或创建页人工价格控件', () => {
+    const html = render(false);
+
+    expect(html).not.toContain('报价产品');
+    expect(html).not.toContain('自定义规格');
+    expect(html).not.toContain('自定义纸张');
+    expect(html).not.toContain('手动输入克重');
+    expect(html).not.toContain('改尺寸（转管理员终价）');
+    expect(html).not.toContain('id="items.0.unitPrice"');
+    expect(html).not.toContain('id="items.0.fixedFee"');
+    expect(html).not.toContain('id="items.0.priceOverrideReason"');
+    expect(html).not.toContain('成交单价');
+    expect(html).not.toContain('一次性费用');
+    expect(html).not.toContain('人工改价说明');
+    expect(html).not.toMatch(/<button[^>]*>\s*重新核价\s*<\/button>/u);
   });
 
   it('外部销售表单不渲染任何手工价格或物流金额控件', () => {

@@ -17,7 +17,6 @@ import {
   type SubmitHandler,
 } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import Decimal from 'decimal.js';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -114,9 +113,6 @@ import { calculatePackagingBagCount } from '@/lib/order/packaging-bag-count';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 import {
   catalogPricingFactChoices,
-  inferCatalogProductStructure,
-  parseCatalogDimensions,
-  parseCatalogPaperWeight,
 } from '@/lib/order/catalog-pricing-facts';
 import {
   shouldProtectOrderFormLeave,
@@ -180,13 +176,6 @@ type ExternalCreateOrderQuoteViewState = {
 type QuoteFacts = Parameters<typeof quoteFactsKey>[0];
 
 type OrderCreationIntent = 'draft' | 'submit';
-
-const PRODUCT_STRUCTURE_LABELS: Record<OrderProductStructure, string> = {
-  [OrderProductStructure.UNSPECIFIED]: '未明确',
-  [OrderProductStructure.STANDARD_ENVELOPE]: '普通封',
-  [OrderProductStructure.WESTERN_ENVELOPE]: '西封',
-  [OrderProductStructure.TEN_THOUSAND_ENVELOPE]: '万元封',
-};
 
 const LAMINATION_LABELS: Record<OrderLamination, string> = {
   [OrderLamination.NONE]: '不覆膜',
@@ -785,40 +774,6 @@ function orderItemQuoteFacts(
   };
 }
 
-function quoteAmountMatches(
-  actual: string | null | undefined,
-  suggested: string | null,
-  scale: number,
-): boolean {
-  const trimmed = actual?.trim() ?? '';
-  if (trimmed === '') return suggested === null;
-  if (!/^\d{1,10}(?:\.\d{1,4})?$/.test(trimmed) || suggested === null) {
-    return false;
-  }
-  return Number(trimmed).toFixed(scale) === Number(suggested).toFixed(scale);
-}
-
-function hasAmount(value: string | null | undefined): boolean {
-  return Boolean(value?.trim());
-}
-
-function internalOrderItemAmount(
-  item: CreateOrderInput['items'][number] | undefined,
-): string | null {
-  if (!item || (!hasAmount(item.unitPrice) && !hasAmount(item.fixedFee))) {
-    return null;
-  }
-  try {
-    return new Decimal(item.unitPrice || 0)
-      .mul(item.quantity)
-      .plus(item.fixedFee || 0)
-      .toDecimalPlaces(2)
-      .toFixed(2);
-  } catch {
-    return null;
-  }
-}
-
 function formatLocalDraftTime(savedAt: string): string {
   const date = new Date(savedAt);
   if (Number.isNaN(date.getTime())) return '时间未知';
@@ -1353,21 +1308,19 @@ export function OrderForm({
     startSubmit(async () => {
       const submittedData: CreateOrderInput = {
         ...data,
-        items: data.items.map((item) => {
-          const normalizedItem = {
-            ...item,
-            manualQuoteReason: null,
-          };
-          return usesExternalSalesPricing
-            ? {
-                ...normalizedItem,
-                unitPrice: null,
-                fixedFee: null,
-                suggestedSubtotal: null,
-                priceOverrideReason: null,
-              }
-            : normalizedItem;
-        }),
+        items: data.items.map((item) => ({
+          ...item,
+          // Prices are always server-owned on the create screen. Internal
+          // operators may only describe an out-of-catalog item; the factory
+          // confirmation step records the confirmed amount later.
+          manualQuoteReason: usesExternalSalesPricing
+            ? null
+            : item.manualQuoteReason,
+          unitPrice: null,
+          fixedFee: null,
+          suggestedSubtotal: null,
+          priceOverrideReason: null,
+        })),
         destinationProvince: data.isSfCollect ? null : data.destinationProvince,
         quotedWeightKg: data.isSfCollect ? null : data.quotedWeightKg,
         shippingFee: null,
@@ -1819,10 +1772,11 @@ export function OrderForm({
         artworkVersion: current.artworkVersion,
         plateGroupId: current.plateGroupId,
         pricingGroup: current.pricingGroup,
-        unitPrice: current.unitPrice,
-        fixedFee: current.fixedFee,
-        suggestedSubtotal: current.suggestedSubtotal,
-        priceOverrideReason: current.priceOverrideReason,
+        manualQuoteReason: current.manualQuoteReason,
+        unitPrice: null,
+        fixedFee: null,
+        suggestedSubtotal: null,
+        priceOverrideReason: null,
         remark: current.remark,
       },
       { shouldDirty: true, shouldValidate: true },
@@ -2108,11 +2062,6 @@ export function OrderForm({
           );
           return;
         }
-        const factsStillCurrent =
-          quoteFactsKey(
-            getValues(`items.${index}`),
-            getValues('items').length,
-          ) === inputKey;
         if (response.status === 'success') {
           const result = response.items[0];
           if (!result) {
@@ -2125,28 +2074,8 @@ export function OrderForm({
               ...current,
               [fieldId]: { inputKey, result },
             }));
-            if (
-              result.complete &&
-              factsStillCurrent &&
-              !usesExternalSalesPricing
-            ) {
-              setValue(`items.${index}.unitPrice`, result.suggestedUnitPrice, {
-                shouldDirty: true,
-                shouldValidate: true,
-              });
-              setValue(`items.${index}.fixedFee`, result.suggestedFixedFee, {
-                shouldDirty: true,
-                shouldValidate: true,
-              });
-              setValue(
-                `items.${index}.suggestedSubtotal`,
-                result.suggestedSubtotal,
-                {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                },
-              );
-            }
+            // A preview may populate display state, but it never writes money
+            // back into the creation payload. Final amounts are server-owned.
           }
         } else {
           const error =
@@ -2165,7 +2094,7 @@ export function OrderForm({
         }
       });
     },
-    [getValues, setValue, startQuote, usesExternalSalesPricing],
+    [getValues, startQuote],
   );
 
   const currentLogisticsQuoteInput = useCallback(() => {
@@ -2587,22 +2516,9 @@ export function OrderForm({
       quoteStatus = 'incomplete';
     }
 
-    const completeQuote = quoteStatus === 'complete' ? view?.result : undefined;
-    const manualPriceProvided =
-      hasAmount(item.unitPrice) || hasAmount(item.fixedFee);
-    const priceOverrideRequired = completeQuote
-      ? !quoteAmountMatches(
-          item.unitPrice,
-          completeQuote.suggestedUnitPrice,
-          4,
-        ) ||
-        !quoteAmountMatches(item.fixedFee, completeQuote.suggestedFixedFee, 2)
-      : manualPriceProvided;
     return {
       ...item,
       quoteStatus,
-      manualPriceProvided,
-      priceOverrideRequired,
     };
   });
 
@@ -2649,17 +2565,8 @@ export function OrderForm({
     const current =
       view?.inputKey === quoteFactsKey(watchedItems[index], watchedItems.length);
     const result = current ? view?.result : undefined;
-    const manualPriceResolved =
-      !usesExternalSalesPricing &&
-      item.manualPriceProvided &&
-      Boolean(item.priceOverrideReason?.trim());
-    const manualAmount = manualPriceResolved
-      ? internalOrderItemAmount(watchedItems[index])
-      : null;
-    const effectiveStatus =
-      manualPriceResolved && manualAmount !== null
-        ? ('complete' as const)
-        : item.quoteStatus;
+    const manualPricingRequested =
+      !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
     return {
       key: fieldId,
       label:
@@ -2667,21 +2574,13 @@ export function OrderForm({
         ORDER_PRICING_ROUTE_LABELS[
           watchedItems[index]?.pricingRoute ?? OrderItemPricingRoute.STOCK_BLANK
         ],
-      status: effectiveStatus,
+      status: manualPricingRequested ? 'incomplete' : item.quoteStatus,
       amount:
-        manualAmount ??
-        (item.quoteStatus === 'complete'
+        !manualPricingRequested && item.quoteStatus === 'complete'
           ? (result?.suggestedSubtotal ?? null)
-          : null),
+          : null,
       components:
-        manualAmount !== null
-          ? [
-              {
-                label: '人工成交金额',
-                amount: manualAmount,
-              },
-            ]
-          : item.quoteStatus === 'complete'
+        !manualPricingRequested && item.quoteStatus === 'complete'
             ? (result?.components ?? []).map((component) => ({
                 label: externalQuoteComponentLabel(
                   watchedItems[index] ?? item,
@@ -2691,7 +2590,9 @@ export function OrderForm({
               }))
             : [],
       message:
-        item.quoteStatus === 'error'
+        manualPricingRequested
+          ? `配置外项目：${item.manualQuoteReason?.trim()}`
+          : item.quoteStatus === 'error'
           ? view?.error
           : item.quoteStatus === 'incomplete'
             ? result?.errors.join('；')
@@ -3120,15 +3021,6 @@ export function OrderForm({
         : undefined,
     items: externalItemErrors,
   };
-  const activeItemField = itemsArray.fields[expandedItem];
-  const activeQuoteView = activeItemField
-    ? quoteViews[activeItemField.id]
-    : undefined;
-  const activeQuoteIsStale = Boolean(
-    activeQuoteView &&
-      activeQuoteView.inputKey !==
-        quoteFactsKey(watchedItems[expandedItem], watchedItems.length),
-  );
   if (usesExternalSalesPricing && submittedOrder) {
     return (
       <OrderSubmissionSuccess
@@ -3315,214 +3207,6 @@ export function OrderForm({
                     />
                   </div>
                   <div>
-                    <Label htmlFor={`items.${expandedItem}.productId`}>
-                      报价产品
-                    </Label>
-                    <select
-                      id={`items.${expandedItem}.productId`}
-                      className={`${selectClass} mt-2`}
-                      {...register(`items.${expandedItem}.productId`, {
-                        setValueAs: (value) => (value === '' ? null : value),
-                        onChange: (event) => {
-                          const product = products.find(
-                            (candidate) => candidate.id === event.target.value,
-                          );
-                          const specificationChoices = catalogPricingFactChoices(
-                            product?.specification,
-                          );
-                          const paperChoices = catalogPricingFactChoices(
-                            product?.paperType,
-                          );
-                          const specification =
-                            specificationChoices.length === 1
-                              ? (specificationChoices[0] ?? null)
-                              : null;
-                          const paperType =
-                            paperChoices.length === 1
-                              ? (paperChoices[0] ?? null)
-                              : null;
-                          const dimensions = parseCatalogDimensions(specification);
-                          const options = {
-                            shouldDirty: true,
-                            shouldValidate: true,
-                          } as const;
-                          if (product && !getValues(`items.${expandedItem}.name`)?.trim()) {
-                            setValue(`items.${expandedItem}.name`, product.name, options);
-                          }
-                          setValue(
-                            `items.${expandedItem}.specification`,
-                            specification,
-                            options,
-                          );
-                          setValue(
-                            `items.${expandedItem}.paperType`,
-                            paperType,
-                            options,
-                          );
-                          setValue(
-                            `items.${expandedItem}.actualWidthMm`,
-                            dimensions?.widthMm ?? null,
-                            options,
-                          );
-                          setValue(
-                            `items.${expandedItem}.actualHeightMm`,
-                            dimensions?.heightMm ?? null,
-                            options,
-                          );
-                          setValue(
-                            `items.${expandedItem}.paperWeightGsm`,
-                            parseCatalogPaperWeight(paperType),
-                            options,
-                          );
-                          setValue(
-                            `items.${expandedItem}.productStructure`,
-                            inferCatalogProductStructure(specification),
-                            options,
-                          );
-                        },
-                      })}
-                    >
-                      <option value="">— 请选择 —</option>
-                      {products
-                        .filter((product) =>
-                          productCategoryMatchesPricingRoute(
-                            watchedItems[expandedItem]?.pricingRoute ??
-                              OrderItemPricingRoute.STOCK_BLANK,
-                            product.category,
-                          ),
-                        )
-                        .map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {product.name}
-                          </option>
-                        ))}
-                    </select>
-                    {errors.items?.[expandedItem]?.productId?.message ? (
-                      <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                        {errors.items[expandedItem]?.productId?.message}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="min-[560px]:col-span-2 border-t pt-4">
-                    <p className="text-[0.6875rem] font-extrabold tracking-[0.18em] text-muted-foreground">
-                      内部生产参数 · 非标时填写
-                    </p>
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.productStructure`}>
-                      产品结构
-                    </Label>
-                    <select
-                      id={`items.${expandedItem}.productStructure`}
-                      className={`${selectClass} mt-2`}
-                      {...register(`items.${expandedItem}.productStructure`)}
-                    >
-                      {Object.values(OrderProductStructure).map((structure) => (
-                        <option key={structure} value={structure}>
-                          {PRODUCT_STRUCTURE_LABELS[structure]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.specification`}>
-                      自定义规格
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.specification`}
-                      className="mt-2 h-10"
-                      placeholder="例如：9.5 × 17.2 cm、客户来样"
-                      {...register(`items.${expandedItem}.specification`, {
-                        onChange: (event) => {
-                          const specification = event.target.value || null;
-                          const dimensions = parseCatalogDimensions(specification);
-                          setValue(
-                            `items.${expandedItem}.actualWidthMm`,
-                            dimensions?.widthMm ?? null,
-                            { shouldDirty: true, shouldValidate: true },
-                          );
-                          setValue(
-                            `items.${expandedItem}.actualHeightMm`,
-                            dimensions?.heightMm ?? null,
-                            { shouldDirty: true, shouldValidate: true },
-                          );
-                          setValue(
-                            `items.${expandedItem}.productStructure`,
-                            inferCatalogProductStructure(specification),
-                            { shouldDirty: true, shouldValidate: true },
-                          );
-                        },
-                      })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.paperType`}>
-                      自定义纸张
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.paperType`}
-                      className="mt-2 h-10"
-                      placeholder="输入材料字典中尚未配置的纸张"
-                      {...register(`items.${expandedItem}.paperType`, {
-                        onChange: (event) => {
-                          setValue(
-                            `items.${expandedItem}.paperWeightGsm`,
-                            parseCatalogPaperWeight(event.target.value),
-                            { shouldDirty: true, shouldValidate: true },
-                          );
-                        },
-                      })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.paperWeightGsm`}>
-                      纸张克重（g㎡）
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.paperWeightGsm`}
-                      type="number"
-                      min={1}
-                      step={1}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.paperWeightGsm`, {
-                        setValueAs: (value) =>
-                          value === '' ? null : Number(value),
-                      })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.actualWidthMm`}>
-                      实际宽度（mm）
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.actualWidthMm`}
-                      type="number"
-                      min={0.01}
-                      step={0.01}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.actualWidthMm`, {
-                        setValueAs: (value) =>
-                          value === '' ? null : Number(value),
-                      })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`items.${expandedItem}.actualHeightMm`}>
-                      实际高度（mm）
-                    </Label>
-                    <Input
-                      id={`items.${expandedItem}.actualHeightMm`}
-                      type="number"
-                      min={0.01}
-                      step={0.01}
-                      className="mt-2 h-10"
-                      {...register(`items.${expandedItem}.actualHeightMm`, {
-                        setValueAs: (value) =>
-                          value === '' ? null : Number(value),
-                      })}
-                    />
-                  </div>
-                  <div>
                     <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
                       稿件版本
                     </Label>
@@ -3558,101 +3242,26 @@ export function OrderForm({
             pricingExtras={
               !usesExternalSalesPricing ? (
                 <section
-                  aria-label="加工费报价"
+                  aria-label="内部生产信息"
                   className="mt-[1.125rem] border-t pt-[1.125rem]"
                 >
-                  <div className="mb-3.5 flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-[0.6875rem] font-extrabold tracking-[0.2em] text-muted-foreground">
-                        加工费报价
-                      </h2>
-                      <p className="mt-1.5 text-xs font-semibold text-muted-foreground">
-                        {quoting && quotingFieldId === activeItemField?.id
-                          ? '正在核价…'
-                          : activeQuoteIsStale
-                            ? '报价条件已变化，正在重新核价'
-                            : activeQuoteView?.error
-                              ? activeQuoteView.error
-                              : activeQuoteView?.result?.complete
-                                ? `系统建议小计 ¥${activeQuoteView.result.suggestedSubtotal ?? '—'}`
-                                : activeQuoteView?.result
-                                  ? activeQuoteView.result.errors.join('；')
-                                  : '系统会自动核价；规则不完整时可填人工成交价。'}
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={
-                        !activeItemField ||
-                        submitting ||
-                        uploading ||
-                        Boolean(createdDraft) ||
-                        (quoting && quotingFieldId === activeItemField.id)
-                      }
-                      onClick={() => {
-                        if (activeItemField) {
-                          calculateAndApplyQuote(expandedItem, activeItemField.id);
-                        }
-                      }}
-                    >
-                      {quoting && quotingFieldId === activeItemField?.id
-                        ? '计算中…'
-                        : '重新核价'}
-                    </Button>
-                  </div>
                   <div className="grid min-w-0 grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.unitPrice`}>
-                        成交单价
-                      </Label>
-                      <Input
-                        id={`items.${expandedItem}.unitPrice`}
-                        inputMode="decimal"
-                        className="mt-2 h-10"
-                        aria-invalid={Boolean(errors.items?.[expandedItem]?.unitPrice)}
-                        {...register(`items.${expandedItem}.unitPrice`, {
-                          setValueAs: (value) => (value === '' ? null : value),
-                        })}
-                      />
-                      {errors.items?.[expandedItem]?.unitPrice?.message ? (
-                        <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                          {errors.items[expandedItem]?.unitPrice?.message}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.fixedFee`}>
-                        一次性费用
-                      </Label>
-                      <Input
-                        id={`items.${expandedItem}.fixedFee`}
-                        inputMode="decimal"
-                        className="mt-2 h-10"
-                        aria-invalid={Boolean(errors.items?.[expandedItem]?.fixedFee)}
-                        {...register(`items.${expandedItem}.fixedFee`, {
-                          setValueAs: (value) => (value === '' ? null : value),
-                        })}
-                      />
-                      {errors.items?.[expandedItem]?.fixedFee?.message ? (
-                        <p role="alert" className="mt-1.5 text-xs font-semibold text-destructive">
-                          {errors.items[expandedItem]?.fixedFee?.message}
-                        </p>
-                      ) : null}
-                    </div>
                     <div className="min-[560px]:col-span-2">
-                      <Label htmlFor={`items.${expandedItem}.priceOverrideReason`}>
-                        人工改价说明
+                      <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
+                        配置外项目说明（转人工核价）
                       </Label>
                       <Textarea
-                        id={`items.${expandedItem}.priceOverrideReason`}
-                        className="mt-2 min-h-16"
-                        placeholder="成交价与建议价不同，或规则不完整时必填"
+                        id={`items.${expandedItem}.manualQuoteReason`}
+                        className="mt-2 min-h-20"
+                        placeholder="仅当规则配置里没有所需纸张、规格或工艺时填写；请记录完整客需，金额由工厂确认时录入"
                         aria-invalid={Boolean(
-                          errors.items?.[expandedItem]?.priceOverrideReason,
+                          errors.items?.[expandedItem]?.manualQuoteReason,
                         )}
-                        {...register(`items.${expandedItem}.priceOverrideReason`)}
+                        {...register(`items.${expandedItem}.manualQuoteReason`)}
                       />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        不会在创建页录入人工单价；填写后该款式进入工厂人工核价。
+                      </p>
                     </div>
                     <div className="min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.remark`}>
@@ -3964,9 +3573,9 @@ export function OrderForm({
             paperKey={activeExternalPaper?.key ?? null}
             weightOptions={externalWeightOptions}
             specificationOptions={externalSpecificationOptions}
-            foilOptions={
-              usesExternalSalesPricing ? externalFoilOptions : undefined
-            }
+            foilOptions={externalCreateOrderOptions ? externalFoilOptions : undefined}
+            allowManualWeight={usesExternalSalesPricing}
+            allowCustomSize={usesExternalSalesPricing}
             disabled={
               !localDraftReady ||
               submitting ||

@@ -204,6 +204,34 @@ describe('new-order pricing route schema', () => {
     }
   });
 
+  it('uses one internal note to admit missing catalog facts without adding a fourth route', () => {
+    const configurationOutside = item({
+      productId: null,
+      paperType: null,
+      crafts: [],
+      manualQuoteReason: '客户来样纸与特殊击凸未进入规则配置',
+    });
+
+    const created = createOrderSchema.safeParse(
+      order({ items: [configurationOutside] }),
+    );
+    const previewed = quoteOrderItemsSchema.safeParse({
+      items: [configurationOutside],
+    });
+
+    expect(created.success).toBe(true);
+    expect(previewed.success).toBe(true);
+    if (created.success) {
+      expect(created.data.items[0]).toMatchObject({
+        pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+        productId: null,
+        paperType: null,
+        crafts: [],
+        manualQuoteReason: '客户来样纸与特殊击凸未进入规则配置',
+      });
+    }
+  });
+
   it('requires stock local foil facts without turning them into a fourth route', () => {
     const invalid = createOrderSchema.safeParse(
       order({

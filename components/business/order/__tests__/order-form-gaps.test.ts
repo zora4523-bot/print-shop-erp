@@ -16,9 +16,7 @@ function input(overrides: Partial<OrderFormGapInput> = {}): OrderFormGapInput {
         quantity: 8000,
         crafts: ['foil'],
         quoteStatus: 'complete',
-        manualPriceProvided: true,
-        priceOverrideReason: null,
-        priceOverrideRequired: false,
+        manualQuoteReason: null,
       },
     ],
     shipping: {
@@ -64,7 +62,7 @@ describe('collectOrderFormGaps', () => {
     );
     expect(gaps.map((gap) => gap.label)).toEqual([
       '款式 #1 未填名称',
-      '款式 #1 未选工艺',
+      '款式 #1 未匹配工艺配置，请填写配置外说明',
       '款式 #2 数量无效',
     ]);
     expect(gaps[0]?.fieldId).toBe('items.0.name');
@@ -74,7 +72,7 @@ describe('collectOrderFormGaps', () => {
     expect(collectOrderFormGaps(input())).toEqual([]);
   });
 
-  it('covers customer, deadline, product, quote and manual override reason', () => {
+  it('points missing catalog/quote facts at the configuration-outside note', () => {
     const gaps = collectOrderFormGaps(
       input({
         customerRef: '',
@@ -87,9 +85,7 @@ describe('collectOrderFormGaps', () => {
             quantity: 8000,
             crafts: ['foil'],
             quoteStatus: 'stale',
-            manualPriceProvided: true,
-            priceOverrideRequired: true,
-            priceOverrideReason: '',
+            manualQuoteReason: '',
           },
         ],
       }),
@@ -100,8 +96,28 @@ describe('collectOrderFormGaps', () => {
       'promised-date',
       'item-0-product',
       'item-0-quote',
-      'item-0-price-reason',
     ]);
+    expect(gaps.at(-1)?.fieldId).toBe('items.0.manualQuoteReason');
+  });
+
+  it('allows an internal configuration-outside note to route missing facts to manual pricing', () => {
+    expect(
+      collectOrderFormGaps(
+        input({
+          items: [
+            {
+              name: '客户来样',
+              productId: null,
+              paperType: null,
+              quantity: 8000,
+              crafts: [],
+              quoteStatus: 'incomplete',
+              manualQuoteReason: '客户来样纸与特殊击凸尚未配置',
+            },
+          ],
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('keeps external-sales logistics fact gaps without requiring charge amounts', () => {
@@ -143,9 +159,7 @@ describe('collectOrderFormGaps', () => {
             quantity: 8000,
             crafts: ['foil'],
             quoteStatus: 'incomplete',
-            manualPriceProvided: false,
-            priceOverrideRequired: true,
-            priceOverrideReason: '',
+            manualQuoteReason: null,
           },
         ],
         shipping: {

@@ -54,6 +54,7 @@ export const EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS = {
     'quotedAmount',
     'quoteDisposition',
     'priceOverrideReason',
+    'manualQuoteReason',
   ],
   shipment: [
     'weightKg',

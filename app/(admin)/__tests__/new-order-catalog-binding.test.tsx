@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProductCategory, Role } from '@/generated/prisma/enums';
 
 const {
-  activeProductsMock,
   externalBootstrapMock,
   listCraftsMock,
   listCustomersMock,
@@ -11,7 +10,6 @@ const {
   redirectMock,
   requireSessionMock,
 } = vi.hoisted(() => ({
-  activeProductsMock: vi.fn(),
   externalBootstrapMock: vi.fn(),
   listCraftsMock: vi.fn(),
   listCustomersMock: vi.fn(),
@@ -23,9 +21,6 @@ const {
 vi.mock('@/lib/auth/session', () => ({ requireSession: requireSessionMock }));
 vi.mock('@/lib/craft', () => ({
   listActiveCraftOrderOptions: listCraftsMock,
-}));
-vi.mock('@/lib/product', () => ({
-  listActiveProductOrderOptions: activeProductsMock,
 }));
 vi.mock('@/lib/order/create-order-bootstrap', () => ({
   loadExternalCreateOrderBootstrap: externalBootstrapMock,
@@ -54,20 +49,10 @@ describe('new-order price catalog binding', () => {
       paperType: '160g珠光艳闪',
     },
   ];
-  const unreferencedProducts = [
-    {
-      ...currentPriceBookProducts[0],
-      id: 'unreferenced-product',
-      code: 'EXT-UNREFERENCED',
-      name: '未被当前价目引用',
-    },
-  ];
-
   beforeEach(() => {
     vi.clearAllMocks();
     listCraftsMock.mockResolvedValue([]);
     listCustomersMock.mockResolvedValue([]);
-    activeProductsMock.mockResolvedValue(unreferencedProducts);
     externalBootstrapMock.mockResolvedValue({
       options: {
         products: currentPriceBookProducts,
@@ -90,7 +75,6 @@ describe('new-order price catalog binding', () => {
     renderToStaticMarkup(await NewOrderPage());
 
     expect(externalBootstrapMock).toHaveBeenCalledOnce();
-    expect(activeProductsMock).not.toHaveBeenCalled();
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         products: currentPriceBookProducts,
@@ -106,19 +90,25 @@ describe('new-order price catalog binding', () => {
     );
   });
 
-  it('工厂直单继续使用全部启用产品', async () => {
+  it('工厂直单与外部销售使用同一已发布配置快照', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
     });
 
     renderToStaticMarkup(await NewOrderPage());
 
-    expect(activeProductsMock).toHaveBeenCalledOnce();
-    expect(externalBootstrapMock).not.toHaveBeenCalled();
+    expect(externalBootstrapMock).toHaveBeenCalledOnce();
     expect(orderFormPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        products: unreferencedProducts,
+        products: currentPriceBookProducts,
         settlementType: 'FACTORY_DIRECT',
+        externalCreateOrderOptions: expect.objectContaining({
+          products: currentPriceBookProducts,
+        }),
+        initialExternalPriceSnapshot: expect.objectContaining({
+          processing: expect.objectContaining({ version: 2 }),
+          logistics: expect.objectContaining({ version: 3 }),
+        }),
       }),
     );
   });

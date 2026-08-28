@@ -1548,7 +1548,6 @@ const orderItemBaseSchema = z.object({
   ).optional(),
   crafts: z
     .array(craftIdSchema)
-    .min(1, '至少选择一项工艺')
     .max(10, '单款式工艺不超过 10 项'),
   frontFoilColors: orderItemFoilSideColorsField.default([]),
   backFoilColors: orderItemFoilSideColorsField.default([]),
@@ -1592,6 +1591,7 @@ type OrderItemPricingFactsForValidation = Pick<
   | 'productId'
   | 'pricingRoute'
   | 'paperType'
+  | 'crafts'
   | 'actualWidthMm'
   | 'actualHeightMm'
   | 'frontFoilColors'
@@ -1602,7 +1602,9 @@ type OrderItemPricingFactsForValidation = Pick<
   | 'lamination'
   | 'printColors'
   | 'isDoubleSided'
->;
+> & {
+  manualQuoteReason?: string | null;
+};
 
 function validateOrderItemPricingFacts(
   item: OrderItemPricingFactsForValidation,
@@ -1625,18 +1627,26 @@ function validateOrderItemPricingFacts(
     });
   }
 
-  if (!item.productId) {
+  const manualPricingRequested = Boolean(item.manualQuoteReason?.trim());
+  if (!item.productId && !manualPricingRequested) {
     ctx.addIssue({
       code: 'custom',
       path: ['productId'],
       message: '自动计价路线必须选择精确的报价产品',
     });
   }
-  if (!item.paperType) {
+  if (!item.paperType && !manualPricingRequested) {
     ctx.addIssue({
       code: 'custom',
       path: ['paperType'],
       message: '请选择标准纸张或填写自定义纸张',
+    });
+  }
+  if (item.crafts.length === 0 && !manualPricingRequested) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['crafts'],
+      message: '至少选择一项工艺',
     });
   }
 
@@ -1781,6 +1791,7 @@ export const orderItemPricingFactsSchema = orderItemBaseSchema
     productId: true,
     pricingRoute: true,
     paperType: true,
+    crafts: true,
     actualWidthMm: true,
     actualHeightMm: true,
     frontFoilColors: true,

@@ -23,9 +23,7 @@ export type OrderFormGapItem = {
   quantity?: number | null;
   crafts?: string[] | null;
   quoteStatus?: OrderFormQuoteStatus;
-  manualPriceProvided?: boolean;
-  priceOverrideReason?: string | null;
-  priceOverrideRequired?: boolean;
+  manualQuoteReason?: string | null;
 };
 
 export type OrderFormGapShipment = {
@@ -108,6 +106,8 @@ export function collectOrderFormGaps(
 
   input.items.forEach((item, index) => {
     const n = index + 1;
+    const manualPricingRequested =
+      !usesExternalSalesPricing && hasText(item.manualQuoteReason);
     if (!hasText(item.name)) {
       gaps.push({
         id: `item-${index}-name`,
@@ -117,22 +117,22 @@ export function collectOrderFormGaps(
         fieldId: `items.${index}.name`,
       });
     }
-    if (!hasText(item.productId)) {
+    if (!hasText(item.productId) && !manualPricingRequested) {
       gaps.push({
         id: `item-${index}-product`,
         step: 'items',
         itemIndex: index,
-        label: `款式 #${n} 未选报价产品`,
-        fieldId: `items.${index}.productId`,
+        label: `款式 #${n} 未匹配规则配置，请填写配置外说明`,
+        fieldId: `items.${index}.manualQuoteReason`,
       });
     }
-    if (!hasText(item.paperType)) {
+    if (!hasText(item.paperType) && !manualPricingRequested) {
       gaps.push({
         id: `item-${index}-paper`,
         step: 'items',
         itemIndex: index,
-        label: `款式 #${n} 未选择纸张`,
-        fieldId: `items.${index}.paperType`,
+        label: `款式 #${n} 未匹配纸张配置，请填写配置外说明`,
+        fieldId: `items.${index}.manualQuoteReason`,
       });
     }
     if (!Number.isInteger(item.quantity) || (item.quantity ?? 0) < 1) {
@@ -144,40 +144,28 @@ export function collectOrderFormGaps(
         fieldId: `items.${index}.quantity`,
       });
     }
-    if (!item.crafts || item.crafts.length === 0) {
+    if ((!item.crafts || item.crafts.length === 0) && !manualPricingRequested) {
       gaps.push({
         id: `item-${index}-crafts`,
         step: 'items',
         itemIndex: index,
-        label: `款式 #${n} 未选工艺`,
-        fieldId: `items.${index}.crafts`,
+        label: `款式 #${n} 未匹配工艺配置，请填写配置外说明`,
+        fieldId: `items.${index}.manualQuoteReason`,
       });
     }
 
-    // External sales submit production/quote facts only. The server ignores
-    // browser-supplied amounts and routes an incomplete calculation to the
-    // administrator pricing review, so asking the salesperson for a manual
-    // price or override reason here would point at controls that are hidden.
-    if (!usesExternalSalesPricing) {
-      const hasReason = hasText(item.priceOverrideReason);
-      const manualQuoteResolved = item.manualPriceProvided && hasReason;
-      if (item.quoteStatus !== 'complete' && !manualQuoteResolved) {
+    // Internal operators can describe a configuration that is absent from the
+    // published catalog. The note deliberately resolves only create-form
+    // readiness: the resulting order still requires factory price confirmation.
+    if (!usesExternalSalesPricing && !manualPricingRequested) {
+      if (item.quoteStatus !== 'complete') {
         const stateLabel = quoteGapLabel(item.quoteStatus);
         gaps.push({
           id: `item-${index}-quote`,
           step: 'items',
           itemIndex: index,
           label: `款式 #${n} ${stateLabel}`,
-          fieldId: `items.${index}.quote`,
-        });
-      }
-      if (item.priceOverrideRequired && !hasReason) {
-        gaps.push({
-          id: `item-${index}-price-reason`,
-          step: 'items',
-          itemIndex: index,
-          label: `款式 #${n} 缺少人工改价说明`,
-          fieldId: `items.${index}.priceOverrideReason`,
+          fieldId: `items.${index}.manualQuoteReason`,
         });
       }
     }

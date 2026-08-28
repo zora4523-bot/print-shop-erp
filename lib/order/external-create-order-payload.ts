@@ -26,6 +26,7 @@ export const EXTERNAL_CREATE_PAYLOAD_SERVER_OWNED_FIELDS = {
     'quotedAmount',
     'quoteDisposition',
     'priceOverrideReason',
+    'manualQuoteReason',
   ],
   shipment: [
     'weightKg',

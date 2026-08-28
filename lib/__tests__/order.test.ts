@@ -649,6 +649,63 @@ describe('createOrder', () => {
     });
   });
 
+  it('内部配置外项目只保存说明并进入工厂人工核价', async () => {
+    const result = await createOrder(
+      {
+        customerRef: '客户来样',
+        receiverName: '王小姐',
+        receiverPhone: '13800000000',
+        receiverAddress: '广东佛山测试收货地址',
+        expressCode: null,
+        packageRequirement: null,
+        remark: null,
+        promisedDate: null,
+        isUrgent: false,
+        isSfCollect: false,
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
+        items: [
+          baseItem({
+            pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+            productId: null,
+            paperType: null,
+            crafts: [],
+            manualQuoteReason: '  客户来样纸与特殊击凸未进入规则配置  ',
+            unitPrice: null,
+            fixedFee: null,
+            priceOverrideReason: null,
+          }),
+        ],
+      },
+      ownerActor,
+      new Date('2026-08-28T09:00:00+08:00'),
+    );
+
+    expect(result.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
+      processingAmount: '0.00',
+      totalAmount: '0.00',
+      pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+      pricingConfirmedAt: null,
+      items: {
+        create: [
+          expect.objectContaining({
+            productId: null,
+            paperType: null,
+            crafts: [],
+            manualQuoteReason: '客户来样纸与特殊击凸未进入规则配置',
+            unitPrice: '0',
+            fixedFee: '0',
+            subtotal: '0.00',
+            quoteDisposition: 'MANUAL_PRICING_REQUIRED',
+            priceOverrideReason: null,
+          }),
+        ],
+      },
+    });
+  });
+
   it('在服务边界拒绝没有任何包装组的外部销售工单', async () => {
     await expect(
       createOrder(

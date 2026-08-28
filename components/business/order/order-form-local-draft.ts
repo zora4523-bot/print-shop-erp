@@ -63,12 +63,7 @@ const ITEM_FACT_KEYS = [
   'remark',
 ] as const;
 
-const ITEM_INTERNAL_PRICE_KEYS = [
-  'unitPrice',
-  'fixedFee',
-  'suggestedSubtotal',
-  'priceOverrideReason',
-] as const;
+const ITEM_INTERNAL_FACT_KEYS = ['manualQuoteReason'] as const;
 
 const PACKAGING_GROUP_VALUE_KEYS = [
   'name',
@@ -160,13 +155,13 @@ export function sanitizeOrderFormDraftValues(
   if (!Array.isArray(value.packagingGroups)) return null;
   const packagingGroupValues = value.packagingGroups as unknown[];
 
-  const includeInternalPrices = pricingScope === 'internal';
+  const includeInternalFacts = pricingScope === 'internal';
   const root = pickValues(value, ROOT_FACT_KEYS);
   if (!root) return null;
   const items = value.items.map((item, itemIndex) => {
     const picked = pickValues(item, [
       ...ITEM_FACT_KEYS,
-      ...(includeInternalPrices ? ITEM_INTERNAL_PRICE_KEYS : []),
+      ...(includeInternalFacts ? ITEM_INTERNAL_FACT_KEYS : []),
     ]);
     if (
       !picked ||

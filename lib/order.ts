@@ -7,6 +7,7 @@ import {
   OrderCustomerChargeStatus,
   OrderCostCategory,
   OrderKind,
+  OrderItemQuoteDisposition,
   OrderQuotedFeeCompleteness,
   OrderSettlementType,
   OrderStatus,
@@ -570,6 +571,23 @@ export async function createOrder(
           fixedFee: '0',
           subtotal: '0.00',
           suggestedSubtotal: null,
+          quoteDisposition: null,
+          requiresAdminConfirmation: true,
+          pricingSnapshot: null,
+        };
+      }
+
+      if (it.manualQuoteReason?.trim()) {
+        return {
+          ...it,
+          manualQuoteReason: it.manualQuoteReason.trim(),
+          priceOverrideReason: null,
+          unitPrice: '0',
+          fixedFee: '0',
+          subtotal: '0.00',
+          suggestedSubtotal: null,
+          quoteDisposition:
+            OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
           requiresAdminConfirmation: true,
           pricingSnapshot: null,
         };
@@ -653,6 +671,7 @@ export async function createOrder(
         fixedFee,
         subtotal,
         suggestedSubtotal: quote.suggestedSubtotal,
+        quoteDisposition: null,
         requiresAdminConfirmation,
         pricingSnapshot: {
           ...quote.snapshot,
@@ -798,7 +817,9 @@ export async function createOrder(
     // finalizer prices these persisted shipment/item facts under one snapshot.
     const totalAmount = processingAmount;
     assertStorableOrderTotal(totalAmount);
-    const requiresAdminPricing = isExternalSalesDraft;
+    const requiresAdminPricing =
+      isExternalSalesDraft ||
+      itemsWithSubtotals.some((item) => item.requiresAdminConfirmation);
     const pricingStatus = requiresAdminPricing
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
       : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
@@ -874,7 +895,7 @@ export async function createOrder(
             unitPrice: it.unitPrice ?? '0',
             fixedFee: it.fixedFee ?? '0',
             subtotal: it.subtotal,
-            quoteDisposition: null,
+            quoteDisposition: it.quoteDisposition,
             quotedAmount: null,
             suggestedSubtotal: it.suggestedSubtotal,
             ...(it.pricingSnapshot === null
@@ -1028,6 +1049,7 @@ export async function createOrder(
               unitPrice: item.unitPrice,
               fixedFee: item.fixedFee,
               subtotal: item.subtotal,
+              quoteDisposition: item.quoteDisposition,
               suggestedSubtotal: item.suggestedSubtotal,
               priceOverrideReason: item.priceOverrideReason ?? null,
               requiresAdminConfirmation: item.requiresAdminConfirmation,

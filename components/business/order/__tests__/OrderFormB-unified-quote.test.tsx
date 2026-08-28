@@ -158,7 +158,7 @@ describe('OrderForm B unified external-sales quote', () => {
     expect(orderFormSource).toContain('<OrderFormB');
     expect(orderFormSource).not.toContain('<OrderFormC');
     expect(orderFormSource).toContain(
-      'usesExternalSalesPricing ? externalFoilOptions : undefined',
+      'externalCreateOrderOptions ? externalFoilOptions : undefined',
     );
   });
 

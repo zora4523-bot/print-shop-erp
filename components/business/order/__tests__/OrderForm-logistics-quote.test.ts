@@ -173,15 +173,17 @@ describe('unified create-order quote request gate', () => {
 });
 
 describe('OrderForm processing quote concurrency', () => {
-  it('rejects an older request and never applies a response to changed facts', () => {
+  it('rejects an older request and never writes preview money into create fields', () => {
     expect(source).toContain(
       'latestQuoteRequestByField.current[fieldId] !== requestId',
     );
-    expect(source).toContain(
-      "getValues('items').length,",
-    );
     expect(source).toContain('if (!sameRow) {');
-    expect(source).toMatch(/result\.complete\s*&&\s*factsStillCurrent/);
+    expect(source).not.toContain(
+      'setValue(`items.${index}.unitPrice`, result.suggestedUnitPrice',
+    );
+    expect(source).not.toContain(
+      'setValue(`items.${index}.fixedFee`, result.suggestedFixedFee',
+    );
   });
 
   it('invalidates all dependent quotes and immediately saves structural changes', () => {
@@ -196,10 +198,13 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain('onRemove={(index) => {');
   });
 
-  it('offers only B business routes and clears any historical manual reason', () => {
+  it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
     expect(formBSource).toContain('options={ROUTE_OPTIONS}');
     expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
-    expect(source).toContain('manualQuoteReason: null');
+    expect(source).toContain(
+      'manualQuoteReason: usesExternalSalesPricing',
+    );
+    expect(source).toContain(': item.manualQuoteReason');
   });
 });
 

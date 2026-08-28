@@ -1,10 +1,7 @@
 import { redirect } from 'next/navigation';
-import { OrderSettlementType, Role } from '../../../../generated/prisma/enums';
+import { Role } from '../../../../generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
 import { listActiveCraftOrderOptions } from '@/lib/craft';
-import {
-  listActiveProductOrderOptions,
-} from '@/lib/product';
 import { listCustomerPartyOptions } from '@/lib/party';
 import { OrderForm } from '@/components/business/order/OrderForm';
 import {
@@ -26,32 +23,26 @@ export default async function NewOrderPage() {
   if (!canCreate) redirect('/orders');
 
   const settlementType = settlementTypeForOrderCreator(user.role);
-  const usesExternalSalesPricing =
-    settlementType === OrderSettlementType.EXTERNAL_SALES;
-  const [crafts, customers, externalBootstrap, internalProducts] =
-    await Promise.all([
+  const [crafts, customers, createOrderBootstrap] = await Promise.all([
     listActiveCraftOrderOptions(),
     listCustomerPartyOptions(),
-    usesExternalSalesPricing
-      ? loadExternalCreateOrderBootstrap()
-      : Promise.resolve(null),
-    usesExternalSalesPricing
-      ? Promise.resolve([])
-      : listActiveProductOrderOptions(),
+    // Every chargeable create path uses the same published catalog snapshot.
+    // Role changes who may request manual pricing, not which paper/spec/craft
+    // dictionary the form renders.
+    loadExternalCreateOrderBootstrap(),
   ]);
-  const products = externalBootstrap?.options.products ?? internalProducts;
 
   return (
     <div className="space-y-4">
       <OrderForm
         draftScope={user.id}
         crafts={crafts}
-        products={products}
+        products={createOrderBootstrap.options.products}
         customers={customers}
         settlementLabel={ORDER_SETTLEMENT_LABELS[settlementType]}
         settlementType={settlementType}
-        externalCreateOrderOptions={externalBootstrap?.options}
-        initialExternalPriceSnapshot={externalBootstrap?.priceSnapshot}
+        externalCreateOrderOptions={createOrderBootstrap.options}
+        initialExternalPriceSnapshot={createOrderBootstrap.priceSnapshot}
       />
     </div>
   );

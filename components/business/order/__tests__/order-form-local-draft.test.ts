@@ -86,6 +86,9 @@ describe('order form local draft', () => {
     expect(serialized).not.toContain('pendingDesigns');
     expect(serialized).not.toContain('designFile');
     const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
+    const internalItem = (
+      parsed?.values.items as Array<Record<string, unknown>>
+    )[0];
     expect(parsed?.savedAt).toBe('2026-08-24T03:00:00.000Z');
     expect(parsed?.values.promisedDate).toBe('2026-09-01');
     expect(parsed?.values.nextItemFig).toBe(7);
@@ -108,10 +111,7 @@ describe('order form local draft', () => {
         foilTechnique: 'FLAT',
         hasLocalFoil: true,
         printColors: ['C', 'M'],
-        unitPrice: '0.2500',
-        fixedFee: '20.00',
-        suggestedSubtotal: '2020.00',
-        priceOverrideReason: '旧人工改价',
+        manualQuoteReason: '已切回自动路线的旧原因',
       }),
     ]);
     expect(parsed?.values.packagingGroups).toEqual([
@@ -125,6 +125,10 @@ describe('order form local draft', () => {
     expect(parsed?.values).not.toHaveProperty('shippingFee');
     expect(parsed?.values).not.toHaveProperty('packingMaterialFee');
     expect(parsed?.values).not.toHaveProperty('customerChargeOverrideReason');
+    expect(internalItem).not.toHaveProperty('unitPrice');
+    expect(internalItem).not.toHaveProperty('fixedFee');
+    expect(internalItem).not.toHaveProperty('suggestedSubtotal');
+    expect(internalItem).not.toHaveProperty('priceOverrideReason');
     expect(
       (parsed?.values.additionalShipments as Array<Record<string, unknown>>)[0],
     ).not.toHaveProperty('shippingFee');
