@@ -1,4 +1,5 @@
 import { OrderSettlementType } from '../../generated/prisma/enums';
+import type { Prisma } from '../../generated/prisma/client';
 import type {
   QuoteExternalOrderChargesInput,
   QuoteOrderItemsInput,
@@ -10,14 +11,21 @@ import {
   type ExternalOrderChargeQuote,
 } from '../price/external-order-charges';
 import { calculateCreateOrderQuote } from '../price/create-order';
-import type { CreateOrderQuoteInput as PureCreateOrderQuoteInput } from '../price/create-order/types';
+import type {
+  CreateOrderPriceSnapshot,
+  CreateOrderPriceVersionBundle,
+  CreateOrderQuoteInput as PureCreateOrderQuoteInput,
+} from '../price/create-order/types';
 import {
   buildCreateOrderQuoteInputFromCatalog,
   CreateOrderQuoteFactsAdapterError,
+  type CreateOrderQuoteFactsAdapterInput,
 } from './create-order-quote-facts-adapter';
 import {
+  type CreateOrderProcessingPresentation,
   type CreateOrderQuotePresentation,
   presentCreateOrderQuote,
+  presentCreateOrderProcessingQuote,
 } from './create-order-quote-presentation';
 import { createExternalOrderQuoteToken } from './create-order-quote-token';
 import {
@@ -44,6 +52,32 @@ export type CreateOrderQuoteInput = {
 
 export type CreateOrderQuoteResult = CreateOrderQuotePresentation;
 export type { CreateOrderItemQuotePreview } from './create-order-quote-presentation';
+
+export type InternalCreateOrderQuoteInput = {
+  factsKey: string;
+  settlementType:
+    | typeof OrderSettlementType.INTERNAL_SALES
+    | typeof OrderSettlementType.FACTORY_DIRECT;
+  items: CreateOrderQuoteItemInput[];
+  orderItemCount: number;
+  packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
+};
+
+export type InternalCreateOrderQuoteResult =
+  CreateOrderProcessingPresentation & {
+    factsKey: string;
+    priceVersion: CreateOrderPriceVersionBundle;
+    knownTotal: string;
+    total: string | null;
+    hasManualPricing: boolean;
+    totalSemantics: 'COMPLETE' | 'EXCLUDES_MANUAL_ITEMS';
+    plateFee: {
+      status: 'PENDING';
+      amount: null;
+      displayAmount: '待定';
+      label: '制版费';
+    };
+  };
 
 export class CreateOrderQuoteError extends Error {
   constructor(message: string) {
@@ -127,6 +161,61 @@ function shipmentFacts(input: CreateOrderQuoteInput) {
   }));
 }
 
+export type CatalogCreateOrderQuoteCalculation = {
+  input: PureCreateOrderQuoteInput;
+  snapshot: CreateOrderPriceSnapshot;
+  quote: ReturnType<typeof calculateCreateOrderQuote>;
+  processing: CreateOrderProcessingPresentation;
+};
+
+/**
+ * Shared transactional IO boundary. It reads one published version pair,
+ * resolves catalog authority, then hands immutable data to the pure engine.
+ */
+export async function calculateCreateOrderQuoteFromCatalogInTx(
+  tx: Prisma.TransactionClient,
+  args: {
+    now: Date;
+    facts: CreateOrderQuoteFactsAdapterInput;
+    includeOrderCharges: boolean;
+  },
+): Promise<CatalogCreateOrderQuoteCalculation> {
+  try {
+    const snapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
+      now: args.now,
+    });
+    const catalogInput = await buildCreateOrderQuoteInputFromCatalog(
+      tx,
+      args.facts,
+    );
+    const input: PureCreateOrderQuoteInput = {
+      ...catalogInput,
+      includeOrderCharges: args.includeOrderCharges,
+    };
+    const quote = calculateCreateOrderQuote(input, snapshot);
+    if (!quote.submittable) {
+      throw new CreateOrderQuoteError(
+        quote.errors.join('；') || '报价业务事实无效',
+      );
+    }
+    return {
+      input,
+      snapshot,
+      quote,
+      processing: presentCreateOrderProcessingQuote({ input, quote }),
+    };
+  } catch (error) {
+    if (error instanceof CreateOrderQuoteError) throw error;
+    if (
+      error instanceof CreateOrderQuoteFactsAdapterError ||
+      error instanceof PublishedCreateOrderPriceAdapterError
+    ) {
+      throw new CreateOrderQuoteError(error.message);
+    }
+    throw error;
+  }
+}
+
 /**
  * Quote one external-sales create command from one immutable, dual-version
  * published snapshot. IO ends before the pure calculator is called.
@@ -144,9 +233,6 @@ export async function quoteExternalCreateOrder(
 
   try {
     return await db.$transaction(async (tx) => {
-      const snapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
-        now,
-      });
       const itemKeys = input.items.map((_, index) => String(index + 1));
       const catalogItems = input.items.map((item, index) => {
         if (item.manualQuoteReason?.trim()) {
@@ -166,19 +252,19 @@ export async function quoteExternalCreateOrder(
           fig: index + 1,
         };
       });
-      const pureInput = await buildCreateOrderQuoteInputFromCatalog(tx, {
-        items: catalogItems,
-        packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
-        isSfCollect: input.logistics.isSfCollect,
-        shipments: shipmentFacts(input),
+      const calculated = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
+        now,
+        facts: {
+          items: catalogItems,
+          packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
+          isSfCollect: input.logistics.isSfCollect,
+          shipments: shipmentFacts(input),
+        },
+        includeOrderCharges: true,
       });
-      const quote = calculateCreateOrderQuote(pureInput, snapshot);
-      if (!quote.submittable) {
-        throw new CreateOrderQuoteError(
-          quote.errors.join('；') || '报价业务事实无效',
-        );
-      }
-      const logistics = trustedChargeQuote(pureInput, snapshot);
+      const pureInput = calculated.input;
+      const quote = calculated.quote;
+      const logistics = trustedChargeQuote(pureInput, calculated.snapshot);
       const quoteToken = createExternalOrderQuoteToken({
         items: pureInput.items,
         packagingGroups: pureInput.packagingGroups,
@@ -200,6 +286,89 @@ export async function quoteExternalCreateOrder(
         logistics,
         quoteToken,
       });
+    });
+  } catch (error) {
+    if (error instanceof CreateOrderQuoteError) throw error;
+    if (
+      error instanceof CreateOrderQuoteFactsAdapterError ||
+      error instanceof PublishedCreateOrderPriceAdapterError
+    ) {
+      throw new CreateOrderQuoteError(error.message);
+    }
+    throw error;
+  }
+}
+
+/** Internal create preview: processing + BAGGING only, never external charges. */
+export async function quoteInternalCreateOrder(
+  input: InternalCreateOrderQuoteInput,
+  now: Date = new Date(),
+): Promise<InternalCreateOrderQuoteResult> {
+  if (
+    input.settlementType !== OrderSettlementType.INTERNAL_SALES &&
+    input.settlementType !== OrderSettlementType.FACTORY_DIRECT
+  ) {
+    throw new CreateOrderQuoteError('仅支持内部收费建单报价');
+  }
+  if (input.orderItemCount !== input.items.length) {
+    throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
+  }
+
+  try {
+    return await db.$transaction(async (tx) => {
+      const itemKeys = input.items.map((_, index) => String(index + 1));
+      const calculated = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
+        now,
+        facts: {
+          items: input.items.map((item, index) => {
+            if (!isNewOrderPricingRoute(item.pricingRoute)) {
+              throw new CreateOrderQuoteError(
+                `款式 ${index + 1}：新建工单必须选择有效计价路线`,
+              );
+            }
+            return {
+              ...item,
+              pricingRoute: item.pricingRoute,
+              manualQuoteReason: item.manualQuoteReason,
+              itemKey: itemKeys[index]!,
+              fig: index + 1,
+            };
+          }),
+          packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
+          isSfCollect: false,
+          shipments: [
+            {
+              shipmentKey: 'internal-create',
+              province: null,
+              itemQuantities: Object.fromEntries(
+                input.items.map((item, index) => [
+                  itemKeys[index]!,
+                  item.quantity,
+                ]),
+              ),
+            },
+          ],
+        },
+        includeOrderCharges: false,
+      });
+      const hasManualPricing = calculated.quote.status !== 'QUOTED';
+      return {
+        factsKey: input.factsKey,
+        ...calculated.processing,
+        priceVersion: calculated.quote.priceVersion,
+        knownTotal: calculated.quote.knownTotal,
+        total: calculated.quote.total,
+        hasManualPricing,
+        totalSemantics: hasManualPricing
+          ? 'EXCLUDES_MANUAL_ITEMS'
+          : 'COMPLETE',
+        plateFee: {
+          status: 'PENDING',
+          amount: null,
+          displayAmount: '待定',
+          label: '制版费',
+        },
+      };
     });
   } catch (error) {
     if (error instanceof CreateOrderQuoteError) throw error;

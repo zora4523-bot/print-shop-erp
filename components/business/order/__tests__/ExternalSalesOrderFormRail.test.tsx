@@ -45,6 +45,28 @@ describe('OrderFormBRail', () => {
     expect(html).not.toContain('快递费');
   });
 
+  it('uses the pure-engine known total for internal BAGGING without adding external-fee UI', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing={false}
+        settlementLabel="工厂直接业务"
+        knownTotal="180.00"
+        totalSemantics="COMPLETE"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('¥180.00');
+    expect(html).not.toContain('纸箱耗材');
+    expect(html).not.toContain('快递费');
+  });
+
   it('shows the known subtotal while shipping is still pending', () => {
     const logistics = {
       status: 'missing' as const,

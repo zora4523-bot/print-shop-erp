@@ -622,6 +622,63 @@ export function quoteCreateOrderItem(
   item: CreateOrderQuoteItemInput,
   snapshot: CreateOrderPriceSnapshot,
 ): CreateOrderItemQuote {
+  const manualPricingReason = item.manualPricingReason?.trim();
+  if (item.manualPricingReason != null && !manualPricingReason) {
+    return {
+      itemKey: item.itemKey,
+      fig: item.fig,
+      status: 'INVALID_INPUT',
+      unitPrice: null,
+      processingAmount: null,
+      amount: null,
+      knownAmount: '0.00',
+      lines: [],
+      manualReasons: [],
+      errors: ['配置外项目说明不能为空'],
+    };
+  }
+  if (manualPricingReason) {
+    const basicErrors: string[] = [];
+    if (!item.itemKey.trim()) basicErrors.push('款式标识不能为空');
+    if (!Number.isSafeInteger(item.fig) || item.fig < 1) {
+      basicErrors.push('fig 必须是正整数');
+    }
+    if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
+      basicErrors.push('数量必须是正整数');
+    }
+    if (basicErrors.length > 0) {
+      return {
+        itemKey: item.itemKey,
+        fig: item.fig,
+        status: 'INVALID_INPUT',
+        unitPrice: null,
+        processingAmount: null,
+        amount: null,
+        knownAmount: '0.00',
+        lines: [],
+        manualReasons: [],
+        errors: basicErrors,
+      };
+    }
+    return {
+      itemKey: item.itemKey,
+      fig: item.fig,
+      status: 'MANUAL_PRICING_REQUIRED',
+      unitPrice: null,
+      processingAmount: null,
+      amount: null,
+      knownAmount: '0.00',
+      lines: [],
+      manualReasons: [
+        manualReason(
+          'CONFIGURATION_OUTSIDE_NOTE',
+          `配置外项目：${manualPricingReason}`,
+        ),
+      ],
+      errors: [],
+    };
+  }
+
   const validationErrors = validateItem(item);
   if (validationErrors.length > 0) {
     return {

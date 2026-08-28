@@ -15,6 +15,7 @@ export type CreateOrderPrintFoilMode = 'NONE' | 'PARTIAL' | 'FULL';
 export type CreateOrderPricingGroup = 'MID' | 'LARGE';
 
 export type CreateOrderManualReasonCode =
+  | 'CONFIGURATION_OUTSIDE_NOTE'
   | 'CUSTOM_PAPER'
   | 'CUSTOM_CRAFT'
   | 'MANUAL_PAPER_WEIGHT'
@@ -75,6 +76,13 @@ export type CreateOrderQuoteItemInput = {
   quantity: number;
   frontColors: readonly string[];
   backColors: readonly string[];
+  /**
+   * Internal create only: one free-text description is the explicit exit for
+   * configuration-outside work. External create rejects this field at its
+   * command boundary. The pure engine preserves it as a typed manual reason
+   * and never turns it into a fabricated zero quote.
+   */
+  manualPricingReason?: string | null;
   configuration: CreateOrderConfigurationFacts;
   specialEffect?: CreateOrderSpecialEffect;
   printFoilMode?: CreateOrderPrintFoilMode;
@@ -105,6 +113,8 @@ export type CreateOrderQuoteInput = {
   packagingGroups: readonly CreateOrderPackagingGroupInput[];
   isSfCollect: boolean;
   shipments: readonly CreateOrderShipmentInput[];
+  /** External customer charges are included unless an internal caller opts out. */
+  includeOrderCharges?: boolean;
 };
 
 export type PartialBlankUnitPrice = {

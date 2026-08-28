@@ -6,6 +6,8 @@ import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import type {
   CreateOrderQuoteActionInput,
   CreateOrderQuoteMutationResult,
+  InternalCreateOrderQuoteActionInput,
+  InternalCreateOrderQuoteMutationResult,
 } from './create-order-quote.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -17,6 +19,7 @@ import {
 import {
   CreateOrderQuoteError,
   quoteExternalCreateOrder,
+  quoteInternalCreateOrder,
 } from '@/lib/order/create-order-quote-service';
 import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 
@@ -153,6 +156,86 @@ export async function quoteExternalCreateOrderAction(
       logistics: logistics.data,
     };
     const quote = await quoteExternalCreateOrder(input);
+    return { status: 'success', quote };
+  } catch (error) {
+    return {
+      status: 'error',
+      message:
+        error instanceof CreateOrderQuoteError
+          ? `报价失败：${error.message}`
+          : '报价失败，请检查价目配置后重试',
+    };
+  }
+}
+
+export async function quoteInternalCreateOrderAction(
+  raw: unknown,
+): Promise<InternalCreateOrderQuoteMutationResult> {
+  const actor = await requirePermission('order:create');
+  const actorSettlementType = settlementTypeForOrderCreator(actor.role);
+  if (actorSettlementType === OrderSettlementType.EXTERNAL_SALES) {
+    return { status: 'error', message: '当前账号使用外部销售结算' };
+  }
+  if (!isRecord(raw)) {
+    return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
+  }
+
+  const factsKey = factsKeySchema.safeParse(raw.factsKey);
+  const orderItemCount = orderItemCountSchema.safeParse(raw.orderItemCount);
+  const settlementType = z
+    .union([
+      z.literal(OrderSettlementType.INTERNAL_SALES),
+      z.literal(OrderSettlementType.FACTORY_DIRECT),
+    ])
+    .refine((value) => value === actorSettlementType, '建单结算方向与当前账号不一致')
+    .safeParse(raw.settlementType);
+  const items = quoteOrderItemsSchema.safeParse({
+    items: raw.items,
+    orderItemCount: raw.orderItemCount,
+  });
+  const packaging = quoteCreateOrderPackagingGroupsSchema.safeParse({
+    groups: raw.packagingGroups,
+  });
+  const issues = [
+    ...(factsKey.success
+      ? []
+      : prefixedIssues('factsKey', factsKey.error.issues)),
+    ...(settlementType.success
+      ? []
+      : prefixedIssues('settlementType', settlementType.error.issues)),
+    ...(orderItemCount.success
+      ? []
+      : prefixedIssues('orderItemCount', orderItemCount.error.issues)),
+    ...(items.success ? [] : items.error.issues),
+    ...(packaging.success
+      ? []
+      : packaging.error.issues.map((issue) => ({
+          path: ['packagingGroups', ...issue.path.slice(1)],
+          message: issue.message,
+        }))),
+  ];
+  if (issues.length > 0) {
+    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(issues) };
+  }
+  if (
+    !factsKey.success ||
+    !settlementType.success ||
+    !orderItemCount.success ||
+    !items.success ||
+    !packaging.success
+  ) {
+    return { status: 'invalid', fieldErrors: { _: ['报价数据格式非法'] } };
+  }
+
+  try {
+    const input: InternalCreateOrderQuoteActionInput = {
+      factsKey: factsKey.data,
+      settlementType: settlementType.data,
+      items: items.data.items,
+      orderItemCount: orderItemCount.data,
+      packagingGroups: packaging.data.groups,
+    };
+    const quote = await quoteInternalCreateOrder(input);
     return { status: 'success', quote };
   } catch (error) {
     return {

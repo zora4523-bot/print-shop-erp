@@ -75,6 +75,11 @@ export type CreateOrderQuotePresentation = {
   quoteToken: string;
 };
 
+export type CreateOrderProcessingPresentation = {
+  items: CreateOrderItemQuotePreview[];
+  packaging: CreateOrderPackagingQuotePreview;
+};
+
 const BASE_LINE_CODES = new Set([
   'PARTIAL_BLANK',
   'FULL_BASE',
@@ -235,6 +240,41 @@ export function presentCreateOrderQuote(args: {
   logistics: ExternalOrderChargeQuote;
   quoteToken: string;
 }): CreateOrderQuotePresentation {
+  const processing = presentCreateOrderProcessingQuote(args);
+  const hasManualPricing =
+    args.quote.status !== 'QUOTED' ||
+    processing.packaging.requiresAdminConfirmation ||
+    !args.logistics.complete;
+
+  return {
+    factsKey: args.factsKey,
+    ...processing,
+    logistics: args.logistics,
+    priceVersion: args.quote.priceVersion,
+    knownTotal: args.quote.knownTotal,
+    total: args.quote.total,
+    hasManualPricing,
+    totalSemantics: hasManualPricing
+      ? 'EXCLUDES_MANUAL_ITEMS'
+      : 'COMPLETE',
+    plateFee: {
+      status: 'PENDING',
+      amount: null,
+      displayAmount: '待定',
+      label: '制版费',
+    },
+    quoteToken: args.quoteToken,
+  };
+}
+
+/**
+ * Shared pure-result presenter for both internal and external create flows.
+ * It deliberately contains no logistics fields, tokens, or IO.
+ */
+export function presentCreateOrderProcessingQuote(args: {
+  input: CreateOrderQuoteInput;
+  quote: PureCreateOrderQuoteResult;
+}): CreateOrderProcessingPresentation {
   const itemsByKey = new Map(
     args.input.items.map((item) => [item.itemKey, item]),
   );
@@ -252,13 +292,7 @@ export function presentCreateOrderQuote(args: {
   const packagingErrors = groups.flatMap((group) =>
     group.errors.map((error) => `包装组 ${group.groupKey}：${error}`),
   );
-  const hasManualPricing =
-    args.quote.status !== 'QUOTED' ||
-    !packagingComplete ||
-    !args.logistics.complete;
-
   return {
-    factsKey: args.factsKey,
     items,
     packaging: {
       groups,
@@ -273,20 +307,5 @@ export function presentCreateOrderQuote(args: {
       requiresAdminConfirmation: !packagingComplete,
       errors: packagingErrors,
     },
-    logistics: args.logistics,
-    priceVersion: args.quote.priceVersion,
-    knownTotal: args.quote.knownTotal,
-    total: args.quote.total,
-    hasManualPricing,
-    totalSemantics: hasManualPricing
-      ? 'EXCLUDES_MANUAL_ITEMS'
-      : 'COMPLETE',
-    plateFee: {
-      status: 'PENDING',
-      amount: null,
-      displayAmount: '待定',
-      label: '制版费',
-    },
-    quoteToken: args.quoteToken,
   };
 }

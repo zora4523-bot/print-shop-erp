@@ -64,6 +64,8 @@ export type LegacyCreateOrderQuoteItemFacts = {
   foilTechnique: OrderFoilTechnique;
   hasLocalFoil: boolean | null;
   lamination: OrderLamination;
+  /** Internal-only configuration-outside note; external commands reject it. */
+  manualQuoteReason?: string | null;
 };
 
 export type LegacyCreateOrderPackagingGroupFacts = {
@@ -605,7 +607,10 @@ export async function buildCreateOrderQuoteInputFromCatalog(
   input: CreateOrderQuoteFactsAdapterInput,
 ): Promise<CreateOrderQuoteInput> {
   const itemKeys = input.items.map((item) => item.itemKey.trim());
-  if (itemKeys.some((key) => !key) || new Set(itemKeys).size !== itemKeys.length) {
+  if (
+    itemKeys.some((key) => !key) ||
+    new Set(itemKeys).size !== itemKeys.length
+  ) {
     return fail('INVALID_ITEM_FACTS', '款式标识为空或重复');
   }
   const figs = input.items.map((item) => item.fig);
@@ -616,8 +621,25 @@ export async function buildCreateOrderQuoteInputFromCatalog(
     return fail('INVALID_ITEM_FACTS', '款式 fig 无效或重复');
   }
 
-  const productIds = uniqueNonEmpty(input.items.map((item) => item.productId));
-  const craftIds = uniqueNonEmpty(input.items.flatMap((item) => item.crafts));
+  for (const item of input.items) {
+    if (item.manualQuoteReason != null && !item.manualQuoteReason.trim()) {
+      fail(
+        'INVALID_ITEM_FACTS',
+        `款式 ${item.itemKey} 的配置外项目说明不能为空`,
+      );
+    }
+  }
+
+  const automaticallyPricedItems = input.items.filter(
+    (item) => !item.manualQuoteReason?.trim(),
+  );
+
+  const productIds = uniqueNonEmpty(
+    automaticallyPricedItems.map((item) => item.productId),
+  );
+  const craftIds = uniqueNonEmpty(
+    automaticallyPricedItems.flatMap((item) => item.crafts),
+  );
   const [products, crafts, papers] = await Promise.all([
     productIds.length === 0
       ? Promise.resolve([])
@@ -640,21 +662,25 @@ export async function buildCreateOrderQuoteInputFromCatalog(
           where: { id: { in: craftIds } },
           select: { id: true, code: true, isActive: true },
         }),
-    client.material.findMany({
-      where: { category: MaterialCategory.PAPER },
-      select: {
-        id: true,
-        name: true,
-        specification: true,
-        outOfStock: true,
-        isActive: true,
-      },
-    }),
+    automaticallyPricedItems.length === 0
+      ? Promise.resolve([])
+      : client.material.findMany({
+          where: { category: MaterialCategory.PAPER },
+          select: {
+            id: true,
+            name: true,
+            specification: true,
+            outOfStock: true,
+            isActive: true,
+          },
+        }),
   ]);
   const productRows = products as CatalogProduct[];
   const craftRows = crafts as CatalogCraft[];
   const paperRows = papers as CatalogPaper[];
-  const productById = new Map(productRows.map((product) => [product.id, product]));
+  const productById = new Map(
+    productRows.map((product) => [product.id, product]),
+  );
   const craftById = new Map(craftRows.map((craft) => [craft.id, craft]));
 
   for (const productId of productIds) {
@@ -675,7 +701,37 @@ export async function buildCreateOrderQuoteInputFromCatalog(
 
   const normalizedItems: CreateOrderQuoteItemInput[] = input.items.map(
     (item) => {
-      const product = item.productId ? (productById.get(item.productId) ?? null) : null;
+      const manualPricingReason = item.manualQuoteReason?.trim();
+      if (manualPricingReason) {
+        const foilSides = resolveOrderItemFoilSides(item);
+        return {
+          itemKey: item.itemKey.trim(),
+          fig: item.fig,
+          craft: routeCraft(item.pricingRoute),
+          paperType: item.paperType?.trim() || '配置外纸张',
+          paperWeightGsm: item.paperWeightGsm,
+          specification: item.specification?.trim() || '配置外规格',
+          pricingGroup: item.pricingGroup === 'LARGE' ? 'LARGE' : 'MID',
+          productStructure:
+            item.productStructure ?? OrderProductStructure.UNSPECIFIED,
+          quantity: item.quantity,
+          frontColors: foilSides.frontFoilColors,
+          backColors: foilSides.backFoilColors,
+          manualPricingReason,
+          configuration: {
+            paper: 'CUSTOM',
+            paperWeight: 'MANUAL',
+            specification: 'RESIZED',
+            craft: 'CUSTOM',
+          },
+          specialEffect: specialEffect(item.foilTechnique),
+          printFoilMode: 'NONE',
+          printFinishing: undefined,
+        };
+      }
+      const product = item.productId
+        ? (productById.get(item.productId) ?? null)
+        : null;
       if (
         product &&
         !productCategoryMatchesPricingRoute(item.pricingRoute, product.category)

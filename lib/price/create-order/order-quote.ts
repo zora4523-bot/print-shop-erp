@@ -95,6 +95,14 @@ function quoteOrderLayer(
   input: CreateOrderQuoteInput,
   snapshot: CreateOrderPriceSnapshot,
 ): CreateOrderOrderQuote {
+  if (input.includeOrderCharges === false) {
+    return {
+      amount: '0.00',
+      knownAmount: '0.00',
+      lines: [pendingPlateLine(snapshot)],
+      errors: [],
+    };
+  }
   const itemsByKey = new Map(input.items.map((item) => [item.itemKey, item]));
   const chargeQuote = calculateExternalOrderCharges(
     {

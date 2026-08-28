@@ -35,16 +35,16 @@ import {
   OrderSettlementType,
 } from '@/generated/prisma/enums';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
-import { quoteOrderItemsAction } from '@/actions/order-quote';
 import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
+import { quoteInternalCreateOrderAction } from '@/actions/create-order-quote';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
 import type { OrderPackagingQuotePreview } from '@/actions/order-packaging-quote.types';
 import type {
   CreateOrderItemQuotePreview,
   CreateOrderQuoteResult,
+  InternalCreateOrderQuoteResult,
 } from '@/lib/order/create-order-quote-service';
 import type { CustomerPartyOption } from '@/lib/party';
-import type { QuoteResult } from '@/lib/price/quote';
 import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
 import {
   ZTO_PROVINCE_OPTIONS,
@@ -154,7 +154,7 @@ type Props = {
 
 type QuoteViewState = {
   inputKey: string;
-  result?: QuoteResult | CreateOrderItemQuotePreview;
+  result?: CreateOrderItemQuotePreview;
   error?: string;
 };
 
@@ -173,6 +173,12 @@ type PackagingQuoteViewState = {
 type ExternalCreateOrderQuoteViewState = {
   inputKey: string;
   result?: CreateOrderQuoteResult;
+  error?: string;
+};
+
+type InternalCreateOrderQuoteViewState = {
+  inputKey: string;
+  result?: InternalCreateOrderQuoteResult;
   error?: string;
 };
 
@@ -550,9 +556,7 @@ function compactDecimal(value: string): string {
 
 function externalQuoteComponentLabel(
   item: CreateOrderInput['items'][number],
-  component:
-    | QuoteResult['components'][number]
-    | CreateOrderItemQuotePreview['components'][number],
+  component: CreateOrderItemQuotePreview['components'][number],
 ): string {
   const displayName = externalPriceRuleDisplayName(component.name);
   if (
@@ -778,6 +782,15 @@ function orderItemQuoteFacts(
   };
 }
 
+function internalOrderItemQuoteFacts(
+  item: CreateOrderInput['items'][number],
+): NonNullable<QuoteFacts> {
+  return {
+    ...orderItemQuoteFacts(item),
+    manualQuoteReason: item.manualQuoteReason,
+  };
+}
+
 function formatLocalDraftTime(savedAt: string): string {
   const date = new Date(savedAt);
   if (Number.isNaN(date.getTime())) return '时间未知';
@@ -960,7 +973,6 @@ export function OrderForm({
   const [submitting, startSubmit] = useTransition();
   const [quoting, startQuote] = useTransition();
   const [externalQuoteQuoting, startExternalQuote] = useTransition();
-  const [quotingFieldId, setQuotingFieldId] = useState<string | null>(null);
   const [quoteViews, setQuoteViews] = useState<Record<string, QuoteViewState>>(
     {},
   );
@@ -970,6 +982,8 @@ export function OrderForm({
     useState<PackagingQuoteViewState | null>(null);
   const [externalOrderQuote, setExternalOrderQuote] =
     useState<ExternalCreateOrderQuoteViewState | null>(null);
+  const [internalOrderQuote, setInternalOrderQuote] =
+    useState<InternalCreateOrderQuoteViewState | null>(null);
   const [externalValidationVisible, setExternalValidationVisible] =
     useState(false);
   const [externalInputRevision, setExternalInputRevision] = useState(0);
@@ -996,9 +1010,8 @@ export function OrderForm({
     string | null
   >(null);
   const [localDraftError, setLocalDraftError] = useState<string | null>(null);
-  const quoteRequestSequence = useRef(0);
-  const latestQuoteRequestByField = useRef<Record<string, number>>({});
   const externalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
+  const internalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const itemFieldIdsRef = useRef<string[]>([]);
   const nextItemFigRef = useRef(2);
   const localDraftStorageKey = localOrderFormDraftStorageKey(
@@ -1269,6 +1282,7 @@ export function OrderForm({
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
+    setInternalOrderQuote(null);
     setPendingDesigns({});
     setExpandedItem(0);
     setLastLocalDraftSavedAt(pendingLocalDraft.savedAt);
@@ -1472,13 +1486,13 @@ export function OrderForm({
   }
 
   function invalidateStructuralQuotes() {
-    latestQuoteRequestByField.current = {};
     invalidateOrderQuoteRequests(externalQuoteRequestGate.current);
+    invalidateOrderQuoteRequests(internalQuoteRequestGate.current);
     setQuoteViews({});
-    setQuotingFieldId(null);
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
+    setInternalOrderQuote(null);
     setPendingSubmission(null);
   }
 
@@ -2040,67 +2054,6 @@ export function OrderForm({
     setExternalOrderQuote(null);
   }
 
-  const calculateAndApplyQuote = useCallback(
-    (index: number, fieldId: string) => {
-      const item = getValues(`items.${index}`);
-      const facts = orderItemQuoteFacts(item);
-      const orderItemCount = getValues('items').length;
-      const inputKey = quoteFactsKey(facts, orderItemCount);
-      const requestId = ++quoteRequestSequence.current;
-      latestQuoteRequestByField.current[fieldId] = requestId;
-      setQuotingFieldId(fieldId);
-      startQuote(async () => {
-        const response = await quoteOrderItemsAction({
-          items: [facts],
-          orderItemCount,
-        });
-        // A quote can finish after the operator has changed product/quantity/
-        // craft facts, removed the row, or started a newer request for the same
-        // row. Keep the old response available only as a stale-status hint; it
-        // must never write prices into the current form or replace a newer view.
-        if (latestQuoteRequestByField.current[fieldId] !== requestId) return;
-        const sameRow = itemFieldIdsRef.current[index] === fieldId;
-        if (!sameRow) {
-          setQuotingFieldId((current) =>
-            current === fieldId ? null : current,
-          );
-          return;
-        }
-        if (response.status === 'success') {
-          const result = response.items[0];
-          if (!result) {
-            setQuoteViews((current) => ({
-              ...current,
-              [fieldId]: { inputKey, error: '暂时无法获取报价结果' },
-            }));
-          } else {
-            setQuoteViews((current) => ({
-              ...current,
-              [fieldId]: { inputKey, result },
-            }));
-            // A preview may populate display state, but it never writes money
-            // back into the creation payload. Final amounts are server-owned.
-          }
-        } else {
-          const error =
-            response.status === 'error'
-              ? response.message
-              : Object.values(response.fieldErrors).flat().join('；');
-          setQuoteViews((current) => ({
-            ...current,
-            [fieldId]: { inputKey, error },
-          }));
-        }
-        if (latestQuoteRequestByField.current[fieldId] === requestId) {
-          setQuotingFieldId((current) =>
-            current === fieldId ? null : current,
-          );
-        }
-      });
-    },
-    [getValues, startQuote],
-  );
-
   const currentLogisticsQuoteInput = useCallback(() => {
     const values = getValues();
     const additional = values.additionalShipments ?? [];
@@ -2184,44 +2137,6 @@ export function OrderForm({
     watchedItems,
     watchedPackagingGroups.length,
   ]);
-  useEffect(() => {
-    if (
-      usesExternalSalesPricing ||
-      !localDraftReady ||
-      createdDraft ||
-      submitting ||
-      uploading
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      itemsArray.fields.forEach((field, index) => {
-        const item = watchedItems[index];
-        if (
-          !item ||
-          !item.productId ||
-          !Number.isSafeInteger(item.quantity) ||
-          item.quantity < 1 ||
-          item.crafts.length === 0
-        ) {
-          return;
-        }
-        calculateAndApplyQuote(index, field.id);
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [
-    automaticItemFactsKey,
-    calculateAndApplyQuote,
-    createdDraft,
-    itemsArray.fields,
-    localDraftReady,
-    submitting,
-    uploading,
-    usesExternalSalesPricing,
-    watchedItems,
-  ]);
-
   const packagingBagFactsKey = JSON.stringify({
     itemQuantities: watchedItems.map((item) => item.quantity),
     groups: watchedPackagingGroups.map((group) => ({
@@ -2265,6 +2180,151 @@ export function OrderForm({
       itemUnitsPerBag: group.itemUnitsPerBag,
     })),
   });
+
+  const currentInternalQuoteFactsKey = compactOrderQuoteFactsKey({
+    itemFacts: watchedItems.map((item) =>
+      quoteFactsKey(item, watchedItems.length),
+    ),
+    packaging: currentPackagingInputKey,
+    logistics: 'INTERNAL_NO_ORDER_CHARGES',
+    openedPriceVersion: null,
+  });
+  const currentInternalQuoteInput = useCallback(() => {
+    const values = getValues();
+    const packaging = currentPackagingQuoteInput();
+    return {
+      factsKey: compactOrderQuoteFactsKey({
+        itemFacts: values.items.map((item) =>
+          quoteFactsKey(item, values.items.length),
+        ),
+        packaging: JSON.stringify(packaging),
+        logistics: 'INTERNAL_NO_ORDER_CHARGES',
+        openedPriceVersion: null,
+      }),
+      settlementType,
+      items: values.items.map(internalOrderItemQuoteFacts),
+      orderItemCount: values.items.length,
+      packagingGroups: packaging.groups,
+    };
+  }, [currentPackagingQuoteInput, getValues, settlementType]);
+  const currentInternalQuoteRequestReady =
+    watchedItems.length > 0 &&
+    watchedItems.every(
+      (item) =>
+        (Boolean(item.manualQuoteReason?.trim()) ||
+          (Boolean(item.productId) && item.crafts.length > 0)) &&
+        Number.isSafeInteger(item.quantity) &&
+        item.quantity >= 1,
+    ) &&
+    watchedPackagingGroups.length > 0 &&
+    watchedPackagingGroups.every(
+      (group) =>
+        Number.isSafeInteger(group.actualBagCount) &&
+        group.actualBagCount >= 1,
+    );
+
+  useEffect(() => {
+    if (
+      usesExternalSalesPricing ||
+      !localDraftReady ||
+      createdDraft ||
+      submitting ||
+      uploading ||
+      !currentInternalQuoteRequestReady ||
+      internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const input = currentInternalQuoteInput();
+      if (input.factsKey !== currentInternalQuoteFactsKey) return;
+      const requestId = beginOrderQuoteRequest(
+        internalQuoteRequestGate.current,
+      );
+      const fieldIds = [...itemFieldIdsRef.current];
+      const packagingInputKey = JSON.stringify({
+        groups: input.packagingGroups,
+      });
+      setInternalOrderQuote({ inputKey: input.factsKey });
+      startQuote(async () => {
+        const response = await quoteInternalCreateOrderAction(input);
+        if (
+          !isCurrentOrderQuoteResponse({
+            gate: internalQuoteRequestGate.current,
+            requestId,
+            inputKey: input.factsKey,
+            currentInputKey: currentInternalQuoteInput().factsKey,
+            fieldIds,
+            currentFieldIds: itemFieldIdsRef.current,
+          })
+        ) {
+          return;
+        }
+        if (
+          response.status === 'success' &&
+          response.quote.factsKey === input.factsKey
+        ) {
+          setQuoteViews(
+            Object.fromEntries(
+              fieldIds.map((fieldId, index) => [
+                fieldId,
+                {
+                  inputKey: quoteFactsKey(
+                    input.items[index],
+                    input.orderItemCount,
+                  ),
+                  result: response.quote.items[index],
+                },
+              ]),
+            ),
+          );
+          setPackagingQuote({
+            inputKey: packagingInputKey,
+            result: response.quote.packaging,
+          });
+          setInternalOrderQuote({
+            inputKey: input.factsKey,
+            result: response.quote,
+          });
+          return;
+        }
+        const error =
+          response.status === 'error'
+            ? response.message
+            : response.status === 'invalid'
+              ? Object.values(response.fieldErrors).flat().join('；')
+              : '报价响应与当前工单不一致，请重试';
+        setQuoteViews(
+          Object.fromEntries(
+            fieldIds.map((fieldId, index) => [
+              fieldId,
+              {
+                inputKey: quoteFactsKey(
+                  input.items[index],
+                  input.orderItemCount,
+                ),
+                error,
+              },
+            ]),
+          ),
+        );
+        setPackagingQuote({ inputKey: packagingInputKey, error });
+        setInternalOrderQuote({ inputKey: input.factsKey, error });
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    createdDraft,
+    currentInternalQuoteFactsKey,
+    currentInternalQuoteInput,
+    currentInternalQuoteRequestReady,
+    internalOrderQuote?.inputKey,
+    localDraftReady,
+    startQuote,
+    submitting,
+    uploading,
+    usesExternalSalesPricing,
+  ]);
 
   const watchedPrimaryQuantities = watchedItems.map((item, itemIndex) => {
     const allocated = watchedShipments.reduce(
@@ -2509,7 +2569,7 @@ export function OrderForm({
       fieldId &&
       (usesExternalSalesPricing
         ? externalQuoteQuoting
-        : quoting && quotingFieldId === fieldId)
+        : quoting)
     ) {
       quoteStatus = 'loading';
     } else if (view?.inputKey !== undefined && view.inputKey !== currentKey) {
@@ -2650,7 +2710,7 @@ export function OrderForm({
     ? undefined
     : packagingQuote?.result;
   const railPackaging: ExternalSalesPackagingQuote = {
-    status: externalQuoteQuoting
+    status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
       ? 'loading'
       : !packagingQuote
         ? 'missing'
@@ -2673,6 +2733,13 @@ export function OrderForm({
     externalOrderQuote?.inputKey === currentExternalQuoteFactsKey
       ? externalOrderQuote.result
       : undefined;
+  const currentInternalOrderQuote =
+    internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
+      ? internalOrderQuote.result
+      : undefined;
+  const currentCreateOrderQuote = usesExternalSalesPricing
+    ? currentExternalOrderQuote
+    : currentInternalOrderQuote;
   const externalRequiresManualQuote =
     railQuoteItems.some((item) => item.status !== 'complete') ||
     railPackaging.status !== 'complete' ||
@@ -2685,7 +2752,7 @@ export function OrderForm({
     quoteItems: railQuoteItems,
     packaging: railPackaging,
     logistics: railLogistics,
-    knownTotal: currentExternalOrderQuote?.knownTotal,
+    knownTotal: currentCreateOrderQuote?.knownTotal,
   });
   const externalReviewItems: OrderSubmissionReviewItem[] = pendingSubmission
     ? pendingSubmission.data.items.map((item, index) => {
@@ -3606,8 +3673,8 @@ export function OrderForm({
                 logistics={railLogistics}
                 usesExternalSalesPricing={usesExternalSalesPricing}
                 settlementLabel={settlementLabel}
-                knownTotal={currentExternalOrderQuote?.knownTotal}
-                totalSemantics={currentExternalOrderQuote?.totalSemantics}
+                knownTotal={currentCreateOrderQuote?.knownTotal}
+                totalSemantics={currentCreateOrderQuote?.totalSemantics}
                 gaps={orderFormBGaps}
                 busy={
                   pendingState.busy ||

@@ -169,7 +169,11 @@ export function OrderFormBRail({
   onAttemptSubmit: (intent: 'draft' | 'submit') => void;
 }) {
   if (!usesExternalSalesPricing) {
-    const total = internalOrderFormTotal(quoteItems);
+    const serverTotal =
+      totalSemantics === 'COMPLETE' ? decimalAmount(knownTotal) : null;
+    const total = serverTotal
+      ? roundedCurrencyNumber(serverTotal)
+      : internalOrderFormTotal(quoteItems);
     return (
       <div className="space-y-3">
         <section className="rounded-[14px] border bg-card p-[18px]">
