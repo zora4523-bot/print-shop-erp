@@ -3,8 +3,9 @@
 - 计划日期：2026-08-28
 - 对应报告：AUDIT-报告.md
 - 原审查提交：0463468
-- 真值来源：/Users/zhixing/Downloads/工单变更与版本规则 (1).md
-- 真值 SHA-256：10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9
+- 真值正源：[`docs/工单变更与版本规则.md`](docs/工单变更与版本规则.md)
+- 接收来源：`/Users/zhixing/Downloads/工单变更与版本规则 (1).md`（按字节不变入库；145 行、6,657 字节；提交 `282a283`）
+- 真值 SHA-256：`10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`
 - 代码证据快照：2026-08-28 10:22 CST（dirty worktree）
 
 ## 结论
@@ -15,13 +16,15 @@
 
 本计划本身不实施状态机、计费、schema、迁移或 API 改动。审查期间另一路工作流正在修改建单 schema；到 10:22 快照，`PENDING_FACTORY`、三段金额字段、migration、generated Prisma、状态机和部分消费者已发生变动，但状态仍是保留旧值、缺 7 个真值态且查询集合未统一的 9 态兼容草案。因此这些改动记为“进行中的部分草案”，不计入已修。
 
+B0 的原文入库已由 `282a283` 完成，B0a 的锁文件一致性已由 `236969e` 完成；B0 仍受 D-02～D-04 真值冲突局部阻断，B0a 仍受 TOOL-002 的隔离 E2E 数据库前置条件阻断。
+
 ## 一、编码前的人工决策门
 
 以下决策必须逐条确认；对应项未确认前，不开始该项实现。
 
 | 决策门 | 必须确认的问题 | 阻断范围 |
 |---|---|---|
-| D-01 | 是否将收到的 145 行原文按字节不变地纳入 docs/工单变更与版本规则.md | 真值治理、后续引用 |
+| D-01（已完成，`282a283`） | 将收到的 145 行原文按字节不变地纳入 docs/工单变更与版本规则.md | 无；文内冲突由 D-02～D-04 独立阻断 |
 | D-02 | §6 标题称“8 个词”，表格实际产生 9 个唯一销售词；确认“8”是笔误还是还需合并一组 | 销售状态 API、状态药丸、筛选 |
 | D-03 | §1 把 ADDRESS 定义为贴唛前直改，§2 又把 ADDRESS 列为 modifyKind；确认何时直改、何时走申请 | 编辑权限、ChangeRequest |
 | D-04 | §2 使用 settleFee，§4 最终写 settledFee；确认唯一持久字段名 | schema、结算、对账 |
@@ -76,7 +79,7 @@
 | SALES-003 | P1 | 默认动作不是“再来一单”，也没有“清 IMAGE、保留 CDR”的复制领域服务 |
 | SALES-004 | P1 | 原因对应动作、按 fig 跳纸张/文件区和撤回申请均缺失 |
 | SALES-005 | P2 | 首图会取第一个有图的款而非严格首款；超期样式也不是白字红底 |
-| TOOL-001 | P2 | `@vitest/coverage-v8` 的 manifest/lockfile specifier 漂移，干净 checkout 无法 frozen install |
+| TOOL-001（已修 `236969e`） | P2 | manifest 与 lockfile importer 已统一为 `^4.1.5`，解析版本仍为 4.1.5；冻结安装已通过 |
 | TOOL-002 | P1 | 现有基线依赖 dirty worktree、既有服务器和共享开发库，无法由标注 commit 重放 |
 
 已确认的正例：
@@ -91,8 +94,8 @@
 
 | 批次 | 依赖 | 目标 | 覆盖报告项 |
 |---|---|---|---|
-| B0 | 无 | 真值入库和勘误决策 | STATE-001、DOC-TRUTH-001、TRUTH-* |
-| B0a | 无 | 恢复依赖与测试基线可复现性 | TOOL-001、TOOL-002 |
+| B0 | 无 | 原文入库已完成；勘误决策待完成 | STATE-001、DOC-TRUTH-001、TRUTH-* |
+| B0a | 无 | TOOL-001 已完成；TOOL-002 待完成 | TOOL-001、TOOL-002 |
 | B1 | B0、B0a | 数据盘点与 expand 迁移骨架 | STATE-002、STATE-006、AMOUNT-001 |
 | B2 | B1 | 11 态领域状态机和兼容投影 | STATE-002～005 |
 | B3 | B1、B2 | 工单驳回/暂停原因 | REJECT-001 |
@@ -107,8 +110,8 @@
 
 ### B0：真值治理
 
-1. 经确认后，把下载文件原样纳入 docs/工单变更与版本规则.md。
-2. 入库提交只改文件位置、真值索引和 SHA 记录，不静默修正文内冲突。
+1. **已完成（`282a283`）：**把下载文件原样纳入 docs/工单变更与版本规则.md。
+2. **已完成（`282a283`）：**入库提交只改文件位置、真值索引和 SHA 记录，未静默修正文内冲突。
 3. 决策另写 DECISIONS 追加记录：8/9 词、完整转换矩阵、旧状态映射、ADDRESS、结算字段名、贴唛事实、角色和重打印任务。
 4. 决策文件不得留 TBD；有 TBD 的领域继续冻结。
 
@@ -119,12 +122,14 @@
 
 ### B0a：依赖安装与测试基线可复现性
 
-1. 先由维护者确认 `@vitest/coverage-v8` 应保持精确 pin 还是跟随同组 Vitest 的 semver range。
-2. 只更新 importer 中与该决策对应的 specifier，不夹带依赖升级。
-3. 在全新 checkout 执行 `pnpm install --frozen-lockfile`。
-4. 为 Playwright 提供专用测试数据库或可还原快照，记录 migration head/schema hash；不得与并行开发流共享数据库。
-5. 由本批 checkout 在独立端口启动受控服务，不复用来源不明的已有开发服务器。
-6. 归档 commit、tracked diff、未跟踪测试清单、Node/pnpm/browser 版本、数据库指纹和 `playwright test --list`；再运行 lint、typecheck、全量 Vitest 和 Playwright，生成新的可重放基线。
+1. **已完成（`236969e`）：**沿用 manifest 与同组 Vitest 已声明的 `^4.1.5` 范围。
+2. **已完成（`236969e`）：**只同步 lockfile importer 的一行 specifier，解析版本仍为 4.1.5，未夹带依赖升级。
+3. **已完成：**frozen lockfile-only 离线校验及全新 checkout 的 `pnpm install --frozen-lockfile --ignore-scripts` 均通过。
+4. **待人工提供：**专用、可销毁的 `E2E_DATABASE_URL`，以及期望 host/database/user、可审计数据库身份标记和 migrate/reset/seed 权限；禁止回退普通 `DATABASE_URL` 或共享开发库。
+5. **待人工裁决：**数据库每次新建还是快照还原、失败后是否保留、完整 seed 还是最小 seed，以及使用 `next dev` 还是 `build/start`。
+6. 前置条件齐备后实现 fail-closed preflight、固定独立端口、`reuseExistingServer: false`，并归档 commit、tracked diff、未跟踪测试清单、Node/pnpm/browser 版本、数据库指纹和 `playwright test --list`；再运行 lint、typecheck、全量 Vitest 和 Playwright，生成新的可重放基线。
+
+`236969e` 的干净检出已通过 frozen install、Prisma/Next 类型生成、lint 与 typecheck。全量 Vitest 的标准门限受主机约 90 的 load average 影响，留下两个纯超时；其中全仓按钮扫描在修复前提交的同环境对照也同样超时，诊断性延长单次命令门限后断言通过。该证据只排除 TOOL-001 回归，不替代 TOOL-002 的可复现全量基线。
 
 建议提交边界：
 
@@ -259,9 +264,9 @@
 
 | 顺序 | 批次 | 建议 message | 边界 |
 |---:|---|---|---|
-| 1 | B0 | `docs(truth): intake work-order change rules [STATE-001][DOC-TRUTH-001]` | 原文、索引、SHA；不勘误 |
+| 1（已完成 `282a283`） | B0 | `docs(truth): intake work-order change rules [STATE-001][DOC-TRUTH-001]` | 原文、索引、SHA；不勘误 |
 | 2 | B0 | `docs(decision): resolve work-order truth conflicts [TRUTH-ERRATA-001][TRUTH-AMB-001][TRUTH-AMB-002]` | 只记录已批准决策 |
-| 2a | B0a | `chore(deps): synchronize frozen lockfile metadata [TOOL-001]` | 只同步已批准的 specifier 策略，不升级版本 |
+| 2a（已完成 `236969e`） | B0a | `chore(deps): synchronize frozen lockfile metadata [TOOL-001]` | 只同步 importer specifier，不升级版本 |
 | 2b | B0a | `test(audit): establish reproducible full-suite baseline [TOOL-002]` | 专用数据库、受控服务器、清单指纹和基线归档 |
 | 3 | B1 | `chore(audit): inventory legacy order facts [STATE-002][AMOUNT-001]` | 只读盘点脚本与结果 |
 | 4 | B1 | `feat(schema): expand canonical order states [STATE-002][STATE-006]` | 状态 schema/migration/generated 与兼容读；不改 UI |
@@ -302,7 +307,7 @@
 
 1. 不删除断言、不加任意 sleep、不盲目更新截图。
 2. lint、typecheck、全部 Vitest、全部 Playwright。
-3. 与 B0a 重新建立的可复现基线比较；不得出现其已归档失败集合之外的新失败。现有 37 项 dirty-worktree 基线只保留为历史证据，不再作为行为批次门禁。
+3. 与 TOOL-002 重新建立的可复现基线比较；不得出现其已归档失败集合之外的新失败。现有 37 项 dirty-worktree 基线只保留为历史证据，不再作为行为批次门禁。
 4. 新增合同 fixture，不通过修改测试来掩盖行为破坏。
 5. 若旧测试明确编码已被人工裁决取代的旧真值，先在决策记录中列出，再在独立合同提交中替换；不能顺手放宽。
 6. 依赖或锁文件批次必须从干净 checkout 先通过 `pnpm install --frozen-lockfile`，不能复用已有 `node_modules` 掩盖漂移。

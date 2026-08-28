@@ -3,7 +3,7 @@
 - 审查日期：2026-08-28
 - 审查基线：`fcbf001866586be630eab2a798a7609d14fc51e4`
 - 基线归档：[`docs/audits/2026-08-28-print-shop-erp-baseline.md`](docs/audits/2026-08-28-print-shop-erp-baseline.md)
-- 续审真值：`/Users/zhixing/Downloads/工单变更与版本规则 (1).md`（145 行，SHA-256 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`）
+- 续审真值：[`docs/工单变更与版本规则.md`](docs/工单变更与版本规则.md)（由 `/Users/zhixing/Downloads/工单变更与版本规则 (1).md` 按字节不变接收；145 行、6,657 字节；SHA-256 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9`；提交 `282a283`）
 - 续审代码快照：2026-08-28 10:22 CST（dirty worktree；并行建单改动非本轮产出）
 - 修复路线：[`AUDIT-修复计划.md`](AUDIT-修复计划.md)
 
@@ -11,23 +11,25 @@
 
 本次审查在不修改既有测试、不接管用户同期未提交改动的前提下，完成 UI 结构、一致性、文档、功能重复、多余代码与重复嵌套审查。
 
-自主修改形成 4 个代码提交和 1 个规范文档提交：
+截至本轮，自主修改形成 4 个代码提交、1 个规范文档提交和 2 个前置治理提交：
 
 1. `8d6eb35` — 删除确定无引用的 UI 代码。
 2. `4ddd68d` — 修复 UI 模块边界与确定的未用参数。
 3. `6ea0274` — 合并日期、上海日历与 XLSX 列名重复实现。
 4. `a42d9ca` — 扁平化报价缺口标签嵌套。
 5. `5b8fb8c` — 新增 UI 规范与编码规范。
+6. `282a283` — 按字节不变接收工单真值并更新真值索引。
+7. `236969e` — 同步 frozen lockfile importer 元数据，不升级依赖。
 
-续审与修复规划已形成 `cb71507`；该提交及后续验证补记只修改报告、计划和规范文档，不含业务运行时代码。
+续审与修复规划已形成 `cb71507`，验证门禁补记为 `89f850a`；两者只修改报告、计划和规范文档。本轮随后完成真值接收与锁文件元数据修复，仍未修改状态机、计费、schema、迁移、API 或测试。
 
-原报告的“真值内容缺失”阻断已因用户提供原文而解除；治理阻断仍在：仓库 canonical 路径尚未纳入该文件，且原文自身存在“8 个销售词/表格实际 9 个”、`ADDRESS` 直改/申请双重归属、`settleFee/settledFee` 三处待裁决冲突。不能自行勘误后实施。
+原报告的“真值内容缺失”与 canonical 路径阻断已由 `282a283` 解除。当前只剩局部治理阻断：原文自身存在“8 个销售词/表格实际 9 个”、`ADDRESS` 直改/申请双重归属、`settleFee/settledFee` 三处待裁决冲突；不得自行勘误后实施相关业务修改。
 
 续审后的最高风险变为：旧纸二维码无法识别版本、已发货仍可取消、生产中取消没有已产结算和对账闭环、改单契约与真值不一致，以及 11 态旧数据迁移无法机械推断。
 
 金额三态并非全仓缺失：销售专用列表和详情已有待确认、估价“估”和确认金额的结构，但待价文案与 tone 仍不符合统一规范；通用工单列表、创建侧栏、提交审查和底层字段契约也尚未统一。
 
-本轮只继续审查并产出修复计划，没有修改状态机、计费、schema、迁移、API 或测试。审查期间另一条工作流在 dirty worktree 中加入了 `PENDING_FACTORY`、三段金额字段及未提交 migration；到 10:22 快照，`PENDING_FACTORY` 已同步到 migration、generated Prisma、状态机和部分消费者，但仍是保留旧态且缺 7 个真值态的 9 态兼容草案，不计入“已修”。
+本轮执行了两个满足自主修改边界的前置修复：真值文档按字节不变入库，以及锁文件 importer 的单行元数据同步；没有修改状态机、计费、schema、迁移、API 或测试。审查期间另一条工作流在 dirty worktree 中加入了 `PENDING_FACTORY`、三段金额字段及未提交 migration；到 10:22 快照，`PENDING_FACTORY` 已同步到 migration、generated Prisma、状态机和部分消费者，但仍是保留旧态且缺 7 个真值态的 9 态兼容草案，不计入“已修”。
 
 ## 基线与复测
 
@@ -40,14 +42,20 @@
 | `a42d9ca` 后 | 通过 | 通过 | 393 文件 / 4,202 通过 | 68 通过 / 36 失败 / 5 跳过 |
 | 规范文档批次 `5b8fb8c` | 通过 | 通过 | 393 文件 / 4,202 通过 | 68 通过 / 36 失败 / 5 跳过 |
 | 续审规划 `cb71507` 干净提交树诊断 | 通过 | 通过（先生成 Prisma 与 Next 路由类型） | 381 文件 / 4,092 通过 | 10 通过 / 82 失败 / 5 跳过；不可与工作树基线直接比较 |
+| 本轮共享 dirty worktree 诊断 | 通过 | 失败：订单报价并行未提交代码 8 个类型错误 | 397/406 文件通过；4,358/4,367 测试通过；9 失败 | 未运行：TOOL-002 前置未满足 |
+| `236969e` 干净提交树验证 | 通过 | 通过 | 378/381 文件通过、1 跳过、2 个负载超时；4,086/4,092 测试通过、4 跳过 | 未运行：TOOL-002 前置未满足 |
 
 四个自主代码批次及首轮规范文档批次的 Playwright 比基线少 1 个失败，是 `[worker-1024x768]` dark-token 可访问性门禁偶发转绿。本次修改没有触及 worker 主题或对应页面，不把该变化归因于自主修改；这些可比批次的失败集合始终是基线失败的严格子集，没有新增失败。续审的干净提交树诊断环境不同，单独说明如下，不并入该比较。
 
+本轮共享工作树诊断包含大量并行未提交代码和测试，不能归因于 `282a283` 或 `236969e`，也不写入“基线即红”清单。Vitest 的 9 个失败文件为 `actions/__tests__/account.test.ts`、`lib/__tests__/account.test.ts`、`lib/__tests__/cron-deployment-config.test.ts`、`lib/export/__tests__/xlsx.test.ts`、`lib/order/__tests__/create-order-quote-service.test.ts`、`lib/order/__tests__/raw-sql-settlement-contract.test.ts`、`components/business/admin/__tests__/button-components.test.ts`、`components/business/admin/__tests__/pending-form-contract.test.ts`、`components/business/admin/__tests__/responsive-tables.test.ts`；其中 8 项为负载超时，1 项是并行未提交建单代码的 quoteToken 稳定性断言失败。
+
+`236969e` 的验证在全新 detached worktree 中使用 Node 24.15.0 与 pnpm 10.33.1：完整 frozen install、Prisma generate、Next typegen、lint 和 typecheck 均通过。标准 5 秒 Vitest 门限下仅 `lib/__tests__/outsource.test.ts` 与 `components/business/admin/__tests__/button-components.test.ts` 超时，没有断言差异；前者原命令单独复跑 71/71 通过，后者在修复前 `282a283` 的同一 worktree、同一负载下也超时，证明不是锁文件提交引入的回归，并在不改测试文件的 30 秒诊断命令下通过。主机当时 load average 约 90，故本表保留为“环境门限未全绿”，不冒充完整验收通过。
+
 基线 Playwright 耗时约 26.7 分钟。首次尝试隔离端口时被既有 Next.js 开发服务器锁阻止；正式基线复用仓库已有 `localhost:3000` 开发服务器。该基础设施事件不计入红测。
 
-续审诊断使用 `cb71507` 的临时 detached worktree、独立 3100 端口和 Node 24.15.0。干净树缺少被忽略的 Prisma 生成物与 Next 路由类型，分别生成后 lint、typecheck 与 Vitest 全绿。`pnpm install --frozen-lockfile` 因 TOOL-001 失败；仅为完成诊断，临时 worktree 使用 `--no-frozen-lockfile` 安装，主工作区的 manifest 与锁文件均未修改。
+续审诊断使用 `cb71507` 的临时 detached worktree、独立 3100 端口和 Node 24.15.0。干净树缺少被忽略的 Prisma 生成物与 Next 路由类型，分别生成后 lint、typecheck 与 Vitest 全绿。当时 `pnpm install --frozen-lockfile` 因 TOOL-001 失败，仅为完成诊断而在临时 worktree 使用 `--no-frozen-lockfile`；该问题随后由 `236969e` 修复。
 
-该 Playwright 运行仍连接 `.env` 指向的当前共享开发数据库，且提交树测试清单是 97 项，而归档基线来自含并行未提交代码/测试的 109 项工作树。82 个失败同时覆盖旧打印截图、全部 worker 视口、多组管理/销售视口、4 个批量排产场景及部分原基线红项，属于代码清单与数据库指纹不同的诊断结果，不能归因为纯文档提交，也不能加入“基线即红”清单。修复可复现基线本身已登记为 TOOL-002；在 B0a 完成前，不用这两组数字做失败集合差分。
+该 Playwright 运行仍连接 `.env` 指向的当前共享开发数据库，且提交树测试清单是 97 项，而归档基线来自含并行未提交代码/测试的 109 项工作树。82 个失败同时覆盖旧打印截图、全部 worker 视口、多组管理/销售视口、4 个批量排产场景及部分原基线红项，属于代码清单与数据库指纹不同的诊断结果，不能归因为纯文档提交，也不能加入“基线即红”清单。修复可复现基线本身已登记为 TOOL-002；在 TOOL-002 完成前，不用这两组数字做失败集合差分。
 
 ## 审查范围与工具限制
 
@@ -79,18 +87,18 @@
 
 ## 2. 一致性与真值文档
 
-- [一致性][P0·留人工] docs/工单变更与版本规则.md:1 — 真值原文已从下载路径收到，但仓库 canonical 路径仍缺失 — 外部原文 145 行，SHA-256 为 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9` — 动作：留人工；确认后按字节不变入库，不在入库提交中静默勘误（STATE-001）。
+- [一致性][P0·已修] docs/工单变更与版本规则.md:1 — 外部原文已按字节不变纳入 canonical 路径 — 145 行、6,657 字节，SHA-256 `10711faaaab5936720e312184a3f3065474958d2d50cac8de792f4addfa92dd9` 与接收文件一致 — 动作：已修 `282a283`（STATE-001）。
 - [一致性][P0·留人工] prisma/schema.prisma:218 — 真值要求 11 态，基线是旧 8 态，10:22 dirty schema 与生成物则是只添加 `PENDING_FACTORY` 的 9 态混合集 — `generated/prisma/enums.ts:59` 已含新态，但仍保留 `SUBMITTED / SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED` 且缺 7 个真值态 — 动作：留人工；先审批旧数据映射，再做 expand/contract 迁移（STATE-002）。
 - [一致性][P0·留人工] lib/order/status-machine.ts:17 — 运行时已把 `PENDING_FACTORY` 接入旧链，但仍是 9 态兼容流转表 — 真值只列状态和部分能力，未定义 `ON_HOLD` 恢复、`REJECTED` 重提、无烫金跳转等完整边 — 动作：留人工；先批准完整转换矩阵，再与 schema 迁移同批实施（STATE-003）。
 - [一致性][P0·留人工] lib/order/sales-list-presentation.ts:9 — 当前 9 态兼容集仅产生 6 个唯一销售词 — 外部真值 §6 表格给出 9 个唯一词，但正文又称 8 个 — 动作：留人工；勘误裁决后建立服务端穷举投影（STATE-004）。
 - [一致性][P0·留人工] prisma/schema.prisma:579 — 仓库没有工单 `REJECTED / ON_HOLD` 的结构化原因记录 — 现有 `OrderChangeRequest.reviewRemark` 属于另一概念，不能替代 §5 的 `PAPER_OUT / DESIGN_ERROR / PRICE_PENDING + reasonNote + fig[]` — 动作：留人工；单独设计原因模型、关联款校验和兼容迁移（REJECT-001）。
-- [一致性][已符合] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:110 — 全仓未发现被明确禁止的“分辨率不足”类型或界面文案 — 应用、schema、生成物及测试全仓检索无命中 — 动作：无需修改（REJECT-002）。
+- [一致性][已符合] docs/工单变更与版本规则.md:110 — 全仓未发现被明确禁止的“分辨率不足”类型或界面文案 — 应用、schema、生成物及测试全仓检索无命中 — 动作：无需修改（REJECT-002）。
 
 ### 2.1 续审：真值内部冲突与状态漂移
 
-- [一致性][P0·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:114 — §6 声称销售端映射为 8 个词，但 118–128 行表格实际产生 9 个唯一词 — 11 态只合并 `RELEASED / FOILING / PACKING` 三态，数学上也是 9 组 — 动作：留人工；文档负责人确认“8”是笔误还是漏了一组合并（TRUTH-ERRATA-001）。
-- [一致性][P0·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:25 — `ADDRESS` 在能力矩阵中是直接轻变更，却又在 40 行被定义为 `modifyKind` — 未说明状态、贴唛节点或其他分界 — 动作：留人工；确认直改/申请的精确边界（TRUTH-AMB-001）。
-- [一致性][P1·留人工] /Users/zhixing/Downloads/工单变更与版本规则 (1).md:45 — ChangeRequest 使用 `settleFee`，而 91、94、128 行的最终工单/对账字段使用 `settledFee` — 对象边界可能是有意区分，也可能是命名漂移 — 动作：留人工；确认申请参考/裁决值与工单最终值的唯一字段契约（TRUTH-AMB-002）。
+- [一致性][P0·留人工] docs/工单变更与版本规则.md:114 — §6 声称销售端映射为 8 个词，但 118–128 行表格实际产生 9 个唯一词 — 11 态只合并 `RELEASED / FOILING / PACKING` 三态，数学上也是 9 组 — 动作：留人工；文档负责人确认“8”是笔误还是漏了一组合并（TRUTH-ERRATA-001）。
+- [一致性][P0·留人工] docs/工单变更与版本规则.md:25 — `ADDRESS` 在能力矩阵中是直接轻变更，却又在 40 行被定义为 `modifyKind` — 未说明状态、贴唛节点或其他分界 — 动作：留人工；确认直改/申请的精确边界（TRUTH-AMB-001）。
+- [一致性][P1·留人工] docs/工单变更与版本规则.md:45 — ChangeRequest 使用 `settleFee`，而 91、94、128 行的最终工单/对账字段使用 `settledFee` — 对象边界可能是有意区分，也可能是命名漂移 — 动作：留人工；确认申请参考/裁决值与工单最终值的唯一字段契约（TRUTH-AMB-002）。
 - [一致性][P0·留人工] lib/order/status-machine.ts:44 — 9 态兼容状态机仍允许 `SHIPPED → CANCELLED` — 真值 §1 明确已发货不可取消、应转售后 — 动作：留人工；与 11 态迁移、服务端守卫和旧测试契约同批修正（STATE-005）。
 - [一致性][P0·留人工] prisma/migrations/20260828100000_create_order_c_expand/migration.sql:3 — 并行草案已将 `PENDING_FACTORY` 同步到 schema、migration、generated 和部分 runtime，但其自述为保留旧值的兼容扩展，不是 11 态迁移 — `lib/order/sales-list-query.ts:109` 的活动/需处理集合仍漏新态，展示层却已接入 — 动作：留人工；将此视为建单兼容草案而非真值完成，后续 11 态批次再统一查询、迁移和流转（STATE-006）。
 
@@ -149,7 +157,7 @@
 
 - [文档][P2·已修] docs/ui-规范.md:1 — 仓库原先没有任务要求路径的 UI 规范 — 已补 token 表、通用组件、金额三态、确认后果、款级校验、价格熄灭、状态药丸、复制反馈和禁用模式 — 动作：已修 `5b8fb8c`（DOC-UI-001）。
 - [文档][P2·已修] docs/编码规范.md:1 — 仓库原先没有统一编码规范与真值索引 — 已补目录、命名、计费纯函数边界、禁止兜底、fixture 和冲突优先级 — 动作：已修 `5b8fb8c`（DOC-CODE-001）。
-- [文档][P0·留人工] docs/编码规范.md:39 — 外部原文已获取，但 canonical 仓库路径、来源记录和三个勘误裁决尚未完成 — 不得把审查报告或当前代码反向当成真值 — 动作：留人工；按 `AUDIT-修复计划.md` B0 原文入库后，以独立决策记录处理勘误（DOC-TRUTH-001）。
+- [文档][P0·已修] docs/编码规范.md:28 — canonical 真值路径、来源指纹和索引已完成；三个文内冲突继续由 TRUTH-* 条目留人工 — 动作：已修 `282a283`（DOC-TRUTH-001）。
 
 ## 4. 功能重复
 
@@ -169,8 +177,8 @@
 - [多余代码][P3·已修] components/business/salary/SalaryRuleSettingsForm.tsx:31 — `defaultValues` 的 `key` 参数没有使用 — TypeScript 可静态确定，删除不改变调用语义 — 动作：已修 `4ddd68d`（DEAD-LINT-001）。
 - [多余代码][P2·留人工] lib/attendance.ts:50 — `listActiveHourlyWorkers` 等多个公共导出仓内只命中自身声明 — 同类含 `bill/costing.ts:186`、`bom.ts:115`、`product.ts:284`、`salary/rules.ts:149,159`、`pricing-route.ts:184`、`rule-center.ts:46` 和 `order-form-gaps.ts:219,225` — 动作：留人工；可能有外部/动态消费者，不猜删（DEAD-EXPORT-001）。
 - [多余代码][P3·留人工] package.json:34 — `@auth/prisma-adapter`、部分 OpenTelemetry 包和 `@vitest/browser` 未由普通源码 import 明确证明使用 — 未安装 depcheck，且可能由框架配置/启动钩子加载 — 动作：留人工；以生产构建、启动和配置核验后再删（DEAD-DEP-001）。
-- [一致性][P2·留人工] package.json:79 / pnpm-lock.yaml:145 — `@vitest/coverage-v8` 的 manifest specifier 是 `^4.1.5`，锁文件 importer 却记录为 `4.1.5`，干净快照执行 `pnpm install --frozen-lockfile` 会直接失败 — 无法在 CI 式环境复现依赖安装 — 动作：留人工；先确认版本范围策略，再仅同步锁文件元数据并在干净 checkout 验证冻结安装（TOOL-001）。
-- [一致性][P1·留人工] docs/audits/2026-08-28-print-shop-erp-baseline.md:14 / playwright.config.ts:69 — 正式基线是 dirty worktree 且复用既有 3000 端口服务和共享开发库，不能从 `fcbf001` 干净 checkout 重建同一测试清单与运行时 — 隔离快照实际只有 381/4,092 个 Vitest 与 97 个 Playwright，而归档工作树基线是 393/4,202 与 109 个 Playwright — 动作：留人工；后续行为批次先建立独立测试数据库、禁止复用未知服务，并归档代码/迁移/测试清单指纹（TOOL-002）。
+- [一致性][P2·已修] package.json:79 / pnpm-lock.yaml:145 — manifest 与 importer 已统一为 `^4.1.5`，解析版本仍为 4.1.5，未升级依赖 — 动作：已修 `236969e`；已通过 frozen lockfile-only 离线校验及完整干净 checkout 冻结安装（TOOL-001）。
+- [一致性][P1·留人工] docs/audits/2026-08-28-print-shop-erp-baseline.md:14 / playwright.config.ts:10,33-37,100-105 / tests/e2e/global-setup.ts:103-105 / tests/e2e/_helpers.ts:20-27 — 正式基线是 dirty worktree，且现有 E2E 会复用已有 3000 端口服务并继承普通 `DATABASE_URL`，不能从标注 commit 重放同一测试清单与运行时 — 隔离快照实际只有 381/4,092 个 Vitest 与 97 个 Playwright，而归档工作树基线是 393/4,202 与 109 个 Playwright — 动作：留人工；提供专用可销毁的 `E2E_DATABASE_URL`、数据库身份标记与迁移/重置/seed 权限，并裁决生命周期、失败保留、seed 范围及 `next dev` 或 `build/start`，再实现 fail-closed preflight、固定独立端口、禁用服务复用和指纹归档（TOOL-002）。
 
 未发现其他可安全自主删除的无引用路由、成段注释代码或已确认废弃 feature flag。
 
@@ -198,12 +206,14 @@
 | NEST-001 | 扁平化报价缺口状态标签 | `a42d9ca` | lint、typecheck、4,202 Vitest；Playwright 无新增失败 |
 | DOC-UI-001 | 新增 UI 规范 | `5b8fb8c` | lint、typecheck、4,202 Vitest；Playwright 无新增失败 |
 | DOC-CODE-001 | 新增编码规范及真值索引 | `5b8fb8c` | 同上 |
+| STATE-001 | 按字节不变纳入工单变更真值 | `282a283` | 145 行、6,657 字节及 SHA-256 与接收原文一致 |
+| DOC-TRUTH-001 | 更新 canonical 真值索引与局部阻断说明 | `282a283` | 链接、来源指纹和冲突边界复核 |
+| TOOL-001 | 同步 frozen lockfile importer specifier | `236969e` | 离线 frozen lockfile-only 与全新 checkout frozen install 通过；解析版本仍为 4.1.5 |
 
 ## 待人工清单（按风险）
 
 | 风险 | 编号 | 待处理事项 | 建议处置 |
 |---|---|---|---|
-| P0 | STATE-001 / DOC-TRUTH-001 | 外部原文已收到，但 canonical 路径未入库 | 先按字节不变入库并记录 SHA；勘误用独立决策处理 |
 | P0 | TRUTH-ERRATA-001 / TRUTH-AMB-001 | 销售词 8/9 冲突；`ADDRESS` 直改/申请边界不明 | 文档负责人先裁决，冻结相关 API、UI 和迁移 |
 | P0 | STATE-002～006 | 11 态与旧数据无完整映射；并行草案只做了保留旧值的 9 态兼容扩展 | 批准迁移表与完整转换矩阵，再做 expand/contract；已发货禁止取消 |
 | P0 | CHANGE-001～003 | ChangeRequest 入口、对象字段、终态、拒绝必填和撤回均不符真值 | 先决定历史状态映射，再以 additive schema + 服务端并发守卫实施 |
@@ -223,7 +233,7 @@
 | P1 | FALLBACK-001 | 旧 SPEC 与外部销售专用真值作用域不清 | 明确旧 fallback 仅供内部/直单兼容路径 |
 | P1 | UI-INT-001～003 | 高风险动作缺持久理由契约 | 先补后端审计字段/API，再升级确认层 |
 | P1 | UI-IA-001 | 导航信息架构与原型不一致 | 产品确认分组和角色入口后统一改 |
-| P1 | TOOL-002 | dirty worktree、复用服务及共享数据库使基线无法由 commit 重放 | 建立隔离测试库和受控服务器，归档代码、迁移及测试清单指纹后重做可复现基线 |
+| P1 | TOOL-002 | dirty worktree、复用服务及共享数据库使基线无法由 commit 重放 | 提供专用可销毁 `E2E_DATABASE_URL`、身份标记与迁移/seed 权限，裁决生命周期和服务模式后，建立 fail-closed preflight、受控服务器与指纹归档 |
 | P2 | AMOUNT-002 / 005、FMT-001 / 003、PACK-002 | 金额三态、尺寸、包装及待价术语未全仓统一 | 冻结 DTO、格式和词表后分批迁移 |
 | P2 | SALES-005 | 首款缩略图和超期视觉不符 §7 | 在销售 DTO 稳定后单独修 UI 并补视觉回归 |
 | P2 | UI-INT-004 / UI-A11Y-001 | 复制交互重复且有双 live region | 抽共享交互，保留单一播报出口并补无障碍测试 |
@@ -232,7 +242,6 @@
 | P2 | DUP-DATETIME-001 / DUP-ADDRESS-001 / DUP-CRON-001 / DUP-PAPER-001 / DUP-BILL-001 | 行为敏感的重复实现 | 先补契约测试，再合并 |
 | P2 | NEST-002 | 工单表单仍含行为敏感的深层条件 | 按功能区补 fixture 后逐段早返回 |
 | P2 | DEAD-EXPORT-001 | 疑似无引用公共导出 | 确认外部脚本及动态消费者后删除 |
-| P2 | TOOL-001 | manifest 与锁文件 specifier 漂移，冻结安装失败 | 确认 pin/range 策略，独立同步锁文件并在干净 checkout 跑 frozen install |
 | P3 | DEAD-DEP-001 | 疑似未使用依赖 | 用构建、运行时钩子及配置核验 |
 | 建议 | UI-ARCH-001～003 | 巨型页面及公共 Surface 分层 | 独立架构项目处理 |
 | 建议 | PRISMA-001～004 | 深层、宽关系 Prisma 查询 | 先做查询计划、权限和一致性基线 |
