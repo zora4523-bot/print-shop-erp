@@ -666,8 +666,6 @@ function revalidatePriceBookPaths(): void {
   for (const path of [
     RULE_CENTER_HREFS.customerPricing,
     RULE_CENTER_HREFS.priceVersions,
-    '/sales/quote',
-    '/sales/quote/logistics',
     '/orders/new',
   ]) {
     revalidatePath(path);

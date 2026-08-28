@@ -9,7 +9,6 @@ import {
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
   OrderItemPricingRoute,
-  OrderSettlementType,
   Role,
 } from '@/generated/prisma/enums';
 import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '@/lib/price/customer-rule-condition';
@@ -20,7 +19,6 @@ const {
   draftRuleFormPropsMock,
   tierGroupEditorPropsMock,
   discardDraftActionMock,
-  getCatalogMock,
   getDraftMock,
   getPublishPreviewMock,
   getRuleEditorMock,
@@ -43,7 +41,6 @@ const {
   draftRuleFormPropsMock: vi.fn(),
   tierGroupEditorPropsMock: vi.fn(),
   discardDraftActionMock: vi.fn(),
-  getCatalogMock: vi.fn(),
   getDraftMock: vi.fn(),
   getPublishPreviewMock: vi.fn(),
   getRuleEditorMock: vi.fn(),
@@ -60,10 +57,6 @@ const {
   updateRuleActionMock: vi.fn(),
   updateRuleGroupActionMock: vi.fn(),
   dedicatedSectionPropsMock: vi.fn(),
-}));
-
-vi.mock('@/lib/price/customer-price-book', () => ({
-  getActiveCustomerPriceBookCatalog: getCatalogMock,
 }));
 
 vi.mock('@/lib/price/customer-price-book-admin', () => ({
@@ -164,8 +157,6 @@ vi.mock('next/navigation', () => ({
 
 import LegacyOwnerExternalSalesPriceBookPage from '@/app/(admin)/owner/prices/external-sales/page';
 import OwnerExternalSalesPriceVisualFixturePage from '@/app/(admin)/owner/prices/external-sales/visual-fixture/page';
-import SalesQuotePage from '@/app/(admin)/sales/quote/page';
-import SalesLogisticsQuotePage from '@/app/(admin)/sales/quote/logistics/page';
 import OwnerExternalSalesChargeItemsPage from '@/components/business/rules/pricing/CustomerPricingWorkspacePage';
 import OwnerExternalSalesPriceBookVersionsPage from '@/components/business/rules/pricing/PriceVersionsPage';
 
@@ -173,51 +164,6 @@ async function renderToResolvedMarkup(node: ReactNode): Promise<string> {
   const stream = await renderToReadableStream(node);
   await stream.allReady;
   return (await new Response(stream).text()).replaceAll('<!-- -->', '');
-}
-
-function catalog(purpose: CustomerPriceBookPurpose) {
-  const processing = purpose === CustomerPriceBookPurpose.PROCESSING;
-  return {
-    code: processing
-      ? 'EXTERNAL_SALES_PROCESSING'
-      : 'EXTERNAL_SALES_LOGISTICS',
-    name: processing
-      ? '外部销售加工费报价单'
-      : '外部销售快递与打包耗材报价单',
-    version: processing ? 3 : 2,
-    settlementType: OrderSettlementType.EXTERNAL_SALES,
-    source: {
-      fileName: processing ? '长昆-线下报价表.xlsx' : '长昆中通报价表.xlsx',
-      sha256: processing ? 'processing-hash' : 'logistics-hash',
-    },
-    sources: [],
-    effectiveFrom: '2026-08-08',
-    effectiveTo: null,
-    warnings: ['非锚点数量需要人工确认。'],
-    categories: [
-      {
-        code: processing ? 'COLOR_PRINT' : 'EXPRESS',
-        name: processing ? '彩印' : '中通快递',
-        items: [
-          {
-            code: processing ? 'COLOR-200G-LARGE-100' : 'ZTO-GUANGDONG',
-            name: processing ? '200 克双铜纸大号 · 100 个' : '广东省内',
-            product: processing ? '彩印红包' : undefined,
-            specification: processing ? '大号' : undefined,
-            paper: processing ? '200 克双铜纸' : undefined,
-            calculationLabel: processing ? '整批总价' : '首重 + 续重',
-            quantityRangeLabel: processing ? '100 个锚点' : '不限数量',
-            amountLabel: processing ? '¥ 130.00 / 批' : '首重 ¥5.00',
-            source: {
-              sheet: processing ? '彩印' : '中通',
-              range: processing ? 'C6' : 'A3:D3',
-            },
-            automation: 'AUTO',
-          },
-        ],
-      },
-    ],
-  };
 }
 
 const versionRows = [
@@ -625,7 +571,6 @@ function htmlHref(href: string): string {
 
 beforeEach(() => {
   requirePermissionMock.mockReset();
-  getCatalogMock.mockReset();
   createDraftFormPropsMock.mockReset();
   draftRuleFormPropsMock.mockReset();
   tierGroupEditorPropsMock.mockReset();
@@ -646,10 +591,6 @@ beforeEach(() => {
   updateRuleActionMock.mockReset();
   updateRuleGroupActionMock.mockReset();
   dedicatedSectionPropsMock.mockReset();
-  getCatalogMock.mockImplementation(
-    (_settlementType: OrderSettlementType, purpose: CustomerPriceBookPurpose) =>
-      Promise.resolve(catalog(purpose)),
-  );
   listVersionsMock.mockResolvedValue(versionRows);
   getDraftMock.mockResolvedValue(processingDraft);
   getPublishPreviewMock.mockResolvedValue(processingPublishPreview);
@@ -686,41 +627,6 @@ describe('external sales price book pages', () => {
       }),
     ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(requirePermissionMock).not.toHaveBeenCalled();
-  });
-
-  it('keeps processing and logistics in the canonical SALES quote page', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
-
-    const processingHtml = renderToStaticMarkup(
-      await SalesQuotePage({
-        searchParams: Promise.resolve({ section: 'processing' }),
-      }),
-    );
-    const logisticsHtml = renderToStaticMarkup(
-      await SalesQuotePage({
-        searchParams: Promise.resolve({ section: 'logistics' }),
-      }),
-    );
-
-    expect(requirePermissionMock).toHaveBeenCalledWith('order:create');
-    expect(getCatalogMock).toHaveBeenCalledWith(
-      OrderSettlementType.EXTERNAL_SALES,
-      CustomerPriceBookPurpose.PROCESSING,
-    );
-    expect(getCatalogMock).toHaveBeenCalledWith(
-      OrderSettlementType.EXTERNAL_SALES,
-      CustomerPriceBookPurpose.LOGISTICS,
-    );
-    expect(processingHtml).toContain('外部销售报价查询');
-    expect(processingHtml).toContain('¥ 130.00 / 批');
-    expect(processingHtml).toContain(
-      'href="/sales/quote?section=logistics"',
-    );
-    expect(logisticsHtml).toContain('首重 ¥5.00');
-    expect(logisticsHtml).toContain('aria-current="page"');
-    expect(logisticsHtml).not.toContain('ZTO-GUANGDONG');
-    expect(logisticsHtml).not.toContain('A3:D3');
-    expect(logisticsHtml).not.toContain('SHA-256');
   });
 
   it('maps every rule-center section onto its dedicated business editor', async () => {
@@ -963,19 +869,6 @@ describe('external sales price book pages', () => {
     expect(html).not.toContain('not-a-listed-draft');
   });
 
-  it('defaults unknown sections to processing', async () => {
-    requirePermissionMock.mockResolvedValue({ id: 'sales-1', role: Role.SALES });
-
-    const html = renderToStaticMarkup(
-      await SalesQuotePage({
-        searchParams: Promise.resolve({ section: 'versions' }),
-      }),
-    );
-
-    expect(html).toContain('¥ 130.00 / 批');
-    expect(html).not.toContain('section=versions');
-  });
-
   it('redirects legacy ADMIN URLs to the workspace and publish center', async () => {
     redirectMock.mockImplementation((url: string) => {
       throw new Error(`REDIRECT:${url}`);
@@ -997,9 +890,6 @@ describe('external sales price book pages', () => {
       }),
     ).rejects.toThrow(
       'REDIRECT:/owner/rules/price-versions?draft=processing-draft',
-    );
-    expect(() => SalesLogisticsQuotePage()).toThrow(
-      'REDIRECT:/sales/quote?section=logistics',
     );
   });
 });

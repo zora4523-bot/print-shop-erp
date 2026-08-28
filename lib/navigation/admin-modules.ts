@@ -387,18 +387,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'bill:view:self',
   },
   {
-    id: 'sales.quote',
-    label: '报价查询',
-    routeBase: '/sales/quote',
-    iconName: 'FileText',
-    breadcrumbLabel: '报价查询',
-    menuSection: 'workflow',
-    status: 'implemented',
-    menuOrder: 50,
-    menuRoles: [Role.SALES],
-    requiredPermission: 'order:create',
-  },
-  {
     id: 'cs.orders.new',
     label: '创建工单',
     routeBase: '/orders/new',
@@ -445,18 +433,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 50,
     menuRoles: [Role.CUSTOMER_SERVICE],
     requiredPermission: 'salary:view:self',
-  },
-  {
-    id: 'cs.quote',
-    label: '报价查询',
-    routeBase: '#',
-    iconName: 'FileText',
-    breadcrumbLabel: '报价查询',
-    menuSection: 'workflow',
-    status: 'placeholder',
-    menuOrder: 60,
-    menuRoles: [Role.CUSTOMER_SERVICE],
-    requiredPermission: 'order:create',
   },
 ] as const;
 

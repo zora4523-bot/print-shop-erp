@@ -92,7 +92,7 @@ describe('admin navigation prefetch policy', () => {
     expect(breadcrumb).toContain('Object.fromEntries');
     expect(breadcrumb).toContain("prices: '价格管理'");
     expect(breadcrumb).toContain("'external-sales': '客户计价规则'");
-    expect(breadcrumb).toContain("quote: '报价查询'");
+    expect(breadcrumb).not.toContain("quote: '报价查询'");
   });
 });
 

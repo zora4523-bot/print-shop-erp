@@ -364,14 +364,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).toContain('创建工单');
     expect(labels).toContain('我的工单');
     expect(labels).toContain('我的账单');
-    const quote = flatten(getAdminMenuItems({ role: Role.SALES })).find(
-      (item) => item.label === '报价查询',
-    );
-    expect(quote).toMatchObject({
-      href: '/sales/quote',
-      status: 'implemented',
-      requiredPermission: 'order:create',
-    });
+    expect(labels).not.toContain('报价查询');
   });
 
   it('CUSTOMER_SERVICE 看到自己专属的"我的业绩 / 我的工资单"', () => {
@@ -387,10 +380,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('外部销售收费');
     expect(labels).not.toContain('内部报价（低频）');
     expect(labels).not.toContain('规则配置中心');
-    const quote = flatten(
-      getAdminMenuItems({ role: Role.CUSTOMER_SERVICE }),
-    ).find((item) => item.label === '报价查询');
-    expect(quote).toMatchObject({ href: '#', status: 'placeholder' });
+    expect(labels).not.toContain('报价查询');
   });
 
   it('WORKER 返回空（师傅走独立 (worker) 壳，不应进 (admin)）', () => {

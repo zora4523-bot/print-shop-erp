@@ -161,7 +161,7 @@
 
 ## 4. 功能重复
 
-- [功能重复][P2·已修] components/business/price/ExternalSalesPriceBookCatalog.tsx:17 — 价目目录与版本面板各自实现上海日期格式化 — `lib/format/dates.ts` 可等价覆盖 — 动作：已修 `6ea0274`（DUP-DATE-001）。
+- [功能重复][P2·已修·历史] components/business/price/ExternalSalesPriceBookCatalog.tsx:17 — 价目目录与版本面板各自实现上海日期格式化 — `lib/format/dates.ts` 可等价覆盖 — 动作：已修 `6ea0274`（DUP-DATE-001）。该组件所属销售查价功能已于 2026-08-28 废止并删除，本条仅供审计追溯。
 - [功能重复][P2·已修] lib/dashboard/shanghai-clock.ts:20 — 页面、cron 与薪资汇总重复实现上海今天和当前月份 — 既有测试及固定 UTC+8 语义背书 — 动作：已修 `6ea0274`（DUP-CLOCK-001）。
 - [功能重复][P2·已修] lib/export/xlsx-column.ts:2 — 通用 XLSX 与计件 XLSX 各自实现完全相同的列名转换 — 算法逐字符一致且无 IO — 动作：已修 `6ea0274`（DUP-XLSX-001）。
 - [功能重复][P2·留人工] components/business/salary/SalaryRuleSettingsForm.tsx:244 — 多个 datetime-local 表单各自转换上海墙上时间 — 中央模块没有明确的 datetime-local 秒/空值契约 — 动作：留人工；先建时区边界 fixture（DUP-DATETIME-001）。

@@ -42,7 +42,6 @@ const SEGMENT_LABELS: Record<string, string> = {
   'employee-pay': '员工工资与提成',
   prices: '价格管理',
   'external-sales': '客户计价规则',
-  quote: '报价查询',
   adjustments: '加价规则',
   tiers: '价格阶梯',
   notifications: '推送配置',

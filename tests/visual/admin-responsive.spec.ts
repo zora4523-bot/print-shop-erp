@@ -612,16 +612,6 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       prepareGateState: prepareOrderCreationComponentState,
     },
     {
-      name: 'sales-processing-price-book',
-      path: '/sales/quote?section=processing',
-      readyHeading: '外部销售报价查询',
-    },
-    {
-      name: 'sales-logistics-price-book',
-      path: '/sales/quote?section=logistics',
-      readyHeading: '外部销售报价查询',
-    },
-    {
       name: 'sales-bills',
       path: '/sales/bills',
       readyHeading: '我的对客应付账单',
