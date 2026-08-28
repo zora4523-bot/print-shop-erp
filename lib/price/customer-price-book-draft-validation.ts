@@ -11,12 +11,12 @@ import {
   normalizeZtoProvince,
 } from './external-order-charges';
 import type {
-  ExternalSalesPriceRule,
-} from './external-sales-quote';
+  ExternalSalesPriceRuleForValidation,
+} from './external-sales-rule-validation';
 import {
   EXTERNAL_SALES_PRICE_LIMITS,
   validateExternalSalesPriceRules,
-} from './external-sales-quote';
+} from './external-sales-rule-validation';
 import { externalPriceBusinessText } from './external-price-display';
 import { parseCustomerRuleCondition } from './customer-rule-condition';
 
@@ -737,13 +737,13 @@ function processingIssues(
   }
   const engineErrors = validateExternalSalesPriceRules(
     itemRules.map(
-      (rule): ExternalSalesPriceRule => ({
+      (rule): ExternalSalesPriceRuleForValidation => ({
         id: rule.id,
         code: rule.code,
         name: rule.name,
-        kind: rule.kind as ExternalSalesPriceRule['kind'],
+        kind: rule.kind as ExternalSalesPriceRuleForValidation['kind'],
         calculationType:
-          rule.calculationType as ExternalSalesPriceRule['calculationType'],
+          rule.calculationType as ExternalSalesPriceRuleForValidation['calculationType'],
         amount: rule.amount === null ? null : String(rule.amount),
         minQty: rule.minQty,
         maxQty: rule.maxQty,
