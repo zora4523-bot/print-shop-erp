@@ -256,6 +256,11 @@ function PricingNumericInput({
     <div className="relative min-w-0">
       {editable && !disabled ? (
         <Input
+          // The server action revalidates this view with the persisted value.
+          // Remount only the changed field so Base UI receives a stable
+          // defaultValue for each uncontrolled input instance. Other fields
+          // keep their unsaved DOM values after a validation error.
+          key={JSON.stringify([id, value ?? ''])}
           id={id}
           name={name ?? id}
           type="number"

@@ -49,6 +49,12 @@ vi.mock('../CustomerPricingCreateDraftDialog', () => ({
   ),
 }));
 
+vi.mock('../CustomerPricingUrlCleanup', () => ({
+  CustomerPricingUrlCleanup: ({ href }: { href: string }) => (
+    <span data-customer-pricing-url-cleanup={href} />
+  ),
+}));
+
 vi.mock(
   '@/components/business/price/PriceWorkspaceNavigationGuard',
   () => ({
@@ -186,6 +192,22 @@ describe('CustomerPricingDedicatedSection', () => {
     expect(html).not.toContain('aria-label="价格状态"');
     expect(html).not.toContain('当前生效');
     expect(html).not.toContain('data-draft-form-purpose');
+  });
+
+  it('草稿创建完成后收敛已失效的调价弹窗地址', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPricingDedicatedSection
+        workspace={workspace('blank', [
+          source(CustomerPriceBookPurpose.PROCESSING, 'draft'),
+        ])}
+        createDraftPurpose={CustomerPriceBookPurpose.PROCESSING}
+      />,
+    );
+
+    expect(html).toContain(
+      'data-customer-pricing-url-cleanup="/owner/rules/customer-pricing?section=blank"',
+    );
+    expect(html).not.toContain('data-draft-form-purpose="processing"');
   });
 
   it('包装与快递分别调价，且只展开 query 指定的一个表单', () => {

@@ -38,6 +38,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CustomerPricingCreateDraftDialog } from './CustomerPricingCreateDraftDialog';
 import { CustomerPricingSectionDraftForm } from './CustomerPricingSectionDraftForm';
+import { CustomerPricingUrlCleanup } from './CustomerPricingUrlCleanup';
 import {
   CustomerAddsPricingSectionView,
   CustomerBlankPricingSectionView,
@@ -705,12 +706,16 @@ function SelectedCreateDraftDialog({
   workspace,
   createDraftPurpose,
 }: CustomerPricingDedicatedSectionProps) {
+  if (createDraftPurpose === null) return null;
+
+  const returnHref = sectionHref(workspace.section);
   const source = workspace.sources.find(
     (candidate) => candidate.purpose === createDraftPurpose,
   );
-  if (!source || !canCreateDraft(source)) return null;
+  if (!source || !canCreateDraft(source)) {
+    return <CustomerPricingUrlCleanup href={returnHref} />;
+  }
 
-  const returnHref = sectionHref(workspace.section);
   return (
     <CustomerPricingCreateDraftDialog
       dialogId={createDraftDialogId(workspace, source)}
