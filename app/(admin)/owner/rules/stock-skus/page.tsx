@@ -6,7 +6,7 @@ import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { QUOTE_PRODUCT_CATEGORIES } from '@/lib/product';
 
 export const metadata = {
-  title: '报价产品 · 规则配置中心',
+  title: '建单产品目录 · 规则配置中心',
 };
 
 type PageProps = Pick<ProductCatalogListProps, 'searchParams'>;

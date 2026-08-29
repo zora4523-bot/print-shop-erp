@@ -38,7 +38,7 @@ export type CraftCatalogDetailProps = {
 
 export async function getCraftCatalogMetadata({
   params,
-  titleScope = '工艺与参数',
+  titleScope = '建单工艺目录',
 }: Pick<CraftCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const session = await getSession();
   if (!session || !hasPermission('dict:craft:manage', session.user.role)) {
@@ -74,7 +74,7 @@ export async function CraftCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title="工艺与参数"
+        title="建单工艺目录"
         effect="immediate"
         subtitle="维护建单、计价与历史展示共用的工艺字典。"
         actions={

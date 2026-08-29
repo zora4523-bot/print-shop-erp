@@ -61,13 +61,13 @@ describe('工单核心重构验收契约', () => {
   it('规则中心在同一路由树下管理可维护的计价对象', () => {
     const requiredModules = [
       ['papers', '纸张', '/owner/rules/papers'],
-      ['stockSkus', '报价产品', '/owner/rules/stock-skus'],
+      ['stockSkus', '建单产品目录', '/owner/rules/stock-skus'],
       [
         'productCategories',
         '产品结构',
         '/owner/rules/product-categories',
       ],
-      ['crafts', '工艺参数', '/owner/rules/crafts'],
+      ['crafts', '建单工艺目录', '/owner/rules/crafts'],
     ] as const;
 
     expect(

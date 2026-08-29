@@ -66,7 +66,7 @@ const loadProduct = cache(getProductSummary);
 
 export async function getProductCatalogMetadata({
   params,
-  titleScope = '报价产品',
+  titleScope = '建单产品目录',
 }: Pick<ProductCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const { id } = await params;
   const session = await getSession();
@@ -77,7 +77,7 @@ export async function getProductCatalogMetadata({
   return {
     title: product
       ? `编辑 ${externalPriceBusinessText(product.name) || '未命名 SKU'} · ${titleScope}`
-      : '报价产品不存在',
+      : '建单产品不存在',
   };
 }
 
@@ -118,12 +118,12 @@ export async function ProductCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={specWorkspace ? '规格 · 烫金颜色' : '报价产品'}
+        title={specWorkspace ? '规格 · 烫金颜色' : '建单产品目录'}
         effect="immediate"
         subtitle={
           specWorkspace
             ? '规格和纸张来自真实报价产品；烫金颜色当前随工单事实维护。'
-            : '维护外部报价与新建工单可选择的产品、纸张和起订数。'
+            : '这里不是销售询价入口；用于维护建单时按路线、纸张和规格隐式匹配的产品事实。'
         }
         actions={
           <Link
@@ -131,7 +131,7 @@ export async function ProductCatalogList({
             prefetch={false}
             className={buttonVariants()}
           >
-            新建报价产品
+            新建目录项
           </Link>
         }
       />
@@ -162,7 +162,7 @@ export async function ProductCatalogList({
             filters={
               <div
                 role="group"
-                aria-label="报价产品状态筛选"
+                aria-label="建单产品状态筛选"
                 className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
               >
                 {(
@@ -194,7 +194,7 @@ export async function ProductCatalogList({
 
           <AdminTableCard
             isEmpty={productPage.rows.length === 0}
-            emptyTitle="暂无报价产品"
+            emptyTitle="暂无建单产品"
             emptyDescription={
               q
                 ? '没有匹配当前搜索与状态条件的记录。'
@@ -218,7 +218,7 @@ export async function ProductCatalogList({
             <ProductsTable
               products={productPage.rows}
               editBase={routeBase}
-              label="报价产品列表"
+              label="建单产品列表"
               categoryHeading="产品结构"
             />
           </AdminTableCard>
@@ -245,9 +245,9 @@ export async function NewProductCatalogItem({
   return (
     <div className="space-y-4">
       <RuleCenterPageHeader
-        title="新建报价产品"
+        title="新建产品目录项"
         effect="immediate"
-        subtitle="启用后会进入新报价与新工单的产品选择器。"
+        subtitle="启用后会参与新建工单的纸张、规格与产品结构匹配。"
         actions={
           <Link
             href={routeBase}
@@ -315,7 +315,7 @@ export async function EditProductCatalogItem({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={`编辑报价产品：${
+        title={`编辑建单产品：${
           externalPriceBusinessText(product.name) || '未命名 SKU'
         }`}
         effect="immediate"
@@ -355,7 +355,7 @@ export async function EditProductCatalogItem({
       {product.isActive || !isRetired ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-2 text-base font-semibold">
-            {product.isActive ? '停用报价产品' : '启用报价产品'}
+            {product.isActive ? '停用建单产品' : '启用建单产品'}
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
             {product.isActive
