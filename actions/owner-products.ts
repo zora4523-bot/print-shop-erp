@@ -141,7 +141,7 @@ export async function setQuoteProductActiveAction(
   ) {
     return {
       status: 'error',
-      message: '目标报价 SKU 不存在或属于已排除的历史分类',
+      message: '目标建单产品不存在或属于已排除的历史分类',
     };
   }
 

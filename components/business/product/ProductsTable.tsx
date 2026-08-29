@@ -21,7 +21,7 @@ function businessText(value: string, fallback: string): string {
 export function ProductsTable({
   products,
   editBase = RULE_CENTER_HREFS.stockSkus,
-  label = '报价 SKU 列表',
+  label = '建单产品列表',
   categoryHeading = '产品结构',
 }: {
   products: ProductListRow[];

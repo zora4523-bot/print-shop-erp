@@ -323,7 +323,7 @@ function resolvePaperFacts(args: {
     if (!families.some((family) => samePaperType(family, submitted.paperType))) {
       return fail(
         'CATALOG_PRODUCT_MISMATCH',
-        `款式 ${item.itemKey} 的纸张与报价产品 ${product.code ?? product.id} 不一致`,
+        `款式 ${item.itemKey} 的纸张与建单产品 ${product.code ?? product.id} 不一致`,
       );
     }
     if (
@@ -336,7 +336,7 @@ function resolvePaperFacts(args: {
     ) {
       return fail(
         'CATALOG_PRODUCT_MISMATCH',
-        `款式 ${item.itemKey} 的纸张克重与报价产品 ${product.code ?? product.id} 不一致`,
+        `款式 ${item.itemKey} 的纸张克重与建单产品 ${product.code ?? product.id} 不一致`,
       );
     }
   }
@@ -347,13 +347,13 @@ function resolvePaperFacts(args: {
   if (product?.paperMaterialId && !linkedPaper) {
     return fail(
       'CATALOG_PAPER_CHANGED',
-      `报价产品 ${product.code ?? product.id} 关联的纸张不存在`,
+      `建单产品 ${product.code ?? product.id} 关联的纸张不存在`,
     );
   }
   if (linkedPaper && (!linkedPaper.isActive || linkedPaper.outOfStock)) {
     return fail(
       'CATALOG_PAPER_CHANGED',
-      `报价产品 ${product?.code ?? product?.id} 关联的纸张已停用或缺货`,
+      `建单产品 ${product?.code ?? product?.id} 关联的纸张已停用或缺货`,
     );
   }
   if (linkedPaper && !matchesPaperFamily(linkedPaper, submitted)) {
@@ -433,7 +433,7 @@ function resolveSpecificationFacts(args: {
   if (productChoices.length > 0 && !matchedProductChoice) {
     return fail(
       'CATALOG_PRODUCT_MISMATCH',
-      `款式 ${item.itemKey} 的规格与报价产品 ${product?.code ?? product?.id} 不一致`,
+      `款式 ${item.itemKey} 的规格与建单产品 ${product?.code ?? product?.id} 不一致`,
     );
   }
 
@@ -688,7 +688,7 @@ export async function buildCreateOrderQuoteInputFromCatalog(
     if (!product?.isActive) {
       fail(
         'CATALOG_PRODUCT_CHANGED',
-        `报价产品不存在或已停用：${productId}`,
+        `建单产品不存在或已停用：${productId}`,
       );
     }
   }
@@ -738,7 +738,7 @@ export async function buildCreateOrderQuoteInputFromCatalog(
       ) {
         return fail(
           'CATALOG_PRODUCT_MISMATCH',
-          `报价产品“${product.code ?? product.id}”的分类与计价路线“${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}”不一致`,
+          `建单产品“${product.code ?? product.id}”的分类与计价路线“${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}”不一致`,
         );
       }
       const foilSides = resolveOrderItemFoilSides(item);

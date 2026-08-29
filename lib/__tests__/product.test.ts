@@ -323,7 +323,7 @@ describe('listCurrentExternalSalesProductOrderOptions', () => {
   const referencedProduct = {
     id: 'product-priced',
     code: 'PRD-000042',
-    name: '管理员新建报价 SKU',
+    name: '管理员新建产品目录项',
     category: ProductCategory.CUSTOM_FLAT_FOIL,
     specification: '大号封90×165',
     paperType: '160g珠光艳闪',
@@ -374,7 +374,7 @@ describe('listCurrentExternalSalesProductOrderOptions', () => {
     expect(dbMock.product.findMany).not.toHaveBeenCalled();
   });
 
-  it('没有当前加工费价目时关闭报价 SKU 目录', async () => {
+  it('没有当前加工费价目时关闭建单产品目录', async () => {
     await expect(
       listCurrentExternalSalesProductOrderOptions(now),
     ).resolves.toEqual([]);
@@ -1005,7 +1005,7 @@ describe('updateProduct', () => {
         paperType: '铜版纸',
         baseUnitPrice: '0.5000',
       }),
-    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    ).rejects.toThrow(/新建产品目录项.*新价格版本/u);
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
 
@@ -1185,7 +1185,7 @@ describe('setProductActive', () => {
 
     await expect(
       setProductActive('p1', false, activeChangeContext),
-    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    ).rejects.toThrow(/新建产品目录项.*新价格版本/u);
     expect(dbMock.product.update).not.toHaveBeenCalled();
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });

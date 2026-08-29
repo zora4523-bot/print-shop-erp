@@ -1487,7 +1487,7 @@ function validateOrderItemPricingFacts(
     ctx.addIssue({
       code: 'custom',
       path: ['productId'],
-      message: '自动计价路线必须选择精确的报价产品',
+      message: '自动计价路线必须选择精确的建单产品',
     });
   }
   if (!item.paperType && !manualPricingRequested) {

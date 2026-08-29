@@ -270,7 +270,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '所选报价产品与适用范围不一致，请重新选择产品',
+      '所选建单产品与适用范围不一致，请重新选择产品',
     );
   });
 
@@ -294,7 +294,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '所选报价产品的分类与适用计价路线不一致',
+      '所选建单产品的分类与适用计价路线不一致',
     );
   });
 

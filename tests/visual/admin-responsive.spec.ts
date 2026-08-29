@@ -415,7 +415,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'stock-skus',
       path: RULE_CENTER_HREFS.stockSkus,
-      readyHeading: '报价产品',
+      readyHeading: '建单产品目录',
     },
     {
       name: 'rule-center',

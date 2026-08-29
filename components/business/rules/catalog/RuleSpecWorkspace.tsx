@@ -80,7 +80,7 @@ export function RuleSpecWorkspace({
               规格主数据
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              每行对应一条真实报价产品，规格和纸张信息直接来自当前主数据。
+              每行对应一条建单产品目录项，规格和纸张信息直接来自当前主数据。
             </p>
           </div>
           <span className="shrink-0 rounded-full border bg-background px-3 py-1 text-xs font-medium tabular-nums text-muted-foreground">
@@ -253,7 +253,7 @@ export function RuleSpecWorkspace({
         <div className="p-4 sm:p-5">
           <EmptyState
             kind={query ? 'no-result' : 'no-data'}
-            noun="报价产品"
+            noun="建单产品"
             onClear={query ? clearSearch : undefined}
             onCreate={
               query ? undefined : (
@@ -261,7 +261,7 @@ export function RuleSpecWorkspace({
                   href={`${routeBase}/new`}
                   className={cn(buttonVariants(), 'min-h-11')}
                 >
-                  新建报价产品
+                  新建产品目录项
                 </Link>
               )
             }

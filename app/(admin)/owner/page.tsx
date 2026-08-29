@@ -166,8 +166,8 @@ export default async function OwnerDashboardPage() {
         <ActionShortcut
           href={RULE_CENTER_HREFS.stockSkus}
           icon={PackageOpen}
-          label="报价 SKU"
-          description="维护报价规格"
+          label="建单产品"
+          description="维护建单规格"
           tone="info"
         />
         <ActionShortcut

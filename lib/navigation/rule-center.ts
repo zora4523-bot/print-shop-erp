@@ -193,7 +193,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     id: 'productCategories',
     menuParentId: 'overview',
     label: '产品结构',
-    description: '维护报价产品与 BOM 共用的产品分类树。',
+    description: '维护建单产品与 BOM 共用的产品分类树。',
     impact: '新建 SKU、BOM 与历史引用',
     effect: 'immediate',
     href: RULE_CENTER_HREFS.productCategories,

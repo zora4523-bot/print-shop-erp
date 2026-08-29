@@ -122,7 +122,7 @@ export async function ProductCatalogList({
         effect="immediate"
         subtitle={
           specWorkspace
-            ? '规格和纸张来自真实报价产品；烫金颜色当前随工单事实维护。'
+            ? '规格和纸张来自建单产品目录；烫金颜色当前随工单事实维护。'
             : '这里不是销售询价入口；用于维护建单时按路线、纸张和规格隐式匹配的产品事实。'
         }
         actions={

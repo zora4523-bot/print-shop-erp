@@ -142,7 +142,7 @@ test.describe('automation smoke', () => {
       ruleSubmenu.getByRole('link', { name: '客户计价', exact: true }),
     ).toHaveCount(0);
     await expect(
-      ruleSubmenu.getByRole('link', { name: '报价产品', exact: true }),
+      ruleSubmenu.getByRole('link', { name: '建单产品目录', exact: true }),
     ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
     await expect(
       ruleSubmenu.locator('[data-menu-level="child-group"]'),
@@ -294,7 +294,7 @@ test.describe('automation smoke', () => {
       mobileSidebar.getByRole('link', { name: '空白封单价', exact: true }),
     ).toHaveAttribute('aria-current', 'page');
     await expect(
-      mobileSidebar.getByRole('link', { name: '报价产品', exact: true }),
+      mobileSidebar.getByRole('link', { name: '建单产品目录', exact: true }),
     ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
     await expect(
       mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),

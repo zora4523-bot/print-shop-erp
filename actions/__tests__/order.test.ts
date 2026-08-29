@@ -516,7 +516,7 @@ describe('createOrderAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(internalSalesActor);
     orderMock.createOrder.mockRejectedValueOnce(
       new MockOrderInvariantError(
-        '报价产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
+        '建单产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
       ),
     );
 
@@ -525,7 +525,7 @@ describe('createOrderAction', () => {
     ).resolves.toEqual({
       status: 'error',
       message:
-        '报价产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
+        '建单产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
     });
   });
 

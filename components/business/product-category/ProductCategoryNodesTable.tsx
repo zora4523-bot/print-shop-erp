@@ -29,7 +29,7 @@ export function ProductCategoryNodesTable({
         <TableRow>
           <TableHead>分类名</TableHead>
           <TableHead className="text-right">排序</TableHead>
-          <TableHead className="text-right">报价 SKU</TableHead>
+          <TableHead className="text-right">建单产品</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>

@@ -134,7 +134,7 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
   });
 
-  it('内部建单不再渲染报价 SKU、动态材料或创建页人工价格控件', () => {
+  it('内部建单不再渲染产品下拉、动态材料或创建页人工价格控件', () => {
     const html = render(false);
 
     expect(html).not.toContain('报价产品');

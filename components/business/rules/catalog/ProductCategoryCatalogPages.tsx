@@ -59,7 +59,7 @@ export async function ProductCategoryCatalogList({
       <RuleCenterPageHeader
         title="产品结构分类"
         effect="immediate"
-        subtitle="分类树同时服务报价产品与 BOM；历史引用不会因停用而删除。"
+        subtitle="分类树同时服务建单产品与 BOM；历史引用不会因停用而删除。"
         actions={
           <Link href={`${routeBase}/new`} className={buttonVariants()}>
             新建产品结构分类
@@ -139,7 +139,7 @@ export async function EditProductCategoryCatalogItem({
       <RuleCenterPageHeader
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
-        subtitle={`${node._count.products} 个报价产品`}
+        subtitle={`${node._count.products} 个建单产品`}
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>

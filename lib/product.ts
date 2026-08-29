@@ -63,10 +63,10 @@ export type ProductSummary = Pick<
 export type ProductActiveStatusFilter = 'all' | 'active' | 'inactive';
 
 /**
- * 工单、BOM 和自动价共用的报价 SKU 范围。
+ * 工单、BOM 和自动价共用的建单产品范围。
  *
  * STOCK_FOIL_ADD 是旧的“现货加烫”同义分类，现已归并到通版现货；
- * BYO_MATERIAL 需人工确认纸料，不作为新报价 SKU 创建选项。
+ * BYO_MATERIAL 需人工确认纸料，不作为新建单产品创建选项。
  */
 export const QUOTE_PRODUCT_CATEGORIES = [
   ProductCategory.BLANK_STOCK,
@@ -879,7 +879,7 @@ function externalPricingFactsChanged(
 }
 
 function protectedExternalPricingFactsMessage(): string {
-  return '该报价 SKU 已被当前或计划生效的客户价格版本引用；请新建 SKU 并在新价格版本中配置，不能改写已发布的计价事实';
+  return '该建单产品已被当前或计划生效的客户价格版本引用；请新建产品目录项并在新价格版本中配置，不能改写已发布的计价事实';
 }
 
 export async function updateProduct(
@@ -936,7 +936,7 @@ export async function setProductActive(
     const target = await tx.product.findUnique({ where: { id }, select: SUMMARY_SELECT });
     if (!target) throw new ProductInvariantError('目标产品不存在');
     if (isActive && isRetiredProductCategory(target.categoryNode)) {
-      throw new ProductInvariantError('该报价 SKU 属于已退役历史分类，不能重新启用');
+      throw new ProductInvariantError('该建单产品属于已退役历史分类，不能重新启用');
     }
     if (target.isActive === isActive) return target;
 

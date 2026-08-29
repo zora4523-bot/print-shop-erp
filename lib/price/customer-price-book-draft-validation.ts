@@ -636,7 +636,7 @@ function processingIssues(
         issues.push({
           path: `rules.${rule.id}.triggerCondition`,
           ruleId: rule.id,
-          message: '所选报价产品的分类与适用计价路线不一致',
+          message: '所选建单产品的分类与适用计价路线不一致',
         });
       }
     } else {
@@ -712,7 +712,7 @@ function processingIssues(
         issues.push({
           path: `rules.${rule.id}.triggerCondition`,
           ruleId: rule.id,
-          message: '所选报价产品与适用范围不一致，请重新选择产品',
+          message: '所选建单产品与适用范围不一致，请重新选择产品',
         });
       }
     }

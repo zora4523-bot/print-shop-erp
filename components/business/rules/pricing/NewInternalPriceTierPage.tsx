@@ -20,7 +20,7 @@ export default async function NewInternalPriceTierPage() {
       <RuleCenterPageHeader
         title="新建价格阶梯"
         effect="effective-dated"
-        subtitle="同一报价产品、同一起订量的有效期不能重叠。"
+        subtitle="同一建单产品、同一起订量的有效期不能重叠。"
         actions={
           <Link
             href={RULE_CENTER_HREFS.internalPricing}

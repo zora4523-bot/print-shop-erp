@@ -1759,7 +1759,7 @@ export async function updateCustomerPriceRuleDraft(
             where: { id: input.productId },
             select: { id: true, code: true },
           });
-          if (!product) throw new CustomerPriceBookAdminError('报价产品不存在');
+          if (!product) throw new CustomerPriceBookAdminError('建单产品不存在');
           targetProductCodes = [String(product.code)];
         } else if (existing.productId === null) {
           // 历史附加规则可能通过多个 productCodes 限定范围，

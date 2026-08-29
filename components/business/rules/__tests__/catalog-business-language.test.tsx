@@ -28,7 +28,7 @@ vi.mock('@/lib/product', () => ({
 }));
 
 describe('规则中心目录业务语言投影', () => {
-  it('报价 SKU 列表隐藏导入表坐标', () => {
+  it('建单产品列表隐藏导入表坐标', () => {
     const products = [
       {
         id: 'product-1',
@@ -68,7 +68,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('分类表!A4');
   });
 
-  it('报价 SKU 列表只展示一次产品结构', () => {
+  it('建单产品列表只展示一次产品结构', () => {
     const products = [
       {
         id: 'product-duplicate-category',
@@ -105,7 +105,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('计价路线 / 产品结构');
   });
 
-  it('规则中心的报价 SKU 列表不混入内部直单价', () => {
+  it('规则中心的建单产品列表不混入内部直单价', () => {
     const product = {
       id: 'product-internal-price',
       code: 'PRD-INTERNAL',
@@ -140,7 +140,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('123.4567');
   });
 
-  it('报价 SKU 列表明确标记退役分类下的历史记录', () => {
+  it('建单产品列表明确标记退役分类下的历史记录', () => {
     const product = {
       id: 'product-retired',
       code: 'PRD-RETIRED',

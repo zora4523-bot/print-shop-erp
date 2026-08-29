@@ -226,7 +226,7 @@ describe('createQuoteProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
   });
 
-  it('报价 SKU 专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
+  it('建单产品专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -244,7 +244,7 @@ describe('createQuoteProductAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
   });
 
-  it('报价 SKU 创建忽略伪造的内部直单价', async () => {
+  it('建单产品创建忽略伪造的内部直单价', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -264,7 +264,7 @@ describe('createQuoteProductAction', () => {
     );
   });
 
-  it('报价 SKU 专用 action 拒绝已归并的现货加烫旧分类', async () => {
+  it('建单产品专用 action 拒绝已归并的现货加烫旧分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_legacy',
@@ -308,7 +308,7 @@ describe('updateQuoteProductAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
-  it('报价 SKU 更新忽略伪造价格且省略内部直单价字段', async () => {
+  it('建单产品更新忽略伪造价格且省略内部直单价字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -349,7 +349,7 @@ describe('updateQuoteProductAction', () => {
     );
   });
 
-  it('报价 SKU 更新不接受自带纸料分类', async () => {
+  it('建单产品更新不接受自带纸料分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_byo',
@@ -381,7 +381,7 @@ describe('setQuoteProductActiveAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductActive.mockRejectedValueOnce(
       new MockProductInvariantError(
-        '该报价 SKU 属于已退役历史分类，不能重新启用',
+        '该建单产品属于已退役历史分类，不能重新启用',
       ),
     );
     const r = await setQuoteProductActiveAction(
@@ -390,7 +390,7 @@ describe('setQuoteProductActiveAction', () => {
     );
     expect(r).toEqual({
       status: 'error',
-      message: '该报价 SKU 属于已退役历史分类，不能重新启用',
+      message: '该建单产品属于已退役历史分类，不能重新启用',
     });
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
@@ -434,7 +434,7 @@ describe('setQuoteProductActiveAction', () => {
     );
   });
 
-  it('报价 SKU 启停不可操作已排除的历史分类', async () => {
+  it('建单产品启停不可操作已排除的历史分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductSummary.mockResolvedValue({
       id: 'p-old',
