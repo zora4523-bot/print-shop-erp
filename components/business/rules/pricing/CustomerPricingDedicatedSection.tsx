@@ -142,6 +142,7 @@ const PRINT_COLUMNS = [
   { key: 'Q5000', label: '5千' },
   { key: 'Q10000', label: '1万' },
   { key: 'Q20000', label: '2万' },
+  { key: 'Q30000', label: '3万' },
 ] as const;
 
 const PRINT_PRODUCTS = [
