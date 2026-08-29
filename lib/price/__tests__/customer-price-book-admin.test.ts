@@ -7,6 +7,7 @@ import {
   EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
   type CustomerRuleConditionEditorInput,
 } from '../customer-rule-condition';
+import { ZTO_PROVINCE_OPTIONS } from '../external-order-charges';
 
 vi.mock('server-only', () => ({}));
 
@@ -1087,7 +1088,10 @@ describe('customer price-book draft lifecycle', () => {
         productId: null,
         kind: 'ADD_ON',
         calculationType: 'FIXED_AMOUNT',
-        triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+        triggerCondition: {
+          carrierCode: 'ZTO',
+          provinces: [...ZTO_PROVINCE_OPTIONS],
+        },
         category: { code: 'SHIPPING_FEE', name: '快递费' },
         priceBook: {
           id: 'book-v2-draft',
@@ -1115,7 +1119,10 @@ describe('customer price-book draft lifecycle', () => {
         incrementAmount: '1.5000',
         minQty: null,
         maxQty: null,
-        triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+        triggerCondition: {
+          carrierCode: 'ZTO',
+          provinces: [...ZTO_PROVINCE_OPTIONS],
+        },
         exclusiveGroup: 'ZTO_PROVINCE_RATE',
         productId: null,
         product: null,
@@ -1129,19 +1136,22 @@ describe('customer price-book draft lifecycle', () => {
         id: 'packaging-a',
         code: 'PACK_A',
         name: '耗材 1–500',
-        kind: 'REFERENCE',
+        kind: 'ADD_ON',
         calculationType: 'FIXED_AMOUNT',
         amount: '1.0000',
         includedUnits: null,
         incrementUnits: null,
         incrementAmount: null,
         minQty: 1,
-        maxQty: 500,
-        triggerCondition: { scope: 'SHIPMENT_QUANTITY', advisory: true },
-        exclusiveGroup: 'PACKING_MATERIAL_QUANTITY_TIER',
+        maxQty: 5_000,
+        triggerCondition: {
+          scope: 'ORDER_TOTAL_QUANTITY',
+          segmentedAboveMaximum: true,
+        },
+        exclusiveGroup: 'CARTON_ORDER_QUANTITY_TIER',
         productId: null,
         product: null,
-        blocksAutomaticQuote: true,
+        blocksAutomaticQuote: false,
         category: {
           code: 'PACKING_MATERIAL',
           name: '打包耗材',
