@@ -19,7 +19,10 @@ vi.mock('@/components/business/rules/RuleCenterPriceWorkspaceData', () => ({
 }));
 
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
-import { RuleCenterWorkspaceBar } from '@/components/business/rules/RuleCenterWorkspaceBar';
+import {
+  RuleCenterWorkspaceBar,
+  priceWorkspaceNavigationKey,
+} from '@/components/business/rules/RuleCenterWorkspaceBar';
 import {
   RULE_CENTER_DEFAULT_HREF,
   RULE_CENTER_HREFS,
@@ -30,6 +33,20 @@ function visibleText(html: string): string {
 }
 
 describe('rule center workspace UI', () => {
+  it('refreshes the version summary key when route selection changes', () => {
+    expect(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.priceVersions,
+        new URLSearchParams('draft=draft-1'),
+      ),
+    ).not.toBe(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.priceVersions,
+        new URLSearchParams(),
+      ),
+    );
+  });
+
   it('opens the first concrete price editor without a second workspace menu', () => {
     expect(RULE_CENTER_DEFAULT_HREF).toBe(
       '/owner/rules/customer-pricing?section=blank',
@@ -130,5 +147,34 @@ describe('rule center workspace UI', () => {
     expect(visibleText(html)).not.toContain('发布');
     expect(html).not.toContain('aria-label="进入价格版本发布"');
     expect(html).not.toContain('aria-disabled="true"');
+  });
+
+  it('does not render self-links on the price version page', () => {
+    usePathnameMock.mockReturnValue(RULE_CENTER_HREFS.priceVersions);
+    useSearchParamsMock.mockReturnValue(
+      new URLSearchParams('draft=processing-draft'),
+    );
+
+    const html = renderToStaticMarkup(
+      <RuleCenterWorkspaceBar
+        priceVersionSummary={{
+          state: 'ready',
+          streams: [
+            {
+              key: 'processing',
+              label: '加工费',
+              currentVersion: 4,
+              draftVersion: 5,
+              draftId: 'processing-draft',
+              scheduledVersion: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(visibleText(html)).toContain('加工费当前 v4草稿 v5');
+    expect(html).not.toContain('aria-label="审阅价格版本变更"');
+    expect(html).not.toContain('aria-label="进入价格版本发布"');
   });
 });

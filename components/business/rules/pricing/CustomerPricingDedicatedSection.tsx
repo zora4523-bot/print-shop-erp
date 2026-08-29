@@ -37,6 +37,7 @@ import {
 } from '@/lib/navigation/rule-center';
 import { cn } from '@/lib/utils';
 import { CustomerPricingCreateDraftDialog } from './CustomerPricingCreateDraftDialog';
+import { CustomerPricingRuleFocus } from './CustomerPricingRuleFocus';
 import { CustomerPricingSectionDraftForm } from './CustomerPricingSectionDraftForm';
 import { CustomerPricingUrlCleanup } from './CustomerPricingUrlCleanup';
 import {
@@ -61,6 +62,7 @@ import {
 export type CustomerPricingDedicatedSectionProps = {
   workspace: CustomerPriceSectionWorkspaceDto;
   createDraftPurpose: CustomerPriceBookPurpose | null;
+  focusRuleId?: string | null;
 };
 
 type EditableSectionField =
@@ -367,6 +369,26 @@ function buildFormAssembly(
 
 function inputId(name: string): string {
   return `customer-section-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`;
+}
+
+function focusedInputId(
+  assembly: FormAssembly,
+  focusRuleId: string | null | undefined,
+): string | null {
+  if (!focusRuleId) return null;
+  const rowIndex = assembly.rows.findIndex((row) => row.ruleId === focusRuleId);
+  if (rowIndex < 0) return null;
+
+  const matchingBindings = assembly.bindings.filter((binding) =>
+    binding.targets.some((target) => target.rowIndex === rowIndex),
+  );
+  const preferred =
+    matchingBindings.find((binding) =>
+      binding.targets.some(
+        (target) => target.rowIndex === rowIndex && target.field === 'amount',
+      ),
+    ) ?? matchingBindings[0];
+  return preferred ? inputId(preferred.inputName) : null;
 }
 
 function missingField(name: string): PricingNumericFieldState {
@@ -1329,12 +1351,14 @@ function renderSection(
 export function CustomerPricingDedicatedSection({
   workspace,
   createDraftPurpose,
+  focusRuleId,
 }: CustomerPricingDedicatedSectionProps) {
   const assembly = buildFormAssembly(workspace);
   const sectionView = renderSection(workspace, assembly) as ReactElement<{
     headingActions?: ReactNode;
     statusContent?: ReactNode;
   }>;
+  const focusTargetId = focusedInputId(assembly, focusRuleId);
   const context: CustomerPriceSectionFormContext = {
     section: workspace.section,
     rows: assembly.rows,
@@ -1365,6 +1389,9 @@ export function CustomerPricingDedicatedSection({
   return (
     <PriceWorkspaceNavigationGuardProvider>
       <div className="min-w-0">
+        {focusTargetId ? (
+          <CustomerPricingRuleFocus targetId={focusTargetId} />
+        ) : null}
         <CustomerPricingSectionDraftForm saveAction={saveAction}>
           {sectionViewWithStatus}
         </CustomerPricingSectionDraftForm>

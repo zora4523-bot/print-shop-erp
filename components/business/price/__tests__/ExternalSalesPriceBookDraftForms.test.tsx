@@ -482,12 +482,13 @@ describe('CreateCustomerPriceBookDraftForm', () => {
 });
 
 describe('PublishCustomerPriceBookDraftForm', () => {
-  it('要求生效时间和发布说明，再进入 L3 确认层', () => {
+  it('默认立即发布，在一层确认中展示真实影响', () => {
     const html = renderToStaticMarkup(
       <PublishCustomerPriceBookDraftForm
         priceBookId="draft-1"
         expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
-        defaultEffectiveFrom="2026-09-01T08:00"
+        defaultEffectiveFrom=""
+        changeReason="原材料调价"
         impact={{
           totalRuleCount: 121,
           changedItemCount: 2,
@@ -501,14 +502,44 @@ describe('PublishCustomerPriceBookDraftForm', () => {
       />,
     );
 
-    expect(html).toContain('发布说明（必填）');
+    expect(html).toContain('确认本次价格变更');
+    expect(html).toContain('2 个收费项目 · 7 条规则');
+    expect(html).toContain('121 条规则已通过');
+    expect(html).toContain('立即生效');
+    expect(html).toContain('确认并立即发布');
+    expect(html).toContain('预约生效或补充发布说明（可选）');
     const effectiveFrom = html.match(/<input[^>]*name="effectiveFrom"[^>]*>/)?.[0];
     const publishNote = html.match(/<textarea[^>]*name="publishNote"[^>]*>/)?.[0];
-    expect(effectiveFrom).toContain('required=""');
-    expect(publishNote).toContain('required=""');
-    expect(html).toContain('校验通过，进入发布确认');
-    expect(html).not.toContain('name="confirmedImpact"');
-    expect(html).not.toContain('确认校验并发布');
+    expect(effectiveFrom).not.toContain('required=""');
+    expect(publishNote).not.toContain('required=""');
+    expect(html).toContain('name="confirmedImpact" value="true"');
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain('校验通过，进入发布确认');
+    expect(html).not.toContain('2 / 121');
+  });
+
+  it('零差异时禁止发布', () => {
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-empty"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="检查价格"
+        impact={{
+          totalRuleCount: 121,
+          changedItemCount: 0,
+          changedRuleCount: 0,
+          increasedRuleCount: 0,
+          decreasedRuleCount: 0,
+          deltaPercentMin: null,
+          deltaPercentMax: null,
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+
+    expect(html).toContain('没有可发布的差异');
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
   });
 });
 

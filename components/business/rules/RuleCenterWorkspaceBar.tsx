@@ -44,6 +44,13 @@ function isPriceWorkspacePath(pathname: string): boolean {
   );
 }
 
+export function priceWorkspaceNavigationKey(
+  pathname: string,
+  searchParams: Pick<URLSearchParams, 'toString'>,
+): string {
+  return `${pathname}?${searchParams.toString()}`;
+}
+
 const RULE_CENTER_MATCH_ITEMS: readonly AdminMenuItem[] =
   RULE_CENTER_SIDEBAR_ITEMS.map((item) => ({
     label: item.label,
@@ -104,6 +111,8 @@ export function RuleCenterWorkspaceBar({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isPriceWorkspace = isPriceWorkspacePath(pathname);
+  const isVersionPage = pathname === RULE_CENTER_HREFS.priceVersions;
+  const navigationKey = priceWorkspaceNavigationKey(pathname, searchParams);
   const [loadedPriceVersionSummary, setLoadedPriceVersionSummary] =
     useState<RuleCenterPriceVersionSummary>(EMPTY_VERSION_SUMMARY);
   const priceVersionSummary =
@@ -127,7 +136,12 @@ export function RuleCenterWorkspaceBar({
     return () => {
       isActive = false;
     };
-  }, [initialPriceVersionSummary, isPriceWorkspace, loadPriceVersionSummary]);
+  }, [
+    initialPriceVersionSummary,
+    isPriceWorkspace,
+    loadPriceVersionSummary,
+    navigationKey,
+  ]);
 
   if (!isPriceWorkspace) return null;
 
@@ -174,36 +188,38 @@ export function RuleCenterWorkspaceBar({
           </span>
         ) : null}
 
-        <nav
-          aria-label="规则中心审阅与发布"
-          className="ml-auto flex shrink-0 items-center gap-1.5"
-        >
-          <Link
-            href={RULE_CENTER_HREFS.priceVersions}
-            prefetch={false}
-            aria-label="审阅价格版本变更"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-background/20 px-3 text-xs font-bold text-background transition-colors hover:bg-background/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:border-card-foreground/20 dark:text-card-foreground dark:hover:bg-card-foreground/10 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
+        {!isVersionPage ? (
+          <nav
+            aria-label="规则中心审阅与发布"
+            className="ml-auto flex shrink-0 items-center gap-1.5"
           >
-            <History aria-hidden="true" className="size-3.5" />
-            <span>
-              {draftStreams.length > 0
-                ? `${draftStreams.length} 份草稿`
-                : '审阅变更'}
-            </span>
-          </Link>
-
-          {draftStreams.length > 0 ? (
             <Link
-              href={publishHref}
+              href={RULE_CENTER_HREFS.priceVersions}
               prefetch={false}
-              aria-label="进入价格版本发布"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-background px-3.5 text-xs font-extrabold text-foreground transition-colors hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:bg-card-foreground dark:text-card dark:hover:bg-card-foreground/90 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
+              aria-label="审阅价格版本变更"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-background/20 px-3 text-xs font-bold text-background transition-colors hover:bg-background/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:border-card-foreground/20 dark:text-card-foreground dark:hover:bg-card-foreground/10 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
             >
-              <Send aria-hidden="true" className="size-3.5" />
-              发布
+              <History aria-hidden="true" className="size-3.5" />
+              <span>
+                {draftStreams.length > 0
+                  ? `${draftStreams.length} 份草稿`
+                  : '审阅变更'}
+              </span>
             </Link>
-          ) : null}
-        </nav>
+
+            {draftStreams.length > 0 ? (
+              <Link
+                href={publishHref}
+                prefetch={false}
+                aria-label="进入价格版本发布"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-background px-3.5 text-xs font-extrabold text-foreground transition-colors hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:bg-card-foreground dark:text-card dark:hover:bg-card-foreground/90 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
+              >
+                <Send aria-hidden="true" className="size-3.5" />
+                发布
+              </Link>
+            ) : null}
+          </nav>
+        ) : null}
       </div>
     </header>
   );

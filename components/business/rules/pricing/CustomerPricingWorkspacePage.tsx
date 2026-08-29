@@ -21,6 +21,7 @@ type SearchParams = {
   section?: string | string[];
   start?: string | string[];
   purpose?: string | string[];
+  focus?: string | string[];
 };
 
 type PageProps = { searchParams: Promise<SearchParams> };
@@ -40,6 +41,11 @@ function createDraftPurpose(
   if (normalized === 'processing') return CustomerPriceBookPurpose.PROCESSING;
   if (normalized === 'logistics') return CustomerPriceBookPurpose.LOGISTICS;
   return null;
+}
+
+function safeRuleId(value: string): string | null {
+  const normalized = value.trim();
+  return /^[A-Za-z0-9_-]{1,128}$/.test(normalized) ? normalized : null;
 }
 
 export default async function CustomerPricingWorkspacePage({
@@ -70,6 +76,7 @@ export default async function CustomerPricingWorkspacePage({
               firstSearchParam(sp.start),
               firstSearchParam(sp.purpose),
             )}
+            focusRuleId={safeRuleId(firstSearchParam(sp.focus))}
           />
         </Suspense>
       </ErrorBoundary>
@@ -92,15 +99,18 @@ function DedicatedSectionSkeleton() {
 async function DedicatedCustomerPricingSectionContent({
   workspacePromise,
   createDraftPurpose,
+  focusRuleId,
 }: {
   workspacePromise: Promise<CustomerPriceSectionWorkspaceDto>;
   createDraftPurpose: CustomerPriceBookPurpose | null;
+  focusRuleId: string | null;
 }) {
   const workspace = await workspacePromise;
   return (
     <CustomerPricingDedicatedSection
       workspace={workspace}
       createDraftPurpose={createDraftPurpose}
+      focusRuleId={focusRuleId}
     />
   );
 }

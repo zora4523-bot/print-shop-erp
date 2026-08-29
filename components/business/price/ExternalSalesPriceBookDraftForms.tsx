@@ -592,13 +592,13 @@ export function PublishCustomerPriceBookDraftForm({
   priceBookId,
   expectedDraftUpdatedAt,
   defaultEffectiveFrom,
-  ruleCount,
+  changeReason,
   impact,
 }: {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
   defaultEffectiveFrom: string;
-  ruleCount?: number;
+  changeReason: string;
   impact?: {
     totalRuleCount: number;
     changedItemCount: number;
@@ -608,10 +608,14 @@ export function PublishCustomerPriceBookDraftForm({
     deltaPercentMin: string | null;
     deltaPercentMax: string | null;
     validationStatus: 'PASS' | 'FAIL';
+    validationIssues?: Array<{
+      message: string;
+      href?: string;
+    }>;
   };
 }) {
   const router = useRouter();
-  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
     publishDraftFromForm,
     null,
@@ -623,9 +627,10 @@ export function PublishCustomerPriceBookDraftForm({
   const publishNoteId = `publishNote-${priceBookId}`;
   const publishNoteHintId = `${publishNoteId}-hint`;
   const publishNoteErrorId = `${publishNoteId}-error`;
-  const confirmedImpactId = `confirmedImpact-${priceBookId}`;
-  const confirmedImpactErrorId = `${confirmedImpactId}-error`;
   const validationPassed = impact?.validationStatus !== 'FAIL';
+  const hasChanges =
+    (impact?.changedItemCount ?? 0) > 0 &&
+    (impact?.changedRuleCount ?? 0) > 0;
 
   const deltaRange =
     impact && impact.deltaPercentMin !== null && impact.deltaPercentMax !== null
@@ -639,6 +644,7 @@ export function PublishCustomerPriceBookDraftForm({
   useEffect(() => {
     if (state?.status !== 'success') return;
     router.replace(RULE_CENTER_HREFS.priceVersions);
+    router.refresh();
   }, [router, state]);
 
   return (
@@ -655,159 +661,159 @@ export function PublishCustomerPriceBookDraftForm({
         name="expectedDraftUpdatedAt"
         value={expectedDraftUpdatedAt}
       />
-      <div className="space-y-2">
-        <Label htmlFor={effectiveFromId}>
-          生效时间（上海时间）
-        </Label>
-        <Input
-          id={effectiveFromId}
-          name="effectiveFrom"
-          type="datetime-local"
-          className={controlClass}
-          defaultValue={defaultEffectiveFrom}
-          required
-          aria-required="true"
-          onChange={() => setConfirmationOpen(false)}
-          aria-invalid={Boolean(errors.effectiveFrom?.length)}
-          aria-describedby={fieldDescriptionIds(
-            effectiveFromErrorId,
-            errors.effectiveFrom,
-          )}
-        />
-        <FieldErrorMessages
-          id={effectiveFromErrorId}
-          messages={errors.effectiveFrom}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={publishNoteId}>发布说明（必填）</Label>
-        <textarea
-          id={publishNoteId}
-          name="publishNote"
-          className={`${textareaClass} min-h-24`}
-          placeholder="例如：已完成 2026 年 9 月加工费复核，按新价目生效"
-          minLength={2}
-          maxLength={500}
-          required
-          aria-required="true"
-          aria-invalid={Boolean(errors.publishNote?.length)}
-          aria-describedby={fieldDescriptionIds(
-            publishNoteErrorId,
-            errors.publishNote,
-            publishNoteHintId,
-          )}
-          onChange={() => setConfirmationOpen(false)}
-        />
-        <p id={publishNoteHintId} className="text-xs text-muted-foreground">
-          用于发布记录。
-        </p>
-        <FieldErrorMessages id={publishNoteErrorId} messages={errors.publishNote} />
-      </div>
+      <input type="hidden" name="confirmedImpact" value="true" />
 
-      {!confirmationOpen ? (
-        <div className="space-y-2">
-          <Button
-            type="button"
-            className="min-h-11 w-full"
-            disabled={pending || !validationPassed}
-            onClick={() => {
-              if (!formRef.current?.reportValidity()) return;
-              setConfirmationOpen(true);
-            }}
-          >
-            校验通过，进入发布确认
-          </Button>
-          {!validationPassed ? (
-            <p className="text-xs text-destructive">
-              发布检查未通过，请先修正问题。
-            </p>
-          ) : null}
+      <section
+        aria-labelledby={`publish-summary-${priceBookId}`}
+        className="space-y-3 rounded-lg border border-destructive/35 bg-destructive/5 p-3"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
+            发布确认
+          </span>
+          <h3 id={`publish-summary-${priceBookId}`} className="font-medium">
+            确认本次价格变更
+          </h3>
         </div>
-      ) : (
-        <section
-          aria-live="polite"
-          aria-labelledby={`${confirmedImpactId}-heading`}
-          className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
-              发布确认
-            </span>
-            <p id={`${confirmedImpactId}-heading`} className="font-medium">
-              确认发布影响
-            </p>
+
+        <dl className="grid gap-2 text-xs sm:grid-cols-2">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">变更范围</dt>
+            <dd className="font-sans tabular-nums">
+              {impact?.changedItemCount ?? '—'} 个收费项目 ·{' '}
+              {impact?.changedRuleCount ?? '—'} 条规则
+            </dd>
           </div>
-          <dl className="grid gap-2 text-xs sm:grid-cols-2">
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">影响收费项目</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.changedItemCount ?? '—'} 项
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">影响数量档/规则</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.changedRuleCount ?? ruleCount ?? '—'} 档
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">涨跌区间</dt>
-              <dd className="font-sans tabular-nums">{deltaRange}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">涨价 / 下调</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.increasedRuleCount ?? '—'} / {impact?.decreasedRuleCount ?? '—'} 档
-              </dd>
-            </div>
-          </dl>
-          <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
-            已开工单价格不变；新价格从生效时间起用于新建或重新报价工单。
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">全表检查</dt>
+            <dd className={validationPassed ? 'text-success-foreground' : 'text-destructive'}>
+              {validationPassed
+                ? `${impact?.totalRuleCount ?? '—'} 条规则已通过`
+                : '未通过'}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">涨跌区间</dt>
+            <dd className="font-sans tabular-nums">{deltaRange}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">涨价 / 下调</dt>
+            <dd className="font-sans tabular-nums">
+              {impact?.increasedRuleCount ?? '—'} /{' '}
+              {impact?.decreasedRuleCount ?? '—'} 条
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3 sm:col-span-2">
+            <dt className="text-muted-foreground">生效方式</dt>
+            <dd className="font-medium">
+              {effectiveFrom
+                ? `${effectiveFrom.replace('T', ' ')}（上海时间）`
+                : '立即生效'}
+            </dd>
+          </div>
+        </dl>
+
+        {!hasChanges ? (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-background p-2 text-xs text-destructive">
+            草稿和当前生效版没有可发布的差异。
           </p>
-          <label
-            htmlFor={confirmedImpactId}
-            className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border bg-background p-2 text-sm"
-          >
-            <input
-              id={confirmedImpactId}
-              name="confirmedImpact"
-              type="checkbox"
-              value="true"
-              required
-              aria-required="true"
-              aria-invalid={Boolean(errors.confirmedImpact?.length)}
-              aria-describedby={
-                errors.confirmedImpact?.length ? confirmedImpactErrorId : undefined
-              }
-              className="mt-1 size-4 shrink-0"
-            />
-            <span>我已核对变更、生效时间和历史工单影响。</span>
-          </label>
-          <FieldErrorMessages
-            id={confirmedImpactErrorId}
-            messages={errors.confirmedImpact}
-          />
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11 sm:flex-1"
-              disabled={pending}
-              onClick={() => setConfirmationOpen(false)}
-            >
-              返回修改
-            </Button>
-            <Button
-              type="submit"
-              variant="destructive"
-              className="min-h-11 sm:flex-[1.4]"
-              disabled={pending}
-            >
-              {pending ? '正在发布…' : '确认发布'}
-            </Button>
+        ) : null}
+        {!validationPassed ? (
+          <div className="space-y-2 rounded-md border border-destructive/30 bg-background p-2 text-xs text-destructive">
+            <p className="font-medium">发布检查未通过，请先修正以下问题：</p>
+            <ul className="space-y-1.5">
+              {impact?.validationIssues?.map((issue, index) => (
+                <li key={`${issue.href ?? 'price-book'}-${index}`}>
+                  <span className="admin-wrap-anywhere">{issue.message}</span>
+                  {issue.href ? (
+                    <a
+                      href={issue.href}
+                      className="ml-1 font-medium underline underline-offset-4"
+                    >
+                      打开对应价格
+                    </a>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
           </div>
-        </section>
-      )}
+        ) : null}
+
+        <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs leading-5 text-warning-foreground">
+          已开工单价格不变；新价格仅用于发布后新建或重新报价的工单。
+        </p>
+      </section>
+
+      <Disclosure className="rounded-lg border bg-card p-3">
+        <DisclosureSummary className="justify-between gap-3">
+          <span>预约生效或补充发布说明（可选）</span>
+          <span className="text-xs font-normal text-muted-foreground">
+            普通调价无需填写
+          </span>
+        </DisclosureSummary>
+        <div className="mt-3 space-y-3 border-t pt-3">
+          <div className="space-y-2">
+            <Label htmlFor={effectiveFromId}>预约生效时间（上海时间）</Label>
+            <Input
+              id={effectiveFromId}
+              name="effectiveFrom"
+              type="datetime-local"
+              className={controlClass}
+              value={effectiveFrom}
+              onChange={(event) => setEffectiveFrom(event.target.value)}
+              aria-invalid={Boolean(errors.effectiveFrom?.length)}
+              aria-describedby={fieldDescriptionIds(
+                effectiveFromErrorId,
+                errors.effectiveFrom,
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              留空即立即发布；只有已确定未来切换时刻时才需要预约。
+            </p>
+            <FieldErrorMessages
+              id={effectiveFromErrorId}
+              messages={errors.effectiveFrom}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={publishNoteId}>补充发布说明（可选）</Label>
+            <textarea
+              id={publishNoteId}
+              name="publishNote"
+              className={`${textareaClass} min-h-20`}
+              placeholder="如需补充说明，请在此填写"
+              minLength={2}
+              maxLength={500}
+              aria-invalid={Boolean(errors.publishNote?.length)}
+              aria-describedby={fieldDescriptionIds(
+                publishNoteErrorId,
+                errors.publishNote,
+                publishNoteHintId,
+              )}
+            />
+            <p id={publishNoteHintId} className="text-xs text-muted-foreground">
+              留空时发布记录沿用调价原因：{changeReason}
+            </p>
+            <FieldErrorMessages
+              id={publishNoteErrorId}
+              messages={errors.publishNote}
+            />
+          </div>
+        </div>
+      </Disclosure>
+
+      <Button
+        type="submit"
+        variant="destructive"
+        className="min-h-11 w-full"
+        disabled={pending || !validationPassed || !hasChanges}
+      >
+        {pending
+          ? '正在发布…'
+          : effectiveFrom
+            ? '确认预约发布'
+            : '确认并立即发布'}
+      </Button>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}

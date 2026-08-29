@@ -1,4 +1,5 @@
 import type { Permission } from '@/lib/auth/permissions-dict';
+import type { CustomerPriceSection } from '@/lib/price/customer-price-section-membership';
 
 export const RULE_CENTER_HREFS = {
   root: '/owner/rules',
@@ -251,6 +252,19 @@ export function customerPricingHref(
   return purpose === 'logistics'
     ? `${RULE_CENTER_HREFS.customerPricing}?purpose=logistics&section=ship`
     : `${RULE_CENTER_HREFS.customerPricing}?section=blank`;
+}
+
+/**
+ * Return from version review to the design-native editor that owns a rule.
+ * `focus` is intentionally an opaque id; the server-rendered editor resolves it
+ * to one of its trusted form bindings before the client focuses anything.
+ */
+export function customerPricingRuleHref(
+  section: CustomerPriceSection,
+  ruleId: string,
+): string {
+  const params = new URLSearchParams({ section, focus: ruleId });
+  return `${RULE_CENTER_HREFS.customerPricing}?${params.toString()}`;
 }
 
 export const RULE_CENTER_DEFAULT_HREF =

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
+  CustomerPriceRuleKind,
 } from '@/generated/prisma/enums';
 import type {
   CustomerPriceBookDraftAdminDto,
@@ -15,7 +16,21 @@ vi.mock('@/components/business/price/ExternalSalesPriceBookDraftForms', () => ({
   ),
   CreateCustomerPriceBookDraftForm: () => null,
   DiscardCustomerPriceBookDraftForm: () => null,
-  PublishCustomerPriceBookDraftForm: () => null,
+  PublishCustomerPriceBookDraftForm: ({
+    impact,
+  }: {
+    impact?: { validationIssues?: Array<{ message: string; href?: string }> };
+  }) => (
+    <section aria-label="发布确认">
+      <h3>发布检查</h3>
+      <p>已开工单价格不变</p>
+      {impact?.validationIssues?.map((issue) => (
+        <a key={issue.message} href={issue.href}>
+          {issue.message}
+        </a>
+      ))}
+    </section>
+  ),
   RescheduleCustomerPriceBookForm: ({ priceBookId }: { priceBookId: string }) => (
     <span>调整生效时间 {priceBookId}</span>
   ),
@@ -127,7 +142,40 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
       updatedAt: '2026-08-26T01:00:00.000Z',
       categories: [],
       products: [],
-      rules: [],
+      rules: [
+        {
+          id: 'rule-add',
+          code: 'CUSTOM_PAPER_RED_CARD_180',
+          name: '空封现货基础价（A4:C4）',
+          categoryId: 'category-1',
+          categoryCode: 'CUSTOM_ADD_ON',
+          categoryName: '基础加工费',
+          productId: null,
+          productCode: null,
+          productName: null,
+          kind: CustomerPriceRuleKind.ADD_ON,
+          calculationType: CustomerPriceCalculationType.PER_PIECE,
+          amount: '0.2',
+          includedUnits: null,
+          incrementUnits: null,
+          incrementAmount: null,
+          minQty: null,
+          maxQty: null,
+          triggerCondition: null,
+          exclusiveGroup: null,
+          priority: 1,
+          note: null,
+          blocksAutomaticQuote: false,
+          isActive: true,
+          source: {
+            name: null,
+            sha256: null,
+            sheet: null,
+            range: null,
+          },
+          updatedAt: '2026-08-26T01:00:00.000Z',
+        },
+      ],
     };
     const preview: CustomerPriceBookDraftPublishPreviewDto = {
       priceBookId: draft.id,
@@ -144,7 +192,7 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
       deltaPercentMax: null,
       changes: [
         {
-          draftRuleId: null,
+          draftRuleId: 'rule-add',
           name: '空封现货基础价（A4:C4）',
           categoryName: '基础加工费',
           productName: '现货大号（产品表!C2）',
@@ -176,6 +224,7 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
           {
             path: 'rules.rule-overlap.minQty',
             message: '基础报价数量区间与“空封现货基础价（A14:C14）”重叠',
+            ruleId: 'rule-add',
           },
         ],
       },
@@ -197,6 +246,9 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
     expect(html).toContain('基础报价数量区间与“空封现货基础价”重叠');
     expect(html).toContain('发布检查');
     expect(html).toContain('已开工单价格不变');
+    expect(html).toContain(
+      'href="/owner/rules/customer-pricing?section=adds&amp;focus=rule-add"',
+    );
     expect(html).not.toContain('基础加工费');
     expect(html).not.toContain('版本发布说明');
     expect(html).not.toMatch(/A4:C4|A14:C14|产品表!C2|互斥组|优先级/);

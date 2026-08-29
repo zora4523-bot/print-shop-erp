@@ -84,3 +84,15 @@ export function customerPriceSectionOwnsRule(
       code === 'PACKAGING_MIXED_STYLE_PER_BAG')
   );
 }
+
+/** Resolve one persisted rule identity to its single design-native editor. */
+export function customerPriceSectionForRule(
+  purpose: CustomerPriceBookPurpose,
+  rule: CustomerPriceSectionRuleIdentity,
+): CustomerPriceSection | null {
+  return (
+    CUSTOMER_PRICE_SECTIONS.find((section) =>
+      customerPriceSectionOwnsRule(section, purpose, rule),
+    ) ?? null
+  );
+}

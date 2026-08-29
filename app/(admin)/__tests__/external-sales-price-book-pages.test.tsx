@@ -675,6 +675,38 @@ describe('external sales price book pages', () => {
     );
   });
 
+  it('仅向专用编辑器传递安全的价格定位 id', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+
+    await renderToResolvedMarkup(
+      await OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({
+          section: 'adds',
+          focus: 'rule-add-1',
+        }),
+      }),
+    );
+    expect(dedicatedSectionPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        focusRuleId: 'rule-add-1',
+      }),
+    );
+
+    await renderToResolvedMarkup(
+      await OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({
+          section: 'adds',
+          focus: '../rule-add-1',
+        }),
+      }),
+    );
+    expect(dedicatedSectionPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        focusRuleId: null,
+      }),
+    );
+  });
+
   it('只为 query 指定的价目 purpose 展开调价表单', async () => {
     requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
 
@@ -842,7 +874,7 @@ describe('external sales price book pages', () => {
     expect(html).toContain('待处理工作队列');
     expect(html).toContain('发布加工费草稿 · 第 4 版');
     expect(html).toContain('本次修改');
-    expect(html).toContain('发布影响');
+    expect(html).toContain('确认本次价格变更');
     expect(getDraftMock).toHaveBeenCalledTimes(1);
     expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
   });
@@ -883,18 +915,21 @@ describe('external sales price book pages', () => {
     expect(getPublishPreviewMock).toHaveBeenCalledTimes(1);
     expect(html).toContain('发布加工费草稿 · 第 4 版');
     expect(html).toContain('本次修改');
-    expect(html).toContain('发布影响');
-    expect(html).toContain('发布检查');
-    expect(html).toContain('发布说明（必填）');
+    expect(html).toContain('确认本次价格变更');
+    expect(html).toContain('2 个收费项目 · 2 条规则');
+    expect(html).toContain('2 条规则已通过');
+    expect(html).toContain('立即生效');
+    expect(html).toContain('补充发布说明（可选）');
     expect(html).toContain('彩印红包');
     expect(html).toContain('+8.3%');
     expect(html).toContain('aria-label="发布价目草稿"');
     expect(html).toContain('name="effectiveFrom"');
-    expect(html).toContain('生效时间（上海时间）');
+    expect(html).toContain('预约生效时间（上海时间）');
     expect(html).toContain(
       'name="expectedDraftUpdatedAt" value="2026-08-09T00:30:00.000Z"',
     );
     expect(html).toContain('更多草稿操作');
+    expect(html).toContain('查看完整版本历史');
     expect(html).toContain('aria-label="放弃价目草稿"');
     expect(html).not.toContain('COLOR-100');
     expect(html).not.toContain('source-hash');

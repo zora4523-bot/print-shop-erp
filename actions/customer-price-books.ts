@@ -554,22 +554,34 @@ const publishDraftSchema = z
   .object({
     priceBookId: safeId,
     expectedDraftUpdatedAt: strictIsoInstant,
-    publishNote: z
-      .string()
-      .trim()
-      .min(2, '请填写至少 2 个字符的发布说明')
-      .max(500, '发布说明最多 500 字'),
+    publishNote: z.preprocess(
+      (value) =>
+        typeof value === 'string' && value.trim().length === 0
+          ? undefined
+          : value,
+      z
+        .string()
+        .trim()
+        .min(2, '请填写至少 2 个字符的发布说明')
+        .max(500, '发布说明最多 500 字')
+        .optional(),
+    ),
     confirmedImpact: z.literal(true, {
       error: '请确认已了解发布影响范围',
     }),
-    effectiveFrom: z.string().trim().transform((value, ctx) => {
-      const parsed = parseStrictShanghaiDateTimeLocal(value);
-      if (!parsed) {
-        ctx.addIssue({ code: 'custom', message: '请选择合法的上海生效时间' });
-        return z.NEVER;
-      }
-      return parsed;
-    }),
+    effectiveFrom: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value, ctx) => {
+        if (!value) return undefined;
+        const parsed = parseStrictShanghaiDateTimeLocal(value);
+        if (!parsed) {
+          ctx.addIssue({ code: 'custom', message: '请选择合法的上海生效时间' });
+          return z.NEVER;
+        }
+        return parsed;
+      }),
   })
   .strict();
 

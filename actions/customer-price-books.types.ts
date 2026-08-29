@@ -78,10 +78,17 @@ export type UpdateCustomerPriceSectionDraftActionInput = {
 export type PublishCustomerPriceBookDraftActionInput = {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
-  /** Shanghai wall time from an HTML datetime-local control. */
-  effectiveFrom: string;
-  /** Human-readable release note stored with the published workflow and audit. */
-  publishNote: string;
+  /**
+   * Optional Shanghai wall time from an HTML datetime-local control.
+   * Omit it (or submit an empty value) for an immediate, server-timestamped
+   * release. Explicit future instants remain supported for scheduled releases.
+   */
+  effectiveFrom?: string;
+  /**
+   * Optional release-note supplement. Empty values reuse the draft's required
+   * change reason so the same explanation is not entered twice.
+   */
+  publishNote?: string;
   /** Explicit acknowledgement for the L3, all-future-orders impact. */
   confirmedImpact: boolean;
 };

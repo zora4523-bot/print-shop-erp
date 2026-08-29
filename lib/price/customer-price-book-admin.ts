@@ -266,9 +266,11 @@ export type UpdateCustomerPriceSectionDraftInput = {
 
 export type PublishCustomerPriceBookDraftInput = {
   priceBookId: string;
-  effectiveFrom: Date;
+  /** Omit for immediate publication at one server-generated canonical instant. */
+  effectiveFrom?: Date;
   expectedDraftUpdatedAt: Date;
-  publishNote: string;
+  /** Empty values inherit the draft's required change reason. */
+  publishNote?: string;
 };
 
 export type DiscardCustomerPriceBookDraftInput = {
@@ -426,6 +428,33 @@ function scheduleControl(notes: unknown): ScheduleControl | null {
     reason: control.reason,
     previousEffectiveFrom: control.previousEffectiveFrom,
     effectiveFrom: control.effectiveFrom,
+  };
+}
+
+/**
+ * Legacy repair migrations preserved superseded scheduled books instead of
+ * deleting them, but predate `scheduleControl`. Treat that evidence as a
+ * cancelled plan so a version that never became current is not presented as
+ * ordinary historical pricing.
+ */
+function supersededScheduleSummary(notes: unknown): {
+  changedAt: string;
+  reason: string;
+} | null {
+  if (
+    !isRecord(notes) ||
+    typeof notes.supersededAt !== 'string' ||
+    typeof notes.supersededByPriceBookId !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    changedAt: notes.supersededAt,
+    reason:
+      typeof notes.supersededReason === 'string' &&
+      notes.supersededReason.trim().length > 0
+        ? notes.supersededReason
+        : '已由新的计划版本替代',
   };
 }
 
@@ -928,13 +957,16 @@ export async function listCustomerPriceBookVersionsAndDrafts(
       const workflow = draftWorkflow(book.notes);
       const metadata = workflowSummary(book.notes);
       const schedule = scheduleControl(book.notes);
+      const supersededSchedule = supersededScheduleSummary(book.notes);
       let status: CustomerPriceBookVersionAdminDto['status'];
       if (!book.isActive) {
         status =
-          schedule?.status === 'CANCELLED'
+          schedule?.status === 'CANCELLED' || supersededSchedule
             ? 'CANCELLED'
             : workflow
               ? 'DRAFT'
+              : book.effectiveFrom > now
+                ? 'CANCELLED'
               : 'HISTORICAL';
       } else if (book.effectiveFrom > now) {
         status = 'SCHEDULED';
@@ -960,8 +992,10 @@ export async function listCustomerPriceBookVersionsAndDrafts(
         ruleSetSha256: metadata?.ruleSetSha256 ?? null,
         createdById: metadata?.createdById ?? null,
         workflowCreatedAt: metadata?.createdAt ?? null,
-        scheduleChangeReason: schedule?.reason ?? null,
-        scheduleChangedAt: schedule?.changedAt ?? null,
+        scheduleChangeReason:
+          schedule?.reason ?? supersededSchedule?.reason ?? null,
+        scheduleChangedAt:
+          schedule?.changedAt ?? supersededSchedule?.changedAt ?? null,
         updatedAt: book.updatedAt.toISOString(),
       };
     });
@@ -1211,10 +1245,43 @@ export async function getCustomerPriceBookDraftPublishPreview(
       .filter((value): value is string => value !== null)
       .map((value) => new Prisma.Decimal(value));
     const normalizedRules = await validationRules(tx, draft.id);
-    const validationIssues = validateDraftPriceBookRules({
-      purpose: draft.purpose,
-      rules: normalizedRules,
-    });
+    const normalizedCurrentRules = await validationRules(tx, basedOn.id);
+    const validationIssues = [
+      ...validateDraftPriceBookRules({
+        purpose: draft.purpose,
+        rules: normalizedRules,
+      }),
+    ];
+    if (
+      calculateCustomerPriceRuleSetSha256(normalizedRules) ===
+      calculateCustomerPriceRuleSetSha256(normalizedCurrentRules)
+    ) {
+      validationIssues.push({
+        path: 'rules',
+        message: '草稿与当前版本没有价格或规则变化，无需发布',
+      });
+    }
+    if (validationIssues.length === 0) {
+      try {
+        await readCandidatePublishedCreateOrderPriceProjection(tx, {
+          candidatePriceBookId: draft.id,
+          // The ordinary release path is immediate. The final locked publish
+          // repeats this projection at its canonical release instant; an
+          // explicit future release is therefore still validated again there.
+          effectiveFrom: new Date(),
+          snapshotLockHeld: true,
+        });
+      } catch (error) {
+        if (error instanceof PublishedCreateOrderPriceAdapterError) {
+          validationIssues.push({
+            path: 'rules',
+            message: `候选价目版本无法供建单计价：${error.message}`,
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
 
     return {
       priceBookId: draft.id,
@@ -2934,22 +3001,30 @@ export async function rescheduleCustomerPriceBook(
 export async function publishCustomerPriceBookDraft(
   input: PublishCustomerPriceBookDraftInput,
   actor: AuditActor,
-  now: Date = new Date(),
+  /** Test-only clock instant. Production deliberately samples after locking. */
+  suppliedNow?: Date,
 ): Promise<{ id: string; version: number; purpose: CustomerPriceBookPurpose }> {
-  if (!Number.isFinite(input.effectiveFrom.getTime())) {
+  if (
+    input.effectiveFrom !== undefined &&
+    !Number.isFinite(input.effectiveFrom.getTime())
+  ) {
     throw new CustomerPriceBookAdminError('生效时间非法');
-  }
-  if (input.effectiveFrom < now) {
-    throw new CustomerPriceBookAdminError('价目版本不能追溯生效，请选择当前或未来时间');
-  }
-  const publishNote = input.publishNote.trim();
-  if (publishNote.length < 2 || publishNote.length > 500) {
-    throw new CustomerPriceBookAdminError('发布说明需要 2–500 个字符');
   }
 
   try {
     return await db.$transaction(async (tx) => {
       await acquirePriceRuleSnapshotWriteLock(tx);
+      // One timestamp drives current-version selection, the new half-open
+      // window, published metadata and audit evidence. Sampling after the
+      // write lock prevents an "immediate" request from becoming stale while
+      // waiting for another price mutation.
+      const canonicalNow = suppliedNow ?? new Date();
+      const effectiveFrom = input.effectiveFrom ?? canonicalNow;
+      if (effectiveFrom < canonicalNow) {
+        throw new CustomerPriceBookAdminError(
+          '价目版本不能追溯生效，请选择当前或未来时间',
+        );
+      }
       const draft = await tx.customerPriceBook.findUnique({
         where: { id: input.priceBookId },
         select: {
@@ -2979,6 +3054,10 @@ export async function publishCustomerPriceBookDraft(
           '草稿已被其他管理员修改，请刷新后重试',
         );
       }
+      const publishNote = input.publishNote?.trim() || workflow.changeReason.trim();
+      if (publishNote.length < 2 || publishNote.length > 500) {
+        throw new CustomerPriceBookAdminError('发布说明需要 2–500 个字符');
+      }
 
       const normalizedRules = await assertValidRuleSet(
         tx,
@@ -2992,8 +3071,8 @@ export async function publishCustomerPriceBookDraft(
           settlementType: draft.settlementType,
           purpose: draft.purpose,
           isActive: true,
-          effectiveFrom: { lte: now },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+          effectiveFrom: { lte: canonicalNow },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: canonicalNow } }],
         },
         select: {
           id: true,
@@ -3012,10 +3091,18 @@ export async function publishCustomerPriceBookDraft(
       if (current.id !== workflow.basedOn.id) {
         throw new CustomerPriceBookAdminError('草稿基于的旧版本已变化，请重新复制最新版本');
       }
-      if (input.effectiveFrom <= current.effectiveFrom) {
+      const currentRuleSetSha256 = calculateCustomerPriceRuleSetSha256(
+        await validationRules(tx, current.id),
+      );
+      if (ruleSetSha256 === currentRuleSetSha256) {
+        throw new CustomerPriceBookAdminError(
+          '草稿与当前版本没有价格或规则变化，无需发布',
+        );
+      }
+      if (effectiveFrom <= current.effectiveFrom) {
         throw new CustomerPriceBookAdminError('新版本生效时间必须晚于当前版本起始时间');
       }
-      if (current.effectiveTo && input.effectiveFrom > current.effectiveTo) {
+      if (current.effectiveTo && effectiveFrom > current.effectiveTo) {
         throw new CustomerPriceBookAdminError('新版本生效时间不能晚于当前版本既定截止时间');
       }
 
@@ -3027,7 +3114,7 @@ export async function publishCustomerPriceBookDraft(
           id: { not: current.id },
           OR: [
             { effectiveTo: null },
-            { effectiveTo: { gt: input.effectiveFrom } },
+            { effectiveTo: { gt: effectiveFrom } },
           ],
         },
         select: { id: true, version: true },
@@ -3040,7 +3127,7 @@ export async function publishCustomerPriceBookDraft(
       try {
         await readCandidatePublishedCreateOrderPriceProjection(tx, {
           candidatePriceBookId: draft.id,
-          effectiveFrom: input.effectiveFrom,
+          effectiveFrom,
           snapshotLockHeld: true,
         });
       } catch (error) {
@@ -3056,21 +3143,21 @@ export async function publishCustomerPriceBookDraft(
       // before activating the draft so no statement temporarily overlaps.
       await tx.customerPriceBook.update({
         where: { id: current.id },
-        data: { effectiveTo: input.effectiveFrom },
+        data: { effectiveTo: effectiveFrom },
         select: { id: true },
       });
       const published = await tx.customerPriceBook.update({
         where: { id: draft.id },
         data: {
-          effectiveFrom: input.effectiveFrom,
+          effectiveFrom,
           effectiveTo: null,
           isActive: true,
           notes: publishedNotes(
             draft.notes,
             workflow,
             actor,
-            input.effectiveFrom,
-            now,
+            effectiveFrom,
+            canonicalNow,
             ruleSetSha256,
             publishNote,
           ),
@@ -3092,8 +3179,8 @@ export async function publishCustomerPriceBookDraft(
         },
         after: {
           ...published,
-          effectiveFrom: input.effectiveFrom,
-          previousEffectiveTo: input.effectiveFrom,
+          effectiveFrom,
+          previousEffectiveTo: effectiveFrom,
           ruleSetSha256,
           publishNote,
         },

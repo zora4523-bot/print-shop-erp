@@ -55,6 +55,12 @@ vi.mock('../CustomerPricingUrlCleanup', () => ({
   ),
 }));
 
+vi.mock('../CustomerPricingRuleFocus', () => ({
+  CustomerPricingRuleFocus: ({ targetId }: { targetId: string }) => (
+    <span data-price-rule-focus={targetId} />
+  ),
+}));
+
 vi.mock(
   '@/components/business/price/PriceWorkspaceNavigationGuard',
   () => ({
@@ -177,6 +183,37 @@ function editableBagRule(): CustomerPriceSectionRuleDto {
 }
 
 describe('CustomerPricingDedicatedSection', () => {
+  it('只将受信草稿规则 id 解析到所属价格输入框', () => {
+    const html = renderToStaticMarkup(
+      <CustomerPricingDedicatedSection
+        workspace={workspace(
+          'ship',
+          [source(CustomerPriceBookPurpose.PROCESSING, 'draft')],
+          [editableBagRule()],
+        )}
+        createDraftPurpose={null}
+        focusRuleId="packing-single-draft"
+      />,
+    );
+
+    expect(html).toContain(
+      'data-price-rule-focus="customer-section-ship-bag-normalFee"',
+    );
+
+    const untrustedHtml = renderToStaticMarkup(
+      <CustomerPricingDedicatedSection
+        workspace={workspace(
+          'ship',
+          [source(CustomerPriceBookPurpose.PROCESSING, 'draft')],
+          [editableBagRule()],
+        )}
+        createDraftPurpose={null}
+        focusRuleId="unknown-rule"
+      />,
+    );
+    expect(untrustedHtml).not.toContain('data-price-rule-focus');
+  });
+
   it('当前生效态只在标题区提供调价入口，不再渲染正文状态卡', () => {
     const html = renderToStaticMarkup(
       <CustomerPricingDedicatedSection

@@ -569,7 +569,41 @@ describe('customer price-book Server Actions', () => {
     );
   });
 
-  it('拒绝缺少发布说明或 L3 影响确认的请求', async () => {
+  it.each([
+    ['omitted fields', {}],
+    ['empty form fields', { effectiveFrom: '', publishNote: '' }],
+  ])('accepts an immediate release with %s', async (_label, optionalFields) => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockResolvedValue({
+      id: 'book-v2-draft',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await expect(
+      publishCustomerPriceBookDraftAction({
+        priceBookId: 'book-v2-draft',
+        expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+        confirmedImpact: true,
+        ...optionalFields,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      priceBookId: 'book-v2-draft',
+    });
+
+    expect(adminMock.publishCustomerPriceBookDraft).toHaveBeenCalledWith(
+      {
+        priceBookId: 'book-v2-draft',
+        expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
+        effectiveFrom: undefined,
+        publishNote: undefined,
+      },
+      actor,
+    );
+  });
+
+  it('发布说明可沿用调价原因，但仍要求 L3 影响确认', async () => {
     permissionMock.requirePermission.mockResolvedValue(actor);
 
     const result = await publishCustomerPriceBookDraftAction({
@@ -582,8 +616,25 @@ describe('customer price-book Server Actions', () => {
 
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
-      expect(result.fieldErrors.publishNote?.join('\n')).toContain('发布说明');
+      expect(result.fieldErrors.publishNote).toBeUndefined();
       expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('影响范围');
+    }
+    expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
+  });
+
+  it('拒绝长度不足的非空发布补充说明', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      publishNote: '短',
+      confirmedImpact: true,
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.publishNote?.join('\n')).toContain('发布说明');
     }
     expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
   });
