@@ -10,6 +10,7 @@ import {
 import { ZTO_PROVINCE_OPTIONS } from '../../price/external-order-charges';
 import {
   projectPublishedCreateOrderPriceSnapshot,
+  readCandidatePublishedCreateOrderPriceProjection,
   readPublishedCreateOrderPriceProjection,
   type PublishedCreateOrderPriceProjectionInput,
   type PublishedCreateOrderRuleRow,
@@ -21,6 +22,8 @@ const FIXED_CURRENT_TIME = new Date('2026-08-28T08:00:00.000Z');
 const PROCESSING_BOOK_ID = 'cpb_external_processing_rule_v3';
 const FIVE_TIER_PROCESSING_BOOK_ID =
   'cpb_external_processing_rule_v4_five_tier';
+const RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID =
+  'cpb_stock_local_foil_bef5f8d170b81d40ad1e338e';
 const LOGISTICS_BOOK_ID = 'cpb_external_logistics_weight_policy_v3';
 const PROCESSING_SOURCE_SHA =
   '3596993e283d1d06f01dd7048b6ccf2f1c0e4b27394541e004a37419c856d817';
@@ -252,6 +255,43 @@ databaseDescribe.sequential('published create-order rule adapter · PostgreSQL c
       unitPrice: '0.1800',
       processingAmount: '7200.18',
     });
+  });
+
+  it('projects the exact release candidate with its effective-time counterpart and rejects the retired incompatible candidate', async () => {
+    const effectiveFrom = new Date('2026-08-29T09:59:00.000Z');
+    const candidate = await db.$transaction((tx) =>
+      readCandidatePublishedCreateOrderPriceProjection(tx, {
+        candidatePriceBookId: FIVE_TIER_PROCESSING_BOOK_ID,
+        effectiveFrom,
+      }),
+    );
+
+    expect(candidate.snapshot.priceVersion).toMatchObject({
+      processing: { id: FIVE_TIER_PROCESSING_BOOK_ID },
+      logistics: { id: LOGISTICS_BOOK_ID },
+    });
+    expect(candidate.audit.processingRuleCount).toBe(145);
+    expect(candidate.audit.projectedRuleCodes.fullTiers).toHaveLength(50);
+
+    const logisticsCandidate = await db.$transaction((tx) =>
+      readCandidatePublishedCreateOrderPriceProjection(tx, {
+        candidatePriceBookId: LOGISTICS_BOOK_ID,
+        effectiveFrom,
+      }),
+    );
+    expect(logisticsCandidate.snapshot.priceVersion).toMatchObject({
+      processing: { id: FIVE_TIER_PROCESSING_BOOK_ID },
+      logistics: { id: LOGISTICS_BOOK_ID },
+    });
+
+    await expect(
+      db.$transaction((tx) =>
+        readCandidatePublishedCreateOrderPriceProjection(tx, {
+          candidatePriceBookId: RETIRED_INCOMPATIBLE_PROCESSING_BOOK_ID,
+          effectiveFrom,
+        }),
+      ),
+    ).rejects.toThrow('缺少局部烫金空白封单价');
   });
 
   it('preserves null versus zero and fails closed on duplicate or missing rules', async () => {

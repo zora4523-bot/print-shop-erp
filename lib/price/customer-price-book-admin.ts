@@ -13,6 +13,10 @@ import {
 import { writeAuditLogInTx, type AuditActor } from '../audit-log';
 import { db } from '../db';
 import {
+  PublishedCreateOrderPriceAdapterError,
+  readCandidatePublishedCreateOrderPriceProjection,
+} from '../order/create-order-published-rule-adapter';
+import {
   validateDraftPriceBookRules,
   type DraftPriceBookValidationIssue,
   type DraftPriceRuleForValidation,
@@ -2460,6 +2464,21 @@ export async function publishCustomerPriceBookDraft(
       });
       if (futureConflicts.length > 0) {
         throw new CustomerPriceBookAdminError('已有后续生效版本，不能发布重叠的新版本');
+      }
+
+      try {
+        await readCandidatePublishedCreateOrderPriceProjection(tx, {
+          candidatePriceBookId: draft.id,
+          effectiveFrom: input.effectiveFrom,
+          snapshotLockHeld: true,
+        });
+      } catch (error) {
+        if (error instanceof PublishedCreateOrderPriceAdapterError) {
+          throw new CustomerPriceBookAdminError(
+            `候选价目版本无法供建单计价：${error.message}`,
+          );
+        }
+        throw error;
       }
 
       // The exclusion constraint is immediate. Close the old half-open window

@@ -1,8 +1,10 @@
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
+  CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
+  OrderSettlementType,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
 import {
@@ -26,6 +28,7 @@ import {
   type ExternalCreateOrderPriceSnapshot,
 } from './create-order-price-snapshot';
 import { ZTO_PROVINCE_OPTIONS } from '../price/external-order-charges';
+import { acquirePriceRuleSnapshotReadLock } from '../price/rule-snapshot-lock';
 
 const MAX_PERSISTED_QUANTITY = 9_999_999;
 const SHA256 = /^[a-f\d]{64}$/iu;
@@ -89,6 +92,12 @@ export type PublishedCreateOrderPriceReadClient = Pick<
   Prisma.TransactionClient,
   '$executeRaw' | 'customerPriceBook' | 'customerPriceRule'
 >;
+
+export type CandidatePublishedCreateOrderPriceProjectionOptions = {
+  candidatePriceBookId: string;
+  effectiveFrom: Date;
+  snapshotLockHeld?: boolean;
+};
 
 export class PublishedCreateOrderPriceAdapterError extends Error {
   constructor(
@@ -1382,6 +1391,184 @@ const RULE_SELECT = {
   isActive: true,
   category: { select: { code: true, name: true } },
 } as const;
+
+type ProjectionBookMetadata = {
+  id: string;
+  code: unknown;
+  name: string;
+  purpose: CustomerPriceBookPurpose;
+  version: number;
+  sourceSha256: string;
+  notes: unknown;
+};
+
+function assertProjectionBookMetadata(
+  book: ProjectionBookMetadata,
+  label: string,
+): void {
+  if (
+    !book.id.trim() ||
+    !String(book.code).trim() ||
+    !book.name.trim() ||
+    !Number.isSafeInteger(book.version) ||
+    book.version <= 0 ||
+    !SHA256.test(book.sourceSha256)
+  ) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'MISSING_BOOK_DETAILS',
+      `${label}\u4ef7\u76ee\u7c3f\u7248\u672c\u8bc1\u636e\u4e0d\u5b8c\u6574\uff0c\u5df2\u62d2\u7edd\u53d1\u5e03`,
+    );
+  }
+}
+
+function projectedProcessingBookMetadata(
+  book: ProjectionBookMetadata,
+): ExternalCreateOrderPriceSnapshot['processing'] {
+  return {
+    purpose: CustomerPriceBookPurpose.PROCESSING,
+    id: book.id,
+    code: String(book.code),
+    name: book.name,
+    version: book.version,
+    sourceSha256: book.sourceSha256,
+  };
+}
+
+function projectedLogisticsBookMetadata(
+  book: ProjectionBookMetadata,
+): ExternalCreateOrderPriceSnapshot['logistics'] {
+  return {
+    purpose: CustomerPriceBookPurpose.LOGISTICS,
+    id: book.id,
+    code: String(book.code),
+    name: book.name,
+    version: book.version,
+    sourceSha256: book.sourceSha256,
+  };
+}
+
+/**
+ * Project one unpublished candidate together with the exact opposite-purpose
+ * book that will be effective at its requested release instant. The candidate
+ * is addressed by id instead of `isActive`, so publication can fail closed
+ * before either version window is changed.
+ */
+export async function readCandidatePublishedCreateOrderPriceProjection(
+  client: PublishedCreateOrderPriceReadClient,
+  options: CandidatePublishedCreateOrderPriceProjectionOptions,
+): Promise<PublishedCreateOrderPriceProjection> {
+  if (
+    !options.candidatePriceBookId.trim() ||
+    Number.isNaN(options.effectiveFrom.getTime())
+  ) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'MISSING_BOOK_DETAILS',
+      '\u5019\u9009\u4ef7\u76ee\u7c3f\u6216\u751f\u6548\u65f6\u95f4\u65e0\u6548\uff0c\u5df2\u62d2\u7edd\u53d1\u5e03',
+    );
+  }
+  if (!options.snapshotLockHeld) {
+    await acquirePriceRuleSnapshotReadLock(client);
+  }
+
+  const candidate = await client.customerPriceBook.findUnique({
+    where: { id: options.candidatePriceBookId },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      settlementType: true,
+      purpose: true,
+      version: true,
+      sourceSha256: true,
+      notes: true,
+    },
+  });
+  if (
+    !candidate ||
+    candidate.settlementType !== OrderSettlementType.EXTERNAL_SALES
+  ) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'MISSING_BOOK_DETAILS',
+      '\u5f85\u53d1\u5e03\u7684\u5916\u90e8\u9500\u552e\u4ef7\u76ee\u7c3f\u4e0d\u5b58\u5728',
+    );
+  }
+  assertProjectionBookMetadata(candidate, '\u5019\u9009');
+
+  const counterpartPurpose =
+    candidate.purpose === CustomerPriceBookPurpose.PROCESSING
+      ? CustomerPriceBookPurpose.LOGISTICS
+      : CustomerPriceBookPurpose.PROCESSING;
+  const counterparts = await client.customerPriceBook.findMany({
+    where: {
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      purpose: counterpartPurpose,
+      isActive: true,
+      effectiveFrom: { lte: options.effectiveFrom },
+      OR: [
+        { effectiveTo: null },
+        { effectiveTo: { gt: options.effectiveFrom } },
+      ],
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      purpose: true,
+      version: true,
+      sourceSha256: true,
+      notes: true,
+    },
+    orderBy: [
+      { effectiveFrom: 'desc' },
+      { version: 'desc' },
+      { id: 'asc' },
+    ],
+    take: 2,
+  });
+  if (counterparts.length !== 1) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'MISSING_BOOK_DETAILS',
+      counterparts.length === 0
+        ? '\u5019\u9009\u7248\u672c\u751f\u6548\u65f6\u7f3a\u5c11\u552f\u4e00\u7684\u914d\u5957\u4ef7\u76ee\u7c3f'
+        : '\u5019\u9009\u7248\u672c\u751f\u6548\u65f6\u540c\u65f6\u5b58\u5728\u591a\u4e2a\u914d\u5957\u4ef7\u76ee\u7c3f',
+    );
+  }
+  const counterpart = counterparts[0]!;
+  assertProjectionBookMetadata(counterpart, '\u914d\u5957');
+
+  const priceVersion: ExternalCreateOrderPriceSnapshot =
+    candidate.purpose === CustomerPriceBookPurpose.PROCESSING
+      ? {
+          processing: projectedProcessingBookMetadata(candidate),
+          logistics: projectedLogisticsBookMetadata(counterpart),
+        }
+      : {
+          processing: projectedProcessingBookMetadata(counterpart),
+          logistics: projectedLogisticsBookMetadata(candidate),
+        };
+  const rules = await client.customerPriceRule.findMany({
+    where: {
+      priceBookId: {
+        in: [priceVersion.processing.id, priceVersion.logistics.id],
+      },
+    },
+    select: RULE_SELECT,
+    orderBy: [{ priceBookId: 'asc' }, { code: 'asc' }, { id: 'asc' }],
+  });
+
+  return projectPublishedCreateOrderPriceSnapshot({
+    priceVersion,
+    processingNotes:
+      candidate.purpose === CustomerPriceBookPurpose.PROCESSING
+        ? candidate.notes
+        : counterpart.notes,
+    logisticsNotes:
+      candidate.purpose === CustomerPriceBookPurpose.LOGISTICS
+        ? candidate.notes
+        : counterpart.notes,
+    rules: rules as PublishedCreateOrderRuleRow[],
+  });
+}
 
 /**
  * Read the unchanged dual-version identity first, then project only rules from

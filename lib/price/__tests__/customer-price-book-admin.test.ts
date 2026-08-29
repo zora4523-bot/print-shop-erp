@@ -11,43 +11,57 @@ import { ZTO_PROVINCE_OPTIONS } from '../external-order-charges';
 
 vi.mock('server-only', () => ({}));
 
-const { dbMock } = vi.hoisted(() => ({
-  dbMock: {
-    $executeRaw: vi.fn(),
-    $transaction: vi.fn(),
-    customerPriceBook: {
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-    customerPriceRule: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-      createMany: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    customerChargeCategory: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-    },
-    product: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-    },
-    craft: {
-      findMany: vi.fn(),
-    },
-    orderCustomerCharge: { count: vi.fn() },
-    businessAuditLog: { create: vi.fn() },
-  },
-}));
+const { adapterMock, dbMock, MockPublishedCreateOrderPriceAdapterError } =
+  vi.hoisted(() => {
+    class MockPublishedCreateOrderPriceAdapterError extends Error {}
+    return {
+      adapterMock: {
+        readCandidatePublishedCreateOrderPriceProjection: vi.fn(),
+      },
+      MockPublishedCreateOrderPriceAdapterError,
+      dbMock: {
+        $executeRaw: vi.fn(),
+        $transaction: vi.fn(),
+        customerPriceBook: {
+          findMany: vi.fn(),
+          findFirst: vi.fn(),
+          findUnique: vi.fn(),
+          create: vi.fn(),
+          update: vi.fn(),
+          delete: vi.fn(),
+        },
+        customerPriceRule: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+          createMany: vi.fn(),
+          update: vi.fn(),
+          updateMany: vi.fn(),
+          deleteMany: vi.fn(),
+        },
+        customerChargeCategory: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+        },
+        product: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+        },
+        craft: {
+          findMany: vi.fn(),
+        },
+        orderCustomerCharge: { count: vi.fn() },
+        businessAuditLog: { create: vi.fn() },
+      },
+    };
+  });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/order/create-order-published-rule-adapter', () => ({
+  PublishedCreateOrderPriceAdapterError:
+    MockPublishedCreateOrderPriceAdapterError,
+  readCandidatePublishedCreateOrderPriceProjection:
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+}));
 
 import {
   calculateCustomerPriceRuleSetSha256,
@@ -229,6 +243,11 @@ function editableGroupRule(
 }
 
 beforeEach(() => {
+  adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockReset();
+  adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockResolvedValue({
+    snapshot: {},
+    audit: {},
+  });
   for (const delegate of [
     dbMock.customerPriceBook,
     dbMock.customerPriceRule,
@@ -1683,6 +1702,62 @@ describe('customer price-book draft lifecycle', () => {
         }),
       }),
     );
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).toHaveBeenCalledWith(dbMock, {
+      candidatePriceBookId: 'book-v2-draft',
+      effectiveFrom: publishAt,
+      snapshotLockHeld: true,
+    });
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(dbMock.customerPriceBook.update.mock.invocationCallOrder[0]!);
+  });
+
+  it('rejects an engine-incompatible candidate before changing either version window', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValue([validationRule()]);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'book-v1',
+          code: 'EXTERNAL_SALES_PROCESSING_202608',
+          version: 1,
+          effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+          effectiveTo: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockRejectedValue(
+      new MockPublishedCreateOrderPriceAdapterError('缺少局部烫金空白封单价'),
+    );
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+          effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('候选价目版本无法供建单计价：缺少局部烫金空白封单价');
+
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('refuses to publish a draft changed after the page was loaded', async () => {
