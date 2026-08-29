@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '../../generated/prisma/enums';
 
-const { permissionMock, updateSectionMock, revalidateMock, AdminError, ValidationError } =
+const {
+  permissionMock,
+  updateSectionMock,
+  updateSectionsMock,
+  revalidateMock,
+  AdminError,
+  ValidationError,
+} =
   vi.hoisted(() => {
     class MockAdminError extends Error {}
     class MockValidationError extends MockAdminError {
@@ -14,6 +21,7 @@ const { permissionMock, updateSectionMock, revalidateMock, AdminError, Validatio
     return {
       permissionMock: vi.fn(),
       updateSectionMock: vi.fn(),
+      updateSectionsMock: vi.fn(),
       revalidateMock: vi.fn(),
       AdminError: MockAdminError,
       ValidationError: MockValidationError,
@@ -25,12 +33,17 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/price/customer-price-book-admin', () => ({
   updateCustomerPriceSectionDraft: updateSectionMock,
+  updateCustomerPriceSectionsDraft: updateSectionsMock,
   CustomerPriceBookAdminError: AdminError,
   CustomerPriceBookValidationError: ValidationError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidateMock }));
 
-import { updateCustomerPriceSectionDraftAction } from '../customer-price-books';
+import {
+  updateCustomerPriceSectionDraftAction,
+  updateCustomerPriceSectionDraftFormAction,
+  type CustomerPriceSectionFormContext,
+} from '../customer-price-books';
 
 const actor = {
   id: 'owner-1',
@@ -60,6 +73,7 @@ describe('updateCustomerPriceSectionDraftAction', () => {
   beforeEach(() => {
     permissionMock.mockReset();
     updateSectionMock.mockReset();
+    updateSectionsMock.mockReset();
     revalidateMock.mockReset();
   });
 
@@ -130,5 +144,97 @@ describe('updateCustomerPriceSectionDraftAction', () => {
         'rows.0.maxQty': ['数量范围必须连续'],
       },
     });
+  });
+
+  it('一次鉴权并用一个批量 DAL 原子保存跨价目簿页面', async () => {
+    permissionMock.mockResolvedValue(actor);
+    updateSectionsMock.mockResolvedValue([
+      { priceBookId: 'processing-draft', ruleIds: ['packaging-rule'] },
+      { priceBookId: 'logistics-draft', ruleIds: ['carton-rule'] },
+    ]);
+    const context: CustomerPriceSectionFormContext = {
+      section: 'ship',
+      bindings: [],
+      rows: [
+        {
+          ...validInput.rows[0],
+          priceBookId: 'processing-draft',
+          ruleId: 'packaging-rule',
+        },
+        {
+          ...validInput.rows[0],
+          priceBookId: 'logistics-draft',
+          ruleId: 'carton-rule',
+        },
+      ],
+    };
+
+    await expect(
+      updateCustomerPriceSectionDraftFormAction(context, null, new FormData()),
+    ).resolves.toEqual({
+      status: 'success',
+      priceBookId: 'processing-draft,logistics-draft',
+      ruleIds: ['packaging-rule', 'carton-rule'],
+    });
+
+    expect(permissionMock).toHaveBeenCalledTimes(1);
+    expect(permissionMock).toHaveBeenCalledWith('dict:price:manage');
+    expect(updateSectionsMock).toHaveBeenCalledTimes(1);
+    expect(updateSectionsMock).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          priceBookId: 'processing-draft',
+          section: 'ship',
+          rows: [
+            expect.objectContaining({
+              ruleId: 'packaging-rule',
+              expectedUpdatedAt: new Date(
+                validInput.rows[0].expectedUpdatedAt,
+              ),
+            }),
+          ],
+        }),
+        expect.objectContaining({
+          priceBookId: 'logistics-draft',
+          section: 'ship',
+          rows: [expect.objectContaining({ ruleId: 'carton-rule' })],
+        }),
+      ],
+      actor,
+    );
+    expect(updateSectionMock).not.toHaveBeenCalled();
+    expect(revalidateMock).toHaveBeenCalled();
+  });
+
+  it('任一价目簿分组校验失败时不调用批量 DAL', async () => {
+    permissionMock.mockResolvedValue(actor);
+    const context = {
+      section: 'ship',
+      bindings: [],
+      rows: [
+        {
+          ...validInput.rows[0],
+          priceBookId: 'processing-draft',
+          ruleId: 'packaging-rule',
+        },
+        {
+          ...validInput.rows[0],
+          priceBookId: 'logistics-draft',
+          ruleId: 'carton-rule',
+          amount: '0.12345',
+        },
+      ],
+    } as CustomerPriceSectionFormContext;
+
+    const result = await updateCustomerPriceSectionDraftFormAction(
+      context,
+      null,
+      new FormData(),
+    );
+
+    expect(result.status).toBe('invalid');
+    expect(permissionMock).toHaveBeenCalledTimes(1);
+    expect(updateSectionsMock).not.toHaveBeenCalled();
+    expect(updateSectionMock).not.toHaveBeenCalled();
   });
 });

@@ -59,7 +59,7 @@ export type CustomerPriceBookVersionAdminDto = {
   name: string;
   purpose: CustomerPriceBookPurpose;
   version: number;
-  status: 'DRAFT' | 'CURRENT' | 'SCHEDULED' | 'HISTORICAL';
+  status: 'DRAFT' | 'CURRENT' | 'SCHEDULED' | 'CANCELLED' | 'HISTORICAL';
   effectiveFrom: string;
   effectiveTo: string | null;
   ruleCount: number;
@@ -70,6 +70,8 @@ export type CustomerPriceBookVersionAdminDto = {
   ruleSetSha256: string | null;
   createdById: string | null;
   workflowCreatedAt: string | null;
+  scheduleChangeReason: string | null;
+  scheduleChangedAt: string | null;
   updatedAt: string;
 };
 
@@ -274,6 +276,19 @@ export type DiscardCustomerPriceBookDraftInput = {
   expectedDraftUpdatedAt: Date;
 };
 
+export type CancelScheduledCustomerPriceBookInput = {
+  priceBookId: string;
+  expectedUpdatedAt: Date;
+  reason: string;
+};
+
+export type RescheduleCustomerPriceBookInput = {
+  priceBookId: string;
+  expectedUpdatedAt: Date;
+  effectiveFrom: Date;
+  reason: string;
+};
+
 export class CustomerPriceBookAdminError extends Error {
   constructor(message: string) {
     super(message);
@@ -382,12 +397,54 @@ function workflowSummary(notes: unknown): {
   };
 }
 
+type ScheduleControl = {
+  status: 'RESCHEDULED' | 'CANCELLED';
+  changedBy: string;
+  changedAt: string;
+  reason: string;
+  previousEffectiveFrom: string;
+  effectiveFrom: string;
+};
+
+function scheduleControl(notes: unknown): ScheduleControl | null {
+  if (!isRecord(notes) || !isRecord(notes.scheduleControl)) return null;
+  const control = notes.scheduleControl;
+  if (
+    (control.status !== 'RESCHEDULED' && control.status !== 'CANCELLED') ||
+    typeof control.changedBy !== 'string' ||
+    typeof control.changedAt !== 'string' ||
+    typeof control.reason !== 'string' ||
+    typeof control.previousEffectiveFrom !== 'string' ||
+    typeof control.effectiveFrom !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    status: control.status,
+    changedBy: control.changedBy,
+    changedAt: control.changedAt,
+    reason: control.reason,
+    previousEffectiveFrom: control.previousEffectiveFrom,
+    effectiveFrom: control.effectiveFrom,
+  };
+}
+
 function notesRecord(notes: unknown): Record<string, unknown> {
   return isRecord(notes) ? { ...notes } : {};
 }
 
 function notesInput(notes: Record<string, unknown>): Prisma.InputJsonObject {
   return notes as Prisma.InputJsonObject;
+}
+
+function scheduleControlNotes(
+  notes: unknown,
+  control: ScheduleControl,
+): Prisma.InputJsonObject {
+  return notesInput({
+    ...notesRecord(notes),
+    scheduleControl: control,
+  });
 }
 
 function publishedNotes(
@@ -793,9 +850,14 @@ export async function listCustomerPriceBookVersionsAndDrafts(
     return books.map((book) => {
       const workflow = draftWorkflow(book.notes);
       const metadata = workflowSummary(book.notes);
+      const schedule = scheduleControl(book.notes);
       let status: CustomerPriceBookVersionAdminDto['status'];
       if (!book.isActive) {
-        status = workflow ? 'DRAFT' : 'HISTORICAL';
+        status = workflow
+          ? 'DRAFT'
+          : schedule?.status === 'CANCELLED'
+            ? 'CANCELLED'
+            : 'HISTORICAL';
       } else if (book.effectiveFrom > now) {
         status = 'SCHEDULED';
       } else if (book.effectiveTo === null || book.effectiveTo > now) {
@@ -820,6 +882,8 @@ export async function listCustomerPriceBookVersionsAndDrafts(
         ruleSetSha256: metadata?.ruleSetSha256 ?? null,
         createdById: metadata?.createdById ?? null,
         workflowCreatedAt: metadata?.createdAt ?? null,
+        scheduleChangeReason: schedule?.reason ?? null,
+        scheduleChangedAt: schedule?.changedAt ?? null,
         updatedAt: book.updatedAt.toISOString(),
       };
     });
@@ -1773,6 +1837,22 @@ const SECTION_RULE_SELECT = {
   code: true,
 } as const;
 
+type SectionRuleRow = Prisma.CustomerPriceRuleGetPayload<{
+  select: typeof SECTION_RULE_SELECT;
+}>;
+
+const SECTION_BOOK_SELECT = {
+  id: true,
+  settlementType: true,
+  purpose: true,
+  isActive: true,
+  notes: true,
+} as const;
+
+type SectionBookRow = Prisma.CustomerPriceBookGetPayload<{
+  select: typeof SECTION_BOOK_SELECT;
+}>;
+
 /** Matcher arrays represent sets; their persisted order is not semantic. */
 function canonicalGroupMatcherJson(value: unknown): unknown {
   if (value === null || value === undefined) return null;
@@ -2085,198 +2165,262 @@ function sectionRowSnapshot(row: {
   };
 }
 
+type PreparedCustomerPriceSectionDraft = {
+  input: UpdateCustomerPriceSectionDraftInput;
+  book: SectionBookRow;
+  workflow: DraftWorkflow;
+  sectionRules: SectionRuleRow[];
+  sectionIds: string[];
+  submittedById: Map<
+    string,
+    UpdateCustomerPriceSectionDraftInput['rows'][number]
+  >;
+};
+
+async function prepareCustomerPriceSectionDraft(
+  tx: Prisma.TransactionClient,
+  input: UpdateCustomerPriceSectionDraftInput,
+): Promise<PreparedCustomerPriceSectionDraft> {
+  const book = await tx.customerPriceBook.findUnique({
+    where: { id: input.priceBookId },
+    select: SECTION_BOOK_SELECT,
+  });
+  const workflow = book ? draftWorkflow(book.notes) : null;
+  if (
+    !book ||
+    book.settlementType !== EXTERNAL_SETTLEMENT ||
+    book.isActive ||
+    !workflow
+  ) {
+    throw new CustomerPriceBookAdminError('已发布或历史价目版本不可原地修改');
+  }
+
+  const allRules = await tx.customerPriceRule.findMany({
+    where: { priceBookId: input.priceBookId },
+    select: SECTION_RULE_SELECT,
+    orderBy: [{ code: 'asc' }],
+  });
+  const sectionRules = allRules.filter((rule) =>
+    customerPriceSectionOwnsRule(input.section, book.purpose, rule),
+  );
+  if (sectionRules.length === 0) {
+    throw new CustomerPriceBookAdminError('该业务板块暂无可编辑规则');
+  }
+
+  const submittedIds = input.rows.map((row) => row.ruleId);
+  const sectionIds = sectionRules.map((rule) => rule.id);
+  if (
+    new Set(submittedIds).size !== submittedIds.length ||
+    !sameStringSet(submittedIds, sectionIds)
+  ) {
+    throw new CustomerPriceBookAdminError('业务板块规则已变化，请刷新后重试');
+  }
+
+  const existingById = new Map(sectionRules.map((rule) => [rule.id, rule]));
+  for (const submitted of input.rows) {
+    const existing = existingById.get(submitted.ruleId);
+    if (!existing) {
+      throw new CustomerPriceBookAdminError('业务板块规则已变化，请刷新后重试');
+    }
+    if (
+      !Number.isFinite(submitted.expectedUpdatedAt.getTime()) ||
+      existing.updatedAt.getTime() !== submitted.expectedUpdatedAt.getTime()
+    ) {
+      throw new CustomerPriceBookAdminError('价格已被其他管理员修改，请刷新后重试');
+    }
+
+    const group = existing.exclusiveGroup?.toUpperCase() ?? '';
+    const mayEditBounds =
+      input.section === 'machine' ||
+      input.section === 'tiers' ||
+      (input.section === 'ship' &&
+        group === 'CARTON_ORDER_QUANTITY_TIER');
+    const mayEditShippingTerms =
+      input.section === 'ship' && group === 'ZTO_PROVINCE_RATE';
+    if (
+      (!mayEditBounds &&
+        (submitted.minQty !== existing.minQty ||
+          submitted.maxQty !== existing.maxQty)) ||
+      (!mayEditShippingTerms &&
+        (!sameNullableDecimal(existing.includedUnits, submitted.includedUnits) ||
+          !sameNullableDecimal(existing.incrementUnits, submitted.incrementUnits) ||
+          !sameNullableDecimal(
+            existing.incrementAmount,
+            submitted.incrementAmount,
+          )))
+    ) {
+      throw new CustomerPriceBookAdminError('提交内容包含该业务板块不允许修改的字段');
+    }
+  }
+
+  return {
+    input,
+    book,
+    workflow,
+    sectionRules,
+    sectionIds,
+    submittedById: new Map(input.rows.map((row) => [row.ruleId, row])),
+  };
+}
+
+async function writePreparedCustomerPriceSectionDraft(
+  tx: Prisma.TransactionClient,
+  prepared: PreparedCustomerPriceSectionDraft,
+  now: Date,
+): Promise<void> {
+  for (const existing of prepared.sectionRules) {
+    const submitted = prepared.submittedById.get(existing.id)!;
+    const outcome = await tx.customerPriceRule.updateMany({
+      where: {
+        id: existing.id,
+        priceBookId: prepared.input.priceBookId,
+        updatedAt: submitted.expectedUpdatedAt,
+      },
+      data: {
+        amount:
+          submitted.amount === null
+            ? null
+            : new Prisma.Decimal(submitted.amount),
+        minQty: submitted.minQty,
+        maxQty: submitted.maxQty,
+        includedUnits:
+          submitted.includedUnits === null
+            ? null
+            : new Prisma.Decimal(submitted.includedUnits),
+        incrementUnits:
+          submitted.incrementUnits === null
+            ? null
+            : new Prisma.Decimal(submitted.incrementUnits),
+        incrementAmount:
+          submitted.incrementAmount === null
+            ? null
+            : new Prisma.Decimal(submitted.incrementAmount),
+        updatedAt: now,
+      },
+    });
+    if (outcome.count !== 1) {
+      throw new CustomerPriceBookAdminError('价格已被其他管理员修改，请刷新后重试');
+    }
+  }
+}
+
+async function finishPreparedCustomerPriceSectionDraft(
+  tx: Prisma.TransactionClient,
+  prepared: PreparedCustomerPriceSectionDraft,
+  actor: AuditActor,
+  now: Date,
+): Promise<void> {
+  await tx.customerPriceBook.update({
+    where: { id: prepared.input.priceBookId },
+    data: {
+      updatedAt: now,
+      notes: notesInput({
+        ...notesRecord(prepared.book.notes),
+        workflow: {
+          ...prepared.workflow,
+          lastEditedBy: actor.id,
+          lastEditedAt: now.toISOString(),
+        },
+      }),
+    },
+    select: { id: true },
+  });
+
+  for (const existing of prepared.sectionRules) {
+    const submitted = prepared.submittedById.get(existing.id)!;
+    await writeAuditLogInTx(tx, {
+      actor,
+      action: 'UPDATE_DRAFT_PRICE_SECTION_ROW',
+      entityType: 'CustomerPriceRule',
+      entityId: existing.id,
+      before: sectionRowSnapshot(existing),
+      after: { ...submitted, updatedAt: now },
+      requestMetadata: {
+        source: 'customer-price-book-admin.updateCustomerPriceSectionDraft',
+        priceBookId: prepared.input.priceBookId,
+        section: prepared.input.section,
+      },
+    });
+  }
+  await writeAuditLogInTx(tx, {
+    actor,
+    action: 'UPDATE_DRAFT_PRICE_SECTION',
+    entityType: 'CustomerPriceBook',
+    entityId: prepared.input.priceBookId,
+    before: { section: prepared.input.section },
+    after: {
+      section: prepared.input.section,
+      ruleIds: prepared.sectionIds,
+    },
+    requestMetadata: {
+      source: 'customer-price-book-admin.updateCustomerPriceSectionDraft',
+      changedRuleCount: prepared.sectionRules.length,
+    },
+  });
+}
+
 /**
- * Atomically saves one complete design-native section. The payload never
- * decides membership: codes and exclusive groups are re-checked under the
- * write lock, which keeps a forged rule id from crossing section boundaries.
+ * Atomically saves complete design-native sections across every price book in
+ * one page submission. All books are preflighted under one write lock before
+ * the first row is touched; any later write or full-book validation failure
+ * aborts the single database transaction.
+ */
+export async function updateCustomerPriceSectionsDraft(
+  inputs: readonly UpdateCustomerPriceSectionDraftInput[],
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<Array<{ priceBookId: string; ruleIds: string[] }>> {
+  try {
+    return await db.$transaction(async (tx) => {
+      await acquirePriceRuleSnapshotWriteLock(tx);
+      if (inputs.length === 0) {
+        throw new CustomerPriceBookAdminError('当前业务板块没有可保存规则');
+      }
+      const priceBookIds = inputs.map((input) => input.priceBookId);
+      if (new Set(priceBookIds).size !== priceBookIds.length) {
+        throw new CustomerPriceBookAdminError('提交内容包含重复价目版本，请刷新后重试');
+      }
+
+      const prepared: PreparedCustomerPriceSectionDraft[] = [];
+      for (const input of inputs) {
+        prepared.push(await prepareCustomerPriceSectionDraft(tx, input));
+      }
+      for (const section of prepared) {
+        await writePreparedCustomerPriceSectionDraft(tx, section, now);
+      }
+      for (const section of prepared) {
+        await assertValidRuleSet(
+          tx,
+          section.input.priceBookId,
+          section.book.purpose,
+        );
+      }
+      for (const section of prepared) {
+        await finishPreparedCustomerPriceSectionDraft(tx, section, actor, now);
+      }
+
+      return prepared.map((section) => ({
+        priceBookId: section.input.priceBookId,
+        ruleIds: section.sectionIds,
+      }));
+    });
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) throw error;
+    throw mapConstraintError(error) ?? error;
+  }
+}
+
+/**
+ * Backwards-compatible single-book entry point. It delegates to the same
+ * batch transaction so there is only one mutation implementation to audit.
  */
 export async function updateCustomerPriceSectionDraft(
   input: UpdateCustomerPriceSectionDraftInput,
   actor: AuditActor,
   now: Date = new Date(),
 ): Promise<{ priceBookId: string; ruleIds: string[] }> {
-  try {
-    return await db.$transaction(async (tx) => {
-      await acquirePriceRuleSnapshotWriteLock(tx);
-      const book = await tx.customerPriceBook.findUnique({
-        where: { id: input.priceBookId },
-        select: {
-          id: true,
-          settlementType: true,
-          purpose: true,
-          isActive: true,
-          notes: true,
-        },
-      });
-      const workflow = book ? draftWorkflow(book.notes) : null;
-      if (
-        !book ||
-        book.settlementType !== EXTERNAL_SETTLEMENT ||
-        book.isActive ||
-        !workflow
-      ) {
-        throw new CustomerPriceBookAdminError(
-          '已发布或历史价目版本不可原地修改',
-        );
-      }
-
-      const allRules = await tx.customerPriceRule.findMany({
-        where: { priceBookId: input.priceBookId },
-        select: SECTION_RULE_SELECT,
-        orderBy: [{ code: 'asc' }],
-      });
-      const sectionRules = allRules.filter((rule) =>
-        customerPriceSectionOwnsRule(input.section, book.purpose, rule),
-      );
-      if (sectionRules.length === 0) {
-        throw new CustomerPriceBookAdminError('该业务板块暂无可编辑规则');
-      }
-      const submittedIds = input.rows.map((row) => row.ruleId);
-      const sectionIds = sectionRules.map((rule) => rule.id);
-      if (
-        new Set(submittedIds).size !== submittedIds.length ||
-        !sameStringSet(submittedIds, sectionIds)
-      ) {
-        throw new CustomerPriceBookAdminError(
-          '业务板块规则已变化，请刷新后重试',
-        );
-      }
-
-      const existingById = new Map(sectionRules.map((rule) => [rule.id, rule]));
-      for (const submitted of input.rows) {
-        const existing = existingById.get(submitted.ruleId);
-        if (!existing) {
-          throw new CustomerPriceBookAdminError(
-            '业务板块规则已变化，请刷新后重试',
-          );
-        }
-        if (
-          !Number.isFinite(submitted.expectedUpdatedAt.getTime()) ||
-          existing.updatedAt.getTime() !== submitted.expectedUpdatedAt.getTime()
-        ) {
-          throw new CustomerPriceBookAdminError(
-            '价格已被其他管理员修改，请刷新后重试',
-          );
-        }
-
-        const group = existing.exclusiveGroup?.toUpperCase() ?? '';
-        const mayEditBounds =
-          input.section === 'machine' ||
-          input.section === 'tiers' ||
-          (input.section === 'ship' &&
-            group === 'CARTON_ORDER_QUANTITY_TIER');
-        const mayEditShippingTerms =
-          input.section === 'ship' && group === 'ZTO_PROVINCE_RATE';
-        if (
-          (!mayEditBounds &&
-            (submitted.minQty !== existing.minQty ||
-              submitted.maxQty !== existing.maxQty)) ||
-          (!mayEditShippingTerms &&
-            (!sameNullableDecimal(existing.includedUnits, submitted.includedUnits) ||
-              !sameNullableDecimal(existing.incrementUnits, submitted.incrementUnits) ||
-              !sameNullableDecimal(
-                existing.incrementAmount,
-                submitted.incrementAmount,
-              )))
-        ) {
-          throw new CustomerPriceBookAdminError(
-            '提交内容包含该业务板块不允许修改的字段',
-          );
-        }
-      }
-
-      const submittedById = new Map(
-        input.rows.map((row) => [row.ruleId, row]),
-      );
-      for (const existing of sectionRules) {
-        const submitted = submittedById.get(existing.id)!;
-        const outcome = await tx.customerPriceRule.updateMany({
-          where: {
-            id: existing.id,
-            priceBookId: input.priceBookId,
-            updatedAt: submitted.expectedUpdatedAt,
-          },
-          data: {
-            amount:
-              submitted.amount === null
-                ? null
-                : new Prisma.Decimal(submitted.amount),
-            minQty: submitted.minQty,
-            maxQty: submitted.maxQty,
-            includedUnits:
-              submitted.includedUnits === null
-                ? null
-                : new Prisma.Decimal(submitted.includedUnits),
-            incrementUnits:
-              submitted.incrementUnits === null
-                ? null
-                : new Prisma.Decimal(submitted.incrementUnits),
-            incrementAmount:
-              submitted.incrementAmount === null
-                ? null
-                : new Prisma.Decimal(submitted.incrementAmount),
-            updatedAt: now,
-          },
-        });
-        if (outcome.count !== 1) {
-          throw new CustomerPriceBookAdminError(
-            '价格已被其他管理员修改，请刷新后重试',
-          );
-        }
-      }
-
-      await assertValidRuleSet(tx, input.priceBookId, book.purpose);
-      await tx.customerPriceBook.update({
-        where: { id: input.priceBookId },
-        data: {
-          updatedAt: now,
-          notes: notesInput({
-            ...notesRecord(book.notes),
-            workflow: {
-              ...workflow,
-              lastEditedBy: actor.id,
-              lastEditedAt: now.toISOString(),
-            },
-          }),
-        },
-        select: { id: true },
-      });
-
-      for (const existing of sectionRules) {
-        const submitted = submittedById.get(existing.id)!;
-        await writeAuditLogInTx(tx, {
-          actor,
-          action: 'UPDATE_DRAFT_PRICE_SECTION_ROW',
-          entityType: 'CustomerPriceRule',
-          entityId: existing.id,
-          before: sectionRowSnapshot(existing),
-          after: { ...submitted, updatedAt: now },
-          requestMetadata: {
-            source: 'customer-price-book-admin.updateCustomerPriceSectionDraft',
-            priceBookId: input.priceBookId,
-            section: input.section,
-          },
-        });
-      }
-      await writeAuditLogInTx(tx, {
-        actor,
-        action: 'UPDATE_DRAFT_PRICE_SECTION',
-        entityType: 'CustomerPriceBook',
-        entityId: input.priceBookId,
-        before: { section: input.section },
-        after: { section: input.section, ruleIds: sectionIds },
-        requestMetadata: {
-          source: 'customer-price-book-admin.updateCustomerPriceSectionDraft',
-          changedRuleCount: sectionRules.length,
-        },
-      });
-
-      return { priceBookId: input.priceBookId, ruleIds: sectionIds };
-    });
-  } catch (error) {
-    if (error instanceof CustomerPriceBookAdminError) throw error;
-    throw mapConstraintError(error) ?? error;
-  }
+  const [updated] = await updateCustomerPriceSectionsDraft([input], actor, now);
+  return updated!;
 }
 
 export async function discardCustomerPriceBookDraft(

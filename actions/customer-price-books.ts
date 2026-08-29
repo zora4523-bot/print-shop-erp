@@ -25,6 +25,8 @@ import {
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
   updateCustomerPriceSectionDraft,
+  updateCustomerPriceSectionsDraft,
+  type UpdateCustomerPriceSectionDraftInput,
 } from '@/lib/price/customer-price-book-admin';
 import type {
   CreateCustomerPriceBookDraftActionInput,
@@ -837,6 +839,7 @@ export async function updateCustomerPriceSectionDraftFormAction(
   _previousState: CustomerPriceBookMutationResult | null,
   formData: FormData,
 ): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
   const rows = context.rows.map((row) => ({ ...row }));
   for (const binding of context.bindings) {
     const value = formData.get(binding.inputName);
@@ -871,9 +874,9 @@ export async function updateCustomerPriceSectionDraftFormAction(
     byBook.set(row.priceBookId, bookRows);
   });
 
-  const allRuleIds: string[] = [];
+  const parsedInputs: UpdateCustomerPriceSectionDraftInput[] = [];
   for (const [priceBookId, bookRows] of byBook) {
-    const result = await updateCustomerPriceSectionDraftAction({
+    const parsed = updatePriceSectionDraftSchema.safeParse({
       priceBookId,
       section: context.section,
       rows: bookRows.map((row) => ({
@@ -887,14 +890,44 @@ export async function updateCustomerPriceSectionDraftFormAction(
         incrementAmount: row.incrementAmount,
       })),
     });
-    if (result.status !== 'success') return result;
-    allRuleIds.push(...(result.ruleIds ?? []));
+    if (!parsed.success) {
+      return {
+        status: 'invalid',
+        fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+      };
+    }
+    parsedInputs.push(parsed.data);
   }
-  return {
-    status: 'success',
-    priceBookId: [...byBook.keys()].join(','),
-    ruleIds: allRuleIds,
-  };
+  if (parsedInputs.length === 0) {
+    return {
+      status: 'invalid',
+      fieldErrors: { rows: ['当前业务板块没有可保存规则'] },
+    };
+  }
+
+  try {
+    const updated = await updateCustomerPriceSectionsDraft(
+      parsedInputs,
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: updated.map((result) => result.priceBookId).join(','),
+      ruleIds: updated.flatMap((result) => result.ruleIds),
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookValidationError) {
+      return invalidGroupUpdateFromDomain(
+        error,
+        parsedInputs.flatMap((input) => input.rows),
+      );
+    }
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
 }
 
 export async function publishCustomerPriceBookDraftAction(
