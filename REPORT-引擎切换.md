@@ -409,3 +409,27 @@ append-only 报工 E2E 只允许连接显式提供、且与普通 `DATABASE_URL`
 | 开发服务 | 最终已重新启动在 `http://localhost:3000`，`/login` 返回 200 |
 
 最终受保护路径检查对 `prisma/schema.prisma`、`prisma/seed.ts`、`prisma/migrations`、`scripts`、工单页面及建单/计价模块均无差异。本轮浏览器操作只打开和关闭调价界面，没有填写或提交数据。
+
+## 17. 调价输入状态告警修复（2026-08-29）
+
+用户提供的控制台信息为 Base UI `FieldControl` 的非受控 `defaultValue` 变化告警，不是调价事务失败。实际页面已显示调价草稿 v5、1 处未发布改动，且“珠光闪红 160g · 大号封”的 `0.8` 仍在，说明创建草稿与价格保存均已成功。
+
+### 17.1 根因与修复
+
+- 草稿数字格是非受控 Base UI Input。用户修改价格后，Server Action 重新校验页面；同一行列位置的客户端实例被复用，但服务端传回的 `defaultValue` 已从旧值变为新值，Base UI 因此正确报警，而 DOM 还可能停在旧默认值。
+- 数字格现在按“字段 id + 已持久化值”设置稳定 key。保存成功且值真正变化时，只重挂发生变化的那一格；其他未保存输入不会被清空，校验失败时也保留用户尝试值。
+- 创建草稿成功后，服务端重新校验可能先于弹窗内的成功 effect 卸载表单，使 URL 残留 `start=1&purpose=...`。现在对“query 要求开弹窗、但该来源已有草稿/不可创建”的状态进行客户端地址收敛，不重开表单，也不改动价格数据。
+
+### 17.2 回归门禁
+
+| 门禁 | 结果 |
+|---|---|
+| 新增 Chromium 生命周期回归 | `1 / 1` 通过；同一价格格从 `0.12` 重渲染为 `0.13`，最终 DOM 值为 `0.13`，Base UI 告警为 0 |
+| 定向组件/页面测试 | 3 个文件、20 项通过，含已失效弹窗 query 收敛 |
+| 全量 Vitest | `408 files passed / 4072 tests passed` |
+| TypeScript / ESLint / whitespace | `pnpm typecheck`、`pnpm lint`、`git diff --check` 全部通过 |
+| 生产构建 | `pnpm build` 通过，60 个静态页面生成完成 |
+| 真实开发页冷加载 | 残留地址自动收敛为 `?section=blank`；草稿 v5 和 `0.8` 仍正常显示；控制台 `error/warn = 0` |
+| 开发服务 | `http://localhost:3000/login` 返回 200 |
+
+本轮未提交价格表单，未修改已发布价表、`priceVersion` 快照、计价引擎、工单 UI、Prisma schema/seed/migration 或历史工单。
