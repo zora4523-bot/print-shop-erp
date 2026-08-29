@@ -48,6 +48,7 @@ export type CustomerBlankPricingRow = {
 export type CustomerBlankPricingSectionViewProps = {
   columns: readonly PricingMatrixColumn[];
   rows: readonly CustomerBlankPricingRow[];
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -58,6 +59,7 @@ export type CustomerMachinePricingSectionViewProps = {
   flatFee: PricingNumericFieldState;
   jumpQuantity: PricingNumericFieldState;
   plateFee: PricingNumericFieldState;
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -74,6 +76,7 @@ export type CustomerTierPricingRow = {
 export type CustomerTiersPricingSectionViewProps = {
   rows: readonly CustomerTierPricingRow[];
   exampleQuantity?: number;
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -91,6 +94,7 @@ export type CustomerPricingAdjustmentRow = {
 export type CustomerAddsPricingSectionViewProps = {
   paperAdjustments: readonly CustomerPricingAdjustmentRow[];
   craftAdjustments: readonly CustomerPricingAdjustmentRow[];
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -106,6 +110,7 @@ export type CustomerPrintPricingSectionViewProps = {
   columns: readonly PricingMatrixColumn[];
   rows: readonly CustomerPrintPricingRow[];
   foilCells: readonly PricingMatrixCell[];
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -154,6 +159,7 @@ export type CustomerShipPricingSectionViewProps = {
   bag: CustomerBagPricingFields;
   carton: CustomerCartonPricingFields;
   shipping: CustomerShippingPricingFields;
+  headingActions?: ReactNode;
   statusContent?: ReactNode;
   className?: string;
   headingId?: string;
@@ -173,6 +179,7 @@ type PricingSectionHeadingProps = {
   description: ReactNode;
   basis?: string;
   criticalBasis?: boolean;
+  actions?: ReactNode;
 };
 
 const EMPTY_FIELD: PricingNumericFieldState = {
@@ -189,31 +196,41 @@ function PricingSectionHeading({
   description,
   basis,
   criticalBasis = false,
+  actions,
 }: PricingSectionHeadingProps) {
   return (
     <header className="min-w-0">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h1
-          id={headingId}
-          className="admin-wrap-anywhere text-lg font-extrabold tracking-tight sm:text-xl"
-        >
-          {title}
-        </h1>
-        {basis ? (
-          <Badge
-            variant="outline"
-            className={cn(
-              'h-auto rounded-md px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide',
-              criticalBasis && 'border-destructive text-destructive',
-            )}
-          >
-            {basis}
-          </Badge>
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1
+              id={headingId}
+              className="admin-wrap-anywhere text-lg font-extrabold tracking-tight sm:text-xl"
+            >
+              {title}
+            </h1>
+            {basis ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'h-auto rounded-md px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide',
+                  criticalBasis && 'border-destructive text-destructive',
+                )}
+              >
+                {basis}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-[13px]">
+            {description}
+          </p>
+        </div>
+        {actions ? (
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
+            {actions}
+          </div>
         ) : null}
       </div>
-      <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-muted-foreground sm:text-[13px]">
-        {description}
-      </p>
     </header>
   );
 }
@@ -231,29 +248,52 @@ function PricingNumericInput({
   className,
   changedDot = false,
 }: PricingNumericInputProps) {
+  const label = `${ariaLabel}${changed ? '（有未发布改动）' : ''}`;
+  const displayValue =
+    value === null || value === '' ? placeholder : String(value);
+
   return (
     <div className="relative min-w-0">
-      <Input
-        id={id}
-        name={name ?? id}
-        type="number"
-        inputMode="decimal"
-        defaultValue={value ?? ''}
-        placeholder={placeholder}
-        step={step}
-        readOnly={!editable}
-        disabled={disabled}
-        aria-label={`${ariaLabel}${changed ? '（有未发布改动）' : ''}`}
-        aria-readonly={!editable || undefined}
-        data-changed={changed || undefined}
-        className={cn(
-          'h-8 min-w-0 text-right text-[13px] font-bold tabular-nums',
-          !editable && !disabled && 'cursor-default',
-          changed &&
-            'border-warning/50 bg-warning/10 text-warning-foreground',
-          className,
-        )}
-      />
+      {editable && !disabled ? (
+        <Input
+          id={id}
+          name={name ?? id}
+          type="number"
+          inputMode="decimal"
+          defaultValue={value ?? ''}
+          placeholder={placeholder}
+          step={step}
+          aria-label={label}
+          data-changed={changed || undefined}
+          className={cn(
+            'h-8 min-w-0 text-right text-[13px] font-bold tabular-nums',
+            changed &&
+              'border-warning/50 bg-warning/10 text-warning-foreground',
+            className,
+          )}
+        />
+      ) : (
+        <>
+          <span className="sr-only">{label}，只读：</span>
+          <span
+            id={id}
+            data-price-label={label}
+            data-readonly="true"
+            data-disabled={disabled || undefined}
+            data-changed={changed || undefined}
+            className={cn(
+              'flex h-8 min-w-0 items-center justify-end rounded-md border border-transparent bg-transparent px-3 text-right text-[13px] font-bold tabular-nums',
+              (value === null || value === '') && 'text-muted-foreground',
+              disabled && 'text-muted-foreground',
+              changed &&
+                'border-warning/50 bg-warning/10 text-warning-foreground',
+              className,
+            )}
+          >
+            {displayValue}
+          </span>
+        </>
+      )}
       {changed && changedDot ? (
         <span
           aria-hidden="true"
@@ -326,6 +366,7 @@ function matrixCell(
 export function CustomerBlankPricingSectionView({
   columns,
   rows,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-blank-pricing-heading',
@@ -347,6 +388,7 @@ export function CustomerBlankPricingSectionView({
             <strong className="text-foreground">0 元和无报价是两回事</strong>。
           </>
         }
+        actions={headingActions}
       />
       {statusContent}
 
@@ -457,6 +499,7 @@ export function CustomerMachinePricingSectionView({
   flatFee,
   jumpQuantity,
   plateFee,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-machine-pricing-heading',
@@ -492,6 +535,7 @@ export function CustomerMachinePricingSectionView({
             计，不按面数。印刷次数 = 数量 × 过版次数。
           </>
         }
+        actions={headingActions}
       />
       {statusContent}
 
@@ -573,6 +617,7 @@ function tierRanges(rows: readonly CustomerTierPricingRow[]) {
 export function CustomerTiersPricingSectionView({
   rows,
   exampleQuantity = 4_600,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-tiers-pricing-heading',
@@ -598,6 +643,7 @@ export function CustomerTiersPricingSectionView({
             手填范围容易产生缝隙或重叠。末档上界锁定为无穷；无起订量，1 个也落进首档。
           </>
         }
+        actions={headingActions}
       />
       {statusContent}
 
@@ -731,6 +777,7 @@ function AdjustmentRows({
 export function CustomerAddsPricingSectionView({
   paperAdjustments,
   craftAdjustments,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-adds-pricing-heading',
@@ -750,6 +797,7 @@ export function CustomerAddsPricingSectionView({
             基准纸不需要加价行。
           </>
         }
+        actions={headingActions}
       />
       {statusContent}
 
@@ -774,6 +822,7 @@ export function CustomerPrintPricingSectionView({
   columns,
   rows,
   foilCells,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-print-pricing-heading',
@@ -791,6 +840,7 @@ export function CustomerPrintPricingSectionView({
         basis="元 / 单 · PER_ORDER · 整单总价不乘数量"
         criticalBasis
         description="查到的直接就是整单总价。空格 = 该档无报价，转人工。数量取整：5千–7千按5千 · 8千–1万按1万 · 1.5万–2万按2万。"
+        actions={headingActions}
       />
       {statusContent}
 
@@ -949,6 +999,7 @@ export function CustomerShipPricingSectionView({
   bag,
   carton,
   shipping,
+  headingActions,
   statusContent,
   className,
   headingId = 'customer-ship-pricing-heading',
@@ -968,6 +1019,7 @@ export function CustomerShipPricingSectionView({
         headingId={headingId}
         title="包装 · 纸箱耗材 · 中通快递"
         description="入袋混装按袋（款级）；纸箱与快递按整单。纸箱任何情况都收；快递仅总数量 ≤ 上限时自动计，超出走物流待定，顺丰到付归零。"
+        actions={headingActions}
       />
       {statusContent}
 

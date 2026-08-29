@@ -93,4 +93,42 @@ describe('rule center workspace UI', () => {
     expect(html).toContain('draft=processing-draft');
     expect(visibleText(html)).not.toContain('当前生效 v3');
   });
+
+  it('keeps review and version status but omits publish when there is no draft', () => {
+    usePathnameMock.mockReturnValue(RULE_CENTER_HREFS.customerPricing);
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('section=tiers'));
+
+    const html = renderToStaticMarkup(
+      <RuleCenterWorkspaceBar
+        priceVersionSummary={{
+          state: 'ready',
+          streams: [
+            {
+              key: 'processing',
+              label: '加工费',
+              currentVersion: 4,
+              draftVersion: null,
+              draftId: null,
+              scheduledVersion: null,
+            },
+            {
+              key: 'logistics',
+              label: '物流费',
+              currentVersion: 2,
+              draftVersion: null,
+              draftId: null,
+              scheduledVersion: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(visibleText(html)).toContain('加工费当前 v4');
+    expect(visibleText(html)).toContain('物流费当前 v2');
+    expect(visibleText(html)).toContain('审阅变更');
+    expect(visibleText(html)).not.toContain('发布');
+    expect(html).not.toContain('aria-label="进入价格版本发布"');
+    expect(html).not.toContain('aria-disabled="true"');
+  });
 });

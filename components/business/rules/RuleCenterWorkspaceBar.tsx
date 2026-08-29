@@ -13,7 +13,6 @@ import {
   getActiveAdminMenuHref,
   type AdminMenuItem,
 } from '@/lib/navigation/admin-menu';
-import { cn } from '@/lib/utils';
 
 export type RuleCenterPriceVersionStream = {
   key: 'processing' | 'logistics';
@@ -203,18 +202,7 @@ export function RuleCenterWorkspaceBar({
               <Send aria-hidden="true" className="size-3.5" />
               发布
             </Link>
-          ) : (
-            <span
-              aria-disabled="true"
-              className={cn(
-                'inline-flex min-h-11 cursor-not-allowed items-center gap-1.5 rounded-lg bg-background px-3.5 text-xs font-extrabold text-foreground dark:bg-card-foreground dark:text-card',
-                'opacity-35',
-              )}
-            >
-              <Send aria-hidden="true" className="size-3.5" />
-              发布
-            </span>
-          )}
+          ) : null}
         </nav>
       </div>
     </header>

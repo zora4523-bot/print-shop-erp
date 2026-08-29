@@ -4,6 +4,7 @@ import { CustomerPricingDedicatedSection } from './CustomerPricingDedicatedSecti
 import { ContentSkeleton, ErrorBoundary } from '@/components/ui-business';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
+import { CustomerPriceBookPurpose } from '@/generated/prisma/enums';
 import {
   CUSTOMER_PRICE_SECTIONS,
   getCustomerPriceSectionWorkspace,
@@ -19,6 +20,7 @@ export const metadata = {
 type SearchParams = {
   section?: string | string[];
   start?: string | string[];
+  purpose?: string | string[];
 };
 
 type PageProps = { searchParams: Promise<SearchParams> };
@@ -27,6 +29,17 @@ function customerPricingSection(value: string): CustomerPriceSection | null {
   return CUSTOMER_PRICE_SECTIONS.includes(value as CustomerPriceSection)
     ? (value as CustomerPriceSection)
     : null;
+}
+
+function createDraftPurpose(
+  start: string,
+  purpose: string,
+): CustomerPriceBookPurpose | null {
+  if (start !== '1') return null;
+  const normalized = purpose.trim().toLowerCase();
+  if (normalized === 'processing') return CustomerPriceBookPurpose.PROCESSING;
+  if (normalized === 'logistics') return CustomerPriceBookPurpose.LOGISTICS;
+  return null;
 }
 
 export default async function CustomerPricingWorkspacePage({
@@ -53,7 +66,10 @@ export default async function CustomerPricingWorkspacePage({
         <Suspense fallback={<DedicatedSectionSkeleton />}>
           <DedicatedCustomerPricingSectionContent
             workspacePromise={workspacePromise}
-            createDraftOpen={firstSearchParam(sp.start) === '1'}
+            createDraftPurpose={createDraftPurpose(
+              firstSearchParam(sp.start),
+              firstSearchParam(sp.purpose),
+            )}
           />
         </Suspense>
       </ErrorBoundary>
@@ -75,16 +91,16 @@ function DedicatedSectionSkeleton() {
 
 async function DedicatedCustomerPricingSectionContent({
   workspacePromise,
-  createDraftOpen,
+  createDraftPurpose,
 }: {
   workspacePromise: Promise<CustomerPriceSectionWorkspaceDto>;
-  createDraftOpen: boolean;
+  createDraftPurpose: CustomerPriceBookPurpose | null;
 }) {
   const workspace = await workspacePromise;
   return (
     <CustomerPricingDedicatedSection
       workspace={workspace}
-      createDraftOpen={createDraftOpen}
+      createDraftPurpose={createDraftPurpose}
     />
   );
 }

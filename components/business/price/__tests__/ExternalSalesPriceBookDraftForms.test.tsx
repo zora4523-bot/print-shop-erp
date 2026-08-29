@@ -413,6 +413,22 @@ describe('CreateCustomerPriceBookDraftForm', () => {
     );
   });
 
+  it('在弹窗中复用表单时使用业务名称且不重复面板说明', () => {
+    const html = renderToStaticMarkup(
+      <CreateCustomerPriceBookDraftForm
+        purpose={CustomerPriceBookPurpose.PROCESSING}
+        purposeLabel="入袋费"
+        presentation="dialog"
+      />,
+    );
+
+    expect(html).toContain('aria-label="创建入袋费调价草稿"');
+    expect(html).toContain('调价原因（必填）');
+    expect(html).toContain('开始调价');
+    expect(html).not.toContain('草稿发布前不影响当前报价');
+    expect(html).not.toContain('<p class="text-sm font-medium">发起调价</p>');
+  });
+
   it('将服务端字段错误关联到调价原因并用 alert 播报', () => {
     actionStateMock.mockImplementation((action) => [
       {

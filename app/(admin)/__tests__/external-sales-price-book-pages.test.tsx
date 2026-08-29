@@ -88,7 +88,7 @@ vi.mock(
   () => ({
     CustomerPricingDedicatedSection: (props: {
       workspace: { section: string };
-      createDraftOpen: boolean;
+      createDraftPurpose: CustomerPriceBookPurpose | null;
     }) => {
       dedicatedSectionPropsMock(props);
       return (
@@ -661,6 +661,52 @@ describe('external sales price book pages', () => {
     expect(blankHtml).not.toContain('价格规则矩阵');
     expect(addsHtml).not.toContain('搜索收费项目');
     expect(shipHtml).not.toContain('价格规则矩阵');
+    expect(dedicatedSectionPropsMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ createDraftPurpose: null }),
+    );
+    expect(dedicatedSectionPropsMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ createDraftPurpose: null }),
+    );
+    expect(dedicatedSectionPropsMock).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ createDraftPurpose: null }),
+    );
+  });
+
+  it('只为 query 指定的价目 purpose 展开调价表单', async () => {
+    requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+
+    await renderToResolvedMarkup(
+      await OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({
+          section: 'ship',
+          start: '1',
+          purpose: 'logistics',
+        }),
+      }),
+    );
+
+    expect(dedicatedSectionPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        workspace: expect.objectContaining({ section: 'ship' }),
+        createDraftPurpose: CustomerPriceBookPurpose.LOGISTICS,
+      }),
+    );
+
+    await renderToResolvedMarkup(
+      await OwnerExternalSalesChargeItemsPage({
+        searchParams: Promise.resolve({
+          section: 'ship',
+          start: '1',
+        }),
+      }),
+    );
+
+    expect(dedicatedSectionPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ createDraftPurpose: null }),
+    );
   });
 
   it('将无参数和旧版深链统一收敛到空白封业务编辑器', async () => {

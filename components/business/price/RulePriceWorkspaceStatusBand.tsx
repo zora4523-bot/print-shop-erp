@@ -24,6 +24,7 @@ export type ExternalSalesChargeDraftSummary = {
 };
 
 export function RulePriceWorkspaceStatusBand({
+  ariaLabel,
   draft,
   workspaceStatus,
   createDraftHref,
@@ -31,6 +32,7 @@ export function RulePriceWorkspaceStatusBand({
   createDraftOpen,
   createDraftBlockedReason,
 }: {
+  ariaLabel?: string;
   draft?: ExternalSalesChargeDraftSummary | null;
   workspaceStatus: ExternalSalesChargeWorkspaceStatus;
   createDraftHref?: string;
@@ -41,7 +43,7 @@ export function RulePriceWorkspaceStatusBand({
   if (draft) {
     return (
       <section
-        aria-label="调价草稿状态"
+        aria-label={ariaLabel ?? '调价草稿状态'}
         className="min-w-0 rounded-xl border border-warning/40 bg-warning/10 p-3 shadow-sm"
       >
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -98,7 +100,7 @@ export function RulePriceWorkspaceStatusBand({
 
   return (
     <section
-      aria-label="价格状态"
+      aria-label={ariaLabel ?? '价格状态'}
       className="min-w-0 rounded-xl border bg-card p-3 shadow-sm"
     >
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

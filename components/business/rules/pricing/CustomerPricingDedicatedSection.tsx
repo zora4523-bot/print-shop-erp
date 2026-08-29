@@ -8,13 +8,18 @@ import {
   type CustomerPriceSectionFormContext,
 } from '@/actions/customer-price-books';
 import { CreateCustomerPriceBookDraftForm } from '@/components/business/price/ExternalSalesPriceBookDraftForms';
-import { PriceWorkspaceNavigationGuardProvider } from '@/components/business/price/PriceWorkspaceNavigationGuard';
+import {
+  PriceWorkspaceLink,
+  PriceWorkspaceNavigationGuardProvider,
+} from '@/components/business/price/PriceWorkspaceNavigationGuard';
 import {
   RulePriceWorkspaceStatusBand,
   type ExternalSalesChargeDraftSummary,
   type ExternalSalesChargeWorkspaceStatus,
 } from '@/components/business/price/RulePriceWorkspaceStatusBand';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -30,6 +35,8 @@ import {
   RULE_CENTER_HREFS,
   priceVersionsHref,
 } from '@/lib/navigation/rule-center';
+import { cn } from '@/lib/utils';
+import { CustomerPricingCreateDraftDialog } from './CustomerPricingCreateDraftDialog';
 import { CustomerPricingSectionDraftForm } from './CustomerPricingSectionDraftForm';
 import {
   CustomerAddsPricingSectionView,
@@ -52,7 +59,7 @@ import {
 
 export type CustomerPricingDedicatedSectionProps = {
   workspace: CustomerPriceSectionWorkspaceDto;
-  createDraftOpen: boolean;
+  createDraftPurpose: CustomerPriceBookPurpose | null;
 };
 
 type EditableSectionField =
@@ -524,61 +531,200 @@ function draftSummary(
   };
 }
 
-function VersionStatusBlocks({
-  workspace,
-  createDraftOpen,
-  allowCreateDraft,
-}: CustomerPricingDedicatedSectionProps & { allowCreateDraft: boolean }) {
-  const multiple = workspace.sources.length > 1;
+function canCreateDraft(
+  source: CustomerPriceSectionWorkspaceStateDto,
+): boolean {
   return (
-    <div className="min-w-0 space-y-3">
-      {workspace.sources.map((source) => {
-        const canCreate =
-          allowCreateDraft &&
-          source.draft === null &&
-          source.scheduledBook === null &&
-          source.draftCreation.allowed;
-        const purposeLabel =
-          source.purpose === CustomerPriceBookPurpose.LOGISTICS
-            ? '物流价目版本'
-            : workspace.section === 'ship'
-              ? '入袋加工费版本'
-              : '加工费版本';
-        const blockedReason = source.scheduledBook
-          ? `第 ${source.scheduledBook.version} 版已安排在 ${formatShanghaiDateTime(
-              source.scheduledBook.effectiveFrom,
-            )} 生效；生效前不能再发起新调价。`
-          : source.draftCreation.blockedReason;
+    source.draft === null &&
+    source.scheduledBook === null &&
+    source.draftCreation.allowed
+  );
+}
+
+function sourcePurposeLabel(
+  workspace: CustomerPriceSectionWorkspaceDto,
+  source: CustomerPriceSectionWorkspaceStateDto,
+): string {
+  if (source.purpose === CustomerPriceBookPurpose.LOGISTICS) {
+    return '物流费';
+  }
+  return workspace.section === 'ship' ? '入袋费' : '加工费';
+}
+
+function createDraftActionLabel(
+  workspace: CustomerPriceSectionWorkspaceDto,
+  source: CustomerPriceSectionWorkspaceStateDto,
+  selected: boolean,
+): string {
+  if (workspace.section !== 'ship') {
+    return selected ? '收起调价' : '发起调价';
+  }
+  return source.purpose === CustomerPriceBookPurpose.LOGISTICS
+    ? selected
+      ? '收起物流费调价'
+      : '调整物流费'
+    : selected
+      ? '收起入袋费调价'
+      : '调整入袋费';
+}
+
+function createDraftHref(
+  workspace: CustomerPriceSectionWorkspaceDto,
+  source: CustomerPriceSectionWorkspaceStateDto,
+): string {
+  return sectionHref(workspace.section, {
+    start: 1,
+    purpose: source.purpose.toLowerCase(),
+  });
+}
+
+function createDraftDialogId(
+  workspace: CustomerPriceSectionWorkspaceDto,
+  source: CustomerPriceSectionWorkspaceStateDto,
+): string {
+  return `customer-pricing-${workspace.section}-${source.purpose.toLowerCase()}-draft-dialog`;
+}
+
+function VersionHeadingActions({
+  workspace,
+  createDraftPurpose,
+}: CustomerPricingDedicatedSectionProps) {
+  const sources = workspace.sources.filter(canCreateDraft);
+  if (sources.length === 0) return null;
+
+  return (
+    <>
+      {sources.map((source) => {
+        const selected = createDraftPurpose === source.purpose;
         return (
-          <div key={source.purpose} className="min-w-0 space-y-1.5">
-            {multiple ? (
-              <p className="text-xs font-extrabold tracking-wide text-muted-foreground">
-                {purposeLabel}
-              </p>
-            ) : null}
-            <RulePriceWorkspaceStatusBand
-              draft={draftSummary(workspace.section, source)}
-              workspaceStatus={workspaceStatus(source)}
-              createDraftHref={
-                canCreate
-                  ? sectionHref(workspace.section, { start: 1 })
-                  : undefined
-              }
-              createDraftEditor={
-                canCreate ? (
-                  <CreateCustomerPriceBookDraftForm
-                    purpose={source.purpose}
-                    returnHref={sectionHref(workspace.section)}
-                  />
-                ) : undefined
-              }
-              createDraftOpen={createDraftOpen}
-              createDraftBlockedReason={blockedReason}
-            />
-          </div>
+          <PriceWorkspaceLink
+            key={source.purpose}
+            href={
+              selected
+                ? sectionHref(workspace.section)
+                : createDraftHref(workspace, source)
+            }
+            prefetch={false}
+            aria-controls={
+              selected ? createDraftDialogId(workspace, source) : undefined
+            }
+            aria-expanded={selected}
+            aria-haspopup="dialog"
+            data-state={selected ? 'open' : 'closed'}
+            className={cn(
+              buttonVariants({ variant: 'outline', size: 'sm' }),
+              'min-h-11 shrink-0',
+              selected && 'border-foreground bg-muted',
+            )}
+          >
+            {createDraftActionLabel(workspace, source, selected)}
+          </PriceWorkspaceLink>
         );
       })}
-    </div>
+    </>
+  );
+}
+
+function CompactVersionStatus({
+  workspace,
+  source,
+}: {
+  workspace: CustomerPriceSectionWorkspaceDto;
+  source: CustomerPriceSectionWorkspaceStateDto;
+}) {
+  const scheduled = source.scheduledBook;
+  const unavailable = !source.currentBook;
+  if (!scheduled && !unavailable) return null;
+  const purposeLabel = sourcePurposeLabel(workspace, source);
+  const message = scheduled
+    ? `第 ${scheduled.version} 版已安排在 ${formatShanghaiDateTime(
+        scheduled.effectiveFrom,
+      )} 生效；生效前不能再发起新调价。`
+    : source.draftCreation.blockedReason ?? '请在价格版本中检查。';
+
+  return (
+    <section
+      aria-label={`${purposeLabel}价格状态`}
+      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2"
+    >
+      <Badge variant={scheduled ? 'secondary' : 'destructive'}>
+        {purposeLabel} · {scheduled ? '等待生效' : '暂无生效价'}
+      </Badge>
+      <p className="admin-wrap-anywhere text-xs leading-5 text-muted-foreground">
+        {message}
+      </p>
+    </section>
+  );
+}
+
+function VersionStatusBlocks({
+  workspace,
+}: Pick<CustomerPricingDedicatedSectionProps, 'workspace'>) {
+  const multiple = workspace.sources.length > 1;
+  const blocks = workspace.sources.map((source) => {
+    if (source.draft) {
+      return (
+        <div key={source.purpose} className="min-w-0 space-y-1.5">
+          {multiple ? (
+            <p className="text-xs font-extrabold tracking-wide text-muted-foreground">
+              {sourcePurposeLabel(workspace, source)}
+            </p>
+          ) : null}
+          <RulePriceWorkspaceStatusBand
+            ariaLabel={
+              multiple
+                ? `${sourcePurposeLabel(workspace, source)}调价草稿状态`
+                : undefined
+            }
+            draft={draftSummary(workspace.section, source)}
+            workspaceStatus={workspaceStatus(source)}
+          />
+        </div>
+      );
+    }
+
+    if (source.scheduledBook || !source.currentBook) {
+      return (
+        <CompactVersionStatus
+          key={source.purpose}
+          workspace={workspace}
+          source={source}
+        />
+      );
+    }
+
+    return null;
+  });
+
+  return blocks.some(Boolean) ? (
+    <div className="min-w-0 space-y-3">{blocks}</div>
+  ) : null;
+}
+
+function SelectedCreateDraftDialog({
+  workspace,
+  createDraftPurpose,
+}: CustomerPricingDedicatedSectionProps) {
+  const source = workspace.sources.find(
+    (candidate) => candidate.purpose === createDraftPurpose,
+  );
+  if (!source || !canCreateDraft(source)) return null;
+
+  const returnHref = sectionHref(workspace.section);
+  return (
+    <CustomerPricingCreateDraftDialog
+      dialogId={createDraftDialogId(workspace, source)}
+      open
+      purposeLabel={sourcePurposeLabel(workspace, source)}
+      returnHref={returnHref}
+    >
+      <CreateCustomerPriceBookDraftForm
+        purpose={source.purpose}
+        purposeLabel={sourcePurposeLabel(workspace, source)}
+        returnHref={returnHref}
+        presentation="dialog"
+      />
+    </CustomerPricingCreateDraftDialog>
   );
 }
 
@@ -1177,10 +1323,11 @@ function renderSection(
 
 export function CustomerPricingDedicatedSection({
   workspace,
-  createDraftOpen,
+  createDraftPurpose,
 }: CustomerPricingDedicatedSectionProps) {
   const assembly = buildFormAssembly(workspace);
   const sectionView = renderSection(workspace, assembly) as ReactElement<{
+    headingActions?: ReactNode;
     statusContent?: ReactNode;
   }>;
   const context: CustomerPriceSectionFormContext = {
@@ -1193,13 +1340,15 @@ export function CustomerPricingDedicatedSection({
       ? updateCustomerPriceSectionDraftFormAction.bind(null, context)
       : undefined;
   const sectionViewWithStatus = cloneElement(sectionView, {
+    headingActions: (
+      <VersionHeadingActions
+        workspace={workspace}
+        createDraftPurpose={createDraftPurpose}
+      />
+    ),
     statusContent: (
       <div className="min-w-0 space-y-3">
-        <VersionStatusBlocks
-          workspace={workspace}
-          createDraftOpen={createDraftOpen}
-          allowCreateDraft={!saveAction}
-        />
+        <VersionStatusBlocks workspace={workspace} />
         <WarningBlocks
           warnings={[...assembly.warnings]}
           shippingPolicyReadOnly={workspace.section === 'ship'}
@@ -1214,6 +1363,10 @@ export function CustomerPricingDedicatedSection({
         <CustomerPricingSectionDraftForm saveAction={saveAction}>
           {sectionViewWithStatus}
         </CustomerPricingSectionDraftForm>
+        <SelectedCreateDraftDialog
+          workspace={workspace}
+          createDraftPurpose={createDraftPurpose}
+        />
       </div>
     </PriceWorkspaceNavigationGuardProvider>
   );

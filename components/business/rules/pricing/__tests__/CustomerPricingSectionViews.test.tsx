@@ -58,6 +58,17 @@ function inputMarkup(html: string, ariaLabel: string): string {
   return match![0];
 }
 
+function readonlyMarkup(html: string, priceLabel: string): string {
+  const match = html.match(
+    new RegExp(
+      `<span\\b[^>]*data-price-label="${escapeRegExp(priceLabel)}"[^>]*>[\\s\\S]*?<\\/span>`,
+    ),
+  );
+
+  expect(match, `未找到只读价格：${priceLabel}`).not.toBeNull();
+  return match![0];
+}
+
 describe('CustomerPricingSectionViews', () => {
   it('renders tiers as the single design-spec ladder with derived ranges and paired prices', () => {
     const rows = [
@@ -99,8 +110,10 @@ describe('CustomerPricingSectionViews', () => {
     );
     expect(inputMarkup(html, '5万档中号组单价')).toContain('value="0.16"');
     expect(inputMarkup(html, '5万档大号组单价')).toContain('value="0.18"');
-    expect(inputMarkup(html, '5万档上界')).toContain('placeholder="∞"');
-    expect(inputMarkup(html, '5万档上界')).toContain('disabled=""');
+    expect(readonlyMarkup(html, '5万档上界')).toContain('∞');
+    expect(readonlyMarkup(html, '5万档上界')).toContain(
+      'data-disabled="true"',
+    );
 
     expect(text).not.toContain('价格规则矩阵');
     expect(text).not.toContain('搜索收费项目');
@@ -141,6 +154,44 @@ describe('CustomerPricingSectionViews', () => {
       'placeholder="— 转人工"',
     );
     expect(inputMarkup(html, '珠光艳闪160g大号封单价')).toContain('value="0"');
+  });
+
+  it('以文本输出展示生效价，只把草稿价渲染为输入框', () => {
+    const html = renderToStaticMarkup(
+      <CustomerBlankPricingSectionView
+        columns={[
+          { key: 'middle', label: '中号封' },
+          { key: 'large', label: '大号封' },
+        ]}
+        rows={[
+          {
+            key: 'pearl-160',
+            paperName: '珠光艳闪',
+            weight: 160,
+            cells: [
+              {
+                ...field('blank-current-middle', 0.12, { editable: false }),
+                columnKey: 'middle',
+              },
+              {
+                ...field('blank-draft-large', 0.13),
+                columnKey: 'large',
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(readonlyMarkup(html, '珠光艳闪160g中号封单价')).toContain(
+      '0.12',
+    );
+    expect(html).not.toMatch(
+      /<input\b[^>]*aria-label="珠光艳闪160g中号封单价"/,
+    );
+    expect(inputMarkup(html, '珠光艳闪160g大号封单价')).toContain(
+      'value="0.13"',
+    );
   });
 
   it('states that print tiers are per-order totals and blank cells go to manual pricing', () => {

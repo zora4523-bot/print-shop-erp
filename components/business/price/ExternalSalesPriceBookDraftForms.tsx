@@ -492,10 +492,14 @@ function MutationFeedback({
 
 export function CreateCustomerPriceBookDraftForm({
   purpose,
+  purposeLabel,
   returnHref,
+  presentation = 'panel',
 }: {
   purpose: CustomerPriceBookPurpose;
+  purposeLabel?: string;
   returnHref?: string;
+  presentation?: 'panel' | 'dialog';
 }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
@@ -526,19 +530,26 @@ export function CreateCustomerPriceBookDraftForm({
       action={formAction}
       aria-busy={pending}
       aria-label={`创建${
-        purpose === CustomerPriceBookPurpose.PROCESSING
+        purposeLabel ??
+        (purpose === CustomerPriceBookPurpose.PROCESSING
           ? '加工费'
-          : '快递与耗材'
+          : '快递与耗材')
       }调价草稿`}
-      className="mt-4 min-w-0 space-y-3 rounded-lg border border-dashed p-3"
+      className={
+        presentation === 'dialog'
+          ? 'min-w-0 space-y-3'
+          : 'mt-4 min-w-0 space-y-3 rounded-lg border border-dashed p-3'
+      }
     >
       <input type="hidden" name="purpose" value={purpose} />
-      <div className="space-y-1">
-        <p className="text-sm font-medium">发起调价</p>
-        <p className="text-xs leading-5 text-muted-foreground">
-          草稿发布前不影响当前报价。
-        </p>
-      </div>
+      {presentation === 'panel' ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium">发起调价</p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            草稿发布前不影响当前报价。
+          </p>
+        </div>
+      ) : null}
       <div className="space-y-2">
         <Label htmlFor={changeReasonId}>调价原因（必填）</Label>
         <textarea
