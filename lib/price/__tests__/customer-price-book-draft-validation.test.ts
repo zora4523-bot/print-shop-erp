@@ -689,4 +689,23 @@ describe('validateDraftPriceBookRules', () => {
       '纸箱费金额超过收费可保存上限 9999999999.99 元',
     );
   });
+
+  it('按运行时向上取整校验最大计费重量的最后一个续重单位', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'LOGISTICS',
+      rules: [
+        shipping({
+          amount: '9999999666.6568',
+          includedUnits: '1.000',
+          incrementUnits: '3.000',
+          incrementAmount: '0.0001',
+        }),
+        ...packagingTiers(),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message)).toContain(
+      '收费项目在最大计费重量下超过可保存上限 9999999999.99 元',
+    );
+  });
 });

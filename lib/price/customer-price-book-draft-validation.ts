@@ -991,7 +991,7 @@ function logisticsIssues(
     ) {
       const additionalUnits = Decimal.max(
         0,
-        LOGISTICS_WEIGHT_MAX.minus(firstWeight).div(incrementUnit).floor(),
+        LOGISTICS_WEIGHT_MAX.minus(firstWeight).div(incrementUnit).ceil(),
       );
       const maximumCharge = firstFee.plus(
         incrementFee.times(additionalUnits),
