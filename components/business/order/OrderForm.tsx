@@ -2743,7 +2743,8 @@ export function OrderForm({
   const externalRequiresManualQuote =
     railQuoteItems.some((item) => item.status !== 'complete') ||
     railPackaging.status !== 'complete' ||
-    railLogistics?.status !== 'complete';
+    railLogistics?.status !== 'complete' ||
+    currentExternalOrderQuote?.hasManualPricing === true;
   const externalReviewRequiresManualQuote = submitQuoteChange
     ? submitQuoteChange.quotedFeeCompleteness ===
       OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS

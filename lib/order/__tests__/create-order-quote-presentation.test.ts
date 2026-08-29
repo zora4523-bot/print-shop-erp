@@ -82,6 +82,12 @@ describe('create-order pure quote presentation', () => {
       suggestedTotal: '10.00',
       requiresAdminConfirmation: false,
     });
+    expect(presentation).toMatchObject({
+      total: null,
+      hasManualPricing: true,
+      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
+      plateFee: { status: 'PENDING', amount: null },
+    });
     expect(presentation.quoteToken).toBe('token-1');
   });
 

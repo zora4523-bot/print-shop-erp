@@ -467,7 +467,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
 
     expect(result).toMatchObject({
       quotedFee: '335.80',
-      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      quotedFeeCompleteness:
+        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
       reused: false,
     });
   });
@@ -485,7 +486,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       ),
     ).rejects.toMatchObject({
       quotedFee: '346.30',
-      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      quotedFeeCompleteness:
+        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
     });
 
     expect(mocks.resolveLogistics).not.toHaveBeenCalled();
@@ -514,7 +516,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       pricingRevisionId: 'revision-2',
       priceRevision: 2,
       quotedFee: '346.30',
-      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      quotedFeeCompleteness:
+        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
       processingAmount: '300.00',
       packagingAmount: '25.00',
       logisticsAmount: '46.30',
@@ -636,6 +639,7 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(mocks.appendRevision).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
+        status: 'PENDING_ADMIN_CONFIRMATION',
         metadata: expect.objectContaining({
           engineVersion: 'CREATE_ORDER_PURE_V1',
           priceBooks: PRICE_VERSION,
@@ -646,7 +650,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
       where: { id: 'order-1' },
       data: {
         quotedFee: '346.30',
-        quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+        quotedFeeCompleteness:
+          OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
         quotedPricingRevisionId: 'revision-2',
       },
       select: { id: true },
@@ -815,7 +820,8 @@ describe('finalizeExternalOrderQuoteInTx', () => {
 
     expect(result).toMatchObject({
       quotedFee: '305.00',
-      quotedFeeCompleteness: OrderQuotedFeeCompleteness.COMPLETE,
+      quotedFeeCompleteness:
+        OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
     });
     expect(tx.orderCustomerCharge.upsert).toHaveBeenNthCalledWith(
       1,

@@ -149,6 +149,12 @@ describe('quoteExternalCreateOrder', () => {
       suggestedFixedFee: '80.00',
       suggestedSubtotal: '340.00',
     });
+    expect(result).toMatchObject({
+      total: null,
+      hasManualPricing: true,
+      totalSemantics: 'EXCLUDES_MANUAL_ITEMS',
+      plateFee: { status: 'PENDING', amount: null },
+    });
     expect(result.quoteToken).toMatch(/^create-order-quote-v2:[a-f\d]{64}$/);
   });
 

@@ -169,11 +169,12 @@ export function OrderFormBRail({
   onAttemptSubmit: (intent: 'draft' | 'submit') => void;
 }) {
   if (!usesExternalSalesPricing) {
-    const serverTotal =
-      totalSemantics === 'COMPLETE' ? decimalAmount(knownTotal) : null;
-    const total = serverTotal
-      ? roundedCurrencyNumber(serverTotal)
+    const serverKnownTotal = decimalAmount(knownTotal);
+    const total = serverKnownTotal
+      ? roundedCurrencyNumber(serverKnownTotal)
       : internalOrderFormTotal(quoteItems);
+    const requiresFactoryPricing =
+      totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
     return (
       <div className="space-y-3">
         <section className="rounded-[14px] border bg-card p-[18px]">
@@ -218,7 +219,7 @@ export function OrderFormBRail({
 
           <div className="mt-3 border-t-2 border-foreground pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">
-              当前合计
+              {requiresFactoryPricing ? '已知合计' : '当前合计'}
             </p>
             <p
               className={
@@ -230,7 +231,9 @@ export function OrderFormBRail({
               {total === null ? '——' : money(total)}
             </p>
             <p className="mt-1 text-[11px] font-semibold text-muted-foreground">
-              提交时服务端会重新核价
+              {requiresFactoryPricing
+                ? '不含待核价款与制版费；提交后由工厂确认'
+                : '提交时服务端会重新核价'}
             </p>
           </div>
 
@@ -253,7 +256,11 @@ export function OrderFormBRail({
             disabled={busy || gaps.length > 0}
             onClick={() => onAttemptSubmit('submit')}
           >
-            {busy ? '处理中…' : '创建并提交'}
+            {busy
+              ? '处理中…'
+              : requiresFactoryPricing
+                ? '创建并提交核价'
+                : '创建并提交'}
           </Button>
         </section>
 
@@ -286,6 +293,7 @@ export function OrderFormBRail({
     logistics,
     knownTotal,
   });
+  const excludesManualItems = totalSemantics === 'EXCLUDES_MANUAL_ITEMS';
   const manualMessages = [
     ...quoteItems.flatMap((item, index) =>
       item.status === 'incomplete' || item.status === 'error'
@@ -298,11 +306,11 @@ export function OrderFormBRail({
     ...(logistics?.status === 'incomplete' || logistics?.status === 'error'
       ? [logistics.message || STATUS_LABELS[logistics.status]]
       : []),
+    ...(excludesManualItems ? ['制版费金额待工厂确认'] : []),
   ];
   const needsAdminPrice = manualMessages.length > 0;
-  const excludesManualItems =
-    totalSemantics === 'EXCLUDES_MANUAL_ITEMS' || needsAdminPrice;
-  const totalNote = excludesManualItems
+  const hasExcludedAmounts = excludesManualItems || needsAdminPrice;
+  const totalNote = hasExcludedAmounts
     ? logistics?.status === 'complete'
       ? '不含待核价款与制版费'
       : '不含待核价款、制版费与快递费'
@@ -431,7 +439,7 @@ export function OrderFormBRail({
 
         <div className="mt-3 border-t-2 border-foreground pt-3">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            {excludesManualItems ? '已知合计' : '当前合计'}
+            {hasExcludedAmounts ? '已知合计' : '当前合计'}
           </p>
           <p
             className={

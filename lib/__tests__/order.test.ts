@@ -31,6 +31,7 @@ const { dbMock } = vi.hoisted(() => {
     priceAdjustment: { findMany: ReturnType<typeof vi.fn> };
     customerPriceBook: { findMany: ReturnType<typeof vi.fn> };
     customerPriceRule: { findMany: ReturnType<typeof vi.fn> };
+    customerChargeCategory: { findUnique: ReturnType<typeof vi.fn> };
     productionOperation: {
       findMany: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
@@ -56,6 +57,7 @@ const { dbMock } = vi.hoisted(() => {
     orderCustomerCharge: {
       createMany: ReturnType<typeof vi.fn>;
       findMany: ReturnType<typeof vi.fn>;
+      upsert: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
     orderPricingRevision: { create: ReturnType<typeof vi.fn> };
@@ -82,6 +84,7 @@ const { dbMock } = vi.hoisted(() => {
     priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
     customerPriceRule: { findMany: vi.fn() },
+    customerChargeCategory: { findUnique: vi.fn() },
     productionOperation: { findMany: vi.fn(), updateMany: vi.fn() },
     productionProgressStep: { findMany: vi.fn(), updateMany: vi.fn() },
     productionTask: { findMany: vi.fn(), update: vi.fn() },
@@ -98,6 +101,7 @@ const { dbMock } = vi.hoisted(() => {
     orderCustomerCharge: {
       createMany: vi.fn(),
       findMany: vi.fn(),
+      upsert: vi.fn(),
       update: vi.fn(),
     },
     orderPricingRevision: { create: vi.fn() },
@@ -532,6 +536,10 @@ beforeEach(() => {
           ? [externalPackagingRule('SINGLE_STYLE', '0.0000')]
           : [externalBaseRule()],
     );
+  dbMock.customerChargeCategory.findUnique.mockReset().mockResolvedValue({
+    id: 'cat-plate',
+    isActive: true,
+  });
   // Default: pre-cutover order with neither operations nor production tasks.
   dbMock.productionOperation.findMany.mockReset().mockResolvedValue([]);
   dbMock.productionOperation.updateMany
@@ -566,6 +574,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ count: 2 });
   dbMock.orderCustomerCharge.findMany.mockReset().mockResolvedValue([]);
+  dbMock.orderCustomerCharge.upsert.mockReset().mockResolvedValue({});
   dbMock.orderCustomerCharge.update.mockReset().mockResolvedValue({});
   dbMock.orderPricingRevision.create.mockReset().mockResolvedValue({});
   dbMock.orderLog.create.mockReset().mockResolvedValue({});
@@ -1252,7 +1261,7 @@ describe('createOrder', () => {
     );
   });
 
-  it('creates an AUTO_CONFIRMED revision for a non-external order', async () => {
+  it('creates a pending plate charge and blocks auto-confirmation for an internal order', async () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -1305,7 +1314,7 @@ describe('createOrder', () => {
     );
 
     expect(dbMock.order.create.mock.calls[0]![0].data.pricingStatus).toBe(
-      'AUTO_CONFIRMED',
+      'PENDING_ADMIN_CONFIRMATION',
     );
     expect(
       dbMock.order.create.mock.calls[0]![0].data.items.create[0]
@@ -1317,7 +1326,28 @@ describe('createOrder', () => {
       suggestedSubtotal: '170.00',
       source: 'INTERNAL_CREATE_AUTO',
     });
-    expect(result.pricingStatus).toBe('AUTO_CONFIRMED');
+    expect(result.pricingStatus).toBe('PENDING_ADMIN_CONFIRMATION');
+    expect(dbMock.orderCustomerCharge.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          orderId_businessKey: {
+            orderId: 'order-created',
+            businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+          },
+        },
+        create: expect.objectContaining({
+          categoryId: 'cat-plate',
+          status: 'PENDING_AMOUNT',
+          amount: null,
+          pricingSnapshot: expect.objectContaining({
+            source: 'INTERNAL_CREATE_PENDING_PLATE',
+            pendingReason: expect.objectContaining({
+              code: 'PLATE_AMOUNT_PENDING',
+            }),
+          }),
+        }),
+      }),
+    );
     expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 10_000,
       timeout: 30_000,
@@ -1333,8 +1363,8 @@ describe('createOrder', () => {
     expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         revision: 1,
-        status: 'AUTO_CONFIRMED',
-        source: 'ORDER_CREATED_AUTO',
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'ORDER_CREATED_PROVISIONAL',
       }),
     });
     expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith(

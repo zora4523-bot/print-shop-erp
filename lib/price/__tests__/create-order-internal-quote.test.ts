@@ -18,10 +18,10 @@ describe('internal create pure quote contract', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'QUOTED',
+      status: 'PARTIAL',
       submittable: true,
       knownTotal: '180.00',
-      total: '180.00',
+      total: null,
     });
     expect(result.packagingGroups[0]).toMatchObject({
       status: 'QUOTED',

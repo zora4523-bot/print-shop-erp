@@ -687,7 +687,7 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
     });
   });
 
-  it('制烫金版费永返回待定，但不阻塞其他已知总额', () => {
+  it('制烫金版费待定时保留已知合计，但阻断完整总价', () => {
     const result = quoteSingle(createGoldenOrderItem());
     expect(orderLine(result, 'PLATE_FEE')).toMatchObject({
       status: 'PENDING_AMOUNT',
@@ -695,8 +695,9 @@ describe('calculateCreateOrderQuote · 入袋、纸箱与快递', () => {
       includedInKnownTotal: false,
       basis: { displayAmount: '待定', granularity: 'PER_ORDER' },
     });
-    expect(result.status).toBe('QUOTED');
-    expect(result.total).toBe(result.knownTotal);
+    expect(result.status).toBe('PARTIAL');
+    expect(result.total).toBeNull();
+    expect(Number(result.knownTotal)).toBeGreaterThan(0);
     expect(result.pendingLineCodes).toContain('PLATE_FEE');
     expect(result.pendingReasons.map((reason) => reason.code)).toContain(
       'PLATE_AMOUNT_PENDING',

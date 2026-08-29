@@ -97,7 +97,7 @@ function quoteOrderLayer(
 ): CreateOrderOrderQuote {
   if (input.includeOrderCharges === false) {
     return {
-      amount: '0.00',
+      amount: null,
       knownAmount: '0.00',
       lines: [pendingPlateLine(snapshot)],
       errors: [],
@@ -184,11 +184,11 @@ function quoteOrderLayer(
       line.includedInKnownTotal ? line.amount : null,
     ),
   );
-  const allNonPlateKnown = [carton, ...shipping].every(
+  const allOrderChargesKnown = lines.every(
     (line) => line.status === 'QUOTED' && line.amount !== null,
   );
   return {
-    amount: allNonPlateKnown ? knownAmount : null,
+    amount: allOrderChargesKnown ? knownAmount : null,
     knownAmount,
     lines,
     errors: chargeQuote.errors,

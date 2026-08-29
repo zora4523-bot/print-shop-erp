@@ -67,6 +67,29 @@ describe('OrderFormBRail', () => {
     expect(html).not.toContain('快递费');
   });
 
+  it('marks an internal known total as incomplete while the plate fee is pending', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing={false}
+        settlementLabel="工厂直接业务"
+        knownTotal="180.00"
+        totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('已知合计');
+    expect(html).toContain('¥180.00');
+    expect(html).toContain('不含待核价款与制版费；提交后由工厂确认');
+    expect(html).toContain('创建并提交核价');
+  });
+
   it('shows the known subtotal while shipping is still pending', () => {
     const logistics = {
       status: 'missing' as const,
@@ -131,6 +154,33 @@ describe('OrderFormBRail', () => {
     expect(html.match(/¥170\.00/g) ?? []).toHaveLength(0);
     expect(html).toContain('¥130.00');
     expect(html).toContain('¥40.00');
+  });
+
+  it('requires factory pricing when only the plate amount is pending', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={{
+          status: 'complete',
+          shippingAmount: '5.00',
+          packagingAmount: '3.00',
+          totalAmount: '8.00',
+        }}
+        usesExternalSalesPricing
+        settlementLabel="外部销售应付工厂"
+        knownTotal="188.00"
+        totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('制版费金额待工厂确认');
+    expect(html).toContain('这张单需要管理员终价');
+    expect(html).toContain('提交并申请管理员终价');
   });
 
   it('keeps the known total and full fee semantics when one style needs manual pricing', () => {

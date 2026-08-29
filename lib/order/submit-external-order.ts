@@ -40,10 +40,14 @@ import { orderCascadeLockKey } from './locks';
 import { ORDER_PRICING_STATUS } from './pricing-status';
 import { isNewOrderPricingRoute } from './pricing-route';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
+import {
+  PendingPlateChargeError,
+  requireActivePlateCategoryIdInTx,
+  upsertPendingPlateChargeInTx,
+} from './pending-plate-charge';
 
 type MoneyLike = { toString(): string } | string | number;
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
-const PENDING_PLATE_BUSINESS_KEY = 'ORDER:PLATE_MAKING_FEE:PENDING';
 
 type FinalizeOrderItem = {
   id: string;
@@ -605,99 +609,6 @@ function assertResolvedLogisticsMatchesPure(args: {
   return expectedByBusinessKey;
 }
 
-async function requireActivePlateCategoryId(
-  tx: Prisma.TransactionClient,
-): Promise<string> {
-  const category = await tx.customerChargeCategory.findUnique({
-    where: { code: 'PLATE_MAKING_FEE' },
-    select: { id: true, isActive: true },
-  });
-  if (!category?.isActive) {
-    throw new ExternalOrderQuoteFinalizeError(
-      '制版费收费类目不存在或已停用，请联系管理员',
-    );
-  }
-  return category.id;
-}
-
-async function upsertPendingPlateCharge(args: {
-  tx: Prisma.TransactionClient;
-  orderId: string;
-  actorId: string;
-  categoryId: string;
-  quote: CreateOrderQuoteResult;
-}): Promise<void> {
-  const plateLines = args.quote.order.lines.filter(
-    (line) => line.code === 'PLATE_FEE',
-  );
-  const plateLine = plateLines[0];
-  if (
-    plateLines.length !== 1 ||
-    !plateLine ||
-    plateLine.status !== 'PENDING_AMOUNT' ||
-    plateLine.amount !== null ||
-    plateLine.includedInKnownTotal
-  ) {
-    throw new ExternalOrderQuoteFinalizeError(
-      '纯引擎未产生唯一的待核价制版费明细',
-    );
-  }
-  const pendingReason = args.quote.pendingReasons.find(
-    (reason) => reason.code === 'PLATE_AMOUNT_PENDING',
-  );
-  if (!pendingReason) {
-    throw new ExternalOrderQuoteFinalizeError(
-      '纯引擎缺少制版费待核价原因',
-    );
-  }
-  const chargeData = {
-    shipmentId: null,
-    categoryId: args.categoryId,
-    priceBookId: null,
-    sourceRuleId: null,
-    status: OrderCustomerChargeStatus.PENDING_AMOUNT,
-    description: plateLine.label,
-    quantity: null,
-    unit: null,
-    unitPrice: null,
-    suggestedAmount: null,
-    amount: null,
-    isAdjustment: false,
-    pricingSnapshot: {
-      schemaVersion: 2,
-      engineVersion: 'CREATE_ORDER_PURE_V1',
-      source: 'EXTERNAL_SUBMIT_PENDING_PLATE',
-      priceVersion: args.quote.priceVersion,
-      pureLine: plateLine,
-      pendingReason,
-      actual: {
-        amount: null,
-        provisional: true,
-        requiresAdminConfirmation: true,
-      },
-    } satisfies Prisma.InputJsonObject,
-    overrideReason: null,
-    approvalReference: null,
-    finalizedById: null,
-    finalizedAt: null,
-  };
-  await args.tx.orderCustomerCharge.upsert({
-    where: {
-      orderId_businessKey: {
-        orderId: args.orderId,
-        businessKey: PENDING_PLATE_BUSINESS_KEY,
-      },
-    },
-    create: {
-      orderId: args.orderId,
-      businessKey: PENDING_PLATE_BUSINESS_KEY,
-      createdById: args.actorId,
-      ...chargeData,
-    },
-    update: chargeData,
-  });
-}
-
 function priceVersionFromLocks(
   locks: FinalizedPriceVersionLockRow[],
   purpose: CustomerPriceBookPurpose,
@@ -908,8 +819,15 @@ export async function finalizeExternalOrderQuoteInTx(
     quote,
     snapshot: priceSnapshot,
   });
-  const plateCategoryId = await requireActivePlateCategoryId(tx);
-
+  let plateCategoryId: string;
+  try {
+    plateCategoryId = await requireActivePlateCategoryIdInTx(tx);
+  } catch (error) {
+    if (error instanceof PendingPlateChargeError) {
+      throw new ExternalOrderQuoteFinalizeError(error.message);
+    }
+    throw error;
+  }
   const manualItemIds: string[] = [];
   let knownItemAmount = new Decimal(0);
   for (const [index, item] of order.items.entries()) {
@@ -1163,13 +1081,21 @@ export async function finalizeExternalOrderQuoteInTx(
       },
     });
   }
-  await upsertPendingPlateCharge({
-    tx,
-    orderId: order.id,
-    actorId,
-    categoryId: plateCategoryId,
-    quote,
-  });
+  try {
+    await upsertPendingPlateChargeInTx({
+      tx,
+      orderId: order.id,
+      actorId,
+      categoryId: plateCategoryId,
+      quote,
+      source: 'EXTERNAL_SUBMIT_PENDING_PLATE',
+    });
+  } catch (error) {
+    if (error instanceof PendingPlateChargeError) {
+      throw new ExternalOrderQuoteFinalizeError(error.message);
+    }
+    throw error;
+  }
 
   const knownProcessingAmount = knownItemAmount.plus(knownPackagingAmount);
   const knownTotalAmount = knownProcessingAmount.plus(knownLogisticsAmount);
@@ -1187,9 +1113,15 @@ export async function finalizeExternalOrderQuoteInTx(
   const logisticsAmount = knownLogisticsAmount.toFixed(2);
   const totalAmount = knownTotalAmount.toFixed(2);
   const hasManual = presentation.hasManualPricing;
+  const hasPendingPlate = quote.order.lines.some(
+    (line) => line.code === 'PLATE_FEE' && line.status === 'PENDING_AMOUNT',
+  );
   if (
     hasManual !==
-    (manualItemIds.length > 0 || hasManualPackaging || hasManualLogistics)
+    (manualItemIds.length > 0 ||
+      hasManualPackaging ||
+      hasManualLogistics ||
+      hasPendingPlate)
   ) {
     throw new ExternalOrderQuoteFinalizeError(
       '纯引擎的人工核价语义与持久化明细不一致',

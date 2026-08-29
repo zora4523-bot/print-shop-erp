@@ -73,6 +73,11 @@ import {
 } from './order/pricing-status';
 import { appendOrderPricingRevisionInTx } from './order/pricing-revision';
 import {
+  PendingPlateChargeError,
+  requireActivePlateCategoryIdInTx,
+  upsertPendingPlateChargeInTx,
+} from './order/pending-plate-charge';
+import {
   LEGACY_STOCK_FOIL_CRAFT_CODE,
   STOCK_LOCAL_FOIL_CRAFT_CODE,
   deriveLegacyOrderItemFoilFacts,
@@ -964,6 +969,17 @@ export async function createOrder(
     const pricingStatus = requiresAdminPricing
       ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
       : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
+    let internalPlateCategoryId: string | null = null;
+    if (!isExternalSalesDraft) {
+      try {
+        internalPlateCategoryId = await requireActivePlateCategoryIdInTx(tx);
+      } catch (error) {
+        if (error instanceof PendingPlateChargeError) {
+          throw new OrderInvariantError(error.message);
+        }
+        throw error;
+      }
+    }
 
     // (5) one nested write: Order + items + first OrderLog.
     const created = await txClient.order.create({
@@ -1072,6 +1088,24 @@ export async function createOrder(
         },
       },
     });
+
+    if (!isExternalSalesDraft) {
+      try {
+        await upsertPendingPlateChargeInTx({
+          tx,
+          orderId: created.id,
+          actorId: actor.id,
+          categoryId: internalPlateCategoryId!,
+          quote: internalQuote!.quote,
+          source: 'INTERNAL_CREATE_PENDING_PLATE',
+        });
+      } catch (error) {
+        if (error instanceof PendingPlateChargeError) {
+          throw new OrderInvariantError(error.message);
+        }
+        throw error;
+      }
+    }
 
     const itemBySequence = new Map(
       created.items.map((item) => [item.sequence, item.id]),
