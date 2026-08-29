@@ -6,7 +6,7 @@
 >
 > 唯一计价真值：`docs/加工费计费规则.md`，SHA-256 `8a5e1149a2e62920c7ebf9d14a6cedf4e6dac5e0769d556b5a52dbeb99dbd852`。它与 `/Users/zhixing/Downloads/加工费计费规则 (1).md` 逐字节相同。
 >
-> 最终验收时间：2026-08-29 00:48 CST；最终业务代码检查点：`b19c819`（本报告的文档提交在其后）。
+> 最终验收时间：2026-08-29 21:36 CST；最终业务代码检查点：`b052cc8`（本报告的文档提交在其后）。
 
 ## 1. 结论
 
@@ -17,7 +17,7 @@
 1. 三类计件工价与 `effectiveFrom` 未提供，因此只存在 DRAFT/null v1，没有 PUBLISHED 版本；报工计薪按要求拒绝兜底。
 2. 本地库 13 张在途 legacy 工单的转换预检为 `0 convertible / 13 blocked`；没有猜测包装组、工艺或混合终态，也没有写转换数据。
 
-另有一项受“规则配置零改动”红线约束的已存配置风险：截至最终验收，当前 PROCESSING v3 + LOGISTICS v2 仍可完整投影；但将于 `2026-08-29T09:59:00.000Z`（上海时间 17:59）生效的 PROCESSING v4 仅有 126 条旧结构规则，新适配器在该时点实测返回 `MISSING_RULE: 已发布加工费价目簿缺少局部烫金空白封单价`。本次未改、未撤销、未重发该价表，需由配置负责人在生效前另行处置。
+原始验收记录中 `17:59` 即将生效的旧 PROCESSING v4 风险，已按后续明确授权由第 14 节的五万档修复版本取代；旧计划价簿保留取消证据，不再覆盖当前修复版。本轮只退役旧内部计价运行时，没有再改动任何价表。
 
 ## 2. 真值文档与已纠正定性
 
@@ -470,3 +470,78 @@ append-only 报工 E2E 只允许连接显式提供、且与普通 `DATABASE_URL`
 - 当前浏览器中的 v5 草稿仍保留用户录入的 `0.8`，本轮没有点击“确认并立即发布”、没有填写预约时间，也没有提交、放弃或改写任何价表数据。
 - `git diff 53a1d4f^..53a1d4f -- prisma/schema.prisma prisma/seed.ts prisma/migrations scripts app/'(admin)'/orders components/business/order lib/order.ts lib/order` 为空；工单 UI、建单计价引擎、schema、seed、migration、脚本和已发布价表零改动。
 - 预约、取消、改期和历史状态仍保持底层兼容；精简发生在默认交互和安全门禁，不删除版本证据。
+
+## 19. 旧内部阶梯/加价退役与规则中心收口（2026-08-29）
+
+提交 `b052cc8` 完成本轮全面清理。本节取代第 15 节中“建单产品目录”的过渡命名：当前统一名称为“可建单产品组合”。
+
+### 19.1 定性与最终结构
+
+- 旧 `PriceTier / PriceAdjustment` 是一套独立的“内部计价”CRUD，已不被新建单引擎、复核、详情或费用快照消费。此运行时整块删除，不再仅隐藏菜单。
+- 客户计价中的“专版烫金单价”“专版烫金加价”仍保留；它们是最新 `CustomerPriceRule` 价表的业务编辑块，不是已删除的 `PriceTier / PriceAdjustment` 双轨。
+- 规则中心现按“客户计价规则 / 建单主数据 / 员工薪酬规则”三域展示。`/owner/rules` 是边界概览，不再偷跳某个价格表。
+- 工序计件价仍按 `PARTIAL / FULL / PACKING` 独立版本域规划；配置 UI 未上线时只展示边界说明，没有伪造可写入口。
+- “可建单产品组合”仍是有效建单主数据：工单按路线、纸张和规格隐式解析 `productId`，并继续保留 BOM、历史工单和已发布客户规则引用。它不是销售选品或询价入口。
+
+### 19.2 已删除清单
+
+整删 19 个运行时文件：
+
+- 5 个路由：`/owner/rules/internal-pricing`、`tiers/new`、`tiers/[id]`、`adjustments/new`、`adjustments/[id]`。
+- 9 个页面/组件：`InternalPricingPage`、阶梯新建/编辑页、加价新建/编辑页、`PriceTables`、`PriceTierForm`、`PriceAdjustmentForm`、`TogglePriceAdjustmentActiveButton`。
+- 5 个 action/domain 文件：`actions/owner-prices.ts`、`actions/owner-prices.types.ts`、`lib/price.ts`、`lib/price/adjustment-condition.ts`、`lib/price-labels.ts`。
+
+随功能删除 7 个专属测试文件：
+
+- `actions/__tests__/owner-prices.test.ts`
+- `app/(admin)/__tests__/owner-prices-entry.test.tsx`
+- `components/business/price/__tests__/PriceAdjustmentForm.test.tsx`
+- `components/business/rules/__tests__/internal-pricing-business-language.test.tsx`
+- `components/business/rules/pricing/__tests__/InternalPricingMetadataAuth.test.ts`
+- `lib/__tests__/price.test.ts`
+- `lib/price/__tests__/adjustment-condition.test.ts`
+
+新增 `internal-pricing-retirement.test.ts` 负向契约，保证上述写入面不会被误恢复，同时保证历史 Prisma 表仍存在。
+
+### 19.3 引用终检索证据
+
+- 生产路径 `app / components / actions / lib` 终检索：旧组件名、Action/schema 符号、导航 helper、“内部计价”文案与 `PriceTier / PriceAdjustment` 运行时引用均为 0。
+- 旧路由字符只保留在 `next.config.ts` 的兼容重定向和负向契约测试。真实 HTTP 结果：内部页→`?section=blank`、旧阶梯→`?section=tiers`、旧加价→`?section=adds`，均为 307。
+- 兼容重定向直接携带规范 `section`，避免先渲染缺参数页再由客户端补参数。冷启浏览器实测直达正确价格表，控制台错误为 0。
+- `next build` 路由清单已无 `/owner/rules/internal-pricing/**`；当前 `customer-pricing`、`price-versions`、`stock-skus`、`crafts`、`employee-pay`、`orders/new` 均仍在产物中。
+
+### 19.4 产品组合与 UI 清理
+
+- 列表、新建、编辑、引用影响和启停确认统一为“可建单产品组合”；移除起订量列与表单、内部计价档、产品下拉/新报价话术。
+- 创建/更新 schema 不再接受 `baseUnitPrice / minOrderQty`。新组合的兼容单价列固定写 null；编辑时省略这两列，不会清空历史存量。
+- 产品引用统计只读工单、BOM 和当前客户价格规则；原先隐藏在统计查询里的旧 `PriceTier` 只读依赖也已移除。
+- 建单实测：纸张、规格、工艺和包装流程正常；“报价产品”下拉 0 个、“人工单价”输入 0 个、“配置外项目说明（转人工核价）” 1 个。
+
+### 19.5 配置与历史数据零改动
+
+`b052cc8` 对 `prisma/schema.prisma`、`prisma/seed.ts`、`prisma/migrations`、`docs/加工费计费规则.md`、纯计价引擎、已发布规则适配器、工厂核价和 `OrderForm` 的路径 diff 均为 0。
+
+本轮只读基线与最终终检的 count/hash 一致：
+
+| 数据 | count | SHA-256 |
+|---|---:|---|
+| `PriceTier` | 1 | `98565197a6a60c0a15b835bd4e0025ab172fac524dd8278e5eba7d8c1288b71f` |
+| `PriceAdjustment` | 0 | `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945` |
+| `CustomerPriceBook` | 13 | `3383eda5894dba3009f7276440accafbcf1edf9213521641cf7a86fd30f81a54` |
+| `CustomerPriceRule` | 1374 | `2ae3ed732ac7eddf2be2635b0b90b304bf00225795983fe8bb0d0cc88d7a2484` |
+| `OrderPriceVersionLock` | 32 | `417f72f9ebeb84107f5e28c4681776332e259d2d508a15c74fbd79c51bd1a8dc` |
+
+历史表、迁移和行原样保留；退役的是编辑/计价运行时，不是破坏性 drop 或数据清理。
+
+### 19.6 最终验证
+
+| 门禁 | 结果 |
+|---|---|
+| 全量 Vitest | `403 files / 4012 tests` 全部通过 |
+| TypeScript / ESLint / whitespace | `pnpm typecheck`、`pnpm lint`、`git diff --check` 通过 |
+| Prisma | `pnpm exec prisma validate` 通过 |
+| 生产构建 | `pnpm build` 通过；57 个静态生成任务完成，无旧内部计价路由 |
+| 定向 Chromium smoke | 规则中心、子菜单、规范页与移动端关闭 `1 / 1` 通过 |
+| 真实应用内浏览器 | 规则中心、产品组合列表/新建、新建工单、旧路由跳转通过；最终冷启联合流程控制台 error 为 0 |
+
+完整 `smoke.spec.ts` 的本轮相关规则中心 case 通过；同文件的第三个无关 case 仍会在客户/供应商重复编码断言上因 Playwright strict locator 同时匹配错误摘要和行内错误而失败。页面正确显示相同错误的摘要+字段两个无障碍出口，本轮未修改该无关测试断言来制造全绿。
