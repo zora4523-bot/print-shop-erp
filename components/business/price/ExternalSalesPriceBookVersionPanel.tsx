@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import {
+  CancelScheduledCustomerPriceBookForm,
   CreateCustomerPriceBookDraftForm,
   DiscardCustomerPriceBookDraftForm,
   PublishCustomerPriceBookDraftForm,
+  RescheduleCustomerPriceBookForm,
 } from '@/components/business/price/ExternalSalesPriceBookDraftForms';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
@@ -52,6 +54,26 @@ const PURPOSE_PARAMS: Record<CustomerPriceBookPurpose, CustomerPricingPurpose> =
 
 function formatShanghaiDateTime(value: string | null): string {
   return formatDateTimeShanghai(value ? new Date(value) : null, '长期');
+}
+
+const SHANGHAI_LOCAL_INPUT_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function formatShanghaiDateTimeLocalInput(value: string): string {
+  const parts = Object.fromEntries(
+    SHANGHAI_LOCAL_INPUT_FORMATTER.formatToParts(new Date(value)).map((part) => [
+      part.type,
+      part.value,
+    ]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 function PriceBookVersionStatusBadge({
@@ -185,6 +207,19 @@ function VersionHistory({
                     </dd>
                   </div>
                 ) : null}
+                {version.scheduleChangeReason ? (
+                  <div className="min-w-0 sm:col-span-2">
+                    <dt className="text-xs text-muted-foreground">
+                      {version.status === 'CANCELLED' ? '取消原因' : '最近改期原因'}
+                    </dt>
+                    <dd className="admin-wrap-anywhere mt-1">
+                      {version.scheduleChangeReason}
+                      {version.scheduleChangedAt
+                        ? ` · ${formatShanghaiDateTime(version.scheduleChangedAt)}`
+                        : ''}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
 
               {version.status === 'DRAFT' ? (
@@ -206,6 +241,23 @@ function VersionHistory({
                   >
                     准备发布
                   </Link>
+                </div>
+              ) : null}
+              {version.status === 'SCHEDULED' ? (
+                <div className="mt-3 space-y-3 rounded-lg border border-info/30 bg-info/5 p-3">
+                  <RescheduleCustomerPriceBookForm
+                    priceBookId={version.id}
+                    expectedUpdatedAt={version.updatedAt}
+                    version={version.version}
+                    defaultEffectiveFrom={formatShanghaiDateTimeLocalInput(
+                      version.effectiveFrom,
+                    )}
+                  />
+                  <CancelScheduledCustomerPriceBookForm
+                    priceBookId={version.id}
+                    expectedUpdatedAt={version.updatedAt}
+                    version={version.version}
+                  />
                 </div>
               ) : null}
             </li>

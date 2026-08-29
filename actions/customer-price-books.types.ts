@@ -91,6 +91,22 @@ export type DiscardCustomerPriceBookDraftActionInput = {
   expectedDraftUpdatedAt: string;
 };
 
+export type CancelScheduledCustomerPriceBookActionInput = {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  reason: string;
+  confirmedImpact: boolean;
+};
+
+export type RescheduleCustomerPriceBookActionInput = {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  /** Shanghai wall time from an HTML datetime-local control. */
+  effectiveFrom: string;
+  reason: string;
+  confirmedImpact: boolean;
+};
+
 export type CustomerPriceBookMutationResult =
   | {
       status: 'success';

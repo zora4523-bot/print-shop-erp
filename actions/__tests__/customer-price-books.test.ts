@@ -23,10 +23,12 @@ const {
   return {
     permissionMock: { requirePermission: vi.fn() },
     adminMock: {
+      cancelScheduledCustomerPriceBook: vi.fn(),
       createCustomerPriceBookDraft: vi.fn(),
       updateCustomerPriceRuleDraft: vi.fn(),
       updateCustomerPriceRuleDraftGroup: vi.fn(),
       publishCustomerPriceBookDraft: vi.fn(),
+      rescheduleCustomerPriceBook: vi.fn(),
       discardCustomerPriceBookDraft: vi.fn(),
     },
     revalidateMock: vi.fn(),
@@ -46,9 +48,11 @@ vi.mock('@/lib/price/customer-price-book-admin', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: revalidateMock }));
 
 import {
+  cancelScheduledCustomerPriceBookAction,
   createCustomerPriceBookDraftAction,
   discardCustomerPriceBookDraftAction,
   publishCustomerPriceBookDraftAction,
+  rescheduleCustomerPriceBookAction,
   updateCustomerPriceRuleDraftAction,
   updateCustomerPriceRuleDraftGroupAction,
 } from '../customer-price-books';
@@ -116,6 +120,8 @@ describe('customer price-book Server Actions', () => {
     ['group update', () => updateCustomerPriceRuleDraftGroupAction(validGroup)],
     ['publish', () => publishCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30', publishNote: '已完成价格复核', confirmedImpact: true })],
     ['discard', () => discardCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z' })],
+    ['cancel schedule', () => cancelScheduledCustomerPriceBookAction({ priceBookId: 'book-v2-scheduled', expectedUpdatedAt: '2026-08-09T02:00:00.000Z', reason: '取消错误计划', confirmedImpact: true })],
+    ['reschedule', () => rescheduleCustomerPriceBookAction({ priceBookId: 'book-v2-scheduled', expectedUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30', reason: '延后统一切换', confirmedImpact: true })],
   ])('checks dict:price:manage before %s input processing', async (_label, invoke) => {
     permissionMock.requirePermission.mockRejectedValue(new UnauthorizedError('未登录'));
 
@@ -127,6 +133,8 @@ describe('customer price-book Server Actions', () => {
     expect(adminMock.updateCustomerPriceRuleDraftGroup).not.toHaveBeenCalled();
     expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
     expect(adminMock.discardCustomerPriceBookDraft).not.toHaveBeenCalled();
+    expect(adminMock.cancelScheduledCustomerPriceBook).not.toHaveBeenCalled();
+    expect(adminMock.rescheduleCustomerPriceBook).not.toHaveBeenCalled();
   });
 
   it('creates one typed draft and returns only its identity', async () => {
@@ -578,6 +586,58 @@ describe('customer price-book Server Actions', () => {
       expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('影响范围');
     }
     expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
+  });
+
+  it('parses reschedule time in Shanghai and calls the locked lifecycle DAL', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.rescheduleCustomerPriceBook.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await expect(
+      rescheduleCustomerPriceBookAction({
+        priceBookId: 'book-v2-scheduled',
+        expectedUpdatedAt: '2026-08-09T02:00:00.000Z',
+        effectiveFrom: '2026-08-10T09:30',
+        reason: '延后统一切换',
+        confirmedImpact: true,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      priceBookId: 'book-v2-scheduled',
+      version: 2,
+    });
+
+    expect(adminMock.rescheduleCustomerPriceBook).toHaveBeenCalledWith(
+      {
+        priceBookId: 'book-v2-scheduled',
+        expectedUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
+        effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+        reason: '延后统一切换',
+      },
+      actor,
+    );
+    expect(revalidateMock).toHaveBeenCalledWith('/orders/new');
+  });
+
+  it('requires an L3 acknowledgement and reason before cancelling a schedule', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await cancelScheduledCustomerPriceBookAction({
+      priceBookId: 'book-v2-scheduled',
+      expectedUpdatedAt: '2026-08-09T02:00:00.000Z',
+      reason: '',
+      confirmedImpact: false,
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.reason?.join('\n')).toContain('调整原因');
+      expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('取消计划');
+    }
+    expect(adminMock.cancelScheduledCustomerPriceBook).not.toHaveBeenCalled();
   });
 
   it.each([

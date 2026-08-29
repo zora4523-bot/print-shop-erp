@@ -825,6 +825,83 @@ async function assertValidRuleSet(
   return rules;
 }
 
+async function assertCandidateProjectionForRange(
+  tx: Prisma.TransactionClient,
+  input: {
+    candidatePriceBookId: string;
+    candidatePurpose: CustomerPriceBookPurpose;
+    start: Date;
+    end: Date | null;
+  },
+): Promise<void> {
+  const counterpartPurpose =
+    input.candidatePurpose === CustomerPriceBookPurpose.PROCESSING
+      ? CustomerPriceBookPurpose.LOGISTICS
+      : CustomerPriceBookPurpose.PROCESSING;
+  const counterpartBooks = await tx.customerPriceBook.findMany({
+    where: {
+      settlementType: EXTERNAL_SETTLEMENT,
+      purpose: counterpartPurpose,
+      isActive: true,
+      ...(input.end ? { effectiveFrom: { lt: input.end } } : {}),
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: input.start } }],
+    },
+    select: { effectiveFrom: true, effectiveTo: true },
+    orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }],
+  });
+  const inRange = (value: Date): boolean =>
+    value >= input.start && (input.end === null || value < input.end);
+  const boundaryMillis = new Set<number>([input.start.getTime()]);
+  for (const book of counterpartBooks) {
+    if (inRange(book.effectiveFrom)) {
+      boundaryMillis.add(book.effectiveFrom.getTime());
+    }
+    if (book.effectiveTo && inRange(book.effectiveTo)) {
+      boundaryMillis.add(book.effectiveTo.getTime());
+    }
+  }
+
+  for (const milliseconds of [...boundaryMillis].sort((left, right) => left - right)) {
+    const effectiveFrom = new Date(milliseconds);
+    try {
+      await readCandidatePublishedCreateOrderPriceProjection(tx, {
+        candidatePriceBookId: input.candidatePriceBookId,
+        effectiveFrom,
+        snapshotLockHeld: true,
+      });
+    } catch (error) {
+      if (error instanceof PublishedCreateOrderPriceAdapterError) {
+        throw new CustomerPriceBookAdminError(
+          `计划版本调整后无法供建单计价：${error.message}`,
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+async function assertScheduledBookIsUnreferenced(
+  tx: Prisma.TransactionClient,
+  book: {
+    id: string;
+    priceVersionLockCount: number;
+    chargeCount: number;
+  },
+): Promise<void> {
+  const sourceRuleReferences = await tx.orderCustomerCharge.count({
+    where: { sourceRule: { is: { priceBookId: book.id } } },
+  });
+  if (
+    book.priceVersionLockCount > 0 ||
+    book.chargeCount > 0 ||
+    sourceRuleReferences > 0
+  ) {
+    throw new CustomerPriceBookAdminError(
+      '该计划版本已被工单价格事实引用，不能取消或改期',
+    );
+  }
+}
+
 export async function listCustomerPriceBookVersionsAndDrafts(
   now: Date = new Date(),
 ): Promise<CustomerPriceBookVersionAdminDto[]> {
@@ -853,11 +930,12 @@ export async function listCustomerPriceBookVersionsAndDrafts(
       const schedule = scheduleControl(book.notes);
       let status: CustomerPriceBookVersionAdminDto['status'];
       if (!book.isActive) {
-        status = workflow
-          ? 'DRAFT'
-          : schedule?.status === 'CANCELLED'
+        status =
+          schedule?.status === 'CANCELLED'
             ? 'CANCELLED'
-            : 'HISTORICAL';
+            : workflow
+              ? 'DRAFT'
+              : 'HISTORICAL';
       } else if (book.effectiveFrom > now) {
         status = 'SCHEDULED';
       } else if (book.effectiveTo === null || book.effectiveTo > now) {
@@ -2497,6 +2575,355 @@ export async function discardCustomerPriceBookDraft(
         select: { id: true },
       });
       return { id: draft.id, purpose: draft.purpose };
+    });
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) throw error;
+    throw mapConstraintError(error) ?? error;
+  }
+}
+
+export async function cancelScheduledCustomerPriceBook(
+  input: CancelScheduledCustomerPriceBookInput,
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<{ id: string; version: number; purpose: CustomerPriceBookPurpose }> {
+  const reason = input.reason.trim();
+  if (reason.length < 2 || reason.length > 500) {
+    throw new CustomerPriceBookAdminError('取消原因需要 2–500 个字符');
+  }
+
+  try {
+    return await db.$transaction(async (tx) => {
+      await acquirePriceRuleSnapshotWriteLock(tx);
+      const scheduled = await tx.customerPriceBook.findUnique({
+        where: { id: input.priceBookId },
+        select: {
+          id: true,
+          code: true,
+          version: true,
+          settlementType: true,
+          purpose: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+          isActive: true,
+          notes: true,
+          updatedAt: true,
+          _count: {
+            select: { rules: true, charges: true, priceVersionLocks: true },
+          },
+        },
+      });
+      if (
+        !scheduled ||
+        scheduled.settlementType !== EXTERNAL_SETTLEMENT ||
+        !scheduled.isActive ||
+        scheduled.effectiveFrom <= now
+      ) {
+        throw new CustomerPriceBookAdminError('只能取消尚未生效的计划版本');
+      }
+      if (
+        !Number.isFinite(input.expectedUpdatedAt.getTime()) ||
+        scheduled.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+      ) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本已被其他管理员修改，请刷新后重试',
+        );
+      }
+      await assertScheduledBookIsUnreferenced(tx, {
+        id: scheduled.id,
+        priceVersionLockCount: scheduled._count.priceVersionLocks,
+        chargeCount: scheduled._count.charges,
+      });
+
+      const predecessors = await tx.customerPriceBook.findMany({
+        where: {
+          settlementType: scheduled.settlementType,
+          purpose: scheduled.purpose,
+          isActive: true,
+          id: { not: scheduled.id },
+          effectiveFrom: { lt: scheduled.effectiveFrom },
+          effectiveTo: scheduled.effectiveFrom,
+        },
+        select: {
+          id: true,
+          code: true,
+          version: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+        },
+        orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+        take: 2,
+      });
+      if (predecessors.length !== 1) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本的前驱版本不唯一，禁止取消以避免价格时间线断裂',
+        );
+      }
+      const predecessor = predecessors[0]!;
+      await assertCandidateProjectionForRange(tx, {
+        candidatePriceBookId: predecessor.id,
+        candidatePurpose: scheduled.purpose,
+        start: scheduled.effectiveFrom,
+        end: scheduled.effectiveTo,
+      });
+
+      const control: ScheduleControl = {
+        status: 'CANCELLED',
+        changedBy: actor.id,
+        changedAt: now.toISOString(),
+        reason,
+        previousEffectiveFrom: scheduled.effectiveFrom.toISOString(),
+        effectiveFrom: scheduled.effectiveFrom.toISOString(),
+      };
+      const deactivated = await tx.customerPriceBook.updateMany({
+        where: {
+          id: scheduled.id,
+          isActive: true,
+          updatedAt: input.expectedUpdatedAt,
+          effectiveFrom: { gt: now },
+        },
+        data: {
+          isActive: false,
+          notes: scheduleControlNotes(scheduled.notes, control),
+        },
+      });
+      if (deactivated.count !== 1) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本已被其他管理员修改，请刷新后重试',
+        );
+      }
+      await tx.customerPriceBook.update({
+        where: { id: predecessor.id },
+        data: { effectiveTo: scheduled.effectiveTo },
+        select: { id: true },
+      });
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'CANCEL_SCHEDULED_VERSION',
+        entityType: 'CustomerPriceBook',
+        entityId: scheduled.id,
+        before: {
+          id: scheduled.id,
+          code: String(scheduled.code),
+          version: scheduled.version,
+          purpose: scheduled.purpose,
+          effectiveFrom: scheduled.effectiveFrom,
+          effectiveTo: scheduled.effectiveTo,
+          isActive: true,
+          ruleCount: scheduled._count.rules,
+          predecessor,
+        },
+        after: {
+          isActive: false,
+          preservedRuleCount: scheduled._count.rules,
+          predecessorEffectiveTo: scheduled.effectiveTo,
+          control,
+        },
+        requestMetadata: {
+          source: 'customer-price-book-admin.cancelScheduledCustomerPriceBook',
+          reason,
+        },
+      });
+      return {
+        id: scheduled.id,
+        version: scheduled.version,
+        purpose: scheduled.purpose,
+      };
+    });
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) throw error;
+    throw mapConstraintError(error) ?? error;
+  }
+}
+
+export async function rescheduleCustomerPriceBook(
+  input: RescheduleCustomerPriceBookInput,
+  actor: AuditActor,
+  now: Date = new Date(),
+): Promise<{ id: string; version: number; purpose: CustomerPriceBookPurpose }> {
+  if (!Number.isFinite(input.effectiveFrom.getTime())) {
+    throw new CustomerPriceBookAdminError('生效时间非法');
+  }
+  if (input.effectiveFrom <= now) {
+    throw new CustomerPriceBookAdminError('改期后的生效时间必须晚于当前时间');
+  }
+  const reason = input.reason.trim();
+  if (reason.length < 2 || reason.length > 500) {
+    throw new CustomerPriceBookAdminError('改期原因需要 2–500 个字符');
+  }
+
+  try {
+    return await db.$transaction(async (tx) => {
+      await acquirePriceRuleSnapshotWriteLock(tx);
+      const scheduled = await tx.customerPriceBook.findUnique({
+        where: { id: input.priceBookId },
+        select: {
+          id: true,
+          code: true,
+          version: true,
+          settlementType: true,
+          purpose: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+          isActive: true,
+          notes: true,
+          updatedAt: true,
+          _count: {
+            select: { rules: true, charges: true, priceVersionLocks: true },
+          },
+        },
+      });
+      if (
+        !scheduled ||
+        scheduled.settlementType !== EXTERNAL_SETTLEMENT ||
+        !scheduled.isActive ||
+        scheduled.effectiveFrom <= now
+      ) {
+        throw new CustomerPriceBookAdminError('只能调整尚未生效的计划版本');
+      }
+      if (
+        !Number.isFinite(input.expectedUpdatedAt.getTime()) ||
+        scheduled.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+      ) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本已被其他管理员修改，请刷新后重试',
+        );
+      }
+      if (scheduled.effectiveFrom.getTime() === input.effectiveFrom.getTime()) {
+        throw new CustomerPriceBookAdminError('新生效时间与当前计划时间相同');
+      }
+      if (
+        scheduled.effectiveTo &&
+        input.effectiveFrom >= scheduled.effectiveTo
+      ) {
+        throw new CustomerPriceBookAdminError('新生效时间必须早于后续版本');
+      }
+      await assertScheduledBookIsUnreferenced(tx, {
+        id: scheduled.id,
+        priceVersionLockCount: scheduled._count.priceVersionLocks,
+        chargeCount: scheduled._count.charges,
+      });
+
+      const predecessors = await tx.customerPriceBook.findMany({
+        where: {
+          settlementType: scheduled.settlementType,
+          purpose: scheduled.purpose,
+          isActive: true,
+          id: { not: scheduled.id },
+          effectiveFrom: { lt: scheduled.effectiveFrom },
+          effectiveTo: scheduled.effectiveFrom,
+        },
+        select: {
+          id: true,
+          code: true,
+          version: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+        },
+        orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+        take: 2,
+      });
+      if (predecessors.length !== 1) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本的前驱版本不唯一，禁止改期以避免价格时间线断裂',
+        );
+      }
+      const predecessor = predecessors[0]!;
+      if (input.effectiveFrom <= predecessor.effectiveFrom) {
+        throw new CustomerPriceBookAdminError(
+          '新生效时间必须晚于前驱版本的起始时间',
+        );
+      }
+      if (input.effectiveFrom < scheduled.effectiveFrom) {
+        await assertCandidateProjectionForRange(tx, {
+          candidatePriceBookId: scheduled.id,
+          candidatePurpose: scheduled.purpose,
+          start: input.effectiveFrom,
+          end: scheduled.effectiveFrom,
+        });
+      } else {
+        await assertCandidateProjectionForRange(tx, {
+          candidatePriceBookId: predecessor.id,
+          candidatePurpose: scheduled.purpose,
+          start: scheduled.effectiveFrom,
+          end: input.effectiveFrom,
+        });
+        await assertCandidateProjectionForRange(tx, {
+          candidatePriceBookId: scheduled.id,
+          candidatePurpose: scheduled.purpose,
+          start: input.effectiveFrom,
+          end: input.effectiveFrom,
+        });
+      }
+
+      const control: ScheduleControl = {
+        status: 'RESCHEDULED',
+        changedBy: actor.id,
+        changedAt: now.toISOString(),
+        reason,
+        previousEffectiveFrom: scheduled.effectiveFrom.toISOString(),
+        effectiveFrom: input.effectiveFrom.toISOString(),
+      };
+      const deactivated = await tx.customerPriceBook.updateMany({
+        where: {
+          id: scheduled.id,
+          isActive: true,
+          updatedAt: input.expectedUpdatedAt,
+          effectiveFrom: { gt: now },
+        },
+        data: { isActive: false },
+      });
+      if (deactivated.count !== 1) {
+        throw new CustomerPriceBookAdminError(
+          '计划版本已被其他管理员修改，请刷新后重试',
+        );
+      }
+      await tx.customerPriceBook.update({
+        where: { id: predecessor.id },
+        data: { effectiveTo: input.effectiveFrom },
+        select: { id: true },
+      });
+      await tx.customerPriceBook.update({
+        where: { id: scheduled.id },
+        data: {
+          effectiveFrom: input.effectiveFrom,
+          isActive: true,
+          notes: scheduleControlNotes(scheduled.notes, control),
+        },
+        select: { id: true },
+      });
+      await writeAuditLogInTx(tx, {
+        actor,
+        action: 'RESCHEDULE_VERSION',
+        entityType: 'CustomerPriceBook',
+        entityId: scheduled.id,
+        before: {
+          id: scheduled.id,
+          code: String(scheduled.code),
+          version: scheduled.version,
+          purpose: scheduled.purpose,
+          effectiveFrom: scheduled.effectiveFrom,
+          effectiveTo: scheduled.effectiveTo,
+          ruleCount: scheduled._count.rules,
+          predecessor,
+        },
+        after: {
+          effectiveFrom: input.effectiveFrom,
+          effectiveTo: scheduled.effectiveTo,
+          preservedRuleCount: scheduled._count.rules,
+          predecessorEffectiveTo: input.effectiveFrom,
+          control,
+        },
+        requestMetadata: {
+          source: 'customer-price-book-admin.rescheduleCustomerPriceBook',
+          reason,
+        },
+      });
+      return {
+        id: scheduled.id,
+        version: scheduled.version,
+        purpose: scheduled.purpose,
+      };
     });
   } catch (error) {
     if (error instanceof CustomerPriceBookAdminError) throw error;

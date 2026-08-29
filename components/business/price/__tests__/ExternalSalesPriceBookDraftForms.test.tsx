@@ -16,21 +16,25 @@ import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 const {
   actionStateMock,
+  cancelScheduledActionMock,
   createActionMock,
   discardActionMock,
   effectMock,
   publishActionMock,
   refreshMock,
   replaceMock,
+  rescheduleActionMock,
   updateActionMock,
 } = vi.hoisted(() => ({
   actionStateMock: vi.fn(),
+  cancelScheduledActionMock: vi.fn(),
   createActionMock: vi.fn(),
   discardActionMock: vi.fn(),
   effectMock: vi.fn(),
   publishActionMock: vi.fn(),
   refreshMock: vi.fn(),
   replaceMock: vi.fn(),
+  rescheduleActionMock: vi.fn(),
   updateActionMock: vi.fn(),
 }));
 
@@ -44,9 +48,11 @@ vi.mock('react', async () => {
 });
 
 vi.mock('@/actions/customer-price-books', () => ({
+  cancelScheduledCustomerPriceBookAction: cancelScheduledActionMock,
   createCustomerPriceBookDraftAction: createActionMock,
   discardCustomerPriceBookDraftAction: discardActionMock,
   publishCustomerPriceBookDraftAction: publishActionMock,
+  rescheduleCustomerPriceBookAction: rescheduleActionMock,
   updateCustomerPriceRuleDraftAction: updateActionMock,
 }));
 
@@ -55,6 +61,8 @@ vi.mock('next/navigation', () => ({
 }));
 
 import {
+  cancelScheduledFromForm,
+  CancelScheduledCustomerPriceBookForm,
   createDraftFromForm,
   CreateCustomerPriceBookDraftForm,
   customerPriceRuleInputFromFormData,
@@ -62,6 +70,8 @@ import {
   discardDraftFromForm,
   PublishCustomerPriceBookDraftForm,
   publishDraftFromForm,
+  rescheduleFromForm,
+  RescheduleCustomerPriceBookForm,
   updateDraftRuleFromForm,
 } from '../ExternalSalesPriceBookDraftForms';
 
@@ -125,17 +135,21 @@ function ruleContext(
 beforeEach(() => {
   actionStateMock.mockReset();
   createActionMock.mockReset();
+  cancelScheduledActionMock.mockReset();
   discardActionMock.mockReset();
   effectMock.mockReset();
   effectMock.mockImplementation(() => undefined);
   publishActionMock.mockReset();
   refreshMock.mockReset();
   replaceMock.mockReset();
+  rescheduleActionMock.mockReset();
   updateActionMock.mockReset();
   const success = { status: 'success', priceBookId: 'draft-1' };
+  cancelScheduledActionMock.mockResolvedValue(success);
   createActionMock.mockResolvedValue(success);
   discardActionMock.mockResolvedValue(success);
   publishActionMock.mockResolvedValue(success);
+  rescheduleActionMock.mockResolvedValue(success);
   updateActionMock.mockResolvedValue({ ...success, ruleId: 'rule-1' });
   actionStateMock.mockImplementation(
     (action: (state: unknown, payload: FormData) => unknown, initial: unknown) => [
@@ -258,7 +272,7 @@ describe('customer price-book draft form bindings', () => {
     });
   });
 
-  it('binds create, save, publish and discard to their dedicated actions', async () => {
+  it('binds create, save, publish, discard and schedule controls to their dedicated actions', async () => {
     const createData = new FormData();
     createData.set('purpose', CustomerPriceBookPurpose.PROCESSING);
     createData.set('changeReason', '原材料调价');
@@ -299,6 +313,21 @@ describe('customer price-book draft form bindings', () => {
     discardData.set('expectedDraftUpdatedAt', '2026-08-09T00:30:00.000Z');
     await discardDraftFromForm(null, discardData);
 
+    const cancelData = new FormData();
+    cancelData.set('priceBookId', 'scheduled-2');
+    cancelData.set('expectedUpdatedAt', '2026-08-09T00:30:00.000Z');
+    cancelData.set('reason', '取消错误计划');
+    cancelData.set('confirmedImpact', 'true');
+    await cancelScheduledFromForm(null, cancelData);
+
+    const rescheduleData = new FormData();
+    rescheduleData.set('priceBookId', 'scheduled-2');
+    rescheduleData.set('expectedUpdatedAt', '2026-08-09T00:30:00.000Z');
+    rescheduleData.set('effectiveFrom', '2026-09-02T08:00');
+    rescheduleData.set('reason', '延后统一切换');
+    rescheduleData.set('confirmedImpact', 'true');
+    await rescheduleFromForm(null, rescheduleData);
+
     expect(createActionMock).toHaveBeenCalledWith({
       purpose: CustomerPriceBookPurpose.PROCESSING,
       changeReason: '原材料调价',
@@ -315,6 +344,47 @@ describe('customer price-book draft form bindings', () => {
       priceBookId: 'draft-1',
       expectedDraftUpdatedAt: '2026-08-09T00:30:00.000Z',
     });
+    expect(cancelScheduledActionMock).toHaveBeenCalledWith({
+      priceBookId: 'scheduled-2',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      reason: '取消错误计划',
+      confirmedImpact: true,
+    });
+    expect(rescheduleActionMock).toHaveBeenCalledWith({
+      priceBookId: 'scheduled-2',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      effectiveFrom: '2026-09-02T08:00',
+      reason: '延后统一切换',
+      confirmedImpact: true,
+    });
+  });
+});
+
+describe('scheduled price-book controls', () => {
+  it('renders explicit L3 cancel and reschedule forms without deleting evidence', () => {
+    const cancelHtml = renderToStaticMarkup(
+      <CancelScheduledCustomerPriceBookForm
+        priceBookId="scheduled-2"
+        expectedUpdatedAt="2026-08-09T00:30:00.000Z"
+        version={2}
+      />,
+    );
+    const rescheduleHtml = renderToStaticMarkup(
+      <RescheduleCustomerPriceBookForm
+        priceBookId="scheduled-2"
+        expectedUpdatedAt="2026-08-09T00:30:00.000Z"
+        version={2}
+        defaultEffectiveFrom="2026-09-02T08:00"
+      />,
+    );
+
+    expect(cancelHtml).toContain('取消计划');
+    expect(cancelHtml).toContain('name="confirmedImpact"');
+    expect(cancelHtml).toContain('value="true"');
+    expect(rescheduleHtml).toContain('name="effectiveFrom"');
+    expect(rescheduleHtml).toContain('type="datetime-local"');
+    expect(rescheduleHtml).toContain('value="2026-09-02T08:00"');
+    expect(rescheduleHtml).toContain('调整生效时间');
   });
 });
 

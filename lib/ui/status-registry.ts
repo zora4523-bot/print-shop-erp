@@ -387,6 +387,7 @@ export const CUSTOMER_PRICE_BOOK_VERSION_STATUS = {
   DRAFT: 'DRAFT',
   CURRENT: 'CURRENT',
   SCHEDULED: 'SCHEDULED',
+  CANCELLED: 'CANCELLED',
   HISTORICAL: 'HISTORICAL',
 } as const;
 
@@ -406,6 +407,10 @@ export const CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY: StatusRegistry<Custome
     label: '计划生效',
     tone: 'info',
     dot: true,
+  },
+  [CUSTOMER_PRICE_BOOK_VERSION_STATUS.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
   },
   [CUSTOMER_PRICE_BOOK_VERSION_STATUS.HISTORICAL]: {
     label: '历史',

@@ -3,9 +3,11 @@
 import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  cancelScheduledCustomerPriceBookAction,
   createCustomerPriceBookDraftAction,
   discardCustomerPriceBookDraftAction,
   publishCustomerPriceBookDraftAction,
+  rescheduleCustomerPriceBookAction,
   updateCustomerPriceRuleDraftAction,
 } from '@/actions/customer-price-books';
 import type {
@@ -385,6 +387,31 @@ export async function discardDraftFromForm(
   return discardCustomerPriceBookDraftAction({
     priceBookId: textValue(formData, 'priceBookId'),
     expectedDraftUpdatedAt: textValue(formData, 'expectedDraftUpdatedAt'),
+  });
+}
+
+export async function cancelScheduledFromForm(
+  _previous: MutationState,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  return cancelScheduledCustomerPriceBookAction({
+    priceBookId: textValue(formData, 'priceBookId'),
+    expectedUpdatedAt: textValue(formData, 'expectedUpdatedAt'),
+    reason: textValue(formData, 'reason'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
+  });
+}
+
+export async function rescheduleFromForm(
+  _previous: MutationState,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  return rescheduleCustomerPriceBookAction({
+    priceBookId: textValue(formData, 'priceBookId'),
+    expectedUpdatedAt: textValue(formData, 'expectedUpdatedAt'),
+    effectiveFrom: textValue(formData, 'effectiveFrom'),
+    reason: textValue(formData, 'reason'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
   });
 }
 
@@ -839,6 +866,146 @@ export function DiscardCustomerPriceBookDraftForm({
         state={state}
         onRefresh={() => router.refresh()}
         successMessage="未发布草稿已放弃。"
+      />
+    </form>
+  );
+}
+
+export function CancelScheduledCustomerPriceBookForm({
+  priceBookId,
+  expectedUpdatedAt,
+  version,
+}: {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  version: number;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<MutationState, FormData>(
+    cancelScheduledFromForm,
+    null,
+  );
+  const formId = useId();
+
+  useEffect(() => {
+    if (state?.status === 'success') router.refresh();
+  }, [router, state]);
+
+  return (
+    <form
+      id={formId}
+      action={formAction}
+      aria-label={`取消第 ${version} 版计划`}
+      aria-busy={pending}
+    >
+      <input type="hidden" name="priceBookId" value={priceBookId} />
+      <input type="hidden" name="expectedUpdatedAt" value={expectedUpdatedAt} />
+      <input type="hidden" name="confirmedImpact" value="true" />
+      <ConfirmActionDialog
+        level="L3"
+        formId={formId}
+        disabled={pending}
+        reasonLabel="取消原因"
+        reasonPlaceholder="例如：价格复核未完成，取消本次计划"
+        trigger={
+          <Button type="button" variant="destructive" className="min-h-11">
+            {pending ? '正在取消…' : '取消计划'}
+          </Button>
+        }
+        title={`取消第 ${version} 版的生效计划？`}
+        description="这不会删除已发布版本或规则，但它将不再自动生效。"
+        impactItems={[
+          '计划版本和全部规则保留作为审计证据。',
+          '前一版价格将延续覆盖原计划时段。',
+          '已建工单和历史价格快照不变。',
+        ]}
+        confirmLabel="填写原因并取消计划"
+        cancelLabel="保留计划"
+      />
+      <MutationFeedback
+        state={state}
+        onRefresh={() => router.refresh()}
+        successMessage="计划版本已取消，版本与规则证据已保留。"
+      />
+    </form>
+  );
+}
+
+export function RescheduleCustomerPriceBookForm({
+  priceBookId,
+  expectedUpdatedAt,
+  version,
+  defaultEffectiveFrom,
+}: {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  version: number;
+  defaultEffectiveFrom: string;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<MutationState, FormData>(
+    rescheduleFromForm,
+    null,
+  );
+  const formId = useId();
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
+  const errors = mutationFieldErrors(state);
+
+  useEffect(() => {
+    if (state?.status === 'success') router.refresh();
+  }, [router, state]);
+
+  return (
+    <form
+      id={formId}
+      action={formAction}
+      aria-label={`调整第 ${version} 版生效时间`}
+      aria-busy={pending}
+      className="flex min-w-0 flex-wrap items-end gap-2"
+    >
+      <input type="hidden" name="priceBookId" value={priceBookId} />
+      <input type="hidden" name="expectedUpdatedAt" value={expectedUpdatedAt} />
+      <input type="hidden" name="confirmedImpact" value="true" />
+      <div className="min-w-56 flex-1 space-y-1">
+        <Label htmlFor={inputId} className="text-xs">新生效时间（上海时间）</Label>
+        <Input
+          id={inputId}
+          name="effectiveFrom"
+          type="datetime-local"
+          className="min-h-11"
+          defaultValue={defaultEffectiveFrom}
+          required
+          aria-invalid={Boolean(errors.effectiveFrom?.length)}
+          aria-describedby={errors.effectiveFrom?.length ? errorId : undefined}
+        />
+        <FieldErrorMessages id={errorId} messages={errors.effectiveFrom} />
+      </div>
+      <ConfirmActionDialog
+        level="L3"
+        formId={formId}
+        disabled={pending}
+        reasonLabel="改期原因"
+        reasonPlaceholder="例如：延后至下月统一切换"
+        trigger={
+          <Button type="button" variant="outline" className="min-h-11">
+            {pending ? '正在改期…' : '调整生效时间'}
+          </Button>
+        }
+        title={`调整第 ${version} 版的生效时间？`}
+        description="系统会重新衔接前后版本区间，并在提交前重新验证建单计价。"
+        impactItems={[
+          '价目版本、规则、版本号与哈希保持不变。',
+          '新生效时间之后的新建或重新报价工单受影响。',
+          '已建工单的历史快照不会重算。',
+        ]}
+        confirmLabel="填写原因并确认改期"
+        cancelLabel="保持原时间"
+      />
+      <MutationFeedback
+        state={state}
+        onRefresh={() => router.refresh()}
+        successMessage="计划版本已改期。"
       />
     </form>
   );

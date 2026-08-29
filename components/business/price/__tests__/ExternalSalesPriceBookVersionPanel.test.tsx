@@ -10,9 +10,15 @@ import type {
 } from '@/lib/price/customer-price-book-admin';
 
 vi.mock('@/components/business/price/ExternalSalesPriceBookDraftForms', () => ({
+  CancelScheduledCustomerPriceBookForm: ({ priceBookId }: { priceBookId: string }) => (
+    <span>取消计划 {priceBookId}</span>
+  ),
   CreateCustomerPriceBookDraftForm: () => null,
   DiscardCustomerPriceBookDraftForm: () => null,
   PublishCustomerPriceBookDraftForm: () => null,
+  RescheduleCustomerPriceBookForm: ({ priceBookId }: { priceBookId: string }) => (
+    <span>调整生效时间 {priceBookId}</span>
+  ),
 }));
 
 import {
@@ -24,6 +30,59 @@ const FORBIDDEN_TECHNICAL_TEXT =
   /issue\.path|ADD_ON|PER_BAG|PACKAGING_GROUP_MODE|SINGLE_STYLE|MIXED_STYLE|exclusiveGroup|carrierCode|provinces|FIXED_AMOUNT|ZTO_PROVINCE_RATE|unitsPerSheet/;
 
 describe('ExternalSalesPriceBookVersionPanel', () => {
+  it('只为计划版提供改期和取消入口，并展示取消审计原因', () => {
+    const base = {
+      code: 'EXTERNAL_SALES_PROCESSING_RULES',
+      name: '外部销售加工费',
+      purpose: CustomerPriceBookPurpose.PROCESSING,
+      effectiveTo: null,
+      ruleCount: 145,
+      basedOnVersion: 1,
+      basedOnBookId: 'book-v1',
+      changeReason: '调整价格',
+      publishNote: '已复核',
+      ruleSetSha256: 'a'.repeat(64),
+      createdById: 'owner-1',
+      workflowCreatedAt: '2026-08-09T00:00:00.000Z',
+    };
+    const html = renderToStaticMarkup(
+      <ExternalSalesPriceBookVersionPanel
+        versions={[
+          {
+            ...base,
+            id: 'book-v2-scheduled',
+            version: 2,
+            status: 'SCHEDULED',
+            effectiveFrom: '2026-08-10T01:30:00.000Z',
+            scheduleChangeReason: null,
+            scheduleChangedAt: null,
+            updatedAt: '2026-08-09T02:00:00.000Z',
+          },
+          {
+            ...base,
+            id: 'book-v3-cancelled',
+            version: 3,
+            status: 'CANCELLED',
+            effectiveFrom: '2026-08-11T01:30:00.000Z',
+            scheduleChangeReason: '价格复核尚未完成',
+            scheduleChangedAt: '2026-08-09T03:00:00.000Z',
+            updatedAt: '2026-08-09T03:00:00.000Z',
+          },
+        ]}
+        draft={null}
+        preview={null}
+        invalidDraftSelection={false}
+        defaultPublishAt=""
+      />,
+    );
+
+    expect(html).toContain('调整生效时间 book-v2-scheduled');
+    expect(html).toContain('取消计划 book-v2-scheduled');
+    expect(html).not.toContain('调整生效时间 book-v3-cancelled');
+    expect(html).toContain('已取消');
+    expect(html).toContain('价格复核尚未完成');
+  });
+
   it('把历史校验结果中的内部字段和枚举转换为业务文案', () => {
     const message = externalPriceBookValidationMessage(
       'issue.path：ADD_ON / PER_BAG，PACKAGING_GROUP_MODE 包含 SINGLE_STYLE、MIXED_STYLE；exclusiveGroup；carrierCode；provinces；ADD_ON / FIXED_AMOUNT；ZTO_PROVINCE_RATE；unitsPerSheet',

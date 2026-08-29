@@ -17,11 +17,13 @@ import { parseStrictShanghaiDateTimeLocal } from '@/lib/auth/schemas';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { NEW_ORDER_PRICING_ROUTES } from '@/lib/order/pricing-route';
 import {
+  cancelScheduledCustomerPriceBook,
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
   CustomerPriceBookValidationError,
   discardCustomerPriceBookDraft,
   publishCustomerPriceBookDraft,
+  rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
   updateCustomerPriceSectionDraft,
@@ -29,10 +31,12 @@ import {
   type UpdateCustomerPriceSectionDraftInput,
 } from '@/lib/price/customer-price-book-admin';
 import type {
+  CancelScheduledCustomerPriceBookActionInput,
   CreateCustomerPriceBookDraftActionInput,
   CustomerPriceBookMutationResult,
   DiscardCustomerPriceBookDraftActionInput,
   PublishCustomerPriceBookDraftActionInput,
+  RescheduleCustomerPriceBookActionInput,
   UpdateCustomerPriceRuleDraftActionInput,
   UpdateCustomerPriceRuleDraftGroupActionInput,
   UpdateCustomerPriceSectionDraftActionInput,
@@ -576,6 +580,42 @@ const discardDraftSchema = z
   })
   .strict();
 
+const scheduleReason = z
+  .string()
+  .trim()
+  .min(2, '请填写至少 2 个字符的调整原因')
+  .max(500, '调整原因最多 500 字');
+
+const cancelScheduledSchema = z
+  .object({
+    priceBookId: safeId,
+    expectedUpdatedAt: strictIsoInstant,
+    reason: scheduleReason,
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解取消计划的影响',
+    }),
+  })
+  .strict();
+
+const rescheduleSchema = z
+  .object({
+    priceBookId: safeId,
+    expectedUpdatedAt: strictIsoInstant,
+    effectiveFrom: z.string().trim().transform((value, ctx) => {
+      const parsed = parseStrictShanghaiDateTimeLocal(value);
+      if (!parsed) {
+        ctx.addIssue({ code: 'custom', message: '请选择合法的上海生效时间' });
+        return z.NEVER;
+      }
+      return parsed;
+    }),
+    reason: scheduleReason,
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解改期影响',
+    }),
+  })
+  .strict();
+
 function invalidFromDomain(
   error: CustomerPriceBookValidationError,
 ): CustomerPriceBookMutationResult {
@@ -983,6 +1023,75 @@ export async function discardCustomerPriceBookDraftAction(
     const discarded = await discardCustomerPriceBookDraft(parsed.data, actor);
     revalidatePriceBookPaths();
     return { status: 'success', priceBookId: discarded.id };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function cancelScheduledCustomerPriceBookAction(
+  raw: CancelScheduledCustomerPriceBookActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = cancelScheduledSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const cancelled = await cancelScheduledCustomerPriceBook(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedUpdatedAt: parsed.data.expectedUpdatedAt,
+        reason: parsed.data.reason,
+      },
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: cancelled.id,
+      version: cancelled.version,
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function rescheduleCustomerPriceBookAction(
+  raw: RescheduleCustomerPriceBookActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = rescheduleSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const rescheduled = await rescheduleCustomerPriceBook(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedUpdatedAt: parsed.data.expectedUpdatedAt,
+        effectiveFrom: parsed.data.effectiveFrom,
+        reason: parsed.data.reason,
+      },
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: rescheduled.id,
+      version: rescheduled.version,
+    };
   } catch (error) {
     if (error instanceof CustomerPriceBookAdminError) {
       return { status: 'error', message: error.message };
