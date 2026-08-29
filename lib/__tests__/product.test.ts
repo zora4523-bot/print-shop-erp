@@ -239,7 +239,6 @@ describe('listProductsPage', () => {
         orderCount: 3,
         bomCount: 2,
         currentExternalPriceRuleCount: 4,
-        currentInternalPriceTierCount: 1,
       },
     ]);
 
@@ -256,7 +255,6 @@ describe('listProductsPage', () => {
       orderCount: 3,
       bomCount: 2,
       currentExternalPriceRuleCount: 4,
-      currentInternalPriceTierCount: 1,
     });
   });
 
@@ -1027,7 +1025,7 @@ describe('updateProduct', () => {
     expect(dbMock.product.update).toHaveBeenCalledOnce();
   });
 
-  it('omits baseUnitPrice so a concurrent internal-price update is preserved', async () => {
+  it('省略旧计价字段时保留历史存量值', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
     dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
 
@@ -1044,6 +1042,7 @@ describe('updateProduct', () => {
       unknown
     >;
     expect('baseUnitPrice' in data).toBe(false);
+    expect('minOrderQty' in data).toBe(false);
   });
 
   it('allows saving a product that already uses a disabled category node', async () => {
@@ -1213,14 +1212,13 @@ describe('setProductActive', () => {
 });
 
 describe('getProductReferenceImpact', () => {
-  it('counts distinct orders and only currently effective quote sources', async () => {
+  it('counts distinct orders and only the published customer-price source', async () => {
     dbMock.$queryRaw.mockResolvedValue([
       {
         productId: 'p1',
         orderCount: 7,
         bomCount: 2,
         currentExternalPriceRuleCount: 3,
-        currentInternalPriceTierCount: 4,
       },
     ]);
 
@@ -1230,14 +1228,13 @@ describe('getProductReferenceImpact', () => {
       orderCount: 7,
       bomCount: 2,
       currentExternalPriceRuleCount: 3,
-      currentInternalPriceTierCount: 4,
     });
     expect(dbMock.$queryRaw).toHaveBeenCalledOnce();
     const query = dbMock.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
     expect(query.sql).toContain('COUNT(DISTINCT item."orderId")');
     expect(query.sql).toContain('book."settlementType" = \'EXTERNAL_SALES\'');
     expect(query.sql).toContain('book."effectiveFrom" <=');
-    expect(query.sql).toContain('tier."effectiveFrom" <=');
+    expect(query.sql).not.toContain('PriceTier');
   });
 });
 

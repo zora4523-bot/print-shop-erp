@@ -27,7 +27,6 @@ const products = [
       orderCount: 0,
       bomCount: 0,
       currentExternalPriceRuleCount: 0,
-      currentInternalPriceTierCount: 0,
     },
   },
   {
@@ -52,7 +51,6 @@ const products = [
       orderCount: 0,
       bomCount: 0,
       currentExternalPriceRuleCount: 0,
-      currentInternalPriceTierCount: 0,
     },
   },
 ] as unknown as ProductListRow[];
@@ -87,7 +85,7 @@ function renderWorkspace() {
 }
 
 describe('RuleSpecWorkspace', () => {
-  it('只展示真实 SKU 规格事实和建单可选状态', () => {
+  it('只展示可建单组合事实和建单可选状态', () => {
     const html = renderWorkspace();
 
     expect(html).toContain('大号信封');
@@ -95,7 +93,7 @@ describe('RuleSpecWorkspace', () => {
     expect(html).toContain('230 × 120 mm');
     expect(html).toContain('160g 触感纸');
     expect(html).toContain('空白现货');
-    expect(html).toContain('100');
+    expect(html).not.toContain('起订量');
     expect(html).toContain('建单可选');
     expect(html).toContain('停止新单选用');
     expect(html).toContain('未标注规格');
@@ -103,6 +101,7 @@ describe('RuleSpecWorkspace', () => {
     expect(html).not.toContain('价格表!B6');
     expect(html).not.toContain('规格表!A4');
     expect(html).not.toContain('纸张表!B4');
+    expect(html).toContain('价格及数量档由客户计价规则维护');
   });
 
   it('明确烫金颜色无独立主数据，不伪造色库或开关', () => {

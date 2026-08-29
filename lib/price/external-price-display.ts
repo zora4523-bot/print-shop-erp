@@ -16,7 +16,8 @@ export function externalPriceBusinessText(text: string): string {
     .replace(TRAILING_BARE_SOURCE_RANGE, '')
     .replace(/(\d+)\s*个锚点/g, '$1 个')
     .replace(/外部销售/g, '客户')
-    .replace(/内部兼容/g, '内部直单')
+    .replace(/内部兼容价格/g, '历史价格')
+    .replace(/内部兼容/g, '历史')
     .replace(/(?:价格|计价|报价)快照/g, '已保存价格')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();

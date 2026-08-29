@@ -59,12 +59,13 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/owner/prices/external-sales/items',
-        destination: '/owner/rules/customer-pricing',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {
         source: '/owner/prices/external-sales/logistics',
-        destination: '/owner/rules/customer-pricing?purpose=logistics',
+        destination:
+          '/owner/rules/customer-pricing?purpose=logistics&section=ship',
         permanent: false,
       },
       {
@@ -74,17 +75,22 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/owner/prices',
-        destination: '/owner/rules/internal-pricing',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {
-        source: '/owner/prices/tiers/:id',
-        destination: '/owner/rules/internal-pricing/tiers/:id',
+        source: '/owner/prices/tiers/:path*',
+        destination: '/owner/rules/customer-pricing?section=tiers',
         permanent: false,
       },
       {
-        source: '/owner/prices/adjustments/:id',
-        destination: '/owner/rules/internal-pricing/adjustments/:id',
+        source: '/owner/prices/adjustments/:path*',
+        destination: '/owner/rules/customer-pricing?section=adds',
+        permanent: false,
+      },
+      {
+        source: '/owner/rules/internal-pricing/:path*',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {

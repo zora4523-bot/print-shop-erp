@@ -52,7 +52,6 @@ describe('规则中心目录业务语言投影', () => {
           orderCount: 0,
           bomCount: 0,
           currentExternalPriceRuleCount: 0,
-          currentInternalPriceTierCount: 0,
         },
       },
     ] as unknown as ProductListRow[];
@@ -92,7 +91,6 @@ describe('规则中心目录业务语言投影', () => {
           orderCount: 0,
           bomCount: 0,
           currentExternalPriceRuleCount: 0,
-          currentInternalPriceTierCount: 0,
         },
       },
     ] as unknown as ProductListRow[];
@@ -105,7 +103,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('计价路线 / 产品结构');
   });
 
-  it('规则中心的建单产品列表不混入内部直单价', () => {
+  it('可建单组合列表不混入旧单价与起订量', () => {
     const product = {
       id: 'product-internal-price',
       code: 'PRD-INTERNAL',
@@ -115,7 +113,7 @@ describe('规则中心目录业务语言投影', () => {
       specification: '大号',
       paperType: '160g 艳闪',
       baseUnitPrice: '123.4567',
-      minOrderQty: null,
+      minOrderQty: 500,
       isActive: true,
       categoryNode: {
         id: 'blank-stock',
@@ -128,7 +126,6 @@ describe('规则中心目录业务语言投影', () => {
         orderCount: 0,
         bomCount: 0,
         currentExternalPriceRuleCount: 0,
-        currentInternalPriceTierCount: 0,
       },
     } as unknown as ProductListRow;
 
@@ -138,6 +135,8 @@ describe('规则中心目录业务语言投影', () => {
 
     expect(html).not.toContain('内部/直单基础单价');
     expect(html).not.toContain('123.4567');
+    expect(html).not.toContain('起订量');
+    expect(html).not.toContain('>500<');
   });
 
   it('建单产品列表明确标记退役分类下的历史记录', () => {
@@ -163,7 +162,6 @@ describe('规则中心目录业务语言投影', () => {
         orderCount: 1,
         bomCount: 0,
         currentExternalPriceRuleCount: 0,
-        currentInternalPriceTierCount: 0,
       },
     } as unknown as ProductListRow;
 

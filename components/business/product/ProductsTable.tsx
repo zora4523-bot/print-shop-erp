@@ -21,7 +21,7 @@ function businessText(value: string, fallback: string): string {
 export function ProductsTable({
   products,
   editBase = RULE_CENTER_HREFS.stockSkus,
-  label = '建单产品列表',
+  label = '可建单产品组合列表',
   categoryHeading = '产品结构',
 }: {
   products: ProductListRow[];
@@ -37,14 +37,13 @@ export function ProductsTable({
     <Table label={label}>
       <TableHeader>
         <TableRow>
-          <TableHead>编码</TableHead>
+          <TableHead className="hidden xl:table-cell">编码</TableHead>
           <TableHead>{categoryHeading}</TableHead>
-          <TableHead>产品名</TableHead>
+          <TableHead>组合名称</TableHead>
           <TableHead>规格</TableHead>
           <TableHead>纸张</TableHead>
-          <TableHead className="text-right">起订量</TableHead>
           <TableHead>状态</TableHead>
-          <TableHead>被引用</TableHead>
+          <TableHead>引用影响</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -54,13 +53,13 @@ export function ProductsTable({
             key={p.id}
             className={!p.isActive ? 'bg-muted/30' : undefined}
           >
-            <TableCell className="font-sans tabular-nums text-xs">
+            <TableCell className="hidden font-sans tabular-nums text-xs xl:table-cell">
               {p.code ?? '—'}
             </TableCell>
             <TableCell>
               {businessText(p.categoryNode.name, '未命名分类')}
             </TableCell>
-            <TableCell>{businessText(p.name, '未命名 SKU')}</TableCell>
+            <TableCell>{businessText(p.name, '未命名组合')}</TableCell>
             <TableCell className="text-muted-foreground">
               {p.specification
                 ? businessText(p.specification, '未标注规格')
@@ -70,9 +69,6 @@ export function ProductsTable({
               {p.paperType
                 ? businessText(p.paperType, '未标注纸张')
                 : '—'}
-            </TableCell>
-            <TableCell className="text-right font-sans tabular-nums text-muted-foreground">
-              {p.minOrderQty ?? '—'}
             </TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1">

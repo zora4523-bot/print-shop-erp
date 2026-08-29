@@ -26,8 +26,6 @@ const PENDING_FORM_CONTRACTS: ReadonlyArray<
   ['order/UrgentToggleForm.tsx', 'pending'],
   ['outsource/CreateOutsourceForm.tsx', 'pending'],
   ['outsource/OutsourceAmountForm.tsx', 'pending'],
-  ['price/PriceAdjustmentForm.tsx', 'pending'],
-  ['price/PriceTierForm.tsx', 'pending'],
   ['product-category/ProductCategoryForm.tsx', 'pending'],
   ['production/OperationReportForm.tsx', 'pending'],
   ['purchase/PurchaseOrderForm.tsx', 'pending'],

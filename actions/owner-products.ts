@@ -45,8 +45,6 @@ function normalizeFormInput(formData: FormData) {
     name: get('name'),
     specification: get('specification') ?? '',
     paperType: get('paperType') ?? '',
-    baseUnitPrice: '',
-    minOrderQty: get('minOrderQty') ?? '',
     isActive: get('isActive'),
   };
 }
@@ -68,7 +66,12 @@ export async function createQuoteProductAction(
 
   let createdId: string;
   try {
-    const created = await createProduct(parsed.data);
+    const created = await createProduct({
+      ...parsed.data,
+      // Compatibility columns remain nullable for historical records, but
+      // current pricing comes exclusively from published customer price books.
+      baseUnitPrice: null,
+    });
     createdId = created.id;
   } catch (err) {
     const unique = mapUniqueViolation(err);
@@ -105,7 +108,6 @@ export async function updateQuoteProductAction(
     name: parsed.data.name,
     specification: parsed.data.specification,
     paperType: parsed.data.paperType,
-    minOrderQty: parsed.data.minOrderQty,
   };
 
   try {
@@ -204,5 +206,5 @@ function revalidateProductPaths(id: string) {
   revalidatePath(`${RULE_CENTER_HREFS.stockSkus}/${id}`);
   revalidatePath('/orders/new');
   revalidatePath('/owner/boms/new');
-  revalidatePath(`${RULE_CENTER_HREFS.internalPricing}/tiers/new`);
+  revalidatePath(RULE_CENTER_HREFS.customerPricing);
 }

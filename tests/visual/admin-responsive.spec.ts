@@ -415,12 +415,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'stock-skus',
       path: RULE_CENTER_HREFS.stockSkus,
-      readyHeading: '建单产品目录',
+      readyHeading: '可建单产品组合',
     },
     {
       name: 'rule-center',
       path: RULE_CENTER_HREFS.root,
-      readyHeading: '局部烫金 · 空白封现货单价',
+      readyHeading: '规则配置中心',
     },
     {
       name: 'rule-center-customer-processing',
@@ -467,11 +467,6 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       path: RULE_CENTER_HREFS.priceVersions,
       readyHeading: '价格版本与发布',
       prepareGateState: preparePriceBookBusinessState,
-    },
-    {
-      name: 'rule-center-internal-pricing',
-      path: RULE_CENTER_HREFS.internalPricing,
-      readyHeading: '内部直单价格',
     },
     {
       name: 'rule-center-employee-pay',

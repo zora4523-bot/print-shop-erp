@@ -57,9 +57,9 @@ export async function ProductCategoryCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title="产品结构分类"
+        title="产品结构分类 / BOM 分类"
         effect="immediate"
-        subtitle="分类树同时服务建单产品与 BOM；历史引用不会因停用而删除。"
+        subtitle="分类树同时服务可建单产品组合与 BOM；历史引用不会因停用而删除。"
         actions={
           <Link href={`${routeBase}/new`} className={buttonVariants()}>
             新建产品结构分类
@@ -139,7 +139,7 @@ export async function EditProductCategoryCatalogItem({
       <RuleCenterPageHeader
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
-        subtitle={`${node._count.products} 个建单产品`}
+        subtitle={`${node._count.products} 个可建单组合`}
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge tone={node.isActive ? 'success' : 'neutral'}>
@@ -170,8 +170,8 @@ export async function EditProductCategoryCatalogItem({
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
             {node.isActive
-              ? '停用后，新建 SKU 和 BOM 不可选择；已有引用保留。'
-              : '启用后会重新进入新 SKU 和新 BOM 的分类选择器。'}
+              ? '停用后，不能再用于新建可建单组合或 BOM；已有引用保留。'
+              : '启用后会重新进入可建单组合与 BOM 的分类选项。'}
           </p>
           <ToggleProductCategoryActiveButton
             nodeId={node.id}

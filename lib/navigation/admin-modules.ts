@@ -37,6 +37,7 @@ export type AdminMenuSection =
 export type AdminModuleMetadata = {
   id: string;
   menuParentId?: string;
+  menuGroupLabel?: string;
   label: string;
   routeBase: string;
   activeRouteBase?: string;
@@ -58,6 +59,8 @@ const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
       'menuParentId' in item
         ? `owner.rules.${item.menuParentId}`
         : undefined,
+    menuGroupLabel:
+      'menuGroupLabel' in item ? item.menuGroupLabel : undefined,
     label: item.label,
     routeBase: item.href,
     activeRouteBase: item.activeRouteBase,

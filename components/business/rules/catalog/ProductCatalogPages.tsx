@@ -66,7 +66,7 @@ const loadProduct = cache(getProductSummary);
 
 export async function getProductCatalogMetadata({
   params,
-  titleScope = '建单产品目录',
+  titleScope = '可建单产品组合',
 }: Pick<ProductCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const { id } = await params;
   const session = await getSession();
@@ -76,8 +76,8 @@ export async function getProductCatalogMetadata({
   const product = await loadProduct(id);
   return {
     title: product
-      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名 SKU'} · ${titleScope}`
-      : '建单产品不存在',
+      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名组合'} · ${titleScope}`
+      : '可建单组合不存在',
   };
 }
 
@@ -118,12 +118,12 @@ export async function ProductCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={specWorkspace ? '规格 · 烫金颜色' : '建单产品目录'}
+        title={specWorkspace ? '规格 · 烫金颜色' : '可建单产品组合'}
         effect="immediate"
         subtitle={
           specWorkspace
-            ? '规格和纸张来自建单产品目录；烫金颜色当前随工单事实维护。'
-            : '这里不是销售询价入口；用于维护建单时按路线、纸张和规格隐式匹配的产品事实。'
+            ? '规格和纸张来自可建单组合；烫金颜色当前随工单事实维护。'
+            : '维护新建工单的产品结构、纸张与规格组合；系统根据工单参数隐式匹配，价格由已发布客户计价规则决定。'
         }
         actions={
           <Link
@@ -131,7 +131,7 @@ export async function ProductCatalogList({
             prefetch={false}
             className={buttonVariants()}
           >
-            新建目录项
+            新建组合
           </Link>
         }
       />
@@ -162,7 +162,7 @@ export async function ProductCatalogList({
             filters={
               <div
                 role="group"
-                aria-label="建单产品状态筛选"
+                aria-label="可建单组合状态筛选"
                 className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
               >
                 {(
@@ -194,7 +194,7 @@ export async function ProductCatalogList({
 
           <AdminTableCard
             isEmpty={productPage.rows.length === 0}
-            emptyTitle="暂无建单产品"
+            emptyTitle="暂无可建单产品组合"
             emptyDescription={
               q
                 ? '没有匹配当前搜索与状态条件的记录。'
@@ -218,7 +218,7 @@ export async function ProductCatalogList({
             <ProductsTable
               products={productPage.rows}
               editBase={routeBase}
-              label="建单产品列表"
+              label="可建单产品组合列表"
               categoryHeading="产品结构"
             />
           </AdminTableCard>
@@ -245,9 +245,9 @@ export async function NewProductCatalogItem({
   return (
     <div className="space-y-4">
       <RuleCenterPageHeader
-        title="新建产品目录项"
+        title="新建可建单组合"
         effect="immediate"
-        subtitle="启用后会参与新建工单的纸张、规格与产品结构匹配。"
+        subtitle="组合只定义产品结构、纸张与规格匹配；价格及数量档请在客户计价规则中维护。"
         actions={
           <Link
             href={routeBase}
@@ -308,15 +308,13 @@ export async function EditProductCatalogItem({
     name: product.name,
     specification: product.specification,
     paperType: product.paperType,
-    minOrderQty: product.minOrderQty,
-    isActive: product.isActive,
   };
 
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={`编辑建单产品：${
-          externalPriceBusinessText(product.name) || '未命名 SKU'
+        title={`编辑可建单组合：${
+          externalPriceBusinessText(product.name) || '未命名组合'
         }`}
         effect="immediate"
         subtitle={
@@ -324,7 +322,7 @@ export async function EditProductCatalogItem({
             {externalPriceBusinessText(product.categoryNode.name) ||
               '未命名分类'}
             {product.isActive ? ' · 启用' : ' · 停用'}
-            {isLegacyCompatibilityObject ? ' · 不可用于新报价' : ''}
+            {isLegacyCompatibilityObject ? ' · 仅保留历史引用' : ''}
             {isRetired ? (
               <StatusBadge tone="warning" className="ml-2">
                 历史 / 已退役
@@ -355,12 +353,12 @@ export async function EditProductCatalogItem({
       {product.isActive || !isRetired ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-2 text-base font-semibold">
-            {product.isActive ? '停用建单产品' : '启用建单产品'}
+            {product.isActive ? '停用可建单组合' : '启用可建单组合'}
           </h2>
           <p className="mb-3 text-sm text-muted-foreground">
             {product.isActive
-              ? '停用后不再出现在新工单选择器中；已有工单和价格保留。'
-              : '启用后会重新进入新工单的可选规格。'}
+              ? '停用后不再参与新建工单的隐式匹配；已有工单、BOM 和已发布价格不会被改写。'
+              : '启用后会重新参与新建工单的产品结构、纸张与规格匹配。'}
           </p>
           <ToggleActiveButton
             key={`${product.id}-${product.isActive}`}

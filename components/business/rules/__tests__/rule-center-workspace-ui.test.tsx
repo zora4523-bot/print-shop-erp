@@ -24,7 +24,6 @@ import {
   priceWorkspaceNavigationKey,
 } from '@/components/business/rules/RuleCenterWorkspaceBar';
 import {
-  RULE_CENTER_DEFAULT_HREF,
   RULE_CENTER_HREFS,
 } from '@/lib/navigation/rule-center';
 
@@ -47,8 +46,9 @@ describe('rule center workspace UI', () => {
     );
   });
 
-  it('opens the first concrete price editor without a second workspace menu', () => {
-    expect(RULE_CENTER_DEFAULT_HREF).toBe(
+  it('keeps the overview as a real route instead of aliasing a price editor', () => {
+    expect(RULE_CENTER_HREFS.root).toBe('/owner/rules');
+    expect(RULE_CENTER_HREFS.root).not.toBe(
       '/owner/rules/customer-pricing?section=blank',
     );
   });

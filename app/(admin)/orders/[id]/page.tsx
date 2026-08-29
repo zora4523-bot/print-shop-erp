@@ -1020,7 +1020,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   value={PRODUCT_STRUCTURE_LABELS[item.productStructure]}
                 />
                 <Row
-                  label="产品 / SKU"
+                  label="产品组合"
                   value={
                     item.product?.name
                       ? externalPriceBusinessText(item.product.name)

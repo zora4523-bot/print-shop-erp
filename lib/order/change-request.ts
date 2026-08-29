@@ -1345,7 +1345,7 @@ function assertSpecificationIdentityUnchanged(
     change.specification !== item.specification
   ) {
     throw new OrderChangeRequestError(
-      `款式“${item.name}”的规格与产品 SKU、尺寸和产品结构必须一起变更；当前修改申请不支持单独改规格`,
+      `款式“${item.name}”的规格与产品组合、尺寸和产品结构必须一起变更；当前修改申请不支持单独改规格`,
     );
   }
 }

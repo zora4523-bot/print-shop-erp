@@ -29,7 +29,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(37);
+    expect(items).toHaveLength(36);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -47,11 +47,10 @@ describe('getAdminMenuItems', () => {
       '包装与快递',
       '价格版本',
       '纸张',
-      '建单产品目录',
+      '可建单产品组合',
       '产品结构',
       '建单工艺目录',
-      '内部计价',
-      '工资提成',
+      '员工薪酬规则',
       '账单',
       '薪资总览',
       '工序计件结算',
@@ -169,7 +168,7 @@ describe('getAdminMenuItems', () => {
         requiredPermission: 'material:manage',
       },
       {
-        label: '建单产品目录',
+        label: '可建单产品组合',
         href: '/owner/rules/stock-skus',
         requiredPermission: 'dict:product:manage',
       },
@@ -184,15 +183,28 @@ describe('getAdminMenuItems', () => {
         requiredPermission: 'dict:craft:manage',
       },
       {
-        label: '内部计价',
-        href: '/owner/rules/internal-pricing',
-        requiredPermission: 'dict:price:manage',
-      },
-      {
-        label: '工资提成',
+        label: '员工薪酬规则',
         href: '/owner/rules/employee-pay',
         requiredPermission: 'salary:rule:manage',
       },
+    ]);
+    expect(
+      rulesGroup?.items[0]?.children?.map(
+        ({ label, menuGroupLabel }) => [label, menuGroupLabel],
+      ),
+    ).toEqual([
+      ['空白封单价', '客户计价规则'],
+      ['局部烫金机烫费', '客户计价规则'],
+      ['专版烫金单价', '客户计价规则'],
+      ['专版烫金加价', '客户计价规则'],
+      ['彩印阶梯价', '客户计价规则'],
+      ['包装与快递', '客户计价规则'],
+      ['价格版本', '客户计价规则'],
+      ['纸张', '建单主数据'],
+      ['可建单产品组合', '建单主数据'],
+      ['产品结构', '建单主数据'],
+      ['建单工艺目录', '建单主数据'],
+      ['员工薪酬规则', '员工薪酬规则'],
     ]);
     const boms = items.find((i) => i.label === 'BOM/用料');
     expect(boms?.href).toBe('/owner/boms');
@@ -279,16 +291,6 @@ describe('getAdminMenuItems', () => {
         '/owner/rules/price-versions',
         '',
         '/owner/rules/price-versions',
-      ],
-      [
-        '/owner/rules/internal-pricing',
-        '',
-        '/owner/rules/internal-pricing',
-      ],
-      [
-        '/owner/rules/internal-pricing/tiers/new',
-        '',
-        '/owner/rules/internal-pricing',
       ],
       [
         '/owner/rules/employee-pay',

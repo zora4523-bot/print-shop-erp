@@ -29,6 +29,8 @@ describe('product pricing scope labels', () => {
     expect(form).not.toContain('内部销售/工厂直单基础单价');
     expect(table).not.toContain('内部/直单基础单价');
     expect(form).not.toContain('name="baseUnitPrice"');
+    expect(form).not.toContain('name="minOrderQty"');
+    expect(table).not.toContain('起订量');
     expect(form).not.toContain('外部销售不读取此价格');
     expect(catalogWorkspace).not.toContain('此处基础单价仅供内部直单兼容使用');
     expect(catalogWorkspace).not.toContain('统一维护通版现货');

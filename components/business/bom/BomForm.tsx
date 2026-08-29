@@ -98,7 +98,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
               pending={pending}
               className="text-xs text-primary hover:underline"
             >
-              新建产品目录项
+              新建可建单组合
             </PendingLink>
           </div>
           <select

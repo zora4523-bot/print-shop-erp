@@ -27,8 +27,6 @@ const { dbMock } = vi.hoisted(() => {
     party: { findUnique: ReturnType<typeof vi.fn> };
     product: { findMany: ReturnType<typeof vi.fn> };
     material: { findMany: ReturnType<typeof vi.fn> };
-    priceTier: { findMany: ReturnType<typeof vi.fn> };
-    priceAdjustment: { findMany: ReturnType<typeof vi.fn> };
     customerPriceBook: { findMany: ReturnType<typeof vi.fn> };
     customerPriceRule: { findMany: ReturnType<typeof vi.fn> };
     customerChargeCategory: { findUnique: ReturnType<typeof vi.fn> };
@@ -80,8 +78,6 @@ const { dbMock } = vi.hoisted(() => {
     party: { findUnique: vi.fn() },
     product: { findMany: vi.fn() },
     material: { findMany: vi.fn() },
-    priceTier: { findMany: vi.fn() },
-    priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
     customerPriceRule: { findMany: vi.fn() },
     customerChargeCategory: { findUnique: vi.fn() },
@@ -508,8 +504,6 @@ beforeEach(() => {
           ]
         : (where.name?.in ?? []).map((name) => ({ name })),
   );
-  dbMock.priceTier.findMany.mockReset().mockResolvedValue([]);
-  dbMock.priceAdjustment.findMany.mockReset().mockResolvedValue([]);
   dbMock.customerPriceBook.findMany
     .mockReset()
     .mockImplementation(async (args: { where?: { purpose?: string } }) =>

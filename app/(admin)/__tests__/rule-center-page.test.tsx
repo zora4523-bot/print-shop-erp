@@ -1,14 +1,8 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { redirectMock, requirePermissionMock } = vi.hoisted(() => ({
-  redirectMock: vi.fn((href: string) => {
-    throw new Error(`NEXT_REDIRECT:${href}`);
-  }),
+const { requirePermissionMock } = vi.hoisted(() => ({
   requirePermissionMock: vi.fn(),
-}));
-
-vi.mock('next/navigation', () => ({
-  redirect: redirectMock,
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -16,32 +10,40 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 
 import RuleCenterPage from '@/app/(admin)/owner/rules/page';
-import { RULE_CENTER_DEFAULT_HREF } from '@/lib/navigation/rule-center';
 
 beforeEach(() => {
-  redirectMock.mockClear();
   requirePermissionMock.mockReset().mockResolvedValue({ id: 'admin-1' });
 });
 
 describe('rule center entry', () => {
-  it('checks price-management permission before redirecting', async () => {
-    await expect(RuleCenterPage()).rejects.toThrow(
-      `NEXT_REDIRECT:${RULE_CENTER_DEFAULT_HREF}`,
-    );
+  it('checks price-management permission before rendering the overview', async () => {
+    const html = renderToStaticMarkup(await RuleCenterPage());
 
     expect(requirePermissionMock).toHaveBeenCalledOnce();
     expect(requirePermissionMock).toHaveBeenCalledWith('dict:price:manage');
-    expect(redirectMock).toHaveBeenCalledOnce();
-    expect(requirePermissionMock.mock.invocationCallOrder[0]).toBeLessThan(
-      redirectMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
+    expect(html).toContain('规则配置中心');
   });
 
-  it('opens the first concrete editor instead of the obsolete overview', async () => {
-    await expect(RuleCenterPage()).rejects.toThrow('NEXT_REDIRECT:');
+  it('groups current rule domains without exposing retired internal pricing', async () => {
+    const html = renderToStaticMarkup(await RuleCenterPage());
 
-    expect(redirectMock).toHaveBeenCalledWith(
-      '/owner/rules/customer-pricing?section=blank',
-    );
+    expect(html).toContain('客户计价规则');
+    expect(html).toContain('建单主数据');
+    expect(html).toContain('员工薪酬规则');
+    expect(html).toContain('可建单产品组合');
+    expect(html).toContain('href="/owner/rules/customer-pricing?section=blank"');
+    expect(html).toContain('href="/owner/rules/stock-skus"');
+    expect(html).toContain('href="/owner/rules/employee-pay"');
+    expect(html).not.toContain('内部计价');
+    expect(html).not.toContain('/owner/rules/internal-pricing');
+  });
+
+  it('states the piecework boundary without inventing a writable route', async () => {
+    const html = renderToStaticMarkup(await RuleCenterPage());
+
+    expect(html).toContain('工序计件工价');
+    expect(html).toContain('PARTIAL、FULL、PACKING');
+    expect(html).toContain('未开放配置');
+    expect(html).not.toContain('piecework-rules');
   });
 });

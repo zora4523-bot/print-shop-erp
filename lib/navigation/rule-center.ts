@@ -9,13 +9,13 @@ export const RULE_CENTER_HREFS = {
   crafts: '/owner/rules/crafts',
   customerPricing: '/owner/rules/customer-pricing',
   priceVersions: '/owner/rules/price-versions',
-  internalPricing: '/owner/rules/internal-pricing',
   employeePay: '/owner/rules/employee-pay',
 } as const;
 
 type RuleCenterSidebarItem = {
   id: string;
   menuParentId?: string;
+  menuGroupLabel?: string;
   label: string;
   description: string;
   impact: string;
@@ -64,9 +64,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'blankEnvelopePricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '空白封单价',
     description: '按纸张、克重与规格维护局部烫金材料价。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=blank`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -81,9 +82,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'partialFoilMachinePricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '局部烫金机烫费',
     description: '维护局部烫金的费率、固定费、跳变点与制版费。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=machine`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -95,9 +97,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'customFoilTierPricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '专版烫金单价',
     description: '按数量范围维护中号与大号专版烫金单价。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=tiers`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -109,9 +112,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'customFoilAddOnPricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '专版烫金加价',
     description: '维护专版烫金的纸张、工艺与一次性附加费。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=adds`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -123,9 +127,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'colorPrintTierPricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '彩印阶梯价',
     description: '按产品与数量档维护彩印整单价与烫金附加费。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?section=print`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -137,9 +142,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'packagingShippingPricing',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '包装与快递',
     description: '维护入袋、纸箱耗材、重量与快递地区费率。',
-    impact: '对外新建工单计价',
+    impact: '新建工单计价',
     effect: 'versioned',
     href: `${RULE_CENTER_HREFS.customerPricing}?purpose=logistics&section=ship`,
     activeRouteBase: RULE_CENTER_HREFS.customerPricing,
@@ -154,9 +160,10 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'priceVersions',
     menuParentId: 'overview',
+    menuGroupLabel: '客户计价规则',
     label: '价格版本',
     description: '审阅客户价目草稿差异、影响与发布计划。',
-    impact: '之后的对外新建工单计价',
+    impact: '之后的新建工单计价',
     effect: 'versioned',
     href: RULE_CENTER_HREFS.priceVersions,
     activeRouteBase: RULE_CENTER_HREFS.priceVersions,
@@ -167,6 +174,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'papers',
     menuParentId: 'overview',
+    menuGroupLabel: '建单主数据',
     label: '纸张',
     description: '维护纸张编码、规格、库存与启停状态。',
     impact: '建单可选纸张与仓储出入库',
@@ -180,22 +188,24 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'stockSkus',
     menuParentId: 'overview',
-    label: '建单产品目录',
-    description: '维护新建工单按路线、纸张和规格隐式匹配的产品事实。',
+    menuGroupLabel: '建单主数据',
+    label: '可建单产品组合',
+    description: '维护建单时按路线、纸张和规格隐式匹配的产品事实，不是销售选品或报价入口。',
     impact: '新建工单的产品解析与计价事实',
     effect: 'immediate',
     href: RULE_CENTER_HREFS.stockSkus,
     activeRouteBase: RULE_CENTER_HREFS.stockSkus,
     iconName: 'PackageOpen',
-    breadcrumbLabel: '建单产品目录',
+    breadcrumbLabel: '可建单产品组合',
     requiredPermission: 'dict:product:manage',
   },
   {
     id: 'productCategories',
     menuParentId: 'overview',
+    menuGroupLabel: '建单主数据',
     label: '产品结构',
     description: '维护建单产品与 BOM 共用的产品分类树。',
-    impact: '新建 SKU、BOM 与历史引用',
+    impact: '新建可建单组合、BOM 与历史引用',
     effect: 'immediate',
     href: RULE_CENTER_HREFS.productCategories,
     activeRouteBase: RULE_CENTER_HREFS.productCategories,
@@ -206,6 +216,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
   {
     id: 'crafts',
     menuParentId: 'overview',
+    menuGroupLabel: '建单主数据',
     label: '建单工艺目录',
     description: '维护建单、计价、外协识别与历史展示共用的工艺字典。',
     impact: '新建工单的工艺校验、外协识别与历史展示',
@@ -217,29 +228,17 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     requiredPermission: 'dict:craft:manage',
   },
   {
-    id: 'internalPricing',
-    menuParentId: 'overview',
-    label: '内部计价',
-    description: '维护内部直单价格阶梯、加价规则与有效期。',
-    impact: '内部报价和成本结算',
-    effect: 'effective-dated',
-    href: RULE_CENTER_HREFS.internalPricing,
-    activeRouteBase: RULE_CENTER_HREFS.internalPricing,
-    iconName: 'Calculator',
-    breadcrumbLabel: '内部计价',
-    requiredPermission: 'dict:price:manage',
-  },
-  {
     id: 'employeePay',
     menuParentId: 'overview',
-    label: '工资提成',
-    description: '维护客服提成、计时工与厨师工资版本。',
+    menuGroupLabel: '员工薪酬规则',
+    label: '员工薪酬规则',
+    description: '维护客服提成、计时工与固定工资版本；工序计件工价属于独立规则域。',
     impact: '后续工资快照与月度结算',
     effect: 'effective-dated',
     href: RULE_CENTER_HREFS.employeePay,
     activeRouteBase: RULE_CENTER_HREFS.employeePay,
     iconName: 'Users',
-    breadcrumbLabel: '员工工资与提成',
+    breadcrumbLabel: '员工薪酬规则',
     requiredPermission: 'salary:rule:manage',
   },
 ] as const satisfies readonly RuleCenterSidebarItem[];
@@ -267,18 +266,7 @@ export function customerPricingRuleHref(
   return `${RULE_CENTER_HREFS.customerPricing}?${params.toString()}`;
 }
 
-export const RULE_CENTER_DEFAULT_HREF =
-  `${RULE_CENTER_HREFS.customerPricing}?section=blank` as const;
-
 export function priceVersionsHref(draftId?: string): string {
   if (!draftId) return RULE_CENTER_HREFS.priceVersions;
   return `${RULE_CENTER_HREFS.priceVersions}?draft=${encodeURIComponent(draftId)}`;
-}
-
-export function internalPriceTierHref(id: string): string {
-  return `${RULE_CENTER_HREFS.internalPricing}/tiers/${encodeURIComponent(id)}`;
-}
-
-export function internalPriceAdjustmentHref(id: string): string {
-  return `${RULE_CENTER_HREFS.internalPricing}/adjustments/${encodeURIComponent(id)}`;
 }

@@ -35,10 +35,9 @@ const SEGMENT_LABELS: Record<string, string> = {
   warehouses: '仓库/库位',
   'customer-pricing': '客户计价规则',
   papers: '纸张',
-  'stock-skus': '现货 SKU',
+  'stock-skus': '可建单产品组合',
   'price-versions': '价格版本',
-  'internal-pricing': '内部计价',
-  'employee-pay': '员工工资与提成',
+  'employee-pay': '员工薪酬规则',
   prices: '价格管理',
   'external-sales': '客户计价规则',
   adjustments: '加价规则',
@@ -76,8 +75,6 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
 const LAYOUT_ONLY_PATHS = new Set<string>([
   '/foreman',
   '/sales',
-  '/owner/rules/internal-pricing/adjustments',
-  '/owner/rules/internal-pricing/tiers',
 ]);
 
 // cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读

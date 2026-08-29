@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -252,76 +253,77 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
           const hideItems = collapsed;
           const contentId = `admin-menu-group-${idx}`;
           return (
-          <SidebarGroup
-            key={label}
-            data-menu-level="group"
-            data-menu-group={group.label}
-            data-has-active-item={containsActive ? 'true' : undefined}
-            className="py-1.5 group-data-[collapsible=icon]:border-t group-data-[collapsible=icon]:border-sidebar-border/70 group-data-[collapsible=icon]:py-2"
-          >
-            {group.label ? (
-              <SidebarGroupLabel className="h-10 px-1 group-data-[collapsible=icon]:hidden md:h-9">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-10 w-full justify-between rounded-lg px-2 text-left text-xs font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground md:h-9',
-                    containsActive &&
-                      'bg-sidebar-accent/60 text-sidebar-accent-foreground',
-                  )}
-                  aria-expanded={!hideItems}
-                  aria-controls={contentId}
-                  onClick={() => toggleGroup(group.label!)}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
+            <SidebarGroup
+              key={label}
+              data-menu-level="group"
+              data-menu-group={group.label}
+              data-has-active-item={containsActive ? 'true' : undefined}
+              className="py-1.5 group-data-[collapsible=icon]:border-t group-data-[collapsible=icon]:border-sidebar-border/70 group-data-[collapsible=icon]:py-2"
+            >
+              {group.label ? (
+                <SidebarGroupLabel className="h-10 px-1 group-data-[collapsible=icon]:hidden md:h-9">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'h-10 w-full justify-between rounded-lg px-2 text-left text-xs font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground md:h-9',
+                      containsActive &&
+                        'bg-sidebar-accent/60 text-sidebar-accent-foreground',
+                    )}
+                    aria-expanded={!hideItems}
+                    aria-controls={contentId}
+                    onClick={() => toggleGroup(group.label!)}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'size-2 shrink-0 rounded-full border border-sidebar-border bg-sidebar',
+                          containsActive &&
+                            'border-sidebar-primary bg-sidebar-primary',
+                        )}
+                      />
+                      <span className="truncate">{group.label}</span>
+                    </span>
+                    <ChevronRight
                       aria-hidden="true"
                       className={cn(
-                        'size-2 shrink-0 rounded-full border border-sidebar-border bg-sidebar',
-                        containsActive && 'border-sidebar-primary bg-sidebar-primary',
+                        'size-3.5 shrink-0 transition-transform duration-200',
+                        !hideItems && 'rotate-90',
                       )}
                     />
-                    <span className="truncate">{group.label}</span>
-                  </span>
-                  <ChevronRight
-                    aria-hidden="true"
-                    className={cn(
-                      'size-3.5 shrink-0 transition-transform duration-200',
-                      !hideItems && 'rotate-90',
-                    )}
-                  />
-                  <span className="sr-only">
-                    {hideItems ? '展开' : '收起'}
-                  </span>
-                </Button>
-              </SidebarGroupLabel>
-            ) : null}
-            {hideItems ? null : (
-              <SidebarGroupContent
-                id={contentId}
-                data-menu-level="group-children"
-                className="pl-2 group-data-[collapsible=icon]:pl-0"
-              >
-                <SidebarMenu className="gap-0.5">
-                  {group.items.map((item) => (
-                    <SidebarItem
-                      key={item.label + item.href}
-                      item={item}
-                      activeHref={activeHref}
-                      intentHref={intentHref}
-                      onEnter={scheduleIntentPrefetch}
-                      onLeave={cancelIntentPrefetch}
-                      onNavigate={(href) => {
-                        cancelIntentPrefetch(href);
-                        setOpenMobile(false);
-                      }}
-                    />
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            )}
-          </SidebarGroup>
+                    <span className="sr-only">
+                      {hideItems ? '展开' : '收起'}
+                    </span>
+                  </Button>
+                </SidebarGroupLabel>
+              ) : null}
+              {hideItems ? null : (
+                <SidebarGroupContent
+                  id={contentId}
+                  data-menu-level="group-children"
+                  className="pl-2 group-data-[collapsible=icon]:pl-0"
+                >
+                  <SidebarMenu className="gap-0.5">
+                    {group.items.map((item) => (
+                      <SidebarItem
+                        key={item.label + item.href}
+                        item={item}
+                        activeHref={activeHref}
+                        intentHref={intentHref}
+                        onEnter={scheduleIntentPrefetch}
+                        onLeave={cancelIntentPrefetch}
+                        onNavigate={(href) => {
+                          cancelIntentPrefetch(href);
+                          setOpenMobile(false);
+                        }}
+                      />
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              )}
+            </SidebarGroup>
           );
         })}
       </SidebarContent>
@@ -405,17 +407,35 @@ function SidebarItem({
           aria-label={`${item.label}子菜单`}
           data-menu-level="children"
         >
-          {item.children.map((child) => (
-            <SidebarSubItem
-              key={`${child.label}-${child.href}`}
-              item={child}
-              activeHref={activeHref}
-              intentHref={intentHref}
-              onEnter={onEnter}
-              onLeave={onLeave}
-              onNavigate={onNavigate}
-            />
-          ))}
+          {groupSidebarChildren(item.children).map((group, groupIndex) => {
+            const mergeLabelIntoOnlyItem =
+              group.label !== null &&
+              group.items.length === 1 &&
+              group.items[0]?.label === group.label;
+
+            return (
+              <Fragment key={group.label ?? `ungrouped-${groupIndex}`}>
+                {group.items.map((child, childIndex) => (
+                  <SidebarSubItem
+                    key={`${child.label}-${child.href}`}
+                    item={child}
+                    activeHref={activeHref}
+                    intentHref={intentHref}
+                    onEnter={onEnter}
+                    onLeave={onLeave}
+                    onNavigate={onNavigate}
+                    subgroupLabel={group.label}
+                    showSubgroupLabel={
+                      Boolean(group.label) &&
+                      !mergeLabelIntoOnlyItem &&
+                      childIndex === 0
+                    }
+                    startsSubgroup={groupIndex > 0 && childIndex === 0}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
         </SidebarMenuSub>
       ) : null}
     </SidebarMenuItem>
@@ -429,6 +449,9 @@ function SidebarSubItem({
   onEnter,
   onLeave,
   onNavigate,
+  subgroupLabel,
+  showSubgroupLabel,
+  startsSubgroup,
 }: {
   item: AdminMenuItem;
   activeHref: string | null;
@@ -436,13 +459,31 @@ function SidebarSubItem({
   onEnter: (href: string) => void;
   onLeave: (href?: string) => void;
   onNavigate: (href: string) => void;
+  subgroupLabel: string | null;
+  showSubgroupLabel: boolean;
+  startsSubgroup: boolean;
 }) {
   const active = item.href === activeHref;
 
   return (
     <SidebarMenuSubItem data-menu-level="child">
+      {showSubgroupLabel ? (
+        <span
+          data-menu-subgroup={subgroupLabel ?? undefined}
+          className={cn(
+            'block px-2 pb-0.5 pt-2 text-[10px] font-semibold tracking-[0.08em] text-sidebar-foreground/50',
+            startsSubgroup &&
+              'mt-1 border-t border-sidebar-border/70 pt-3',
+          )}
+        >
+          {subgroupLabel}
+        </span>
+      ) : null}
       <SidebarMenuSubButton
         isActive={active}
+        data-menu-subgroup={
+          subgroupLabel && !showSubgroupLabel ? subgroupLabel : undefined
+        }
         render={
           <Link
             href={item.href}
@@ -455,6 +496,8 @@ function SidebarSubItem({
         }
         className={cn(
           'h-10 text-sidebar-foreground/75 md:h-8',
+          startsSubgroup && !showSubgroupLabel &&
+            'mt-1 border-t border-sidebar-border/70 pt-2',
           active &&
             'font-semibold text-sidebar-accent-foreground shadow-sm before:absolute before:-left-[11px] before:h-4 before:w-0.5 before:rounded-full before:bg-sidebar-primary',
         )}
@@ -464,6 +507,24 @@ function SidebarSubItem({
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   );
+}
+
+function groupSidebarChildren(
+  children: readonly AdminMenuItem[],
+): { label: string | null; items: AdminMenuItem[] }[] {
+  const groups: { label: string | null; items: AdminMenuItem[] }[] = [];
+
+  for (const child of children) {
+    const label = child.menuGroupLabel ?? null;
+    const current = groups.at(-1);
+    if (current?.label === label) {
+      current.items.push(child);
+    } else {
+      groups.push({ label, items: [child] });
+    }
+  }
+
+  return groups;
 }
 
 function menuItemContainsHref(

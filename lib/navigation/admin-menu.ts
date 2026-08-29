@@ -15,6 +15,7 @@ export type { IconName } from './admin-modules';
 export type AdminMenuItem = {
   label: string;
   href: string;
+  menuGroupLabel?: string;
   activeRouteBase?: string;
   activeQuery?: readonly Readonly<Record<string, string | null>>[];
   iconName: IconName;
@@ -69,6 +70,7 @@ function toMenuItem(
   return {
     label: module.label,
     href: module.routeBase,
+    menuGroupLabel: module.menuGroupLabel,
     activeRouteBase: module.activeRouteBase,
     activeQuery: module.activeQuery,
     iconName: module.iconName,

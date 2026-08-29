@@ -71,8 +71,6 @@ const validCreate = {
   name: '空白红包',
   specification: '',
   paperType: '',
-  baseUnitPrice: '0.12',
-  minOrderQty: '1000',
 };
 
 const fd = (data: Record<string, string>) => {
@@ -124,7 +122,7 @@ describe('createQuoteProductAction', () => {
     expect(productMock.createProduct).not.toHaveBeenCalled();
   });
 
-  it('discards the retired internal unit price and parses minOrderQty', async () => {
+  it('创建组合时将历史产品单价固定为空', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
     await expect(createQuoteProductAction(null, fd(validCreate))).rejects.toThrow(
@@ -138,8 +136,10 @@ describe('createQuoteProductAction', () => {
         specification: null,
         paperType: null,
         baseUnitPrice: null,
-        minOrderQty: 1000,
       }),
+    );
+    expect(productMock.createProduct.mock.calls[0][0]).not.toHaveProperty(
+      'minOrderQty',
     );
   });
 
@@ -173,18 +173,22 @@ describe('createQuoteProductAction', () => {
     }
   });
 
-  it('converts empty minOrderQty / baseUnitPrice into undefined / null', async () => {
+  it('忽略伪造的旧单价与起订量字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
     await expect(
       createQuoteProductAction(
         null,
-        fd({ ...validCreate, baseUnitPrice: '', minOrderQty: '' }),
+        fd({
+          ...validCreate,
+          baseUnitPrice: '9999999.99999',
+          minOrderQty: 'not-a-number',
+        }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     const arg = productMock.createProduct.mock.calls[0][0];
     expect(arg.baseUnitPrice).toBeNull();
-    expect(arg.minOrderQty).toBeUndefined();
+    expect(arg).not.toHaveProperty('minOrderQty');
   });
 
   it('revalidates + redirects to new product edit page on success', async () => {
@@ -200,10 +204,10 @@ describe('createQuoteProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/internal-pricing/tiers/new',
+      '/owner/rules/customer-pricing',
     );
     expect(revalidatePathMock).not.toHaveBeenCalledWith(
-      '/owner/prices/tiers/new',
+      '/owner/rules/internal-pricing/tiers/new',
     );
     expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
   });
@@ -244,7 +248,7 @@ describe('createQuoteProductAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
   });
 
-  it('建单产品创建忽略伪造的内部直单价', async () => {
+  it('可建单组合创建不接受客户计价字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -255,12 +259,19 @@ describe('createQuoteProductAction', () => {
     await expect(
       createQuoteProductAction(
         null,
-        fd({ ...validCreate, baseUnitPrice: '9999999.99999' }),
+        fd({
+          ...validCreate,
+          baseUnitPrice: '9999999.99999',
+          minOrderQty: '1000',
+        }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(productMock.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({ baseUnitPrice: null }),
+    );
+    expect(productMock.createProduct.mock.calls[0][0]).not.toHaveProperty(
+      'minOrderQty',
     );
   });
 
@@ -308,7 +319,7 @@ describe('updateQuoteProductAction', () => {
     expect('isActive' in passed).toBe(false);
   });
 
-  it('建单产品更新忽略伪造价格且省略内部直单价字段', async () => {
+  it('可建单组合更新忽略伪造的旧单价与起订量', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -319,7 +330,11 @@ describe('updateQuoteProductAction', () => {
     const result = await updateQuoteProductAction(
       'p1',
       null,
-      fd({ ...baseUpdate, baseUnitPrice: '9999999.99999' }),
+      fd({
+        ...baseUpdate,
+        baseUnitPrice: '9999999.99999',
+        minOrderQty: '1000',
+      }),
     );
 
     expect(result.status).toBe('success');
@@ -328,6 +343,7 @@ describe('updateQuoteProductAction', () => {
       unknown
     >;
     expect('baseUnitPrice' in passed).toBe(false);
+    expect('minOrderQty' in passed).toBe(false);
   });
 
   it('revalidates list, item, and all product pickers on success', async () => {
@@ -342,10 +358,10 @@ describe('updateQuoteProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
     expect(revalidatePathMock).toHaveBeenCalledWith(
-      '/owner/rules/internal-pricing/tiers/new',
+      '/owner/rules/customer-pricing',
     );
     expect(revalidatePathMock).not.toHaveBeenCalledWith(
-      '/owner/prices/tiers/new',
+      '/owner/rules/internal-pricing/tiers/new',
     );
   });
 

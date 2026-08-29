@@ -1,10 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const pricesPage = readFileSync(
-  'components/business/rules/pricing/InternalPricingPage.tsx',
-  'utf8',
-);
 const itemsPage = readFileSync(
   'components/business/rules/pricing/CustomerPricingWorkspacePage.tsx',
   'utf8',
@@ -15,19 +11,6 @@ const versionsPage = readFileSync(
 );
 
 describe('pricing fault-isolation contract', () => {
-  it('keeps the price-management header ahead of independent legacy reads', () => {
-    expect(pricesPage.indexOf("await requirePermission('dict:price:manage')"))
-      .toBeLessThan(pricesPage.indexOf('const tiersPromise = listPriceTiers'));
-    expect(pricesPage.indexOf('<PageHeader')).toBeLessThan(
-      pricesPage.indexOf('<ErrorBoundary'),
-    );
-    expect(pricesPage).not.toContain('await Promise.all([');
-    expect(pricesPage.match(/<ErrorBoundary/g)).toHaveLength(2);
-    expect(pricesPage.match(/<Suspense/g)).toHaveLength(2);
-    expect(pricesPage).toContain('价格阶梯暂时无法加载');
-    expect(pricesPage).toContain('加价规则暂时无法加载');
-  });
-
   it('isolates the design-native customer pricing section behind one read', () => {
     expect(itemsPage.indexOf("await requirePermission('dict:price:manage')"))
       .toBeLessThan(

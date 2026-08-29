@@ -45,18 +45,18 @@ test.describe('automation smoke', () => {
       password: E2E_PASSWORD,
     });
 
-    await expect(page).toHaveURL((url) => {
-      return (
-        url.pathname === RULE_CENTER_HREFS.customerPricing &&
-        url.searchParams.get('section') === 'blank'
-      );
-    });
+    await expect(page).toHaveURL((url) =>
+      url.pathname === RULE_CENTER_HREFS.root,
+    );
     await expect(
       page.getByRole('heading', {
-        name: '局部烫金 · 空白封现货单价',
+        name: '规则配置中心',
         exact: true,
       }),
     ).toBeVisible();
+    await expect(page.getByRole('heading', { name: '客户计价规则' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '建单主数据' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '员工薪酬规则' })).toBeVisible();
 
     const priceSidebarEntries = [
       [
@@ -130,6 +130,16 @@ test.describe('automation smoke', () => {
     const ruleSubmenu = ruleParent.locator('[data-sidebar="menu-sub"]');
     await expect(ruleParent).toHaveCount(1);
     await expect(ruleSubmenu).toHaveCount(1);
+    await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
+    await expect(ruleParent).not.toHaveAttribute('data-has-active-child');
+
+    await page.goto('/owner/rules/customer-pricing?section=blank');
+    await expect(
+      page.getByRole('heading', {
+        name: '局部烫金 · 空白封现货单价',
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(ruleParentLink).not.toHaveAttribute('aria-current', 'page');
     await expect(ruleParent).toHaveAttribute('data-has-active-child', 'true');
     await expect(
@@ -142,11 +152,17 @@ test.describe('automation smoke', () => {
       ruleSubmenu.getByRole('link', { name: '客户计价', exact: true }),
     ).toHaveCount(0);
     await expect(
-      ruleSubmenu.getByRole('link', { name: '建单产品目录', exact: true }),
+      ruleSubmenu.getByRole('link', { name: '可建单产品组合', exact: true }),
     ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
-    await expect(
-      ruleSubmenu.locator('[data-menu-level="child-group"]'),
-    ).toHaveCount(0);
+    for (const groupLabel of [
+      '客户计价规则',
+      '建单主数据',
+      '员工薪酬规则',
+    ]) {
+      await expect(
+        ruleSubmenu.locator(`[data-menu-subgroup="${groupLabel}"]`).first(),
+      ).toBeVisible();
+    }
     for (const oldGroupLabel of ['对客计价', '基础事实', '内部结算']) {
       await expect(ruleSubmenu.getByText(oldGroupLabel, { exact: true })).toHaveCount(0);
     }
@@ -196,13 +212,7 @@ test.describe('automation smoke', () => {
         heading: '价格版本与发布',
       },
       {
-        label: '内部计价',
-        path: RULE_CENTER_HREFS.internalPricing,
-        navPath: RULE_CENTER_HREFS.internalPricing,
-        heading: '内部直单价格',
-      },
-      {
-        label: '工资提成',
+        label: '员工薪酬规则',
         path: RULE_CENTER_HREFS.employeePay,
         navPath: RULE_CENTER_HREFS.employeePay,
         heading: '员工工资规则',
@@ -244,7 +254,7 @@ test.describe('automation smoke', () => {
     }
 
     const activePayLink = sidebar.getByRole('link', {
-      name: '工资提成',
+      name: '员工薪酬规则',
       exact: true,
     });
     await expect(activePayLink).toHaveAttribute('aria-current', 'page');
@@ -253,12 +263,9 @@ test.describe('automation smoke', () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(RULE_CENTER_HREFS.root);
-    await expect(page).toHaveURL((url) => {
-      return (
-        url.pathname === RULE_CENTER_HREFS.customerPricing &&
-        url.searchParams.get('section') === 'blank'
-      );
-    });
+    await expect(page).toHaveURL((url) =>
+      url.pathname === RULE_CENTER_HREFS.root,
+    );
     await expect(
       page.getByRole('navigation', { name: '规则配置工作区导航' }),
     ).toHaveCount(0);
@@ -291,10 +298,10 @@ test.describe('automation smoke', () => {
       '/owner/rules/customer-pricing?section=blank',
     );
     await expect(
-      mobileSidebar.getByRole('link', { name: '空白封单价', exact: true }),
+      mobileSidebar.getByRole('link', { name: '规则配置中心', exact: true }),
     ).toHaveAttribute('aria-current', 'page');
     await expect(
-      mobileSidebar.getByRole('link', { name: '建单产品目录', exact: true }),
+      mobileSidebar.getByRole('link', { name: '可建单产品组合', exact: true }),
     ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
     await expect(
       mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),

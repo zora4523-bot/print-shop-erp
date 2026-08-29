@@ -12,8 +12,6 @@ const LOCKED_FORM_FILES = [
 const LOCKED_NAVIGATION_FORM_FILES = [
   'bom/BomForm.tsx',
   'craft/CraftForm.tsx',
-  'price/PriceAdjustmentForm.tsx',
-  'price/PriceTierForm.tsx',
   'product-category/ProductCategoryForm.tsx',
   'purchase/PurchaseOrderForm.tsx',
   'salary/StartCsPeriodForm.tsx',

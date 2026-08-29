@@ -5,7 +5,6 @@ import { z } from 'zod';
 // bundle. /enums exports plain `const` objects with the same values as
 // /client but without the `@prisma/client` runtime (node:module etc.).
 import {
-  AdjustmentType,
   MaterialCategory,
   PartyType,
   ProductCategory,
@@ -33,7 +32,6 @@ import {
   resolveOrderItemFoilSides,
 } from '../order/pricing-route';
 import { calculatePackagingBagCount } from '../order/packaging-bag-count';
-import { validatePriceAdjustmentTriggerCondition } from '../price/adjustment-condition';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -478,32 +476,6 @@ const orderItemMoneyOptionalField = z.preprocess(
     .transform((v) => (v === '' ? null : v)),
 );
 
-// Quantity semantics:
-//   • From FormData (strings): accept `^\d+$` (plus trim), reject JS-ish
-//     numeric forms '1e3' / '0x10' / '+5' etc. that z.coerce.number() would
-//     have silently accepted.
-//   • From JS callers (seed scripts, internal helpers): accept plain
-//     `number` values directly so the schema stays usable outside the
-//     form-post path.
-// Both paths funnel into a plain `z.number().int().min(1).max(…)`.
-const minOrderQtyField = z.preprocess(
-  (v) => {
-    if (typeof v === 'number') return v;
-    if (typeof v !== 'string') return v;
-    const trimmed = v.trim();
-    if (trimmed === '') return undefined;
-    if (!/^\d+$/.test(trimmed)) return null; // invalid — number schema will reject
-    return Number.parseInt(trimmed, 10);
-  },
-  z
-    .number({ message: '最小起订量必须是正整数' })
-    .finite('最小起订量必须是有限数')
-    .int('最小起订量必须是整数')
-    .min(1, '最小起订量必须 ≥ 1')
-    .max(9_999_999, '最小起订量过大')
-    .optional(),
-);
-
 const productCategoryNodeIdField = z
   .string()
   .trim()
@@ -562,8 +534,6 @@ export const createProductSchema = z.object({
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
-  baseUnitPrice: moneyOptionalField,
-  minOrderQty: minOrderQtyField,
 });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;
@@ -574,8 +544,6 @@ export const updateProductSchema = z.object({
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
-  baseUnitPrice: moneyOptionalField,
-  minOrderQty: minOrderQtyField,
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
@@ -632,156 +600,6 @@ export const updatePartySchema = z.object({
 });
 
 export type UpdatePartyInput = z.infer<typeof updatePartySchema>;
-
-// ============================================================
-// Price dictionary (P1)
-// ============================================================
-
-const priceDictionaryIdField = (label: string) =>
-  z
-    .string()
-    .trim()
-    .min(1, `请选择${label}`)
-    .max(64, `${label}格式非法`)
-    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
-
-const pricePositiveIntField = (label: string) =>
-  z.preprocess(
-    (v) => {
-      if (typeof v === 'number') return v;
-      if (typeof v !== 'string') return v;
-      const trimmed = v.trim();
-      if (trimmed === '') return undefined;
-      if (!/^\d+$/.test(trimmed)) return null;
-      return Number.parseInt(trimmed, 10);
-    },
-    z
-      .number({ message: `${label}必须是正整数` })
-      .finite(`${label}必须是有限数`)
-      .int(`${label}必须是整数`)
-      .min(1, `${label}必须 ≥ 1`)
-      .max(9_999_999, `${label}过大`),
-  );
-
-const priceMoneyField = (label: string) =>
-  z
-    .string()
-    .trim()
-    .min(1, `请填写${label}`)
-    .regex(/^\d{1,6}(\.\d{1,4})?$/, {
-      message: `${label}格式错误（整数部分最多 6 位、小数最多 4 位、非负数）`,
-    });
-
-const priceDateField = (label: string) =>
-  z.preprocess((v) => {
-    if (v instanceof Date) return v;
-    if (typeof v === 'string') {
-      const trimmed = v.trim();
-      if (trimmed === '') return undefined;
-      return (
-        parseStrictShanghaiDateTimeLocal(`${trimmed}T00:00`) ?? 'invalid-date'
-      );
-    }
-    return 'invalid-date';
-  }, z.date({ message: `请选择合法${label}（YYYY-MM-DD）` }));
-
-const priceOptionalDateField = (label: string) =>
-  z.preprocess((v) => {
-    if (v === null || v === undefined) return null;
-    if (v instanceof Date) return v;
-    if (typeof v === 'string') {
-      const trimmed = v.trim();
-      if (trimmed === '') return null;
-      return (
-        parseStrictShanghaiDateTimeLocal(`${trimmed}T00:00`) ?? 'invalid-date'
-      );
-    }
-    return 'invalid-date';
-  }, z.date({ message: `${label}格式非法（YYYY-MM-DD）` }).nullable());
-
-const triggerConditionJsonObjectField = z
-  .string()
-  .trim()
-  .max(2000, '触发条件过长（最多 2000 个字符）')
-  .transform((value, ctx): Record<string, unknown> | null => {
-    if (value === '') return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      ctx.addIssue({ code: 'custom', message: '触发条件必须是合法 JSON' });
-      return z.NEVER;
-    }
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      ctx.addIssue({ code: 'custom', message: '触发条件必须是 JSON object' });
-      return z.NEVER;
-    }
-    return parsed as Record<string, unknown>;
-  });
-
-export const createPriceTierSchema = z
-  .object({
-    productId: priceDictionaryIdField('产品'),
-    minQty: pricePositiveIntField('起订量'),
-    unitPrice: priceMoneyField('单价'),
-    effectiveFrom: priceDateField('有效起始日期'),
-    effectiveTo: priceOptionalDateField('有效截止日期'),
-  })
-  .superRefine((data, ctx) => {
-    if (data.effectiveTo && data.effectiveTo <= data.effectiveFrom) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['effectiveTo'],
-        message: '有效截止日期必须晚于有效起始日期',
-      });
-    }
-  });
-
-export type CreatePriceTierInput = z.infer<typeof createPriceTierSchema>;
-
-export const updatePriceTierSchema = createPriceTierSchema;
-
-export type UpdatePriceTierInput = z.infer<typeof updatePriceTierSchema>;
-
-export const createPriceAdjustmentSchema = z
-  .object({
-    name: z
-      .string()
-      .trim()
-      .min(1, '请填写加价规则名称')
-      .max(64, '加价规则名称过长（最多 64 个字符）'),
-    adjustmentType: z.nativeEnum(AdjustmentType, {
-      error: '请选择有效的加价类型',
-    }),
-    amount: priceMoneyField('加价金额'),
-    triggerCondition: triggerConditionJsonObjectField,
-  })
-  .superRefine((data, ctx) => {
-    for (const message of validatePriceAdjustmentTriggerCondition(
-      data.triggerCondition,
-      data.adjustmentType,
-    )) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['triggerCondition'],
-        message,
-      });
-    }
-  });
-
-export type CreatePriceAdjustmentInput = z.infer<
-  typeof createPriceAdjustmentSchema
->;
-
-export const updatePriceAdjustmentSchema = createPriceAdjustmentSchema;
-
-export type UpdatePriceAdjustmentInput = z.infer<
-  typeof updatePriceAdjustmentSchema
->;
 
 // ============================================================
 // Material dictionary and stock transactions (SPEC §5 / P1)
@@ -1260,9 +1078,8 @@ const requiredTrimmedText = (label: string, max: number) =>
     .min(1, `请填写${label}`)
     .max(max, `${label}过长（最多 ${max} 个字符）`);
 
-// Per-item quantity: integer ≥ 1, capped at the same 9,999,999 ceiling as
-// minOrderQty. Reject JS-ish numeric forms on the string path (see
-// minOrderQtyField for rationale).
+// Per-item quantity: integer ≥ 1, capped at 9,999,999. Reject JS-ish numeric
+// forms on the string path rather than accepting z.coerce.number() semantics.
 const orderItemQuantityField = z.preprocess(
   (v) => {
     if (typeof v === 'number') return v;

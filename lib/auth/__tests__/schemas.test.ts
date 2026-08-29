@@ -868,8 +868,6 @@ const validProduct = {
   name: '空白红包',
   specification: '',
   paperType: '',
-  baseUnitPrice: '0.12',
-  minOrderQty: '1000',
 };
 
 describe('createProductSchema', () => {
@@ -877,9 +875,21 @@ describe('createProductSchema', () => {
     const r = createProductSchema.safeParse(validProduct);
     expect(r.success).toBe(true);
     if (r.success) {
-      expect(r.data.baseUnitPrice).toBe('0.12');
-      expect(r.data.minOrderQty).toBe(1000);
       expect(r.data.specification).toBeNull();
+    }
+  });
+
+  it('丢弃旧产品单价与起订量字段', () => {
+    const r = createProductSchema.safeParse({
+      ...validProduct,
+      baseUnitPrice: '0.12',
+      minOrderQty: '1000',
+    });
+
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data).not.toHaveProperty('baseUnitPrice');
+      expect(r.data).not.toHaveProperty('minOrderQty');
     }
   });
 
@@ -921,88 +931,6 @@ describe('createProductSchema', () => {
       });
       expect(r.success).toBe(true);
       if (r.success) expect(r.data.categoryNodeId).toBe('cat_blank_stock');
-    });
-  });
-
-  describe('baseUnitPrice', () => {
-    it.each(['0', '1', '100', '0.1', '1.5', '0.0001', '12.3456', '999999', '999999.9999'])(
-      'accepts %j',
-      (v) => {
-        const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-        expect(r.success, v).toBe(true);
-      },
-    );
-
-    it.each(['1.23456', '-1', '.5', '1.', 'abc', '1,5'])('rejects format %j', (v) => {
-      const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-      expect(r.success, v).toBe(false);
-    });
-
-    it('rejects values exceeding Decimal(10,4) precision (Codex round 21 / P1)', () => {
-      for (const v of ['1000000', '9999999', '1000000.0', '1000000.0000']) {
-        const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-        expect(r.success, v).toBe(false);
-      }
-    });
-
-    it('empty string is normalized to null', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: '' });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.baseUnitPrice).toBeNull();
-    });
-  });
-
-  describe('minOrderQty', () => {
-    it('empty / whitespace → undefined (the DB will store null)', () => {
-      for (const v of ['', '   ']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: v });
-        expect(r.success).toBe(true);
-        if (r.success) expect(r.data.minOrderQty).toBeUndefined();
-      }
-    });
-    it('accepts positive int string', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: '500' });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.minOrderQty).toBe(500);
-    });
-    it('rejects 0 / negative / decimal', () => {
-      for (const bad of ['0', '-1', '3.5', 'abc']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, bad).toBe(false);
-      }
-    });
-    it('rejects JS-ish numeric forms that z.coerce would have accepted (Codex round 21 / P2)', () => {
-      // Trimming is explicitly part of the preprocess, so ' 5 ' is fine —
-      // the invalid shapes are the ones that break the digit-only regex.
-      for (const bad of ['1e3', '0x10', '+5', '005e1']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, bad).toBe(false);
-      }
-    });
-    it('accepts the boundary value 9,999,999 but not one more', () => {
-      expect(
-        createProductSchema.safeParse({ ...validProduct, minOrderQty: '9999999' }).success,
-      ).toBe(true);
-      expect(
-        createProductSchema.safeParse({ ...validProduct, minOrderQty: '10000000' }).success,
-      ).toBe(false);
-    });
-    it('also accepts a plain number for programmatic callers (Codex round 22 / P2)', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: 500 });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.minOrderQty).toBe(500);
-    });
-    it('still rejects non-int and out-of-range numbers', () => {
-      for (const bad of [3.5, 0, -1, 10_000_000]) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, String(bad)).toBe(false);
-      }
-    });
-    it('rejects Infinity / NaN on the numeric path (Codex round 23 / P2)', () => {
-      for (const bad of [Infinity, -Infinity, NaN]) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, String(bad)).toBe(false);
-      }
     });
   });
 

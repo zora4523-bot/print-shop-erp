@@ -181,7 +181,7 @@ export default function ShowcasePage() {
             href="#"
             icon={Boxes}
             label="产品库"
-            description="管理产品清单、规格、基础价与起订量"
+            description="管理可建单产品组合、规格与纸张事实"
             tone="info"
           />
           <NavCard

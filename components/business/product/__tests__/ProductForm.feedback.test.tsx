@@ -54,8 +54,6 @@ describe('ProductForm structured feedback contract', () => {
           name: '大号触感纸（价格表!B6）',
           specification: '160g（价格表!B7）',
           paperType: '触感纸（烫金!B13）',
-          minOrderQty: null,
-          isActive: true,
         }}
       />,
     );
@@ -96,14 +94,12 @@ describe('ProductForm structured feedback contract', () => {
           name: '（价格表!B6）',
           specification: '（价格表!B7）',
           paperType: '（烫金!B13）',
-          minOrderQty: null,
-          isActive: true,
         }}
       />,
     );
 
     expect(html.match(/<input[^>]*id="name"[^>]*>/)?.[0]).toContain(
-      'value="未命名 SKU"',
+      'value="未命名组合"',
     );
     expect(
       html.match(/<input[^>]*id="specification"[^>]*>/)?.[0],
@@ -126,14 +122,14 @@ describe('ProductForm structured feedback contract', () => {
           name: '大号现货',
           specification: '大号',
           paperType: '160g 艳闪',
-          minOrderQty: 100,
-          isActive: true,
         }}
       />,
     );
 
     expect(html).not.toContain('内部销售/工厂直单基础单价');
     expect(html).not.toContain('name="baseUnitPrice"');
+    expect(html).not.toContain('name="minOrderQty"');
+    expect(html).not.toContain('最小起订量');
   });
 
   it('links the summary and select to a stable error message', () => {
@@ -182,7 +178,7 @@ describe('ProductForm structured feedback contract', () => {
     actionState.pending = true;
     const pendingHtml = render();
     expect(pendingHtml).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(pendingHtml).toContain('正在保存产品…');
+    expect(pendingHtml).toContain('正在保存组合…');
     expect(pendingHtml).not.toContain('产品编码已被其他记录占用');
   });
 });

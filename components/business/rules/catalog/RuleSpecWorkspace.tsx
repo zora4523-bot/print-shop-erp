@@ -80,11 +80,11 @@ export function RuleSpecWorkspace({
               规格主数据
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
-              每行对应一条建单产品目录项，规格和纸张信息直接来自当前主数据。
+              每行对应一条可建单组合，只维护产品结构、规格与纸张；价格及数量档由客户计价规则维护。
             </p>
           </div>
           <span className="shrink-0 rounded-full border bg-background px-3 py-1 text-xs font-medium tabular-nums text-muted-foreground">
-            {pagination.total} 条 SKU
+            {pagination.total} 条组合
           </span>
         </div>
 
@@ -130,7 +130,7 @@ export function RuleSpecWorkspace({
                 defaultValue={query}
                 maxLength={120}
                 className="min-h-11 pl-9"
-                placeholder="搜索 SKU 编码、名称、规格或纸张"
+                placeholder="搜索组合编码、名称、规格或纸张"
               />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -143,7 +143,7 @@ export function RuleSpecWorkspace({
 
           <div
             role="group"
-            aria-label="SKU 建单可选状态筛选"
+            aria-label="组合建单可选状态筛选"
             className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
           >
             {(
@@ -176,7 +176,7 @@ export function RuleSpecWorkspace({
       {products.length > 0 ? (
         <ul aria-label="规格主数据列表" className="divide-y">
           {products.map((product) => {
-            const name = displayText(product.name, '未命名 SKU');
+            const name = displayText(product.name, '未命名组合');
             const code = displayText(product.code, '未设置编码');
             const category = displayText(
               product.categoryNode.name,
@@ -216,13 +216,9 @@ export function RuleSpecWorkspace({
                   </div>
                 </div>
 
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                   <SpecFact label="规格" value={specification} />
                   <SpecFact label="纸张" value={paperType} />
-                  <SpecFact
-                    label="起订量"
-                    value={product.minOrderQty ?? '未设置'}
-                  />
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
@@ -235,7 +231,7 @@ export function RuleSpecWorkspace({
                   <Link
                     href={`${routeBase}/${product.id}`}
                     prefetch={false}
-                    aria-label={`编辑 SKU：${name}`}
+                    aria-label={`编辑可建单组合：${name}`}
                     className={cn(
                       buttonVariants({ variant: 'outline' }),
                       'min-h-11',
@@ -253,7 +249,7 @@ export function RuleSpecWorkspace({
         <div className="p-4 sm:p-5">
           <EmptyState
             kind={query ? 'no-result' : 'no-data'}
-            noun="建单产品"
+            noun="可建单组合"
             onClear={query ? clearSearch : undefined}
             onCreate={
               query ? undefined : (
@@ -261,7 +257,7 @@ export function RuleSpecWorkspace({
                   href={`${routeBase}/new`}
                   className={cn(buttonVariants(), 'min-h-11')}
                 >
-                  新建产品目录项
+                  新建组合
                 </Link>
               )
             }

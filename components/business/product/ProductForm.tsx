@@ -25,8 +25,6 @@ type EditInitial = {
   name: string;
   specification: string | null;
   paperType: string | null;
-  minOrderQty: number | null;
-  isActive: boolean;
 };
 
 export type ProductRouteBase = typeof RULE_CENTER_HREFS.stockSkus;
@@ -45,7 +43,7 @@ type Props = CommonProps &
         fd: FormData,
       ) => Promise<ProductMutationResult>;
       categoryNodes: ProductCategoryOption[];
-      }
+    }
     | {
       mode: 'edit';
       action: (
@@ -54,19 +52,18 @@ type Props = CommonProps &
       ) => Promise<ProductMutationResult>;
       initial: EditInitial;
       categoryNodes: ProductCategoryOption[];
-      }
+    }
   );
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const PRODUCT_FIELD_LABELS: Record<string, string> = {
-  code: '产品编码',
+  code: '组合编码',
   categoryNodeId: '分类',
-  name: '产品名',
+  name: '组合名称',
   specification: '规格',
   paperType: '纸张',
-  minOrderQty: '最小起订量',
 };
 
 export function ProductForm(props: Props) {
@@ -103,7 +100,7 @@ export function ProductForm(props: Props) {
           open={Boolean(errs.code?.[0])}
         >
           <DisclosureSummary className="text-muted-foreground">
-            自定义产品编码
+            自定义组合编码
           </DisclosureSummary>
           <div className="mt-3">
             <TextField
@@ -118,7 +115,7 @@ export function ProductForm(props: Props) {
       ) : (
         <TextField
           id="code"
-          label="产品编码"
+          label="组合编码"
           hint="大小写不敏感。"
           disabled={pending}
           error={errs.code?.[0]}
@@ -177,8 +174,8 @@ export function ProductForm(props: Props) {
       {initial ? (
         <PreservedBusinessTextField
           id="name"
-          label="产品名"
-          fallback="未命名 SKU"
+          label="组合名称"
+          fallback="未命名组合"
           required
           disabled={pending}
           error={errs.name?.[0]}
@@ -187,7 +184,7 @@ export function ProductForm(props: Props) {
       ) : (
         <TextField
           id="name"
-          label="产品名"
+          label="组合名称"
           required
           disabled={pending}
           error={errs.name?.[0]}
@@ -234,36 +231,24 @@ export function ProductForm(props: Props) {
         />
       )}
 
-      <TextField
-        id="minOrderQty"
-        label="最小起订量（选填）"
-        hint="正整数；空表示不限。低于起订量时不自动报价，特殊单需手工填价并说明原因。"
-        type="number"
-        min={1}
-        step={1}
-        disabled={pending}
-        error={errs.minOrderQty?.[0]}
-        defaultValue={initial?.minOrderQty != null ? String(initial.minOrderQty) : ''}
-      />
-
       {generalError ? (
         <ActionNotice
           tone="error"
-          title="产品保存失败"
+          title="组合保存失败"
           description={generalError}
         />
       ) : null}
       {success ? (
-        <ActionNotice tone="success" title="产品已保存" />
+        <ActionNotice tone="success" title="组合已保存" />
       ) : null}
 
       <div className="flex gap-3">
         <PendingButton
           pending={pending}
-          pendingLabel="正在保存产品…"
+          pendingLabel="正在保存组合…"
           disabled={missingCategoryNodes}
         >
-          {isCreate ? '创建产品' : '保存修改'}
+          {isCreate ? '创建组合' : '保存修改'}
         </PendingButton>
         <Link href={routeBase} className={buttonVariants({ variant: 'outline' })}>
           返回列表

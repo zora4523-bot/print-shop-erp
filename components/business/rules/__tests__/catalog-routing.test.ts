@@ -19,23 +19,6 @@ const CANONICAL_RULE_ROUTES = [
   ['app/(admin)/owner/rules/crafts/[id]/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/customer-pricing/page.tsx', '/pricing/'],
   ['app/(admin)/owner/rules/price-versions/page.tsx', '/pricing/'],
-  ['app/(admin)/owner/rules/internal-pricing/page.tsx', '/pricing/'],
-  [
-    'app/(admin)/owner/rules/internal-pricing/tiers/new/page.tsx',
-    '/pricing/',
-  ],
-  [
-    'app/(admin)/owner/rules/internal-pricing/tiers/[id]/page.tsx',
-    '/pricing/',
-  ],
-  [
-    'app/(admin)/owner/rules/internal-pricing/adjustments/new/page.tsx',
-    '/pricing/',
-  ],
-  [
-    'app/(admin)/owner/rules/internal-pricing/adjustments/[id]/page.tsx',
-    '/pricing/',
-  ],
   ['app/(admin)/owner/rules/employee-pay/page.tsx', '/salary/'],
 ] as const;
 
@@ -49,19 +32,6 @@ describe('rule-center feature routing', () => {
       );
       expect(source).not.toContain('@/app/(admin)/owner/');
       expect(source).not.toMatch(/from ['"]\.\.\/.*(?:prices|salary)/);
-    }
-  });
-
-  it('canonical pricing forms never link back to redirected legacy dictionaries', () => {
-    for (const relativePath of [
-      'components/business/price/PriceTierForm.tsx',
-      'components/business/price/PriceAdjustmentForm.tsx',
-      'components/business/price/PriceTables.tsx',
-    ]) {
-      const source = readFileSync(join(ROOT, relativePath), 'utf8');
-
-      expect(source).not.toContain('/owner/products');
-      expect(source).not.toContain('/owner/prices');
     }
   });
 

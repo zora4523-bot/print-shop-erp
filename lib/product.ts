@@ -81,8 +81,6 @@ export type ProductReferenceImpact = {
   bomCount: number;
   /** Enabled rules belonging to a currently effective, enabled price book. */
   currentExternalPriceRuleCount: number;
-  /** Internal price tiers whose effective interval contains `now`. */
-  currentInternalPriceTierCount: number;
 };
 
 export type ProductListRow = ProductSummary & {
@@ -211,7 +209,6 @@ type ProductReferenceImpactRaw = {
   orderCount: bigint | number;
   bomCount: bigint | number;
   currentExternalPriceRuleCount: bigint | number;
-  currentInternalPriceTierCount: bigint | number;
 };
 
 type ProductReferenceReadClient = Pick<
@@ -224,7 +221,6 @@ function emptyProductReferenceImpact(): ProductReferenceImpact {
     orderCount: 0,
     bomCount: 0,
     currentExternalPriceRuleCount: 0,
-    currentInternalPriceTierCount: 0,
   };
 }
 
@@ -275,14 +271,7 @@ async function readProductReferenceImpacts(
           AND book."purpose" = 'PROCESSING'
           AND book."effectiveFrom" <= ${now}
           AND (book."effectiveTo" IS NULL OR book."effectiveTo" > ${now})
-      ) AS "currentExternalPriceRuleCount",
-      (
-        SELECT COUNT(*)
-        FROM "PriceTier" AS tier
-        WHERE tier."productId" = product."id"
-          AND tier."effectiveFrom" <= ${now}
-          AND (tier."effectiveTo" IS NULL OR tier."effectiveTo" > ${now})
-      ) AS "currentInternalPriceTierCount"
+      ) AS "currentExternalPriceRuleCount"
     FROM "Product" AS product
     WHERE product."id" IN (${Prisma.join(ids)})
   `);
@@ -293,9 +282,6 @@ async function readProductReferenceImpacts(
       bomCount: referenceCount(row.bomCount),
       currentExternalPriceRuleCount: referenceCount(
         row.currentExternalPriceRuleCount,
-      ),
-      currentInternalPriceTierCount: referenceCount(
-        row.currentInternalPriceTierCount,
       ),
     });
   }
@@ -913,7 +899,9 @@ export async function updateProduct(
         ...(data.baseUnitPrice === undefined
           ? {}
           : { baseUnitPrice: data.baseUnitPrice }),
-        minOrderQty: data.minOrderQty ?? null,
+        ...(data.minOrderQty === undefined
+          ? {}
+          : { minOrderQty: data.minOrderQty }),
       },
       select: SUMMARY_SELECT,
     });

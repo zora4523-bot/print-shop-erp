@@ -12,7 +12,6 @@ const DENSE_LINK_FILES = [
   'components/business/material/MaterialsTable.tsx',
   'components/business/order/OrdersTable.tsx',
   'components/business/party/PartiesTable.tsx',
-  'components/business/price/PriceTables.tsx',
   'components/business/product/ProductsTable.tsx',
   'components/business/product-category/ProductCategoryNodesTable.tsx',
   'components/business/purchase/PurchaseOrdersTable.tsx',

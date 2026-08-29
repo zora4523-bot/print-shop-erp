@@ -74,7 +74,7 @@ describe('owner 详情页 metadata 权限边界', () => {
       generateProductMetadata({
         params: Promise.resolve({ id: 'product-private' }),
       }),
-    ).resolves.toEqual({ title: '建单产品目录' });
+    ).resolves.toEqual({ title: '可建单产品组合' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
     ).resolves.toEqual({ title: 'BOM/用料' });
@@ -90,7 +90,7 @@ describe('owner 详情页 metadata 权限边界', () => {
       generateProductMetadata({
         params: Promise.resolve({ id: 'product-private' }),
       }),
-    ).resolves.toEqual({ title: '建单产品目录' });
+    ).resolves.toEqual({ title: '可建单产品组合' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
     ).resolves.toEqual({ title: 'BOM/用料' });
@@ -105,7 +105,7 @@ describe('owner 详情页 metadata 权限边界', () => {
 
     await expect(
       generateProductMetadata({ params: Promise.resolve({ id: 'product-1' }) }),
-    ).resolves.toEqual({ title: '编辑 烫金红包 · 建单产品目录' });
+    ).resolves.toEqual({ title: '编辑 烫金红包 · 可建单产品组合' });
     expect(getProductSummaryMock).toHaveBeenCalledOnce();
     expect(getProductSummaryMock).toHaveBeenCalledWith('product-1');
   });
