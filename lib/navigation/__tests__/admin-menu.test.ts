@@ -28,7 +28,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(30);
+    expect(items).toHaveLength(28);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -45,13 +45,11 @@ describe('getAdminMenuItems', () => {
       '员工工资规则',
       '客服周期',
       '时薪工月结',
-      '客户/供应商',
       '工艺字典',
       '产品字典',
       '产品分类',
       '外部销售收费',
       '内部报价（低频）',
-      'BOM/用料',
       '物料',
       '仓库/库位',
       '用户管理',
@@ -71,9 +69,7 @@ describe('getAdminMenuItems', () => {
     const orderChanges = items.find((i) => i.label === '工单修改申请');
     expect(orderChanges?.href).toBe('/owner/order-changes');
     expect(orderChanges?.requiredPermission).toBe('order:change:review');
-    const parties = items.find((i) => i.label === '客户/供应商');
-    expect(parties?.href).toBe('/owner/parties');
-    expect(parties?.requiredPermission).toBe('party:manage');
+    expect(items.map((item) => item.label)).not.toContain('客户/供应商');
     // P1 #2 Slice B：推送配置走 /owner/notifications，权限 notification:config
     const notif = items.find((i) => i.label === '推送配置');
     expect(notif?.href).toBe('/owner/notifications');
@@ -110,9 +106,7 @@ describe('getAdminMenuItems', () => {
     expect(prices?.href).toBe('/owner/prices');
     expect(prices?.requiredPermission).toBe('dict:price:manage');
     expect(prices?.breadcrumbLabel).toBe('内部报价');
-    const boms = items.find((i) => i.label === 'BOM/用料');
-    expect(boms?.href).toBe('/owner/boms');
-    expect(boms?.requiredPermission).toBe('bom:manage');
+    expect(items.map((item) => item.label)).not.toContain('BOM/用料');
     const pieceworkRules = items.find((i) => i.label === '开机师傅计件规则');
     expect(pieceworkRules?.href).toBe('/owner/salary/piecework-rules');
     expect(pieceworkRules?.requiredPermission).toBe('salary:rule:manage');
