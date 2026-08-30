@@ -29,7 +29,7 @@ describe('getAdminMenuItems', () => {
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(36);
+    expect(items).toHaveLength(34);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -57,8 +57,6 @@ describe('getAdminMenuItems', () => {
       '历史日薪档案',
       '客服周期',
       '时薪工月结',
-      '客户/供应商',
-      'BOM/用料',
       '物料',
       '仓库/库位',
       '用户管理',
@@ -78,9 +76,7 @@ describe('getAdminMenuItems', () => {
     const orderChanges = items.find((i) => i.label === '工单修改申请');
     expect(orderChanges?.href).toBe('/owner/order-changes');
     expect(orderChanges?.requiredPermission).toBe('order:change:review');
-    const parties = items.find((i) => i.label === '客户/供应商');
-    expect(parties?.href).toBe('/owner/parties');
-    expect(parties?.requiredPermission).toBe('party:manage');
+    expect(items.map((item) => item.label)).not.toContain('客户/供应商');
     // P1 #2 Slice B：推送配置走 /owner/notifications，权限 notification:config
     const notif = items.find((i) => i.label === '推送配置');
     expect(notif?.href).toBe('/owner/notifications');
@@ -206,9 +202,7 @@ describe('getAdminMenuItems', () => {
       ['建单工艺目录', '建单主数据'],
       ['员工薪酬规则', '员工薪酬规则'],
     ]);
-    const boms = items.find((i) => i.label === 'BOM/用料');
-    expect(boms?.href).toBe('/owner/boms');
-    expect(boms?.requiredPermission).toBe('bom:manage');
+    expect(items.map((item) => item.label)).not.toContain('BOM/用料');
     expect(items.map((item) => item.label)).not.toEqual(
       expect.arrayContaining([
         '外部销售收费',
