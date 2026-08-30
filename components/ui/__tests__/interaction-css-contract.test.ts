@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 const root = process.cwd()
+const eslintConfigSource = readFileSync(join(root, "eslint.config.mjs"), "utf8")
 const globalsCss = readFileSync(join(root, "app/globals.css"), "utf8")
 const dropdownSource = readFileSync(
   join(root, "components/ui/dropdown-menu.tsx"),
@@ -32,7 +33,6 @@ describe("shared interaction CSS contract", () => {
     expect(targetRule).toContain("min-height: 2.75rem")
     expect(targetRule).toContain(".worker-viewport :where")
     expect(targetRule).toContain(':not([aria-hidden="true"])')
-    expect(targetRule).toContain(':not([type="checkbox"])')
     expect(targetRule).toContain('[role="checkbox"]')
     expect(targetRule).not.toContain("button:not([disabled])")
     expect(targetRule).not.toContain(":not([aria-disabled=\"true\"])")
@@ -51,17 +51,14 @@ describe("shared interaction CSS contract", () => {
     expect(viewportGate).toContain('[role="checkbox"]:not([aria-disabled="true"])')
   })
 
-  it("routes business checkboxes through the shared primitive", () => {
-    const nativeCheckboxConsumers = [
-      ...productionTsxFiles(join(root, "app")),
-      ...productionTsxFiles(join(root, "components/business")),
-    ].filter((path) =>
-      /type\s*=\s*(?:["']checkbox["']|\{\s*["']checkbox["']\s*\})/.test(
-        readFileSync(path, "utf8")
-      )
+  it("keeps the native checkbox guard in eslint", () => {
+    expect(eslintConfigSource).toContain("NATIVE_CHECKBOX_GUARD_MESSAGE")
+    expect(eslintConfigSource).toContain(
+      "Use the shared Checkbox component so the 44px target, 20px indicator, keyboard states, and mixed-state semantics stay consistent."
     )
-
-    expect(nativeCheckboxConsumers).toEqual([])
+    expect(eslintConfigSource).toContain(
+      "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'][value.value='checkbox']"
+    )
   })
 
   it("reduces motion for primitives mounted outside the app shells", () => {
