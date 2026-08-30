@@ -191,7 +191,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             const selected = selectedItems.has(item.id);
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
-                <label className="flex min-h-11 min-w-0 items-center gap-3">
+                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
                   <Checkbox
                     checked={selected}
                     disabled={pending}
@@ -252,7 +252,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         {item.crafts.map((craft) => (
                           <label
                             key={craft.id}
-                            className="flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
                           >
                             <Checkbox
                               checked={
