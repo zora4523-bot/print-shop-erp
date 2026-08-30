@@ -572,7 +572,59 @@ describe('PublishCustomerPriceBookDraftForm', () => {
     expect(html).toContain('检测到 1 条高风险报价变更');
     expect(html).toContain('name="confirmedHighRisk"');
     expect(html).toContain('我已逐条核对高风险变更');
+    const checkbox = html.match(
+      /<span[^>]*aria-label="我已逐条核对高风险变更，确认按当前新规则发布"[^>]*>/,
+    )?.[0];
+    expect(checkbox).toContain('data-slot="checkbox"');
+    expect(checkbox).toContain('aria-checked="false"');
+    expect(checkbox).not.toContain('aria-describedby');
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+  });
+
+  it('高风险确认只在有错误时关联错误文案，且发布中锁定', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: {
+          confirmedHighRisk: ['请确认已核对高风险变更'],
+        },
+      },
+      action,
+      true,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-risky"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="修订单价"
+        impact={{
+          totalRuleCount: 145,
+          changedItemCount: 1,
+          changedRuleCount: 1,
+          increasedRuleCount: 1,
+          decreasedRuleCount: 0,
+          highRiskRuleCount: 1,
+          highRiskDeltaPercentThreshold: '50',
+          deltaPercentMin: '515.4',
+          deltaPercentMax: '515.4',
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+    const checkbox = html.match(
+      /<span[^>]*aria-label="我已逐条核对高风险变更，确认按当前新规则发布"[^>]*>/,
+    )?.[0];
+
+    expect(checkbox).toContain('aria-invalid="true"');
+    expect(checkbox).toContain(
+      'aria-describedby="confirmedHighRisk-draft-risky-error"',
+    );
+    expect(checkbox).toContain('data-disabled=""');
+    expect(checkbox).toContain('aria-disabled="true"');
+    expect(html).toContain('id="confirmedHighRisk-draft-risky-error"');
+    expect(html).toContain('请确认已核对高风险变更');
   });
 });
 
@@ -608,8 +660,8 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).not.toContain('name="priority"');
     expect(html).not.toContain('name="note"');
     expect(html).toContain('min-h-11');
-    expect(html).toContain('opacity-0');
-    expect(html).toContain('size-5');
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-slot="checkbox-indicator"');
     expect(html).toContain(
       'name="expectedUpdatedAt" value="2026-08-09T00:30:00.000Z"',
     );
@@ -617,6 +669,29 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).not.toContain('发布前不会改变当前报价或历史工单金额');
     expect(html).toContain('sticky bottom-0');
     expect(html).toContain('保存草稿');
+  });
+
+  it('保存中锁定全部共享复选框', () => {
+    actionStateMock.mockImplementation((action, initial) => [
+      initial,
+      action,
+      true,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+      />,
+    );
+    const checkboxRoots =
+      html.match(/<span[^>]*data-slot="checkbox"[^>]*>/g) ?? [];
+
+    expect(checkboxRoots.length).toBeGreaterThan(0);
+    for (const checkbox of checkboxRoots) {
+      expect(checkbox).toContain('data-disabled=""');
+      expect(checkbox).toContain('aria-disabled="true"');
+    }
   });
 
   it('默认收起低频条件，并只向管理员展示中文工艺名称', () => {
@@ -864,7 +939,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
       />,
     );
     const packagingCheckbox = html.match(
-      /<input[^>]*name="match\.packagingModes"[^>]*>/,
+      /<span[^>]*role="checkbox"[^>]*aria-label="单款装"[^>]*>/,
     )?.[0];
 
     expect(html).toContain('name="match.target" value="PACKAGING_GROUP"');

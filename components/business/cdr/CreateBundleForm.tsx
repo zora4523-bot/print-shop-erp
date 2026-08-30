@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DisabledReason,
   EmptyState,
@@ -120,19 +121,15 @@ export function CreateBundleForm({
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     // toggleAll 的语义是全选/全清，不是反选。
                     aria-label="全选 / 全不选"
-                    // 部分选中时置原生 indeterminate：读屏器据此播报
-                    // “mixed”，视觉上浏览器也画横线而不是空框。只用 DOM
-                    // 属性、不额外写 aria-checked——原生 checkbox 上手写
-                    // aria-checked 会和原生状态打架。
-                    ref={(el) => {
-                      if (el) el.indeterminate = someSelected;
-                    }}
+                    // Base UI 同时会把部分选中暴露为 aria-checked="mixed"
+                    // 并由共享 Indicator 画横线，语义与视觉保持一致。
+                    indeterminate={someSelected}
                     checked={allSelected}
-                    onChange={toggleAll}
+                    disabled={isPending}
+                    onCheckedChange={toggleAll}
                   />
                 </th>
                 <th className="px-3 py-2 text-left">工单号</th>
@@ -148,13 +145,13 @@ export function CreateBundleForm({
                 return (
                   <tr key={o.id}>
                     <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         name="orderIds"
                         value={o.id}
                         aria-label={`选择工单 ${o.orderNo}`}
                         checked={checked}
-                        onChange={() => toggleOne(o.id)}
+                        disabled={isPending}
+                        onCheckedChange={() => toggleOne(o.id)}
                       />
                     </td>
                     <td className="px-3 py-2 font-sans tabular-nums text-xs">

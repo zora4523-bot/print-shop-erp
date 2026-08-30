@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,15 +68,14 @@ export function CraftForm(props: Props) {
         defaultValue={initial?.name}
       />
 
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
+      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+        <Checkbox
           name="isOutsource"
           defaultChecked={initial?.isOutsource}
           disabled={pending}
-          className="mt-0.5 h-4 w-4 rounded border-input"
+          aria-label="外协工艺"
         />
-        <span className="space-y-1">
+        <span className="min-w-0 space-y-1 py-2.5">
           <span className="block">外协工艺</span>
           <span className="block text-xs text-muted-foreground">
             勾选后，该工艺进入外协清单；内部工序由工单收费项固定生成。

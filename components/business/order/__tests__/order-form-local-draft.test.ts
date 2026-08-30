@@ -92,6 +92,7 @@ describe('order form local draft', () => {
     expect(parsed?.savedAt).toBe('2026-08-24T03:00:00.000Z');
     expect(parsed?.values.promisedDate).toBe('2026-09-01');
     expect(parsed?.values.nextItemFig).toBe(7);
+    expect(parsed?.values.isUrgent).toBe(false);
     expect(parsed?.values.items).toEqual([
       expect.objectContaining({
         name: '外盒',
@@ -132,6 +133,16 @@ describe('order form local draft', () => {
     expect(
       (parsed?.values.additionalShipments as Array<Record<string, unknown>>)[0],
     ).not.toHaveProperty('shippingFee');
+  });
+
+  it.each([true, false])('round-trips the urgent flag as %s', (isUrgent) => {
+    const values = formValues();
+    values.isUrgent = isUrgent;
+
+    const serialized = serializeLocalOrderFormDraft(values, 'internal');
+    const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
+
+    expect(parsed?.values.isUrgent).toBe(isUrgent);
   });
 
   it('removes every hidden price authority field from external-sales drafts', () => {

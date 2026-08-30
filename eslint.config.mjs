@@ -21,6 +21,9 @@ const PALETTE_GUARD_MESSAGE =
 const NATIVE_CONFIRM_GUARD_MESSAGE =
   "Use ConfirmActionDialog for confirmations and ActionNotice/FormMessage for operation feedback instead of native alert/confirm dialogs.";
 
+const NATIVE_CHECKBOX_GUARD_MESSAGE =
+  "Use the shared Checkbox component so the 44px target, 20px indicator, keyboard states, and mixed-state semantics stay consistent.";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -66,6 +69,16 @@ const eslintConfig = defineConfig([
           selector:
             "CallExpression[callee.object.name='window'][callee.property.name='confirm']",
           message: NATIVE_CONFIRM_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'][value.value='checkbox']",
+          message: NATIVE_CHECKBOX_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'] > JSXExpressionContainer > Literal[value='checkbox']",
+          message: NATIVE_CHECKBOX_GUARD_MESSAGE,
         },
       ],
     },

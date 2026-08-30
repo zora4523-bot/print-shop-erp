@@ -48,12 +48,13 @@ test.describe('notification urgent wire — golden path', () => {
     await form
       .getByRole('textbox', { name: '客户名称/简称', exact: true })
       .fill(orderRef);
-    await form
-      .getByRole('checkbox', {
-        name: '急单（提交后会推送至排产群）',
-        exact: true,
-      })
-      .check();
+    const urgentCheckbox = form.getByRole('checkbox', {
+      name: '急单（提交后会推送至排产群）',
+      exact: true,
+    });
+    await expect(urgentCheckbox).not.toBeChecked();
+    await urgentCheckbox.click();
+    await expect(urgentCheckbox).toBeChecked();
 
     const routes = form.getByRole('group', { name: '工艺类型' });
     await routes

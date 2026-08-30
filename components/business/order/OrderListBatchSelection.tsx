@@ -9,9 +9,10 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, ClipboardCopy, Minus, X } from 'lucide-react';
+import { ClipboardCopy, X } from 'lucide-react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 export type OrderListSelectionItem = {
@@ -287,37 +288,14 @@ function SelectionCheckbox({
   label: string;
   onChange: () => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-
   return (
-    <span className="relative flex size-11 shrink-0 items-center justify-center">
-      <input
-        ref={inputRef}
-        type="checkbox"
-        data-batch-checkbox="true"
-        checked={checked}
-        onChange={onChange}
-        aria-label={label}
-        className="peer absolute inset-0 size-full cursor-pointer opacity-0"
-      />
-      <span
-        aria-hidden="true"
-        className={cn(
-          'pointer-events-none flex size-5 items-center justify-center rounded border border-input bg-background text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-checked:border-primary peer-checked:bg-primary',
-          indeterminate && 'border-primary bg-primary',
-        )}
-      >
-        {indeterminate ? (
-          <Minus className="size-4" />
-        ) : (
-          <Check className={checked ? 'size-4' : 'size-4 opacity-0'} />
-        )}
-      </span>
-    </span>
+    <Checkbox
+      data-batch-checkbox="true"
+      checked={checked}
+      indeterminate={indeterminate}
+      onCheckedChange={onChange}
+      aria-label={label}
+    />
   );
 }
 

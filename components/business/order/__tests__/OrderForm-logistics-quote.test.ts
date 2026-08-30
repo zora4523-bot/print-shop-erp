@@ -200,8 +200,11 @@ describe('OrderForm local draft recovery', () => {
     expect(source).toContain('恢复本地草稿');
     expect(source).toContain('放弃本地草稿');
     expect(source).toContain('reset(pendingLocalDraft.values');
+    expect(source).toContain(
+      'const orderFormControlsDisabled =\n    !localDraftReady || submitting || uploading;',
+    );
     expect(source).toMatch(
-      /<fieldset[\s\S]{0,120}disabled=\{!localDraftReady \|\| submitting \|\| uploading\}/,
+      /<fieldset[\s\S]{0,120}disabled=\{orderFormControlsDisabled\}/,
     );
     expect(source).not.toContain('reset(draft.values');
   });

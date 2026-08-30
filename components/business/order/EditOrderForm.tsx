@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateOrderAction } from '@/actions/order';
@@ -125,20 +126,18 @@ export function EditOrderForm({ orderId, fieldset, initial }: Props) {
             />
           )}
           {!isShippingOnly && (
-            <div className="sm:col-span-2 flex items-center gap-2">
-              <input
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
                 id="isUrgent"
                 name="isUrgent"
-                type="checkbox"
+                value="on"
                 defaultChecked={initial.isUrgent}
                 disabled={pending}
-                className="h-4 w-4"
+                aria-label="标记为急单"
               />
-              <Label htmlFor="isUrgent" className="text-sm">
-                标记为急单
-              </Label>
+              <span className="text-sm">标记为急单</span>
               <input type="hidden" name="isUrgent" value="false" />
-            </div>
+            </label>
           )}
         </div>
       </section>

@@ -134,6 +134,22 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(tagWithIdSuffix(html, '-custom-name')).not.toContain('required=""');
   });
 
+  it('管理员急单使用统一 44px 复选框并保留表单语义', () => {
+    const html = render(false);
+
+    expect(html).toContain('data-slot="urgent-order-field"');
+    expect(html).toContain('data-slot="urgent-order-title"');
+    expect(html).toContain('data-slot="urgent-order-description"');
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('role="checkbox"');
+    expect(html).toContain('id="urgent-order-accessible-label"');
+    expect(html).toContain('aria-labelledby="urgent-order-accessible-label"');
+    expect(html).toContain('name="isUrgent"');
+    expect(html).toContain('size-11');
+    expect(html).toContain('@min-[560px]:grid-cols-2');
+    expect(html).not.toContain('class="size-4 shrink-0"');
+  });
+
   it('内部建单不再渲染产品下拉、动态材料或创建页人工价格控件', () => {
     const html = render(false);
 

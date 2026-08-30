@@ -50,6 +50,101 @@ test.describe('administrator workspace', () => {
   test('critical routes pass the same gates with dark tokens', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'dark');
   });
+
+  test('order creation responds to its available container instead of the viewport', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'admin-1280x800',
+      'Focused geometry regression runs once; the route matrix still covers every configured viewport.',
+    );
+
+    const controlledStateWarnings: string[] = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      if (/controlled|uncontrolled/i.test(text)) {
+        controlledStateWarnings.push(text);
+      }
+    });
+
+    await page.setViewportSize({ width: 911, height: 881 });
+    await page.goto('/orders/new');
+
+    for (const viewport of [
+      { width: 911, height: 881, stacked: true },
+      { width: 1280, height: 800, stacked: false },
+    ]) {
+      await test.step(`${viewport.width}x${viewport.height}`, async () => {
+        await page.setViewportSize(viewport);
+
+        const form = page.locator('[data-slot="order-form-b"]');
+        await expect(form).toBeVisible();
+        const urgentCheckbox = form.getByRole('checkbox', {
+          name: '急单（提交后会推送至排产群）',
+          exact: true,
+        });
+        await expect(urgentCheckbox).toBeVisible();
+
+        await urgentCheckbox.focus();
+        await page.keyboard.press('Space');
+        await expect(urgentCheckbox).toBeChecked();
+        await page.keyboard.press('Space');
+        await expect(urgentCheckbox).not.toBeChecked();
+
+        const geometry = await form.evaluate((root) => {
+          const rect = (selector: string) => {
+            const element = root.querySelector<HTMLElement>(selector);
+            if (!element) throw new Error(`Missing ${selector}`);
+            const bounds = element.getBoundingClientRect();
+            return {
+              bottom: bounds.bottom,
+              height: bounds.height,
+              left: bounds.left,
+              top: bounds.top,
+              width: bounds.width,
+            };
+          };
+          const rail = root.querySelector<HTMLElement>(
+            '[data-slot="order-form-rail"]',
+          );
+          if (!rail) throw new Error('Missing order form rail');
+
+          return {
+            checkbox: rect('[data-slot="checkbox"]'),
+            description: rect('[data-slot="urgent-order-description"]'),
+            editor: rect('[data-slot="order-form-editor"]'),
+            field: rect('[data-slot="urgent-order-field"]'),
+            indicator: rect('[data-slot="checkbox-indicator"]'),
+            rail: rect('[data-slot="order-form-rail"]'),
+            railPosition: getComputedStyle(rail).position,
+            title: rect('[data-slot="urgent-order-title"]'),
+          };
+        });
+
+        expect(geometry.checkbox.width).toBeCloseTo(44, 0);
+        expect(geometry.checkbox.height).toBeCloseTo(44, 0);
+        expect(geometry.indicator.width).toBeCloseTo(20, 0);
+        expect(geometry.indicator.height).toBeCloseTo(20, 0);
+        expect(geometry.field.width).toBeGreaterThanOrEqual(240);
+        expect(geometry.title.height).toBeLessThanOrEqual(24);
+        expect(geometry.description.height).toBeLessThanOrEqual(40);
+
+        if (viewport.stacked) {
+          expect(geometry.railPosition).toBe('static');
+          expect(geometry.rail.top).toBeGreaterThanOrEqual(
+            geometry.editor.bottom - 1,
+          );
+        } else {
+          expect(geometry.railPosition).toBe('sticky');
+          expect(Math.abs(geometry.rail.top - geometry.editor.top)).toBeLessThanOrEqual(
+            1,
+          );
+        }
+      });
+    }
+
+    expect(controlledStateWarnings).toEqual([]);
+  });
 });
 
 test.describe('设计稿客户计价板块', () => {

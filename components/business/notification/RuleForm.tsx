@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { DisabledReason, PendingButton } from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
@@ -100,7 +101,7 @@ export function RuleForm({
       </div>
 
       <fieldset className="space-y-2">
-        <Label>推送到群（多选）</Label>
+        <legend className="text-sm font-medium">推送到群（多选）</legend>
         {(eventType === 'CS_PERIOD_ENDING' ||
           eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
           <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
@@ -133,16 +134,21 @@ export function RuleForm({
               //     必失败，dashboard 永红）
               const disabled = !c.isActive && !isSelected;
               const option = (
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
                     name="channelIds"
                     value={c.id}
                     defaultChecked={isSelected}
-                    disabled={disabled}
-                    className="h-4 w-4 rounded border-input"
+                    disabled={pending || disabled}
+                    aria-label={c.channelName}
                   />
-                  <span className={c.isActive ? '' : 'text-muted-foreground'}>
+                  <span
+                    className={
+                      c.isActive
+                        ? 'min-w-0 py-2'
+                        : 'min-w-0 py-2 text-muted-foreground'
+                    }
+                  >
                     {c.channelName}
                     {!c.isActive ? '（已停用）' : ''}
                   </span>
@@ -172,18 +178,18 @@ export function RuleForm({
         ))}
       </fieldset>
 
-      <div className="flex items-center gap-2">
-        <input
+      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+        <Checkbox
           id="isActive"
           name="isActive"
-          type="checkbox"
           defaultChecked={initial.isActive}
-          className="h-4 w-4 rounded border-input"
+          disabled={pending}
+          aria-label="启用通知规则"
         />
-        <Label htmlFor="isActive" className="cursor-pointer">
+        <span className="min-w-0 py-2">
           启用此规则（关闭后此事件不再触发推送）
-        </Label>
-      </div>
+        </span>
+      </label>
 
       {state?.status === 'error' ? (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">

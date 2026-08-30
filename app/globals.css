@@ -340,10 +340,12 @@
      注意：这条规则**不是**组件自带的，控件本身是 h-8（32px）。凡是没被
      下面这些容器罩住的路由，触控目标就不合规——曾经 /login 与
      /account/password 就落在外面（它们不在 (admin)/(worker) 壳里）。
-     所以这里用一个可复用的 .touch-viewport 类，任何独立页面外壳都能挂。 */
-  .admin-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]),
-  .worker-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]),
-  .touch-viewport :where(a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"]) {
+     所以这里用一个可复用的 .touch-viewport 类，任何独立页面外壳都能挂。
+     checkbox 的可见目标由 [role="checkbox"] 负责；排除其内部原生 input，
+     避免把 20px 指示框错误放大成 44px 浏览器原生方框。 */
+  .admin-viewport :where(a[href], button, input:not([type="hidden"]):not([type="checkbox"]):not([aria-hidden="true"]), select, textarea, summary, [role="button"], [role="checkbox"]),
+  .worker-viewport :where(a[href], button, input:not([type="hidden"]):not([type="checkbox"]):not([aria-hidden="true"]), select, textarea, summary, [role="button"], [role="checkbox"]),
+  .touch-viewport :where(a[href], button, input:not([type="hidden"]):not([type="checkbox"]):not([aria-hidden="true"]), select, textarea, summary, [role="button"], [role="checkbox"]) {
     min-width: 2.75rem;
     min-height: 2.75rem;
   }

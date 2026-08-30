@@ -10,6 +10,7 @@ import type { FormEvent } from 'react';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -218,14 +219,13 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           return (
             <div key={item.id} className="min-w-0 rounded-lg border p-3">
               <label className="flex min-h-11 min-w-0 items-center gap-3">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={current.selected}
                   disabled={pending}
-                  onChange={(event) =>
-                    updateItem(item.id, { selected: event.target.checked })
+                  aria-label={`选择款式 ${item.sequence}：${externalPriceBusinessText(item.name)}`}
+                  onCheckedChange={(checked) =>
+                    updateItem(item.id, { selected: checked })
                   }
-                  className="size-4 shrink-0"
                 />
                 <span className="admin-wrap-anywhere min-w-0 font-medium">
                   #{item.sequence} · {externalPriceBusinessText(item.name)}
@@ -306,12 +306,11 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
       <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
         <label className="flex min-h-11 items-center gap-3">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={addEnabled}
             disabled={pending}
-            onChange={(event) => setAddEnabled(event.target.checked)}
-            className="size-4"
+            aria-label="本次申请需要新增一款"
+            onCheckedChange={setAddEnabled}
           />
           <span className="text-sm">本次申请需要新增一款</span>
         </label>

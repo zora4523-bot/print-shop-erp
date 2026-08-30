@@ -11,13 +11,16 @@ import {
   type ClipboardEventHandler,
 } from 'react';
 import {
+  Controller,
   useForm,
   useFieldArray,
   useWatch,
+  type Control,
   type SubmitHandler,
 } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -908,6 +911,91 @@ function pastedTextareaValue(
   return `${textarea.value.slice(0, start)}${pasted}${textarea.value.slice(end)}`;
 }
 
+function UrgentOrderField({
+  control,
+  disabled,
+}: {
+  control: Control<CreateOrderInput>;
+  disabled: boolean;
+}) {
+  return (
+    <Controller
+      control={control}
+      name="isUrgent"
+      render={({ field }) => (
+        <label
+          htmlFor="isUrgent"
+          data-slot="urgent-order-field"
+          className="flex min-h-16 min-w-0 cursor-pointer items-center gap-2 self-end rounded-xl border bg-background py-2 pr-2 pl-3 transition-colors hover:bg-muted/50 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+        >
+          <span id="urgent-order-accessible-label" className="sr-only">
+            急单（提交后会推送至排产群）
+          </span>
+          <span className="min-w-0 flex-1">
+            <span
+              data-slot="urgent-order-title"
+              className="block text-sm font-semibold"
+            >
+              急单
+            </span>
+            <span
+              data-slot="urgent-order-description"
+              className="mt-0.5 block text-xs leading-5 text-muted-foreground"
+            >
+              提交后会推送至排产群
+            </span>
+          </span>
+          <Checkbox
+            id="isUrgent"
+            name={field.name}
+            checked={field.value ?? false}
+            disabled={disabled}
+            inputRef={field.ref}
+            aria-labelledby="urgent-order-accessible-label"
+            onBlur={field.onBlur}
+            onCheckedChange={field.onChange}
+          />
+        </label>
+      )}
+    />
+  );
+}
+
+function InternalAdditionalCraftChoices({
+  options,
+  selectedIds,
+  disabled,
+  onToggle,
+}: {
+  options: readonly CraftOption[];
+  selectedIds: readonly string[];
+  disabled: boolean;
+  onToggle: (craftId: string, checked: boolean) => void;
+}) {
+  return (
+    <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 @min-[560px]:grid-cols-2">
+      {options.map((craft) => (
+        <label
+          key={craft.id}
+          className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border pr-3 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+        >
+          <Checkbox
+            checked={selectedIds.includes(craft.id)}
+            disabled={disabled}
+            aria-label={`${craft.name}${craft.isOutsource ? ' · 外协' : ''}${craft.isLowFrequency ? ' · 低频' : ''}`}
+            onCheckedChange={(checked) => onToggle(craft.id, checked)}
+          />
+          <span className="min-w-0">
+            {craft.name}
+            {craft.isOutsource ? ' · 外协' : ''}
+            {craft.isLowFrequency ? ' · 低频' : ''}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function OrderForm({
   crafts,
   products,
@@ -1121,6 +1209,8 @@ export function OrderForm({
     quoting: quoting || externalQuoteQuoting,
     logisticsQuoting: externalQuoteQuoting,
   });
+  const orderFormControlsDisabled =
+    !localDraftReady || submitting || uploading;
   const pendingDesignFileCount = Object.values(pendingDesigns).reduce(
     (total, queue) => total + queue.length,
     0,
@@ -3220,7 +3310,7 @@ export function OrderForm({
       ) : null}
 
       <fieldset
-        disabled={!localDraftReady || submitting || uploading}
+        disabled={orderFormControlsDisabled}
         className="contents"
       >
         {(
@@ -3240,7 +3330,10 @@ export function OrderForm({
             }}
             orderExtras={
               !usesExternalSalesPricing ? (
-                <div className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
+                <div
+                  data-slot="order-form-order-extras"
+                  className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
+                >
                   <div>
                     <Label htmlFor="customerPartyId">客户主数据（选填）</Label>
                     <select
@@ -3314,15 +3407,11 @@ export function OrderForm({
                       </p>
                     ) : null}
                   </div>
-                  <label className="flex min-h-10 items-center gap-2 self-end rounded-lg border px-3 text-sm font-semibold">
-                    <input
-                      type="checkbox"
-                      className="size-4 shrink-0"
-                      {...register('isUrgent')}
-                    />
-                    急单（提交后会推送至排产群）
-                  </label>
-                  <div className="min-[560px]:col-span-2">
+                  <UrgentOrderField
+                    control={control}
+                    disabled={orderFormControlsDisabled}
+                  />
+                  <div className="@min-[560px]:col-span-2">
                     <Label htmlFor="remark">工单备注</Label>
                     <Textarea
                       id="remark"
@@ -3335,7 +3424,7 @@ export function OrderForm({
             }
             materialExtras={
               !usesExternalSalesPricing ? (
-                <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
+                <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                   <div>
                     <Label htmlFor={`items.${expandedItem}.name`}>款式名</Label>
                     <Input
@@ -3384,8 +3473,8 @@ export function OrderForm({
                   aria-label="内部生产信息"
                   className="mt-[1.125rem] border-t pt-[1.125rem]"
                 >
-                  <div className="grid min-w-0 grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
-                    <div className="min-[560px]:col-span-2">
+                  <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
+                    <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
                         配置外项目说明（转人工核价）
                       </Label>
@@ -3402,7 +3491,7 @@ export function OrderForm({
                         不会在创建页录入人工单价；填写后该款式进入工厂人工核价。
                       </p>
                     </div>
-                    <div className="min-[560px]:col-span-2">
+                    <div className="@min-[560px]:col-span-2">
                       <Label htmlFor={`items.${expandedItem}.remark`}>
                         款式备注
                       </Label>
@@ -3422,49 +3511,25 @@ export function OrderForm({
                       <p className="mt-2 text-xs text-muted-foreground">
                         主工艺已由上方工艺类型、烫金和包装选择自动生成；这里只选择额外工序。
                       </p>
-                      <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 min-[560px]:grid-cols-2">
-                        {internalAdditionalCraftOptions.map((craft) => {
-                          const selected = (
-                            watchedItems[expandedItem]?.crafts ?? []
-                          ).includes(craft.id);
-                          return (
-                            <label
-                              key={craft.id}
-                              className="flex min-h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"
-                            >
-                              <input
-                                type="checkbox"
-                                className="size-4 shrink-0"
-                                checked={selected}
-                                onChange={(event) => {
-                                  const currentItem = getValues(
-                                    `items.${expandedItem}`,
-                                  );
-                                  const next = new Set(currentItem.crafts);
-                                  if (event.target.checked) next.add(craft.id);
-                                  else next.delete(craft.id);
-                                  setValue(
-                                    `items.${expandedItem}.crafts`,
-                                    resolveInternalOrderCraftIds(
-                                      {
-                                        ...currentItem,
-                                        crafts: [...next],
-                                      },
-                                      crafts,
-                                    ),
-                                    { shouldDirty: true, shouldValidate: true },
-                                  );
-                                }}
-                              />
-                              <span className="min-w-0">
-                                {craft.name}
-                                {craft.isOutsource ? ' · 外协' : ''}
-                                {craft.isLowFrequency ? ' · 低频' : ''}
-                              </span>
-                            </label>
+                      <InternalAdditionalCraftChoices
+                        options={internalAdditionalCraftOptions}
+                        selectedIds={watchedItems[expandedItem]?.crafts ?? []}
+                        disabled={orderFormControlsDisabled}
+                        onToggle={(craftId, checked) => {
+                          const currentItem = getValues(`items.${expandedItem}`);
+                          const next = new Set(currentItem.crafts);
+                          if (checked) next.add(craftId);
+                          else next.delete(craftId);
+                          setValue(
+                            `items.${expandedItem}.crafts`,
+                            resolveInternalOrderCraftIds(
+                              { ...currentItem, crafts: [...next] },
+                              crafts,
+                            ),
+                            { shouldDirty: true, shouldValidate: true },
                           );
-                        })}
-                      </div>
+                        }}
+                      />
                     </fieldset>
                   ) : null}
                 </section>
@@ -3472,7 +3537,7 @@ export function OrderForm({
             }
             shippingExtras={
               !usesExternalSalesPricing ? (
-                <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
+                <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
                   <div>
                     <Label htmlFor="expressCode">快递代码</Label>
                     <Input
@@ -3551,7 +3616,7 @@ export function OrderForm({
                               删除地址
                             </Button>
                           </div>
-                          <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 min-[560px]:grid-cols-2">
+                          <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
                             <div>
                               <Label
                                 htmlFor={`additionalShipments.${shipmentIndex}.receiverName`}
@@ -3594,7 +3659,7 @@ export function OrderForm({
                                 )}
                               />
                             </div>
-                            <div className="min-[560px]:col-span-2">
+                            <div className="@min-[560px]:col-span-2">
                               <Label
                                 htmlFor={`additionalShipments.${shipmentIndex}.receiverAddress`}
                               >
@@ -3651,7 +3716,7 @@ export function OrderForm({
                             <legend className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
                               款式分配数量
                             </legend>
-                            <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 min-[560px]:grid-cols-2">
+                            <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
                               {itemsArray.fields.map((itemField, itemIndex) => (
                                 <div key={itemField.id}>
                                   <Label

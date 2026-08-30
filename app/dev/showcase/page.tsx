@@ -39,6 +39,7 @@ import {
   formMessageA11yProps,
 } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
@@ -46,6 +47,46 @@ import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 // **仅 dev 可见**：production 走 notFound() 不暴露。
 // 用法：本地 `pnpm dev` → 访问 `/dev/showcase` 看完整设计系统。
 // 改 globals.css 的语义 token 后这一页会立即反映视觉变化，省去逐页核验。
+
+function CheckboxShowcase() {
+  return (
+    <Section
+      title="Checkbox"
+      subtitle="44px 触控区域与 20px 可视勾选框分离，覆盖默认、选中、混合和禁用状态。"
+    >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label
+          htmlFor="showcase-checkbox-default"
+          className="flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl border bg-card py-1 pr-1 pl-3 text-sm font-medium"
+        >
+          默认
+          <Checkbox id="showcase-checkbox-default" />
+        </label>
+        <label
+          htmlFor="showcase-checkbox-checked"
+          className="flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl border bg-card py-1 pr-1 pl-3 text-sm font-medium"
+        >
+          已选
+          <Checkbox id="showcase-checkbox-checked" defaultChecked />
+        </label>
+        <label
+          htmlFor="showcase-checkbox-mixed"
+          className="flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl border bg-card py-1 pr-1 pl-3 text-sm font-medium"
+        >
+          部分选择
+          <Checkbox id="showcase-checkbox-mixed" indeterminate />
+        </label>
+        <label
+          htmlFor="showcase-checkbox-disabled"
+          className="flex min-h-14 cursor-not-allowed items-center justify-between gap-3 rounded-xl border bg-muted/40 py-1 pr-1 pl-3 text-sm font-medium text-muted-foreground"
+        >
+          已禁用
+          <Checkbox id="showcase-checkbox-disabled" disabled />
+        </label>
+      </div>
+    </Section>
+  );
+}
 
 export default function ShowcasePage() {
   if (process.env.NODE_ENV === 'production') notFound();
@@ -336,7 +377,7 @@ export default function ShowcasePage() {
           />
         </div>
       </Section>
-
+      <CheckboxShowcase />
       <Section
         title="BatchActionResult"
         subtitle="批量动作的完整 / 部分 / 失败回执；失败项必须展示具体原因。"

@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -62,6 +63,17 @@ const LAMINATION_OPTIONS = [
   { value: OrderLamination.NEW_GLOSS, label: '新光膜' },
   { value: OrderLamination.LASER, label: '雷射' },
 ] as const;
+
+function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
+  return (
+    <aside
+      data-slot="order-form-rail"
+      className="min-w-0 @min-[881px]:sticky @min-[881px]:top-[70px]"
+    >
+      {rail}
+    </aside>
+  );
+}
 
 export type OrderFormBErrors = {
   summary?: readonly string[];
@@ -937,7 +949,7 @@ export function OrderFormB({
     <div
       ref={rootRef}
       data-slot="order-form-b"
-      className="mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums"
+      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums"
       onPaste={(event) => {
         const target = event.target as HTMLElement;
         if (
@@ -1029,8 +1041,14 @@ export function OrderFormB({
         </span>
       </nav>
 
-      <div className="grid grid-cols-1 items-start gap-[1.375rem] min-[881px]:grid-cols-[minmax(0,1fr)_310px]">
-        <div className="min-w-0 rounded-[14px] border bg-card p-5">
+      <div
+        data-slot="order-form-layout"
+        className="grid grid-cols-1 items-start gap-[1.375rem] @min-[881px]:grid-cols-[minmax(0,1fr)_310px]"
+      >
+        <div
+          data-slot="order-form-editor"
+          className="@container min-w-0 rounded-[14px] border bg-card p-5"
+        >
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
             <div
               role="alert"
@@ -1233,15 +1251,12 @@ export function OrderFormB({
               {allowCustomSize &&
               item.pricingRoute ===
                 OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.8125rem] font-semibold">
-                  <input
-                    type="checkbox"
-                    className="size-4! min-h-4! min-w-4! shrink-0"
+                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
                     checked={customSizeSelected}
                     disabled={disabled}
-                    onChange={(event) =>
-                      onCustomSizeChange(event.target.checked)
-                    }
+                    aria-label="改尺寸（转管理员终价）"
+                    onCheckedChange={onCustomSizeChange}
                   />
                   改尺寸（转管理员终价）
                 </label>
@@ -1250,7 +1265,7 @@ export function OrderFormB({
           </Group>
 
           <Group title="数量与包装">
-            <div className="grid grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <div>
                 <FieldLabel htmlFor={`${uid}-quantity`} required>
                   数量
@@ -1336,7 +1351,7 @@ export function OrderFormB({
                 设计文件
                 {designImageRequired ? <RequiredMark /> : null}
               </legend>
-              <div className="grid grid-cols-1 gap-3 min-[560px]:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
                 <DesignFileBox
                   itemNumber={safeActiveIndex + 1}
                   fileType={DesignFileType.IMAGE}
@@ -1494,13 +1509,12 @@ export function OrderFormB({
               </div>
             ) : null}
 
-            <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.8125rem] font-semibold">
-              <input
-                type="checkbox"
-                className="size-4! min-h-4! min-w-4! shrink-0"
-                checked={values.isSfCollect}
+            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
+                checked={values.isSfCollect ?? false}
                 disabled={disabled}
-                onChange={(event) => onSfCollectChange(event.target.checked)}
+                aria-label="顺丰到付（本单不计快递费）"
+                onCheckedChange={onSfCollectChange}
               />
               顺丰到付（本单不计快递费）
             </label>
@@ -1508,9 +1522,7 @@ export function OrderFormB({
           {afterShipping}
         </div>
 
-        <aside className="min-w-0 min-[881px]:sticky min-[881px]:top-[70px]">
-          {rail}
-        </aside>
+        <StickyOrderFormRail rail={rail} />
       </div>
     </div>
   );

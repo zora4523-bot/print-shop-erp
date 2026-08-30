@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Table } from '@/components/ui/table';
@@ -386,13 +387,12 @@ function WorkspaceFilters(props: FilterProps) {
             ]}
           />
           {props.changedFilterAvailable ? (
-            <label className="flex min-h-11 min-w-0 items-center gap-3 self-end rounded-lg border bg-background px-3 text-sm font-medium">
-              <input
-                type="checkbox"
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 self-end rounded-lg border bg-background pr-3 text-sm font-medium">
+              <Checkbox
                 name="changed"
                 value="1"
                 defaultChecked={props.filters.changedOnly}
-                className="size-4 shrink-0 accent-primary"
+                aria-label="只看本次修改"
               />
               只看本次修改
             </label>

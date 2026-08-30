@@ -265,6 +265,9 @@ describe('OrderListFilters', () => {
       ?.find((input) => input.includes('id="order-filter-craftId-retired-craft"'));
     expect(retiredCraft).toContain('value="retired-craft"');
     expect(retiredCraft).toContain('checked=""');
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-slot="checkbox-indicator"');
+    expect(html).toContain('aria-label="工艺（retired-craft）"');
     expect(html).toContain('工艺（retired-craft）');
   });
 

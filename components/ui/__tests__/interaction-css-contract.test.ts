@@ -31,11 +31,37 @@ describe("shared interaction CSS contract", () => {
 
     expect(targetRule).toContain("min-height: 2.75rem")
     expect(targetRule).toContain(".worker-viewport :where")
+    expect(targetRule).toContain(':not([aria-hidden="true"])')
+    expect(targetRule).toContain(':not([type="checkbox"])')
+    expect(targetRule).toContain('[role="checkbox"]')
     expect(targetRule).not.toContain("button:not([disabled])")
     expect(targetRule).not.toContain(":not([aria-disabled=\"true\"])")
     expect(globalsCss).toContain(
       ":where(.admin-viewport, .worker-viewport, .touch-viewport)"
     )
+  })
+
+  it("measures the visible Base UI checkbox target instead of its hidden input", () => {
+    const viewportGate = readFileSync(
+      join(root, "tests/visual/ui-gates.ts"),
+      "utf8"
+    )
+
+    expect(viewportGate).toContain('input:not([type="hidden"]):not([aria-hidden="true"])')
+    expect(viewportGate).toContain('[role="checkbox"]:not([aria-disabled="true"])')
+  })
+
+  it("routes business checkboxes through the shared primitive", () => {
+    const nativeCheckboxConsumers = [
+      ...productionTsxFiles(join(root, "app")),
+      ...productionTsxFiles(join(root, "components/business")),
+    ].filter((path) =>
+      /type\s*=\s*(?:["']checkbox["']|\{\s*["']checkbox["']\s*\})/.test(
+        readFileSync(path, "utf8")
+      )
+    )
+
+    expect(nativeCheckboxConsumers).toEqual([])
   })
 
   it("reduces motion for primitives mounted outside the app shells", () => {

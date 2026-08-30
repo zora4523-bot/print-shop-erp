@@ -13,6 +13,7 @@ import { createReworkOrderAction } from '@/actions/order';
 import type { CreateReworkOrderMutationResult } from '@/actions/order.types';
 import { ReworkCause } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 
 type CraftOption = {
@@ -191,12 +192,11 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
                 <label className="flex min-h-11 min-w-0 items-center gap-3">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected}
                     disabled={pending}
-                    onChange={() => toggleItem(item.id)}
-                    className="h-4 w-4 shrink-0"
+                    aria-label={`选择重做款式 ${item.sequence}：${item.name}`}
+                    onCheckedChange={() => toggleItem(item.id)}
                   />
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
                     #{item.sequence} · {item.name}
@@ -254,14 +254,15 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                             key={craft.id}
                             className="flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm"
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={
                                 selectedCrafts[item.id]?.has(craft.id) ?? false
                               }
                               disabled={pending}
-                              onChange={() => toggleCraft(item.id, craft.id)}
-                              className="h-4 w-4"
+                              aria-label={`重做工艺：${craft.name}${craft.isOutsource ? '（外协）' : ''}`}
+                              onCheckedChange={() =>
+                                toggleCraft(item.id, craft.id)
+                              }
                             />
                             <span>
                               {craft.name}

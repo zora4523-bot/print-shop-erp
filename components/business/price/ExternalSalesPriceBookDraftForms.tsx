@@ -15,6 +15,7 @@ import type {
   UpdateCustomerPriceRuleDraftActionInput,
 } from '@/actions/customer-price-books.types';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -631,6 +632,7 @@ export function PublishCustomerPriceBookDraftForm({
   const publishNoteId = `publishNote-${priceBookId}`;
   const publishNoteHintId = `${publishNoteId}-hint`;
   const publishNoteErrorId = `${publishNoteId}-error`;
+  const confirmedHighRiskErrorId = `confirmedHighRisk-${priceBookId}-error`;
   const validationPassed = impact?.validationStatus !== 'FAIL';
   const hasChanges =
     (impact?.changedItemCount ?? 0) > 0 &&
@@ -759,20 +761,26 @@ export function PublishCustomerPriceBookDraftForm({
               以及有效规则新增、移除或启停时，需要单独确认。
               系统不会限制价格，只防止误触发布。
             </p>
-            <label className="flex min-h-11 items-start gap-2 rounded-md border p-2 text-sm">
-              <input
-                type="checkbox"
+            <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
                 name="confirmedHighRisk"
                 value="true"
                 checked={confirmedHighRisk}
-                onChange={(event) => setConfirmedHighRisk(event.target.checked)}
-                className="mt-0.5 size-4 shrink-0"
-                aria-describedby={`confirmedHighRisk-${priceBookId}-error`}
+                disabled={pending}
+                aria-label="我已逐条核对高风险变更，确认按当前新规则发布"
+                onCheckedChange={setConfirmedHighRisk}
+                aria-invalid={Boolean(errors.confirmedHighRisk?.length)}
+                aria-describedby={fieldDescriptionIds(
+                  confirmedHighRiskErrorId,
+                  errors.confirmedHighRisk,
+                )}
               />
-              <span>我已逐条核对高风险变更，确认按当前新规则发布</span>
+              <span className="min-w-0 py-2">
+                我已逐条核对高风险变更，确认按当前新规则发布
+              </span>
             </label>
             <FieldErrorMessages
-              id={`confirmedHighRisk-${priceBookId}-error`}
+              id={confirmedHighRiskErrorId}
               messages={errors.confirmedHighRisk}
             />
           </div>
@@ -1106,6 +1114,7 @@ function MatchCheckboxGroup<T extends string>({
   values,
   defaultValues,
   required,
+  disabled,
   errors,
   errorId,
 }: {
@@ -1115,6 +1124,7 @@ function MatchCheckboxGroup<T extends string>({
   values?: readonly T[];
   defaultValues: readonly T[];
   required?: boolean;
+  disabled?: boolean;
   errors?: string[];
   errorId: string;
 }) {
@@ -1131,14 +1141,14 @@ function MatchCheckboxGroup<T extends string>({
           (value) => (
             <label
               key={value}
-              className="relative flex min-h-11 min-w-0 cursor-pointer items-center rounded-lg border bg-background pl-10 pr-2 text-sm"
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 name={name}
                 value={value}
-                className="absolute left-3 size-4"
                 defaultChecked={defaultValues.includes(value)}
+                disabled={disabled}
+                aria-label={labels[value]}
                 aria-invalid={Boolean(errors?.length)}
                 aria-describedby={errors?.length ? errorId : undefined}
               />
@@ -1614,6 +1624,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={PACKAGING_MODE_LABELS}
                 defaultValues={rule.match.packagingModes}
                 required
+                disabled={pending}
                 errors={errors['match.packagingModes']}
                 errorId={`${prefix}-packagingModes-error`}
               />
@@ -1626,6 +1637,7 @@ export function CustomerPriceBookDraftRuleForm({
                   values={NEW_ORDER_PRICING_ROUTES}
                   defaultValues={rule.match.pricingRoutes}
                   required
+                  disabled={pending}
                   errors={errors['match.pricingRoutes']}
                   errorId={`${prefix}-pricingRoutes-error`}
                 />
@@ -1641,6 +1653,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.productStructures"
               labels={PRODUCT_STRUCTURE_LABELS}
               defaultValues={rule.match.productStructures}
+              disabled={pending}
               errors={errors['match.productStructures']}
               errorId={`${prefix}-productStructures-error`}
             />
@@ -1649,6 +1662,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.foilTechniques"
               labels={FOIL_TECHNIQUE_LABELS}
               defaultValues={rule.match.foilTechniques}
+              disabled={pending}
               errors={errors['match.foilTechniques']}
               errorId={`${prefix}-foilTechniques-error`}
             />
@@ -1657,6 +1671,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.laminations"
               labels={LAMINATION_LABELS}
               defaultValues={rule.match.laminations}
+              disabled={pending}
               errors={errors['match.laminations']}
               errorId={`${prefix}-laminations-error`}
             />
@@ -1684,6 +1699,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.craftCodes}
+                disabled={pending}
                 errors={errors['match.craftCodes']}
                 errorId={`${prefix}-craftCodes-error`}
               />
@@ -1709,6 +1725,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.noneOfCraftCodes}
+                disabled={pending}
                 errors={errors['match.noneOfCraftCodes']}
                 errorId={`${prefix}-noneOfCraftCodes-error`}
               />
@@ -1718,6 +1735,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.anyCraftCodeOutside}
+                disabled={pending}
                 errors={errors['match.anyCraftCodeOutside']}
                 errorId={`${prefix}-anyCraftCodeOutside-error`}
               />
@@ -1805,8 +1823,14 @@ export function CustomerPriceBookDraftRuleForm({
                 ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
                 ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
               ].map(([name, label, checked]) => (
-                <label key={String(name)} className="flex min-h-11 items-center gap-3 rounded-lg border bg-background px-3 text-sm">
-                  <input type="checkbox" name={String(name)} value="true" defaultChecked={Boolean(checked)} className="size-4" />
+                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
+                    name={String(name)}
+                    value="true"
+                    defaultChecked={Boolean(checked)}
+                    disabled={pending}
+                    aria-label={String(label)}
+                  />
                   <span>{String(label)}</span>
                 </label>
               ))}
@@ -1879,21 +1903,15 @@ export function CustomerPriceBookDraftRuleForm({
       >
         <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
-        <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-12 text-sm">
-          <input
-            type="checkbox"
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <Checkbox
             name="isActive"
             value="true"
-            className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0"
             defaultChecked={rule.isActive}
+            disabled={pending}
+            aria-label="启用此规则"
             {...fieldA11y('isActive')}
           />
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 flex size-5 items-center justify-center rounded border border-input text-xs text-transparent peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
-          >
-            ✓
-          </span>
           <span className="admin-wrap-anywhere">启用此规则</span>
         </label>
         <FieldErrorMessages
@@ -1907,21 +1925,15 @@ export function CustomerPriceBookDraftRuleForm({
               name="blocksAutomaticQuote"
               value="false"
             />
-            <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-12 text-sm">
-              <input
-                type="checkbox"
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
                 name="blocksAutomaticQuote"
                 value="true"
-                className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0"
                 defaultChecked={rule.blocksAutomaticQuote}
+                disabled={pending}
+                aria-label="不自动计价"
                 {...fieldA11y('blocksAutomaticQuote')}
               />
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 flex size-5 items-center justify-center rounded border border-input text-xs text-transparent peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
-              >
-                ✓
-              </span>
               <span className="admin-wrap-anywhere">
                 不自动计价
               </span>

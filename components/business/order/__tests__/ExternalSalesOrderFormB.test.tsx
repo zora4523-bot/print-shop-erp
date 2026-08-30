@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -15,6 +17,14 @@ import {
   parseExternalReceiverDisplay,
   replacePendingDesignKind,
 } from '../order-form-b/ExternalSalesOrderFormB';
+
+const formBSource = readFileSync(
+  join(
+    process.cwd(),
+    'components/business/order/order-form-b/ExternalSalesOrderFormB.tsx',
+  ),
+  'utf8',
+);
 
 type RecordedButtonProps = {
   children?: unknown;
@@ -240,8 +250,18 @@ describe('OrderFormB', () => {
     expect(html).toContain('⧉ 复制当前');
     expect(html).toContain('已自动保存 10:30:00');
     expect(html).toContain('价格面板');
+    expect(html).toContain('data-slot="order-form-layout"');
+    expect(html).toContain('data-slot="order-form-editor"');
+    expect(html).toContain('data-slot="order-form-rail"');
+    expect(html).toContain('@container');
     expect(html).toContain(
-      'min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
+      '@min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
+    );
+    expect(html).toContain('@min-[560px]:grid-cols-2');
+    expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
+    expect(formBSource).toContain('checked={values.isSfCollect ?? false}');
+    expect(html).not.toContain(
+      ' min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
     );
 
     for (const retiredText of [

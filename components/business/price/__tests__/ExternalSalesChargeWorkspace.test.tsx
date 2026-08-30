@@ -313,6 +313,8 @@ describe('RulePriceWorkbench', () => {
     expect(filteredHtml).toContain('value="ADD_ON" selected=""');
     expect(filteredHtml).toContain('value="AUTO" selected=""');
     expect(filteredHtml).toContain('checked=""');
+    expect(filteredHtml).toContain('data-slot="checkbox"');
+    expect(filteredHtml).toContain('aria-label="只看本次修改"');
     expect(filteredHtml).toContain(
       'aria-label="已启用的收费项目筛选"',
     );

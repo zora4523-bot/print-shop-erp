@@ -37,7 +37,11 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
     expect(html).toContain('现货大号');
     expect(html).toContain('正反面烫金颜色');
     expect(html).toContain('继承规格、纸张、工艺和计价参数');
+    expect(html.match(/data-slot="checkbox"/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="选择款式 1：现货大号"');
+    expect(html).toContain('aria-label="本次申请需要新增一款"');
     expect(html).not.toContain('可改款式名、数量、规格');
+    expect(html).not.toContain('class="size-4 shrink-0"');
     expect(html).not.toMatch(/<input[^>]*value="大号90×165"/);
     expect(html).not.toMatch(/产品表!C2|规格表!A4:C4/);
   });

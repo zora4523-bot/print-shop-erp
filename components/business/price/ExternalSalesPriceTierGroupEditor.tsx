@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CustomerPriceCalculationType } from '@/generated/prisma/enums';
@@ -697,7 +698,7 @@ export function ExternalSalesPriceTierGroupEditor({
       <div className="min-w-0">
         <div
           aria-hidden="true"
-          className="hidden min-w-0 grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_4.5rem] gap-2 border-b bg-muted/20 px-3 py-2 text-xs font-medium text-muted-foreground @min-[31rem]:grid"
+          className="hidden min-w-0 grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_5.25rem] gap-2 border-b bg-muted/20 px-3 py-2 text-xs font-medium text-muted-foreground @min-[31rem]:grid"
         >
           <span>数量</span>
           <span className="text-right">当前</span>
@@ -721,7 +722,7 @@ export function ExternalSalesPriceTierGroupEditor({
               <li
                 key={tier.ruleId}
                 className={cn(
-                  'grid min-w-0 grid-cols-2 items-center gap-3 px-4 py-3 @min-[31rem]:min-h-12 @min-[31rem]:grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_4.5rem] @min-[31rem]:gap-2 @min-[31rem]:px-3 @min-[31rem]:py-1',
+                  'grid min-w-0 grid-cols-2 items-center gap-3 px-4 py-3 @min-[31rem]:min-h-12 @min-[31rem]:grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_5.25rem] @min-[31rem]:gap-2 @min-[31rem]:px-3 @min-[31rem]:py-1',
                   (tier.changed || locallyChanged) &&
                     'bg-warning/5 ring-1 ring-inset ring-warning/30',
                 )}
@@ -824,15 +825,17 @@ export function ExternalSalesPriceTierGroupEditor({
                 </div>
 
                 <div className="flex min-w-0 items-center justify-end">
-                  <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-11 text-sm @min-[31rem]:min-h-10 @min-[31rem]:pl-10">
-                    <input
-                      type="checkbox"
+                  <div
+                    className={cn(
+                      'flex min-h-11 min-w-0 items-center gap-1 text-sm',
+                      pending && 'opacity-60',
+                    )}
+                  >
+                    <Checkbox
                       checked={active}
                       disabled={pending}
-                      className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0 @min-[31rem]:size-10"
                       aria-label={`${quantityFormatter.format(tier.quantity)} 个价格档启用`}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
+                      onCheckedChange={(checked) => {
                         const nextActiveStates = [...draftState.activeStates];
                         nextActiveStates[index] = checked;
                         commitDraftState({
@@ -841,14 +844,8 @@ export function ExternalSalesPriceTierGroupEditor({
                         });
                       }}
                     />
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute left-3 flex size-5 items-center justify-center rounded border border-input text-xs text-transparent peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
-                    >
-                      ✓
-                    </span>
-                    <span>{active ? '启用' : '停用'}</span>
-                  </label>
+                    <span aria-hidden="true">{active ? '启用' : '停用'}</span>
+                  </div>
                 </div>
               </li>
             );
