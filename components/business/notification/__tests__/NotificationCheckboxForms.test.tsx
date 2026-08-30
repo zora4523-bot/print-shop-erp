@@ -45,6 +45,7 @@ describe('notification form checkbox contracts', () => {
     expect(checkboxRoots(html)).toHaveLength(1);
     expect(html).toContain('data-slot="checkbox"');
     expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('aria-label="启用"');
     expect(namedInputs(html, 'isActive')).toHaveLength(1);
     expect(namedInputs(html, 'isActive')[0]).not.toContain('value=');
   });
@@ -97,6 +98,7 @@ describe('notification form checkbox contracts', () => {
           input.includes('disabled=""'),
       ),
     ).toBe(true);
+    expect(html).toContain('aria-label="启用此规则"');
     expect(namedInputs(html, 'isActive')).toHaveLength(1);
     expect(namedInputs(html, 'isActive')[0]).not.toContain('value=');
   });

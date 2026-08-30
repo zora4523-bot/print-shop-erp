@@ -184,7 +184,7 @@ export function RuleForm({
           name="isActive"
           defaultChecked={initial.isActive}
           disabled={pending}
-          aria-label="启用通知规则"
+          aria-label="启用此规则"
         />
         <span className="min-w-0 py-2">
           启用此规则（关闭后此事件不再触发推送）

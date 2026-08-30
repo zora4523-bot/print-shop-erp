@@ -117,7 +117,7 @@ export function ChannelForm(props: Props) {
           name="isActive"
           defaultChecked={initial?.isActive ?? true}
           disabled={pending}
-          aria-label="启用通知群"
+          aria-label="启用"
         />
         <span className="min-w-0 py-2">
           启用（关闭后该群暂停接收推送，但保留配置）
