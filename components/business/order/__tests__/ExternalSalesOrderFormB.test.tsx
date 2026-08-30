@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -17,14 +15,6 @@ import {
   parseExternalReceiverDisplay,
   replacePendingDesignKind,
 } from '../order-form-b/ExternalSalesOrderFormB';
-
-const formBSource = readFileSync(
-  join(
-    process.cwd(),
-    'components/business/order/order-form-b/ExternalSalesOrderFormB.tsx',
-  ),
-  'utf8',
-);
 
 type RecordedButtonProps = {
   children?: unknown;
@@ -99,6 +89,7 @@ function render(
     pendingDesigns?: Readonly<Record<string, PendingDesignImage[]>>;
     receiverAddress?: string;
     receiverPhoneRequired?: boolean;
+    isSfCollect?: boolean | undefined;
     onRemove?: (index: number) => void;
     onFoilSidesChange?: (front: string[], back: string[]) => void;
   } = {},
@@ -112,7 +103,10 @@ function render(
         receiverName: '',
         receiverPhone: '',
         receiverAddress: options.receiverAddress ?? '',
-        isSfCollect: false,
+        isSfCollect:
+          'isSfCollect' in options
+            ? (options.isSfCollect as boolean)
+            : false,
       }}
       items={items}
       itemFields={items.map((_, index) => ({ id: `style-${index + 1}` }))}
@@ -259,7 +253,13 @@ describe('OrderFormB', () => {
     );
     expect(html).toContain('@min-[560px]:grid-cols-2');
     expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
-    expect(formBSource).toContain('checked={values.isSfCollect ?? false}');
+    const htmlWithMissingSfCollect = render(undefined, {
+      isSfCollect: undefined,
+    });
+    const sfCollectCheckbox = htmlWithMissingSfCollect.match(
+      /<span[^>]*role="checkbox"[^>]*aria-label="顺丰到付（本单不计快递费）"[^>]*>/,
+    )?.[0];
+    expect(sfCollectCheckbox).toContain('aria-checked="false"');
     expect(html).not.toContain(
       ' min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
     );
