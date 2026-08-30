@@ -71,10 +71,10 @@ function CheckboxShowcase() {
         </label>
         <label
           htmlFor="showcase-checkbox-mixed"
-          className="flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-xl border bg-card py-1 pr-1 pl-3 text-sm font-medium"
+          className="flex min-h-14 cursor-not-allowed items-center justify-between gap-3 rounded-xl border bg-muted/40 py-1 pr-1 pl-3 text-sm font-medium text-muted-foreground"
         >
-          部分选择
-          <Checkbox id="showcase-checkbox-mixed" indeterminate />
+          部分选择（禁用示例）
+          <Checkbox id="showcase-checkbox-mixed" indeterminate disabled />
         </label>
         <label
           htmlFor="showcase-checkbox-disabled"
