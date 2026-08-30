@@ -51,6 +51,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   listUsers,
+  listUsersPage,
   createUser,
   updateUser,
   setUserActive,
@@ -106,12 +107,17 @@ beforeEach(() => {
 });
 
 describe('listUsers', () => {
-  it('orders by isActive desc then createdAt asc', async () => {
+  it('orders active users deterministically when timestamps tie', async () => {
     dbMock.user.findMany.mockResolvedValue([]);
     await listUsers();
     expect(dbMock.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [
+          { isActive: 'desc' },
+          { createdAt: 'asc' },
+          { username: 'asc' },
+          { id: 'asc' },
+        ],
       }),
     );
   });
@@ -122,6 +128,45 @@ describe('listUsers', () => {
     const call = dbMock.user.findMany.mock.calls[0][0];
     expect(call.select).toBeDefined();
     expect(call.select.password).toBeUndefined();
+  });
+
+  it('searches and bounds the account-management page at the database', async () => {
+    dbMock.user.count.mockResolvedValue(45);
+    dbMock.user.findMany.mockResolvedValue([makeUser()]);
+
+    const result = await listUsersPage({
+      q: '  师傅03  ',
+      page: 3,
+      pageSize: 20,
+    });
+
+    const where = {
+      OR: [
+        { username: { contains: '师傅03', mode: 'insensitive' } },
+        { displayName: { contains: '师傅03', mode: 'insensitive' } },
+        { phone: { contains: '师傅03', mode: 'insensitive' } },
+      ],
+    };
+    expect(dbMock.user.count).toHaveBeenCalledWith({ where });
+    expect(dbMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where,
+        skip: 40,
+        take: 20,
+        orderBy: [
+          { isActive: 'desc' },
+          { createdAt: 'asc' },
+          { username: 'asc' },
+          { id: 'asc' },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({
+      total: 45,
+      page: 3,
+      pageSize: 20,
+      pageCount: 3,
+    });
   });
 });
 

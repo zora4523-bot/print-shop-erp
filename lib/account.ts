@@ -8,6 +8,11 @@ import {
   type User,
 } from '../generated/prisma/client';
 import { db } from './db';
+import {
+  paginatedResult,
+  paginationWindow,
+  type PaginatedResult,
+} from './admin/table';
 import { todayShanghai } from './dashboard/shanghai-clock';
 import { computePeriodEnd } from './salary/cs';
 import { csUserLockKey } from './salary/cs-lock';
@@ -199,8 +204,45 @@ const SUMMARY_SELECT = {
 export async function listUsers(): Promise<AccountSummary[]> {
   return db.user.findMany({
     select: SUMMARY_SELECT,
-    orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+    orderBy: [
+      { isActive: 'desc' },
+      { createdAt: 'asc' },
+      { username: 'asc' },
+      { id: 'asc' },
+    ],
   });
+}
+
+export async function listUsersPage(opts: {
+  q?: string | null;
+  page: number;
+  pageSize: number;
+}): Promise<PaginatedResult<AccountSummary>> {
+  const query = opts.q?.trim() ?? '';
+  const where = query
+    ? {
+        OR: [
+          { username: { contains: query, mode: 'insensitive' as const } },
+          { displayName: { contains: query, mode: 'insensitive' as const } },
+          { phone: { contains: query, mode: 'insensitive' as const } },
+        ],
+      }
+    : undefined;
+  const total = await db.user.count({ where });
+  const window = paginationWindow(total, opts.page, opts.pageSize);
+  const rows = await db.user.findMany({
+    where,
+    select: SUMMARY_SELECT,
+    orderBy: [
+      { isActive: 'desc' },
+      { createdAt: 'asc' },
+      { username: 'asc' },
+      { id: 'asc' },
+    ],
+    skip: window.skip,
+    take: window.take,
+  });
+  return paginatedResult(rows, total, window);
 }
 
 export async function getUserSummary(id: string): Promise<AccountSummary | null> {

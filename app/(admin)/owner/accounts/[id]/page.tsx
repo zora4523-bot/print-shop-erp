@@ -5,6 +5,8 @@ import { AccountForm } from '@/components/business/account/AccountForm';
 import { ResetPasswordForm } from '@/components/business/account/ResetPasswordForm';
 import { ToggleActiveButton } from '@/components/business/account/ToggleActiveButton';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -12,6 +14,10 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
+  const session = await getSession();
+  if (!session || !hasPermission('account:manage', session.user.role)) {
+    return { title: '账号管理' };
+  }
   const account = await getUserSummary(id);
   return {
     title: account ? `编辑 ${account.displayName} · 账号管理` : '账号不存在',
