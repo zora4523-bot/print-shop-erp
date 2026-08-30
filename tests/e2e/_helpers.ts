@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
 // Re-export so specs don't have to import from global-setup directly.
-import { E2E_USERS } from './global-setup';
-export { E2E_PASSWORD, E2E_USERS } from './global-setup';
+import { E2E_PASSWORD, E2E_USERS } from './global-setup';
+export { E2E_PASSWORD, E2E_USERS };
 
 // ---- DB-side fixture helpers ----
 //
@@ -14,6 +14,7 @@ export { E2E_PASSWORD, E2E_USERS } from './global-setup';
 // Prisma client cleanly.
 
 import { randomBytes } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { Client } from 'pg';
 import { isolateE2eLoginClient } from './_login-client';
 
@@ -25,6 +26,34 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   } finally {
     await db.end();
   }
+}
+
+export async function cleanupPrintableOrderStressFixture(): Promise<void> {
+  await withDb(async (db) => {
+    await db.query('BEGIN');
+    try {
+      // The stress order owns the ProductionTask rows. Delete it first so the
+      // task cascade releases the dedicated worker and craft foreign keys.
+      await db.query(
+        `DELETE FROM "Order"
+          WHERE id ~ '^e2e-vr-large-items-[0-9]+-[0-9]+-stress-v2$'`,
+      );
+      await db.query(
+        `DELETE FROM "User"
+          WHERE id ~ '^e2e-vr-print-long-worker-[0-9]{2}$'
+            AND username = id`,
+      );
+      await db.query(
+        `DELETE FROM "Craft"
+          WHERE id = 'e2e-vr-print-long-team-craft'
+            AND code = 'E2E_PRINT_LONG_TEAM'`,
+      );
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export async function getUserIdByUsername(username: string): Promise<string> {
@@ -597,6 +626,7 @@ export async function seedPrintableOrder(opts: {
       const craftId = 'e2e-vr-print-long-team-craft';
       const firstOrderItemId =
         itemCount === 1 ? orderItemId : `${orderItemId}-1`;
+      const workerPasswordHash = await bcrypt.hash(E2E_PASSWORD, 10);
       const workers = Array.from({ length: 50 }, (_, index) => {
         const sequence = String(index + 1).padStart(2, '0');
         return {
@@ -629,23 +659,30 @@ export async function seedPrintableOrder(opts: {
         await db.query(
           `
           INSERT INTO "User" (
-            id, username, password, role, "workerType", "displayName",
+            id, username, password, role, "workerType", "employmentType", "displayName",
             "isActive", "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, 'e2e-print-only-password', 'WORKER'::"Role",
-            'PACKER'::"WorkerType", $3, TRUE,
+            $1, $2, $4, 'WORKER'::"Role",
+            'PACKER'::"WorkerType", 'TEMPORARY'::"EmploymentType", $3, TRUE,
             TIMESTAMP '2026-01-01 00:00:00',
             TIMESTAMP '2026-01-01 00:00:00'
           )
           ON CONFLICT (id) DO UPDATE SET
             username = EXCLUDED.username,
+            password = EXCLUDED.password,
             role = EXCLUDED.role,
             "workerType" = EXCLUDED."workerType",
+            "employmentType" = EXCLUDED."employmentType",
             "displayName" = EXCLUDED."displayName",
             "isActive" = TRUE,
             "updatedAt" = EXCLUDED."updatedAt"
           `,
-          [worker.id, worker.username, worker.displayName],
+          [
+            worker.id,
+            worker.username,
+            worker.displayName,
+            workerPasswordHash,
+          ],
         );
       }
 
