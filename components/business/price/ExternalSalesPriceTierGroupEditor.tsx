@@ -825,12 +825,7 @@ export function ExternalSalesPriceTierGroupEditor({
                 </div>
 
                 <div className="flex min-w-0 items-center justify-end">
-                  <div
-                    className={cn(
-                      'flex min-h-11 min-w-0 items-center gap-1 text-sm',
-                      pending && 'opacity-60',
-                    )}
-                  >
+                  <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
                     <Checkbox
                       checked={active}
                       disabled={pending}
@@ -844,8 +839,8 @@ export function ExternalSalesPriceTierGroupEditor({
                         });
                       }}
                     />
-                    <span aria-hidden="true">{active ? '启用' : '停用'}</span>
-                  </div>
+                    <span>{active ? '启用' : '停用'}</span>
+                  </label>
                 </div>
               </li>
             );

@@ -123,10 +123,14 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('aria-label="1,000 个价格档启用"');
     expect(html).toContain('data-slot="checkbox"');
     expect(html).toContain('data-slot="checkbox-indicator"');
+    expect(html).toContain(
+      'cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60',
+    );
     expect(html).toContain('>当前<');
     expect(html).toContain('>草稿<');
     expect(html).toContain('>变化<');
     expect(html).toContain('启用');
+    expect(html).not.toContain('aria-hidden="true">启用');
     expect(html).toContain('撤销上一步');
     expect(html).toContain('撤销本次修改');
     expect(html).not.toContain('1,000 个草稿总价（元）');
