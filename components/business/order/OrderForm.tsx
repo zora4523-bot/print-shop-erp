@@ -130,6 +130,39 @@ export type CraftOption = {
   isLowFrequency: boolean;
 };
 
+/**
+ * These production facts are already owned by the structured controls in the
+ * main B form. Showing them again as checkboxes creates two competing inputs
+ * for the same fact; PACKING is derived from packaging groups instead.
+ */
+const ORDER_FORM_DERIVED_CRAFT_CODES = new Set([
+  'FLAT_FOIL_PARTIAL',
+  'STOCK_FOIL',
+  'FLAT_FOIL_SINGLE',
+  'FLAT_FOIL_DOUBLE',
+  'FLAT_FOIL_TRIPLE',
+  'EMBOSS',
+  'BUMP',
+  'COATED_COLOR_PRINT',
+  'COATED_COLOR_PRINT_FOIL',
+  'COLOR_PRINT',
+  'COLOR_PRINT_FOIL',
+  'PACKING',
+]);
+
+function isAdditionalOrderCraft(craft: CraftOption): boolean {
+  return (
+    !isLegacyStockFoilCraft(craft) &&
+    (!craft.code || !ORDER_FORM_DERIVED_CRAFT_CODES.has(craft.code))
+  );
+}
+
+export function additionalOrderCraftOptions(
+  crafts: readonly CraftOption[],
+): CraftOption[] {
+  return crafts.filter(isAdditionalOrderCraft);
+}
+
 export type ProductOption = {
   id: string;
   code?: string | null;
@@ -355,6 +388,29 @@ function resolveExternalOrderCraftIds(
     resolved,
     crafts,
   );
+}
+
+/**
+ * Keep only genuinely additional production steps from the previous value and
+ * replace every route-owned craft with the facts derived from the current
+ * structured selections. This also cleans stale route crafts from recovered
+ * local drafts and from PARTIAL/FULL/PRINT route switches.
+ */
+export function resolveInternalOrderCraftIds(
+  item: CreateOrderInput['items'][number],
+  crafts: readonly CraftOption[],
+): string[] {
+  const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
+  const additionalIds = item.crafts.filter((id) => {
+    const craft = craftById.get(id);
+    return craft ? isAdditionalOrderCraft(craft) : false;
+  });
+  return [
+    ...new Set([
+      ...resolveExternalOrderCraftIds(item, crafts),
+      ...additionalIds,
+    ]),
+  ];
 }
 
 function normalizeExternalOrderItem(args: {
@@ -1277,7 +1333,19 @@ export function OrderForm({
     nextItemFigRef.current = resolveNextOrderItemFig(
       pendingLocalDraft.values,
     );
-    reset(pendingLocalDraft.values as unknown as CreateOrderInput);
+    const restoredValues =
+      pendingLocalDraft.values as unknown as CreateOrderInput;
+    reset(
+      usesExternalSalesPricing
+        ? restoredValues
+        : {
+            ...restoredValues,
+            items: restoredValues.items.map((item) => ({
+              ...item,
+              crafts: resolveInternalOrderCraftIds(item, crafts),
+            })),
+          },
+    );
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
@@ -1328,6 +1396,9 @@ export function OrderForm({
         ...data,
         items: data.items.map((item) => ({
           ...item,
+          crafts: usesExternalSalesPricing
+            ? item.crafts
+            : resolveInternalOrderCraftIds(item, crafts),
           // Prices are always server-owned on the create screen. Internal
           // operators may only describe an out-of-catalog item; the factory
           // confirmation step records the confirmed amount later.
@@ -1782,9 +1853,8 @@ export function OrderForm({
           internalMaterialChange === 'specification'
             ? normalized.actualHeightMm
             : current.actualHeightMm,
-        crafts: normalizeCraftIdsForPricingRoute(
-          normalized.pricingRoute,
-          [...current.crafts, ...normalized.crafts],
+        crafts: resolveInternalOrderCraftIds(
+          { ...normalized, crafts: current.crafts },
           crafts,
         ),
         artworkVersion: current.artworkVersion,
@@ -2877,12 +2947,7 @@ export function OrderForm({
     : [];
   const activeExternalItem =
     watchedItems[expandedItem] ?? watchedItems[0] ?? initialItem;
-  const activeRequiredCraftIds = new Set(
-    resolveExternalOrderCraftIds(activeExternalItem, crafts),
-  );
-  const internalCraftOptions = crafts.filter(
-    (craft) => !isLegacyStockFoilCraft(craft),
-  );
+  const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
   const activeExternalPaper = externalOrderPaperFromType(
     products,
     activeExternalItem.paperType,
@@ -3349,57 +3414,59 @@ export function OrderForm({
                       />
                     </div>
                   </div>
-                  <fieldset className="mt-5 border-t pt-4">
-                    <legend className="text-[0.6875rem] font-extrabold tracking-[0.18em] text-muted-foreground">
-                      生产工艺
-                    </legend>
-                    <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 min-[560px]:grid-cols-2">
-                      {internalCraftOptions.map((craft) => {
-                        const selected = (
-                          watchedItems[expandedItem]?.crafts ?? []
-                        ).includes(craft.id);
-                        const required = activeRequiredCraftIds.has(craft.id);
-                        return (
-                          <label
-                            key={craft.id}
-                            className="flex min-h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"
-                          >
-                            <input
-                              type="checkbox"
-                              className="size-4 shrink-0"
-                              checked={selected}
-                              disabled={required}
-                              onChange={(event) => {
-                                const current = getValues(
-                                  `items.${expandedItem}.crafts`,
-                                );
-                                const next = new Set(current);
-                                if (event.target.checked) next.add(craft.id);
-                                else next.delete(craft.id);
-                                setValue(
-                                  `items.${expandedItem}.crafts`,
-                                  normalizeCraftIdsForPricingRoute(
-                                    getValues(
-                                      `items.${expandedItem}.pricingRoute`,
+                  {internalAdditionalCraftOptions.length > 0 ? (
+                    <fieldset className="mt-5 border-t pt-4">
+                      <legend className="text-[0.6875rem] font-extrabold tracking-[0.18em] text-muted-foreground">
+                        附加工艺（选填）
+                      </legend>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        主工艺已由上方工艺类型、烫金和包装选择自动生成；这里只选择额外工序。
+                      </p>
+                      <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 min-[560px]:grid-cols-2">
+                        {internalAdditionalCraftOptions.map((craft) => {
+                          const selected = (
+                            watchedItems[expandedItem]?.crafts ?? []
+                          ).includes(craft.id);
+                          return (
+                            <label
+                              key={craft.id}
+                              className="flex min-h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"
+                            >
+                              <input
+                                type="checkbox"
+                                className="size-4 shrink-0"
+                                checked={selected}
+                                onChange={(event) => {
+                                  const currentItem = getValues(
+                                    `items.${expandedItem}`,
+                                  );
+                                  const next = new Set(currentItem.crafts);
+                                  if (event.target.checked) next.add(craft.id);
+                                  else next.delete(craft.id);
+                                  setValue(
+                                    `items.${expandedItem}.crafts`,
+                                    resolveInternalOrderCraftIds(
+                                      {
+                                        ...currentItem,
+                                        crafts: [...next],
+                                      },
+                                      crafts,
                                     ),
-                                    [...next],
-                                    crafts,
-                                  ),
-                                  { shouldDirty: true, shouldValidate: true },
-                                );
-                              }}
-                            />
-                            <span className="min-w-0">
-                              {craft.name}
-                              {required ? '（计价必需）' : ''}
-                              {craft.isOutsource ? ' · 外协' : ''}
-                              {craft.isLowFrequency ? ' · 低频' : ''}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </fieldset>
+                                    { shouldDirty: true, shouldValidate: true },
+                                  );
+                                }}
+                              />
+                              <span className="min-w-0">
+                                {craft.name}
+                                {craft.isOutsource ? ' · 外协' : ''}
+                                {craft.isLowFrequency ? ' · 低频' : ''}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  ) : null}
                 </section>
               ) : undefined
             }
