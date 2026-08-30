@@ -88,11 +88,15 @@ test.describe('owner notifications — admin UI', () => {
     );
 
     // 勾选新 channel
-    await page.getByRole('checkbox', { name: channelName }).check();
+    const channelCheckbox = page.getByRole('checkbox', { name: channelName });
+    await channelCheckbox.click();
+    await expect(channelCheckbox).toBeChecked();
     // 勾选&ldquo;启用此规则&rdquo;
-    await page
-      .locator('#isActive')
-      .check();
+    const ruleActiveCheckbox = page.getByRole('checkbox', {
+      name: '启用此规则',
+    });
+    await ruleActiveCheckbox.click();
+    await expect(ruleActiveCheckbox).toBeChecked();
     await page.getByRole('button', { name: '保存修改' }).click();
 
     await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
@@ -124,8 +128,10 @@ test.describe('owner notifications — admin UI', () => {
 
     // ─── 6. 取消 rule 引用 + 关闭 → 删除按钮可点，但 FK 还会拦 ───
     await orderSubmittedRow.getByRole('link', { name: '编辑' }).click();
-    await page.getByRole('checkbox', { name: channelName }).uncheck();
-    await page.locator('#isActive').uncheck();
+    await channelCheckbox.click();
+    await expect(channelCheckbox).not.toBeChecked();
+    await ruleActiveCheckbox.click();
+    await expect(ruleActiveCheckbox).not.toBeChecked();
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
 

@@ -50,15 +50,26 @@ test.describe('administrator workspace', () => {
   test('critical routes pass the same gates with dark tokens', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, ownerRoutes(fixture), 'dark');
   });
+});
 
-  test('order creation responds to its available container instead of the viewport', async ({
-    page,
-  }, testInfo) => {
+test.describe('administrator workspace geometry', () => {
+  test.describe.configure({ timeout: 360_000 });
+
+  test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== 'admin-1280x800',
       'Focused geometry regression runs once; the route matrix still covers every configured viewport.',
     );
+    await login(page, {
+      from: '/owner',
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+  });
 
+  test('order creation responds to its available container instead of the viewport', async ({
+    page,
+  }) => {
     const controlledStateWarnings: string[] = [];
     page.on('console', (message) => {
       const text = message.text();
@@ -1131,8 +1142,12 @@ async function prepareSalesOrderDetailState(page: Page) {
   await expect(formSection).toBeVisible();
   const styleCheckboxes = formSection.getByRole('checkbox');
   expect(await styleCheckboxes.count()).toBeGreaterThanOrEqual(3);
-  await styleCheckboxes.first().check();
-  await styleCheckboxes.last().check();
+  const firstStyleCheckbox = styleCheckboxes.first();
+  await firstStyleCheckbox.click();
+  await expect(firstStyleCheckbox).toBeChecked();
+  const lastStyleCheckbox = styleCheckboxes.last();
+  await lastStyleCheckbox.click();
+  await expect(lastStyleCheckbox).toBeChecked();
   await expect(
     formSection.getByLabel('新款式名称', { exact: true }),
   ).toBeVisible();

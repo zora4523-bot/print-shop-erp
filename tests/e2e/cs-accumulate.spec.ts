@@ -100,9 +100,11 @@ test.describe('客服业绩事件账本与外部销售应收分离', () => {
       await form
         .getByRole('textbox', { name: '收货地址', exact: true })
         .fill('E2E 收货人 13800138000 广东省佛山市南海区测试路 1 号');
-      await form
-        .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
-        .check();
+      const sfCollectCheckbox = form.getByRole('checkbox', {
+        name: '顺丰到付（本单不计快递费）',
+      });
+      await sfCollectCheckbox.click();
+      await expect(sfCollectCheckbox).toBeChecked();
       await expect(
         form.getByRole('textbox', { name: '成交单价' }),
       ).toHaveCount(0);
