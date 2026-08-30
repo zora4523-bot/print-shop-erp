@@ -580,6 +580,9 @@ function DraftPublishPanel({
               changedRuleCount: preview.changedRuleCount,
               increasedRuleCount: preview.increasedRuleCount,
               decreasedRuleCount: preview.decreasedRuleCount,
+              highRiskRuleCount: preview.highRiskRuleCount,
+              highRiskDeltaPercentThreshold:
+                preview.highRiskDeltaPercentThreshold,
               deltaPercentMin: preview.deltaPercentMin,
               deltaPercentMax: preview.deltaPercentMax,
               validationStatus: preview.validation.status,

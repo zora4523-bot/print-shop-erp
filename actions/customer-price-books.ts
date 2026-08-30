@@ -20,6 +20,7 @@ import {
   cancelScheduledCustomerPriceBook,
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
+  CustomerPriceBookHighRiskConfirmationError,
   CustomerPriceBookValidationError,
   discardCustomerPriceBookDraft,
   publishCustomerPriceBookDraft,
@@ -569,6 +570,7 @@ const publishDraftSchema = z
     confirmedImpact: z.literal(true, {
       error: '请确认已了解发布影响范围',
     }),
+    confirmedHighRisk: z.boolean().optional().default(false),
     effectiveFrom: z
       .string()
       .trim()
@@ -1001,6 +1003,7 @@ export async function publishCustomerPriceBookDraftAction(
         expectedDraftUpdatedAt: parsed.data.expectedDraftUpdatedAt,
         effectiveFrom: parsed.data.effectiveFrom,
         publishNote: parsed.data.publishNote,
+        confirmedHighRisk: parsed.data.confirmedHighRisk,
       },
       actor,
     );
@@ -1012,6 +1015,12 @@ export async function publishCustomerPriceBookDraftAction(
     };
   } catch (error) {
     if (error instanceof CustomerPriceBookValidationError) return invalidFromDomain(error);
+    if (error instanceof CustomerPriceBookHighRiskConfirmationError) {
+      return {
+        status: 'invalid',
+        fieldErrors: { confirmedHighRisk: [error.message] },
+      };
+    }
     if (error instanceof CustomerPriceBookAdminError) {
       return { status: 'error', message: error.message };
     }

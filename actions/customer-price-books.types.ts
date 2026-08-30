@@ -91,6 +91,8 @@ export type PublishCustomerPriceBookDraftActionInput = {
   publishNote?: string;
   /** Explicit acknowledgement for the L3, all-future-orders impact. */
   confirmedImpact: boolean;
+  /** Separate acknowledgement when the server detects an abnormal price swing. */
+  confirmedHighRisk?: boolean;
 };
 
 export type DiscardCustomerPriceBookDraftActionInput = {

@@ -188,6 +188,8 @@ describe('ExternalSalesPriceBookVersionPanel', () => {
       changedRuleCount: 1,
       increasedRuleCount: 0,
       decreasedRuleCount: 0,
+      highRiskRuleCount: 0,
+      highRiskDeltaPercentThreshold: '50',
       deltaPercentMin: null,
       deltaPercentMax: null,
       changes: [

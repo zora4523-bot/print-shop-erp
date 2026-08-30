@@ -159,6 +159,12 @@ export type CustomerPriceBookDraftPublishPreviewDto = {
   changedRuleCount: number;
   increasedRuleCount: number;
   decreasedRuleCount: number;
+  /**
+   * A high-risk change is not forbidden. It requires a separate acknowledgement
+   * because a misplaced decimal can otherwise pass structural validation.
+   */
+  highRiskRuleCount: number;
+  highRiskDeltaPercentThreshold: string;
   deltaPercentMin: string | null;
   deltaPercentMax: string | null;
   changes: CustomerPriceBookDraftImpactChangeDto[];
@@ -271,6 +277,8 @@ export type PublishCustomerPriceBookDraftInput = {
   expectedDraftUpdatedAt: Date;
   /** Empty values inherit the draft's required change reason. */
   publishNote?: string;
+  /** Required when the locked current-to-draft comparison detects high risk. */
+  confirmedHighRisk?: boolean;
 };
 
 export type DiscardCustomerPriceBookDraftInput = {
@@ -305,6 +313,13 @@ export class CustomerPriceBookValidationError extends CustomerPriceBookAdminErro
     super('价目簿规则校验未通过');
     this.name = 'CustomerPriceBookValidationError';
     this.issues = issues;
+  }
+}
+
+export class CustomerPriceBookHighRiskConfirmationError extends CustomerPriceBookAdminError {
+  constructor() {
+    super('本次调价包含高风险报价变更，请勾选高风险确认后再发布');
+    this.name = 'CustomerPriceBookHighRiskConfirmationError';
   }
 }
 
@@ -829,6 +844,78 @@ function buildImpactChange(
   };
 }
 
+/**
+ * This is a review threshold, not a price constraint. Administrators may still
+ * publish any value after explicitly acknowledging a large relative change.
+ */
+const HIGH_RISK_DELTA_PERCENT_THRESHOLD = new Prisma.Decimal(50);
+
+function hasHighRiskPriceTransition(
+  beforeRaw: string | null,
+  afterRaw: string | null,
+): boolean {
+  if (beforeRaw === afterRaw) return false;
+  if (beforeRaw === null || afterRaw === null) return true;
+
+  const before = new Prisma.Decimal(beforeRaw);
+  const after = new Prisma.Decimal(afterRaw);
+  if (before.isZero()) return !after.isZero();
+  return after
+    .minus(before)
+    .dividedBy(before)
+    .times(100)
+    .abs()
+    .greaterThanOrEqualTo(HIGH_RISK_DELTA_PERCENT_THRESHOLD);
+}
+
+function isHighRiskImpactChange(
+  change: CustomerPriceBookDraftImpactChangeDto,
+): boolean {
+  // Adding/removing an active rule or toggling its active state changes quote
+  // availability even when the stored numeric fields themselves stay equal.
+  if (!change.current || !change.draft) {
+    return (change.current ?? change.draft)?.isActive === true;
+  }
+  if (change.current.isActive !== change.draft.isActive) return true;
+  if (!change.current.isActive) return false;
+
+  return (
+    hasHighRiskPriceTransition(
+      change.current.amount,
+      change.draft.amount,
+    ) ||
+    hasHighRiskPriceTransition(
+      change.current.incrementAmount,
+      change.draft.incrementAmount,
+    )
+  );
+}
+
+function buildImpactChanges(
+  currentRules: readonly ImpactRuleRow[],
+  draftRules: readonly ImpactRuleRow[],
+): CustomerPriceBookDraftImpactChangeDto[] {
+  const draftByCode = new Map(
+    draftRules.map((rule) => [String(rule.code), rule] as const),
+  );
+  const currentByCode = new Map(
+    currentRules.map((rule) => [String(rule.code), rule] as const),
+  );
+  const allCodes = new Set([...currentByCode.keys(), ...draftByCode.keys()]);
+
+  return [...allCodes]
+    .map((code) =>
+      buildImpactChange(
+        currentByCode.get(code) ?? null,
+        draftByCode.get(code) ?? null,
+      ),
+    )
+    .filter(
+      (change): change is CustomerPriceBookDraftImpactChangeDto =>
+        change !== null,
+    );
+}
+
 function impactItemKey(rule: ImpactRuleRow): string {
   if (rule.productId) return `${rule.categoryId}:${rule.productId}`;
   const normalizedName = rule.name.replace(
@@ -1211,17 +1298,7 @@ export async function getCustomerPriceBookDraftPublishPreview(
       currentRules.map((rule) => [String(rule.code), rule] as const),
     );
     const allCodes = new Set([...currentByCode.keys(), ...draftByCode.keys()]);
-    const changes = [...allCodes]
-      .map((code) =>
-        buildImpactChange(
-          currentByCode.get(code) ?? null,
-          draftByCode.get(code) ?? null,
-        ),
-      )
-      .filter(
-        (change): change is CustomerPriceBookDraftImpactChangeDto =>
-          change !== null,
-      )
+    const changes = buildImpactChanges(currentRules, draftRules)
       .sort((left, right) => {
         if (left.deltaPercent !== null && right.deltaPercent !== null) {
           return new Prisma.Decimal(right.deltaPercent)
@@ -1298,6 +1375,9 @@ export async function getCustomerPriceBookDraftPublishPreview(
       decreasedRuleCount: changes.filter(
         (change) => change.direction === 'DOWN' || change.direction === 'MIXED',
       ).length,
+      highRiskRuleCount: changes.filter(isHighRiskImpactChange).length,
+      highRiskDeltaPercentThreshold:
+        HIGH_RISK_DELTA_PERCENT_THRESHOLD.toString(),
       deltaPercentMin:
         percentValues.length > 0
           ? Prisma.Decimal.min(...percentValues).toString()
@@ -2310,11 +2390,26 @@ function sectionRowSnapshot(row: {
   };
 }
 
+function sectionRowHasSemanticChange(
+  existing: SectionRuleRow,
+  submitted: UpdateCustomerPriceSectionDraftInput['rows'][number],
+): boolean {
+  return (
+    !sameNullableDecimal(existing.amount, submitted.amount) ||
+    existing.minQty !== submitted.minQty ||
+    existing.maxQty !== submitted.maxQty ||
+    !sameNullableDecimal(existing.includedUnits, submitted.includedUnits) ||
+    !sameNullableDecimal(existing.incrementUnits, submitted.incrementUnits) ||
+    !sameNullableDecimal(existing.incrementAmount, submitted.incrementAmount)
+  );
+}
+
 type PreparedCustomerPriceSectionDraft = {
   input: UpdateCustomerPriceSectionDraftInput;
   book: SectionBookRow;
   workflow: DraftWorkflow;
   sectionRules: SectionRuleRow[];
+  changedRules: SectionRuleRow[];
   sectionIds: string[];
   submittedById: Map<
     string,
@@ -2398,13 +2493,17 @@ async function prepareCustomerPriceSectionDraft(
     }
   }
 
+  const submittedById = new Map(input.rows.map((row) => [row.ruleId, row]));
   return {
     input,
     book,
     workflow,
     sectionRules,
+    changedRules: sectionRules.filter((rule) =>
+      sectionRowHasSemanticChange(rule, submittedById.get(rule.id)!),
+    ),
     sectionIds,
-    submittedById: new Map(input.rows.map((row) => [row.ruleId, row])),
+    submittedById,
   };
 }
 
@@ -2413,7 +2512,7 @@ async function writePreparedCustomerPriceSectionDraft(
   prepared: PreparedCustomerPriceSectionDraft,
   now: Date,
 ): Promise<void> {
-  for (const existing of prepared.sectionRules) {
+  for (const existing of prepared.changedRules) {
     const submitted = prepared.submittedById.get(existing.id)!;
     const outcome = await tx.customerPriceRule.updateMany({
       where: {
@@ -2455,6 +2554,8 @@ async function finishPreparedCustomerPriceSectionDraft(
   actor: AuditActor,
   now: Date,
 ): Promise<void> {
+  if (prepared.changedRules.length === 0) return;
+
   await tx.customerPriceBook.update({
     where: { id: prepared.input.priceBookId },
     data: {
@@ -2471,7 +2572,7 @@ async function finishPreparedCustomerPriceSectionDraft(
     select: { id: true },
   });
 
-  for (const existing of prepared.sectionRules) {
+  for (const existing of prepared.changedRules) {
     const submitted = prepared.submittedById.get(existing.id)!;
     await writeAuditLogInTx(tx, {
       actor,
@@ -2495,11 +2596,11 @@ async function finishPreparedCustomerPriceSectionDraft(
     before: { section: prepared.input.section },
     after: {
       section: prepared.input.section,
-      ruleIds: prepared.sectionIds,
+      ruleIds: prepared.changedRules.map((rule) => rule.id),
     },
     requestMetadata: {
       source: 'customer-price-book-admin.updateCustomerPriceSectionDraft',
-      changedRuleCount: prepared.sectionRules.length,
+      changedRuleCount: prepared.changedRules.length,
     },
   });
 }
@@ -2546,7 +2647,7 @@ export async function updateCustomerPriceSectionsDraft(
 
       return prepared.map((section) => ({
         priceBookId: section.input.priceBookId,
-        ruleIds: section.sectionIds,
+        ruleIds: section.changedRules.map((rule) => rule.id),
       }));
     });
   } catch (error) {
@@ -3037,6 +3138,14 @@ export async function publishCustomerPriceBookDraft(
           isActive: true,
           notes: true,
           updatedAt: true,
+          rules: {
+            select: IMPACT_RULE_SELECT,
+            orderBy: [
+              { categoryId: 'asc' },
+              { priority: 'desc' },
+              { code: 'asc' },
+            ],
+          },
         },
       });
       const workflow = draft ? draftWorkflow(draft.notes) : null;
@@ -3080,6 +3189,14 @@ export async function publishCustomerPriceBookDraft(
           version: true,
           effectiveFrom: true,
           effectiveTo: true,
+          rules: {
+            select: IMPACT_RULE_SELECT,
+            orderBy: [
+              { categoryId: 'asc' },
+              { priority: 'desc' },
+              { code: 'asc' },
+            ],
+          },
         },
         orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
         take: 2,
@@ -3090,6 +3207,13 @@ export async function publishCustomerPriceBookDraft(
       const current = currentBooks[0]!;
       if (current.id !== workflow.basedOn.id) {
         throw new CustomerPriceBookAdminError('草稿基于的旧版本已变化，请重新复制最新版本');
+      }
+      const highRiskRuleCount = buildImpactChanges(
+        current.rules ?? [],
+        draft.rules ?? [],
+      ).filter(isHighRiskImpactChange).length;
+      if (highRiskRuleCount > 0 && input.confirmedHighRisk !== true) {
+        throw new CustomerPriceBookHighRiskConfirmationError();
       }
       const currentRuleSetSha256 = calculateCustomerPriceRuleSetSha256(
         await validationRules(tx, current.id),
@@ -3175,7 +3299,13 @@ export async function publishCustomerPriceBookDraft(
             version: draft.version,
             isActive: draft.isActive,
           },
-          previousVersion: current,
+          previousVersion: {
+            id: current.id,
+            code: String(current.code),
+            version: current.version,
+            effectiveFrom: current.effectiveFrom,
+            effectiveTo: current.effectiveTo,
+          },
         },
         after: {
           ...published,
@@ -3187,6 +3317,9 @@ export async function publishCustomerPriceBookDraft(
         requestMetadata: {
           source: 'customer-price-book-admin.publishCustomerPriceBookDraft',
           basedOnPriceBookId: current.id,
+          highRiskRuleCount,
+          highRiskConfirmed:
+            highRiskRuleCount > 0 ? input.confirmedHighRisk === true : false,
         },
       });
       return published;

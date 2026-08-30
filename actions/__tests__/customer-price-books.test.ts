@@ -9,9 +9,11 @@ const {
   adminMock,
   revalidateMock,
   MockAdminError,
+  MockHighRiskError,
   MockValidationError,
 } = vi.hoisted(() => {
   class AdminError extends Error {}
+  class HighRiskError extends AdminError {}
   class ValidationError extends AdminError {
     issues: Array<{ path: string; message: string }>;
 
@@ -33,6 +35,7 @@ const {
     },
     revalidateMock: vi.fn(),
     MockAdminError: AdminError,
+    MockHighRiskError: HighRiskError,
     MockValidationError: ValidationError,
   };
 });
@@ -43,6 +46,7 @@ vi.mock('@/lib/auth/permissions', () => ({
 vi.mock('@/lib/price/customer-price-book-admin', () => ({
   ...adminMock,
   CustomerPriceBookAdminError: MockAdminError,
+  CustomerPriceBookHighRiskConfirmationError: MockHighRiskError,
   CustomerPriceBookValidationError: MockValidationError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidateMock }));
@@ -564,6 +568,7 @@ describe('customer price-book Server Actions', () => {
         expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
         effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
         publishNote: '已完成价格复核',
+        confirmedHighRisk: false,
       },
       actor,
     );
@@ -598,9 +603,54 @@ describe('customer price-book Server Actions', () => {
         expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
         effectiveFrom: undefined,
         publishNote: undefined,
+        confirmedHighRisk: false,
       },
       actor,
     );
+  });
+
+  it('forwards explicit high-risk confirmation to the locked domain publisher', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockResolvedValue({
+      id: 'book-v2-draft',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      confirmedImpact: true,
+      confirmedHighRisk: true,
+    });
+
+    expect(adminMock.publishCustomerPriceBookDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmedHighRisk: true }),
+      actor,
+    );
+  });
+
+  it('returns a field error when the locked publisher detects unconfirmed high risk', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockRejectedValue(
+      new MockHighRiskError('本次调价包含异常幅度，请勾选高风险确认后再发布'),
+    );
+
+    const result = await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      confirmedImpact: true,
+      confirmedHighRisk: false,
+    });
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        confirmedHighRisk: [
+          '本次调价包含异常幅度，请勾选高风险确认后再发布',
+        ],
+      },
+    });
   });
 
   it('发布说明可沿用调价原因，但仍要求 L3 影响确认', async () => {

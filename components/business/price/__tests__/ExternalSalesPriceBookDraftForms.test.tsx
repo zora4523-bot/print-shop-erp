@@ -339,6 +339,7 @@ describe('customer price-book draft form bindings', () => {
       effectiveFrom: '2026-09-01T08:00',
       publishNote: '已完成价格复核',
       confirmedImpact: true,
+      confirmedHighRisk: false,
     });
     expect(discardActionMock).toHaveBeenCalledWith({
       priceBookId: 'draft-1',
@@ -495,6 +496,8 @@ describe('PublishCustomerPriceBookDraftForm', () => {
           changedRuleCount: 7,
           increasedRuleCount: 7,
           decreasedRuleCount: 0,
+          highRiskRuleCount: 0,
+          highRiskDeltaPercentThreshold: '50',
           deltaPercentMin: '2.8',
           deltaPercentMax: '5.8',
           validationStatus: 'PASS',
@@ -531,6 +534,8 @@ describe('PublishCustomerPriceBookDraftForm', () => {
           changedRuleCount: 0,
           increasedRuleCount: 0,
           decreasedRuleCount: 0,
+          highRiskRuleCount: 0,
+          highRiskDeltaPercentThreshold: '50',
           deltaPercentMin: null,
           deltaPercentMax: null,
           validationStatus: 'PASS',
@@ -539,6 +544,34 @@ describe('PublishCustomerPriceBookDraftForm', () => {
     );
 
     expect(html).toContain('没有可发布的差异');
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+  });
+
+  it('异常涨跌要求额外显式确认，未勾选时不能提交', () => {
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-risky"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="修订单价"
+        impact={{
+          totalRuleCount: 145,
+          changedItemCount: 1,
+          changedRuleCount: 1,
+          increasedRuleCount: 1,
+          decreasedRuleCount: 0,
+          highRiskRuleCount: 1,
+          highRiskDeltaPercentThreshold: '50',
+          deltaPercentMin: '515.4',
+          deltaPercentMax: '515.4',
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+
+    expect(html).toContain('检测到 1 条高风险报价变更');
+    expect(html).toContain('name="confirmedHighRisk"');
+    expect(html).toContain('我已逐条核对高风险变更');
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
   });
 });

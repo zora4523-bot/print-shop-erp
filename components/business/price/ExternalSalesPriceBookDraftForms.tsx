@@ -377,6 +377,7 @@ export async function publishDraftFromForm(
     effectiveFrom: textValue(formData, 'effectiveFrom'),
     publishNote: textValue(formData, 'publishNote'),
     confirmedImpact: checkedValue(formData, 'confirmedImpact'),
+    confirmedHighRisk: checkedValue(formData, 'confirmedHighRisk'),
   });
 }
 
@@ -605,6 +606,8 @@ export function PublishCustomerPriceBookDraftForm({
     changedRuleCount: number;
     increasedRuleCount: number;
     decreasedRuleCount: number;
+    highRiskRuleCount: number;
+    highRiskDeltaPercentThreshold: string;
     deltaPercentMin: string | null;
     deltaPercentMax: string | null;
     validationStatus: 'PASS' | 'FAIL';
@@ -616,6 +619,7 @@ export function PublishCustomerPriceBookDraftForm({
 }) {
   const router = useRouter();
   const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
+  const [confirmedHighRisk, setConfirmedHighRisk] = useState(false);
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
     publishDraftFromForm,
     null,
@@ -631,6 +635,7 @@ export function PublishCustomerPriceBookDraftForm({
   const hasChanges =
     (impact?.changedItemCount ?? 0) > 0 &&
     (impact?.changedRuleCount ?? 0) > 0;
+  const requiresHighRiskConfirmation = (impact?.highRiskRuleCount ?? 0) > 0;
 
   const deltaRange =
     impact && impact.deltaPercentMin !== null && impact.deltaPercentMax !== null
@@ -742,6 +747,36 @@ export function PublishCustomerPriceBookDraftForm({
         <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs leading-5 text-warning-foreground">
           已开工单价格不变；新价格仅用于发布后新建或重新报价的工单。
         </p>
+
+        {requiresHighRiskConfirmation ? (
+          <div className="space-y-2 rounded-md border border-destructive/40 bg-background p-3">
+            <p className="text-sm font-medium text-destructive">
+              检测到 {impact?.highRiskRuleCount} 条高风险报价变更
+            </p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              任一价格相对当前版涨跌达到 {impact?.highRiskDeltaPercentThreshold}% ，
+              或价格在 0 元与非零之间、无报价与有报价之间切换，
+              以及有效规则新增、移除或启停时，需要单独确认。
+              系统不会限制价格，只防止误触发布。
+            </p>
+            <label className="flex min-h-11 items-start gap-2 rounded-md border p-2 text-sm">
+              <input
+                type="checkbox"
+                name="confirmedHighRisk"
+                value="true"
+                checked={confirmedHighRisk}
+                onChange={(event) => setConfirmedHighRisk(event.target.checked)}
+                className="mt-0.5 size-4 shrink-0"
+                aria-describedby={`confirmedHighRisk-${priceBookId}-error`}
+              />
+              <span>我已逐条核对高风险变更，确认按当前新规则发布</span>
+            </label>
+            <FieldErrorMessages
+              id={`confirmedHighRisk-${priceBookId}-error`}
+              messages={errors.confirmedHighRisk}
+            />
+          </div>
+        ) : null}
       </section>
 
       <Disclosure className="rounded-lg border bg-card p-3">
@@ -806,7 +841,12 @@ export function PublishCustomerPriceBookDraftForm({
         type="submit"
         variant="destructive"
         className="min-h-11 w-full"
-        disabled={pending || !validationPassed || !hasChanges}
+        disabled={
+          pending ||
+          !validationPassed ||
+          !hasChanges ||
+          (requiresHighRiskConfirmation && !confirmedHighRisk)
+        }
       >
         {pending
           ? '正在发布…'
