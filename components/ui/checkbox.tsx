@@ -1,15 +1,19 @@
 "use client"
 
+import type { KeyboardEvent } from "react"
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
+import type { BaseUIEvent } from "@base-ui/react/types"
 import { CheckIcon, MinusIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
 type CheckboxProps = Omit<CheckboxPrimitive.Root.Props, "children">
+type BaseUICheckboxKeyEvent = BaseUIEvent<KeyboardEvent<HTMLSpanElement>>
 
 function Checkbox({
   className,
   indeterminate = false,
+  onKeyDown,
   ...props
 }: CheckboxProps) {
   return (
@@ -20,6 +24,12 @@ function Checkbox({
         "inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:focus-visible:ring-destructive data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className
       )}
+      onKeyDown={(event: BaseUICheckboxKeyEvent) => {
+        onKeyDown?.(event)
+        if (event.key === "Enter") {
+          event.preventBaseUIHandler?.()
+        }
+      }}
       {...props}
     >
       <CheckboxPrimitive.Indicator
