@@ -1,5 +1,5 @@
-import { createReadStream, type ReadStream } from 'node:fs';
-import { chmod, mkdir, readdir, stat, unlink } from 'node:fs/promises';
+import type { ReadStream } from 'node:fs';
+import { chmod, mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 
@@ -36,9 +36,20 @@ export async function openOrderExportArtifact(name: string): Promise<{
   byteLength: number;
 }> {
   const path = orderExportArtifactPath(name);
-  const info = await stat(path);
-  if (!info.isFile()) throw new InvalidOrderExportArtifactError();
-  return { stream: createReadStream(path), byteLength: info.size };
+  const handle = await open(path, 'r');
+  try {
+    // Stat the already-open descriptor. This closes the path replacement race
+    // between a separate stat() and createReadStream(path).
+    const info = await handle.stat();
+    if (!info.isFile()) throw new InvalidOrderExportArtifactError();
+    return {
+      stream: handle.createReadStream({ autoClose: true }),
+      byteLength: info.size,
+    };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function deleteOrderExportArtifact(name: string): Promise<void> {
