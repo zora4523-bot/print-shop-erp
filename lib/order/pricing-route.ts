@@ -181,18 +181,6 @@ export const ORDER_PRICING_ROUTE_LABELS: Record<
   [OrderItemPricingRoute.MANUAL_QUOTE]: '待管理员终价',
 };
 
-export const NEW_ORDER_PRICING_ROUTE_DESCRIPTIONS: Record<
-  NewOrderPricingRoute,
-  string
-> = {
-  [OrderItemPricingRoute.STOCK_BLANK]:
-    '精确匹配现货产品组合，系统自动带入局部烫金工艺',
-  [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL]:
-    '颜色、单双面与烫法都是计价参数，未覆盖组合转管理员终价',
-  [OrderItemPricingRoute.COLOR_PRINT]:
-    '彩印与组合工艺按已发布规则核价，未覆盖组合转管理员终价',
-};
-
 export const STOCK_LOCAL_FOIL_CRAFT_CODE = 'FLAT_FOIL_PARTIAL';
 export const LEGACY_STOCK_FOIL_CRAFT_CODE = 'STOCK_FOIL';
 

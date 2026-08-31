@@ -249,19 +249,6 @@ export async function seedFinishedOrder(opts: {
   return { orderId, orderNo };
 }
 
-// Seeds an Order + one OrderItem + N OrderItemDesigns for visual
-// regression tests of OrderPrintLayout. Deterministic across runs:
-// - Fixed orderId per design count (delete-then-insert idempotency)
-// - Stable customerRef / receiverName / item fields → render is
-//   pixel-identical regardless of clock or other state.
-// - Designs use a tiny inline data: PNG so no network fetch is needed
-//   and the image bytes are hashable. Without this the print page
-//   would 404 / hang on the placeholder fileUrl.
-//
-// Caller is responsible for providing submitterId (admin user works).
-// Returns the deterministic orderId so the spec can navigate to
-// /print/orders/<id> directly.
-//
 // 1×1 transparent PNG, base64. Renders as a tiny dot inside whatever
 // CSS sizing the design-grid imposes. Plenty for visual baseline.
 const PLACEHOLDER_PNG_DATA_URL =
@@ -282,81 +269,6 @@ const COLOR_ARTWORK_DATA_URL =
       '<rect x="285" y="545" width="330" height="26" rx="13" fill="#c91f37"/>' +
       '</svg>',
   ).toString('base64');
-
-export async function seedE2eOrderDesign(opts: {
-  orderId?: string;
-  expectedCustomName: string;
-}): Promise<{ orderId: string; orderNo: string; itemName: string }> {
-  return withDb(async (db) => {
-    const result = await db.query<{
-      orderId: string;
-      orderNo: string;
-      customName: string | null;
-      createdById: string;
-      creatorUsername: string;
-      itemId: string;
-      itemName: string;
-    }>(
-      `SELECT o.id AS "orderId",
-              o."orderNo" AS "orderNo",
-              o."customName" AS "customName",
-              o."createdById" AS "createdById",
-              creator.username AS "creatorUsername",
-              item.id AS "itemId",
-              item.name AS "itemName"
-         FROM "Order" o
-         JOIN "User" creator ON creator.id = o."createdById"
-         JOIN LATERAL (
-           SELECT oi.id, oi.name
-             FROM "OrderItem" oi
-            WHERE oi."orderId" = o.id
-            ORDER BY oi.sequence ASC
-            LIMIT 1
-         ) item ON TRUE
-        WHERE ($1::text IS NULL OR o.id = $1)
-          AND o."customName" = $2
-          AND o.status = 'DRAFT'
-        ORDER BY o."createdAt" DESC
-        LIMIT 2`,
-      [opts.orderId ?? null, opts.expectedCustomName],
-    );
-    const row = result.rows[0];
-    if (
-      result.rows.length !== 1 ||
-      !row ||
-      row.customName !== opts.expectedCustomName ||
-      !row.creatorUsername.startsWith('e2e-') ||
-      !opts.expectedCustomName.startsWith('E2E ')
-    ) {
-      throw new Error(
-        'seedE2eOrderDesign refuses an order outside the exact E2E fixture',
-      );
-    }
-
-    await db.query(
-      `INSERT INTO "OrderItemDesign" (
-         id, "orderItemId", "fileType", "fileUrl", "fileName",
-         "fileSize", "thumbnailUrl", "uploadedBy", "uploadedAt"
-       ) VALUES (
-         $1, $2, 'IMAGE'::"DesignFileType", $3, $4,
-         $5, $3, $6, NOW()
-       )`,
-      [
-        `e2e-design-${randomBytes(8).toString('hex')}`,
-        row.itemId,
-        PLACEHOLDER_PNG_DATA_URL,
-        'e2e-production-design.png',
-        Buffer.byteLength(PLACEHOLDER_PNG_DATA_URL),
-        row.createdById,
-      ],
-    );
-    return {
-      orderId: row.orderId,
-      orderNo: row.orderNo,
-      itemName: row.itemName,
-    };
-  });
-}
 
 export async function seedPrintableOrder(opts: {
   submitterId: string;
@@ -1700,36 +1612,6 @@ export async function openFirstOrderItemEditor(page: Page): Promise<void> {
   await expect(
     form.getByRole('spinbutton', { name: '数量', exact: true }),
   ).toBeVisible();
-}
-
-// The external-sales B form has one visible page and never accepts a browser
-// weight or manual logistics amount. Production-flow E2E uses SF collect,
-// which produces a complete versioned quote without inventing carrier facts.
-// A design row is attached by seedE2eOrderDesign so local tests stay hermetic
-// and do not upload fixtures into the real OSS bucket.
-export async function fillExternalSalesOrderDraft(
-  page: Page,
-  opts: { customName: string; quantity?: number },
-): Promise<void> {
-  const form = page.locator('[data-slot="order-form-b"]');
-  await expect(form).toBeVisible();
-  await form
-    .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill(opts.customName);
-  await form
-    .getByRole('spinbutton', { name: '数量', exact: true })
-    .fill(String(opts.quantity ?? 1000));
-  await form
-    .getByRole('textbox', { name: '收货地址', exact: true })
-    .fill('E2E 收货人 13800138000 广东省深圳市南山区测试路 1 号');
-  await form
-    .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
-    .check();
-  await expect(
-    form.getByRole('button', {
-      name: /^(创建并提交|提交并申请管理员终价)$/,
-    }),
-  ).toBeEnabled();
 }
 
 // ---- ProductionOperation scanner fixture ----

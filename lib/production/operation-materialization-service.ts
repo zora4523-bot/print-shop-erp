@@ -7,7 +7,6 @@ import {
   ProductionOperationStatus,
 } from '../../generated/prisma/enums';
 import { databaseNow } from '../background-jobs/clock';
-import { db } from '../db';
 import { orderCascadeLockKey } from '../order/locks';
 import { transitionOrder } from '../order/status-machine';
 import {
@@ -427,13 +426,4 @@ export async function activateProductionOperationsInTx(
     progressStepsCreated: progressStepIds.length,
     idempotentReplay: false,
   };
-}
-
-export async function activateProductionOperations(
-  orderId: string,
-  actor: { id: string },
-): Promise<ActivateProductionOperationsResult> {
-  return db.$transaction((tx) =>
-    activateProductionOperationsInTx(tx, orderId, actor),
-  );
 }

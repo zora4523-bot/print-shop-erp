@@ -203,11 +203,3 @@ export function collectOrderFormGaps(
 
   return gaps;
 }
-
-export const ORDER_FORM_STEP_LABELS: Record<OrderFormStep, string> = {
-  customer: '① 客户与交期',
-  items: '② 款式',
-  shipping: '③ 收货与费用',
-};
-
-export const PRINT_ITEM_IMAGE_WARN_COUNT = 6;

@@ -88,23 +88,6 @@ async function getActiveCsRule<T>(
   return getActiveRuleValue<T>(SalaryRuleType.CS_COMMISSION, ruleKey, now);
 }
 
-export async function getActiveCsMonthlyBase(
-  now: Date = new Date(),
-): Promise<number | null> {
-  const v = await getActiveCsRule<{ monthlyBase: number }>(
-    'CS_BASE_SALARY',
-    now,
-  );
-  return v?.monthlyBase ?? null;
-}
-
-export async function getActiveCsPeriodLength(
-  now: Date = new Date(),
-): Promise<number | null> {
-  const v = await getActiveCsRule<{ months: number }>('CS_PERIOD_LENGTH', now);
-  return v?.months ?? null;
-}
-
 export async function getActiveCsTiers(
   now: Date = new Date(),
 ): Promise<CsTiersConfig | null> {
