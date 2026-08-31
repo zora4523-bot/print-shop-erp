@@ -100,6 +100,41 @@ describe('MaterialForm structured feedback contract', () => {
     expect(html).toContain('name="name" value="（烫金!B13）"');
   });
 
+  it('编辑任意已有物料时都锁定可见单位并保留原值', () => {
+    const html = renderToStaticMarkup(
+      <MaterialForm
+        mode="edit"
+        action={vi.fn()}
+        routeBase="/owner/materials"
+        initial={{
+          code: 'INK-1',
+          name: '专色油墨',
+          category: MaterialCategory.OTHER,
+          specification: null,
+          unit: 'kg',
+          safetyStock: null,
+          averageCost: null,
+        }}
+      />,
+    );
+
+    const unitInput = html.match(/<input[^>]*id="unit"[^>]*>/)?.[0];
+    expect(unitInput).toContain('disabled=""');
+    expect(unitInput).not.toMatch(/\sname=/);
+    expect(html.match(/name="unit"/g)).toHaveLength(1);
+    expect(html).toContain('type="hidden" name="unit" value="kg"');
+    expect(html).toContain('物料创建后不能修改');
+    expect(html).toContain('请新建物料');
+  });
+
+  it('创建物料时单位仍可输入', () => {
+    const html = render();
+    const unitInput = html.match(/<input[^>]*id="unit"[^>]*>/)?.[0];
+
+    expect(unitInput).toMatch(/\sname="unit"/);
+    expect(unitInput).not.toContain('disabled=""');
+  });
+
   it('summarizes validation failures and links category to its message', () => {
     actionState.current = {
       status: 'invalid',

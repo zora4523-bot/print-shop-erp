@@ -12,7 +12,7 @@ const { dbMock, txMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
     },
-    material: { update: vi.fn() },
+    material: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     materialLocationStock: { update: vi.fn() },
     materialTransaction: { create: vi.fn() },
   };
@@ -56,6 +56,7 @@ import {
   listMaterialsPage,
   listMaterials,
   MaterialInvariantError,
+  MaterialUnitChangeError,
   setMaterialActive,
   updateMaterial,
 } from '../material';
@@ -74,6 +75,8 @@ beforeEach(() => {
     isActive: true,
     warehouse: { id: 'wh-default', isActive: true },
   });
+  txMock.material.create.mockReset();
+  txMock.material.findUnique.mockReset();
   txMock.material.update.mockReset();
   txMock.materialLocationStock.update.mockReset().mockResolvedValue({ id: 'stock1' });
   txMock.materialTransaction.create.mockReset();
@@ -268,7 +271,7 @@ describe('listActivePaperOrderOptions', () => {
 describe('createMaterial', () => {
   it('generates a material code when the operator leaves it blank', async () => {
     dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 23 });
-    dbMock.material.create.mockResolvedValue(makeMaterial({ code: 'MAT-000023' }));
+    txMock.material.create.mockResolvedValue(makeMaterial({ code: 'MAT-000023' }));
 
     await createMaterial({
       code: null,
@@ -280,11 +283,11 @@ describe('createMaterial', () => {
       averageCost: null,
     });
 
-    expect(dbMock.material.create.mock.calls[0][0].data.code).toBe('MAT-000023');
+    expect(txMock.material.create.mock.calls[0][0].data.code).toBe('MAT-000023');
   });
 
   it('forces isActive=true and leaves stock changes to transaction flow', async () => {
-    dbMock.material.create.mockResolvedValue(makeMaterial());
+    txMock.material.create.mockResolvedValue(makeMaterial());
     await createMaterial({
       code: 'PAPER-A4',
       name: 'A4 白卡纸',
@@ -294,15 +297,37 @@ describe('createMaterial', () => {
       safetyStock: '2.00',
       averageCost: '0.1200',
     });
-    const data = dbMock.material.create.mock.calls[0][0].data;
+    const data = txMock.material.create.mock.calls[0][0].data;
     expect(data.isActive).toBe(true);
     expect('currentStock' in data).toBe(false);
   });
+
+  it.each([MaterialCategory.PAPER, MaterialCategory.FOIL])(
+    'takes the price snapshot write lock before creating %s catalog facts',
+    async (category) => {
+      txMock.material.create.mockResolvedValue(makeMaterial({ category }));
+
+      await createMaterial({
+        code: 'CATALOG-FACT',
+        name: '建单目录事实',
+        category,
+        specification: null,
+        unit: '张',
+        safetyStock: null,
+        averageCost: null,
+      });
+
+      expect(txMock.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        txMock.material.create.mock.invocationCallOrder[0],
+      );
+    },
+  );
 });
 
 describe('updateMaterial', () => {
   it('throws when target missing', async () => {
-    dbMock.material.findUnique.mockResolvedValue(null);
+    txMock.material.findUnique.mockResolvedValue(null);
     await expect(
       updateMaterial('missing', {
         code: 'PAPER-A4',
@@ -314,12 +339,13 @@ describe('updateMaterial', () => {
         averageCost: null,
       }),
     ).rejects.toBeInstanceOf(MaterialInvariantError);
-    expect(dbMock.material.update).not.toHaveBeenCalled();
+    expect(txMock.material.update).not.toHaveBeenCalled();
   });
 
-  it('never writes isActive or currentStock through the dictionary update path', async () => {
-    dbMock.material.findUnique.mockResolvedValue(makeMaterial());
-    dbMock.material.update.mockResolvedValue(makeMaterial({ name: '改名' }));
+  it('allows same-unit metadata edits without writing unit or stock fields', async () => {
+    txMock.material.findUnique.mockResolvedValue(makeMaterial({ unit: '张' }));
+    txMock.material.update.mockResolvedValue(makeMaterial({ name: '改名' }));
+
     await updateMaterial('mat1', {
       code: 'PAPER-A4',
       name: '改名',
@@ -329,26 +355,80 @@ describe('updateMaterial', () => {
       safetyStock: null,
       averageCost: null,
     });
-    const data = dbMock.material.update.mock.calls[0][0].data as Record<string, unknown>;
+    const data = txMock.material.update.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect('unit' in data).toBe(false);
     expect('isActive' in data).toBe(false);
     expect('currentStock' in data).toBe(false);
+  });
+
+  it('rejects a unit change even when the material has zero stock and no facts', async () => {
+    txMock.material.findUnique.mockResolvedValue(
+      makeMaterial({ unit: 'kg', currentStock: '0.00' }),
+    );
+    await expect(
+      updateMaterial('mat1', {
+        code: 'INK-1',
+        name: '专色油墨',
+        category: MaterialCategory.OTHER,
+        specification: null,
+        unit: '卷',
+        safetyStock: null,
+        averageCost: null,
+      }),
+    ).rejects.toMatchObject({
+      name: MaterialUnitChangeError.name,
+      message: expect.stringContaining('请新建物料'),
+    });
+    expect(txMock.material.update).not.toHaveBeenCalled();
+  });
+
+  it('holds the price snapshot write lock across read and update', async () => {
+    txMock.material.findUnique.mockResolvedValue(makeMaterial({ unit: '张' }));
+    txMock.material.update.mockResolvedValue(makeMaterial({ name: '改名' }));
+
+    await updateMaterial('mat1', {
+      code: 'PAPER-A4',
+      name: '改名',
+      category: MaterialCategory.PAPER,
+      specification: null,
+      unit: '张',
+      safetyStock: null,
+      averageCost: null,
+    });
+
+    expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.material.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(txMock.material.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.material.update.mock.invocationCallOrder[0],
+    );
   });
 });
 
 describe('setMaterialActive', () => {
   it('no-ops when already matching', async () => {
     const material = makeMaterial({ isActive: true });
-    dbMock.material.findUnique.mockResolvedValue(material);
+    txMock.material.findUnique.mockResolvedValue(material);
     const result = await setMaterialActive('mat1', true);
     expect(result).toBe(material);
-    expect(dbMock.material.update).not.toHaveBeenCalled();
+    expect(txMock.material.update).not.toHaveBeenCalled();
+    expect(txMock.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
   it('flips isActive when different', async () => {
-    dbMock.material.findUnique.mockResolvedValue(makeMaterial({ isActive: true }));
-    dbMock.material.update.mockResolvedValue(makeMaterial({ isActive: false }));
+    txMock.material.findUnique.mockResolvedValue(makeMaterial({ isActive: true }));
+    txMock.material.update.mockResolvedValue(makeMaterial({ isActive: false }));
     await setMaterialActive('mat1', false);
-    expect(dbMock.material.update.mock.calls[0][0].data).toEqual({ isActive: false });
+    expect(txMock.material.update.mock.calls[0][0].data).toEqual({ isActive: false });
+    expect(txMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.material.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(txMock.material.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      txMock.material.update.mock.invocationCallOrder[0],
+    );
   });
 });
 

@@ -22,6 +22,7 @@ import {
   createMaterialTransaction,
   getMaterialSummary,
   MaterialInvariantError,
+  MaterialUnitChangeError,
   setMaterialActive,
   updateMaterial,
 } from '@/lib/material';
@@ -188,6 +189,12 @@ async function updateMaterialWithScope(
   } catch (err) {
     const unique = mapUniqueViolation(err);
     if (unique) return unique;
+    if (err instanceof MaterialUnitChangeError) {
+      return {
+        status: 'invalid',
+        fieldErrors: { unit: [err.message] },
+      };
+    }
     const invariant = mapInvariantError(err, MaterialInvariantError);
     if (invariant) return invariant;
     throw err;
