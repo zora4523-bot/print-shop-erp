@@ -2,10 +2,7 @@ import { cache } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
-  createProductAction,
   createQuoteProductAction,
-  setQuoteProductActiveAction,
-  updateProductAction,
   updateQuoteProductAction,
 } from '@/actions/owner-products';
 import {
@@ -21,7 +18,9 @@ import { ProductReferenceImpact } from '@/components/business/product/ProductRef
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
+import { RuleSpecWorkspace } from '@/components/business/rules/catalog/RuleSpecWorkspace';
 import type { ProductCategory } from '@/generated/prisma/enums';
 import {
   buildTableHref,
@@ -37,6 +36,7 @@ import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import {
   getProductReferenceImpact,
   getProductSummary,
+  isRetiredProductCategory,
   listProductCategoryOptions,
   listProductsPage,
   type ProductActiveStatusFilter,
@@ -48,6 +48,7 @@ export type ProductCatalogListProps = {
     page?: string | string[];
     pageSize?: string | string[];
     status?: string | string[];
+    section?: string | string[];
   }>;
   routeBase: ProductRouteBase;
   categories?: readonly ProductCategory[];
@@ -65,7 +66,7 @@ const loadProduct = cache(getProductSummary);
 
 export async function getProductCatalogMetadata({
   params,
-  titleScope = '报价 SKU',
+  titleScope = '可建单产品组合',
 }: Pick<ProductCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const { id } = await params;
   const session = await getSession();
@@ -75,8 +76,8 @@ export async function getProductCatalogMetadata({
   const product = await loadProduct(id);
   return {
     title: product
-      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名 SKU'} · ${titleScope}`
-      : '报价 SKU 不存在',
+      ? `编辑 ${externalPriceBusinessText(product.name) || '未命名组合'} · ${titleScope}`
+      : '可建单组合不存在',
   };
 }
 
@@ -88,6 +89,9 @@ export async function ProductCatalogList({
   await requirePermission('dict:product:manage');
   const sp = await searchParams;
   const q = firstSearchParam(sp.q).trim();
+  const specWorkspace =
+    routeBase === RULE_CENTER_HREFS.stockSkus &&
+    firstSearchParam(sp.section) === 'specs';
   const rawStatus = firstSearchParam(sp.status);
   const status: ProductActiveStatusFilter =
     rawStatus === 'all' || rawStatus === 'inactive' ? rawStatus : 'active';
@@ -109,94 +113,117 @@ export async function ProductCatalogList({
     page: productPage.page,
     pageSize,
     status,
+    section: specWorkspace ? 'specs' : undefined,
   };
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.stockSkus;
-
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={inRuleCenter ? '报价 SKU' : '产品字典'}
+      <RuleCenterPageHeader
+        title={specWorkspace ? '规格 · 烫金颜色' : '可建单产品组合'}
+        effect="immediate"
+        subtitle={
+          specWorkspace
+            ? '规格和纸张来自可建单组合；烫金颜色当前随工单事实维护。'
+            : '维护新建工单的产品结构、纸张与规格组合；系统根据工单参数隐式匹配，价格由已发布客户计价规则决定。'
+        }
         actions={
           <Link
             href={`${routeBase}/new`}
             prefetch={false}
             className={buttonVariants()}
           >
-            新建报价 SKU
+            新建组合
           </Link>
         }
       />
 
-      <AdminListToolbar
-        action={routeBase}
-        query={q}
-        placeholder="搜索编码、名称、规格、纸张"
-        clearHref={buildTableHref(routeBase, {}, { status, pageSize })}
-        hiddenParams={{ pageSize, status }}
-        filters={
-          <div
-            role="group"
-            aria-label="报价 SKU 状态筛选"
-            className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
-          >
-            {(
-              [
-                ['all', '全部'],
-                ['active', '已启用'],
-                ['inactive', '已停用'],
-              ] as const
-            ).map(([value, label]) => (
-              <Link
-                key={value}
-                href={buildTableHref(routeBase, queryParams, {
-                  status: value,
-                  page: null,
-                })}
-                prefetch={false}
-                aria-current={status === value ? 'page' : undefined}
-                className={buttonVariants({
-                  variant: status === value ? 'secondary' : 'ghost',
-                  size: 'sm',
-                })}
-              >
-                {label}
-              </Link>
-            ))}
-          </div>
-        }
-      />
-
-      <AdminTableCard
-        isEmpty={productPage.rows.length === 0}
-        emptyTitle={inRuleCenter ? '暂无报价 SKU' : '暂无产品'}
-        emptyDescription={
-          q
-            ? '没有匹配当前搜索与状态条件的记录。'
-            : status === 'inactive'
-              ? '暂无已停用记录。'
-              : status === 'active'
-                ? '暂无已启用记录，可切换到“全部”查看。'
-                : undefined
-        }
-        footer={
-          <AdminPagination
-            basePath={routeBase}
-            page={productPage.page}
-            pageCount={productPage.pageCount}
-            total={productPage.total}
-            pageSize={productPage.pageSize}
-            queryParams={queryParams}
-          />
-        }
-      >
-        <ProductsTable
+      {specWorkspace ? (
+        <RuleSpecWorkspace
           products={productPage.rows}
-          editBase={routeBase}
-          label={inRuleCenter ? '报价 SKU 列表' : '产品字典列表'}
-          categoryHeading={inRuleCenter ? '产品结构' : '分类'}
-          showInternalPrice={!inRuleCenter}
+          routeBase={routeBase}
+          query={q}
+          status={status}
+          hiddenSearchParams={{ section: 'specs', pageSize, status }}
+          pagination={{
+            page: productPage.page,
+            pageCount: productPage.pageCount,
+            total: productPage.total,
+            pageSize: productPage.pageSize,
+            queryParams,
+          }}
         />
-      </AdminTableCard>
+      ) : (
+        <>
+          <AdminListToolbar
+            action={routeBase}
+            query={q}
+            placeholder="搜索编码、名称、规格、纸张"
+            clearHref={buildTableHref(routeBase, {}, { status, pageSize })}
+            hiddenParams={{ pageSize, status }}
+            filters={
+              <div
+                role="group"
+                aria-label="可建单组合状态筛选"
+                className="flex flex-wrap gap-1 rounded-lg border bg-muted/20 p-1"
+              >
+                {(
+                  [
+                    ['all', '全部'],
+                    ['active', '已启用'],
+                    ['inactive', '已停用'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Link
+                    key={value}
+                    href={buildTableHref(routeBase, queryParams, {
+                      status: value,
+                      page: null,
+                    })}
+                    prefetch={false}
+                    aria-current={status === value ? 'page' : undefined}
+                    className={buttonVariants({
+                      variant: status === value ? 'secondary' : 'ghost',
+                      size: 'sm',
+                    })}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            }
+          />
+
+          <AdminTableCard
+            isEmpty={productPage.rows.length === 0}
+            emptyTitle="暂无可建单产品组合"
+            emptyDescription={
+              q
+                ? '没有匹配当前搜索与状态条件的记录。'
+                : status === 'inactive'
+                  ? '暂无已停用记录。'
+                  : status === 'active'
+                    ? '暂无已启用记录，可切换到“全部”查看。'
+                    : undefined
+            }
+            footer={
+              <AdminPagination
+                basePath={routeBase}
+                page={productPage.page}
+                pageCount={productPage.pageCount}
+                total={productPage.total}
+                pageSize={productPage.pageSize}
+                queryParams={queryParams}
+              />
+            }
+          >
+            <ProductsTable
+              products={productPage.rows}
+              editBase={routeBase}
+              label="可建单产品组合列表"
+              categoryHeading="产品结构"
+            />
+          </AdminTableCard>
+        </>
+      )}
     </div>
   );
 }
@@ -207,32 +234,36 @@ export async function NewProductCatalogItem({
 }: Omit<ProductCatalogListProps, 'searchParams'>) {
   await requirePermission('dict:product:manage');
   const allCategoryNodes = await listProductCategoryOptions();
+  const activeCategoryNodes = allCategoryNodes.filter(
+    (node) => !isRetiredProductCategory(node),
+  );
   const categoryNodes = categories?.length
-    ? allCategoryNodes.filter((node) => categories.includes(node.legacyCategory))
-    : allCategoryNodes;
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.stockSkus;
-
+    ? activeCategoryNodes.filter((node) =>
+        categories.includes(node.legacyCategory),
+      )
+    : activeCategoryNodes;
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">新建报价 SKU</h1>
-        <p className="text-sm text-muted-foreground">
+      <RuleCenterPageHeader
+        title="新建可建单组合"
+        effect="immediate"
+        subtitle="组合只定义产品结构、纸张与规格匹配；价格及数量档请在客户计价规则中维护。"
+        actions={
           <Link
             href={routeBase}
-            className="text-primary underline hover:no-underline"
+            className={buttonVariants({ variant: 'outline' })}
           >
             返回列表
           </Link>
-        </p>
-      </div>
+        }
+      />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductForm
           mode="create"
-          action={inRuleCenter ? createQuoteProductAction : createProductAction}
+          action={createQuoteProductAction}
           categoryNodes={categoryNodes}
           routeBase={routeBase}
           categoryManagementHref={RULE_CENTER_HREFS.productCategories}
-          showInternalPrice={!inRuleCenter}
         />
       </div>
     </div>
@@ -251,6 +282,7 @@ export async function EditProductCatalogItem({
     getProductReferenceImpact(id),
   ]);
   if (!product) notFound();
+  const isRetired = isRetiredProductCategory(product.categoryNode);
 
   const isLegacyCompatibilityObject = Boolean(
     categories?.length && !categories.includes(product.category),
@@ -258,46 +290,47 @@ export async function EditProductCatalogItem({
   const allCategoryOptions = await listProductCategoryOptions({
     includeInactiveIds: [product.categoryNodeId],
   });
+  const currentAndActiveCategoryOptions = allCategoryOptions.filter(
+    (node) =>
+      node.id === product.categoryNodeId || !isRetiredProductCategory(node),
+  );
   const categoryOptions = categories?.length
-    ? allCategoryOptions.filter(
+    ? currentAndActiveCategoryOptions.filter(
         (node) =>
           node.id === product.categoryNodeId ||
           categories.includes(node.legacyCategory),
       )
-    : allCategoryOptions;
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.stockSkus;
-  const boundUpdate = (
-    inRuleCenter ? updateQuoteProductAction : updateProductAction
-  ).bind(null, id);
+    : currentAndActiveCategoryOptions;
+  const boundUpdate = updateQuoteProductAction.bind(null, id);
   const formInitial = {
     code: product.code,
     categoryNodeId: product.categoryNodeId,
     name: product.name,
     specification: product.specification,
     paperType: product.paperType,
-    baseUnitPrice:
-      product.baseUnitPrice === null || product.baseUnitPrice === undefined
-        ? null
-        : String(product.baseUnitPrice),
-    minOrderQty: product.minOrderQty,
-    isActive: product.isActive,
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">
-          编辑报价 SKU：
-          {externalPriceBusinessText(product.name) || '未命名 SKU'}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {externalPriceBusinessText(product.categoryNode.name) || '未命名分类'}
-          {product.isActive ? ' · 启用' : ' · 停用'}
-          {isLegacyCompatibilityObject
-            ? ' · 不可用于新报价'
-            : ''}
-        </p>
-      </div>
+      <RuleCenterPageHeader
+        title={`编辑可建单组合：${
+          externalPriceBusinessText(product.name) || '未命名组合'
+        }`}
+        effect="immediate"
+        subtitle={
+          <>
+            {externalPriceBusinessText(product.categoryNode.name) ||
+              '未命名分类'}
+            {product.isActive ? ' · 启用' : ' · 停用'}
+            {isLegacyCompatibilityObject ? ' · 仅保留历史引用' : ''}
+            {isRetired ? (
+              <StatusBadge tone="warning" className="ml-2">
+                历史 / 已退役
+              </StatusBadge>
+            ) : null}
+          </>
+        }
+      />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>
@@ -309,7 +342,6 @@ export async function EditProductCatalogItem({
           categoryNodes={categoryOptions}
           routeBase={routeBase}
           categoryManagementHref={RULE_CENTER_HREFS.productCategories}
-          showInternalPrice={!inRuleCenter}
         />
       </section>
 
@@ -318,25 +350,24 @@ export async function EditProductCatalogItem({
         <ProductReferenceImpact impact={referenceImpact} />
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <h2 className="mb-2 text-base font-semibold">
-          {product.isActive ? '停用报价 SKU' : '启用报价 SKU'}
-        </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          {product.isActive
-            ? '停用后不再出现在新工单选择器中；已有工单和价格保留。'
-            : '启用后会重新进入新工单的可选规格。'}
-        </p>
-        <ToggleActiveButton
-          key={`${product.id}-${product.isActive}`}
-          productId={product.id}
-          currentlyActive={product.isActive}
-          impact={referenceImpact}
-          action={
-            inRuleCenter ? setQuoteProductActiveAction : undefined
-          }
-        />
-      </section>
+      {product.isActive || !isRetired ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="mb-2 text-base font-semibold">
+            {product.isActive ? '停用可建单组合' : '启用可建单组合'}
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {product.isActive
+              ? '停用后不再参与新建工单的隐式匹配；已有工单、BOM 和已发布价格不会被改写。'
+              : '启用后会重新参与新建工单的产品结构、纸张与规格匹配。'}
+          </p>
+          <ToggleActiveButton
+            key={`${product.id}-${product.isActive}`}
+            productId={product.id}
+            currentlyActive={product.isActive}
+            impact={referenceImpact}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

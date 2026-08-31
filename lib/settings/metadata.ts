@@ -38,11 +38,6 @@ export const SETTING_METADATA = {
     help: '单条报工总数达到计划数量 × 此倍数时拒绝；低于上限的超报需确认并留痕。',
     field: { kind: 'int', name: 'multiple', min: 1, max: 10, unit: '倍' },
   },
-  worker_self_claim_enabled: {
-    label: '师傅自由抢单',
-    help: '开启后，管理员可将未开工任务释放到抢单池；关闭只停止新的释放和抢单，不撤销已抢任务。',
-    field: { kind: 'boolean', name: 'enabled' },
-  },
 } as const satisfies Record<string, SettingMetadata>;
 
 export type SettingKey = keyof typeof SETTING_METADATA;

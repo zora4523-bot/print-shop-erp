@@ -36,10 +36,12 @@ vi.mock('@/lib/material', () => ({
 }));
 vi.mock('@/lib/craft', () => ({
   getCraftSummary: getCraftSummaryMock,
+  isRetiredCraft: vi.fn(() => false),
   listCraftsPage: vi.fn(),
 }));
 vi.mock('@/lib/product', () => ({
   getProductCategoryNodeSummary: getProductCategoryNodeSummaryMock,
+  isRetiredProductCategory: vi.fn(() => false),
   listProductCategoryNodes: vi.fn(),
 }));
 vi.mock('@/actions/owner-materials', () => ({
@@ -53,12 +55,10 @@ vi.mock('@/actions/owner-materials', () => ({
   updatePaperAction: vi.fn(),
 }));
 vi.mock('@/actions/owner-crafts', () => ({
-  createCraftAction: vi.fn(),
   createRuleCenterCraftAction: vi.fn(),
   updateCraftAction: vi.fn(),
 }));
 vi.mock('@/actions/owner-product-categories', () => ({
-  createProductCategoryNodeAction: vi.fn(),
   createRuleCenterProductCategoryNodeAction: vi.fn(),
   updateProductCategoryNodeAction: vi.fn(),
 }));
@@ -97,7 +97,7 @@ beforeEach(() => {
 describe('rule catalog metadata authorization', () => {
   it.each([
     ['纸张', getMaterialCatalogMetadata, getMaterialSummaryMock],
-    ['工艺与参数', getCraftCatalogMetadata, getCraftSummaryMock],
+    ['建单工艺目录', getCraftCatalogMetadata, getCraftSummaryMock],
     [
       '产品结构分类',
       getProductCategoryCatalogMetadata,
@@ -127,7 +127,7 @@ describe('rule catalog metadata authorization', () => {
       getCraftCatalogMetadata({
         params: Promise.resolve({ id: 'craft-private' }),
       }),
-    ).resolves.toEqual({ title: '工艺与参数' });
+    ).resolves.toEqual({ title: '建单工艺目录' });
 
     expect(getMaterialSummaryMock).not.toHaveBeenCalled();
     expect(getCraftSummaryMock).not.toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe('rule catalog metadata authorization', () => {
       getCraftCatalogMetadata({
         params: Promise.resolve({ id: 'craft-1' }),
       }),
-    ).resolves.toEqual({ title: '编辑 局部烫金 · 工艺与参数' });
+    ).resolves.toEqual({ title: '编辑 局部烫金 · 建单工艺目录' });
 
     expect(getMaterialSummaryMock).toHaveBeenCalledWith('paper-1');
     expect(getCraftSummaryMock).toHaveBeenCalledWith('craft-1');

@@ -17,7 +17,6 @@ export const PERMISSIONS = {
   'order:view:all':             [Role.ADMIN],
   'order:view:self':            [Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER],
   'order:export:all':           [Role.ADMIN],
-  'order:schedule':             [Role.ADMIN],
   'order:ship':                 [Role.ADMIN],
   'order:mark-urgent':          [Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN],
   'order:cancel':               [Role.ADMIN],
@@ -25,12 +24,13 @@ export const PERMISSIONS = {
   'order:change:review':        [Role.ADMIN],
   'order:price:confirm':        [Role.ADMIN],
 
-  // 生产任务
-  'task:assign':                [Role.ADMIN],
-  'task:claim':                 [Role.WORKER],
+  // 新生产工序与历史任务异议
   'task:report':                [Role.WORKER],
   'task:dispute:create':        [Role.WORKER],
   'task:dispute:review':        [Role.ADMIN],
+
+  // 考勤独立于人员派工；保留 ADMIN 角色集合但不复用 task:assign。
+  'attendance:manage':          [Role.ADMIN],
 
   // 外协
   'outsource:manage':           [Role.ADMIN],

@@ -17,21 +17,30 @@ import { parseStrictShanghaiDateTimeLocal } from '@/lib/auth/schemas';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { NEW_ORDER_PRICING_ROUTES } from '@/lib/order/pricing-route';
 import {
+  cancelScheduledCustomerPriceBook,
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
+  CustomerPriceBookHighRiskConfirmationError,
   CustomerPriceBookValidationError,
   discardCustomerPriceBookDraft,
   publishCustomerPriceBookDraft,
+  rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
+  updateCustomerPriceSectionDraft,
+  updateCustomerPriceSectionsDraft,
+  type UpdateCustomerPriceSectionDraftInput,
 } from '@/lib/price/customer-price-book-admin';
 import type {
+  CancelScheduledCustomerPriceBookActionInput,
   CreateCustomerPriceBookDraftActionInput,
   CustomerPriceBookMutationResult,
   DiscardCustomerPriceBookDraftActionInput,
   PublishCustomerPriceBookDraftActionInput,
+  RescheduleCustomerPriceBookActionInput,
   UpdateCustomerPriceRuleDraftActionInput,
   UpdateCustomerPriceRuleDraftGroupActionInput,
+  UpdateCustomerPriceSectionDraftActionInput,
 } from './customer-price-books.types';
 
 const safeId = z
@@ -505,18 +514,107 @@ const updateDraftRuleGroupSchema = z
     }
   });
 
+const updatePriceSectionDraftSchema = z
+  .object({
+    priceBookId: safeId,
+    section: z.enum(['blank', 'machine', 'tiers', 'adds', 'print', 'ship']),
+    rows: z
+      .array(
+        z
+          .object({
+            ruleId: safeId,
+            expectedUpdatedAt: strictIsoInstant,
+            amount: nullableDecimal('金额', 10, 4),
+            minQty: nullableQuantity,
+            maxQty: nullableQuantity,
+            includedUnits: nullableDecimal('首重', 7, 3),
+            incrementUnits: nullableDecimal('续重单位', 7, 3),
+            incrementAmount: nullableDecimal('续重金额', 10, 4),
+          })
+          .strict(),
+      )
+      .min(1, '当前业务板块没有可保存规则')
+      .max(100, '一次最多保存 100 条规则'),
+  })
+  .strict()
+  .superRefine((input, ctx) => {
+    const seen = new Set<string>();
+    input.rows.forEach((row, index) => {
+      if (seen.has(row.ruleId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['rows', index, 'ruleId'],
+          message: '收费项重复，请刷新后重试',
+        });
+      }
+      seen.add(row.ruleId);
+    });
+  });
+
 const publishDraftSchema = z
   .object({
     priceBookId: safeId,
     expectedDraftUpdatedAt: strictIsoInstant,
-    publishNote: z
-      .string()
-      .trim()
-      .min(2, '请填写至少 2 个字符的发布说明')
-      .max(500, '发布说明最多 500 字'),
+    publishNote: z.preprocess(
+      (value) =>
+        typeof value === 'string' && value.trim().length === 0
+          ? undefined
+          : value,
+      z
+        .string()
+        .trim()
+        .min(2, '请填写至少 2 个字符的发布说明')
+        .max(500, '发布说明最多 500 字')
+        .optional(),
+    ),
     confirmedImpact: z.literal(true, {
       error: '请确认已了解发布影响范围',
     }),
+    confirmedHighRisk: z.boolean().optional().default(false),
+    effectiveFrom: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value, ctx) => {
+        if (!value) return undefined;
+        const parsed = parseStrictShanghaiDateTimeLocal(value);
+        if (!parsed) {
+          ctx.addIssue({ code: 'custom', message: '请选择合法的上海生效时间' });
+          return z.NEVER;
+        }
+        return parsed;
+      }),
+  })
+  .strict();
+
+const discardDraftSchema = z
+  .object({
+    priceBookId: safeId,
+    expectedDraftUpdatedAt: strictIsoInstant,
+  })
+  .strict();
+
+const scheduleReason = z
+  .string()
+  .trim()
+  .min(2, '请填写至少 2 个字符的调整原因')
+  .max(500, '调整原因最多 500 字');
+
+const cancelScheduledSchema = z
+  .object({
+    priceBookId: safeId,
+    expectedUpdatedAt: strictIsoInstant,
+    reason: scheduleReason,
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解取消计划的影响',
+    }),
+  })
+  .strict();
+
+const rescheduleSchema = z
+  .object({
+    priceBookId: safeId,
+    expectedUpdatedAt: strictIsoInstant,
     effectiveFrom: z.string().trim().transform((value, ctx) => {
       const parsed = parseStrictShanghaiDateTimeLocal(value);
       if (!parsed) {
@@ -525,13 +623,10 @@ const publishDraftSchema = z
       }
       return parsed;
     }),
-  })
-  .strict();
-
-const discardDraftSchema = z
-  .object({
-    priceBookId: safeId,
-    expectedDraftUpdatedAt: strictIsoInstant,
+    reason: scheduleReason,
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解改期影响',
+    }),
   })
   .strict();
 
@@ -609,7 +704,13 @@ function invalidGroupUpdateFromDomain(
       segments.length === 3 &&
       segments[0] === 'rules' &&
       rowIndex !== undefined &&
-      (fieldName === 'amount' || fieldName === 'isActive')
+      (fieldName === 'amount' ||
+        fieldName === 'isActive' ||
+        fieldName === 'minQty' ||
+        fieldName === 'maxQty' ||
+        fieldName === 'includedUnits' ||
+        fieldName === 'incrementUnits' ||
+        fieldName === 'incrementAmount')
         ? `rows.${rowIndex}.${fieldName}`
         : issue.path;
     (fieldErrors[path] ??= []).push(issue.message);
@@ -621,13 +722,6 @@ function revalidatePriceBookPaths(): void {
   for (const path of [
     RULE_CENTER_HREFS.customerPricing,
     RULE_CENTER_HREFS.priceVersions,
-    '/owner/prices',
-    '/owner/prices/external-sales',
-    '/owner/prices/external-sales/items',
-    '/owner/prices/external-sales/versions',
-    '/owner/prices/external-sales/logistics',
-    '/sales/quote',
-    '/sales/quote/logistics',
     '/orders/new',
   ]) {
     revalidatePath(path);
@@ -725,6 +819,171 @@ export async function updateCustomerPriceRuleDraftGroupAction(
   }
 }
 
+export async function updateCustomerPriceSectionDraftAction(
+  raw: UpdateCustomerPriceSectionDraftActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = updatePriceSectionDraftSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const updated = await updateCustomerPriceSectionDraft(parsed.data, actor);
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: updated.priceBookId,
+      ruleIds: updated.ruleIds,
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookValidationError) {
+      return invalidGroupUpdateFromDomain(error, parsed.data.rows);
+    }
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+type CustomerPriceSectionFormField =
+  | 'amount'
+  | 'minQty'
+  | 'maxQty'
+  | 'includedUnits'
+  | 'incrementUnits'
+  | 'incrementAmount';
+
+export type CustomerPriceSectionFormBinding = {
+  inputName: string;
+  targets: Array<{
+    rowIndex: number;
+    field: CustomerPriceSectionFormField;
+    /** Used for inferred adjacent quantity boundaries. */
+    integerOffset?: number;
+  }>;
+};
+
+export type CustomerPriceSectionFormContext = {
+  section: UpdateCustomerPriceSectionDraftActionInput['section'];
+  rows: Array<
+    UpdateCustomerPriceSectionDraftActionInput['rows'][number] & {
+      priceBookId: string;
+    }
+  >;
+  bindings: CustomerPriceSectionFormBinding[];
+};
+
+function formDecimal(value: FormDataEntryValue): string | null {
+  return typeof value === 'string' && value.trim() !== ''
+    ? value.trim()
+    : null;
+}
+
+/**
+ * Bound-form adapter for the design-native matrices. Rule identities and the
+ * field-to-row propagation map are supplied by the authenticated server page;
+ * the locked DAL still re-derives complete section membership before writing.
+ */
+export async function updateCustomerPriceSectionDraftFormAction(
+  context: CustomerPriceSectionFormContext,
+  _previousState: CustomerPriceBookMutationResult | null,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const rows = context.rows.map((row) => ({ ...row }));
+  for (const binding of context.bindings) {
+    const value = formData.get(binding.inputName);
+    if (value === null) continue;
+    for (const target of binding.targets) {
+      const row = rows[target.rowIndex];
+      if (!row) {
+        return {
+          status: 'invalid',
+          fieldErrors: {
+            [binding.inputName]: ['页面价格定位已失效，请刷新后重试'],
+          },
+        };
+      }
+      if (target.field === 'minQty' || target.field === 'maxQty') {
+        const text = typeof value === 'string' ? value.trim() : '';
+        const parsed = Number(text);
+        row[target.field] =
+          text === ''
+            ? null
+            : parsed + (target.integerOffset ?? 0);
+      } else {
+        row[target.field] = formDecimal(value);
+      }
+    }
+  }
+
+  const byBook = new Map<string, typeof rows>();
+  rows.forEach((row) => {
+    const bookRows = byBook.get(row.priceBookId) ?? [];
+    bookRows.push(row);
+    byBook.set(row.priceBookId, bookRows);
+  });
+
+  const parsedInputs: UpdateCustomerPriceSectionDraftInput[] = [];
+  for (const [priceBookId, bookRows] of byBook) {
+    const parsed = updatePriceSectionDraftSchema.safeParse({
+      priceBookId,
+      section: context.section,
+      rows: bookRows.map((row) => ({
+        ruleId: row.ruleId,
+        expectedUpdatedAt: row.expectedUpdatedAt,
+        amount: row.amount,
+        minQty: row.minQty,
+        maxQty: row.maxQty,
+        includedUnits: row.includedUnits,
+        incrementUnits: row.incrementUnits,
+        incrementAmount: row.incrementAmount,
+      })),
+    });
+    if (!parsed.success) {
+      return {
+        status: 'invalid',
+        fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+      };
+    }
+    parsedInputs.push(parsed.data);
+  }
+  if (parsedInputs.length === 0) {
+    return {
+      status: 'invalid',
+      fieldErrors: { rows: ['当前业务板块没有可保存规则'] },
+    };
+  }
+
+  try {
+    const updated = await updateCustomerPriceSectionsDraft(
+      parsedInputs,
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: updated.map((result) => result.priceBookId).join(','),
+      ruleIds: updated.flatMap((result) => result.ruleIds),
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookValidationError) {
+      return invalidGroupUpdateFromDomain(
+        error,
+        parsedInputs.flatMap((input) => input.rows),
+      );
+    }
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
 export async function publishCustomerPriceBookDraftAction(
   raw: PublishCustomerPriceBookDraftActionInput,
 ): Promise<CustomerPriceBookMutationResult> {
@@ -744,6 +1003,7 @@ export async function publishCustomerPriceBookDraftAction(
         expectedDraftUpdatedAt: parsed.data.expectedDraftUpdatedAt,
         effectiveFrom: parsed.data.effectiveFrom,
         publishNote: parsed.data.publishNote,
+        confirmedHighRisk: parsed.data.confirmedHighRisk,
       },
       actor,
     );
@@ -755,6 +1015,12 @@ export async function publishCustomerPriceBookDraftAction(
     };
   } catch (error) {
     if (error instanceof CustomerPriceBookValidationError) return invalidFromDomain(error);
+    if (error instanceof CustomerPriceBookHighRiskConfirmationError) {
+      return {
+        status: 'invalid',
+        fieldErrors: { confirmedHighRisk: [error.message] },
+      };
+    }
     if (error instanceof CustomerPriceBookAdminError) {
       return { status: 'error', message: error.message };
     }
@@ -778,6 +1044,75 @@ export async function discardCustomerPriceBookDraftAction(
     const discarded = await discardCustomerPriceBookDraft(parsed.data, actor);
     revalidatePriceBookPaths();
     return { status: 'success', priceBookId: discarded.id };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function cancelScheduledCustomerPriceBookAction(
+  raw: CancelScheduledCustomerPriceBookActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = cancelScheduledSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const cancelled = await cancelScheduledCustomerPriceBook(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedUpdatedAt: parsed.data.expectedUpdatedAt,
+        reason: parsed.data.reason,
+      },
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: cancelled.id,
+      version: cancelled.version,
+    };
+  } catch (error) {
+    if (error instanceof CustomerPriceBookAdminError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
+  }
+}
+
+export async function rescheduleCustomerPriceBookAction(
+  raw: RescheduleCustomerPriceBookActionInput,
+): Promise<CustomerPriceBookMutationResult> {
+  const actor = await requirePermission('dict:price:manage');
+  const parsed = rescheduleSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
+  }
+  try {
+    const rescheduled = await rescheduleCustomerPriceBook(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedUpdatedAt: parsed.data.expectedUpdatedAt,
+        effectiveFrom: parsed.data.effectiveFrom,
+        reason: parsed.data.reason,
+      },
+      actor,
+    );
+    revalidatePriceBookPaths();
+    return {
+      status: 'success',
+      priceBookId: rescheduled.id,
+      version: rescheduled.version,
+    };
   } catch (error) {
     if (error instanceof CustomerPriceBookAdminError) {
       return { status: 'error', message: error.message };

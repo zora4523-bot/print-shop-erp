@@ -9,7 +9,72 @@ import { loadEnvConfig } from '@next/env';
 // would diverge from the running app (Codex round 74 / P2).
 loadEnvConfig(process.cwd(), /* dev */ true);
 
-const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
+const defaultDatabaseUrl = process.env.DATABASE_URL?.trim() || null;
+const requestedE2eDatabaseUrl = process.env.E2E_DATABASE_URL?.trim() || null;
+
+function postgresDatabaseTarget(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+      return null;
+    }
+    const hostname =
+      url.hostname === '127.0.0.1' || url.hostname === '::1'
+        ? 'localhost'
+        : url.hostname.toLowerCase();
+    const port = url.port || '5432';
+    const database = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+    return database ? `${hostname}:${port}/${database}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function pointsAtSameDatabase(left: string, right: string): boolean {
+  if (left === right) return true;
+  const leftTarget = postgresDatabaseTarget(left);
+  const rightTarget = postgresDatabaseTarget(right);
+  return leftTarget !== null && leftTarget === rightTarget;
+}
+
+const requestedE2eDatabaseTarget = requestedE2eDatabaseUrl
+  ? postgresDatabaseTarget(requestedE2eDatabaseUrl)
+  : null;
+const e2eDatabaseMatchesDefault = Boolean(
+  requestedE2eDatabaseTarget &&
+    requestedE2eDatabaseUrl &&
+    defaultDatabaseUrl &&
+    pointsAtSameDatabase(requestedE2eDatabaseUrl, defaultDatabaseUrl),
+);
+const isolatedE2eDatabaseUrl =
+  requestedE2eDatabaseTarget && !e2eDatabaseMatchesDefault
+    ? requestedE2eDatabaseUrl
+    : null;
+const hasIsolatedE2eDatabase = isolatedE2eDatabaseUrl !== null;
+
+// Workers inherit the resolved config environment. The marker lets the
+// append-only scanner fixture fail closed before opening a DB connection; the
+// URL itself is never included in skip/error output.
+process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED = hasIsolatedE2eDatabase
+  ? '1'
+  : '0';
+let appendOnlyDatabaseReason = 'ISOLATED';
+if (!requestedE2eDatabaseUrl) appendOnlyDatabaseReason = 'MISSING';
+else if (!requestedE2eDatabaseTarget) appendOnlyDatabaseReason = 'INVALID';
+else if (e2eDatabaseMatchesDefault) {
+  appendOnlyDatabaseReason = 'SAME_AS_DEFAULT';
+}
+process.env.E2E_APPEND_ONLY_DATABASE_REASON = appendOnlyDatabaseReason;
+if (hasIsolatedE2eDatabase) {
+  process.env.DATABASE_URL = isolatedE2eDatabaseUrl;
+}
+
+const explicitBaseURL = process.env.E2E_BASE_URL?.trim();
+const baseURL =
+  explicitBaseURL ||
+  (hasIsolatedE2eDatabase
+    ? 'http://localhost:3100'
+    : 'http://localhost:3000');
 const webServerPort = new URL(baseURL).port || '3000';
 
 const workerViewportProjects = [
@@ -30,11 +95,11 @@ const adminViewportProjects = [
   { name: 'admin-1920x1080', width: 1920, height: 1080 },
 ] as const;
 
-// E2E config — runs against the Next.js dev server. Locally we reuse
-// whatever dev server is already running at E2E_BASE_URL (default :3000);
-// CI / one-shot `pnpm test:e2e` spawns its own. Tests share the dev
-// database (per CLAUDE.md MVP posture) and use unique-per-run inputs
-// so reruns don't collide. A separate test DB can be added later.
+// Ordinary E2E retains the shared-dev-DB MVP posture. When an explicit,
+// genuinely separate E2E_DATABASE_URL is supplied, both Playwright workers and
+// the spawned Next server use it. That mode defaults to :3100 and never reuses
+// the normal :3000 server, because append-only production reports cannot be
+// safely cleaned out of a developer's working database.
 export default defineConfig({
   // Cover both end-to-end specs (./tests/e2e) and visual regression
   // specs (./tests/visual) under one runner. testMatch defaults pick
@@ -102,7 +167,10 @@ export default defineConfig({
     // regenerates Prisma before Next loads its client.
     command: `pnpm run dev --port ${webServerPort}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    ...(hasIsolatedE2eDatabase
+      ? { env: { DATABASE_URL: isolatedE2eDatabaseUrl } }
+      : {}),
+    reuseExistingServer: !hasIsolatedE2eDatabase && !process.env.CI,
     timeout: 120 * 1000,
     stdout: 'pipe',
     stderr: 'pipe',

@@ -9,6 +9,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ZipArchive } from 'archiver';
+import { xlsxColumnName } from './xlsx-column';
 
 const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLUMNS = 16_384;
@@ -281,7 +282,7 @@ async function* renderWorksheet(sheet: XlsxSheet): AsyncGenerator<string> {
   }
 
   const lastRow = Math.max(1, rowNumber);
-  const lastColumn = columnName(maxColumnCount - 1);
+  const lastColumn = xlsxColumnName(maxColumnCount - 1);
   yield `</sheetData><autoFilter ref="A1:${lastColumn}${lastRow}"/></worksheet>`;
 }
 
@@ -291,7 +292,7 @@ function cellXml(
   column: number,
   isHeader: boolean,
 ): string {
-  const ref = `${columnName(column)}${row}`;
+  const ref = `${xlsxColumnName(column)}${row}`;
   const style = isHeader ? ' s="1"' : '';
   if (value === null || value === undefined) return `<c r="${ref}"${style}/>`;
   if (isXlsxDecimal(value)) {
@@ -347,17 +348,6 @@ function validatePlainDecimal(value: string): void {
       `精确十进制值必须使用普通数字格式（不允许指数、公式或特殊值）：${value}`,
     );
   }
-}
-
-function columnName(index: number): string {
-  let value = index + 1;
-  let result = '';
-  while (value > 0) {
-    value -= 1;
-    result = String.fromCharCode(65 + (value % 26)) + result;
-    value = Math.floor(value / 26);
-  }
-  return result;
 }
 
 function stripInvalidXmlCharacters(value: string): string {

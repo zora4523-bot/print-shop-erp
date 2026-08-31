@@ -28,10 +28,7 @@ function tiersFrom(value: SalaryRuleValue | null | undefined): TierRow[] {
   }));
 }
 
-function defaultValues(
-  key: SalaryRuleKey,
-  current: SalaryRuleSettingsData[SalaryRuleKey],
-) {
+function defaultValues(current: SalaryRuleSettingsData[SalaryRuleKey]) {
   const value = current?.ruleValue;
   const monthlyBase = value && 'monthlyBase' in value ? value.monthlyBase : undefined;
   const hourlyRate = value && 'hourlyRate' in value ? value.hourlyRate : undefined;
@@ -73,7 +70,7 @@ export function SalaryRuleSettingsForm({
     SalaryRuleVersionMutationResult | null,
     FormData
   >(createSalaryRuleVersionAction, null);
-  const defaults = defaultValues(selectedKey, current);
+  const defaults = defaultValues(current);
   const errors = state?.status === 'invalid' ? state.fieldErrors : {};
 
   function switchRule(key: SalaryRuleKey) {
@@ -191,7 +188,7 @@ export function SalaryRuleSettingsForm({
           </Button>
         </fieldset>
       ) : null}
-      {selectedKey === 'PACKER_HOURLY' || selectedKey === 'CLEANER_HOURLY' || selectedKey === 'COOK_SPARE_HOURLY' ? (
+      {selectedKey === 'CLEANER_HOURLY' || selectedKey === 'COOK_SPARE_HOURLY' ? (
         <Field label="时薪（元/小时）">
           <Input name="hourlyRate" inputMode="decimal" defaultValue={defaults.hourlyRate} required disabled={pending} />
         </Field>

@@ -7,48 +7,65 @@ import {
   EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
   type CustomerRuleConditionEditorInput,
 } from '../customer-rule-condition';
+import { ZTO_PROVINCE_OPTIONS } from '../external-order-charges';
 
 vi.mock('server-only', () => ({}));
 
-const { dbMock } = vi.hoisted(() => ({
-  dbMock: {
-    $executeRaw: vi.fn(),
-    $transaction: vi.fn(),
-    customerPriceBook: {
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-      findUnique: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-    customerPriceRule: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-      createMany: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn(),
-      deleteMany: vi.fn(),
-    },
-    customerChargeCategory: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-    },
-    product: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
-    },
-    craft: {
-      findMany: vi.fn(),
-    },
-    orderCustomerCharge: { count: vi.fn() },
-    businessAuditLog: { create: vi.fn() },
-  },
-}));
+const { adapterMock, dbMock, MockPublishedCreateOrderPriceAdapterError } =
+  vi.hoisted(() => {
+    class MockPublishedCreateOrderPriceAdapterError extends Error {}
+    return {
+      adapterMock: {
+        readCandidatePublishedCreateOrderPriceProjection: vi.fn(),
+      },
+      MockPublishedCreateOrderPriceAdapterError,
+      dbMock: {
+        $executeRaw: vi.fn(),
+        $transaction: vi.fn(),
+        customerPriceBook: {
+          findMany: vi.fn(),
+          findFirst: vi.fn(),
+          findUnique: vi.fn(),
+          create: vi.fn(),
+          update: vi.fn(),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        customerPriceRule: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+          createMany: vi.fn(),
+          update: vi.fn(),
+          updateMany: vi.fn(),
+          deleteMany: vi.fn(),
+        },
+        customerChargeCategory: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+        },
+        product: {
+          findMany: vi.fn(),
+          findUnique: vi.fn(),
+        },
+        craft: {
+          findMany: vi.fn(),
+        },
+        orderCustomerCharge: { count: vi.fn() },
+        businessAuditLog: { create: vi.fn() },
+      },
+    };
+  });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/order/create-order-published-rule-adapter', () => ({
+  PublishedCreateOrderPriceAdapterError:
+    MockPublishedCreateOrderPriceAdapterError,
+  readCandidatePublishedCreateOrderPriceProjection:
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+}));
 
 import {
+  cancelScheduledCustomerPriceBook,
   calculateCustomerPriceRuleSetSha256,
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
@@ -57,8 +74,11 @@ import {
   getCustomerPriceBookDraftRuleEditor,
   listCustomerPriceBookVersionsAndDrafts,
   publishCustomerPriceBookDraft,
+  rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
+  updateCustomerPriceSectionDraft,
+  updateCustomerPriceSectionsDraft,
 } from '../customer-price-book-admin';
 import type { DraftPriceRuleForValidation } from '../customer-price-book-draft-validation';
 
@@ -124,6 +144,37 @@ function validationRule(
       isActive: true,
     },
     product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
+    ...overrides,
+  };
+}
+
+function impactRule(
+  amount: string,
+  id: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    code: 'BASE_A',
+    name: '基础报价 A',
+    categoryId: 'category-base',
+    productId: 'product-a',
+    kind: 'BASE',
+    calculationType: 'PER_PIECE',
+    amount,
+    includedUnits: null,
+    incrementUnits: null,
+    incrementAmount: null,
+    minQty: 1,
+    maxQty: 1_000,
+    triggerCondition: { productCodes: ['PRODUCT_A'] },
+    exclusiveGroup: null,
+    priority: 100,
+    note: null,
+    blocksAutomaticQuote: false,
+    isActive: true,
+    category: { name: '基础加工费' },
+    product: { name: '产品 A' },
     ...overrides,
   };
 }
@@ -227,7 +278,45 @@ function editableGroupRule(
   };
 }
 
+function editableSectionRule(
+  id: string,
+  priceBookId: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    priceBookId,
+    updatedAt: now,
+    categoryId: 'category-packaging',
+    productId: null,
+    code: 'PACKAGING_SINGLE_STYLE_PER_BAG',
+    kind: 'ADD_ON',
+    calculationType: 'PER_BAG',
+    amount: '0.1000',
+    includedUnits: null,
+    incrementUnits: null,
+    incrementAmount: null,
+    minQty: null,
+    maxQty: null,
+    triggerCondition: { schemaVersion: 1 },
+    exclusiveGroup: null,
+    priority: 100,
+    sourceSheet: null,
+    sourceName: null,
+    sourceSha256: null,
+    note: null,
+    blocksAutomaticQuote: false,
+    isActive: true,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
+  adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockReset();
+  adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockResolvedValue({
+    snapshot: {},
+    audit: {},
+  });
   for (const delegate of [
     dbMock.customerPriceBook,
     dbMock.customerPriceRule,
@@ -250,34 +339,6 @@ beforeEach(() => {
 
 describe('customer price-book draft lifecycle', () => {
   it('builds an exact publish preview against the immutable draft baseline', async () => {
-    const impactRule = (
-      amount: string,
-      id: string,
-      overrides: Record<string, unknown> = {},
-    ) => ({
-      id,
-      code: 'BASE_A',
-      name: '基础报价 A',
-      categoryId: 'category-base',
-      productId: 'product-a',
-      kind: 'BASE',
-      calculationType: 'PER_PIECE',
-      amount,
-      includedUnits: null,
-      incrementUnits: null,
-      incrementAmount: null,
-      minQty: 1,
-      maxQty: 1_000,
-      triggerCondition: { productCodes: ['PRODUCT_A'] },
-      exclusiveGroup: null,
-      priority: 100,
-      note: null,
-      blocksAutomaticQuote: false,
-      isActive: true,
-      category: { name: '基础加工费' },
-      product: { name: '产品 A' },
-      ...overrides,
-    });
     dbMock.customerPriceBook.findUnique
       .mockResolvedValueOnce({
         id: 'book-v2-draft',
@@ -300,9 +361,9 @@ describe('customer price-book draft lifecycle', () => {
         version: 1,
         rules: [impactRule('0.1350', 'current-rule-a')],
       });
-    dbMock.customerPriceRule.findMany.mockResolvedValue([
-      validationRule({ amount: '0.1500' }),
-    ]);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1500' })])
+      .mockResolvedValueOnce([validationRule()]);
 
     const preview = await getCustomerPriceBookDraftPublishPreview(
       'book-v2-draft',
@@ -317,8 +378,11 @@ describe('customer price-book draft lifecycle', () => {
       changedRuleCount: 1,
       increasedRuleCount: 1,
       decreasedRuleCount: 0,
+      highRiskRuleCount: 0,
+      highRiskDeltaPercentThreshold: '50',
       deltaPercentMin: '11.1',
       deltaPercentMax: '11.1',
+      validation: { status: 'PASS', issues: [] },
       changes: [
         expect.objectContaining({
           draftRuleId: 'draft-rule-a',
@@ -330,8 +394,217 @@ describe('customer price-book draft lifecycle', () => {
         }),
       ],
     });
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).toHaveBeenCalledWith(dbMock, {
+      candidatePriceBookId: 'book-v2-draft',
+      effectiveFrom: expect.any(Date),
+      snapshotLockHeld: true,
+    });
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection.mock
+        .invocationCallOrder[0]!,
+    );
     expect(JSON.stringify(preview)).not.toContain('BASE_A');
     expect(JSON.stringify(preview)).not.toContain('productCodes');
+  });
+
+  it('marks a misplaced-decimal-sized change as high risk without rejecting the editable price', async () => {
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule('0.8000', 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [impactRule('0.1300', 'current-rule-a')],
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.8000' })])
+      .mockResolvedValueOnce([validationRule({ id: 'current-rule-a', amount: '0.1300' })]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      changedRuleCount: 1,
+      increasedRuleCount: 1,
+      highRiskRuleCount: 1,
+      highRiskDeltaPercentThreshold: '50',
+      deltaPercentMax: '515.4',
+      validation: { status: 'PASS' },
+    });
+  });
+
+  it.each([
+    { label: '无报价转有报价', currentAmount: null, draftAmount: '0.1300' },
+    { label: '0 元转非零价格', currentAmount: '0.0000', draftAmount: '0.0100' },
+  ])('marks $label as high risk', async ({ currentAmount, draftAmount }) => {
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule(draftAmount, 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [
+          impactRule('0.0000', 'current-rule-a', {
+            amount: currentAmount,
+          }),
+        ],
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([
+        validationRule({ amount: draftAmount }),
+      ])
+      .mockResolvedValueOnce([
+        validationRule({ id: 'current-rule-a', amount: currentAmount }),
+      ]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      changedRuleCount: 1,
+      highRiskRuleCount: 1,
+      validation: { status: 'PASS' },
+    });
+  });
+
+  it('marks active-rule additions as high risk because they create a new automatic quote path', async () => {
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule('0.1300', 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [],
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1300' })])
+      .mockResolvedValueOnce([]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      changedRuleCount: 1,
+      highRiskRuleCount: 1,
+      changes: [expect.objectContaining({ direction: 'ADDED' })],
+      validation: { status: 'PASS' },
+    });
+  });
+
+  it('fails publish preview when the draft has no semantic rule change', async () => {
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule('0.1350', 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [impactRule('0.1350', 'current-rule-a')],
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule()])
+      .mockResolvedValueOnce([validationRule({ id: 'current-rule-a' })]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      changedItemCount: 0,
+      changedRuleCount: 0,
+      validation: {
+        status: 'FAIL',
+        issues: [
+          expect.objectContaining({
+            message: '草稿与当前版本没有价格或规则变化，无需发布',
+          }),
+        ],
+      },
+    });
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('fails publish preview when the candidate cannot feed create-order pricing', async () => {
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [impactRule('0.1500', 'draft-rule-a')],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [impactRule('0.1350', 'current-rule-a')],
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1500' })])
+      .mockResolvedValueOnce([validationRule()]);
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockRejectedValue(
+      new MockPublishedCreateOrderPriceAdapterError('缺少局部烫金空白封单价'),
+    );
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview?.validation).toEqual({
+      status: 'FAIL',
+      issues: [
+        {
+          path: 'rules',
+          message: '候选价目版本无法供建单计价：缺少局部烫金空白封单价',
+        },
+      ],
+    });
   });
 
   it('copies the current book into one inactive, traceable next version', async () => {
@@ -1087,7 +1360,10 @@ describe('customer price-book draft lifecycle', () => {
         productId: null,
         kind: 'ADD_ON',
         calculationType: 'FIXED_AMOUNT',
-        triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+        triggerCondition: {
+          carrierCode: 'ZTO',
+          provinces: [...ZTO_PROVINCE_OPTIONS],
+        },
         category: { code: 'SHIPPING_FEE', name: '快递费' },
         priceBook: {
           id: 'book-v2-draft',
@@ -1115,7 +1391,10 @@ describe('customer price-book draft lifecycle', () => {
         incrementAmount: '1.5000',
         minQty: null,
         maxQty: null,
-        triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+        triggerCondition: {
+          carrierCode: 'ZTO',
+          provinces: [...ZTO_PROVINCE_OPTIONS],
+        },
         exclusiveGroup: 'ZTO_PROVINCE_RATE',
         productId: null,
         product: null,
@@ -1129,19 +1408,22 @@ describe('customer price-book draft lifecycle', () => {
         id: 'packaging-a',
         code: 'PACK_A',
         name: '耗材 1–500',
-        kind: 'REFERENCE',
+        kind: 'ADD_ON',
         calculationType: 'FIXED_AMOUNT',
         amount: '1.0000',
         includedUnits: null,
         incrementUnits: null,
         incrementAmount: null,
         minQty: 1,
-        maxQty: 500,
-        triggerCondition: { scope: 'SHIPMENT_QUANTITY', advisory: true },
-        exclusiveGroup: 'PACKING_MATERIAL_QUANTITY_TIER',
+        maxQty: 5_000,
+        triggerCondition: {
+          scope: 'ORDER_TOTAL_QUANTITY',
+          segmentedAboveMaximum: true,
+        },
+        exclusiveGroup: 'CARTON_ORDER_QUANTITY_TIER',
         productId: null,
         product: null,
-        blocksAutomaticQuote: true,
+        blocksAutomaticQuote: false,
         category: {
           code: 'PACKING_MATERIAL',
           name: '打包耗材',
@@ -1564,6 +1846,231 @@ describe('customer price-book draft lifecycle', () => {
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
+  it('在一个事务内预检所有价目簿，第二本过期时第一本零写入', async () => {
+    const processingRule = editableSectionRule(
+      'processing-packaging-rule',
+      'processing-draft',
+    );
+    const logisticsRule = editableSectionRule(
+      'logistics-carton-rule',
+      'logistics-draft',
+      {
+        code: 'PACKAGING_CARTON_QTY_1_100',
+        calculationType: 'FIXED_AMOUNT',
+        minQty: 1,
+        maxQty: 100,
+        exclusiveGroup: 'CARTON_ORDER_QUANTITY_TIER',
+      },
+    );
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'processing-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        isActive: false,
+        notes: draftNotes(),
+      })
+      .mockResolvedValueOnce({
+        id: 'logistics-draft',
+        purpose: 'LOGISTICS',
+        settlementType: 'EXTERNAL_SALES',
+        isActive: false,
+        notes: draftNotes(),
+      });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([processingRule])
+      .mockResolvedValueOnce([logisticsRule]);
+
+    await expect(
+      updateCustomerPriceSectionsDraft(
+        [
+          {
+            priceBookId: 'processing-draft',
+            section: 'ship',
+            rows: [
+              {
+                ruleId: 'processing-packaging-rule',
+                expectedUpdatedAt: now,
+                amount: '0.1200',
+                minQty: null,
+                maxQty: null,
+                includedUnits: null,
+                incrementUnits: null,
+                incrementAmount: null,
+              },
+            ],
+          },
+          {
+            priceBookId: 'logistics-draft',
+            section: 'ship',
+            rows: [
+              {
+                ruleId: 'logistics-carton-rule',
+                expectedUpdatedAt: new Date(now.getTime() - 1),
+                amount: '5.0000',
+                minQty: 1,
+                maxQty: 100,
+                includedUnits: null,
+                incrementUnits: null,
+                incrementAmount: null,
+              },
+            ],
+          },
+        ],
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('价格已被其他管理员修改，请刷新后重试');
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.customerPriceRule.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('保留单本业务板块入口并仅开启一个事务', async () => {
+    const sectionRule = editableSectionRule(
+      'stock-base-rule',
+      'processing-draft',
+      {
+        categoryId: 'category-base',
+        productId: 'product-a',
+        code: 'BASE_A',
+        kind: 'BASE',
+        calculationType: 'PER_PIECE',
+        amount: '0.1350',
+        minQty: 1,
+        maxQty: 1_000,
+        exclusiveGroup: 'STOCK_BASE',
+      },
+    );
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'processing-draft',
+      purpose: 'PROCESSING',
+      settlementType: 'EXTERNAL_SALES',
+      isActive: false,
+      notes: draftNotes(),
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([sectionRule])
+      .mockResolvedValueOnce([validationRule()]);
+    dbMock.customerPriceRule.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.customerPriceBook.update.mockResolvedValue({
+      id: 'processing-draft',
+    });
+
+    await expect(
+      updateCustomerPriceSectionDraft(
+        {
+          priceBookId: 'processing-draft',
+          section: 'blank',
+          rows: [
+            {
+              ruleId: 'stock-base-rule',
+              expectedUpdatedAt: now,
+              amount: '0.1500',
+              minQty: 1,
+              maxQty: 1_000,
+              includedUnits: null,
+              incrementUnits: null,
+              incrementAmount: null,
+            },
+          ],
+        },
+        actor,
+        now,
+      ),
+    ).resolves.toEqual({
+      priceBookId: 'processing-draft',
+      ruleIds: ['stock-base-rule'],
+    });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.customerPriceBook.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('整板块保存只写入并审计真实变化行', async () => {
+    const unchanged = editableSectionRule(
+      'packaging-single',
+      'processing-draft',
+    );
+    const changed = editableSectionRule(
+      'packaging-mixed',
+      'processing-draft',
+      {
+        code: 'PACKAGING_MIXED_STYLE_PER_BAG',
+        amount: '0.1200',
+      },
+    );
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'processing-draft',
+      purpose: 'PROCESSING',
+      settlementType: 'EXTERNAL_SALES',
+      isActive: false,
+      notes: draftNotes(),
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([unchanged, changed])
+      .mockResolvedValueOnce([validationRule()]);
+    dbMock.customerPriceRule.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.customerPriceBook.update.mockResolvedValue({
+      id: 'processing-draft',
+    });
+
+    await expect(
+      updateCustomerPriceSectionDraft(
+        {
+          priceBookId: 'processing-draft',
+          section: 'ship',
+          rows: [
+            {
+              ruleId: 'packaging-single',
+              expectedUpdatedAt: now,
+              amount: '0.1000',
+              minQty: null,
+              maxQty: null,
+              includedUnits: null,
+              incrementUnits: null,
+              incrementAmount: null,
+            },
+            {
+              ruleId: 'packaging-mixed',
+              expectedUpdatedAt: now,
+              amount: '0.1800',
+              minQty: null,
+              maxQty: null,
+              includedUnits: null,
+              incrementUnits: null,
+              incrementAmount: null,
+            },
+          ],
+        },
+        actor,
+        now,
+      ),
+    ).resolves.toEqual({
+      priceBookId: 'processing-draft',
+      ruleIds: ['packaging-mixed'],
+    });
+
+    expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.customerPriceRule.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'packaging-mixed' }),
+      }),
+    );
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledTimes(2);
+    expect(dbMock.businessAuditLog.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requestMetadata: expect.objectContaining({ changedRuleCount: 1 }),
+        }),
+      }),
+    );
+  });
+
   it('does not create an unpublishable draft behind a scheduled version', async () => {
     dbMock.customerPriceBook.findMany
       .mockResolvedValueOnce([
@@ -1611,8 +2118,11 @@ describe('customer price-book draft lifecycle', () => {
       isActive: false,
       notes: draftNotes(),
       updatedAt: now,
+      rules: [impactRule('0.1500', 'draft-rule-a')],
     });
-    dbMock.customerPriceRule.findMany.mockResolvedValue([validationRule()]);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1500' })])
+      .mockResolvedValueOnce([validationRule()]);
     dbMock.customerPriceBook.findMany
       .mockResolvedValueOnce([
         {
@@ -1621,6 +2131,7 @@ describe('customer price-book draft lifecycle', () => {
           version: 1,
           effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
           effectiveTo: null,
+          rules: [impactRule('0.1350', 'current-rule-a')],
         },
       ])
       .mockResolvedValueOnce([]);
@@ -1673,6 +2184,660 @@ describe('customer price-book draft lifecycle', () => {
         }),
       }),
     );
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).toHaveBeenCalledWith(dbMock, {
+      candidatePriceBookId: 'book-v2-draft',
+      effectiveFrom: publishAt,
+      snapshotLockHeld: true,
+    });
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(dbMock.customerPriceBook.update.mock.invocationCallOrder[0]!);
+    const publishAudit = dbMock.businessAuditLog.create.mock.calls[0]![0].data;
+    expect(publishAudit.before).toMatchObject({
+      previousVersion: {
+        id: 'book-v1',
+        code: 'EXTERNAL_SALES_PROCESSING_202608',
+        version: 1,
+        effectiveFrom: '2026-08-01T00:00:00.000Z',
+        effectiveTo: null,
+      },
+    });
+    expect(publishAudit.before.previousVersion).not.toHaveProperty('rules');
+  });
+
+  it('requires a separate locked confirmation for an abnormal price swing', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+      rules: [impactRule('0.8000', 'draft-rule-a')],
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([
+      validationRule({ amount: '0.8000' }),
+    ]);
+    dbMock.customerPriceBook.findMany.mockResolvedValueOnce([
+      {
+        id: 'book-v1',
+        code: 'EXTERNAL_SALES_PROCESSING_202608',
+        version: 1,
+        effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+        effectiveTo: null,
+        rules: [impactRule('0.1300', 'current-rule-a')],
+      },
+    ]);
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('高风险报价变更');
+
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('requires locked confirmation when a rule is enabled without changing its amount', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+      rules: [impactRule('0.1300', 'draft-rule-a')],
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([
+      validationRule({ amount: '0.1300' }),
+    ]);
+    dbMock.customerPriceBook.findMany.mockResolvedValueOnce([
+      {
+        id: 'book-v1',
+        code: 'EXTERNAL_SALES_PROCESSING_202608',
+        version: 1,
+        effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+        effectiveTo: null,
+        rules: [
+          impactRule('0.1300', 'current-rule-a', { isActive: false }),
+        ],
+      },
+    ]);
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('高风险报价变更');
+
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('allows the same high-risk price after explicit confirmation and audits it', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+      rules: [impactRule('0.8000', 'draft-rule-a')],
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.8000' })])
+      .mockResolvedValueOnce([
+        validationRule({ id: 'current-rule-a', amount: '0.1300' }),
+      ]);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'book-v1',
+          code: 'EXTERNAL_SALES_PROCESSING_202608',
+          version: 1,
+          effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+          effectiveTo: null,
+          rules: [impactRule('0.1300', 'current-rule-a')],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    dbMock.customerPriceBook.update.mockImplementation(
+      async (args: { where: { id: string } }) =>
+        args.where.id === 'book-v1'
+          ? { id: 'book-v1' }
+          : { id: 'book-v2-draft', version: 2, purpose: 'PROCESSING' },
+    );
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+          confirmedHighRisk: true,
+        },
+        actor,
+        now,
+      ),
+    ).resolves.toMatchObject({ id: 'book-v2-draft', version: 2 });
+
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          requestMetadata: expect.objectContaining({
+            highRiskRuleCount: 1,
+            highRiskConfirmed: true,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('samples the immediate canonical instant after the write lock and reuses the draft reason', async () => {
+    const lockedNow = new Date(now.getTime() + 60_000);
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1500' })])
+      .mockResolvedValueOnce([validationRule()]);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'book-v1',
+          code: 'EXTERNAL_SALES_PROCESSING_202608',
+          version: 1,
+          effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+          effectiveTo: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    dbMock.customerPriceBook.update.mockImplementation(
+      async (args: { where: { id: string } }) =>
+        args.where.id === 'book-v1'
+          ? { id: 'book-v1' }
+          : { id: 'book-v2-draft', version: 2, purpose: 'PROCESSING' },
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    dbMock.$executeRaw.mockImplementationOnce(async () => {
+      // Simulate waiting for another publisher. The domain must not capture
+      // the request-start time before this advisory lock resolves.
+      vi.setSystemTime(lockedNow);
+      return 0;
+    });
+    try {
+      await expect(
+        publishCustomerPriceBookDraft(
+          {
+            priceBookId: 'book-v2-draft',
+            expectedDraftUpdatedAt: now,
+          },
+          actor,
+        ),
+      ).resolves.toMatchObject({ id: 'book-v2-draft', version: 2 });
+
+      expect(dbMock.customerPriceBook.update).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ data: { effectiveTo: lockedNow } }),
+      );
+      expect(dbMock.customerPriceBook.update).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            effectiveFrom: lockedNow,
+            notes: expect.objectContaining({
+              workflow: expect.objectContaining({
+                effectiveFrom: lockedNow.toISOString(),
+                publishedAt: lockedNow.toISOString(),
+                publishNote: '调整加工费',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(
+        adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+      ).toHaveBeenCalledWith(dbMock, {
+        candidatePriceBookId: 'book-v2-draft',
+        effectiveFrom: lockedNow,
+        snapshotLockHeld: true,
+      });
+      expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            after: expect.objectContaining({
+              effectiveFrom: lockedNow.toISOString(),
+              previousEffectiveTo: lockedNow.toISOString(),
+              publishNote: '调整加工费',
+            }),
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses to publish a draft whose normalized rule set is unchanged', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule()])
+      .mockResolvedValueOnce([validationRule({ id: 'current-rule-a' })]);
+    dbMock.customerPriceBook.findMany.mockResolvedValueOnce([
+      {
+        id: 'book-v1',
+        code: 'EXTERNAL_SALES_PROCESSING_202608',
+        version: 1,
+        effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+        effectiveTo: null,
+      },
+    ]);
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('草稿与当前版本没有价格或规则变化，无需发布');
+
+    expect(
+      adapterMock.readCandidatePublishedCreateOrderPriceProjection,
+    ).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an engine-incompatible candidate before changing either version window', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-draft',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      name: '外部销售加工费',
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      version: 2,
+      isActive: false,
+      notes: draftNotes(),
+      updatedAt: now,
+    });
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([validationRule({ amount: '0.1500' })])
+      .mockResolvedValueOnce([validationRule()]);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'book-v1',
+          code: 'EXTERNAL_SALES_PROCESSING_202608',
+          version: 1,
+          effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+          effectiveTo: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockRejectedValue(
+      new MockPublishedCreateOrderPriceAdapterError('缺少局部烫金空白封单价'),
+    );
+
+    await expect(
+      publishCustomerPriceBookDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          expectedDraftUpdatedAt: now,
+          effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('候选价目版本无法供建单计价：缺少局部烫金空白封单价');
+
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('cancels an unreferenced future version without deleting its book or rules', async () => {
+    const scheduledAt = new Date('2026-08-10T01:30:00.000Z');
+    const scheduled = {
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: scheduledAt,
+      effectiveTo: null,
+      isActive: true,
+      notes: { workflow: { ...draftNotes().workflow, status: 'PUBLISHED' } },
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 0 },
+    };
+    const predecessor = {
+      id: 'book-v1',
+      code: scheduled.code,
+      version: 1,
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+      effectiveTo: scheduledAt,
+    };
+    dbMock.customerPriceBook.findUnique.mockResolvedValue(scheduled);
+    dbMock.orderCustomerCharge.count.mockResolvedValue(0);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([predecessor])
+      .mockResolvedValueOnce([]);
+    dbMock.customerPriceBook.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.customerPriceBook.update.mockResolvedValue({ id: predecessor.id });
+
+    await expect(
+      cancelScheduledCustomerPriceBook(
+        {
+          priceBookId: scheduled.id,
+          expectedUpdatedAt: now,
+          reason: '价格复核尚未完成',
+        },
+        actor,
+        now,
+      ),
+    ).resolves.toEqual({
+      id: scheduled.id,
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    expect(dbMock.customerPriceBook.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: scheduled.id,
+          updatedAt: now,
+          isActive: true,
+        }),
+        data: expect.objectContaining({
+          isActive: false,
+          notes: expect.objectContaining({
+            scheduleControl: expect.objectContaining({
+              status: 'CANCELLED',
+              reason: '价格复核尚未完成',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(dbMock.customerPriceBook.update).toHaveBeenCalledWith({
+      where: { id: predecessor.id },
+      data: { effectiveTo: null },
+      select: { id: true },
+    });
+    expect(dbMock.customerPriceBook.delete).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.deleteMany).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'CANCEL_SCHEDULED_VERSION' }),
+      }),
+    );
+  });
+
+  it('reschedules a future version by safely reconnecting both half-open windows', async () => {
+    const oldEffectiveFrom = new Date('2026-08-10T01:30:00.000Z');
+    const newEffectiveFrom = new Date('2026-08-11T01:30:00.000Z');
+    const scheduled = {
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: oldEffectiveFrom,
+      effectiveTo: null,
+      isActive: true,
+      notes: { workflow: { ...draftNotes().workflow, status: 'PUBLISHED' } },
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 0 },
+    };
+    const predecessor = {
+      id: 'book-v1',
+      code: scheduled.code,
+      version: 1,
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+      effectiveTo: oldEffectiveFrom,
+    };
+    dbMock.customerPriceBook.findUnique.mockResolvedValue(scheduled);
+    dbMock.orderCustomerCharge.count.mockResolvedValue(0);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([predecessor])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    dbMock.customerPriceBook.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.customerPriceBook.update.mockResolvedValue({ id: scheduled.id });
+
+    await rescheduleCustomerPriceBook(
+      {
+        priceBookId: scheduled.id,
+        expectedUpdatedAt: now,
+        effectiveFrom: newEffectiveFrom,
+        reason: '延后至下周统一切换',
+      },
+      actor,
+      now,
+    );
+
+    expect(dbMock.customerPriceBook.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: scheduled.id, updatedAt: now }),
+        data: { isActive: false },
+      }),
+    );
+    expect(dbMock.customerPriceBook.update).toHaveBeenNthCalledWith(1, {
+      where: { id: predecessor.id },
+      data: { effectiveTo: newEffectiveFrom },
+      select: { id: true },
+    });
+    expect(dbMock.customerPriceBook.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: { id: scheduled.id },
+        data: expect.objectContaining({
+          effectiveFrom: newEffectiveFrom,
+          isActive: true,
+          notes: expect.objectContaining({
+            scheduleControl: expect.objectContaining({
+              status: 'RESCHEDULED',
+              previousEffectiveFrom: oldEffectiveFrom.toISOString(),
+              effectiveFrom: newEffectiveFrom.toISOString(),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      dbMock.customerPriceBook.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.customerPriceBook.update.mock.invocationCallOrder[0]!);
+  });
+
+  it('fails closed before cancelling when the restored predecessor cannot be projected', async () => {
+    const scheduledAt = new Date('2026-08-10T01:30:00.000Z');
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: scheduledAt,
+      effectiveTo: null,
+      isActive: true,
+      notes: null,
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 0 },
+    });
+    dbMock.orderCustomerCharge.count.mockResolvedValue(0);
+    dbMock.customerPriceBook.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'book-v1',
+          code: 'EXTERNAL_SALES_PROCESSING_202608',
+          version: 1,
+          effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
+          effectiveTo: scheduledAt,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    adapterMock.readCandidatePublishedCreateOrderPriceProjection.mockRejectedValue(
+      new MockPublishedCreateOrderPriceAdapterError('缺少配套物流价目簿'),
+    );
+
+    await expect(
+      cancelScheduledCustomerPriceBook(
+        {
+          priceBookId: 'book-v2-scheduled',
+          expectedUpdatedAt: now,
+          reason: '取消错误计划',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('调整后无法供建单计价');
+    expect(dbMock.customerPriceBook.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects schedule changes once a version is referenced by an order price lock', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+      effectiveTo: null,
+      isActive: true,
+      notes: null,
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 1 },
+    });
+    dbMock.orderCustomerCharge.count.mockResolvedValue(0);
+
+    await expect(
+      cancelScheduledCustomerPriceBook(
+        {
+          priceBookId: 'book-v2-scheduled',
+          expectedUpdatedAt: now,
+          reason: '取消错误计划',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('已被工单价格事实引用');
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects schedule changes once a charge references one of the preserved rules', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+      effectiveTo: null,
+      isActive: true,
+      notes: null,
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 0 },
+    });
+    dbMock.orderCustomerCharge.count.mockResolvedValue(1);
+
+    await expect(
+      rescheduleCustomerPriceBook(
+        {
+          priceBookId: 'book-v2-scheduled',
+          expectedUpdatedAt: now,
+          effectiveFrom: new Date('2026-08-11T01:30:00.000Z'),
+          reason: '延后统一切换',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('已被工单价格事实引用');
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses a stale schedule cancellation before reading references or changing windows', async () => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      code: 'EXTERNAL_SALES_PROCESSING_202608',
+      version: 2,
+      settlementType: 'EXTERNAL_SALES',
+      purpose: 'PROCESSING',
+      effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+      effectiveTo: null,
+      isActive: true,
+      notes: null,
+      updatedAt: now,
+      _count: { rules: 145, charges: 0, priceVersionLocks: 0 },
+    });
+
+    await expect(
+      cancelScheduledCustomerPriceBook(
+        {
+          priceBookId: 'book-v2-scheduled',
+          expectedUpdatedAt: new Date(now.getTime() - 1),
+          reason: '取消错误计划',
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('计划版本已被其他管理员修改');
+    expect(dbMock.orderCustomerCharge.count).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.findMany).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceBook.updateMany).not.toHaveBeenCalled();
   });
 
   it('refuses to publish a draft changed after the page was loaded', async () => {
@@ -1821,6 +2986,112 @@ describe('price-book admin DTO and normalized hash', () => {
         ruleSetSha256: null,
       }),
     ]);
+  });
+
+  it('reports a preserved cancelled schedule separately from ordinary history', async () => {
+    const cancelledAt = new Date('2026-08-09T03:00:00.000Z');
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      {
+        id: 'book-v2-cancelled',
+        code: 'EXTERNAL_SALES_PROCESSING_202608',
+        name: '外部销售加工费',
+        purpose: 'PROCESSING',
+        version: 2,
+        effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+        effectiveTo: null,
+        isActive: false,
+        notes: {
+          workflow: { ...draftNotes().workflow, status: 'PUBLISHED' },
+          scheduleControl: {
+            status: 'CANCELLED',
+            changedBy: actor.id,
+            changedAt: cancelledAt.toISOString(),
+            reason: '价格复核尚未完成',
+            previousEffectiveFrom: '2026-08-10T01:30:00.000Z',
+            effectiveFrom: '2026-08-10T01:30:00.000Z',
+          },
+        },
+        updatedAt: cancelledAt,
+        _count: { rules: 145 },
+      },
+    ]);
+
+    const versions = await listCustomerPriceBookVersionsAndDrafts(now);
+
+    expect(versions[0]).toMatchObject({
+      id: 'book-v2-cancelled',
+      status: 'CANCELLED',
+      ruleCount: 145,
+      scheduleChangeReason: '价格复核尚未完成',
+      scheduleChangedAt: cancelledAt.toISOString(),
+    });
+  });
+
+  it('reports a legacy superseded plan as cancelled instead of historical', async () => {
+    const supersededAt = new Date('2026-08-29T02:30:00.000Z');
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      {
+        id: 'book-v4-superseded',
+        code: 'EXTERNAL_SALES_PROCESSING_202608_LEGACY',
+        name: '客户加工费价目簿（2026-08）·结构化规则',
+        purpose: 'PROCESSING',
+        version: 4,
+        effectiveFrom: new Date('2026-08-29T09:59:00.000Z'),
+        effectiveTo: null,
+        isActive: false,
+        notes: {
+          workflow: { ...draftNotes().workflow, status: 'PUBLISHED' },
+          supersededByPriceBookId: 'book-v4-current-lineage',
+          supersededAt: supersededAt.toISOString(),
+          supersededReason: '已由专版 5 万档价目簿替代',
+        },
+        updatedAt: supersededAt,
+        _count: { rules: 145 },
+      },
+    ]);
+
+    const versions = await listCustomerPriceBookVersionsAndDrafts(now);
+
+    expect(versions[0]).toMatchObject({
+      id: 'book-v4-superseded',
+      status: 'CANCELLED',
+      scheduleChangeReason: '已由专版 5 万档价目簿替代',
+      scheduleChangedAt: supersededAt.toISOString(),
+    });
+  });
+
+  it('does not label an inactive future published version as historical', async () => {
+    const disabledAt = new Date('2026-08-09T03:00:00.000Z');
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      {
+        id: 'book-v2-disabled-before-release',
+        code: 'EXTERNAL_SALES_PROCESSING_202608_LEGACY',
+        name: '旧客户加工费价目簿',
+        purpose: 'PROCESSING',
+        version: 2,
+        effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+        effectiveTo: null,
+        isActive: false,
+        notes: {
+          workflow: {
+            ...draftNotes().workflow,
+            status: 'PUBLISHED',
+            publishedAt: disabledAt.toISOString(),
+          },
+        },
+        updatedAt: disabledAt,
+        _count: { rules: 121 },
+      },
+    ]);
+
+    const versions = await listCustomerPriceBookVersionsAndDrafts(now);
+
+    expect(versions[0]).toMatchObject({
+      id: 'book-v2-disabled-before-release',
+      status: 'CANCELLED',
+      scheduleChangeReason: null,
+      scheduleChangedAt: null,
+    });
   });
 
   it('hashes normalized rule semantics independent of row order and JSON key order', () => {

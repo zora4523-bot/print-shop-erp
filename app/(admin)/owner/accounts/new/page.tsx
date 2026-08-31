@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { createUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
 import { requirePermission } from '@/lib/auth/permissions';
-import { listWorkerCapabilityCrafts } from '@/lib/account';
 
 export const metadata = {
   title: '新建账号 · 红包印刷 ERP',
@@ -12,7 +11,6 @@ export default async function NewAccountPage() {
   // Page-level server-side authz (defense-in-depth; the create action
   // also re-checks). Layout gate doesn't re-run on soft navigation.
   await requirePermission('account:manage');
-  const capabilityCrafts = await listWorkerCapabilityCrafts();
   return (
     <div className="space-y-4">
       <div>
@@ -25,11 +23,7 @@ export default async function NewAccountPage() {
         </p>
       </div>
       <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <AccountForm
-          mode="create"
-          action={createUserAction}
-          capabilityCrafts={capabilityCrafts}
-        />
+        <AccountForm mode="create" action={createUserAction} />
       </div>
     </div>
   );

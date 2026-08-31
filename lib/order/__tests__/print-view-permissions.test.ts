@@ -27,6 +27,20 @@ beforeEach(() => {
 });
 
 describe('getOrderForPrint permissions', () => {
+  it('does not expose production print or PDF data to SALES', async () => {
+    await expect(
+      getOrderForPrint(
+        'sales-order',
+        { id: 'sales-1', role: Role.SALES },
+        'https://erp.example.com',
+      ),
+    ).resolves.toBeNull();
+
+    expect(dbMock.order.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.craft.findMany).not.toHaveBeenCalled();
+    expect(buildQrSvgMock).not.toHaveBeenCalled();
+  });
+
   it('图稿与任务同时间戳时用 id 稳定次序，避免跨页漂移', async () => {
     await getOrderForPrint(
       'order-stable-sort',

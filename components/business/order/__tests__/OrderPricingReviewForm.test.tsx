@@ -76,7 +76,24 @@ function preview(): OrderPricingReviewPreview {
       sourceName: '物流费.xlsx',
       sourceSha256: 'b'.repeat(64),
     },
-    items: [],
+    items: [
+      {
+        itemId: 'item-manual',
+        sequence: 1,
+        name: '配置外纸张',
+        quantity: 100,
+        complete: false,
+        errors: ['配置外纸张需人工核价'],
+        manualQuoteReason: '客户自带纸，建单时转人工',
+        currentUnitPrice: '0.2000',
+        currentFixedFee: '5.00',
+        currentSubtotal: '25.00',
+        suggestedUnitPrice: null,
+        suggestedFixedFee: null,
+        suggestedSubtotal: null,
+        currentReason: '工厂已核对纸张',
+      },
+    ],
     packagingGroups: [
       {
         packagingGroupId: 'packaging-auto',
@@ -107,6 +124,19 @@ function preview(): OrderPricingReviewPreview {
         currentReason: '管理员按混装工艺确认',
       },
     ],
+    orderCharges: [
+      {
+        chargeId: 'plate-pending',
+        businessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+        categoryCode: 'PLATE_MAKING_FEE',
+        description: '制版费',
+        complete: false,
+        errors: ['制版费待工厂确认'],
+        suggestedAmount: null,
+        currentAmount: '30.00',
+        currentReason: '工厂确认制版成本',
+      },
+    ],
     shipments: [],
   };
 }
@@ -126,8 +156,8 @@ beforeEach(() => {
   harness.refresh.mockReset();
 });
 
-describe('OrderPricingReviewForm packaging pricing contract', () => {
-  it('submits every packaging group with immutable facts and the correct price authority', () => {
+describe('OrderPricingReviewForm snapshot confirmation contract', () => {
+  it('submits immutable packaging facts while keeping the stored automatic amount', () => {
     render();
 
     expect(harness.onConfirm).not.toBeNull();
@@ -143,7 +173,7 @@ describe('OrderPricingReviewForm packaging pricing contract', () => {
             packagingGroupId: 'packaging-auto',
             expectedMode: OrderPackagingMode.SINGLE_STYLE,
             expectedActualBagCount: 100,
-            unitPrice: '0.1000',
+            unitPrice: '9.0000',
             reason: '旧人工价',
           },
           {
@@ -154,8 +184,29 @@ describe('OrderPricingReviewForm packaging pricing contract', () => {
             reason: '管理员按混装工艺确认',
           },
         ],
+        orderCharges: [
+          {
+            chargeId: 'plate-pending',
+            expectedBusinessKey: 'ORDER:PLATE_MAKING_FEE:PENDING',
+            amount: '30.00',
+            reason: '工厂确认制版成本',
+          },
+        ],
       }),
     );
+  });
+
+  it('describes snapshot confirmation without promising a latest-rule reprice', () => {
+    const html = render();
+
+    expect(html).toContain('工厂核价确认');
+    expect(html).toContain('仅核对工单已保存的报价快照');
+    expect(html).toContain('已锁定快照价');
+    expect(html).toContain('建单转人工原因：客户自带纸，建单时转人工');
+    expect(html).toContain('订单级待核价费用');
+    expect(html).toContain('制版费待工厂确认');
+    expect(html).not.toContain('按最新价格');
+    expect(html).not.toContain('最新规则自动价');
   });
 
   it('shows the finalized packaging total returned by the server action', () => {
@@ -166,6 +217,7 @@ describe('OrderPricingReviewForm packaging pricing contract', () => {
       packagingAmount: '20.00',
       processingAmount: '150.00',
       totalAmount: '185.00',
+      confirmedFee: '185.00',
     };
 
     const html = render();

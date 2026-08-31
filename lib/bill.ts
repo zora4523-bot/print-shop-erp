@@ -755,6 +755,14 @@ export async function getAdminBillDetail(id: string) {
                   },
                 },
               },
+              productionOperations: {
+                select: {
+                  reports: {
+                    orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
+                    select: { amount: true },
+                  },
+                },
+              },
               outsourceOrders: {
                 where: { status: { not: 'CANCELLED' } },
                 select: { amount: true },
@@ -768,6 +776,14 @@ export async function getAdminBillDetail(id: string) {
                       tasks: {
                         where: { status: 'COMPLETED' },
                         select: { pieceworkAmount: true },
+                      },
+                    },
+                  },
+                  productionOperations: {
+                    select: {
+                      reports: {
+                        orderBy: [{ reportedAt: 'asc' }, { id: 'asc' }],
+                        select: { amount: true },
                       },
                     },
                   },

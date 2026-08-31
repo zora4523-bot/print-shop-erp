@@ -3,6 +3,7 @@ import { OrderStatus } from '../../../generated/prisma/enums';
 import {
   transitionOrder,
   canTransitionOrder,
+  canAttachOutsource,
   isTerminalOrderStatus,
   InvalidOrderTransitionError,
   ORDER_TRANSITIONS,
@@ -18,7 +19,7 @@ describe('ORDER_TRANSITIONS shape', () => {
   it('main happy-path sequence is fully linked', () => {
     const chain = [
       OrderStatus.DRAFT,
-      OrderStatus.SUBMITTED,
+      OrderStatus.PENDING_FACTORY,
       OrderStatus.SCHEDULING,
       OrderStatus.IN_PRODUCTION,
       OrderStatus.COMPLETED,
@@ -53,8 +54,32 @@ describe('ORDER_TRANSITIONS shape', () => {
   });
 });
 
+describe('canAttachOutsource', () => {
+  it('accepts both the new pending-factory state and legacy SUBMITTED', () => {
+    expect(canAttachOutsource(OrderStatus.PENDING_FACTORY)).toBe(true);
+    expect(canAttachOutsource(OrderStatus.SUBMITTED)).toBe(true);
+  });
+
+  it('rejects post-production and terminal states', () => {
+    for (const status of [
+      OrderStatus.COMPLETED,
+      OrderStatus.SHIPPED,
+      OrderStatus.FINISHED,
+      OrderStatus.CANCELLED,
+    ]) {
+      expect(canAttachOutsource(status), `status=${status}`).toBe(false);
+    }
+  });
+});
+
 describe('transitionOrder', () => {
   it('returns target on a valid move', () => {
+    expect(transitionOrder(OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY)).toBe(
+      OrderStatus.PENDING_FACTORY,
+    );
+  });
+
+  it('keeps DRAFT → SUBMITTED valid for legacy callers', () => {
     expect(transitionOrder(OrderStatus.DRAFT, OrderStatus.SUBMITTED)).toBe(
       OrderStatus.SUBMITTED,
     );
@@ -103,7 +128,9 @@ describe('transitionOrder', () => {
 
 describe('canTransitionOrder spot-checks per SPEC §4.3', () => {
   it.each([
+    [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, true],
     [OrderStatus.DRAFT, OrderStatus.SUBMITTED, true],
+    [OrderStatus.PENDING_FACTORY, OrderStatus.SCHEDULING, true],
     [OrderStatus.SUBMITTED, OrderStatus.SCHEDULING, true],
     [OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION, true],
     [OrderStatus.SCHEDULING, OrderStatus.COMPLETED, true],
@@ -111,6 +138,7 @@ describe('canTransitionOrder spot-checks per SPEC §4.3', () => {
     [OrderStatus.COMPLETED, OrderStatus.SHIPPED, true],
     [OrderStatus.SHIPPED, OrderStatus.FINISHED, true],
     [OrderStatus.DRAFT, OrderStatus.IN_PRODUCTION, false],
+    [OrderStatus.PENDING_FACTORY, OrderStatus.COMPLETED, false],
     [OrderStatus.SUBMITTED, OrderStatus.COMPLETED, false],
     [OrderStatus.COMPLETED, OrderStatus.IN_PRODUCTION, false],
   ] as const)('%s → %s = %s', (from, to, expected) => {

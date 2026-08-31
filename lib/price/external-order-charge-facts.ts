@@ -1,8 +1,15 @@
-import type { ExternalOrderChargeShipmentInput } from './external-order-charges';
+import type {
+  ExternalOrderChargeShipmentInput,
+  ExternalOrderChargeWeightItem,
+  ExternalOrderProductStructure,
+} from './external-order-charges';
 
 export type ExternalOrderChargeItemFacts = {
   itemKey?: string;
   quantity: number;
+  paperWeightGsm?: number | null;
+  paperType?: string | null;
+  productStructure?: ExternalOrderProductStructure;
 };
 
 export type ExternalOrderChargeShipmentFacts = {
@@ -14,21 +21,17 @@ export type ExternalOrderChargeShipmentFacts = {
 
 export type DerivedExternalOrderChargeShipment = Omit<
   ExternalOrderChargeShipmentInput,
-  'billableWeightKg'
+  'billableWeightKg' | 'weightItems'
 > & {
   billableWeightKg: string | null;
+  weightItems: ExternalOrderChargeWeightItem[];
 };
 
-function carrierBillableWeight(value: string | null): string | null {
-  const normalized = value?.trim() ?? '';
-  if (!/^\d{1,6}(?:\.\d{1,3})?$/.test(normalized)) return null;
-  return Number(normalized) > 0 ? normalized : null;
-}
-
 /**
- * Converts validated order/shipment facts into the narrow input accepted by
- * the versioned logistics calculator. Billable weight is a carrier-confirmed
- * fact: paper and quantity are never used to guess it.
+ * Allocates server-validated item facts to shipments. The price-book policy is
+ * intentionally applied later, after the service loads the selected version.
+ * `billableWeightKg` is a trusted actual override; `weightItems` are the only
+ * facts eligible for a server estimate when that override is absent.
  */
 export function deriveExternalOrderChargeShipments(args: {
   items: readonly ExternalOrderChargeItemFacts[];
@@ -36,16 +39,19 @@ export function deriveExternalOrderChargeShipments(args: {
   isSfCollect: boolean;
 }): DerivedExternalOrderChargeShipment[] {
   return args.shipments.map((shipment) => {
-    const allocatedItems = args.items.flatMap((item, itemIndex) => {
+    const weightItems = args.items.flatMap((item, itemIndex) => {
       const quantity = shipment.itemQuantities[itemIndex] ?? 0;
-      if (quantity <= 0) return [];
+      if (quantity === 0) return [];
       return [{
-        key: item.itemKey?.trim() || String(itemIndex + 1),
+        itemKey: item.itemKey?.trim() || String(itemIndex + 1),
         quantity,
+        paperWeightGsm: item.paperWeightGsm ?? null,
+        paperType: item.paperType?.trim() || null,
+        productStructure: item.productStructure ?? 'UNSPECIFIED',
       }];
     });
-    const itemQuantity = allocatedItems.reduce(
-      (sum, item) => sum + item.quantity,
+    const itemQuantity = weightItems.reduce(
+      (sum, item) => sum + (item.quantity > 0 ? item.quantity : 0),
       0,
     );
     return {
@@ -53,7 +59,8 @@ export function deriveExternalOrderChargeShipments(args: {
       province: shipment.province,
       billableWeightKg: args.isSfCollect
         ? null
-        : carrierBillableWeight(shipment.billableWeightKg),
+        : shipment.billableWeightKg?.trim() || null,
+      weightItems,
       itemQuantity,
     };
   });

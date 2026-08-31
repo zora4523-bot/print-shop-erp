@@ -18,9 +18,17 @@ vi.mock('@/lib/material', () => ({
     OTHER: '其他',
   },
 }));
+vi.mock('@/lib/product', () => ({
+  isRetiredProductCategory: (category: {
+    path: string;
+    legacyCategory: ProductCategory;
+  }) =>
+    category.path === 'product.generic_stock' ||
+    category.legacyCategory === ProductCategory.GENERIC_STOCK,
+}));
 
 describe('规则中心目录业务语言投影', () => {
-  it('报价 SKU 列表隐藏导入表坐标', () => {
+  it('建单产品列表隐藏导入表坐标', () => {
     const products = [
       {
         id: 'product-1',
@@ -44,7 +52,6 @@ describe('规则中心目录业务语言投影', () => {
           orderCount: 0,
           bomCount: 0,
           currentExternalPriceRuleCount: 0,
-          currentInternalPriceTierCount: 0,
         },
       },
     ] as unknown as ProductListRow[];
@@ -60,7 +67,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('分类表!A4');
   });
 
-  it('报价 SKU 列表只展示一次产品结构', () => {
+  it('建单产品列表只展示一次产品结构', () => {
     const products = [
       {
         id: 'product-duplicate-category',
@@ -84,7 +91,6 @@ describe('规则中心目录业务语言投影', () => {
           orderCount: 0,
           bomCount: 0,
           currentExternalPriceRuleCount: 0,
-          currentInternalPriceTierCount: 0,
         },
       },
     ] as unknown as ProductListRow[];
@@ -97,7 +103,7 @@ describe('规则中心目录业务语言投影', () => {
     expect(html).not.toContain('计价路线 / 产品结构');
   });
 
-  it('规则中心的报价 SKU 列表不混入内部直单价', () => {
+  it('可建单组合列表不混入旧单价与起订量', () => {
     const product = {
       id: 'product-internal-price',
       code: 'PRD-INTERNAL',
@@ -107,7 +113,7 @@ describe('规则中心目录业务语言投影', () => {
       specification: '大号',
       paperType: '160g 艳闪',
       baseUnitPrice: '123.4567',
-      minOrderQty: null,
+      minOrderQty: 500,
       isActive: true,
       categoryNode: {
         id: 'blank-stock',
@@ -120,16 +126,49 @@ describe('规则中心目录业务语言投影', () => {
         orderCount: 0,
         bomCount: 0,
         currentExternalPriceRuleCount: 0,
-        currentInternalPriceTierCount: 0,
       },
     } as unknown as ProductListRow;
 
     const html = renderToStaticMarkup(
-      <ProductsTable products={[product]} showInternalPrice={false} />,
+      <ProductsTable products={[product]} />,
     );
 
     expect(html).not.toContain('内部/直单基础单价');
     expect(html).not.toContain('123.4567');
+    expect(html).not.toContain('起订量');
+    expect(html).not.toContain('>500<');
+  });
+
+  it('建单产品列表明确标记退役分类下的历史记录', () => {
+    const product = {
+      id: 'product-retired',
+      code: 'PRD-RETIRED',
+      category: ProductCategory.GENERIC_STOCK,
+      categoryNodeId: 'generic-stock',
+      name: '历史现货',
+      specification: null,
+      paperType: null,
+      baseUnitPrice: null,
+      minOrderQty: null,
+      isActive: false,
+      categoryNode: {
+        id: 'generic-stock',
+        path: 'product.generic_stock',
+        name: '历史通用现货',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+        isActive: false,
+      },
+      referenceImpact: {
+        orderCount: 1,
+        bomCount: 0,
+        currentExternalPriceRuleCount: 0,
+      },
+    } as unknown as ProductListRow;
+
+    const html = renderToStaticMarkup(<ProductsTable products={[product]} />);
+
+    expect(html).toContain('历史 / 已退役');
+    expect(html).toContain('停用');
   });
 
   it('纸张列表隐藏导入表坐标', () => {

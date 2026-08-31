@@ -12,11 +12,6 @@ import {
   ORDER_PRICING_ROUTE_LABELS,
 } from '../../order/pricing-route';
 import {
-  calculateExternalSalesQuote,
-  type ExternalSalesPriceRule,
-  type ExternalSalesQuoteInput,
-} from '../../price/external-sales-quote';
-import {
   flattenAdminMenuItems,
   getAdminMenuItems,
 } from '../admin-menu';
@@ -32,76 +27,6 @@ function adminMenuLabels(): string[] {
     ),
   ).map((item) => item.label);
 }
-
-function legacyStockFoilInput(): ExternalSalesQuoteInput {
-  return {
-    quantity: 2_000,
-    productId: 'stock-touch-large',
-    productCode: 'EXT-STOCK-TOUCH-LARGE',
-    craftIds: ['legacy-stock-foil-craft'],
-    craftCodes: ['STOCK_FOIL'],
-    specification: '大号',
-    paperType: '触感纸',
-    paperCatalogMatched: true,
-    pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
-    productStructure: 'STANDARD_ENVELOPE',
-    artworkVersion: 'V1',
-    plateGroupId: null,
-    pricingGroup: null,
-    actualWidthMm: null,
-    actualHeightMm: null,
-    paperWeightGsm: null,
-    foilColors: ['哑金'],
-    foilTechnique: 'FLAT',
-    hasLocalFoil: true,
-    lamination: 'NONE',
-    printColors: [],
-    isDoubleSided: true,
-    isDoubleColor: false,
-    settlementType: 'EXTERNAL_SALES',
-    orderItemCount: 1,
-  };
-}
-
-function canonicalStockFoilRule(): ExternalSalesPriceRule {
-  return {
-    id: 'stock-touch-large-2000',
-    code: 'STOCK_TOUCH_LARGE_2000',
-    name: '触感纸大号通版现货局部烫金 2000 个',
-    kind: 'BASE',
-    calculationType: 'PER_PIECE',
-    amount: '0.2000',
-    minQty: 2_000,
-    maxQty: 2_000,
-    triggerCondition: {
-      schemaVersion: 1,
-      target: 'ITEM',
-      pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
-      productCodes: ['EXT-STOCK-TOUCH-LARGE'],
-      craftCodes: ['FLAT_FOIL_PARTIAL'],
-      productStructures: ['STANDARD_ENVELOPE'],
-      foilTechniques: ['FLAT'],
-      hasLocalFoil: true,
-    },
-    exclusiveGroup: null,
-    priority: 0,
-    blocksAutomaticQuote: false,
-    sourceSheet: '通版现货',
-    sourceRange: 'A1',
-    note: null,
-    productId: 'stock-touch-large',
-    category: { code: 'BASE_PRODUCT', name: '基础加工费' },
-  };
-}
-
-const priceBook = {
-  id: 'processing-v1',
-  code: 'PROCESSING_EXTERNAL',
-  name: '客户加工费',
-  version: 1,
-  sourceName: '当前规则版本',
-  sourceSha256: null,
-};
 
 describe('工单核心重构验收契约', () => {
   it('新建工单严格只提供三条互斥的基础计价路线', () => {
@@ -133,17 +58,16 @@ describe('工单核心重构验收契约', () => {
     );
   });
 
-  it('规则中心在同一路由树下管理可维护的计价对象与师傅计件', () => {
+  it('规则中心在同一路由树下管理可维护的计价对象', () => {
     const requiredModules = [
       ['papers', '纸张', '/owner/rules/papers'],
-      ['stockSkus', '报价 SKU', '/owner/rules/stock-skus'],
+      ['stockSkus', '可建单产品组合', '/owner/rules/stock-skus'],
       [
         'productCategories',
         '产品结构',
         '/owner/rules/product-categories',
       ],
-      ['crafts', '工艺参数', '/owner/rules/crafts'],
-      ['workerPiecework', '师傅计件', '/owner/rules/worker-piecework'],
+      ['crafts', '建单工艺目录', '/owner/rules/crafts'],
     ] as const;
 
     expect(
@@ -157,13 +81,22 @@ describe('工单核心重构验收契约', () => {
       href: RULE_CENTER_HREFS.root,
       requiredPermission: 'dict:price:manage',
     });
-    expect(childItems).toHaveLength(9);
+    expect(childItems).toHaveLength(12);
     expect(
       childItems.every(
         (item) =>
           'menuParentId' in item && item.menuParentId === rootItem.id,
       ),
     ).toBe(true);
+    expect(
+      new Set(
+        childItems.map((item) =>
+          'menuGroupLabel' in item ? item.menuGroupLabel : null,
+        ),
+      ),
+    ).toEqual(
+      new Set(['客户计价规则', '建单主数据', '员工薪酬规则']),
+    );
 
     const rulesGroup = getAdminMenuItems({ role: Role.ADMIN }).find(
       (group) => group.label === '规则',
@@ -173,7 +106,7 @@ describe('工单核心重构验收契约', () => {
       label: '规则配置中心',
       href: RULE_CENTER_HREFS.root,
     });
-    expect(rulesGroup?.items[0]?.children).toHaveLength(9);
+    expect(rulesGroup?.items[0]?.children).toHaveLength(12);
 
     for (const [key, label, href] of requiredModules) {
       expect(RULE_CENTER_HREFS[key]).toBe(href);
@@ -195,26 +128,8 @@ describe('工单核心重构验收契约', () => {
       ).toBe(true);
     }
 
-    expect(RULE_CENTER_HREFS.pricingRoutes).toBe(
-      '/owner/rules/pricing-routes',
-    );
-    expect(RULE_CENTER_SIDEBAR_ITEMS.map((item) => item.href)).not.toContain(
-      RULE_CENTER_HREFS.pricingRoutes,
-    );
-    expect(
-      existsSync(
-        join(
-          process.cwd(),
-          'app',
-          '(admin)',
-          'owner',
-          'rules',
-          'pricing-routes',
-          'page.tsx',
-        ),
-      ),
-      '旧链接应继续打开精简后的计价方式说明页',
-    ).toBe(true);
+    expect(RULE_CENTER_HREFS).not.toHaveProperty('pricingRoutes');
+    expect(RULE_CENTER_HREFS).not.toHaveProperty('internalPricing');
   });
 
   it('旧字典地址仅作兼容入口，统一转到规则中心', async () => {
@@ -222,6 +137,11 @@ describe('工单核心重构验收契约', () => {
 
     expect(redirects).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          source: '/owner/rules/pricing-routes',
+          destination: RULE_CENTER_HREFS.root,
+          permanent: false,
+        }),
         expect.objectContaining({
           source: '/owner/products',
           destination: RULE_CENTER_HREFS.stockSkus,
@@ -241,36 +161,7 @@ describe('工单核心重构验收契约', () => {
     );
   });
 
-  it('历史 STOCK_FOIL 工艺仍可匹配新的“局部烫金”规则', () => {
-    const result = calculateExternalSalesQuote({
-      input: legacyStockFoilInput(),
-      priceBook,
-      rules: [canonicalStockFoilRule()],
-    });
-
-    expect(result).toMatchObject({
-      complete: true,
-      suggestedUnitPrice: '0.2000',
-      suggestedFixedFee: '0.00',
-      suggestedSubtotal: '400.00',
-      errors: [],
-    });
-  });
-
-  it('自动价未覆盖时不伪造建议价，进入待管理员终价状态', () => {
-    const result = calculateExternalSalesQuote({
-      input: legacyStockFoilInput(),
-      priceBook,
-      rules: [],
-    });
-
-    expect(result.complete).toBe(false);
-    expect(result.suggestedUnitPrice).toBeNull();
-    expect(result.suggestedFixedFee).toBeNull();
-    expect(result.suggestedSubtotal).toBeNull();
-    expect(result.errors.some((message) => message.includes('管理员'))).toBe(
-      true,
-    );
+  it('仍保留新建工单的人工核价状态', () => {
     expect(ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION).toBe(
       'PENDING_ADMIN_CONFIRMATION',
     );

@@ -31,7 +31,6 @@ export async function createSalaryRuleVersionAction(
   try {
     const created = await createSalaryRuleVersion(parsed.data, actor);
     revalidatePath('/owner/salary');
-    revalidatePath('/owner/salary/rules');
     revalidatePath('/owner/salary/cs');
     revalidatePath('/owner/salary/hourly');
     revalidatePath(RULE_CENTER_HREFS.employeePay);

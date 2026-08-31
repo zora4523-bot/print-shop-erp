@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
 import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
+import { RULE_CENTER_SIDEBAR_ITEMS } from '@/lib/navigation/rule-center';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -28,31 +29,23 @@ const SEGMENT_LABELS: Record<string, string> = {
   accounts: '账号管理',
   parties: '客户/供应商',
   crafts: '工艺',
-  products: '产品',
   'product-categories': '产品分类',
   boms: 'BOM/用料',
   materials: '物料',
   warehouses: '仓库/库位',
   'customer-pricing': '客户计价规则',
-  'pricing-routes': '计价方式',
   papers: '纸张',
-  'stock-skus': '现货 SKU',
+  'stock-skus': '可建单产品组合',
   'price-versions': '价格版本',
-  'internal-pricing': '内部计价',
-  'worker-piecework': '师傅计件规则',
-  'employee-pay': '员工工资与提成',
+  'employee-pay': '员工薪酬规则',
   prices: '价格管理',
   'external-sales': '客户计价规则',
-  items: '规则工作台',
-  versions: '价格版本',
-  quote: '报价查询',
   adjustments: '加价规则',
   tiers: '价格阶梯',
   notifications: '推送配置',
   pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '计件工资',
-  'piecework-rules': '计件规则',
   hourly: '时薪工月结',
   cs: '客服周期',
   scheduling: '排产',
@@ -65,23 +58,15 @@ const SEGMENT_LABELS: Record<string, string> = {
   count: '盘点',
 };
 
-// 有些路由在不同业务下会复用同一末级段名（例如
-// `/owner/rules` 与 `/owner/salary/rules`）。这些标签必须按完整累计路径
-// 解析，不能仅依赖 segment，否则会把旧的工资规则误标为规则中心。
-export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> = {
-  '/owner/rules': '规则配置中心',
-  '/owner/rules/pricing-routes': '计价方式',
-  '/owner/rules/papers': '纸张',
-  '/owner/rules/stock-skus': '报价 SKU',
-  '/owner/rules/product-categories': '产品结构分类',
-  '/owner/rules/crafts': '工艺与参数',
-  '/owner/rules/customer-pricing': '客户计价规则',
-  '/owner/rules/price-versions': '价格版本',
-  '/owner/rules/internal-pricing': '内部计价',
-  '/owner/rules/worker-piecework': '师傅计件规则',
-  '/owner/rules/employee-pay': '员工工资与提成',
-  '/owner/salary/rules': '员工工资规则',
-};
+// 规则中心的子页使用完整路径标签，避免同名 segment 在不同
+// 业务层级中回落到模糊的通用文案。
+export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    RULE_CENTER_SIDEBAR_ITEMS.map((item) => [
+      item.href,
+      item.breadcrumbLabel,
+    ]),
+  );
 
 // Routes that are layout-only (no page.tsx) — linking them produces
 // 404s. Render those segments as text instead。
@@ -90,10 +75,6 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> = {
 const LAYOUT_ONLY_PATHS = new Set<string>([
   '/foreman',
   '/sales',
-  '/owner/prices/adjustments',
-  '/owner/prices/tiers',
-  '/owner/rules/internal-pricing/adjustments',
-  '/owner/rules/internal-pricing/tiers',
 ]);
 
 // cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读

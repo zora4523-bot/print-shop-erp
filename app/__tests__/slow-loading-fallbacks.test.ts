@@ -47,10 +47,13 @@ describe('custom loading fallback slow-loading contract', () => {
       'app/(admin)/orders/_components/OrdersListContent.tsx',
     );
 
-    expect(page).toContain('fallback={<OrdersListContentSkeleton />}');
+    expect(page).toContain('<SalesOrdersListContentSkeleton />');
+    expect(page).toContain('<OrdersListContentSkeleton />');
     expect(content).toContain('fallback={<OrdersListFiltersSkeleton />}');
     expect(content).toContain('fallback={<OrdersListTableSkeleton />}');
     expect(content).toContain('fallback={<OrderExportControlsSkeleton />}');
+    expect(content).toContain('fallback={<SalesOrdersFiltersSkeleton />}');
+    expect(content).toContain('fallback={<SalesOrdersListSkeleton />}');
     expect(skeletons).toContain(
       '<OrdersListFiltersSkeleton announce={false} />',
     );
@@ -60,10 +63,16 @@ describe('custom loading fallback slow-loading contract', () => {
     expect(skeletons).toContain(
       '<OrderExportControlsSkeleton announce={false} />',
     );
-    expect(skeletons.match(/<SlowLoadingHint/g)).toHaveLength(4);
+    expect(skeletons).toContain(
+      '<SalesOrdersFiltersSkeleton announce={false} />',
+    );
+    expect(skeletons).toContain(
+      '<SalesOrdersListSkeleton announce={false} />',
+    );
+    expect(skeletons.match(/<SlowLoadingHint/g)).toHaveLength(7);
     expect(
       skeletons.match(/aria-live=\{announce \? 'polite' : undefined\}/g),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
   });
 
   it('keeps one delayed hint in every independent Dashboard fallback', () => {

@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { SalaryAdjustmentType } from '@/generated/prisma/enums';
@@ -15,11 +14,9 @@ import {
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
-import { AddSalaryAdjustmentForm } from '@/components/business/salary/AddSalaryAdjustmentForm';
-import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { PageHeader } from '@/components/ui-business';
-import type { MachineRuleWithBase } from '@/lib/salary/rules';
+import type { LegacyMachineRuleSnapshot } from '@/lib/salary/legacy-machine-snapshot';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -59,7 +56,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
-        subtitle="核对报工、计件、保底与调整；已发放记录不可修改。"
+        subtitle="只读核对切换前的任务、计件、保底与调整快照；本页不重算或修改历史财务事实。"
         actions={
           <div className="flex gap-2">
             <Link
@@ -89,32 +86,19 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         <Summary label="实发" value={`¥ ${salary.actualSalary}`} strong />
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">状态</p>
-          <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="mt-2">
             <PaymentStatusBadge isPaid={salary.isPaid} />
-            <MarkPaidForm
-              returnTo="/owner/salary/daily"
-              id={salary.id}
-              currentPaid={salary.isPaid}
-              workerName={salary.worker.displayName}
-              salaryDate={formatDateShanghai(salary.date)}
-              amount={String(salary.actualSalary)}
-            />
           </div>
         </div>
       </section>
 
       <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <h2 className="font-semibold">人工调整</h2>
+        <h2 className="font-semibold">历史人工调整</h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          不改写原始计件；每笔奖金、扣款或差错修正都会保留操作人、时间和原因。
+          仅展示旧账本已保存的奖金、扣款或差错修正；不再提供新增或改写入口。
         </p>
-        <AddSalaryAdjustmentForm
-          dailySalaryId={salary.id}
-          disabled={salary.isPaid}
-          initialIdempotencyKey={randomUUID()}
-        />
         {salary.adjustments.length > 0 ? (
-          <ul className="mt-4 divide-y border-t text-sm">
+          <ul className="divide-y border-t text-sm">
             {salary.adjustments.map((entry) => (
               <li key={entry.id} className="grid gap-2 py-3 sm:grid-cols-[100px_100px_1fr_220px]">
                 <span>{ADJUSTMENT_LABELS[entry.type]}</span>
@@ -128,7 +112,9 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               </li>
             ))}
           </ul>
-        ) : null}
+        ) : (
+          <p className="text-sm text-muted-foreground">无历史人工调整。</p>
+        )}
       </section>
 
       <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
@@ -196,7 +182,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
 }
 
 function formatRuleSnapshot(snapshot: unknown): string {
-  const rule = snapshot as Partial<MachineRuleWithBase>;
+  const rule = snapshot as LegacyMachineRuleSnapshot;
   const parts = [
     `每下 ¥${rule.pieceRate ?? '—'}`,
     `每板 ¥${rule.boardRate ?? '—'}`,

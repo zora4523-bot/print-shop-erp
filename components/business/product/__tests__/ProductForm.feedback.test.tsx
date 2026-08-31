@@ -54,9 +54,6 @@ describe('ProductForm structured feedback contract', () => {
           name: '大号触感纸（价格表!B6）',
           specification: '160g（价格表!B7）',
           paperType: '触感纸（烫金!B13）',
-          baseUnitPrice: null,
-          minOrderQty: null,
-          isActive: true,
         }}
       />,
     );
@@ -97,15 +94,12 @@ describe('ProductForm structured feedback contract', () => {
           name: '（价格表!B6）',
           specification: '（价格表!B7）',
           paperType: '（烫金!B13）',
-          baseUnitPrice: null,
-          minOrderQty: null,
-          isActive: true,
         }}
       />,
     );
 
     expect(html.match(/<input[^>]*id="name"[^>]*>/)?.[0]).toContain(
-      'value="未命名 SKU"',
+      'value="未命名组合"',
     );
     expect(
       html.match(/<input[^>]*id="specification"[^>]*>/)?.[0],
@@ -116,49 +110,41 @@ describe('ProductForm structured feedback contract', () => {
     expect(html).toContain('name="name" value="（价格表!B6）"');
   });
 
-  it('规则中心不展示也不提交内部直单价', () => {
+  it('规则中心表单没有旧内部直单价字段', () => {
     const html = renderToStaticMarkup(
       <ProductForm
         mode="edit"
         action={vi.fn()}
         categoryNodes={categoryNodes}
-        showInternalPrice={false}
         initial={{
           code: 'PRD-3',
           categoryNodeId: 'category-1',
           name: '大号现货',
           specification: '大号',
           paperType: '160g 艳闪',
-          baseUnitPrice: '12.3456',
-          minOrderQty: 100,
-          isActive: true,
         }}
       />,
     );
 
     expect(html).not.toContain('内部销售/工厂直单基础单价');
     expect(html).not.toContain('name="baseUnitPrice"');
-    expect(html).not.toContain('12.3456');
+    expect(html).not.toContain('name="minOrderQty"');
+    expect(html).not.toContain('最小起订量');
   });
 
-  it('links the summary, select and price input to stable error messages', () => {
+  it('links the summary and select to a stable error message', () => {
     actionState.current = {
       status: 'invalid',
       fieldErrors: {
         categoryNodeId: ['请选择产品分类'],
-        baseUnitPrice: ['价格格式错误'],
       },
     };
 
     const html = render();
 
     expect(html).toContain('href="#categoryNodeId"');
-    expect(html).toContain('href="#baseUnitPrice"');
     expect(html).toMatch(
       /id="categoryNodeId"[^>]*aria-errormessage="categoryNodeId-message"/,
-    );
-    expect(html).toMatch(
-      /id="baseUnitPrice"[^>]*aria-errormessage="baseUnitPrice-message"/,
     );
   });
 
@@ -192,7 +178,7 @@ describe('ProductForm structured feedback contract', () => {
     actionState.pending = true;
     const pendingHtml = render();
     expect(pendingHtml).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(pendingHtml).toContain('正在保存产品…');
+    expect(pendingHtml).toContain('正在保存组合…');
     expect(pendingHtml).not.toContain('产品编码已被其他记录占用');
   });
 });

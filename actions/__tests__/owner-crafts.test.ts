@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MachineType, Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
 
 const {
@@ -40,7 +40,6 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
-  createCraftAction,
   createRuleCenterCraftAction,
   updateCraftAction,
   setCraftActiveAction,
@@ -58,8 +57,6 @@ const ownerActor = {
 const validCreateFields = {
   name: '专版单色平烫',
   isOutsource: 'false',
-  defaultWorkerType: 'MACHINE',
-  defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
 
@@ -80,13 +77,13 @@ beforeEach(() => {
   });
 });
 
-describe('createCraftAction', () => {
+describe('createRuleCenterCraftAction', () => {
   it('新建工艺始终由服务端生成稳定编号', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
 
     await expect(
-      createCraftAction(
+      createRuleCenterCraftAction(
         null,
         fd({ ...validCreateFields, code: 'FORGED_CRAFT_CODE' }),
       ),
@@ -101,7 +98,7 @@ describe('createCraftAction', () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
-    await expect(createCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
+    await expect(createRuleCenterCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('dict:craft:manage');
@@ -117,7 +114,7 @@ describe('createCraftAction', () => {
         meta: { target: ['code'] },
       }),
     );
-    const result = await createCraftAction(null, fd(validCreateFields));
+    const result = await createRuleCenterCraftAction(null, fd(validCreateFields));
     expect(result).toEqual({
       status: 'error',
       message: '系统未能生成工艺编号，请重新提交。',
@@ -133,7 +130,7 @@ describe('createCraftAction', () => {
         meta: { target: ['name'] },
       }),
     );
-    const result = await createCraftAction(null, fd(validCreateFields));
+    const result = await createRuleCenterCraftAction(null, fd(validCreateFields));
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
       expect(result.fieldErrors.name).toContain('该工艺名已被占用');
@@ -149,7 +146,7 @@ describe('createCraftAction', () => {
         meta: { target: 'code' },
       }),
     );
-    const result = await createCraftAction(null, fd(validCreateFields));
+    const result = await createRuleCenterCraftAction(null, fd(validCreateFields));
     expect(result.status).toBe('error');
   });
 
@@ -165,7 +162,7 @@ describe('createCraftAction', () => {
         meta: { target: 'Craft_code_key' },
       }),
     );
-    const result = await createCraftAction(null, fd(validCreateFields));
+    const result = await createRuleCenterCraftAction(null, fd(validCreateFields));
     expect(result.status).toBe('error');
   });
 
@@ -179,7 +176,7 @@ describe('createCraftAction', () => {
       }),
     );
     // Not in our synonym allowlist → bubbles up, not mapped.
-    await expect(createCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
+    await expect(createRuleCenterCraftAction(null, fd(validCreateFields))).rejects.toBeInstanceOf(
       Prisma.PrismaClientKnownRequestError,
     );
   });
@@ -187,11 +184,16 @@ describe('createCraftAction', () => {
   it('revalidates + redirects to the new craft edit page on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
-    await expect(createCraftAction(null, fd(validCreateFields))).rejects.toThrow(
+    await expect(createRuleCenterCraftAction(null, fd(validCreateFields))).rejects.toThrow(
       /NEXT_REDIRECT/,
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
-    expect(redirectMock).toHaveBeenCalledWith('/owner/crafts/craft-new');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/crafts/craft-new',
+    );
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/crafts/craft-new',
+    );
   });
 
   it('keeps rule-center craft creation inside the rule center', async () => {
@@ -199,7 +201,7 @@ describe('createCraftAction', () => {
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
 
     await expect(
-      createCraftAction(
+      createRuleCenterCraftAction(
         null,
         fd({
           ...validCreateFields,
@@ -234,7 +236,7 @@ describe('createCraftAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
     await expect(
-      createCraftAction(null, fd({ ...validCreateFields, sortOrder: '42' })),
+      createRuleCenterCraftAction(null, fd({ ...validCreateFields, sortOrder: '42' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ sortOrder: 42 }),
@@ -245,7 +247,7 @@ describe('createCraftAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
     await expect(
-      createCraftAction(null, fd({ ...validCreateFields, isOutsource: 'on' })),
+      createRuleCenterCraftAction(null, fd({ ...validCreateFields, isOutsource: 'on' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ isOutsource: true }),
@@ -257,11 +259,9 @@ describe('createCraftAction', () => {
     craftMock.createCraft.mockResolvedValue({ id: 'craft-new' });
     const f = new FormData();
     f.set('name', '粘封');
-    f.set('defaultWorkerType', 'MACHINE');
-    f.set('defaultMachineType', MachineType.GLUE);
     f.set('sortOrder', '40');
     // isOutsource deliberately absent
-    await expect(createCraftAction(null, f)).rejects.toThrow(/NEXT_REDIRECT/);
+    await expect(createRuleCenterCraftAction(null, f)).rejects.toThrow(/NEXT_REDIRECT/);
     expect(craftMock.createCraft).toHaveBeenCalledWith(
       expect.objectContaining({ isOutsource: false }),
     );
@@ -291,8 +291,8 @@ describe('updateCraftAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.updateCraft.mockResolvedValue({ id: 'c' });
     await updateCraftAction('c', null, fd(baseUpdate));
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts/c');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts/c');
   });
 
   it('编辑时忽略篡改的内部编号', async () => {
@@ -320,13 +320,17 @@ describe('setCraftActiveAction', () => {
     await expect(setCraftActiveAction('c', false)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
-  it('maps invariant error to error status', async () => {
+  it('maps a retired-craft activation invariant without revalidating', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     craftMock.setCraftActive.mockRejectedValueOnce(
-      new MockCraftInvariantError('目标工艺不存在'),
+      new MockCraftInvariantError('历史工艺已退役，不能重新启用'),
     );
-    const result = await setCraftActiveAction('c', false);
-    expect(result.status).toBe('error');
+    const result = await setCraftActiveAction('c', true);
+    expect(result).toEqual({
+      status: 'error',
+      message: '历史工艺已退役，不能重新启用',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it('revalidates on success', async () => {
@@ -334,6 +338,7 @@ describe('setCraftActiveAction', () => {
     craftMock.setCraftActive.mockResolvedValue({ id: 'c' });
     const result = await setCraftActiveAction('c', false);
     expect(result.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/crafts');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/crafts/c');
   });
 });

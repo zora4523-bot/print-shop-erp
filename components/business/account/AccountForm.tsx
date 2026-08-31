@@ -28,7 +28,6 @@ import {
   WORKER_TYPE_LABELS,
   MACHINE_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
-import type { WorkerCapabilityCraft } from '@/lib/account';
 
 type EditInitial = {
   username: string;
@@ -37,8 +36,6 @@ type EditInitial = {
   role: Role;
   workerType: WorkerType | null;
   machineType: MachineType | null;
-  machineCapabilities: MachineType[];
-  craftCapabilities: Array<{ craftId: string }>;
   isActive: boolean;
   employmentType: EmploymentType | null;
   employmentStartDate: Date | null;
@@ -52,7 +49,6 @@ type Props =
         prev: AccountMutationResult | null,
         fd: FormData,
       ) => Promise<AccountMutationResult>;
-      capabilityCrafts: WorkerCapabilityCraft[];
     }
   | {
       mode: 'edit';
@@ -61,7 +57,6 @@ type Props =
         fd: FormData,
       ) => Promise<AccountMutationResult>;
       initial: EditInitial;
-      capabilityCrafts: WorkerCapabilityCraft[];
     };
 
 // Simple native <select> styled to match shadcn Input — keeps the bundle
@@ -103,8 +98,6 @@ const ACCOUNT_FIELD_LABELS: Record<string, string> = {
   role: '角色',
   workerType: '岗位类型',
   machineType: '主机型',
-  machineCapabilities: '可操作机器',
-  craftCapabilities: '熟练工艺',
   employmentType: '用工类型',
   employmentStartDate: '入职日期',
   employmentEndDate: '离职日期',
@@ -123,25 +116,6 @@ export function AccountForm(props: Props) {
   const [machineType, setMachineType] = useState<MachineType | ''>(
     initial?.machineType ?? '',
   );
-  const [machineCapabilities, setMachineCapabilities] = useState<
-    Set<MachineType>
-  >(
-    () =>
-      new Set(
-        initial?.machineCapabilities.length
-          ? initial.machineCapabilities
-          : initial?.machineType
-            ? [initial.machineType]
-            : [],
-      ),
-  );
-  const [craftCapabilities, setCraftCapabilities] = useState<Set<string>>(
-    () =>
-      new Set(
-        initial?.craftCapabilities.map((capability) => capability.craftId) ??
-          [],
-      ),
-  );
   const [employmentType, setEmploymentType] = useState<EmploymentType | ''>(
     initial?.employmentType ??
       (initial?.role === Role.CUSTOMER_SERVICE || initial?.role === Role.WORKER
@@ -157,8 +131,6 @@ export function AccountForm(props: Props) {
     if (next !== Role.WORKER) {
       setWorkerType('');
       setMachineType('');
-      setMachineCapabilities(new Set());
-      setCraftCapabilities(new Set());
     }
     if (next === Role.CUSTOMER_SERVICE || next === Role.WORKER) {
       if (!employmentType) setEmploymentType(EmploymentType.FULL_TIME);
@@ -168,50 +140,10 @@ export function AccountForm(props: Props) {
   }
   function onWorkerTypeChange(next: WorkerType | '') {
     setWorkerType(next);
-    setCraftCapabilities(new Set());
     if (next !== WorkerType.MACHINE) {
       setMachineType('');
-      setMachineCapabilities(new Set());
     }
   }
-  function onPrimaryMachineChange(next: MachineType | '') {
-    setMachineType(next);
-    if (!next) return;
-    setMachineCapabilities((current) => new Set([...current, next]));
-  }
-  function toggleMachineCapability(machine: MachineType) {
-    if (machine === machineType) return;
-    setMachineCapabilities((current) => {
-      const next = new Set(current);
-      if (next.has(machine)) next.delete(machine);
-      else next.add(machine);
-      setCraftCapabilities((selected) =>
-        new Set(
-          [...selected].filter((craftId) => {
-            const craft = props.capabilityCrafts.find(
-              (candidate) => candidate.id === craftId,
-            );
-            return craft
-              ? craftMatchesWorker(craft, workerType, next)
-              : false;
-          }),
-        ),
-      );
-      return next;
-    });
-  }
-  function toggleCraftCapability(craftId: string) {
-    setCraftCapabilities((current) => {
-      const next = new Set(current);
-      if (next.has(craftId)) next.delete(craftId);
-      else next.add(craftId);
-      return next;
-    });
-  }
-
-  const eligibleCapabilityCrafts = props.capabilityCrafts.filter((craft) =>
-    craftMatchesWorker(craft, workerType, machineCapabilities),
-  );
 
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
@@ -335,7 +267,7 @@ export function AccountForm(props: Props) {
             className={selectClass}
             value={machineType}
             onChange={(e) =>
-              onPrimaryMachineChange(e.target.value as MachineType | '')
+              setMachineType(e.target.value as MachineType | '')
             }
             disabled={pending}
           >
@@ -352,105 +284,10 @@ export function AccountForm(props: Props) {
             </FormMessage>
           ) : (
             <FormMessage fieldId="machineType" tone="hint" className="text-xs">
-              主机型默认优先；派工范围以可操作机器和工艺要求为准。
+              主机型用于标识该账号所属的固定生产工序。
             </FormMessage>
           )}
         </div>
-      ) : null}
-
-      {role === Role.WORKER && workerType === WorkerType.MACHINE ? (
-        <fieldset
-          id="machineCapabilities"
-          {...(errs.machineCapabilities?.[0]
-            ? formMessageA11yProps('machineCapabilities', 'error')
-            : {})}
-          className="space-y-2 rounded-lg border p-3"
-        >
-          <legend className="px-1 text-sm font-medium">可操作机器</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {MACHINE_TYPE_OPTIONS.map((machine) => (
-              <label
-                key={machine}
-                className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                {machine === machineType ? (
-                  <input
-                    type="hidden"
-                    name="machineCapabilities"
-                    value={machine}
-                  />
-                ) : null}
-                <input
-                  type="checkbox"
-                  name={
-                    machine === machineType
-                      ? undefined
-                      : 'machineCapabilities'
-                  }
-                  value={machine}
-                  checked={machineCapabilities.has(machine)}
-                  disabled={pending || machine === machineType}
-                  onChange={() => toggleMachineCapability(machine)}
-                  className="size-4"
-                />
-                <span>
-                  {MACHINE_TYPE_LABELS[machine]}
-                  {machine === machineType ? '（主机型）' : ''}
-                </span>
-              </label>
-            ))}
-          </div>
-          {errs.machineCapabilities?.[0] ? (
-            <FormMessage fieldId="machineCapabilities" tone="error">
-              {errs.machineCapabilities[0]}
-            </FormMessage>
-          ) : null}
-        </fieldset>
-      ) : null}
-
-      {role === Role.WORKER && workerType ? (
-        <fieldset
-          id="craftCapabilities"
-          {...(errs.craftCapabilities?.[0]
-            ? formMessageA11yProps('craftCapabilities', 'error')
-            : {})}
-          className="space-y-2 rounded-lg border p-3"
-        >
-          <legend className="px-1 text-sm font-medium">熟练工艺（推荐项）</legend>
-          <p className="text-xs text-muted-foreground">
-            勾选后排产优先推荐；超出推荐范围需填写原因。
-          </p>
-          {eligibleCapabilityCrafts.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {eligibleCapabilityCrafts.map((craft) => (
-                <label
-                  key={craft.id}
-                  className="flex min-h-11 items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    name="craftCapabilities"
-                    value={craft.id}
-                    checked={craftCapabilities.has(craft.id)}
-                    disabled={pending}
-                    onChange={() => toggleCraftCapability(craft.id)}
-                    className="size-4"
-                  />
-                  <span className="break-words">{craft.name}</span>
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-warning-foreground">
-              当前岗位或机器能力没有可配置的内部工艺。
-            </p>
-          )}
-          {errs.craftCapabilities?.[0] ? (
-            <FormMessage fieldId="craftCapabilities" tone="error">
-              {errs.craftCapabilities[0]}
-            </FormMessage>
-          ) : null}
-        </fieldset>
       ) : null}
 
       {role === Role.CUSTOMER_SERVICE || role === Role.WORKER ? (
@@ -530,28 +367,6 @@ export function AccountForm(props: Props) {
       </div>
     </form>
   );
-}
-
-function craftMatchesWorker(
-  craft: WorkerCapabilityCraft,
-  workerType: WorkerType | '',
-  machineCapabilities: Set<MachineType>,
-): boolean {
-  if (
-    !workerType ||
-    craft.defaultWorkerType !== workerType ||
-    (craft.isOutsource && craft.inHouseMachineTypes.length === 0)
-  ) {
-    return false;
-  }
-  if (workerType !== WorkerType.MACHINE) return true;
-  const allowedMachines =
-    craft.inHouseMachineTypes.length > 0
-      ? craft.inHouseMachineTypes
-      : craft.defaultMachineType
-        ? [craft.defaultMachineType]
-        : [];
-  return allowedMachines.some((machine) => machineCapabilities.has(machine));
 }
 
 function TextField({

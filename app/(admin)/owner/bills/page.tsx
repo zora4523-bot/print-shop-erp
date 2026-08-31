@@ -17,6 +17,7 @@ import {
   TableScrollArea,
 } from '@/components/ui-business';
 import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '销售应收账单' };
@@ -28,16 +29,6 @@ type PageProps = {
     salesUserId?: string;
   }>;
 };
-
-function currentMonthShanghai(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(new Date());
-  // en-CA formats as "YYYY-MM"; already the shape we want.
-  return parts;
-}
 
 function isValidYm(s: string | undefined): s is string {
   if (!s) return false;
@@ -61,7 +52,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('bill:view:all');
   const sp = await searchParams;
-  const currentMonth = currentMonthShanghai();
+  const currentMonth = currentShanghaiMonth();
 
   const periodFilter = isValidYm(sp.period) ? sp.period : undefined;
   const statusFilter = isBillStatus(sp.status) ? sp.status : undefined;

@@ -107,10 +107,46 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
       }
     }
 
+    const nativeCheckboxes = [
+      ...document.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]:not([aria-hidden="true"])',
+      ),
+    ].filter(isVisible);
+    for (const checkbox of nativeCheckboxes) {
+      issues.push(`native-checkbox:${describe(checkbox)}`);
+    }
+
+    const sharedCheckboxes = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="checkbox"]'),
+    ].filter(isVisible);
+    for (const checkbox of sharedCheckboxes) {
+      const targetRect = checkbox.getBoundingClientRect();
+      const indicator = checkbox.querySelector<HTMLElement>(
+        '[data-slot="checkbox-indicator"]',
+      );
+      const indicatorRect = indicator?.getBoundingClientRect();
+      if (targetRect.width < 44 || targetRect.height < 44) {
+        issues.push(
+          `checkbox-target:${describe(checkbox)}:${targetRect.width.toFixed(1)}x${targetRect.height.toFixed(1)}`,
+        );
+      }
+      if (
+        !indicatorRect ||
+        indicatorRect.width < 18 ||
+        indicatorRect.width > 22 ||
+        indicatorRect.height < 18 ||
+        indicatorRect.height > 22
+      ) {
+        issues.push(
+          `checkbox-indicator:${describe(checkbox)}:${indicatorRect ? `${indicatorRect.width.toFixed(1)}x${indicatorRect.height.toFixed(1)}` : 'missing'}`,
+        );
+      }
+    }
+
     if (mobile) {
       const interactives = [
         ...document.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"])',
+          'a[href], button:not([disabled]), input:not([type="hidden"]):not([aria-hidden="true"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([aria-disabled="true"]), [role="checkbox"]:not([aria-disabled="true"])',
         ),
       ].filter(isVisible);
       for (const element of interactives) {

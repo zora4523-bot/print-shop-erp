@@ -9,9 +9,11 @@ const {
   adminMock,
   revalidateMock,
   MockAdminError,
+  MockHighRiskError,
   MockValidationError,
 } = vi.hoisted(() => {
   class AdminError extends Error {}
+  class HighRiskError extends AdminError {}
   class ValidationError extends AdminError {
     issues: Array<{ path: string; message: string }>;
 
@@ -23,14 +25,17 @@ const {
   return {
     permissionMock: { requirePermission: vi.fn() },
     adminMock: {
+      cancelScheduledCustomerPriceBook: vi.fn(),
       createCustomerPriceBookDraft: vi.fn(),
       updateCustomerPriceRuleDraft: vi.fn(),
       updateCustomerPriceRuleDraftGroup: vi.fn(),
       publishCustomerPriceBookDraft: vi.fn(),
+      rescheduleCustomerPriceBook: vi.fn(),
       discardCustomerPriceBookDraft: vi.fn(),
     },
     revalidateMock: vi.fn(),
     MockAdminError: AdminError,
+    MockHighRiskError: HighRiskError,
     MockValidationError: ValidationError,
   };
 });
@@ -41,14 +46,17 @@ vi.mock('@/lib/auth/permissions', () => ({
 vi.mock('@/lib/price/customer-price-book-admin', () => ({
   ...adminMock,
   CustomerPriceBookAdminError: MockAdminError,
+  CustomerPriceBookHighRiskConfirmationError: MockHighRiskError,
   CustomerPriceBookValidationError: MockValidationError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidateMock }));
 
 import {
+  cancelScheduledCustomerPriceBookAction,
   createCustomerPriceBookDraftAction,
   discardCustomerPriceBookDraftAction,
   publishCustomerPriceBookDraftAction,
+  rescheduleCustomerPriceBookAction,
   updateCustomerPriceRuleDraftAction,
   updateCustomerPriceRuleDraftGroupAction,
 } from '../customer-price-books';
@@ -116,6 +124,8 @@ describe('customer price-book Server Actions', () => {
     ['group update', () => updateCustomerPriceRuleDraftGroupAction(validGroup)],
     ['publish', () => publishCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30', publishNote: '已完成价格复核', confirmedImpact: true })],
     ['discard', () => discardCustomerPriceBookDraftAction({ priceBookId: 'book-v2-draft', expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z' })],
+    ['cancel schedule', () => cancelScheduledCustomerPriceBookAction({ priceBookId: 'book-v2-scheduled', expectedUpdatedAt: '2026-08-09T02:00:00.000Z', reason: '取消错误计划', confirmedImpact: true })],
+    ['reschedule', () => rescheduleCustomerPriceBookAction({ priceBookId: 'book-v2-scheduled', expectedUpdatedAt: '2026-08-09T02:00:00.000Z', effectiveFrom: '2026-08-10T09:30', reason: '延后统一切换', confirmedImpact: true })],
   ])('checks dict:price:manage before %s input processing', async (_label, invoke) => {
     permissionMock.requirePermission.mockRejectedValue(new UnauthorizedError('未登录'));
 
@@ -127,6 +137,8 @@ describe('customer price-book Server Actions', () => {
     expect(adminMock.updateCustomerPriceRuleDraftGroup).not.toHaveBeenCalled();
     expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
     expect(adminMock.discardCustomerPriceBookDraft).not.toHaveBeenCalled();
+    expect(adminMock.cancelScheduledCustomerPriceBook).not.toHaveBeenCalled();
+    expect(adminMock.rescheduleCustomerPriceBook).not.toHaveBeenCalled();
   });
 
   it('creates one typed draft and returns only its identity', async () => {
@@ -152,7 +164,9 @@ describe('customer price-book Server Actions', () => {
       { purpose: 'PROCESSING', changeReason: '调整加工费' },
       actor,
     );
-    expect(revalidateMock).toHaveBeenCalledWith('/owner/prices/external-sales');
+    expect(revalidateMock).not.toHaveBeenCalledWith(
+      '/owner/prices/external-sales',
+    );
     expect(revalidateMock).toHaveBeenCalledWith(
       RULE_CENTER_HREFS.customerPricing,
     );
@@ -298,6 +312,9 @@ describe('customer price-book Server Actions', () => {
       actor,
     );
     expect(revalidateMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.customerPricing,
+    );
+    expect(revalidateMock).not.toHaveBeenCalledWith(
       '/owner/prices/external-sales/items',
     );
   });
@@ -551,12 +568,92 @@ describe('customer price-book Server Actions', () => {
         expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
         effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
         publishNote: '已完成价格复核',
+        confirmedHighRisk: false,
       },
       actor,
     );
   });
 
-  it('拒绝缺少发布说明或 L3 影响确认的请求', async () => {
+  it.each([
+    ['omitted fields', {}],
+    ['empty form fields', { effectiveFrom: '', publishNote: '' }],
+  ])('accepts an immediate release with %s', async (_label, optionalFields) => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockResolvedValue({
+      id: 'book-v2-draft',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await expect(
+      publishCustomerPriceBookDraftAction({
+        priceBookId: 'book-v2-draft',
+        expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+        confirmedImpact: true,
+        ...optionalFields,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      priceBookId: 'book-v2-draft',
+    });
+
+    expect(adminMock.publishCustomerPriceBookDraft).toHaveBeenCalledWith(
+      {
+        priceBookId: 'book-v2-draft',
+        expectedDraftUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
+        effectiveFrom: undefined,
+        publishNote: undefined,
+        confirmedHighRisk: false,
+      },
+      actor,
+    );
+  });
+
+  it('forwards explicit high-risk confirmation to the locked domain publisher', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockResolvedValue({
+      id: 'book-v2-draft',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      confirmedImpact: true,
+      confirmedHighRisk: true,
+    });
+
+    expect(adminMock.publishCustomerPriceBookDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmedHighRisk: true }),
+      actor,
+    );
+  });
+
+  it('returns a field error when the locked publisher detects unconfirmed high risk', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.publishCustomerPriceBookDraft.mockRejectedValue(
+      new MockHighRiskError('本次调价包含异常幅度，请勾选高风险确认后再发布'),
+    );
+
+    const result = await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      confirmedImpact: true,
+      confirmedHighRisk: false,
+    });
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        confirmedHighRisk: [
+          '本次调价包含异常幅度，请勾选高风险确认后再发布',
+        ],
+      },
+    });
+  });
+
+  it('发布说明可沿用调价原因，但仍要求 L3 影响确认', async () => {
     permissionMock.requirePermission.mockResolvedValue(actor);
 
     const result = await publishCustomerPriceBookDraftAction({
@@ -569,10 +666,79 @@ describe('customer price-book Server Actions', () => {
 
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
-      expect(result.fieldErrors.publishNote?.join('\n')).toContain('发布说明');
+      expect(result.fieldErrors.publishNote).toBeUndefined();
       expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('影响范围');
     }
     expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
+  });
+
+  it('拒绝长度不足的非空发布补充说明', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await publishCustomerPriceBookDraftAction({
+      priceBookId: 'book-v2-draft',
+      expectedDraftUpdatedAt: '2026-08-09T02:00:00.000Z',
+      publishNote: '短',
+      confirmedImpact: true,
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.publishNote?.join('\n')).toContain('发布说明');
+    }
+    expect(adminMock.publishCustomerPriceBookDraft).not.toHaveBeenCalled();
+  });
+
+  it('parses reschedule time in Shanghai and calls the locked lifecycle DAL', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+    adminMock.rescheduleCustomerPriceBook.mockResolvedValue({
+      id: 'book-v2-scheduled',
+      version: 2,
+      purpose: 'PROCESSING',
+    });
+
+    await expect(
+      rescheduleCustomerPriceBookAction({
+        priceBookId: 'book-v2-scheduled',
+        expectedUpdatedAt: '2026-08-09T02:00:00.000Z',
+        effectiveFrom: '2026-08-10T09:30',
+        reason: '延后统一切换',
+        confirmedImpact: true,
+      }),
+    ).resolves.toMatchObject({
+      status: 'success',
+      priceBookId: 'book-v2-scheduled',
+      version: 2,
+    });
+
+    expect(adminMock.rescheduleCustomerPriceBook).toHaveBeenCalledWith(
+      {
+        priceBookId: 'book-v2-scheduled',
+        expectedUpdatedAt: new Date('2026-08-09T02:00:00.000Z'),
+        effectiveFrom: new Date('2026-08-10T01:30:00.000Z'),
+        reason: '延后统一切换',
+      },
+      actor,
+    );
+    expect(revalidateMock).toHaveBeenCalledWith('/orders/new');
+  });
+
+  it('requires an L3 acknowledgement and reason before cancelling a schedule', async () => {
+    permissionMock.requirePermission.mockResolvedValue(actor);
+
+    const result = await cancelScheduledCustomerPriceBookAction({
+      priceBookId: 'book-v2-scheduled',
+      expectedUpdatedAt: '2026-08-09T02:00:00.000Z',
+      reason: '',
+      confirmedImpact: false,
+    });
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.reason?.join('\n')).toContain('调整原因');
+      expect(result.fieldErrors.confirmedImpact?.join('\n')).toContain('取消计划');
+    }
+    expect(adminMock.cancelScheduledCustomerPriceBook).not.toHaveBeenCalled();
   });
 
   it.each([

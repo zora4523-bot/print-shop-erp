@@ -1,100 +1,147 @@
+import Link from 'next/link';
 import { Inbox } from 'lucide-react';
+import { PieceworkOperationType } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
-import { listClaimableTasks, listWorkerTasks } from '@/lib/production';
-import { EmptyState } from '@/components/ui-business';
-import { WorkerTaskBatchList } from '@/components/business/production/WorkerTaskBatchList';
-import { ClaimTaskButton } from '@/components/business/production/ClaimTaskButton';
-import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import {
-  machineTypeLabel,
-  workerTypeLabel,
-} from '@/lib/auth/role-labels';
+  listProductionOperationsForReporter,
+  listProductionProgressForReporter,
+} from '@/lib/production/operation-portal';
+import { OperationReportingError } from '@/lib/production/operation-reporting';
+import { EmptyState, StatusBadge } from '@/components/ui-business';
+import { Badge } from '@/components/ui/badge';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
+import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
-export const metadata = { title: '我的任务' };
+export const metadata = { title: '生产工序' };
+
+const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  [PieceworkOperationType.PARTIAL]: '局部烫金',
+  [PieceworkOperationType.FULL]: '专版烫金',
+  [PieceworkOperationType.PACKING]: '打包入袋',
+};
 
 export default async function WorkerTasksPage() {
   const { user } = await requireSession();
-  const [tasks, claimableTasks] = await Promise.all([
-    listWorkerTasks(user.id),
-    listClaimableTasks({ id: user.id, role: user.role }),
-  ]);
+  const actor = { id: user.id, role: user.role };
+  let operations: Awaited<
+    ReturnType<typeof listProductionOperationsForReporter>
+  > = [];
+  try {
+    operations = await listProductionOperationsForReporter(actor);
+  } catch (error) {
+    // CLEANER/other WORKER accounts have no paid lane but still see shared
+    // no-pay progress. Inactive or non-worker sessions are rejected again by
+    // listProductionProgressForReporter below.
+    if (
+      !(error instanceof OperationReportingError) ||
+      error.code !== 'ACCOUNT_NOT_AUTHORIZED'
+    ) {
+      throw error;
+    }
+  }
+  const progressSteps = await listProductionProgressForReporter(actor);
 
   return (
     <div className="min-w-0 space-y-3">
-      <div className="worker-wrap-anywhere">
-        <h1 className="text-lg font-semibold">我的任务</h1>
+      <header className="worker-wrap-anywhere">
+        <h1 className="text-lg font-semibold">生产工序</h1>
         <p className="text-xs text-muted-foreground">
-          进行中优先，其次待开始；急单和较早工单靠前。
+          计件工序按账号固定岗位展示；其他内制步骤全员可见、不计薪。
         </p>
-      </div>
+      </header>
 
-      {tasks.length === 0 ? (
+      {operations.length === 0 && progressSteps.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title="暂无待处理任务"
-          description={
-            claimableTasks.length > 0
-              ? '可以先从下方抢单池选择一个适合的任务。'
-              : '管理员派工后会出现在这里。'
-          }
+          title="暂无待处理工序"
+          description="价格确认并生成工序后会自动出现在这里。"
         />
       ) : (
-        <WorkerTaskBatchList
-          tasks={tasks}
-          workerName={user.displayName}
-        />
-      )}
-
-      {claimableTasks.length > 0 ? (
-        <section aria-labelledby="claim-pool-heading" className="space-y-3 pt-2">
-          <div className="worker-wrap-anywhere">
-            <h2 id="claim-pool-heading" className="text-base font-semibold">
-              可抢任务
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              只显示符合岗位、机型和工艺能力的任务；抢单后请在“我的任务”开始生产。
-            </p>
-          </div>
-          <ul className="space-y-3">
-            {claimableTasks.map((task) => (
-              <li
-                key={task.id}
-                className="worker-wrap-anywhere space-y-3 rounded-xl border bg-card p-4 shadow-sm"
-              >
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="font-sans text-sm tabular-nums">
-                    {task.order.orderNo}
-                  </span>
-                  {task.order.isUrgent ? <UrgentBadge /> : null}
-                </div>
-                <div>
-                  <h3 className="font-semibold">
-                    #{task.item.sequence} · {task.item.name}
-                  </h3>
-                  {task.order.customName ? (
-                    <p className="text-sm font-medium">{task.order.customName}</p>
+        <ul className="space-y-3">
+          {operations.map((operation) => {
+            const statusDefinition =
+              PRODUCTION_OPERATION_STATUS_REGISTRY[operation.status];
+            return (
+              <li key={operation.id}>
+                <Link
+                  href={`/worker/tasks/${operation.id}`}
+                  className="block min-h-11 min-w-0 rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="font-sans text-sm tabular-nums">
+                      {operation.orderNo}
+                    </span>
+                    {operation.isUrgent ? <UrgentBadge /> : null}
+                    <StatusBadge
+                      tone={statusDefinition.tone}
+                      dot={statusDefinition.dot}
+                    >
+                      {statusDefinition.label}
+                    </StatusBadge>
+                  </div>
+                  <h2 className="worker-wrap-anywhere mt-2 font-semibold">
+                    {OPERATION_LABELS[operation.operationType]}
+                  </h2>
+                  {operation.customName ? (
+                    <p className="worker-wrap-anywhere mt-1 text-sm">
+                      {operation.customName}
+                    </p>
                   ) : null}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    工艺：{task.craft.name} · 计划 {task.plannedQty} 个 · 接单人：
-                    {task.order.submitterName}
+                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    已完成 {operation.completedQty} /{' '}
+                    {operation.plannedCompletedQty}
+                    {operation.passCount > 1
+                      ? ` · 每个 ${operation.passCount} 次烫印`
+                      : ''}
+                    {operation.promisedDate
+                      ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}`
+                      : ''}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {task.workerType === 'MACHINE'
-                      ? `机型：${task.claimMachineTypes
-                          .map((machine) => machineTypeLabel(machine))
-                          .join('、')}`
-                      : `岗位：${workerTypeLabel(task.workerType)}`}
-                    {' · '}交期：
-                    {formatDateShanghai(task.order.promisedDate, '未设置')}
-                  </p>
-                </div>
-                <ClaimTaskButton taskId={task.id} />
+                </Link>
               </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+            );
+          })}
+          {progressSteps.map((step) => {
+            const statusDefinition =
+              PRODUCTION_OPERATION_STATUS_REGISTRY[step.status];
+            return (
+              <li key={step.id}>
+                <Link
+                  href={`/worker/tasks/${step.id}`}
+                  className="block min-h-11 min-w-0 rounded-xl border bg-card p-4 shadow-sm transition hover:bg-muted/40"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="font-sans text-sm tabular-nums">
+                      {step.orderNo}
+                    </span>
+                    {step.isUrgent ? <UrgentBadge /> : null}
+                    <StatusBadge
+                      tone={statusDefinition.tone}
+                      dot={statusDefinition.dot}
+                    >
+                      {statusDefinition.label}
+                    </StatusBadge>
+                    <Badge variant="outline">进度·不计薪</Badge>
+                  </div>
+                  <h2 className="worker-wrap-anywhere mt-2 font-semibold">
+                    {step.craftName}
+                  </h2>
+                  <p className="worker-wrap-anywhere mt-1 text-sm">
+                    #{step.orderItemSequence} · {step.orderItemName}
+                  </p>
+                  <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
+                    已完成 {step.completedQty} / {step.plannedQty}
+                    {step.promisedDate
+                      ? ` · 交期 ${formatDateShanghai(step.promisedDate)}`
+                      : ''}
+                  </p>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

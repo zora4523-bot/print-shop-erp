@@ -19,6 +19,7 @@ import { dispatchNotification } from './notification/dispatch';
 import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
 import type { EnqueueClient } from './background-jobs/repository';
 import { sortBySearchRelevance } from './search-ranking';
+import { parseCatalogPaperWeight } from './order/catalog-pricing-facts';
 
 export { MATERIAL_CATEGORY_LABELS } from './material-labels';
 
@@ -51,6 +52,34 @@ export type MaterialSummary = Pick<
 export type PaperOrderOption = Pick<
   Material,
   'id' | 'code' | 'name' | 'specification' | 'unit'
+>;
+
+/**
+ * 外部销售建单使用的纸张事实。`weight` 只从纸张配置解析；无法解析时
+ * 保持 null，让上层转人工核价，绝不猜测默认克重。
+ */
+export type ExternalCreateOrderPaperOption = Pick<
+  Material,
+  | 'id'
+  | 'code'
+  | 'name'
+  | 'specification'
+  | 'unit'
+  | 'outOfStock'
+  | 'sortOrder'
+> & {
+  weight: number | null;
+};
+
+/** 外部销售建单的烫金色配置；色板和值均由 FOIL 物料提供。 */
+export type ExternalCreateOrderFoilOption = Pick<
+  Material,
+  'id' | 'code' | 'name' | 'displayColor' | 'displayImage' | 'sortOrder'
+>;
+
+export type CreateOrderMaterialReadClient = Pick<
+  Prisma.TransactionClient,
+  'material'
 >;
 
 export type MaterialTransactionSummary = Pick<
@@ -217,6 +246,61 @@ export async function listActivePaperOrderOptions(): Promise<
       unit: true,
     },
     orderBy: [{ name: 'asc' }, { specification: 'asc' }, { id: 'asc' }],
+  });
+}
+
+function configuredPaperWeight(row: {
+  name: string;
+  specification: string | null;
+}): number | null {
+  const parsed =
+    parseCatalogPaperWeight(row.specification) ??
+    parseCatalogPaperWeight(row.name);
+  return parsed !== null && parsed <= 2_000 ? parsed : null;
+}
+
+export async function listExternalCreateOrderPaperOptions(
+  client: CreateOrderMaterialReadClient = db,
+): Promise<ExternalCreateOrderPaperOption[]> {
+  const rows = await client.material.findMany({
+    where: { category: MaterialCategory.PAPER, isActive: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      specification: true,
+      unit: true,
+      outOfStock: true,
+      sortOrder: true,
+    },
+    orderBy: [
+      { sortOrder: 'asc' },
+      { name: 'asc' },
+      { specification: 'asc' },
+      { id: 'asc' },
+    ],
+  });
+
+  return rows.map((row) => ({
+    ...row,
+    weight: configuredPaperWeight(row),
+  }));
+}
+
+export async function listExternalCreateOrderFoilOptions(
+  client: CreateOrderMaterialReadClient = db,
+): Promise<ExternalCreateOrderFoilOption[]> {
+  return client.material.findMany({
+    where: { category: MaterialCategory.FOIL, isActive: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      displayColor: true,
+      displayImage: true,
+      sortOrder: true,
+    },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
   });
 }
 

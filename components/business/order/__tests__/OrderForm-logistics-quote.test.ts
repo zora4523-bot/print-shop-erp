@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  beginOrderQuoteRequest,
+  createOrderQuoteRequestGate,
+  invalidateOrderQuoteRequests,
+  isCurrentOrderQuoteResponse,
+} from '../create-order-quote-request';
 
 const source = readFileSync(
   path.join(process.cwd(), 'components', 'business', 'order', 'OrderForm.tsx'),
@@ -12,29 +18,27 @@ const railSource = readFileSync(
     'components',
     'business',
     'order',
-    'OrderFormRail.tsx',
+    'ExternalSalesOrderFormRail.tsx',
   ),
   'utf8',
 );
-const schedulingSource = readFileSync(
+const formBSource = readFileSync(
   path.join(
     process.cwd(),
     'components',
     'business',
-    'production',
-    'SchedulingForm.tsx',
+    'order',
+    'order-form-b',
+    'ExternalSalesOrderFormB.tsx',
   ),
   'utf8',
 );
-
 describe('OrderForm logistics quote authority', () => {
-  it('requests the authoritative server quote instead of calculating bundled defaults', () => {
+  it('requests one authoritative server quote for items, packaging, and logistics', () => {
     expect(source).toContain(
-      "import { quoteExternalOrderChargesAction } from '@/actions/order-logistics-quote';",
+      "import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';",
     );
-    expect(source).toContain(
-      'const response = await quoteExternalOrderChargesAction(input);',
-    );
+    expect(source).toContain('quoteExternalCreateOrderAction(input)');
     expect(source).not.toContain('calculateExternalOrderCharges(input)');
     expect(source).not.toContain('DEFAULT_EXTERNAL_ORDER_CHARGE_RULES');
   });
@@ -50,12 +54,11 @@ describe('OrderForm logistics quote authority', () => {
   });
 
   it('does not apply an async quote after its shipment facts become stale', () => {
+    expect(source).toContain('isCurrentOrderQuoteResponse({');
     expect(source).toContain(
-      'if (JSON.stringify(currentLogisticsQuoteInput()) !== inputKey)',
+      'currentInputKey: currentExternalQuoteInput().factsKey',
     );
-    expect(source).toContain(
-      'setLogisticsQuote({ inputKey, result: response.quote });',
-    );
+    expect(source).toContain('currentFieldIds: itemFieldIdsRef.current');
   });
 
   it('keeps the authoritative quote as display state instead of writing external-sales fees', () => {
@@ -65,15 +68,18 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).not.toContain(
       'setValue(packingPath, shipment.packaging.amount, {',
     );
-    expect(source).toContain('<ShipmentPricingFactsFields');
-    expect(source).not.toContain('factsOnly');
+    expect(source).toContain('const railLogistics = usesExternalSalesPricing');
+    expect(railSource).toContain("{packaging.label ?? '入袋'}");
+    expect(railSource).toContain("{logistics?.packagingLabel ?? '纸箱耗材'}");
+    expect(railSource).toContain("{logistics?.shippingLabel ?? '快递费'}");
+    expect(railSource).toContain('当前合计');
     expect(source).not.toContain('对客快递费（元，销售暂定）');
     expect(source).not.toContain('收费调整说明');
   });
 
-  it('keeps every address fact editable and clears stale provinces after paste parsing', () => {
-    expect(source).toContain("registration={register('receiverName')}");
-    expect(source).toContain("registration={register('receiverPhone')}");
+  it('keeps every address fact editable and updates provinces after paste parsing', () => {
+    expect(formBSource).toContain('onReceiverNameChange');
+    expect(formBSource).toContain('onReceiverPhoneChange');
     expect(source).toContain(
       '`additionalShipments.${shipmentIndex}.receiverName`',
     );
@@ -90,41 +96,102 @@ describe('OrderForm logistics quote authority', () => {
   it('removes unreachable manual-fee adjustment state and blocks submission while quoting', () => {
     expect(source).not.toContain('logisticsQuoteAmountsAdjusted');
     expect(source).not.toContain('实际快递费或耗材费已调整');
+    expect(source).toContain('busy={');
+    expect(source).toContain('pendingState.busy ||');
     expect(source).toMatch(
-      /type="submit"[\s\S]{0,180}disabled=\{[\s\S]{0,180}logisticsQuoting/,
-    );
-    expect(source).toMatch(
-      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*logisticsQuoting\s*\|\|\s*packagingQuoting\s*\)\s*\{\s*return;\s*\}/,
+      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
     );
   });
 
-  it('announces every pending phase and prevents unsafe navigation during writes', () => {
+  it('announces pending writes and keeps the B rail disabled while totals are settling', () => {
     expect(source).toContain('aria-busy={pendingState.busy}');
-    expect(source).toContain(
-      'aria-disabled={pendingState.lockNavigation || undefined}',
-    );
-    expect(source).toContain(
-      "'pointer-events-none cursor-not-allowed opacity-50'",
-    );
+    expect(railSource).toContain('disabled={busy}');
+  });
+});
+
+describe('unified create-order quote request gate', () => {
+  it('accepts only the newest response for the same full-order facts', () => {
+    const gate = createOrderQuoteRequestGate();
+    const oldRequestId = beginOrderQuoteRequest(gate);
+    const newRequestId = beginOrderQuoteRequest(gate);
+    const shared = {
+      gate,
+      inputKey: 'new',
+      currentInputKey: 'new',
+      fieldIds: ['fig-1', 'fig-3'],
+      currentFieldIds: ['fig-1', 'fig-3'],
+    };
+
+    expect(
+      isCurrentOrderQuoteResponse({ ...shared, requestId: oldRequestId }),
+    ).toBe(false);
+    expect(
+      isCurrentOrderQuoteResponse({ ...shared, requestId: newRequestId }),
+    ).toBe(true);
+  });
+
+  it('rejects a response after facts, row identity, or request validity changes', () => {
+    const gate = createOrderQuoteRequestGate();
+    const requestId = beginOrderQuoteRequest(gate);
+    const base = {
+      gate,
+      requestId,
+      inputKey: 'before',
+      currentInputKey: 'after',
+      fieldIds: ['fig-1'],
+      currentFieldIds: ['fig-1'],
+    };
+    expect(isCurrentOrderQuoteResponse(base)).toBe(false);
+    expect(
+      isCurrentOrderQuoteResponse({
+        ...base,
+        currentInputKey: 'before',
+        currentFieldIds: ['fig-2'],
+      }),
+    ).toBe(false);
+    invalidateOrderQuoteRequests(gate);
+    expect(
+      isCurrentOrderQuoteResponse({
+        ...base,
+        currentInputKey: 'before',
+      }),
+    ).toBe(false);
   });
 });
 
 describe('OrderForm processing quote concurrency', () => {
-  it('rejects an older request and never applies a response to changed facts', () => {
-    expect(source).toContain(
-      'latestQuoteRequestByField.current[fieldId] !== requestId',
+  it('rejects an older request and never writes preview money into create fields', () => {
+    expect(source).toContain('beginOrderQuoteRequest(');
+    expect(source).toContain('isCurrentOrderQuoteResponse({');
+    expect(source).not.toContain(
+      'setValue(`items.${index}.unitPrice`, result.suggestedUnitPrice',
     );
-    expect(source).toContain(
-      'quoteFactsKey(getValues(`items.${index}`)) === inputKey',
+    expect(source).not.toContain(
+      'setValue(`items.${index}.fixedFee`, result.suggestedFixedFee',
     );
-    expect(source).toMatch(/result\.complete\s*&&\s*factsStillCurrent/);
   });
 
-  it('offers only business routes and clears any historical manual reason', () => {
-    expect(source).toContain('NEW_ORDER_PRICING_ROUTES.map');
-    expect(source).not.toContain('value={OrderItemPricingRoute.MANUAL_QUOTE}');
-    expect(source).toContain('`items.${index}.manualQuoteReason`');
-    expect(source).toContain('manualQuoteReason: null');
+  it('invalidates all dependent quotes and immediately saves structural changes', () => {
+    expect(source).toContain(
+      'invalidateOrderQuoteRequests(externalQuoteRequestGate.current);',
+    );
+    expect(source).toContain(
+      'invalidateOrderQuoteRequests(internalQuoteRequestGate.current);',
+    );
+    expect(source).toContain('setQuoteViews({});');
+    expect(source).toContain('setLogisticsQuote(null);');
+    expect(source).toContain('setPackagingQuote(null);');
+    expect(source).toContain('persistLocalDraftValues({');
+    expect(source).toContain('onRemove={(index) => {');
+  });
+
+  it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
+    expect(formBSource).toContain('options={ROUTE_OPTIONS}');
+    expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
+    expect(source).toContain(
+      'manualQuoteReason: usesExternalSalesPricing',
+    );
+    expect(source).toContain(': item.manualQuoteReason');
   });
 });
 
@@ -134,7 +201,7 @@ describe('OrderForm local draft recovery', () => {
     expect(source).toContain('放弃本地草稿');
     expect(source).toContain('reset(pendingLocalDraft.values');
     expect(source).toMatch(
-      /<fieldset[\s\S]{0,120}disabled=\{!localDraftReady \|\| submitting \|\| uploading\}/,
+      /<fieldset[\s\S]{0,120}disabled=\{orderFormControlsDisabled\}/,
     );
     expect(source).not.toContain('reset(draft.values');
   });
@@ -144,7 +211,7 @@ describe('OrderForm local draft recovery', () => {
     expect(source).toContain('localDraftPricingScope');
     expect(source).toContain('watchedFormValues');
     expect(source).toContain('}, 900);');
-    expect(source).toContain('本地草稿已保存');
+    expect(source).toContain('草稿已保存 ${formatLocalDraftTime');
     expect(source).toContain('clearLocalDraftAfterServerCreate();');
     expect(source).toContain(
       'window.localStorage.removeItem(localDraftStorageKey)',
@@ -152,34 +219,19 @@ describe('OrderForm local draft recovery', () => {
   });
 });
 
-describe('OrderForm style tabs and shared controls', () => {
-  it('uses the complete style-tab contract with roving focus and arrow/home/end keys', () => {
-    expect(source).toContain('role="tablist"');
-    expect(source).toContain('aria-controls={`order-item-${index}-editor`}');
-    expect(source).toContain('tabIndex={active ? 0 : -1}');
-    expect(source).toContain('handleItemTabKeyDown(event, index)');
-    expect(source).toContain("event.key === 'ArrowRight'");
-    expect(source).toContain("event.key === 'ArrowLeft'");
-    expect(source).toContain("event.key === 'Home'");
-    expect(source).toContain("event.key === 'End'");
-    expect(source).toContain('role="tabpanel"');
-    expect(source).toContain('＋ 添加款式');
-    expect(source).toContain('复制当前');
-    expect(source).toContain('删除当前');
-    expect(source).toMatch(
-      /role="tablist"[\s\S]*?\}\)\}\s*<\/div>\s*<div[\s\S]{0,180}role="group"[\s\S]{0,80}aria-label="款式操作"/,
-    );
-    expect(source.indexOf('aria-label="款式操作"')).toBeLessThan(
-      source.indexOf('＋ 添加款式'),
-    );
-    expect(source).not.toContain('order-step-');
-    expect(source).not.toContain('上一步');
-    expect(source).not.toContain('下一步');
+describe('OrderForm B style navigation and shared controls', () => {
+  it('uses the B style navigation and removes the retired tab-panel contract', () => {
+    expect(formBSource).toContain('aria-label="款式"');
+    expect(formBSource).toContain('＋ 加款');
+    expect(formBSource).toContain('⧉ 复制当前');
+    expect(formBSource).toContain('删除当前');
+    expect(source).not.toContain('role="tablist"');
+    expect(source).not.toContain('handleItemTabKeyDown');
   });
 
   it('routes custom clickable controls through the shared Button component', () => {
     expect(source).not.toContain('<button');
     expect(railSource).not.toContain('<button');
-    expect(schedulingSource).not.toContain('<button');
+    expect(formBSource).not.toContain('<button');
   });
 });

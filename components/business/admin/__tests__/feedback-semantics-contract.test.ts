@@ -8,14 +8,13 @@ const ROOT = process.cwd();
 const STATIC_PREREQUISITES: ReadonlyArray<
   readonly [relativePath: string, copy: string]
 > = [
-  ['bom/BomForm.tsx', '暂无可用报价 SKU，请先创建并启用。'],
+  ['bom/BomForm.tsx', '暂无可用建单产品，请先创建并启用。'],
   ['bom/BomForm.tsx', '暂无可用物料，请先创建并启用至少一种物料。'],
   [
     'purchase/PurchaseOrderForm.tsx',
     '只有启用的“供应商”或“客户/供应商”主数据可用于采购。',
   ],
   ['purchase/PurchaseOrderForm.tsx', '请先创建并启用至少一种物料。'],
-  ['price/PriceTierForm.tsx', '请先创建并启用报价 SKU。'],
   [
     'salary/StartCsPeriodForm.tsx',
     '暂无启用的客服账号，请先在用户管理中创建或启用客服。',
@@ -25,9 +24,7 @@ const STATIC_PREREQUISITES: ReadonlyArray<
 const SUCCESS_FEEDBACK: ReadonlyArray<
   readonly [relativePath: string, copy: string]
 > = [
-  ['salary/AddSalaryAdjustmentForm.tsx', '调整已记账。'],
   ['salary/SalaryRuleSettingsForm.tsx', '工资规则新版本已保存。'],
-  ['salary/WorkerMachineRuleForm.tsx', '规则版本已生效。'],
 ];
 
 describe('business feedback semantics', () => {

@@ -8,7 +8,8 @@ import { OrderStatus, Role } from '../../generated/prisma/enums';
 // visibility matches SPEC §2.2:
 //   - ADMIN: see every order
 //   - SALES / CUSTOMER_SERVICE: only their own submissions
-//   - WORKER: only assigned orders that have left the SUBMITTED scheduling-draft state
+//   - WORKER: historical ProductionTask ownership only; new operation views use
+//     the fixed-lane worker portal instead of this legacy scope
 //   - unknown role: an impossible filter (hard-fail rather than leak)
 export function getOrderScopeFilter(user: { id: string; role: Role }) {
   if (user.role === Role.ADMIN) {
@@ -19,10 +20,8 @@ export function getOrderScopeFilter(user: { id: string; role: Role }) {
   }
   if (user.role === Role.WORKER) {
     return {
-      // Partial batch scheduling may create assigned PENDING tasks while the
-      // order is still SUBMITTED. Those rows are drafts until the final
-      // internal craft is assigned, so no shared detail / print / PDF reader
-      // may expose them to the worker yet (DECISIONS: scheduling draft boundary).
+      // Read-only compatibility for old detail / print / PDF links. New orders
+      // are authorized by ProductionOperation lane in lib/worker-portal.ts.
       status: { not: OrderStatus.SUBMITTED },
       items: {
         some: {

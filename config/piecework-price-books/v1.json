@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "priceBookVersion": 1,
+  "effectiveFrom": null,
+  "sourceName": "待补：三类工序工价确认单",
+  "publishNote": "首版三类工序计件工价",
+  "rules": [
+    {
+      "operationType": "PARTIAL",
+      "unit": "PER_PASS",
+      "amount": null
+    },
+    {
+      "operationType": "FULL",
+      "unit": "PER_PIECE",
+      "amount": null
+    },
+    {
+      "operationType": "PACKING",
+      "unit": "PER_BAG",
+      "amount": null
+    }
+  ]
+}

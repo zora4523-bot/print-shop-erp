@@ -3,7 +3,7 @@ import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { QUOTE_PRODUCT_CATEGORIES } from '@/lib/product';
 
 export const metadata = {
-  title: '新建报价 SKU · 规则配置中心',
+  title: '新建可建单组合 · 规则配置中心',
 };
 
 export default function NewStockSkuPage() {

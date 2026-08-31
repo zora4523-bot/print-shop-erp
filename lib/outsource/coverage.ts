@@ -32,8 +32,7 @@ export type OutsourceQuantityCoverageLink = {
 /**
  * 是否对这张工单适用款式级外协覆盖校验。
  *
- * requiresOutsource 是**排产那一刻的快照**，且没有重算路径
- * （scheduleOrder 对已排产工单必抛 InvalidOrderTransitionError），
+ * requiresOutsource 是**生产工序首次物化时的快照**，且没有重算路径，
  * 而 lib/craft.ts 的 updateCraft 允许把 isOutsource 从 false 翻成 true。
  * 闸口只在它为真时校验，读路径必须用同一个谓词——否则会出现
  * 「页面说不能完工、闸口其实照样完工」的反向漂移，而主管照提示
@@ -103,8 +102,8 @@ export function findUndercoveredOutsourceItems<
 }
 
 // 混合工艺（isOutsource === true 且 inHouseMachineTypes 非空）**也算**
-// 需要外协：它在 scheduleOrder 里同时计入 skippedOutsourceCrafts（决定
-// Order.requiresOutsource 快照）并生成内部任务，语义上就是「一部分发出去」。
+// 需要外协：首次物化生产工序时会写入 Order.requiresOutsource
+// 快照；混合工艺语义上仍是「一部分发出去」，必须纳入覆盖判定。
 export function collectOutsourceCraftIds(
   crafts: readonly { id: string; isOutsource: boolean }[],
 ): Set<string> {

@@ -1,10 +1,7 @@
+import { formatDateInputShanghai } from '../format/dates';
+
 export function shanghaiCalendarDate(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
+  return formatDateInputShanghai(now);
 }
 
 export function yesterdayShanghai(now: Date = new Date()): string {

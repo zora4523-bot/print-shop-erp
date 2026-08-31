@@ -43,14 +43,37 @@ export function unsavedTierNavigationMessage(tierCount: number): string {
   return `当前选中组有 ${tierCount.toLocaleString('zh-CN')} 个档位尚未保存。离开后将丢失这些修改，仍要离开吗？`;
 }
 
+export function guardedPriceWorkspaceDestination(
+  currentHref: string,
+  nextHref: string,
+): string | null {
+  try {
+    const current = new URL(currentHref);
+    const destination = new URL(nextHref, current);
+    if (
+      destination.origin !== current.origin ||
+      (destination.pathname === current.pathname &&
+        destination.search === current.search)
+    ) {
+      return null;
+    }
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export function PriceWorkspaceNavigationGuardProvider({
   children,
 }: {
   children: ReactNode;
 }) {
+  const router = useRouter();
   const [unsaved, setUnsaved] = useState<UnsavedTierState>(
     EMPTY_UNSAVED_STATE,
   );
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const pendingLinkRef = useRef<HTMLAnchorElement | null>(null);
 
   const reportTierChanges = useCallback((tierCount: number) => {
     const normalizedCount = Math.max(0, Math.floor(tierCount));
@@ -77,6 +100,51 @@ export function PriceWorkspaceNavigationGuardProvider({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [unsaved.tierCount]);
 
+  useEffect(() => {
+    if (unsaved.tierCount === 0) return;
+
+    const onDocumentClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        !(event.target instanceof Element)
+      ) {
+        return;
+      }
+
+      const anchor = event.target.closest<HTMLAnchorElement>('a[href]');
+      if (
+        !anchor ||
+        anchor.dataset.priceWorkspaceGuarded === 'true' ||
+        anchor.hasAttribute('download') ||
+        (anchor.target && anchor.target !== '_self')
+      ) {
+        return;
+      }
+
+      const destination = guardedPriceWorkspaceDestination(
+        window.location.href,
+        anchor.href,
+      );
+      if (!destination) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      pendingLinkRef.current = anchor;
+      setPendingHref(destination);
+    };
+
+    // The price editor is rendered inside the page while the global admin
+    // sidebar lives outside it. Capture same-origin links at document level so
+    // moving section navigation into that sidebar does not bypass draft safety.
+    document.addEventListener('click', onDocumentClick, true);
+    return () => document.removeEventListener('click', onDocumentClick, true);
+  }, [unsaved.tierCount]);
+
   const value = useMemo<NavigationGuardContextValue>(
     () => ({
       unsaved,
@@ -95,6 +163,25 @@ export function PriceWorkspaceNavigationGuardProvider({
   return (
     <NavigationGuardContext.Provider value={value}>
       {children}
+      <ConfirmActionDialog
+        level="L2"
+        open={pendingHref !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingHref(null);
+        }}
+        focusReturnRef={pendingLinkRef}
+        title="放弃未保存修改并离开？"
+        description={unsavedTierNavigationMessage(unsaved.tierCount)}
+        impactItems={[
+          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
+          '已保存的价目和已发布版本保持不变。',
+        ]}
+        confirmLabel="放弃修改并离开"
+        cancelLabel="继续编辑"
+        onConfirm={() => {
+          if (pendingHref) router.push(pendingHref);
+        }}
+      />
     </NavigationGuardContext.Provider>
   );
 }
@@ -166,6 +253,7 @@ export function PriceWorkspaceLink({
         {...props}
         ref={linkRef}
         href={href}
+        data-price-workspace-guarded="true"
         replace={replace}
         scroll={scroll}
         onNavigate={(event) => {
@@ -178,14 +266,11 @@ export function PriceWorkspaceLink({
           });
           if (consumerPrevented || unsaved.tierCount === 0) return;
 
-          const current = new URL(window.location.href);
-          const destination = new URL(href, current);
-          if (
-            destination.pathname === current.pathname &&
-            destination.search === current.search
-          ) {
-            return;
-          }
+          const destination = guardedPriceWorkspaceDestination(
+            window.location.href,
+            href,
+          );
+          if (!destination) return;
           event.preventDefault();
           setConfirmationOpen(true);
         }}

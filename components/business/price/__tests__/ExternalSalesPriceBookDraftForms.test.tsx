@@ -12,24 +12,29 @@ import { EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT } from '@/lib/price/customer
 import type {
   CustomerPriceRuleDraftEditorDto,
 } from '@/lib/price/customer-price-book-admin';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 const {
   actionStateMock,
+  cancelScheduledActionMock,
   createActionMock,
   discardActionMock,
   effectMock,
   publishActionMock,
   refreshMock,
   replaceMock,
+  rescheduleActionMock,
   updateActionMock,
 } = vi.hoisted(() => ({
   actionStateMock: vi.fn(),
+  cancelScheduledActionMock: vi.fn(),
   createActionMock: vi.fn(),
   discardActionMock: vi.fn(),
   effectMock: vi.fn(),
   publishActionMock: vi.fn(),
   refreshMock: vi.fn(),
   replaceMock: vi.fn(),
+  rescheduleActionMock: vi.fn(),
   updateActionMock: vi.fn(),
 }));
 
@@ -43,9 +48,11 @@ vi.mock('react', async () => {
 });
 
 vi.mock('@/actions/customer-price-books', () => ({
+  cancelScheduledCustomerPriceBookAction: cancelScheduledActionMock,
   createCustomerPriceBookDraftAction: createActionMock,
   discardCustomerPriceBookDraftAction: discardActionMock,
   publishCustomerPriceBookDraftAction: publishActionMock,
+  rescheduleCustomerPriceBookAction: rescheduleActionMock,
   updateCustomerPriceRuleDraftAction: updateActionMock,
 }));
 
@@ -54,6 +61,8 @@ vi.mock('next/navigation', () => ({
 }));
 
 import {
+  cancelScheduledFromForm,
+  CancelScheduledCustomerPriceBookForm,
   createDraftFromForm,
   CreateCustomerPriceBookDraftForm,
   customerPriceRuleInputFromFormData,
@@ -61,6 +70,8 @@ import {
   discardDraftFromForm,
   PublishCustomerPriceBookDraftForm,
   publishDraftFromForm,
+  rescheduleFromForm,
+  RescheduleCustomerPriceBookForm,
   updateDraftRuleFromForm,
 } from '../ExternalSalesPriceBookDraftForms';
 
@@ -124,17 +135,21 @@ function ruleContext(
 beforeEach(() => {
   actionStateMock.mockReset();
   createActionMock.mockReset();
+  cancelScheduledActionMock.mockReset();
   discardActionMock.mockReset();
   effectMock.mockReset();
   effectMock.mockImplementation(() => undefined);
   publishActionMock.mockReset();
   refreshMock.mockReset();
   replaceMock.mockReset();
+  rescheduleActionMock.mockReset();
   updateActionMock.mockReset();
   const success = { status: 'success', priceBookId: 'draft-1' };
+  cancelScheduledActionMock.mockResolvedValue(success);
   createActionMock.mockResolvedValue(success);
   discardActionMock.mockResolvedValue(success);
   publishActionMock.mockResolvedValue(success);
+  rescheduleActionMock.mockResolvedValue(success);
   updateActionMock.mockResolvedValue({ ...success, ruleId: 'rule-1' });
   actionStateMock.mockImplementation(
     (action: (state: unknown, payload: FormData) => unknown, initial: unknown) => [
@@ -257,7 +272,7 @@ describe('customer price-book draft form bindings', () => {
     });
   });
 
-  it('binds create, save, publish and discard to their dedicated actions', async () => {
+  it('binds create, save, publish, discard and schedule controls to their dedicated actions', async () => {
     const createData = new FormData();
     createData.set('purpose', CustomerPriceBookPurpose.PROCESSING);
     createData.set('changeReason', '原材料调价');
@@ -298,6 +313,21 @@ describe('customer price-book draft form bindings', () => {
     discardData.set('expectedDraftUpdatedAt', '2026-08-09T00:30:00.000Z');
     await discardDraftFromForm(null, discardData);
 
+    const cancelData = new FormData();
+    cancelData.set('priceBookId', 'scheduled-2');
+    cancelData.set('expectedUpdatedAt', '2026-08-09T00:30:00.000Z');
+    cancelData.set('reason', '取消错误计划');
+    cancelData.set('confirmedImpact', 'true');
+    await cancelScheduledFromForm(null, cancelData);
+
+    const rescheduleData = new FormData();
+    rescheduleData.set('priceBookId', 'scheduled-2');
+    rescheduleData.set('expectedUpdatedAt', '2026-08-09T00:30:00.000Z');
+    rescheduleData.set('effectiveFrom', '2026-09-02T08:00');
+    rescheduleData.set('reason', '延后统一切换');
+    rescheduleData.set('confirmedImpact', 'true');
+    await rescheduleFromForm(null, rescheduleData);
+
     expect(createActionMock).toHaveBeenCalledWith({
       purpose: CustomerPriceBookPurpose.PROCESSING,
       changeReason: '原材料调价',
@@ -309,11 +339,53 @@ describe('customer price-book draft form bindings', () => {
       effectiveFrom: '2026-09-01T08:00',
       publishNote: '已完成价格复核',
       confirmedImpact: true,
+      confirmedHighRisk: false,
     });
     expect(discardActionMock).toHaveBeenCalledWith({
       priceBookId: 'draft-1',
       expectedDraftUpdatedAt: '2026-08-09T00:30:00.000Z',
     });
+    expect(cancelScheduledActionMock).toHaveBeenCalledWith({
+      priceBookId: 'scheduled-2',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      reason: '取消错误计划',
+      confirmedImpact: true,
+    });
+    expect(rescheduleActionMock).toHaveBeenCalledWith({
+      priceBookId: 'scheduled-2',
+      expectedUpdatedAt: '2026-08-09T00:30:00.000Z',
+      effectiveFrom: '2026-09-02T08:00',
+      reason: '延后统一切换',
+      confirmedImpact: true,
+    });
+  });
+});
+
+describe('scheduled price-book controls', () => {
+  it('renders explicit L3 cancel and reschedule forms without deleting evidence', () => {
+    const cancelHtml = renderToStaticMarkup(
+      <CancelScheduledCustomerPriceBookForm
+        priceBookId="scheduled-2"
+        expectedUpdatedAt="2026-08-09T00:30:00.000Z"
+        version={2}
+      />,
+    );
+    const rescheduleHtml = renderToStaticMarkup(
+      <RescheduleCustomerPriceBookForm
+        priceBookId="scheduled-2"
+        expectedUpdatedAt="2026-08-09T00:30:00.000Z"
+        version={2}
+        defaultEffectiveFrom="2026-09-02T08:00"
+      />,
+    );
+
+    expect(cancelHtml).toContain('取消计划');
+    expect(cancelHtml).toContain('name="confirmedImpact"');
+    expect(cancelHtml).toContain('value="true"');
+    expect(rescheduleHtml).toContain('name="effectiveFrom"');
+    expect(rescheduleHtml).toContain('type="datetime-local"');
+    expect(rescheduleHtml).toContain('value="2026-09-02T08:00"');
+    expect(rescheduleHtml).toContain('调整生效时间');
   });
 });
 
@@ -340,6 +412,22 @@ describe('CreateCustomerPriceBookDraftForm', () => {
     expect(textarea).toContain(
       'aria-describedby="changeReason-PROCESSING-hint"',
     );
+  });
+
+  it('在弹窗中复用表单时使用业务名称且不重复面板说明', () => {
+    const html = renderToStaticMarkup(
+      <CreateCustomerPriceBookDraftForm
+        purpose={CustomerPriceBookPurpose.PROCESSING}
+        purposeLabel="入袋费"
+        presentation="dialog"
+      />,
+    );
+
+    expect(html).toContain('aria-label="创建入袋费调价草稿"');
+    expect(html).toContain('调价原因（必填）');
+    expect(html).toContain('开始调价');
+    expect(html).not.toContain('草稿发布前不影响当前报价');
+    expect(html).not.toContain('<p class="text-sm font-medium">发起调价</p>');
   });
 
   it('将服务端字段错误关联到调价原因并用 alert 播报', () => {
@@ -395,18 +483,21 @@ describe('CreateCustomerPriceBookDraftForm', () => {
 });
 
 describe('PublishCustomerPriceBookDraftForm', () => {
-  it('要求生效时间和发布说明，再进入 L3 确认层', () => {
+  it('默认立即发布，在一层确认中展示真实影响', () => {
     const html = renderToStaticMarkup(
       <PublishCustomerPriceBookDraftForm
         priceBookId="draft-1"
         expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
-        defaultEffectiveFrom="2026-09-01T08:00"
+        defaultEffectiveFrom=""
+        changeReason="原材料调价"
         impact={{
           totalRuleCount: 121,
           changedItemCount: 2,
           changedRuleCount: 7,
           increasedRuleCount: 7,
           decreasedRuleCount: 0,
+          highRiskRuleCount: 0,
+          highRiskDeltaPercentThreshold: '50',
           deltaPercentMin: '2.8',
           deltaPercentMax: '5.8',
           validationStatus: 'PASS',
@@ -414,14 +505,126 @@ describe('PublishCustomerPriceBookDraftForm', () => {
       />,
     );
 
-    expect(html).toContain('发布说明（必填）');
+    expect(html).toContain('确认本次价格变更');
+    expect(html).toContain('2 个收费项目 · 7 条规则');
+    expect(html).toContain('121 条规则已通过');
+    expect(html).toContain('立即生效');
+    expect(html).toContain('确认并立即发布');
+    expect(html).toContain('预约生效或补充发布说明（可选）');
     const effectiveFrom = html.match(/<input[^>]*name="effectiveFrom"[^>]*>/)?.[0];
     const publishNote = html.match(/<textarea[^>]*name="publishNote"[^>]*>/)?.[0];
-    expect(effectiveFrom).toContain('required=""');
-    expect(publishNote).toContain('required=""');
-    expect(html).toContain('校验通过，进入发布确认');
-    expect(html).not.toContain('name="confirmedImpact"');
-    expect(html).not.toContain('确认校验并发布');
+    expect(effectiveFrom).not.toContain('required=""');
+    expect(publishNote).not.toContain('required=""');
+    expect(html).toContain('name="confirmedImpact" value="true"');
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain('校验通过，进入发布确认');
+    expect(html).not.toContain('2 / 121');
+  });
+
+  it('零差异时禁止发布', () => {
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-empty"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="检查价格"
+        impact={{
+          totalRuleCount: 121,
+          changedItemCount: 0,
+          changedRuleCount: 0,
+          increasedRuleCount: 0,
+          decreasedRuleCount: 0,
+          highRiskRuleCount: 0,
+          highRiskDeltaPercentThreshold: '50',
+          deltaPercentMin: null,
+          deltaPercentMax: null,
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+
+    expect(html).toContain('没有可发布的差异');
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+  });
+
+  it('异常涨跌要求额外显式确认，未勾选时不能提交', () => {
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-risky"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="修订单价"
+        impact={{
+          totalRuleCount: 145,
+          changedItemCount: 1,
+          changedRuleCount: 1,
+          increasedRuleCount: 1,
+          decreasedRuleCount: 0,
+          highRiskRuleCount: 1,
+          highRiskDeltaPercentThreshold: '50',
+          deltaPercentMin: '515.4',
+          deltaPercentMax: '515.4',
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+
+    expect(html).toContain('检测到 1 条高风险报价变更');
+    expect(html).toContain('name="confirmedHighRisk"');
+    expect(html).toContain('我已逐条核对高风险变更');
+    const checkbox = html.match(
+      /<span[^>]*aria-label="我已逐条核对高风险变更，确认按当前新规则发布"[^>]*>/,
+    )?.[0];
+    expect(checkbox).toContain('data-slot="checkbox"');
+    expect(checkbox).toContain('aria-checked="false"');
+    expect(checkbox).not.toContain('aria-describedby');
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+  });
+
+  it('高风险确认只在有错误时关联错误文案，且发布中锁定', () => {
+    actionStateMock.mockImplementation((action) => [
+      {
+        status: 'invalid',
+        fieldErrors: {
+          confirmedHighRisk: ['请确认已核对高风险变更'],
+        },
+      },
+      action,
+      true,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <PublishCustomerPriceBookDraftForm
+        priceBookId="draft-risky"
+        expectedDraftUpdatedAt="2026-08-09T00:30:00.000Z"
+        defaultEffectiveFrom=""
+        changeReason="修订单价"
+        impact={{
+          totalRuleCount: 145,
+          changedItemCount: 1,
+          changedRuleCount: 1,
+          increasedRuleCount: 1,
+          decreasedRuleCount: 0,
+          highRiskRuleCount: 1,
+          highRiskDeltaPercentThreshold: '50',
+          deltaPercentMin: '515.4',
+          deltaPercentMax: '515.4',
+          validationStatus: 'PASS',
+        }}
+      />,
+    );
+    const checkbox = html.match(
+      /<span[^>]*aria-label="我已逐条核对高风险变更，确认按当前新规则发布"[^>]*>/,
+    )?.[0];
+
+    expect(checkbox).toContain('aria-invalid="true"');
+    expect(checkbox).toContain(
+      'aria-describedby="confirmedHighRisk-draft-risky-error"',
+    );
+    expect(checkbox).toContain('data-disabled=""');
+    expect(checkbox).toContain('aria-disabled="true"');
+    expect(html).toContain('id="confirmedHighRisk-draft-risky-error"');
+    expect(html).toContain('请确认已核对高风险变更');
   });
 });
 
@@ -457,8 +660,8 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).not.toContain('name="priority"');
     expect(html).not.toContain('name="note"');
     expect(html).toContain('min-h-11');
-    expect(html).toContain('opacity-0');
-    expect(html).toContain('size-5');
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-slot="checkbox-indicator"');
     expect(html).toContain(
       'name="expectedUpdatedAt" value="2026-08-09T00:30:00.000Z"',
     );
@@ -466,6 +669,29 @@ describe('CustomerPriceBookDraftRuleForm', () => {
     expect(html).not.toContain('发布前不会改变当前报价或历史工单金额');
     expect(html).toContain('sticky bottom-0');
     expect(html).toContain('保存草稿');
+  });
+
+  it('保存中锁定全部共享复选框', () => {
+    actionStateMock.mockImplementation((action, initial) => [
+      initial,
+      action,
+      true,
+    ]);
+
+    const html = renderToStaticMarkup(
+      <CustomerPriceBookDraftRuleForm
+        context={ruleContext(CustomerPriceBookPurpose.PROCESSING)}
+        rule={rule()}
+      />,
+    );
+    const checkboxRoots =
+      html.match(/<span[^>]*data-slot="checkbox"[^>]*>/g) ?? [];
+
+    expect(checkboxRoots.length).toBeGreaterThan(0);
+    for (const checkbox of checkboxRoots) {
+      expect(checkbox).toContain('data-disabled=""');
+      expect(checkbox).toContain('aria-disabled="true"');
+    }
   });
 
   it('默认收起低频条件，并只向管理员展示中文工艺名称', () => {
@@ -713,7 +939,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
       />,
     );
     const packagingCheckbox = html.match(
-      /<input[^>]*name="match\.packagingModes"[^>]*>/,
+      /<span[^>]*role="checkbox"[^>]*aria-label="单款装"[^>]*>/,
     )?.[0];
 
     expect(html).toContain('name="match.target" value="PACKAGING_GROUP"');
@@ -775,8 +1001,7 @@ describe('CustomerPriceBookDraftRuleForm', () => {
       false,
     ]);
     effectMock.mockImplementation((effect: () => void) => effect());
-    const successHref =
-      '/owner/prices/external-sales/items?purpose=processing&item=rule-1#selected-charge-detail';
+    const successHref = `${RULE_CENTER_HREFS.customerPricing}?purpose=processing&item=rule-1#selected-charge-detail`;
 
     renderToStaticMarkup(
       <CustomerPriceBookDraftRuleForm

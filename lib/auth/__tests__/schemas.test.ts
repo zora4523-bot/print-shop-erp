@@ -36,8 +36,6 @@ import {
   createOutsourceSchema,
   confirmOutsourceAmountSchema,
   recordOutsourcePaymentSchema,
-  batchScheduleOrdersSchema,
-  scheduleOrderSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
   startCsPeriodSchema,
@@ -81,48 +79,6 @@ describe('production task dispute schemas', () => {
         disputeId: 'dispute-1',
         decision: 'PENDING',
         resolution: '',
-      }).success,
-    ).toBe(false);
-  });
-});
-
-describe('production scheduling schema', () => {
-  it('accepts task identity and a positive split quantity', () => {
-    const parsed = scheduleOrderSchema.safeParse({
-      orderId: 'order-1',
-      assignments: [
-        {
-          taskId: 'task-1',
-          orderItemId: 'item-1',
-          craftId: 'craft-1',
-          workerId: 'worker-1',
-          plannedQty: '600',
-        },
-      ],
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.assignments[0]?.plannedQty).toBe(600);
-    }
-  });
-
-  it('rejects zero or fractional split quantities', () => {
-    const payload = {
-      orderId: 'order-1',
-      assignments: [
-        {
-          orderItemId: 'item-1',
-          craftId: 'craft-1',
-          workerId: 'worker-1',
-          plannedQty: 0,
-        },
-      ],
-    };
-    expect(scheduleOrderSchema.safeParse(payload).success).toBe(false);
-    expect(
-      scheduleOrderSchema.safeParse({
-        ...payload,
-        assignments: [{ ...payload.assignments[0], plannedQty: 1.5 }],
       }).success,
     ).toBe(false);
   });
@@ -667,44 +623,8 @@ describe('createUserSchema', () => {
         employmentType: EmploymentType.FULL_TIME,
         workerType: WorkerType.MACHINE,
         machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [MachineType.HAND_PRESS],
       });
       expect(r.success).toBe(true);
-    });
-
-    it('accepts multiple machine capabilities when they include the primary machine', () => {
-      const r = createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.WORKER,
-        employmentType: EmploymentType.FULL_TIME,
-        workerType: WorkerType.MACHINE,
-        machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [
-          MachineType.HAND_PRESS,
-          MachineType.WINDMILL,
-        ],
-        craftCapabilities: ['craft-foil', 'craft-color-foil'],
-      });
-      expect(r.success).toBe(true);
-    });
-
-    it('rejects machine capabilities that omit the primary machine', () => {
-      const r = createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.WORKER,
-        employmentType: EmploymentType.FULL_TIME,
-        workerType: WorkerType.MACHINE,
-        machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [MachineType.WINDMILL],
-      });
-      expect(r.success).toBe(false);
-      if (!r.success) {
-        expect(
-          r.error.issues.find(
-            (issue) => issue.path[0] === 'machineCapabilities',
-          )?.message,
-        ).toMatch(/包含主机型/);
-      }
     });
 
     it('accepts WORKER + PACKER without machineType', () => {
@@ -830,8 +750,6 @@ const validCraft = {
   name: '专版单色平烫',
   code: 'FLAT_FOIL_SINGLE',
   isOutsource: 'false',
-  defaultWorkerType: WorkerType.MACHINE,
-  defaultMachineType: MachineType.WINDMILL,
   sortOrder: '20',
 };
 
@@ -876,55 +794,6 @@ describe('createCraftSchema', () => {
       const r = createCraftSchema.safeParse({ ...validCraft, code: 'A' });
       expect(r.success).toBe(false);
     });
-  });
-
-  describe('defaultMachineType', () => {
-    it('accepts null / empty string (outsource with no machine)', () => {
-      for (const v of ['', null, undefined]) {
-        const r = createCraftSchema.safeParse({
-          ...validCraft,
-          isOutsource: 'true',
-          defaultWorkerType: '',
-          defaultMachineType: v,
-        });
-        expect(r.success).toBe(true);
-        if (r.success) expect(r.data.defaultMachineType).toBeNull();
-      }
-    });
-    it('accepts a MachineType value', () => {
-      const r = createCraftSchema.safeParse({
-        ...validCraft,
-        defaultMachineType: MachineType.HAND_PRESS,
-      });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.defaultMachineType).toBe(MachineType.HAND_PRESS);
-    });
-    it('rejects an unknown string', () => {
-      const r = createCraftSchema.safeParse({
-        ...validCraft,
-        defaultMachineType: 'NOT_A_MACHINE',
-      });
-      expect(r.success).toBe(false);
-      if (!r.success) {
-        const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
-        expect(visibleErrors).toContain('请选择有效的接单机型');
-        expect(visibleErrors).not.toContain('NOT_A_MACHINE');
-        expect(visibleErrors).not.toContain('HAND_PRESS');
-      }
-    });
-  });
-
-  it('不向管理端暴露无效的内部岗位值', () => {
-    const r = createCraftSchema.safeParse({
-      ...validCraft,
-      defaultWorkerType: 'INTERNAL_WORKER_TYPE',
-    });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const visibleErrors = r.error.issues.map((issue) => issue.message).join('\n');
-      expect(visibleErrors).toContain('请选择有效的接单岗位');
-      expect(visibleErrors).not.toContain('INTERNAL_WORKER_TYPE');
-    }
   });
 
   describe('sortOrder', () => {
@@ -999,8 +868,6 @@ const validProduct = {
   name: '空白红包',
   specification: '',
   paperType: '',
-  baseUnitPrice: '0.12',
-  minOrderQty: '1000',
 };
 
 describe('createProductSchema', () => {
@@ -1008,9 +875,21 @@ describe('createProductSchema', () => {
     const r = createProductSchema.safeParse(validProduct);
     expect(r.success).toBe(true);
     if (r.success) {
-      expect(r.data.baseUnitPrice).toBe('0.12');
-      expect(r.data.minOrderQty).toBe(1000);
       expect(r.data.specification).toBeNull();
+    }
+  });
+
+  it('丢弃旧产品单价与起订量字段', () => {
+    const r = createProductSchema.safeParse({
+      ...validProduct,
+      baseUnitPrice: '0.12',
+      minOrderQty: '1000',
+    });
+
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data).not.toHaveProperty('baseUnitPrice');
+      expect(r.data).not.toHaveProperty('minOrderQty');
     }
   });
 
@@ -1052,88 +931,6 @@ describe('createProductSchema', () => {
       });
       expect(r.success).toBe(true);
       if (r.success) expect(r.data.categoryNodeId).toBe('cat_blank_stock');
-    });
-  });
-
-  describe('baseUnitPrice', () => {
-    it.each(['0', '1', '100', '0.1', '1.5', '0.0001', '12.3456', '999999', '999999.9999'])(
-      'accepts %j',
-      (v) => {
-        const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-        expect(r.success, v).toBe(true);
-      },
-    );
-
-    it.each(['1.23456', '-1', '.5', '1.', 'abc', '1,5'])('rejects format %j', (v) => {
-      const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-      expect(r.success, v).toBe(false);
-    });
-
-    it('rejects values exceeding Decimal(10,4) precision (Codex round 21 / P1)', () => {
-      for (const v of ['1000000', '9999999', '1000000.0', '1000000.0000']) {
-        const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: v });
-        expect(r.success, v).toBe(false);
-      }
-    });
-
-    it('empty string is normalized to null', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, baseUnitPrice: '' });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.baseUnitPrice).toBeNull();
-    });
-  });
-
-  describe('minOrderQty', () => {
-    it('empty / whitespace → undefined (the DB will store null)', () => {
-      for (const v of ['', '   ']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: v });
-        expect(r.success).toBe(true);
-        if (r.success) expect(r.data.minOrderQty).toBeUndefined();
-      }
-    });
-    it('accepts positive int string', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: '500' });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.minOrderQty).toBe(500);
-    });
-    it('rejects 0 / negative / decimal', () => {
-      for (const bad of ['0', '-1', '3.5', 'abc']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, bad).toBe(false);
-      }
-    });
-    it('rejects JS-ish numeric forms that z.coerce would have accepted (Codex round 21 / P2)', () => {
-      // Trimming is explicitly part of the preprocess, so ' 5 ' is fine —
-      // the invalid shapes are the ones that break the digit-only regex.
-      for (const bad of ['1e3', '0x10', '+5', '005e1']) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, bad).toBe(false);
-      }
-    });
-    it('accepts the boundary value 9,999,999 but not one more', () => {
-      expect(
-        createProductSchema.safeParse({ ...validProduct, minOrderQty: '9999999' }).success,
-      ).toBe(true);
-      expect(
-        createProductSchema.safeParse({ ...validProduct, minOrderQty: '10000000' }).success,
-      ).toBe(false);
-    });
-    it('also accepts a plain number for programmatic callers (Codex round 22 / P2)', () => {
-      const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: 500 });
-      expect(r.success).toBe(true);
-      if (r.success) expect(r.data.minOrderQty).toBe(500);
-    });
-    it('still rejects non-int and out-of-range numbers', () => {
-      for (const bad of [3.5, 0, -1, 10_000_000]) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, String(bad)).toBe(false);
-      }
-    });
-    it('rejects Infinity / NaN on the numeric path (Codex round 23 / P2)', () => {
-      for (const bad of [Infinity, -Infinity, NaN]) {
-        const r = createProductSchema.safeParse({ ...validProduct, minOrderQty: bad });
-        expect(r.success, String(bad)).toBe(false);
-      }
     });
   });
 
@@ -2268,34 +2065,36 @@ describe('createReworkOrderSchema', () => {
     });
     expect(result.success).toBe(false);
   });
-});
 
-describe('batchScheduleOrdersSchema', () => {
-  it('accepts unique order ids and one worker id', () => {
-    expect(
-      batchScheduleOrdersSchema.parse({
-        orderIds: ['order-1', 'order-2'],
-        workerId: 'worker-1',
-      }),
-    ).toEqual({
-      orderIds: ['order-1', 'order-2'],
-      workerId: 'worker-1',
+  it('allows packing-only rework and normalizes an explicit legacy pack value', () => {
+    const result = createReworkOrderSchema.safeParse({
+      ...input,
+      cause: 'LOGISTICS_DAMAGE',
+      items: [
+        {
+          ...input.items[0],
+          craftIds: [],
+          unitsPerBag: '50',
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.items[0]).toMatchObject({
+      craftIds: [],
+      unitsPerBag: 50,
     });
   });
 
-  it('rejects empty, duplicate, oversized and unsafe order selections', () => {
-    for (const orderIds of [
-      [],
-      ['order-1', 'order-1'],
-      Array.from({ length: 31 }, (_, index) => `order-${index}`),
-      ['../order-1'],
-    ]) {
-      expect(
-        batchScheduleOrdersSchema.safeParse({
-          orderIds,
-          workerId: 'worker-1',
-        }).success,
-      ).toBe(false);
-    }
-  });
+  it.each([0, -1, 1.5, 10_000_000, 'abc'])(
+    'rejects invalid explicit units per bag: %s',
+    (unitsPerBag) => {
+      const result = createReworkOrderSchema.safeParse({
+        ...input,
+        items: [{ ...input.items[0], unitsPerBag }],
+      });
+      expect(result.success).toBe(false);
+    },
+  );
 });

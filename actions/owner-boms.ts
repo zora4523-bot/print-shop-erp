@@ -13,6 +13,7 @@ import {
 import { requirePermission } from '@/lib/auth/permissions';
 import { createBomSchema } from '@/lib/auth/schemas';
 import { BomInvariantError, createBom, setBomActive } from '@/lib/bom';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import type { BomMutationResult } from './owner-boms.types';
 
 const BOM_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
@@ -120,7 +121,7 @@ function revalidateBomPaths(id: string) {
   revalidatePaths([
     '/owner/boms',
     `/owner/boms/${id}`,
-    '/owner/products',
+    RULE_CENTER_HREFS.stockSkus,
     '/orders',
   ]);
 }

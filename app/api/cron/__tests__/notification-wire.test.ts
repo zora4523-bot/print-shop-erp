@@ -1,22 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mocks for all 4 cron routes' lib dependencies. Using vi.hoisted so
-// mocks are wired before route imports below.
 const {
-  computeDailyMock,
+  lockPieceworkMock,
+  readPieceworkDayMock,
   settleReadyCsMock,
   getOverdueOutsourcingMock,
   scanOverdueOrdersMock,
   getEndingPeriodsMock,
   dbMock,
   dispatchMock,
-  readDailyCheckpointMock,
-  getDailyRosterMock,
-  prepareDailySummaryMock,
-  MockDailyBatchUnexpectedError,
   MockCsBatchUnexpectedError,
 } = vi.hoisted(() => ({
-  computeDailyMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  lockPieceworkMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  readPieceworkDayMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOverdueOutsourcingMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   scanOverdueOrdersMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -25,16 +21,6 @@ const {
     user: { findMany: vi.fn() },
   },
   dispatchMock: vi.fn<(...args: unknown[]) => void>(),
-  readDailyCheckpointMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  getDailyRosterMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  prepareDailySummaryMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  MockDailyBatchUnexpectedError: class extends Error {
-    partialResult: unknown;
-    constructor(partialResult: unknown) {
-      super('unexpected daily batch failure');
-      this.partialResult = partialResult;
-    }
-  },
   MockCsBatchUnexpectedError: class extends Error {
     partialResult: unknown;
     constructor(partialResult: unknown) {
@@ -43,9 +29,9 @@ const {
     }
   },
 }));
-vi.mock('@/lib/salary/daily', () => ({
-  computeDailyForAllMachineWorkers: computeDailyMock,
-  DailyBatchUnexpectedError: MockDailyBatchUnexpectedError,
+vi.mock('@/lib/salary/piecework-settlement', () => ({
+  lockPieceworkSettlementsForDate: lockPieceworkMock,
+  getPieceworkSettlementDay: readPieceworkDayMock,
 }));
 vi.mock('@/lib/salary/cs', () => ({
   settleReadyCsPeriods: settleReadyCsMock,
@@ -63,13 +49,6 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: dispatchMock,
 }));
-vi.mock('@/lib/cron/daily-salary-summary', () => ({
-  dailySalaryNotificationKey: (date: string) =>
-    `notification:DAILY_WORKER_SALARY:v2:${date}`,
-  readDailySalaryRunCheckpoint: readDailyCheckpointMock,
-  getOrCreateDailySalaryRoster: getDailyRosterMock,
-  prepareDailySalarySummary: prepareDailySummaryMock,
-}));
 
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as csSettlePost } from '../cs-settle/route';
@@ -80,16 +59,20 @@ import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
 const SECRET = 'test-cron-secret-12345';
 
 beforeEach(() => {
-  computeDailyMock.mockReset();
+  lockPieceworkMock.mockReset().mockResolvedValue({
+    settled: [],
+    errors: [],
+  });
+  readPieceworkDayMock.mockReset().mockResolvedValue({
+    settlements: [],
+    candidates: [],
+  });
   settleReadyCsMock.mockReset();
   getOverdueOutsourcingMock.mockReset();
   scanOverdueOrdersMock.mockReset();
   getEndingPeriodsMock.mockReset();
   dbMock.user.findMany.mockReset();
   dispatchMock.mockReset();
-  readDailyCheckpointMock.mockReset().mockResolvedValue(null);
-  getDailyRosterMock.mockReset().mockResolvedValue([]);
-  prepareDailySummaryMock.mockReset();
   process.env.CRON_SECRET = SECRET;
 });
 
@@ -108,126 +91,56 @@ function unauthedReq(url: string): Request {
   return new Request(url, { method: 'POST' });
 }
 
-// ─── /api/cron/daily-salary wire (DAILY_WORKER_SALARY) ───
-
 describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
-  it('settled.length > 0 → fire DAILY_WORKER_SALARY with summed totalAmount', async () => {
-    computeDailyMock.mockResolvedValue({
-      settled: [
-        { workerId: 'w1', date: '2026-04-27', actualSalary: '120.50', machineType: 'HAND_PRESS', totalPieceworkAmount: '120.50', baseSalary: '0', taskCount: 1, orderCount: 1 },
-        { workerId: 'w2', date: '2026-04-27', actualSalary: '80.00', machineType: 'WINDMILL', totalPieceworkAmount: '80.00', baseSalary: '0', taskCount: 2, orderCount: 1 },
-        { workerId: 'w3', date: '2026-04-27', actualSalary: '0.50', machineType: 'GLUE', totalPieceworkAmount: '0.50', baseSalary: '0', taskCount: 1, orderCount: 1 },
-      ],
+  it('locks the new ledger and sends the authoritative settlement total', async () => {
+    lockPieceworkMock.mockResolvedValue({
+      settled: [{ reporterId: 'w1' }, { reporterId: 'w2' }],
       errors: [],
     });
-    prepareDailySummaryMock.mockResolvedValue({
-      date: '2026-04-27',
-      workerCount: 3,
-      totalAmount: '201.00',
-      notificationQueued: false,
+    readPieceworkDayMock.mockResolvedValue({
+      settlements: [
+        { payableAmount: '120.50' },
+        { payableAmount: '80.50' },
+      ],
+      candidates: [],
     });
+
     const res = await dailySalaryPost(
-      authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
+      authedReq('http://x/api/cron/daily-salary', {
+        date: '2026-04-27',
+      }),
     );
+
     expect(res.status).toBe(200);
-    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toEqual({
+      status: 'ok',
+      date: '2026-04-27',
+      workerCount: 2,
+      errorCount: 0,
+    });
     expect(dispatchMock).toHaveBeenCalledWith(
       'DAILY_WORKER_SALARY',
       {
         date: '2026-04-27',
-        workerCount: 3,
-        // 千分位 + 不含 ¥（formatMoneyPlain；round 109 P2）
+        workerCount: 2,
         totalAmount: '201.00',
       },
-      { dedupeKey: 'notification:DAILY_WORKER_SALARY:v2:2026-04-27' },
+      {
+        dedupeKey:
+          'notification:DAILY_WORKER_SALARY:piecework-v1:2026-04-27',
+      },
     );
   });
 
-  it('settled empty → 不触发推送', async () => {
-    computeDailyMock.mockResolvedValue({ settled: [], errors: [] });
-    prepareDailySummaryMock.mockResolvedValue({
-      date: '2026-04-27',
-      workerCount: 0,
-      totalAmount: '0.00',
-      notificationQueued: false,
-    });
+  it('requires cron authentication before touching the ledger', async () => {
     const res = await dailySalaryPost(
-      authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
-    );
-    expect(res.status).toBe(200);
-    expect(dispatchMock).not.toHaveBeenCalled();
-  });
-
-  it('401 / 503 路径 → 不触发推送', async () => {
-    delete process.env.CRON_SECRET;
-    const a = await dailySalaryPost(
-      authedReq('http://x/api/cron/daily-salary'),
-    );
-    expect(a.status).toBe(503);
-
-    process.env.CRON_SECRET = SECRET;
-    const b = await dailySalaryPost(
       unauthedReq('http://x/api/cron/daily-salary'),
     );
-    expect(b.status).toBe(401);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(computeDailyMock).not.toHaveBeenCalled();
-  });
 
-  it('Decimal sum 精度（0.1 + 0.2 + 0.3 = 0.60）', async () => {
-    computeDailyMock.mockResolvedValue({
-      settled: [
-        { workerId: 'w1', date: '2026-04-27', actualSalary: '0.10', machineType: 'HAND_PRESS', totalPieceworkAmount: '0.10', baseSalary: '0', taskCount: 0, orderCount: 0 },
-        { workerId: 'w2', date: '2026-04-27', actualSalary: '0.20', machineType: 'HAND_PRESS', totalPieceworkAmount: '0.20', baseSalary: '0', taskCount: 0, orderCount: 0 },
-        { workerId: 'w3', date: '2026-04-27', actualSalary: '0.30', machineType: 'HAND_PRESS', totalPieceworkAmount: '0.30', baseSalary: '0', taskCount: 0, orderCount: 0 },
-      ],
-      errors: [],
-    });
-    prepareDailySummaryMock.mockResolvedValue({
-      date: '2026-04-27',
-      workerCount: 3,
-      totalAmount: '0.60',
-      notificationQueued: false,
-    });
-    await dailySalaryPost(
-      authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
-    );
-    const payload = dispatchMock.mock.calls[0]![1] as { totalAmount: string };
-    expect(payload.totalAmount).toBe('0.60');
-  });
-
-  it('partial batch failure logs counts, withholds an incomplete aggregate notification, and retries', async () => {
-    computeDailyMock.mockRejectedValue(
-      new MockDailyBatchUnexpectedError({
-        settled: [
-          {
-            workerId: 'w1',
-            date: '2026-04-27',
-            actualSalary: '120.50',
-          },
-        ],
-        errors: [{ workerId: 'w-known', message: 'known business error' }],
-      }),
-    );
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
-    const response = await dailySalaryPost(
-      authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
-    );
-
-    expect(response.status).toBe(500);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalledWith(
-      '[cron:daily-salary] unexpected failure after partial progress:',
-      { committedCount: 1, businessErrorCount: 1 },
-    );
-    consoleError.mockRestore();
+    expect(res.status).toBe(401);
+    expect(lockPieceworkMock).not.toHaveBeenCalled();
   });
 });
-
-// ─── /api/cron/cs-settle wire (CS_PERIOD_SETTLED, per-period) ───
 
 describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
   it('settled[N] → N 条 CS_PERIOD_SETTLED notify（每条 csName/totalSales/commission）', async () => {

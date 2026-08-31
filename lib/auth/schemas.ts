@@ -5,7 +5,6 @@ import { z } from 'zod';
 // bundle. /enums exports plain `const` objects with the same values as
 // /client but without the `@prisma/client` runtime (node:module etc.).
 import {
-  AdjustmentType,
   MaterialCategory,
   PartyType,
   ProductCategory,
@@ -33,7 +32,6 @@ import {
   resolveOrderItemFoilSides,
 } from '../order/pricing-route';
 import { calculatePackagingBagCount } from '../order/packaging-bag-count';
-import { validatePriceAdjustmentTriggerCondition } from '../price/adjustment-condition';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
 // input. Anything beyond that is silently truncated, so a 200-byte password
@@ -148,29 +146,6 @@ const phoneField = z
 const roleField = z.nativeEnum(Role);
 const workerTypeField = z.nativeEnum(WorkerType).nullable().optional();
 const machineTypeField = z.nativeEnum(MachineType).nullable().optional();
-const machineCapabilitiesField = z
-  .array(z.nativeEnum(MachineType))
-  .max(3, '机器能力最多 3 项')
-  .refine(
-    (values) => new Set(values).size === values.length,
-    '机器能力不能重复',
-  )
-  .default([]);
-const workerCraftCapabilitiesField = z
-  .array(
-    z
-      .string()
-      .trim()
-      .min(1, '工艺能力格式非法')
-      .max(64, '工艺能力格式非法')
-      .regex(/^[A-Za-z0-9_-]+$/, '工艺能力格式非法'),
-  )
-  .max(100, '工艺能力最多 100 项')
-  .refine(
-    (values) => new Set(values).size === values.length,
-    '工艺能力不能重复',
-  )
-  .default([]);
 
 // Enforces the SPEC §2.1 cascade:
 //   role === WORKER            ⇒ workerType is required
@@ -185,8 +160,6 @@ function enforceWorkerCascade(
     role: Role;
     workerType?: WorkerType | null;
     machineType?: MachineType | null;
-    machineCapabilities: MachineType[];
-    craftCapabilities: string[];
   },
   ctx: z.RefinementCtx,
 ) {
@@ -198,42 +171,11 @@ function enforceWorkerCascade(
     if (data.workerType === WorkerType.MACHINE && !data.machineType) {
       ctx.addIssue({ code: 'custom', path: ['machineType'], message: '请为开机师傅选择机器类型' });
     }
-    if (
-      data.workerType === WorkerType.MACHINE &&
-      data.machineCapabilities.length === 0
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['machineCapabilities'],
-        message: '请至少选择一种可操作机器',
-      });
-    }
-    if (
-      data.workerType === WorkerType.MACHINE &&
-      data.machineType &&
-      !data.machineCapabilities.includes(data.machineType)
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['machineCapabilities'],
-        message: '可操作机器必须包含主机型',
-      });
-    }
     if (data.workerType !== WorkerType.MACHINE && data.machineType) {
       ctx.addIssue({
         code: 'custom',
         path: ['machineType'],
         message: '只有开机师傅（MACHINE）才需要机器类型',
-      });
-    }
-    if (
-      data.workerType !== WorkerType.MACHINE &&
-      data.machineCapabilities.length > 0
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['machineCapabilities'],
-        message: '只有开机师傅才需要设置机器能力',
       });
     }
   } else {
@@ -242,20 +184,6 @@ function enforceWorkerCascade(
     }
     if (data.machineType) {
       ctx.addIssue({ code: 'custom', path: ['machineType'], message: '非开机师傅不应设置机器类型' });
-    }
-    if (data.machineCapabilities.length > 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['machineCapabilities'],
-        message: '非师傅角色不应设置机器能力',
-      });
-    }
-    if (data.craftCapabilities.length > 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['craftCapabilities'],
-        message: '非师傅角色不应设置工艺能力',
-      });
     }
   }
 }
@@ -353,8 +281,6 @@ export const createUserSchema = z
     role: roleField,
     workerType: workerTypeField,
     machineType: machineTypeField,
-    machineCapabilities: machineCapabilitiesField,
-    craftCapabilities: workerCraftCapabilitiesField,
     password: passwordField('密码'),
     employmentType: employmentTypeField,
     employmentStartDate: employmentDateField('入职日期'),
@@ -414,8 +340,6 @@ export const updateUserSchema = z
     role: roleField,
     workerType: workerTypeField,
     machineType: machineTypeField,
-    machineCapabilities: machineCapabilitiesField,
-    craftCapabilities: workerCraftCapabilitiesField,
     employmentType: employmentTypeField,
     employmentStartDate: employmentDateField('入职日期'),
     employmentEndDate: employmentDateField('离职日期'),
@@ -458,73 +382,6 @@ const craftNameField = z
   .min(1, '请填写工艺名')
   .max(32, '工艺名过长（最多 32 个字符）');
 
-// Optional select that arrives from FormData as '' when the operator didn't
-// pick anything. Normalize to null so Prisma's MachineType? column stores
-// a proper "no default machine".
-const optionalMachineTypeField = z
-  .union([
-    z.nativeEnum(MachineType),
-    z.literal(''),
-    z.null(),
-    z.undefined(),
-  ], { error: '请选择有效的接单机型' })
-  .transform((v) => (v === '' || v === undefined ? null : v));
-
-const optionalProductionWorkerTypeField = z
-  .union([
-    z.nativeEnum(WorkerType),
-    z.literal(''),
-    z.null(),
-    z.undefined(),
-  ], { error: '请选择有效的接单岗位' })
-  .transform((v) => (v === '' || v === undefined ? null : v));
-
-function validateCraftAssignment(
-  data: {
-    isOutsource: boolean;
-    defaultWorkerType: WorkerType | null;
-    defaultMachineType: MachineType | null;
-  },
-  ctx: z.RefinementCtx,
-) {
-  // Outsource crafts never create ProductionTask rows. The lib layer
-  // normalises stale form values to null when the operator ticks 外协工艺.
-  if (data.isOutsource) return;
-
-  if (!data.defaultWorkerType) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['defaultWorkerType'],
-      message: '自产工艺必须选择接单岗位',
-    });
-    return;
-  }
-  if (data.defaultWorkerType === WorkerType.COOK) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['defaultWorkerType'],
-      message: '厨师不能作为生产工艺的接单岗位',
-    });
-  }
-  if (data.defaultWorkerType === WorkerType.MACHINE && !data.defaultMachineType) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['defaultMachineType'],
-      message: '开机工艺必须选择机型',
-    });
-  }
-  if (
-    data.defaultWorkerType !== WorkerType.MACHINE &&
-    data.defaultMachineType
-  ) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['defaultMachineType'],
-      message: '非开机岗位不应设置机型',
-    });
-  }
-}
-
 // FormData always hands us strings; accept the string form too and coerce.
 // Min is 1 (not 0) so an untouched create form — where the default-empty
 // input coerces to 0 — fails validation rather than accidentally sorting
@@ -539,20 +396,16 @@ export const createCraftSchema = z.object({
   name: craftNameField,
   code: optionalCraftCodeField,
   isOutsource: formBoolean,
-  defaultWorkerType: optionalProductionWorkerTypeField,
-  defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
-}).superRefine(validateCraftAssignment);
+});
 
 export type CreateCraftInput = z.infer<typeof createCraftSchema>;
 
 export const updateCraftSchema = z.object({
   name: craftNameField,
   isOutsource: formBoolean,
-  defaultWorkerType: optionalProductionWorkerTypeField,
-  defaultMachineType: optionalMachineTypeField,
   sortOrder: sortOrderField,
-}).superRefine(validateCraftAssignment);
+});
 
 export type UpdateCraftInput = z.infer<typeof updateCraftSchema>;
 
@@ -623,32 +476,6 @@ const orderItemMoneyOptionalField = z.preprocess(
     .transform((v) => (v === '' ? null : v)),
 );
 
-// Quantity semantics:
-//   • From FormData (strings): accept `^\d+$` (plus trim), reject JS-ish
-//     numeric forms '1e3' / '0x10' / '+5' etc. that z.coerce.number() would
-//     have silently accepted.
-//   • From JS callers (seed scripts, internal helpers): accept plain
-//     `number` values directly so the schema stays usable outside the
-//     form-post path.
-// Both paths funnel into a plain `z.number().int().min(1).max(…)`.
-const minOrderQtyField = z.preprocess(
-  (v) => {
-    if (typeof v === 'number') return v;
-    if (typeof v !== 'string') return v;
-    const trimmed = v.trim();
-    if (trimmed === '') return undefined;
-    if (!/^\d+$/.test(trimmed)) return null; // invalid — number schema will reject
-    return Number.parseInt(trimmed, 10);
-  },
-  z
-    .number({ message: '最小起订量必须是正整数' })
-    .finite('最小起订量必须是有限数')
-    .int('最小起订量必须是整数')
-    .min(1, '最小起订量必须 ≥ 1')
-    .max(9_999_999, '最小起订量过大')
-    .optional(),
-);
-
 const productCategoryNodeIdField = z
   .string()
   .trim()
@@ -707,8 +534,6 @@ export const createProductSchema = z.object({
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
-  baseUnitPrice: moneyOptionalField,
-  minOrderQty: minOrderQtyField,
 });
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;
@@ -719,8 +544,6 @@ export const updateProductSchema = z.object({
   name: productNameField,
   specification: productTextFieldOptional('规格', 64),
   paperType: productTextFieldOptional('纸张', 32),
-  baseUnitPrice: moneyOptionalField,
-  minOrderQty: minOrderQtyField,
 });
 
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
@@ -777,156 +600,6 @@ export const updatePartySchema = z.object({
 });
 
 export type UpdatePartyInput = z.infer<typeof updatePartySchema>;
-
-// ============================================================
-// Price dictionary (P1)
-// ============================================================
-
-const priceDictionaryIdField = (label: string) =>
-  z
-    .string()
-    .trim()
-    .min(1, `请选择${label}`)
-    .max(64, `${label}格式非法`)
-    .regex(/^[A-Za-z0-9_-]+$/, `${label}格式非法`);
-
-const pricePositiveIntField = (label: string) =>
-  z.preprocess(
-    (v) => {
-      if (typeof v === 'number') return v;
-      if (typeof v !== 'string') return v;
-      const trimmed = v.trim();
-      if (trimmed === '') return undefined;
-      if (!/^\d+$/.test(trimmed)) return null;
-      return Number.parseInt(trimmed, 10);
-    },
-    z
-      .number({ message: `${label}必须是正整数` })
-      .finite(`${label}必须是有限数`)
-      .int(`${label}必须是整数`)
-      .min(1, `${label}必须 ≥ 1`)
-      .max(9_999_999, `${label}过大`),
-  );
-
-const priceMoneyField = (label: string) =>
-  z
-    .string()
-    .trim()
-    .min(1, `请填写${label}`)
-    .regex(/^\d{1,6}(\.\d{1,4})?$/, {
-      message: `${label}格式错误（整数部分最多 6 位、小数最多 4 位、非负数）`,
-    });
-
-const priceDateField = (label: string) =>
-  z.preprocess((v) => {
-    if (v instanceof Date) return v;
-    if (typeof v === 'string') {
-      const trimmed = v.trim();
-      if (trimmed === '') return undefined;
-      return (
-        parseStrictShanghaiDateTimeLocal(`${trimmed}T00:00`) ?? 'invalid-date'
-      );
-    }
-    return 'invalid-date';
-  }, z.date({ message: `请选择合法${label}（YYYY-MM-DD）` }));
-
-const priceOptionalDateField = (label: string) =>
-  z.preprocess((v) => {
-    if (v === null || v === undefined) return null;
-    if (v instanceof Date) return v;
-    if (typeof v === 'string') {
-      const trimmed = v.trim();
-      if (trimmed === '') return null;
-      return (
-        parseStrictShanghaiDateTimeLocal(`${trimmed}T00:00`) ?? 'invalid-date'
-      );
-    }
-    return 'invalid-date';
-  }, z.date({ message: `${label}格式非法（YYYY-MM-DD）` }).nullable());
-
-const triggerConditionJsonObjectField = z
-  .string()
-  .trim()
-  .max(2000, '触发条件过长（最多 2000 个字符）')
-  .transform((value, ctx): Record<string, unknown> | null => {
-    if (value === '') return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      ctx.addIssue({ code: 'custom', message: '触发条件必须是合法 JSON' });
-      return z.NEVER;
-    }
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      ctx.addIssue({ code: 'custom', message: '触发条件必须是 JSON object' });
-      return z.NEVER;
-    }
-    return parsed as Record<string, unknown>;
-  });
-
-export const createPriceTierSchema = z
-  .object({
-    productId: priceDictionaryIdField('产品'),
-    minQty: pricePositiveIntField('起订量'),
-    unitPrice: priceMoneyField('单价'),
-    effectiveFrom: priceDateField('有效起始日期'),
-    effectiveTo: priceOptionalDateField('有效截止日期'),
-  })
-  .superRefine((data, ctx) => {
-    if (data.effectiveTo && data.effectiveTo <= data.effectiveFrom) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['effectiveTo'],
-        message: '有效截止日期必须晚于有效起始日期',
-      });
-    }
-  });
-
-export type CreatePriceTierInput = z.infer<typeof createPriceTierSchema>;
-
-export const updatePriceTierSchema = createPriceTierSchema;
-
-export type UpdatePriceTierInput = z.infer<typeof updatePriceTierSchema>;
-
-export const createPriceAdjustmentSchema = z
-  .object({
-    name: z
-      .string()
-      .trim()
-      .min(1, '请填写加价规则名称')
-      .max(64, '加价规则名称过长（最多 64 个字符）'),
-    adjustmentType: z.nativeEnum(AdjustmentType, {
-      error: '请选择有效的加价类型',
-    }),
-    amount: priceMoneyField('加价金额'),
-    triggerCondition: triggerConditionJsonObjectField,
-  })
-  .superRefine((data, ctx) => {
-    for (const message of validatePriceAdjustmentTriggerCondition(
-      data.triggerCondition,
-      data.adjustmentType,
-    )) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['triggerCondition'],
-        message,
-      });
-    }
-  });
-
-export type CreatePriceAdjustmentInput = z.infer<
-  typeof createPriceAdjustmentSchema
->;
-
-export const updatePriceAdjustmentSchema = createPriceAdjustmentSchema;
-
-export type UpdatePriceAdjustmentInput = z.infer<
-  typeof updatePriceAdjustmentSchema
->;
 
 // ============================================================
 // Material dictionary and stock transactions (SPEC §5 / P1)
@@ -1405,9 +1078,8 @@ const requiredTrimmedText = (label: string, max: number) =>
     .min(1, `请填写${label}`)
     .max(max, `${label}过长（最多 ${max} 个字符）`);
 
-// Per-item quantity: integer ≥ 1, capped at the same 9,999,999 ceiling as
-// minOrderQty. Reject JS-ish numeric forms on the string path (see
-// minOrderQtyField for rationale).
+// Per-item quantity: integer ≥ 1, capped at 9,999,999. Reject JS-ish numeric
+// forms on the string path rather than accepting z.coerce.number() semantics.
 const orderItemQuantityField = z.preprocess(
   (v) => {
     if (typeof v === 'number') return v;
@@ -1491,6 +1163,12 @@ const orderItemFoilSideColorsField = z
   });
 
 const orderItemBaseSchema = z.object({
+  fig: z
+    .number({ message: '款式编号必须是正整数' })
+    .int('款式编号必须是整数')
+    .min(1, '款式编号必须大于 0')
+    .max(999_999, '款式编号过大')
+    .optional(),
   name: z.string().trim().min(1, '请填写款式名').max(64, '款式名过长（最多 64 个字符）'),
   productId: optionalTrimmedText('产品 id', 32),
   pricingRoute: z.enum(OrderItemPricingRoute),
@@ -1531,9 +1209,17 @@ const orderItemBaseSchema = z.object({
       .nullable(),
   ),
   quantity: orderItemQuantityField,
+  pack: z.preprocess(
+    (value) => (value === '' || value === undefined ? null : value),
+    z
+      .number({ message: '每包数量必须是数字' })
+      .int('每包数量必须是整数')
+      .min(1, '每包数量必须大于 0')
+      .max(9_999_999, '每包数量过大')
+      .nullable(),
+  ).optional(),
   crafts: z
     .array(craftIdSchema)
-    .min(1, '至少选择一项工艺')
     .max(10, '单款式工艺不超过 10 项'),
   frontFoilColors: orderItemFoilSideColorsField.default([]),
   backFoilColors: orderItemFoilSideColorsField.default([]),
@@ -1577,6 +1263,7 @@ type OrderItemPricingFactsForValidation = Pick<
   | 'productId'
   | 'pricingRoute'
   | 'paperType'
+  | 'crafts'
   | 'actualWidthMm'
   | 'actualHeightMm'
   | 'frontFoilColors'
@@ -1587,7 +1274,9 @@ type OrderItemPricingFactsForValidation = Pick<
   | 'lamination'
   | 'printColors'
   | 'isDoubleSided'
->;
+> & {
+  manualQuoteReason?: string | null;
+};
 
 function validateOrderItemPricingFacts(
   item: OrderItemPricingFactsForValidation,
@@ -1610,18 +1299,26 @@ function validateOrderItemPricingFacts(
     });
   }
 
-  if (!item.productId) {
+  const manualPricingRequested = Boolean(item.manualQuoteReason?.trim());
+  if (!item.productId && !manualPricingRequested) {
     ctx.addIssue({
       code: 'custom',
       path: ['productId'],
-      message: '自动计价路线必须选择精确的报价产品',
+      message: '自动计价路线必须选择精确的建单产品',
     });
   }
-  if (!item.paperType) {
+  if (!item.paperType && !manualPricingRequested) {
     ctx.addIssue({
       code: 'custom',
       path: ['paperType'],
       message: '请选择标准纸张或填写自定义纸张',
+    });
+  }
+  if (item.crafts.length === 0 && !manualPricingRequested) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['crafts'],
+      message: '至少选择一项工艺',
     });
   }
 
@@ -1766,6 +1463,7 @@ export const orderItemPricingFactsSchema = orderItemBaseSchema
     productId: true,
     pricingRoute: true,
     paperType: true,
+    crafts: true,
     actualWidthMm: true,
     actualHeightMm: true,
     frontFoilColors: true,
@@ -1787,7 +1485,7 @@ export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
 // 建议价由服务端根据当前生效规则计算。客户端只传业务事实，
 // 不传价格或规则快照，避免直接 POST 伪造报价结果。
-export const quoteOrderItemsSchema = z.object({
+export const createOrderQuoteItemsSchema = z.object({
   items: z
     .array(
       orderItemBaseSchema
@@ -1796,11 +1494,11 @@ export const quoteOrderItemsSchema = z.object({
           specification: true,
           paperType: true,
           pricingRoute: true,
+          manualQuoteReason: true,
           productStructure: true,
           artworkVersion: true,
           plateGroupId: true,
           pricingGroup: true,
-          manualQuoteReason: true,
           actualWidthMm: true,
           actualHeightMm: true,
           paperWeightGsm: true,
@@ -1832,7 +1530,9 @@ export const quoteOrderItemsSchema = z.object({
     .optional(),
 });
 
-export type QuoteOrderItemsInput = z.infer<typeof quoteOrderItemsSchema>;
+export type CreateOrderQuoteItemsInput = z.infer<
+  typeof createOrderQuoteItemsSchema
+>;
 
 // OrderItem.subtotal and Order.totalAmount are Decimal(12,2): at most
 // 9,999,999,999.99 yuan. lib/order.ts persists each line as
@@ -2075,6 +1775,21 @@ export type QuoteExternalOrderChargesInput = z.infer<
 
 // 创建页包装组预报价只接收可验证的业务事实。袋数由浏览器根据
 // 每袋组成实时计算，服务端仍严格校验类型和范围，并按当前生效价目重算金额。
+const quotePackagingUnitsPerBagField = z.preprocess(
+  (value) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+      return Number.parseInt(value.trim(), 10);
+    }
+    return value;
+  },
+  z
+    .number({ message: '每袋数量必须是非负整数' })
+    .int('每袋数量必须是整数')
+    .min(0, '每袋数量不能小于 0')
+    .max(9_999_999, '每袋数量过大'),
+);
+
 const orderPackagingQuoteGroupSchema = z.object({
   groupKey: z
     .string({ error: '包装组标识不能为空' })
@@ -2090,10 +1805,21 @@ const orderPackagingQuoteGroupSchema = z.object({
     .max(9_999_999, '袋数过大'),
 });
 
-export const quoteOrderPackagingGroupsSchema = z
+// 统一建单报价还需要每袋的款式组成，用来验证混装与计算袋数。
+const createOrderPackagingQuoteGroupSchema =
+  orderPackagingQuoteGroupSchema.extend({
+    itemUnitsPerBag: z
+      .array(quotePackagingUnitsPerBagField, {
+        error: '包装组款式组成格式非法',
+      })
+      .min(1, '包装组至少需要一个款式组成')
+      .max(MAX_ORDER_ITEMS_PER_ORDER, '包装组款式组成过多'),
+  });
+
+export const quoteCreateOrderPackagingGroupsSchema = z
   .object({
     groups: z
-      .array(orderPackagingQuoteGroupSchema, {
+      .array(createOrderPackagingQuoteGroupSchema, {
         error: '包装组数据格式非法',
       })
       .min(1, '至少需要一个包装组')
@@ -2113,8 +1839,8 @@ export const quoteOrderPackagingGroupsSchema = z
     });
   });
 
-export type QuoteOrderPackagingGroupsInput = z.infer<
-  typeof quoteOrderPackagingGroupsSchema
+export type QuoteCreateOrderPackagingGroupsInput = z.infer<
+  typeof quoteCreateOrderPackagingGroupsSchema
 >;
 
 const additionalShipmentSchema = z.object({
@@ -2194,6 +1920,12 @@ const optionalDateFieldPartial = z.preprocess((v) => {
 
 export const createOrderSchema = z
   .object({
+    clientSubmissionId: z.string().uuid('提交标识无效').optional(),
+    nextItemFig: z
+      .number()
+      .int('下一款式编号必须是整数')
+      .min(1, '下一款式编号必须大于 0')
+      .optional(),
     customName: optionalTrimmedText('工单名称', 100).optional(),
     customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
     customerRef: optionalTrimmedText('客户名称/简称', 64),
@@ -2229,6 +1961,30 @@ export const createOrderSchema = z
       ),
   })
   .superRefine((input, ctx) => {
+    const seenFigs = new Set<number>();
+    let maximumFig = 0;
+    input.items.forEach((item, itemIndex) => {
+      const fig = item.fig ?? itemIndex + 1;
+      maximumFig = Math.max(maximumFig, fig);
+      if (seenFigs.has(fig)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', itemIndex, 'fig'],
+          message: `款式编号 ${fig} 重复`,
+        });
+      }
+      seenFigs.add(fig);
+    });
+    if (
+      input.nextItemFig !== undefined &&
+      input.nextItemFig <= maximumFig
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['nextItemFig'],
+        message: '下一款式编号必须大于已有款式编号',
+      });
+    }
     let orderTotalCents = BigInt(0);
     for (const [itemIndex, item] of input.items.entries()) {
       const subtotalCents = orderItemSubtotalCents(
@@ -2451,6 +2207,22 @@ const reworkEntityId = z
   .trim()
   .regex(/^[A-Za-z0-9_-]+$/, '记录 id 格式非法');
 
+const optionalReworkUnitsPerBagField = z.preprocess(
+  (value) => {
+    if (value === '' || value === null || value === undefined) return undefined;
+    if (typeof value === 'string' && /^\d+$/u.test(value.trim())) {
+      return Number.parseInt(value.trim(), 10);
+    }
+    return value;
+  },
+  z
+    .number({ message: '每袋数量必须是数字' })
+    .int('每袋数量必须是整数')
+    .min(1, '每袋数量必须大于 0')
+    .max(9_999_999, '每袋数量过大')
+    .optional(),
+);
+
 export const createReworkOrderSchema = z.object({
   sourceOrderId: reworkEntityId,
   cause: z.enum(ReworkCause),
@@ -2460,9 +2232,11 @@ export const createReworkOrderSchema = z.object({
       z.object({
         sourceOrderItemId: reworkEntityId,
         quantity: orderItemQuantityField,
+        // 只有历史原单无结构化包装组且该款 pack 也缺失时，
+        // 域层才会采用管理员显式补录的每袋数；不得覆盖 canonical 包装组。
+        unitsPerBag: optionalReworkUnitsPerBagField,
         craftIds: z
           .array(craftIdSchema)
-          .min(1, '至少选择一项重做工艺')
           .max(10)
           .refine(
             (craftIds) => new Set(craftIds).size === craftIds.length,
@@ -2572,8 +2346,8 @@ export type PreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
 >;
 
-// 外部销售终价只接收管理员的确认值；价目簿 id、建议价和小计
-// 一律由领域层按最新有效版本重算，不信任浏览器快照。
+// 工厂终价只接收管理员对待定行的确认值；价目簿 id、自动价和小计
+// 一律读取工单已经锁定的快照，不信任浏览器金额或当前价表。
 const orderPricingRevisionField = z.preprocess(
   (value) => {
     if (typeof value === 'number') return value;
@@ -2640,6 +2414,21 @@ export const finalizeOrderPricingSchema = z
       )
       .max(20, '单工单包装组不超过 20 组')
       .default([]),
+    orderCharges: z
+      .array(
+        z.object({
+          chargeId: orderChangeId,
+          expectedBusinessKey: z
+            .string()
+            .trim()
+            .min(1, '订单级收费业务键不能为空')
+            .max(128, '订单级收费业务键过长'),
+          amount: confirmedShipmentChargeMoneyField,
+          reason: optionalTrimmedText('订单级收费定价依据', 500),
+        }),
+      )
+      .max(50, '单工单订单级待核价费用不超过 50 项')
+      .default([]),
     shipments: z
       .array(
         z.object({
@@ -2677,6 +2466,18 @@ export const finalizeOrderPricingSchema = z
         });
       }
       shipmentIds.add(shipment.shipmentId);
+    });
+
+    const orderChargeIds = new Set<string>();
+    input.orderCharges.forEach((charge, index) => {
+      if (orderChargeIds.has(charge.chargeId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['orderCharges', index, 'chargeId'],
+          message: '同一订单级待核价费用不能重复提交',
+        });
+      }
+      orderChargeIds.add(charge.chargeId);
     });
 
     const packagingGroupIds = new Set<string>();
@@ -2893,7 +2694,7 @@ export const setOrderSfCollectSchema = z
 export type SetOrderSfCollectInput = z.infer<typeof setOrderSfCollectSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
-// Production scheduling (SPEC §3.2 / §4.3)
+// Historical production-task disputes
 // ─────────────────────────────────────────────────────────────────────
 
 // ID allowlist kept in sync with lib/oss/sign.ts — cuid / cuid2 only,
@@ -2902,66 +2703,6 @@ export type SetOrderSfCollectInput = z.infer<typeof setOrderSfCollectSchema>;
 const scheduleIdRe = /^[A-Za-z0-9_-]+$/;
 const safeId = (label: string) =>
   z.string().trim().regex(scheduleIdRe, `${label}格式非法`);
-const assignmentOverrideReasonField = z
-  .string()
-  .trim()
-  .max(200, '越权派工原因最多 200 个字符')
-  .optional();
-
-const scheduleAssignmentSchema = z.object({
-  taskId: safeId('生产任务 id').optional(),
-  orderItemId: safeId('款式 id'),
-  craftId: safeId('工艺 id'),
-  workerId: safeId('师傅 id'),
-  plannedQty: z.coerce
-    .number()
-    .int('分配数量必须是整数')
-    .positive('分配数量必须大于 0')
-    .max(100_000_000, '分配数量不能超过 100000000')
-    // 兼容旧客户端：同一款式工艺只有一条派工时，
-    // 业务层会以 OrderItem.quantity 补全。拆分多人时必须显式传入。
-    .optional(),
-  overrideReason: assignmentOverrideReasonField,
-});
-
-export const scheduleOrderSchema = z.object({
-  orderId: safeId('工单 id'),
-  assignments: z
-    .array(scheduleAssignmentSchema)
-    // An "all-outsource" order has zero expected assignments. Allow
-    // the empty array so scheduleOrder can still transition Order to
-    // SCHEDULING (lib enforces the real invariant: every expected
-    // non-outsource pair must be covered).
-    // createOrder allows 50 items × 10 crafts, and each pair may be split
-    // across workers. Keep a bounded payload while leaving room for splits.
-    .max(2000, '单次排产不超过 2000 个师傅任务'),
-});
-
-export type ScheduleOrderInput = z.infer<typeof scheduleOrderSchema>;
-
-export const batchScheduleOrdersSchema = z.object({
-  orderIds: z
-    .array(safeId('工单 id'))
-    .min(1, '请至少选择一张工单')
-    .max(30, '单次最多排产 30 张工单')
-    .refine((ids) => new Set(ids).size === ids.length, '工单不能重复选择'),
-  workerId: safeId('师傅 id'),
-  overrideReason: assignmentOverrideReasonField,
-});
-
-export type BatchScheduleOrdersInput = z.infer<
-  typeof batchScheduleOrdersSchema
->;
-
-export const reassignProductionTaskSchema = z.object({
-  workerId: safeId('师傅 id'),
-  overrideReason: assignmentOverrideReasonField,
-});
-
-export type ReassignProductionTaskInput = z.infer<
-  typeof reassignProductionTaskSchema
->;
-
 export const createProductionTaskDisputeSchema = z.object({
   taskId: safeId('生产任务 id'),
   reason: z
@@ -2990,79 +2731,6 @@ export const reviewProductionTaskDisputeSchema = z.object({
 export type ReviewProductionTaskDisputeInput = z.infer<
   typeof reviewProductionTaskDisputeSchema
 >;
-
-// ─────────────────────────────────────────────────────────────────────
-// Worker task report (SPEC §3.3)
-// ─────────────────────────────────────────────────────────────────────
-
-// Shared coercion for the three count fields. Accepts either a number
-// (programmatic caller) or the string that FormData hands us; null /
-// empty / blank string → 0 so a worker who doesn't have any rework
-// pieces can leave the field blank.
-const taskCountField = (label: string) =>
-  z.preprocess(
-    (v) => {
-      if (typeof v === 'number') return v;
-      if (typeof v === 'string') {
-        const trimmed = v.trim();
-        if (trimmed === '') return 0;
-        // Reject decimals, signs, scientific notation — counts are
-        // non-negative integers.
-        if (!/^\d+$/.test(trimmed)) return Number.NaN;
-        const n = Number.parseInt(trimmed, 10);
-        return Number.isSafeInteger(n) ? n : Number.NaN;
-      }
-      if (v === null || v === undefined) return 0;
-      return Number.NaN;
-    },
-    z
-      .number()
-      .int(`${label}必须是整数`)
-      .min(0, `${label}不能为负`)
-      .max(10_000_000, `${label}超出合理范围`),
-  );
-
-// 注意这里**只做字段形状校验**。「合计不得达到 plannedQty 的 N 倍」的守卫在
-// lib/production.ts 的 reportTask() 里，不在这个 schema 里，原因有两条，都不是
-// 风格问题：
-//   1. Zod 是同步纯校验。plannedQty 在库里、倍数上限在 Setting 表里，两个都要
-//      await，schema 拿不到。
-//   2. plannedQty 必须和最终写入在同一个事务、同一把 taskLockKey advisory lock
-//      内读，才能和写入取到同一个一致性快照。这只有 lib 层做得到。
-// overReportConfirmed 用 optionalFormBoolean（不是 formBoolean）：undefined 保持
-// undefined，让 ReportTaskInput 对既有的三字段直调调用点保持可编译，语义上
-// undefined ≡ 未确认，守卫只认显式 true。
-export const reportTaskSchema = z
-  .object({
-    completedQty: taskCountField('合格数'),
-    defectQty: taskCountField('不良数'),
-    reworkQty: taskCountField('返工数'),
-    overReportConfirmed: optionalFormBoolean,
-  })
-  .refine(
-    (v) => v.completedQty + v.defectQty + v.reworkQty > 0,
-    {
-      message: '至少报一件（合格 / 不良 / 返工 三者之和 > 0）',
-      path: ['completedQty'],
-    },
-  );
-
-export type ReportTaskInput = z.infer<typeof reportTaskSchema>;
-
-export const batchTaskMutationSchema = z.object({
-  taskIds: z
-    .array(
-      z
-        .string()
-        .trim()
-        .regex(/^[A-Za-z0-9_-]+$/, '任务 id 格式非法'),
-    )
-    .min(1, '请至少选择一个任务')
-    .max(50, '单次最多处理 50 个任务')
-    .refine((ids) => new Set(ids).size === ids.length, '任务不能重复选择'),
-});
-
-export type BatchTaskMutationInput = z.infer<typeof batchTaskMutationSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
 // Outsource order (SPEC §3.2, 外协)
@@ -3267,62 +2935,7 @@ export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSch
 // Salary actions (SPEC §5)
 // ─────────────────────────────────────────────────────────────────────
 
-// The recompute-daily endpoint takes a date and optionally a single
-// workerId (for "recompute just this row" from the UI). Strict calendar
-// validation — refuses 2026-02-31 and the like .
-// Server Action 输入契约（不是 Prisma schema）。第一阶段只读预检
-// 不要求用户先编造理由；任何 confirmed=true 的写入请求仍由
-// 服务端强制 1–500 字。这个闸口不依赖客户端对话框的 required。
-export const recomputeDailySalarySchema = z
-  .object({
-    date: z
-      .string()
-      .trim()
-      .superRefine((val, ctx) => {
-        if (!YMD_RE.test(val)) {
-          ctx.addIssue({
-            code: 'custom',
-            message: '日期格式非法（应为 YYYY-MM-DD）',
-          });
-          return;
-        }
-        if (!parseStrictYmd(val)) {
-          ctx.addIssue({
-            code: 'custom',
-            message: '日期不是合法日历日期',
-          });
-        }
-      }),
-    workerId: safeId('师傅 id').optional(),
-    reason: z.preprocess(
-      (value) => (value === undefined || value === null ? '' : value),
-      z
-        .string()
-        .trim()
-        .max(500, '重算理由过长（最多 500 个字符）'),
-    ),
-    confirmed: formBoolean,
-  })
-  .superRefine((data, ctx) => {
-    if (data.confirmed && data.reason.length === 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reason'],
-        message: '请填写重算理由',
-      });
-    }
-  });
-
-export type RecomputeDailySalaryInput = z.infer<typeof recomputeDailySalarySchema>;
-
-export const markDailySalaryPaidSchema = z.object({
-  isPaid: formBoolean,
-});
-
-export type MarkDailySalaryPaidInput = z.infer<typeof markDailySalaryPaidSchema>;
-
-// Reusable strict-calendar YYYY-MM-DD field (covers rule-key resolution
-// + calendar validity in one helper, like recomputeDailySalarySchema).
+// Reusable strict-calendar YYYY-MM-DD field for salary-period resolution.
 const ymdField = (label: string) =>
   z
     .string()

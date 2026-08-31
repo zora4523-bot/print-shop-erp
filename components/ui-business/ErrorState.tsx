@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -68,35 +67,5 @@ export function ErrorState({
         </div>
       ) : null}
     </div>
-  );
-}
-
-export function BlockingPrerequisite({
-  title,
-  description,
-  href,
-  linkLabel,
-}: {
-  title: string;
-  description?: string;
-  href: string;
-  linkLabel: string;
-}) {
-  return (
-    <ErrorState
-      blocking
-      title={title}
-      description={description}
-      action={
-        <Button
-          render={<Link href={href} prefetch={false} />}
-          nativeButton={false}
-          variant="outline"
-          size="sm"
-        >
-          {linkLabel}
-        </Button>
-      }
-    />
   );
 }

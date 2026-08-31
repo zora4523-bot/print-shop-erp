@@ -28,6 +28,7 @@ const MANUAL_CATEGORY_CODES = [
   'APPROVED_ADJUSTMENT',
 ] as const;
 const PLATE_CATEGORY_CODE = 'PLATE_MAKING_FEE';
+const PENDING_PLATE_BUSINESS_KEY = 'ORDER:PLATE_MAKING_FEE:PENDING';
 
 export type OrderManualChargeCategoryCode =
   (typeof MANUAL_CATEGORY_CODES)[number];
@@ -349,7 +350,7 @@ export async function deleteOrderManualCharge(
           version: 1,
           source: 'ADMIN_MANUAL_CHARGE_REMOVED',
           removedAt: now.toISOString(),
-          previousAmount: existing.amount.toString(),
+          previousAmount: existing.amount?.toString() ?? null,
         },
         overrideReason: input.reason,
         finalizedById: actor.id,
@@ -477,6 +478,47 @@ export async function saveOrderPlateDetail(
       finalizedById: actor.id,
       finalizedAt: now,
     } satisfies Prisma.OrderCustomerChargeUncheckedUpdateInput;
+
+    // The create-order engine stores one aggregate pending plate charge so a
+    // factory-confirmed amount has a complete exit. Once structured plate
+    // rows exist, they become the sole plate-fee breakdown; waive the aggregate
+    // row first so later detail maintenance can never charge both totals.
+    const aggregatePlateCharge = await tx.orderCustomerCharge.findUnique({
+      where: {
+        orderId_businessKey: {
+          orderId: order.id,
+          businessKey: PENDING_PLATE_BUSINESS_KEY,
+        },
+      },
+      select: { id: true, status: true, amount: true, pricingSnapshot: true },
+    });
+    if (
+      aggregatePlateCharge &&
+      aggregatePlateCharge.status !== OrderCustomerChargeStatus.WAIVED
+    ) {
+      await tx.orderCustomerCharge.update({
+        where: { id: aggregatePlateCharge.id },
+        data: {
+          status: OrderCustomerChargeStatus.WAIVED,
+          amount: '0.00',
+          pricingSnapshot: {
+            version: 1,
+            source: 'PLATE_DETAIL_BREAKDOWN_SUPERSEDES_AGGREGATE',
+            supersededAt: now.toISOString(),
+            plateDetailId,
+            previousStatus: aggregatePlateCharge.status,
+            previousAmount: aggregatePlateCharge.amount?.toString() ?? null,
+            ...(aggregatePlateCharge.pricingSnapshot === null
+              ? {}
+              : { previousSnapshot: aggregatePlateCharge.pricingSnapshot }),
+          },
+          overrideReason: '已由逐款制版明细替代订单级暂估制版费',
+          finalizedById: actor.id,
+          finalizedAt: now,
+        },
+        select: { id: true },
+      });
+    }
     await tx.orderCustomerCharge.upsert({
       where: {
         orderId_businessKey: {

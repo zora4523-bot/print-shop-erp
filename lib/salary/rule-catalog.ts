@@ -6,7 +6,6 @@ export const SALARY_RULE_KEYS = [
   'CS_BASE_SALARY',
   'CS_PERIOD_LENGTH',
   'CS_TIERS',
-  'PACKER_HOURLY',
   'CLEANER_HOURLY',
   'COOK_SPARE_HOURLY',
   'OT_MULTIPLIER',
@@ -49,11 +48,6 @@ export const SALARY_RULE_CATALOG: readonly SalaryRuleCatalogEntry[] = [
     key: 'CS_TIERS',
     label: '内部客服销售额提成档位',
     description: 'FLAT：达到的最高档比例作用于整个销售额。',
-  },
-  {
-    key: 'PACKER_HOURLY',
-    label: '打包工时薪',
-    description: '工厂支付给打包员工的正常工时时薪。',
   },
   {
     key: 'CLEANER_HOURLY',

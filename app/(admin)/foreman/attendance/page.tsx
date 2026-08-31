@@ -14,6 +14,7 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
+import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 export const metadata = { title: '员工考勤' };
 
@@ -24,14 +25,6 @@ type PageProps = {
     workerType?: string;
   }>;
 };
-
-function currentShanghaiMonth(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(new Date());
-}
 
 // [start, end) → array of YYYY-MM-DD strings
 function monthDates(month: string): string[] {
@@ -68,12 +61,7 @@ function computeFullDayNormalHours(rule: {
 export default async function ForemanAttendancePage({ searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
-  // TODO(tech-debt): reuses 'task:assign' because there is no dedicated
-  // attendance permission (its role set [ADMIN] matches the
-  // attendance write action). If attendance ever needs finer control,
-  // add attendance:read / attendance:write and update the permission
-  // matrix, menu, pages, actions and tests together.
-  await requirePermission('task:assign');
+  await requirePermission('attendance:manage');
   const sp = await searchParams;
   const selectedMonth =
     sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();

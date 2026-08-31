@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ExternalSalesOrderFormRail,
+  OrderFormBRail,
   externalSalesOrderFormTotal,
 } from '../ExternalSalesOrderFormRail';
 
@@ -18,7 +18,78 @@ const quoteItems = [
   },
 ];
 
-describe('ExternalSalesOrderFormRail', () => {
+describe('OrderFormBRail', () => {
+  it('uses the internal settlement rail without external packaging or logistics fees', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'missing', amount: null }}
+        logistics={null}
+        usesExternalSalesPricing={false}
+        settlementLabel="工厂直接业务"
+        gaps={['未填写承诺交期']}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('¥170.00');
+    expect(html).toContain('工厂直接业务');
+    expect(html).toContain('保存草稿');
+    expect(html).toContain('创建并提交');
+    expect(html).toContain('未填写承诺交期');
+    expect(html).not.toContain('入袋');
+    expect(html).not.toContain('制烫金版费');
+    expect(html).not.toContain('纸箱耗材');
+    expect(html).not.toContain('快递费');
+  });
+
+  it('uses the pure-engine known total for internal BAGGING without adding external-fee UI', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing={false}
+        settlementLabel="工厂直接业务"
+        knownTotal="180.00"
+        totalSemantics="COMPLETE"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('¥180.00');
+    expect(html).not.toContain('纸箱耗材');
+    expect(html).not.toContain('快递费');
+  });
+
+  it('marks an internal known total as incomplete while the plate fee is pending', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={null}
+        usesExternalSalesPricing={false}
+        settlementLabel="工厂直接业务"
+        knownTotal="180.00"
+        totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('已知合计');
+    expect(html).toContain('¥180.00');
+    expect(html).toContain('不含待核价款与制版费；提交后由工厂确认');
+    expect(html).toContain('创建并提交核价');
+  });
+
   it('shows the known subtotal while shipping is still pending', () => {
     const logistics = {
       status: 'missing' as const,
@@ -36,26 +107,33 @@ describe('ExternalSalesOrderFormRail', () => {
     ).toBe(183);
 
     const html = renderToStaticMarkup(
-      <ExternalSalesOrderFormRail
+      <OrderFormBRail
         itemCount={1}
         quoteItems={quoteItems}
         packaging={{ status: 'complete', amount: '10.00' }}
         logistics={logistics}
+        usesExternalSalesPricing
+        settlementLabel="外部销售应付工厂"
+        gaps={[]}
         busy={false}
         onAttemptSubmit={vi.fn()}
       />,
     );
 
     expect(html).toContain('¥183.00');
+    expect(html).toContain('外部销售应付工厂');
+    expect(html).toContain('1 款');
     expect(html).toContain('纸箱耗材');
     expect(html).toContain('¥3.00');
     expect(html).toContain('不含制版费与快递费');
+    expect(html).toContain('创建并提交');
+    expect(html).not.toContain('保存草稿');
     expect(html).not.toContain('这张单需要管理员终价');
   });
 
   it('does not repeat a completed style total above its fee lines', () => {
     const html = renderToStaticMarkup(
-      <ExternalSalesOrderFormRail
+      <OrderFormBRail
         itemCount={1}
         quoteItems={quoteItems}
         packaging={{ status: 'complete', amount: '10.00' }}
@@ -65,6 +143,9 @@ describe('ExternalSalesOrderFormRail', () => {
           packagingAmount: '3.00',
           totalAmount: '8.00',
         }}
+        usesExternalSalesPricing
+        settlementLabel="外部销售应付工厂"
+        gaps={[]}
         busy={false}
         onAttemptSubmit={vi.fn()}
       />,
@@ -73,5 +154,122 @@ describe('ExternalSalesOrderFormRail', () => {
     expect(html.match(/¥170\.00/g) ?? []).toHaveLength(0);
     expect(html).toContain('¥130.00');
     expect(html).toContain('¥40.00');
+  });
+
+  it('requires factory pricing when only the plate amount is pending', () => {
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={1}
+        quoteItems={quoteItems}
+        packaging={{ status: 'complete', amount: '10.00' }}
+        logistics={{
+          status: 'complete',
+          shippingAmount: '5.00',
+          packagingAmount: '3.00',
+          totalAmount: '8.00',
+        }}
+        usesExternalSalesPricing
+        settlementLabel="外部销售应付工厂"
+        knownTotal="188.00"
+        totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('制版费金额待工厂确认');
+    expect(html).toContain('这张单需要管理员终价');
+    expect(html).toContain('提交并申请管理员终价');
+  });
+
+  it('keeps the known total and full fee semantics when one style needs manual pricing', () => {
+    const mixedQuoteItems = [
+      ...quoteItems,
+      {
+        key: 'style-2',
+        label: '专版烫金 · 三色',
+        status: 'incomplete' as const,
+        amount: null,
+        components: [],
+        message: '专版三色需工厂核价',
+      },
+    ];
+    const packaging = {
+      status: 'complete' as const,
+      amount: '10.00',
+      label: '入袋 10袋',
+    };
+    const logistics = {
+      status: 'complete' as const,
+      shippingAmount: '5.00',
+      packagingAmount: '3.00',
+      totalAmount: '8.00',
+    };
+
+    expect(
+      externalSalesOrderFormTotal({
+        quoteItems: mixedQuoteItems,
+        packaging,
+        logistics,
+      }),
+    ).toBe(188);
+
+    const html = renderToStaticMarkup(
+      <OrderFormBRail
+        itemCount={2}
+        quoteItems={mixedQuoteItems}
+        packaging={packaging}
+        logistics={logistics}
+        usesExternalSalesPricing
+        settlementLabel="外部销售应付工厂"
+        knownTotal="188.00"
+        totalSemantics="EXCLUDES_MANUAL_ITEMS"
+        gaps={[]}
+        busy={false}
+        onAttemptSubmit={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('已知合计');
+    expect(html).toContain('¥188.00');
+    expect(html).toContain('不含待核价款');
+    expect(html).not.toContain('>——<');
+    expect(html).toContain('入袋 10袋');
+    expect(html).toContain('制烫金版费');
+    expect(html).toContain('待定');
+    expect(html).toContain('纸箱耗材');
+    expect(html).toContain('快递费');
+    expect(html).toContain('这张单需要管理员终价');
+  });
+
+  it('adds decimal amounts without floating-point drift', () => {
+    expect(
+      externalSalesOrderFormTotal({
+        quoteItems: [
+          {
+            key: 'decimal-1',
+            label: '款式 1',
+            status: 'complete',
+            amount: '0.10',
+            components: [],
+          },
+          {
+            key: 'decimal-2',
+            label: '款式 2',
+            status: 'complete',
+            amount: '0.20',
+            components: [],
+          },
+        ],
+        packaging: { status: 'complete', amount: '0.30' },
+        logistics: {
+          status: 'complete',
+          shippingAmount: '0.50',
+          packagingAmount: '0.40',
+          totalAmount: '0.90',
+        },
+      }),
+    ).toBe(1.5);
   });
 });

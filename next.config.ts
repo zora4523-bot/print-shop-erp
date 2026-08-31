@@ -2,8 +2,16 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Codex and local browser previews open the dev server through 127.0.0.1.
+  // Next 16 otherwise blocks the dev-only client bootstrap/HMR endpoints.
+  allowedDevOrigins: ['127.0.0.1'],
   async redirects() {
     return [
+      {
+        source: '/owner/rules/pricing-routes',
+        destination: '/owner/rules',
+        permanent: false,
+      },
       {
         source: '/owner/products',
         destination: '/owner/rules/stock-skus',
@@ -51,12 +59,13 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/owner/prices/external-sales/items',
-        destination: '/owner/rules/customer-pricing',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {
         source: '/owner/prices/external-sales/logistics',
-        destination: '/owner/rules/customer-pricing?purpose=logistics',
+        destination:
+          '/owner/rules/customer-pricing?purpose=logistics&section=ship',
         permanent: false,
       },
       {
@@ -66,22 +75,22 @@ const nextConfig: NextConfig = {
       },
       {
         source: '/owner/prices',
-        destination: '/owner/rules/internal-pricing',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {
-        source: '/owner/prices/tiers/:id',
-        destination: '/owner/rules/internal-pricing/tiers/:id',
+        source: '/owner/prices/tiers/:path*',
+        destination: '/owner/rules/customer-pricing?section=tiers',
         permanent: false,
       },
       {
-        source: '/owner/prices/adjustments/:id',
-        destination: '/owner/rules/internal-pricing/adjustments/:id',
+        source: '/owner/prices/adjustments/:path*',
+        destination: '/owner/rules/customer-pricing?section=adds',
         permanent: false,
       },
       {
-        source: '/owner/salary/piecework-rules',
-        destination: '/owner/rules/worker-piecework',
+        source: '/owner/rules/internal-pricing/:path*',
+        destination: '/owner/rules/customer-pricing?section=blank',
         permanent: false,
       },
       {

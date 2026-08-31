@@ -9,6 +9,7 @@ import {
   OutsourceStatus,
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
+  ProductionOperationStatus,
   SalaryPeriodStatus,
   ShipmentStatus,
   TaskStatus,
@@ -47,7 +48,8 @@ export function statusFilterLabel(definition: StatusDefinition): string {
 
 export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
-  [OrderStatus.SUBMITTED]: { label: '已提交', tone: 'info' },
+  [OrderStatus.PENDING_FACTORY]: { label: '待工厂确认', tone: 'info' },
+  [OrderStatus.SUBMITTED]: { label: '待工厂确认', tone: 'info' },
   [OrderStatus.SCHEDULING]: { label: '排产中', tone: 'info', dot: true },
   [OrderStatus.IN_PRODUCTION]: {
     label: '生产中',
@@ -251,6 +253,27 @@ export const PRODUCTION_TASK_STATUS_REGISTRY: StatusRegistry<TaskStatus> = {
   },
 };
 
+export const PRODUCTION_OPERATION_STATUS_REGISTRY: StatusRegistry<ProductionOperationStatus> = {
+  [ProductionOperationStatus.PENDING]: {
+    label: '待报工',
+    tone: 'neutral',
+    dot: true,
+  },
+  [ProductionOperationStatus.IN_PROGRESS]: {
+    label: '进行中',
+    tone: 'warning',
+    dot: true,
+  },
+  [ProductionOperationStatus.COMPLETED]: {
+    label: '已完工',
+    tone: 'success',
+  },
+  [ProductionOperationStatus.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
+  },
+};
+
 export const SHIPMENT_STATUS_REGISTRY: StatusRegistry<ShipmentStatus> = {
   [ShipmentStatus.PLANNED]: {
     label: '待发货',
@@ -364,6 +387,7 @@ export const CUSTOMER_PRICE_BOOK_VERSION_STATUS = {
   DRAFT: 'DRAFT',
   CURRENT: 'CURRENT',
   SCHEDULED: 'SCHEDULED',
+  CANCELLED: 'CANCELLED',
   HISTORICAL: 'HISTORICAL',
 } as const;
 
@@ -383,6 +407,10 @@ export const CUSTOMER_PRICE_BOOK_VERSION_STATUS_REGISTRY: StatusRegistry<Custome
     label: '计划生效',
     tone: 'info',
     dot: true,
+  },
+  [CUSTOMER_PRICE_BOOK_VERSION_STATUS.CANCELLED]: {
+    label: '已取消',
+    tone: 'danger',
   },
   [CUSTOMER_PRICE_BOOK_VERSION_STATUS.HISTORICAL]: {
     label: '历史',

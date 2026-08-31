@@ -15,6 +15,7 @@ type ExternalOrderPaperVariant = {
   specification: string;
   paperType: string;
   weight: number;
+  paperMaterialId: string | null;
 };
 
 export type ExternalOrderPaper = {
@@ -42,6 +43,8 @@ export type ExternalOrderCatalogProduct = {
   category: string;
   specification: string | null;
   paperType: string | null;
+  paperMaterialId?: string | null;
+  weight?: number | null;
 };
 
 const AUTOMATIC_ROUTES = [
@@ -96,7 +99,8 @@ export function buildExternalOrderPapers<
     const route = productPricingRoute(product);
     const paperType = product.paperType?.trim();
     const specification = product.specification?.trim();
-    const weight = parseCatalogPaperWeight(paperType);
+    const weight =
+      product.weight ?? parseCatalogPaperWeight(paperType);
     if (!route || !paperType || !specification || weight === null) continue;
     const label = paperFamilyLabel(paperType);
     if (!label) continue;
@@ -110,7 +114,13 @@ export function buildExternalOrderPapers<
           sameCatalogText(candidate.specification, specification),
       )
     ) {
-      entry.variants.push({ route, specification, paperType, weight });
+      entry.variants.push({
+        route,
+        specification,
+        paperType,
+        weight,
+        paperMaterialId: product.paperMaterialId ?? null,
+      });
     }
     byKey.set(key, entry);
   }

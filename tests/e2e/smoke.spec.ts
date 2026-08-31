@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import {
   cleanupAutoCodePartyFixture,
+  cleanupSearchSmokeFixtures,
   E2E_PASSWORD,
   E2E_USERS,
   expectNoNextErrorOverlay,
@@ -12,10 +13,13 @@ import {
 import {
   RULE_CENTER_HREFS,
   RULE_CENTER_SIDEBAR_ITEMS,
-  customerPricingHref,
 } from '../../lib/navigation/rule-center';
 
 test.describe('automation smoke', () => {
+  test.afterAll(async () => {
+    await cleanupSearchSmokeFixtures();
+  });
+
   test('protected routes redirect unauthenticated users to /login', async ({
     page,
   }) => {
@@ -33,7 +37,7 @@ test.describe('automation smoke', () => {
   test('ADMIN uses direct rule-center sidebar entries and canonical rule pages', async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     await login(page, {
       from: RULE_CENTER_HREFS.root,
@@ -41,11 +45,53 @@ test.describe('automation smoke', () => {
       password: E2E_PASSWORD,
     });
 
+    await expect(page).toHaveURL((url) =>
+      url.pathname === RULE_CENTER_HREFS.root,
+    );
     await expect(
-      page.getByRole('heading', { name: '规则配置中心', exact: true }),
+      page.getByRole('heading', {
+        name: '规则配置中心',
+        exact: true,
+      }),
     ).toBeVisible();
+    await expect(page.getByRole('heading', { name: '客户计价规则' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '建单主数据' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '员工薪酬规则' })).toBeVisible();
+
+    const priceSidebarEntries = [
+      [
+        '空白封单价',
+        '/owner/rules/customer-pricing?section=blank',
+        '局部烫金 · 空白封现货单价',
+      ],
+      [
+        '局部烫金机烫费',
+        '/owner/rules/customer-pricing?section=machine',
+        '局部烫金 · 机烫费与制版费',
+      ],
+      [
+        '专版烫金单价',
+        '/owner/rules/customer-pricing?section=tiers',
+        '专版烫金 · 阶梯单价',
+      ],
+      [
+        '专版烫金加价',
+        '/owner/rules/customer-pricing?section=adds',
+        '专版烫金 · 加价',
+      ],
+      [
+        '彩印阶梯价',
+        '/owner/rules/customer-pricing?section=print',
+        '彩印阶梯总价',
+      ],
+      [
+        '包装与快递',
+        '/owner/rules/customer-pricing?purpose=logistics&section=ship',
+        '包装 · 纸箱耗材 · 中通快递',
+      ],
+    ] as const;
     await expect(
-      page.getByRole('navigation', { name: '规则配置中心模块' }),
+      page.getByRole('navigation', { name: '规则配置工作区导航' }),
     ).toHaveCount(0);
     const sidebar = page.locator('[data-sidebar="sidebar"]');
     await expect(
@@ -85,6 +131,41 @@ test.describe('automation smoke', () => {
     await expect(ruleParent).toHaveCount(1);
     await expect(ruleSubmenu).toHaveCount(1);
     await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
+    await expect(ruleParent).not.toHaveAttribute('data-has-active-child');
+
+    await page.goto('/owner/rules/customer-pricing?section=blank');
+    await expect(
+      page.getByRole('heading', {
+        name: '局部烫金 · 空白封现货单价',
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(ruleParentLink).not.toHaveAttribute('aria-current', 'page');
+    await expect(ruleParent).toHaveAttribute('data-has-active-child', 'true');
+    await expect(
+      ruleSubmenu.getByRole('link', {
+        name: '空白封单价',
+        exact: true,
+      }),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      ruleSubmenu.getByRole('link', { name: '客户计价', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      ruleSubmenu.getByRole('link', { name: '可建单产品组合', exact: true }),
+    ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
+    for (const groupLabel of [
+      '客户计价规则',
+      '建单主数据',
+      '员工薪酬规则',
+    ]) {
+      await expect(
+        ruleSubmenu.locator(`[data-menu-subgroup="${groupLabel}"]`).first(),
+      ).toBeVisible();
+    }
+    for (const oldGroupLabel of ['对客计价', '基础事实', '内部结算']) {
+      await expect(ruleSubmenu.getByText(oldGroupLabel, { exact: true })).toHaveCount(0);
+    }
     for (const child of ruleChildItems) {
       await expect(
         ruleSubmenu.getByRole('link', { name: child.label, exact: true }),
@@ -118,18 +199,12 @@ test.describe('automation smoke', () => {
     ).toHaveCount(0);
 
     const canonicalPages = [
-      {
-        label: '客户计价',
-        path: customerPricingHref('processing'),
-        navPath: RULE_CENTER_HREFS.customerPricing,
-        heading: '客户计价规则',
-      },
-      {
-        label: '客户计价',
-        path: customerPricingHref('logistics'),
-        navPath: RULE_CENTER_HREFS.customerPricing,
-        heading: '客户计价规则',
-      },
+      ...priceSidebarEntries.map(([label, path, heading]) => ({
+        label,
+        path,
+        navPath: path,
+        heading,
+      })),
       {
         label: '价格版本',
         path: RULE_CENTER_HREFS.priceVersions,
@@ -137,19 +212,7 @@ test.describe('automation smoke', () => {
         heading: '价格版本与发布',
       },
       {
-        label: '内部计价',
-        path: RULE_CENTER_HREFS.internalPricing,
-        navPath: RULE_CENTER_HREFS.internalPricing,
-        heading: '内部兼容价格',
-      },
-      {
-        label: '师傅计件',
-        path: RULE_CENTER_HREFS.workerPiecework,
-        navPath: RULE_CENTER_HREFS.workerPiecework,
-        heading: '计件规则',
-      },
-      {
-        label: '工资提成',
+        label: '员工薪酬规则',
         path: RULE_CENTER_HREFS.employeePay,
         navPath: RULE_CENTER_HREFS.employeePay,
         heading: '员工工资规则',
@@ -170,11 +233,28 @@ test.describe('automation smoke', () => {
           exact: true,
         }).first(),
       ).toBeVisible();
+      await expect(
+        ruleSubmenu.getByRole('link', {
+          name: route.label,
+          exact: true,
+        }),
+      ).toHaveAttribute('aria-current', 'page');
+      await expect(
+        ruleSubmenu.locator('a[aria-current="page"]'),
+      ).toHaveCount(1);
+      await expect(
+        page.getByRole('navigation', { name: '规则配置工作区导航' }),
+      ).toHaveCount(0);
+      if (route.path.startsWith(RULE_CENTER_HREFS.customerPricing)) {
+        await expect(
+          page.getByRole('navigation', { name: '客户计价规则类型' }),
+        ).toHaveCount(0);
+      }
       await expectNoNextErrorOverlay(page);
     }
 
     const activePayLink = sidebar.getByRole('link', {
-      name: '工资提成',
+      name: '员工薪酬规则',
       exact: true,
     });
     await expect(activePayLink).toHaveAttribute('aria-current', 'page');
@@ -183,6 +263,12 @@ test.describe('automation smoke', () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(RULE_CENTER_HREFS.root);
+    await expect(page).toHaveURL((url) =>
+      url.pathname === RULE_CENTER_HREFS.root,
+    );
+    await expect(
+      page.getByRole('navigation', { name: '规则配置工作区导航' }),
+    ).toHaveCount(0);
     await page
       .getByRole('button', { name: '打开/关闭侧边栏菜单' })
       .click();
@@ -206,8 +292,20 @@ test.describe('automation smoke', () => {
       mobileRuleParent.locator('[data-sidebar="menu-sub"]'),
     ).toHaveCount(1);
     await expect(
+      mobileSidebar.getByRole('link', { name: '空白封单价', exact: true }),
+    ).toHaveAttribute(
+      'href',
+      '/owner/rules/customer-pricing?section=blank',
+    );
+    await expect(
+      mobileSidebar.getByRole('link', { name: '规则配置中心', exact: true }),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      mobileSidebar.getByRole('link', { name: '可建单产品组合', exact: true }),
+    ).toHaveAttribute('href', RULE_CENTER_HREFS.stockSkus);
+    await expect(
       mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),
-    ).toHaveAttribute('href', RULE_CENTER_HREFS.customerPricing);
+    ).toHaveCount(0);
     await mobileSidebar
       .getByRole('link', { name: '价格版本', exact: true })
       .click();
@@ -336,12 +434,14 @@ test.describe('automation smoke', () => {
 
     await page.goto('/orders/new');
     await expect(page.getByRole('heading', { name: '新建工单' })).toBeVisible();
-    await expect(page.getByLabel('客户主数据（选填）')).toHaveCount(0);
+    await expect(page.getByLabel('客户主数据（选填）')).toBeVisible();
     await expect(page.locator('input[name="customerRef"]')).toBeVisible();
     await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
-    await page.getByRole('tab', { name: /收货与费用/ }).click();
-    const receiverAddress = page.getByLabel('收货信息');
+    const receiverAddress = page.getByRole('textbox', {
+      name: '收货地址',
+      exact: true,
+    });
     await expect(receiverAddress).toBeVisible();
     await expect(receiverAddress).toHaveAttribute('required', '');
     await expectNoNextErrorOverlay(page);

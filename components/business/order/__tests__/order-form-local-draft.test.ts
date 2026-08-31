@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   localOrderFormDraftStorageKey,
   parseLocalOrderFormDraft,
+  resolveNextOrderItemFig,
   serializeLocalOrderFormDraft,
 } from '../order-form-local-draft';
 
 function formValues() {
   return {
+    nextItemFig: 7,
     customerRef: '星河礼品',
     promisedDate: new Date('2026-09-01T00:00:00.000Z'),
     isUrgent: false,
@@ -84,8 +86,13 @@ describe('order form local draft', () => {
     expect(serialized).not.toContain('pendingDesigns');
     expect(serialized).not.toContain('designFile');
     const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
+    const internalItem = (
+      parsed?.values.items as Array<Record<string, unknown>>
+    )[0];
     expect(parsed?.savedAt).toBe('2026-08-24T03:00:00.000Z');
     expect(parsed?.values.promisedDate).toBe('2026-09-01');
+    expect(parsed?.values.nextItemFig).toBe(7);
+    expect(parsed?.values.isUrgent).toBe(false);
     expect(parsed?.values.items).toEqual([
       expect.objectContaining({
         name: '外盒',
@@ -105,10 +112,7 @@ describe('order form local draft', () => {
         foilTechnique: 'FLAT',
         hasLocalFoil: true,
         printColors: ['C', 'M'],
-        unitPrice: '0.2500',
-        fixedFee: '20.00',
-        suggestedSubtotal: '2020.00',
-        priceOverrideReason: '旧人工改价',
+        manualQuoteReason: '已切回自动路线的旧原因',
       }),
     ]);
     expect(parsed?.values.packagingGroups).toEqual([
@@ -122,9 +126,23 @@ describe('order form local draft', () => {
     expect(parsed?.values).not.toHaveProperty('shippingFee');
     expect(parsed?.values).not.toHaveProperty('packingMaterialFee');
     expect(parsed?.values).not.toHaveProperty('customerChargeOverrideReason');
+    expect(internalItem).not.toHaveProperty('unitPrice');
+    expect(internalItem).not.toHaveProperty('fixedFee');
+    expect(internalItem).not.toHaveProperty('suggestedSubtotal');
+    expect(internalItem).not.toHaveProperty('priceOverrideReason');
     expect(
       (parsed?.values.additionalShipments as Array<Record<string, unknown>>)[0],
     ).not.toHaveProperty('shippingFee');
+  });
+
+  it.each([true, false])('round-trips the urgent flag as %s', (isUrgent) => {
+    const values = formValues();
+    values.isUrgent = isUrgent;
+
+    const serialized = serializeLocalOrderFormDraft(values, 'internal');
+    const parsed = parseLocalOrderFormDraft(serialized!, 'internal');
+
+    expect(parsed?.values.isUrgent).toBe(isUrgent);
   });
 
   it('removes every hidden price authority field from external-sales drafts', () => {
@@ -203,5 +221,20 @@ describe('order form local draft', () => {
     expect(localOrderFormDraftStorageKey('user/1', true)).not.toBe(
       localOrderFormDraftStorageKey('user/1', false),
     );
+  });
+
+  it('keeps a monotonic fig counter even after the highest card was deleted', () => {
+    expect(
+      resolveNextOrderItemFig({
+        nextItemFig: 8,
+        items: [{ fig: 1 }, { fig: 3 }],
+      }),
+    ).toBe(8);
+    expect(
+      resolveNextOrderItemFig({
+        nextItemFig: 2,
+        items: [{ fig: 1 }, { fig: 3 }],
+      }),
+    ).toBe(4);
   });
 });

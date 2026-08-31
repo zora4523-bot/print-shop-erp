@@ -11,7 +11,7 @@ import { useHorizontalScrollCue } from "@/components/ui/use-horizontal-scroll-cu
 // registry 漂移清单。
 //
 // label 可传：此前 aria-label 硬编码成「数据表格」，同一页渲染多张表时
-// （如 /owner/prices 的价格阶梯 + 加价规则）会出现多个同名地标，读屏器
+// 同页存在多张数据表时会出现多个同名地标，读屏器
 // 的地标列表里根本分不出谁是谁。默认值保留原文案，避免一次性改崩。
 function Table({
   className,

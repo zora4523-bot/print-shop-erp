@@ -252,7 +252,15 @@ function isEditableControl(
 ): boolean {
   const tagName = node.tagName.getText();
   if (
-    !['Button', 'Field', 'Input', 'input', 'select', 'textarea'].includes(
+    ![
+      'Button',
+      'Checkbox',
+      'Field',
+      'Input',
+      'input',
+      'select',
+      'textarea',
+    ].includes(
       tagName,
     )
   ) {

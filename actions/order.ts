@@ -20,6 +20,7 @@ import {
   deleteOrderManualChargeSchema,
   saveOrderPlateDetailSchema,
   deleteOrderPlateDetailSchema,
+  type CreateOrderInput,
 } from '@/lib/auth/schemas';
 import {
   createOrder,
@@ -31,6 +32,7 @@ import {
   setOrderUrgent,
   setOrderSfCollect,
   OrderInvariantError,
+  OrderQuoteChangedError,
   InvalidOrderTransitionError,
 } from '@/lib/order';
 import {
@@ -66,9 +68,13 @@ import type {
   ReviewOrderChangeRequestMutationResult,
   FinalizeOrderPricingMutationResult,
   OrderCommercialDetailMutationResult,
+  SubmitOrderMutationResult,
 } from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { FULL_EDITABLE_FIELDS } from '@/lib/order/editable-fields';
+import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
+import { parseExternalCreateOrderCommand } from '@/lib/order/external-create-order-command';
+import { OrderSettlementType } from '@/generated/prisma/enums';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
 // items is a nested array and `FormData` flattens poorly. The UI layer
@@ -79,19 +85,40 @@ export async function createOrderAction(
   raw: unknown,
 ): Promise<CreateOrderMutationResult> {
   const actor = await requirePermission('order:create');
-
-  const parsed = createOrderSchema.safeParse(raw);
-  if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+  const settlementType = settlementTypeForOrderCreator(actor.role);
+  let input: CreateOrderInput;
+  if (settlementType === OrderSettlementType.EXTERNAL_SALES) {
+    const external = parseExternalCreateOrderCommand(raw);
+    if (!external.success) {
+      return {
+        status: 'invalid',
+        fieldErrors: collectFieldErrorsDeep(external.issues),
+      };
+    }
+    input = external.data;
+  } else {
+    const parsed = createOrderSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        status: 'invalid',
+        fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+      };
+    }
+    input = parsed.data;
   }
 
   let created: Awaited<ReturnType<typeof createOrder>>;
   try {
-    created = await createOrder(parsed.data, actor);
+    created = await createOrder(input, actor);
   } catch (err) {
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }
+    console.error('[order:create] unexpected failure', {
+      name: err instanceof Error ? err.name : typeof err,
+      message: err instanceof Error ? err.message : 'non-Error rejection',
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     throw err;
   }
 
@@ -101,6 +128,7 @@ export async function createOrderAction(
     orderId: created.id,
     orderNo: created.orderNo,
     itemIds: created.itemIds,
+    pricingStatus: created.pricingStatus,
   };
 }
 
@@ -108,7 +136,7 @@ export async function createReworkOrderAction(
   _prev: CreateReworkOrderMutationResult | null,
   raw: unknown,
 ): Promise<CreateReworkOrderMutationResult> {
-  const actor = await requirePermission('order:schedule');
+  const actor = await requirePermission('order:change:review');
 
   const parsed = createReworkOrderSchema.safeParse(raw);
   if (!parsed.success) {
@@ -121,7 +149,6 @@ export async function createReworkOrderAction(
   try {
     const created = await createReworkOrder(parsed.data, actor);
     revalidatePath('/orders');
-    revalidatePath('/foreman/scheduling');
     revalidatePath(`/orders/${parsed.data.sourceOrderId}`);
     revalidatePath(`/orders/${created.id}`);
     return { status: 'success', orderId: created.id };
@@ -135,7 +162,8 @@ export async function createReworkOrderAction(
 
 export async function submitOrderAction(
   orderId: string,
-): Promise<OrderMutationResult> {
+  expectedQuoteToken: unknown = null,
+): Promise<SubmitOrderMutationResult> {
   // 'order:create' is the coarse role gate. Ownership — "you can only
   // submit your own DRAFT unless you're ADMIN" — is enforced
   // deeper in lib/order.submitOrder's `authz` callback (round 27), which
@@ -144,9 +172,41 @@ export async function submitOrderAction(
   // that guard.
   const actor = await requirePermission('order:create');
 
+  if (
+    expectedQuoteToken !== null &&
+    (typeof expectedQuoteToken !== 'string' ||
+      !/^create-order-quote-v2:[a-f\d]{64}$/u.test(expectedQuoteToken))
+  ) {
+    return {
+      status: 'invalid',
+      fieldErrors: { quoteToken: ['报价确认标识格式非法'] },
+    };
+  }
+
   try {
-    await submitOrder(orderId, actor);
+    const submitted = await submitOrder(
+      orderId,
+      actor,
+      new Date(),
+      expectedQuoteToken,
+    );
+    revalidatePath('/orders');
+    revalidatePath(`/orders/${orderId}`);
+    return {
+      status: 'success',
+      quotedFee: submitted.quotedFee,
+      quotedFeeCompleteness: submitted.quotedFeeCompleteness,
+    };
   } catch (err) {
+    if (err instanceof OrderQuoteChangedError) {
+      return {
+        status: 'quote_changed',
+        quoteToken: err.quoteToken,
+        quotedFee: err.quotedFee,
+        quotedFeeCompleteness: err.quotedFeeCompleteness,
+        message: err.message,
+      };
+    }
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }
@@ -155,10 +215,6 @@ export async function submitOrderAction(
     }
     throw err;
   }
-
-  revalidatePath('/orders');
-  revalidatePath(`/orders/${orderId}`);
-  return { status: 'success' };
 }
 
 export async function cancelOrderAction(
@@ -568,7 +624,6 @@ export async function finalizeOrderPricingAction(
     const finalized = await finalizeOrderPricing(command, actor);
     revalidatePath('/orders');
     revalidatePath(`/orders/${finalized.orderId}`);
-    revalidatePath('/foreman/scheduling');
     revalidatePath('/owner/order-changes');
     return {
       status: 'success',
@@ -577,6 +632,7 @@ export async function finalizeOrderPricingAction(
       packagingAmount: finalized.packagingAmount,
       processingAmount: finalized.processingAmount,
       totalAmount: finalized.totalAmount,
+      confirmedFee: finalized.confirmedFee,
     };
   } catch (error) {
     if (error instanceof OrderPricingReviewError) {

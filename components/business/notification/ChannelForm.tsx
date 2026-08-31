@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PendingButton } from '@/components/ui-business';
@@ -110,18 +111,18 @@ export function ChannelForm(props: Props) {
         </p>
       </div>
 
-      <div className="flex items-center gap-2">
-        <input
+      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+        <Checkbox
           id="isActive"
           name="isActive"
-          type="checkbox"
           defaultChecked={initial?.isActive ?? true}
-          className="h-4 w-4 rounded border-input"
+          disabled={pending}
+          aria-label="启用"
         />
-        <Label htmlFor="isActive" className="cursor-pointer">
+        <span className="min-w-0 py-2">
           启用（关闭后该群暂停接收推送，但保留配置）
-        </Label>
-      </div>
+        </span>
+      </label>
 
       {state?.status === 'error' ? (
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">

@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 import Decimal from 'decimal.js';
 import {
-  ExternalSalesChargeWorkspace,
+  RulePriceWorkbench,
   type ExternalSalesChargeWorkspaceItem,
-} from '@/components/business/price/ExternalSalesChargeWorkspace';
+} from '@/components/business/price/RulePriceWorkbench';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -110,10 +110,9 @@ export default async function ExternalSalesPriceVisualFixturePage({
         title="收费工作台视觉验收"
         subtitle="仅在非生产环境渲染的无写入回归页。"
       />
-      <ExternalSalesChargeWorkspace
+      <RulePriceWorkbench
         purpose="processing"
         workspaceStatus="CURRENT"
-        purposeHrefs={{ processing: '#', logistics: '#' }}
         searchAction={FIXTURE_PATH}
         hiddenSearchFields={{ state }}
         filters={{

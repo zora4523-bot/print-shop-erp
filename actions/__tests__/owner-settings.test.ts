@@ -47,7 +47,6 @@ function formWith(overrides: Record<string, string> = {}): FormData {
     cdr_link_expire_hours: '24',
     outsource_overdue_days: '1',
     report_qty_max_multiple: '3',
-    worker_self_claim_enabled: 'false',
   };
   for (const key of SETTING_KEYS) {
     const value = overrides[key] ?? valid[key];
@@ -87,7 +86,6 @@ describe('updateSettingsAction', () => {
         cdr_link_expire_hours: { hours: 24 },
         outsource_overdue_days: { days: 1 },
         report_qty_max_multiple: { multiple: 3 },
-        worker_self_claim_enabled: { enabled: false },
       },
       ACTOR,
     );

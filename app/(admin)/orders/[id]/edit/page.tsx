@@ -8,6 +8,7 @@ import {
 } from '@/lib/order/editable-fields';
 import { EditOrderForm } from '@/components/business/order/EditOrderForm';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
+import { Role } from '@/generated/prisma/enums';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -21,6 +22,10 @@ export async function generateMetadata({ params }: PageProps) {
 
 export default async function EditOrderPage({ params }: PageProps) {
   const { user } = await requireSession();
+  // WORKER can own an assigned-order read scope, but never has order:create
+  // permission. Reject the page before loading or rendering an edit form; the
+  // action layer remains the final mutation gate.
+  if (user.role === Role.WORKER) notFound();
   const { id } = await params;
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   if (!order) notFound();

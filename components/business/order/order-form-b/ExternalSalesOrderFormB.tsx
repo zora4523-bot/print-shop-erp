@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -23,7 +24,7 @@ import {
 } from '@/generated/prisma/enums';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
 import { cn } from '@/lib/utils';
-import type { PendingDesignImage } from '../PendingDesignImages';
+import type { PendingDesignImage } from '../pending-design-image';
 import { formatDesignFileSize } from '../design-file-display';
 import { LocalDesignImagePreview } from '../LocalDesignImagePreview';
 import { prepareDesignFile } from '../design-upload-client';
@@ -63,7 +64,18 @@ const LAMINATION_OPTIONS = [
   { value: OrderLamination.LASER, label: '雷射' },
 ] as const;
 
-export type ExternalSalesOrderFormBErrors = {
+function StickyOrderFormRail({ rail }: { rail: ReactNode }) {
+  return (
+    <aside
+      data-slot="order-form-rail"
+      className="min-w-0 @min-[881px]:sticky @min-[881px]:top-[70px]"
+    >
+      {rail}
+    </aside>
+  );
+}
+
+export type OrderFormBErrors = {
   summary?: readonly string[];
   customName?: string;
   receiverName?: string;
@@ -84,7 +96,7 @@ export type ExternalSalesOrderFormBErrors = {
   )[];
 };
 
-export type ExternalSalesOrderFormBProps = {
+export type OrderFormBProps = {
   values: {
     customName: string;
     receiverName: string;
@@ -92,6 +104,19 @@ export type ExternalSalesOrderFormBProps = {
     receiverAddress: string;
     isSfCollect: boolean;
   };
+  title?: string;
+  settlementLabel?: string;
+  customNameRequired?: boolean;
+  designImageRequired?: boolean;
+  receiverNameRequired?: boolean;
+  receiverPhoneRequired?: boolean;
+  orderExtras?: ReactNode;
+  materialExtras?: ReactNode;
+  pricingExtras?: ReactNode;
+  shippingExtras?: ReactNode;
+  afterShipping?: ReactNode;
+  allowManualWeight?: boolean;
+  allowCustomSize?: boolean;
   items: CreateOrderInput['items'];
   itemFields: readonly { id: string }[];
   activeIndex: number;
@@ -110,13 +135,15 @@ export type ExternalSalesOrderFormBProps = {
     label: string;
     disabled?: boolean;
   }[];
+  foilOptions?: readonly OrderFoilSwatchOption[];
   disabled?: boolean;
   savedLabel: string;
-  fieldErrors?: ExternalSalesOrderFormBErrors;
+  fieldErrors?: OrderFormBErrors;
   rail: ReactNode;
   onActiveIndexChange: (index: number) => void;
   onAdd: () => void;
   onDuplicate: (index: number) => void;
+  onRemove: (index: number) => void;
   onCustomNameChange: (value: string) => void;
   onRouteChange: (value: OrderItemPricingRoute) => void;
   onPaperChange: (value: string) => void;
@@ -312,6 +339,7 @@ function DesignFileBox({
   fileType,
   entry,
   disabled,
+  required = false,
   error,
   onFile,
   onRemove,
@@ -320,12 +348,15 @@ function DesignFileBox({
   fileType: DesignFileType;
   entry?: PendingDesignImage;
   disabled?: boolean;
+  required?: boolean;
   error?: string;
   onFile: (file: File) => void;
   onRemove: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const image = fileType === DesignFileType.IMAGE;
+  const errorId = `order-style-${itemNumber}-${image ? 'image' : 'cdr'}-error`;
+  const fileLabel = `第 ${itemNumber} 款 ${image ? '设计图' : 'CDR 文件'}`;
 
   const openFilePicker = () => {
     if (!disabled) inputRef.current?.click();
@@ -339,24 +370,21 @@ function DesignFileBox({
 
   const uploadContent = (
     <>
-      <div
-        aria-hidden="true"
-        className={cn(
-          'flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-[0.625rem] font-bold text-muted-foreground',
-          image && 'bg-destructive text-destructive-foreground',
-        )}
-      >
-        {image && entry ? (
-          <LocalDesignImagePreview
-            image={entry.prepared}
-            alt={`第 ${itemNumber} 款设计图预览：${entry.prepared.file.name}`}
-          />
-        ) : image ? (
-          '图'
-        ) : (
-          'CDR'
-        )}
-      </div>
+      {entry ? (
+        <div
+          data-slot="design-file-marker"
+          className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-[0.625rem] font-bold text-muted-foreground"
+        >
+          {image ? (
+            <LocalDesignImagePreview
+              image={entry.prepared}
+              alt={`第 ${itemNumber} 款设计图预览：${entry.prepared.file.name}`}
+            />
+          ) : (
+            <span>CDR</span>
+          )}
+        </div>
+      ) : null}
       <div className="min-w-0 flex-1">
         <p className="text-[0.8125rem] font-bold leading-snug">
           {entry
@@ -366,7 +394,7 @@ function DesignFileBox({
             : image
               ? '粘贴或上传设计图'
               : '上传 CDR 文件'}
-          {image && !entry ? <RequiredMark /> : null}
+          {required && !entry ? <RequiredMark /> : null}
         </p>
         {entry ? (
           <p
@@ -389,8 +417,10 @@ function DesignFileBox({
         className="sr-only"
         tabIndex={-1}
         disabled={disabled}
+        aria-required={required}
         aria-invalid={Boolean(error)}
-        aria-label={`第 ${itemNumber} 款${image ? '设计图' : 'CDR 文件'}`}
+        aria-describedby={error ? errorId : undefined}
+        aria-label={fileLabel}
         accept={
           image
             ? '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp'
@@ -421,6 +451,9 @@ function DesignFileBox({
               type="button"
               size="xs"
               variant="outline"
+              aria-label={`替换${fileLabel}`}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
               disabled={disabled}
               onClick={(event) => {
                 event.stopPropagation();
@@ -433,6 +466,7 @@ function DesignFileBox({
               type="button"
               size="xs"
               variant="outline"
+              aria-label={`移除${fileLabel}`}
               className="border-destructive/20 text-destructive hover:bg-destructive/5 hover:text-destructive"
               disabled={disabled}
               onClick={(event) => {
@@ -450,10 +484,12 @@ function DesignFileBox({
           variant="outline"
           disabled={disabled}
           data-invalid={Boolean(error)}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
           aria-label={
             image
-              ? '粘贴、拖放或选择设计图'
-              : '拖放或选择 CDR 文件'
+              ? `粘贴、拖放或选择${fileLabel}`
+              : `拖放或选择${fileLabel}`
           }
           className={cn(
             'flex min-h-[5.375rem] w-full cursor-pointer items-center justify-start gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-card p-3.5 text-left outline-none transition-colors hover:border-foreground hover:bg-card hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
@@ -480,7 +516,7 @@ function DesignFileBox({
           </span>
         </Button>
       )}
-      <FieldError>{error}</FieldError>
+      <FieldError id={errorId}>{error}</FieldError>
     </div>
   );
 }
@@ -568,6 +604,7 @@ function FoilSideFields({
   disabled,
   error,
   idStem,
+  foilOptions,
   onFoilSidesChange,
   onBackFoilToggle,
 }: {
@@ -577,6 +614,7 @@ function FoilSideFields({
   disabled?: boolean;
   error?: string;
   idStem: string;
+  foilOptions: readonly OrderFoilSwatchOption[];
   onFoilSidesChange: (front: string[], back: string[]) => void;
   onBackFoilToggle: (enabled: boolean) => void;
 }) {
@@ -591,9 +629,9 @@ function FoilSideFields({
           id={`${idStem}-foil-front`}
           label="烫金颜色"
           value={front}
-          options={FOIL_OPTIONS}
+          options={foilOptions}
           maxSelections={maxSelections}
-          minimumSelections={1}
+          minimumSelections={0}
           disabled={disabled}
           error={error}
           onChange={(nextFront) => onFoilSidesChange(nextFront, [])}
@@ -612,40 +650,31 @@ function FoilSideFields({
       <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
         烫金颜色
       </legend>
-      <div className="rounded-xl border bg-card p-3.5">
+      <div className="rounded-xl bg-muted/30 p-3.5">
         <div className="mb-2.5 flex items-center gap-2">
-          <span className="rounded-md bg-foreground px-2 py-1 text-[0.6875rem] font-extrabold tracking-[0.12em] text-background">
+          <span className="text-sm font-semibold text-foreground">
             正面
-          </span>
-          <span className="text-xs font-semibold text-muted-foreground">
-            {front.join(' + ') || '未选'}
           </span>
         </div>
         <OrderFoilSwatchPicker
           id={`${idStem}-foil-front`}
           label=""
           value={front}
-          options={FOIL_OPTIONS}
+          options={foilOptions}
           maxSelections={maxSelections}
-          minimumSelections={1}
+          minimumSelections={0}
           disabled={disabled}
           onChange={(nextFront) => onFoilSidesChange(nextFront, back)}
         />
       </div>
       <div
         className={cn(
-          'mt-2 rounded-xl border bg-card p-3.5',
-          !backEnabled && 'border-dashed bg-transparent',
+          'mt-2 rounded-xl bg-muted/30 p-3.5',
+          !backEnabled && 'bg-muted/15',
         )}
       >
         <div className={cn('flex items-center gap-2', backEnabled && 'mb-2.5')}>
-          <span
-            className={cn(
-              'rounded-md border px-2 py-1 text-[0.6875rem] font-extrabold tracking-[0.12em] text-muted-foreground',
-              backEnabled &&
-                'border-foreground bg-foreground text-background',
-            )}
-          >
+          <span className="text-sm font-semibold text-foreground">
             反面
           </span>
           <span className="text-xs font-semibold text-muted-foreground">
@@ -658,14 +687,10 @@ function FoilSideFields({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="ghost"
             aria-pressed={backEnabled}
             disabled={disabled}
-            className={cn(
-              'ml-auto',
-              backEnabled &&
-                'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background',
-            )}
+            className="ml-auto text-xs font-semibold"
             onClick={() => onBackFoilToggle(!backEnabled)}
           >
             {backEnabled ? '取消反面' : '＋ 加烫反面'}
@@ -676,9 +701,9 @@ function FoilSideFields({
             id={`${idStem}-foil-back`}
             label=""
             value={back}
-            options={FOIL_OPTIONS}
+            options={foilOptions}
             maxSelections={maxSelections}
-            minimumSelections={1}
+            minimumSelections={0}
             disabled={disabled}
             onChange={(nextBack) => onFoilSidesChange(front, nextBack)}
           />
@@ -740,8 +765,21 @@ function SpecialTechnique({
   );
 }
 
-export function ExternalSalesOrderFormB({
+export function OrderFormB({
   values,
+  title = '新建工单',
+  settlementLabel,
+  customNameRequired = true,
+  designImageRequired = true,
+  receiverNameRequired = false,
+  receiverPhoneRequired = true,
+  orderExtras,
+  materialExtras,
+  pricingExtras,
+  shippingExtras,
+  afterShipping,
+  allowManualWeight = true,
+  allowCustomSize = true,
   items,
   itemFields,
   activeIndex,
@@ -751,6 +789,7 @@ export function ExternalSalesOrderFormB({
   paperKey,
   weightOptions,
   specificationOptions,
+  foilOptions = FOIL_OPTIONS,
   disabled = false,
   savedLabel,
   fieldErrors,
@@ -758,6 +797,7 @@ export function ExternalSalesOrderFormB({
   onActiveIndexChange,
   onAdd,
   onDuplicate,
+  onRemove,
   onCustomNameChange,
   onRouteChange,
   onPaperChange,
@@ -778,7 +818,7 @@ export function ExternalSalesOrderFormB({
   onReceiverNameChange,
   onReceiverPhoneChange,
   onSfCollectChange,
-}: ExternalSalesOrderFormBProps) {
+}: OrderFormBProps) {
   const uid = useId().replaceAll(':', '');
   const safeActiveIndex = Math.min(
     Math.max(0, activeIndex),
@@ -794,8 +834,14 @@ export function ExternalSalesOrderFormB({
   const cdrEntry = queue.find(
     (entry) => entry.prepared.fileType === DesignFileType.CDR,
   );
-  const [imageFileError, setImageFileError] = useState<string | null>(null);
-  const [cdrFileError, setCdrFileError] = useState<string | null>(null);
+  const [imageFileError, setImageFileError] = useState<{
+    fieldId: string;
+    message: string;
+  } | null>(null);
+  const [cdrFileError, setCdrFileError] = useState<{
+    fieldId: string;
+    message: string;
+  } | null>(null);
   const [customNameOverride, setCustomNameOverride] = useState<string | null>(
     null,
   );
@@ -821,6 +867,8 @@ export function ExternalSalesOrderFormB({
       if (!root) return;
       const directSelector = message.includes('工单名称')
         ? '[id$="-custom-name"]'
+        : message.includes('收件人')
+          ? '[id$="-receiver-name"]'
         : message.includes('收货电话') || message.includes('手机号')
           ? '[id$="-receiver-phone"]'
           : message.includes('收货地址') || message.includes('地址')
@@ -870,10 +918,12 @@ export function ExternalSalesOrderFormB({
     const prepared = prepareDesignFile(file, {
       fallbackStem: `style-${safeActiveIndex + 1}-design-${Date.now()}`,
     });
-    const setError =
+    const setErrorState =
       expectedType === DesignFileType.IMAGE
         ? setImageFileError
         : setCdrFileError;
+    const setError = (message: string | null) =>
+      setErrorState(message ? { fieldId: field.id, message } : null);
     if (!prepared.ok) {
       setError(prepared.message);
       return;
@@ -898,8 +948,8 @@ export function ExternalSalesOrderFormB({
   return (
     <div
       ref={rootRef}
-      data-slot="external-sales-order-form-b"
-      className="mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums"
+      data-slot="order-form-b"
+      className="@container mx-auto w-full max-w-[1180px] px-0 pb-10 font-sans tabular-nums"
       onPaste={(event) => {
         const target = event.target as HTMLElement;
         if (
@@ -917,13 +967,15 @@ export function ExternalSalesOrderFormB({
         putFile(file, DesignFileType.IMAGE);
       }}
     >
-      <header className="mb-[1.125rem]">
+      <header className="mb-[1.125rem] flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[1.3125rem] font-extrabold tracking-tight">
-          B · 单页速录
+          {title}
         </h1>
-        <p className="mt-1 max-w-[62ch] text-[0.8125rem] leading-relaxed text-muted-foreground">
-          一款的全部字段一屏展开，右侧价格实时跟着变。熟练销售录单最快，桌面优先。
-        </p>
+        {settlementLabel ? (
+          <span className="rounded-full border px-3 py-1 text-[0.71875rem] font-semibold text-muted-foreground">
+            {settlementLabel}
+          </span>
+        ) : null}
       </header>
 
       <nav
@@ -962,15 +1014,25 @@ export function ExternalSalesOrderFormB({
         >
           ＋ 加款
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className="h-auto min-h-8 rounded-[9px] border-dashed px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-muted-foreground"
+          onClick={() => onDuplicate(safeActiveIndex)}
+        >
+          ⧉ 复制当前
+        </Button>
         {itemFields.length > 1 ? (
           <Button
             type="button"
             variant="outline"
+            aria-label={`删除第 ${safeActiveIndex + 1} 款`}
             disabled={disabled}
-            className="h-auto min-h-8 rounded-[9px] border-dashed px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-muted-foreground"
-            onClick={() => onDuplicate(safeActiveIndex)}
+            className="h-auto min-h-8 rounded-[9px] px-3.5 py-1.5 text-[0.8125rem] font-extrabold text-destructive hover:bg-destructive/5 hover:text-destructive"
+            onClick={() => onRemove(safeActiveIndex)}
           >
-            ⧉ 复制当前
+            删除当前
           </Button>
         ) : null}
         <span className="ml-auto flex items-center gap-1.5 text-[0.71875rem] font-semibold text-muted-foreground">
@@ -979,8 +1041,14 @@ export function ExternalSalesOrderFormB({
         </span>
       </nav>
 
-      <div className="grid grid-cols-1 items-start gap-[1.375rem] min-[881px]:grid-cols-[minmax(0,1fr)_310px]">
-        <div className="min-w-0 rounded-[14px] border bg-card p-5">
+      <div
+        data-slot="order-form-layout"
+        className="grid grid-cols-1 items-start gap-[1.375rem] @min-[881px]:grid-cols-[minmax(0,1fr)_310px]"
+      >
+        <div
+          data-slot="order-form-editor"
+          className="@container min-w-0 rounded-[14px] border bg-card p-5"
+        >
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (
             <div
               role="alert"
@@ -1008,14 +1076,17 @@ export function ExternalSalesOrderFormB({
 
           <Group title="工单" first>
             <div>
-              <FieldLabel htmlFor={`${uid}-custom-name`} required>
+              <FieldLabel
+                htmlFor={`${uid}-custom-name`}
+                required={customNameRequired}
+              >
                 工单名称
               </FieldLabel>
           <Input
             id={`${uid}-custom-name`}
             value={customNameOverride ?? values.customName}
-                required
-                aria-required="true"
+                required={customNameRequired}
+                aria-required={customNameRequired}
                 aria-invalid={Boolean(fieldErrors?.customName)}
                 aria-describedby={
                   fieldErrors?.customName
@@ -1035,6 +1106,7 @@ export function ExternalSalesOrderFormB({
                 {fieldErrors?.customName}
               </FieldError>
             </div>
+            {orderExtras}
           </Group>
 
           <Group title={`工艺 · 第 ${safeActiveIndex + 1} 款`}>
@@ -1085,6 +1157,7 @@ export function ExternalSalesOrderFormB({
                 disabled={disabled}
                 error={itemErrors?.foilColors}
                 idStem={`${uid}-style-${safeActiveIndex}`}
+                foilOptions={foilOptions}
                 onFoilSidesChange={onFoilSidesChange}
                 onBackFoilToggle={onBackFoilToggle}
               />
@@ -1101,6 +1174,7 @@ export function ExternalSalesOrderFormB({
           </Group>
 
           <Group title="材料">
+            {materialExtras}
             <OrderPaperSwatchPicker
               id={`${uid}-paper`}
               value={paperKey}
@@ -1123,8 +1197,9 @@ export function ExternalSalesOrderFormB({
                 error={itemErrors?.weight}
                 onChange={onWeightChange}
               />
-              {item.pricingRoute ===
-              OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
+              {allowManualWeight &&
+              item.pricingRoute ===
+                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
                 <div className="mt-2">
                   <div className="flex max-w-[11rem] items-center gap-2">
                     <Input
@@ -1173,17 +1248,15 @@ export function ExternalSalesOrderFormB({
                   迷你封仅珠光纸艳闪可做
                 </p>
               ) : null}
-              {item.pricingRoute ===
-              OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-                <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.8125rem] font-semibold">
-                  <input
-                    type="checkbox"
-                    className="size-4! min-h-4! min-w-4! shrink-0"
+              {allowCustomSize &&
+              item.pricingRoute ===
+                OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
+                <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
                     checked={customSizeSelected}
                     disabled={disabled}
-                    onChange={(event) =>
-                      onCustomSizeChange(event.target.checked)
-                    }
+                    aria-label="改尺寸（转管理员终价）"
+                    onCheckedChange={onCustomSizeChange}
                   />
                   改尺寸（转管理员终价）
                 </label>
@@ -1192,7 +1265,7 @@ export function ExternalSalesOrderFormB({
           </Group>
 
           <Group title="数量与包装">
-            <div className="grid grid-cols-1 gap-3.5 min-[560px]:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <div>
                 <FieldLabel htmlFor={`${uid}-quantity`} required>
                   数量
@@ -1270,19 +1343,26 @@ export function ExternalSalesOrderFormB({
             </div>
           </Group>
 
+          {pricingExtras}
+
           <Group title="文件">
             <fieldset>
               <legend className="mb-2 text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground">
                 设计文件
-                <RequiredMark />
+                {designImageRequired ? <RequiredMark /> : null}
               </legend>
-              <div className="grid grid-cols-1 gap-3 min-[560px]:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
                 <DesignFileBox
                   itemNumber={safeActiveIndex + 1}
                   fileType={DesignFileType.IMAGE}
                   entry={imageEntry}
                   disabled={disabled}
-                  error={imageFileError ?? itemErrors?.designImage}
+                  required={designImageRequired}
+                  error={
+                    (imageFileError?.fieldId === field.id
+                      ? imageFileError.message
+                      : undefined) ?? itemErrors?.designImage
+                  }
                   onFile={(file) => putFile(file, DesignFileType.IMAGE)}
                   onRemove={() =>
                     onPendingDesignsChange(
@@ -1299,7 +1379,11 @@ export function ExternalSalesOrderFormB({
                   fileType={DesignFileType.CDR}
                   entry={cdrEntry}
                   disabled={disabled}
-                  error={cdrFileError ?? undefined}
+                  error={
+                    cdrFileError?.fieldId === field.id
+                      ? cdrFileError.message
+                      : undefined
+                  }
                   onFile={(file) => putFile(file, DesignFileType.CDR)}
                   onRemove={() =>
                     onPendingDesignsChange(
@@ -1316,6 +1400,7 @@ export function ExternalSalesOrderFormB({
           </Group>
 
           <Group title="收货">
+            {shippingExtras}
             <div>
               <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
                 收货地址
@@ -1345,6 +1430,11 @@ export function ExternalSalesOrderFormB({
                     className="text-[0.65625rem] font-bold tracking-[0.14em] text-muted-foreground"
                   >
                     收件人
+                    {receiverNameRequired ? (
+                      <span aria-hidden="true" className="ml-0.5 text-destructive">
+                        *
+                      </span>
+                    ) : null}
                   </label>
                   <Input
                     key={`${uid}-receiver-name-${values.receiverAddress}`}
@@ -1353,6 +1443,8 @@ export function ExternalSalesOrderFormB({
                       values.receiverName || parsedReceiver.receiverName || ''
                     }
                     aria-invalid={Boolean(fieldErrors?.receiverName)}
+                    required={receiverNameRequired}
+                    aria-required={receiverNameRequired}
                     disabled={disabled}
                     className="h-7 border-0 bg-transparent px-0 font-semibold shadow-none focus-visible:ring-0"
                     placeholder="请填写收件人"
@@ -1379,8 +1471,8 @@ export function ExternalSalesOrderFormB({
                     id={`${uid}-receiver-phone`}
                     type="tel"
                     defaultValue={receiverPhoneInitialValue}
-                    required
-                    aria-required="true"
+                    required={receiverPhoneRequired}
+                    aria-required={receiverPhoneRequired}
                     aria-invalid={Boolean(fieldErrors?.receiverPhone)}
                     disabled={disabled}
                     className="h-7 w-full min-w-0 border-0 bg-transparent px-0 py-1 font-mono text-sm font-semibold outline-none placeholder:text-muted-foreground focus-visible:ring-0 disabled:opacity-50"
@@ -1417,22 +1509,20 @@ export function ExternalSalesOrderFormB({
               </div>
             ) : null}
 
-            <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.8125rem] font-semibold">
-              <input
-                type="checkbox"
-                className="size-4! min-h-4! min-w-4! shrink-0"
-                checked={values.isSfCollect}
+            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-[0.8125rem] font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
+                checked={values.isSfCollect ?? false}
                 disabled={disabled}
-                onChange={(event) => onSfCollectChange(event.target.checked)}
+                aria-label="顺丰到付（本单不计快递费）"
+                onCheckedChange={onSfCollectChange}
               />
               顺丰到付（本单不计快递费）
             </label>
           </Group>
+          {afterShipping}
         </div>
 
-        <aside className="min-w-0 min-[881px]:sticky min-[881px]:top-[70px]">
-          {rail}
-        </aside>
+        <StickyOrderFormRail rail={rail} />
       </div>
     </div>
   );

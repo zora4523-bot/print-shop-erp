@@ -148,7 +148,7 @@ describe('listQueryObservabilityReadiness', () => {
     dbMock.$queryRaw.mockResolvedValue([
       {
         candidateKey: 'product-search-index-advisor',
-        routePath: '/owner/products?q=...',
+        routePath: '/owner/rules/stock-skus?q=...',
         businessArea: '商品搜索',
         suggestedExtension: 'index_advisor',
         representativeSql: 'SELECT id FROM public."Product";',

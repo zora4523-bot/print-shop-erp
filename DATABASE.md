@@ -98,6 +98,17 @@ DATABASE_URL="$FRESH_DATABASE_URL" pnpm exec prisma migrate status
 DATABASE_URL="$FRESH_DATABASE_URL" pnpm db:seed
 ```
 
+仓库还提供一个不会创建或删除数据库的完整迁移链门禁。它会先拒绝非空库，再运行
+`migrate deploy` / `migrate status` 并检查关键版本后置条件：
+
+```bash
+FRESH_DATABASE_URL="$FRESH_DATABASE_URL" \
+FRESH_DATABASE_CONFIRM_DATABASE="<database-name>" \
+pnpm test:migrations:fresh
+```
+
+该命令不会自动 seed、drop 或 reset；数据库生命周期仍由 DBA 在命令外管理。
+
 随后运行与本次 migration 相关的写路径、约束和 E2E。仓库 migration 数量会增长，门禁应通过目录和 `migrate status` 动态确认，不把某个旧数字长期复制在多份文档中。
 
 ## 扩展与降级

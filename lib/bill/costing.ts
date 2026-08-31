@@ -2,6 +2,9 @@ import Decimal from 'decimal.js';
 import { OrderCostCategory } from '../../generated/prisma/enums';
 
 type CostOrder = {
+  productionOperations?: Array<{
+    reports: Array<{ amount: Decimal.Value }>;
+  }>;
   items: Array<{
     tasks: Array<{ pieceworkAmount: Decimal.Value }>;
   }>;
@@ -60,10 +63,24 @@ const AUTOMATIC_COST_CATEGORIES = new Set<OrderCostCategory>([
 
 function directCost(order: CostOrder) {
   const completedTasks = order.items.flatMap((item) => item.tasks);
-  const automaticPiecework = completedTasks.reduce(
+  const legacyTaskPiecework = completedTasks.reduce(
     (sum, task) => sum.plus(new Decimal(task.pieceworkAmount)),
     new Decimal(0),
   );
+  // Generation-exclusive read: an order with new operations is costed only
+  // from immutable ProductionReport snapshots (including signed reversals).
+  // Legacy ProductionTask amounts remain the historical source only when the
+  // order has no new-generation operation at all.
+  const hasOperationLedger = (order.productionOperations?.length ?? 0) > 0;
+  const operationPiecework = (order.productionOperations ?? [])
+    .flatMap((operation) => operation.reports)
+    .reduce(
+      (sum, report) => sum.plus(new Decimal(report.amount)),
+      new Decimal(0),
+    );
+  const automaticPiecework = hasOperationLedger
+    ? operationPiecework
+    : legacyTaskPiecework;
   const postedOutsourceOrders = order.outsourceOrders.filter(
     (entry) => entry.amount !== null,
   );
@@ -76,7 +93,7 @@ function directCost(order: CostOrder) {
   // cost evidence. Suppress them only when the corresponding authoritative
   // ledger actually has evidence; otherwise retain them as the historical
   // fallback instead of silently understating an old bill.
-  const hasAutomaticPiecework = completedTasks.length > 0;
+  const hasAutomaticPiecework = hasOperationLedger || completedTasks.length > 0;
   const hasAutomaticOutsource = postedOutsourceOrders.length > 0;
   const legacyPiecework = order.costEntries.reduce(
     (sum, entry) =>

@@ -17,7 +17,6 @@ const { dbMock } = vi.hoisted(() => {
       update: ReturnType<typeof vi.fn>;
       count: ReturnType<typeof vi.fn>;
     };
-    craft: { findMany: ReturnType<typeof vi.fn> };
     salaryRule: { findFirst: ReturnType<typeof vi.fn> };
     salaryPeriod: {
       findFirst: ReturnType<typeof vi.fn>;
@@ -33,7 +32,6 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       count: vi.fn(),
     },
-    craft: { findMany: vi.fn() },
     salaryRule: { findFirst: vi.fn() },
     salaryPeriod: { findFirst: vi.fn(), create: vi.fn() },
     // $executeRaw is only used to acquire the advisory lock; no return value.
@@ -53,6 +51,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   listUsers,
+  listUsersPage,
   createUser,
   updateUser,
   setUserActive,
@@ -70,7 +69,6 @@ const makeUser = (over: Partial<{
   role: Role;
   workerType: WorkerType | null;
   machineType: MachineType | null;
-  machineCapabilities: MachineType[];
   isActive: boolean;
 }> = {}) => ({
   id: 'user-1',
@@ -80,8 +78,6 @@ const makeUser = (over: Partial<{
   role: Role.SALES,
   workerType: null,
   machineType: null,
-  machineCapabilities: [],
-  craftCapabilities: [],
   isActive: true,
   createdAt: new Date('2026-04-22T00:00:00Z'),
   updatedAt: new Date('2026-04-22T00:00:00Z'),
@@ -90,7 +86,6 @@ const makeUser = (over: Partial<{
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.user)) fn.mockReset();
-  dbMock.craft.findMany.mockReset().mockResolvedValue([]);
   dbMock.salaryRule.findFirst.mockReset().mockImplementation(
     async (args: { where: { ruleKey: string } }) => {
       if (args.where.ruleKey === 'CS_BASE_SALARY') {
@@ -112,12 +107,17 @@ beforeEach(() => {
 });
 
 describe('listUsers', () => {
-  it('orders by isActive desc then createdAt asc', async () => {
+  it('orders active users deterministically when timestamps tie', async () => {
     dbMock.user.findMany.mockResolvedValue([]);
     await listUsers();
     expect(dbMock.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [
+          { isActive: 'desc' },
+          { createdAt: 'asc' },
+          { username: 'asc' },
+          { id: 'asc' },
+        ],
       }),
     );
   });
@@ -128,6 +128,45 @@ describe('listUsers', () => {
     const call = dbMock.user.findMany.mock.calls[0][0];
     expect(call.select).toBeDefined();
     expect(call.select.password).toBeUndefined();
+  });
+
+  it('searches and bounds the account-management page at the database', async () => {
+    dbMock.user.count.mockResolvedValue(45);
+    dbMock.user.findMany.mockResolvedValue([makeUser()]);
+
+    const result = await listUsersPage({
+      q: '  师傅03  ',
+      page: 3,
+      pageSize: 20,
+    });
+
+    const where = {
+      OR: [
+        { username: { contains: '师傅03', mode: 'insensitive' } },
+        { displayName: { contains: '师傅03', mode: 'insensitive' } },
+        { phone: { contains: '师傅03', mode: 'insensitive' } },
+      ],
+    };
+    expect(dbMock.user.count).toHaveBeenCalledWith({ where });
+    expect(dbMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where,
+        skip: 40,
+        take: 20,
+        orderBy: [
+          { isActive: 'desc' },
+          { createdAt: 'asc' },
+          { username: 'asc' },
+          { id: 'asc' },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({
+      total: 45,
+      page: 3,
+      pageSize: 20,
+      pageCount: 3,
+    });
   });
 });
 
@@ -196,18 +235,7 @@ describe('createUser', () => {
     expect(data.machineType).toBe(MachineType.WINDMILL);
   });
 
-  it('stores multiple machine capabilities and validated craft capabilities atomically', async () => {
-    dbMock.craft.findMany.mockResolvedValue([
-      {
-        id: 'craft-foil',
-        name: '烫金',
-        isActive: true,
-        isOutsource: false,
-        defaultWorkerType: WorkerType.MACHINE,
-        defaultMachineType: MachineType.WINDMILL,
-        inHouseMachineTypes: [],
-      },
-    ]);
+  it('does not write retired worker-to-craft capability metadata', async () => {
     dbMock.user.create.mockResolvedValue(
       makeUser({ role: Role.WORKER }),
     );
@@ -219,30 +247,12 @@ describe('createUser', () => {
       role: Role.WORKER,
       workerType: WorkerType.MACHINE,
       machineType: MachineType.HAND_PRESS,
-      machineCapabilities: [
-        MachineType.HAND_PRESS,
-        MachineType.WINDMILL,
-      ],
-      craftCapabilities: ['craft-foil'],
     });
 
-    expect(dbMock.craft.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: { in: ['craft-foil'] } },
-      }),
-    );
-    expect(dbMock.user.create.mock.calls[0][0].data).toEqual(
-      expect.objectContaining({
-        machineType: MachineType.HAND_PRESS,
-        machineCapabilities: [
-          MachineType.HAND_PRESS,
-          MachineType.WINDMILL,
-        ],
-        craftCapabilities: {
-          create: [{ craftId: 'craft-foil' }],
-        },
-      }),
-    );
+    const data = dbMock.user.create.mock.calls[0][0].data;
+    expect(data.machineType).toBe(MachineType.HAND_PRESS);
+    expect(data).not.toHaveProperty('machineCapabilities');
+    expect(data).not.toHaveProperty('craftCapabilities');
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
@@ -448,6 +458,8 @@ describe('updateUser invariants', () => {
     await updateUser('sales-1', { displayName: 'Y', role: Role.SALES }, baseActor);
     const data = dbMock.user.update.mock.calls[0][0].data as Record<string, unknown>;
     expect('isActive' in data).toBe(false);
+    expect(data).not.toHaveProperty('machineCapabilities');
+    expect(data).not.toHaveProperty('craftCapabilities');
   });
 
   it('allows editing another active user when invariants are fine', async () => {

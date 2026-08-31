@@ -92,3 +92,72 @@ export function OrdersListTableSkeleton({
     </div>
   );
 }
+
+export function SalesOrdersListContentSkeleton() {
+  return (
+    <section aria-busy="true" aria-live="polite" className="space-y-6">
+      <span className="sr-only">正在加载销售工单数据</span>
+      <SalesOrdersFiltersSkeleton announce={false} />
+      <SalesOrdersListSkeleton announce={false} />
+      <SlowLoadingHint />
+    </section>
+  );
+}
+
+export function SalesOrdersFiltersSkeleton({
+  announce = true,
+}: {
+  announce?: boolean;
+}) {
+  return (
+    <div
+      aria-busy="true"
+      aria-live={announce ? 'polite' : undefined}
+      className="space-y-3 rounded-xl border bg-card p-4 shadow-sm"
+    >
+      {announce ? <span className="sr-only">正在加载销售工单筛选</span> : null}
+      <div className="space-y-2" aria-hidden="true">
+        <Skeleton className="h-5 w-24 motion-reduce:animate-none" />
+        <Skeleton className="h-4 w-44 motion-reduce:animate-none" />
+      </div>
+      <div className="flex gap-2 overflow-hidden" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <Skeleton
+            key={index}
+            className="h-9 w-20 shrink-0 rounded-full motion-reduce:animate-none"
+          />
+        ))}
+      </div>
+      <Skeleton
+        className="h-10 w-full rounded-full motion-reduce:animate-none"
+        aria-hidden="true"
+      />
+      {announce ? <SlowLoadingHint /> : null}
+    </div>
+  );
+}
+
+export function SalesOrdersListSkeleton({
+  announce = true,
+}: {
+  announce?: boolean;
+}) {
+  return (
+    <div
+      aria-busy="true"
+      aria-live={announce ? 'polite' : undefined}
+      className="space-y-2 rounded-xl border bg-card p-3 shadow-sm"
+    >
+      {announce ? <span className="sr-only">正在加载销售工单列表</span> : null}
+      <div className="space-y-2" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => (
+          <Skeleton
+            key={index}
+            className="h-32 w-full rounded-xl motion-reduce:animate-none"
+          />
+        ))}
+      </div>
+      {announce ? <SlowLoadingHint /> : null}
+    </div>
+  );
+}

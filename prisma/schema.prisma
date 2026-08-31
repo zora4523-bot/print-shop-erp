@@ -113,6 +113,10 @@ model User {
   resolvedTaskDisputes      ProductionTaskDispute[]     @relation("ProductionTaskDisputeResolver")
   confirmedOrderPricing     Order[]                     @relation("OrderPricingConfirmer")
   createdPricingRevisions   OrderPricingRevision[]      @relation("OrderPricingRevisionCreator")
+  publishedPieceworkBooks   PieceworkPriceBook[]        @relation("PieceworkPriceBookPublisher")
+  productionReports         ProductionReport[]          @relation("ProductionReportReporter")
+  productionProgressReports ProductionProgressReport[]  @relation("ProductionProgressReportReporter")
+  pieceworkSettlements      PieceworkSettlement[]       @relation("PieceworkSettlementReporter")
 
   @@index([role])
   @@index([workerType])
@@ -217,6 +221,7 @@ model PartyAddress {
 
 enum OrderStatus {
   DRAFT
+  PENDING_FACTORY
   SUBMITTED
   SCHEDULING
   IN_PRODUCTION
@@ -252,6 +257,24 @@ enum OrderPricingStatus {
   AUTO_CONFIRMED
   PENDING_ADMIN_CONFIRMATION
   ADMIN_CONFIRMED
+}
+
+// 外部销售建单的业务工艺。该枚举与生产工艺 Craft 主数据分离，
+// 也不再把历史计价路由 OrderItemPricingRoute 当作建单事实。
+enum OrderCraft {
+  PARTIAL
+  FULL
+  PRINT
+}
+
+enum OrderQuotedFeeCompleteness {
+  COMPLETE
+  EXCLUDES_MANUAL_ITEMS
+}
+
+enum OrderItemQuoteDisposition {
+  PRICED
+  MANUAL_PRICING_REQUIRED
 }
 
 // 款式的基础计价路线是互斥的。工艺可以组合，但一个款式不得同时
@@ -306,67 +329,77 @@ enum ReworkCause {
 }
 
 model Order {
-  id                   String              @id @default(cuid())
-  orderNo              String              @unique // GD-YYMMDD-XXX; historical formats remain valid
-  submitterId          String
-  submitterRole        Role // 创建时身份快照（权限/审计）；不用于推导资金方向
-  createdById          String // 代下单场景
-  customerPartyId      String?
-  status               OrderStatus         @default(DRAFT)
-  kind                 OrderKind           @default(NORMAL)
-  billingMode          OrderBillingMode    @default(CHARGE)
-  settlementType       OrderSettlementType
-  sourceOrderId        String?
-  reworkCause          ReworkCause?
-  reworkReason         String?
-  requiresOutsource    Boolean             @default(false) // 排产时快照：工单含外协工艺
-  isUrgent             Boolean             @default(false)
-  customName           String? // 录单人自定义的工单识别名称
-  customerRef          String? // 客户名称/简称，如"苹果福"
-  receiverName         String?
-  receiverPhone        String?
-  receiverAddress      String?
-  expressCode          String? // 快递代码/菜鸟码
-  isSfCollect          Boolean             @default(false) // 顺丰到付：自行预约，物流费不计入工单金额
-  packageRequirement   String?
-  remark               String?
-  processingAmount     Decimal             @default(0) @db.Decimal(12, 2) // 加工费合计 = 各款小计 + 入袋加工费
-  packagingAmount      Decimal             @default(0) @db.Decimal(12, 2) // processingAmount 中的包装组入袋费子集
-  totalAmount          Decimal             @default(0) @db.Decimal(12, 2)
-  revision             Int                 @default(1)
-  pricingStatus        OrderPricingStatus  @default(PENDING_ADMIN_CONFIRMATION)
-  priceRevision        Int                 @default(1)
-  pricingConfirmedAt   DateTime?
-  pricingConfirmedById String?
-  promisedDate         DateTime? // 承诺交期（对客户）；逾期预警扫描用
-  trackingNo           String? // 快递单号
-  searchPinyin         String?
-  searchPinyinInitials String?
-  submittedAt          DateTime?
-  scheduledAt          DateTime?
-  completedAt          DateTime?
-  shippedAt            DateTime?
-  finishedAt           DateTime?
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  id                      String                      @id @default(cuid())
+  orderNo                 String                      @unique // GD-YYMMDD-XXX; historical formats remain valid
+  submitterId             String
+  submitterRole           Role // 创建时身份快照（权限/审计）；不用于推导资金方向
+  createdById             String // 代下单场景
+  customerPartyId         String?
+  status                  OrderStatus                 @default(DRAFT)
+  kind                    OrderKind                   @default(NORMAL)
+  billingMode             OrderBillingMode            @default(CHARGE)
+  settlementType          OrderSettlementType
+  sourceOrderId           String?
+  reworkCause             ReworkCause?
+  reworkReason            String?
+  requiresOutsource       Boolean                     @default(false) // 排产时快照：工单含外协工艺
+  isUrgent                Boolean                     @default(false)
+  customName              String? // 录单人自定义的工单识别名称
+  customerRef             String? // 客户名称/简称，如"苹果福"
+  receiverName            String?
+  receiverPhone           String?
+  receiverAddress         String?
+  expressCode             String? // 快递代码/菜鸟码
+  isSfCollect             Boolean                     @default(false) // 顺丰到付：自行预约，物流费不计入工单金额
+  packageRequirement      String?
+  remark                  String?
+  nextItemFig             Int                         @default(1)
+  clientSubmissionId      String?                     @unique
+  processingAmount        Decimal                     @default(0) @db.Decimal(12, 2) // 加工费合计 = 各款小计 + 入袋加工费
+  packagingAmount         Decimal                     @default(0) @db.Decimal(12, 2) // processingAmount 中的包装组入袋费子集
+  totalAmount             Decimal                     @default(0) @db.Decimal(12, 2)
+  quotedFee               Decimal?                    @db.Decimal(12, 2)
+  confirmedFee            Decimal?                    @db.Decimal(12, 2)
+  settledFee              Decimal?                    @db.Decimal(12, 2)
+  quotedFeeCompleteness   OrderQuotedFeeCompleteness?
+  quotedPricingRevisionId String?
+  revision                Int                         @default(1)
+  pricingStatus           OrderPricingStatus          @default(PENDING_ADMIN_CONFIRMATION)
+  priceRevision           Int                         @default(1)
+  pricingConfirmedAt      DateTime?
+  pricingConfirmedById    String?
+  promisedDate            DateTime? // 承诺交期（对客户）；逾期预警扫描用
+  trackingNo              String? // 快递单号
+  searchPinyin            String?
+  searchPinyinInitials    String?
+  submittedAt             DateTime?
+  scheduledAt             DateTime?
+  completedAt             DateTime?
+  shippedAt               DateTime?
+  finishedAt              DateTime?
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
 
-  submitter          User                   @relation("OrderSubmitter", fields: [submitterId], references: [id])
-  createdBy          User                   @relation("OrderCreator", fields: [createdById], references: [id])
-  pricingConfirmedBy User?                  @relation("OrderPricingConfirmer", fields: [pricingConfirmedById], references: [id], onDelete: Restrict)
-  customerParty      Party?                 @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
-  sourceOrder        Order?                 @relation("OrderReworkLineage", fields: [sourceOrderId], references: [id], onDelete: SetNull)
-  reworkOrders       Order[]                @relation("OrderReworkLineage")
-  items              OrderItem[]
-  packagingGroups    OrderPackagingGroup[]
-  shipments          OrderShipment[]
-  outsourceOrders    OutsourceOrder[]
-  logs               OrderLog[]
-  billItems          BillItem[]
-  changeRequests     OrderChangeRequest[]
-  costEntries        OrderCostEntry[]
-  customerCharges    OrderCustomerCharge[]
-  csSalesEntries     CsSalesEntry[]
-  pricingRevisions   OrderPricingRevision[]
+  submitter               User                     @relation("OrderSubmitter", fields: [submitterId], references: [id])
+  createdBy               User                     @relation("OrderCreator", fields: [createdById], references: [id])
+  pricingConfirmedBy      User?                    @relation("OrderPricingConfirmer", fields: [pricingConfirmedById], references: [id], onDelete: Restrict)
+  customerParty           Party?                   @relation("OrderCustomerParty", fields: [customerPartyId], references: [id], onDelete: SetNull)
+  sourceOrder             Order?                   @relation("OrderReworkLineage", fields: [sourceOrderId], references: [id], onDelete: SetNull)
+  reworkOrders            Order[]                  @relation("OrderReworkLineage")
+  items                   OrderItem[]
+  packagingGroups         OrderPackagingGroup[]
+  shipments               OrderShipment[]
+  outsourceOrders         OutsourceOrder[]
+  logs                    OrderLog[]
+  billItems               BillItem[]
+  changeRequests          OrderChangeRequest[]
+  costEntries             OrderCostEntry[]
+  customerCharges         OrderCustomerCharge[]
+  csSalesEntries          CsSalesEntry[]
+  pricingRevisions        OrderPricingRevision[]   @relation("OrderPricingRevisions")
+  quotedPricingRevision   OrderPricingRevision?    @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
+  productionOperations    ProductionOperation[]
+  productionProgressSteps ProductionProgressStep[]
 
   @@index([submitterId])
   @@index([customerPartyId])
@@ -376,6 +409,7 @@ model Order {
   @@index([settlementType, status, finishedAt])
   @@index([settlementType, pricingStatus, status])
   @@index([pricingConfirmedById])
+  @@index([quotedPricingRevisionId])
   @@index([status])
   @@index([createdAt])
   @@index([isUrgent])
@@ -405,8 +439,10 @@ model OrderPricingRevision {
   createdById String?
   createdAt   DateTime           @default(now())
 
-  order     Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  createdBy User? @relation("OrderPricingRevisionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  order             Order                   @relation("OrderPricingRevisions", fields: [orderId], references: [id], onDelete: Restrict)
+  quotedForOrders   Order[]                 @relation("OrderQuotedPricingRevision")
+  createdBy         User?                   @relation("OrderPricingRevisionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  priceVersionLocks OrderPriceVersionLock[]
 
   @@unique([orderId, revision])
   @@index([orderId, createdAt(sort: Desc)])
@@ -414,59 +450,69 @@ model OrderPricingRevision {
 }
 
 model OrderItem {
-  id                  String                @id @default(cuid())
+  id                  String                     @id @default(cuid())
   orderId             String
   sequence            Int
+  fig                 Int?
   name                String
   productId           String?
   pricingRoute        OrderItemPricingRoute
+  craft               OrderCraft?
   productStructure    OrderProductStructure
   artworkVersion      String?
   plateGroupId        String?
   pricingGroup        String?
   manualQuoteReason   String?
   specification       String?
-  actualWidthMm       Decimal?              @db.Decimal(8, 2)
-  actualHeightMm      Decimal?              @db.Decimal(8, 2)
+  actualWidthMm       Decimal?                   @db.Decimal(8, 2)
+  actualHeightMm      Decimal?                   @db.Decimal(8, 2)
   paperType           String?
   paperWeightGsm      Int?
   quantity            Int
+  pack                Int?
   crafts              String[] // 工艺ID数组
   // 新报价以正/反面颜色项为唯一过版事实；同一颜色出现在两面仍是两次过版。
   // foilColors / isDoubleSided / isDoubleColor 仅保留给历史读取与旧报表。
-  frontFoilColors     String[]              @default([])
-  backFoilColors      String[]              @default([])
-  foilColors          String[]              @default([])
+  frontFoilColors     String[]                   @default([])
+  backFoilColors      String[]                   @default([])
+  foilColors          String[]                   @default([])
   foilTechnique       OrderFoilTechnique
   hasLocalFoil        Boolean?
-  lamination          OrderLamination       @default(NONE)
-  printColors         String[]              @default([])
-  printColorsKnown    Boolean               @default(false)
-  isDoubleSided       Boolean               @default(false)
-  isDoubleColor       Boolean               @default(false)
-  unitPrice           Decimal               @default(0) @db.Decimal(10, 4)
-  fixedFee            Decimal               @default(0) @db.Decimal(12, 2) // 每款一次性收费/按张折算费用
-  subtotal            Decimal               @default(0) @db.Decimal(12, 2)
-  suggestedPrice      Decimal?              @db.Decimal(12, 2) // 历史建议单价（保留原语义，新报价不再写入）
-  suggestedSubtotal   Decimal?              @db.Decimal(12, 2) // 系统建议小计
+  lamination          OrderLamination            @default(NONE)
+  printColors         String[]                   @default([])
+  printColorsKnown    Boolean                    @default(false)
+  isDoubleSided       Boolean                    @default(false)
+  isDoubleColor       Boolean                    @default(false)
+  unitPrice           Decimal                    @default(0) @db.Decimal(10, 4)
+  fixedFee            Decimal                    @default(0) @db.Decimal(12, 2) // 每款一次性收费/按张折算费用
+  subtotal            Decimal                    @default(0) @db.Decimal(12, 2)
+  quoteDisposition    OrderItemQuoteDisposition?
+  quotedAmount        Decimal?                   @db.Decimal(12, 2)
+  suggestedPrice      Decimal?                   @db.Decimal(12, 2) // 历史建议单价（保留原语义，新报价不再写入）
+  suggestedSubtotal   Decimal?                   @db.Decimal(12, 2) // 系统建议小计
   pricingSnapshot     Json? // 创建时的规则、分项、数量与结算方向快照
   priceOverrideReason String? // 成交价与建议价不同时的人工说明
   remark              String?
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
 
-  order               Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product             Product?                     @relation(fields: [productId], references: [id])
-  designs             OrderItemDesign[]
-  tasks               ProductionTask[]
-  shipmentLines       OrderShipmentLine[]
-  packagingGroupLines OrderPackagingGroupLine[]
-  outsourceSnapshots  OutsourceOrderItemSnapshot[]
-  plateDetails        OrderItemPlateDetail[]
+  order                   Order                        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product                 Product?                     @relation(fields: [productId], references: [id])
+  designs                 OrderItemDesign[]
+  tasks                   ProductionTask[]
+  shipmentLines           OrderShipmentLine[]
+  packagingGroupLines     OrderPackagingGroupLine[]
+  outsourceSnapshots      OutsourceOrderItemSnapshot[]
+  plateDetails            OrderItemPlateDetail[]
+  operationSources        ProductionOperationSource[]
+  productionProgressSteps ProductionProgressStep[]
 
   @@unique([orderId, sequence])
+  @@unique([orderId, fig])
   @@unique([orderId, id])
   @@index([orderId])
+  @@index([craft])
+  @@index([quoteDisposition])
 }
 
 // 每款可有多行制版明细。plateGroupId/specification 是生产与复核事实，
@@ -516,8 +562,9 @@ model OrderPackagingGroup {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
-  order Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  lines OrderPackagingGroupLine[]
+  order            Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lines            OrderPackagingGroupLine[]
+  operationSources ProductionOperationSource[]
 
   @@unique([orderId, sequence])
   @@unique([orderId, id])
@@ -759,6 +806,251 @@ model ProductionTaskDispute {
 }
 
 // ============================================================
+// 新工序计件域（与旧 ProductionTask / SalaryRule 完全隔离）
+// ============================================================
+
+enum PieceworkOperationType {
+  PARTIAL
+  FULL
+  PACKING
+}
+
+enum PieceworkRateUnit {
+  PER_PASS
+  PER_PIECE
+  PER_BAG
+}
+
+enum PieceworkPriceBookStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ProductionOperationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductionOperationSourceType {
+  ORDER_ITEM
+  PACKAGING_GROUP
+}
+
+enum ProductionReportSource {
+  LIVE
+  LEGACY_IMPORT
+}
+
+enum ProductionReportEntryType {
+  REPORT
+  REVERSAL
+}
+
+enum PieceworkSettlementStatus {
+  DRAFT
+  LOCKED
+  PAID
+}
+
+// 对内工价簿独立版本化。DRAFT 可补金额，PUBLISHED 一旦发布后
+// 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
+model PieceworkPriceBook {
+  id             String                   @id @default(cuid())
+  version        Int                      @unique
+  status         PieceworkPriceBookStatus @default(DRAFT)
+  effectiveFrom  DateTime?                @db.Timestamptz(3)
+  effectiveTo    DateTime?                @db.Timestamptz(3)
+  sourceName     String?                  @db.Text
+  sourceSha256   String?                  @db.VarChar(64)
+  manifestSha256 String?                  @db.VarChar(64)
+  ruleSetSha256  String?                  @db.VarChar(64)
+  publishNote    String?                  @db.Text
+  publishedById  String?
+  publishedAt    DateTime?                @db.Timestamptz(3)
+  createdAt      DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                 @updatedAt @db.Timestamptz(3)
+
+  publishedBy User?                @relation("PieceworkPriceBookPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
+  rules       PieceworkPriceRule[]
+  reports     ProductionReport[]
+
+  @@index([status, effectiveFrom])
+  @@index([publishedById])
+  @@index([sourceSha256])
+}
+
+model PieceworkPriceRule {
+  id            String                 @id @default(cuid())
+  priceBookId   String
+  operationType PieceworkOperationType
+  unit          PieceworkRateUnit
+  amount        Decimal?               @db.Decimal(14, 4)
+  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime               @updatedAt @db.Timestamptz(3)
+
+  priceBook PieceworkPriceBook @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+
+  @@unique([priceBookId, operationType])
+  @@index([operationType])
+}
+
+// 生产工序只记业务类型和计划数，不记工人或机型。来源行只用于
+// 追溯数量事实，不参与工价键的选择。
+model ProductionOperation {
+  id            String                    @id @default(cuid())
+  orderId       String
+  operationType PieceworkOperationType
+  unit          PieceworkRateUnit
+  status        ProductionOperationStatus @default(PENDING)
+  plannedQty    Decimal                   @db.Decimal(14, 3)
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime                  @updatedAt @db.Timestamptz(3)
+
+  order   Order                       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  sources ProductionOperationSource[]
+  reports ProductionReport[]
+
+  @@index([orderId, status])
+  @@index([operationType, status])
+}
+
+model ProductionOperationSource {
+  id               String                        @id @default(cuid())
+  operationId      String
+  sourceType       ProductionOperationSourceType
+  orderItemId      String?
+  packagingGroupId String?
+  sourceQty        Decimal                       @db.Decimal(14, 3)
+  createdAt        DateTime                      @default(now()) @db.Timestamptz(3)
+
+  operation      ProductionOperation  @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  orderItem      OrderItem?           @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  packagingGroup OrderPackagingGroup? @relation(fields: [packagingGroupId], references: [id], onDelete: Restrict)
+
+  @@unique([operationId, orderItemId])
+  @@unique([operationId, packagingGroupId])
+  @@index([orderItemId])
+  @@index([packagingGroupId])
+}
+
+// 每次扫码都追加一行。报工人、工价版本和金额快照同行锁定；
+// 更正只能追加一条 REVERSAL，数据库触发器禁止 UPDATE / DELETE。
+model ProductionReport {
+  id                   String                    @id @default(cuid())
+  operationId          String
+  reporterId           String
+  entryType            ProductionReportEntryType @default(REPORT)
+  source               ProductionReportSource    @default(LIVE)
+  reversalOfId         String?                   @unique
+  reportedCompletedQty Decimal                   @db.Decimal(14, 3)
+  defectQty            Decimal                   @default(0) @db.Decimal(14, 3)
+  reworkQty            Decimal                   @default(0) @db.Decimal(14, 3)
+  chargeableQty        Decimal                   @db.Decimal(14, 3)
+  unit                 PieceworkRateUnit
+  rate                 Decimal                   @db.Decimal(14, 4)
+  amount               Decimal                   @db.Decimal(14, 2)
+  priceBookId          String
+  priceBookVersion     Int
+  ruleSetSha256        String                    @db.VarChar(64)
+  snapshot             Json
+  idempotencyKey       String                    @unique @db.VarChar(128)
+  reportedAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(3)
+
+  operation      ProductionOperation      @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  reporter       User                     @relation("ProductionReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  priceBook      PieceworkPriceBook       @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+  reversalOf     ProductionReport?        @relation("ProductionReportReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     ProductionReport?        @relation("ProductionReportReversal")
+  settlementItem PieceworkSettlementItem?
+
+  @@index([operationId, reportedAt])
+  @@index([reporterId, reportedAt])
+  @@index([priceBookId])
+}
+
+// 三类计件工序之外的内制工艺只保留生产进度，不存人员/机型/
+// 工价。工艺编码和名称在投产时冻结，字典后续改名不改变历史。
+model ProductionProgressStep {
+  id          String                    @id @default(cuid())
+  orderId     String
+  orderItemId String
+  craftId     String
+  craftCode   String                    @db.VarChar(64)
+  craftName   String                    @db.VarChar(128)
+  status      ProductionOperationStatus @default(PENDING)
+  plannedQty  Decimal                   @db.Decimal(14, 3)
+  createdAt   DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime                  @updatedAt @db.Timestamptz(3)
+
+  order     Order                      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem OrderItem                  @relation(fields: [orderId, orderItemId], references: [orderId, id], onDelete: Restrict)
+  reports   ProductionProgressReport[]
+
+  @@unique([orderItemId, craftId])
+  @@index([orderId, status])
+  @@index([craftId, status])
+}
+
+// 无计件进度的每次扫码也是只追加事实。质量数量只记录，
+// 没有 rate / amount / priceBook 字段，因此不可能被计入工资。
+model ProductionProgressReport {
+  id             String   @id @default(cuid())
+  progressStepId String
+  reporterId     String
+  completedQty   Decimal  @db.Decimal(14, 3)
+  defectQty      Decimal  @default(0) @db.Decimal(14, 3)
+  reworkQty      Decimal  @default(0) @db.Decimal(14, 3)
+  idempotencyKey String   @unique @db.VarChar(128)
+  reportedAt     DateTime @default(now()) @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  progressStep ProductionProgressStep @relation(fields: [progressStepId], references: [id], onDelete: Restrict)
+  reporter     User                   @relation("ProductionProgressReportReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+
+  @@index([progressStepId, reportedAt])
+  @@index([reporterId, reportedAt])
+}
+
+// 新 ledger 拥有独立结算边界，不与 DailyWorkerSalaryItem 相加或共用键。
+model PieceworkSettlement {
+  id               String                    @id @default(cuid())
+  reporterId       String
+  workDate         DateTime                  @db.Date
+  status           PieceworkSettlementStatus @default(DRAFT)
+  reportAmount     Decimal                   @db.Decimal(14, 2)
+  adjustmentAmount Decimal                   @default(0) @db.Decimal(14, 2)
+  payableAmount    Decimal                   @db.Decimal(14, 2)
+  snapshot         Json
+  lockedAt         DateTime?                 @db.Timestamptz(3)
+  paidAt           DateTime?                 @db.Timestamptz(3)
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                  @updatedAt @db.Timestamptz(3)
+
+  reporter User                      @relation("PieceworkSettlementReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  items    PieceworkSettlementItem[]
+
+  @@unique([reporterId, workDate])
+  @@index([status, workDate])
+}
+
+model PieceworkSettlementItem {
+  id           String   @id @default(cuid())
+  settlementId String
+  reportId     String   @unique
+  amount       Decimal  @db.Decimal(14, 2)
+  snapshot     Json
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  settlement PieceworkSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  report     ProductionReport    @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([settlementId])
+}
+
+// ============================================================
 // 外协
 // ============================================================
 
@@ -977,6 +1269,8 @@ model Product {
   name                 String
   specification        String?
   paperType            String?
+  paperMaterialId      String?
+  weight               Int?
   searchPinyin         String?
   searchPinyinInitials String?
   baseUnitPrice        Decimal?        @db.Decimal(10, 4)
@@ -986,12 +1280,14 @@ model Product {
   updatedAt            DateTime        @updatedAt
 
   categoryNode       ProductCategoryNode @relation(fields: [categoryNodeId], references: [id])
+  paperMaterial      Material?           @relation("ProductPaperMaterial", fields: [paperMaterialId], references: [id], onDelete: SetNull)
   orderItems         OrderItem[]
   priceTiers         PriceTier[]
   customerPriceRules CustomerPriceRule[]
   boms               BillOfMaterial[]
 
   @@index([categoryNodeId])
+  @@index([paperMaterialId])
   @@index([category])
   @@index([isActive])
 }
@@ -1087,12 +1383,32 @@ model CustomerPriceBook {
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
-  rules   CustomerPriceRule[]
-  charges OrderCustomerCharge[]
+  rules             CustomerPriceRule[]
+  charges           OrderCustomerCharge[]
+  priceVersionLocks OrderPriceVersionLock[]
 
   @@unique([code, version])
   @@index([settlementType, purpose, isActive, effectiveFrom])
   @@index([sourceSha256])
+}
+
+// 每次官方报价修订分别锁定加工与物流价目簿。不把两条
+// 独立版本流压成一个无法追溯的单值 priceVersion。
+model OrderPriceVersionLock {
+  id                String                   @id @default(cuid())
+  pricingRevisionId String
+  purpose           CustomerPriceBookPurpose
+  priceBookId       String
+  priceBookVersion  Int
+  sourceSha256      String                   @db.VarChar(64)
+  createdAt         DateTime                 @default(now())
+
+  pricingRevision OrderPricingRevision @relation(fields: [pricingRevisionId], references: [id], onDelete: Restrict)
+  priceBook       CustomerPriceBook    @relation(fields: [priceBookId], references: [id], onDelete: Restrict)
+
+  @@unique([pricingRevisionId, purpose])
+  @@index([priceBookId])
+  @@index([purpose, createdAt])
 }
 
 model CustomerChargeCategory {
@@ -1153,6 +1469,7 @@ model CustomerPriceRule {
 
 enum OrderCustomerChargeStatus {
   ESTIMATED
+  PENDING_AMOUNT
   FINAL
   WAIVED
 }
@@ -1173,7 +1490,7 @@ model OrderCustomerCharge {
   unit              String?
   unitPrice         Decimal?                  @db.Decimal(12, 4)
   suggestedAmount   Decimal?                  @db.Decimal(12, 2)
-  amount            Decimal                   @db.Decimal(12, 2)
+  amount            Decimal?                  @db.Decimal(12, 2)
   isAdjustment      Boolean                   @default(false)
   pricingSnapshot   Json?
   overrideReason    String?                   @db.Text
@@ -1269,6 +1586,10 @@ model Material {
   currentStock         Decimal          @default(0) @db.Decimal(12, 2)
   safetyStock          Decimal?         @db.Decimal(12, 2)
   averageCost          Decimal?         @db.Decimal(10, 4)
+  outOfStock           Boolean          @default(false)
+  displayColor         String?
+  displayImage         String?
+  sortOrder            Int              @default(0)
   isActive             Boolean          @default(true)
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
@@ -1278,10 +1599,12 @@ model Material {
   purchaseReceiptItems PurchaseReceiptItem[]
   locationStocks       MaterialLocationStock[]
   bomItems             BillOfMaterialItem[]
+  paperProducts        Product[]               @relation("ProductPaperMaterial")
   stockTransfers       StockTransfer[]
   inventoryCountItems  InventoryCountItem[]
 
   @@index([category])
+  @@index([category, isActive, sortOrder])
 }
 
 enum TxDirection {

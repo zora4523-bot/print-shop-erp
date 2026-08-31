@@ -186,7 +186,7 @@ export const NEW_ORDER_PRICING_ROUTE_DESCRIPTIONS: Record<
   string
 > = {
   [OrderItemPricingRoute.STOCK_BLANK]:
-    '精确匹配现货 SKU，系统自动带入局部烫金工艺',
+    '精确匹配现货产品组合，系统自动带入局部烫金工艺',
   [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL]:
     '颜色、单双面与烫法都是计价参数，未覆盖组合转管理员终价',
   [OrderItemPricingRoute.COLOR_PRINT]:

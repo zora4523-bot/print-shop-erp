@@ -106,6 +106,12 @@ describe('bill detail visibility boundary', () => {
                 category: { code: 'PACKING_MATERIAL', name: '打包耗材费' },
                 shipment: { sequence: 1 },
               },
+              {
+                amount: null,
+                status: 'PENDING_AMOUNT',
+                category: { code: 'PLATE_MAKING_FEE', name: '制烫金版费' },
+                shipment: null,
+              },
             ],
             costEntries: [
               {
@@ -163,6 +169,8 @@ describe('bill detail visibility boundary', () => {
     expect(html).toContain('¥ 488.00');
     expect(html).toContain('¥ 8.00');
     expect(html).toContain('¥ 4.00');
+    expect(html).toContain('待定');
+    expect(html).not.toContain('¥ 待定');
     expect(html).toContain('快递费');
     expect(html).toContain('打包耗材');
     expect(html).toContain('应付总额');
@@ -247,6 +255,12 @@ describe('bill detail visibility boundary', () => {
                 category: { code: 'PACKING_MATERIAL', name: '打包耗材费' },
                 shipment: { sequence: 1 },
               },
+              {
+                amount: null,
+                status: 'PENDING_AMOUNT',
+                category: { code: 'SHIPPING_FEE', name: '快递费' },
+                shipment: { sequence: 2 },
+              },
             ],
             costEntries: [
               {
@@ -315,6 +329,7 @@ describe('bill detail visibility boundary', () => {
     expect(html).toContain('对客耗材');
     expect(html).toContain('¥ 488.00');
     expect(html).toContain('¥ 8.00');
+    expect(html).toContain('¥ 8.00（另有待定）');
     expect(html).toContain('¥ 4.00');
   });
 });

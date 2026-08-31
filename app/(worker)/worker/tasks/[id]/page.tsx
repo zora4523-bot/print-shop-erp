@@ -1,204 +1,312 @@
+import { randomUUID } from 'node:crypto';
+import Decimal from 'decimal.js';
 import { notFound } from 'next/navigation';
-import { Role, TaskStatus, WorkerType } from '@/generated/prisma/enums';
-import { getSession, requireSession } from '@/lib/auth/session';
-import { getWorkerTaskDetail } from '@/lib/production';
-import { getWorkerTaskTitleRef } from '@/lib/page-title/refs';
-import { workerTaskTitle } from '@/lib/page-title/titles';
-import { machineTypeLabel } from '@/lib/auth/role-labels';
-import { StatusBadge } from '@/components/ui-business';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { BeginTaskButton } from '@/components/business/production/BeginTaskButton';
-import { ReportTaskForm } from '@/components/business/production/ReportTaskForm';
+import {
+  PieceworkOperationType,
+  ProductionOperationStatus,
+  TaskStatus,
+  WorkerType,
+} from '@/generated/prisma/enums';
+import { requireSession } from '@/lib/auth/session';
+import {
+  getProductionOperationForReporter,
+  getProductionProgressForReporter,
+} from '@/lib/production/operation-portal';
+import { getLegacyProductionTaskDetail } from '@/lib/production/legacy-task-reader';
+import { OperationReportingError } from '@/lib/production/operation-reporting';
+import {
+  OperationReportForm,
+  ProgressReportForm,
+} from '@/components/business/production/OperationReportForm';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
-import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { signDesignReadUrl } from '@/lib/oss/read-url';
-import { getSetting } from '@/lib/settings';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
-import { formatFoilColors } from '@/lib/order/foil-colors';
-import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
-import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
+import { StatusBadge } from '@/components/ui-business';
+import { signDesignReadUrl } from '@/lib/oss/read-url';
+import { formatDateShanghai } from '@/lib/format/dates';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 type PageProps = { params: Promise<{ id: string }> };
 
-export async function generateMetadata({ params }: PageProps) {
-  const { id } = await params;
-  const session = await getSession();
-  if (!session) return { title: '任务' };
-  // 与 getWorkerTaskDetail 共用 getWorkerTaskScopeFilter：非 ADMIN 只能
-  // 读分配给自己、且工单已离开 SUBMITTED 草稿态的任务。
-  const ref = await getWorkerTaskTitleRef(
-    id,
-    session.user.id,
-    session.user.role,
-  );
-  return {
-    title: workerTaskTitle(
-      ref
-        ? {
-            orderNo: ref.orderItem.order.orderNo,
-            sequence: ref.orderItem.sequence,
-          }
-        : null,
-    ),
-  };
-}
+export const metadata = { title: '生产工序' };
+
+const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  [PieceworkOperationType.PARTIAL]: '局部烫金',
+  [PieceworkOperationType.FULL]: '专版烫金',
+  [PieceworkOperationType.PACKING]: '打包入袋',
+};
 
 export default async function WorkerTaskDetailPage({ params }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
-  const task = await getWorkerTaskDetail(id, { id: user.id, role: user.role });
-  if (!task) notFound();
-  const isPiecework = task.workerType === WorkerType.MACHINE;
-  // 报工数量上限（计划数 × Setting 的倍数）。只用来在表单上给出说明文字，
-  // 真正的判定在 lib/production.ts 的 reportTask 里、事务内做。
-  const [reportSetting, disputes] = await Promise.all([
-    getSetting('report_qty_max_multiple'),
-    user.role === Role.WORKER
-      ? listWorkerTaskDisputes(task.id, { id: user.id, role: user.role })
-      : Promise.resolve([]),
-  ]);
-  const { multiple: maxReportMultiple } = reportSetting;
-
-  return (
-    <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere min-w-0 space-y-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="worker-wrap-anywhere min-w-0 font-sans tabular-nums text-sm">
-            {task.orderItem.order.orderNo}
-          </span>
-          {task.orderItem.order.isUrgent ? (
-            <UrgentBadge />
+  const actor = { id: user.id, role: user.role };
+  let operation: Awaited<ReturnType<typeof getProductionOperationForReporter>> =
+    null;
+  try {
+    operation = await getProductionOperationForReporter(id, actor);
+  } catch (error) {
+    // 旧工资/审计链接可能属于清废等新计件域未定义的岗位。
+    // 只在账号没有新工序 lane 时允许继续查旧任务；其他报工错误不吞。
+    if (
+      !(error instanceof OperationReportingError) ||
+      error.code !== 'ACCOUNT_NOT_AUTHORIZED'
+    ) {
+      throw error;
+    }
+  }
+  if (operation) {
+    const remainingQty = Decimal.max(
+      new Decimal(operation.plannedCompletedQty).minus(operation.completedQty),
+      0,
+    ).toString();
+    return (
+      <div className="min-w-0 space-y-5">
+        <header className="worker-wrap-anywhere min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-sans text-sm tabular-nums">
+              {operation.orderNo}
+            </span>
+            {operation.isUrgent ? <UrgentBadge /> : null}
+            <OperationStatusBadge status={operation.status} />
+          </div>
+          <h1 className="text-lg font-semibold">
+            {OPERATION_LABELS[operation.operationType]}
+          </h1>
+          {operation.customName ? (
+            <p className="text-sm font-semibold">{operation.customName}</p>
           ) : null}
-          <ProductionTaskStatusBadge status={task.status} />
-        </div>
-        <h1 className="worker-wrap-anywhere text-lg font-semibold">
-          #{task.orderItem.sequence} · {task.orderItem.name}
-        </h1>
-        {task.orderItem.order.customName ? (
-          <p className="worker-wrap-anywhere text-sm font-semibold">
-            {task.orderItem.order.customName}
+          <p className="text-xs text-muted-foreground">
+            计划 {operation.plannedCompletedQty}
+            {operation.passCount > 1
+              ? ` 个 · 每个 ${operation.passCount} 次烫印`
+              : operation.operationType === PieceworkOperationType.PACKING
+                ? ' 袋'
+                : ' 个'}
+            {operation.promisedDate
+              ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}`
+              : ''}
           </p>
+        </header>
+
+        {operation.status === ProductionOperationStatus.PENDING ||
+        operation.status === ProductionOperationStatus.IN_PROGRESS ? (
+          <section className="rounded-xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 text-sm font-semibold">扫码报工</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              累计合格 {operation.completedQty} / {operation.plannedCompletedQty}
+            </p>
+            <OperationReportForm
+              operationId={operation.id}
+              idempotencyKey={randomUUID()}
+              remainingQty={remainingQty}
+            />
+          </section>
         ) : null}
-        <p className="worker-wrap-anywhere text-xs text-muted-foreground">
-          客户名称/简称：{task.orderItem.order.customerRef ?? '—'} · 工艺：
-          {task.craft.name}
-          {task.machineType
-            ? ` · ${machineTypeLabel(task.machineType)}`
-            : ''}
-          {' · '}接单人：{task.orderItem.order.submitter.displayName}
-        </p>
-      </header>
 
-      {task.status === TaskStatus.PENDING ? (
-        <section className="rounded-xl border bg-card p-4 shadow-sm">
-          <BeginTaskButton taskId={task.id} />
-        </section>
-      ) : null}
-
-      {task.status === TaskStatus.IN_PROGRESS ? (
-        <section className="rounded-xl border bg-card p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold">报工</h2>
-          <ReportTaskForm
-            taskId={task.id}
-            plannedQty={task.plannedQty}
-            maxReportQty={task.plannedQty * maxReportMultiple}
-            isPiecework={isPiecework}
-          />
-        </section>
-      ) : null}
-
-      {task.orderItem.remark ? (
-        <HighlightedRemark className="worker-wrap-anywhere">
-          {task.orderItem.remark}
-        </HighlightedRemark>
-      ) : null}
-
-      <Disclosure className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-        <DisclosureSummary className="font-semibold">
-          任务规格与设计图
-        </DisclosureSummary>
-        <DesignImageGallery
-          headingLevel={2}
-          images={task.orderItem.designs.map((design) => ({
-            ...design,
-            fileUrl: signDesignReadUrl(design.fileUrl),
-          }))}
-        />
-
-        <section className="mt-3">
-          <h2 className="mb-2 text-sm font-semibold">任务规格</h2>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-            <Row label="计划数量" value={task.plannedQty.toLocaleString()} tabular />
-            <Row
-              label="规格"
-              value={
-                task.orderItem.specification
-                  ? externalPriceBusinessText(task.orderItem.specification)
-                  : '—'
-              }
-            />
-            <Row
-              label="纸张"
-              value={
-                task.orderItem.paperType
-                  ? externalPriceBusinessText(task.orderItem.paperType)
-                  : '—'
-              }
-            />
-            <Row
-              label="烫金色"
-              value={formatFoilColors(task.orderItem.foilColors)}
-            />
-            <Row
-              label="双面 / 双色"
-              value={`${task.orderItem.isDoubleSided ? '双面' : '单面'} · ${task.orderItem.isDoubleColor ? '双色' : '单色'}`}
-            />
+        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+          <h2 className="font-semibold">工序进度</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-3">
+            <Metric label="合格完成" value={operation.completedQty} />
+            <Metric label="计划数量" value={operation.plannedCompletedQty} />
+            <Metric label="缺陷记录" value={operation.defectQty} />
+            <Metric label="返工记录" value={operation.reworkQty} />
           </dl>
         </section>
-      </Disclosure>
 
-      {task.status === TaskStatus.COMPLETED ? (
-        <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-          <h2 className="mb-2 text-sm font-semibold">已完工</h2>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-            <Row label="合格数" value={task.completedQty.toLocaleString()} tabular />
-            <Row label="不良数" value={task.defectQty.toLocaleString()} tabular />
-            <Row label="返工数" value={task.reworkQty.toLocaleString()} tabular />
-            {isPiecework ? (
-              <>
-                <Row label="板数" value={String(task.boardCount)} tabular />
-                <Row label="下数" value={task.pressCount.toLocaleString()} tabular />
-                <Row
-                  label="计件金额"
-                  value={`¥ ${String(task.pieceworkAmount)}`}
-                  tabular
-                  full
+        {operation.packageRequirement || operation.orderRemark ? (
+          <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+            <h2 className="font-semibold">包装与工单备注</h2>
+            <dl className="mt-3 space-y-2">
+              <div>
+                <dt className="text-xs text-muted-foreground">包装要求</dt>
+                <dd className="break-words">
+                  {operation.packageRequirement ?? '—'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">工单备注</dt>
+                <dd className="break-words">{operation.orderRemark ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">工序来源</h2>
+          {operation.sources.map((source, index) =>
+            source.item ? (
+              <article
+                key={source.item.id}
+                className="rounded-xl border bg-card p-4 shadow-sm"
+              >
+                <h3 className="font-semibold">
+                  #{source.item.sequence} · {source.item.name}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {source.item.specification
+                    ? externalPriceBusinessText(source.item.specification)
+                    : '未填规格'}
+                  {' · '}
+                  {source.item.paperType
+                    ? externalPriceBusinessText(source.item.paperType)
+                    : '未填纸张'}
+                  {' · '}款式数量 {source.item.quantity}
+                </p>
+                {source.item.remark ? (
+                  <HighlightedRemark className="mt-3">
+                    {source.item.remark}
+                  </HighlightedRemark>
+                ) : null}
+                <DesignImageGallery
+                  images={source.item.designs.map((design) => ({
+                    ...design,
+                    fileUrl: signDesignReadUrl(design.fileUrl),
+                  }))}
                 />
-              </>
+              </article>
+            ) : source.packagingGroup ? (
+              <article
+                key={source.packagingGroup.id}
+                className="rounded-xl border bg-card p-4 text-sm shadow-sm"
+              >
+                <h3 className="font-semibold">
+                  包装组 #{source.packagingGroup.sequence}
+                  {source.packagingGroup.name
+                    ? ` · ${source.packagingGroup.name}`
+                    : ''}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  计划 {source.packagingGroup.actualBagCount} 袋
+                </p>
+              </article>
             ) : (
-              <Row label="计薪方式" value="按考勤时薪结算" full />
-            )}
-          </dl>
+              <p key={index} className="text-sm text-muted-foreground">
+                来源记录不完整
+              </p>
+            ),
+          )}
         </section>
-      ) : null}
+      </div>
+    );
+  }
 
-      {task.status === TaskStatus.CANCELLED ? (
+  const progress = await getProductionProgressForReporter(id, actor);
+  if (progress) {
+    const remainingQty = Decimal.max(
+      new Decimal(progress.plannedQty).minus(progress.completedQty),
+      0,
+    ).toString();
+    return (
+      <div className="min-w-0 space-y-5">
+        <header className="worker-wrap-anywhere min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-sans text-sm tabular-nums">
+              {progress.orderNo}
+            </span>
+            {progress.isUrgent ? <UrgentBadge /> : null}
+            <OperationStatusBadge status={progress.status} />
+            <StatusBadge tone="neutral">进度·不计薪</StatusBadge>
+          </div>
+          <h1 className="text-lg font-semibold">{progress.craftName}</h1>
+          <p className="text-sm">
+            #{progress.orderItemSequence} · {progress.orderItemName}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            计划 {progress.plannedQty} 个
+            {progress.promisedDate
+              ? ` · 交期 ${formatDateShanghai(progress.promisedDate)}`
+              : ''}
+          </p>
+        </header>
+
+        {progress.status === ProductionOperationStatus.PENDING ||
+        progress.status === ProductionOperationStatus.IN_PROGRESS ? (
+          <section className="rounded-xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 text-sm font-semibold">扫码报进度</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              累计合格 {progress.completedQty} / {progress.plannedQty}
+            </p>
+            <ProgressReportForm
+              progressStepId={progress.id}
+              idempotencyKey={randomUUID()}
+              remainingQty={remainingQty}
+            />
+          </section>
+        ) : null}
+
         <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-          <p className="text-muted-foreground">此任务已取消。</p>
+          <h2 className="font-semibold">工序进度</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-3">
+            <Metric label="合格完成" value={progress.completedQty} />
+            <Metric label="计划数量" value={progress.plannedQty} />
+            <Metric label="缺陷记录" value={progress.defectQty} />
+            <Metric label="返工记录" value={progress.reworkQty} />
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">
+            此步骤仅推进生产进度，不产生计件工资。
+          </p>
         </section>
-      ) : null}
 
-      {user.role === Role.WORKER ? (
-        <TaskDisputePanel taskId={task.id} disputes={disputes} />
-      ) : null}
-    </div>
-  );
+        {progress.packageRequirement || progress.orderRemark ? (
+          <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+            <h2 className="font-semibold">包装与工单备注</h2>
+            <dl className="mt-3 space-y-2">
+              <div>
+                <dt className="text-xs text-muted-foreground">包装要求</dt>
+                <dd className="break-words">
+                  {progress.packageRequirement ?? '—'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">工单备注</dt>
+                <dd className="break-words">{progress.orderRemark ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+
+        <article className="rounded-xl border bg-card p-4 shadow-sm">
+          <h2 className="font-semibold">
+            #{progress.item.sequence} · {progress.item.name}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {progress.item.specification
+              ? externalPriceBusinessText(progress.item.specification)
+              : '未填规格'}
+            {' · '}
+            {progress.item.paperType
+              ? externalPriceBusinessText(progress.item.paperType)
+              : '未填纸张'}
+            {' · '}款式数量 {progress.item.quantity}
+          </p>
+          {progress.item.remark ? (
+            <HighlightedRemark className="mt-3">
+              {progress.item.remark}
+            </HighlightedRemark>
+          ) : null}
+          <DesignImageGallery
+            images={progress.item.designs.map((design) => ({
+              ...design,
+              fileUrl: signDesignReadUrl(design.fileUrl),
+            }))}
+          />
+        </article>
+      </div>
+    );
+  }
+
+  const legacyTask = await getLegacyProductionTaskDetail(id, actor);
+  if (!legacyTask) notFound();
+  return <LegacyTaskDetail task={legacyTask} />;
 }
 
-function ProductionTaskStatusBadge({ status }: { status: TaskStatus }) {
-  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
+function OperationStatusBadge({
+  status,
+}: {
+  status: ProductionOperationStatus;
+}) {
+  const definition = PRODUCTION_OPERATION_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={definition.tone} dot={definition.dot}>
       {definition.label}
@@ -206,25 +314,68 @@ function ProductionTaskStatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
-function Row({
-  label,
-  value,
-  tabular,
-  full,
+function LegacyTaskDetail({
+  task,
 }: {
-  label: string;
-  value: string;
-  tabular?: boolean;
-  full?: boolean;
+  task: NonNullable<Awaited<ReturnType<typeof getLegacyProductionTaskDetail>>>;
 }) {
   return (
-    <div className={full ? 'col-span-full min-w-0' : 'min-w-0'}>
+    <div className="min-w-0 space-y-5">
+      <header className="worker-wrap-anywhere space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-sans text-sm tabular-nums">
+            {task.orderItem.order.orderNo}
+          </span>
+          {task.orderItem.order.isUrgent ? <UrgentBadge /> : null}
+          <StatusBadge tone="neutral">历史任务</StatusBadge>
+        </div>
+        <h1 className="text-lg font-semibold">
+          #{task.orderItem.sequence} · {task.orderItem.name}
+        </h1>
+        <p className="text-xs text-muted-foreground">
+          {task.craft.name} · 此记录来自旧派工流程，仅供查阅
+        </p>
+      </header>
+      <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
+        <h2 className="font-semibold">历史完工记录</h2>
+        <dl className="mt-3 grid grid-cols-2 gap-3">
+          <Metric label="计划数量" value={task.plannedQty} />
+          <Metric label="合格数" value={task.completedQty} />
+          <Metric label="缺陷数" value={task.defectQty} />
+          <Metric label="返工数" value={task.reworkQty} />
+          {task.workerType === WorkerType.MACHINE ? (
+            <Metric label="历史计件金额" value={`¥ ${task.pieceworkAmount}`} />
+          ) : null}
+          <Metric
+            label="旧任务状态"
+            value={
+              task.status === TaskStatus.COMPLETED
+                ? '已完工'
+                : task.status === TaskStatus.CANCELLED
+                  ? '已取消'
+                  : '历史在途'
+            }
+          />
+        </dl>
+      </section>
+      {task.orderItem.remark ? (
+        <HighlightedRemark>{task.orderItem.remark}</HighlightedRemark>
+      ) : null}
+      <DesignImageGallery
+        images={task.orderItem.designs.map((design) => ({
+          ...design,
+          fileUrl: signDesignReadUrl(design.fileUrl),
+        }))}
+      />
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd
-        className={`worker-wrap-anywhere ${tabular ? 'font-sans tabular-nums' : ''}`}
-      >
-        {value}
-      </dd>
+      <dd className="worker-wrap-anywhere font-sans tabular-nums">{value}</dd>
     </div>
   );
 }

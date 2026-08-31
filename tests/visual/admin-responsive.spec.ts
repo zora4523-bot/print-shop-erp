@@ -3,7 +3,6 @@ import {
   E2E_PASSWORD,
   E2E_USERS,
   login,
-  openFirstOrderItemEditor,
 } from '../e2e/_helpers';
 import {
   cleanupWorkerUiFixture,
@@ -53,6 +52,167 @@ test.describe('administrator workspace', () => {
   });
 });
 
+test.describe('administrator workspace geometry', () => {
+  test.describe.configure({ timeout: 360_000 });
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'admin-1280x800',
+      'Focused geometry regression runs once; the route matrix still covers every configured viewport.',
+    );
+    await login(page, {
+      from: '/owner',
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+  });
+
+  test('order creation responds to its available container instead of the viewport', async ({
+    page,
+  }) => {
+    const controlledStateWarnings: string[] = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      if (/controlled|uncontrolled/i.test(text)) {
+        controlledStateWarnings.push(text);
+      }
+    });
+
+    await page.setViewportSize({ width: 911, height: 881 });
+    await page.goto('/orders/new');
+
+    for (const viewport of [
+      { width: 911, height: 881, stacked: true },
+      { width: 1280, height: 800, stacked: false },
+    ]) {
+      await test.step(`${viewport.width}x${viewport.height}`, async () => {
+        await page.setViewportSize(viewport);
+
+        const form = page.locator('[data-slot="order-form-b"]');
+        await expect(form).toBeVisible();
+        const urgentCheckbox = form.getByRole('checkbox', {
+          name: '急单（提交后会推送至排产群）',
+          exact: true,
+        });
+        await expect(urgentCheckbox).toBeVisible();
+
+        await urgentCheckbox.focus();
+        await page.keyboard.press('Space');
+        await expect(urgentCheckbox).toBeChecked();
+        await page.keyboard.press('Space');
+        await expect(urgentCheckbox).not.toBeChecked();
+
+        const geometry = await form.evaluate((root) => {
+          const rect = (selector: string) => {
+            const element = root.querySelector<HTMLElement>(selector);
+            if (!element) throw new Error(`Missing ${selector}`);
+            const bounds = element.getBoundingClientRect();
+            return {
+              bottom: bounds.bottom,
+              height: bounds.height,
+              left: bounds.left,
+              top: bounds.top,
+              width: bounds.width,
+            };
+          };
+          const rail = root.querySelector<HTMLElement>(
+            '[data-slot="order-form-rail"]',
+          );
+          if (!rail) throw new Error('Missing order form rail');
+
+          return {
+            checkbox: rect('[data-slot="checkbox"]'),
+            description: rect('[data-slot="urgent-order-description"]'),
+            editor: rect('[data-slot="order-form-editor"]'),
+            field: rect('[data-slot="urgent-order-field"]'),
+            indicator: rect('[data-slot="checkbox-indicator"]'),
+            rail: rect('[data-slot="order-form-rail"]'),
+            railPosition: getComputedStyle(rail).position,
+            title: rect('[data-slot="urgent-order-title"]'),
+          };
+        });
+
+        expect(geometry.checkbox.width).toBeCloseTo(44, 0);
+        expect(geometry.checkbox.height).toBeCloseTo(44, 0);
+        expect(geometry.indicator.width).toBeCloseTo(20, 0);
+        expect(geometry.indicator.height).toBeCloseTo(20, 0);
+        expect(geometry.field.width).toBeGreaterThanOrEqual(240);
+        expect(geometry.title.height).toBeLessThanOrEqual(24);
+        expect(geometry.description.height).toBeLessThanOrEqual(40);
+
+        if (viewport.stacked) {
+          expect(geometry.railPosition).toBe('static');
+          expect(geometry.rail.top).toBeGreaterThanOrEqual(
+            geometry.editor.bottom - 1,
+          );
+        } else {
+          expect(geometry.railPosition).toBe('sticky');
+          expect(Math.abs(geometry.rail.top - geometry.editor.top)).toBeLessThanOrEqual(
+            1,
+          );
+        }
+      });
+    }
+
+    expect(controlledStateWarnings).toEqual([]);
+  });
+});
+
+test.describe('设计稿客户计价板块', () => {
+  test.describe.configure({ timeout: 180_000 });
+
+  test.beforeEach(async ({ page }) => {
+    await login(page, {
+      from: '/owner/rules/customer-pricing?section=blank',
+      username: E2E_USERS.owner!.username,
+      password: E2E_PASSWORD,
+    });
+  });
+
+  test('六个业务编辑器不再回落通用价格矩阵', async ({
+    page,
+  }, testInfo) => {
+    const sections = [
+      ['blank', '局部烫金 · 空白封现货单价'],
+      ['machine', '局部烫金 · 机烫费与制版费'],
+      ['tiers', '专版烫金 · 阶梯单价'],
+      ['adds', '专版烫金 · 加价'],
+      ['print', '彩印阶梯总价'],
+      ['ship', '包装 · 纸箱耗材 · 中通快递'],
+    ] as const;
+
+    for (const [section, heading] of sections) {
+      await test.step(section, async () => {
+        await page.goto(
+          `${RULE_CENTER_HREFS.customerPricing}?section=${section}`,
+        );
+        await expect(
+          page.getByRole('heading', { name: heading, exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('region', { name: heading, exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('region', {
+            name: '客户计价规则矩阵',
+            exact: true,
+          }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole('search', { name: '查找收费项目' }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole('navigation', {
+            name: '规则配置工作区导航',
+          }),
+        ).toHaveCount(0);
+        await expectViewportGate(page, testInfo);
+        await expectA11yGate(page);
+      });
+    }
+  });
+});
+
 test.describe('deterministic external sales price tier fixture', () => {
   test.describe.configure({ timeout: 90_000 });
 
@@ -76,7 +236,7 @@ test.describe('deterministic external sales price tier fixture', () => {
     await checkRoutes(page, testInfo, priceTierFixtureRoutes(), 'dark');
   });
 
-  test('mobile pricing filters preserve focus, height, and single-chip removal', async ({
+  test('mobile pricing filters stay inline, scroll locally, and remove one chip', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'admin-393x852');
@@ -91,22 +251,49 @@ test.describe('deterministic external sales price tier fixture', () => {
       }),
     ).toBeVisible();
 
-    const trigger = page.getByRole('button', {
-      name: '打开更多筛选，已启用 4 项',
-      exact: true,
-    });
-    await trigger.click();
-    const dialog = page.getByRole('dialog', {
-      name: '更多筛选',
-      exact: true,
-    });
-    await expect(dialog).toBeVisible();
+    const filters = page.getByRole('search', { name: '查找收费项目' });
+    const filterDetails = filters.locator('details');
+    const filterSummary = filterDetails.locator('summary');
+    await expect(filterDetails).toHaveAttribute('open', '');
+    await expect(filterSummary).toContainText('筛选定位');
+    await expect(filterSummary).toContainText('4 项');
+    await expect(filters.getByLabel('收费类目')).toHaveValue('print');
     await expect(
-      dialog.locator('#mobile-external-charge-category'),
-    ).toBeFocused();
-    const dialogBox = await dialog.boundingBox();
-    expect(dialogBox).not.toBeNull();
-    expect(dialogBox!.height).toBeLessThanOrEqual(852 * 0.8 + 1);
+      page.getByRole('dialog', { name: '更多筛选', exact: true }),
+    ).toHaveCount(0);
+
+    await filterSummary.click();
+    await expect(filterDetails).not.toHaveAttribute('open', '');
+    await expect(filterSummary).toBeFocused();
+    await filterSummary.click();
+    await expect(filterDetails).toHaveAttribute('open', '');
+    await expect(filterSummary).toBeFocused();
+
+    const activeFilters = filters.getByLabel('已启用的收费项目筛选');
+    const filterScrollMetrics = await activeFilters.evaluate((element) => {
+      const node = element as HTMLElement;
+      return {
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth,
+        overflowX: getComputedStyle(node).overflowX,
+      };
+    });
+    expect(filterScrollMetrics.overflowX).toMatch(/auto|scroll/);
+    expect(filterScrollMetrics.scrollWidth).toBeGreaterThan(
+      filterScrollMetrics.clientWidth,
+    );
+    await activeFilters.evaluate((element) => {
+      const node = element as HTMLElement;
+      node.scrollLeft = node.scrollWidth;
+    });
+    await expect
+      .poll(() =>
+        activeFilters.evaluate((element) => (element as HTMLElement).scrollLeft),
+      )
+      .toBeGreaterThan(0);
+    await activeFilters.evaluate((element) => {
+      (element as HTMLElement).scrollLeft = 0;
+    });
     await page.evaluate(async () => {
       await Promise.all(
         document
@@ -120,12 +307,8 @@ test.describe('deterministic external sales price tier fixture', () => {
       page,
       testInfo,
       'admin',
-      'pricing-filter-sheet-light',
+      'pricing-filters-inline-light',
     );
-
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(trigger).toBeFocused();
 
     const categoryChip = page.getByRole('link', {
       name: '清除筛选：类目：彩印基础加工费',
@@ -174,6 +357,26 @@ test.describe('sales workspace', () => {
 
   test('sales routes pass the same gates with dark tokens', async ({ page }, testInfo) => {
     await checkRoutes(page, testInfo, salesRoutes(fixture), 'dark');
+  });
+
+  test('sales order list passes its focused light and dark gates', async ({
+    page,
+  }, testInfo) => {
+    const listRoute = salesRoutes(fixture).filter(
+      (route) => route.name === 'sales-orders',
+    );
+    await checkRoutes(page, testInfo, listRoute, 'light');
+    await checkRoutes(page, testInfo, listRoute, 'dark');
+  });
+
+  test('sales order detail passes its focused safe-surface gates', async ({
+    page,
+  }, testInfo) => {
+    const detailRoute = salesRoutes(fixture).filter(
+      (route) => route.name === 'sales-order-detail',
+    );
+    await checkRoutes(page, testInfo, detailRoute, 'light');
+    await checkRoutes(page, testInfo, detailRoute, 'dark');
   });
 });
 
@@ -292,14 +495,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'order-new',
       path: '/orders/new',
       readyHeading: '新建工单',
-      prepareGateState: prepareOrderCreationComponentState,
-    },
-    {
-      name: 'scheduling',
-      path: '/foreman/scheduling',
-      readyHeading: '待排产',
-      prepareGateState: (page) =>
-        preparePendingSchedulingListState(page, data),
+      prepareGateState: prepareAdminOrderCreationState,
     },
     {
       name: 'attendance',
@@ -307,24 +503,26 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '员工考勤',
       prepareGateState: prepareAttendanceState,
     },
-    {
-      name: 'scheduling-detail',
-      path: `/foreman/scheduling/${data.schedulingOrderId}`,
-      readyHeading: `排产 ${data.schedulingOrderNo}`,
-      prepareGateState: prepareBulkSchedulingState,
-    },
     { name: 'inventory', path: '/foreman/materials', readyHeading: '物料库存' },
     { name: 'outsource', path: '/foreman/outsource', readyHeading: '外协单' },
     // 以下四条此前从未被任何门禁访问过。UI 审查在它们上面实测到 axe
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
     // 路由表，避免再次退化。
     { name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结' },
-    { name: 'salary-daily', path: '/owner/salary/daily', readyHeading: '计件工资' },
+    {
+      name: 'salary-daily',
+      path: '/owner/salary/daily',
+      readyHeading: '历史开机师傅日薪档案',
+    },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
     { name: 'cs-period-new', path: '/owner/salary/cs/new', readyHeading: '新建客服周期' },
     { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
-    { name: 'products', path: '/owner/products', readyHeading: '产品字典' },
+    {
+      name: 'stock-skus',
+      path: RULE_CENTER_HREFS.stockSkus,
+      readyHeading: '可建单产品组合',
+    },
     {
       name: 'rule-center',
       path: RULE_CENTER_HREFS.root,
@@ -333,30 +531,48 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'rule-center-customer-processing',
       path: customerPricingHref('processing'),
-      readyHeading: '客户计价规则',
-      prepareGateState: preparePriceBookWorkspaceState,
+      readyHeading: '局部烫金 · 空白封现货单价',
+      prepareGateState: (page) =>
+        prepareDedicatedPriceSectionState(
+          page,
+          '局部烫金 · 空白封现货单价',
+        ),
     },
     {
       name: 'rule-center-customer-logistics',
       path: customerPricingHref('logistics'),
-      readyHeading: '客户计价规则',
-      prepareGateState: preparePriceBookWorkspaceState,
+      readyHeading: '包装 · 纸箱耗材 · 中通快递',
+      prepareGateState: (page) =>
+        prepareDedicatedPriceSectionState(
+          page,
+          '包装 · 纸箱耗材 · 中通快递',
+        ),
+    },
+    {
+      name: 'rule-center-papers',
+      path: RULE_CENTER_HREFS.papers,
+      readyHeading: '纸张',
+    },
+    {
+      name: 'rule-center-specs',
+      path: `${RULE_CENTER_HREFS.stockSkus}?section=specs`,
+      readyHeading: '规格 · 烫金颜色',
+    },
+    {
+      name: 'rule-center-product-categories',
+      path: RULE_CENTER_HREFS.productCategories,
+      readyHeading: '产品结构分类',
+    },
+    {
+      name: 'rule-center-crafts',
+      path: RULE_CENTER_HREFS.crafts,
+      readyHeading: '工艺与参数',
     },
     {
       name: 'rule-center-price-versions',
       path: RULE_CENTER_HREFS.priceVersions,
       readyHeading: '价格版本与发布',
       prepareGateState: preparePriceBookBusinessState,
-    },
-    {
-      name: 'rule-center-internal-pricing',
-      path: RULE_CENTER_HREFS.internalPricing,
-      readyHeading: '内部兼容价格',
-    },
-    {
-      name: 'rule-center-worker-piecework',
-      path: RULE_CENTER_HREFS.workerPiecework,
-      readyHeading: '计件规则',
     },
     {
       name: 'rule-center-employee-pay',
@@ -477,23 +693,13 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'sales-order-detail',
       path: `/orders/${data.orderId}`,
       readyHeading: /^GD-260719-WORKER-RESPONSIVE-LONG-IDENTIFIER-0123456789/,
-      prepareGateState: prepareOrderChangeRequestState,
+      prepareGateState: prepareSalesOrderDetailState,
     },
     {
       name: 'sales-order-new',
       path: '/orders/new',
       readyHeading: '新建工单',
-      prepareGateState: prepareOrderCreationComponentState,
-    },
-    {
-      name: 'sales-processing-price-book',
-      path: '/sales/quote?section=processing',
-      readyHeading: '外部销售报价查询',
-    },
-    {
-      name: 'sales-logistics-price-book',
-      path: '/sales/quote?section=logistics',
-      readyHeading: '外部销售报价查询',
+      prepareGateState: prepareSalesOrderCreationState,
     },
     {
       name: 'sales-bills',
@@ -516,106 +722,156 @@ async function preparePriceBookBusinessState(page: Page) {
   ).toHaveCount(0);
 }
 
+async function prepareDedicatedPriceSectionState(
+  page: Page,
+  heading: string,
+) {
+  await preparePriceBookBusinessState(page);
+  await expect(
+    page.getByRole('region', { name: heading, exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole('region', {
+      name: '客户计价规则矩阵',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('search', { name: '查找收费项目' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('navigation', { name: '规则配置工作区导航' }),
+  ).toHaveCount(0);
+}
+
 async function expectPriceWorkspaceOverview(page: Page) {
-  const groups = page.locator(
-    'section[aria-labelledby^="external-charge-group-"]',
-  );
-  // 价格工作台由 Suspense 流式渲染。并发跑多个视口时，Turbopack
-  // 可能仍在展示骨架；直接读取 count() 不会像 Playwright 的 web-first
-  // 断言一样重试，会把尚未挂载误判成数据为空。
-  await expect(groups.first()).toBeAttached({ timeout: 30_000 });
-  const firstGroup = groups.first();
-  const viewport = page.viewportSize();
-  const selectedDetail = page.locator(
-    'aside[aria-labelledby="selected-charge-heading"]',
-  );
-  const detailFirstOnMobile =
-    Boolean(viewport && viewport.width < 1280) &&
-    (await selectedDetail.count()) > 0 &&
-    (await selectedDetail.isVisible());
-  if (detailFirstOnMobile) {
-    await expect(firstGroup).toBeHidden();
-  } else {
-    await expect(firstGroup).toBeVisible();
-  }
-  await expect(firstGroup.locator('ol > li').first()).toBeAttached({
+  const workbench = page.locator('[data-slot="rule-price-workbench"]');
+  await expect(workbench).toBeVisible({ timeout: 30_000 });
+  const matrix = workbench.getByRole('region', {
+    name: '客户计价规则矩阵',
+    exact: true,
+  });
+  await expect(matrix).toBeVisible({ timeout: 30_000 });
+  const table = matrix.locator(':scope > table');
+  const tableHeader = table.locator(':scope > thead');
+  await expect(table.locator('tbody > tr').first()).toBeAttached({
     timeout: 30_000,
   });
-  await expect(firstGroup.getByText('档数').first()).toHaveCount(1);
-  await expect(firstGroup.getByText('当前价区间').first()).toHaveCount(1);
-  await expect(firstGroup.getByText('调整进度').first()).toHaveCount(1);
-  await expect(firstGroup.getByText('待补全').first()).toHaveCount(1);
+  for (const heading of [
+    '收费项目',
+    '适用范围',
+    '数量与档位',
+    '当前价',
+    '状态',
+    '操作',
+  ]) {
+    await expect(
+      tableHeader.getByRole('columnheader', { name: heading, exact: true }),
+    ).toBeAttached();
+  }
   await expect(
-    firstGroup.locator('dl[aria-label$="数量价格阶梯"]'),
+    matrix
+      .getByRole('link', {
+        name: /^(?:编辑|查看|正在编辑|正在查看)收费项目：/,
+      })
+      .first(),
+  ).toBeAttached();
+
+  // 新工作台只有一张矩阵，选中详情作为同一表格的下一行
+  // 展开；不再保留旧分组卡片、独立列表或右侧详情栏。
+  await expect(
+    workbench.locator('section[aria-labelledby^="external-charge-group-"]'),
   ).toHaveCount(0);
+  await expect(workbench.locator('#external-charge-list')).toHaveCount(0);
+  await expect(
+    workbench.locator('aside[aria-labelledby="selected-charge-heading"]'),
+  ).toHaveCount(0);
+
+  if ((page.viewportSize()?.width ?? 1280) <= 768) {
+    const metrics = await matrix.evaluate((element) => {
+      const node = element as HTMLElement;
+      return {
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth,
+        overflowX: getComputedStyle(node).overflowX,
+      };
+    });
+    expect(metrics.overflowX).toMatch(/auto|scroll/);
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+    await matrix.evaluate((element) => {
+      const node = element as HTMLElement;
+      node.scrollLeft = node.scrollWidth;
+    });
+    await expect
+      .poll(() =>
+        matrix.evaluate((element) => (element as HTMLElement).scrollLeft),
+      )
+      .toBeGreaterThan(0);
+    await matrix.evaluate((element) => {
+      (element as HTMLElement).scrollLeft = 0;
+    });
+  }
 }
 
 async function expectSelectedPriceWorkspace(
   page: Page,
   hasDraft: boolean,
 ) {
-  const selectedDetail = page.locator(
-    'aside[aria-labelledby="selected-charge-heading"]',
-  );
-  const chargeList = page.locator('#external-charge-list');
-  const returnToList = page.getByRole('link', {
-    name: '返回收费项目列表',
+  const workbench = page.locator('[data-slot="rule-price-workbench"]');
+  const matrix = workbench.getByRole('region', {
+    name: '客户计价规则矩阵',
+    exact: true,
+  });
+  const selectedDetail = workbench.locator('section#selected-charge-detail');
+  const collapseDetail = selectedDetail.getByRole('link', {
+    name: '收起详情',
     exact: true,
   });
   await expect(selectedDetail).toBeVisible();
-
-  const viewport = page.viewportSize();
-  if (!viewport) throw new Error('收费工作台视口信息不可用');
-  const detailBox = await selectedDetail.boundingBox();
-  if (!detailBox) throw new Error('收费工作台详情布局不可见');
-  if (viewport.width < 1280) {
-    await expect(returnToList).toBeVisible();
-    await expect(chargeList).toBeHidden();
-    await expect(returnToList).toHaveAttribute(
-      'href',
-      /#external-charge-list$/,
-    );
-  } else {
-    await expect(returnToList).toBeHidden();
-    await expect(chargeList).toBeVisible();
-    const listBox = await chargeList.boundingBox();
-    if (!listBox) throw new Error('收费工作台列表布局不可见');
-    expect(detailBox.x).toBeGreaterThan(listBox.x);
-  }
+  await expect(matrix).toBeVisible();
+  await expect(collapseDetail).toBeVisible();
+  await expect(collapseDetail).toHaveAttribute(
+    'href',
+    /#rule-price-matrix-heading$/,
+  );
+  await expect(
+    matrix.getByRole('link', {
+      name: /^(正在编辑|正在查看)收费项目：/,
+    }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(selectedDetail.locator('xpath=ancestor::td[1]')).toHaveCount(0);
 
   if (hasDraft) {
-    await expect(page.getByLabel('调价草稿状态')).toBeVisible();
-    const editorSection = page.locator(
-      'section[aria-label="编辑收费项目"]',
-    );
+    await expect(workbench.getByLabel('调价草稿状态')).toBeVisible();
+    const editorSection = selectedDetail.getByLabel('编辑收费项目');
     await expect(editorSection).toBeVisible();
     const editorForm = editorSection.locator('form').first();
     await expect(editorForm).toBeVisible();
     await expect(
       editorForm.getByRole('button', {
-        name: /^(?:保存到调价草稿|保存本组（\d+ 档待保存）)$/,
+        name: /^(?:保存到调价草稿|保存（\d+ 档）)$/,
       }),
     ).toBeVisible();
     return;
   }
 
-  await expect(page.getByLabel('价格状态')).toBeVisible();
+  await expect(workbench.getByLabel('价格状态')).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: '当前为生效价', exact: true }),
+    workbench.getByText('当前生效', { exact: true }),
   ).toBeVisible();
-  const selectedListLink = page.getByRole('link', { name: /^正在查看：/ });
-  if (viewport.width < 1280) {
-    await expect(selectedListLink).toBeHidden();
-  } else {
-    await expect(selectedListLink).toBeVisible();
-  }
+  await expect(
+    matrix.getByRole('link', { name: /^正在查看收费项目：/ }),
+  ).toBeAttached();
 
-  const createDraftPanel = page.locator('#start-price-adjustment');
+  const createDraftSummary = workbench
+    .locator('details > summary')
+    .filter({ hasText: /^发起调价$/ });
+  const createDraftPanel = createDraftSummary.locator('..');
   if ((await createDraftPanel.count()) > 0) {
     await expect(createDraftPanel).not.toHaveAttribute('open', '');
-    await createDraftPanel.locator('summary').click();
+    await createDraftSummary.click();
     await expect(createDraftPanel).toHaveAttribute('open', '');
-    const createDraftForm = page.getByRole('form', {
+    const createDraftForm = workbench.getByRole('form', {
       name: /^创建(?:加工费|快递与耗材)调价草稿$/,
     });
     await expect(createDraftForm).toBeVisible();
@@ -626,34 +882,16 @@ async function expectSelectedPriceWorkspace(
         exact: true,
       }),
     ).toBeVisible();
+  } else if (
+    (await workbench.getByRole('link', { name: '发起调价', exact: true }).count()) >
+    0
+  ) {
+    await expect(
+      workbench.getByRole('link', { name: '发起调价', exact: true }),
+    ).toBeVisible();
   } else {
-    await expect(page.getByText(/生效前不能再发起新调价/)).toBeVisible();
+    await expect(workbench.getByText(/生效前不能再发起新调价/)).toBeVisible();
   }
-}
-
-async function preparePriceBookWorkspaceState(page: Page) {
-  await preparePriceBookBusinessState(page);
-  await expectPriceWorkspaceOverview(page);
-
-  const editableItems = page.getByRole('link', {
-    name: /^编辑收费项目：/,
-  });
-  const hasDraft = (await editableItems.count()) > 0;
-  const firstItem = hasDraft
-    ? editableItems.first()
-    : page.getByRole('link', { name: /^查看详情：/ }).first();
-
-  await expect(firstItem).toBeVisible();
-  await expect(firstItem).toHaveAttribute('href', /#selected-charge-detail$/);
-  await firstItem.click();
-  await expect(page).toHaveURL(/#selected-charge-detail$/, {
-    // 四个视口共享开发态 Turbopack 时，RSC 导航可能超过默认 5 秒；
-    // 等待导航提交，但仍要求落到明确的详情锚点。
-    timeout: 30_000,
-  });
-  await expectSelectedPriceWorkspace(page, hasDraft);
-
-  await preparePriceBookBusinessState(page);
 }
 
 async function prepareDeterministicPriceWorkspaceState(
@@ -672,42 +910,69 @@ async function prepareDeterministicPriceWorkspaceState(
     '20,000 个',
   ];
 
-  await expect(page.getByText('7 档', { exact: true })).toHaveCount(1);
+  const matrix = page.getByRole('region', {
+    name: '客户计价规则矩阵',
+    exact: true,
+  });
   const selectedDetail = page.locator(
-    'aside[aria-labelledby="selected-charge-heading"]',
+    '[data-slot="rule-price-workbench"] section#selected-charge-detail',
   );
-  const tierPanel =
-    state === 'current'
-      ? page.locator('section[aria-label="当前产品价格阶梯"]')
-      : selectedDetail.locator('section[aria-label="编辑收费项目"] form');
-  await expect(selectedDetail).toBeVisible();
-  await expect(tierPanel).toBeVisible();
-  const tierHeader = tierPanel.locator('header');
   await expect(
-    tierHeader.getByText(/157克超长双铜纸彩印加局部烫金/),
+    matrix.getByText(/^7 档 · 7 个数量档·/),
   ).toBeVisible();
   await expect(
-    tierHeader.getByText(/157克双铜纸·客户指定超长纸张名称/),
+    selectedDetail.getByRole('heading', {
+      name: /大号·非标定制 123\.45 × 678\.90 mm/,
+    }),
   ).toBeVisible();
   await expect(
-    tierHeader.getByText(/非标定制 123\.45 × 678\.90 mm/),
+    selectedDetail
+      .getByText(/157克双铜纸·客户指定超长纸张名称/)
+      .first(),
   ).toBeVisible();
-  await expect(
-    tierPanel.getByText('7 个数量档', { exact: true }),
-  ).toBeVisible();
-  await expect(tierPanel.locator('ol > li')).toHaveCount(7);
-  await expect(
-    page.locator('dl[aria-label$="数量价格阶梯"]'),
-  ).toHaveCount(0);
 
-  const renderedQuantities = await tierPanel
-    .locator('ol > li')
-    .evaluateAll((rows) =>
-      rows.map(
-        (row) =>
-          row.querySelector<HTMLElement>('.tabular-nums')?.textContent?.trim() ?? '',
-      ),
-    );
+  const readOnlyTierPanel = selectedDetail.getByRole('region', {
+    name: /大号·非标定制 123\.45 × 678\.90 mm.*价格阶梯$/,
+  });
+  const tierPanel = state === 'current'
+    ? readOnlyTierPanel
+    : selectedDetail.getByLabel('编辑收费项目').locator('form');
+  await expect(tierPanel).toBeVisible();
+  if (state === 'current') {
+    await expect(
+      tierPanel.getByRole('columnheader', { name: '数量档', exact: true }),
+    ).toBeVisible();
+    await expect(tierPanel.locator('tbody > tr')).toHaveCount(7);
+    await expect(tierPanel.locator('input')).toHaveCount(0);
+  } else {
+    const tierHeader = tierPanel.locator('header');
+    await expect(
+      tierHeader.getByText(/157克超长双铜纸彩印加局部烫金/),
+    ).toBeVisible();
+    await expect(
+      tierHeader.getByText(/157克双铜纸·客户指定超长纸张名称/),
+    ).toBeVisible();
+    await expect(
+      tierHeader.getByText(/非标定制 123\.45 × 678\.90 mm/),
+    ).toBeVisible();
+    await expect(
+      tierPanel.getByText('7 个数量档', { exact: true }),
+    ).toBeVisible();
+    await expect(tierPanel.locator('ol > li')).toHaveCount(7);
+  }
+
+  const quantityRows =
+    state === 'current'
+      ? tierPanel.locator('tbody > tr')
+      : tierPanel.locator('ol > li');
+  const renderedQuantities = await quantityRows.evaluateAll((rows) =>
+    rows.map(
+      (row) =>
+        row.querySelector<HTMLElement>('.tabular-nums')?.textContent?.trim() ??
+        row.querySelector<HTMLElement>('td')?.textContent?.trim() ??
+        '',
+    ),
+  );
   expect(renderedQuantities).toEqual(expectedQuantities);
 
   if (state === 'draft') {
@@ -734,7 +999,7 @@ async function prepareDeterministicPriceWorkspaceState(
     await expect(tierPanel.locator('ol > li').first()).toContainText('+¥15');
     await expect(
       tierPanel.getByRole('button', {
-        name: '保存本组（0 档待保存）',
+        name: '保存（0 档）',
         exact: true,
       }),
     ).toBeDisabled();
@@ -754,18 +1019,21 @@ async function prepareDeterministicPriceWorkspaceState(
         .getByLabel('草稿单价（元/个）', { exact: true }),
     ).toHaveValue('0.18');
     await expect(tierPanel.getByText('¥0.52 / 个', { exact: true })).toBeVisible();
-    await expect(tierPanel).toContainText('计价单位：每个成品');
+    await expect(tierPanel.getByText('按个计价', { exact: true })).toBeVisible();
     await expect(tierPanel.getByText('折合单价', { exact: true })).toHaveCount(0);
     await expect(
       tierPanel.getByRole('button', {
-        name: '保存本组（0 档待保存）',
+        name: '保存（0 档）',
         exact: true,
       }),
     ).toBeDisabled();
   } else {
-    await expect(tierPanel.locator('input')).toHaveCount(0);
+    await expect(readOnlyTierPanel).toBeVisible();
     await expect(
-      tierPanel.getByText('当前生效价格仅供查看；发起调价后才能修改。'),
+      readOnlyTierPanel.getByRole('columnheader', {
+        name: '当前价',
+        exact: true,
+      }),
     ).toBeVisible();
   }
 
@@ -780,17 +1048,106 @@ async function prepareSalesOrderListState(page: Page) {
   await expect(
     page.getByRole('button', { name: /导出工单/ }),
   ).toHaveCount(0);
+  const filters = page.locator(
+    '[data-slot="sales-order-list-filters"]:visible',
+  );
+  await expect(filters).toBeVisible();
+  const views = filters.getByRole('navigation', { name: '销售工单视图' });
+  for (const label of ['全部', '需处理', '进行中', '已发货', '已完成', '草稿']) {
+    await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
+  }
+  await expect(
+    filters.getByRole('searchbox', {
+      name: '搜索工单名、客户或工单号',
+    }),
+  ).toBeVisible();
+
+  const list = page.getByRole('list', { name: '销售工单列表' });
+  await expect(list).toBeVisible();
+  const cards = list.locator('[data-sales-order-card]');
+  expect(await cards.count()).toBeGreaterThan(0);
+  const actionableButton = page.getByRole('button', {
+    name: /查看详情|查看原因/,
+  });
+  const firstCard = cards.filter({ has: actionableButton }).first();
+  const action = firstCard.getByRole('button', {
+    name: /查看详情|查看原因/,
+  });
+  await expect(action).toBeVisible();
+  await expect(firstCard).not.toContainText('计件成本');
+  await expect(firstCard).not.toContainText('师傅');
+  const copyLabel = await firstCard
+    .getByRole('button', { name: /^复制工单号 / })
+    .getAttribute('aria-label');
+  const orderNo = copyLabel?.replace(/^复制工单号 /, '');
+  expect(orderNo).toBeTruthy();
+
+  await action.click();
+  await expect(page).toHaveURL(/#wo=/);
+  const drawer = page.getByRole('dialog', { name: /工单明细/ });
+  await expect(drawer).toBeVisible();
+  await expect(drawer).not.toContainText('计件成本');
+  await expect(drawer).not.toContainText('生产任务');
+  await expect(drawer.getByRole('link', { name: '完整详情' })).toHaveCount(0);
+  await expect(drawer.getByRole('link', { name: '下载 PDF' })).toHaveCount(0);
+  if ((page.viewportSize()?.width ?? 0) < 640) {
+    const drawerBox = await drawer.boundingBox();
+    expect(drawerBox).not.toBeNull();
+    expect(drawerBox!.width).toBeGreaterThanOrEqual(
+      (page.viewportSize()?.width ?? 0) - 1,
+    );
+  }
+
+  await drawer.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(drawer).toBeHidden();
+  await expect(page).toHaveURL((url) => !url.hash);
+  await page.goForward();
+  await expect(drawer).toBeVisible();
+
+  await page.goto(`/orders?view=draft#wo=${encodeURIComponent(orderNo!)}`);
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toContainText(orderNo!);
+  await expect(
+    drawer.getByRole('heading', { name: '进度', exact: true }),
+  ).toBeVisible();
 }
 
-async function prepareOrderChangeRequestState(page: Page) {
+async function prepareSalesOrderDetailState(page: Page) {
+  // Streaming can briefly retain the hidden Suspense copy beside the resolved
+  // page on compact viewports; gate only the visible sales surface.
+  const detail = page.locator('[data-slot="sales-order-detail"]:visible');
+  await expect(detail).toBeVisible();
+  for (const hiddenFactoryField of [
+    '师傅',
+    '生产安排',
+    '修改日志',
+    '制版明细',
+    '计价快照',
+    '计件工资',
+    '内部成本',
+  ]) {
+    await expect(detail).not.toContainText(hiddenFactoryField);
+  }
+  await expect(detail.getByRole('link', { name: '打印', exact: true })).toHaveCount(0);
+  await expect(
+    detail.getByRole('link', { name: '下载 PDF', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    detail.getByRole('link', { name: '返回工单列表', exact: true }),
+  ).toBeVisible();
+
   const formSection = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '申请修改工单', exact: true }) });
   await expect(formSection).toBeVisible();
   const styleCheckboxes = formSection.getByRole('checkbox');
   expect(await styleCheckboxes.count()).toBeGreaterThanOrEqual(3);
-  await styleCheckboxes.first().check();
-  await styleCheckboxes.last().check();
+  const firstStyleCheckbox = styleCheckboxes.first();
+  await firstStyleCheckbox.click();
+  await expect(firstStyleCheckbox).toBeChecked();
+  const lastStyleCheckbox = styleCheckboxes.last();
+  await lastStyleCheckbox.click();
+  await expect(lastStyleCheckbox).toBeChecked();
   await expect(
     formSection.getByLabel('新款式名称', { exact: true }),
   ).toBeVisible();
@@ -838,9 +1195,9 @@ async function prepareOrderDetailDesignPreview(
   await expect(itemCard.getByText('¥ 0.1234', { exact: true })).toBeVisible();
   await expect(itemCard.getByText('¥ 152,345.57', { exact: true })).toBeVisible();
   await expect(definition('工艺')).toHaveText(data.craftName);
-  await expect(definition('印刷面')).toHaveText('双面');
-  await expect(definition('印刷色数')).toHaveText('双色');
-  await expect(definition('生产安排')).toContainText(data.craftName);
+  await expect(definition('加工面')).toHaveText('双面加工');
+  await expect(definition('双色烫金')).toHaveText('是');
+  await expect(definition('生产工序')).toContainText('局部烫金：进行中');
   await expect(itemCard).not.toContainText(data.craftId);
 
   const fileName =
@@ -862,142 +1219,150 @@ async function prepareOrderDetailDesignPreview(
   expect(box?.height).toBeGreaterThanOrEqual(280);
 }
 
-async function prepareBulkSchedulingState(page: Page) {
-  await page
-    .getByRole('checkbox', { name: '选择全部内部工艺', exact: true })
-    .check();
-  await expect(page.getByText('已选 2 项', { exact: false })).toBeVisible();
-
-  const bulkWorker = page.getByLabel('批量派给同一位师傅', {
-    exact: true,
-  });
-  const workerOption = bulkWorker.locator('option').filter({
-    hasText: E2E_USERS.workerHandPress!.displayName,
-  });
-  const workerId = await workerOption.getAttribute('value');
-  expect(workerId).toBeTruthy();
-  await bulkWorker.selectOption(workerId!);
-  await page.getByRole('button', { name: '应用到已选', exact: true }).click();
-
-  for (const itemName of ['批量派工款式一', '批量派工款式二']) {
-    const row = page.getByRole('row').filter({ hasText: itemName });
-    const selectedWorker = row
-      .getByRole('radio')
-      .filter({ hasText: E2E_USERS.workerHandPress!.displayName });
-    await expect(selectedWorker).toHaveCount(1);
-    await expect(selectedWorker).toHaveAttribute('aria-checked', 'true');
-  }
-}
-
-async function preparePendingSchedulingListState(
-  page: Page,
-  data: WorkerUiFixture,
-) {
-  const workerSelect = page.getByLabel('接单师傅', { exact: true });
-  const workerOption = workerSelect
-    .locator('option')
-    .filter({ hasText: E2E_USERS.workerHandPress!.displayName });
-  const workerId = await workerOption.getAttribute('value');
-  expect(workerId).toBeTruthy();
-  await workerSelect.selectOption(workerId!);
-  await page
-    .getByRole('checkbox', {
-      name: `选择工单 ${data.schedulingOrderNo}`,
-      exact: true,
-    })
-    .check();
-  await page
-    .getByRole('checkbox', {
-      name: `选择工单 ${data.schedulingOrderTwoNo}`,
-      exact: true,
-    })
-    .check();
-  await expect(page.getByText('已选 2 张', { exact: false })).toBeVisible();
-  await expect(workerSelect).not.toHaveValue('');
+async function prepareConfiguredLocalFoilStyle(page: Page) {
+  const form = page.locator('[data-slot="order-form-b"]:visible');
+  await expect(form).toBeVisible();
   await expect(
-    page.getByRole('button', {
-      name: '确认分配所选工艺',
+    form
+      .getByRole('navigation', { name: '款式' })
+      .getByRole('button')
+      .first(),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  const routePicker = form.getByRole('group', { name: '工艺类型' });
+  for (const route of ['局部烫金', '专版烫金', '彩印']) {
+    await expect(
+      routePicker.getByRole('button', { name: route, exact: true }),
+    ).toBeVisible();
+  }
+  await routePicker
+    .getByRole('button', { name: '局部烫金', exact: true })
+    .click();
+
+  const paperPicker = form.getByRole('group', { name: '纸张材质' });
+  await paperPicker
+    .getByRole('button', { name: '珠光艳闪', exact: true })
+    .click();
+  const specificationPicker = form.getByRole('group', { name: '规格' });
+  await specificationPicker
+    .getByRole('button', { name: '大号封', exact: true })
+    .click();
+  const weightPicker = form.getByRole('group', { name: '克重' });
+  await weightPicker
+    .getByRole('button', { name: '160g', exact: true })
+    .click();
+
+  await expect(
+    routePicker.getByRole('button', {
+      name: '局部烫金',
       exact: true,
+      pressed: true,
     }),
-  ).toBeEnabled();
+  ).toBeVisible();
+  await expect(
+    paperPicker.getByRole('button', {
+      name: '珠光艳闪',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    specificationPicker.getByRole('button', {
+      name: '大号封',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    weightPicker.getByRole('button', {
+      name: '160g',
+      exact: true,
+      pressed: true,
+    }),
+  ).toBeVisible();
+  for (const retiredField of ['报价产品', '成交单价', '人工改价说明']) {
+    await expect(form.getByLabel(retiredField, { exact: true })).toHaveCount(0);
+  }
+
+  return form;
 }
 
-async function prepareOrderCreationComponentState(page: Page) {
-  await openFirstOrderItemEditor(page);
-  await page
-    .getByRole('button', {
-      name: '非标定制（自定义尺寸）',
+async function prepareAdminOrderCreationState(page: Page) {
+  const form = await prepareConfiguredLocalFoilStyle(page);
+  await form
+    .getByRole('textbox', { name: '工单名称', exact: true })
+    .fill('管理员内部建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .getByRole('textbox', { name: '客户名称/简称', exact: true })
+    .fill('超长客户名称用于验证小屏换行与表单容器不溢出');
+  await form
+    .getByRole('textbox', { name: '款式名', exact: true })
+    .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
+  await form
+    .getByRole('textbox', {
+      name: '配置外项目说明（转人工核价）',
       exact: true,
     })
-    .click();
-  await page
-    .getByLabel('自定义尺寸 / 规格', { exact: true })
-    .fill('超长非标尺寸 123.45 × 678.90 mm / 横向折叠');
+    .fill('客户要求追加配置外特殊工艺，请工厂确认环节人工核价并保留完整客需说明。');
 
-  await page
-    .getByRole('button', { name: '其他纸张（自定义）', exact: true })
+  await form
+    .getByRole('button', { name: '增加收货地址', exact: true })
     .click();
-  await page
-    .getByLabel('自定义纸张', { exact: true })
-    .fill('客户指定超长纸张名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .locator('textarea[name="additionalShipments.0.receiverAddress"]')
+    .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .locator('input[name="additionalShipments.0.itemQuantities.0"]')
+    .fill('100');
+  await expect(
+    form.getByRole('heading', { name: '额外地址 1', exact: true }),
+  ).toBeVisible();
+}
 
-  await page.getByRole('button', { name: '哑金', exact: true }).click();
-  await page.getByRole('button', { name: '红金', exact: true }).click();
-  await page
-    .getByRole('button', { name: '添加其他色', exact: true })
-    .click();
-  await page
-    .getByLabel('自定义烫金色 / 色号', { exact: true })
-    .fill('潘通 871C');
-  await page
-    .getByRole('button', { name: '添加颜色', exact: true })
-    .click();
+async function prepareSalesOrderCreationState(page: Page) {
+  const form = await prepareConfiguredLocalFoilStyle(page);
+  // 销售端款式名由已选计价事实生成，不提供人工命名入口。
+  await expect(
+    form.getByRole('textbox', { name: '款式名', exact: true }),
+  ).toHaveCount(0);
+  await form
+    .getByRole('textbox', { name: '工单名称', exact: true })
+    .fill('外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+  await form
+    .getByRole('spinbutton', { name: '数量', exact: true })
+    .fill('1234567');
+  await form
+    .getByRole('textbox', { name: '收货地址', exact: true })
+    .fill('张三 13800138000 广东省深圳市南山区科技园超长地址压力测试大厦A座12345678901234567890');
 
-  await page.getByLabel('款式 1 选择设计图', { exact: true }).setInputFiles({
-    name: '超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
+  const foilPicker = form.getByRole('group', { name: '烫金颜色' }).first();
+  const selectedFoilCount = await foilPicker
+    .getByRole('button', { pressed: true })
+    .count();
+  const configuredFoil = foilPicker
+    .getByRole('button', { pressed: false })
+    .first();
+  await expect(configuredFoil).toBeVisible();
+  await configuredFoil.click();
+  await expect(
+    foilPicker.getByRole('button', { pressed: true }),
+  ).toHaveCount(selectedFoilCount + 1);
+
+  const fileName =
+    '超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789最终确认版.png';
+  await form.getByLabel('第 1 款 设计图', { exact: true }).setInputFiles({
+    name: fileName,
     mimeType: 'image/png',
     buffer: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
       'base64',
     ),
   });
-
   await expect(
-    page.getByRole('button', {
-      name: '非标定制（自定义尺寸）',
+    form.getByRole('img', {
+      name: `第 1 款设计图预览：${fileName}`,
       exact: true,
-      pressed: true,
     }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('button', {
-      name: '其他纸张（自定义）',
-      exact: true,
-      pressed: true,
-    }),
-  ).toBeVisible();
-  await expect(page.getByText('已选 3 色：哑金、红金、潘通 871C')).toBeVisible();
-  await expect(
-    page.getByAltText(
-      '待上传设计图：超长设计图文件名ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.png',
-    ),
-  ).toBeVisible();
-
-  await page.getByRole('tab', { name: /收货与费用/ }).click();
-  await page
-    .getByRole('button', { name: '增加收货地址', exact: true })
-    .click();
-  await page
-    .locator(
-      'textarea[name="additionalShipments.0.receiverAddress"]',
-    )
-    .fill('额外收货地址ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-  await page
-    .locator(
-      'input[name="additionalShipments.0.itemQuantities.0"]',
-    )
-    .fill('100');
-  await expect(
-    page.getByRole('heading', { name: '额外地址 1', exact: true }),
-  ).toBeVisible();
+  await expect(form.getByText(fileName, { exact: false })).toBeVisible();
 }

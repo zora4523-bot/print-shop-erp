@@ -9,13 +9,15 @@ import {
   calculateExternalOrderCharges,
   type ExternalOrderChargeInput,
   type ExternalOrderChargeLine,
-  type ExternalOrderChargeQuote,
   type ExternalOrderChargeRule,
+  type ExternalOrderChargeWeightItem,
+  type ExternalOrderEstimateLogisticsPolicy,
+  type ExternalOrderLegacyLogisticsPolicy,
+  type ExternalOrderLogisticsPolicy,
   type ExternalOrderPackagingRule,
   type ExternalOrderShippingRule,
 } from './external-order-charges';
 import { acquirePriceRuleSnapshotReadLock } from './rule-snapshot-lock';
-import { db } from '../db';
 
 export class OrderCustomerChargeError extends Error {
   constructor(message: string) {
@@ -28,6 +30,7 @@ export type SubmittedShipmentCustomerCharges = {
   shipmentKey: string;
   province: string | null;
   billableWeightKg: string | null;
+  weightItems?: readonly ExternalOrderChargeWeightItem[];
   itemQuantity: number;
   shippingFee: string | null;
   packingMaterialFee: string | null;
@@ -76,6 +79,7 @@ type LoadedLogisticsPriceBook = {
   version: number;
   sourceName: string;
   sourceSha256: string;
+  policy: ExternalOrderLogisticsPolicy;
   rules: ExternalOrderChargeRule[];
   ruleRowsByCode: Map<string, PriceBookRuleRow>;
   categoryIdByCode: Map<string, string>;
@@ -85,11 +89,6 @@ export type ExternalOrderChargePriceBookSnapshot = Omit<
   LoadedLogisticsPriceBook,
   'rules' | 'ruleRowsByCode' | 'categoryIdByCode'
 >;
-
-export type ExternalOrderChargeBookQuote = {
-  priceBook: ExternalOrderChargePriceBookSnapshot;
-  quote: ExternalOrderChargeQuote;
-};
 
 function requiredDecimal(value: unknown, label: string): string {
   if (value === null || value === undefined) {
@@ -113,6 +112,160 @@ function requiredPositiveDecimal(value: unknown, label: string): string {
     throw new OrderCustomerChargeError(`物流价目簿规则${label}必须大于 0`);
   }
   return parsed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function logisticsPolicyFromNotes(
+  notes: unknown,
+  options: { allowLegacyCarrierConfirmed: boolean },
+): ExternalOrderLogisticsPolicy {
+  if (!isRecord(notes) || !isRecord(notes.shipping)) {
+    throw new OrderCustomerChargeError('物流价目簿缺少版本化重量策略');
+  }
+  const ruleVersion =
+    typeof notes.ruleVersion === 'string' ? notes.ruleVersion.trim() : '';
+  if (!ruleVersion) {
+    throw new OrderCustomerChargeError('物流价目簿缺少规则版本');
+  }
+
+  const shipping = notes.shipping;
+  const billableWeightInput = shipping.billableWeightInput;
+  if (billableWeightInput === 'CARRIER_CONFIRMED') {
+    if (!options.allowLegacyCarrierConfirmed) {
+      throw new OrderCustomerChargeError(
+        '当前物流价目簿不支持服务端重量估算',
+      );
+    }
+    const maximum =
+      shipping.maxOrderQuantity ?? shipping.ztoMaximumOrderQuantity;
+    if (!Number.isSafeInteger(maximum) || Number(maximum) < 1) {
+      throw new OrderCustomerChargeError('历史物流价目簿的数量边界无效');
+    }
+    if (
+      shipping.weightResolutionOrder !== undefined &&
+      (!Array.isArray(shipping.weightResolutionOrder) ||
+        shipping.weightResolutionOrder.length !== 1 ||
+        shipping.weightResolutionOrder[0] !== 'ACTUAL_FULFILLMENT_WEIGHT')
+    ) {
+      throw new OrderCustomerChargeError('历史物流价目簿的重量决议顺序无效');
+    }
+    return {
+      ruleVersion,
+      billableWeightInput: 'CARRIER_CONFIRMED',
+      weightResolutionOrder: ['ACTUAL_FULFILLMENT_WEIGHT'],
+      maxOrderQuantity: Number(maximum),
+    } satisfies ExternalOrderLegacyLogisticsPolicy;
+  }
+
+  if (billableWeightInput !== 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE') {
+    throw new OrderCustomerChargeError('物流价目簿的重量来源策略无效');
+  }
+  if (
+    !Array.isArray(shipping.weightResolutionOrder) ||
+    shipping.weightResolutionOrder.length !== 2 ||
+    shipping.weightResolutionOrder[0] !== 'ACTUAL_FULFILLMENT_WEIGHT' ||
+    shipping.weightResolutionOrder[1] !== 'SERVER_ESTIMATE'
+  ) {
+    throw new OrderCustomerChargeError('物流价目簿的重量决议顺序无效');
+  }
+  if (
+    !Number.isSafeInteger(shipping.maxOrderQuantity) ||
+    Number(shipping.maxOrderQuantity) < 1
+  ) {
+    throw new OrderCustomerChargeError('物流价目簿的数量边界无效');
+  }
+  if (shipping.billableWeightRounding !== 'CEIL_KG') {
+    throw new OrderCustomerChargeError('物流价目簿的重量进位策略无效');
+  }
+
+  const gramsByPaperWeight = shipping.gramsPerItemByPaperWeightGsm;
+  if (!isRecord(gramsByPaperWeight) || Object.keys(gramsByPaperWeight).length === 0) {
+    throw new OrderCustomerChargeError('物流价目簿缺少纸张单重策略');
+  }
+  const normalizedGramsByPaperWeight: Record<string, string> = {};
+  for (const [paperWeightGsm, gramsPerItem] of Object.entries(
+    gramsByPaperWeight,
+  )) {
+    if (
+      !/^[1-9]\d*$/.test(paperWeightGsm) ||
+      !Number.isSafeInteger(Number(paperWeightGsm))
+    ) {
+      throw new OrderCustomerChargeError('物流价目簿的纸张克重键无效');
+    }
+    normalizedGramsByPaperWeight[paperWeightGsm] = requiredPositiveDecimal(
+      gramsPerItem,
+      `${paperWeightGsm}g 纸张单重`,
+    );
+  }
+
+  return {
+    ruleVersion,
+    billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+    weightResolutionOrder: [
+      'ACTUAL_FULFILLMENT_WEIGHT',
+      'SERVER_ESTIMATE',
+    ],
+    maxOrderQuantity: Number(shipping.maxOrderQuantity),
+    billableWeightRounding: 'CEIL_KG',
+    minimumBillableWeightKg: requiredPositiveDecimal(
+      shipping.minimumBillableWeightKg,
+      '最低计费重量',
+    ),
+    gramsPerItemByPaperWeightGsm: normalizedGramsByPaperWeight,
+    tenThousandEnvelopeGramsPerItem: requiredPositiveDecimal(
+      shipping.tenThousandEnvelopeGramsPerItem,
+      '万元封单个重量',
+    ),
+  } satisfies ExternalOrderEstimateLogisticsPolicy;
+}
+
+const HISTORICAL_EXTERNAL_LOGISTICS_BOOK = {
+  id: 'cpb_external_sales_logistics_202608_v1',
+  code: 'EXTERNAL_SALES_LOGISTICS_202608',
+  version: 1,
+  sourceSha256:
+    '7d3d0b6dddb2ee910046b3bc80f1d7fc8e35aa94dd25d5cf14f23c58a6ab8a69',
+} as const;
+
+function isHistoricalExternalLogisticsBook(book: {
+  id: string;
+  code: unknown;
+  version: number;
+  sourceSha256: string;
+}): boolean {
+  return (
+    book.id === HISTORICAL_EXTERNAL_LOGISTICS_BOOK.id &&
+    String(book.code) === HISTORICAL_EXTERNAL_LOGISTICS_BOOK.code &&
+    book.version === HISTORICAL_EXTERNAL_LOGISTICS_BOOK.version &&
+    book.sourceSha256 === HISTORICAL_EXTERNAL_LOGISTICS_BOOK.sourceSha256
+  );
+}
+
+function logisticsPolicyForBook(
+  book: {
+    id: string;
+    code: unknown;
+    version: number;
+    sourceSha256: string;
+    notes: unknown;
+  },
+  options: { allowLegacyCarrierConfirmed: boolean },
+): ExternalOrderLogisticsPolicy {
+  if (
+    options.allowLegacyCarrierConfirmed &&
+    isHistoricalExternalLogisticsBook(book)
+  ) {
+    return {
+      ruleVersion: `historical:${HISTORICAL_EXTERNAL_LOGISTICS_BOOK.code}:v1`,
+      billableWeightInput: 'CARRIER_CONFIRMED',
+      weightResolutionOrder: ['ACTUAL_FULFILLMENT_WEIGHT'],
+      maxOrderQuantity: 2_000,
+    } satisfies ExternalOrderLegacyLogisticsPolicy;
+  }
+  return logisticsPolicyFromNotes(book.notes, options);
 }
 
 function sourceFromRule(rule: PriceBookRuleRow) {
@@ -198,7 +351,6 @@ async function loadLogisticsPriceBook(
   now: Date,
   priceBookId?: string,
   snapshotLockHeld = false,
-  allowLegacyBlockedPackagingRules = false,
 ): Promise<LoadedLogisticsPriceBook> {
   if (!snapshotLockHeld) {
     await acquirePriceRuleSnapshotReadLock(client);
@@ -223,6 +375,7 @@ async function loadLogisticsPriceBook(
       version: true,
       sourceName: true,
       sourceSha256: true,
+      notes: true,
       rules: {
         where: {
           isActive: true,
@@ -268,6 +421,11 @@ async function loadLogisticsPriceBook(
   }
 
   const book = books[0]!;
+  const policy = logisticsPolicyForBook(book, {
+    allowLegacyCarrierConfirmed: priceBookId !== undefined,
+  });
+  const isExplicitHistoricalBook =
+    priceBookId !== undefined && isHistoricalExternalLogisticsBook(book);
   const rows = book.rules as PriceBookRuleRow[];
   const ruleRowsByCode = new Map<string, PriceBookRuleRow>();
   const categoryIdByCode = new Map<string, string>();
@@ -285,7 +443,7 @@ async function loadLogisticsPriceBook(
     } else if (categoryCode === 'PACKING_MATERIAL') {
       rules.push(
         packagingRule(row, {
-          allowLegacyBlockedRule: allowLegacyBlockedPackagingRules,
+          allowLegacyBlockedRule: isExplicitHistoricalBook,
         }),
       );
     }
@@ -304,6 +462,7 @@ async function loadLogisticsPriceBook(
     version: book.version,
     sourceName: book.sourceName,
     sourceSha256: book.sourceSha256,
+    policy,
     rules,
     ruleRowsByCode,
     categoryIdByCode,
@@ -327,54 +486,6 @@ function parseSubmittedAmount(value: string | null, label: string): Decimal | nu
     throw new OrderCustomerChargeError(`${label}超出系统允许范围`);
   }
   return amount;
-}
-
-/**
- * Read-only logistics preview for the order creation screen.
- *
- * The browser sends shipment facts only. Every call opens a short transaction,
- * takes the shared price-rule snapshot lock, and loads the currently-effective
- * LOGISTICS book. There is deliberately no fallback to the engine's bundled
- * reference rules: a missing or malformed database book must fail closed.
- */
-export async function quoteExternalOrderChargesPreview(
-  input: ExternalOrderChargeInput,
-  now: Date = new Date(),
-): Promise<ExternalOrderChargeQuote> {
-  return db.$transaction(async (client) => {
-    const result = await quoteExternalOrderChargesInTransaction(client, input, now);
-    return result.quote;
-  });
-}
-
-/**
- * Transaction-aware quote used by the administrator's whole-order pricing
- * review. It returns the selected version as well as the calculation, and it
- * never accepts a browser supplied price-book id.
- */
-export async function quoteExternalOrderChargesInTransaction(
-  client: Prisma.TransactionClient,
-  input: ExternalOrderChargeInput,
-  now: Date,
-  options: { snapshotLockHeld?: boolean } = {},
-): Promise<ExternalOrderChargeBookQuote> {
-  const book = await loadLogisticsPriceBook(
-    client,
-    now,
-    undefined,
-    options.snapshotLockHeld ?? false,
-  );
-  return {
-    priceBook: {
-      id: book.id,
-      code: book.code,
-      name: book.name,
-      version: book.version,
-      sourceName: book.sourceName,
-      sourceSha256: book.sourceSha256,
-    },
-    quote: calculateExternalOrderCharges(input, book.rules),
-  };
 }
 
 function resolveAmount(params: {
@@ -454,30 +565,6 @@ function resolveAmount(params: {
   };
 }
 
-export async function resolveExternalOrderChargesForCreation(
-  client: Prisma.TransactionClient,
-  input: {
-    isSfCollect: boolean;
-    shipments: SubmittedShipmentCustomerCharges[];
-  },
-  now: Date,
-  options: { snapshotLockHeld?: boolean } = {},
-): Promise<{
-  priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
-  charges: ResolvedOrderCustomerCharge[];
-  totalAmount: string;
-  requiresAdminConfirmation: boolean;
-}> {
-  return resolveExternalOrderCharges(
-    client,
-    input,
-    now,
-    undefined,
-    options.snapshotLockHeld ?? false,
-    false,
-  );
-}
-
 /**
  * Creation-time resolver for external sales. Missing or advisory prices are
  * persisted as provisional (suggestion when available, otherwise zero) so the
@@ -517,7 +604,8 @@ export async function resolveExternalOrderChargesForFinalization(
   priceBookId: string,
   now: Date,
   options: {
-    allowLegacyBlockedPackagingRules?: boolean;
+    /** Only for an unshipped order reverting from SF collect to prepaid freight. */
+    allowPending?: boolean;
   } = {},
 ): Promise<{
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
@@ -531,8 +619,7 @@ export async function resolveExternalOrderChargesForFinalization(
     now,
     priceBookId,
     false,
-    false,
-    options.allowLegacyBlockedPackagingRules ?? false,
+    options.allowPending ?? false,
   );
 }
 
@@ -546,7 +633,6 @@ async function resolveExternalOrderCharges(
   priceBookId?: string,
   snapshotLockHeld = false,
   allowPending = false,
-  allowLegacyBlockedPackagingRules = false,
 ): Promise<{
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
   charges: ResolvedOrderCustomerCharge[];
@@ -558,7 +644,6 @@ async function resolveExternalOrderCharges(
     now,
     priceBookId,
     snapshotLockHeld,
-    allowLegacyBlockedPackagingRules,
   );
   const quoteInput: ExternalOrderChargeInput = {
     isSfCollect: input.isSfCollect,
@@ -566,10 +651,15 @@ async function resolveExternalOrderCharges(
       shipmentKey: shipment.shipmentKey,
       province: shipment.province,
       billableWeightKg: shipment.billableWeightKg,
+      weightItems: shipment.weightItems,
       itemQuantity: shipment.itemQuantity,
     })),
   };
-  const quote = calculateExternalOrderCharges(quoteInput, book.rules);
+  const quote = calculateExternalOrderCharges(
+    quoteInput,
+    book.rules,
+    book.policy,
+  );
   const submittedByKey = new Map(
     input.shipments.map((shipment) => [shipment.shipmentKey, shipment]),
   );
@@ -606,6 +696,10 @@ async function resolveExternalOrderCharges(
         ? book.ruleRowsByCode.get(line.ruleCode) ?? null
         : null;
       const isShipping = categoryCode === 'SHIPPING_FEE';
+      const resolvedBillableWeightKg =
+        typeof line.basis.billableWeightKg === 'string'
+          ? line.basis.billableWeightKg
+          : submitted.billableWeightKg;
       const categoryId = book.categoryIdByCode.get(categoryCode);
       if (!categoryId) {
         throw new OrderCustomerChargeError(
@@ -627,7 +721,7 @@ async function resolveExternalOrderCharges(
           : OrderCustomerChargeStatus.ESTIMATED,
         description: line.name,
         quantity: isShipping
-          ? submitted.billableWeightKg
+          ? resolvedBillableWeightKg
           : String(submitted.itemQuantity),
         unit: isShipping ? 'kg' : '个',
         suggestedAmount: resolved.suggestedAmount,
@@ -642,6 +736,7 @@ async function resolveExternalOrderCharges(
             version: book.version,
             sourceName: book.sourceName,
             sourceSha256: book.sourceSha256,
+            policy: book.policy,
           },
           quote: line as unknown as Prisma.InputJsonObject,
           actual: {
@@ -664,6 +759,7 @@ async function resolveExternalOrderCharges(
       version: book.version,
       sourceName: book.sourceName,
       sourceSha256: book.sourceSha256,
+      policy: book.policy,
     },
     charges,
     totalAmount: charges

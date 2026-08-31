@@ -100,6 +100,7 @@
 - **师傅超报要多一次提交往返**（零 JS 下是整页 POST + 重渲染），弱网车间会感知到延迟。这是拍板方案的固有成本，上线前跟业主对一次预期。
 - **首页「24 小时推送失败」告警条的计数语义变了**：瞬时抖动不再点红，重试成功会把历史 `FAILED` 行就地翻成 `SUCCESS`。上线前告知业主，别让人以为数据丢了。
 - **`ProductionTask.remark` 的写入格式从此是对外契约**：`[超计划报工] YYYY-MM-DD 计划 N / 合计 M（合格 a / 不良 b / 返工 c），报工人 <id>，已勾选确认`，多次写入 `\n` 追加；老板看板「明细」列原样渲染它。
+- **`pnpm test:browser` 是否纳入 §6.3 文档化门禁仍需业主拍板**：当前只有 `components/business/cdr/__tests__/CreateBundleForm.browser.spec.tsx` 等交互契约落在该通道，但 `CLAUDE.md` / `DECISIONS.md` 都还没把它写成正式门禁。本轮只在单文件层面使用普通 Vitest 守住共享 Checkbox 的 Enter/Space wrapper 契约，没有擅自接浏览器门禁。
 
 ### **CLAUDE.md 待业主落笔**（配置文件，AI 不改）
 

@@ -146,8 +146,7 @@ export async function register() {
   //   @opentelemetry/auto-instrumentations-node
   //   @opentelemetry/resources
   //   @opentelemetry/semantic-conventions
-  // Reference skeleton at _reference/instrumentation.ts. Sentry's own
-  // OTel tracing covers HTTP routes well enough for MVP; revisit when
+  // Sentry's own OTel tracing covers HTTP routes well enough for MVP; revisit when
   // we want PG span detail or pg_advisory_xact_lock visibility.
 }
 

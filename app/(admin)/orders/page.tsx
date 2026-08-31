@@ -6,7 +6,10 @@ import { requireSession } from '@/lib/auth/session';
 import type { OrderListSearchParams } from '@/lib/order/list-query';
 import { ErrorBoundary, PageHeader } from '@/components/ui-business';
 import { OrdersListContent } from './_components/OrdersListContent';
-import { OrdersListContentSkeleton } from './_components/OrdersListContentSkeleton';
+import {
+  OrdersListContentSkeleton,
+  SalesOrdersListContentSkeleton,
+} from './_components/OrdersListContentSkeleton';
 
 export const metadata = {
   title: '工单列表 · 红包印刷 ERP',
@@ -39,7 +42,15 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
         title="工单页面数据暂时无法加载"
         description="页头和新建工单入口仍可使用；请重试工单数据区域。"
       >
-        <Suspense fallback={<OrdersListContentSkeleton />}>
+        <Suspense
+          fallback={
+            user.role === Role.SALES ? (
+              <SalesOrdersListContentSkeleton />
+            ) : (
+              <OrdersListContentSkeleton />
+            )
+          }
+        >
           <OrdersListContent
             searchParams={searchParams}
             user={{ id: user.id, role: user.role }}

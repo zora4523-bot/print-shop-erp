@@ -37,9 +37,11 @@ export type AdminMenuSection =
 export type AdminModuleMetadata = {
   id: string;
   menuParentId?: string;
+  menuGroupLabel?: string;
   label: string;
   routeBase: string;
   activeRouteBase?: string;
+  activeQuery?: readonly Readonly<Record<string, string | null>>[];
   iconName: IconName;
   breadcrumbLabel: string;
   menuSection: AdminMenuSection;
@@ -57,9 +59,12 @@ const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
       'menuParentId' in item
         ? `owner.rules.${item.menuParentId}`
         : undefined,
+    menuGroupLabel:
+      'menuGroupLabel' in item ? item.menuGroupLabel : undefined,
     label: item.label,
     routeBase: item.href,
     activeRouteBase: item.activeRouteBase,
+    activeQuery: 'activeQuery' in item ? item.activeQuery : undefined,
     iconName: item.iconName,
     breadcrumbLabel: item.breadcrumbLabel,
     menuSection: 'rules',
@@ -145,11 +150,23 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'salary:view:all',
   },
   {
+    id: 'owner.salary.piecework',
+    label: '工序计件结算',
+    routeBase: '/owner/salary/piecework',
+    iconName: 'Calculator',
+    breadcrumbLabel: '工序计件结算',
+    menuSection: 'finance',
+    status: 'implemented',
+    menuOrder: 45,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'salary:view:all',
+  },
+  {
     id: 'owner.salary.daily',
-    label: '计件工资',
+    label: '历史日薪档案',
     routeBase: '/owner/salary/daily',
     iconName: 'Calculator',
-    breadcrumbLabel: '计件工资',
+    breadcrumbLabel: '历史日薪档案',
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 50,
@@ -179,30 +196,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 70,
     menuRoles: [Role.ADMIN],
     requiredPermission: 'salary:view:all',
-  },
-  {
-    id: 'owner.parties',
-    label: '客户/供应商',
-    routeBase: '/owner/parties',
-    iconName: 'Users',
-    breadcrumbLabel: '客户/供应商',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 75,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'party:manage',
-  },
-  {
-    id: 'owner.boms',
-    label: 'BOM/用料',
-    routeBase: '/owner/boms',
-    iconName: 'FileText',
-    breadcrumbLabel: 'BOM/用料',
-    menuSection: 'dictionary',
-    status: 'implemented',
-    menuOrder: 115,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'bom:manage',
   },
   {
     id: 'owner.materials',
@@ -289,18 +282,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'ops:jobs:manage',
   },
   {
-    id: 'foreman.scheduling',
-    label: '排产',
-    routeBase: '/foreman/scheduling',
-    iconName: 'CalendarDays',
-    breadcrumbLabel: '排产',
-    menuSection: 'workflow',
-    status: 'implemented',
-    menuOrder: 30,
-    menuRoles: [Role.ADMIN],
-    requiredPermission: 'order:schedule',
-  },
-  {
     id: 'foreman.outsource',
     label: '外协',
     routeBase: '/foreman/outsource',
@@ -334,7 +315,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     status: 'implemented',
     menuOrder: 50,
     menuRoles: [Role.ADMIN],
-    requiredPermission: 'task:assign',
+    requiredPermission: 'attendance:manage',
   },
   {
     id: 'foreman.cdr',
@@ -385,18 +366,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'bill:view:self',
   },
   {
-    id: 'sales.quote',
-    label: '报价查询',
-    routeBase: '/sales/quote',
-    iconName: 'FileText',
-    breadcrumbLabel: '报价查询',
-    menuSection: 'workflow',
-    status: 'implemented',
-    menuOrder: 50,
-    menuRoles: [Role.SALES],
-    requiredPermission: 'order:create',
-  },
-  {
     id: 'cs.orders.new',
     label: '创建工单',
     routeBase: '/orders/new',
@@ -443,18 +412,6 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuOrder: 50,
     menuRoles: [Role.CUSTOMER_SERVICE],
     requiredPermission: 'salary:view:self',
-  },
-  {
-    id: 'cs.quote',
-    label: '报价查询',
-    routeBase: '#',
-    iconName: 'FileText',
-    breadcrumbLabel: '报价查询',
-    menuSection: 'workflow',
-    status: 'placeholder',
-    menuOrder: 60,
-    menuRoles: [Role.CUSTOMER_SERVICE],
-    requiredPermission: 'order:create',
   },
 ] as const;
 

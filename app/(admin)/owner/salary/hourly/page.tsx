@@ -20,6 +20,7 @@ import {
   getAttendanceSummaries,
   parseShanghaiMonth,
 } from '@/lib/attendance';
+import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
@@ -33,16 +34,6 @@ type PageProps = {
     markedPaid?: string;
   }>;
 };
-
-function currentShanghaiMonth(): string {
-  const ymd = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-  return ymd.slice(0, 7);
-}
 
 export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
@@ -84,8 +75,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       account.id === sp.workerId ||
       payrollWorkerIds.has(account.id) ||
       (account.role === Role.WORKER &&
-        (account.workerType === WorkerType.PACKER ||
-          account.workerType === WorkerType.CLEANER ||
+        (account.workerType === WorkerType.CLEANER ||
           account.workerType === WorkerType.COOK)),
   );
   const monthRange = parseShanghaiMonth(selectedMonth);
@@ -107,11 +97,14 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       new Decimal(0),
     )
     .toFixed(2);
-  const allMonthUnpaidRows = allMonthRows.filter((row) => !row.isPaid);
+  const activeMonthRows = allMonthRows.filter(
+    (row) => row.payrollWorkerType !== WorkerType.PACKER,
+  );
+  const allMonthUnpaidRows = activeMonthRows.filter((row) => !row.isPaid);
   const recomputeContext = {
-    existingRecordCount: allMonthRows.length,
+    existingRecordCount: activeMonthRows.length,
     unpaidRecordCount: allMonthUnpaidRows.length,
-    paidRecordCount: allMonthRows.length - allMonthUnpaidRows.length,
+    paidRecordCount: activeMonthRows.length - allMonthUnpaidRows.length,
     unpaidTotal: allMonthUnpaidRows
       .reduce(
         (sum, row) =>
@@ -119,7 +112,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         new Decimal(0),
       )
       .toFixed(2),
-    sampleRows: allMonthRows.slice(0, 5).map((row) => ({
+    sampleRows: activeMonthRows.slice(0, 5).map((row) => ({
       workerName: row.worker.displayName,
       totalSalary: String(row.totalSalary),
       isPaid: row.isPaid,
@@ -146,7 +139,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       ) : null}
       <PageHeader
         title="时薪工月结"
-        subtitle="按上海日历月汇总打包、清废和厨师工资；已发放记录不可重算。"
+        subtitle="新结算仅汇总清废和厨师；切换前打包月结快照只读展示，不再重算或发放。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
@@ -189,7 +182,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         <EmptyState
           icon={FileText}
           title={`${selectedMonth} 暂无月结记录`}
-          description="先点击上方&ldquo;重算该月全员时薪工月结&rdquo;生成数据。"
+          description="清废与厨师可使用上方重算生成月结；历史打包记录只在已有快照时显示。"
         />
       ) : (
         <div
@@ -256,14 +249,20 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       <PaymentStatusBadge isPaid={r.isPaid} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <MarkHourlyPaidForm
-                        id={r.id}
-                        currentPaid={r.isPaid}
-                        workerName={r.worker.displayName}
-                        month={r.month}
-                        totalSalary={String(r.totalSalary)}
-                        returnTo={returnTo}
-                      />
+                      {wt === WorkerType.PACKER ? (
+                        <span className="text-xs text-muted-foreground">
+                          历史只读
+                        </span>
+                      ) : (
+                        <MarkHourlyPaidForm
+                          id={r.id}
+                          currentPaid={r.isPaid}
+                          workerName={r.worker.displayName}
+                          month={r.month}
+                          totalSalary={String(r.totalSalary)}
+                          returnTo={returnTo}
+                        />
+                      )}
                     </td>
                   </tr>
                 );

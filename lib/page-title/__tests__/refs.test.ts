@@ -25,7 +25,6 @@ import {
   getOrderTitleRef,
   getOutsourceTitleRef,
   getSalesBillTitleRef,
-  getSchedulingTitleRef,
   getWorkerTaskTitleRef,
 } from '../refs';
 
@@ -80,18 +79,6 @@ describe('getOrderTitleRef', () => {
   it('只取标题要用的字段', () => {
     getOrderTitleRef('order-1', 'admin-1', Role.ADMIN);
 
-    expect(selectOf(dbMock.order.findFirst)).toEqual({ orderNo: true });
-  });
-});
-
-describe('getSchedulingTitleRef', () => {
-  it('沿用 getSchedulingView 的前置条件：只有 SUBMITTED 在排产台上', () => {
-    getSchedulingTitleRef('order-1');
-
-    expect(whereOf(dbMock.order.findFirst)).toEqual({
-      id: 'order-1',
-      status: OrderStatus.SUBMITTED,
-    });
     expect(selectOf(dbMock.order.findFirst)).toEqual({ orderNo: true });
   });
 });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  moveOrderFoilSelection,
   nextOrderFoilSelection,
   OrderFoilSwatchPicker,
 } from '../order-form-b/OrderFoilSwatchPicker';
@@ -69,16 +70,54 @@ describe('OrderFoilSwatchPicker', () => {
         minimumSelections: 1,
       }),
     ).toEqual(['银色']);
+    expect(
+      nextOrderFoilSelection({
+        current: ['哑金'],
+        option: '哑金',
+        maxSelections: 3,
+        minimumSelections: 0,
+      }),
+    ).toEqual([]);
+  });
+
+  it('moves an existing selection without changing the fixed palette order', () => {
+    expect(
+      moveOrderFoilSelection({
+        current: ['红色', '哑金', '银色'],
+        option: '哑金',
+        direction: 'up',
+      }),
+    ).toEqual(['哑金', '红色', '银色']);
+    expect(
+      moveOrderFoilSelection({
+        current: ['红色', '哑金', '银色'],
+        option: '哑金',
+        direction: 'down',
+      }),
+    ).toEqual(['红色', '银色', '哑金']);
+    expect(
+      moveOrderFoilSelection({
+        current: ['红色', '哑金'],
+        option: '红色',
+        direction: 'up',
+      }),
+    ).toEqual(['红色', '哑金']);
   });
 
   it('shows selected ordinals and disables unselected colors at the cap', () => {
     const html = renderToStaticMarkup(
       <OrderFoilSwatchPicker
         id="foil"
-        value={['哑金', '红色']}
+        value={['红色', '哑金']}
         maxSelections={2}
+        minimumSelections={0}
         options={[
-          { value: '哑金', label: '哑金', tone: 'matte-gold' },
+          {
+            value: '哑金',
+            label: '哑金',
+            tone: 'matte-gold',
+            imageSrc: '/images/order/foil/matte-gold.png',
+          },
           { value: '红色', label: '红色', tone: 'red' },
           { value: '银色', label: '银色', tone: 'silver' },
         ]}
@@ -86,12 +125,46 @@ describe('OrderFoilSwatchPicker', () => {
       />,
     );
 
-    expect(html).toContain('aria-label="哑金，第 1 色"');
-    expect(html).toContain('aria-label="红色，第 2 色"');
+    expect(html).toContain('aria-label="哑金，第 2 色"');
+    expect(html).toContain('aria-label="红色，第 1 色"');
+    expect(html.indexOf('aria-label="哑金，第 2 色"')).toBeLessThan(
+      html.indexOf('aria-label="红色，第 1 色"'),
+    );
+    expect(html).toContain('%2Fimages%2Forder%2Ffoil%2Fmatte-gold.png');
+    expect(html).toMatch(/<img[^>]*alt=""[^>]*aria-hidden="true"/);
+    expect(html).toContain('data-selection-order="1"');
+    expect(html).toContain('data-selection-order="2"');
+    expect(html).not.toContain('bg-black/85');
+    expect(html).not.toContain('shadow-[0_4px_12px');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="银色"/);
-    expect(html).toContain('双色');
-    expect(html).toContain('色1 哑金 · 色2 红色');
-    expect(html).toContain('已选满，取消一个再换');
+    expect(html).toContain('已选 2/2');
+    expect(html).toMatch(
+      /class="sr-only">，选择顺序：第 1 色 红色 · 第 2 色 哑金<\/span>/,
+    );
+    expect(html).toContain('烫印顺序');
+    expect(html.indexOf('data-order-color="红色"')).toBeLessThan(
+      html.indexOf('data-order-color="哑金"'),
+    );
+    expect(html).toContain('aria-label="将第 1 色 红色 上移"');
+    expect(html).toContain('aria-label="将第 1 色 红色 下移"');
+    expect(html).toContain('aria-label="移除第 1 色 红色"');
+    expect(html).not.toContain('已选满，取消一个再换');
+  });
+
+  it('keeps a visible material fallback for transparent foil without a photo', () => {
+    const html = renderToStaticMarkup(
+      <OrderFoilSwatchPicker
+        id="clear-foil"
+        value={['透明色']}
+        options={[
+          { value: '透明色', label: '透明色', tone: 'clear' },
+        ]}
+        onChange={noop}
+      />,
+    );
+
+    expect(html).toContain('background-size:10px 10px');
+    expect(html).toContain('background-image:linear-gradient(45deg');
   });
 });
 

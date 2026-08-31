@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import type { ProductListRow, ProductSummary } from '@/lib/product';
+import type { ProductListRow } from '@/lib/product';
+import { isRetiredProductCategory } from '@/lib/rules/retired-catalog';
 import {
   Table,
   TableBody,
@@ -10,13 +11,8 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ProductReferenceImpact } from './ProductReferenceImpact';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
-
-function formatPrice(v: ProductSummary['baseUnitPrice']): string {
-  if (v === null || v === undefined) return '—';
-  // Prisma's Decimal serializes via toString() to a plain decimal string.
-  return String(v);
-}
 
 function businessText(value: string, fallback: string): string {
   return externalPriceBusinessText(value) || fallback;
@@ -24,16 +20,14 @@ function businessText(value: string, fallback: string): string {
 
 export function ProductsTable({
   products,
-  editBase = '/owner/products',
-  label = '产品字典列表',
-  categoryHeading = '分类',
-  showInternalPrice = true,
+  editBase = RULE_CENTER_HREFS.stockSkus,
+  label = '可建单产品组合列表',
+  categoryHeading = '产品结构',
 }: {
   products: ProductListRow[];
   editBase?: string;
   label?: string;
   categoryHeading?: string;
-  showInternalPrice?: boolean;
 }) {
   if (products.length === 0) {
     return null;
@@ -43,17 +37,13 @@ export function ProductsTable({
     <Table label={label}>
       <TableHeader>
         <TableRow>
-          <TableHead>编码</TableHead>
+          <TableHead className="hidden xl:table-cell">编码</TableHead>
           <TableHead>{categoryHeading}</TableHead>
-          <TableHead>产品名</TableHead>
+          <TableHead>组合名称</TableHead>
           <TableHead>规格</TableHead>
           <TableHead>纸张</TableHead>
-          {showInternalPrice ? (
-            <TableHead className="text-right">内部/直单基础单价</TableHead>
-          ) : null}
-          <TableHead className="text-right">起订量</TableHead>
           <TableHead>状态</TableHead>
-          <TableHead>被引用</TableHead>
+          <TableHead>引用影响</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -63,13 +53,13 @@ export function ProductsTable({
             key={p.id}
             className={!p.isActive ? 'bg-muted/30' : undefined}
           >
-            <TableCell className="font-sans tabular-nums text-xs">
+            <TableCell className="hidden font-sans tabular-nums text-xs xl:table-cell">
               {p.code ?? '—'}
             </TableCell>
             <TableCell>
               {businessText(p.categoryNode.name, '未命名分类')}
             </TableCell>
-            <TableCell>{businessText(p.name, '未命名 SKU')}</TableCell>
+            <TableCell>{businessText(p.name, '未命名组合')}</TableCell>
             <TableCell className="text-muted-foreground">
               {p.specification
                 ? businessText(p.specification, '未标注规格')
@@ -80,20 +70,17 @@ export function ProductsTable({
                 ? businessText(p.paperType, '未标注纸张')
                 : '—'}
             </TableCell>
-            {showInternalPrice ? (
-              <TableCell className="text-right font-sans tabular-nums text-xs">
-                {formatPrice(p.baseUnitPrice)}
-              </TableCell>
-            ) : null}
-            <TableCell className="text-right font-sans tabular-nums text-muted-foreground">
-              {p.minOrderQty ?? '—'}
-            </TableCell>
             <TableCell>
-              {p.isActive ? (
-                <Badge variant="outline">启用</Badge>
-              ) : (
-                <Badge variant="secondary">停用</Badge>
-              )}
+              <div className="flex flex-wrap gap-1">
+                {p.isActive ? (
+                  <Badge variant="outline">启用</Badge>
+                ) : (
+                  <Badge variant="secondary">停用</Badge>
+                )}
+                {isRetiredProductCategory(p.categoryNode) ? (
+                  <Badge variant="secondary">历史 / 已退役</Badge>
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <ProductReferenceImpact

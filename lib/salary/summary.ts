@@ -1,7 +1,11 @@
 import Decimal from 'decimal.js';
-import { SalaryPeriodStatus } from '../../generated/prisma/enums';
+import {
+  PieceworkSettlementStatus,
+  SalaryPeriodStatus,
+} from '../../generated/prisma/enums';
 import { db } from '../db';
-import { shanghaiDayRange } from './daily';
+import { currentShanghaiMonth, todayShanghai } from '../dashboard/shanghai-clock';
+import { shanghaiDayRange } from './daily-common';
 
 // Read-only aggregates for the owner's salary index page. Every query
 // here is a sum over existing tables — no new state, no writes. Kept
@@ -11,6 +15,16 @@ import { shanghaiDayRange } from './daily';
 export type SalaryIndexSummary = {
   today: string;
   currentMonth: string;
+  // 新工序报工账本：与旧 DailyWorkerSalary 物理分查、分展示。
+  pieceworkToday: {
+    count: number;
+    payableTotal: string;
+    unpaidTotal: string;
+  };
+  pieceworkUnpaidAllTime: {
+    count: number;
+    payableTotal: string;
+  };
   // 师傅日薪（今天）
   dailyToday: {
     count: number;
@@ -44,19 +58,6 @@ export type SalaryIndexSummary = {
   };
 };
 
-function todayShanghai(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
-}
-
-function currentShanghaiMonth(now: Date = new Date()): string {
-  return todayShanghai(now).slice(0, 7);
-}
-
 export async function getSalaryIndexSummary(
   now: Date = new Date(),
 ): Promise<SalaryIndexSummary> {
@@ -78,6 +79,8 @@ export async function getSalaryIndexSummary(
   // whole unpaid ledgers into Node just to reduce them, which grows
   // without bound as unpaid rows accumulate.
   const [
+    pieceworkTodayGroups,
+    pieceworkUnpaidAgg,
     dailyTodayGroups,
     dailyUnpaidAgg,
     csUnpaidAgg,
@@ -86,6 +89,17 @@ export async function getSalaryIndexSummary(
     hourlyMonthGroups,
     hourlyUnpaidAgg,
   ] = await Promise.all([
+    db.pieceworkSettlement.groupBy({
+      by: ['status'],
+      where: { workDate: todayDateCol },
+      _count: { _all: true },
+      _sum: { payableAmount: true },
+    }),
+    db.pieceworkSettlement.aggregate({
+      where: { status: { not: PieceworkSettlementStatus.PAID } },
+      _count: { _all: true },
+      _sum: { payableAmount: true },
+    }),
     // One scan of today's rows, split into the paid / unpaid buckets the
     // card needs. At most two groups come back.
     db.dailyWorkerSalary.groupBy({
@@ -151,10 +165,32 @@ export async function getSalaryIndexSummary(
     .minus(decimalFromSum(csUnpaidAgg._sum.paidBase))
     .plus(decimalFromSum(csUnpaidAgg._sum.commissionAmount))
     .minus(decimalFromSum(csUnpaidAgg._sum.paidCommission));
+  let pieceworkTodayCount = 0;
+  let pieceworkTodayTotal = new Decimal(0);
+  let pieceworkTodayUnpaid = new Decimal(0);
+  for (const group of pieceworkTodayGroups) {
+    const amount = decimalFromSum(group._sum.payableAmount);
+    pieceworkTodayCount += group._count._all;
+    pieceworkTodayTotal = pieceworkTodayTotal.plus(amount);
+    if (group.status !== PieceworkSettlementStatus.PAID) {
+      pieceworkTodayUnpaid = pieceworkTodayUnpaid.plus(amount);
+    }
+  }
 
   return {
     today,
     currentMonth: month,
+    pieceworkToday: {
+      count: pieceworkTodayCount,
+      payableTotal: pieceworkTodayTotal.toFixed(2),
+      unpaidTotal: pieceworkTodayUnpaid.toFixed(2),
+    },
+    pieceworkUnpaidAllTime: {
+      count: pieceworkUnpaidAgg._count._all,
+      payableTotal: decimalFromSum(
+        pieceworkUnpaidAgg._sum.payableAmount,
+      ).toFixed(2),
+    },
     dailyToday: {
       count: dailyToday.count,
       actualTotal: dailyToday.total.toFixed(2),

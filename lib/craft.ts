@@ -1,8 +1,4 @@
-import {
-  type Craft,
-  type MachineType,
-  WorkerType,
-} from '../generated/prisma/client';
+import { type Craft } from '../generated/prisma/client';
 import { resolveBusinessCode } from './business-code';
 import { db } from './db';
 import {
@@ -11,6 +7,12 @@ import {
   type PaginatedResult,
 } from './admin/table';
 import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
+import {
+  isRetiredCraft,
+  RETIRED_CRAFT_CODES,
+} from './rules/retired-catalog';
+
+export { isRetiredCraft } from './rules/retired-catalog';
 
 // Thrown when a mutation is refused for a reason the UI should surface,
 // not a generic 500. Same pattern as AccountInvariantError in lib/account.ts.
@@ -27,8 +29,6 @@ export type CraftSummary = Pick<
   | 'name'
   | 'code'
   | 'isOutsource'
-  | 'defaultWorkerType'
-  | 'defaultMachineType'
   | 'sortOrder'
   | 'isActive'
   | 'createdAt'
@@ -49,8 +49,6 @@ const SUMMARY_SELECT = {
   name: true,
   code: true,
   isOutsource: true,
-  defaultWorkerType: true,
-  defaultMachineType: true,
   sortOrder: true,
   isActive: true,
   createdAt: true,
@@ -92,7 +90,10 @@ export async function listActiveCraftOrderOptions(): Promise<
   CraftOrderOption[]
 > {
   const rows = await db.craft.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      code: { notIn: [...RETIRED_CRAFT_CODES] },
+    },
     select: {
       id: true,
       name: true,
@@ -116,14 +117,14 @@ export type CreateCraftData = {
   name: string;
   code: string | null;
   isOutsource: boolean;
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
   sortOrder: number;
 };
 
 export async function createCraft(data: CreateCraftData): Promise<CraftSummary> {
   const code = await resolveBusinessCode('CRAFT', data.code);
-  const assignment = normalizeCraftAssignment(data);
+  if (isRetiredCraft({ code })) {
+    throw new CraftInvariantError('历史工艺已退役，不能新建或重新启用');
+  }
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
     return tx.craft.create({
@@ -131,7 +132,6 @@ export async function createCraft(data: CreateCraftData): Promise<CraftSummary> 
         name: data.name,
         code,
         isOutsource: data.isOutsource,
-        ...assignment,
         sortOrder: data.sortOrder,
         isActive: true,
       },
@@ -145,8 +145,6 @@ export async function createCraft(data: CreateCraftData): Promise<CraftSummary> 
 export type UpdateCraftData = {
   name: string;
   isOutsource: boolean;
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
   sortOrder: number;
 };
 
@@ -154,8 +152,6 @@ export async function updateCraft(
   id: string,
   data: UpdateCraftData,
 ): Promise<CraftSummary> {
-  const assignment = normalizeCraftAssignment(data);
-
   return db.$transaction(async (tx) => {
     await acquirePriceRuleSnapshotWriteLock(tx);
     const target = await tx.craft.findUnique({
@@ -169,53 +165,11 @@ export async function updateCraft(
       data: {
         name: data.name,
         isOutsource: data.isOutsource,
-        ...assignment,
         sortOrder: data.sortOrder,
       },
       select: SUMMARY_SELECT,
     });
   });
-}
-
-function normalizeCraftAssignment(data: {
-  isOutsource: boolean;
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
-}): {
-  defaultWorkerType: WorkerType | null;
-  defaultMachineType: MachineType | null;
-} {
-  if (data.isOutsource) {
-    return {
-      defaultWorkerType: null,
-      defaultMachineType: data.defaultMachineType,
-    };
-  }
-  if (!data.defaultWorkerType) {
-    throw new CraftInvariantError('自产工艺必须选择接单岗位');
-  }
-  if (data.defaultWorkerType === WorkerType.COOK) {
-    throw new CraftInvariantError('厨师不能作为生产工艺的接单岗位');
-  }
-  if (
-    data.defaultWorkerType === WorkerType.MACHINE &&
-    !data.defaultMachineType
-  ) {
-    throw new CraftInvariantError('开机工艺必须选择机型');
-  }
-  if (
-    data.defaultWorkerType !== WorkerType.MACHINE &&
-    data.defaultMachineType
-  ) {
-    throw new CraftInvariantError('非开机岗位不应设置机型');
-  }
-  return {
-    defaultWorkerType: data.defaultWorkerType,
-    defaultMachineType:
-      data.defaultWorkerType === WorkerType.MACHINE
-        ? data.defaultMachineType
-        : null,
-  };
 }
 
 // Soft-delete only. Crafts are referenced by ProductionTask rows; a hard
@@ -232,6 +186,9 @@ export async function setCraftActive(
       select: SUMMARY_SELECT,
     });
     if (!target) throw new CraftInvariantError('目标工艺不存在');
+    if (isActive && isRetiredCraft(target)) {
+      throw new CraftInvariantError('历史工艺已退役，不能重新启用');
+    }
     if (target.isActive === isActive) return target;
 
     return tx.craft.update({

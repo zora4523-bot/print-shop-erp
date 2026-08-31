@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
+  OrderCraft,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
   OrderKind,
+  OrderLamination,
+  OrderPackagingMode,
+  OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
   ReworkCause,
@@ -10,7 +16,13 @@ import {
 } from '../../../generated/prisma/enums';
 import { ORDER_PRICING_STATUS } from '../pricing-status';
 
-const { dbMock, notifyMock, modeMock, enqueueNotificationMock } = vi.hoisted(() => {
+const {
+  dbMock,
+  notifyMock,
+  modeMock,
+  enqueueNotificationMock,
+  activateOperationsMock,
+} = vi.hoisted(() => {
   const mock = {
     order: {
       findUnique: vi.fn(),
@@ -21,6 +33,8 @@ const { dbMock, notifyMock, modeMock, enqueueNotificationMock } = vi.hoisted(() 
     craft: { findMany: vi.fn() },
     orderShipment: { create: vi.fn() },
     orderShipmentLine: { createMany: vi.fn() },
+    orderPackagingGroup: { create: vi.fn() },
+    orderPackagingGroupLine: { createMany: vi.fn() },
     orderPricingRevision: { create: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn(),
@@ -31,6 +45,7 @@ const { dbMock, notifyMock, modeMock, enqueueNotificationMock } = vi.hoisted(() 
     notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
     modeMock: vi.fn<() => 'inline' | 'durable'>(),
     enqueueNotificationMock: vi.fn<(...args: unknown[]) => Promise<boolean>>(),
+    activateOperationsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 });
 
@@ -44,9 +59,15 @@ vi.mock('@/lib/background-jobs/mode', () => ({
 vi.mock('@/lib/notification/transactional-outbox', () => ({
   enqueueNotificationInTransaction: enqueueNotificationMock,
 }));
+vi.mock('@/lib/production/operation-materialization-service', () => ({
+  activateProductionOperationsInTx: activateOperationsMock,
+  ProductionOperationMaterializationError: class extends Error {},
+}));
 
 import {
   createReworkOrder,
+  REWORK_PACKAGING_FACT_SOURCES,
+  reworkItemRequiresUnitsPerBagInput,
   ReworkOrderError,
 } from '../rework';
 
@@ -71,11 +92,29 @@ const sourceOrder = {
       id: 'source-item-1',
       name: '大号红包',
       productId: null,
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+      craft: OrderCraft.PARTIAL,
+      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      artworkVersion: null,
+      plateGroupId: null,
+      pricingGroup: null,
+      manualQuoteReason: null,
       specification: '大号',
+      actualWidthMm: null,
+      actualHeightMm: null,
       paperType: '艳红珠光纸',
+      paperWeightGsm: 160,
       quantity: 1000,
+      pack: 100,
       crafts: ['craft-foil', 'craft-cut'],
+      frontFoilColors: ['哑金', '红金'],
+      backFoilColors: [],
       foilColors: ['哑金', '红金'],
+      foilTechnique: OrderFoilTechnique.FLAT,
+      hasLocalFoil: true,
+      lamination: OrderLamination.NONE,
+      printColors: [],
+      printColorsKnown: true,
       isDoubleSided: false,
       isDoubleColor: true,
       suggestedSubtotal: null,
@@ -102,6 +141,21 @@ const sourceOrder = {
       expressCode: 'SF',
     },
   ],
+  packagingGroups: [
+    {
+      id: 'source-group-1',
+      sequence: 1,
+      name: '原单单款装',
+      mode: OrderPackagingMode.SINGLE_STYLE,
+      actualBagCount: 10,
+      lines: [
+        {
+          orderItemId: 'source-item-1',
+          unitsPerBag: 100,
+        },
+      ],
+    },
+  ],
 };
 
 const validInput = {
@@ -123,6 +177,8 @@ beforeEach(() => {
     dbMock.craft,
     dbMock.orderShipment,
     dbMock.orderShipmentLine,
+    dbMock.orderPackagingGroup,
+    dbMock.orderPackagingGroupLine,
     dbMock.orderPricingRevision,
     dbMock.orderLog,
   ]) {
@@ -133,7 +189,9 @@ beforeEach(() => {
     async (fn: (tx: typeof dbMock) => unknown) => fn(dbMock),
   );
   dbMock.order.findFirst.mockResolvedValue(null);
-  dbMock.craft.findMany.mockResolvedValue([{ id: 'craft-foil' }]);
+  dbMock.craft.findMany.mockResolvedValue([
+    { id: 'craft-foil', code: 'FLAT_FOIL_PARTIAL' },
+  ]);
   dbMock.order.create.mockResolvedValue({
     id: 'rework-1',
     orderNo: 'GD-260731-001',
@@ -141,14 +199,29 @@ beforeEach(() => {
   });
   dbMock.orderShipment.create.mockResolvedValue({ id: 'shipment-1' });
   dbMock.orderShipmentLine.createMany.mockResolvedValue({ count: 1 });
+  dbMock.orderPackagingGroup.create.mockResolvedValue({ id: 'rework-group-1' });
+  dbMock.orderPackagingGroupLine.createMany.mockResolvedValue({ count: 1 });
   dbMock.orderPricingRevision.create.mockResolvedValue({});
   dbMock.orderLog.create.mockResolvedValue({});
   notifyMock.mockReset().mockResolvedValue(undefined);
   modeMock.mockReset().mockReturnValue('inline');
   enqueueNotificationMock.mockReset().mockResolvedValue(true);
+  activateOperationsMock.mockReset().mockResolvedValue({
+    orderId: 'rework-1',
+    orderStatus: OrderStatus.SCHEDULING,
+    operationsCreated: 2,
+    progressStepsCreated: 1,
+  });
 });
 
 describe('createReworkOrder', () => {
+  it('只在该款无结构化归属且无有效 pack 时要求补录', () => {
+    expect(reworkItemRequiresUnitsPerBagInput(0, null)).toBe(true);
+    expect(reworkItemRequiresUnitsPerBagInput(0, 100)).toBe(false);
+    expect(reworkItemRequiresUnitsPerBagInput(1, null)).toBe(false);
+    expect(reworkItemRequiresUnitsPerBagInput(2, null)).toBe(false);
+  });
+
   it('creates a submitted, no-charge child order and preserves source evidence', async () => {
     dbMock.order.findUnique
       .mockResolvedValueOnce(sourceOrder)
@@ -181,6 +254,9 @@ describe('createReworkOrder', () => {
       sourceOrderId: 'source-1',
       reworkCause: ReworkCause.QUALITY,
       totalAmount: '0.00',
+      quotedFee: null,
+      confirmedFee: '0.00',
+      settledFee: null,
       submittedAt: now,
       receiverAddress: '佛山市主地址',
     });
@@ -188,11 +264,22 @@ describe('createReworkOrder', () => {
       name: '大号红包',
       quantity: 120,
       crafts: ['craft-foil'],
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
+      craft: OrderCraft.PARTIAL,
+      productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+      frontFoilColors: ['哑金', '红金'],
+      backFoilColors: [],
+      hasLocalFoil: true,
+      pack: 100,
       unitPrice: '0',
       fixedFee: '0',
       subtotal: '0',
       suggestedSubtotal: null,
       priceOverrideReason: '免费重做，不计加工费',
+      pricingSnapshot: expect.objectContaining({
+        packagingFactSource:
+          REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+      }),
     });
     expect(data.items.create[0].designs.create).toEqual([
       expect.objectContaining({
@@ -214,6 +301,32 @@ describe('createReworkOrder', () => {
         },
       ],
     });
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'rework-1',
+        sequence: 1,
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        actualBagCount: 2,
+        unitPrice: '0',
+        subtotal: '0',
+        pricingSnapshot: expect.objectContaining({
+          packagingFactSource:
+            REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+          sourcePackagingGroupId: 'source-group-1',
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.orderPackagingGroupLine.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          orderId: 'rework-1',
+          packagingGroupId: 'rework-group-1',
+          orderItemId: 'rework-item-1',
+          unitsPerBag: 100,
+        },
+      ],
+    });
     expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: 'rework-1',
@@ -228,10 +341,25 @@ describe('createReworkOrder', () => {
             settlementType: OrderSettlementType.NO_CHARGE,
             pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
             totalAmount: '0.00',
+            quotedFee: null,
+            confirmedFee: '0.00',
+            settledFee: null,
           }),
           items: [
             expect.objectContaining({
               id: 'rework-item-1',
+              subtotal: '0',
+              requiresAdminConfirmation: false,
+            }),
+          ],
+          packagingGroups: [
+            expect.objectContaining({
+              sequence: 1,
+              mode: OrderPackagingMode.SINGLE_STYLE,
+              actualBagCount: 2,
+              packagingFactSource:
+                REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+              sourcePackagingGroupId: 'source-group-1',
               subtotal: '0',
               requiresAdminConfirmation: false,
             }),
@@ -244,8 +372,25 @@ describe('createReworkOrder', () => {
       data: expect.objectContaining({
         orderId: 'source-1',
         action: 'CREATE_REWORK',
+        changedFields: expect.objectContaining({
+          packagingFactSources: {
+            before: null,
+            after: [
+              expect.objectContaining({
+                source: REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+                sourcePackagingGroupId: 'source-group-1',
+              }),
+            ],
+          },
+        }),
       }),
     });
+    expect(activateOperationsMock).toHaveBeenCalledWith(
+      dbMock,
+      'rework-1',
+      ownerActor,
+      now,
+    );
     expect(notifyMock).toHaveBeenCalledWith(
       'ORDER_SUBMITTED',
       expect.objectContaining({
@@ -265,6 +410,50 @@ describe('createReworkOrder', () => {
       { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
     );
     expect(notifyMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('只重做非计件工艺时不复制原单烫金计件事实', async () => {
+    dbMock.craft.findMany.mockResolvedValue([
+      { id: 'craft-glue', code: 'GLUING' },
+    ]);
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        ...sourceOrder,
+        items: [
+          {
+            ...sourceOrder.items[0],
+            craft: OrderCraft.FULL,
+            crafts: ['craft-foil', 'craft-glue'],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(
+      {
+        ...validInput,
+        items: [{ ...validInput.items[0], craftIds: ['craft-glue'] }],
+      },
+      ownerActor,
+    );
+
+    expect(dbMock.order.create.mock.calls[0]![0].data.items.create[0]).toMatchObject({
+      crafts: ['craft-glue'],
+      craft: OrderCraft.PRINT,
+      frontFoilColors: [],
+      backFoilColors: [],
+      foilColors: [],
+      foilTechnique: OrderFoilTechnique.NONE,
+      hasLocalFoil: false,
+    });
+    expect(activateOperationsMock).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -470,6 +659,285 @@ describe('createReworkOrder', () => {
         ownerActor,
       ),
     ).rejects.toThrow(/不包含所选重做工艺/);
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+
+  it('无结构化包装组时复用原款式明确的 pack 快照', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        ...sourceOrder,
+        packagingGroups: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actualBagCount: 2,
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        pricingSnapshot: expect.objectContaining({
+          packagingFactSource:
+            REWORK_PACKAGING_FACT_SOURCES.SOURCE_ITEM_PACK,
+          sourcePackagingGroupId: null,
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.orderPackagingGroupLine.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ unitsPerBag: 100 })],
+    });
+  });
+
+  it('原单无包装事实时要求管理员显式填每袋数，并支持仅重新入袋', async () => {
+    const legacySource = {
+      ...sourceOrder,
+      items: [{ ...sourceOrder.items[0], pack: null }],
+      packagingGroups: [],
+    };
+    dbMock.order.findUnique.mockResolvedValueOnce(legacySource);
+    await expect(
+      createReworkOrder(
+        {
+          ...validInput,
+          cause: ReworkCause.LOGISTICS_DAMAGE,
+          items: [{ ...validInput.items[0], craftIds: [] }],
+        },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/由管理员显式填写/);
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+
+    dbMock.order.findUnique
+      .mockResolvedValueOnce(legacySource)
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+    await createReworkOrder(
+      {
+        ...validInput,
+        cause: ReworkCause.LOGISTICS_DAMAGE,
+        items: [
+          {
+            ...validInput.items[0],
+            craftIds: [],
+            unitsPerBag: 50,
+          },
+        ],
+      },
+      ownerActor,
+    );
+
+    expect(dbMock.craft.findMany).not.toHaveBeenCalled();
+    expect(dbMock.order.create.mock.calls[0]![0].data.items.create[0]).toMatchObject({
+      craft: OrderCraft.PRINT,
+      crafts: [],
+      pack: 50,
+      frontFoilColors: [],
+      backFoilColors: [],
+      foilColors: [],
+      foilTechnique: OrderFoilTechnique.NONE,
+      hasLocalFoil: false,
+      pricingSnapshot: expect.objectContaining({
+        packagingFactSource: REWORK_PACKAGING_FACT_SOURCES.ADMIN_INPUT,
+      }),
+    });
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actualBagCount: 3,
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        pricingSnapshot: expect.objectContaining({
+          packagingFactSource: REWORK_PACKAGING_FACT_SOURCES.ADMIN_INPUT,
+        }),
+      }),
+      select: { id: true },
+    });
+    expect(dbMock.orderPackagingGroupLine.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ unitsPerBag: 50 })],
+    });
+    expect(activateOperationsMock).toHaveBeenCalledOnce();
+  });
+
+  it('结构化包装组存在时忽略客户端覆盖值，不改写 canonical 事实', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce(sourceOrder)
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(
+      {
+        ...validInput,
+        items: [{ ...validInput.items[0], unitsPerBag: 1 }],
+      },
+      ownerActor,
+    );
+
+    expect(dbMock.orderPackagingGroupLine.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ unitsPerBag: 100 })],
+    });
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actualBagCount: 2,
+        pricingSnapshot: expect.objectContaining({
+          packagingFactSource:
+            REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+        }),
+      }),
+      select: { id: true },
+    });
+  });
+
+  it('同一张历史单可同时复用 canonical 包装与管理员补录事实', async () => {
+    const secondSourceItem = {
+      ...sourceOrder.items[0],
+      id: 'source-item-2',
+      name: '中号红包',
+      quantity: 400,
+      pack: null,
+      crafts: [],
+    };
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        ...sourceOrder,
+        items: [...sourceOrder.items, secondSourceItem],
+      })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+    dbMock.order.create.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      items: [
+        { id: 'rework-item-1', sequence: 1 },
+        { id: 'rework-item-2', sequence: 2 },
+      ],
+    });
+    dbMock.orderPackagingGroup.create
+      .mockResolvedValueOnce({ id: 'rework-group-1' })
+      .mockResolvedValueOnce({ id: 'rework-group-2' });
+
+    await createReworkOrder(
+      {
+        ...validInput,
+        items: [
+          validInput.items[0],
+          {
+            sourceOrderItemId: 'source-item-2',
+            quantity: 80,
+            craftIds: [],
+            unitsPerBag: 40,
+          },
+        ],
+      },
+      ownerActor,
+    );
+
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenCalledTimes(2);
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sequence: 1,
+          actualBagCount: 2,
+          pricingSnapshot: expect.objectContaining({
+            packagingFactSource:
+              REWORK_PACKAGING_FACT_SOURCES.SOURCE_GROUP,
+          }),
+        }),
+      }),
+    );
+    expect(dbMock.orderPackagingGroup.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sequence: 2,
+          actualBagCount: 2,
+          pricingSnapshot: expect.objectContaining({
+            packagingFactSource: REWORK_PACKAGING_FACT_SOURCES.ADMIN_INPUT,
+          }),
+        }),
+      }),
+    );
+    expect(dbMock.order.create.mock.calls[0]![0].data.items.create[1]).toMatchObject({
+      name: '中号红包',
+      craft: OrderCraft.PRINT,
+      crafts: [],
+      pack: 40,
+      foilColors: [],
+    });
+  });
+
+  it('选中款式同时属于多个包装组时仍 fail closed', async () => {
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      ...sourceOrder,
+      packagingGroups: [
+        ...sourceOrder.packagingGroups,
+        {
+          ...sourceOrder.packagingGroups[0],
+          id: 'source-group-2',
+          sequence: 2,
+        },
+      ],
+    });
+    await expect(createReworkOrder(validInput, ownerActor)).rejects.toThrow(
+      /同时属于 2 个包装组/,
+    );
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+    expect(activateOperationsMock).not.toHaveBeenCalled();
+  });
+
+  it('同时选中多个烫金主工艺时 fail closed', async () => {
+    dbMock.craft.findMany.mockResolvedValue([
+      { id: 'craft-foil', code: 'FLAT_FOIL_PARTIAL' },
+      { id: 'craft-full', code: 'FLAT_FOIL_SINGLE' },
+    ]);
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      ...sourceOrder,
+      items: [
+        {
+          ...sourceOrder.items[0],
+          crafts: ['craft-foil', 'craft-full'],
+        },
+      ],
+    });
+
+    await expect(
+      createReworkOrder(
+        {
+          ...validInput,
+          items: [
+            {
+              ...validInput.items[0],
+              craftIds: ['craft-foil', 'craft-full'],
+            },
+          ],
+        },
+        ownerActor,
+      ),
+    ).rejects.toThrow(/多个烫金主工艺/);
     expect(dbMock.order.create).not.toHaveBeenCalled();
   });
 });

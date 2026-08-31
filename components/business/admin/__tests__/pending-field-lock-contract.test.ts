@@ -5,16 +5,13 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = process.cwd();
 const LOCKED_FORM_FILES = [
-  'production/ReportTaskForm.tsx',
+  'production/OperationReportForm.tsx',
   'salary/StartCsPeriodForm.tsx',
-  'salary/WorkerMachineRuleForm.tsx',
   'setting/SettingsForm.tsx',
 ] as const;
 const LOCKED_NAVIGATION_FORM_FILES = [
   'bom/BomForm.tsx',
   'craft/CraftForm.tsx',
-  'price/PriceAdjustmentForm.tsx',
-  'price/PriceTierForm.tsx',
   'product-category/ProductCategoryForm.tsx',
   'purchase/PurchaseOrderForm.tsx',
   'salary/StartCsPeriodForm.tsx',

@@ -1,7 +1,7 @@
 'use client';
 
 import { unstable_catchError as catchError, type ErrorInfo } from 'next/error';
-import { ErrorState } from '@/components/ui-business/ErrorState';
+import { ErrorState } from '@/components/ui-business';
 
 type PriceDataBoundaryFallbackProps = {
   title: string;

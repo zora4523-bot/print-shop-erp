@@ -1,6 +1,7 @@
 import {
   OrderStatus,
   OutsourceStatus,
+  ProductionOperationStatus,
   TaskStatus,
 } from '../generated/prisma/enums';
 import { transitionOrder } from './order/status-machine';
@@ -66,6 +67,22 @@ export type ProductionCompletionTx = {
       where: unknown;
       select?: unknown;
     }) => Promise<Array<{ id: string; status: TaskStatus }>>;
+  };
+  productionOperation: {
+    findMany: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<
+      Array<{ id: string; status: ProductionOperationStatus }>
+    >;
+  };
+  productionProgressStep: {
+    findMany: (args: {
+      where: unknown;
+      select?: unknown;
+    }) => Promise<
+      Array<{ id: string; status: ProductionOperationStatus }>
+    >;
   };
   outsourceOrder: {
     findMany: (args: {
@@ -137,14 +154,50 @@ export async function maybeCompleteProductionOrder(
     return notApplicable();
   }
 
-  const tasks = await tx.productionTask.findMany({
-    where: { orderItem: { orderId } },
+  const operations = await tx.productionOperation.findMany({
+    where: { orderId },
     select: { id: true, status: true },
   });
-  const activeTasks = tasks.filter((task) => task.status !== TaskStatus.CANCELLED);
-  const internalReady = activeTasks.every(
-    (task) => task.status === TaskStatus.COMPLETED,
-  );
+  const usesOperationGeneration = operations.length > 0;
+  let internalReady: boolean;
+  let internalWorkCount: number;
+  if (usesOperationGeneration) {
+    // Generation is exclusive: once an order owns any ProductionOperation,
+    // legacy ProductionTask rows (including an empty legacy set) are ignored.
+    // This prevents the first completed operation from finishing an order
+    // merely because the old task ledger has no rows.
+    const progressSteps = await tx.productionProgressStep.findMany({
+      where: { orderId },
+      select: { id: true, status: true },
+    });
+    const activeOperations = operations.filter(
+      (operation) => operation.status !== ProductionOperationStatus.CANCELLED,
+    );
+    const activeProgressSteps = progressSteps.filter(
+      (step) => step.status !== ProductionOperationStatus.CANCELLED,
+    );
+    internalReady =
+      activeOperations.every(
+        (operation) =>
+          operation.status === ProductionOperationStatus.COMPLETED,
+      ) &&
+      activeProgressSteps.every(
+        (step) => step.status === ProductionOperationStatus.COMPLETED,
+      );
+    internalWorkCount = activeOperations.length + activeProgressSteps.length;
+  } else {
+    const tasks = await tx.productionTask.findMany({
+      where: { orderItem: { orderId } },
+      select: { id: true, status: true },
+    });
+    const activeTasks = tasks.filter(
+      (task) => task.status !== TaskStatus.CANCELLED,
+    );
+    internalReady = activeTasks.every(
+      (task) => task.status === TaskStatus.COMPLETED,
+    );
+    internalWorkCount = activeTasks.length;
+  }
 
   // 与 getOrderDetail 的「暂不能完工」横幅共用同一个前置谓词。不共用会
   // 出现「页面说不能完工、闸口其实照样完工」的反向漂移。
@@ -187,8 +240,8 @@ export async function maybeCompleteProductionOrder(
     });
     const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
     // 按 id 取字典再在 JS 里筛 isOutsource（而不是 where isOutsource:
-    // true 扫全表），与 lib/production.ts scheduleOrder 的取法一致：in
-    // 列表被本工单的工艺数收敛住。**不加 isActive 过滤**——历史工单引用的
+    // true 扫全表）：in 列表被本工单的工艺数收敛住。
+    // **不加 isActive 过滤**——历史工单引用的
     // 已停用工艺仍然要参与判定，同 getOrderDetail 解析工艺名的理由。
     const crafts =
       craftIds.length === 0
@@ -234,11 +287,11 @@ export async function maybeCompleteProductionOrder(
         status: { before: order.status, after: OrderStatus.COMPLETED },
       },
       remark:
-        activeTasks.length === 0
+        internalWorkCount === 0
           ? '外协全部收货，工单完工'
           : coverageApplies
-            ? '内部任务与外协全部完成'
-            : '全部任务完工',
+            ? '内部生产步骤与外协全部完成'
+            : '全部生产步骤完工',
     },
   });
   await enqueueNotificationInTransaction(

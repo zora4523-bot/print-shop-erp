@@ -2,6 +2,7 @@ import type { HTMLAttributes } from 'react';
 import { OrderKind } from '@/generated/prisma/enums';
 import type { OrderFilterOption } from '@/lib/order/list-query';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 
 export const ORDER_KIND_LABELS: Record<OrderKind, string> = {
@@ -202,16 +203,14 @@ export function CheckboxGroup<T extends string>({
             return (
               <label
                 key={option.id}
-                htmlFor={id}
                 className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 text-sm text-foreground"
               >
-                <input
+                <Checkbox
                   id={id}
-                  type="checkbox"
                   name={name}
                   value={option.id}
                   defaultChecked={selected.includes(option.id)}
-                  className="size-4 shrink-0 accent-primary"
+                  aria-label={option.label}
                 />
                 <span className="admin-wrap-anywhere">{option.label}</span>
               </label>

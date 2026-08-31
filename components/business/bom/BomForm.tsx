@@ -74,7 +74,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
             }
             disabled={pending}
           >
-            <option value="PRODUCT">报价 SKU</option>
+            <option value="PRODUCT">建单产品</option>
             <option value="CATEGORY">产品结构分类</option>
           </select>
           {errs.targetType?.[0] ? (
@@ -92,13 +92,13 @@ export function BomForm({ action, products, categories, materials }: Props) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="productId">报价 SKU</Label>
+            <Label htmlFor="productId">建单产品</Label>
             <PendingLink
               href={`${RULE_CENTER_HREFS.stockSkus}/new`}
               pending={pending}
               className="text-xs text-primary hover:underline"
             >
-              新建报价 SKU
+              新建可建单组合
             </PendingLink>
           </div>
           <select
@@ -108,7 +108,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
             defaultValue=""
             disabled={pending || targetType !== 'PRODUCT' || missingProducts}
           >
-            <option value="">请选择报价 SKU</option>
+            <option value="">请选择建单产品</option>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.code ? `${product.code} · ` : ''}
@@ -156,7 +156,7 @@ export function BomForm({ action, products, categories, materials }: Props) {
       {missingTarget ? (
         <p className="text-sm text-muted-foreground">
           {targetType === 'PRODUCT'
-            ? '暂无可用报价 SKU，请先创建并启用。'
+            ? '暂无可用建单产品，请先创建并启用。'
             : '暂无可用产品结构分类，请先创建并启用。'}
         </p>
       ) : null}

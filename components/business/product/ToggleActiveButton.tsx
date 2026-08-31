@@ -3,7 +3,7 @@
 import { useActionState, useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { ActionNotice, ConfirmActionDialog } from '@/components/ui-business';
-import { setProductActiveAction } from '@/actions/owner-products';
+import { setQuoteProductActiveAction } from '@/actions/owner-products';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductReferenceImpact } from '@/lib/product';
 import { productActiveChangeImpactItems } from './ProductReferenceImpact';
@@ -12,22 +12,16 @@ export function ToggleActiveButton({
   productId,
   currentlyActive,
   impact,
-  action = setProductActiveAction,
 }: {
   productId: string;
   currentlyActive: boolean;
   impact: ProductReferenceImpact;
-  action?: (
-    id: string,
-    isActive: boolean,
-    formData?: FormData,
-  ) => Promise<ProductMutationResult>;
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
     async (_previous, formData) =>
-      action(productId, nextActive, formData),
+      setQuoteProductActiveAction(productId, nextActive, formData),
     null,
   );
 
@@ -52,18 +46,18 @@ export function ToggleActiveButton({
           >
             {pending
               ? currentlyActive
-                ? '正在停用产品…'
-                : '正在启用产品…'
+                ? '正在停用组合…'
+                : '正在启用组合…'
               : currentlyActive
-                ? '停用产品'
-                : '启用产品'}
+                ? '停用组合'
+                : '启用组合'}
           </Button>
         }
-        title={currentlyActive ? '停用该产品？' : '重新启用该产品？'}
+        title={currentlyActive ? '停用该组合？' : '重新启用该组合？'}
         description={
           currentlyActive
-            ? '停用后，该产品不能用于新建工单和新报价。请核对下列引用并填写停用理由。'
-            : '启用后，该产品可重新用于新建工单和新报价。请核对下列影响。'
+            ? '停用后，该组合不再参与新建工单的隐式匹配。请核对下列引用并填写停用理由。'
+            : '启用后，该组合会重新参与新建工单的隐式匹配。请核对下列影响。'
         }
         impactItems={productActiveChangeImpactItems(impact, nextActive)}
         confirmLabel={currentlyActive ? '确认停用' : '确认启用'}
@@ -76,14 +70,14 @@ export function ToggleActiveButton({
       {error ? (
         <ActionNotice
           tone="error"
-          title={currentlyActive ? '产品停用失败' : '产品启用失败'}
+          title={currentlyActive ? '组合停用失败' : '组合启用失败'}
           description={error}
         />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '产品已停用' : '产品已启用'}
+          title={currentlyActive ? '组合已停用' : '组合已启用'}
         />
       ) : null}
     </div>

@@ -61,6 +61,7 @@ import {
   ProductInvariantError,
   QUOTE_PRODUCT_CATEGORIES,
   orderCategoryNodesAsTree,
+  isRetiredProductCategory,
 } from '../product';
 
 describe('QUOTE_PRODUCT_CATEGORIES', () => {
@@ -238,7 +239,6 @@ describe('listProductsPage', () => {
         orderCount: 3,
         bomCount: 2,
         currentExternalPriceRuleCount: 4,
-        currentInternalPriceTierCount: 1,
       },
     ]);
 
@@ -255,7 +255,6 @@ describe('listProductsPage', () => {
       orderCount: 3,
       bomCount: 2,
       currentExternalPriceRuleCount: 4,
-      currentInternalPriceTierCount: 1,
     });
   });
 
@@ -322,7 +321,7 @@ describe('listCurrentExternalSalesProductOrderOptions', () => {
   const referencedProduct = {
     id: 'product-priced',
     code: 'PRD-000042',
-    name: '管理员新建报价 SKU',
+    name: '管理员新建产品目录项',
     category: ProductCategory.CUSTOM_FLAT_FOIL,
     specification: '大号封90×165',
     paperType: '160g珠光艳闪',
@@ -373,7 +372,7 @@ describe('listCurrentExternalSalesProductOrderOptions', () => {
     expect(dbMock.product.findMany).not.toHaveBeenCalled();
   });
 
-  it('没有当前加工费价目时关闭报价 SKU 目录', async () => {
+  it('没有当前加工费价目时关闭建单产品目录', async () => {
     await expect(
       listCurrentExternalSalesProductOrderOptions(now),
     ).resolves.toEqual([]);
@@ -431,6 +430,41 @@ describe('listProductCategoryOptions', () => {
       },
       orderBy: [{ sortOrder: 'asc' }, { path: 'asc' }],
     });
+  });
+
+  it('新业务选项排除退役根节点及其后代', async () => {
+    const active = makeCategoryNode();
+    const retiredRoot = makeCategoryNode({
+      id: 'cat-generic',
+      path: 'product.generic_stock',
+      legacyCategory: ProductCategory.GENERIC_STOCK,
+    });
+    const retiredChild = makeCategoryNode({
+      id: 'cat-generic-child',
+      path: 'product.generic_stock.legacy_child',
+      legacyCategory: ProductCategory.BLANK_STOCK,
+    });
+    dbMock.productCategoryNode.findMany.mockResolvedValue([
+      active,
+      retiredRoot,
+      retiredChild,
+    ]);
+
+    await expect(listProductCategoryOptions()).resolves.toEqual([active]);
+  });
+
+  it('编辑历史 SKU 时仍可显式保留它当前的退役分类', async () => {
+    const retired = makeCategoryNode({
+      id: 'cat-generic',
+      path: 'product.generic_stock',
+      legacyCategory: ProductCategory.GENERIC_STOCK,
+      isActive: false,
+    });
+    dbMock.productCategoryNode.findMany.mockResolvedValue([retired]);
+
+    await expect(
+      listProductCategoryOptions({ includeInactiveIds: ['cat-generic'] }),
+    ).resolves.toEqual([retired]);
   });
 });
 
@@ -499,6 +533,23 @@ describe('product category node management', () => {
     });
   });
 
+  it.each([
+    ProductCategory.GENERIC_STOCK,
+    ProductCategory.STOCK_FOIL_ADD,
+    ProductCategory.BYO_MATERIAL,
+  ])('拒绝通过新建节点重建退役兼容分类 %s', async (legacyCategory) => {
+    await expect(
+      createProductCategoryNode({
+        parentId: null,
+        name: '历史分类',
+        legacyCategory,
+        sortOrder: 900,
+      }),
+    ).rejects.toThrow(/历史产品分类已退役.*不能新建/u);
+
+    expect(dbMock.productCategoryNode.create).not.toHaveBeenCalled();
+  });
+
   it('creates a child node under the parent path; rejects missing/inactive parent', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue({
       path: 'product.custom',
@@ -539,6 +590,26 @@ describe('product category node management', () => {
     ).rejects.toThrow(/已停用/);
   });
 
+  it('拒绝在退役分类下新建子分类', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.generic_stock',
+        legacyCategory: ProductCategory.BLANK_STOCK,
+        isActive: true,
+      }),
+    );
+
+    await expect(
+      createProductCategoryNode({
+        parentId: 'cat-generic',
+        name: '新子分类',
+        legacyCategory: ProductCategory.COLOR_PRINT,
+        sortOrder: 10,
+      }),
+    ).rejects.toThrow(/已退役.*不能在其下新建/u);
+    expect(dbMock.productCategoryNode.create).not.toHaveBeenCalled();
+  });
+
   it('updates category node editable fields', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
     dbMock.productCategoryNode.update.mockResolvedValue(makeCategoryNode({ name: '改名' }));
@@ -555,6 +626,64 @@ describe('product category node management', () => {
     });
   });
 
+  it('允许退役分类保持兼容标识时修改历史展示信息', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.generic_stock',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+        isActive: false,
+      }),
+    );
+    dbMock.productCategoryNode.update.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.generic_stock',
+        name: '历史通版现货',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+        isActive: false,
+      }),
+    );
+
+    await updateProductCategoryNode('cat-generic', {
+      name: '历史通版现货',
+      legacyCategory: ProductCategory.GENERIC_STOCK,
+      sortOrder: 900,
+    });
+
+    expect(dbMock.productCategoryNode.update).toHaveBeenCalledOnce();
+  });
+
+  it('拒绝修改退役节点的兼容分类来绕过激活保护', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.archived_alias',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+        isActive: false,
+      }),
+    );
+
+    await expect(
+      updateProductCategoryNode('cat-generic', {
+        name: '历史通版现货',
+        legacyCategory: ProductCategory.BLANK_STOCK,
+        sortOrder: 900,
+      }),
+    ).rejects.toThrow(/已退役.*不能改变其兼容分类/u);
+    expect(dbMock.productCategoryNode.update).not.toHaveBeenCalled();
+  });
+
+  it('拒绝将现行节点改入退役兼容分类', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(makeCategoryNode());
+
+    await expect(
+      updateProductCategoryNode('cat-custom', {
+        name: '不应变为历史分类',
+        legacyCategory: ProductCategory.BYO_MATERIAL,
+        sortOrder: 30,
+      }),
+    ).rejects.toThrow(/不能将现行产品分类改为已退役分类/u);
+    expect(dbMock.productCategoryNode.update).not.toHaveBeenCalled();
+  });
+
   it('flips category node active status', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(
       makeCategoryNode({ isActive: true }),
@@ -568,9 +697,114 @@ describe('product category node management', () => {
     });
   });
 
+  it('允许普通停用分类重新启用', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({ isActive: false }),
+    );
+    dbMock.productCategoryNode.update.mockResolvedValue(
+      makeCategoryNode({ isActive: true }),
+    );
+
+    await setProductCategoryNodeActive('cat-custom', true);
+
+    expect(dbMock.productCategoryNode.update.mock.calls[0][0].data).toEqual({
+      isActive: true,
+    });
+  });
+
+  it.each([
+    [
+      'path',
+      {
+        path: 'product.generic_stock',
+        legacyCategory: ProductCategory.BLANK_STOCK,
+      },
+    ],
+    [
+      'legacyCategory',
+      {
+        path: 'product.archived_alias',
+        legacyCategory: ProductCategory.STOCK_FOIL_ADD,
+      },
+    ],
+  ])('拒绝通过 %s 命中的退役分类重新启用', async (_kind, identity) => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({ ...identity, isActive: false }),
+    );
+
+    await expect(
+      setProductCategoryNodeActive('cat-retired', true),
+    ).rejects.toThrow(/历史产品分类已退役.*不能重新启用/u);
+    expect(dbMock.productCategoryNode.update).not.toHaveBeenCalled();
+  });
+
+  it('已退役分类仍可从异常激活状态停用', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.byo_material',
+        legacyCategory: ProductCategory.BYO_MATERIAL,
+        isActive: true,
+      }),
+    );
+    dbMock.productCategoryNode.update.mockResolvedValue(
+      makeCategoryNode({
+        path: 'product.byo_material',
+        legacyCategory: ProductCategory.BYO_MATERIAL,
+        isActive: false,
+      }),
+    );
+
+    await setProductCategoryNodeActive('cat-byo', false);
+
+    expect(dbMock.productCategoryNode.update.mock.calls[0][0].data).toEqual({
+      isActive: false,
+    });
+  });
+
   it('returns null when category node is absent', async () => {
     dbMock.productCategoryNode.findUnique.mockResolvedValue(null);
     await expect(getProductCategoryNodeSummary('missing')).resolves.toBeNull();
+  });
+});
+
+describe('isRetiredProductCategory', () => {
+  it.each([
+    'product.generic_stock',
+    'product.stock_foil_add',
+    'product.byo_material',
+  ])('通过历史 path 判定退役分类: %s', (path) => {
+    expect(
+      isRetiredProductCategory({
+        path,
+        legacyCategory: ProductCategory.BLANK_STOCK,
+      }),
+    ).toBe(true);
+  });
+
+  it('将退役节点的既有后代一并判定为退役', () => {
+    expect(
+      isRetiredProductCategory({
+        path: 'product.generic_stock.legacy_child.deep_leaf',
+        legacyCategory: ProductCategory.BLANK_STOCK,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ProductCategory.GENERIC_STOCK,
+    ProductCategory.STOCK_FOIL_ADD,
+    ProductCategory.BYO_MATERIAL,
+  ])('通过历史 legacyCategory 判定退役分类: %s', (legacyCategory) => {
+    expect(
+      isRetiredProductCategory({
+        path: 'product.archived_alias',
+        legacyCategory,
+      }),
+    ).toBe(true);
+  });
+
+  it('不将普通分类误判为退役', () => {
+    expect(isRetiredProductCategory(makeCategoryNode())).toBe(false);
   });
 });
 
@@ -664,6 +898,30 @@ describe('createProduct', () => {
     ).rejects.toBeInstanceOf(ProductInvariantError);
     expect(dbMock.product.create).not.toHaveBeenCalled();
   });
+
+  it('拒绝通过伪造的活跃分类 ID 在退役分类下创建 SKU', async () => {
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        id: 'cat-retired',
+        path: 'product.stock_foil_add',
+        legacyCategory: ProductCategory.STOCK_FOIL_ADD,
+        isActive: true,
+      }),
+    );
+
+    await expect(
+      createProduct({
+        code: 'HISTORY-ONLY',
+        categoryNodeId: 'cat-retired',
+        name: '不应新建的 SKU',
+        specification: null,
+        paperType: null,
+        baseUnitPrice: null,
+      }),
+    ).rejects.toThrow(/历史产品分类已退役.*不能用于新业务/u);
+    expect(dbMock.product.create).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 describe('updateProduct', () => {
@@ -708,6 +966,30 @@ describe('updateProduct', () => {
     expect(data.baseUnitPrice).toBe('1.5000');
   });
 
+  it('拒绝将现行 SKU 迁入退役分类', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.productCategoryNode.findUnique.mockResolvedValue(
+      makeCategoryNode({
+        id: 'cat-retired',
+        path: 'product.archived_alias',
+        legacyCategory: ProductCategory.BYO_MATERIAL,
+        isActive: true,
+      }),
+    );
+
+    await expect(
+      updateProduct('p1', {
+        code: 'HB001',
+        categoryNodeId: 'cat-retired',
+        name: '不应迁入的 SKU',
+        specification: null,
+        paperType: null,
+        baseUnitPrice: null,
+      }),
+    ).rejects.toThrow(/历史产品分类已退役.*不能用于新业务/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+
   it('protects SKU matching facts referenced by a current or scheduled price book', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
     dbMock.customerPriceRule.count.mockResolvedValue(1);
@@ -721,7 +1003,7 @@ describe('updateProduct', () => {
         paperType: '铜版纸',
         baseUnitPrice: '0.5000',
       }),
-    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    ).rejects.toThrow(/新建产品目录项.*新价格版本/u);
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
 
@@ -743,7 +1025,7 @@ describe('updateProduct', () => {
     expect(dbMock.product.update).toHaveBeenCalledOnce();
   });
 
-  it('omits baseUnitPrice so a concurrent internal-price update is preserved', async () => {
+  it('省略旧计价字段时保留历史存量值', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct());
     dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
 
@@ -760,6 +1042,7 @@ describe('updateProduct', () => {
       unknown
     >;
     expect('baseUnitPrice' in data).toBe(false);
+    expect('minOrderQty' in data).toBe(false);
   });
 
   it('allows saving a product that already uses a disabled category node', async () => {
@@ -837,13 +1120,71 @@ describe('setProductActive', () => {
     );
   });
 
+  it('允许普通分类下的停用 SKU 重新启用', async () => {
+    dbMock.product.findUnique.mockResolvedValue(
+      makeProduct({ isActive: false }),
+    );
+    dbMock.product.update.mockResolvedValue(makeProduct({ isActive: true }));
+
+    await setProductActive('p1', true, {
+      ...activeChangeContext,
+      reason: null,
+    });
+
+    expect(dbMock.product.update.mock.calls[0][0].data).toEqual({
+      isActive: true,
+    });
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'PRODUCT_ACTIVATE' }),
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'path',
+      {
+        path: 'product.byo_material',
+        legacyCategory: ProductCategory.BLANK_STOCK,
+      },
+    ],
+    [
+      'legacyCategory',
+      {
+        path: 'product.archived_alias',
+        legacyCategory: ProductCategory.GENERIC_STOCK,
+      },
+    ],
+  ])('拒绝重新启用通过 %s 命中退役分类的 SKU', async (_kind, identity) => {
+    dbMock.product.findUnique.mockResolvedValue(
+      makeProduct({
+        isActive: false,
+        category: identity.legacyCategory,
+        categoryNode: makeCategoryNode({
+          ...identity,
+          isActive: false,
+        }),
+      }),
+    );
+
+    await expect(
+      setProductActive('p1', true, {
+        ...activeChangeContext,
+        reason: null,
+      }),
+    ).rejects.toThrow(/属于已退役历史分类.*不能重新启用/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
   it('rejects deactivation while a current or scheduled price version references the SKU', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
     dbMock.customerPriceRule.count.mockResolvedValue(1);
 
     await expect(
       setProductActive('p1', false, activeChangeContext),
-    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    ).rejects.toThrow(/新建产品目录项.*新价格版本/u);
     expect(dbMock.product.update).not.toHaveBeenCalled();
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
@@ -871,14 +1212,13 @@ describe('setProductActive', () => {
 });
 
 describe('getProductReferenceImpact', () => {
-  it('counts distinct orders and only currently effective quote sources', async () => {
+  it('counts distinct orders and only the published customer-price source', async () => {
     dbMock.$queryRaw.mockResolvedValue([
       {
         productId: 'p1',
         orderCount: 7,
         bomCount: 2,
         currentExternalPriceRuleCount: 3,
-        currentInternalPriceTierCount: 4,
       },
     ]);
 
@@ -888,14 +1228,13 @@ describe('getProductReferenceImpact', () => {
       orderCount: 7,
       bomCount: 2,
       currentExternalPriceRuleCount: 3,
-      currentInternalPriceTierCount: 4,
     });
     expect(dbMock.$queryRaw).toHaveBeenCalledOnce();
     const query = dbMock.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
     expect(query.sql).toContain('COUNT(DISTINCT item."orderId")');
     expect(query.sql).toContain('book."settlementType" = \'EXTERNAL_SALES\'');
     expect(query.sql).toContain('book."effectiveFrom" <=');
-    expect(query.sql).toContain('tier."effectiveFrom" <=');
+    expect(query.sql).not.toContain('PriceTier');
   });
 });
 

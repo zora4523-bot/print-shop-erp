@@ -13,6 +13,7 @@ import { createReworkOrderAction } from '@/actions/order';
 import type { CreateReworkOrderMutationResult } from '@/actions/order.types';
 import { ReworkCause } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 
 type CraftOption = {
@@ -26,6 +27,7 @@ type ReworkItemOption = {
   sequence: number;
   name: string;
   quantity: number;
+  requiresUnitsPerBagInput?: boolean;
   crafts: CraftOption[];
 };
 
@@ -39,6 +41,18 @@ const REWORK_CAUSE_LABELS: Record<ReworkCause, string> = {
   [ReworkCause.LOGISTICS_DAMAGE]: '物流损毁',
   [ReworkCause.OTHER]: '其他原因',
 };
+
+const MAX_UNITS_PER_BAG = 9_999_999;
+
+function parsedUnitsPerBag(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/u.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) &&
+    parsed > 0 &&
+    parsed <= MAX_UNITS_PER_BAG
+    ? parsed
+    : undefined;
+}
 
 export function ReworkOrderForm({ sourceOrderId, items }: Props) {
   const router = useRouter();
@@ -65,6 +79,9 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
       ]),
     ),
   );
+  const [unitsPerBag, setUnitsPerBag] = useState<Record<string, string>>(() =>
+    Object.fromEntries(items.map((item) => [item.id, ''])),
+  );
 
   useEffect(() => {
     if (state?.status === 'success') {
@@ -78,11 +95,16 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
       selectedCount > 0 &&
       reason.trim().length > 0 &&
       [...selectedItems].every(
-        (itemId) =>
-          (quantities[itemId] ?? 0) > 0 &&
-          (selectedCrafts[itemId]?.size ?? 0) > 0,
+        (itemId) => {
+          const item = items.find((candidate) => candidate.id === itemId);
+          return (
+            (quantities[itemId] ?? 0) > 0 &&
+            (!item?.requiresUnitsPerBagInput ||
+              parsedUnitsPerBag(unitsPerBag[itemId]) !== undefined)
+          );
+        },
       ),
-    [quantities, reason, selectedCrafts, selectedCount, selectedItems],
+    [items, quantities, reason, selectedCount, selectedItems, unitsPerBag],
   );
 
   function toggleItem(itemId: string) {
@@ -116,6 +138,9 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
           sourceOrderItemId: item.id,
           quantity: quantities[item.id],
           craftIds: [...(selectedCrafts[item.id] ?? [])],
+          ...(item.requiresUnitsPerBagInput
+            ? { unitsPerBag: parsedUnitsPerBag(unitsPerBag[item.id]) }
+            : {}),
         })),
     };
     startTransition(() => action(payload));
@@ -158,18 +183,20 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
         <legend className="text-sm font-medium">
           选择重做款式、数量和工艺
         </legend>
+        <p className="text-xs text-muted-foreground">
+          加工工艺可不选；未选加工工艺 = 仅重新打包/入袋。
+        </p>
         <ol className="space-y-3">
           {items.map((item) => {
             const selected = selectedItems.has(item.id);
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
-                <label className="flex min-h-11 min-w-0 items-center gap-3">
-                  <input
-                    type="checkbox"
+                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
                     checked={selected}
                     disabled={pending}
-                    onChange={() => toggleItem(item.id)}
-                    className="h-4 w-4 shrink-0"
+                    aria-label={`选择重做款式 ${item.sequence}：${item.name}`}
+                    onCheckedChange={() => toggleItem(item.id)}
                   />
                   <span className="admin-wrap-anywhere min-w-0 font-medium">
                     #{item.sequence} · {item.name}
@@ -194,6 +221,29 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         }
                       />
                     </label>
+                    {item.requiresUnitsPerBagInput ? (
+                      <label className="block max-w-56 space-y-1 text-sm">
+                        <span>每袋数量（原单未记录）</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={MAX_UNITS_PER_BAG}
+                          step={1}
+                          required
+                          value={unitsPerBag[item.id] ?? ''}
+                          disabled={pending}
+                          onChange={(event) =>
+                            setUnitsPerBag((current) => ({
+                              ...current,
+                              [item.id]: event.target.value,
+                            }))
+                          }
+                        />
+                        <span className="block text-xs text-muted-foreground">
+                          该值只用于原单缺失包装事实的这一款，不会覆盖已有包装组。
+                        </span>
+                      </label>
+                    ) : null}
                     <fieldset>
                       <legend className="text-xs font-medium text-muted-foreground">
                         重做工艺
@@ -202,16 +252,17 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         {item.crafts.map((craft) => (
                           <label
                             key={craft.id}
-                            className="flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={
                                 selectedCrafts[item.id]?.has(craft.id) ?? false
                               }
                               disabled={pending}
-                              onChange={() => toggleCraft(item.id, craft.id)}
-                              className="h-4 w-4"
+                              aria-label={`重做工艺：${craft.name}${craft.isOutsource ? '（外协）' : ''}`}
+                              onCheckedChange={() =>
+                                toggleCraft(item.id, craft.id)
+                              }
                             />
                             <span>
                               {craft.name}
@@ -219,6 +270,11 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                             </span>
                           </label>
                         ))}
+                        {item.crafts.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">
+                            原单无可选加工工艺，本款将仅重新打包/入袋。
+                          </span>
+                        ) : null}
                       </div>
                     </fieldset>
                   </div>

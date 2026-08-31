@@ -21,7 +21,6 @@ vi.mock('react', async (importOriginal) => {
 });
 
 vi.mock('@/actions/owner-salary', () => ({
-  setDailySalaryPaidAction: vi.fn(),
   setHourlyPayrollPaidAction: vi.fn(),
   recordCsPayrollPaymentAction: vi.fn(),
   recomputeHourlyPayrollAction: vi.fn(),
@@ -29,10 +28,6 @@ vi.mock('@/actions/owner-salary', () => ({
   settleReadyCsPeriodsAction: vi.fn(),
 }));
 
-import {
-  MarkPaidForm,
-  dailyPaidImpactItems,
-} from './MarkPaidForm';
 import {
   MarkHourlyPaidForm,
   hourlyPaidImpactItems,
@@ -55,7 +50,6 @@ import {
 } from './SettleReadyCsButton';
 
 const salarySources = [
-  'MarkPaidForm.tsx',
   'MarkHourlyPaidForm.tsx',
   'CsPayrollPaymentForm.tsx',
   'RecomputeHourlyForm.tsx',
@@ -113,15 +107,7 @@ beforeEach(() => {
 });
 
 describe('salary critical-action confirmations', () => {
-  it('shows the exact daily and hourly payment targets before changing finance state', () => {
-    expect(
-      dailyPaidImpactItems({
-        currentPaid: false,
-        workerName: '张师傅',
-        salaryDate: '2026-08-23',
-        amount: '520.00',
-      }).join('\n'),
-    ).toContain('张师傅 · 2026-08-23 · 将标记已发 ¥ 520.00');
+  it('shows the exact hourly payment target before changing finance state', () => {
     expect(
       hourlyPaidImpactItems({
         currentPaid: true,
@@ -131,16 +117,6 @@ describe('salary critical-action confirmations', () => {
       }).join('\n'),
     ).toContain('不会冲销外部付款');
 
-    const dailyHtml = renderToStaticMarkup(
-      <MarkPaidForm
-        id="daily-1"
-        currentPaid={false}
-        workerName="张师傅"
-        salaryDate="2026-08-23"
-        amount="520.00"
-        returnTo="/owner/salary/daily?paid=unpaid"
-      />,
-    );
     const hourlyHtml = renderToStaticMarkup(
       <MarkHourlyPaidForm
         id="hourly-1"
@@ -152,8 +128,6 @@ describe('salary critical-action confirmations', () => {
       />,
     );
 
-    expect(dailyHtml).toContain('data-slot="alert-dialog-trigger"');
-    expect(dailyHtml).toContain('aria-haspopup="dialog"');
     expect(hourlyHtml).toContain('data-slot="alert-dialog-trigger"');
     expect(hourlyHtml).toContain('aria-haspopup="dialog"');
     expect(hourlyHtml).toContain(
@@ -200,7 +174,7 @@ describe('salary critical-action confirmations', () => {
     expect(html).toMatch(/type="datetime-local"[^>]*required=""/);
     expect(html).toContain('核对并记录工资发放');
 
-    const source = salarySources[2]!;
+    const source = salarySources[1]!;
     expect(source).toContain('form.reportValidity()');
     expect(source).toContain('onSubmit={handleSubmit}');
     expect(source).toContain('confirmedRef.current = true');

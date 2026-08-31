@@ -3,9 +3,11 @@
 import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  cancelScheduledCustomerPriceBookAction,
   createCustomerPriceBookDraftAction,
   discardCustomerPriceBookDraftAction,
   publishCustomerPriceBookDraftAction,
+  rescheduleCustomerPriceBookAction,
   updateCustomerPriceRuleDraftAction,
 } from '@/actions/customer-price-books';
 import type {
@@ -13,6 +15,7 @@ import type {
   UpdateCustomerPriceRuleDraftActionInput,
 } from '@/actions/customer-price-books.types';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -375,6 +378,7 @@ export async function publishDraftFromForm(
     effectiveFrom: textValue(formData, 'effectiveFrom'),
     publishNote: textValue(formData, 'publishNote'),
     confirmedImpact: checkedValue(formData, 'confirmedImpact'),
+    confirmedHighRisk: checkedValue(formData, 'confirmedHighRisk'),
   });
 }
 
@@ -385,6 +389,31 @@ export async function discardDraftFromForm(
   return discardCustomerPriceBookDraftAction({
     priceBookId: textValue(formData, 'priceBookId'),
     expectedDraftUpdatedAt: textValue(formData, 'expectedDraftUpdatedAt'),
+  });
+}
+
+export async function cancelScheduledFromForm(
+  _previous: MutationState,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  return cancelScheduledCustomerPriceBookAction({
+    priceBookId: textValue(formData, 'priceBookId'),
+    expectedUpdatedAt: textValue(formData, 'expectedUpdatedAt'),
+    reason: textValue(formData, 'reason'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
+  });
+}
+
+export async function rescheduleFromForm(
+  _previous: MutationState,
+  formData: FormData,
+): Promise<CustomerPriceBookMutationResult> {
+  return rescheduleCustomerPriceBookAction({
+    priceBookId: textValue(formData, 'priceBookId'),
+    expectedUpdatedAt: textValue(formData, 'expectedUpdatedAt'),
+    effectiveFrom: textValue(formData, 'effectiveFrom'),
+    reason: textValue(formData, 'reason'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
   });
 }
 
@@ -465,10 +494,14 @@ function MutationFeedback({
 
 export function CreateCustomerPriceBookDraftForm({
   purpose,
+  purposeLabel,
   returnHref,
+  presentation = 'panel',
 }: {
   purpose: CustomerPriceBookPurpose;
+  purposeLabel?: string;
   returnHref?: string;
+  presentation?: 'panel' | 'dialog';
 }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
@@ -499,19 +532,26 @@ export function CreateCustomerPriceBookDraftForm({
       action={formAction}
       aria-busy={pending}
       aria-label={`创建${
-        purpose === CustomerPriceBookPurpose.PROCESSING
+        purposeLabel ??
+        (purpose === CustomerPriceBookPurpose.PROCESSING
           ? '加工费'
-          : '快递与耗材'
+          : '快递与耗材')
       }调价草稿`}
-      className="mt-4 min-w-0 space-y-3 rounded-lg border border-dashed p-3"
+      className={
+        presentation === 'dialog'
+          ? 'min-w-0 space-y-3'
+          : 'mt-4 min-w-0 space-y-3 rounded-lg border border-dashed p-3'
+      }
     >
       <input type="hidden" name="purpose" value={purpose} />
-      <div className="space-y-1">
-        <p className="text-sm font-medium">发起调价</p>
-        <p className="text-xs leading-5 text-muted-foreground">
-          草稿发布前不影响当前报价。
-        </p>
-      </div>
+      {presentation === 'panel' ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium">发起调价</p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            草稿发布前不影响当前报价。
+          </p>
+        </div>
+      ) : null}
       <div className="space-y-2">
         <Label htmlFor={changeReasonId}>调价原因（必填）</Label>
         <textarea
@@ -554,26 +594,33 @@ export function PublishCustomerPriceBookDraftForm({
   priceBookId,
   expectedDraftUpdatedAt,
   defaultEffectiveFrom,
-  ruleCount,
+  changeReason,
   impact,
 }: {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
   defaultEffectiveFrom: string;
-  ruleCount?: number;
+  changeReason: string;
   impact?: {
     totalRuleCount: number;
     changedItemCount: number;
     changedRuleCount: number;
     increasedRuleCount: number;
     decreasedRuleCount: number;
+    highRiskRuleCount: number;
+    highRiskDeltaPercentThreshold: string;
     deltaPercentMin: string | null;
     deltaPercentMax: string | null;
     validationStatus: 'PASS' | 'FAIL';
+    validationIssues?: Array<{
+      message: string;
+      href?: string;
+    }>;
   };
 }) {
   const router = useRouter();
-  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
+  const [confirmedHighRisk, setConfirmedHighRisk] = useState(false);
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
     publishDraftFromForm,
     null,
@@ -585,9 +632,12 @@ export function PublishCustomerPriceBookDraftForm({
   const publishNoteId = `publishNote-${priceBookId}`;
   const publishNoteHintId = `${publishNoteId}-hint`;
   const publishNoteErrorId = `${publishNoteId}-error`;
-  const confirmedImpactId = `confirmedImpact-${priceBookId}`;
-  const confirmedImpactErrorId = `${confirmedImpactId}-error`;
+  const confirmedHighRiskErrorId = `confirmedHighRisk-${priceBookId}-error`;
   const validationPassed = impact?.validationStatus !== 'FAIL';
+  const hasChanges =
+    (impact?.changedItemCount ?? 0) > 0 &&
+    (impact?.changedRuleCount ?? 0) > 0;
+  const requiresHighRiskConfirmation = (impact?.highRiskRuleCount ?? 0) > 0;
 
   const deltaRange =
     impact && impact.deltaPercentMin !== null && impact.deltaPercentMax !== null
@@ -601,6 +651,7 @@ export function PublishCustomerPriceBookDraftForm({
   useEffect(() => {
     if (state?.status !== 'success') return;
     router.replace(RULE_CENTER_HREFS.priceVersions);
+    router.refresh();
   }, [router, state]);
 
   return (
@@ -617,159 +668,200 @@ export function PublishCustomerPriceBookDraftForm({
         name="expectedDraftUpdatedAt"
         value={expectedDraftUpdatedAt}
       />
-      <div className="space-y-2">
-        <Label htmlFor={effectiveFromId}>
-          生效时间（上海时间）
-        </Label>
-        <Input
-          id={effectiveFromId}
-          name="effectiveFrom"
-          type="datetime-local"
-          className={controlClass}
-          defaultValue={defaultEffectiveFrom}
-          required
-          aria-required="true"
-          onChange={() => setConfirmationOpen(false)}
-          aria-invalid={Boolean(errors.effectiveFrom?.length)}
-          aria-describedby={fieldDescriptionIds(
-            effectiveFromErrorId,
-            errors.effectiveFrom,
-          )}
-        />
-        <FieldErrorMessages
-          id={effectiveFromErrorId}
-          messages={errors.effectiveFrom}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor={publishNoteId}>发布说明（必填）</Label>
-        <textarea
-          id={publishNoteId}
-          name="publishNote"
-          className={`${textareaClass} min-h-24`}
-          placeholder="例如：已完成 2026 年 9 月加工费复核，按新价目生效"
-          minLength={2}
-          maxLength={500}
-          required
-          aria-required="true"
-          aria-invalid={Boolean(errors.publishNote?.length)}
-          aria-describedby={fieldDescriptionIds(
-            publishNoteErrorId,
-            errors.publishNote,
-            publishNoteHintId,
-          )}
-          onChange={() => setConfirmationOpen(false)}
-        />
-        <p id={publishNoteHintId} className="text-xs text-muted-foreground">
-          用于发布记录。
-        </p>
-        <FieldErrorMessages id={publishNoteErrorId} messages={errors.publishNote} />
-      </div>
+      <input type="hidden" name="confirmedImpact" value="true" />
 
-      {!confirmationOpen ? (
-        <div className="space-y-2">
-          <Button
-            type="button"
-            className="min-h-11 w-full"
-            disabled={pending || !validationPassed}
-            onClick={() => {
-              if (!formRef.current?.reportValidity()) return;
-              setConfirmationOpen(true);
-            }}
-          >
-            校验通过，进入发布确认
-          </Button>
-          {!validationPassed ? (
-            <p className="text-xs text-destructive">
-              发布检查未通过，请先修正问题。
-            </p>
-          ) : null}
+      <section
+        aria-labelledby={`publish-summary-${priceBookId}`}
+        className="space-y-3 rounded-lg border border-destructive/35 bg-destructive/5 p-3"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
+            发布确认
+          </span>
+          <h3 id={`publish-summary-${priceBookId}`} className="font-medium">
+            确认本次价格变更
+          </h3>
         </div>
-      ) : (
-        <section
-          aria-live="polite"
-          aria-labelledby={`${confirmedImpactId}-heading`}
-          className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
-              发布确认
-            </span>
-            <p id={`${confirmedImpactId}-heading`} className="font-medium">
-              确认发布影响
-            </p>
+
+        <dl className="grid gap-2 text-xs sm:grid-cols-2">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">变更范围</dt>
+            <dd className="font-sans tabular-nums">
+              {impact?.changedItemCount ?? '—'} 个收费项目 ·{' '}
+              {impact?.changedRuleCount ?? '—'} 条规则
+            </dd>
           </div>
-          <dl className="grid gap-2 text-xs sm:grid-cols-2">
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">影响收费项目</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.changedItemCount ?? '—'} 项
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">影响数量档/规则</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.changedRuleCount ?? ruleCount ?? '—'} 档
-              </dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">涨跌区间</dt>
-              <dd className="font-sans tabular-nums">{deltaRange}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">涨价 / 下调</dt>
-              <dd className="font-sans tabular-nums">
-                {impact?.increasedRuleCount ?? '—'} / {impact?.decreasedRuleCount ?? '—'} 档
-              </dd>
-            </div>
-          </dl>
-          <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
-            已开工单价格不变；新价格从生效时间起用于新建或重新报价工单。
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">全表检查</dt>
+            <dd className={validationPassed ? 'text-success-foreground' : 'text-destructive'}>
+              {validationPassed
+                ? `${impact?.totalRuleCount ?? '—'} 条规则已通过`
+                : '未通过'}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">涨跌区间</dt>
+            <dd className="font-sans tabular-nums">{deltaRange}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">涨价 / 下调</dt>
+            <dd className="font-sans tabular-nums">
+              {impact?.increasedRuleCount ?? '—'} /{' '}
+              {impact?.decreasedRuleCount ?? '—'} 条
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3 sm:col-span-2">
+            <dt className="text-muted-foreground">生效方式</dt>
+            <dd className="font-medium">
+              {effectiveFrom
+                ? `${effectiveFrom.replace('T', ' ')}（上海时间）`
+                : '立即生效'}
+            </dd>
+          </div>
+        </dl>
+
+        {!hasChanges ? (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-background p-2 text-xs text-destructive">
+            草稿和当前生效版没有可发布的差异。
           </p>
-          <label
-            htmlFor={confirmedImpactId}
-            className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border bg-background p-2 text-sm"
-          >
-            <input
-              id={confirmedImpactId}
-              name="confirmedImpact"
-              type="checkbox"
-              value="true"
-              required
-              aria-required="true"
-              aria-invalid={Boolean(errors.confirmedImpact?.length)}
-              aria-describedby={
-                errors.confirmedImpact?.length ? confirmedImpactErrorId : undefined
-              }
-              className="mt-1 size-4 shrink-0"
-            />
-            <span>我已核对变更、生效时间和历史工单影响。</span>
-          </label>
-          <FieldErrorMessages
-            id={confirmedImpactErrorId}
-            messages={errors.confirmedImpact}
-          />
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11 sm:flex-1"
-              disabled={pending}
-              onClick={() => setConfirmationOpen(false)}
-            >
-              返回修改
-            </Button>
-            <Button
-              type="submit"
-              variant="destructive"
-              className="min-h-11 sm:flex-[1.4]"
-              disabled={pending}
-            >
-              {pending ? '正在发布…' : '确认发布'}
-            </Button>
+        ) : null}
+        {!validationPassed ? (
+          <div className="space-y-2 rounded-md border border-destructive/30 bg-background p-2 text-xs text-destructive">
+            <p className="font-medium">发布检查未通过，请先修正以下问题：</p>
+            <ul className="space-y-1.5">
+              {impact?.validationIssues?.map((issue, index) => (
+                <li key={`${issue.href ?? 'price-book'}-${index}`}>
+                  <span className="admin-wrap-anywhere">{issue.message}</span>
+                  {issue.href ? (
+                    <a
+                      href={issue.href}
+                      className="ml-1 font-medium underline underline-offset-4"
+                    >
+                      打开对应价格
+                    </a>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
           </div>
-        </section>
-      )}
+        ) : null}
+
+        <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs leading-5 text-warning-foreground">
+          已开工单价格不变；新价格仅用于发布后新建或重新报价的工单。
+        </p>
+
+        {requiresHighRiskConfirmation ? (
+          <div className="space-y-2 rounded-md border border-destructive/40 bg-background p-3">
+            <p className="text-sm font-medium text-destructive">
+              检测到 {impact?.highRiskRuleCount} 条高风险报价变更
+            </p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              任一价格相对当前版涨跌达到 {impact?.highRiskDeltaPercentThreshold}% ，
+              或价格在 0 元与非零之间、无报价与有报价之间切换，
+              以及有效规则新增、移除或启停时，需要单独确认。
+              系统不会限制价格，只防止误触发布。
+            </p>
+            <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
+                name="confirmedHighRisk"
+                value="true"
+                checked={confirmedHighRisk}
+                disabled={pending}
+                aria-label="我已逐条核对高风险变更，确认按当前新规则发布"
+                onCheckedChange={setConfirmedHighRisk}
+                aria-invalid={Boolean(errors.confirmedHighRisk?.length)}
+                aria-describedby={fieldDescriptionIds(
+                  confirmedHighRiskErrorId,
+                  errors.confirmedHighRisk,
+                )}
+              />
+              <span className="min-w-0 py-2">
+                我已逐条核对高风险变更，确认按当前新规则发布
+              </span>
+            </label>
+            <FieldErrorMessages
+              id={confirmedHighRiskErrorId}
+              messages={errors.confirmedHighRisk}
+            />
+          </div>
+        ) : null}
+      </section>
+
+      <Disclosure className="rounded-lg border bg-card p-3">
+        <DisclosureSummary className="justify-between gap-3">
+          <span>预约生效或补充发布说明（可选）</span>
+          <span className="text-xs font-normal text-muted-foreground">
+            普通调价无需填写
+          </span>
+        </DisclosureSummary>
+        <div className="mt-3 space-y-3 border-t pt-3">
+          <div className="space-y-2">
+            <Label htmlFor={effectiveFromId}>预约生效时间（上海时间）</Label>
+            <Input
+              id={effectiveFromId}
+              name="effectiveFrom"
+              type="datetime-local"
+              className={controlClass}
+              value={effectiveFrom}
+              onChange={(event) => setEffectiveFrom(event.target.value)}
+              aria-invalid={Boolean(errors.effectiveFrom?.length)}
+              aria-describedby={fieldDescriptionIds(
+                effectiveFromErrorId,
+                errors.effectiveFrom,
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              留空即立即发布；只有已确定未来切换时刻时才需要预约。
+            </p>
+            <FieldErrorMessages
+              id={effectiveFromErrorId}
+              messages={errors.effectiveFrom}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={publishNoteId}>补充发布说明（可选）</Label>
+            <textarea
+              id={publishNoteId}
+              name="publishNote"
+              className={`${textareaClass} min-h-20`}
+              placeholder="如需补充说明，请在此填写"
+              minLength={2}
+              maxLength={500}
+              aria-invalid={Boolean(errors.publishNote?.length)}
+              aria-describedby={fieldDescriptionIds(
+                publishNoteErrorId,
+                errors.publishNote,
+                publishNoteHintId,
+              )}
+            />
+            <p id={publishNoteHintId} className="text-xs text-muted-foreground">
+              留空时发布记录沿用调价原因：{changeReason}
+            </p>
+            <FieldErrorMessages
+              id={publishNoteErrorId}
+              messages={errors.publishNote}
+            />
+          </div>
+        </div>
+      </Disclosure>
+
+      <Button
+        type="submit"
+        variant="destructive"
+        className="min-h-11 w-full"
+        disabled={
+          pending ||
+          !validationPassed ||
+          !hasChanges ||
+          (requiresHighRiskConfirmation && !confirmedHighRisk)
+        }
+      >
+        {pending
+          ? '正在发布…'
+          : effectiveFrom
+            ? '确认预约发布'
+            : '确认并立即发布'}
+      </Button>
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
@@ -844,6 +936,146 @@ export function DiscardCustomerPriceBookDraftForm({
   );
 }
 
+export function CancelScheduledCustomerPriceBookForm({
+  priceBookId,
+  expectedUpdatedAt,
+  version,
+}: {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  version: number;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<MutationState, FormData>(
+    cancelScheduledFromForm,
+    null,
+  );
+  const formId = useId();
+
+  useEffect(() => {
+    if (state?.status === 'success') router.refresh();
+  }, [router, state]);
+
+  return (
+    <form
+      id={formId}
+      action={formAction}
+      aria-label={`取消第 ${version} 版计划`}
+      aria-busy={pending}
+    >
+      <input type="hidden" name="priceBookId" value={priceBookId} />
+      <input type="hidden" name="expectedUpdatedAt" value={expectedUpdatedAt} />
+      <input type="hidden" name="confirmedImpact" value="true" />
+      <ConfirmActionDialog
+        level="L3"
+        formId={formId}
+        disabled={pending}
+        reasonLabel="取消原因"
+        reasonPlaceholder="例如：价格复核未完成，取消本次计划"
+        trigger={
+          <Button type="button" variant="destructive" className="min-h-11">
+            {pending ? '正在取消…' : '取消计划'}
+          </Button>
+        }
+        title={`取消第 ${version} 版的生效计划？`}
+        description="这不会删除已发布版本或规则，但它将不再自动生效。"
+        impactItems={[
+          '计划版本和全部规则保留作为审计证据。',
+          '前一版价格将延续覆盖原计划时段。',
+          '已建工单和历史价格快照不变。',
+        ]}
+        confirmLabel="填写原因并取消计划"
+        cancelLabel="保留计划"
+      />
+      <MutationFeedback
+        state={state}
+        onRefresh={() => router.refresh()}
+        successMessage="计划版本已取消，版本与规则证据已保留。"
+      />
+    </form>
+  );
+}
+
+export function RescheduleCustomerPriceBookForm({
+  priceBookId,
+  expectedUpdatedAt,
+  version,
+  defaultEffectiveFrom,
+}: {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  version: number;
+  defaultEffectiveFrom: string;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<MutationState, FormData>(
+    rescheduleFromForm,
+    null,
+  );
+  const formId = useId();
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
+  const errors = mutationFieldErrors(state);
+
+  useEffect(() => {
+    if (state?.status === 'success') router.refresh();
+  }, [router, state]);
+
+  return (
+    <form
+      id={formId}
+      action={formAction}
+      aria-label={`调整第 ${version} 版生效时间`}
+      aria-busy={pending}
+      className="flex min-w-0 flex-wrap items-end gap-2"
+    >
+      <input type="hidden" name="priceBookId" value={priceBookId} />
+      <input type="hidden" name="expectedUpdatedAt" value={expectedUpdatedAt} />
+      <input type="hidden" name="confirmedImpact" value="true" />
+      <div className="min-w-56 flex-1 space-y-1">
+        <Label htmlFor={inputId} className="text-xs">新生效时间（上海时间）</Label>
+        <Input
+          id={inputId}
+          name="effectiveFrom"
+          type="datetime-local"
+          className="min-h-11"
+          defaultValue={defaultEffectiveFrom}
+          required
+          aria-invalid={Boolean(errors.effectiveFrom?.length)}
+          aria-describedby={errors.effectiveFrom?.length ? errorId : undefined}
+        />
+        <FieldErrorMessages id={errorId} messages={errors.effectiveFrom} />
+      </div>
+      <ConfirmActionDialog
+        level="L3"
+        formId={formId}
+        disabled={pending}
+        reasonLabel="改期原因"
+        reasonPlaceholder="例如：延后至下月统一切换"
+        trigger={
+          <Button type="button" variant="outline" className="min-h-11">
+            {pending ? '正在改期…' : '调整生效时间'}
+          </Button>
+        }
+        title={`调整第 ${version} 版的生效时间？`}
+        description="系统会重新衔接前后版本区间，并在提交前重新验证建单计价。"
+        impactItems={[
+          '价目版本、规则、版本号与哈希保持不变。',
+          '新生效时间之后的新建或重新报价工单受影响。',
+          '已建工单的历史快照不会重算。',
+        ]}
+        confirmLabel="填写原因并确认改期"
+        cancelLabel="保持原时间"
+      />
+      <MutationFeedback
+        state={state}
+        onRefresh={() => router.refresh()}
+        successMessage="计划版本已改期。"
+      />
+    </form>
+  );
+}
+
 function Field({
   label,
   htmlFor,
@@ -882,6 +1114,7 @@ function MatchCheckboxGroup<T extends string>({
   values,
   defaultValues,
   required,
+  disabled,
   errors,
   errorId,
 }: {
@@ -891,6 +1124,7 @@ function MatchCheckboxGroup<T extends string>({
   values?: readonly T[];
   defaultValues: readonly T[];
   required?: boolean;
+  disabled?: boolean;
   errors?: string[];
   errorId: string;
 }) {
@@ -907,14 +1141,14 @@ function MatchCheckboxGroup<T extends string>({
           (value) => (
             <label
               key={value}
-              className="relative flex min-h-11 min-w-0 cursor-pointer items-center rounded-lg border bg-background pl-10 pr-2 text-sm"
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 name={name}
                 value={value}
-                className="absolute left-3 size-4"
                 defaultChecked={defaultValues.includes(value)}
+                disabled={disabled}
+                aria-label={labels[value]}
                 aria-invalid={Boolean(errors?.length)}
                 aria-describedby={errors?.length ? errorId : undefined}
               />
@@ -1390,6 +1624,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={PACKAGING_MODE_LABELS}
                 defaultValues={rule.match.packagingModes}
                 required
+                disabled={pending}
                 errors={errors['match.packagingModes']}
                 errorId={`${prefix}-packagingModes-error`}
               />
@@ -1402,6 +1637,7 @@ export function CustomerPriceBookDraftRuleForm({
                   values={NEW_ORDER_PRICING_ROUTES}
                   defaultValues={rule.match.pricingRoutes}
                   required
+                  disabled={pending}
                   errors={errors['match.pricingRoutes']}
                   errorId={`${prefix}-pricingRoutes-error`}
                 />
@@ -1417,6 +1653,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.productStructures"
               labels={PRODUCT_STRUCTURE_LABELS}
               defaultValues={rule.match.productStructures}
+              disabled={pending}
               errors={errors['match.productStructures']}
               errorId={`${prefix}-productStructures-error`}
             />
@@ -1425,6 +1662,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.foilTechniques"
               labels={FOIL_TECHNIQUE_LABELS}
               defaultValues={rule.match.foilTechniques}
+              disabled={pending}
               errors={errors['match.foilTechniques']}
               errorId={`${prefix}-foilTechniques-error`}
             />
@@ -1433,6 +1671,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="match.laminations"
               labels={LAMINATION_LABELS}
               defaultValues={rule.match.laminations}
+              disabled={pending}
               errors={errors['match.laminations']}
               errorId={`${prefix}-laminations-error`}
             />
@@ -1460,6 +1699,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.craftCodes}
+                disabled={pending}
                 errors={errors['match.craftCodes']}
                 errorId={`${prefix}-craftCodes-error`}
               />
@@ -1485,6 +1725,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.noneOfCraftCodes}
+                disabled={pending}
                 errors={errors['match.noneOfCraftCodes']}
                 errorId={`${prefix}-noneOfCraftCodes-error`}
               />
@@ -1494,6 +1735,7 @@ export function CustomerPriceBookDraftRuleForm({
                 labels={craftLabels}
                 values={craftValues}
                 defaultValues={rule.match.anyCraftCodeOutside}
+                disabled={pending}
                 errors={errors['match.anyCraftCodeOutside']}
                 errorId={`${prefix}-anyCraftCodeOutside-error`}
               />
@@ -1581,8 +1823,14 @@ export function CustomerPriceBookDraftRuleForm({
                 ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
                 ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
               ].map(([name, label, checked]) => (
-                <label key={String(name)} className="flex min-h-11 items-center gap-3 rounded-lg border bg-background px-3 text-sm">
-                  <input type="checkbox" name={String(name)} value="true" defaultChecked={Boolean(checked)} className="size-4" />
+                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                  <Checkbox
+                    name={String(name)}
+                    value="true"
+                    defaultChecked={Boolean(checked)}
+                    disabled={pending}
+                    aria-label={String(label)}
+                  />
                   <span>{String(label)}</span>
                 </label>
               ))}
@@ -1655,21 +1903,15 @@ export function CustomerPriceBookDraftRuleForm({
       >
         <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
-        <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-12 text-sm">
-          <input
-            type="checkbox"
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <Checkbox
             name="isActive"
             value="true"
-            className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0"
             defaultChecked={rule.isActive}
+            disabled={pending}
+            aria-label="启用此规则"
             {...fieldA11y('isActive')}
           />
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 flex size-5 items-center justify-center rounded border border-input text-xs text-transparent peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
-          >
-            ✓
-          </span>
           <span className="admin-wrap-anywhere">启用此规则</span>
         </label>
         <FieldErrorMessages
@@ -1683,21 +1925,15 @@ export function CustomerPriceBookDraftRuleForm({
               name="blocksAutomaticQuote"
               value="false"
             />
-            <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-12 text-sm">
-              <input
-                type="checkbox"
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+              <Checkbox
                 name="blocksAutomaticQuote"
                 value="true"
-                className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0"
                 defaultChecked={rule.blocksAutomaticQuote}
+                disabled={pending}
+                aria-label="不自动计价"
                 {...fieldA11y('blocksAutomaticQuote')}
               />
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 flex size-5 items-center justify-center rounded border border-input text-xs text-transparent peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
-              >
-                ✓
-              </span>
               <span className="admin-wrap-anywhere">
                 不自动计价
               </span>

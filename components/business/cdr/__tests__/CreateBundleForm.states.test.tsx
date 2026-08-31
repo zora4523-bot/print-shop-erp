@@ -49,6 +49,30 @@ beforeEach(() => {
 });
 
 describe('CreateBundleForm state contract', () => {
+  it('通过共享 Checkbox 保留全选与逐单 FormData 契约', () => {
+    const html = render();
+
+    expect(html.match(/data-slot="checkbox"/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="全选 / 全不选"');
+    expect(html).toContain('aria-label="选择工单 20260824001"');
+    expect(html).toMatch(
+      /<input[^>]*name="orderIds"[^>]*value="order-1"/,
+    );
+  });
+
+  it('生成中锁定全选与逐单复选框', () => {
+    formState.pending = true;
+    const html = render();
+    const checkboxRoots =
+      html.match(/<span[^>]*data-slot="checkbox"[^>]*>/g) ?? [];
+
+    expect(checkboxRoots).toHaveLength(2);
+    for (const checkbox of checkboxRoots) {
+      expect(checkbox).toContain('data-disabled=""');
+      expect(checkbox).toContain('aria-disabled="true"');
+    }
+  });
+
   it('uses the no-result state and keeps the disabled reason visible', () => {
     const html = render([]);
 

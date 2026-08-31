@@ -1,17 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
-import { MachineType, WorkerType } from '@/generated/prisma/enums';
 
 const { actionState } = vi.hoisted(() => ({
-  actionState: { current: null as CraftMutationResult | null },
+  actionState: {
+    current: null as CraftMutationResult | null,
+    pending: false,
+  },
 }));
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
   return {
     ...actual,
-    useActionState: () => [actionState.current, vi.fn(), false],
+    useActionState: () => [actionState.current, vi.fn(), actionState.pending],
   };
 });
 
@@ -26,6 +28,7 @@ describe('CraftForm business language', () => {
 
   beforeEach(() => {
     actionState.current = null;
+    actionState.pending = false;
   });
 
   it('lets the server generate the code when creating a craft', () => {
@@ -47,8 +50,6 @@ describe('CraftForm business language', () => {
         initial={{
           name: '局部烫金',
           isOutsource: false,
-          defaultWorkerType: WorkerType.MACHINE,
-          defaultMachineType: MachineType.HAND_PRESS,
           sortOrder: 10,
           isActive: true,
         }}
@@ -59,6 +60,52 @@ describe('CraftForm business language', () => {
     expect(text).not.toContain('工艺代码');
     expect(text).not.toContain(internalCode);
     expect(html).not.toContain('name="code"');
+  });
+
+  it('does not expose retired assignment or capacity controls', () => {
+    const html = renderToStaticMarkup(
+      <CraftForm mode="create" action={action} />,
+    );
+
+    expect(html).not.toContain('name="defaultWorkerType"');
+    expect(html).not.toContain('name="defaultMachineType"');
+    expect(visibleText(html)).not.toContain('接单岗位');
+    expect(visibleText(html)).not.toContain('排产');
+  });
+
+  it('uses the shared checkbox while preserving the form field', () => {
+    const html = renderToStaticMarkup(
+      <CraftForm
+        mode="edit"
+        action={action}
+        initial={{
+          name: '镭射压纹',
+          isOutsource: true,
+          sortOrder: 20,
+          isActive: true,
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('role="checkbox"');
+    expect(html).toContain('name="isOutsource"');
+    expect(html).toContain('aria-checked="true"');
+    const input = html.match(/<input[^>]*name="isOutsource"[^>]*>/)?.[0];
+    expect(input).toBeDefined();
+    expect(input).not.toContain('value=');
+  });
+
+  it('disables the outsource checkbox while the form is pending', () => {
+    actionState.pending = true;
+
+    const html = renderToStaticMarkup(
+      <CraftForm mode="create" action={action} />,
+    );
+
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-disabled=""');
+    expect(html).toContain('name="isOutsource"');
   });
 
   it('历史服务端返回未归属字段错误时仍给出可见反馈', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   OrderStatus,
   OutsourceStatus,
+  ProductionOperationStatus,
   TaskStatus,
 } from '../../generated/prisma/enums';
 import {
@@ -40,6 +41,8 @@ type FakeItemRow = {
 function makeTx(opts: {
   order?: FakeOrderRow | null;
   tasks?: Array<{ id: string; status: TaskStatus }>;
+  operations?: Array<{ id: string; status: ProductionOperationStatus }>;
+  progressSteps?: Array<{ id: string; status: ProductionOperationStatus }>;
   outsourceOrders?: FakeOutsourceRow[];
   items?: FakeItemRow[];
   crafts?: Array<{ id: string; isOutsource: boolean }>;
@@ -56,6 +59,8 @@ function makeTx(opts: {
   });
   const orderUpdate = vi.fn(async () => ({ id: 'order-1' }));
   const taskFindMany = vi.fn(async () => opts.tasks ?? []);
+  const operationFindMany = vi.fn(async () => opts.operations ?? []);
+  const progressStepFindMany = vi.fn(async () => opts.progressSteps ?? []);
   const outsourceFindMany = vi.fn(
     async (args: { where: unknown; select?: unknown }) => {
       const where = args.where as {
@@ -93,6 +98,8 @@ function makeTx(opts: {
     orderItem: { findMany: itemFindMany },
     craft: { findMany: craftFindMany },
     productionTask: { findMany: taskFindMany },
+    productionOperation: { findMany: operationFindMany },
+    productionProgressStep: { findMany: progressStepFindMany },
     outsourceOrder: { findMany: outsourceFindMany },
     orderLog: { create: logCreate },
   } as unknown as ProductionCompletionTx;
@@ -102,6 +109,8 @@ function makeTx(opts: {
     orderFindUnique,
     orderUpdate,
     taskFindMany,
+    operationFindMany,
+    progressStepFindMany,
     outsourceFindMany,
     itemFindMany,
     craftFindMany,
@@ -156,6 +165,86 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(h.itemFindMany).not.toHaveBeenCalled();
     expect(h.craftFindMany).not.toHaveBeenCalled();
     expect(h.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('新代工序存在时只读新 ledger，旧任务为空也不得提前完工', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.IN_PRODUCTION,
+        requiresOutsource: false,
+      },
+      tasks: [],
+      operations: [
+        { id: 'operation-1', status: ProductionOperationStatus.COMPLETED },
+        { id: 'operation-2', status: ProductionOperationStatus.IN_PROGRESS },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.blockedBy).toBe('INTERNAL_TASKS');
+    expect(h.taskFindMany).not.toHaveBeenCalled();
+    expect(h.progressStepFindMany).toHaveBeenCalledOnce();
+    expect(h.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('计件工序全完成但无计件进度未完成时仍阻止完工', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.IN_PRODUCTION,
+        requiresOutsource: false,
+      },
+      operations: [
+        { id: 'operation-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+      progressSteps: [
+        { id: 'progress-1', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.blockedBy).toBe('INTERNAL_TASKS');
+    expect(h.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('新代计件与无计件步骤全完成后放行，不受旧任务影响', async () => {
+    const h = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.IN_PRODUCTION,
+        requiresOutsource: false,
+      },
+      tasks: [{ id: 'legacy-pending', status: TaskStatus.PENDING }],
+      operations: [
+        { id: 'operation-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+      progressSteps: [
+        { id: 'progress-1', status: ProductionOperationStatus.COMPLETED },
+      ],
+    });
+
+    const out = await maybeCompleteProductionOrder(
+      h.tx,
+      'order-1',
+      'user-1',
+      NOW,
+    );
+
+    expect(out.completed).toBe(true);
+    expect(h.taskFindMany).not.toHaveBeenCalled();
   });
 
   it('requiresOutsource=false 且内部任务全完 → 完工，且外协/款式/工艺三条查询全不跑', async () => {

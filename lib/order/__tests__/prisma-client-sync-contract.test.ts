@@ -22,6 +22,27 @@ describe('Prisma client synchronization contract', () => {
     );
   });
 
+  it('isolates append-only production E2E facts from the normal database', () => {
+    const config = readFileSync(
+      join(workspace, 'playwright.config.ts'),
+      'utf8',
+    );
+    const helpers = readFileSync(
+      join(workspace, 'tests/e2e/_helpers.ts'),
+      'utf8',
+    );
+
+    expect(config).toContain('E2E_DATABASE_URL');
+    expect(config).toContain('pointsAtSameDatabase');
+    expect(config).toContain(
+      'reuseExistingServer: !hasIsolatedE2eDatabase && !process.env.CI',
+    );
+    expect(helpers).toContain('productionOperationE2eIsolationFailure()');
+    expect(helpers.indexOf('productionOperationE2eIsolationFailure()')).toBeLessThan(
+      helpers.indexOf('return withDb(async (db) => {', helpers.indexOf('seedE2eProductionOperationFixture')),
+    );
+  });
+
   it('keeps the generated client schema byte-for-byte current', () => {
     const schema = readFileSync(join(workspace, 'prisma/schema.prisma'), 'utf8');
     const generatedSource = readFileSync(

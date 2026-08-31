@@ -4,6 +4,7 @@ import type {
   CustomerPriceRuleKind,
 } from '../generated/prisma/enums';
 import type { CustomerRuleConditionEditorInput } from '../lib/price/customer-rule-condition';
+import type { CustomerPriceSection } from '../lib/price/customer-price-section-membership';
 
 export type CreateCustomerPriceBookDraftActionInput = {
   purpose: CustomerPriceBookPurpose;
@@ -53,20 +54,66 @@ export type UpdateCustomerPriceRuleDraftGroupActionInput = {
   }>;
 };
 
+export type CustomerPricingSectionId = CustomerPriceSection;
+
+/**
+ * Saves a complete dedicated rule-center section. The server derives the
+ * section membership again and rejects partial or cross-section payloads.
+ */
+export type UpdateCustomerPriceSectionDraftActionInput = {
+  priceBookId: string;
+  section: CustomerPricingSectionId;
+  rows: Array<{
+    ruleId: string;
+    expectedUpdatedAt: string;
+    amount: string | null;
+    minQty: number | null;
+    maxQty: number | null;
+    includedUnits: string | null;
+    incrementUnits: string | null;
+    incrementAmount: string | null;
+  }>;
+};
+
 export type PublishCustomerPriceBookDraftActionInput = {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
-  /** Shanghai wall time from an HTML datetime-local control. */
-  effectiveFrom: string;
-  /** Human-readable release note stored with the published workflow and audit. */
-  publishNote: string;
+  /**
+   * Optional Shanghai wall time from an HTML datetime-local control.
+   * Omit it (or submit an empty value) for an immediate, server-timestamped
+   * release. Explicit future instants remain supported for scheduled releases.
+   */
+  effectiveFrom?: string;
+  /**
+   * Optional release-note supplement. Empty values reuse the draft's required
+   * change reason so the same explanation is not entered twice.
+   */
+  publishNote?: string;
   /** Explicit acknowledgement for the L3, all-future-orders impact. */
   confirmedImpact: boolean;
+  /** Separate acknowledgement when the server detects an abnormal price swing. */
+  confirmedHighRisk?: boolean;
 };
 
 export type DiscardCustomerPriceBookDraftActionInput = {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
+};
+
+export type CancelScheduledCustomerPriceBookActionInput = {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  reason: string;
+  confirmedImpact: boolean;
+};
+
+export type RescheduleCustomerPriceBookActionInput = {
+  priceBookId: string;
+  expectedUpdatedAt: string;
+  /** Shanghai wall time from an HTML datetime-local control. */
+  effectiveFrom: string;
+  reason: string;
+  confirmedImpact: boolean;
 };
 
 export type CustomerPriceBookMutationResult =

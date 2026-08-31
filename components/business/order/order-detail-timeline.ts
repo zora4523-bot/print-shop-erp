@@ -1,12 +1,9 @@
-import {
-  OrderStatus,
-  TaskStatus,
-} from '../../../generated/prisma/enums';
+import { OrderStatus } from '../../../generated/prisma/enums';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { orderStatusZh } from '@/lib/order/log-format';
 
-export type OrderTimelineTask = {
-  status: TaskStatus;
+export type OrderTimelineProductionUnit = {
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 };
 
 export type OrderTimelineLog = {
@@ -23,8 +20,7 @@ export type OrderTimelineInput = {
   promisedDate: Date | null;
   submitterName: string;
   logs: OrderTimelineLog[];
-  tasks: OrderTimelineTask[];
-  assignedWorkerCount: number;
+  productionUnits: OrderTimelineProductionUnit[];
   uncoveredOutsourceNames: string[];
   hasLiveOutsource: boolean;
   pendingChangeRequest: boolean;
@@ -42,8 +38,8 @@ export type OrderTimelineStep = {
 
 const FLOW: Array<{ key: string; label: string }> = [
   { key: 'created', label: '已创建' },
-  { key: 'submitted', label: '已提交' },
-  { key: 'scheduled', label: '排产完成' },
+  { key: 'submitted', label: '待工厂确认' },
+  { key: 'scheduled', label: '工序已生成' },
   { key: 'producing', label: '生产中' },
   { key: 'complete', label: '等待完工' },
   { key: 'shipped', label: '发货' },
@@ -52,6 +48,7 @@ const FLOW: Array<{ key: string; label: string }> = [
 
 const FLOW_INDEX: Record<OrderStatus, number> = {
   [OrderStatus.DRAFT]: 0,
+  [OrderStatus.PENDING_FACTORY]: 1,
   [OrderStatus.SUBMITTED]: 1,
   [OrderStatus.SCHEDULING]: 2,
   [OrderStatus.IN_PRODUCTION]: 3,
@@ -85,15 +82,15 @@ export function buildOrderDetailTimeline(
   input: OrderTimelineInput,
 ): OrderTimelineStep[] {
   const currentIndex = FLOW_INDEX[input.status];
-  const completedTasks = input.tasks.filter(
-    (task) => task.status === TaskStatus.COMPLETED,
+  const completedUnits = input.productionUnits.filter(
+    (unit) => unit.status === 'COMPLETED',
   ).length;
-  const incompleteTasks = input.tasks.filter(
-    (task) =>
-      task.status === TaskStatus.PENDING ||
-      task.status === TaskStatus.IN_PROGRESS,
+  const incompleteUnits = input.productionUnits.filter(
+    (unit) => unit.status === 'PENDING' || unit.status === 'IN_PROGRESS',
   ).length;
-  const submittedLog = logForStatus(input.logs, OrderStatus.SUBMITTED);
+  const submittedLog =
+    logForStatus(input.logs, OrderStatus.PENDING_FACTORY) ??
+    logForStatus(input.logs, OrderStatus.SUBMITTED);
   const scheduledLog = logForStatus(input.logs, OrderStatus.SCHEDULING);
   const productionLog = logForStatus(input.logs, OrderStatus.IN_PRODUCTION);
   const completedLog = logForStatus(input.logs, OrderStatus.COMPLETED);
@@ -109,8 +106,8 @@ export function buildOrderDetailTimeline(
     ? '阻断：仍有已发出或进行中的外协单'
     : null;
   const incompleteBlock =
-    incompleteTasks > 0
-      ? `${incompleteTasks} 个任务未完工`
+    incompleteUnits > 0
+      ? `${incompleteUnits} 个工序未完工`
       : null;
   const changeBlock = input.pendingChangeRequest
     ? '有待审核的修改申请'
@@ -125,19 +122,19 @@ export function buildOrderDetailTimeline(
     ),
     scheduledLog
       ? stamp(scheduledLog.createdAt, scheduledLog.operatorName)
-      : input.assignedWorkerCount > 0
-        ? `已分派 ${input.assignedWorkerCount} 名师傅`
+      : input.productionUnits.length > 0
+        ? `已生成 ${input.productionUnits.length} 个生产工序`
         : input.status === OrderStatus.SCHEDULING
-          ? '等待分派'
+          ? '等待生成生产工序'
           : '—',
     productionLog
-      ? `${stamp(productionLog.createdAt, productionLog.operatorName)} · 已完工 ${completedTasks} / ${input.tasks.length} 个任务`
-      : input.tasks.length > 0
-        ? `已完工 ${completedTasks} / ${input.tasks.length} 个任务`
-        : '尚未排产',
+      ? `${stamp(productionLog.createdAt, productionLog.operatorName)} · 已完工 ${completedUnits} / ${input.productionUnits.length} 个工序`
+      : input.productionUnits.length > 0
+        ? `已完工 ${completedUnits} / ${input.productionUnits.length} 个工序`
+        : '尚未生成生产工序',
     completedLog
       ? stamp(completedLog.createdAt, completedLog.operatorName)
-      : uncovered ?? '内部任务完工后转入',
+      : uncovered ?? '内部工序完工后转入',
     shippedLog
       ? stamp(shippedLog.createdAt, shippedLog.operatorName)
       : input.promisedDate
@@ -175,7 +172,7 @@ export function buildOrderDetailTimeline(
         label: '已取消',
         meta: cancelMeta,
         state: 'current',
-        block: '工单不再参与排产、生产与账单归集',
+        block: '工单不再参与生产与账单归集',
       },
       ...FLOW.map((step, index) => ({
         key: step.key,
@@ -214,23 +211,23 @@ export function buildOrderDetailTimeline(
 }
 
 export function orderCancelImpact(input: {
-  pendingTaskCount: number;
-  inProgressTaskCount: number;
-  completedTaskCount: number;
+  pendingProductionCount: number;
+  inProgressProductionCount: number;
+  completedProductionCount: number;
   liveOutsourceCount: number;
 }): Array<{ label: string; value: string }> {
   return [
     {
-      label: '取消未开工的生产任务',
-      value: `${input.pendingTaskCount} 个`,
+      label: '取消未开工的生产工序',
+      value: `${input.pendingProductionCount} 个`,
     },
     {
-      label: '进行中任务需人工收尾',
-      value: `${input.inProgressTaskCount} 个`,
+      label: '进行中工序需人工收尾',
+      value: `${input.inProgressProductionCount} 个`,
     },
     {
-      label: '已完工任务保留计件工资',
-      value: `${input.completedTaskCount} 个`,
+      label: '已报工记录保留金额快照',
+      value: `${input.completedProductionCount} 个`,
     },
     {
       label: '外协单需人工处理',

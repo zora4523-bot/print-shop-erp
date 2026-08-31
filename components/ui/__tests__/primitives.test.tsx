@@ -26,6 +26,7 @@ import {
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Disclosure,
   DisclosureSummary,
@@ -52,6 +53,33 @@ describe("Button interaction contract", () => {
 
     expect(html).toContain("focus-visible:ring-destructive")
     expect(html).not.toContain("focus-visible:ring-destructive/")
+  })
+})
+
+describe("Checkbox interaction contract", () => {
+  it("separates the 44px target from the compact visual indicator", () => {
+    const html = renderToStaticMarkup(
+      <Checkbox aria-label="急单" defaultChecked name="isUrgent" />
+    )
+
+    expect(html).toContain('data-slot="checkbox"')
+    expect(html).toContain('role="checkbox"')
+    expect(html).toContain("size-11")
+    expect(html).toContain('data-slot="checkbox-indicator"')
+    expect(html).toContain("size-5")
+    expect(html).toContain("motion-reduce:transition-none")
+    expect(html).toContain('type="checkbox"')
+    expect(html).toContain('name="isUrgent"')
+  })
+
+  it("preserves disabled and mixed-state semantics", () => {
+    const html = renderToStaticMarkup(
+      <Checkbox aria-label="选择全部" disabled indeterminate />
+    )
+
+    expect(html).toContain('aria-checked="mixed"')
+    expect(html).toContain('data-disabled=""')
+    expect(html).toContain('data-indeterminate=""')
   })
 })
 

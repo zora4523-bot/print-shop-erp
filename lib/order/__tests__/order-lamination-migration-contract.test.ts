@@ -65,8 +65,8 @@ describe('order item lamination migration contract', () => {
       schema.indexOf('model OrderItem {'),
       schema.indexOf('\n}', schema.indexOf('model OrderItem {')),
     );
-    expect(itemModel).toContain(
-      'lamination          OrderLamination       @default(NONE)',
+    expect(itemModel).toMatch(
+      /lamination\s+OrderLamination\s+@default\(NONE\)/,
     );
   });
 });

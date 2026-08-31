@@ -84,7 +84,7 @@ pnpm dev
 
 ## 测试环境约束
 
-- Vitest 排除 `tests/e2e`、`tests/visual`、`.next`、`generated` 和 `_reference`。
+- Vitest 排除 `tests/e2e`、`tests/visual`、`.next` 和 `generated`。
 - Playwright 默认 `baseURL` 是 `http://localhost:3000`，可用 `E2E_BASE_URL` 覆盖。
 - Playwright 当前会操作开发数据库，并依靠每次运行的唯一 fixture 降低冲突；它不是生产只读测试。禁止让 `DATABASE_URL` 指向生产。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。

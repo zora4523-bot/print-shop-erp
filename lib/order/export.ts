@@ -1009,7 +1009,7 @@ async function* customerChargeRows(
           row.unit,
           row.unitPrice ? decimal(row.unitPrice, 4) : null,
           row.suggestedAmount ? decimal(row.suggestedAmount, 2) : null,
-          decimal(row.amount, 2),
+          row.amount === null ? null : decimal(row.amount, 2),
           CUSTOMER_CHARGE_STATUS_LABELS[row.status] ?? row.status,
           yesNo(row.isAdjustment),
           row.overrideReason,
@@ -1915,6 +1915,7 @@ const PACKAGING_MODE_LABELS: Record<string, string> = {
 };
 const CUSTOMER_CHARGE_STATUS_LABELS: Record<string, string> = {
   ESTIMATED: '暂估',
+  PENDING_AMOUNT: '金额待定',
   FINAL: '已终审',
   WAIVED: '免收',
 };

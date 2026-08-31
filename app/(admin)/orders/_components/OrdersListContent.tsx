@@ -4,6 +4,8 @@ import { Role } from '@/generated/prisma/enums';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { OrderExportControls } from '@/components/business/order/OrderExportControls';
 import { OrderListFilters } from '@/components/business/order/OrderListFilters';
+import { SalesOrderListFilters } from '@/components/business/order/SalesOrderListFilters';
+import { SalesOrdersList } from '@/components/business/order/SalesOrdersList';
 import { OrdersTable } from '@/components/business/order/OrdersTable';
 import { OrderListScrollState } from '@/components/business/order/OrderListNavigationState';
 import { ErrorBoundary } from '@/components/ui-business';
@@ -17,6 +19,13 @@ import {
   type OrderListSearchParams,
 } from '@/lib/order/list-query';
 import {
+  getSalesOrderListPageWindow,
+  getSalesOrderListSummary,
+  getSalesLatestRejectedOrderIds,
+  listSalesOrdersPage,
+  sanitizeSalesOrderListQuery,
+} from '@/lib/order/sales-list-query';
+import {
   listRecentOrderExports,
   orderExportParamsFromQuery,
 } from '@/lib/order/export';
@@ -24,6 +33,8 @@ import {
   OrderExportControlsSkeleton,
   OrdersListFiltersSkeleton,
   OrdersListTableSkeleton,
+  SalesOrdersFiltersSkeleton,
+  SalesOrdersListSkeleton,
 } from './OrdersListContentSkeleton';
 
 type OrdersActor = { id: string; role: Role };
@@ -31,6 +42,10 @@ type OrdersPagePromise = ReturnType<typeof listOrdersPage>;
 type OrderListPageWindowPromise = ReturnType<typeof getOrderListPageWindow>;
 type FilterOptionsPromise = ReturnType<typeof getOrderListFilterOptions>;
 type RecentExportsPromise = ReturnType<typeof listRecentOrderExports>;
+type SalesOrdersPagePromise = ReturnType<typeof listSalesOrdersPage>;
+type SalesOrderListSummaryPromise = ReturnType<
+  typeof getSalesOrderListSummary
+>;
 
 export async function OrdersListContent({
   searchParams,
@@ -42,6 +57,14 @@ export async function OrdersListContent({
   const rawSearchParams = await searchParams;
   const parsed = parseOrderListQuery(rawSearchParams);
   const actor = { id: user.id, role: user.role };
+  if (user.role === Role.SALES) {
+    return (
+      <SalesOrdersListContent
+        actor={actor}
+        parsed={parsed}
+      />
+    );
+  }
   const query = sanitizeOrderListQueryForActor(actor, parsed.query);
   // count + pagination 和行数据分开：筛选区只等待窗口与选项，
   // 行查询失败时不会连带替换已可用的筛选控件。列表复用同一窗口
@@ -96,6 +119,113 @@ export async function OrdersListContent({
         </Suspense>
       </ErrorBoundary>
     </>
+  );
+}
+
+export async function SalesOrdersListContent({
+  actor,
+  parsed,
+}: {
+  actor: OrdersActor;
+  parsed: ReturnType<typeof parseOrderListQuery>;
+}) {
+  const query = sanitizeSalesOrderListQuery(parsed.query);
+  const latestRejectedOrderIdsPromise =
+    getSalesLatestRejectedOrderIds(actor);
+  const pageWindowPromise = getSalesOrderListPageWindow(
+    actor,
+    query,
+    latestRejectedOrderIdsPromise,
+  );
+  const pagePromise = listSalesOrdersPage(actor, query, pageWindowPromise);
+  const summaryPromise = getSalesOrderListSummary(
+    actor,
+    new Date(),
+    latestRejectedOrderIdsPromise,
+  );
+
+  return (
+    <>
+      <OrderListScrollState
+        selectedOrderId={query.selectedOrderId}
+        scrollY={query.scrollY}
+      />
+      <ErrorBoundary
+        scope="section"
+        title="销售工单筛选暂时无法加载"
+        description="工单列表仍可继续使用；请重试筛选区域。"
+      >
+        <Suspense fallback={<SalesOrdersFiltersSkeleton />}>
+          <SalesOrdersListFiltersSection
+            query={query}
+            issues={parsed.issues}
+            summaryPromise={summaryPromise}
+          />
+        </Suspense>
+      </ErrorBoundary>
+      <ErrorBoundary
+        scope="section"
+        title="销售工单暂时无法加载"
+        description="筛选与新建工单入口仍可继续使用；请重试列表区域。"
+      >
+        <Suspense fallback={<SalesOrdersListSkeleton />}>
+          <SalesOrdersListSection
+            query={query}
+            pagePromise={pagePromise}
+          />
+        </Suspense>
+      </ErrorBoundary>
+    </>
+  );
+}
+
+export async function SalesOrdersListFiltersSection({
+  query,
+  issues,
+  summaryPromise,
+}: {
+  query: ReturnType<typeof sanitizeSalesOrderListQuery>;
+  issues: readonly string[];
+  summaryPromise: SalesOrderListSummaryPromise;
+}) {
+  const summary = await summaryPromise;
+  return (
+    <SalesOrderListFilters
+      query={query}
+      summary={summary}
+      issues={issues}
+    />
+  );
+}
+
+export async function SalesOrdersListSection({
+  query,
+  pagePromise,
+}: {
+  query: ReturnType<typeof sanitizeSalesOrderListQuery>;
+  pagePromise: SalesOrdersPagePromise;
+}) {
+  const page = await pagePromise;
+  const displayedQuery = { ...query, page: page.page };
+  const queryParams = serializeOrderListQuery(displayedQuery);
+  return (
+    <SalesOrdersList
+      orders={page.rows}
+      query={displayedQuery}
+      nowIso={new Date().toISOString()}
+      footer={
+        <div className="border-t px-4 py-3">
+          <AdminPagination
+            basePath="/orders"
+            page={page.page}
+            pageCount={page.pageCount}
+            total={page.total}
+            pageSize={page.pageSize}
+            queryParams={queryParams}
+          />
+        </div>
+      }
+    />
   );
 }
 

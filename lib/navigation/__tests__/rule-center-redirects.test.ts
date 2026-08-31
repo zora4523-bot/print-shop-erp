@@ -8,6 +8,10 @@ describe('legacy rule management redirects', () => {
     expect(redirects).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          source: '/owner/rules/pricing-routes',
+          destination: '/owner/rules',
+        }),
+        expect.objectContaining({
           source: '/owner/products',
           destination: '/owner/rules/stock-skus',
         }),
@@ -37,7 +41,12 @@ describe('legacy rule management redirects', () => {
         }),
         expect.objectContaining({
           source: '/owner/prices/external-sales/items',
-          destination: '/owner/rules/customer-pricing',
+          destination: '/owner/rules/customer-pricing?section=blank',
+        }),
+        expect.objectContaining({
+          source: '/owner/prices/external-sales/logistics',
+          destination:
+            '/owner/rules/customer-pricing?purpose=logistics&section=ship',
         }),
         expect.objectContaining({
           source: '/owner/prices/external-sales/versions',
@@ -45,19 +54,19 @@ describe('legacy rule management redirects', () => {
         }),
         expect.objectContaining({
           source: '/owner/prices',
-          destination: '/owner/rules/internal-pricing',
+          destination: '/owner/rules/customer-pricing?section=blank',
         }),
         expect.objectContaining({
-          source: '/owner/prices/tiers/:id',
-          destination: '/owner/rules/internal-pricing/tiers/:id',
+          source: '/owner/prices/tiers/:path*',
+          destination: '/owner/rules/customer-pricing?section=tiers',
         }),
         expect.objectContaining({
-          source: '/owner/prices/adjustments/:id',
-          destination: '/owner/rules/internal-pricing/adjustments/:id',
+          source: '/owner/prices/adjustments/:path*',
+          destination: '/owner/rules/customer-pricing?section=adds',
         }),
         expect.objectContaining({
-          source: '/owner/salary/piecework-rules',
-          destination: '/owner/rules/worker-piecework',
+          source: '/owner/rules/internal-pricing/:path*',
+          destination: '/owner/rules/customer-pricing?section=blank',
         }),
         expect.objectContaining({
           source: '/owner/salary/rules',
@@ -69,6 +78,7 @@ describe('legacy rule management redirects', () => {
     expect(redirects).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ source: '/owner/prices/external-sales' }),
+        expect.objectContaining({ source: '/owner/prices/:path*' }),
       ]),
     );
   });

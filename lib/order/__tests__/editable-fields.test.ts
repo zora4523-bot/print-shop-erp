@@ -10,8 +10,9 @@ import {
 } from '../editable-fields';
 
 describe('editableFieldsetForStatus (SPEC §3.6)', () => {
-  it('FULL for DRAFT and SUBMITTED', () => {
+  it('FULL for DRAFT, PENDING_FACTORY and legacy SUBMITTED', () => {
     expect(editableFieldsetForStatus(OrderStatus.DRAFT)).toBe('FULL');
+    expect(editableFieldsetForStatus(OrderStatus.PENDING_FACTORY)).toBe('FULL');
     expect(editableFieldsetForStatus(OrderStatus.SUBMITTED)).toBe('FULL');
   });
 
@@ -90,6 +91,7 @@ describe('canEditOrderSfCollect', () => {
   it('allows correction through SHIPPED but keeps terminal states immutable', () => {
     for (const status of [
       OrderStatus.DRAFT,
+      OrderStatus.PENDING_FACTORY,
       OrderStatus.SUBMITTED,
       OrderStatus.SCHEDULING,
       OrderStatus.IN_PRODUCTION,
@@ -104,9 +106,10 @@ describe('canEditOrderSfCollect', () => {
 });
 
 describe('isOrderEditable', () => {
-  it('true for DRAFT/SUBMITTED/SCHEDULING/IN_PRODUCTION', () => {
+  it('true through the pre-production and active-production states', () => {
     for (const s of [
       OrderStatus.DRAFT,
+      OrderStatus.PENDING_FACTORY,
       OrderStatus.SUBMITTED,
       OrderStatus.SCHEDULING,
       OrderStatus.IN_PRODUCTION,

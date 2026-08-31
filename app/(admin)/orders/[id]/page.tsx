@@ -14,6 +14,8 @@ import {
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
+  PieceworkOperationType,
+  ProductionOperationStatus,
   Role,
   TaskStatus,
 } from '../../../../generated/prisma/enums';
@@ -60,12 +62,11 @@ import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMater
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
-import { getPendingTaskReassignmentView } from '@/lib/production';
-import { ReassignTaskForm } from '@/components/business/production/ReassignTaskForm';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import {
   getReworkCraftOptions,
+  reworkItemRequiresUnitsPerBagInput,
 } from '@/lib/order/rework';
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderChangeRequestForm } from '@/components/business/order/OrderChangeRequestForm';
@@ -87,15 +88,21 @@ import { ORDER_PRICING_ROUTE_LABELS } from '@/lib/order/pricing-route';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
+import { selectOrderCustomerFee } from '@/lib/order/customer-fee';
 import { OrderDetailTimeline } from '@/components/business/order/OrderDetailTimeline';
 import { OrderDetailStickyScope } from '@/components/business/order/OrderDetailStickyScope';
 import {
   buildOrderDetailTimeline,
   orderCancelImpact,
 } from '@/components/business/order/order-detail-timeline';
-import { getSetting } from '@/lib/settings';
 import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputeAdminPanel } from '@/components/business/production/TaskDisputeAdminPanel';
+import {
+  listOrderProductionOperations,
+  listOrderProductionProgressSteps,
+} from '@/lib/production/operation-order-view';
+import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
+import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -113,6 +120,18 @@ export async function generateMetadata({ params }: PageProps) {
 export default async function OrderDetailPage({ params }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  // SALES uses a narrow, customer-facing query and operation page. The legacy
+  // shared detail includes production tasks/workers, audit logs, plate data,
+  // pricing snapshots and internal costs, so SALES must branch before that
+  // query runs. Keep real draft/design/change actions on the safe surface.
+  if (user.role === Role.SALES) {
+    const salesOrder = await getSalesOrderDetailById(
+      { id: user.id, role: user.role },
+      id,
+    );
+    if (!salesOrder) notFound();
+    return <SalesOrderDetailView order={salesOrder} />;
+  }
   const order = await getOrderDetail(id, { id: user.id, role: user.role });
   // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
   // 不是整单累加。
@@ -122,6 +141,10 @@ export default async function OrderDetailPage({ params }: PageProps) {
   );
   if (!order) notFound();
   const canViewCommercialAmounts = user.role !== Role.WORKER;
+  const displayedCustomerFee =
+    canViewCommercialAmounts && 'totalAmount' in order
+      ? selectOrderCustomerFee(order)
+      : null;
   const canCreateRework =
     user.role === Role.ADMIN &&
     order.kind !== OrderKind.REWORK &&
@@ -130,27 +153,23 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const [
     materialEstimate,
     pieceworkSummary,
-    reassignmentView,
     taskDisputes,
     reworkCraftOptions,
-    selfClaimSetting,
+    productionOperations,
+    productionProgressSteps,
   ] = await Promise.all([
     estimateMaterialUsageForOrderItems(order.items),
     user.role === Role.ADMIN
       ? getOrderPieceworkSummary(order.id)
       : Promise.resolve(null),
     user.role === Role.ADMIN
-      ? getPendingTaskReassignmentView(order.id)
-      : Promise.resolve({ tasks: [] }),
-    user.role === Role.ADMIN
       ? listOrderTaskDisputes(order.id, { id: user.id, role: user.role })
       : Promise.resolve([]),
     canCreateRework
       ? getReworkCraftOptions(order.items.flatMap((item) => item.crafts))
       : Promise.resolve([]),
-    user.role === Role.ADMIN
-      ? getSetting('worker_self_claim_enabled')
-      : Promise.resolve({ enabled: false }),
+    listOrderProductionOperations(order.id),
+    listOrderProductionProgressSteps(order.id),
   ]);
 
   const canSubmit =
@@ -166,6 +185,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const isExternalSalesOrder =
     'settlementType' in order &&
     order.settlementType === OrderSettlementType.EXTERNAL_SALES;
+  const isChargeableOrder =
+    'settlementType' in order &&
+    order.settlementType !== OrderSettlementType.NO_CHARGE;
   const pricingStatus: string | null =
     canViewCommercialAmounts && 'pricingStatus' in order
       ? String(order.pricingStatus)
@@ -203,7 +225,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
   const canToggleUrgent = editableFieldsetForStatus(order.status) === 'FULL' && canEdit;
   const canAdminReviewPricing =
     user.role === Role.ADMIN &&
-    isExternalSalesOrder &&
+    isChargeableOrder &&
     order.status !== OrderStatus.FINISHED &&
     order.status !== OrderStatus.CANCELLED;
   const isFinalizedExternalShipment =
@@ -234,21 +256,47 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ),
   ];
   const allTasks = order.items.flatMap((item) => item.tasks);
-  const pendingTaskCount = allTasks.filter(
-    (task) => task.status === TaskStatus.PENDING,
+  const hasProductionOperations = productionOperations.length > 0;
+  const productionUnits = hasProductionOperations
+    ? [...productionOperations, ...productionProgressSteps]
+    : allTasks;
+  const pendingProductionCount = productionUnits.filter(
+    (unit) => unit.status === 'PENDING',
   ).length;
-  const inProgressTaskCount = allTasks.filter(
-    (task) => task.status === TaskStatus.IN_PROGRESS,
+  const inProgressProductionCount = productionUnits.filter(
+    (unit) => unit.status === 'IN_PROGRESS',
   ).length;
-  const completedTaskCount = allTasks.filter(
-    (task) => task.status === TaskStatus.COMPLETED,
+  const completedProductionCount = productionUnits.filter(
+    (unit) => unit.status === 'COMPLETED',
   ).length;
+  const operationsByOrderItemId = new Map<
+    string,
+    typeof productionOperations
+  >();
+  for (const operation of productionOperations) {
+    for (const source of operation.sources) {
+      if (!source.orderItemId) continue;
+      const current = operationsByOrderItemId.get(source.orderItemId) ?? [];
+      current.push(operation);
+      operationsByOrderItemId.set(source.orderItemId, current);
+    }
+  }
+  const progressByOrderItemId = new Map<
+    string,
+    typeof productionProgressSteps
+  >();
+  for (const step of productionProgressSteps) {
+    const current = progressByOrderItemId.get(step.orderItemId) ?? [];
+    current.push(step);
+    progressByOrderItemId.set(step.orderItemId, current);
+  }
   const liveOutsourceCount = order.outsourceOrders.filter(
     (row) =>
       row.status === OutsourceStatus.SENT ||
       row.status === OutsourceStatus.IN_PROGRESS,
   ).length;
-  const incompleteTaskCount = pendingTaskCount + inProgressTaskCount;
+  const incompleteProductionCount =
+    pendingProductionCount + inProgressProductionCount;
   const pendingChangeRequest = order.changeRequests.find(
     (request) => request.status === OrderChangeRequestStatus.PENDING,
   );
@@ -264,8 +312,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
       operatorName: log.operator.displayName,
       changedFields: 'changedFields' in log ? log.changedFields : undefined,
     })),
-    tasks: allTasks.map((task) => ({ status: task.status })),
-    assignedWorkerCount: assignedWorkerNames.length,
+    productionUnits: productionUnits.map((unit) => ({ status: unit.status })),
     uncoveredOutsourceNames: order.uncoveredOutsourceItems.map(
       (item) => `#${item.sequence} ${item.name}`,
     ),
@@ -273,22 +320,22 @@ export default async function OrderDetailPage({ params }: PageProps) {
     pendingChangeRequest: Boolean(pendingChangeRequest),
   });
   const cancelImpact = orderCancelImpact({
-    pendingTaskCount,
-    inProgressTaskCount,
-    completedTaskCount,
+    pendingProductionCount,
+    inProgressProductionCount,
+    completedProductionCount,
     liveOutsourceCount,
   });
   const shipDisabledReason = isPricingPending
     ? '价格待管理员确认'
     : hasLiveOutsource
       ? '仍有已发出或进行中的外协单'
-    : incompleteTaskCount > 0
-      ? `${incompleteTaskCount} 个任务未完工`
+    : incompleteProductionCount > 0
+      ? `${incompleteProductionCount} 个工序未完工`
       : order.status !== OrderStatus.COMPLETED
         ? '完工后才可发货'
         : null;
   const canRequestChange =
-    (user.role === Role.SALES || user.role === Role.CUSTOMER_SERVICE) &&
+    user.role === Role.CUSTOMER_SERVICE &&
     order.submitterId === user.id &&
     (order.status === OrderStatus.DRAFT ||
       order.status === OrderStatus.SUBMITTED ||
@@ -306,6 +353,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
     ['SAMPLE_FEE', 'OTHER_PACKAGING_FEE', 'APPROVED_ADJUSTMENT'].includes(
       String(charge.category.code),
     ),
+  );
+  const hasPendingCustomerChargeAmount = order.customerCharges.some(
+    (charge) => charge.amount === null,
   );
 
   return (
@@ -492,7 +542,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         }
       >
 
-      {isExternalSalesOrder && pricingStatus ? (
+      {isChargeableOrder && pricingStatus ? (
         <section
           className={
             isPricingPending
@@ -502,7 +552,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="text-base font-semibold">对客价格状态</h2>
+              <h2 className="text-base font-semibold">工单价格状态</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
                   ? '价格待管理员确认，确认前不可排产。'
@@ -543,7 +593,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      {canAdminReviewPricing && priceRevision !== null ? (
+      {canAdminReviewPricing && isExternalSalesOrder && priceRevision !== null ? (
         <OrderCommercialDetailsManager
           orderId={order.id}
           priceRevision={priceRevision}
@@ -596,10 +646,37 @@ export default async function OrderDetailPage({ params }: PageProps) {
             label="提交人"
             value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
           />
-          <Row
-            label="师傅"
-            value={assignedWorkerNames.length ? assignedWorkerNames.join('、') : '未派工'}
-          />
+          {hasProductionOperations ? (
+            <>
+              <Row
+                label="计件生产工序"
+                value={productionOperations
+                  .map(
+                    (operation) =>
+                      `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
+                  )
+                  .join('；')}
+              />
+              <Row
+                label="无计件生产进度"
+                value={
+                  productionProgressSteps.length > 0
+                    ? productionProgressSteps
+                        .map(
+                          (step) =>
+                            `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
+                        )
+                        .join('；')
+                    : '无'
+                }
+                full
+              />
+            </>
+          ) : assignedWorkerNames.length > 0 ? (
+            <Row label="历史派工" value={assignedWorkerNames.join('、')} />
+          ) : (
+            <Row label="生产工序" value="尚未生成" />
+          )}
           <Row label="客户名称/简称" value={order.customerRef} />
           {canViewCommercialAmounts && 'settlementType' in order ? (
             <Row
@@ -657,11 +734,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
               />
               <Row
                 label={
-                  order.isSfCollect
+                  hasPendingCustomerChargeAmount
+                    ? '对客已知应收总额（不含待定费用）'
+                    : order.isSfCollect
                     ? '对客应收总额（不含快递费，含耗材费）'
                     : '对客应收总额'
                 }
-                value={String(order.totalAmount)}
+                value={displayedCustomerFee?.amount ?? String(order.totalAmount)}
                 tabular
               />
             </>
@@ -704,6 +783,8 @@ export default async function OrderDetailPage({ params }: PageProps) {
                       ? '已确认'
                       : charge.status === 'WAIVED'
                         ? '已免收'
+                        : charge.status === 'PENDING_AMOUNT'
+                          ? '金额待定'
                         : '创建时估算'}
                   </Badge>
                 </div>
@@ -711,14 +792,18 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   <div>
                     <dt className="text-muted-foreground">实际收费</dt>
                     <dd className="font-sans font-medium tabular-nums">
-                      {formatMoney(charge.amount)}
+                      {charge.amount === null
+                        ? '待定'
+                        : formatMoney(charge.amount)}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">报价表建议</dt>
                     <dd className="font-sans tabular-nums">
                       {charge.suggestedAmount === null
-                        ? '人工确认'
+                        ? charge.status === 'PENDING_AMOUNT'
+                          ? '待定'
+                          : '人工确认'
                         : formatMoney(charge.suggestedAmount)}
                     </dd>
                   </div>
@@ -875,9 +960,13 @@ export default async function OrderDetailPage({ params }: PageProps) {
                     {item.craftNames.length
                       ? ` · ${item.craftNames.length} 项工艺`
                       : ''}
-                    {item.tasks.length
-                      ? ` · 已完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
-                      : ' · 尚未排产'}
+                    {hasProductionOperations
+                      ? (operationsByOrderItemId.get(item.id)?.length ?? 0) > 0
+                        ? ` · 已完工 ${operationsByOrderItemId.get(item.id)!.filter((operation) => operation.status === ProductionOperationStatus.COMPLETED).length}/${operationsByOrderItemId.get(item.id)!.length} 工序`
+                        : ' · 无独立生产工序'
+                      : item.tasks.length
+                        ? ` · 历史完工 ${item.tasks.filter((task) => task.status === TaskStatus.COMPLETED).length}/${item.tasks.length} 任务`
+                        : ' · 尚未生成生产工序'}
                     <span className="ml-2 group-open:hidden">展开</span>
                     <span className="ml-2 hidden group-open:inline">收起</span>
                   </span>
@@ -931,7 +1020,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   value={PRODUCT_STRUCTURE_LABELS[item.productStructure]}
                 />
                 <Row
-                  label="产品 / SKU"
+                  label="产品组合"
                   value={
                     item.product?.name
                       ? externalPriceBusinessText(item.product.name)
@@ -1039,19 +1128,43 @@ export default async function OrderDetailPage({ params }: PageProps) {
                   </>
                 ) : null}
                 <Row
-                  label="生产安排"
+                  label={hasProductionOperations ? '生产工序' : '历史生产记录'}
                   value={
-                    item.tasks.length
-                      ? item.tasks
+                    hasProductionOperations
+                      ? (operationsByOrderItemId.get(item.id) ?? [])
                           .map(
-                            (task) =>
-                              `${task.craft.name}：${task.worker?.displayName ?? '未派工'}`,
+                            (operation) =>
+                              `${PRODUCTION_OPERATION_LABELS[operation.operationType]}：${productionOperationStatusLabel(operation.status)}`,
                           )
-                          .join('；')
-                      : '尚未排产'
+                          .join('；') || '该款式无独立生产工序'
+                      : item.tasks.length
+                        ? item.tasks
+                            .map(
+                              (task) =>
+                                `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}`,
+                            )
+                            .join('；')
+                        : '尚未生成生产工序'
                   }
                   full
                 />
+                {hasProductionOperations ? (
+                  <Row
+                    label="无计件进度（不计薪）"
+                    value={
+                      (progressByOrderItemId.get(item.id) ?? [])
+                        .map((step) => {
+                          const completed = step.reports.reduce(
+                            (sum, report) => sum.plus(report.completedQty),
+                            new Decimal(0),
+                          );
+                          return `${step.craftName}：${productionOperationStatusLabel(step.status)}（${completed.toString()}/${step.plannedQty.toString()}）`;
+                        })
+                        .join('；') || '该款式无无计件进度步骤'
+                    }
+                    full
+                  />
+                ) : null}
               </dl>
               {canViewCommercialAmounts &&
               'plateDetails' in item &&
@@ -1344,41 +1457,6 @@ export default async function OrderDetailPage({ params }: PageProps) {
         />
       ) : null}
 
-      {reassignmentView.tasks.length > 0 ? (
-        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <div>
-            <h2 className="text-base font-semibold">未开工任务改派</h2>
-            <p className="text-xs text-muted-foreground">
-              只能改派未开工任务；已开工或已完工任务会固定师傅与薪资归属。
-            </p>
-          </div>
-          <ul className="divide-y text-sm">
-            {reassignmentView.tasks.map((task) => (
-              <li
-                key={task.id}
-                className="grid items-center gap-3 py-3 sm:grid-cols-[1fr_1fr_minmax(320px,1.5fr)]"
-              >
-                <span>#{task.itemSequence} · {task.itemName}</span>
-                <span>
-                  {task.craftName}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    当前：{task.currentWorkerName ?? '未派工'}
-                  </span>
-                </span>
-                <ReassignTaskForm
-                  taskId={task.id}
-                  orderId={order.id}
-                  currentWorkerId={task.currentWorkerId}
-                  craftId={task.craftId}
-                  eligibleWorkers={task.eligibleWorkers}
-                  selfClaimEnabled={selfClaimSetting.enabled}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
       <OrderMaterialUsageEstimate estimate={materialEstimate} />
 
       {pieceworkSummary ? (
@@ -1562,7 +1640,7 @@ export default async function OrderDetailPage({ params }: PageProps) {
         >
           <h2 className="text-base font-semibold">标记发货</h2>
           <p className="text-xs text-muted-foreground">
-            所有任务已完工；标记发货后可填写运单号。
+            所有生产工序已完工；标记发货后可填写运单号。
           </p>
           <ShipOrderForm
             orderId={order.id}
@@ -1676,9 +1754,9 @@ export default async function OrderDetailPage({ params }: PageProps) {
       {canCreateRework ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
-            <h2 className="text-base font-semibold">发起重做排单</h2>
+          <h2 className="text-base font-semibold">发起重做工单</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              适用于质量问题或物流损毁。系统会创建关联的新工单进入待排产；
+              适用于质量问题或物流损毁。系统会创建关联的新工单并生成对应工序；
               原工单状态、应收账单和历史工资保持不变。
             </p>
           </div>
@@ -1689,6 +1767,15 @@ export default async function OrderDetailPage({ params }: PageProps) {
               sequence: item.sequence,
               name: item.name,
               quantity: item.quantity,
+              requiresUnitsPerBagInput:
+                reworkItemRequiresUnitsPerBagInput(
+                  order.packagingGroups.filter((group) =>
+                    group.lines.some(
+                      (line) => line.orderItem.id === item.id,
+                    ),
+                  ).length,
+                  item.pack,
+                ),
               crafts: reworkCraftOptions.filter((craft) =>
                 item.crafts.includes(craft.id),
               ),
@@ -1755,6 +1842,21 @@ const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
   [OrderPackagingMode.SINGLE_STYLE]: '单款装',
   [OrderPackagingMode.MIXED_STYLE]: '混装',
 };
+
+const PRODUCTION_OPERATION_LABELS: Record<PieceworkOperationType, string> = {
+  [PieceworkOperationType.PARTIAL]: '局部烫金',
+  [PieceworkOperationType.FULL]: '专版烫金',
+  [PieceworkOperationType.PACKING]: '打包入袋',
+};
+
+function productionOperationStatusLabel(
+  status: ProductionOperationStatus,
+): string {
+  if (status === ProductionOperationStatus.PENDING) return '待报工';
+  if (status === ProductionOperationStatus.IN_PROGRESS) return '进行中';
+  if (status === ProductionOperationStatus.COMPLETED) return '已完工';
+  return '已取消';
+}
 
 function formatActualSize(
   width: unknown,

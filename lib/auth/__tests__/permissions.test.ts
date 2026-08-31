@@ -43,18 +43,16 @@ describe('PERMISSIONS map', () => {
       'order:view:all',
       'order:view:self',
       'order:export:all',
-      'order:schedule',
       'order:ship',
       'order:mark-urgent',
       'order:cancel',
       'order:change:request',
       'order:change:review',
       'order:price:confirm',
-      'task:assign',
-      'task:claim',
       'task:report',
       'task:dispute:create',
       'task:dispute:review',
+      'attendance:manage',
       'outsource:manage',
       'design:upload',
       'design:bundle:create',
@@ -101,6 +99,7 @@ describe('PERMISSIONS map', () => {
       'order:price:confirm',
       'order:export:all',
       'task:dispute:review',
+      'attendance:manage',
       'bill:view:all',
       'bill:mark-paid',
       'salary:view:all',
@@ -125,7 +124,6 @@ describe('PERMISSIONS map', () => {
   });
 
   it('worker-only task permissions are [WORKER]', () => {
-    expect(PERMISSIONS['task:claim']).toEqual([Role.WORKER]);
     expect(PERMISSIONS['task:report']).toEqual([Role.WORKER]);
     expect(PERMISSIONS['task:dispute:create']).toEqual([Role.WORKER]);
   });
@@ -152,7 +150,6 @@ describe('requirePermission', () => {
     [Role.ADMIN, 'account:manage'],
     [Role.ADMIN, 'order:export:all'],
     [Role.SALES, 'bill:view:self'],
-    [Role.WORKER, 'task:claim'],
     [Role.WORKER, 'task:report'],
     [Role.WORKER, 'order:view:self'],
     [Role.WORKER, 'salary:view:self'],
@@ -171,7 +168,6 @@ describe('requirePermission', () => {
     [Role.WORKER, 'order:view:all'],
     [Role.SALES, 'order:export:all'],
     [Role.CUSTOMER_SERVICE, 'bill:view:self'],
-    [Role.SALES, 'task:claim'],
     [Role.SALES, 'task:report'],
   ] as const)('role %s is denied for %s', async (role, perm) => {
     mockedRequireSession.mockResolvedValue(session(role));
@@ -269,7 +265,7 @@ describe('getOrderScopeFilter', () => {
     });
   });
 
-  it('WORKER sees assigned orders only after they leave the scheduling-draft state', () => {
+  it('WORKER legacy scope reads only their historical task-linked orders', () => {
     expect(getOrderScopeFilter({ id: 'w1', role: Role.WORKER })).toEqual({
       status: { not: OrderStatus.SUBMITTED },
       items: { some: { tasks: { some: { workerId: 'w1' } } } },

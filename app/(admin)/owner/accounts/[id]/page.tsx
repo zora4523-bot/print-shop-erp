@@ -1,13 +1,12 @@
 import { notFound } from 'next/navigation';
-import {
-  getUserSummary,
-  listWorkerCapabilityCrafts,
-} from '@/lib/account';
+import { getUserSummary } from '@/lib/account';
 import { updateUserAction } from '@/actions/owner-accounts';
 import { AccountForm } from '@/components/business/account/AccountForm';
 import { ResetPasswordForm } from '@/components/business/account/ResetPasswordForm';
 import { ToggleActiveButton } from '@/components/business/account/ToggleActiveButton';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -15,6 +14,10 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
+  const session = await getSession();
+  if (!session || !hasPermission('account:manage', session.user.role)) {
+    return { title: '账号管理' };
+  }
   const account = await getUserSummary(id);
   return {
     title: account ? `编辑 ${account.displayName} · 账号管理` : '账号不存在',
@@ -26,10 +29,7 @@ export default async function EditAccountPage({ params }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('account:manage');
   const { id } = await params;
-  const [account, capabilityCrafts] = await Promise.all([
-    getUserSummary(id),
-    listWorkerCapabilityCrafts(),
-  ]);
+  const account = await getUserSummary(id);
   if (!account) notFound();
 
   // Bind the id once so the form only has to pass (prev, fd).
@@ -64,7 +64,6 @@ export default async function EditAccountPage({ params }: PageProps) {
           mode="edit"
           action={boundUpdate}
           initial={account}
-          capabilityCrafts={capabilityCrafts}
         />
       </section>
 

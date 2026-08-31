@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
+  cleanupPrintableOrderStressFixture,
   login,
   ADMIN_USERNAME,
   E2E_PASSWORD,
@@ -15,6 +16,11 @@ import {
 const ARTWORK_COUNTS = [1, 2, 3, 5, 8, 10] as const;
 const browserErrors = new WeakMap<Page, string[]>();
 
+test.beforeAll(async () => {
+  // Also removes residue left by a previously interrupted local run.
+  await cleanupPrintableOrderStressFixture();
+});
+
 test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   browserErrors.set(page, errors);
@@ -25,7 +31,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(async ({ page }) => {
-  expect(browserErrors.get(page), '打印页不应产生浏览器错误').toEqual([]);
+  try {
+    expect(browserErrors.get(page), '打印页不应产生浏览器错误').toEqual([]);
+  } finally {
+    await cleanupPrintableOrderStressFixture();
+  }
 });
 
 async function waitForPrintReady(page: Page, sheetCount?: number) {

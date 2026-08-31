@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
 // Re-export so specs don't have to import from global-setup directly.
-import { E2E_USERS } from './global-setup';
-export { E2E_PASSWORD, E2E_USERS } from './global-setup';
+import { E2E_PASSWORD, E2E_USERS } from './global-setup';
+export { E2E_PASSWORD, E2E_USERS };
 
 // ---- DB-side fixture helpers ----
 //
@@ -14,6 +14,7 @@ export { E2E_PASSWORD, E2E_USERS } from './global-setup';
 // Prisma client cleanly.
 
 import { randomBytes } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { Client } from 'pg';
 import { isolateE2eLoginClient } from './_login-client';
 
@@ -25,6 +26,34 @@ async function withDb<T>(fn: (db: Client) => Promise<T>): Promise<T> {
   } finally {
     await db.end();
   }
+}
+
+export async function cleanupPrintableOrderStressFixture(): Promise<void> {
+  await withDb(async (db) => {
+    await db.query('BEGIN');
+    try {
+      // The stress order owns the ProductionTask rows. Delete it first so the
+      // task cascade releases the dedicated worker and craft foreign keys.
+      await db.query(
+        `DELETE FROM "Order"
+          WHERE id ~ '^e2e-vr-large-items-[0-9]+-[0-9]+-stress-v2$'`,
+      );
+      await db.query(
+        `DELETE FROM "User"
+          WHERE id ~ '^e2e-vr-print-long-worker-[0-9]{2}$'
+            AND username = id`,
+      );
+      await db.query(
+        `DELETE FROM "Craft"
+          WHERE id = 'e2e-vr-print-long-team-craft'
+            AND code = 'E2E_PRINT_LONG_TEAM'`,
+      );
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export async function getUserIdByUsername(username: string): Promise<string> {
@@ -116,6 +145,31 @@ export async function resetBillsForUser(userId: string): Promise<void> {
          )`,
       [userId],
     );
+    // Pricing revisions are immutable audit facts and may have been added to
+    // an older E2E fixture by a backfill migration. Such orders cannot be
+    // deleted; retire only this exact no-item e2e-bill shape so billing will
+    // not pick it up again. Rows without a revision remain safe to delete.
+    await db.query(
+      `UPDATE "Order" target
+          SET status = 'CANCELLED'::"OrderStatus",
+              "finishedAt" = NULL,
+              "updatedAt" = NOW()
+        WHERE target."submitterId" = $1
+          AND target.status = 'FINISHED'
+          AND target."orderNo" LIKE 'E2E-%'
+          AND (
+            target."customerRef" LIKE 'e2e-bill-%'
+            OR target."customerRef" LIKE 'e2e-cs-bill-%'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "OrderItem" item WHERE item."orderId" = target.id
+          )
+          AND EXISTS (
+            SELECT 1 FROM "OrderPricingRevision" revision
+             WHERE revision."orderId" = target.id
+          )`,
+      [userId],
+    );
     await db.query(
       `DELETE FROM "Order" target
         WHERE target."submitterId" = $1
@@ -127,6 +181,10 @@ export async function resetBillsForUser(userId: string): Promise<void> {
           )
           AND NOT EXISTS (
             SELECT 1 FROM "OrderItem" item WHERE item."orderId" = target.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "OrderPricingRevision" revision
+             WHERE revision."orderId" = target.id
           )`,
       [userId],
     );
@@ -568,6 +626,7 @@ export async function seedPrintableOrder(opts: {
       const craftId = 'e2e-vr-print-long-team-craft';
       const firstOrderItemId =
         itemCount === 1 ? orderItemId : `${orderItemId}-1`;
+      const workerPasswordHash = await bcrypt.hash(E2E_PASSWORD, 10);
       const workers = Array.from({ length: 50 }, (_, index) => {
         const sequence = String(index + 1).padStart(2, '0');
         return {
@@ -600,23 +659,30 @@ export async function seedPrintableOrder(opts: {
         await db.query(
           `
           INSERT INTO "User" (
-            id, username, password, role, "workerType", "displayName",
+            id, username, password, role, "workerType", "employmentType", "displayName",
             "isActive", "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2, 'e2e-print-only-password', 'WORKER'::"Role",
-            'PACKER'::"WorkerType", $3, TRUE,
+            $1, $2, $4, 'WORKER'::"Role",
+            'PACKER'::"WorkerType", 'TEMPORARY'::"EmploymentType", $3, TRUE,
             TIMESTAMP '2026-01-01 00:00:00',
             TIMESTAMP '2026-01-01 00:00:00'
           )
           ON CONFLICT (id) DO UPDATE SET
             username = EXCLUDED.username,
+            password = EXCLUDED.password,
             role = EXCLUDED.role,
             "workerType" = EXCLUDED."workerType",
+            "employmentType" = EXCLUDED."employmentType",
             "displayName" = EXCLUDED."displayName",
             "isActive" = TRUE,
             "updatedAt" = EXCLUDED."updatedAt"
           `,
-          [worker.id, worker.username, worker.displayName],
+          [
+            worker.id,
+            worker.username,
+            worker.displayName,
+            workerPasswordHash,
+          ],
         );
       }
 
@@ -844,6 +910,40 @@ export async function readActiveCsTotalSales(
     );
     if (r.rowCount === 0) return null;
     return { periodId: r.rows[0]!.id, totalSales: r.rows[0]!.totalSales };
+  });
+}
+
+export async function readE2eOrderPricingSnapshot(opts: {
+  orderId: string;
+  customerRef: string;
+}): Promise<{
+  totalAmount: string;
+  settlementType: string;
+  pricingStatus: string;
+} | null> {
+  if (!opts.customerRef.startsWith('e2e-')) {
+    throw new Error(
+      `readE2eOrderPricingSnapshot refuses non-E2E customerRef "${opts.customerRef}"`,
+    );
+  }
+  return withDb(async (db) => {
+    const result = await db.query<{
+      totalAmount: string;
+      settlementType: string;
+      pricingStatus: string;
+    }>(
+      `SELECT "totalAmount"::text AS "totalAmount",
+              "settlementType"::text AS "settlementType",
+              "pricingStatus"::text AS "pricingStatus"
+         FROM "Order"
+        WHERE id = $1 AND "customerRef" = $2`,
+      [opts.orderId, opts.customerRef],
+    );
+    if (result.rowCount === 0) return null;
+    if (result.rowCount !== 1) {
+      throw new Error('E2E order id unexpectedly matched multiple orders');
+    }
+    return result.rows[0]!;
   });
 }
 
@@ -1587,40 +1687,19 @@ export async function login(
   });
 }
 
-// Both order-entry variants render the active style inline. External sales use
-// the B single-page form (pressed style buttons); internal users use a tablist
-// whose selected style owns the visible editor. Do not look for the retired
-// three-step "款式" tab — it no longer exists in either flow.
+// Every settlement mode now renders the B single-page form. The active style
+// is represented by a pressed button in the shared style navigation.
 export async function openFirstOrderItemEditor(page: Page): Promise<void> {
-  const externalForm = page.locator(
-    '[data-slot="external-sales-order-form-b"]',
-  );
-  const internalEditor = page.locator(
-    'input[name="items.0.name"]:visible',
-  );
-  await expect(externalForm.or(internalEditor)).toBeVisible();
-
-  if (await externalForm.isVisible()) {
-    const firstStyle = externalForm
-      .getByRole('navigation', { name: '款式' })
-      .getByRole('button')
-      .first();
-    await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
-    await expect(
-      externalForm.getByRole('spinbutton', { name: '数量', exact: true }),
-    ).toBeVisible();
-    return;
-  }
-
-  const firstStyle = page
-    .getByRole('tablist', { name: '款式' })
-    .getByRole('tab')
+  const form = page.locator('[data-slot="order-form-b"]');
+  await expect(form).toBeVisible();
+  const firstStyle = form
+    .getByRole('navigation', { name: '款式' })
+    .getByRole('button')
     .first();
-  if ((await firstStyle.getAttribute('aria-selected')) !== 'true') {
-    await firstStyle.click();
-  }
-  await expect(firstStyle).toHaveAttribute('aria-selected', 'true');
-  await expect(internalEditor).toBeVisible();
+  await expect(firstStyle).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    form.getByRole('spinbutton', { name: '数量', exact: true }),
+  ).toBeVisible();
 }
 
 // The external-sales B form has one visible page and never accepts a browser
@@ -1632,7 +1711,7 @@ export async function fillExternalSalesOrderDraft(
   page: Page,
   opts: { customName: string; quantity?: number },
 ): Promise<void> {
-  const form = page.locator('[data-slot="external-sales-order-form-b"]');
+  const form = page.locator('[data-slot="order-form-b"]');
   await expect(form).toBeVisible();
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
@@ -1647,18 +1726,440 @@ export async function fillExternalSalesOrderDraft(
     .getByRole('checkbox', { name: '顺丰到付（本单不计快递费）' })
     .check();
   await expect(
-    form.getByRole('button', { name: /^提交工单$/ }),
+    form.getByRole('button', {
+      name: /^(创建并提交|提交并申请管理员终价)$/,
+    }),
   ).toBeEnabled();
+}
+
+// ---- ProductionOperation scanner fixture ----
+//
+// The worker scanner must price each live report from the real published
+// PieceworkPriceBook. This helper deliberately treats that book as read-only:
+// it verifies the prerequisite and seeds only e2e-* order/operation facts.
+// A successful report is append-only by database contract, so the fixture is
+// one deterministic order with a very large plan. Re-runs reuse it and append
+// another small report instead of leaking one order per run. It is forbidden
+// outside the explicitly isolated E2E database selected by playwright.config.
+
+const E2E_PRODUCTION_ORDER_ID = 'e2e-production-order-main';
+const E2E_PRODUCTION_ORDER_NO = 'E2E-PRODUCTION-MAIN';
+const E2E_PRODUCTION_ITEM_ID = 'e2e-production-item-main';
+const E2E_PRODUCTION_OPERATION_ID = 'e2e-production-operation-main';
+const E2E_PRODUCTION_SOURCE_ID = 'e2e-production-source-main';
+const E2E_PRODUCTION_PLAN = '9000000';
+export const E2E_PRODUCTION_REPORT_INCREMENT = 7;
+
+export type E2eProductionOperationFixture = {
+  orderId: string;
+  orderNo: string;
+  orderItemId: string;
+  operationId: string;
+  plannedCompletedQty: string;
+  completedQtyBefore: string;
+  reportCountBefore: number;
+};
+
+export type E2eProductionOperationSeedResult =
+  | { ready: true; fixture: E2eProductionOperationFixture }
+  | { ready: false; reason: string };
+
+export type E2eProductionOperationCleanupResult = {
+  deleted: boolean;
+  immutableReportCount: number;
+};
+
+export function productionOperationE2eIsolationFailure(): string | null {
+  const requestedDatabaseUrl = process.env.E2E_DATABASE_URL?.trim();
+  if (!requestedDatabaseUrl) {
+    return 'ProductionOperation E2E skipped: set an isolated E2E_DATABASE_URL before creating append-only report facts.';
+  }
+  if (
+    process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED !== '1' ||
+    process.env.DATABASE_URL?.trim() !== requestedDatabaseUrl
+  ) {
+    if (process.env.E2E_APPEND_ONLY_DATABASE_REASON === 'INVALID') {
+      return 'ProductionOperation E2E skipped: E2E_DATABASE_URL is not a valid PostgreSQL database URL.';
+    }
+    return process.env.E2E_APPEND_ONLY_DATABASE_REASON === 'SAME_AS_DEFAULT'
+      ? 'ProductionOperation E2E skipped: E2E_DATABASE_URL points at the normal application database.'
+      : 'ProductionOperation E2E skipped: the isolated E2E database was not activated by Playwright config.';
+  }
+  return null;
+}
+
+type E2eProductionFixtureRow = {
+  orderId: string;
+  orderNo: string;
+  orderStatus: string;
+  customName: string | null;
+  customerRef: string | null;
+  creatorUsername: string;
+  submitterUsername: string;
+  orderItemId: string;
+  quantity: number;
+  frontFoilColors: string[];
+  operationId: string;
+  operationType: string;
+  unit: string;
+  operationStatus: string;
+  plannedQty: string;
+  sourceId: string;
+  sourceQty: string;
+  completedQty: string;
+  reportCount: number;
+  unexpectedReporterCount: number;
+};
+
+function productionFixtureResult(
+  row: E2eProductionFixtureRow,
+): E2eProductionOperationFixture {
+  return {
+    orderId: row.orderId,
+    orderNo: row.orderNo,
+    orderItemId: row.orderItemId,
+    operationId: row.operationId,
+    plannedCompletedQty: E2E_PRODUCTION_PLAN,
+    completedQtyBefore: row.completedQty,
+    reportCountBefore: Number(row.reportCount),
+  };
+}
+
+function assertE2eProductionFixtureRow(row: E2eProductionFixtureRow): void {
+  const valid =
+    row.orderId === E2E_PRODUCTION_ORDER_ID &&
+    row.orderNo === E2E_PRODUCTION_ORDER_NO &&
+    (row.orderStatus === 'SCHEDULING' ||
+      row.orderStatus === 'IN_PRODUCTION') &&
+    row.customName === 'E2E ProductionOperation 主流程' &&
+    row.customerRef === 'e2e-production-main' &&
+    row.creatorUsername === E2E_USERS.owner!.username &&
+    row.submitterUsername === E2E_USERS.owner!.username &&
+    row.orderItemId === E2E_PRODUCTION_ITEM_ID &&
+    row.quantity === Number(E2E_PRODUCTION_PLAN) &&
+    row.frontFoilColors.length === 1 &&
+    row.frontFoilColors[0] === '亚金' &&
+    row.operationId === E2E_PRODUCTION_OPERATION_ID &&
+    row.operationType === 'PARTIAL' &&
+    row.unit === 'PER_PASS' &&
+    (row.operationStatus === 'PENDING' ||
+      row.operationStatus === 'IN_PROGRESS') &&
+    Number(row.plannedQty) === Number(E2E_PRODUCTION_PLAN) &&
+    row.sourceId === E2E_PRODUCTION_SOURCE_ID &&
+    Number(row.sourceQty) === Number(E2E_PRODUCTION_PLAN) &&
+    Number(row.completedQty) >= 0 &&
+    Number(row.completedQty) < Number(E2E_PRODUCTION_PLAN) &&
+    Number(row.unexpectedReporterCount) === 0;
+  if (!valid) {
+    throw new Error(
+      'ProductionOperation E2E fixture collided with unexpected or non-E2E data',
+    );
+  }
+}
+
+async function readE2eProductionFixture(
+  db: Client,
+): Promise<E2eProductionFixtureRow | null> {
+  const result = await db.query<E2eProductionFixtureRow>(
+    `SELECT target.id AS "orderId",
+            target."orderNo" AS "orderNo",
+            target.status::text AS "orderStatus",
+            target."customName" AS "customName",
+            target."customerRef" AS "customerRef",
+            creator.username AS "creatorUsername",
+            submitter.username AS "submitterUsername",
+            item.id AS "orderItemId",
+            item.quantity,
+            item."frontFoilColors" AS "frontFoilColors",
+            operation.id AS "operationId",
+            operation."operationType"::text AS "operationType",
+            operation.unit::text AS unit,
+            operation.status::text AS "operationStatus",
+            operation."plannedQty"::text AS "plannedQty",
+            source.id AS "sourceId",
+            source."sourceQty"::text AS "sourceQty",
+            COALESCE(SUM(report."reportedCompletedQty"), 0)::text AS "completedQty",
+            COUNT(report.id)::int AS "reportCount",
+            COUNT(report.id) FILTER (
+              WHERE reporter.username IS DISTINCT FROM $2
+            )::int AS "unexpectedReporterCount"
+       FROM "Order" target
+       JOIN "User" creator ON creator.id = target."createdById"
+       JOIN "User" submitter ON submitter.id = target."submitterId"
+       JOIN "OrderItem" item
+         ON item."orderId" = target.id AND item.id = $3
+       JOIN "ProductionOperation" operation
+         ON operation."orderId" = target.id AND operation.id = $4
+       JOIN "ProductionOperationSource" source
+         ON source."operationId" = operation.id AND source.id = $5
+       LEFT JOIN "ProductionReport" report
+         ON report."operationId" = operation.id
+       LEFT JOIN "User" reporter ON reporter.id = report."reporterId"
+      WHERE target.id = $1 OR target."orderNo" = $6
+      GROUP BY target.id, creator.username, submitter.username,
+               item.id, operation.id, source.id`,
+    [
+      E2E_PRODUCTION_ORDER_ID,
+      E2E_USERS.workerHandPress!.username,
+      E2E_PRODUCTION_ITEM_ID,
+      E2E_PRODUCTION_OPERATION_ID,
+      E2E_PRODUCTION_SOURCE_ID,
+      E2E_PRODUCTION_ORDER_NO,
+    ],
+  );
+  if (result.rowCount === 0) return null;
+  if (result.rowCount !== 1) {
+    throw new Error(
+      'ProductionOperation E2E fixture id/orderNo matched multiple orders',
+    );
+  }
+  const row = result.rows[0]!;
+  assertE2eProductionFixtureRow(row);
+  return row;
+}
+
+export async function seedE2eProductionOperationFixture(): Promise<E2eProductionOperationSeedResult> {
+  const isolationFailure = productionOperationE2eIsolationFailure();
+  if (isolationFailure) {
+    return { ready: false, reason: isolationFailure };
+  }
+  return withDb(async (db) => {
+    const activeBooks = await db.query<{
+      priceBookId: string;
+      version: number;
+      ruleSetSha256: string | null;
+      unit: string | null;
+      amount: string | null;
+    }>(
+      `SELECT book.id AS "priceBookId", book.version,
+              book."ruleSetSha256" AS "ruleSetSha256",
+              rule.unit::text AS unit,
+              rule.amount::text AS amount
+         FROM "PieceworkPriceBook" book
+         LEFT JOIN "PieceworkPriceRule" rule
+           ON rule."priceBookId" = book.id
+          AND rule."operationType" = 'PARTIAL'::"PieceworkOperationType"
+        WHERE book.status = 'PUBLISHED'::"PieceworkPriceBookStatus"
+          AND book."effectiveFrom" <= CURRENT_TIMESTAMP
+          AND (book."effectiveTo" IS NULL OR book."effectiveTo" > CURRENT_TIMESTAMP)
+        ORDER BY book.version DESC
+        LIMIT 2`,
+    );
+    if (
+      activeBooks.rowCount !== 1 ||
+      !activeBooks.rows[0]?.ruleSetSha256 ||
+      activeBooks.rows[0].unit !== 'PER_PASS' ||
+      activeBooks.rows[0].amount === null
+    ) {
+      return {
+        ready: false,
+        reason:
+          'ProductionOperation E2E prerequisite missing: current time needs exactly one published PARTIAL/PER_PASS piecework rate. The test never creates or edits protected price books.',
+      };
+    }
+
+    const accounts = await db.query<{
+      id: string;
+      username: string;
+      role: string;
+      workerType: string | null;
+      machineType: string | null;
+      isActive: boolean;
+    }>(
+      `SELECT id, username, role::text AS role,
+              "workerType"::text AS "workerType",
+              "machineType"::text AS "machineType",
+              "isActive"
+         FROM "User"
+        WHERE username = ANY($1::text[])`,
+      [[E2E_USERS.owner!.username, E2E_USERS.workerHandPress!.username]],
+    );
+    const owner = accounts.rows.find(
+      (account) => account.username === E2E_USERS.owner!.username,
+    );
+    const worker = accounts.rows.find(
+      (account) => account.username === E2E_USERS.workerHandPress!.username,
+    );
+    if (
+      !owner?.isActive ||
+      owner.role !== 'ADMIN' ||
+      !worker?.isActive ||
+      worker.role !== 'WORKER' ||
+      worker.workerType !== 'MACHINE' ||
+      worker.machineType !== 'HAND_PRESS'
+    ) {
+      throw new Error(
+        'ProductionOperation E2E requires active e2e-owner and e2e-worker-hand accounts with the fixed PARTIAL lane',
+      );
+    }
+
+    const existing = await readE2eProductionFixture(db);
+    if (existing) {
+      if (
+        Number(existing.completedQty) + E2E_PRODUCTION_REPORT_INCREMENT >
+        Number(E2E_PRODUCTION_PLAN)
+      ) {
+        return {
+          ready: false,
+          reason:
+            'ProductionOperation E2E fixture has fewer than 7 reportable units remaining; append-only reports were retained and the fixed fixture must be versioned before another run.',
+        };
+      }
+      return { ready: true, fixture: productionFixtureResult(existing) };
+    }
+
+    const collision = await db.query<{ id: string; orderNo: string }>(
+      `SELECT id, "orderNo" AS "orderNo"
+         FROM "Order"
+        WHERE id = $1 OR "orderNo" = $2`,
+      [E2E_PRODUCTION_ORDER_ID, E2E_PRODUCTION_ORDER_NO],
+    );
+    if (collision.rowCount !== 0) {
+      throw new Error(
+        'ProductionOperation E2E order id/orderNo collided with an incomplete or unexpected fixture',
+      );
+    }
+
+    await db.query('BEGIN');
+    try {
+      await db.query(
+        `INSERT INTO "Order" (
+           id, "orderNo", "submitterId", "submitterRole", "settlementType",
+           "createdById", status, "pricingStatus", "pricingConfirmedById",
+           "pricingConfirmedAt", "isUrgent", "customName", "customerRef",
+           "clientSubmissionId", "scheduledAt", "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, $3, 'ADMIN'::"Role", 'FACTORY_DIRECT'::"OrderSettlementType",
+           $3, 'SCHEDULING'::"OrderStatus",
+           'ADMIN_CONFIRMED'::"OrderPricingStatus", $3, NOW(), TRUE, $4, $5,
+           'e2e-production-main-v1', NOW(), NOW(), NOW()
+         )`,
+        [
+          E2E_PRODUCTION_ORDER_ID,
+          E2E_PRODUCTION_ORDER_NO,
+          owner.id,
+          'E2E ProductionOperation 主流程',
+          'e2e-production-main',
+        ],
+      );
+      await db.query(
+        `INSERT INTO "OrderItem" (
+           id, "orderId", sequence, fig, name, "pricingRoute", craft,
+           "productStructure", specification, "actualWidthMm",
+           "actualHeightMm", "paperType", "paperWeightGsm", quantity, pack,
+           crafts, "frontFoilColors", "backFoilColors", "foilColors",
+           "foilTechnique", "hasLocalFoil", "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 1, 1, 'E2E 局部烫金款',
+           'STOCK_BLANK'::"OrderItemPricingRoute", 'PARTIAL'::"OrderCraft",
+           'STANDARD_ENVELOPE'::"OrderProductStructure", '大号封90×165',
+           90, 165, '160g珠光艳闪', 160, $3::int, 10,
+           ARRAY[]::text[], ARRAY['亚金']::text[], ARRAY[]::text[],
+           ARRAY['亚金']::text[], 'FLAT'::"OrderFoilTechnique", TRUE,
+           NOW(), NOW()
+         )`,
+        [E2E_PRODUCTION_ITEM_ID, E2E_PRODUCTION_ORDER_ID, E2E_PRODUCTION_PLAN],
+      );
+      await db.query(
+        `INSERT INTO "ProductionOperation" (
+           id, "orderId", "operationType", unit, status, "plannedQty",
+           "createdAt", "updatedAt"
+         ) VALUES (
+           $1, $2, 'PARTIAL'::"PieceworkOperationType",
+           'PER_PASS'::"PieceworkRateUnit",
+           'PENDING'::"ProductionOperationStatus", $3::numeric, NOW(), NOW()
+         )`,
+        [
+          E2E_PRODUCTION_OPERATION_ID,
+          E2E_PRODUCTION_ORDER_ID,
+          E2E_PRODUCTION_PLAN,
+        ],
+      );
+      await db.query(
+        `INSERT INTO "ProductionOperationSource" (
+           id, "operationId", "sourceType", "orderItemId",
+           "packagingGroupId", "sourceQty", "createdAt"
+         ) VALUES (
+           $1, $2, 'ORDER_ITEM'::"ProductionOperationSourceType",
+           $3, NULL, $4::numeric, NOW()
+         )`,
+        [
+          E2E_PRODUCTION_SOURCE_ID,
+          E2E_PRODUCTION_OPERATION_ID,
+          E2E_PRODUCTION_ITEM_ID,
+          E2E_PRODUCTION_PLAN,
+        ],
+      );
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+
+    const created = await readE2eProductionFixture(db);
+    if (!created) {
+      throw new Error('ProductionOperation E2E fixture insert did not persist');
+    }
+    return { ready: true, fixture: productionFixtureResult(created) };
+  });
+}
+
+export async function cleanupE2eProductionOperationFixture(
+  fixture: E2eProductionOperationFixture,
+): Promise<E2eProductionOperationCleanupResult> {
+  if (
+    fixture.orderId !== E2E_PRODUCTION_ORDER_ID ||
+    fixture.orderNo !== E2E_PRODUCTION_ORDER_NO ||
+    fixture.orderItemId !== E2E_PRODUCTION_ITEM_ID ||
+    fixture.operationId !== E2E_PRODUCTION_OPERATION_ID
+  ) {
+    throw new Error(
+      'cleanupE2eProductionOperationFixture refuses a non-E2E fixture',
+    );
+  }
+  return withDb(async (db) => {
+    const row = await readE2eProductionFixture(db);
+    if (!row) return { deleted: true, immutableReportCount: 0 };
+    const immutableReportCount = Number(row.reportCount);
+    if (immutableReportCount > 0) {
+      return { deleted: false, immutableReportCount };
+    }
+
+    await db.query('BEGIN');
+    try {
+      await db.query(
+        `DELETE FROM "ProductionOperationSource" WHERE id = $1`,
+        [E2E_PRODUCTION_SOURCE_ID],
+      );
+      await db.query(`DELETE FROM "ProductionOperation" WHERE id = $1`, [
+        E2E_PRODUCTION_OPERATION_ID,
+      ]);
+      await db.query(`DELETE FROM "OrderItem" WHERE id = $1`, [
+        E2E_PRODUCTION_ITEM_ID,
+      ]);
+      await db.query(`DELETE FROM "Order" WHERE id = $1`, [
+        E2E_PRODUCTION_ORDER_ID,
+      ]);
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+    return { deleted: true, immutableReportCount: 0 };
+  });
 }
 
 // The submit button changes to "提交中…" immediately, so asserting that the
 // old accessible name disappeared can pass before the server transition has
-// committed. Wait for the detail heading's server-rendered status instead.
+// committed. Wait for the detail heading's server-rendered non-draft status
+// instead. AUTO_CONFIRMED work now activates directly into SCHEDULING, while
+// manual-pricing work remains SUBMITTED for factory review.
 export async function submitDraftOrderAndWait(page: Page): Promise<void> {
   await page.getByRole('button', { name: /^提交工单$/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('已提交', {
-    timeout: 20_000,
-  });
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(
+    /已提交|排产中/,
+    { timeout: 20_000 },
+  );
 }
 
 // Stamps a cuid-shaped suffix onto identifiers so reruns against the
@@ -1717,6 +2218,9 @@ export async function cleanupAutoCodePartyFixture(opts: {
 // owner-only Pigsty readiness, and the three search surfaces render against a
 // real dev database. Fixtures are idempotent and use fixed CODX/E2E values so
 // failed runs are easy to inspect manually.
+const SEARCH_SMOKE_PRODUCT_CODE = 'CODX-E2E-PROD-001';
+const SEARCH_SMOKE_MATERIAL_CODE = 'CODX-E2E-MAT-001';
+
 export async function seedSearchSmokeFixtures(opts: {
   ownerId: string;
 }): Promise<{
@@ -1738,12 +2242,12 @@ export async function seedSearchSmokeFixtures(opts: {
   supplierPartyCode: string;
   supplierPartyName: string;
 }> {
-  const productCode = 'CODX-E2E-PROD-001';
+  const productCode = SEARCH_SMOKE_PRODUCT_CODE;
   const productName = 'Codex E2E 测试红包';
   const orderId = 'codx_e2e_order_search_001';
   const orderNo = 'CODX-E2E-ORDER-001';
   const customerRef = 'CODX-E2E客户代号';
-  const materialCode = 'CODX-E2E-MAT-001';
+  const materialCode = SEARCH_SMOKE_MATERIAL_CODE;
   const materialName = 'Codex E2E 测试铜版纸';
   const partyId = 'codx_e2e_party_search_001';
   const partyCode = 'CODX_E2E_CUST_001';
@@ -1934,13 +2438,16 @@ export async function seedSearchSmokeFixtures(opts: {
     await db.query(
       `
       INSERT INTO "OrderItem" (
-        id, "orderId", sequence, name, "productId", specification,
-        "paperType", quantity, crafts, "unitPrice", subtotal,
+        id, "orderId", sequence, name, "productId", "pricingRoute",
+        "productStructure", specification, "paperType", quantity, crafts,
+        "foilTechnique", "unitPrice", subtotal,
         "createdAt", "updatedAt"
       ) VALUES (
         'codx_e2e_order_item_search_001', $1, 1, 'Codex E2E 款式',
-        'codx_e2e_product_search_001', '7寸 单色', '铜版纸',
-        2000, ARRAY[]::text[], 0.1200, 240.00, NOW(), NOW()
+        'codx_e2e_product_search_001', 'MANUAL_QUOTE'::"OrderItemPricingRoute",
+        'UNSPECIFIED'::"OrderProductStructure", '7寸 单色', '铜版纸',
+        2000, ARRAY[]::text[], 'FLAT'::"OrderFoilTechnique",
+        0.1200, 240.00, NOW(), NOW()
       )
       `,
       [orderId],
@@ -2073,6 +2580,46 @@ export async function seedSearchSmokeFixtures(opts: {
     supplierPartyCode,
     supplierPartyName,
   };
+}
+
+/**
+ * Retire searchable catalog fixtures without deleting rows referenced by the
+ * smoke order/BOM. A later seed reactivates the same fixed records, so cleanup
+ * remains safe and idempotent after both successful and interrupted runs.
+ */
+export async function cleanupSearchSmokeFixtures(): Promise<void> {
+  await withDb(async (db) => {
+    const errors: unknown[] = [];
+
+    try {
+      await db.query(
+        `UPDATE "Product"
+            SET "isActive" = false, "updatedAt" = NOW()
+          WHERE code = $1`,
+        [SEARCH_SMOKE_PRODUCT_CODE],
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+
+    try {
+      await db.query(
+        `UPDATE "Material"
+            SET "isActive" = false, "updatedAt" = NOW()
+          WHERE code = $1`,
+        [SEARCH_SMOKE_MATERIAL_CODE],
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+
+    if (errors.length > 0) {
+      throw new AggregateError(
+        errors,
+        'cleanupSearchSmokeFixtures could not retire every fixture',
+      );
+    }
+  });
 }
 
 // Logs out the currently signed-in user via the header UserMenu dropdown

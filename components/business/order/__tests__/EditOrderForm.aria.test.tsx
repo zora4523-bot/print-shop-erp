@@ -41,9 +41,13 @@ const initial = {
   isUrgent: false,
 };
 
-function render() {
+function render(isUrgent = false) {
   return renderToStaticMarkup(
-    <EditOrderForm orderId="order-1" fieldset="FULL" initial={initial} />,
+    <EditOrderForm
+      orderId="order-1"
+      fieldset="FULL"
+      initial={{ ...initial, isUrgent }}
+    />,
   );
 }
 
@@ -83,5 +87,23 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
     expect(tag).toBeDefined();
     expect(tag).toContain('required=""');
     expect(tag).toContain('aria-required="true"');
+  });
+
+
+  it('急单使用共享复选框并保留原生 FormData 的 on/false 顺序', () => {
+    const html = render(true);
+    const enabledValueIndex = html.indexOf('value="on"');
+    const falseFallbackIndex = html.indexOf(
+      'type="hidden" name="isUrgent" value="false"',
+    );
+
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-slot="checkbox-indicator"');
+    expect(html).toContain('role="checkbox"');
+    expect(html).toContain('aria-label="标记为急单"');
+    expect(html).toContain('name="isUrgent"');
+    expect(html).toContain('checked=""');
+    expect(enabledValueIndex).toBeGreaterThan(-1);
+    expect(falseFallbackIndex).toBeGreaterThan(enabledValueIndex);
   });
 });

@@ -12,7 +12,6 @@ const DENSE_LINK_FILES = [
   'components/business/material/MaterialsTable.tsx',
   'components/business/order/OrdersTable.tsx',
   'components/business/party/PartiesTable.tsx',
-  'components/business/price/PriceTables.tsx',
   'components/business/product/ProductsTable.tsx',
   'components/business/product-category/ProductCategoryNodesTable.tsx',
   'components/business/purchase/PurchaseOrdersTable.tsx',
@@ -87,26 +86,12 @@ describe('admin navigation prefetch policy', () => {
     expect(header).toContain('prefetch={false}');
     expect(breadcrumb).toContain('prefetch={false}');
     expect(breadcrumb).toContain('export const BREADCRUMB_PATH_LABELS');
-    expect(breadcrumb).toContain("'/owner/rules': '规则配置中心'");
-    expect(breadcrumb).toContain(
-      "'/owner/rules/customer-pricing': '客户计价规则'",
-    );
-    expect(breadcrumb).toContain("'/owner/rules/price-versions': '价格版本'");
-    expect(breadcrumb).toContain(
-      "'/owner/rules/internal-pricing': '内部计价'",
-    );
-    expect(breadcrumb).toContain(
-      "'/owner/rules/worker-piecework': '师傅计件规则'",
-    );
-    expect(breadcrumb).toContain(
-      "'/owner/rules/employee-pay': '员工工资与提成'",
-    );
-    expect(breadcrumb).toContain("'/owner/salary/rules': '员工工资规则'");
+    expect(breadcrumb).toContain('RULE_CENTER_SIDEBAR_ITEMS');
+    expect(breadcrumb).toContain('item.breadcrumbLabel');
+    expect(breadcrumb).toContain('Object.fromEntries');
     expect(breadcrumb).toContain("prices: '价格管理'");
     expect(breadcrumb).toContain("'external-sales': '客户计价规则'");
-    expect(breadcrumb).toContain("items: '规则工作台'");
-    expect(breadcrumb).toContain("versions: '价格版本'");
-    expect(breadcrumb).toContain("quote: '报价查询'");
+    expect(breadcrumb).not.toContain("quote: '报价查询'");
   });
 });
 

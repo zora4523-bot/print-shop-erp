@@ -9,14 +9,15 @@ import { productCategoryMatchesPricingRoute } from '../order/pricing-route';
 import {
   EXTERNAL_ORDER_CHARGE_MONEY_MAX,
   normalizeZtoProvince,
+  ZTO_PROVINCE_OPTIONS,
 } from './external-order-charges';
 import type {
-  ExternalSalesPriceRule,
-} from './external-sales-quote';
+  ExternalSalesPriceRuleForValidation,
+} from './external-sales-rule-validation';
 import {
   EXTERNAL_SALES_PRICE_LIMITS,
   validateExternalSalesPriceRules,
-} from './external-sales-quote';
+} from './external-sales-rule-validation';
 import { externalPriceBusinessText } from './external-price-display';
 import { parseCustomerRuleCondition } from './customer-rule-condition';
 
@@ -635,7 +636,7 @@ function processingIssues(
         issues.push({
           path: `rules.${rule.id}.triggerCondition`,
           ruleId: rule.id,
-          message: '所选报价产品的分类与适用计价路线不一致',
+          message: '所选建单产品的分类与适用计价路线不一致',
         });
       }
     } else {
@@ -711,7 +712,7 @@ function processingIssues(
         issues.push({
           path: `rules.${rule.id}.triggerCondition`,
           ruleId: rule.id,
-          message: '所选报价产品与适用范围不一致，请重新选择产品',
+          message: '所选建单产品与适用范围不一致，请重新选择产品',
         });
       }
     }
@@ -737,13 +738,13 @@ function processingIssues(
   }
   const engineErrors = validateExternalSalesPriceRules(
     itemRules.map(
-      (rule): ExternalSalesPriceRule => ({
+      (rule): ExternalSalesPriceRuleForValidation => ({
         id: rule.id,
         code: rule.code,
         name: rule.name,
-        kind: rule.kind as ExternalSalesPriceRule['kind'],
+        kind: rule.kind as ExternalSalesPriceRuleForValidation['kind'],
         calculationType:
-          rule.calculationType as ExternalSalesPriceRule['calculationType'],
+          rule.calculationType as ExternalSalesPriceRuleForValidation['calculationType'],
         amount: rule.amount === null ? null : String(rule.amount),
         minQty: rule.minQty,
         maxQty: rule.maxQty,
@@ -990,7 +991,7 @@ function logisticsIssues(
     ) {
       const additionalUnits = Decimal.max(
         0,
-        LOGISTICS_WEIGHT_MAX.minus(firstWeight).div(incrementUnit).floor(),
+        LOGISTICS_WEIGHT_MAX.minus(firstWeight).div(incrementUnit).ceil(),
       );
       const maximumCharge = firstFee.plus(
         incrementFee.times(additionalUnits),
@@ -1034,14 +1035,28 @@ function logisticsIssues(
     }
   }
 
+  const missingProvinces = ZTO_PROVINCE_OPTIONS.filter(
+    (province) => !provinceOwner.has(province),
+  );
+  const unsupportedProvinces = [...provinceOwner.keys()].filter(
+    (province) => !ZTO_PROVINCE_OPTIONS.includes(province),
+  );
+  if (missingProvinces.length > 0 || unsupportedProvinces.length > 0) {
+    issues.push({
+      path: 'rules',
+      message: `中通地区规则未完整覆盖（缺失：${missingProvinces.join('、') || '无'}；额外：${unsupportedProvinces.join('、') || '无'}）`,
+    });
+  }
+
   const sortedPackaging = [...packaging].sort(
     (left, right) => (left.minQty ?? 0) - (right.minQty ?? 0),
   );
+  let nextMinimum = 1;
   for (const rule of sortedPackaging) {
     const prefix = `rules.${rule.id}`;
     const amount = parsedDecimal(rule.amount);
     const amountError = decimal(rule.amount, {
-      label: '耗材金额',
+      label: '纸箱费金额',
       maximum: LOGISTICS_MONEY_MAX,
       decimalPlaces: 4,
     });
@@ -1050,21 +1065,21 @@ function logisticsIssues(
         path: `${prefix}.amount`,
         ruleId: rule.id,
         message: amount?.gt(LOGISTICS_MONEY_MAX)
-          ? `耗材金额超过收费可保存上限 ${EXTERNAL_ORDER_CHARGE_MONEY_MAX} 元`
+          ? `纸箱费金额超过收费可保存上限 ${EXTERNAL_ORDER_CHARGE_MONEY_MAX} 元`
           : amountError,
       });
     }
     if (
-      rule.kind !== 'REFERENCE' ||
+      rule.kind !== 'ADD_ON' ||
       rule.calculationType !== 'FIXED_AMOUNT' ||
-      !rule.blocksAutomaticQuote ||
       rule.minQty === null ||
-      rule.maxQty === null
+      rule.maxQty === null ||
+      rule.maxQty < rule.minQty
     ) {
       issues.push({
         path: `${prefix}.kind`,
         ruleId: rule.id,
-        message: '耗材规则必须是带完整数量区间的人工确认参考价',
+        message: '纸箱费必须使用带完整数量区间的自动固定金额计价',
       });
     }
     const condition = isRecord(rule.triggerCondition)
@@ -1072,67 +1087,73 @@ function logisticsIssues(
       : null;
     if (
       condition === null ||
-      !hasExactlyKeys(condition, ['scope', 'advisory']) ||
-      condition.scope !== 'SHIPMENT_QUANTITY' ||
-      condition.advisory !== true
+      !hasExactlyKeys(condition, ['scope', 'segmentedAboveMaximum']) ||
+      condition.scope !== 'ORDER_TOTAL_QUANTITY' ||
+      condition.segmentedAboveMaximum !== true
     ) {
       issues.push({
         path: `${prefix}.triggerCondition`,
         ruleId: rule.id,
-        message:
-          '耗材规则触发条件必须固定为每票数量的人工确认参考价',
+        message: '纸箱费必须按整单数量分档，并在 5000 个以上按段累计',
       });
     }
     if (rule.productId !== null) {
       issues.push({
         path: `${prefix}.productId`,
         ruleId: rule.id,
-        message: '耗材规则不能绑定产品',
+        message: '纸箱费规则不能绑定产品',
       });
     }
-    if (rule.exclusiveGroup !== 'PACKING_MATERIAL_QUANTITY_TIER') {
+    if (rule.exclusiveGroup !== 'CARTON_ORDER_QUANTITY_TIER') {
       issues.push({
         path: `${prefix}.exclusiveGroup`,
         ruleId: rule.id,
-        message: '打包耗材的数量范围设置不完整，请重新选择适用数量',
+        message: '纸箱费的整单数量范围设置不完整，请重新选择适用数量',
       });
     }
     if (rule.priority !== 100) {
       issues.push({
         path: `${prefix}.priority`,
         ruleId: rule.id,
-        message: '打包耗材的应用顺序设置不正确',
+        message: '纸箱费的应用顺序设置不正确',
+      });
+    }
+    if (rule.blocksAutomaticQuote) {
+      issues.push({
+        path: `${prefix}.blocksAutomaticQuote`,
+        ruleId: rule.id,
+        message: '纸箱费规则必须允许自动报价',
       });
     }
     if (rule.includedUnits !== null || rule.incrementUnits !== null || rule.incrementAmount !== null) {
       issues.push({
         path: `${prefix}.includedUnits`,
         ruleId: rule.id,
-        message: '耗材规则不能配置首重或续重字段',
+        message: '纸箱费规则不能配置首重或续重字段',
       });
+    }
+    if (
+      rule.minQty !== null &&
+      rule.maxQty !== null &&
+      rule.maxQty >= rule.minQty
+    ) {
+      if (rule.minQty !== nextMinimum) {
+        issues.push({
+          path: `${prefix}.minQty`,
+          ruleId: rule.id,
+          message: `纸箱费数量区间必须从 ${nextMinimum} 开始连续分档`,
+        });
+      }
+      nextMinimum = rule.maxQty + 1;
     }
   }
-  for (let index = 1; index < sortedPackaging.length; index += 1) {
-    const previous = sortedPackaging[index - 1]!;
-    const current = sortedPackaging[index]!;
-    if (
-      previous.minQty !== null &&
-      previous.maxQty !== null &&
-      current.minQty !== null &&
-      current.maxQty !== null &&
-      rangeOverlaps(
-        previous.minQty,
-        previous.maxQty,
-        current.minQty,
-        current.maxQty,
-      )
-    ) {
-      issues.push({
-        path: `rules.${current.id}.minQty`,
-        ruleId: current.id,
-        message: `耗材数量区间与“${previous.name}”重叠`,
-      });
-    }
+  const finalPackaging = sortedPackaging.at(-1);
+  if (finalPackaging && finalPackaging.maxQty !== 5_000) {
+    issues.push({
+      path: `rules.${finalPackaging.id}.maxQty`,
+      ruleId: finalPackaging.id,
+      message: '纸箱费末档上限必须为 5000 个',
+    });
   }
   return issues;
 }

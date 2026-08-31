@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { CraftSummary } from '@/lib/craft';
+import { isRetiredCraft } from '@/lib/rules/retired-catalog';
 import {
   Table,
   TableBody,
@@ -9,11 +10,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { machineTypeLabel, workerTypeLabel } from '@/lib/auth/role-labels';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export function CraftsTable({
   crafts,
-  editBase = '/owner/crafts',
+  editBase = RULE_CENTER_HREFS.crafts,
 }: {
   crafts: CraftSummary[];
   editBase?: string;
@@ -29,8 +30,6 @@ export function CraftsTable({
           <TableHead className="w-24">排序</TableHead>
           <TableHead>工艺名</TableHead>
           <TableHead>外协</TableHead>
-          <TableHead>接单岗位</TableHead>
-          <TableHead>默认机器</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-24">操作</TableHead>
         </TableRow>
@@ -47,18 +46,17 @@ export function CraftsTable({
                 <span className="text-muted-foreground">—</span>
               )}
             </TableCell>
-            <TableCell className="text-muted-foreground">
-              {workerTypeLabel(c.defaultWorkerType) || '—'}
-            </TableCell>
-            <TableCell className="text-muted-foreground">
-              {machineTypeLabel(c.defaultMachineType) || '—'}
-            </TableCell>
             <TableCell>
-              {c.isActive ? (
-                <Badge variant="outline">启用</Badge>
-              ) : (
-                <Badge variant="secondary">停用</Badge>
-              )}
+              <div className="flex flex-wrap gap-1">
+                {c.isActive ? (
+                  <Badge variant="outline">启用</Badge>
+                ) : (
+                  <Badge variant="secondary">停用</Badge>
+                )}
+                {isRetiredCraft(c) ? (
+                  <Badge variant="secondary">历史 / 已退役</Badge>
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <Link

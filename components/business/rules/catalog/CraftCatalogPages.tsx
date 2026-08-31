@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
-  createCraftAction,
   createRuleCenterCraftAction,
   updateCraftAction,
 } from '@/actions/owner-crafts';
@@ -16,13 +15,13 @@ import {
 import { CraftsTable } from '@/components/business/craft/CraftsTable';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { parsePositiveInt, type TableHrefParams } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
-import { getCraftSummary, listCraftsPage } from '@/lib/craft';
-import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { getCraftSummary, isRetiredCraft, listCraftsPage } from '@/lib/craft';
 
 export type CraftCatalogListProps = {
   searchParams: Promise<{
@@ -39,7 +38,7 @@ export type CraftCatalogDetailProps = {
 
 export async function getCraftCatalogMetadata({
   params,
-  titleScope = '工艺与参数',
+  titleScope = '建单工艺目录',
 }: Pick<CraftCatalogDetailProps, 'params'> & { titleScope?: string }) {
   const session = await getSession();
   if (!session || !hasPermission('dict:craft:manage', session.user.role)) {
@@ -72,12 +71,12 @@ export async function CraftCatalogList({
     page: craftPage.page,
     pageSize,
   };
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.crafts;
-
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={inRuleCenter ? '工艺与参数' : '工艺字典'}
+      <RuleCenterPageHeader
+        title="建单工艺目录"
+        effect="immediate"
+        subtitle="维护建单、计价与历史展示共用的工艺字典。"
         actions={
           <Link
             href={`${routeBase}/new`}
@@ -112,26 +111,25 @@ export async function NewCraftCatalogItem({
   routeBase,
 }: Pick<CraftCatalogListProps, 'routeBase'>) {
   await requirePermission('dict:craft:manage');
-  const inRuleCenter = routeBase === RULE_CENTER_HREFS.crafts;
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">新建工艺</h1>
-        <p className="text-sm text-muted-foreground">
+      <RuleCenterPageHeader
+        title="新建工艺"
+        effect="immediate"
+        subtitle="启用后会进入新工单与新规则的工艺选择器。"
+        actions={
           <Link
             href={routeBase}
-            className="text-primary underline hover:no-underline"
+            className={buttonVariants({ variant: 'outline' })}
           >
             返回列表
           </Link>
-        </p>
-      </div>
+        }
+      />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <CraftForm
           mode="create"
-          action={
-            inRuleCenter ? createRuleCenterCraftAction : createCraftAction
-          }
+          action={createRuleCenterCraftAction}
           routeBase={routeBase}
         />
       </div>
@@ -147,17 +145,26 @@ export async function EditCraftCatalogItem({
   const { id } = await params;
   const craft = await getCraftSummary(id);
   if (!craft) notFound();
+  const isRetired = isRetiredCraft(craft);
   const boundUpdate = updateCraftAction.bind(null, id);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">编辑工艺：{craft.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          {craft.isActive ? '启用' : '停用'}
-          {craft.isOutsource ? ' · 外协' : ''}
-        </p>
-      </div>
+      <RuleCenterPageHeader
+        title={`编辑工艺：${craft.name}`}
+        effect="immediate"
+        subtitle={
+          <>
+            {craft.isActive ? '启用' : '停用'}
+            {craft.isOutsource ? ' · 外协' : ''}
+            {isRetired ? (
+              <StatusBadge tone="warning" className="ml-2">
+                历史 / 已退役
+              </StatusBadge>
+            ) : null}
+          </>
+        }
+      />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">基本信息</h2>
@@ -170,17 +177,22 @@ export async function EditCraftCatalogItem({
         />
       </section>
 
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <h2 className="mb-2 text-base font-semibold">
-          {craft.isActive ? '停用工艺' : '启用工艺'}
-        </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          {craft.isActive
-            ? '停用后不再出现在新工单和新规则的工艺选择器中；历史引用保留。'
-            : '启用后会重新进入新工单和新规则的工艺选择器。'}
-        </p>
-        <ToggleActiveButton craftId={craft.id} currentlyActive={craft.isActive} />
-      </section>
+      {craft.isActive || !isRetired ? (
+        <section className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="mb-2 text-base font-semibold">
+            {craft.isActive ? '停用工艺' : '启用工艺'}
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {craft.isActive
+              ? '停用后不再出现在新工单和新规则的工艺选择器中；历史引用保留。'
+              : '启用后会重新进入新工单和新规则的工艺选择器。'}
+          </p>
+          <ToggleActiveButton
+            craftId={craft.id}
+            currentlyActive={craft.isActive}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

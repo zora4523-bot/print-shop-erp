@@ -3,6 +3,7 @@ import {
   validateDraftPriceBookRules,
   type DraftPriceRuleForValidation,
 } from '../customer-price-book-draft-validation';
+import { ZTO_PROVINCE_OPTIONS } from '../external-order-charges';
 
 function rule(
   overrides: Partial<DraftPriceRuleForValidation> = {},
@@ -59,7 +60,10 @@ function shipping(
     incrementAmount: '1.5000',
     minQty: null,
     maxQty: null,
-    triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+    triggerCondition: {
+      carrierCode: 'ZTO',
+      provinces: [...ZTO_PROVINCE_OPTIONS],
+    },
     exclusiveGroup: 'ZTO_PROVINCE_RATE',
     productId: null,
     product: null,
@@ -78,20 +82,23 @@ function packaging(
   return rule({
     id: 'packaging-a',
     code: 'PACK_A',
-    name: '耗材 1–500',
-    kind: 'REFERENCE',
+    name: '纸箱费 1–5000',
+    kind: 'ADD_ON',
     calculationType: 'FIXED_AMOUNT',
     amount: '1.0000',
     includedUnits: null,
     incrementUnits: null,
     incrementAmount: null,
     minQty: 1,
-    maxQty: 500,
-    triggerCondition: { scope: 'SHIPMENT_QUANTITY', advisory: true },
-    exclusiveGroup: 'PACKING_MATERIAL_QUANTITY_TIER',
+    maxQty: 5_000,
+    triggerCondition: {
+      scope: 'ORDER_TOTAL_QUANTITY',
+      segmentedAboveMaximum: true,
+    },
+    exclusiveGroup: 'CARTON_ORDER_QUANTITY_TIER',
     productId: null,
     product: null,
-    blocksAutomaticQuote: true,
+    blocksAutomaticQuote: false,
     category: {
       code: 'PACKING_MATERIAL',
       name: '打包耗材',
@@ -99,6 +106,25 @@ function packaging(
     },
     ...overrides,
   });
+}
+
+function packagingTiers(): DraftPriceRuleForValidation[] {
+  return [
+    [1, 500, '1.0000'],
+    [501, 1_000, '3.0000'],
+    [1_001, 2_000, '5.0000'],
+    [2_001, 3_000, '7.0000'],
+    [3_001, 5_000, '8.0000'],
+  ].map(([minQty, maxQty, amount], index) =>
+    packaging({
+      id: `packaging-${index + 1}`,
+      code: `PACK_${index + 1}`,
+      name: `纸箱费 ${minQty}–${maxQty}`,
+      minQty: Number(minQty),
+      maxQty: Number(maxQty),
+      amount: String(amount),
+    }),
+  );
 }
 
 function bagging(
@@ -244,7 +270,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '所选报价产品与适用范围不一致，请重新选择产品',
+      '所选建单产品与适用范围不一致，请重新选择产品',
     );
   });
 
@@ -268,7 +294,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '所选报价产品的分类与适用计价路线不一致',
+      '所选建单产品的分类与适用计价路线不一致',
     );
   });
 
@@ -468,9 +494,25 @@ describe('validateDraftPriceBookRules', () => {
     expect(
       validateDraftPriceBookRules({
         purpose: 'LOGISTICS',
-        rules: [shipping(), packaging()],
+        rules: [shipping(), ...packagingTiers()],
       }),
     ).toEqual([]);
+  });
+
+  it('rejects incomplete province coverage that the published adapter cannot project', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'LOGISTICS',
+      rules: [
+        shipping({
+          triggerCondition: { carrierCode: 'ZTO', provinces: ['广东'] },
+        }),
+        packaging(),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message).join('\n')).toContain(
+      '中通地区规则未完整覆盖',
+    );
   });
 
   it('rejects a province assigned to two active shipping tariffs', () => {
@@ -551,16 +593,16 @@ describe('validateDraftPriceBookRules', () => {
           blocksAutomaticQuote: true,
         }),
         packaging({
-          kind: 'ADD_ON',
+          kind: 'REFERENCE',
           calculationType: 'PER_PIECE',
           triggerCondition: {
             scope: 'SHIPMENT_QUANTITY',
             advisory: true,
             ignoredFutureField: true,
           },
-          exclusiveGroup: 'IGNORED_GROUP',
+          exclusiveGroup: 'PACKING_MATERIAL_QUANTITY_TIER',
           priority: 101,
-          blocksAutomaticQuote: false,
+          blocksAutomaticQuote: true,
           productId: 'product-a',
           product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
         }),
@@ -573,16 +615,17 @@ describe('validateDraftPriceBookRules', () => {
         '快递费的地区范围设置不完整，请重新选择承运商和省份',
         '快递费的应用顺序设置不正确',
         '快递费规则必须允许自动报价',
-        '耗材规则必须是带完整数量区间的人工确认参考价',
-        '耗材规则触发条件必须固定为每票数量的人工确认参考价',
-        '耗材规则不能绑定产品',
-        '打包耗材的数量范围设置不完整，请重新选择适用数量',
-        '打包耗材的应用顺序设置不正确',
+        '纸箱费必须使用带完整数量区间的自动固定金额计价',
+        '纸箱费必须按整单数量分档，并在 5000 个以上按段累计',
+        '纸箱费规则不能绑定产品',
+        '纸箱费的整单数量范围设置不完整，请重新选择适用数量',
+        '纸箱费的应用顺序设置不正确',
+        '纸箱费规则必须允许自动报价',
       ]),
     );
 
     expect(issues.map((issue) => issue.message).join('\n')).not.toMatch(
-      /ADD_ON|FIXED_AMOUNT|ZTO_PROVINCE_RATE|PACKING_MATERIAL_QUANTITY_TIER|exclusiveGroup|carrierCode|provinces/,
+      /ADD_ON|FIXED_AMOUNT|ZTO_PROVINCE_RATE|CARTON_ORDER_QUANTITY_TIER|exclusiveGroup|carrierCode|provinces/,
     );
   });
 
@@ -592,21 +635,21 @@ describe('validateDraftPriceBookRules', () => {
       rules: [shipping(), packaging({ amount: null })],
     });
 
-    expect(issues.map((issue) => issue.message)).toContain('耗材金额不能为空');
+    expect(issues.map((issue) => issue.message)).toContain('纸箱费金额不能为空');
   });
 
-  it('rejects overlapping packaging quantity tiers and over-precision money', () => {
+  it('rejects non-contiguous carton tiers and over-precision money', () => {
     const issues = validateDraftPriceBookRules({
       purpose: 'LOGISTICS',
       rules: [
         shipping(),
-        packaging({ amount: '1.00001' }),
+        packaging({ amount: '1.00001', maxQty: 500 }),
         packaging({
           id: 'packaging-b',
           code: 'PACK_B',
-          name: '耗材 500–1000',
+          name: '纸箱费 500–5000',
           minQty: 500,
-          maxQty: 1_000,
+          maxQty: 5_000,
         }),
       ],
     });
@@ -615,8 +658,20 @@ describe('validateDraftPriceBookRules', () => {
       '最多 4 位小数',
     );
     expect(issues.map((issue) => issue.message)).toContain(
-      '耗材数量区间与“耗材 1–500”重叠',
+      '纸箱费数量区间必须从 501 开始连续分档',
     );
+  });
+
+  it.each([
+    ['does not start at one', { minQty: 2, maxQty: 5_000 }, '从 1 开始'],
+    ['does not end at 5000', { minQty: 1, maxQty: 4_999 }, '末档上限必须为 5000 个'],
+  ])('rejects a carton range that %s', (_label, overrides, expected) => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'LOGISTICS',
+      rules: [shipping(), packaging(overrides)],
+    });
+
+    expect(issues.map((issue) => issue.message).join('\n')).toContain(expected);
   });
 
   it('rejects logistics tariffs above the receivable amount limit', () => {
@@ -631,7 +686,26 @@ describe('validateDraftPriceBookRules', () => {
     const messages = issues.map((issue) => issue.message).join('\n');
     expect(messages).toContain('首重金额必须是非负数字');
     expect(messages).toContain(
-      '耗材金额超过收费可保存上限 9999999999.99 元',
+      '纸箱费金额超过收费可保存上限 9999999999.99 元',
+    );
+  });
+
+  it('按运行时向上取整校验最大计费重量的最后一个续重单位', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'LOGISTICS',
+      rules: [
+        shipping({
+          amount: '9999999666.6568',
+          includedUnits: '1.000',
+          incrementUnits: '3.000',
+          incrementAmount: '0.0001',
+        }),
+        ...packagingTiers(),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message)).toContain(
+      '收费项目在最大计费重量下超过可保存上限 9999999999.99 元',
     );
   });
 });

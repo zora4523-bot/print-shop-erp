@@ -20,9 +20,8 @@ import {
 const CUID = 'cmey8k3s10000abcdefghijkl';
 
 describe('resolveSegmentLabel', () => {
-  it('完整路径标签明确区分新规则中心与旧工资规则', () => {
+  it('完整路径标签覆盖规则中心', () => {
     expect(BREADCRUMB_PATH_LABELS['/owner/rules']).toBe('规则配置中心');
-    expect(BREADCRUMB_PATH_LABELS['/owner/salary/rules']).toBe('员工工资规则');
   });
 
   it('已知段名走中文标签表', () => {
@@ -95,14 +94,5 @@ describe('AdminBreadcrumb SSR', () => {
     expect(text).toContain('规则配置中心');
     expect(text).toContain('客户计价规则');
     expect(text).not.toContain('员工工资规则');
-  });
-
-  it('/owner/salary/rules 仍显示员工工资规则，不串到新规则中心', () => {
-    usePathnameMock.mockReturnValue('/owner/salary/rules');
-
-    const text = visibleText(renderToStaticMarkup(<AdminBreadcrumb />));
-
-    expect(text).toContain('员工工资规则');
-    expect(text).not.toContain('规则配置中心');
   });
 });

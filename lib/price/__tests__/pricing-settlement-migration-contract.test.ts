@@ -346,5 +346,11 @@ describe('pricing and settlement migration safety contract', () => {
     expect(compatibilityFenceMigration).toContain(
       'quote snapshot and suggestedSubtotal are inconsistent',
     );
+    expect(compatibilityFenceMigration).toContain(
+      `jsonb_typeof("pricingSnapshot" -> 'version') IS DISTINCT FROM 'number'`,
+    );
+    expect(compatibilityFenceMigration).toContain(
+      `"pricingSnapshot" ->> 'version' IS DISTINCT FROM '1'`,
+    );
   });
 });

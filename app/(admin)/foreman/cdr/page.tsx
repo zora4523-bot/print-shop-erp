@@ -30,6 +30,7 @@ import {
   type DesignBundleDisplayStatus,
 } from '@/lib/ui/status-registry';
 import { cdrBundleFailureDisplay } from '@/lib/cdr/failure-display';
+import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 
 export const metadata = { title: 'CDR 汇总下载' };
 
@@ -342,13 +343,4 @@ function FilterBar({ from, to }: { from: string; to: string }) {
       </Button>
     </form>
   );
-}
-
-function todayShanghai(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
 }

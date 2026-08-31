@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '../../generated/prisma/client';
 import { UnauthorizedError } from '../../lib/auth/errors';
+import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
 
 const {
   permissionsMock,
@@ -108,6 +109,10 @@ describe('createBomAction', () => {
       items: [{ materialId: 'mat1', quantity: '500.0000', remark: null }],
     });
     expect(redirectMock).toHaveBeenCalledWith('/owner/boms/bom1');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.stockSkus,
+    );
+    expect(revalidatePathMock).not.toHaveBeenCalledWith('/owner/products');
   });
 
   it('maps active product unique violation to productId field error', async () => {

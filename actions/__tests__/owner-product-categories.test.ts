@@ -41,7 +41,6 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
-  createProductCategoryNodeAction,
   createRuleCenterProductCategoryNodeAction,
   setProductCategoryNodeActiveAction,
   updateProductCategoryNodeAction,
@@ -80,13 +79,13 @@ beforeEach(() => {
   });
 });
 
-describe('createProductCategoryNodeAction', () => {
+describe('createRuleCenterProductCategoryNodeAction', () => {
   it("first-line requirePermission('dict:product:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
     await expect(
-      createProductCategoryNodeAction(null, fd(validCategory)),
+      createRuleCenterProductCategoryNodeAction(null, fd(validCategory)),
     ).rejects.toBeInstanceOf(UnauthorizedError);
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
       'dict:product:manage',
@@ -96,7 +95,7 @@ describe('createProductCategoryNodeAction', () => {
 
   it('returns invalid for empty name', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const result = await createProductCategoryNodeAction(
+    const result = await createRuleCenterProductCategoryNodeAction(
       null,
       fd({ ...validCategory, name: '  ' }),
     );
@@ -108,7 +107,7 @@ describe('createProductCategoryNodeAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProductCategoryNode.mockResolvedValue({ id: 'cat1' });
     await expect(
-      createProductCategoryNodeAction(null, fd(validCategory)),
+      createRuleCenterProductCategoryNodeAction(null, fd(validCategory)),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(productMock.createProductCategoryNode).toHaveBeenCalledWith({
       parentId: 'cat_custom',
@@ -116,7 +115,9 @@ describe('createProductCategoryNodeAction', () => {
       legacyCategory: ProductCategory.COLOR_PRINT,
       sortOrder: 70,
     });
-    expect(redirectMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
   });
 
   it('规则中心创建后保持在 canonical 分类路由', async () => {
@@ -124,7 +125,7 @@ describe('createProductCategoryNodeAction', () => {
     productMock.createProductCategoryNode.mockResolvedValue({ id: 'cat1' });
 
     await expect(
-      createProductCategoryNodeAction(
+      createRuleCenterProductCategoryNodeAction(
         null,
         fd({
           ...validCategory,
@@ -172,7 +173,7 @@ describe('createProductCategoryNodeAction', () => {
         meta: { target: ['path'] },
       }),
     );
-    const result = await createProductCategoryNodeAction(null, fd(validCategory));
+    const result = await createRuleCenterProductCategoryNodeAction(null, fd(validCategory));
     expect(result.status).toBe('error');
     if (result.status === 'error') {
       expect(result.message).toBe('分类创建冲突，请重试');
@@ -187,7 +188,7 @@ describe('createProductCategoryNodeAction', () => {
         clientVersion: 'test',
       }),
     );
-    const result = await createProductCategoryNodeAction(null, fd(validCategory));
+    const result = await createRuleCenterProductCategoryNodeAction(null, fd(validCategory));
     expect(result.status).toBe('error');
     if (result.status === 'error') {
       expect(result.message).toMatch(/内部路径校验未通过/);
@@ -221,13 +222,18 @@ describe('updateProductCategoryNodeAction', () => {
       fd(validCategory),
     );
     expect(result.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/rules/product-categories',
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/new');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/stock-skus',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/stock-skus/new',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
   });
 });
@@ -242,11 +248,31 @@ describe('setProductCategoryNodeActiveAction', () => {
     ).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
+  it('maps a retired-category activation invariant without revalidating', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.setProductCategoryNodeActive.mockRejectedValueOnce(
+      new MockProductInvariantError('历史产品分类已退役，不能重新启用'),
+    );
+
+    const result = await setProductCategoryNodeActiveAction('cat1', true);
+
+    expect(result).toEqual({
+      status: 'error',
+      message: '历史产品分类已退役，不能重新启用',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it('revalidates on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductCategoryNodeActive.mockResolvedValue({ id: 'cat1' });
     const result = await setProductCategoryNodeActiveAction('cat1', false);
     expect(result.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
   });
 });

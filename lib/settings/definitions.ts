@@ -90,13 +90,6 @@ export const SETTING_DEFINITIONS = {
     fallback: { multiple: 3 },
   }),
 
-  worker_self_claim_enabled: define({
-    ...SETTING_METADATA.worker_self_claim_enabled,
-    remark: '师傅自由抢单全局开关',
-    schema: z.object({ enabled: z.boolean() }),
-    // 安全默认：新版代码先于 migration / seed 到位时也不会意外开池。
-    fallback: { enabled: false },
-  }),
 };
 
 export type SettingValue<K extends SettingKey> =

@@ -30,80 +30,48 @@ const PRODUCT_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
   },
 ];
 
-function productRouteBase(formData: FormData) {
-  return formData.get('routeBase') === RULE_CENTER_HREFS.stockSkus
-    ? RULE_CENTER_HREFS.stockSkus
-    : '/owner/products';
-}
-
 function mapUniqueViolation(err: unknown): ProductMutationResult | null {
   return mapPrismaUniqueViolation(err, PRODUCT_UNIQUE_VIOLATIONS);
 }
 
-function normalizeFormInput(
-  formData: FormData,
-  options: { includeInternalPrice?: boolean } = {},
-) {
+function normalizeFormInput(formData: FormData) {
   const get = (k: string) => {
     const v = formData.get(k);
     return typeof v === 'string' ? v : undefined;
   };
-  const includeInternalPrice = options.includeInternalPrice ?? true;
   return {
     code: get('code') ?? '',
     categoryNodeId: get('categoryNodeId'),
     name: get('name'),
     specification: get('specification') ?? '',
     paperType: get('paperType') ?? '',
-    baseUnitPrice: includeInternalPrice ? get('baseUnitPrice') ?? '' : '',
-    minOrderQty: get('minOrderQty') ?? '',
     isActive: get('isActive'),
   };
-}
-
-export async function createProductAction(
-  _prev: ProductMutationResult | null,
-  formData: FormData,
-): Promise<ProductMutationResult> {
-  return createProductWithScope(
-    formData,
-    productRouteBase(formData),
-    false,
-  );
 }
 
 export async function createQuoteProductAction(
   _prev: ProductMutationResult | null,
   formData: FormData,
 ): Promise<ProductMutationResult> {
-  return createProductWithScope(formData, RULE_CENTER_HREFS.stockSkus, true);
-}
-
-async function createProductWithScope(
-  formData: FormData,
-  redirectBase: '/owner/products' | '/owner/rules/stock-skus',
-  enforceQuoteScope: boolean,
-): Promise<ProductMutationResult> {
   await requirePermission('dict:product:manage');
 
-  const parsed = createProductSchema.safeParse(
-    normalizeFormInput(formData, {
-      includeInternalPrice: !enforceQuoteScope,
-    }),
-  );
+  const parsed = createProductSchema.safeParse(normalizeFormInput(formData));
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
-  if (enforceQuoteScope) {
-    const scopeError = await validateQuoteProductCategory(
-      parsed.data.categoryNodeId,
-    );
-    if (scopeError) return scopeError;
-  }
+  const scopeError = await validateQuoteProductCategory(
+    parsed.data.categoryNodeId,
+  );
+  if (scopeError) return scopeError;
 
   let createdId: string;
   try {
-    const created = await createProduct(parsed.data);
+    const created = await createProduct({
+      ...parsed.data,
+      // Compatibility columns remain nullable for historical records, but
+      // current pricing comes exclusively from published customer price books.
+      baseUnitPrice: null,
+    });
     createdId = created.id;
   } catch (err) {
     const unique = mapUniqueViolation(err);
@@ -115,15 +83,7 @@ async function createProductWithScope(
   }
 
   revalidateProductPaths(createdId);
-  redirect(`${redirectBase}/${createdId}`);
-}
-
-export async function updateProductAction(
-  id: string,
-  _prev: ProductMutationResult | null,
-  formData: FormData,
-): Promise<ProductMutationResult> {
-  return updateProductWithScope(id, formData, false);
+  redirect(`${RULE_CENTER_HREFS.stockSkus}/${createdId}`);
 }
 
 export async function updateQuoteProductAction(
@@ -131,41 +91,24 @@ export async function updateQuoteProductAction(
   _prev: ProductMutationResult | null,
   formData: FormData,
 ): Promise<ProductMutationResult> {
-  return updateProductWithScope(id, formData, true);
-}
-
-async function updateProductWithScope(
-  id: string,
-  formData: FormData,
-  enforceQuoteScope: boolean,
-): Promise<ProductMutationResult> {
   await requirePermission('dict:product:manage');
 
-  const parsed = updateProductSchema.safeParse(
-    normalizeFormInput(formData, {
-      includeInternalPrice: !enforceQuoteScope,
-    }),
-  );
+  const parsed = updateProductSchema.safeParse(normalizeFormInput(formData));
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: collectFieldErrors(parsed.error.issues) };
   }
-  if (enforceQuoteScope) {
-    const scopeError = await validateQuoteProductCategory(
-      parsed.data.categoryNodeId,
-    );
-    if (scopeError) return scopeError;
-  }
+  const scopeError = await validateQuoteProductCategory(
+    parsed.data.categoryNodeId,
+  );
+  if (scopeError) return scopeError;
 
-  const updateData: UpdateProductData = enforceQuoteScope
-    ? {
-        code: parsed.data.code,
-        categoryNodeId: parsed.data.categoryNodeId,
-        name: parsed.data.name,
-        specification: parsed.data.specification,
-        paperType: parsed.data.paperType,
-        minOrderQty: parsed.data.minOrderQty,
-      }
-    : parsed.data;
+  const updateData: UpdateProductData = {
+    code: parsed.data.code,
+    categoryNodeId: parsed.data.categoryNodeId,
+    name: parsed.data.name,
+    specification: parsed.data.specification,
+    paperType: parsed.data.paperType,
+  };
 
   try {
     await updateProduct(id, updateData);
@@ -182,45 +125,26 @@ async function updateProductWithScope(
   return { status: 'success' };
 }
 
-export async function setProductActiveAction(
-  id: string,
-  isActive: boolean,
-  formData?: FormData,
-): Promise<ProductMutationResult> {
-  return setProductActiveWithScope(id, isActive, formData, false);
-}
-
 export async function setQuoteProductActiveAction(
   id: string,
   isActive: boolean,
   formData?: FormData,
 ): Promise<ProductMutationResult> {
-  return setProductActiveWithScope(id, isActive, formData, true);
-}
-
-async function setProductActiveWithScope(
-  id: string,
-  isActive: boolean,
-  formData: FormData | undefined,
-  enforceQuoteScope: boolean,
-): Promise<ProductMutationResult> {
   // Authorization stays first: forged requests must not learn whether the
   // product exists or whether their reason would pass validation.
   const actor = await requirePermission('dict:product:manage');
 
-  if (enforceQuoteScope) {
-    const product = await getProductSummary(id);
-    if (
-      !product ||
-      !QUOTE_PRODUCT_CATEGORIES.some(
-        (category) => category === product.category,
-      )
-    ) {
-      return {
-        status: 'error',
-        message: '目标报价 SKU 不存在或属于已排除的历史分类',
-      };
-    }
+  const product = await getProductSummary(id);
+  if (
+    !product ||
+    !QUOTE_PRODUCT_CATEGORIES.some(
+      (category) => category === product.category,
+    )
+  ) {
+    return {
+      status: 'error',
+      message: '目标建单产品不存在或属于已排除的历史分类',
+    };
   }
 
   const rawReason = formData?.get('reason');
@@ -278,12 +202,9 @@ async function validateQuoteProductCategory(
 }
 
 function revalidateProductPaths(id: string) {
-  revalidatePath('/owner/products');
-  revalidatePath(`/owner/products/${id}`);
   revalidatePath(RULE_CENTER_HREFS.stockSkus);
   revalidatePath(`${RULE_CENTER_HREFS.stockSkus}/${id}`);
   revalidatePath('/orders/new');
   revalidatePath('/owner/boms/new');
-  revalidatePath(`${RULE_CENTER_HREFS.internalPricing}/tiers/new`);
-  revalidatePath('/owner/prices/tiers/new');
+  revalidatePath(RULE_CENTER_HREFS.customerPricing);
 }

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderFoilTechnique,
   DesignFileType,
@@ -9,12 +9,34 @@ import {
   OrderProductStructure,
 } from '@/generated/prisma/enums';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
-import type { PendingDesignImage } from '../PendingDesignImages';
+import type { PendingDesignImage } from '../pending-design-image';
 import {
-  ExternalSalesOrderFormB,
+  OrderFormB,
   parseExternalReceiverDisplay,
   replacePendingDesignKind,
 } from '../order-form-b/ExternalSalesOrderFormB';
+
+type RecordedButtonProps = {
+  children?: unknown;
+  onClick?: (event: unknown) => void;
+  'aria-label'?: string;
+};
+
+const recordedButtonProps = vi.hoisted(
+  () => [] as RecordedButtonProps[],
+);
+
+vi.mock('@/components/ui/button', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/button')>();
+  const { createElement } = await import('react');
+  return {
+    ...actual,
+    Button: (props: Parameters<typeof actual.Button>[0]) => {
+      recordedButtonProps.push(props as RecordedButtonProps);
+      return createElement(actual.Button, props);
+    },
+  };
+});
 
 vi.mock('../design-upload-client', () => ({
   prepareDesignFile: vi.fn(),
@@ -63,24 +85,33 @@ function render(
   options: {
     paperKey?: string;
     itemCount?: number;
+    activeIndex?: number;
+    pendingDesigns?: Readonly<Record<string, PendingDesignImage[]>>;
     receiverAddress?: string;
+    receiverPhoneRequired?: boolean;
+    isSfCollect?: boolean | undefined;
+    onRemove?: (index: number) => void;
+    onFoilSidesChange?: (front: string[], back: string[]) => void;
   } = {},
 ) {
   const itemCount = options.itemCount ?? 1;
   const items = Array.from({ length: itemCount }, () => ({ ...activeItem }));
   return renderToStaticMarkup(
-    <ExternalSalesOrderFormB
+    <OrderFormB
       values={{
         customName: '',
         receiverName: '',
         receiverPhone: '',
         receiverAddress: options.receiverAddress ?? '',
-        isSfCollect: false,
+        isSfCollect:
+          'isSfCollect' in options
+            ? (options.isSfCollect as boolean)
+            : false,
       }}
       items={items}
       itemFields={items.map((_, index) => ({ id: `style-${index + 1}` }))}
-      activeIndex={0}
-      pendingDesigns={{}}
+      activeIndex={options.activeIndex ?? 0}
+      pendingDesigns={options.pendingDesigns ?? {}}
       packaging={{
         mode: OrderPackagingMode.SINGLE_STYLE,
         unitsPerBag: 10,
@@ -97,16 +128,18 @@ function render(
         { value: '大号封', label: '大号封' },
       ]}
       savedLabel="已自动保存 10:30:00"
+      receiverPhoneRequired={options.receiverPhoneRequired}
       rail={<div data-testid="price-rail">价格面板</div>}
       onActiveIndexChange={vi.fn()}
       onAdd={vi.fn()}
       onDuplicate={vi.fn()}
+      onRemove={options.onRemove ?? vi.fn()}
       onCustomNameChange={vi.fn()}
       onRouteChange={vi.fn()}
       onPaperChange={vi.fn()}
       onWeightChange={vi.fn()}
       onSpecificationChange={vi.fn()}
-      onFoilSidesChange={vi.fn()}
+      onFoilSidesChange={options.onFoilSidesChange ?? vi.fn()}
       onBackFoilToggle={vi.fn()}
       onFoilTechniqueChange={vi.fn()}
       onCustomSizeChange={vi.fn()}
@@ -124,7 +157,11 @@ function render(
   );
 }
 
-describe('ExternalSalesOrderFormB', () => {
+describe('OrderFormB', () => {
+  beforeEach(() => {
+    recordedButtonProps.length = 0;
+  });
+
   it('shows a cleaned address and keeps the platform code separate', () => {
     expect(
       parseExternalReceiverDisplay(
@@ -185,9 +222,9 @@ describe('ExternalSalesOrderFormB', () => {
   it('matches the B single-page information hierarchy without the retired fields', () => {
     const html = render();
 
-    expect(html).toContain('data-slot="external-sales-order-form-b"');
-    expect(html).toContain('B · 单页速录');
-    expect(html).toContain(
+    expect(html).toContain('data-slot="order-form-b"');
+    expect(html).toContain('新建工单');
+    expect(html).not.toContain(
       '一款的全部字段一屏展开，右侧价格实时跟着变。熟练销售录单最快，桌面优先。',
     );
     for (const heading of [
@@ -204,10 +241,27 @@ describe('ExternalSalesOrderFormB', () => {
     expect(html).toContain('专版烫金');
     expect(html).toContain('彩印');
     expect(html).toContain('＋ 加款');
+    expect(html).toContain('⧉ 复制当前');
     expect(html).toContain('已自动保存 10:30:00');
     expect(html).toContain('价格面板');
+    expect(html).toContain('data-slot="order-form-layout"');
+    expect(html).toContain('data-slot="order-form-editor"');
+    expect(html).toContain('data-slot="order-form-rail"');
+    expect(html).toContain('@container');
     expect(html).toContain(
-      'min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
+      '@min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
+    );
+    expect(html).toContain('@min-[560px]:grid-cols-2');
+    expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
+    const htmlWithMissingSfCollect = render(undefined, {
+      isSfCollect: undefined,
+    });
+    const sfCollectCheckbox = htmlWithMissingSfCollect.match(
+      /<span[^>]*role="checkbox"[^>]*aria-label="顺丰到付（本单不计快递费）"[^>]*>/,
+    )?.[0];
+    expect(sfCollectCheckbox).toContain('aria-checked="false"');
+    expect(html).not.toContain(
+      ' min-[881px]:grid-cols-[minmax(0,1fr)_310px]',
     );
 
     for (const retiredText of [
@@ -236,13 +290,83 @@ describe('ExternalSalesOrderFormB', () => {
 
     expect(html).toContain('粘贴或上传设计图');
     expect(html).toContain('上传 CDR 文件');
-    expect(html).toContain('粘贴、拖放或选择设计图');
-    expect(html).toContain('拖放或选择 CDR 文件');
+    expect(html).not.toContain('data-slot="design-file-marker"');
+    expect(html).not.toMatch(/>图</);
+    expect(html).toContain('粘贴、拖放或选择第 1 款 设计图');
+    expect(html).toContain('拖放或选择第 1 款 CDR 文件');
     expect(html).toMatch(/id="[^\"]*custom-name"[^>]*required=""/);
     expect(html).toMatch(/id="[^\"]*quantity"[^>]*required=""/);
     expect(html).not.toMatch(/id="[^\"]*receiver-name"[^>]*required=""/);
     expect(html).toMatch(/id="[^\"]*receiver-phone"[^>]*required=""/);
     expect(html).toContain('顺丰到付（本单不计快递费）');
+  });
+
+  it('allows internal settlement to make the receiver phone optional', () => {
+    const html = render(undefined, {
+      receiverAddress: '广东省佛山市测试路 1 号',
+      receiverPhoneRequired: false,
+    });
+
+    expect(html).not.toMatch(/id="[^\"]*receiver-phone"[^>]*required=""/);
+    expect(html).not.toMatch(
+      /id="[^\"]*receiver-phone"[^>]*aria-required="true"/,
+    );
+  });
+
+  it('shows real image preview markup and a compact CDR marker after upload', () => {
+    const pending = (
+      id: string,
+      fileType: DesignFileType,
+      fileName: string,
+    ): PendingDesignImage => ({
+      id,
+      prepared: {
+        file: { name: fileName, size: 1024 } as File,
+        fileType,
+        mimeType:
+          fileType === DesignFileType.IMAGE
+            ? 'image/png'
+            : 'application/octet-stream',
+      },
+    });
+    const html = render(undefined, {
+      pendingDesigns: {
+        'style-1': [
+          pending('image', DesignFileType.IMAGE, 'design.png'),
+          pending('cdr', DesignFileType.CDR, 'source.cdr'),
+        ],
+      },
+    });
+
+    expect(html).toContain('data-slot="local-design-image-preview"');
+    expect(html.match(/data-slot="design-file-marker"/g)).toHaveLength(2);
+    expect(html).toContain('<span>CDR</span>');
+    expect(html).toContain('design.png');
+    expect(html).toContain('source.cdr');
+  });
+
+  it('keeps copy available for one style and removes only the active extra style', () => {
+    const single = render();
+    expect(single).toContain('⧉ 复制当前');
+    expect(single).not.toContain('删除当前');
+
+    recordedButtonProps.length = 0;
+    const onRemove = vi.fn();
+    const multiple = render(undefined, {
+      itemCount: 2,
+      activeIndex: 1,
+      onRemove,
+    });
+    expect(multiple).toContain('删除当前');
+    expect(multiple).toContain('aria-label="删除第 2 款"');
+
+    const removeButton = recordedButtonProps.find(
+      (props) => props['aria-label'] === '删除第 2 款',
+    );
+    expect(removeButton).toBeDefined();
+    removeButton?.onClick?.({});
+    expect(onRemove).toHaveBeenCalledOnce();
+    expect(onRemove).toHaveBeenCalledWith(1);
   });
 
   it('shows stock front/back foil controls and disables mixed packing for one style', () => {
@@ -256,6 +380,54 @@ describe('ExternalSalesOrderFormB', () => {
     expect(html).toContain('混装需两款以上');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[\s\S]*?混装/);
     expect(html).toContain('共 200 包');
+  });
+
+  it('cancels the final color and wires direct order editing without moving the palette', () => {
+    const onFoilSidesChange = vi.fn();
+    render(undefined, { onFoilSidesChange });
+
+    const selectedGold = recordedButtonProps.find(
+      (props) => props['aria-label'] === '亚金，第 1 色',
+    );
+    expect(selectedGold).toBeDefined();
+    selectedGold?.onClick?.({});
+    expect(onFoilSidesChange).toHaveBeenLastCalledWith([], []);
+
+    recordedButtonProps.length = 0;
+    onFoilSidesChange.mockClear();
+    const ordered = item(OrderItemPricingRoute.STOCK_BLANK);
+    ordered.frontFoilColors = ['红色', '亚金', '浅色'];
+    ordered.foilColors = ['红色', '亚金', '浅色'];
+    ordered.isDoubleColor = true;
+    const html = render(ordered, { onFoilSidesChange });
+
+    expect(html.indexOf('aria-label="亚金，第 2 色"')).toBeLessThan(
+      html.indexOf('aria-label="红色，第 1 色"'),
+    );
+
+    recordedButtonProps
+      .find((props) => props['aria-label'] === '将第 2 色 亚金 上移')
+      ?.onClick?.({});
+    expect(onFoilSidesChange).toHaveBeenLastCalledWith(
+      ['亚金', '红色', '浅色'],
+      [],
+    );
+
+    recordedButtonProps
+      .find((props) => props['aria-label'] === '将第 2 色 亚金 下移')
+      ?.onClick?.({});
+    expect(onFoilSidesChange).toHaveBeenLastCalledWith(
+      ['红色', '浅色', '亚金'],
+      [],
+    );
+
+    recordedButtonProps
+      .find((props) => props['aria-label'] === '移除第 2 色 亚金')
+      ?.onClick?.({});
+    expect(onFoilSidesChange).toHaveBeenLastCalledWith(
+      ['红色', '浅色'],
+      [],
+    );
   });
 
   it('reveals the B-only process controls for full foil and coated color print', () => {

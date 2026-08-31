@@ -333,6 +333,20 @@ describe('parseOrderListQuery', () => {
 });
 
 describe('worker commercial-query boundary', () => {
+  it('drops sales-only views for non-SALES actors', () => {
+    const requested = parseOrderListQuery({ view: 'todo' }).query;
+
+    expect(
+      sanitizeOrderListQueryForActor(
+        { role: Role.ADMIN },
+        requested,
+      ).view,
+    ).toBeUndefined();
+    expect(sanitizeOrderListQueryForActor(salesActor, requested)).toBe(
+      requested,
+    );
+  });
+
   it('removes amount ranges and restores newest-first sorting for WORKER URLs', () => {
     const requested = parseOrderListQuery({
       amountMin: '10',

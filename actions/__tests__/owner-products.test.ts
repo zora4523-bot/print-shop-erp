@@ -51,12 +51,9 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
-  createProductAction,
   createQuoteProductAction,
   setQuoteProductActiveAction,
-  updateProductAction,
   updateQuoteProductAction,
-  setProductActiveAction,
 } from '../owner-products';
 
 const ownerActor = {
@@ -74,8 +71,6 @@ const validCreate = {
   name: '空白红包',
   specification: '',
   paperType: '',
-  baseUnitPrice: '0.12',
-  minOrderQty: '1000',
 };
 
 const fd = (data: Record<string, string>) => {
@@ -91,18 +86,26 @@ beforeEach(() => {
   productMock.setProductActive.mockReset();
   productMock.getProductCategoryNodeSummary.mockReset();
   productMock.getProductSummary.mockReset();
+  productMock.getProductCategoryNodeSummary.mockResolvedValue({
+    id: 'cat_blank_stock',
+    legacyCategory: ProductCategory.BLANK_STOCK,
+  });
+  productMock.getProductSummary.mockResolvedValue({
+    id: 'p1',
+    category: ProductCategory.BLANK_STOCK,
+  });
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   });
 });
 
-describe('createProductAction', () => {
+describe('createQuoteProductAction', () => {
   it("first-line requirePermission('dict:product:manage')", async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
-    await expect(createProductAction(null, fd(validCreate))).rejects.toBeInstanceOf(
+    await expect(createQuoteProductAction(null, fd(validCreate))).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('dict:product:manage');
@@ -111,7 +114,7 @@ describe('createProductAction', () => {
 
   it('returns invalid on schema failure (empty name)', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const result = await createProductAction(
+    const result = await createQuoteProductAction(
       null,
       fd({ ...validCreate, name: '' }),
     );
@@ -119,10 +122,10 @@ describe('createProductAction', () => {
     expect(productMock.createProduct).not.toHaveBeenCalled();
   });
 
-  it('passes parsed Decimal string + int minOrderQty to lib.createProduct', async () => {
+  it('创建组合时将历史产品单价固定为空', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
-    await expect(createProductAction(null, fd(validCreate))).rejects.toThrow(
+    await expect(createQuoteProductAction(null, fd(validCreate))).rejects.toThrow(
       /NEXT_REDIRECT/,
     );
     expect(productMock.createProduct).toHaveBeenCalledWith(
@@ -132,9 +135,11 @@ describe('createProductAction', () => {
         name: '空白红包',
         specification: null,
         paperType: null,
-        baseUnitPrice: '0.12',
-        minOrderQty: 1000,
+        baseUnitPrice: null,
       }),
+    );
+    expect(productMock.createProduct.mock.calls[0][0]).not.toHaveProperty(
+      'minOrderQty',
     );
   });
 
@@ -142,7 +147,7 @@ describe('createProductAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
     await expect(
-      createProductAction(null, fd({ ...validCreate, code: 'HB001' })),
+      createQuoteProductAction(null, fd({ ...validCreate, code: 'HB001' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(productMock.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'HB001' }),
@@ -158,7 +163,7 @@ describe('createProductAction', () => {
         meta: { target: ['code'] },
       }),
     );
-    const result = await createProductAction(
+    const result = await createQuoteProductAction(
       null,
       fd({ ...validCreate, code: 'HB001' }),
     );
@@ -168,46 +173,43 @@ describe('createProductAction', () => {
     }
   });
 
-  it('converts empty minOrderQty / baseUnitPrice into undefined / null', async () => {
+  it('忽略伪造的旧单价与起订量字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
     await expect(
-      createProductAction(
+      createQuoteProductAction(
         null,
-        fd({ ...validCreate, baseUnitPrice: '', minOrderQty: '' }),
+        fd({
+          ...validCreate,
+          baseUnitPrice: '9999999.99999',
+          minOrderQty: 'not-a-number',
+        }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     const arg = productMock.createProduct.mock.calls[0][0];
     expect(arg.baseUnitPrice).toBeNull();
-    expect(arg.minOrderQty).toBeUndefined();
-  });
-
-  it('rejects >4-decimal baseUnitPrice (schema refine)', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const result = await createProductAction(
-      null,
-      fd({ ...validCreate, baseUnitPrice: '1.23456' }),
-    );
-    expect(result.status).toBe('invalid');
-    if (result.status === 'invalid') {
-      expect(result.fieldErrors.baseUnitPrice).toBeDefined();
-    }
+    expect(arg).not.toHaveProperty('minOrderQty');
   });
 
   it('revalidates + redirects to new product edit page on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
-    await expect(createProductAction(null, fd(validCreate))).rejects.toThrow(
+    await expect(createQuoteProductAction(null, fd(validCreate))).rejects.toThrow(
       /NEXT_REDIRECT/,
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/stock-skus/p1',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
     expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/customer-pricing',
+    );
+    expect(revalidatePathMock).not.toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/tiers/new',
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
-    expect(redirectMock).toHaveBeenCalledWith('/owner/products/p1');
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
   });
 
   it('keeps rule-center stock SKU creation inside the rule center', async () => {
@@ -215,7 +217,7 @@ describe('createProductAction', () => {
     productMock.createProduct.mockResolvedValue({ id: 'p1' });
 
     await expect(
-      createProductAction(
+      createQuoteProductAction(
         null,
         fd({
           ...validCreate,
@@ -228,7 +230,7 @@ describe('createProductAction', () => {
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
   });
 
-  it('报价 SKU 专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
+  it('建单产品专用 action 只接受三条路线分类且固定 canonical 路径', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -246,7 +248,7 @@ describe('createProductAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/rules/stock-skus/p1');
   });
 
-  it('报价 SKU 创建忽略伪造的内部直单价', async () => {
+  it('可建单组合创建不接受客户计价字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -257,16 +259,23 @@ describe('createProductAction', () => {
     await expect(
       createQuoteProductAction(
         null,
-        fd({ ...validCreate, baseUnitPrice: '9999999.99999' }),
+        fd({
+          ...validCreate,
+          baseUnitPrice: '9999999.99999',
+          minOrderQty: '1000',
+        }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(productMock.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({ baseUnitPrice: null }),
     );
+    expect(productMock.createProduct.mock.calls[0][0]).not.toHaveProperty(
+      'minOrderQty',
+    );
   });
 
-  it('报价 SKU 专用 action 拒绝已归并的现货加烫旧分类', async () => {
+  it('建单产品专用 action 拒绝已归并的现货加烫旧分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_legacy',
@@ -280,14 +289,14 @@ describe('createProductAction', () => {
   });
 });
 
-describe('updateProductAction', () => {
+describe('updateQuoteProductAction', () => {
   const baseUpdate = { ...validCreate };
 
   it('requires dict:product:manage', async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
-    await expect(updateProductAction('p1', null, fd(baseUpdate))).rejects.toBeInstanceOf(
+    await expect(updateQuoteProductAction('p1', null, fd(baseUpdate))).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
   });
@@ -297,7 +306,7 @@ describe('updateProductAction', () => {
     productMock.updateProduct.mockRejectedValueOnce(
       new MockProductInvariantError('目标产品不存在'),
     );
-    const result = await updateProductAction('p1', null, fd(baseUpdate));
+    const result = await updateQuoteProductAction('p1', null, fd(baseUpdate));
     expect(result.status).toBe('error');
   });
 
@@ -305,28 +314,12 @@ describe('updateProductAction', () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
     // Even if an isActive=on field sneaks through FormData, the schema strips it.
-    await updateProductAction('p1', null, fd({ ...baseUpdate, isActive: 'on' }));
+    await updateQuoteProductAction('p1', null, fd({ ...baseUpdate, isActive: 'on' }));
     const passed = productMock.updateProduct.mock.calls[0][1] as Record<string, unknown>;
     expect('isActive' in passed).toBe(false);
   });
 
-  it('普通产品更新仍可修改内部直单价', async () => {
-    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    productMock.updateProduct.mockResolvedValue({ id: 'p1' });
-
-    await updateProductAction(
-      'p1',
-      null,
-      fd({ ...baseUpdate, baseUnitPrice: '1.5000' }),
-    );
-
-    expect(productMock.updateProduct).toHaveBeenCalledWith(
-      'p1',
-      expect.objectContaining({ baseUnitPrice: '1.5000' }),
-    );
-  });
-
-  it('报价 SKU 更新忽略伪造价格且省略内部直单价字段', async () => {
+  it('可建单组合更新忽略伪造的旧单价与起订量', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_blank_stock',
@@ -337,7 +330,11 @@ describe('updateProductAction', () => {
     const result = await updateQuoteProductAction(
       'p1',
       null,
-      fd({ ...baseUpdate, baseUnitPrice: '9999999.99999' }),
+      fd({
+        ...baseUpdate,
+        baseUnitPrice: '9999999.99999',
+        minOrderQty: '1000',
+      }),
     );
 
     expect(result.status).toBe('success');
@@ -346,24 +343,29 @@ describe('updateProductAction', () => {
       unknown
     >;
     expect('baseUnitPrice' in passed).toBe(false);
+    expect('minOrderQty' in passed).toBe(false);
   });
 
   it('revalidates list, item, and all product pickers on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.updateProduct.mockResolvedValue({ id: 'p1' });
-    const result = await updateProductAction('p1', null, fd(baseUpdate));
+    const result = await updateQuoteProductAction('p1', null, fd(baseUpdate));
     expect(result.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/p1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/stock-skus/p1',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');
     expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/customer-pricing',
+    );
+    expect(revalidatePathMock).not.toHaveBeenCalledWith(
       '/owner/rules/internal-pricing/tiers/new',
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/new');
   });
 
-  it('报价 SKU 更新不接受自带纸料分类', async () => {
+  it('建单产品更新不接受自带纸料分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductCategoryNodeSummary.mockResolvedValue({
       id: 'cat_byo',
@@ -381,32 +383,37 @@ describe('updateProductAction', () => {
   });
 });
 
-describe('setProductActiveAction', () => {
+describe('setQuoteProductActiveAction', () => {
   it('requires dict:product:manage', async () => {
     permissionsMock.requirePermission.mockImplementation(async () => {
       throw new UnauthorizedError('未登录');
     });
-    await expect(setProductActiveAction('p1', false)).rejects.toBeInstanceOf(
+    await expect(setQuoteProductActiveAction('p1', false)).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
   });
 
-  it('maps invariant to error', async () => {
+  it('maps a retired-category activation invariant without revalidating', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductActive.mockRejectedValueOnce(
-      new MockProductInvariantError('目标产品不存在'),
+      new MockProductInvariantError(
+        '该建单产品属于已退役历史分类，不能重新启用',
+      ),
     );
-    const r = await setProductActiveAction(
+    const r = await setQuoteProductActiveAction(
       'p1',
-      false,
-      fd({ reason: '旧款停产' }),
+      true,
     );
-    expect(r.status).toBe('error');
+    expect(r).toEqual({
+      status: 'error',
+      message: '该建单产品属于已退役历史分类，不能重新启用',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it('rejects a forged deactivation without a reason before the mutation', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const r = await setProductActiveAction('p1', false, fd({ reason: '   ' }));
+    const r = await setQuoteProductActiveAction('p1', false, fd({ reason: '   ' }));
     expect(r).toEqual({
       status: 'invalid',
       fieldErrors: { reason: ['停用产品必须填写业务理由'] },
@@ -417,7 +424,7 @@ describe('setProductActiveAction', () => {
   it('forwards the authorized actor and trimmed audit reason', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductActive.mockResolvedValue({ id: 'p1' });
-    await setProductActiveAction(
+    await setQuoteProductActiveAction(
       'p1',
       false,
       fd({ reason: '  旧款停产  ' }),
@@ -431,16 +438,19 @@ describe('setProductActiveAction', () => {
   it('revalidates on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.setProductActive.mockResolvedValue({ id: 'p1' });
-    const r = await setProductActiveAction(
+    const r = await setQuoteProductActiveAction(
       'p1',
       false,
       fd({ reason: '旧款停产' }),
     );
     expect(r.status).toBe('success');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/stock-skus');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/stock-skus/p1',
+    );
   });
 
-  it('报价 SKU 启停不可操作已排除的历史分类', async () => {
+  it('建单产品启停不可操作已排除的历史分类', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.getProductSummary.mockResolvedValue({
       id: 'p-old',

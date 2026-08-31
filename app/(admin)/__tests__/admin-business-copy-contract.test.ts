@@ -13,8 +13,8 @@ describe('admin business copy contract', () => {
       'components/business/dashboard/DashboardChartsContent.tsx',
     );
 
-    expect(dashboard).toContain('label="报价 SKU"');
-    expect(dashboard).not.toContain('报价 SKU / 规格');
+    expect(dashboard).toContain('label="建单产品"');
+    expect(dashboard).not.toContain('建单产品 / 规格');
     expect(dashboard).not.toContain('periodEnd ·');
     expect(charts).not.toContain('COMPLETED / SHIPPED / FINISHED');
     expect(charts).not.toContain('SALES 蓝色');
@@ -75,11 +75,11 @@ describe('admin business copy contract', () => {
     expect(attendance).toContain('workerTypeLabel(selectedWorker.workerType)');
     expect(attendance).toContain('workerTypeLabel(w.workerType)');
     expect(attendance).not.toContain('?? w.workerType');
-    expect(workerTasks).toContain('machineTypeLabel(machine)');
-    expect(workerTasks).toContain('workerTypeLabel(task.workerType)');
-    expect(workerTasks).not.toContain('?? machine');
-    expect(workerTasks).not.toContain('?? task.workerType');
-    expect(workerTaskDetail).toContain('machineTypeLabel(task.machineType)');
-    expect(workerTaskDetail).not.toContain('?? task.machineType');
+    expect(workerTasks).toContain('OPERATION_LABELS[operation.operationType]');
+    expect(workerTasks).toContain('step.craftName');
+    expect(workerTasks).not.toContain('task.workerType');
+    expect(workerTasks).not.toContain('task.machineType');
+    expect(workerTaskDetail).toContain('此记录来自旧派工流程，仅供查阅');
+    expect(workerTaskDetail).not.toContain('task.machineType');
   });
 });

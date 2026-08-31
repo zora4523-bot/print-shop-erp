@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createOutsourceAction } from '@/actions/outsource';
@@ -124,18 +125,17 @@ export function CreateOutsourceForm({
           <ul className="space-y-2">
             {items.map((it) => (
               <li key={it.id} className="flex items-center gap-3 text-sm">
-                <input
+                <Checkbox
                   id={`item-${it.id}`}
-                  type="checkbox"
                   checked={!!selected[it.id]}
                   disabled={pending}
-                  onChange={(e) =>
+                  aria-label={`#${it.sequence} · ${externalPriceBusinessText(it.name)} · 数量 ${it.quantity.toLocaleString()}`}
+                  onCheckedChange={(checked) =>
                     setSelected((prev) => ({
                       ...prev,
-                      [it.id]: e.target.checked,
+                      [it.id]: checked,
                     }))
                   }
-                  className="h-4 w-4"
                 />
                 <Label htmlFor={`item-${it.id}`} className="flex-1">
                   #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}

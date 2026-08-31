@@ -21,7 +21,6 @@ import {
   getActiveCookMonthlyBase,
   getActiveCookSpareHourlyRate,
   getActiveOtMultiplier,
-  getActivePackerHourlyRate,
   getActiveWorkHours,
   type WorkHoursConfig,
 } from './rules';
@@ -54,7 +53,6 @@ export type ComputeHourlyPayrollResult = {
 };
 
 type HourlyRuleBundle = Readonly<{
-  packerRate: number | null;
   cleanerRate: number | null;
   cookMonthly: number | null;
   cookSpareRate: number | null;
@@ -64,17 +62,15 @@ type HourlyRuleBundle = Readonly<{
 
 async function readHourlyRuleBundle(
   now: Date,
-  client: Parameters<typeof getActivePackerHourlyRate>[1],
+  client: Parameters<typeof getActiveCleanerHourlyRate>[1],
 ): Promise<HourlyRuleBundle> {
   const [
-    packerRate,
     cleanerRate,
     cookMonthly,
     cookSpareRate,
     otMultiplier,
     workHours,
   ] = await Promise.all([
-    getActivePackerHourlyRate(now, client),
     getActiveCleanerHourlyRate(now, client),
     getActiveCookMonthlyBase(now, client),
     getActiveCookSpareHourlyRate(now, client),
@@ -82,7 +78,6 @@ async function readHourlyRuleBundle(
     getActiveWorkHours(now, client),
   ]);
   return {
-    packerRate,
     cleanerRate,
     cookMonthly,
     cookSpareRate,
@@ -106,14 +101,22 @@ function dec(v: unknown): Decimal {
   return new Decimal(v as Decimal.Value);
 }
 
-const HOURLY_WORKER_TYPES = [
-  WorkerType.PACKER,
+const ACTIVE_HOURLY_WORKER_TYPES = [
   WorkerType.CLEANER,
   WorkerType.COOK,
 ] as const;
 
+const HISTORICAL_HOURLY_WORKER_TYPES = [
+  WorkerType.PACKER,
+  ...ACTIVE_HOURLY_WORKER_TYPES,
+] as const;
+
 function isHourlyWorkerType(value: unknown): value is WorkerType {
-  return (HOURLY_WORKER_TYPES as readonly unknown[]).includes(value);
+  return (HISTORICAL_HOURLY_WORKER_TYPES as readonly unknown[]).includes(value);
+}
+
+function isActiveHourlyWorkerType(value: unknown): value is WorkerType {
+  return (ACTIVE_HOURLY_WORKER_TYPES as readonly unknown[]).includes(value);
 }
 
 export function getHourlyPayrollWorkerType(snapshot: unknown): WorkerType | null {
@@ -228,7 +231,7 @@ export async function computeHourlyPayroll(
     const historicalRows = rows.filter(
       (row) =>
         row.roleSnapshot === Role.WORKER &&
-        isHourlyWorkerType(row.workerTypeSnapshot),
+        isActiveHourlyWorkerType(row.workerTypeSnapshot),
     );
     const historicalTypes = [
       ...new Set(historicalRows.map((row) => row.workerTypeSnapshot)),
@@ -248,16 +251,16 @@ export async function computeHourlyPayroll(
     } else if (
       worker.role === Role.WORKER &&
       worker.isActive &&
-      isHourlyWorkerType(worker.workerType)
+      isActiveHourlyWorkerType(worker.workerType)
     ) {
       workerType = worker.workerType;
     } else {
       if (worker.role !== Role.WORKER) {
         throw new HourlyAggregateError('不是工人（role != WORKER）');
       }
-      if (!isHourlyWorkerType(worker.workerType)) {
+      if (!isActiveHourlyWorkerType(worker.workerType)) {
         throw new HourlyAggregateError(
-          '仅时薪工（打包 / 清废 / 厨师）走月结；机器师傅是日薪，请看 /owner/salary/daily',
+          '只有清废和厨师继续走时薪月结；打包报工已切换为工序计件结算',
         );
       }
       throw new HourlyAggregateError(
@@ -289,7 +292,6 @@ export async function computeHourlyPayroll(
       await acquireSalaryRuleSnapshotReadLock(tx);
     }
     const {
-      packerRate,
       cleanerRate,
       cookMonthly,
       cookSpareRate,
@@ -301,16 +303,7 @@ export async function computeHourlyPayroll(
     let hourlyRateForSchema: Decimal; // DB column baseline — non-COOK uses
     // the worker's own rate; COOK stores 0 (basepay is flat).
 
-    if (workerType === WorkerType.PACKER) {
-      if (packerRate === null) {
-        throw new HourlyAggregateError('无当前生效的 PACKER_HOURLY 规则');
-      }
-      rules = {
-        hourlyRate: packerRate,
-        otMultiplier: otMultiplier ?? 1,
-      };
-      hourlyRateForSchema = dec(packerRate);
-    } else if (workerType === WorkerType.CLEANER) {
+    if (workerType === WorkerType.CLEANER) {
       if (cleanerRate === null) {
         throw new HourlyAggregateError('无当前生效的 CLEANER_HOURLY 规则');
       }
@@ -364,7 +357,6 @@ export async function computeHourlyPayroll(
     // wants to know "was OT multiplier already 1.5 when I paid out?").
     const salaryRuleSnapshot = {
       workerType,
-      packerHourlyRate: packerRate,
       cleanerHourlyRate: cleanerRate,
       cookMonthlyBase: cookMonthly,
       cookSpareHourlyRate: cookSpareRate,
@@ -494,14 +486,14 @@ export async function computeHourlyForAllInMonth(
           {
             role: Role.WORKER,
             isActive: true,
-            workerType: { in: [...HOURLY_WORKER_TYPES] },
+            workerType: { in: [...ACTIVE_HOURLY_WORKER_TYPES] },
           },
           {
             attendanceRecords: {
               some: {
                 date: { gte: start, lt: end },
                 roleSnapshot: Role.WORKER,
-                workerTypeSnapshot: { in: [...HOURLY_WORKER_TYPES] },
+                workerTypeSnapshot: { in: [...ACTIVE_HOURLY_WORKER_TYPES] },
               },
             },
           },
@@ -615,11 +607,19 @@ export async function markHourlyPayrollPaid(
       select: {
         workerId: true,
         month: true,
+        salaryRuleSnapshot: true,
         worker: { select: { displayName: true } },
       },
     });
     if (!row) {
       throw new HourlyAggregateError('月结记录不存在');
+    }
+    if (
+      getHourlyPayrollWorkerType(row.salaryRuleSnapshot) === WorkerType.PACKER
+    ) {
+      throw new HourlyAggregateError(
+        '历史打包时薪快照只读保留；新打包报工已切换为工序计件结算',
+      );
     }
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyLockKey(
       row.workerId,
