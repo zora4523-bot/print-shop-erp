@@ -1,5 +1,5 @@
-import { OrderPrintLayout } from '../../components/business/order/OrderPrintLayout';
-import type { PrintOrder } from '../../components/business/order/OrderPrintLayout.types';
+import { OrderPrintLayout } from './print-layout';
+import type { PrintOrder } from './print-types';
 
 const MAX_FILENAME_COMPONENT_LENGTH = 80;
 

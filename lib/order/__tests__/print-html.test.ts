@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import type {
   PrintOrder,
   PrintPackagingGroup,
-} from '../../../components/business/order/OrderPrintLayout.types';
+} from '../print-types';
 import { buildOrderPdfFilename, buildPrintHtml } from '../print-html';
+import { OrderPrintLayout } from '../print-layout';
 
 const STUB_QR_SVG = '<svg data-stub-qr="1"></svg>';
 const TEST_FACTORY_NAME = '佛山测试印刷厂';
@@ -177,6 +180,20 @@ function supplementTextByLabel(html: string, label: string): string {
 }
 
 describe('buildPrintHtml', () => {
+  it('静态 PDF shell 与浏览器打印共用完全相同的布局 DOM', async () => {
+    const order = fixtureOrder();
+    const layoutMarkup = renderToStaticMarkup(
+      createElement(OrderPrintLayout, {
+        order,
+        factoryName: TEST_FACTORY_NAME,
+      }),
+    );
+
+    const html = await renderPrintHtml(order);
+
+    expect(html).toContain(`<body>${layoutMarkup}<script>`);
+  });
+
   it('生成完整 HTML，并安全输出工单号标题', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({ orderNo: 'GD-260423-001<script>' }),

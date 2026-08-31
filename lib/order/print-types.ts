@@ -1,4 +1,4 @@
-// Narrow view-model the print layout actually needs. We flatten the
+// Narrow view-model the order print renderer actually needs. We flatten the
 // DB joins into plain fields so:
 //   1. The server page can resolve craft IDs → names once (instead of
 //      carrying the whole Craft dictionary into a client bundle).
