@@ -2615,7 +2615,23 @@ export type DeleteOrderPlateDetailInput = z.infer<
 // → don't change; optional text may be cleared to null. receiverAddress
 // is the deliberate exception: once supplied it must stay non-blank.
 // optionalFormBoolean handles the undefined case for the urgent checkbox.
+const staleOrderEditTokenMessage = '编辑页面已过期，请刷新后重试';
+
+// The database owns this monotonic token. Keep the hidden form value strict
+// so scientific notation, decimals and unsafe integers cannot weaken the CAS.
+const expectedOrderEditVersionField = z
+  .preprocess(
+    (value) => (typeof value === 'string' ? value.trim() : ''),
+    z
+      .string()
+      .regex(/^(0|[1-9]\d*)$/, staleOrderEditTokenMessage)
+      .transform(Number)
+      .refine(Number.isSafeInteger, staleOrderEditTokenMessage),
+  )
+  .pipe(z.number().int().nonnegative());
+
 export const updateEditableOrderSchema = z.object({
+  expectedEditVersion: expectedOrderEditVersionField,
   customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户名称/简称', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
@@ -2632,6 +2648,7 @@ export const updateEditableOrderSchema = z.object({
 export type UpdateEditableOrderInput = z.infer<typeof updateEditableOrderSchema>;
 
 export const updateShippingOrderSchema = z.object({
+  expectedEditVersion: expectedOrderEditVersionField,
   receiverName: optionalTrimmedText('收货人', 64),
   receiverPhone: optionalTrimmedText('收货电话', 32),
   receiverAddress: requiredTrimmedText('收货地址', 256),

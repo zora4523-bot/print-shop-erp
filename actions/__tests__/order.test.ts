@@ -282,6 +282,10 @@ const fd = (data: Record<string, string>) => {
   return f;
 };
 
+const ORDER_EDIT_TOKEN = '7';
+const editFd = (data: Record<string, string>) =>
+  fd({ expectedEditVersion: ORDER_EDIT_TOKEN, ...data });
+
 beforeEach(() => {
   permissionsMock.requirePermission.mockReset();
   orderMock.createOrder.mockReset();
@@ -932,12 +936,16 @@ describe('updateOrderAction', () => {
       updateOrderAction(
         'o1',
         null,
-        fd({ remark: '新备注', receiverName: '张三' }),
+        editFd({ remark: '新备注', receiverName: '张三' }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     const args = orderMock.updateOrderFields.mock.calls[0];
     expect(args[0]).toBe('o1');
-    expect(args[1]).toMatchObject({ remark: '新备注', receiverName: '张三' });
+    expect(args[1]).toMatchObject({
+      expectedEditVersion: 7,
+      remark: '新备注',
+      receiverName: '张三',
+    });
   });
 
   it('parses isUrgent="on" (HTML checkbox) as true', async () => {
@@ -949,7 +957,7 @@ describe('updateOrderAction', () => {
       changedFields: ['isUrgent'],
     });
     await expect(
-      updateOrderAction('o1', null, fd({ isUrgent: 'on' })),
+      updateOrderAction('o1', null, editFd({ isUrgent: 'on' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(orderMock.updateOrderFields).toHaveBeenCalledWith(
       'o1',
@@ -967,7 +975,7 @@ describe('updateOrderAction', () => {
       changedFields: [],
     });
     await expect(
-      updateOrderAction('o1', null, fd({ isSfCollect: 'false' })),
+      updateOrderAction('o1', null, editFd({ isSfCollect: 'false' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     const payload = orderMock.updateOrderFields.mock.calls[0][1] as Record<
       string,
@@ -983,7 +991,7 @@ describe('updateOrderAction', () => {
       const result = await updateOrderAction(
         'o1',
         null,
-        fd({ receiverAddress }),
+        editFd({ receiverAddress }),
       );
       expect(result).toEqual({
         status: 'invalid',
@@ -1007,7 +1015,7 @@ describe('updateOrderAction', () => {
       updateOrderAction(
         'o1',
         null,
-        fd({ receiverAddress: '  佛山市南海区  ' }),
+        editFd({ receiverAddress: '  佛山市南海区  ' }),
       ),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(orderMock.updateOrderFields).toHaveBeenCalledWith(
@@ -1029,7 +1037,7 @@ describe('updateOrderAction', () => {
       changedFields: ['receiverName'],
     });
     await expect(
-      updateOrderAction('o1', null, fd({ receiverName: '新收货人' })),
+      updateOrderAction('o1', null, editFd({ receiverName: '新收货人' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     const parsed = orderMock.updateOrderFields.mock.calls[0][1] as Record<
       string,
@@ -1041,6 +1049,7 @@ describe('updateOrderAction', () => {
   it('rejects a File upload in a text field as invalid', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     const f = new FormData();
+    f.set('expectedEditVersion', ORDER_EDIT_TOKEN);
     f.set('remark', new Blob(['x'], { type: 'text/plain' }), 'r.txt');
     const result = await updateOrderAction('o1', null, f);
     expect(result.status).toBe('invalid');
@@ -1052,7 +1061,7 @@ describe('updateOrderAction', () => {
     orderMock.updateOrderFields.mockRejectedValueOnce(
       new MockOrderInvariantError('当前状态不可编辑'),
     );
-    const result = await updateOrderAction('o1', null, fd({ remark: 'x' }));
+    const result = await updateOrderAction('o1', null, editFd({ remark: 'x' }));
     expect(result.status).toBe('error');
     if (result.status === 'error') {
       expect(result.message).toBe('当前状态不可编辑');
@@ -1068,12 +1077,31 @@ describe('updateOrderAction', () => {
       changedFields: ['remark'],
     });
     await expect(
-      updateOrderAction('o1', null, fd({ remark: 'x' })),
+      updateOrderAction('o1', null, editFd({ remark: 'x' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
     expect(redirectMock).toHaveBeenCalledWith('/orders/o1');
   });
+
+  it.each([undefined, '', 'not-a-version', '1.5', '-1'])(
+    '缺失或非法的编辑版本令牌友好拒绝 %#',
+    async (expectedEditVersion) => {
+      permissionsMock.requirePermission.mockResolvedValue(salesActor);
+      const formData = fd({ remark: 'x' });
+      if (expectedEditVersion !== undefined) {
+        formData.set('expectedEditVersion', expectedEditVersion);
+      }
+
+      const result = await updateOrderAction('o1', null, formData);
+
+      expect(result).toEqual({
+        status: 'error',
+        message: '编辑页面已过期，请刷新后重试',
+      });
+      expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('setOrderUrgentAction', () => {

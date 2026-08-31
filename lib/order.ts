@@ -2565,6 +2565,7 @@ type EditTxClient = {
           promisedDate: Date | null;
           isUrgent: boolean;
           isSfCollect: boolean;
+          editVersion: number;
         }
       | null
     >;
@@ -2573,6 +2574,10 @@ type EditTxClient = {
       data: unknown;
       select?: unknown;
     }) => Promise<{ id: string; status: OrderStatus }>;
+    updateMany: (args: {
+      where: { id: string; editVersion: number };
+      data: unknown;
+    }) => Promise<{ count: number }>;
   };
   orderShipment: {
     updateMany: (args: {
@@ -2692,9 +2697,19 @@ export type UpdateOrderResult = {
   changedFields: string[];
 };
 
-export async function updateOrderFields(
+const STALE_ORDER_EDIT_MESSAGE = '工单已被其他人修改，请刷新页面后再编辑';
+const INVALID_ORDER_EDIT_TOKEN_MESSAGE = '编辑页面已过期，请刷新后重试';
+
+type OrderEditCommand =
+  | {
+      kind: 'full-form';
+      input: UpdateEditableOrderInput | UpdateShippingOrderInput;
+    }
+  | { kind: 'urgent-only'; isUrgent: boolean };
+
+async function updateOrderEditableFields(
   orderId: string,
-  input: UpdateEditableOrderInput | UpdateShippingOrderInput,
+  command: OrderEditCommand,
   actor: { id: string; role: Role },
 ): Promise<UpdateOrderResult> {
   return db.$transaction(async (tx) => {
@@ -2724,6 +2739,7 @@ export async function updateOrderFields(
         remark: true,
         promisedDate: true,
         isUrgent: true,
+        editVersion: true,
       },
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
@@ -2743,8 +2759,24 @@ export async function updateOrderFields(
     const allowed =
       fieldset === 'FULL' ? FULL_EDITABLE_FIELDS : SHIPPING_EDITABLE_FIELDS;
 
+    if (command.kind === 'full-form') {
+      const { expectedEditVersion } = command.input;
+      if (!Number.isSafeInteger(expectedEditVersion) || expectedEditVersion < 0) {
+        throw new OrderInvariantError(INVALID_ORDER_EDIT_TOKEN_MESSAGE);
+      }
+      // Reject a stale snapshot before calculating or writing any dependent
+      // Shipment / OrderLog state. The conditional UPDATE below repeats this
+      // guard to close the read-to-write race with writers that do not take
+      // our advisory lock.
+      if (order.editVersion !== expectedEditVersion) {
+        throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
+      }
+    }
+
     const nextFields = pickEditableFields(
-      input as unknown as Record<string, unknown>,
+      command.kind === 'full-form'
+        ? (command.input as unknown as Record<string, unknown>)
+        : { isUrgent: command.isUrgent },
       allowed,
     );
     if ('receiverAddress' in nextFields) {
@@ -2770,11 +2802,29 @@ export async function updateOrderFields(
       };
     }
 
-    const updated = await txClient.order.update({
-      where: { id: orderId },
-      data: nextFields,
-      select: { id: true, status: true },
-    });
+    let updated: { id: string; status: OrderStatus };
+    if (command.kind === 'full-form') {
+      const persisted = await txClient.order.updateMany({
+        where: {
+          id: orderId,
+          editVersion: command.input.expectedEditVersion,
+        },
+        data: nextFields,
+      });
+      if (persisted.count !== 1) {
+        throw new OrderInvariantError(STALE_ORDER_EDIT_MESSAGE);
+      }
+      updated = { id: order.id, status: order.status };
+    } else {
+      // The one-click urgent command is serialized by the advisory lock and
+      // can write only isUrgent. It intentionally has no general-purpose
+      // optional version-token escape hatch for full-form edits.
+      updated = await txClient.order.update({
+        where: { id: orderId },
+        data: nextFields,
+        select: { id: true, status: true },
+      });
+    }
 
     const primaryShipmentChanges = Object.fromEntries(
       ['receiverName', 'receiverPhone', 'receiverAddress', 'expressCode']
@@ -2811,15 +2861,31 @@ export async function updateOrderFields(
   });
 }
 
+export async function updateOrderFields(
+  orderId: string,
+  input: UpdateEditableOrderInput | UpdateShippingOrderInput,
+  actor: { id: string; role: Role },
+): Promise<UpdateOrderResult> {
+  return updateOrderEditableFields(
+    orderId,
+    { kind: 'full-form', input },
+    actor,
+  );
+}
+
 // Quick one-click 急单 flip. Callable only while the order is in
-// DRAFT / SUBMITTED (isUrgent is not in the SHIPPING_ONLY set); delegates
-// to updateOrderFields so the same scope / OrderLog guarantees apply.
+// DRAFT / SUBMITTED (isUrgent is not in the SHIPPING_ONLY set). Its command
+// shape accepts only the target boolean while sharing scope / OrderLog rules.
 export async function setOrderUrgent(
   orderId: string,
   isUrgent: boolean,
   actor: { id: string; role: Role },
 ): Promise<UpdateOrderResult> {
-  return updateOrderFields(orderId, { isUrgent } as UpdateEditableOrderInput, actor);
+  return updateOrderEditableFields(
+    orderId,
+    { kind: 'urgent-only', isUrgent },
+    actor,
+  );
 }
 
 // 顺丰到付是可后补的履约标识。外部销售工单切换时必须同步免收/恢复

@@ -21,6 +21,7 @@ const { dbMock } = vi.hoisted(() => {
       findUnique: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
     orderItem: { findFirst: ReturnType<typeof vi.fn> };
     craft: { findMany: ReturnType<typeof vi.fn> };
@@ -72,6 +73,7 @@ const { dbMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     orderItem: { findFirst: vi.fn() },
     craft: { findMany: vi.fn() },
@@ -486,6 +488,7 @@ function baseItem(over: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   for (const fn of Object.values(dbMock.order)) fn.mockReset();
+  dbMock.order.updateMany.mockResolvedValue({ count: 1 });
   dbMock.orderItem.findFirst.mockReset().mockResolvedValue(null);
   dbMock.craft.findMany.mockReset();
   dbMock.party.findUnique.mockReset();
@@ -4321,6 +4324,15 @@ describe('listOrders / getOrderDetail — scope filter application', () => {
 });
 
 describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
+  const editSnapshotAt = new Date('2026-08-30T00:00:00.000Z');
+
+  function editInput(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      expectedEditVersion: 7,
+      ...overrides,
+    };
+  }
+
   function snapshot(overrides: Partial<Record<string, unknown>> = {}) {
     return {
       id: 'order-1',
@@ -4337,6 +4349,8 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       promisedDate: null,
       isUrgent: false,
       isSfCollect: false,
+      editVersion: 7,
+      updatedAt: new Date(editSnapshotAt),
       ...overrides,
     };
   }
@@ -4344,7 +4358,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
   it('throws when the order cannot be seen (scope filter returns null)', async () => {
     dbMock.order.findFirst.mockResolvedValue(null);
     await expect(
-      updateOrderFields('order-1', { remark: 'x' }, salesActor),
+      updateOrderFields('order-1', editInput({ remark: 'x' }), salesActor),
     ).rejects.toBeInstanceOf(OrderInvariantError);
   });
 
@@ -4353,7 +4367,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       snapshot({ submitterId: 'sales-OTHER' }),
     );
     await expect(
-      updateOrderFields('order-1', { remark: 'x' }, salesActor),
+      updateOrderFields('order-1', editInput({ remark: 'x' }), salesActor),
     ).rejects.toThrow(/只能修改自己创建的工单/);
   });
 
@@ -4361,13 +4375,9 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ submitterId: 'sales-OTHER' }),
     );
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.DRAFT,
-    });
     const result = await updateOrderFields(
       'order-1',
-      { remark: '管理员代改' },
+      editInput({ remark: '管理员代改' }),
       ownerActor,
     );
     expect(result.changed).toBe(true);
@@ -4378,19 +4388,64 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       snapshot({ status: OrderStatus.FINISHED }),
     );
     await expect(
-      updateOrderFields('order-1', { remark: 'x' }, ownerActor),
+      updateOrderFields('order-1', editInput({ remark: 'x' }), ownerActor),
     ).rejects.toThrow(/当前状态不可编辑/);
+  });
+
+  it.each([
+    ['缺失', { remark: 'x' }],
+    ['非法', { expectedEditVersion: Number.NaN, remark: 'x' }],
+  ])('领域层友好拒绝%s的编辑版本令牌', async (_label, input) => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot());
+
+    await expect(
+      updateOrderFields('order-1', input as never, salesActor),
+    ).rejects.toThrow('编辑页面已过期，请刷新后重试');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('读取到的工单已晚于表单快照时拒绝任何写入', async () => {
+    dbMock.order.findFirst.mockResolvedValue(
+      snapshot({ editVersion: 8 }),
+    );
+
+    await expect(
+      updateOrderFields('order-1', editInput({ remark: '过期备注' }), salesActor),
+    ).rejects.toThrow('工单已被其他人修改，请刷新页面后再编辑');
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
+  });
+
+  it('CAS 落库冲突时不写 Shipment 或 OrderLog', async () => {
+    dbMock.order.findFirst.mockResolvedValue(snapshot());
+    dbMock.order.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      updateOrderFields(
+        'order-1',
+        editInput({ receiverName: '并发修改' }),
+        salesActor,
+      ),
+    ).rejects.toThrow('工单已被其他人修改，请刷新页面后再编辑');
+    expect(dbMock.order.updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-1', editVersion: 7 },
+      data: { receiverName: '并发修改' },
+    });
+    expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('DRAFT / FULL fieldset: customerRef and isUrgent are both applied', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
-    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
     await updateOrderFields(
       'order-1',
-      { customerRef: '新客户', isUrgent: true, remark: '新备注' },
+      editInput({ customerRef: '新客户', isUrgent: true, remark: '新备注' }),
       salesActor,
     );
-    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.customerRef).toBe('新客户');
     expect(data.isUrgent).toBe(true);
     expect(data.remark).toBe('新备注');
@@ -4405,7 +4460,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     await expect(
       updateOrderFields(
         'order-1',
-        { isSfCollect: true } as never,
+        editInput({ isSfCollect: true }) as never,
         salesActor,
       ),
     ).resolves.toMatchObject({ changed: false, changedFields: [] });
@@ -4414,7 +4469,7 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
       dbMock.order.findFirst.mock.invocationCallOrder[0]!,
     );
     expect(dbMock.orderCostEntry.aggregate).not.toHaveBeenCalled();
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
@@ -4428,30 +4483,27 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     await expect(
       updateOrderFields(
         'order-1',
-        { receiverAddress } as never,
+        editInput({ receiverAddress }) as never,
         salesActor,
       ),
     ).rejects.toThrow('请填写收货地址');
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('收货地址修剪后同一事务写入工单与主发货记录', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.DRAFT,
-    });
 
     await updateOrderFields(
       'order-1',
-      { receiverAddress: '  广州市越秀区新地址  ' },
+      editInput({ receiverAddress: '  广州市越秀区新地址  ' }),
       salesActor,
     );
 
-    expect(dbMock.order.update).toHaveBeenCalledWith(
+    expect(dbMock.order.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: 'order-1', editVersion: 7 },
         data: expect.objectContaining({ receiverAddress: '广州市越秀区新地址' }),
       }),
     );
@@ -4463,16 +4515,12 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
 
   it('缺少主发货记录时拒绝完成地址编辑，避免两份快照分叉', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.DRAFT,
-    });
     dbMock.orderShipment.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(
       updateOrderFields(
         'order-1',
-        { receiverAddress: '广州市越秀区新地址' },
+        editInput({ receiverAddress: '广州市越秀区新地址' }),
         salesActor,
       ),
     ).rejects.toThrow(/缺少主发货记录.*无法同步/);
@@ -4483,13 +4531,9 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ status: OrderStatus.IN_PRODUCTION }),
     );
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.IN_PRODUCTION,
-    });
     await updateOrderFields(
       'order-1',
-      {
+      editInput({
         // These two live outside the SHIPPING_ONLY allowlist and MUST be
         // ignored even if the action hands them down — SPEC §3.6 forbids
         // changing them once production starts.
@@ -4498,10 +4542,10 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
         isSfCollect: true,
         receiverName: '新收货人',
         remark: '新备注',
-      } as never,
+      }) as never,
       ownerActor,
     );
-    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
     expect(data).not.toHaveProperty('customerRef');
     expect(data).not.toHaveProperty('isUrgent');
     expect(data).not.toHaveProperty('isSfCollect');
@@ -4513,10 +4557,9 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     dbMock.order.findFirst.mockResolvedValue(
       snapshot({ remark: null, receiverName: '旧' }),
     );
-    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
     await updateOrderFields(
       'order-1',
-      { remark: '新', receiverName: '新', receiverPhone: null },
+      editInput({ remark: '新', receiverName: '新', receiverPhone: null }),
       salesActor,
     );
     const log = dbMock.orderLog.create.mock.calls[0][0].data as {
@@ -4545,11 +4588,11 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
 
   it('does not touch the shipment snapshot when only non-address fields change', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot({ remark: null }));
-    dbMock.order.update.mockResolvedValue({
-      id: 'order-1',
-      status: OrderStatus.DRAFT,
-    });
-    await updateOrderFields('order-1', { remark: '只改备注' }, salesActor);
+    await updateOrderFields(
+      'order-1',
+      editInput({ remark: '只改备注' }),
+      salesActor,
+    );
     expect(dbMock.orderShipment.updateMany).not.toHaveBeenCalled();
   });
 
@@ -4557,19 +4600,18 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot());
     const result = await updateOrderFields(
       'order-1',
-      { remark: null, customerRef: '苹果福' },
+      editInput({ remark: null, customerRef: '苹果福' }),
       salesActor,
     );
     expect(result.changed).toBe(false);
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
     expect(dbMock.orderLog.create).not.toHaveBeenCalled();
   });
 
   it('empty-string input normalizes to null for text fields (cleared field)', async () => {
     dbMock.order.findFirst.mockResolvedValue(snapshot({ remark: '旧备注' }));
-    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
-    await updateOrderFields('order-1', { remark: '' }, salesActor);
-    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    await updateOrderFields('order-1', editInput({ remark: '' }), salesActor);
+    const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.remark).toBeNull();
   });
 
@@ -4581,23 +4623,22 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     );
     const noop = await updateOrderFields(
       'order-1',
-      { promisedDate: promised },
+      editInput({ promisedDate: promised }),
       salesActor,
     );
     expect(noop.changed).toBe(false);
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
 
     // 真实修改：null → 2026-07-15，data 写 Date，diff 记录 before/after
     dbMock.order.findFirst.mockResolvedValue(snapshot({ promisedDate: null }));
-    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.DRAFT });
     const changed = await updateOrderFields(
       'order-1',
-      { promisedDate: promised },
+      editInput({ promisedDate: promised }),
       salesActor,
     );
     expect(changed.changed).toBe(true);
     expect(changed.changedFields).toEqual(['promisedDate']);
-    const data = dbMock.order.update.mock.calls[0][0].data as Record<string, unknown>;
+    const data = dbMock.order.updateMany.mock.calls[0][0].data as Record<string, unknown>;
     expect(data.promisedDate).toEqual(promised);
   });
 
@@ -4607,11 +4648,11 @@ describe('updateOrderFields (SPEC §3.6 — E-lean)', () => {
     );
     const result = await updateOrderFields(
       'order-1',
-      { promisedDate: new Date('2026-07-15T00:00:00Z') },
+      editInput({ promisedDate: new Date('2026-07-15T00:00:00Z') }),
       ownerActor,
     );
     expect(result.changed).toBe(false);
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -4642,6 +4683,7 @@ describe('setOrderUrgent — quick toggle', () => {
     expect(result.changedFields).toEqual(['isUrgent']);
     const data = dbMock.order.update.mock.calls[0][0].data as { isUrgent: boolean };
     expect(data.isUrgent).toBe(true);
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
   });
 
   it('no-op when target matches current value', async () => {

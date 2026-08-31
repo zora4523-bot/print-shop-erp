@@ -375,7 +375,9 @@ export async function updateOrderAction(
 ): Promise<OrderMutationResult> {
   const actor = await requirePermission('order:create');
 
-  const raw: Record<string, unknown> = {};
+  const raw: Record<string, unknown> = {
+    expectedEditVersion: formData.get('expectedEditVersion'),
+  };
   for (const key of FULL_EDITABLE_FIELDS) {
     const value = formData.get(key);
     // Reject non-string uploads at the action boundary so File / Blob
@@ -392,6 +394,14 @@ export async function updateOrderAction(
 
   const parsed = updateEditableOrderSchema.safeParse(raw);
   if (!parsed.success) {
+    const tokenIssue = parsed.error.issues.find(
+      (issue) => issue.path[0] === 'expectedEditVersion',
+    );
+    // This field is deliberately hidden, so a field-level error would never
+    // be visible next to a control. Return a form-level, actionable message.
+    if (tokenIssue) {
+      return { status: 'error', message: tokenIssue.message };
+    }
     return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
   }
 

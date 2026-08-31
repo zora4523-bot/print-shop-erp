@@ -364,6 +364,7 @@ model Order {
   quotedFeeCompleteness   OrderQuotedFeeCompleteness?
   quotedPricingRevisionId String?
   revision                Int                         @default(1)
+  editVersion             Int                         @default(0)
   pricingStatus           OrderPricingStatus          @default(PENDING_ADMIN_CONFIRMATION)
   priceRevision           Int                         @default(1)
   pricingConfirmedAt      DateTime?
