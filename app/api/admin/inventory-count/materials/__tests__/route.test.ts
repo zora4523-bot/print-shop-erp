@@ -71,4 +71,74 @@ describe('GET /api/admin/inventory-count/materials', () => {
     expect(inventoryMock.listInventoryCountMaterials).not.toHaveBeenCalled();
     await expect(res.json()).resolves.toEqual({ error: '未登录' });
   });
+
+  it.each([
+    '',
+    'abc',
+    '10x',
+    '1.5',
+    '0',
+    '-1',
+    '101',
+    '9007199254740992',
+  ])('returns 400 for invalid limit %j without querying', async (limit) => {
+    permissionsMock.requireSessionPermission.mockResolvedValue({ id: 'owner1' });
+
+    const res = await handleInventoryCountMaterialsGet(
+      request(
+        `http://test.local/api/admin/inventory-count/materials?limit=${encodeURIComponent(limit)}`,
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(inventoryMock.listInventoryCountMaterials).not.toHaveBeenCalled();
+    await expect(res.json()).resolves.toEqual({
+      error: 'limit 必须是 1 到 100 之间的整数',
+    });
+  });
+
+  it('returns 400 when limit is repeated', async () => {
+    permissionsMock.requireSessionPermission.mockResolvedValue({ id: 'owner1' });
+
+    const res = await handleInventoryCountMaterialsGet(
+      request(
+        'http://test.local/api/admin/inventory-count/materials?limit=10&limit=20',
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(inventoryMock.listInventoryCountMaterials).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 100])('accepts limit boundary %i', async (limit) => {
+    permissionsMock.requireSessionPermission.mockResolvedValue({ id: 'owner1' });
+    inventoryMock.listInventoryCountMaterials.mockResolvedValue([]);
+
+    const res = await handleInventoryCountMaterialsGet(
+      request(
+        `http://test.local/api/admin/inventory-count/materials?limit=${limit}`,
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(inventoryMock.listInventoryCountMaterials).toHaveBeenCalledWith({
+      q: '',
+      limit,
+    });
+  });
+
+  it('uses the service default when limit is absent', async () => {
+    permissionsMock.requireSessionPermission.mockResolvedValue({ id: 'owner1' });
+    inventoryMock.listInventoryCountMaterials.mockResolvedValue([]);
+
+    const res = await handleInventoryCountMaterialsGet(
+      request('http://test.local/api/admin/inventory-count/materials'),
+    );
+
+    expect(res.status).toBe(200);
+    expect(inventoryMock.listInventoryCountMaterials).toHaveBeenCalledWith({
+      q: '',
+      limit: undefined,
+    });
+  });
 });

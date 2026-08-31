@@ -80,4 +80,14 @@ describe('listInventoryCountMaterials', () => {
       },
     ]);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    'rejects unsafe database limit %s before querying',
+    async (limit) => {
+      await expect(listInventoryCountMaterials({ limit })).rejects.toThrow(
+        '盘点物料查询数量必须是有限安全整数',
+      );
+      expect(dbMock.material.findMany).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -48,7 +48,11 @@ export async function listInventoryCountMaterials(
   opts: { q?: string | null; limit?: number } = {},
 ): Promise<InventoryCountMaterialRow[]> {
   const query = normalizeSearchQuery(opts.q);
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const requestedLimit = opts.limit ?? 50;
+  if (!Number.isSafeInteger(requestedLimit)) {
+    throw new RangeError('盘点物料查询数量必须是有限安全整数');
+  }
+  const limit = Math.min(Math.max(requestedLimit, 1), 100);
   const rows = await db.material.findMany({
     where: inventoryCountSearchFilter(query),
     select: {
