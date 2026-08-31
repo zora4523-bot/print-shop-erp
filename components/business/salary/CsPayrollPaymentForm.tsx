@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { recordCsPayrollPaymentAction } from '@/actions/owner-salary';
 import type { CsPayrollPaymentResult } from '@/actions/owner-salary.types';
+import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -261,7 +262,7 @@ export function CsPayrollPaymentForm({
             id={inputIds.paidAt}
             type="datetime-local"
             name="paidAt"
-            defaultValue={shanghaiDateTimeLocal(new Date())}
+            defaultValue={formatDateTimeLocalShanghai(new Date())}
             required
             className="min-h-11"
             {...formMessageA11yProps(
@@ -407,20 +408,4 @@ function AmountField({
       </FormMessage>
     </div>
   );
-}
-
-function shanghaiDateTimeLocal(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }

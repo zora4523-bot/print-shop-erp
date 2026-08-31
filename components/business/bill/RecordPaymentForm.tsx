@@ -18,6 +18,7 @@ import {
 } from '@/components/ui-business';
 import { recordBillPaymentAction } from '@/actions/bill';
 import type { RecordBillPaymentResult } from '@/actions/bill.types';
+import { formatDateTimeLocalShanghai } from '@/lib/format/dates';
 
 type Props = {
   billId: string;
@@ -81,7 +82,7 @@ export function RecordPaymentForm({
     RecordBillPaymentResult | null,
     FormData
   >(submitPayment, null);
-  const defaultPaidAt = shanghaiDateTimeLocal(new Date());
+  const defaultPaidAt = formatDateTimeLocalShanghai(new Date());
   const inputIds = {
     amount: `${formId}-amount`,
     paidAt: `${formId}-paid-at`,
@@ -257,20 +258,4 @@ export function RecordPaymentForm({
       ) : null}
     </form>
   );
-}
-
-function shanghaiDateTimeLocal(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const values = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }

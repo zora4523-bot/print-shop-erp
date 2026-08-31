@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import type { Prisma } from '../../generated/prisma/client';
 import { parseStrictYmd } from '../auth/schemas';
 import { db } from '../db';
+import { xlsxCellXml, type XlsxCellValue } from '../export/xlsx-cell';
 import { xlsxColumnName } from '../export/xlsx-column';
 
 export type PieceworkSettlementExportFilter = {
@@ -86,29 +87,7 @@ export async function loadPieceworkSettlementExportData(
   });
 }
 
-type CellValue = string | number | boolean | Date | null | undefined;
-
-function xmlEscape(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
-
-function cellXml(value: CellValue, row: number, column: number): string {
-  const ref = `${xlsxColumnName(column)}${row}`;
-  if (value === null || value === undefined) return `<c r="${ref}"/>`;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `<c r="${ref}" s="2"><v>${value}</v></c>`;
-  }
-  if (typeof value === 'boolean') {
-    return `<c r="${ref}" t="b"><v>${value ? 1 : 0}</v></c>`;
-  }
-  const text = value instanceof Date ? value.toISOString() : String(value);
-  return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
-}
+type CellValue = XlsxCellValue;
 
 function sheetXml(rows: CellValue[][]): string {
   const columnCount = Math.max(1, rows[0]?.length ?? 1);
@@ -127,7 +106,7 @@ function sheetXml(rows: CellValue[][]): string {
       const row = index + 1;
       const style = row === 1 ? ' s="1" customFormat="1"' : '';
       return `<row r="${row}"${style}>${cells
-        .map((value, column) => cellXml(value, row, column))
+        .map((value, column) => xlsxCellXml(value, row, column))
         .join('')}</row>`;
     })
     .join('');
