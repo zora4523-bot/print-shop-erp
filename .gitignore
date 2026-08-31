@@ -17,6 +17,8 @@
 /blob-report/
 /public/load-test/
 /output/
+/.review/
+/.vitest-attachments/
 
 # next.js
 /.next/

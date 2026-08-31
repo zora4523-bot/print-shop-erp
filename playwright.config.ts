@@ -102,9 +102,10 @@ const adminViewportProjects = [
 // safely cleaned out of a developer's working database.
 export default defineConfig({
   // Cover both end-to-end specs (./tests/e2e) and visual regression
-  // specs (./tests/visual) under one runner. testMatch defaults pick
-  // up *.spec.ts in either subdir.
+  // specs (./tests/visual) under one runner. Keep Vitest regression files in
+  // ./tests/regression out of Playwright's default *.test.* discovery.
   testDir: './tests',
+  testMatch: ['e2e/**/*.spec.ts', 'visual/**/*.spec.ts'],
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false, // share dev DB; serial keeps assertions stable
   forbidOnly: !!process.env.CI,
