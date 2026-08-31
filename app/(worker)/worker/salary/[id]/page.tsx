@@ -1,15 +1,17 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import {
   Role,
   SalaryAdjustmentType,
   WorkerType,
 } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { getSession } from '@/lib/auth/session';
 import {
   getWorkerHourlyPayrollDetail,
   getWorkerSalaryDetail,
-  type WorkerSalaryActor,
 } from '@/lib/worker-portal';
 import {
   MACHINE_TYPE_LABELS,
@@ -17,11 +19,30 @@ import {
 } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import Decimal from 'decimal.js';
 import { getAttendanceSummaries } from '@/lib/attendance';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
+
+const getWorkerPieceworkSalaryPageData = cache(
+  (id: string, actorId: string, actorRole: Role, workerType: WorkerType) =>
+    getWorkerSalaryDetail(id, {
+      id: actorId,
+      role: actorRole,
+      workerType,
+    }),
+);
+
+const getWorkerHourlySalaryPageData = cache(
+  (id: string, actorId: string, actorRole: Role, workerType: WorkerType) =>
+    getWorkerHourlyPayrollDetail(id, {
+      id: actorId,
+      role: actorRole,
+      workerType,
+    }),
+);
 
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   BONUS: '奖金',
@@ -29,23 +50,61 @@ const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   CORRECTION: '差错修正',
 };
 
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  const user = session?.user;
+  if (!user || user.role !== Role.WORKER || !user.workerType) {
+    return { title: '我的工资' };
+  }
+
+  const { id } = await params;
+  if (user.workerType === WorkerType.MACHINE) {
+    const salary = await getWorkerPieceworkSalaryPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
+    return {
+      title: salary
+        ? `${formatDateShanghai(salary.date)} · 我的工资`
+        : '工资记录不存在',
+    };
+  }
+
+  const payroll = await getWorkerHourlySalaryPageData(
+    id,
+    user.id,
+    user.role,
+    user.workerType,
+  );
+  return {
+    title: payroll ? `${payroll.month} · 我的工资` : '工资记录不存在',
+  };
+}
+
 export default async function WorkerSalaryDetailPage({ params }: PageProps) {
   const user = await requirePermission('salary:view:self');
   if (user.role !== Role.WORKER || !user.workerType) notFound();
   const { id } = await params;
-  const actor: WorkerSalaryActor = {
-    id: user.id,
-    role: user.role,
-    workerType: user.workerType,
-  };
 
   if (user.workerType !== WorkerType.MACHINE) {
-    const payroll = await getWorkerHourlyPayrollDetail(id, actor);
+    const payroll = await getWorkerHourlySalaryPageData(
+      id,
+      user.id,
+      user.role,
+      user.workerType,
+    );
     if (!payroll) notFound();
     return <HourlySalaryDetail payroll={payroll} />;
   }
 
-  const salary = await getWorkerSalaryDetail(id, actor);
+  const salary = await getWorkerPieceworkSalaryPageData(
+    id,
+    user.id,
+    user.role,
+    user.workerType,
+  );
   if (!salary) notFound();
   const attendanceEnd = new Date(salary.date);
   attendanceEnd.setUTCDate(attendanceEnd.getUTCDate() + 1);
@@ -67,11 +126,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
             {formatDateShanghai(salary.date)} 工资明细
           </h1>
-          {salary.isPaid ? (
-            <Badge variant="secondary">已发</Badge>
-          ) : (
-            <Badge variant="outline">未发</Badge>
-          )}
+          <PaymentStatusBadge isPaid={salary.isPaid} />
           <Badge variant={pieceworkVsBase > 0 ? 'secondary' : 'outline'}>
             {pieceworkVsBase > 0
               ? '计件高于保底'
@@ -83,8 +138,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {MACHINE_TYPE_LABELS[salary.machineType]} ·
-          只展示当前账号自己的计件记录
+          {MACHINE_TYPE_LABELS[salary.machineType]}
         </p>
       </header>
 
@@ -145,6 +199,12 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
                     {item.reworkQty} · 板 {item.boardCount} · 下{' '}
                     {item.pressCount}
                   </p>
+                  <Link
+                    href={`/worker/tasks/${item.productionTaskId}`}
+                    className="mt-2 inline-flex min-h-11 items-center text-xs font-medium text-primary underline"
+                  >
+                    查看任务 / 提出计件异议
+                  </Link>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="font-sans tabular-nums font-medium">
@@ -188,15 +248,10 @@ function HourlySalaryDetail({
           <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
             {payroll.month} 工资明细
           </h1>
-          {payroll.isPaid ? (
-            <Badge variant="secondary">已发</Badge>
-          ) : (
-            <Badge variant="outline">未发</Badge>
-          )}
+          <PaymentStatusBadge isPaid={payroll.isPaid} />
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'} ·
-          只展示当前账号自己的月结记录
+          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'}
         </p>
         {payroll.isPaid && payroll.paidAt ? (
           <p className="mt-1 text-xs text-muted-foreground">

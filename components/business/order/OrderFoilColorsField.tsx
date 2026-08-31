@@ -12,7 +12,10 @@ import { ORDER_FOIL_COLOR_OPTIONS } from './order-item-options';
 
 type Props = {
   id: string;
+  label?: string;
   value: string[];
+  maxColors?: number;
+  allowNoColor?: boolean;
   disabled?: boolean;
   error?: string;
   onChange: (value: string[]) => void;
@@ -25,7 +28,10 @@ const PRESET_VALUES = new Set(
 
 export function OrderFoilColorsField({
   id,
+  label = '烫金色（可多选）',
   value,
+  maxColors = MAX_ORDER_ITEM_FOIL_COLORS,
+  allowNoColor = true,
   disabled = false,
   error,
   onChange,
@@ -63,8 +69,8 @@ export function OrderFoilColorsField({
     }
 
     const withoutNoColor = value.filter((entry) => entry !== NO_FOIL_COLOR);
-    if (withoutNoColor.length >= MAX_ORDER_ITEM_FOIL_COLORS) {
-      setLocalMessage(`最多选择 ${MAX_ORDER_ITEM_FOIL_COLORS} 种烫金颜色`);
+    if (withoutNoColor.length >= maxColors) {
+      setLocalMessage(`最多选择 ${maxColors} 种烫金颜色`);
       return;
     }
     onChange([...withoutNoColor, color]);
@@ -86,8 +92,8 @@ export function OrderFoilColorsField({
     }
 
     const withoutNoColor = value.filter((entry) => entry !== NO_FOIL_COLOR);
-    if (withoutNoColor.length >= MAX_ORDER_ITEM_FOIL_COLORS) {
-      setLocalMessage(`最多选择 ${MAX_ORDER_ITEM_FOIL_COLORS} 种烫金颜色`);
+    if (withoutNoColor.length >= maxColors) {
+      setLocalMessage(`最多选择 ${maxColors} 种烫金颜色`);
       return;
     }
 
@@ -102,14 +108,15 @@ export function OrderFoilColorsField({
       aria-invalid={Boolean(error || localMessage)}
       aria-describedby={describedBy}
     >
-      <legend className="text-sm font-medium">烫金色（可多选）</legend>
+      <legend className="text-sm font-medium">{label}</legend>
       <p id={helperId} className="text-xs text-muted-foreground">
-        最多选择 {MAX_ORDER_ITEM_FOIL_COLORS} 色；“{NO_FOIL_COLOR}
-        ”会清除其他颜色
+        最多选择 {maxColors} 色
       </p>
 
       <div className="flex min-w-0 flex-wrap gap-2">
-        {ORDER_FOIL_COLOR_OPTIONS.map((option) => {
+        {ORDER_FOIL_COLOR_OPTIONS.filter(
+          (option) => allowNoColor || option.value !== NO_FOIL_COLOR,
+        ).map((option) => {
           const selected = value.includes(option.value);
           return (
             <Button

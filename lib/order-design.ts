@@ -146,7 +146,7 @@ export async function recordOrderItemDesign(
 ) {
   const cfgResult = readOssConfig(env);
   if (!cfgResult.configured) {
-    throw new OrderDesignError('OSS 未配置，无法登记设计图');
+    throw new OrderDesignError('设计文件上传暂不可用，请联系管理员');
   }
   const cfg = cfgResult.cfg;
 

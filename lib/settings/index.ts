@@ -7,6 +7,7 @@ import {
   type SettingKey,
   type SettingValue,
 } from './definitions';
+import { acquireWorkerSelfClaimSettingWriteLock } from './locks';
 
 export {
   SETTING_DEFINITIONS,
@@ -26,7 +27,7 @@ export type {
 // 不做请求级缓存（React cache()）是刻意的：读取方里有 lib/cron/tasks.ts 和
 // background job，跑在 PM2 worker 里，根本没有 request 上下文。一次按唯一键
 // 查单行的开销远小于「同一份代码在两种运行时里行为不一样」的维护成本。
-// 每次渲染最多多一两次这种查询。
+// 读取方按需做一次单键查询；设置页则通过 getAllSettings 一次批量读取。
 
 export async function getSetting<K extends SettingKey>(
   key: K,
@@ -50,7 +51,7 @@ export async function getAllSettings(): Promise<AllSettings> {
 
   // 从 SETTING_KEYS 出发而不是从查询结果出发：没有对应行的 key 也要拿到兜底
   // 值，否则新加的配置项在没跑过 seed 的库上会是 undefined。
-  // 循环里 key 是联合类型，TS 会把 result[key] 的目标类型收敛成三个 value
+  // 循环里 key 是联合类型，TS 会把 result[key] 的目标类型收敛成各项 value
   // 类型的交集（永远赋不进去）。resolveSetting 本身是逐 key 类型安全的，
   // 这里的断言只是解开映射类型在写入侧的这个已知限制。
   const result: Record<string, unknown> = {};
@@ -101,6 +102,11 @@ export async function updateSettings(
   // 一个事务：几项配置要么一起生效要么都不动，避免业主看到「厂名改了、阈值没改」
   // 这种半截状态。用 callback 形式（不是数组形式）才能把审计写在同一个 tx 里。
   await db.$transaction(async (tx) => {
+    // 表单整体提交；只要包含抢单开关就先拿排他锁。即使本次值
+    // 未变，短暂串行也比“关闭已返回但又成功抢入一单”更容易解释。
+    if (entries.some(([key]) => key === 'worker_self_claim_enabled')) {
+      await acquireWorkerSelfClaimSettingWriteLock(tx);
+    }
     const existing = await tx.setting.findMany({
       where: { key: { in: entries.map(([key]) => key) } },
       select: { key: true, value: true },

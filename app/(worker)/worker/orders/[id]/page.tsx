@@ -1,24 +1,53 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { TaskStatus, WorkerType } from '@/generated/prisma/enums';
+import { cache } from 'react';
+import { Role, TaskStatus, WorkerType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { getSession } from '@/lib/auth/session';
 import { getWorkerOrderDetail } from '@/lib/worker-portal';
 import { orderStatusZh } from '@/lib/order/log-format';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
+import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
 
+const getWorkerOrderPageData = cache(
+  (id: string, actorId: string, actorRole: Role) =>
+    getWorkerOrderDetail(id, { id: actorId, role: actorRole }),
+);
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  if (!session || session.user.role !== Role.WORKER) {
+    return { title: '我的工单' };
+  }
+
+  const { id } = await params;
+  const order = await getWorkerOrderPageData(
+    id,
+    session.user.id,
+    session.user.role,
+  );
+  return {
+    title: order ? `${order.orderNo} · 我的工单` : '工单不存在',
+  };
+}
+
 export default async function WorkerOrderDetailPage({ params }: PageProps) {
   const user = await requirePermission('order:view:self');
   const { id } = await params;
-  const order = await getWorkerOrderDetail(id, { id: user.id, role: user.role });
+  const order = await getWorkerOrderPageData(id, user.id, user.role);
   if (!order) notFound();
 
   return (
@@ -29,14 +58,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
             {order.orderNo}
           </span>
           <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
-          {order.isUrgent ? (
-            <Badge
-              variant="destructive"
-              className="bg-destructive text-background dark:bg-destructive dark:text-background"
-            >
-              急单
-            </Badge>
-          ) : null}
+          {order.isUrgent ? <UrgentBadge /> : null}
         </div>
         <h1 className="text-lg font-semibold">我的工单任务</h1>
         {order.customName ? (
@@ -73,8 +95,14 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               #{item.sequence} · {item.name}
             </h2>
             <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-              {item.specification ?? '未填规格'} ·{' '}
-              {item.paperType ?? '未填纸张'} · 数量{' '}
+              {item.specification
+                ? externalPriceBusinessText(item.specification)
+                : '未填规格'}{' '}
+              ·{' '}
+              {item.paperType
+                ? externalPriceBusinessText(item.paperType)
+                : '未填纸张'}{' '}
+              · 数量{' '}
               {item.quantity.toLocaleString()} ·{' '}
               烫金色 {formatFoilColors(item.foilColors, '未填')} ·{' '}
               {item.isDoubleSided ? '双面' : '单面'} ·{' '}
@@ -163,18 +191,11 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
 }
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const label =
-    status === TaskStatus.PENDING
-      ? '待开始'
-      : status === TaskStatus.IN_PROGRESS
-        ? '进行中'
-        : status === TaskStatus.COMPLETED
-          ? '已完工'
-          : '已取消';
+  const definition = PRODUCTION_TASK_STATUS_REGISTRY[status];
   return (
-    <Badge variant={status === TaskStatus.COMPLETED ? 'secondary' : 'outline'}>
-      {label}
-    </Badge>
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
   );
 }
 

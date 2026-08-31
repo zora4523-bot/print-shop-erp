@@ -12,6 +12,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import Link from 'next/link';
 import { RecomputeDailyForm } from '@/components/business/salary/RecomputeDailyForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -20,6 +21,7 @@ import {
   StatCard as UiStatCard,
 } from '@/components/ui-business';
 import { getAttendanceSummaries } from '@/lib/attendance';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '计件工资' };
@@ -125,11 +127,11 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
       ) : null}
       <PageHeader
         title="计件工资"
-        subtitle="按上海日历天汇总已完工任务；工资取计件合计与实际工作机型最高保底的较高者，再加人工调整。上班/请假天数仅作考勤展示，不自动扣减计件保底。"
+        subtitle="按上海日历天汇总已完工任务；显示计件、保底、调整和实发金额。"
         actions={
           <div className="flex gap-2">
             <Link
-              href="/owner/salary/piecework-rules"
+              href={RULE_CENTER_HREFS.workerPiecework}
               className={buttonVariants({ variant: 'outline' })}
             >
               <Settings className="mr-2 size-4" />
@@ -145,10 +147,6 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           </div>
         }
       />
-
-      <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeDailyForm defaultDate={selectedDate} maxDate={todayShanghai()} />
-      </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <UiStatCard
@@ -176,6 +174,8 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
         paid={sp.paid}
         workerId={sp.workerId}
         workers={workers}
+        recomputeDate={selectedDate}
+        recomputeMaxDate={todayShanghai()}
       />
 
       {rows.length === 0 ? (
@@ -216,7 +216,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3">{r.worker.displayName}</td>
                   <td className="px-4 py-3 text-xs">
                     {MACHINE_TYPE_LABELS[r.machineType as MachineType] ??
-                      r.machineType}
+                      '未识别机型'}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {String(r.totalPieceworkAmount)}
@@ -240,11 +240,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
-                      {r.isPaid ? (
-                        <Badge>已发</Badge>
-                      ) : (
-                        <Badge variant="outline">未发</Badge>
-                      )}
+                      <PaymentStatusBadge isPaid={r.isPaid} />
                       {salaryFloorBadge(
                         new Decimal(
                           r.totalPieceworkAmount as unknown as string,
@@ -264,6 +260,9 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
                       <MarkPaidForm
                         id={r.id}
                         currentPaid={r.isPaid}
+                        workerName={r.worker.displayName}
+                        salaryDate={formatDateShanghai(r.date)}
+                        amount={String(r.actualSalary)}
                         returnTo={returnTo}
                       />
                     </div>
@@ -293,17 +292,22 @@ function FilterBar({
   paid,
   workerId,
   workers,
+  recomputeDate,
+  recomputeMaxDate,
 }: {
   selectedDate: string;
   paid: string | undefined;
   workerId: string | undefined;
   workers: Array<{ id: string; displayName: string; username: string }>;
+  recomputeDate: string;
+  recomputeMaxDate: string;
 }) {
   // Plain GET form — the searchParams round-trip is server-rendered
   // so filtering doesn't need any client JS. No form action attribute
   // means "submit to the same URL", exactly what we want.
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm lg:flex-row lg:items-end">
+    <form className="flex min-w-0 flex-wrap items-end gap-3">
       <div className="flex flex-col">
         <label htmlFor="daily-date" className="text-xs text-muted-foreground">日期</label>
         <input
@@ -353,5 +357,15 @@ function FilterBar({
         清除
       </Link>
     </form>
+      <div className="min-w-0 border-t pt-3 lg:ml-auto lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <p className="mb-1 text-xs font-medium text-destructive">
+          L3 · 重算会覆盖该日未发放记录
+        </p>
+        <RecomputeDailyForm
+          defaultDate={recomputeDate}
+          maxDate={recomputeMaxDate}
+        />
+      </div>
+    </div>
   );
 }

@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderKind,
   OrderChangeRequestStatus,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderPackagingMode,
+  OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -16,7 +20,10 @@ const {
   sfCollectTogglePropsMock,
   pieceworkSummaryMock,
   reassignmentViewMock,
+  taskDisputesMock,
   reworkCraftOptionsMock,
+  getSettingMock,
+  reassignTaskFormPropsMock,
 } = vi.hoisted(() => ({
   getOrderDetailMock: vi.fn(),
   requireSessionMock: vi.fn(),
@@ -24,7 +31,10 @@ const {
   sfCollectTogglePropsMock: vi.fn(),
   pieceworkSummaryMock: vi.fn(),
   reassignmentViewMock: vi.fn(),
+  taskDisputesMock: vi.fn(),
   reworkCraftOptionsMock: vi.fn(),
+  getSettingMock: vi.fn(),
+  reassignTaskFormPropsMock: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/session', () => ({
@@ -42,11 +52,17 @@ vi.mock('@/lib/page-title/refs', () => ({
 vi.mock('@/lib/bom', () => ({
   estimateMaterialUsageForOrderItems: estimateMaterialUsageMock,
 }));
+vi.mock('@/lib/dashboard/format', () => ({
+  formatMoney: (value: string | number) => `¥ ${Number(value).toFixed(2)}`,
+}));
 vi.mock('@/components/business/bom/OrderMaterialUsageEstimate', () => ({
   OrderMaterialUsageEstimate: () => null,
 }));
 vi.mock('@/components/business/order/DesignUploadPanel', () => ({
   DesignUploadPanel: () => null,
+}));
+vi.mock('@/components/business/order/PromisedDateBadge', () => ({
+  PromisedDateBadge: () => null,
 }));
 vi.mock('@/components/business/order/SubmitOrderButton', () => ({
   SubmitOrderButton: () => null,
@@ -70,7 +86,13 @@ vi.mock('@/components/business/order/SfCollectToggleForm', () => ({
   },
 }));
 vi.mock('@/components/business/production/ReassignTaskForm', () => ({
-  ReassignTaskForm: () => null,
+  ReassignTaskForm: (props: unknown) => {
+    reassignTaskFormPropsMock(props);
+    return null;
+  },
+}));
+vi.mock('@/components/business/production/TaskDisputeAdminPanel', () => ({
+  TaskDisputeAdminPanel: () => null,
 }));
 vi.mock('@/components/business/order/ReworkOrderForm', () => ({
   ReworkOrderForm: () => null,
@@ -81,6 +103,12 @@ vi.mock('@/components/business/order/OrderChangeRequestForm', () => ({
 vi.mock('@/components/business/order/OrderChangeReviewForm', () => ({
   OrderChangeReviewForm: () => null,
 }));
+vi.mock('@/components/business/order/OrderPricingReviewForm', () => ({
+  OrderPricingReviewForm: () => null,
+}));
+vi.mock('@/components/business/order/OrderCommercialDetailsManager', () => ({
+  OrderCommercialDetailsManager: () => null,
+}));
 vi.mock('@/components/business/bill/OrderCostEntryForm', () => ({
   OrderCostEntryForm: () => null,
 }));
@@ -90,8 +118,14 @@ vi.mock('@/lib/salary/daily', () => ({
 vi.mock('@/lib/production', () => ({
   getPendingTaskReassignmentView: reassignmentViewMock,
 }));
+vi.mock('@/lib/production/task-dispute', () => ({
+  listOrderTaskDisputes: taskDisputesMock,
+}));
 vi.mock('@/lib/order/rework', () => ({
   getReworkCraftOptions: reworkCraftOptionsMock,
+}));
+vi.mock('@/lib/settings', () => ({
+  getSetting: getSettingMock,
 }));
 vi.mock('@/lib/oss/read-url', () => ({
   signDesignReadUrl: vi.fn((value: string) => value),
@@ -111,7 +145,10 @@ beforeEach(() => {
   sfCollectTogglePropsMock.mockReset();
   pieceworkSummaryMock.mockReset().mockResolvedValue(null);
   reassignmentViewMock.mockReset().mockResolvedValue({ tasks: [] });
+  taskDisputesMock.mockReset().mockResolvedValue([]);
   reworkCraftOptionsMock.mockReset().mockResolvedValue([]);
+  getSettingMock.mockReset().mockResolvedValue({ enabled: false });
+  reassignTaskFormPropsMock.mockReset();
 });
 
 describe('order detail commercial visibility', () => {
@@ -133,6 +170,14 @@ describe('order detail commercial visibility', () => {
     });
     expect(html).not.toContain('结算路径');
     expect(html).not.toContain('对客应收总额');
+    expect(html).not.toContain('款式加工费');
+    expect(html).not.toContain('入袋费');
+    expect(html).not.toContain('加工费合计');
+    expect(html).not.toContain('入袋单价');
+    expect(html).not.toContain('入袋小计');
+    expect(html).not.toContain('入袋费改价说明');
+    expect(html).not.toContain('包装协议改价机密');
+    expect(html).not.toContain('入袋计价明细');
     expect(html).not.toContain('对客快递与打包耗材费');
     expect(html).not.toContain('外部销售快递费');
     expect(html).not.toContain('外部销售打包耗材费');
@@ -145,11 +190,14 @@ describe('order detail commercial visibility', () => {
     expect(html).not.toContain('协议改价机密说明');
     expect(html).not.toContain('收费项目明细');
     expect(html).not.toContain('外部销售专属收费项');
+    expect(html).not.toContain('客户要求非标准工艺人工核价');
     expect(html).not.toContain('内部材料成本秘密');
     expect(html).not.toContain('沿用原价 87654.32');
     expect(html).not.toContain('日志沿用原价 76543.21');
     expect(html).toContain('生产安排');
     expect(html).toContain('张师傅');
+    expect(html).toContain('top:var(--admin-header-offset)');
+    expect(html).toContain('z-[9]');
   });
 
   it('keeps customer charge details for SALES without exposing internal costs', async () => {
@@ -166,12 +214,17 @@ describe('order detail commercial visibility', () => {
 
     expect(html).toContain('结算路径');
     expect(html).toContain('对客应收总额');
-    expect(html).toContain('对客快递与打包耗材费');
+    expect(html).toContain('款式加工费');
+    expect(html).toContain('入袋费');
+    expect(html).toContain('加工费合计');
+    expect(html).toContain('¥ 98728.43');
+    expect(html).toContain('¥ 98753.43');
+    expect(html).toContain('对客收费明细');
     expect(html).toContain('外部销售快递费');
     expect(html).toContain('外部销售打包耗材费');
     expect(html).toContain('¥ 8.00');
     expect(html).toContain('¥ 4.00');
-    expect(html).toContain('调整说明：物流人工改价秘密');
+    expect(html).toContain('原因：物流人工改价秘密');
     expect(html).toContain('一次性费用');
     expect(html).toContain('系统建议小计');
     expect(html).toContain('人工改价说明');
@@ -179,11 +232,72 @@ describe('order detail commercial visibility', () => {
     expect(html).toContain('87654.32');
     expect(html).toContain('协议改价机密说明');
     expect(html).toContain('收费项目明细（1）');
-    expect(html).toContain('外部销售专属收费项');
+    expect(html).not.toContain('外部销售专属收费项');
     expect(html).toContain('¥ 888.00');
     expect(html).toContain('沿用原价 87654.32');
     expect(html).toContain('日志沿用原价 76543.21');
     expect(html).not.toContain('内部材料成本秘密');
+  });
+
+  it('清晰展示结构化款式事实与包装组组成', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'sales-1', role: Role.SALES },
+    });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({
+        params: Promise.resolve({ id: 'order-1' }),
+      }),
+    );
+
+    expect(html).toContain('计价路线');
+    expect(html).toContain('待管理员终价');
+    expect(html).not.toContain('历史兼容');
+    expect(html).toContain('万元封');
+    expect(html).toContain('229.00 × 162.00 mm');
+    expect(html).toContain('200 g/㎡');
+    expect(html).toContain('客户确认版 V3');
+    expect(html).toContain('PLATE-GROUP-7');
+    expect(html).toContain('万元封-大号');
+    expect(html).toContain('浮雕');
+    expect(html).toContain('哑金（1 色）');
+    expect(html).toContain('青、品红（2 色）');
+    expect(html).toContain('人工报价原因');
+    expect(html).toContain('客户要求非标准工艺人工核价');
+    expect(html).toContain('包装组（1）');
+    expect(html).toContain('单款装');
+    expect(html).toContain('礼盒单款装');
+    expect(html).toContain('每袋 8 个 · 全组 1,000 个');
+    expect(html).toContain('入袋单价');
+    expect(html).toContain('¥ 0.2000 / 袋');
+    expect(html).toContain('入袋小计');
+    expect(html).toContain('¥ 25.00');
+    expect(html).toContain('系统建议小计');
+    expect(html).toContain('入袋费改价说明');
+    expect(html).toContain('包装协议改价机密');
+    expect(html).toContain('入袋计价明细（1）');
+  });
+
+  it('价格状态和来源不回显未知内部标识', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'sales-1', role: Role.SALES },
+    });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(),
+      pricingStatus: 'RAW_PRICING_STATUS',
+      priceRevision: 2,
+      pricingRevisions: [{ source: 'RAW_PRICING_SOURCE' }],
+    });
+
+    const html = renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(html).toContain('未识别状态');
+    expect(html).toContain('未识别来源');
+    expect(html).not.toContain('RAW_PRICING_STATUS');
+    expect(html).not.toContain('RAW_PRICING_SOURCE');
   });
 
   it('不向外部销售开放已发货工单的顺丰收费更正', async () => {
@@ -206,7 +320,7 @@ describe('order detail commercial visibility', () => {
     expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
   });
 
-  it('仅向管理员传递已发货外部销售工单的逐票更正事实', async () => {
+  it('仅向管理员传递承运商实际重量，不回退创建时报价重量', async () => {
     requireSessionMock.mockResolvedValue({
       user: { id: 'admin-1', role: Role.ADMIN },
     });
@@ -234,9 +348,43 @@ describe('order detail commercial visibility', () => {
             id: 'shipment-1',
             sequence: 1,
             destinationProvince: '广东',
-            weightKg: '2.000',
+            weightKg: null,
           }),
         ],
+      }),
+    );
+  });
+
+  it('管理员改派区读取自由抢单开关并传入任务组件', async () => {
+    requireSessionMock.mockResolvedValue({
+      user: { id: 'admin-1', role: Role.ADMIN },
+    });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+    getSettingMock.mockResolvedValue({ enabled: true });
+    reassignmentViewMock.mockResolvedValue({
+      tasks: [
+        {
+          id: 'task-1',
+          itemSequence: 1,
+          itemName: '礼盒款',
+          craftId: 'craft-1',
+          craftName: '局部烫金',
+          currentWorkerId: null,
+          currentWorkerName: null,
+          eligibleWorkers: [],
+        },
+      ],
+    });
+
+    renderToStaticMarkup(
+      await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }),
+    );
+
+    expect(getSettingMock).toHaveBeenCalledWith('worker_self_claim_enabled');
+    expect(reassignTaskFormPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        selfClaimEnabled: true,
       }),
     );
   });
@@ -265,6 +413,8 @@ describe('order detail — 暂不能完工横幅', () => {
 
     expect(html).toContain('暂不能完工');
     expect(html).toContain('烫金款');
+    expect(html).toContain('外协履约数量不足');
+    expect(html).not.toContain('还没有任何未取消的外协单覆盖');
     expect(html).toContain('/foreman/outsource/new?orderId=order-1');
   });
 
@@ -319,6 +469,7 @@ function orderFixture() {
     packageRequirement: null,
     remark: null,
     processingAmount: '98753.43',
+    packagingAmount: '25.00',
     totalAmount: '98765.43',
     revision: 1,
     promisedDate: null,
@@ -343,6 +494,39 @@ function orderFixture() {
         expressCode: null,
         trackingNo: null,
         lines: [],
+      },
+    ],
+    packagingGroups: [
+      {
+        id: 'packaging-1',
+        sequence: 1,
+        name: '礼盒单款装',
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        actualBagCount: 125,
+        unitPrice: '0.2000',
+        subtotal: '25.00',
+        suggestedSubtotal: '25.00',
+        priceOverrideReason: '包装协议改价机密',
+        pricingSnapshot: {
+          components: [
+            {
+              source: 'BASE',
+              sourceId: 'packing-single',
+              name: '单款入袋费',
+              adjustmentType: 'PER_ITEM',
+              rate: '0.2000',
+              units: '125',
+              amount: '25.00',
+            },
+          ],
+        },
+        lines: [
+          {
+            id: 'packaging-line-1',
+            unitsPerBag: 8,
+            orderItem: { id: 'item-1', sequence: 1, name: '礼盒款' },
+          },
+        ],
       },
     ],
     customerCharges: [
@@ -417,14 +601,27 @@ function orderFixture() {
         id: 'item-1',
         sequence: 1,
         name: '礼盒款',
+        pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+        productStructure: OrderProductStructure.TEN_THOUSAND_ENVELOPE,
+        artworkVersion: '客户确认版 V3',
+        plateGroupId: 'PLATE-GROUP-7',
+        pricingGroup: '万元封-大号',
+        manualQuoteReason: '客户要求非标准工艺人工核价',
         specification: '大号',
+        actualWidthMm: '229.00',
+        actualHeightMm: '162.00',
         paperType: '艳红珠光纸',
+        paperWeightGsm: 200,
         quantity: 1000,
         crafts: ['craft-1'],
         craftNames: ['局部烫金'],
         foilColors: ['哑金'],
-        isDoubleSided: false,
-        isDoubleColor: false,
+        foilTechnique: OrderFoilTechnique.RELIEF,
+        hasLocalFoil: true,
+        printColors: ['青', '品红'],
+        printColorsKnown: true,
+        isDoubleSided: true,
+        isDoubleColor: true,
         unitPrice: '98.7654',
         fixedFee: '123.45',
         subtotal: '98888.85',

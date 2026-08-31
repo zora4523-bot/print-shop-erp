@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  OrderPackagingMode,
   OrderStatus,
   ReworkCause,
   Role,
@@ -11,12 +12,15 @@ const {
   orderMock,
   reworkMock,
   changeRequestMock,
+  pricingReviewMock,
+  commercialDetailsMock,
   revalidatePathMock,
   redirectMock,
   MockOrderInvariantError,
   MockInvalidOrderTransitionError,
   MockReworkOrderError,
   MockOrderChangeRequestError,
+  MockOrderPricingReviewError,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   orderMock: {
@@ -36,6 +40,16 @@ const {
     createOrderChangeRequest: vi.fn(),
     previewOrderChangeRequestPricing: vi.fn(),
     reviewOrderChangeRequest: vi.fn(),
+  },
+  pricingReviewMock: {
+    previewOrderPricingReview: vi.fn(),
+    finalizeOrderPricing: vi.fn(),
+  },
+  commercialDetailsMock: {
+    saveOrderManualCharge: vi.fn(),
+    deleteOrderManualCharge: vi.fn(),
+    saveOrderPlateDetail: vi.fn(),
+    deleteOrderPlateDetail: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   redirectMock: vi.fn((path: string) => {
@@ -69,6 +83,12 @@ const {
       this.name = 'OrderChangeRequestError';
     }
   },
+  MockOrderPricingReviewError: class extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'OrderPricingReviewError';
+    }
+  },
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -97,6 +117,15 @@ vi.mock('@/lib/order/change-request', () => ({
   reviewOrderChangeRequest: changeRequestMock.reviewOrderChangeRequest,
   OrderChangeRequestError: MockOrderChangeRequestError,
 }));
+vi.mock('@/lib/order/pricing-review', () => ({
+  previewOrderPricingReview: pricingReviewMock.previewOrderPricingReview,
+  finalizeOrderPricing: pricingReviewMock.finalizeOrderPricing,
+  OrderPricingReviewError: MockOrderPricingReviewError,
+}));
+vi.mock('@/lib/order/commercial-details', () => ({
+  ...commercialDetailsMock,
+  OrderCommercialDetailsError: class extends Error {},
+}));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
@@ -110,6 +139,9 @@ import {
   setOrderSfCollectAction,
   shipOrderAction,
   previewOrderChangeRequestPricingAction,
+  previewOrderPricingReviewAction,
+  finalizeOrderPricingAction,
+  saveOrderManualChargeAction,
 } from '../order';
 
 const salesActor = {
@@ -126,7 +158,7 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
     customerRef: '苹果福',
     receiverName: null,
     receiverPhone: null,
-    receiverAddress: null,
+    receiverAddress: '佛山市南海区测试路 1 号',
     expressCode: null,
     packageRequirement: null,
     remark: null,
@@ -135,12 +167,18 @@ function baseOrderInput(over: Record<string, unknown> = {}) {
     items: [
       {
         name: '烫金款 A',
-        productId: null,
+        productId: 'product-1',
+        pricingRoute: 'COLOR_PRINT',
+        productStructure: 'STANDARD_ENVELOPE',
+        manualQuoteReason: null,
         specification: null,
-        paperType: null,
+        paperType: '艳红珠光纸',
         quantity: 1000,
         crafts: ['craft-1'],
         foilColors: [],
+        foilTechnique: 'NONE',
+        hasLocalFoil: false,
+        printColors: ['C', 'M', 'Y', 'K'],
         isDoubleSided: false,
         isDoubleColor: false,
         unitPrice: '0.5',
@@ -172,6 +210,12 @@ beforeEach(() => {
   changeRequestMock.createOrderChangeRequest.mockReset();
   changeRequestMock.previewOrderChangeRequestPricing.mockReset();
   changeRequestMock.reviewOrderChangeRequest.mockReset();
+  pricingReviewMock.previewOrderPricingReview.mockReset();
+  pricingReviewMock.finalizeOrderPricing.mockReset();
+  commercialDetailsMock.saveOrderManualCharge.mockReset();
+  commercialDetailsMock.deleteOrderManualCharge.mockReset();
+  commercialDetailsMock.saveOrderPlateDetail.mockReset();
+  commercialDetailsMock.deleteOrderPlateDetail.mockReset();
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -196,6 +240,26 @@ describe('createOrderAction', () => {
     expect(result.status).toBe('invalid');
     if (result.status === 'invalid') {
       expect(result.fieldErrors.items).toBeDefined();
+    }
+    expect(orderMock.createOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null],
+    ['空字符串', ''],
+    ['纯空格', '   '],
+    ['缺失', undefined],
+  ])('主收货地址为%s时不进入领域创建', async (_label, receiverAddress) => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+
+    const result = await createOrderAction(
+      null,
+      baseOrderInput({ receiverAddress }),
+    );
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.receiverAddress).toContain('请填写收货地址');
     }
     expect(orderMock.createOrder).not.toHaveBeenCalled();
   });
@@ -252,6 +316,23 @@ describe('createOrderAction', () => {
     }
   });
 
+  it('returns a catalog-route invariant as a create error instead of an unhandled failure', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.createOrder.mockRejectedValueOnce(
+      new MockOrderInvariantError(
+        '报价产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
+      ),
+    );
+
+    await expect(
+      createOrderAction(null, baseOrderInput()),
+    ).resolves.toEqual({
+      status: 'error',
+      message:
+        '报价产品“EXT-CUSTOM”的分类与计价路线“局部烫金（通版现货）”不一致',
+    });
+  });
+
   it('revalidates and returns ordered item ids for post-create design uploads', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.createOrder.mockResolvedValue({
@@ -265,6 +346,7 @@ describe('createOrderAction', () => {
     expect(result).toEqual({
       status: 'success',
       orderId: 'order-new',
+      orderNo: '20260423-0001',
       itemIds: ['item-1'],
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
@@ -403,16 +485,15 @@ describe('cancelOrderAction', () => {
     expect(permissionsMock.requirePermission).toHaveBeenCalledWith('order:cancel');
   });
 
-  it('accepts an empty reason and forwards null to lib.cancelOrder', async () => {
+  it('rejects an empty cancellation reason before the destructive write', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
     const r = await cancelOrderAction('o1', null, fd({ reason: '' }));
-    expect(r.status).toBe('success');
-    expect(orderMock.cancelOrder).toHaveBeenCalledWith(
-      'o1',
-      expect.objectContaining({ id: 'sales-1', role: Role.SALES }),
-      null,
-    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') {
+      expect(r.fieldErrors.reason?.[0]).toMatch(/取消原因/);
+    }
+    expect(orderMock.cancelOrder).not.toHaveBeenCalled();
   });
 
   it('forwards a trimmed reason', async () => {
@@ -440,14 +521,18 @@ describe('cancelOrderAction', () => {
     orderMock.cancelOrder.mockRejectedValueOnce(
       new MockInvalidOrderTransitionError(OrderStatus.FINISHED, OrderStatus.CANCELLED),
     );
-    const r = await cancelOrderAction('o1', null, fd({ reason: '' }));
+    const r = await cancelOrderAction(
+      'o1',
+      null,
+      fd({ reason: '客户取消' }),
+    );
     expect(r.status).toBe('error');
   });
 
   it('revalidates both routes on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.cancelOrder.mockResolvedValue({ id: 'o1', status: OrderStatus.CANCELLED });
-    await cancelOrderAction('o1', null, fd({ reason: '' }));
+    await cancelOrderAction('o1', null, fd({ reason: '客户取消' }));
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
     expect(revalidatePathMock).toHaveBeenCalledWith('/orders/o1');
   });
@@ -602,21 +687,62 @@ describe('updateOrderAction', () => {
     );
   });
 
-  it('parses an unchecked 顺丰到付 field as false so it can be cancelled', async () => {
+  it('普通编辑不再解析或下传专用的 isSfCollect 字段', async () => {
     permissionsMock.requirePermission.mockResolvedValue(salesActor);
     orderMock.updateOrderFields.mockResolvedValue({
       id: 'o1',
       status: OrderStatus.IN_PRODUCTION,
-      changed: true,
-      changedFields: ['isSfCollect'],
+      changed: false,
+      changedFields: [],
     });
     await expect(
       updateOrderAction('o1', null, fd({ isSfCollect: 'false' })),
     ).rejects.toThrow(/NEXT_REDIRECT/);
+    const payload = orderMock.updateOrderFields.mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect(payload).not.toHaveProperty('isSfCollect');
+  });
+
+  it.each([[''], ['   ']])(
+    '收货地址为空时在 action schema 层拒绝',
+    async (receiverAddress) => {
+      permissionsMock.requirePermission.mockResolvedValue(salesActor);
+      const result = await updateOrderAction(
+        'o1',
+        null,
+        fd({ receiverAddress }),
+      );
+      expect(result).toEqual({
+        status: 'invalid',
+        fieldErrors: expect.objectContaining({
+          receiverAddress: expect.arrayContaining(['请填写收货地址']),
+        }),
+      });
+      expect(orderMock.updateOrderFields).not.toHaveBeenCalled();
+    },
+  );
+
+  it('有效收货地址修剪后下传领域层', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(salesActor);
+    orderMock.updateOrderFields.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.DRAFT,
+      changed: true,
+      changedFields: ['receiverAddress'],
+    });
+    await expect(
+      updateOrderAction(
+        'o1',
+        null,
+        fd({ receiverAddress: '  佛山市南海区  ' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(orderMock.updateOrderFields).toHaveBeenCalledWith(
       'o1',
-      expect.objectContaining({ isSfCollect: false }),
-      expect.anything(),
+      expect.objectContaining({ receiverAddress: '佛山市南海区' }),
+      salesActor,
     );
   });
 
@@ -966,5 +1092,200 @@ describe('previewOrderChangeRequestPricingAction', () => {
         requestId: 'request-1',
       }),
     ).resolves.toEqual({ status: 'error', message: '工单版本已过期' });
+  });
+});
+
+describe('order pricing review actions', () => {
+  const adminActor = { ...salesActor, role: Role.ADMIN };
+
+  it('checks order:price:confirm before parsing a preview request', async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+
+    await expect(
+      previewOrderPricingReviewAction(null, { orderId: 'bad id' }),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
+      'order:price:confirm',
+    );
+    expect(pricingReviewMock.previewOrderPricingReview).not.toHaveBeenCalled();
+  });
+
+  it('checks order:price:confirm before parsing a finalize request', async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+
+    await expect(
+      finalizeOrderPricingAction(null, { orderId: 'bad id' }),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
+      'order:price:confirm',
+    );
+    expect(pricingReviewMock.finalizeOrderPricing).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid finalize input without entering the pricing domain', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+
+    const result = await finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 0,
+      expectedPriceRevision: 0,
+      items: [],
+      packagingGroups: [],
+      shipments: [],
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(pricingReviewMock.finalizeOrderPricing).not.toHaveBeenCalled();
+  });
+
+  it('maps pricing domain errors without revalidating stale pages', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockRejectedValue(
+      new MockOrderPricingReviewError('工单价格已被其他人更新'),
+    );
+
+    await expect(
+      finalizeOrderPricingAction(null, {
+        orderId: 'order-1',
+        expectedOrderRevision: 2,
+        expectedPriceRevision: 1,
+        items: [],
+        packagingGroups: [
+          {
+            packagingGroupId: 'packaging-group-1',
+            expectedMode: OrderPackagingMode.MIXED_STYLE,
+            expectedActualBagCount: 200,
+            unitPrice: '0.20',
+            reason: '混装入袋人工终价',
+          },
+        ],
+        shipments: [
+          {
+            shipmentId: 'shipment-1',
+            expectedDestinationProvince: '广东',
+            expectedBillableWeightKg: '2',
+            shippingFee: '4.30',
+            packingMaterialFee: '2.00',
+            reason: null,
+          },
+        ],
+        remark: null,
+      }),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '工单价格已被其他人更新',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('passes structured packaging-group facts and returns the packaging total', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    pricingReviewMock.finalizeOrderPricing.mockResolvedValue({
+      orderId: 'order-1',
+      priceRevision: 4,
+      packagingAmount: '40.00',
+      processingAmount: '590.00',
+      totalAmount: '645.00',
+    });
+
+    const result = await finalizeOrderPricingAction(null, {
+      orderId: 'order-1',
+      expectedOrderRevision: 2,
+      expectedPriceRevision: 3,
+      items: [],
+      packagingGroups: [
+        {
+          packagingGroupId: 'packaging-group-1',
+          expectedMode: OrderPackagingMode.MIXED_STYLE,
+          expectedActualBagCount: '200',
+          unitPrice: '0.20',
+          reason: '混装入袋人工终价',
+        },
+      ],
+      shipments: [
+        {
+          shipmentId: 'shipment-1',
+          expectedDestinationProvince: '广东',
+          expectedBillableWeightKg: '2',
+          shippingFee: '4.30',
+          packingMaterialFee: '10.70',
+          reason: null,
+        },
+      ],
+      remark: '确认包装组终价',
+    });
+
+    expect(pricingReviewMock.finalizeOrderPricing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packagingGroups: [
+          {
+            packagingGroupId: 'packaging-group-1',
+            expectedMode: OrderPackagingMode.MIXED_STYLE,
+            expectedActualBagCount: 200,
+            unitPrice: '0.20',
+            reason: '混装入袋人工终价',
+          },
+        ],
+      }),
+      adminActor,
+    );
+    expect(result).toEqual({
+      status: 'success',
+      orderId: 'order-1',
+      priceRevision: 4,
+      packagingAmount: '40.00',
+      processingAmount: '590.00',
+      totalAmount: '645.00',
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/scheduling');
+  });
+});
+
+describe('structured order commercial detail actions', () => {
+  it('authorizes, validates, mutates, and revalidates an approved adjustment', async () => {
+    const adminActor = { ...salesActor, role: Role.ADMIN };
+    permissionsMock.requirePermission.mockResolvedValue(adminActor);
+    commercialDetailsMock.saveOrderManualCharge.mockResolvedValue({
+      chargeId: 'charge-1',
+      priceRevision: 5,
+      totalAmount: '980.00',
+    });
+
+    const result = await saveOrderManualChargeAction(null, {
+      orderId: 'order-1',
+      chargeId: null,
+      expectedPriceRevision: 4,
+      categoryCode: 'APPROVED_ADJUSTMENT',
+      description: '售后折让',
+      amount: '-20.00',
+      reason: '交期延误',
+      approvalReference: '审批单 AP-1',
+    });
+
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith(
+      'order:price:confirm',
+    );
+    expect(commercialDetailsMock.saveOrderManualCharge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryCode: 'APPROVED_ADJUSTMENT',
+        amount: '-20.00',
+        approvalReference: '审批单 AP-1',
+      }),
+      adminActor,
+    );
+    expect(result).toEqual({
+      status: 'success',
+      entityId: 'charge-1',
+      priceRevision: 5,
+      totalAmount: '980.00',
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills');
   });
 });

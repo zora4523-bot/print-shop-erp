@@ -4,6 +4,7 @@ import {
   fieldLabel,
   formatLogValue,
   formatOrderLogChanges,
+  orderStatusZh,
 } from '../log-format';
 
 describe('fieldLabel', () => {
@@ -12,10 +13,14 @@ describe('fieldLabel', () => {
     expect(fieldLabel('isUrgent')).toBe('急单');
     expect(fieldLabel('isSfCollect')).toBe('顺丰到付');
     expect(fieldLabel('status')).toBe('状态');
+    expect(fieldLabel('isSelfClaimable')).toBe('抢单池状态');
+    expect(fieldLabel('pricingStatus')).toBe('对客价格状态');
+    expect(fieldLabel('priceRevision')).toBe('价格修订');
+    expect(fieldLabel('priceBooks')).toBe('本次价目簿');
   });
 
-  it('falls back to the raw field name for unknown keys', () => {
-    expect(fieldLabel('mysteryField')).toBe('mysteryField');
+  it('does not expose unknown field names', () => {
+    expect(fieldLabel('mysteryField')).toBe('其他变更');
   });
 });
 
@@ -37,15 +42,28 @@ describe('formatLogValue', () => {
     expect(formatLogValue('status', 'CANCELLED')).toBe('已取消');
   });
 
-  it('falls back to the raw string for unknown status values (forward-compat)', () => {
-    // If a future OrderStatus variant is added but not yet labelled,
-    // render the raw value rather than "—" so readers can still trace
-    // what happened.
-    expect(formatLogValue('status', 'NEW_STATE')).toBe('NEW_STATE');
+  it('does not expose unknown status values', () => {
+    expect(formatLogValue('status', 'NEW_STATE')).toBe('未识别工单状态');
+    expect(formatLogValue('pricingStatus', 'NEW_PRICE_STATE')).toBe(
+      '未识别价格状态',
+    );
+    expect(orderStatusZh('NEW_STATE')).toBe('未识别工单状态');
   });
 
-  it('stringifies unexpected object shapes', () => {
-    expect(formatLogValue('remark', { weird: 1 })).toBe('{"weird":1}');
+  it('translates pricing review statuses', () => {
+    expect(
+      formatLogValue('pricingStatus', 'PENDING_ADMIN_CONFIRMATION'),
+    ).toBe('待管理员确认价格');
+    expect(formatLogValue('pricingStatus', 'ADMIN_CONFIRMED')).toBe(
+      '管理员已确认',
+    );
+  });
+
+  it('does not expose unknown fields or unexpected value shapes', () => {
+    expect(formatLogValue('internalField', 'RAW_VALUE')).toBe(
+      '未识别变更内容',
+    );
+    expect(formatLogValue('remark', { weird: 1 })).toBe('未识别变更内容');
   });
 
   it('coerces numeric values through String()', () => {
@@ -109,9 +127,14 @@ describe('actionLabel', () => {
     expect(actionLabel('UPDATE')).toBe('编辑');
     expect(actionLabel('STATUS_CHANGE')).toBe('状态变更');
     expect(actionLabel('DELETE')).toBe('删除');
+    expect(actionLabel('TASK_RELEASE_TO_POOL')).toBe('释放到抢单池');
+    expect(actionLabel('TASK_SELF_CLAIM')).toBe('师傅抢单');
+    expect(actionLabel('PRICING_ADMIN_CONFIRMED')).toBe('管理员终价确认');
+    expect(actionLabel('ORDER_MANUAL_CHARGE_CREATED')).toBe('新增对客费用');
+    expect(actionLabel('ORDER_PLATE_DETAIL_REMOVED')).toBe('移除制版明细');
   });
 
-  it('falls back to the raw action for unknown values', () => {
-    expect(actionLabel('EXPORT')).toBe('EXPORT');
+  it('does not expose unknown actions', () => {
+    expect(actionLabel('EXPORT')).toBe('其他操作');
   });
 });

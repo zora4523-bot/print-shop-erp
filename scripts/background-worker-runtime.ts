@@ -1,10 +1,12 @@
 import { hostname } from 'node:os';
 import * as Sentry from '@sentry/nextjs';
 import { BackgroundJobQueue } from '../generated/prisma/client';
-import { backgroundJobHandlers } from '../lib/background-jobs/handlers';
 import { backgroundJobErrorCode } from '../lib/background-jobs/policy';
 import { startWorkerHeartbeat } from '../lib/background-jobs/heartbeat';
-import { runBackgroundWorker } from '../lib/background-jobs/worker';
+import {
+  runBackgroundWorker,
+  type BackgroundJobHandlers,
+} from '../lib/background-jobs/worker';
 import { db } from '../lib/db';
 
 export async function runBackgroundWorkerProcess(): Promise<void> {
@@ -26,6 +28,7 @@ async function main(): Promise<void> {
     process.env.BACKGROUND_JOB_QUEUE ??
       process.argv.find((arg) => arg.startsWith('--queue='))?.slice(8),
   );
+  const handlers = await loadBackgroundJobHandlers(queue);
   const workerId = `${hostname()}:${process.pid}:${queue.toLowerCase()}`;
   const controller = new AbortController();
 
@@ -63,7 +66,7 @@ async function main(): Promise<void> {
     await runBackgroundWorker({
       queue,
       workerId,
-      handlers: backgroundJobHandlers,
+      handlers,
       concurrency: intEnv(
         queue === BackgroundJobQueue.HEAVY
           ? 'HEAVY_WORKER_CONCURRENCY'
@@ -109,6 +112,21 @@ async function main(): Promise<void> {
     if (process.env.SENTRY_DSN) await Sentry.flush(2_000);
     console.info(`[worker] stopped ${workerId}`);
   }
+}
+
+async function loadBackgroundJobHandlers(
+  queue: BackgroundJobQueue,
+): Promise<BackgroundJobHandlers> {
+  if (queue === BackgroundJobQueue.LIGHT) {
+    const { lightBackgroundJobHandlers } = await import(
+      '../lib/background-jobs/handlers-light'
+    );
+    return lightBackgroundJobHandlers;
+  }
+  const { heavyBackgroundJobHandlers } = await import(
+    '../lib/background-jobs/handlers-heavy'
+  );
+  return heavyBackgroundJobHandlers;
 }
 
 function parseQueue(value: string | undefined): BackgroundJobQueue {

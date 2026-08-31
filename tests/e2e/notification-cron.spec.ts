@@ -36,7 +36,7 @@ test.describe('cron notify wire', () => {
     const { outsourceId } = await seedOverdueOutsourceForCron();
 
     const res = await request.post(
-      'http://localhost:3000/api/cron/outsource-overdue',
+      '/api/cron/outsource-overdue',
       {
         headers: { authorization: `Bearer ${CRON_SECRET}` },
       },
@@ -91,7 +91,7 @@ test.describe('cron notify wire', () => {
     const { periodId } = await seedEndingPeriodForCron({ csUserId });
 
     const res = await request.post(
-      'http://localhost:3000/api/cron/cs-period-ending',
+      '/api/cron/cs-period-ending',
       {
         headers: { authorization: `Bearer ${CRON_SECRET}` },
       },
@@ -141,7 +141,7 @@ test.describe('cron notify wire', () => {
     const { orderNo } = await seedOrderOverdueForCron();
 
     const res = await request.post(
-      'http://localhost:3000/api/cron/order-overdue',
+      '/api/cron/order-overdue',
       {
         headers: { authorization: `Bearer ${CRON_SECRET}` },
       },

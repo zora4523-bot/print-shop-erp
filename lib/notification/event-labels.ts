@@ -1,0 +1,49 @@
+import {
+  NOTIFICATION_EVENTS,
+  TEST_EVENT_TYPE,
+  type NotificationEvent,
+} from './events';
+
+export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
+  [NOTIFICATION_EVENTS.ORDER_SUBMITTED]: '工单已提交',
+  [NOTIFICATION_EVENTS.URGENT_ORDER]: '急单提醒',
+  [NOTIFICATION_EVENTS.ORDER_SCHEDULED]: '工单已排产',
+  [NOTIFICATION_EVENTS.ORDER_COMPLETED]: '工单已完工',
+  [NOTIFICATION_EVENTS.ORDER_SHIPPED]: '工单已发货',
+  [NOTIFICATION_EVENTS.OUTSOURCE_OVERDUE]: '外协超期',
+  [NOTIFICATION_EVENTS.ORDER_OVERDUE]: '工单交期逾期',
+  [NOTIFICATION_EVENTS.STOCK_ALERT]: '库存预警',
+  [NOTIFICATION_EVENTS.CS_PERIOD_ENDING]: '客服周期即将结束',
+  [NOTIFICATION_EVENTS.CS_PERIOD_SETTLED]: '客服周期已结算',
+  [NOTIFICATION_EVENTS.DAILY_WORKER_SALARY]: '师傅日薪汇总',
+};
+
+export function notificationEventLabel(eventType: string): string {
+  if (eventType === TEST_EVENT_TYPE) return '测试消息';
+  return (
+    NOTIFICATION_EVENT_LABELS[eventType as NotificationEvent] ?? '未识别事件'
+  );
+}
+
+export function notificationDeliveryMessage(
+  errorMessage: string | null | undefined,
+): string | null {
+  const message = errorMessage?.trim();
+  if (!message) return null;
+  if (message === 'MOCK') return '测试模式';
+  if (message.startsWith('人工')) return message;
+  if (message === 'channel inactive') return '群已停用';
+  if (/errcode/i.test(message)) return '企业微信拒绝发送';
+  if (/http\s+429/i.test(message)) return '推送频率受限';
+  if (/timeout/i.test(message)) return '推送超时';
+  if (/response lost|lease ended|outcome unknown/i.test(message)) {
+    return '送达结果不明';
+  }
+  if (/finalization failed|persist/i.test(message)) {
+    return '推送结果保存失败';
+  }
+  if (/^http\s+\d+$/i.test(message) || message === 'invalid wecom response') {
+    return '推送服务异常';
+  }
+  return '推送失败';
+}

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatUnitPrice } from '@/lib/format/unit-price';
+import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
 import { cn } from '@/lib/utils';
 
 export type ParsedPricingSnapshotComponent = {
@@ -105,6 +106,7 @@ export function parsePricingSnapshotComponents(
 
     const source = optionalText(candidate.source);
     const categoryName = optionalText(candidate.categoryName);
+    const persistedName = optionalText(candidate.name);
     const fallbackName =
       categoryName ??
       (source === 'BASE'
@@ -117,7 +119,9 @@ export function parsePricingSnapshotComponents(
       {
         source,
         sourceId: optionalText(candidate.sourceId),
-        name: optionalText(candidate.name) ?? fallbackName,
+        name: persistedName
+          ? externalPriceRuleDisplayName(persistedName)
+          : fallbackName,
         adjustmentType: optionalText(candidate.adjustmentType),
         rate: decimalText(candidate.rate, MAX_COMPONENT_RATE),
         units: decimalText(candidate.units, MAX_COMPONENT_UNITS),
@@ -159,7 +163,7 @@ export function parsePricingSnapshotSummary(
 
 export function PricingSnapshotBreakdown({
   pricingSnapshot,
-  title = '系统建议收费分项',
+  title = '已保存价格明细',
   className,
 }: PricingSnapshotBreakdownProps) {
   const components = parsePricingSnapshotComponents(pricingSnapshot);
@@ -191,21 +195,21 @@ export function PricingSnapshotBreakdown({
           <dl className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
             {summary.suggestedSubtotal !== null ? (
               <BreakdownField
-                label="系统建议小计"
+                label="自动计价小计"
                 value={formatMoney(summary.suggestedSubtotal)}
                 tabular
               />
             ) : null}
             {summary.actualSubtotal !== null ? (
               <BreakdownField
-                label="实际成交小计"
+                label="已保存价格小计"
                 value={formatMoney(summary.actualSubtotal)}
                 tabular
               />
             ) : null}
             {summary.overrideReason ? (
               <BreakdownField
-                label="人工调整说明"
+                label="价格调整原因"
                 value={summary.overrideReason}
                 full
               />
@@ -213,7 +217,7 @@ export function PricingSnapshotBreakdown({
           </dl>
           {adjusted ? (
             <p className="mt-2 text-warning-foreground">
-              下方分项是系统建议的计价依据；账单实际金额以“实际成交小计”为准。
+              收费以“已保存价格小计”为准。
             </p>
           ) : null}
         </div>

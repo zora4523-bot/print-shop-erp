@@ -6,53 +6,71 @@ import {
   E2E_USERS,
   seedNotificationWireFixture,
   readNotificationLogs,
+  openFirstOrderItemEditor,
+  submitDraftOrderAndWait,
 } from './_helpers';
 
 // P1 #2 Slice C — URGENT_ORDER wire smoke。
 //
 // production-flow.spec.ts 的主链路用的是非急单，所以 ORDER_SUBMITTED
 // 单触发；急单这条路（SPEC §8.1：急单 → 排产群+管理员群，**两条事件
-// 都触发**）需要单独一个 fixture：勾"急单"复选框创建工单 → 提交 →
+// 都触发**）需要单独一个内部工单 fixture：勾"急单"创建并提交 →
 // 断言 NotificationLog 同时多 1 行 ORDER_SUBMITTED + 1 行 URGENT_ORDER。
 //
 // Mock-mode 下两条 log 都 status=SUCCESS errorMessage='MOCK'。
 //
 // 不重复 production-flow 的整链 —— 排产 / 报工 / 发货已在主 spec 覆盖。
 test.describe('notification urgent wire — golden path', () => {
-  test('SALES 创建急单 → 提交 → ORDER_SUBMITTED + URGENT_ORDER 两条 log', async ({
+  test('ADMIN 创建急单 → 提交 → ORDER_SUBMITTED + URGENT_ORDER 两条 log', async ({
     page,
   }) => {
     test.setTimeout(60_000);
 
     const orderRef = `e2e-urgent-${uniqueSuffix()}`;
+    const customName = `E2E 急单通知 ${orderRef}`;
     const itemName = `E2E 急单款 ${orderRef}`;
 
     const { channelId } = await seedNotificationWireFixture();
 
     await login(page, {
       from: '/orders/new',
-      username: E2E_USERS.sales.username,
+      username: E2E_USERS.foreman.username,
       password: E2E_PASSWORD,
     });
 
     // 创建工单 + 勾"急单"复选框
+    await page.getByLabel('工单自定义名称').fill(customName);
     await page.locator('input[name="customerRef"]').fill(orderRef);
+    await page.locator('input[name="isUrgent"]').check();
+    await openFirstOrderItemEditor(page);
     await page.locator('input[name="items.0.name"]').fill(itemName);
     await page.locator('input[name="items.0.quantity"]').fill('1000');
-    await page.getByRole('button', { name: '现货加烫' }).click();
-    // 急单复选框 (CreateOrderForm name="isUrgent")
-    await page.locator('input[name="isUrgent"]').check();
-    await page.getByRole('button', { name: /创建工单/ }).click();
+    await page
+      .getByRole('combobox', { name: '报价产品' })
+      .selectOption({ label: '珠光艳闪 160g · 大号封' });
+    await page
+      .getByRole('textbox', { name: '承诺交期（提交前必填）' })
+      .fill('2026-12-31');
+    await page.locator('input[name="items.0.unitPrice"]').fill('1.00');
+    await page
+      .locator('textarea[name="items.0.priceOverrideReason"]')
+      .fill('E2E 急单通知链路人工报价');
+    await page
+      .getByRole('textbox', {
+        name: '详细地址 / 粘贴完整收货信息',
+        exact: true,
+      })
+      .fill('E2E 收货人 13800138000 广东省佛山市测试路 1 号');
+    await page
+      .getByRole('button', { name: '保存草稿', exact: true })
+      .click();
     await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
       timeout: 10_000,
     });
     const orderId = new URL(page.url()).pathname.split('/').filter(Boolean).pop()!;
 
     // 提交工单 → notify('ORDER_SUBMITTED') + notify('URGENT_ORDER') 都触发
-    await page.getByRole('button', { name: /^提交工单$/ }).click();
-    await expect(
-      page.getByRole('button', { name: /^提交工单$/ }),
-    ).toHaveCount(0, { timeout: 10_000 });
+    await submitDraftOrderAndWait(page);
 
     // 等待 notify 真正写入 NotificationLog —— Server Action 完成 +
     // revalidatePath 触发的 fetch 都跑完。expect.poll 比 waitForTimeout

@@ -4,7 +4,7 @@ import {
   SalaryPeriodStatus,
 } from '../../../generated/prisma/enums';
 
-const { dbMock } = vi.hoisted(() => {
+const { dbMock, enqueueNotificationInTransactionMock } = vi.hoisted(() => {
   const mock = {
     user: { findUnique: vi.fn() },
     salaryRule: { findFirst: vi.fn() },
@@ -31,9 +31,15 @@ const { dbMock } = vi.hoisted(() => {
       return fn;
     }),
   };
-  return { dbMock: mock };
+  return {
+    dbMock: mock,
+    enqueueNotificationInTransactionMock: vi.fn(),
+  };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+vi.mock('@/lib/notification/transactional-outbox', () => ({
+  enqueueNotificationInTransaction: enqueueNotificationInTransactionMock,
+}));
 
 import {
   computePeriodEnd,
@@ -60,6 +66,7 @@ const TIERS_RULE_VALUE = {
 };
 
 beforeEach(() => {
+  enqueueNotificationInTransactionMock.mockReset().mockResolvedValue(false);
   dbMock.user.findUnique.mockReset().mockResolvedValue({
     id: 'cs-1',
     role: Role.CUSTOMER_SERVICE,
@@ -615,6 +622,41 @@ describe('settleCsPeriod', () => {
     const update = dbMock.salaryPeriod.update.mock.calls[0][0];
     expect(update.data.status).toBe(SalaryPeriodStatus.SETTLED);
     expect(update.data.settledAt).toBe(now);
+  });
+
+  it('commits the durable notification through the same settlement transaction', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+    enqueueNotificationInTransactionMock.mockResolvedValue(true);
+
+    const result = await settleCsPeriod('period-1');
+
+    expect(result.notificationQueued).toBe(true);
+    expect(enqueueNotificationInTransactionMock).toHaveBeenCalledExactlyOnceWith(
+      dbMock,
+      'CS_PERIOD_SETTLED',
+      {
+        settledCount: 1,
+        csName: 'cs-1',
+        totalSales: '550000.00',
+        commission: '33000.00',
+      },
+      { dedupeKey: 'notification:CS_PERIOD_SETTLED:period-1' },
+    );
+  });
+
+  it('does not suppress a durable outbox failure after finance writes', async () => {
+    dbMock.salaryPeriod.findUnique.mockResolvedValue(periodFixture);
+    dbMock.customerServiceCommission.create.mockResolvedValue({ id: 'comm-1' });
+    dbMock.salaryPeriod.create.mockResolvedValue({ id: 'period-2' });
+    enqueueNotificationInTransactionMock.mockRejectedValue(
+      new Error('outbox unavailable'),
+    );
+
+    await expect(settleCsPeriod('period-1')).rejects.toThrow(
+      'outbox unavailable',
+    );
   });
 
   it('auto-starts next period beginning the day after periodEnd', async () => {

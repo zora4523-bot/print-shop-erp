@@ -20,7 +20,6 @@ export default async function AccountsListPage() {
     <div className="space-y-6">
       <PageHeader
         title="账号管理"
-        subtitle="新增、编辑、停用员工账号。系统至少保留一位活跃管理员。"
         actions={
           <Link href="/owner/accounts/new" className={buttonVariants()}>
             新建账号

@@ -6,7 +6,11 @@ import {
 import { MaterialForm } from '@/components/business/material/MaterialForm';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
-import { PageHeader, StatusBadge } from '@/components/ui-business';
+import {
+  PageHeader,
+  StatusBadge,
+  TableEmptyState,
+} from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   getMaterialSummary,
@@ -14,6 +18,7 @@ import {
   MATERIAL_CATEGORY_LABELS,
 } from '@/lib/material';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -31,7 +36,9 @@ export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
   const material = await getMaterialSummary(id);
   return {
-    title: material ? `编辑 ${material.name} · 物料库存` : '物料不存在',
+    title: material
+      ? `编辑 ${externalPriceBusinessText(material.name)} · 物料库存`
+      : '物料不存在',
   };
 }
 
@@ -60,7 +67,7 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`编辑物料：${material.name}`}
+        title={`编辑物料：${externalPriceBusinessText(material.name)}`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         actions={
           <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>
@@ -94,25 +101,29 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">库位库存</h2>
-        {locationStocks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无库位库存记录</p>
-        ) : (
-          <div
-            className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            role="region"
-            aria-label="物料库位库存"
-            tabIndex={0}
-          >
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="py-2 pr-3">仓库</th>
-                  <th className="py-2 pr-3">库位</th>
-                  <th className="py-2 pr-3 text-right">库存</th>
-                </tr>
-              </thead>
-              <tbody>
-                {locationStocks.map((stock) => (
+        <div
+          className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          role="region"
+          aria-label="物料库位库存"
+          tabIndex={0}
+        >
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="py-2 pr-3">仓库</th>
+                <th className="py-2 pr-3">库位</th>
+                <th className="py-2 pr-3 text-right">库存</th>
+              </tr>
+            </thead>
+            <tbody>
+              {locationStocks.length === 0 ? (
+                <TableEmptyState
+                  colSpan={3}
+                  title="暂无库位库存记录"
+                  description="完成首次入库后，各库位库存会显示在这里。"
+                />
+              ) : (
+                locationStocks.map((stock) => (
                   <tr key={stock.id} className="border-b last:border-0">
                     <td className="py-3 pr-3">{stock.warehouse.name}</td>
                     <td className="py-3 pr-3">{stock.location.name}</td>
@@ -120,11 +131,11 @@ export default async function EditForemanMaterialPage({ params }: PageProps) {
                       {decimal(stock.currentStock)} {material.unit}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

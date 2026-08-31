@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { DisabledReason, PendingButton } from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
+import { notificationEventLabel } from '@/lib/notification/event-labels';
 
 type ChannelOption = {
   id: string;
@@ -45,11 +47,11 @@ export function RuleForm({
   const selected = new Set(initial.channelIds);
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} aria-busy={pending} className="space-y-5">
       <div className="space-y-2">
         <Label>事件</Label>
-        <div className="rounded-md border bg-muted/30 px-3 py-2 font-mono text-sm">
-          {eventType}
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          {notificationEventLabel(eventType)}
         </div>
         <p className="text-xs text-muted-foreground">
           事件类型固定，不可修改。
@@ -99,18 +101,11 @@ export function RuleForm({
 
       <fieldset className="space-y-2">
         <Label>推送到群（多选）</Label>
-        {/* Privacy 警告：CS_PERIOD_* 事件含具体客服业绩 / 提成数据，
-            绑多个 channel 会让所有 channel 看到所有客服的业绩。
-            schema 暂无 per-user 路由（SPEC §8.1 &ldquo;对应客服&rdquo; 待 P2 加
-            User.notificationChannelId 后实现）。
-            源码注释敌不过 owner 误配；UI 需明示。 */}
         {(eventType === 'CS_PERIOD_ENDING' ||
           eventType === 'CS_PERIOD_SETTLED') && channels.length > 0 ? (
           <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
-            ⚠️ 此事件含具体客服业绩 / 提成数据。启用规则时<strong>最多
-            只能绑 1 个 channel</strong>（避免不同客服互相看到金额；schema
-            暂无&ldquo;对应客服&rdquo;1:1 路由，等 P2 加 per-user 字段后放开）。
-            禁用 draft 状态可暂存多个，便于切换。
+            此事件包含客服业绩和提成。为避免不同客服看到彼此金额，
+            启用时<strong>只能选择一个推送群</strong>；停用时可暂存多个选项。
           </p>
         ) : null}
         {channels.length === 0 ? (
@@ -137,16 +132,8 @@ export function RuleForm({
               //   - inactive 未绑定 → disabled，禁止新绑（否则 notify()
               //     必失败，dashboard 永红）
               const disabled = !c.isActive && !isSelected;
-              return (
-                <label
-                  key={c.id}
-                  className="flex items-center gap-2"
-                  title={
-                    disabled
-                      ? '该群已停用，不可新绑；启用群后再勾选'
-                      : undefined
-                  }
-                >
+              const option = (
+                <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     name="channelIds"
@@ -160,6 +147,20 @@ export function RuleForm({
                     {!c.isActive ? '（已停用）' : ''}
                   </span>
                 </label>
+              );
+              return disabled ? (
+                <DisabledReason
+                  key={c.id}
+                  cause="prerequisite"
+                  reason="该群已停用，不可新绑"
+                  fixHref={`/owner/notifications/channels/${c.id}`}
+                  fixLabel="去启用群"
+                  className="[&_[data-slot=disabled-reason-copy]]:text-xs"
+                >
+                  {option}
+                </DisabledReason>
+              ) : (
+                <div key={c.id}>{option}</div>
               );
             })}
           </div>
@@ -191,9 +192,9 @@ export function RuleForm({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={pending}>
+        <PendingButton pending={pending} pendingLabel="保存中…">
           保存修改
-        </Button>
+        </PendingButton>
         <Link
           href="/owner/notifications"
           className={buttonVariants({ variant: 'outline' })}

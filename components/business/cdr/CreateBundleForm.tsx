@@ -6,6 +6,13 @@ import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
 import { Button } from '@/components/ui/button';
+import {
+  DisabledReason,
+  EmptyState,
+  EnvNotice,
+  LongTaskReceipt,
+  PendingButton,
+} from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 
 type EligibleOrder = {
@@ -70,7 +77,9 @@ export function CreateBundleForm({
 
   return (
     <form
+      id="cdr-bundle-form"
       action={formAction}
+      aria-busy={isPending}
       className="rounded-xl border bg-card p-4 shadow-sm space-y-4"
     >
       <input type="hidden" name="from" value={from} />
@@ -86,9 +95,20 @@ export function CreateBundleForm({
       </div>
 
       {eligible.length === 0 ? (
-        <div className="rounded-md border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-          所选日期窗口内没有含 CDR 文件的工单。
-        </div>
+        <EmptyState
+          kind="no-result"
+          noun="含 CDR 文件的工单"
+          onClear={
+            <Button
+              render={<Link href="#cdr-filter" prefetch={false} />}
+              nativeButton={false}
+              variant="outline"
+            >
+              调整日期范围
+            </Button>
+          }
+          className="py-6"
+        />
       ) : (
         <div
           className="overflow-x-auto rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -161,60 +181,81 @@ export function CreateBundleForm({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <Button
-          type="submit"
-          disabled={isPending || selected.size === 0}
-        >
-          {isPending ? '生成中…' : '生成下载包'}
-        </Button>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        {selected.size === 0 ? (
+          <DisabledReason cause="status" reason="先勾选至少一个工单">
+            <PendingButton pending={isPending} disabled pendingLabel="生成中…">
+              生成下载包
+            </PendingButton>
+          </DisabledReason>
+        ) : (
+          <PendingButton pending={isPending} pendingLabel="生成中…">
+            生成下载包
+          </PendingButton>
+        )}
         {state?.status === 'error' ? (
           <p role="alert" className="text-sm text-destructive">{state.message}</p>
         ) : null}
         {state?.status === 'invalid' ? (
-          <p className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {Object.values(state.fieldErrors).flat()[0] ?? '表单校验失败'}
           </p>
         ) : null}
       </div>
 
       {state?.status === 'success' ? (
-        <div className="rounded-md border border-success/40 bg-success/10 px-4 py-3 text-sm text-success-foreground">
-          ✅ 已生成 {state.fileCount} 个 CDR 文件的下载包。
+        <div className="space-y-3">
+          <LongTaskReceipt
+            taskId={state.bundleId}
+            status="ready"
+            title={`已生成 ${state.fileCount} 个 CDR 文件的下载包`}
+            description="可以离开页面；之后仍可从下方“最近生成的下载包”取回。"
+            expiresAt={state.expiresAt}
+            action={
+              <div className="min-w-0 space-y-2 text-sm">
+                <p className="break-all font-mono text-xs">
+                  <a
+                    href={state.downloadUrl}
+                    className="underline underline-offset-2"
+                    rel="noreferrer"
+                  >
+                    {state.downloadUrl}
+                  </a>
+                </p>
+                <Button
+                  render={<a href={state.downloadUrl} rel="noreferrer" />}
+                  nativeButton={false}
+                  variant="outline"
+                >
+                  打开下载链接
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTimeShanghai(new Date(state.expiresAt))} 过期。复制上方完整
+                  URL 发给外协。
+                </p>
+              </div>
+            }
+          />
           {state.isMock ? (
-            <span className="ml-2 text-xs">
-              (mock-mode：URL 是占位，OSS 配齐后才能真下载)
-            </span>
+            <EnvNotice>
+              文件存储尚未启用，当前下载地址不可用。
+            </EnvNotice>
           ) : null}
-          {/* href 用绝对 URL（不是 relativePath）—— owner 在 admin
-              host 上右键&ldquo;复制链接地址&rdquo;时拿到的是 APP_PUBLIC_URL 域，
-              而不是当前 admin 域（split-origin 部署：staff 走内网域，
-              外协拿公网域）。 */}
-          <div className="mt-2 break-all font-mono text-xs">
-            <a
-              href={state.downloadUrl}
-              className="underline underline-offset-2"
-              // 同源时 fallback 到正常导航；跨源会被浏览器当外链打开。
-              rel="noreferrer"
-            >
-              {state.downloadUrl}
-            </a>
-          </div>
-          <div className="mt-1 text-xs text-success-foreground/80">
-            链接 24 小时有效（{formatDateTimeShanghai(new Date(state.expiresAt))} 过期）。复制
-            上方完整 URL 发给外协。
-          </div>
         </div>
       ) : null}
 
       {state?.status === 'queued' ? (
-        <div className="rounded-md border border-info/40 bg-info/10 px-4 py-3 text-sm">
-          已将 {state.fileCount} 个 CDR 文件加入重任务队列。打包在独立进程中进行，
-          完成后会出现在下方列表。
-          <span className="ml-2 font-mono text-xs text-muted-foreground">
-            任务 {state.jobId}
-          </span>
-        </div>
+        <LongTaskReceipt
+          taskId={state.jobId}
+          status="accepted"
+          title={`已受理：正在生成 ${state.fileCount} 个 CDR 文件`}
+          description="可以离开页面；完成后会出现在下方“最近生成的下载包”。"
+          action={
+            <Button type="button" variant="outline" onClick={() => router.refresh()}>
+              刷新进度
+            </Button>
+          }
+        />
       ) : null}
     </form>
   );

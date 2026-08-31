@@ -19,7 +19,11 @@ function rule(
     incrementAmount: null,
     minQty: 1,
     maxQty: 1_000,
-    triggerCondition: { productCodes: ['PRODUCT_A'] },
+    triggerCondition: {
+      schemaVersion: 1,
+      productCodes: ['PRODUCT_A'],
+      pricingRoutes: ['STOCK_BLANK'],
+    },
     exclusiveGroup: null,
     priority: 100,
     blocksAutomaticQuote: false,
@@ -35,7 +39,7 @@ function rule(
       name: '基础加工费',
       isActive: true,
     },
-    product: { code: 'PRODUCT_A', isActive: true },
+    product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
     ...overrides,
   };
 }
@@ -97,11 +101,108 @@ function packaging(
   });
 }
 
+function bagging(
+  overrides: Partial<DraftPriceRuleForValidation> = {},
+): DraftPriceRuleForValidation {
+  return rule({
+    id: 'bagging-single',
+    code: 'REF_PACKING_SINGLE_ITEM',
+    name: '单款入袋',
+    kind: 'ADD_ON',
+    calculationType: 'PER_BAG',
+    amount: '0.1000',
+    minQty: null,
+    maxQty: null,
+    triggerCondition: {
+      schemaVersion: 1,
+      target: 'PACKAGING_GROUP',
+      packagingModes: ['SINGLE_STYLE'],
+    },
+    exclusiveGroup: 'PACKAGING_GROUP_MODE',
+    productId: null,
+    product: null,
+    category: {
+      code: 'PACKING',
+      name: '入袋与包装',
+      isActive: true,
+    },
+    ...overrides,
+  });
+}
+
 describe('validateDraftPriceBookRules', () => {
   it('accepts a processing rule set understood by the production quote engine', () => {
     expect(
       validateDraftPriceBookRules({ purpose: 'PROCESSING', rules: [rule()] }),
     ).toEqual([]);
+  });
+
+  it('rejects the historical manual route when publishing a new draft version', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule({
+          isActive: false,
+          triggerCondition: {
+            schemaVersion: 1,
+            pricingRoutes: ['MANUAL_QUOTE'],
+          },
+        }),
+      ],
+    });
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'rules.rule-base.triggerCondition',
+          message: expect.stringContaining('三条计价路线'),
+        }),
+      ]),
+    );
+  });
+
+  it('接受按包装模式和实际袋数计价的通用规则', () => {
+    expect(
+      validateDraftPriceBookRules({
+        purpose: 'PROCESSING',
+        rules: [rule(), bagging()],
+      }),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['绑定产品', { productId: 'product-a', product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true } }],
+    ['错误计价方式', { calculationType: 'PER_PIECE' }],
+    ['混入款式条件', {
+      triggerCondition: {
+        schemaVersion: 1,
+        target: 'PACKAGING_GROUP',
+        packagingModes: ['SINGLE_STYLE'],
+        pricingRoutes: ['STOCK_BLANK'],
+      },
+    }],
+  ])('拒绝包装组规则%s', (_label, overrides) => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [rule(), bagging(overrides as Partial<DraftPriceRuleForValidation>)],
+    });
+
+    expect(issues.length).toBeGreaterThan(0);
+  });
+
+  it('拒绝同一包装模式命中多条入袋规则', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule(),
+        bagging(),
+        bagging({ id: 'bagging-single-duplicate', code: 'PACKING_SINGLE_2' }),
+      ],
+    });
+
+    const message = issues.map((issue) => issue.message).join('\n');
+    expect(message).toContain('单款装同时命中多条入袋规则');
+    expect(message).not.toMatch(/SINGLE_STYLE|PACKAGING_GROUP_MODE|PER_BAG/);
   });
 
   it('reuses the production trigger contract instead of accepting unknown fields', () => {
@@ -110,9 +211,9 @@ describe('validateDraftPriceBookRules', () => {
       rules: [rule({ triggerCondition: { futureField: true } })],
     });
 
-    expect(issues.map((issue) => issue.message).join('\n')).toContain(
-      '包含未知触发字段：futureField',
-    );
+    const message = issues.map((issue) => issue.message).join('\n');
+    expect(message).toContain('适用条件非法：适用条件：设置无效，请重新选择或填写');
+    expect(message).not.toMatch(/futureField|Unrecognized key/i);
   });
 
   it('keeps processing books out of logistics-only charge categories', () => {
@@ -143,7 +244,31 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '产品条件必须包含规则所选产品代码“PRODUCT_A”',
+      '所选报价产品与适用范围不一致，请重新选择产品',
+    );
+  });
+
+  it('rejects a bound product whose category conflicts with the configured route', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule({
+          product: {
+            code: 'PRODUCT_A',
+            category: 'BLANK_STOCK',
+            isActive: true,
+          },
+          triggerCondition: {
+            schemaVersion: 1,
+            productCodes: ['PRODUCT_A'],
+            pricingRoutes: ['COLOR_PRINT'],
+          },
+        }),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message)).toContain(
+      '所选报价产品的分类与适用计价路线不一致',
     );
   });
 
@@ -168,6 +293,54 @@ describe('validateDraftPriceBookRules', () => {
     expect(subtotalIssues.map((issue) => issue.message).join('\n')).toContain(
       '金额超过款式可保存上限 9999999999.99 元',
     );
+  });
+
+  it('includes the configured print-color multiplier in publication overflow checks', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule({
+          calculationType: 'FIXED_AMOUNT',
+          amount: '900000000.0000',
+          triggerCondition: {
+            schemaVersion: 1,
+            productCodes: ['PRODUCT_A'],
+            pricingRoutes: ['COLOR_PRINT'],
+            perPrintColor: true,
+            maxPrintColorCount: 12,
+          },
+        }),
+      ],
+    });
+
+    expect(issues.map((issue) => issue.message).join('\n')).toContain(
+      '收费项目在数量上限处的金额超过款式可保存上限 9999999999.99 元',
+    );
+  });
+
+  it('发布前按配置的烫金道数校验金额上限', () => {
+    const issues = validateDraftPriceBookRules({
+      purpose: 'PROCESSING',
+      rules: [
+        rule({
+          calculationType: 'FIXED_AMOUNT',
+          amount: '4000000000.0000',
+          triggerCondition: {
+            schemaVersion: 1,
+            productCodes: ['PRODUCT_A'],
+            pricingRoutes: ['STOCK_BLANK'],
+            foilPassCount: 3,
+            perFoilPass: true,
+          },
+        }),
+      ],
+    });
+
+    const message = issues.map((issue) => issue.message).join('\n');
+    expect(message).toContain(
+      '收费项目在数量上限处的金额超过款式可保存上限 9999999999.99 元',
+    );
+    expect(message).not.toMatch(/foilPassCount|perFoilPass|STOCK_BLANK/);
   });
 
   it('rejects a provably co-charged BASE and ADD_ON whose aggregate overflows', () => {
@@ -195,7 +368,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '基础规则“基础报价 A”与必然叠加收费合计超过款式可保存上限 9999999999.99 元',
+      '基础报价“基础报价 A”与必然叠加收费合计超过款式可保存上限 9999999999.99 元',
     );
   });
 
@@ -226,7 +399,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message)).toContain(
-      '基础规则“基础报价 A”与必然叠加收费合计超过款式可保存上限 9999999999.99 元',
+      '基础报价“基础报价 A”与必然叠加收费合计超过款式可保存上限 9999999999.99 元',
     );
   });
 
@@ -234,7 +407,7 @@ describe('validateDraftPriceBookRules', () => {
     const issues = validateDraftPriceBookRules({
       purpose: 'PROCESSING',
       rules: [
-        rule(),
+        rule({ name: '基础报价 A（A4:C4）' }),
         rule({
           id: 'rule-overlap',
           code: 'BASE_B',
@@ -252,6 +425,9 @@ describe('validateDraftPriceBookRules', () => {
           message: '基础报价数量区间与“基础报价 A”重叠',
         }),
       ]),
+    );
+    expect(issues.map((issue) => issue.message).join('\n')).not.toContain(
+      'A4:C4',
     );
   });
 
@@ -284,7 +460,7 @@ describe('validateDraftPriceBookRules', () => {
     });
 
     expect(issues.map((issue) => issue.message).join('\n')).toContain(
-      '互斥组“SIDE_SURCHARGE”内与“双面加价 A”存在同优先级命中冲突',
+      '收费项目“双面加价 B”与“双面加价 A”在同一适用范围和顺序下冲突',
     );
   });
 
@@ -343,7 +519,7 @@ describe('validateDraftPriceBookRules', () => {
         shipping({
           minQty: 9_000,
           productId: 'product-a',
-          product: { code: 'PRODUCT_A', isActive: true },
+          product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
           triggerCondition: {
             carrierCode: 'ZTO',
             provinces: ['广东'],
@@ -356,7 +532,7 @@ describe('validateDraftPriceBookRules', () => {
 
     expect(issues.map((issue) => issue.message)).toEqual(
       expect.arrayContaining([
-        '快递费规则触发条件只能包含 carrierCode 和 provinces',
+        '快递费的适用范围只能包含承运商和省份',
         '快递费规则不能绑定产品',
         '快递费规则不能配置数量区间',
       ]),
@@ -386,23 +562,27 @@ describe('validateDraftPriceBookRules', () => {
           priority: 101,
           blocksAutomaticQuote: false,
           productId: 'product-a',
-          product: { code: 'PRODUCT_A', isActive: true },
+          product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
         }),
       ],
     });
 
     expect(issues.map((issue) => issue.message)).toEqual(
       expect.arrayContaining([
-        '快递费规则类型必须固定为 ADD_ON / FIXED_AMOUNT',
-        '快递费互斥组必须固定为 ZTO_PROVINCE_RATE',
-        '快递费规则优先级必须固定为 100',
+        '快递费必须使用自动固定金额计价',
+        '快递费的地区范围设置不完整，请重新选择承运商和省份',
+        '快递费的应用顺序设置不正确',
         '快递费规则必须允许自动报价',
         '耗材规则必须是带完整数量区间的人工确认参考价',
         '耗材规则触发条件必须固定为每票数量的人工确认参考价',
         '耗材规则不能绑定产品',
-        '耗材互斥组必须固定为 PACKING_MATERIAL_QUANTITY_TIER',
-        '耗材规则优先级必须固定为 100',
+        '打包耗材的数量范围设置不完整，请重新选择适用数量',
+        '打包耗材的应用顺序设置不正确',
       ]),
+    );
+
+    expect(issues.map((issue) => issue.message).join('\n')).not.toMatch(
+      /ADD_ON|FIXED_AMOUNT|ZTO_PROVINCE_RATE|PACKING_MATERIAL_QUANTITY_TIER|exclusiveGroup|carrierCode|provinces/,
     );
   });
 

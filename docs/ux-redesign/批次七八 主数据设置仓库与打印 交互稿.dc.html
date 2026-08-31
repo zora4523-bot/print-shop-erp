@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-p { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .btn-x { font: inherit; font-size: 13px; font-weight: 500; height: 32px; padding: 0 14px; border: 1px solid #e4e4e7; border-radius: 8px; background: #f4f4f5; color: #52525b; white-space: nowrap }
+  .fld { font-size: 12.5px; height: 30px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; display: flex; align-items: center; padding: 0 10px }
+  .cap { font-size: 12.5px; color: #52525b }
+  .oid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 3px 8px; background: #18181b; color: #fff; border-radius: 5px }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">批次七 + 八 · 主数据 / 设置 / 仓库 / 打印</h1>
+      <span class="pill" style="background: #fef2f2; color: #b91c1c">41 + 1 页</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">这 41 页里有 <b>21 页是同一个模式</b>——字典列表 + 新建/编辑表单，逐页画没有意义。所以这一批只画两屏：一屏定死字典 CRUD 的通用骨架（改一次全站受益），一屏画你刚发来的 CDR（它是本批唯一有真实原图、且暴露了新问题的页面）。其余按模式映射，逐条写差异。<b>证据</b>：CDR 原图为你本轮提供；仓库、盘点、通知等页原图未打开，标推断。</p>
+    <div class="pcard" style="max-width: 1180px; margin-top: 13px; padding: 12px 15px; border-color: #fecaca">
+      <div style="font-size: 14px; font-weight: 600; color: #b91c1c">面包屑英文路由段：第二次出现，确认是全站缺陷</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">CDR 页面包屑末项显示 <code>cdr</code>，工单修改申请页显示 <code>order-changes</code>。两处都是 AdminBreadcrumb 的中文映射表漏了该路由。这不是两个页面的问题，是一张映射表要按全站路由补齐——41 页里大概率还有更多。<b>建议加一道兜底</b>：映射缺失时不显示原始路由段，改用页面 H1 的文字。</div>
+    </div>
+  </div>
+
+  <section class="sect" id="c1">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">M1</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">字典 CRUD 通用骨架</h2>
+      <span class="cap">以「产品」为例 · 覆盖 21 页 · 契约 01 02 03 04 08 09 10</span>
+    </div>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">产品、分类、客户/供应商、工艺、BOM、物料、账号——七类主数据各 3 页，共 <b>21 页</b>，全部落这一个骨架（车间物料、采购、通知频道等另外十几页也沿用它，只是各自有额外字段）。<b>三条铁律</b>：停用不是删除（历史工单仍引用）；停用是 L3（要列出有多少对象在引用它）；列表必须能按「已停用」筛选，否则停用后就找不回来了。<b>侧栏为提案态</b>：在现状 13 项基础上新增「主数据」「设置」两组，以及经营分析与 CDR 两个入口（见批次一的更正条目）——批次四至六的稿子里侧栏是现状 13 项，差异在此。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column; min-height: 0; overflow-y: auto">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="4">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>主数据</span><span>›</span><span style="color: #3f3f46">产品</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div><h3 style="margin: 0; font-size: 22px; font-weight: 700">产品</h3><div class="cap" style="margin-top: 2px">产品、规格、纸张与基础价。停用后历史工单仍可引用。</div></div>
+          <div style="display: flex; gap: 8px"><button type="button" class="btn-s">导入</button><button type="button" class="btn-p">新建产品</button></div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: none">
+          <div class="pcard" style="padding: 9px 12px">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <div class="fld nw" style="width: 200px; color: #71717a">搜索名称、编码或规格</div>
+              <span class="cap nw" style="font-size: 12px">分类</span><div class="fld nw">全部 ▾</div>
+              <span class="cap nw" style="font-size: 12px">状态</span>
+              <div style="display: flex; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden">
+                <sc-for list="{{ statusSeg }}" as="s" hint-placeholder-count="3">
+                  <span class="nw" style="font-size: 12px; padding: 6px 11px; background: {{ s.bg }}; color: {{ s.fg }}; font-weight: {{ s.w }}">{{ s.t }}</span>
+                </sc-for>
+              </div>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums">共 <b>86</b> 项 · 已停用 <b>7</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden; display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: 30px 1fr 126px 118px 96px 96px 118px; gap: 10px; padding: 9px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a; flex: none">
+              <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid #d4d4d8; border-radius: 4px"></i></div>
+              <div>名称 / 编码</div><div>分类</div><div>规格</div><div style="text-align: right">基础价</div><div>状态</div><div>被引用</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ dictRows }}" as="r" hint-placeholder-count="8">
+                <div style="display: grid; grid-template-columns: 30px 1fr 126px 118px 96px 96px 118px; gap: 10px; align-items: center; padding: 9px 13px; border-bottom: 1px solid #f5f5f7; background: {{ r.bg }}">
+                  <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid #d4d4d8; border-radius: 4px"></i></div>
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 12.5px; font-weight: 500; color: {{ r.nameC }}; overflow: hidden; text-overflow: ellipsis">{{ r.name }}</div>
+                    <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px">{{ r.code }}</div>
+                  </div>
+                  <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ r.cat }}</div>
+                  <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ r.spec }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums">{{ r.price }}</div>
+                  <div><span class="pill nw" style="background: {{ r.stBg }}; color: {{ r.stFg }}">{{ r.st }}</span></div>
+                  <div class="nw" style="font-size: 11.5px; color: {{ r.refC }}">{{ r.ref }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; border-top: 1px solid #f0f0f2; background: #fafafa; flex: none; font-size: 12px; color: #52525b; font-variant-numeric: tabular-nums">
+              <span class="nw">共 86 项 · 每页 20 条 ▾ · 第 1 / 5 页</span>
+              <div style="display: flex; gap: 8px"><button type="button" class="btn-x" style="height: 28px; font-size: 12px">上一页</button><button type="button" class="btn-s" style="height: 28px; font-size: 12px">下一页</button></div>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+    <div class="pcard" style="max-width: 1280px; margin-top: 16px; padding: 13px 15px">
+      <div style="font-size: 14px; font-weight: 600">这一屏定死的四件事</div>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 22px; margin-top: 8px">
+        <sc-for list="{{ dictNotes }}" as="n" hint-placeholder-count="4">
+          <div style="display: flex; align-items: flex-start; gap: 8px">
+            <span class="pill nw" style="background: {{ n.bg }}; color: {{ n.fg }}; flex: none">{{ n.tag }}</span>
+            <span style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ n.t }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="c2">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">M2</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">CDR 汇总下载</h2>
+      <span class="cap">/foreman/cdr · 观察（你本轮提供的原图）· 契约 03 08 09</span>
+    </div>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">原图暴露四个问题：① 面包屑末项是 <code>cdr</code>；② 「生成下载包」的禁用态用<b>淡红填充</b>——既看不清，又和主按钮同色系容易误点，且没写为什么不能点；③ mock-mode 告警用了和业务警告相同的橙色，环境问题和业务异常混在一起；④ 表格里的链接「已过期」是终态，但重新生成要自己滚回上面重选日期。<b>侧栏同上为提案态</b>（现状 13 项 + 主数据/设置两组）。</p>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column; min-height: 0; overflow-y: auto">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav2 }}" as="g" hint-placeholder-count="4">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>生产管理</span><span>›</span><span style="color: #3f3f46">CDR 汇总下载</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div><h3 style="margin: 0; font-size: 22px; font-weight: 700">CDR 汇总下载</h3><div class="cap" style="margin-top: 2px">按日期窗口勾选工单 → 生成 ZIP 包 → 24 小时有效短链发外协。</div></div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: none">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 13px; border: 1px solid #d4d4d8; border-left: 3px solid #52525b; border-radius: 9px; background: #f7f7f8">
+            <span class="pill nw" style="background: #52525b; color: #fff; flex: none">环境</span>
+            <div style="min-width: 0">
+              <div style="font-size: 12.5px; font-weight: 600">OSS 未配置 · 当前为 mock 模式</div>
+              <div style="font-size: 12px; line-height: 1.6; color: #3f3f46; margin-top: 2px">流程可以走完并写入 DesignBundle 记录，但 ZIP 的 URL 是占位，外协点开会返 503。上线时在 .env 配齐 OSS_* 后即可真打包。<b>这是环境配置状态，不是业务异常</b>——所以用中性灰而不是业务警告的橙色。</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: none">
+          <div class="pcard" style="padding: 10px 13px">
+            <div style="display: flex; align-items: center; gap: 9px">
+              <span class="cap nw" style="font-size: 12px">日期窗口</span>
+              <div class="fld nw" style="width: 124px">2026-07-19</div>
+              <span class="cap nw">→</span>
+              <div class="fld nw" style="width: 124px">2026-07-19</div>
+              <button type="button" class="btn-s">查询候选工单</button>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums">候选 <b>3</b> 单 · 已选 <b>2</b> 单 · 共 <b>5</b> 个 CDR 文件</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden; display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: 30px 1fr 116px 96px 1fr; gap: 10px; padding: 9px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a; flex: none">
+              <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid #dc2626; border-radius: 4px; background: #dc2626"></i></div>
+              <div>工单 / 客户</div><div>款式</div><div style="text-align: right">CDR 数</div><div>外协去向</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ cdrRows }}" as="r" hint-placeholder-count="3">
+                <div style="display: grid; grid-template-columns: 30px 1fr 116px 96px 1fr; gap: 10px; align-items: center; padding: 9px 13px; border-bottom: 1px solid #f5f5f7; background: {{ r.bg }}">
+                  <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid {{ r.ckBd }}; border-radius: 4px; background: {{ r.ckBg }}"></i></div>
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ r.no }}</div>
+                    <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px; overflow: hidden; text-overflow: ellipsis">{{ r.who }}</div>
+                  </div>
+                  <div class="nw" style="font-size: 12px; color: #3f3f46">{{ r.style }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums">{{ r.n }}</div>
+                  <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ r.vendor }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; gap: 11px; padding: 9px 13px; border-top: 1px solid #f0f0f2; background: #fafafa; flex: none">
+              <div style="min-width: 0; flex: 1">
+                <div class="nw" style="font-size: 12.5px; font-weight: 500">已选 2 单 · 5 个 CDR · 预计包大小 42 MB</div>
+                <div class="cap" style="font-size: 11.5px">生成后链接 24 小时失效；mock 模式下外协下载会返 503。</div>
+              </div>
+              <button type="button" class="btn-p">生成下载包</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: none">
+          <div class="pcard" style="padding: 10px 13px">
+            <div style="display: flex; align-items: center; gap: 9px">
+              <span style="font-size: 13px; font-weight: 600">最近生成的下载包</span>
+              <div style="flex: 1"></div>
+              <span class="cap nw" style="font-size: 11.5px">链接与下载次数是审计证据，不清理</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 160px 74px 74px 108px 132px 78px 1fr 96px; gap: 9px; margin-top: 8px; padding-bottom: 5px; border-bottom: 1px solid #f0f0f2; font-size: 11px; color: #71717a">
+              <div>日期窗口</div><div style="text-align: right">工单</div><div style="text-align: right">CDR</div><div>链接</div><div>过期时间</div><div style="text-align: right">下载</div><div>生成人</div><div style="text-align: right">操作</div>
+            </div>
+            <sc-for list="{{ bundles }}" as="b" hint-placeholder-count="2">
+              <div style="display: grid; grid-template-columns: 160px 74px 74px 108px 132px 78px 1fr 96px; gap: 9px; align-items: center; padding: 7px 0; border-bottom: 1px solid #f7f7f9">
+                <div class="nw" style="font-size: 12px; font-variant-numeric: tabular-nums">{{ b.win }}</div>
+                <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums">{{ b.o }}</div>
+                <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums">{{ b.c }}</div>
+                <div><span class="pill nw" style="background: {{ b.lBg }}; color: {{ b.lFg }}">{{ b.link }}</span></div>
+                <div class="nw" style="font-size: 12px; font-variant-numeric: tabular-nums; color: #52525b">{{ b.exp }}</div>
+                <div class="nw" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums">{{ b.d }}</div>
+                <div class="nw" style="font-size: 12px; color: #3f3f46; overflow: hidden; text-overflow: ellipsis">{{ b.by }}</div>
+                <div class="nw" style="text-align: right; font-size: 12px; color: #b91c1c">{{ b.act }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="map" style="border-bottom: none">
+    <h2 style="margin: 0 0 6px; font-size: 23px; font-weight: 700">其余 37 页 + 批次八</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">按模式归类。标「推断」的原图未打开。</p>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 860px)); gap: 16px 22px">
+      <sc-for list="{{ rest }}" as="r" hint-placeholder-count="9">
+        <div class="pcard" style="padding: 13px 15px 14px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 14.5px; font-weight: 600">{{ r.name }}</span>
+            <span class="pill" style="background: {{ r.tBg }}; color: {{ r.tFg }}">{{ r.tag }}</span>
+            <span class="cap nw" style="font-size: 11.5px">{{ r.n }}</span>
+          </div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; margin-top: 7px; text-wrap: pretty">{{ r.t }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+function navFor(active) {
+  const G = [
+    ['概览', [['Dashboard', 0], ['经营分析', 0]]],
+    ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0], ['CDR 汇总下载', 0]]],
+    ['主数据', [['产品', 0], ['产品分类', 0], ['客户 / 供应商', 0], ['工艺', 0], ['BOM', 0], ['物料与库存', 0]]],
+    ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+    ['设置', [['通知配置', 0], ['系统设置', 0], ['账号', 0]]],
+  ];
+  return G.map(([group, items]) => ({
+    group,
+    items: items.map(([label]) => ({
+      label, w: label === active ? 600 : 400,
+      bg: label === active ? '#f4f4f5' : 'transparent',
+      edge: label === active ? '#dc2626' : 'transparent',
+    })),
+  }));
+}
+
+const STATUS_SEG = [['全部', 0], ['已启用', 1], ['已停用', 0]];
+
+const DICT_ROWS = [
+  ['七夕红包 大号', 'PRD-0012', '红包 / 烫金', '大号 9×16.5', '¥0.52', '已启用', '32 张工单 · 2 个 BOM', 0],
+  ['七夕红包 中号', 'PRD-0013', '红包 / 烫金', '中号 8×15', '¥0.48', '已启用', '18 张工单', 0],
+  ['中秋礼盒 外盒', 'PRD-0031', '礼盒 / 精装', '大号定制', '¥2.80', '已启用', '9 张工单 · 1 个 BOM', 0],
+  ['万元封 标准', 'PRD-0044', '红包 / 素面', '万元封', '¥0.31', '已启用', '41 张工单', 0],
+  ['空封现货 大号', 'PRD-0051', '红包 / 现货', '大号', '¥0.19', '已启用', '112 张工单', 0],
+  ['旧款请柬 A', 'PRD-0007', '请柬 / 停产', '中号', '¥0.66', '已停用', '24 张工单仍引用', 1],
+  ['旧款请柬 B', 'PRD-0008', '请柬 / 停产', '方形', '¥0.72', '已停用', '6 张工单仍引用', 1],
+  ['测试产品 · 勿用', 'PRD-9001', '未分类', '—', '¥0.00', '已停用', '未被引用', 1],
+];
+
+const DICT_NOTES = [
+  ['铁律', '停用不是删除。列表默认只看「已启用」，但状态是一个三段控件而不是隐藏筛选——否则停用后就找不回来了。', '#fef2f2', '#b91c1c'],
+  ['铁律', '「被引用」是必须有的一列。停用前要能一眼看到有多少工单、BOM、价目在引用它。没有这一列，停用就是盲操作。', '#fef2f2', '#b91c1c'],
+  ['L3', '停用属 L3：确认层逐条列出引用方数量，并说明「历史记录不受影响，但新建时不再可选」。', '#fffbeb', '#b45309'],
+  ['一致', '这 30 页的列宽可以不同，但列的语义顺序固定：标识 → 分类 → 关键属性 → 数值 → 状态 → 被引用 → 行内动作。换页面不换心智。', '#f4f4f5', '#52525b'],
+];
+
+const CDR_ROWS = [
+  ['GD-260719-008', 'e2e-prod-mrrqtv1d-a7', '#1 #2', '3', '阿福外协 · 铜版纸纯彩印', 1],
+  ['GD-260719-007', 'e2e-pack-mrrqtrfc-5j8', '#1', '2', '阿福外协 · 冰白彩印', 1],
+  ['GD-260719-006', 'e2e-prod-mrrqsqlw-6wai', '#1', '2', '未指定外协', 0],
+];
+
+const BUNDLES = [
+  ['2026/07/19 → 07/19', '1', '2', '已过期', '2026/07/20 16:25', '1', 'E2E 管理员 2', '按同条件重新生成', '#f4f4f5', '#52525b'],
+  ['2026/08/22 → 08/22', '4', '9', '有效 · 剩 18h', '2026/08/24 09:10', '3', 'E2E 管理员', '复制链接', '#ecfdf5', '#047857'],
+];
+
+const REST = [
+  ['产品分类', '推断', '3 页', '树形层级 + 历史分类映射。列表用可展开的树而不是平铺分页——分类总量小但层级要看得见。父级停用时提示会影响多少子节点。'],
+  ['客户 / 供应商', '推断', '3 页', '同 M1 骨架，「被引用」列换成「关联工单 / 采购单」。类型（客户 / 供应商 / 两者）是筛选维度不是两个页面。联系人与地址是一对多，用行内可增删的子表。'],
+  ['工艺字典', '推断', '3 页', '除 M1 外多两个属性：默认工种、默认机型——它们直接决定排产时的兼容匹配。改这两个字段属 L3，要提示会影响多少个待排产任务。'],
+  ['BOM', '推断', '3 页', '版本化：一个产品/分类可以有多版 BOM，有生效区间。改 BOM 不影响已生成的用料记录（快照）。多行物料用 M1 的行编辑 + 复制上一行。'],
+  ['物料与盘点', '推断', '4 页', '物料主数据 + 库位库存 + 流水 + 盘点录入。盘点是高风险录入：差异预览 → 过账属 L3，冲突恢复信息不得弱化。库存流水必须能回溯到业务单据。'],
+  ['采购', '推断', '3 页', '分批收货是核心：订购 / 已收 / 待收三个数并排，按库位过账。部分收货不是错误状态。收货属 L2，确认层列出会新增哪些库存流水。'],
+  ['仓库作业台', '推断', '1 页', '41 页里最复杂的一页：KPI + 收货 + 调拨 + 库存 + 流水 + 设置六个分区的长页。建议改成 S2 详情骨架——左侧分区导航 sticky，右侧单区滚动，而不是六段平铺。'],
+  ['车间物料 / 外协 / 考勤', '推断', '7 页', '车间物料三页复用 M1；外协三页复用 S1+S2+S3（覆盖保持 max 口径）；考勤是月历录入，四类（出勤/请假/加班/代班）要能批量填且可撤销一步，改动影响薪资需明确提示影响月份。'],
+  ['通知配置 · 系统设置 · 账号', '推断', '8 页', '归「设置」组。通知四态语义不得合并；模板改动、账号能力配置、系统参数改动都属 L3。账号停用不删除。'],
+  ['后台任务 · Pigsty', '已重分类', '2 页', '就是上一轮重切过的那两页，仍计入本批 41 页，但不在侧栏里。① 后台任务拆开：死信里有业务后果的（通知投递失败、导出失败）并入 Dashboard 的待处理异常队列（批次二 DASH-02 已画）；worker 心跳、队列深度这类纯技术指标保留在本页，但不进导航。② Pigsty 是纯基础设施只读（扩展、cron、分区、查询观测），只从告警条进入，本地阻塞不当生产结论。两页都不需要单独重设计，只需按新入口接线。'],
+  ['批次八 · 打印', '受保护', '1 页', '/print/orders/:id 是车间生产资产，视觉基线受保护。本轮完全未动。二维码、承诺交期、关键备注、款式、工艺、多地址、设计图都是生产证据，不能为视觉极简删掉。要改必须单独立案，附全部款式数量的 before/after，等你人工确认后才替换基线。'],
+  ['批次八 · 五态组件库', '契约', '系统', '把规范 C 段的五态做成可复用组件：Skeleton（按行数配置）、EmptyState（三变体）、ErrorBoundary（四层）、DisabledReason、PendingButton、LongTaskReceipt。全站一处改、处处生效——这是 41 页能保持一致的唯一现实办法。'],
+  ['批次八 · 一致性收口', '契约', '系统', '收口四件事：面包屑中文映射表按全站路由补齐（并加「缺失时用 H1 文字」的兜底）；禁用态统一用中性灰 + 原因文字，禁止用主色淡化；环境/配置类提示用中性灰，与业务警告的橙色分开；所有列表的筛选、排序、分页、选中进 URL。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: navFor('产品'),
+      nav2: navFor('CDR 汇总下载'),
+      statusSeg: STATUS_SEG.map(([t, on]) => ({ t, bg: on ? '#dc2626' : '#fff', fg: on ? '#fff' : '#3f3f46', w: on ? 500 : 400 })),
+      dictRows: DICT_ROWS.map(([name, code, cat, spec, price, st, ref, off]) => ({
+        name, code, cat, spec, price, st, ref,
+        bg: off ? '#fafafa' : '#fff',
+        nameC: off ? '#52525b' : '#27272a',
+        stBg: off ? '#f4f4f5' : '#ecfdf5',
+        stFg: off ? '#52525b' : '#047857',
+        refC: ref.indexOf('仍引用') > -1 ? '#b45309' : '#52525b',
+      })),
+      dictNotes: DICT_NOTES.map(([tag, t, bg, fg]) => ({ tag, t, bg, fg })),
+      cdrRows: CDR_ROWS.map(([no, who, style, n, vendor, sel]) => ({
+        no, who, style, n, vendor,
+        bg: sel ? '#fffafa' : '#fff',
+        ckBd: sel ? '#dc2626' : '#d4d4d8',
+        ckBg: sel ? '#dc2626' : '#fff',
+      })),
+      bundles: BUNDLES.map(([win, o, c, link, exp, d, by, act, lBg, lFg]) => ({ win, o, c, link, exp, d, by, act, lBg, lFg })),
+      rest: REST.map(([name, tag, n, t]) => ({
+        name, tag, n, t,
+        tBg: tag === '推断' ? '#fffbeb' : (tag === '受保护' ? '#fef2f2' : (tag === '已重分类' ? '#f0f9ff' : '#f4f4f5')),
+        tFg: tag === '推断' ? '#92400e' : (tag === '受保护' ? '#b91c1c' : (tag === '已重分类' ? '#0369a1' : '#52525b')),
+      })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

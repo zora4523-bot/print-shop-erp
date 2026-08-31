@@ -7,6 +7,7 @@ const { dbMock } = vi.hoisted(() => ({
     $transaction: vi.fn(),
     product: { findMany: vi.fn() },
     craft: { findMany: vi.fn() },
+    material: { findMany: vi.fn() },
     priceTier: { findMany: vi.fn() },
     priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
@@ -16,15 +17,28 @@ const { dbMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
-import { quoteOrderItems } from '../quote-service';
+import { quoteOrderItems, quoteOrderItemsPreview } from '../quote-service';
 
 const item = {
   productId: 'product-1',
+  pricingRoute: 'STOCK_BLANK' as const,
+  productStructure: 'STANDARD_ENVELOPE' as const,
+  artworkVersion: null,
+  plateGroupId: null,
+  pricingGroup: null,
+  manualQuoteReason: null,
   specification: '大号',
+  actualWidthMm: null,
+  actualHeightMm: null,
   paperType: '艳红珠光纸',
+  paperWeightGsm: null,
   quantity: 100,
   crafts: ['craft-foil'],
   foilColors: ['哑金'],
+  foilTechnique: 'FLAT' as const,
+  hasLocalFoil: true,
+  lamination: 'NONE' as const,
+  printColors: [],
   isDoubleSided: false,
   isDoubleColor: false,
 };
@@ -40,12 +54,16 @@ beforeEach(() => {
     {
       id: 'product-1',
       code: 'EXT-STOCK-LARGE',
+      category: 'BLANK_STOCK',
       baseUnitPrice: '0.2000',
       minOrderQty: null,
     },
   ]);
   dbMock.craft.findMany.mockReset().mockResolvedValue([
-    { id: 'craft-foil', code: 'FLAT_FOIL_SINGLE' },
+    { id: 'craft-foil', code: 'FLAT_FOIL_PARTIAL' },
+  ]);
+  dbMock.material.findMany.mockReset().mockResolvedValue([
+    { name: '艳红珠光纸' },
   ]);
   dbMock.priceTier.findMany.mockReset().mockResolvedValue([
     {
@@ -73,6 +91,8 @@ beforeEach(() => {
       code: 'EXTERNAL_SALES_PROCESSING_202608',
       name: '外部销售加工费（2026-08）',
       version: 1,
+      currency: 'CNY',
+      effectiveFrom: new Date('2026-08-01T00:00:00.000Z'),
       sourceName: '长昆-线下报价表(3)(1).xlsx',
       sourceSha256: 'hash',
     },
@@ -88,6 +108,7 @@ beforeEach(() => {
       minQty: 100,
       maxQty: 100,
       triggerCondition: {
+        pricingRoutes: ['STOCK_BLANK'],
         specifications: ['大号'],
         paperTypes: ['艳红珠光纸'],
       },
@@ -135,9 +156,23 @@ describe('quoteOrderItems', () => {
     expect(dbMock.product.findMany).toHaveBeenCalledTimes(1);
     expect(dbMock.product.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        select: { id: true, code: true },
+        select: {
+          id: true,
+          code: true,
+          category: true,
+          specification: true,
+          paperType: true,
+        },
       }),
     );
+    expect(dbMock.material.findMany).toHaveBeenCalledWith({
+      where: {
+        category: 'PAPER',
+        name: { in: ['艳红珠光纸'] },
+        isActive: true,
+      },
+      select: { name: true },
+    });
     expect(dbMock.customerPriceBook.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -153,6 +188,12 @@ describe('quoteOrderItems', () => {
           priceBookId: 'external-book',
           isActive: true,
           category: { isActive: true },
+          NOT: {
+            triggerCondition: {
+              path: ['target'],
+              equals: 'PACKAGING_GROUP',
+            },
+          },
         },
       }),
     );
@@ -175,6 +216,320 @@ describe('quoteOrderItems', () => {
       suggestedUnitPrice: '0.1000',
       suggestedFixedFee: '5.00',
       suggestedSubtotal: '15.00',
+      snapshot: {
+        quotedAt: now.toISOString(),
+        input: { lamination: 'NONE' },
+        priceBook: {
+          currency: 'CNY',
+          effectiveFrom: '2026-08-01T00:00:00.000Z',
+          version: 1,
+        },
+      },
+    });
+  });
+
+  it('loads stable product and craft codes for explicitly authorized historical repricing', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([
+      {
+        id: 'product-1',
+        code: 'EXT-STOCK-LARGE',
+        category: 'STOCK_FOIL_ADD',
+        isActive: false,
+      },
+    ]);
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      {
+        id: 'craft-foil',
+        code: 'FLAT_FOIL_PARTIAL',
+        isActive: false,
+      },
+    ]);
+
+    const [quote] = await quoteOrderItems(
+      [item],
+      OrderSettlementType.EXTERNAL_SALES,
+      new Date('2026-08-07T08:00:00.000Z'),
+      dbMock as never,
+      { allowInactiveCatalogFacts: true },
+    );
+
+    expect(dbMock.product.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['product-1'] } },
+      select: {
+        id: true,
+        code: true,
+        category: true,
+        specification: true,
+        paperType: true,
+      },
+    });
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['craft-foil'] } },
+      select: { id: true, code: true },
+    });
+    expect(dbMock.material.findMany).toHaveBeenCalledWith({
+      where: {
+        category: 'PAPER',
+        name: { in: ['艳红珠光纸'] },
+      },
+      select: { name: true },
+    });
+    expect(quote?.snapshot.input).toMatchObject({
+      productCode: 'EXT-STOCK-LARGE',
+      craftCodes: ['FLAT_FOIL_PARTIAL'],
+    });
+    expect(quote?.complete).toBe(true);
+  });
+
+  it('keeps new-order quoting closed to a deactivated product', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([]);
+
+    await expect(
+      quoteOrderItems(
+        [item],
+        OrderSettlementType.EXTERNAL_SALES,
+        new Date('2026-08-07T08:00:00.000Z'),
+        dbMock as never,
+      ),
+    ).rejects.toThrow('报价产品字典已变化');
+
+    expect(dbMock.product.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['product-1'] }, isActive: true },
+      select: {
+        id: true,
+        code: true,
+        category: true,
+        specification: true,
+        paperType: true,
+      },
+    });
+  });
+
+  it('rejects a product whose category does not belong to the selected route', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([
+      {
+        id: 'product-1',
+        code: 'EXT-CUSTOM-FOIL-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
+      },
+    ]);
+
+    await expect(
+      quoteOrderItemsPreview(
+        [item],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('分类与计价路线“局部烫金（通版现货）”不一致');
+  });
+
+  it('does not accept the retired stock-foil product category in a new preview', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([
+      {
+        id: 'product-1',
+        code: 'EXT-LEGACY-STOCK-FOIL',
+        category: 'STOCK_FOIL_ADD',
+      },
+    ]);
+
+    await expect(
+      quoteOrderItemsPreview(
+        [item],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('分类与计价路线');
+  });
+
+  it('rejects a stock preview that omits the canonical local-foil craft', async () => {
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      { id: 'craft-foil', code: 'PACKING' },
+    ]);
+
+    await expect(
+      quoteOrderItemsPreview(
+        [item],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('必须包含“局部烫金”生产工艺');
+  });
+
+  it('rejects custom and color routes that omit their production operation', async () => {
+    dbMock.product.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'product-1',
+          code: 'EXT-CUSTOM-LARGE',
+          category: 'CUSTOM_FLAT_FOIL',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'product-1',
+          code: 'EXT-COLOR-LARGE',
+          category: 'COLOR_PRINT',
+        },
+      ]);
+    dbMock.craft.findMany.mockResolvedValue([
+      { id: 'craft-foil', code: 'PACKING' },
+    ]);
+
+    await expect(
+      quoteOrderItemsPreview(
+        [
+          {
+            ...item,
+            pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+            foilColors: ['哑金'],
+          },
+        ],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('必须包含“专版单色平烫”生产工艺');
+
+    await expect(
+      quoteOrderItemsPreview(
+        [
+          {
+            ...item,
+            pricingRoute: 'COLOR_PRINT',
+            foilColors: [],
+            foilTechnique: 'NONE',
+            hasLocalFoil: false,
+            printColors: ['C', 'M', 'Y', 'K'],
+          },
+        ],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('必须包含“彩印”生产工艺');
+  });
+
+  it('derives side facts before applying versioned manual-pricing guards', async () => {
+    dbMock.product.findMany.mockResolvedValueOnce([
+      {
+        id: 'product-1',
+        code: 'PRD-CUSTOM-LARGE',
+        category: 'CUSTOM_FLAT_FOIL',
+        specification: '大号封90×165',
+        paperType: '160g珠光艳闪',
+      },
+    ]);
+    dbMock.craft.findMany.mockResolvedValueOnce([
+      { id: 'craft-foil', code: 'FLAT_FOIL_DOUBLE' },
+    ]);
+    dbMock.material.findMany.mockResolvedValueOnce([
+      { name: '160g珠光艳闪' },
+    ]);
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce([
+      {
+        id: 'custom-base',
+        code: 'CUSTOM_BASE_100',
+        name: '专版基础价',
+        kind: 'BASE',
+        calculationType: 'FIXED_AMOUNT',
+        amount: '100.0000',
+        minQty: 100,
+        maxQty: 100,
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+        },
+        exclusiveGroup: null,
+        priority: 100,
+        blocksAutomaticQuote: false,
+        sourceSheet: '烫金',
+        sourceRange: 'A1',
+        note: null,
+        productId: 'product-1',
+        category: { code: 'BASE_PROCESSING', name: '基础加工费' },
+      },
+      {
+        id: 'custom-double-sided-guard',
+        code: 'CUSTOM_DOUBLE_SIDED_MANUAL',
+        name: '专版双面烫金',
+        kind: 'REFERENCE',
+        calculationType: null,
+        amount: null,
+        minQty: null,
+        maxQty: null,
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+          isDoubleSided: true,
+        },
+        exclusiveGroup: null,
+        priority: 500,
+        blocksAutomaticQuote: true,
+        sourceSheet: '烫金',
+        sourceRange: 'A2',
+        note: '暂无自动价',
+        productId: null,
+        category: { code: 'REFERENCE', name: '人工参考' },
+      },
+    ]);
+
+    const [quote] = await quoteOrderItemsPreview(
+      [
+        {
+          ...item,
+          pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL',
+          specification: '大号封90×165',
+          actualWidthMm: 90,
+          actualHeightMm: 165,
+          paperType: '160g珠光艳闪',
+          paperWeightGsm: 160,
+          frontFoilColors: ['哑金'],
+          backFoilColors: ['红金'],
+          foilColors: ['哑金', '红金'],
+          hasLocalFoil: false,
+          // Simulate a stale legacy client. The explicit side arrays above
+          // remain authoritative and must not be overridden by these flags.
+          isDoubleSided: false,
+          isDoubleColor: false,
+        },
+      ],
+      OrderSettlementType.EXTERNAL_SALES,
+      1,
+      new Date('2026-08-07T08:00:00.000Z'),
+    );
+
+    expect(quote).toMatchObject({
+      complete: false,
+      suggestedSubtotal: null,
+      snapshot: {
+        input: { isDoubleSided: true, isDoubleColor: true },
+      },
+    });
+    expect(quote?.errors).toContain(
+      '需人工报价：专版双面烫金（暂无自动价）',
+    );
+  });
+
+  it('keeps ordinary previews closed to a deactivated craft', async () => {
+    dbMock.craft.findMany.mockResolvedValueOnce([]);
+
+    await expect(
+      quoteOrderItemsPreview(
+        [item],
+        OrderSettlementType.EXTERNAL_SALES,
+        1,
+        new Date('2026-08-07T08:00:00.000Z'),
+      ),
+    ).rejects.toThrow('工艺字典已变化');
+
+    expect(dbMock.craft.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['craft-foil'] }, isActive: true },
+      select: { id: true, code: true },
     });
   });
 
@@ -205,7 +560,7 @@ describe('quoteOrderItems', () => {
     });
     expect(quote?.errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('当前没有生效的外部销售价目簿'),
+        expect.stringContaining('当前没有生效的客户价目簿'),
         '报价单未覆盖当前产品、规格、纸张或数量，请联系管理员人工报价',
       ]),
     );
@@ -263,6 +618,12 @@ describe('quoteOrderItems', () => {
           priceBookId: 'external-book',
           isActive: true,
           category: { isActive: true },
+          NOT: {
+            triggerCondition: {
+              path: ['target'],
+              equals: 'PACKAGING_GROUP',
+            },
+          },
         },
       }),
     );
@@ -294,6 +655,23 @@ describe('quoteOrderItems', () => {
     expect(quote?.suggestedSubtotal).toBeNull();
     expect(quote?.errors).toContain(
       '报价单未覆盖当前产品、规格、纸张或数量，请联系管理员人工报价',
+    );
+  });
+
+  it('marks a custom paper as pending administrator final pricing', async () => {
+    dbMock.material.findMany.mockResolvedValueOnce([]);
+
+    const [quote] = await quoteOrderItems(
+      [{ ...item, paperType: '客户自带特种纸' }],
+      OrderSettlementType.EXTERNAL_SALES,
+      new Date('2026-08-07T08:00:00.000Z'),
+      dbMock as never,
+    );
+
+    expect(quote?.complete).toBe(false);
+    expect(quote?.suggestedSubtotal).toBeNull();
+    expect(quote?.errors).toContain(
+      '自定义纸张或纸张已不在有效字典，需管理员填写终价',
     );
   });
 

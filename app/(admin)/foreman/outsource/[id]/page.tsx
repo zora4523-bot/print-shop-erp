@@ -5,7 +5,10 @@ import Decimal from 'decimal.js';
 import { OutsourceStatus } from '@/generated/prisma/enums';
 import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
-import { Badge } from '@/components/ui/badge';
+import {
+  StatusBadge as UiStatusBadge,
+  TableEmptyState,
+} from '@/components/ui-business';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OutsourceActions } from '@/components/business/outsource/OutsourceActions';
 import { OutsourceAmountForm } from '@/components/business/outsource/OutsourceAmountForm';
@@ -16,16 +19,10 @@ import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
 import { getOutsourceTitleRef } from '@/lib/page-title/refs';
 import { outsourceTitle } from '@/lib/page-title/titles';
+import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 type PageProps = { params: Promise<{ id: string }> };
-
-const STATUS_LABELS: Record<OutsourceStatus, string> = {
-  [OutsourceStatus.SENT]: '已发出',
-  [OutsourceStatus.IN_PROGRESS]: '进行中',
-  [OutsourceStatus.RECEIVED]: '已回货',
-  [OutsourceStatus.CANCELLED]: '已取消',
-};
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -68,6 +65,7 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
   );
   const remainingAmount = payableAmount?.minus(paidAmount) ?? null;
   const paymentLedgerInvalid = remainingAmount?.isNegative() ?? false;
+  const statusDefinition = OUTSOURCE_STATUS_REGISTRY[row.status];
 
   return (
     <div className="space-y-6">
@@ -93,19 +91,12 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
             )}
           </p>
         </div>
-        <Badge
-          variant={
-            row.status === OutsourceStatus.RECEIVED
-              ? 'default'
-              : row.status === OutsourceStatus.CANCELLED
-                ? 'outline'
-                : row.status === OutsourceStatus.IN_PROGRESS
-                  ? 'secondary'
-                  : 'outline'
-          }
+        <UiStatusBadge
+          tone={statusDefinition.tone}
+          dot={statusDefinition.dot}
         >
-          {STATUS_LABELS[row.status]}
-        </Badge>
+          {statusDefinition.label}
+        </UiStatusBadge>
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
@@ -232,6 +223,8 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           ) : (
             <OutsourcePaymentForm
               id={row.id}
+              supplierName={row.supplierName}
+              orderNo={row.order?.orderNo ?? null}
               remainingAmount={remainingAmount?.toFixed(2) ?? '0.00'}
               initialIdempotencyKey={randomUUID()}
             />
@@ -244,9 +237,12 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           付款明细（{row.payments.length}）
         </h2>
         {row.payments.length === 0 ? (
-          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
-            暂无外协付款记录。
-          </p>
+          <TableEmptyState
+            variant="compact"
+            title="暂无外协付款记录"
+            description="外协单回货并确认金额后，录入的付款会显示在这里。"
+            className="m-4 sm:m-6"
+          />
         ) : (
           <ol className="divide-y text-sm">
             {row.payments.map((payment) => (
@@ -272,16 +268,23 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
         )}
       </section>
 
-      {canReceive || canCancel ? (
-        <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
-          <h2 className="text-base font-semibold">状态操作</h2>
-          <OutsourceActions
-            id={row.id}
-            canReceive={canReceive}
-            canCancel={canCancel}
-          />
-        </section>
-      ) : null}
+      <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
+        <h2 className="text-base font-semibold">状态操作</h2>
+        <OutsourceActions
+          id={row.id}
+          canReceive={canReceive}
+          canCancel={canCancel}
+          supplierName={row.supplierName}
+          orderNo={row.order?.orderNo ?? null}
+          totalQty={row.totalQty}
+          expectedDateLabel={formatDateShanghai(row.expectedDate)}
+        />
+        {!canReceive && !canCancel ? (
+          <p className="text-sm text-muted-foreground">
+            该外协单已结束，没有可执行的状态操作。
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }

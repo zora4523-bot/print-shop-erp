@@ -3,7 +3,14 @@
 import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Decimal from 'decimal.js';
-import { ArrowRight, Check, RefreshCw, Save } from 'lucide-react';
+import {
+  ArrowRight,
+  Check,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Undo2,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +21,7 @@ import type {
   CustomerPriceBookMutationResult,
   UpdateCustomerPriceRuleDraftGroupActionInput,
 } from '@/actions/customer-price-books.types';
+import { usePriceWorkspaceUnsavedTierChanges } from './PriceWorkspaceNavigationGuard';
 
 export type ExternalSalesPriceTier = {
   ruleId: string;
@@ -74,6 +82,18 @@ function parseAmount(value: string): Decimal | null {
   }
 }
 
+function parseSignedPercent(value: string): Decimal | null {
+  const trimmed = value.trim();
+  const match = /^([+-])?((?:0|[1-9]\d{0,3})(?:\.\d{1,4})?)$/.exec(trimmed);
+  if (!match) return null;
+  try {
+    const amount = new Decimal(match[2] ?? '0');
+    return match[1] === '-' ? amount.neg() : amount;
+  } catch {
+    return null;
+  }
+}
+
 function decimalLabel(value: Decimal.Value): string {
   const [integer = '0', fraction = ''] = new Decimal(value)
     .toFixed(4)
@@ -84,28 +104,26 @@ function decimalLabel(value: Decimal.Value): string {
   return fraction ? `${groupedInteger}.${fraction}` : groupedInteger;
 }
 
+function decimalInputValue(value: Decimal.Value): string {
+  return new Decimal(value)
+    .toFixed(4)
+    .replace(/\.0+$/, '')
+    .replace(/(\.\d*?)0+$/, '$1');
+}
+
 function amountLabel(value: string | null): string {
   if (value === null || value.trim() === '') return '待设置';
   const amount = parseAmount(value);
   return amount ? `¥${decimalLabel(amount)}` : '待设置';
 }
 
-function fixedAmountUnitLabel(value: string, quantity: number): string {
-  const amount = parseAmount(value);
-  if (amount === null || quantity <= 0) return '—';
-  return `¥${decimalLabel(amount.div(quantity))} / 个`;
-}
-
 type PricingPresentation = {
   calculationLabel: string;
   currentColumnLabel: string;
   draftColumnLabel: string;
-  supportingColumnLabel: string;
-  inputLabel: string;
   amountSuffix: string;
   valueNoun: string;
   instruction: string;
-  supportingValue: (value: string, quantity: number) => string;
 };
 
 const PRICING_PRESENTATIONS: Record<
@@ -116,61 +134,49 @@ const PRICING_PRESENTATIONS: Record<
     calculationLabel: '整批固定总价',
     currentColumnLabel: '当前总价',
     draftColumnLabel: '草稿总价（元）',
-    supportingColumnLabel: '折合单价',
-    inputLabel: '草稿总价（元）',
     amountSuffix: ' / 批',
     valueNoun: '总价',
-    instruction:
-      '数量档保持不变，只需修改每档整批总价；保存时整组一次更新。',
-    supportingValue: fixedAmountUnitLabel,
+    instruction: '修改各数量档总价；折合单价自动计算。',
   },
   [CustomerPriceCalculationType.PER_PIECE]: {
     calculationLabel: '按个计价',
     currentColumnLabel: '当前单价',
     draftColumnLabel: '草稿单价（元/个）',
-    supportingColumnLabel: '计价单位',
-    inputLabel: '草稿单价（元/个）',
     amountSuffix: ' / 个',
     valueNoun: '单价',
-    instruction:
-      '数量档保持不变，只需修改每档的每个单价；系统不会将单价再除以数量。',
-    supportingValue: () => '每个成品',
+    instruction: '修改各数量档单价。',
   },
   [CustomerPriceCalculationType.PER_SHEET]: {
     calculationLabel: '按张计价',
     currentColumnLabel: '当前每张价',
     draftColumnLabel: '草稿每张价（元/张）',
-    supportingColumnLabel: '计价单位',
-    inputLabel: '草稿每张价（元/张）',
     amountSuffix: ' / 张',
     valueNoun: '每张价',
-    instruction:
-      '数量档保持不变，只需修改每张价格；保存时整组一次更新。',
-    supportingValue: () => '每张用纸',
+    instruction: '修改各数量档每张价。',
   },
   [CustomerPriceCalculationType.PER_10K]: {
     calculationLabel: '每万个计价',
     currentColumnLabel: '当前每万个价',
     draftColumnLabel: '草稿每万个价（元/万个）',
-    supportingColumnLabel: '计价单位',
-    inputLabel: '草稿每万个价（元/万个）',
     amountSuffix: ' / 万个',
     valueNoun: '每万个价',
-    instruction:
-      '数量档保持不变，只需修改每万个价格；保存时整组一次更新。',
-    supportingValue: () => '每 10,000 个成品',
+    instruction: '修改各数量档每万个价。',
   },
   [CustomerPriceCalculationType.PER_ITEM]: {
     calculationLabel: '每款一次',
     currentColumnLabel: '当前每款价',
     draftColumnLabel: '草稿每款价（元/款）',
-    supportingColumnLabel: '计价单位',
-    inputLabel: '草稿每款价（元/款）',
     amountSuffix: ' / 款',
     valueNoun: '每款价',
-    instruction:
-      '数量档保持不变，只需修改每款一次的价格；保存时整组一次更新。',
-    supportingValue: () => '每款一次',
+    instruction: '修改各数量档每款价。',
+  },
+  [CustomerPriceCalculationType.PER_BAG]: {
+    calculationLabel: '按实际袋数',
+    currentColumnLabel: '当前每袋价',
+    draftColumnLabel: '草稿每袋价（元/袋）',
+    amountSuffix: ' / 袋',
+    valueNoun: '每袋价',
+    instruction: '入袋费 = 实际袋数 × 每袋价。',
   },
 };
 
@@ -183,9 +189,160 @@ function priceAmountLabel(
 }
 
 function numericValuesEqual(left: string, right: string): boolean {
+  if (left.trim() === '' && right.trim() === '') return true;
   const leftValue = parseAmount(left);
   const rightValue = parseAmount(right);
   return leftValue !== null && rightValue !== null && leftValue.eq(rightValue);
+}
+
+export type ExternalSalesTierDraftState = {
+  amounts: string[];
+  activeStates: boolean[];
+};
+
+export function createExternalSalesTierDraftState(
+  tiers: ExternalSalesPriceTier[],
+): ExternalSalesTierDraftState {
+  return {
+    amounts: tiers.map((tier) => tier.draftAmount ?? ''),
+    activeStates: tiers.map((tier) => tier.isActive),
+  };
+}
+
+function cloneTierDraftState(
+  state: ExternalSalesTierDraftState,
+): ExternalSalesTierDraftState {
+  return {
+    amounts: [...state.amounts],
+    activeStates: [...state.activeStates],
+  };
+}
+
+function tierDraftStatesEqual(
+  left: ExternalSalesTierDraftState,
+  right: ExternalSalesTierDraftState,
+): boolean {
+  return (
+    left.amounts.length === right.amounts.length &&
+    left.activeStates.length === right.activeStates.length &&
+    left.amounts.every((amount, index) =>
+      numericValuesEqual(amount, right.amounts[index] ?? ''),
+    ) &&
+    left.activeStates.every(
+      (active, index) => active === right.activeStates[index],
+    )
+  );
+}
+
+export function undoExternalSalesTierDraftChange(
+  history: ExternalSalesTierDraftState[],
+):
+  | { state: ExternalSalesTierDraftState; history: ExternalSalesTierDraftState[] }
+  | null {
+  const previous = history.at(-1);
+  if (!previous) return null;
+  return {
+    state: cloneTierDraftState(previous),
+    history: history.slice(0, -1).map(cloneTierDraftState),
+  };
+}
+
+export function countExternalSalesTierDraftChanges(
+  state: ExternalSalesTierDraftState,
+  tiers: ExternalSalesPriceTier[],
+): number {
+  return tiers.filter(
+    (tier, index) =>
+      !numericValuesEqual(state.amounts[index] ?? '', tier.draftAmount ?? '') ||
+      (state.activeStates[index] ?? tier.isActive) !== tier.isActive,
+  ).length;
+}
+
+export type ExternalSalesTierPercentResult =
+  | { success: true; state: ExternalSalesTierDraftState }
+  | { success: false; message: string };
+
+export function applyExternalSalesTierPercentAdjustment(
+  state: ExternalSalesTierDraftState,
+  percentInput: string,
+): ExternalSalesTierPercentResult {
+  if (percentInput.trim() === '') {
+    return { success: false, message: '请输入调整百分比' };
+  }
+  const percent = parseSignedPercent(percentInput);
+  if (percent === null) {
+    return {
+      success: false,
+      message: '请输入有效百分比，最多 4 位小数',
+    };
+  }
+  if (percent.lte(-100)) {
+    return { success: false, message: '降价幅度必须大于 -100%' };
+  }
+  if (!state.activeStates.some(Boolean)) {
+    return {
+      success: false,
+      message: '当前没有启用档，批量调整未应用',
+    };
+  }
+
+  const multiplier = new Decimal(1).plus(percent.div(100));
+  const nextAmounts = [...state.amounts];
+  for (let index = 0; index < state.amounts.length; index += 1) {
+    if (!state.activeStates[index]) continue;
+    const amount = parseAmount(state.amounts[index] ?? '');
+    if (amount === null) {
+      return {
+        success: false,
+        message: '请先修正启用档的草稿价',
+      };
+    }
+    const adjusted = amount.mul(multiplier).toDecimalPlaces(4);
+    if (adjusted.gt('9999999999.9999')) {
+      return {
+        success: false,
+        message: '调整后金额超出允许范围',
+      };
+    }
+    nextAmounts[index] = decimalInputValue(adjusted);
+  }
+
+  return {
+    success: true,
+    state: {
+      amounts: nextAmounts,
+      activeStates: [...state.activeStates],
+    },
+  };
+}
+
+export type DraftAmountDelta = {
+  kind: 'none' | 'up' | 'down';
+  amountLabel: string;
+  percentLabel: string;
+};
+
+export function formatDraftAmountDelta(
+  currentAmount: string | null,
+  draftAmount: string,
+): DraftAmountDelta {
+  const current = parseAmount(currentAmount ?? '');
+  const draft = parseAmount(draftAmount);
+  if (current === null || draft === null || current.eq(draft)) {
+    return { kind: 'none', amountLabel: '未修改', percentLabel: '' };
+  }
+  const diff = draft.minus(current);
+  const down = diff.lt(0);
+  const abs = diff.abs();
+  const sign = down ? '−' : '+';
+  const percent = current.eq(0)
+    ? ''
+    : `${sign}${decimalLabel(abs.div(current).mul(100))}%`;
+  return {
+    kind: down ? 'down' : 'up',
+    amountLabel: `${sign}¥${decimalLabel(abs)}`,
+    percentLabel: percent,
+  };
 }
 
 function fieldErrorsForTier(
@@ -259,7 +416,7 @@ function TierMutationFeedback({
         className="flex items-center gap-2 text-sm text-success-foreground"
       >
         <Check aria-hidden="true" className="size-4" />
-        这一组{valueNoun}已全部保存到调价草稿。
+        草稿已保存。
       </p>
     );
   }
@@ -318,12 +475,35 @@ export function ExternalSalesPriceTierGroupEditor({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const headingId = useId();
-  const [draftAmounts, setDraftAmounts] = useState(() =>
-    tiers.map((tier) => tier.draftAmount ?? ''),
+  const editorIdentity = `${priceBookId}:${anchorRuleId}`;
+  const editorIdentityRef = useRef(editorIdentity);
+  const initialDraftState = useRef(createExternalSalesTierDraftState(tiers));
+  const lastSubmittedDraftState = useRef<ExternalSalesTierDraftState | null>(
+    null,
   );
-  const [draftActiveStates, setDraftActiveStates] = useState(() =>
-    tiers.map((tier) => tier.isActive),
+  const [draftState, setDraftState] = useState(() =>
+    createExternalSalesTierDraftState(tiers),
   );
+  const [undoStack, setUndoStack] = useState<ExternalSalesTierDraftState[]>([]);
+  const [batchPercent, setBatchPercent] = useState('');
+  const [batchPercentError, setBatchPercentError] = useState<string | null>(null);
+  const locallyChangedTierCount = countExternalSalesTierDraftChanges(
+    draftState,
+    tiers,
+  );
+  const clearWorkspaceUnsavedChanges = usePriceWorkspaceUnsavedTierChanges(
+    locallyChangedTierCount,
+  );
+
+  function commitDraftState(nextState: ExternalSalesTierDraftState) {
+    if (tierDraftStatesEqual(draftState, nextState)) return;
+    setUndoStack((current) => [
+      ...current.slice(-49),
+      cloneTierDraftState(draftState),
+    ]);
+    setDraftState(cloneTierDraftState(nextState));
+  }
+
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     async (_previousState, formData) => {
       const parsed = externalSalesPriceTierSaveInputFromFormData(
@@ -331,9 +511,10 @@ export function ExternalSalesPriceTierGroupEditor({
         anchorRuleId,
         tiers,
         formData,
-        draftActiveStates,
+        draftState.activeStates,
       );
       if (!parsed.success) return parsed.result;
+      lastSubmittedDraftState.current = cloneTierDraftState(draftState);
       return saveAction(parsed.input);
     },
     null,
@@ -352,13 +533,32 @@ export function ExternalSalesPriceTierGroupEditor({
   }, [state, tiers]);
 
   useEffect(() => {
+    if (editorIdentityRef.current === editorIdentity) return;
+    const nextState = createExternalSalesTierDraftState(tiers);
+    editorIdentityRef.current = editorIdentity;
+    initialDraftState.current = cloneTierDraftState(nextState);
+    lastSubmittedDraftState.current = null;
+    setDraftState(nextState);
+    setUndoStack([]);
+    setBatchPercent('');
+    setBatchPercentError(null);
+  }, [editorIdentity, tiers]);
+
+  useEffect(() => {
     if (state?.status !== 'success') return;
+    if (lastSubmittedDraftState.current) {
+      initialDraftState.current = cloneTierDraftState(
+        lastSubmittedDraftState.current,
+      );
+      setUndoStack([]);
+    }
+    clearWorkspaceUnsavedChanges();
     if (successHref) {
       router.replace(successHref);
       return;
     }
     router.refresh();
-  }, [router, state, successHref]);
+  }, [clearWorkspaceUnsavedChanges, router, state, successHref]);
 
   return (
     <form
@@ -369,7 +569,7 @@ export function ExternalSalesPriceTierGroupEditor({
       className="@container min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
     >
       <header className="min-w-0 border-b bg-muted/30 p-4">
-        <div className="flex min-w-0 flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-start @min-[32rem]:justify-between">
+        <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-start @min-[31rem]:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-medium text-muted-foreground">
               产品价格阶梯
@@ -404,40 +604,130 @@ export function ExternalSalesPriceTierGroupEditor({
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {presentation.instruction}
         </p>
+        <div className="mt-3 flex min-w-0 flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label htmlFor={`${headingId}-batch-percent`} className="text-xs">
+              按百分比批量调草稿价
+            </Label>
+            <Input
+              id={`${headingId}-batch-percent`}
+              value={batchPercent}
+              inputMode="decimal"
+              autoComplete="off"
+              disabled={pending}
+              placeholder="如 5.8 或 -3"
+              className="min-h-11 w-full font-sans tabular-nums"
+              aria-invalid={Boolean(batchPercentError)}
+              aria-describedby={
+                batchPercentError ? `${headingId}-batch-percent-error` : undefined
+              }
+              onChange={(event) => {
+                setBatchPercent(event.target.value);
+                setBatchPercentError(null);
+              }}
+            />
+            <p className="text-xs text-muted-foreground">仅作用于当前启用档</p>
+            {batchPercentError ? (
+              <p
+                id={`${headingId}-batch-percent-error`}
+                role="alert"
+                className="admin-wrap-anywhere text-xs text-destructive"
+              >
+                {batchPercentError}
+              </p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={pending}
+            onClick={() => {
+              const result = applyExternalSalesTierPercentAdjustment(
+                draftState,
+                batchPercent,
+              );
+              if (!result.success) {
+                setBatchPercentError(result.message);
+                return;
+              }
+              setBatchPercentError(null);
+              commitDraftState(result.state);
+            }}
+          >
+            应用到启用档
+          </Button>
+        </div>
+        <div className="mt-2 flex min-w-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11"
+            disabled={pending || undoStack.length === 0}
+            onClick={() => {
+              const undone = undoExternalSalesTierDraftChange(undoStack);
+              if (!undone) return;
+              setDraftState(undone.state);
+              setUndoStack(undone.history);
+              setBatchPercentError(null);
+            }}
+          >
+            <Undo2 aria-hidden="true" />
+            撤销上一步
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11 text-muted-foreground"
+            disabled={pending || locallyChangedTierCount === 0}
+            title="恢复本次修改前的值"
+            onClick={() => {
+              setDraftState(cloneTierDraftState(initialDraftState.current));
+              setUndoStack([]);
+              setBatchPercent('');
+              setBatchPercentError(null);
+            }}
+          >
+            <RotateCcw aria-hidden="true" />
+            撤销本次修改
+          </Button>
+        </div>
       </header>
 
       <div className="min-w-0">
         <div
           aria-hidden="true"
-          className="hidden min-w-0 grid-cols-[minmax(5.5rem,0.7fr)_minmax(6.5rem,0.85fr)_minmax(9rem,1fr)_minmax(7rem,0.9fr)_auto] gap-3 border-b bg-muted/20 px-4 py-2 text-xs font-medium text-muted-foreground @min-[42rem]:grid"
+          className="hidden min-w-0 grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_4.5rem] gap-2 border-b bg-muted/20 px-3 py-2 text-xs font-medium text-muted-foreground @min-[31rem]:grid"
         >
           <span>数量</span>
-          <span>{presentation.currentColumnLabel}</span>
-          <span>{presentation.draftColumnLabel}</span>
-          <span>{presentation.supportingColumnLabel}</span>
-          <span>状态</span>
+          <span className="text-right">当前</span>
+          <span className="text-right">草稿</span>
+          <span className="text-right">变化</span>
+          <span className="text-right">启用</span>
         </div>
         <ol className="min-w-0 divide-y">
           {tiers.map((tier, index) => {
             const amountInputId = `${headingId}-amount-${index}`;
             const errorId = `${headingId}-amount-${index}-error`;
             const errors = fieldErrorsForTier(state, index);
-            const value = draftAmounts[index] ?? '';
-            const active = draftActiveStates[index] ?? tier.isActive;
+            const value = draftState.amounts[index] ?? '';
+            const active = draftState.activeStates[index] ?? tier.isActive;
             const locallyChanged =
               !numericValuesEqual(value, tier.draftAmount ?? '') ||
               active !== tier.isActive;
+            const delta = formatDraftAmountDelta(tier.currentAmount, value);
 
             return (
               <li
                 key={tier.ruleId}
                 className={cn(
-                  'grid min-w-0 gap-3 p-4 @min-[42rem]:grid-cols-[minmax(5.5rem,0.7fr)_minmax(6.5rem,0.85fr)_minmax(9rem,1fr)_minmax(7rem,0.9fr)_auto] @min-[42rem]:items-center',
-                  (tier.changed || locallyChanged) && 'bg-warning/5',
+                  'grid min-w-0 grid-cols-2 items-center gap-3 px-4 py-3 @min-[31rem]:min-h-12 @min-[31rem]:grid-cols-[minmax(4.75rem,0.65fr)_minmax(5.5rem,0.9fr)_minmax(7rem,1fr)_minmax(5.5rem,0.8fr)_4.5rem] @min-[31rem]:gap-2 @min-[31rem]:px-3 @min-[31rem]:py-1',
+                  (tier.changed || locallyChanged) &&
+                    'bg-warning/5 ring-1 ring-inset ring-warning/30',
                 )}
               >
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground @min-[42rem]:hidden">
+                  <p className="text-xs text-muted-foreground @min-[31rem]:hidden">
                     数量
                   </p>
                   <p className="font-sans font-semibold tabular-nums">
@@ -446,24 +736,27 @@ export function ExternalSalesPriceTierGroupEditor({
                 </div>
 
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground @min-[42rem]:hidden">
+                  <p className="text-xs text-muted-foreground @min-[31rem]:hidden">
                     {presentation.currentColumnLabel}
                   </p>
-                  <p className="flex min-w-0 items-center gap-2 font-sans tabular-nums">
+                  <p className="flex min-w-0 items-center justify-end gap-2 font-sans tabular-nums">
                     <span className="admin-wrap-anywhere">
                       {priceAmountLabel(tier.currentAmount, presentation)}
                     </span>
                     <ArrowRight
                       aria-label="调整为"
-                      className="size-3.5 shrink-0 text-muted-foreground sm:hidden"
+                      className="size-3.5 shrink-0 text-muted-foreground @min-[31rem]:hidden"
                     />
                   </p>
                 </div>
 
-                <div className="min-w-0 space-y-1.5">
-                  <Label htmlFor={amountInputId} className="text-xs">
-                    {quantityFormatter.format(tier.quantity)} 个
-                    {presentation.inputLabel}
+                <div className="min-w-0 space-y-1">
+                  <Label
+                    htmlFor={amountInputId}
+                    className="text-xs @min-[31rem]:sr-only"
+                    title={presentation.draftColumnLabel}
+                  >
+                    {presentation.draftColumnLabel}
                   </Label>
                   <div className="relative min-w-0">
                     <span
@@ -478,7 +771,8 @@ export function ExternalSalesPriceTierGroupEditor({
                       value={value}
                       inputMode="decimal"
                       autoComplete="off"
-                      className="min-h-11 min-w-0 pl-7 font-sans tabular-nums"
+                      disabled={pending}
+                      className="min-h-11 min-w-0 pl-7 text-right font-sans tabular-nums @min-[31rem]:h-10 @min-[31rem]:!min-h-10"
                       pattern="(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?"
                       required
                       aria-required="true"
@@ -486,11 +780,12 @@ export function ExternalSalesPriceTierGroupEditor({
                       aria-describedby={errors?.length ? errorId : undefined}
                       onChange={(event) => {
                         const nextValue = event.target.value;
-                        setDraftAmounts((current) =>
-                          current.map((amount, amountIndex) =>
-                            amountIndex === index ? nextValue : amount,
-                          ),
-                        );
+                        const nextAmounts = [...draftState.amounts];
+                        nextAmounts[index] = nextValue;
+                        commitDraftState({
+                          amounts: nextAmounts,
+                          activeStates: draftState.activeStates,
+                        });
                       }}
                     />
                   </div>
@@ -505,29 +800,45 @@ export function ExternalSalesPriceTierGroupEditor({
                   ) : null}
                 </div>
 
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground @min-[42rem]:hidden">
-                    {presentation.supportingColumnLabel}
+                <div className="min-w-0 text-right">
+                  <p className="text-xs text-muted-foreground @min-[31rem]:hidden">
+                    变化
                   </p>
-                  <p className="admin-wrap-anywhere font-sans text-sm tabular-nums">
-                    {presentation.supportingValue(value, tier.quantity)}
-                  </p>
+                  {delta.kind === 'none' ? (
+                    <p className="text-xs text-muted-foreground">未修改</p>
+                  ) : (
+                    <p
+                      className={cn(
+                        'font-sans text-sm tabular-nums',
+                        delta.kind === 'down'
+                          ? 'text-warning-foreground'
+                          : 'text-foreground',
+                      )}
+                    >
+                      {delta.amountLabel}
+                      {delta.percentLabel ? (
+                        <span className="ml-1 text-xs">{delta.percentLabel}</span>
+                      ) : null}
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5 @min-[42rem]:justify-end">
-                  <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-11 text-sm">
+                <div className="flex min-w-0 items-center justify-end">
+                  <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-11 text-sm @min-[31rem]:min-h-10 @min-[31rem]:pl-10">
                     <input
                       type="checkbox"
                       checked={active}
-                      className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0"
+                      disabled={pending}
+                      className="peer absolute top-0 left-0 size-11 cursor-pointer opacity-0 @min-[31rem]:size-10"
                       aria-label={`${quantityFormatter.format(tier.quantity)} 个价格档启用`}
                       onChange={(event) => {
                         const checked = event.target.checked;
-                        setDraftActiveStates((current) =>
-                          current.map((state, stateIndex) =>
-                            stateIndex === index ? checked : state,
-                          ),
-                        );
+                        const nextActiveStates = [...draftState.activeStates];
+                        nextActiveStates[index] = checked;
+                        commitDraftState({
+                          amounts: draftState.amounts,
+                          activeStates: nextActiveStates,
+                        });
                       }}
                     />
                     <span
@@ -538,13 +849,6 @@ export function ExternalSalesPriceTierGroupEditor({
                     </span>
                     <span>{active ? '启用' : '停用'}</span>
                   </label>
-                  {locallyChanged ? (
-                    <Badge variant="secondary">待保存</Badge>
-                  ) : tier.changed ? (
-                    <Badge variant="secondary">草稿已调整</Badge>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">未修改</span>
-                  )}
                 </div>
               </li>
             );
@@ -552,8 +856,8 @@ export function ExternalSalesPriceTierGroupEditor({
         </ol>
       </div>
 
-      <footer className="sticky bottom-0 min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="flex min-w-0 flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between">
+      <footer className="sticky bottom-0 z-[5] min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-center @min-[31rem]:justify-between">
           <div className="min-w-0">
             <TierMutationFeedback
               state={state}
@@ -562,19 +866,23 @@ export function ExternalSalesPriceTierGroupEditor({
             />
             {!state ? (
               <p className="text-xs text-muted-foreground">
-                任意一行校验失败时，整组价格都不会保存。
+                {locallyChangedTierCount > 0
+                  ? `${locallyChangedTierCount} 档待保存；保存失败时不修改任何档。`
+                  : '暂无修改。'}
               </p>
             ) : null}
           </div>
           <Button
             type="submit"
-            className="min-h-11 w-full shrink-0 @min-[32rem]:w-auto"
-            disabled={pending || tiers.length === 0}
+            className="min-h-11 w-full shrink-0 @min-[31rem]:w-auto"
+            disabled={
+              pending || tiers.length === 0 || locallyChangedTierCount === 0
+            }
           >
             <Save aria-hidden="true" />
             {pending
-              ? `正在保存全部${presentation.valueNoun}…`
-              : `保存全部${presentation.valueNoun}（${tiers.length} 项）`}
+              ? `正在保存${presentation.valueNoun}…`
+              : `保存（${locallyChangedTierCount} 档）`}
           </Button>
         </div>
       </footer>

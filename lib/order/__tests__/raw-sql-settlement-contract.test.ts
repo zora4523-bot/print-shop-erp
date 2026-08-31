@@ -70,12 +70,16 @@ function rawOrderInserts(): RawOrderInsert[] {
 describe('raw Order INSERT settlement contract', () => {
   it('makes every non-migration raw insert declare a role-correct settlement direction', () => {
     const inserts = rawOrderInserts();
-    expect(inserts).toHaveLength(15);
+    // Keep a floor so a broken scanner cannot make the contract pass on an
+    // empty/partial corpus. New fixtures and operational seed scripts may add
+    // valid INSERTs; every discovered statement is validated below, so an
+    // exact count would turn legitimate additions into unrelated failures.
+    expect(inserts.length).toBeGreaterThanOrEqual(15);
 
     for (const insert of inserts) {
       const location = `${insert.file}:${insert.line}`;
       const columns = insert.statement.match(
-        /INSERT\s+INTO\s+"Order"\s*\(([\s\S]*?)\)\s*VALUES/iu,
+        /INSERT\s+INTO\s+"Order"\s*\(([\s\S]*?)\)\s*(?:VALUES|SELECT)/iu,
       )?.[1];
 
       expect(columns, `${location} must have a parseable column list`).toBeDefined();

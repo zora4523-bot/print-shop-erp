@@ -21,6 +21,7 @@ import {
   updateProductCategoryNode,
 } from '@/lib/product';
 import type { ProductCategoryNodeMutationResult } from './owner-product-categories.types';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 
 function normalizeProductCategoryCreateInput(formData: FormData) {
@@ -38,6 +39,13 @@ function normalizeProductCategoryUpdateInput(formData: FormData) {
     legacyCategory: getFormString(formData, 'legacyCategory'),
     sortOrder: getFormStringOr(formData, 'sortOrder', '0'),
   };
+}
+
+function productCategoryRouteBase(formData: FormData) {
+  return getFormString(formData, 'routeBase') ===
+    RULE_CENTER_HREFS.productCategories
+    ? RULE_CENTER_HREFS.productCategories
+    : '/owner/product-categories';
 }
 
 // path 由服务端自动生成（随机段名），撞唯一键的概率可忽略；万一发生
@@ -74,6 +82,28 @@ export async function createProductCategoryNodeAction(
   _prev: ProductCategoryNodeMutationResult | null,
   formData: FormData,
 ): Promise<ProductCategoryNodeMutationResult> {
+  return createProductCategoryNodeWithRoute(
+    formData,
+    productCategoryRouteBase(formData),
+  );
+}
+
+export async function createRuleCenterProductCategoryNodeAction(
+  _prev: ProductCategoryNodeMutationResult | null,
+  formData: FormData,
+): Promise<ProductCategoryNodeMutationResult> {
+  return createProductCategoryNodeWithRoute(
+    formData,
+    RULE_CENTER_HREFS.productCategories,
+  );
+}
+
+async function createProductCategoryNodeWithRoute(
+  formData: FormData,
+  redirectBase:
+    | '/owner/product-categories'
+    | '/owner/rules/product-categories',
+): Promise<ProductCategoryNodeMutationResult> {
   await requirePermission('dict:product:manage');
 
   const parsed = createProductCategoryNodeSchema.safeParse(
@@ -94,7 +124,7 @@ export async function createProductCategoryNodeAction(
   }
 
   revalidateProductCategoryPaths(createdId);
-  redirect(`/owner/product-categories/${createdId}`);
+  redirect(`${redirectBase}/${createdId}`);
 }
 
 export async function updateProductCategoryNodeAction(
@@ -145,6 +175,8 @@ function revalidateProductCategoryPaths(id: string) {
   revalidatePaths([
     '/owner/product-categories',
     `/owner/product-categories/${id}`,
+    RULE_CENTER_HREFS.productCategories,
+    `${RULE_CENTER_HREFS.productCategories}/${id}`,
     '/owner/products',
     '/owner/products/new',
     '/owner/boms/new',

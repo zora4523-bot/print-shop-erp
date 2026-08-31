@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +17,10 @@ import type {
 } from '@/lib/order/list-query';
 import { decodeFoilColorFilterValues } from '@/lib/order/foil-color-filter-codec';
 import { Button } from '@/components/ui/button';
-import { OrderListFilters } from '../OrderListFilters';
+import {
+  ADVANCED_FILTER_KEYS,
+  OrderListFilters,
+} from '../OrderListFilters';
 
 const options: OrderListFilterOptions = {
   submitters: [{ id: 'sales-1', label: '销售小王' }],
@@ -72,6 +77,37 @@ const fullQuery: OrderListQuery = {
 };
 
 describe('OrderListFilters', () => {
+  it('renders shareable preset views and a persistent save-current action', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={{ ...emptyQuery(), view: 'urgent' }}
+        options={{ submitters: [], workers: [], crafts: [] }}
+        issues={[]}
+        total={30}
+        canReviewChanges
+      />,
+    );
+
+    expect(html).toContain('aria-label="常用工单视图"');
+    expect(html).toContain('>我的急单</a>');
+    expect(html).toContain('>今天要发</a>');
+    expect(html).toContain('>待排产</a>');
+    expect(html).toContain('>待审核修改</a>');
+    expect(html).toContain('>保存当前条件</button>');
+    expect(anchorHref(html, '切换视图：我的急单')).toContain(
+      'view=urgent',
+    );
+    expect(anchorHref(html, '切换视图：今天要发')).toContain(
+      'view=due-today',
+    );
+    expect(anchorHref(html, '切换视图：待排产')).toContain(
+      'status=SUBMITTED',
+    );
+    expect(
+      html.match(/<a\b[^>]*aria-label="切换视图：我的急单"[^>]*>/)?.[0],
+    ).toContain('aria-current="page"');
+  });
+
   it('keeps the filter controls collapsed by default', () => {
     const html = renderToStaticMarkup(
       <OrderListFilters
@@ -88,6 +124,54 @@ describe('OrderListFilters', () => {
     );
     expect(html).not.toContain('需要修正');
     expect(html).not.toContain('项已启用');
+    expect(html).not.toContain('name="orderNo"');
+    expect(html).toMatch(/<button\b(?=[^>]*name="advanced")(?=[^>]*value="1")/);
+  });
+
+  it('does not instantiate inactive advanced controls until explicitly requested', () => {
+    const collapsed = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+      />,
+    );
+    const requested = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+        advancedRequested
+      />,
+    );
+
+    expect(collapsed).not.toContain('id="order-filter-order-no"');
+    expect(requested).toContain('id="order-filter-order-no"');
+    expect(requested).toContain('name="craftId"');
+    expect(filterPanelTag(requested)).toContain('open=""');
+    expect(formControlCount(collapsed)).toBeLessThan(formControlCount(requested));
+  });
+
+  it('keeps advanced activation keys aligned with rendered controls', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={emptyQuery()}
+        options={options}
+        issues={[]}
+        total={30}
+        advancedRequested
+      />,
+    );
+    const panel = advancedFilterPanel(html);
+    const renderedKeys = new Set<string>();
+    for (const match of panel.matchAll(/\bname="([^"]+)"/g)) {
+      const name = match[1];
+      if (name) renderedKeys.add(name);
+    }
+
+    expect([...renderedKeys].sort()).toEqual([...ADVANCED_FILTER_KEYS].sort());
   });
 
   it('places the optional export entry in the filter header outside the GET form', () => {
@@ -245,6 +329,38 @@ describe('OrderListFilters', () => {
     expect(chipsIndex).toBeGreaterThan(-1);
     expect(panelIndex).toBeGreaterThan(chipsIndex);
     expect(filterPanelTag(html)).not.toContain('open=""');
+  });
+
+  it('uses the specified mobile bottom drawer while keeping active chips visible', () => {
+    const html = renderToStaticMarkup(
+      <OrderListFilters
+        query={fullQuery}
+        options={options}
+        issues={[]}
+        total={12}
+      />,
+    );
+    const source = readFileSync(
+      path.join(
+        process.cwd(),
+        'components',
+        'business',
+        'order',
+        'OrderListFilters.tsx',
+      ),
+      'utf8',
+    );
+
+    expect(html).toContain('打开筛选条件，已启用');
+    expect(html).toMatch(
+      /aria-label="已启用的筛选条件"[^>]*class="[^"]*overflow-x-auto[^"]*"/,
+    );
+    expect(source).toContain('side="bottom"');
+    expect(source).toContain('max-h-[80dvh]');
+    expect(source).toContain('min-h-0 flex-1 overflow-y-auto');
+    expect(source).toContain("idPrefix: 'mobile-'");
+    expect(source).toContain('className="hidden sm:block"');
+    expect(source).toContain('safe-area-inset-bottom');
   });
 
   it('renders independently removable chips while retaining table preferences and other filters', () => {
@@ -427,6 +543,20 @@ function filterPanelTag(html: string): string {
     ?.find((candidate) => candidate.includes('id="order-list-filter-controls"'));
   if (!tag) throw new Error('找不到工单筛选面板');
   return tag;
+}
+
+function advancedFilterPanel(html: string): string {
+  const marker = html.indexOf('更多筛选');
+  const start = html.lastIndexOf('<details', marker);
+  const end = html.indexOf('</details>', marker);
+  if (marker < 0 || start < 0 || end < 0) {
+    throw new Error('找不到高级筛选面板');
+  }
+  return html.slice(start, end);
+}
+
+function formControlCount(html: string): number {
+  return html.match(/<(?:input|select|button)\b/g)?.length ?? 0;
 }
 
 function findForm(node: ReactNode): ReactElement {

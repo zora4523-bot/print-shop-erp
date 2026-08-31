@@ -1,30 +1,10 @@
-import Link from 'next/link';
-import { createCraftAction } from '@/actions/owner-crafts';
-import { CraftForm } from '@/components/business/craft/CraftForm';
-import { requirePermission } from '@/lib/auth/permissions';
+import { NewCraftCatalogItem } from '@/components/business/rules/catalog/CraftCatalogPages';
 
 export const metadata = {
   title: '新建工艺 · 红包印刷 ERP',
 };
 
-export default async function NewCraftPage() {
-  // Page-level server-side authz (defense-in-depth; the create action
-  // also re-checks). Layout gate doesn't re-run on soft navigation.
-  await requirePermission('dict:craft:manage');
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">新建工艺</h1>
-        <p className="text-sm text-muted-foreground">
-          新工艺默认启用，会立即出现在录单时的工艺多选框里。
-          <Link href="/owner/crafts" className="ml-2 text-primary underline hover:no-underline">
-            返回列表
-          </Link>
-        </p>
-      </div>
-      <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <CraftForm mode="create" action={createCraftAction} />
-      </div>
-    </div>
-  );
+/** @deprecated 入站请求会被转到规则中心。 */
+export default function LegacyNewCraftPage() {
+  return NewCraftCatalogItem({ routeBase: '/owner/crafts' });
 }

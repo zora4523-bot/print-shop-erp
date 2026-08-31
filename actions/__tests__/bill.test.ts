@@ -6,6 +6,7 @@ const {
   permissionsMock,
   billMock,
   revalidatePathMock,
+  redirectMock,
   MockBillError,
   MockInvalidBillTransitionError,
 } = vi.hoisted(() => ({
@@ -16,6 +17,9 @@ const {
     recordPayment: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
   MockBillError: class extends Error {
     constructor(m: string) {
       super(m);
@@ -41,6 +45,7 @@ vi.mock('@/lib/bill', () => ({
   InvalidBillTransitionError: MockInvalidBillTransitionError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
+vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   generateBillsAction,
@@ -70,6 +75,7 @@ beforeEach(() => {
   billMock.issueBill.mockReset();
   billMock.recordPayment.mockReset();
   revalidatePathMock.mockReset();
+  redirectMock.mockClear();
 });
 
 describe('generateBillsAction', () => {
@@ -143,11 +149,12 @@ describe('issueBillAction', () => {
     expect(r.status).toBe('error');
   });
 
-  it('revalidates both paths on success', async () => {
+  it('revalidates both paths and redirects to a page-level receipt on success', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     billMock.issueBill.mockResolvedValue({ id: 'b1', status: BillStatus.ISSUED });
-    const r = await issueBillAction('b1');
-    expect(r.status).toBe('success');
+    await expect(issueBillAction('b1')).rejects.toThrow(
+      'NEXT_REDIRECT:/owner/bills/b1?issued=1',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/bills/b1');
   });

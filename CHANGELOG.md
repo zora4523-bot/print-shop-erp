@@ -1,4 +1,16 @@
+---
+status: historical
+owner: project-maintainers
+last_verified: 2026-08-24
+applies_to: SPEC v1.0 through v1.2.1; not product releases
+---
+
 # SPEC 变更日志
+
+> 本文件只记录业务规格与技术基线在 v1.0–v1.2.1 期间的历史变化，**不是当前产品发布日志**。
+> 仓库目前没有可据实补写的正式产品 release 清单，因此不从未提交工作区、计划或测试结果伪造版本。
+> 产品发布记录的建立与字段要求见
+> [`CONTRIBUTING.md` 的“产品发布记录策略”](./CONTRIBUTING.md#产品发布记录策略)。
 
 ## v1.2.1 技术栈校准（2026-04-22，脚手架初始化时发现）
 

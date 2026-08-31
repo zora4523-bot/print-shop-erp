@@ -50,11 +50,12 @@ export function formatBusinessDateKey(date: Date): string {
 export async function nextDailyDocumentNumber(
   kind: DailyDocumentKind,
   date: Date = new Date(),
+  client: Pick<typeof db, '$queryRaw'> = db,
 ): Promise<string> {
   const spec = DOCUMENT_NUMBER_SPECS[kind];
   const businessDate = formatBusinessDateKey(date);
   const sequenceKey = `${kind}:${businessDate}`;
-  const rows = await db.$queryRaw<{ value: number }[]>`
+  const rows = await client.$queryRaw<{ value: number }[]>`
     INSERT INTO "DailyDocumentSequence" ("key", "value", "updatedAt")
     VALUES (${sequenceKey}, 1, NOW())
     ON CONFLICT ("key") DO UPDATE

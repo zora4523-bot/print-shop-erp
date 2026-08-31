@@ -15,10 +15,17 @@ import type {
 } from './types';
 import { databaseNow } from './clock';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
+import {
+  backgroundJobRequiresOwnerResolution,
+  isTerminalNotificationFailure,
+} from './terminal-policy';
 
 // 带上 `$queryRaw` 是为了让复活分支能用**同一个** client 去取库时钟：
 // 调用方传的是事务时，时钟也必须来自那个事务，否则又变成两个时间源。
-type EnqueueClient = Pick<Prisma.TransactionClient, 'backgroundJob' | '$queryRaw'>;
+export type EnqueueClient = Pick<
+  Prisma.TransactionClient,
+  'backgroundJob' | '$queryRaw'
+>;
 
 export type EnqueueBackgroundJobResult = {
   job: BackgroundJob;
@@ -37,78 +44,89 @@ export async function enqueueBackgroundJob(
   input: EnqueueBackgroundJobInput,
   client: EnqueueClient = db,
 ): Promise<EnqueueBackgroundJobResult> {
-  try {
-    const job = await client.backgroundJob.create({
+  // Do not use create -> catch P2002 here.  PostgreSQL marks an interactive
+  // transaction aborted after a unique violation, so the duplicate lookup
+  // itself fails when this helper is used as a transactional outbox.  Prisma's
+  // createMany(skipDuplicates) compiles to ON CONFLICT DO NOTHING: duplicates
+  // are an ordinary result and the owning business transaction remains usable.
+  const inserted = await client.backgroundJob.createMany({
+    data: [{
+      type: input.type,
+      queue: input.queue,
+      dedupeKey: input.dedupeKey,
+      payload: input.payload,
+      priority: input.priority ?? 100,
+      maxAttempts: input.maxAttempts ?? 5,
+      availableAt: input.availableAt,
+    }],
+    skipDuplicates: true,
+  });
+  const job = await client.backgroundJob.findUnique({
+    where: { dedupeKey: input.dedupeKey },
+  });
+  if (!job) {
+    throw new Error(`background job insert was not observable: ${input.dedupeKey}`);
+  }
+  if (inserted.count === 1) {
+    return { job, created: true, requeued: false };
+  }
+
+  // SUCCEEDED/RUNNING/PENDING are real duplicates and must stay idempotent.
+  // DEAD may be re-triggered through the same logical scope, keeping attempt
+  // history attached. CANCELLED is an explicit operator decision and remains
+  // terminal; a duplicate webhook/cron POST must not silently undo it.
+  if (job.status === BackgroundJobStatus.DEAD) {
+    // An UNKNOWN notification is a deliberate do-not-resend state. A repeated
+    // business event with the same dedupe key must not move its job away from
+    // the owner-resolution queue; only resolveUnknownNotification may re-arm
+    // it after every ambiguous channel has an explicit decision.
+    if (backgroundJobRequiresOwnerResolution(job)) {
+      return { job, created: false, requeued: false };
+    }
+    const retryBudget = input.maxAttempts ?? 5;
+    const updated = await client.backgroundJob.updateMany({
+      where: {
+        id: job.id,
+        // Generation CAS: a concurrent re-arm/run/cancel must make this stale
+        // reader lose. Matching either terminal status would let an old DEAD
+        // reader overwrite a newer CANCELLED generation (ABA), possibly with
+        // attempts === maxAttempts and a permanently unclaimable PENDING row.
+        status: BackgroundJobStatus.DEAD,
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
+      },
       data: {
         type: input.type,
         queue: input.queue,
-        dedupeKey: input.dedupeKey,
         payload: input.payload,
         priority: input.priority ?? 100,
-        maxAttempts: input.maxAttempts ?? 5,
-        availableAt: input.availableAt,
+        maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
+        // 库时钟，不是 new Date()：这一行写下的 availableAt 之后要被
+        // claimNextBackgroundJob 拿 `availableAt <= now()` 比较（同文件
+        // 的 SQL）。用 Node 时钟写、用库时钟读，就是本模块专门要消除的
+        // 两套时间源——web 机快 5 分钟时，本该立刻执行的 re-arm 会白等
+        // 5 分钟。failBackgroundJob / retryDeadBackgroundJob 早已切到
+        // databaseNow，唯独这条 DEAD/CANCELLED 复活路径漏了。
+        availableAt: input.availableAt ?? (await databaseNow(client)),
+        result: Prisma.JsonNull,
+        status: BackgroundJobStatus.PENDING,
+        finishedAt: null,
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
+        lastErrorCode: null,
       },
     });
-    return { job, created: true, requeued: false };
-  } catch (error) {
-    if (
-      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-      error.code !== 'P2002'
-    ) {
-      throw error;
-    }
-    const job = await client.backgroundJob.findUnique({
+    const current = await client.backgroundJob.findUnique({
       where: { dedupeKey: input.dedupeKey },
     });
-    if (!job) throw error;
-
-    // SUCCEEDED/RUNNING/PENDING are real duplicates and must stay idempotent.
-    // DEAD/CANCELLED are terminal delivery failures: keeping their unique key
-    // forever would make an operator retry of the same logical scope silently
-    // no-op. Re-arm the same ledger row so attempt history stays attached.
-    if (
-      job.status === BackgroundJobStatus.DEAD ||
-      job.status === BackgroundJobStatus.CANCELLED
-    ) {
-      const retryBudget = input.maxAttempts ?? 5;
-      const updated = await client.backgroundJob.updateMany({
-        where: {
-          id: job.id,
-          status: {
-            in: [BackgroundJobStatus.DEAD, BackgroundJobStatus.CANCELLED],
-          },
-        },
-        data: {
-          type: input.type,
-          queue: input.queue,
-          payload: input.payload,
-          priority: input.priority ?? 100,
-          maxAttempts: Math.max(job.maxAttempts, job.attempts + retryBudget),
-          // 库时钟，不是 new Date()：这一行写下的 availableAt 之后要被
-          // claimNextBackgroundJob 拿 `availableAt <= now()` 比较（同文件
-          // 的 SQL）。用 Node 时钟写、用库时钟读，就是本模块专门要消除的
-          // 两套时间源——web 机快 5 分钟时，本该立刻执行的 re-arm 会白等
-          // 5 分钟。failBackgroundJob / retryDeadBackgroundJob 早已切到
-          // databaseNow，唯独这条 DEAD/CANCELLED 复活路径漏了。
-          availableAt: input.availableAt ?? (await databaseNow(client)),
-          result: Prisma.JsonNull,
-          status: BackgroundJobStatus.PENDING,
-          finishedAt: null,
-          lockedBy: null,
-          lockedAt: null,
-          heartbeatAt: null,
-          lastErrorCode: null,
-        },
-      });
-      const current = await client.backgroundJob.findUnique({
-        where: { dedupeKey: input.dedupeKey },
-      });
-      if (!current) throw error;
-      return { job: current, created: false, requeued: updated.count === 1 };
+    if (!current) {
+      throw new Error(`background job disappeared while re-arming: ${input.dedupeKey}`);
     }
-
-    return { job, created: false, requeued: false };
+    return { job: current, created: false, requeued: updated.count === 1 };
   }
+
+  return { job, created: false, requeued: false };
 }
 
 type ClaimedRow = {
@@ -120,6 +138,7 @@ type ClaimedRow = {
   attempts: number;
   maxAttempts: number;
   claimedAt: Date;
+  reclaimed: boolean;
 };
 
 export async function claimNextBackgroundJob(input: {
@@ -127,93 +146,14 @@ export async function claimNextBackgroundJob(input: {
   workerId: string;
   leaseMs: number;
 }): Promise<ClaimedBackgroundJob | null> {
-  // 下面每一个瞬间都来自数据库，绝不来自本 worker 的 Node 时钟。两台机器上的
-  // worker 会拿各自的 new Date() 去比对方写下的 heartbeatAt —— 时钟快的那台
-  // 会把对方还在跑的租约判成过期并重新 claim，同一个导出/通知执行两次。
-  //
-  // 这里用 now()（= transaction_timestamp）而不是 clock_timestamp()：整个事务
-  // 一个固定瞬间，下面 4 条清扫语句和最后的 claim 必须对同一个瞬间达成一致。
-  // clock_timestamp() 会随语句间的往返前进，于是租约可能在「清扫 attempt 之后、
-  // claim 之前」过期 —— 旧 attempt 行永远停在 RUNNING，新 attempt 行却已插进来。
-  // 代价是 now() 略早于真实时间（事务开始时刻），这只会让清扫更保守，是安全方向。
+  // 租约判定只用数据库时钟。终态回收由 queue-local lease
+  // reaper 独立调度；claim 热路径只领取一条任务并开启 attempt。
   const leaseCutoff = Prisma.sql`(now() - (${input.leaseMs}::int * interval '1 millisecond'))`;
 
   return db.$transaction(async (tx) => {
-    // Close the attempt left behind by a worker that stopped heartbeating.
-    await tx.$executeRaw`
-      UPDATE "BackgroundJobAttempt" AS attempt
-         SET "status" = 'ABANDONED'::"BackgroundJobAttemptStatus",
-             "finishedAt" = now(),
-             "durationMs" = LEAST(
-               2147483647,
-               GREATEST(
-                 0,
-                 FLOOR(EXTRACT(EPOCH FROM (now() - attempt."startedAt")) * 1000)
-               )
-             )::integer
-        FROM "BackgroundJob" AS job
-       WHERE attempt."jobId" = job."id"
-         AND attempt."status" = 'RUNNING'::"BackgroundJobAttemptStatus"
-         AND job."status" = 'RUNNING'::"BackgroundJobStatus"
-         AND COALESCE(job."heartbeatAt", job."lockedAt") < ${leaseCutoff}
-    `;
-
-    // A final-attempt worker may die before it can mark DEAD. The lease
-    // sweeper makes that terminal state observable instead of leaving RUNNING
-    // forever.
-    await tx.$executeRaw`
-      UPDATE "BackgroundJob"
-         SET "status" = 'DEAD'::"BackgroundJobStatus",
-             "finishedAt" = now(),
-             "lockedBy" = NULL,
-             "lockedAt" = NULL,
-             "heartbeatAt" = NULL,
-             "lastErrorCode" = COALESCE("lastErrorCode", 'WorkerLeaseExpired'),
-             "updatedAt" = now()
-       WHERE "status" = 'RUNNING'::"BackgroundJobStatus"
-         AND "attempts" >= "maxAttempts"
-         AND COALESCE("heartbeatAt", "lockedAt") < ${leaseCutoff}
-    `;
-
-    // A final-attempt CDR worker can disappear before its handler records the
-    // terminal bundle state. Reconcile from the authoritative job ledger so
-    // the download page never remains PENDING forever.
-    await tx.$executeRaw`
-      UPDATE "DesignBundle" AS bundle
-         SET "status" = 'FAILED'::"DesignBundleStatus",
-             "lastErrorCode" = COALESCE(job."lastErrorCode", 'WorkerLeaseExpired')
-        FROM "BackgroundJob" AS job
-       WHERE bundle."backgroundJobId" = job."id"
-         AND bundle."status" = 'PENDING'::"DesignBundleStatus"
-         AND job."status" = 'DEAD'::"BackgroundJobStatus"
-         AND job."type" = 'CDR_BUNDLE'
-    `;
-
-    // Export handlers deliberately leave retryable failures PENDING. When a
-    // worker disappears on its final attempt, reconcile the user-facing
-    // export ledger from the authoritative background-job terminal state.
-    await tx.$executeRaw`
-      UPDATE "OrderExport" AS order_export
-         SET "status" = 'FAILED'::"OrderExportStatus",
-             "lastErrorCode" = COALESCE(job."lastErrorCode", 'WorkerLeaseExpired'),
-             "filters" = jsonb_build_object(
-               'scope',
-               CASE
-                 WHEN order_export."filters"->>'scope' = 'all' THEN 'all'
-                 ELSE 'filtered'
-               END
-             ),
-             "updatedAt" = now()
-        FROM "BackgroundJob" AS job
-       WHERE order_export."backgroundJobId" = job."id"
-         AND order_export."status" = 'PENDING'::"OrderExportStatus"
-         AND job."status" = 'DEAD'::"BackgroundJobStatus"
-         AND job."type" = 'ORDER_EXPORT'
-    `;
-
     const rows = await tx.$queryRaw<ClaimedRow[]>`
       WITH candidate AS (
-        SELECT "id"
+        SELECT "id", ("status" = 'RUNNING'::"BackgroundJobStatus") AS "reclaimed"
           FROM "BackgroundJob"
          WHERE "queue" = ${input.queue}::"BackgroundJobQueue"
            AND "attempts" < "maxAttempts"
@@ -245,11 +185,32 @@ export async function claimNextBackgroundJob(input: {
        WHERE job."id" = candidate."id"
       RETURNING job."id", job."type", job."queue", job."dedupeKey",
                 job."payload", job."attempts", job."maxAttempts",
-                now() AS "claimedAt"
+                now() AS "claimedAt", candidate."reclaimed"
     `;
 
     const row = rows[0];
     if (!row) return null;
+
+    if (row.reclaimed) {
+      // The UPDATE above still holds the job row lock. Close the abandoned
+      // attempt before inserting its successor, so all lease transitions use
+      // the same job -> attempt locking order.
+      await tx.$executeRaw`
+        UPDATE "BackgroundJobAttempt" AS attempt
+           SET "status" = 'ABANDONED'::"BackgroundJobAttemptStatus",
+               "finishedAt" = now(),
+               "durationMs" = LEAST(
+                 2147483647,
+                 GREATEST(
+                   0,
+                   FLOOR(EXTRACT(EPOCH FROM (now() - attempt."startedAt")) * 1000)
+                 )
+               )::integer
+         WHERE attempt."jobId" = ${row.id}
+           AND attempt."attempt" = ${row.attempts - 1}
+           AND attempt."status" = 'RUNNING'::"BackgroundJobAttemptStatus"
+      `;
+    }
 
     await tx.backgroundJobAttempt.create({
       data: {
@@ -263,7 +224,14 @@ export async function claimNextBackgroundJob(input: {
     });
 
     return {
-      ...row,
+      id: row.id,
+      type: row.type,
+      queue: row.queue,
+      dedupeKey: row.dedupeKey,
+      payload: row.payload,
+      attempts: row.attempts,
+      maxAttempts: row.maxAttempts,
+      claimedAt: row.claimedAt,
       workerId: input.workerId,
     };
   });
@@ -343,7 +311,16 @@ export async function failBackgroundJob(
   now?: Date,
 ): Promise<void> {
   const errorCode = backgroundJobErrorCode(error);
-  const exhausted = job.attempts >= job.maxAttempts;
+  const partialResult = backgroundJobPartialResult(error);
+  // UNKNOWN and stale manual-replay authorization are not retryable transport
+  // failures. Retrying either payload cannot make it safe or current, so keep
+  // the ledger evidence and terminate the owning job without burning attempts.
+  const terminalNotificationFailure = isTerminalNotificationFailure({
+    type: job.type,
+    lastErrorCode: errorCode,
+  });
+  const exhausted =
+    job.attempts >= job.maxAttempts || terminalNotificationFailure;
 
   await db.$transaction(async (tx) => {
     // availableAt 之后要被 claim 拿 `availableAt <= now()` 比较，所以退避
@@ -368,6 +345,7 @@ export async function failBackgroundJob(
         lockedAt: null,
         heartbeatAt: null,
         lastErrorCode: errorCode,
+        ...(partialResult === undefined ? {} : { result: partialResult }),
       },
     });
     if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
@@ -450,7 +428,13 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
   return db.$transaction(async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { status: true, type: true, attempts: true, maxAttempts: true },
+      select: {
+        status: true,
+        type: true,
+        attempts: true,
+        maxAttempts: true,
+        lastErrorCode: true,
+      },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
     // Terminal export rows no longer retain their raw filter params. Reusing
@@ -460,19 +444,37 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
       await scrubOrderExportFiltersForBackgroundJob(jobId, tx);
       return false;
     }
+    if (backgroundJobRequiresOwnerResolution(job)) {
+      return false;
+    }
     // 「立刻可跑」必须用库时钟表达：web 进程的 new Date() 快了就把重试
     // 推迟到未来，慢了则无所谓 —— 两种都不该由 web 的时钟说了算。
     const at = await databaseNow(tx);
-    await tx.backgroundJob.update({
-      where: { id: jobId },
+    const updated = await tx.backgroundJob.updateMany({
+      // CAS: two operators (or a stale browser double-submit) may both read
+      // DEAD above. Only the first is allowed to move the ledger row; a later
+      // request must not overwrite a job that has already been claimed.
+      where: {
+        id: jobId,
+        status: BackgroundJobStatus.DEAD,
+        // Include the generation as well as the state. A fast worker could
+        // otherwise take the first retry through PENDING/RUNNING back to DEAD
+        // before a stale second request executes (the classic ABA race).
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
+      },
       data: {
         status: BackgroundJobStatus.PENDING,
         maxAttempts: Math.max(job.maxAttempts, job.attempts + 3),
         availableAt: at,
         finishedAt: null,
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
         lastErrorCode: null,
       },
     });
+    if (updated.count !== 1) return false;
     if (job.type === 'CDR_BUNDLE') {
       await tx.designBundle.updateMany({
         where: { backgroundJobId: jobId },
@@ -481,6 +483,23 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
     }
     return true;
   });
+}
+
+function backgroundJobPartialResult(
+  error: unknown,
+): Prisma.InputJsonValue | undefined {
+  if (
+    !error ||
+    typeof error !== 'object' ||
+    !('partialResult' in error) ||
+    error.partialResult === undefined
+  ) {
+    return undefined;
+  }
+  // Durable handlers attach plain JSON progress snapshots to their typed
+  // errors (batch results and notification delivery counts). Persist that
+  // snapshot on the authoritative job row before retrying or marking DEAD.
+  return error.partialResult as Prisma.InputJsonValue;
 }
 
 export async function cancelPendingBackgroundJob(jobId: string): Promise<boolean> {

@@ -29,5 +29,5 @@ export const TX_REASON_LABELS: Record<string, string> = {
 };
 
 export function txReasonLabel(reasonType: string): string {
-  return TX_REASON_LABELS[reasonType] ?? reasonType;
+  return TX_REASON_LABELS[reasonType] ?? '未识别出入库原因';
 }

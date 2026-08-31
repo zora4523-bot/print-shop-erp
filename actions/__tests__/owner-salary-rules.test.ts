@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
+import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
 
 const { permissionMock, ruleAdminMock, revalidateMock } = vi.hoisted(() => ({
   permissionMock: { requirePermission: vi.fn() },
@@ -57,5 +58,8 @@ describe('createSalaryRuleVersionAction', () => {
     expect(ruleAdminMock.createSalaryRuleVersion).toHaveBeenCalledWith(input, actor);
     expect(revalidateMock).toHaveBeenCalledWith('/owner/salary/rules');
     expect(revalidateMock).toHaveBeenCalledWith('/owner/salary/hourly');
+    expect(revalidateMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.employeePay,
+    );
   });
 });

@@ -53,7 +53,7 @@ export function OutsourceAmountForm({
   const errors = state?.status === 'invalid' ? state.fieldErrors : {};
 
   return (
-    <form action={action} className="space-y-3">
+    <form action={action} aria-busy={pending} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] sm:items-end">
         <div className="space-y-1">
@@ -64,6 +64,7 @@ export function OutsourceAmountForm({
             id="outsource-amount"
             name="amount"
             value={amount}
+            disabled={pending}
             onChange={(event) => setAmount(event.target.value)}
             inputMode="decimal"
             min="0"
@@ -79,6 +80,7 @@ export function OutsourceAmountForm({
             id="outsource-amount-reason"
             name="reason"
             value={reason}
+            disabled={pending}
             onChange={(event) => setReason(event.target.value)}
             maxLength={200}
             required

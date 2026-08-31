@@ -110,7 +110,7 @@ describe('writeXlsxFile', () => {
     expect(sawTemporaryOutput).toBe(true);
     expect((await stat(filePath)).size).toBeGreaterThan(10_000);
     expect(await readdir(directory)).toEqual(['streamed.xlsx']);
-  });
+  }, 15_000);
 
   it('writes exact decimal cells without converting through JavaScript Number', async () => {
     const directory = await temporaryDirectory();

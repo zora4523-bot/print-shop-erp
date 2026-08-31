@@ -11,13 +11,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import {
-  PURCHASE_ORDER_STATUS_LABELS,
   type PurchaseOrderListSortKey,
   type PurchaseOrderSummary,
 } from '@/lib/purchase';
 import type { SortDirection, TableHrefParams } from '@/lib/admin/table';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { PurchaseOrderStatusBadge } from './PurchaseStatusBadge';
 
 type Props = {
   orders: PurchaseOrderSummary[];
@@ -119,7 +119,7 @@ export function PurchaseOrdersTable({
               <TableCell>
                 {firstItem ? (
                   <>
-                    <div>{firstItem.material.name}</div>
+                    <div>{externalPriceBusinessText(firstItem.material.name)}</div>
                     <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {firstItem.material.code}
                     </div>
@@ -137,9 +137,7 @@ export function PurchaseOrdersTable({
                   : '—'}
               </TableCell>
               <TableCell>
-                <Badge variant="outline">
-                  {PURCHASE_ORDER_STATUS_LABELS[order.status]}
-                </Badge>
+                <PurchaseOrderStatusBadge status={order.status} />
               </TableCell>
               <TableCell>
                 <AdminRowActions>

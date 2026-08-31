@@ -42,6 +42,7 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createProductCategoryNodeAction,
+  createRuleCenterProductCategoryNodeAction,
   setProductCategoryNodeActiveAction,
   updateProductCategoryNodeAction,
 } from '../owner-product-categories';
@@ -118,6 +119,50 @@ describe('createProductCategoryNodeAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
   });
 
+  it('规则中心创建后保持在 canonical 分类路由', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.createProductCategoryNode.mockResolvedValue({ id: 'cat1' });
+
+    await expect(
+      createProductCategoryNodeAction(
+        null,
+        fd({
+          ...validCategory,
+          routeBase: '/owner/rules/product-categories',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
+  });
+
+  it('规则中心专用 action 忽略伪造的旧返回路径', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    productMock.createProductCategoryNode.mockResolvedValue({ id: 'cat1' });
+
+    await expect(
+      createRuleCenterProductCategoryNodeAction(
+        null,
+        fd({
+          ...validCategory,
+          routeBase: '/owner/product-categories',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories/cat1',
+    );
+  });
+
   it('maps P2002 path collision to a retry-level general error（自动段名，无表单字段可指）', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     productMock.createProductCategoryNode.mockRejectedValueOnce(
@@ -178,6 +223,9 @@ describe('updateProductCategoryNodeAction', () => {
     expect(result.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/product-categories/cat1');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/product-categories',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/products/new');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/boms/new');

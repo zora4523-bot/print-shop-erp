@@ -24,6 +24,7 @@ const VERSION = 'v1';
 function fixture(): BackgroundJobHealth {
   const now = new Date();
   return {
+    observedAt: now,
     activeWorkers: [
       { queue: BackgroundJobQueue.LIGHT, version: VERSION, lastSeenAt: now },
       { queue: BackgroundJobQueue.HEAVY, version: VERSION, lastSeenAt: now },
@@ -62,6 +63,7 @@ describe('GET /api/health/ready', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('degraded');
+    expect(body.time).toBe(health.observedAt.toISOString());
     expect(body.warnings).toContain('dead-jobs-last-24h');
     expect(body.warnings).toContain('stale-running-jobs');
     expect(body.jobs.deadLast24h).toBe(5);

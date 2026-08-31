@@ -12,6 +12,7 @@ import {
   paginatedResult,
   paginationWindow,
   type PaginatedResult,
+  type PaginationWindow,
   type SortDirection,
   type TableHrefParams,
 } from '../admin/table';
@@ -91,7 +92,23 @@ export type OrderListQuery = {
   pageSize: number;
   sort: OrderListSortKey;
   dir: SortDirection;
+  /**
+   * Pure presentation state. These values are deliberately kept outside
+   * `filters` so they can round-trip through the URL without ever reaching
+   * Prisma's `where` clause.
+   */
+  selectedOrderId?: string;
+  scrollY?: number;
+  view?: OrderListViewKey;
 };
+
+export const ORDER_LIST_VIEW_KEYS = [
+  'urgent',
+  'due-today',
+  'scheduling',
+  'saved',
+] as const;
+export type OrderListViewKey = (typeof ORDER_LIST_VIEW_KEYS)[number];
 
 export type OrderListParseResult = {
   query: OrderListQuery;
@@ -118,9 +135,14 @@ export type OrderListRow = {
   submitterId: string;
   submitterName: string;
   workerNames: string[];
+  promisedDate: Date | null;
   createdAt: Date;
   updatedAt: Date;
   pieceworkCost: string | null;
+};
+
+export type OrderListPageWindow = PaginationWindow & {
+  total: number;
 };
 
 /**
@@ -338,6 +360,37 @@ function parsePositiveInteger(
   return Math.min(max, Math.max(1, parsed));
 }
 
+function parseScrollPosition(
+  params: OrderListSearchParams,
+  issues: string[],
+): number | undefined {
+  const value = firstValue(params, 'scroll');
+  if (!value) return undefined;
+  if (!/^\d{1,8}$/.test(value)) {
+    issues.push('列表滚动位置不合法');
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    issues.push('列表滚动位置不合法');
+    return undefined;
+  }
+  return parsed;
+}
+
+function parseListView(
+  params: OrderListSearchParams,
+  issues: string[],
+): OrderListViewKey | undefined {
+  const value = firstValue(params, 'view');
+  if (!value) return undefined;
+  if (!ORDER_LIST_VIEW_KEYS.includes(value as OrderListViewKey)) {
+    issues.push('保存视图不合法');
+    return undefined;
+  }
+  return value as OrderListViewKey;
+}
+
 export function parseOrderListQuery(
   params: OrderListSearchParams,
 ): OrderListParseResult {
@@ -398,6 +451,15 @@ export function parseOrderListQuery(
   if (dirValue && dirValue !== 'asc' && dirValue !== 'desc') {
     issues.push('排序方向不合法');
   }
+
+  const selectedOrderId = parseId(
+    params,
+    'selected',
+    '当前选中工单',
+    issues,
+  );
+  const scrollY = parseScrollPosition(params, issues);
+  const view = parseListView(params, issues);
 
   return {
     query: {
@@ -498,6 +560,9 @@ export function parseOrderListQuery(
       ),
       sort,
       dir,
+      ...(selectedOrderId ? { selectedOrderId } : {}),
+      ...(scrollY !== undefined ? { scrollY } : {}),
+      ...(view ? { view } : {}),
     },
     issues,
   };
@@ -768,6 +833,9 @@ export function serializeOrderListQuery(query: OrderListQuery): TableHrefParams 
     sort: query.sort !== 'createdAt' ? query.sort : undefined,
     dir:
       query.sort !== 'createdAt' || query.dir !== 'desc' ? query.dir : undefined,
+    selected: query.selectedOrderId,
+    scroll: query.scrollY,
+    view: query.view,
   };
 }
 
@@ -775,14 +843,29 @@ function booleanParam(value: boolean | undefined): string | undefined {
   return value === undefined ? undefined : value ? 'yes' : 'no';
 }
 
-export async function listOrdersPage(
+export async function getOrderListPageWindow(
   actor: { id: string; role: Role },
   query: OrderListQuery,
-): Promise<PaginatedResult<OrderListRow>> {
+): Promise<OrderListPageWindow> {
   const safeQuery = sanitizeOrderListQueryForActor(actor, query);
   const where = buildOrderWhere(actor, safeQuery.filters);
   const total = await db.order.count({ where });
   const window = paginationWindow(total, safeQuery.page, safeQuery.pageSize);
+
+  return { ...window, total };
+}
+
+export async function listOrdersPage(
+  actor: { id: string; role: Role },
+  query: OrderListQuery,
+  windowPromise: Promise<OrderListPageWindow> = getOrderListPageWindow(
+    actor,
+    query,
+  ),
+): Promise<PaginatedResult<OrderListRow>> {
+  const safeQuery = sanitizeOrderListQueryForActor(actor, query);
+  const where = buildOrderWhere(actor, safeQuery.filters);
+  const { total, ...window } = await windowPromise;
   const rows = await db.order.findMany({
     where,
     select: {
@@ -801,6 +884,7 @@ export async function listOrdersPage(
       expressCode: true,
       ...(actor.role === Role.WORKER ? {} : { totalAmount: true }),
       submitterId: true,
+      promisedDate: true,
       submitter: { select: { displayName: true } },
       sourceOrder: { select: { orderNo: true } },
       _count: { select: { shipments: true } },

@@ -17,7 +17,7 @@ export function ChangePasswordForm() {
   const success = state?.status === 'success';
 
   return (
-    <form action={formAction} className="space-y-4" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-4" noValidate>
       <Field
         id="currentPassword"
         label="当前密码"

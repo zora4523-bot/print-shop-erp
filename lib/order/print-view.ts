@@ -1,13 +1,13 @@
 import { buildQrSvg } from './qr';
 import { db } from '../db';
-import { Role } from '../../generated/prisma/enums';
+import { Role, TaskStatus } from '../../generated/prisma/enums';
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { signDesignReadUrl } from '../oss/read-url';
-import { roleLabel } from '../auth/role-labels';
 import type {
   PrintDesign,
   PrintOrder,
   PrintOrderItem,
+  PrintPackagingGroup,
   PrintShipment,
   PrintTask,
 } from '../../components/business/order/OrderPrintLayout.types';
@@ -33,10 +33,19 @@ export async function getOrderForPrint(
       ...getOrderScopeFilter(user),
     },
     include: {
-      submitter: {
-        select: { displayName: true, role: true },
-      },
+      customerParty: { select: { name: true } },
       sourceOrder: { select: { orderNo: true } },
+      packagingGroups: {
+        orderBy: { sequence: 'asc' },
+        include: {
+          lines: {
+            orderBy: { orderItem: { sequence: 'asc' } },
+            include: {
+              orderItem: { select: { sequence: true } },
+            },
+          },
+        },
+      },
       shipments: {
         orderBy: { sequence: 'asc' },
         include: {
@@ -52,10 +61,11 @@ export async function getOrderForPrint(
         orderBy: { sequence: 'asc' },
         include: {
           designs: {
-            orderBy: { uploadedAt: 'asc' },
+            orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }],
           },
           tasks: {
-            orderBy: { createdAt: 'asc' },
+            where: { status: { not: TaskStatus.CANCELLED } },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             include: {
               craft: { select: { name: true } },
               worker: { select: { displayName: true } },
@@ -83,61 +93,85 @@ export async function getOrderForPrint(
     for (const row of rows) craftNameById.set(row.id, row.name);
   }
 
-  // Pre-render every QR SVG in one Promise.all so we don't serialize
-  // the I/O-bound calls. Order QR + one per task; task counts cap out
-  // around 10–20 in practice.
-  const taskQrPairs = order.items.flatMap((item) => item.tasks);
   const base = baseUrl.replace(/\/+$/, '');
-  const [orderQrSvg, ...taskQrSvgs] = await Promise.all([
-    buildQrSvg(`${base}/orders/${order.id}`, 95),
-    ...taskQrPairs.map((t) => buildQrSvg(`${base}/worker/tasks/${t.id}`, 55)),
-  ]);
-  const taskQrById = new Map(
-    taskQrPairs.map((t, i) => [t.id, taskQrSvgs[i] as string]),
+  const orderQrSvg = await buildQrSvg(
+    `${base}/wo/${encodeURIComponent(order.orderNo)}`,
+    95,
+    { errorCorrectionLevel: 'Q' },
   );
 
-  const printItems: PrintOrderItem[] = order.items.map((item) => ({
-    id: item.id,
-    sequence: item.sequence,
-    name: item.name,
-    specification: item.specification,
-    paperType: item.paperType,
-    quantity: item.quantity,
-    foilColors: item.foilColors,
-    isDoubleSided: item.isDoubleSided,
-    isDoubleColor: item.isDoubleColor,
-    // Drop unresolvable IDs silently rather than rendering a raw cuid
-    // into the printed sheet — if a craft was deleted, the workshop
-    // shouldn't see garbage on paper.
-    craftNames: item.crafts
-      .map((cid) => craftNameById.get(cid))
-      .filter((n): n is string => typeof n === 'string'),
-    remark: item.remark,
-    designs: item.designs.map(
-      (d): PrintDesign => ({
-        id: d.id,
-        fileType: d.fileType,
-        // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
-        // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
-        // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
-        fileUrl:
-          d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
-        fileName: d.fileName,
-        thumbnailUrl: d.thumbnailUrl
-          ? signDesignReadUrl(d.thumbnailUrl)
-          : d.thumbnailUrl,
-        uploadedAt: d.uploadedAt,
-      }),
-    ),
-    tasks: item.tasks.map(
-      (t): PrintTask => ({
-        id: t.id,
-        craftName: t.craft.name,
-        workerDisplayName: t.worker?.displayName ?? null,
-        qrSvg: taskQrById.get(t.id) ?? '',
-      }),
-    ),
-  }));
+  const printItems: PrintOrderItem[] = await Promise.all(
+    order.items.map(async (item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      name: item.name,
+      pricingRoute: item.pricingRoute,
+      artworkVersion: item.artworkVersion,
+      specification: item.specification,
+      paperType: item.paperType,
+      paperWeightGsm: item.paperWeightGsm,
+      quantity: item.quantity,
+      frontFoilColors: item.frontFoilColors,
+      backFoilColors: item.backFoilColors,
+      foilColors: item.foilColors,
+      foilTechnique: item.foilTechnique,
+      hasLocalFoil: item.hasLocalFoil,
+      lamination: item.lamination,
+      printColors: item.printColors,
+      printColorsKnown: item.printColorsKnown,
+      isDoubleSided: item.isDoubleSided,
+      isDoubleColor: item.isDoubleColor,
+      // Drop unresolvable IDs silently rather than rendering a raw cuid
+      // into the printed sheet — if a craft was deleted, the workshop
+      // shouldn't see garbage on paper.
+      craftNames: item.crafts
+        .map((cid) => craftNameById.get(cid))
+        .filter((n): n is string => typeof n === 'string'),
+      remark: item.remark,
+      designs: item.designs.map(
+        (d): PrintDesign => ({
+          id: d.id,
+          fileType: d.fileType,
+          // bucket 私有：IMAGE 渲染前换成 30min 预签 GET（浏览器打印和
+          // Puppeteer PDF 都在窗口内完成）。CDR 不签——打印视图按 SPEC
+          // §E.2.1 过滤掉 CDR，不该在 HTML 里留可用下载 URL。
+          fileUrl:
+            d.fileType === 'IMAGE' ? signDesignReadUrl(d.fileUrl) : d.fileUrl,
+        }),
+      ),
+      tasks: await Promise.all(
+        item.tasks.map(
+          async (t): Promise<PrintTask> => ({
+            id: t.id,
+            craftName: t.craft.name,
+            workerDisplayName: t.worker?.displayName ?? null,
+            plannedQty: t.plannedQty,
+            completedQty: t.completedQty,
+            defectQty: t.defectQty,
+            completedAt: t.completedAt,
+            taskQrSvg: await buildQrSvg(
+              `${base}/worker/tasks/${encodeURIComponent(t.id)}`,
+              55,
+              { errorCorrectionLevel: 'Q' },
+            ),
+          }),
+        ),
+      ),
+    })),
+  );
+  const printPackagingGroups: PrintPackagingGroup[] =
+    order.packagingGroups.map((group) => ({
+      id: group.id,
+      sequence: group.sequence,
+      name: group.name,
+      mode: group.mode,
+      actualBagCount: group.actualBagCount,
+      lines: group.lines.map((line) => ({
+        orderItemId: line.orderItemId,
+        orderItemSequence: line.orderItem.sequence,
+        unitsPerBag: line.unitsPerBag,
+      })),
+    }));
   const printShipments: PrintShipment[] = order.shipments.map((shipment) => ({
     id: shipment.id,
     sequence: shipment.sequence,
@@ -145,6 +179,7 @@ export async function getOrderForPrint(
     receiverPhone: shipment.receiverPhone,
     receiverAddress: shipment.receiverAddress,
     expressCode: shipment.expressCode,
+    carrierCode: shipment.carrierCode,
     trackingNo: shipment.trackingNo,
     lines: shipment.lines.map((line) => ({
       orderItemSequence: line.orderItem.sequence,
@@ -162,6 +197,8 @@ export async function getOrderForPrint(
     isUrgent: order.isUrgent,
     isSfCollect: order.isSfCollect,
     promisedDate: order.promisedDate,
+    customerName:
+      order.customerParty?.name?.trim() || order.customerRef?.trim() || null,
     customerRef: order.customerRef,
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
@@ -171,9 +208,8 @@ export async function getOrderForPrint(
     remark: order.remark,
     submittedAt: order.submittedAt,
     createdAt: order.createdAt,
-    submitterDisplayName: order.submitter.displayName,
-    submitterRoleLabel: roleLabel(order.submitter.role),
     items: printItems,
+    packagingGroups: printPackagingGroups,
     shipments: printShipments,
     orderQrSvg,
   };

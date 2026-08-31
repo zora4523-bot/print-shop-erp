@@ -10,6 +10,7 @@ import {
   paginationWindow,
   type PaginatedResult,
 } from './admin/table';
+import { acquirePriceRuleSnapshotWriteLock } from './price/rule-snapshot-lock';
 
 // Thrown when a mutation is refused for a reason the UI should surface,
 // not a generic 500. Same pattern as AccountInvariantError in lib/account.ts.
@@ -36,7 +37,7 @@ export type CraftSummary = Pick<
 
 export type CraftOrderOption = Pick<
   Craft,
-  'id' | 'name' | 'isOutsource'
+  'id' | 'name' | 'code' | 'isOutsource'
 > & {
   isLowFrequency: boolean;
 };
@@ -95,6 +96,7 @@ export async function listActiveCraftOrderOptions(): Promise<
     select: {
       id: true,
       name: true,
+      code: true,
       isOutsource: true,
       sortOrder: true,
     },
@@ -122,16 +124,19 @@ export type CreateCraftData = {
 export async function createCraft(data: CreateCraftData): Promise<CraftSummary> {
   const code = await resolveBusinessCode('CRAFT', data.code);
   const assignment = normalizeCraftAssignment(data);
-  return db.craft.create({
-    data: {
-      name: data.name,
-      code,
-      isOutsource: data.isOutsource,
-      ...assignment,
-      sortOrder: data.sortOrder,
-      isActive: true,
-    },
-    select: SUMMARY_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    return tx.craft.create({
+      data: {
+        name: data.name,
+        code,
+        isOutsource: data.isOutsource,
+        ...assignment,
+        sortOrder: data.sortOrder,
+        isActive: true,
+      },
+      select: SUMMARY_SELECT,
+    });
   });
 }
 
@@ -139,7 +144,6 @@ export async function createCraft(data: CreateCraftData): Promise<CraftSummary> 
 // lib/account.ts for the rationale.
 export type UpdateCraftData = {
   name: string;
-  code: string;
   isOutsource: boolean;
   defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
@@ -150,20 +154,26 @@ export async function updateCraft(
   id: string,
   data: UpdateCraftData,
 ): Promise<CraftSummary> {
-  const target = await getCraftSummary(id);
-  if (!target) throw new CraftInvariantError('目标工艺不存在');
   const assignment = normalizeCraftAssignment(data);
 
-  return db.craft.update({
-    where: { id },
-    data: {
-      name: data.name,
-      code: data.code,
-      isOutsource: data.isOutsource,
-      ...assignment,
-      sortOrder: data.sortOrder,
-    },
-    select: SUMMARY_SELECT,
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.craft.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!target) throw new CraftInvariantError('目标工艺不存在');
+
+    return tx.craft.update({
+      where: { id },
+      data: {
+        name: data.name,
+        isOutsource: data.isOutsource,
+        ...assignment,
+        sortOrder: data.sortOrder,
+      },
+      select: SUMMARY_SELECT,
+    });
   });
 }
 
@@ -215,13 +225,19 @@ export async function setCraftActive(
   id: string,
   isActive: boolean,
 ): Promise<CraftSummary> {
-  const target = await getCraftSummary(id);
-  if (!target) throw new CraftInvariantError('目标工艺不存在');
-  if (target.isActive === isActive) return target;
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const target = await tx.craft.findUnique({
+      where: { id },
+      select: SUMMARY_SELECT,
+    });
+    if (!target) throw new CraftInvariantError('目标工艺不存在');
+    if (target.isActive === isActive) return target;
 
-  return db.craft.update({
-    where: { id },
-    data: { isActive },
-    select: SUMMARY_SELECT,
+    return tx.craft.update({
+      where: { id },
+      data: { isActive },
+      select: SUMMARY_SELECT,
+    });
   });
 }

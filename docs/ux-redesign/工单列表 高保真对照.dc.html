@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<style>
+  body { margin: 0; background: #e6e6e8; }
+  a { color: #5980a6; text-decoration: none; }
+  a:hover { color: #416180; }
+  .oid { font-family: var(--font-heading); font-size: 12px; letter-spacing: 0.08em; padding: 3px 9px; background: #1d2d3d; color: #f2f2f3; text-decoration: none; }
+  .oid:hover { background: #5980a6; color: #f2f2f3; }
+  .sk { font: 400 14px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+  .ind { font-family: var(--font-body); font-size: 14px; line-height: 1.5; }
+  .nowrap { white-space: nowrap; }
+  /* Industry 样式表有元素级 h1–h4 { font-family: var(--font-heading) }，元素规则永远赢过
+     祖先继承来的 .sk 字体，所以 1b 的标题必须显式夺回系统 CJK 栈，否则 A/B 不成立。 */
+  .sk h1, .sk h2, .sk h3, .sk h4 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding: 0 0 40px; color: #1d1f20; font-family: var(--font-body)">
+
+  <div style="padding: 36px 40px 26px; background: #f2f2f3; border-bottom: 1px solid rgba(29,31,32,0.16)">
+    <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-family: var(--font-heading); font-size: 44px; line-height: 1.1">工单列表 · 高保真对照</h1>
+      <span class="tag tag-outline nowrap">ORD-LIST-01 · 1280×800 · light</span>
+    </div>
+    <p style="max-width: 1120px; margin: 12px 0 0; font-size: 15px; line-height: 1.6; color: #424244; text-wrap: pretty">两版<b>结构完全一致</b>——同样的保存视图、常驻筛选行、已选条件 chips、六列可见的表格、行内动作、分页。唯一变量是视觉语言：<a class="oid" href="#1a">1a</a> 用 Industry（钢蓝 + Barlow Condensed + 直角 + 发丝边 + 十字定位标），<a class="oid" href="#1b">1b</a> 用你们现有的 shadcn 皮肤（白卡 + 圆角 + 柔阴影 + 红主色 + 系统 CJK 字体栈）。看完选一个，我就照它把设计语言钉死。</p>
+    <div class="blueprint" style="max-width: 1120px; margin-top: 18px; padding: 12px 15px; background: #fff">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family: var(--font-heading); font-size: 15px; letter-spacing: 0.04em">别把两个变量混起来看</div>
+      <div style="font-size: 12.5px; line-height: 1.7; color: #424244; margin-top: 4px">两版相对<b>当前实现</b>都改了同样四处结构，且<b>只有</b>这四处：① 表格六列全部可见（当前 1280 下只渲染 3 列、状态/交期/金额/动作被容器裁掉，这是本批最高优先的 Blocker）；② 折叠筛选面板改成常驻一行 + 已选条件 chips 永远可见（当前折叠后只剩一个「已启用」布尔徽章）；③ 新增保存视图，取代每天在 30+ 字段里重选同一组条件；④ 补行内动作，取代「进详情再返回」且返回后筛选丢失。<b>这四处与皮肤无关</b>——你选 <a class="oid" href="#1b">1b</a> 也照样要做。</div>
+      <div style="font-size: 12.5px; line-height: 1.7; color: #424244; margin-top: 6px"><b>外壳是忠实还原的，没动</b>：侧栏仍是截图里的三组（概览 / 业务 / 财务，13 项，含「开机师傅计件规则」「员工工资规则」），没有补「主数据」「运维」两组；顶栏仍保留 工单 / 排产 / 采购单 / 仓库/库位 四个与侧栏重复的链接，也仍然没有全局搜索、没有常驻告警入口。这些都是线框文档里的<b>建议</b>，属于另一个议题，故意不放进这一屏——否则你分不清自己在选视觉还是在选结构。</div>
+    </div>
+  </div>
+
+  <section style="padding: 30px 40px 34px">
+    <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px">
+      <span class="oid">1</span>
+      <span style="font-family: var(--font-heading); font-size: 20px">同一屏，两种视觉语言</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 34px; align-items: flex-start">
+
+      <div id="1a" style="flex: none; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: baseline; gap: 10px">
+          <a class="oid" href="#1a">1a</a>
+          <span style="font-size: 13px; color: #5d5d60">Industry — 钢蓝 #5980a6 · Barlow Condensed / Barlow · 直角 · 发丝边 · 十字定位标</span>
+        </div>
+        <div class="ind" style="width: 1280px; height: 800px; overflow: hidden; background: #f2f2f3; border: 1px solid rgba(29,31,32,0.16); display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100%">
+
+          <div style="border-right: 1px solid rgba(29,31,32,0.16); display: flex; flex-direction: column">
+            <div style="padding: 14px 16px 12px; border-bottom: 1px solid rgba(29,31,32,0.16)">
+              <div style="font-family: var(--font-heading); font-size: 18px; letter-spacing: 0.01em">红包印刷 ERP</div>
+              <div style="font-size: 11px; color: #5d5d60; margin-top: 1px">管理员后台</div>
+            </div>
+            <div style="padding: 12px 0; overflow: hidden">
+              <sc-for list="{{ nav }}" as="g" hint-placeholder-count="5">
+                <div style="padding: 0 0 10px">
+                  <div style="padding: 0 16px 4px; font-family: var(--font-heading); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #5980a6">{{ g.group }}</div>
+                  <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4">
+                    <div style="display: flex; align-items: center; gap: 9px; padding: 6px 16px; font-size: 13px; background: {{ it.indBg }}; box-shadow: inset 3px 0 0 {{ it.indEdge }}">
+                      <i style="display: block; width: 13px; height: 13px; border: 1px solid #98989b; flex: none"></i>
+                      <span class="nowrap" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+                      <sc-if value="{{ it.soon }}" hint-placeholder-val="{{ false }}">
+                        <span class="nowrap" style="font-size: 9px; letter-spacing: 0.06em; color: #7a7a7d; border: 1px solid #d4d4d7; padding: 0 4px">未上线</span>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; min-width: 0">
+            <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; border-bottom: 1px solid rgba(29,31,32,0.16); flex: none">
+              <i style="display: block; width: 15px; height: 13px; border: 1px solid #5d5d60; flex: none"></i>
+              <div class="nowrap" style="font-size: 12px; color: #5d5d60; display: flex; gap: 6px"><span>管理后台</span><span>›</span><span style="color: #1d1f20">工单</span></div>
+              <div style="flex: 1"></div>
+              <div style="display: flex; align-items: center; gap: 14px; flex: none; font-size: 12.5px">
+                <span class="nowrap">工单</span><span class="nowrap">排产</span><span class="nowrap">采购单</span><span class="nowrap">仓库/库位</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 7px; flex: none">
+                <span class="tag tag-outline nowrap">DEVELOPMENT</span>
+                <i style="display: block; width: 26px; height: 26px; border: 1px solid rgba(29,31,32,0.16); flex: none"></i>
+                <div class="nowrap" style="display: flex; align-items: center; gap: 7px; padding: 3px 9px 3px 4px; border: 1px solid rgba(29,31,32,0.16)">
+                  <i style="display: block; width: 20px; height: 20px; background: #5980a6"></i>
+                  <span style="font-size: 12.5px">E2E 管理员 · 管理员…</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 14px 20px 0; flex: none">
+              <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px">
+                <div>
+                  <h2 style="margin: 0; font-family: var(--font-heading); font-size: 30px; line-height: 1.1">工单</h2>
+                  <div style="font-size: 12.5px; color: #5d5d60; margin-top: 2px">销售 / 客服只看自己提交的；管理员看全部。</div>
+                </div>
+                <div style="display: flex; gap: 8px; flex: none">
+                  <button type="button" class="btn btn-secondary nowrap" style="background: #fff">导出工单</button>
+                  <button type="button" class="btn btn-primary nowrap">新建工单</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 12px 20px 0; flex: none">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span class="nowrap" style="font-family: var(--font-heading); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #5d5d60">视图</span>
+                <sc-for list="{{ views }}" as="v" hint-placeholder-count="5">
+                  <span class="nowrap" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 4px 10px; border: 1px solid {{ v.indBd }}; background: {{ v.indBg }}; color: {{ v.indFg }}">{{ v.label }}<b style="font-size: 11px; opacity: 0.75">{{ v.n }}</b></span>
+                </sc-for>
+                <span class="nowrap" style="font-size: 12.5px; color: #5980a6; padding: 4px 6px">+ 保存当前条件</span>
+              </div>
+            </div>
+
+            <div style="padding: 10px 20px 0; flex: none">
+              <div class="blueprint" style="padding: 9px 12px; background: #fff">
+                <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <span class="nowrap" style="font-size: 12px; color: #5d5d60">状态</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 3px 9px; border: 1px solid rgba(29,31,32,0.16); background: #f2f2f3">生产中 ▾</span>
+                  <span class="nowrap" style="font-size: 12px; color: #5d5d60; margin-left: 4px">交期</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 3px 9px; border: 1px solid rgba(29,31,32,0.16); background: #f2f2f3">未来 7 天 ▾</span>
+                  <span class="nowrap" style="font-size: 12px; color: #5d5d60; margin-left: 4px">负责人</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 3px 9px; border: 1px solid rgba(29,31,32,0.16); background: #f2f2f3">全部 ▾</span>
+                  <span class="nowrap" style="font-size: 12.5px; color: #5980a6; margin-left: 2px">更多筛选 <b>4</b></span>
+                  <div style="flex: 1"></div>
+                  <span class="nowrap" style="font-size: 12.5px; font-variant-numeric: tabular-nums">共 <b>36</b> 条</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(29,31,32,0.1)">
+                  <span class="nowrap" style="font-size: 11px; color: #5d5d60">已选</span>
+                  <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4">
+                    <span class="tag tag-accent nowrap">{{ c }} ✕</span>
+                  </sc-for>
+                  <span class="nowrap" style="font-size: 12px; color: #5980a6">清除全部</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 10px 20px 8px; min-width: 0; flex: 1; min-height: 0; overflow: hidden">
+              <div class="blueprint" style="background: #fff; height: 100%">
+                <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                <div style="display: grid; grid-template-columns: 236px 128px 122px 108px 106px 108px 90px; gap: 10px; padding: 7px 12px; border-bottom: 1px solid rgba(29,31,32,0.16); background: #f5f5f8; font-family: var(--font-heading); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #5d5d60">
+                  <div>工单号 / 客户</div><div>状态</div><div>阻断原因</div><div style="text-align: right">承诺交期</div><div style="text-align: right">款式 / 数量</div><div style="text-align: right">金额</div><div style="text-align: right">动作</div>
+                </div>
+                <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+                  <div style="display: grid; grid-template-columns: 236px 128px 122px 108px 106px 108px 90px; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid rgba(29,31,32,0.08)">
+                    <div style="min-width: 0">
+                      <div style="display: flex; align-items: center; gap: 6px">
+                        <sc-if value="{{ r.urgent }}" hint-placeholder-val="{{ false }}">
+                          <span class="nowrap" style="font-size: 9.5px; padding: 1px 5px; background: #1d2d3d; color: #f2f2f3; letter-spacing: 0.06em">▲ 急单</span>
+                        </sc-if>
+                        <span class="nowrap" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ r.no }}</span>
+                      </div>
+                      <div class="nowrap" style="font-size: 11px; color: #5d5d60; margin-top: 1px; overflow: hidden; text-overflow: ellipsis">{{ r.who }}</div>
+                    </div>
+                    <div><span class="nowrap" style="font-size: 11.5px; padding: 2px 8px; border: 1px solid {{ r.indBd }}; background: {{ r.indBg }}; color: {{ r.indFg }}">{{ r.status }}</span></div>
+                    <div class="nowrap" style="font-size: 11.5px; color: {{ r.blkInd }}; overflow: hidden; text-overflow: ellipsis">{{ r.blocker }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: {{ r.dueInd }}">{{ r.dueMark }}{{ r.due }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums">{{ r.qty }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 500">{{ r.amount }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 11.5px; color: #5980a6">{{ r.act }} ⋯</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 9px 20px 12px; font-size: 12px; color: #5d5d60; font-variant-numeric: tabular-nums; flex: none">
+              <span class="nowrap">共 36 条 · 每页 20 条 ▾ · 第 1 / 2 页</span>
+              <div style="display: flex; gap: 7px">
+                <button type="button" class="btn btn-secondary nowrap" disabled="disabled" style="height: 28px; font-size: 12.5px; background: #fff">上一页</button>
+                <button type="button" class="btn btn-secondary nowrap" style="height: 28px; font-size: 12.5px; background: #fff">下一页</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="1b" style="flex: none; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: baseline; gap: 10px">
+          <a class="oid" href="#1b">1b</a>
+          <span style="font-size: 13px; color: #5d5d60">现有 shadcn 皮肤 — 红主色 #dc2626 · 系统 CJK 字体栈 · 圆角 12px · 柔阴影</span>
+        </div>
+        <div class="sk" style="width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #e5e5e5; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100%">
+
+          <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+            <div style="padding: 14px 16px 12px">
+              <div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div>
+              <div style="font-size: 11px; color: #8a8a8e; margin-top: 1px">管理员后台</div>
+            </div>
+            <div style="padding: 6px 0; overflow: hidden">
+              <sc-for list="{{ nav }}" as="g" hint-placeholder-count="5">
+                <div style="padding: 0 0 10px">
+                  <div style="padding: 0 16px 4px; font-size: 11px; color: #a1a1a6">{{ g.group }}</div>
+                  <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4">
+                    <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 7px 8px; font-size: 13px; border-radius: 8px; background: {{ it.skBg }}; box-shadow: inset 2px 0 0 {{ it.skEdge }}">
+                      <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1a6; border-radius: 3px; flex: none"></i>
+                      <span class="nowrap" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+                      <sc-if value="{{ it.soon }}" hint-placeholder-val="{{ false }}">
+                        <span class="nowrap" style="font-size: 9px; color: #a1a1a6; background: #f4f4f5; border-radius: 4px; padding: 1px 5px">未上线</span>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; min-width: 0">
+            <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+              <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #6b6b70; border-radius: 3px; flex: none"></i>
+              <div class="nowrap" style="font-size: 12.5px; color: #8a8a8e; display: flex; gap: 6px"><span>管理后台</span><span>›</span><span style="color: #3f3f46">工单</span></div>
+              <div style="flex: 1"></div>
+              <div style="display: flex; align-items: center; gap: 14px; flex: none; font-size: 12.5px; color: #3f3f46">
+                <span class="nowrap">工单</span><span class="nowrap">排产</span><span class="nowrap">采购单</span><span class="nowrap">仓库/库位</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex: none">
+                <span class="nowrap" style="font-size: 10.5px; letter-spacing: 0.04em; padding: 3px 9px; border: 1px solid #e2e2e4; border-radius: 999px; color: #6b6b70">DEVELOPMENT</span>
+                <i style="display: block; width: 28px; height: 28px; border: 1px solid #e2e2e4; border-radius: 999px; flex: none"></i>
+                <div class="nowrap" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e2e2e4; border-radius: 999px; background: #fff">
+                  <i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i>
+                  <span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 16px 20px 0; flex: none">
+              <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px">
+                <div>
+                  <h2 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em">工单</h2>
+                  <div style="font-size: 12.5px; color: #71717a; margin-top: 3px">销售 / 客服只看自己提交的；管理员看全部。</div>
+                </div>
+                <div style="display: flex; gap: 8px; flex: none">
+                  <button type="button" class="nowrap" style="height: 36px; padding: 0 14px; font: inherit; font-size: 13px; font-weight: 500; border: 1px solid #e2e2e4; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer">导出工单</button>
+                  <button type="button" class="nowrap" style="height: 36px; padding: 0 16px; font: inherit; font-size: 13px; font-weight: 500; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.08)">新建工单</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 14px 20px 0; flex: none">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span class="nowrap" style="font-size: 11.5px; color: #a1a1a6">视图</span>
+                <sc-for list="{{ views }}" as="v" hint-placeholder-count="5">
+                  <span class="nowrap" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 5px 11px; border-radius: 999px; border: 1px solid {{ v.skBd }}; background: {{ v.skBg }}; color: {{ v.skFg }}">{{ v.label }}<b style="font-size: 11px; opacity: 0.7">{{ v.n }}</b></span>
+                </sc-for>
+                <span class="nowrap" style="font-size: 12.5px; color: #dc2626; padding: 5px 6px">+ 保存当前条件</span>
+              </div>
+            </div>
+
+            <div style="padding: 12px 20px 0; flex: none">
+              <div style="background: #fff; border: 1px solid #ececec; border-radius: 12px; padding: 11px 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04)">
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <span class="nowrap" style="font-size: 12px; color: #8a8a8e">状态</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 4px 10px; border: 1px solid #e2e2e4; border-radius: 8px; background: #fff">生产中 ▾</span>
+                  <span class="nowrap" style="font-size: 12px; color: #8a8a8e; margin-left: 4px">交期</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 4px 10px; border: 1px solid #e2e2e4; border-radius: 8px; background: #fff">未来 7 天 ▾</span>
+                  <span class="nowrap" style="font-size: 12px; color: #8a8a8e; margin-left: 4px">负责人</span>
+                  <span class="nowrap" style="font-size: 12.5px; padding: 4px 10px; border: 1px solid #e2e2e4; border-radius: 8px; background: #fff">全部 ▾</span>
+                  <span class="nowrap" style="font-size: 12.5px; color: #dc2626; margin-left: 2px">更多筛选 <b>4</b></span>
+                  <div style="flex: 1"></div>
+                  <span class="nowrap" style="font-size: 12.5px; font-variant-numeric: tabular-nums; color: #3f3f46">共 <b>36</b> 条</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 7px; margin-top: 9px; padding-top: 9px; border-top: 1px solid #f2f2f4">
+                  <span class="nowrap" style="font-size: 11px; color: #a1a1a6">已选</span>
+                  <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4">
+                    <span class="nowrap" style="font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: #fef2f2; color: #b91c1c">{{ c }} ✕</span>
+                  </sc-for>
+                  <span class="nowrap" style="font-size: 12px; color: #dc2626">清除全部</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="padding: 12px 20px 0; min-width: 0; flex: 1; min-height: 0; overflow: hidden">
+              <div style="background: #fff; border: 1px solid #ececec; border-radius: 12px; height: 100%; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04)">
+                <div style="display: grid; grid-template-columns: 236px 128px 122px 108px 106px 108px 90px; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #8a8a8e">
+                  <div>工单号 / 客户</div><div>状态</div><div>阻断原因</div><div style="text-align: right">承诺交期</div><div style="text-align: right">款式 / 数量</div><div style="text-align: right">金额</div><div style="text-align: right">动作</div>
+                </div>
+                <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+                  <div style="display: grid; grid-template-columns: 236px 128px 122px 108px 106px 108px 90px; gap: 10px; align-items: center; padding: 9px 14px; border-bottom: 1px solid #f5f5f7">
+                    <div style="min-width: 0">
+                      <div style="display: flex; align-items: center; gap: 6px">
+                        <sc-if value="{{ r.urgent }}" hint-placeholder-val="{{ false }}">
+                          <span class="nowrap" style="font-size: 9.5px; padding: 2px 6px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-weight: 500">急单</span>
+                        </sc-if>
+                        <span class="nowrap" style="font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis">{{ r.no }}</span>
+                      </div>
+                      <div class="nowrap" style="font-size: 11px; color: #8a8a8e; margin-top: 2px; overflow: hidden; text-overflow: ellipsis">{{ r.who }}</div>
+                    </div>
+                    <div><span class="nowrap" style="font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: {{ r.skBg }}; color: {{ r.skFg }}">{{ r.status }}</span></div>
+                    <div class="nowrap" style="font-size: 11.5px; color: {{ r.blkSk }}; overflow: hidden; text-overflow: ellipsis">{{ r.blocker }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: {{ r.dueSk }}">{{ r.dueMark }}{{ r.due }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: #3f3f46">{{ r.qty }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 500">{{ r.amount }}</div>
+                    <div class="nowrap" style="text-align: right; font-size: 11.5px; color: #dc2626">{{ r.act }} ⋯</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 11px 20px 14px; font-size: 12px; color: #8a8a8e; font-variant-numeric: tabular-nums; flex: none">
+              <span class="nowrap">共 36 条 · 每页 20 条 ▾ · 第 1 / 2 页</span>
+              <div style="display: flex; gap: 8px">
+                <button type="button" class="nowrap" disabled="disabled" style="height: 30px; padding: 0 12px; font: inherit; font-size: 12.5px; border: 1px solid #f0f0f2; border-radius: 8px; background: #fff; color: #c4c4c8">上一页</button>
+                <button type="button" class="nowrap" style="height: 30px; padding: 0 12px; font: inherit; font-size: 12.5px; border: 1px solid #e2e2e4; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer">下一页</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; max-width: 2600px; margin-top: 30px">
+      <sc-for list="{{ notes }}" as="n" hint-placeholder-count="3">
+        <div style="border-top: 2px solid #5980a6; padding-top: 11px">
+          <div style="font-family: var(--font-heading); font-size: 17px">{{ n.h }}</div>
+          <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 8px">
+            <sc-for list="{{ n.items }}" as="x" hint-placeholder-count="4">
+              <div style="display: flex; align-items: flex-start; gap: 8px">
+                <span style="flex: none; width: 5px; height: 5px; margin-top: 7px; background: #5980a6"></span>
+                <div style="font-size: 12.5px; line-height: 1.65; color: #2b2b2d; text-wrap: pretty">{{ x }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <p style="margin: 26px 0 0; font-size: 13px; color: #5d5d60">下一步可以说：「用 <a class="oid" href="#1a">1a</a>，继续批次四」· 「用 <a class="oid" href="#1b">1b</a>，但字号密度按 1a」· 「1a 的红色急单标太重，换掉」· 「再出一版更中性的第三种」</p>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+// 忠实还原 dashboard-light / orders-light 里的侧栏：三组 13 项，不补「主数据」「运维」，
+// 也不删「开机师傅计件规则」「员工工资规则」。补分组是线框文档里的建议，不属于这一屏的变量。
+const NAV = [
+  { group: '概览', items: [['Dashboard', 0, 0]] },
+  { group: '业务', items: [['工单', 1, 0], ['采购单', 0, 0], ['工单修改申请', 0, 0], ['排产', 0, 0], ['外协', 0, 0], ['车间用料', 0, 0], ['工时录入', 0, 0]] },
+  { group: '财务', items: [['账单', 0, 0], ['薪资总览', 0, 0], ['计件工资', 0, 0], ['开机师傅计件规则', 0, 0], ['员工工资规则', 0, 0]] },
+];
+
+const VIEWS = [
+  ['我的急单', '4', 1],
+  ['今天要发', '7', 0],
+  ['待排产', '12', 0],
+  ['待审核修改', '2', 0],
+];
+
+const CHIPS = ['收费类型：普通工单', '发货状态：待发货', '是否外协：是', '机器类型：风车机'];
+
+// [编号, 客户/名称, 状态, 阻断原因, 交期, 交期风险, 款式/数量, 金额, 急单, 动作]
+const ROWS = [
+  ['GD-260807-001', '王总中秋礼盒首批', '生产中', '外协未回货', '09-12', 0, '2 款 · 12,000', '¥8,888.88', 1, '排产'],
+  ['CODX-E2E-ORDER-001', 'CODX-E2E 客户代号', '排产中', '风车机满负荷', '08-26', 1, '1 款 · 5,000', '¥3,200.00', 1, '排产'],
+  ['GD-260719-008', 'e2e-prod-mrrqtv1d-a7', '生产中', '—', '09-04', 0, '3 款 · 24,000', '¥19,640.00', 0, '打印'],
+  ['GD-260719-007', 'e2e-pack-mrrqtrfc-5j8', '已完工', '—', '08-28', 0, '1 款 · 1,000', '¥1,120.00', 0, '发货'],
+  ['GD-260719-006', 'e2e-prod-mrrqsqlw-6wai', '待发货', '收货地址缺电话', '08-25', 1, '2 款 · 8,000', '¥6,410.00', 0, '发货'],
+  ['GD-260719-005', 'e2e-prod-mrrqs81e-o24b', '已提交', '设计图缺失', '09-20', 0, '1 款 · 3,000', '¥2,050.00', 0, '排产'],
+  ['GD-260719-004', 'e2e-pack-mrrqs202-x108', '已发货', '—', '08-20', 0, '1 款 · 2,000', '¥1,760.00', 0, '结案'],
+  ['20260719-0001', 'e2e-prod-mrrj76rl-hz0', '已结案', '—', '08-12', 0, '4 款 · 30,000', '¥24,300.00', 0, '账单'],
+];
+
+// 状态视觉：Industry 只有一个钢蓝强调色，靠深浅 + 边框区分；shadcn 皮肤沿用现有语义色
+const ST_IND = {
+  '已提交': ['#d4d4d7', '#f5f5f8', '#424244'],
+  '排产中': ['#94bce3', '#eef6ff', '#2c455d'],
+  '生产中': ['#5980a6', '#d6ebff', '#1d2d3d'],
+  '已完工': ['#94bce3', '#f5f5f8', '#2c455d'],
+  '待发货': ['#5980a6', '#eef6ff', '#1d2d3d'],
+  '已发货': ['#d4d4d7', '#f5f5f8', '#5d5d60'],
+  '已结案': ['#e7e7ea', '#fff', '#7a7a7d'],
+};
+const ST_SK = {
+  '已提交': ['#f4f4f5', '#52525b'],
+  '排产中': ['#eff6ff', '#1d4ed8'],
+  '生产中': ['#fef2f2', '#b91c1c'],
+  '已完工': ['#ecfdf5', '#047857'],
+  '待发货': ['#fffbeb', '#b45309'],
+  '已发货': ['#f0f9ff', '#0369a1'],
+  '已结案': ['#f4f4f5', '#a1a1aa'],
+};
+
+const NOTES = [
+  {
+    h: '1a Industry 的取舍',
+    items: [
+      '优点：发丝边 + 直角 + 十字定位标让高密度表格看起来是「图纸」而不是「网页卡片堆」，8 行数据占的视觉重量明显更轻；Barlow Condensed 的窄体标题在 1280 宽里省出真实空间。',
+      '风险一：Barlow 没有中文字形，中文一定回落到系统 CJK 字体，于是「英文窄体 + 中文常规」混排，标题里中英并置时字重和字宽会不齐——这一屏的「工单号 / 客户」列就能看出来。',
+      '风险二：只有一个钢蓝强调色，七种工单状态只能靠深浅和边框区分（见状态列）。业务上「生产中 / 待发货 / 已完工」需要一眼分开，单色系做这件事比语义多色吃力。',
+      '风险三：与 03-design-constraints §9「保留 OKLCH 语义 token、不引入新字体」直接冲突，落地要新增一层 token 映射，并重跑明暗双主题对比度。',
+    ],
+  },
+  {
+    h: '1b 现有皮肤的取舍',
+    items: [
+      '优点：语义色现成——状态列七种状态各有独立色域，扫读成本最低；OKLCH token、CJK 回退栈、tabular-nums 都已在跑，落地零迁移成本，也不动打印基线。',
+      '优点：中文排版是按 CJK 字体栈调过的，字重和行高在中文下不会走形。',
+      '风险一：圆角 12px + 柔阴影 + 白卡在高密度表格上会累加视觉重量——同样 8 行，1b 比 1a 明显更「厚」，这也是当前 Dashboard 一屏塞不下东西的原因之一。',
+      '风险二：红色现在同时是品牌色、主按钮色、链接色、急单色、生产中状态色。这一屏里红色出现 9 次，真正的错误提示已经没有颜色可用了——不管选哪版，这条都建议收紧为「仅校验错误 + 破坏性动作」。',
+    ],
+  },
+  {
+    h: '我的建议',
+    items: [
+      '选 1b 的骨架 + 1a 的密度。也就是：保留现有 OKLCH 语义 token 和 CJK 字体栈（不引入 Barlow），但把圆角从 12px 收到 6px、去掉卡片阴影、行高从 61px 收到 44px、边框统一到 1px 发丝——这三项就能拿到 1a 大部分的密度收益，且不触碰 §9。',
+      '如果你要的是「看起来明显换了一套系统」，那就选 1a，但要接受两件事：中英混排字重不齐，以及状态色必须额外立项（在钢蓝之外补一组语义色，等于局部推翻 Industry 的单色原则）。',
+      '无论选哪版，红色收紧、六列可见、常驻筛选 chips、保存视图、行内动作这五项都要做——它们与皮肤无关。',
+      '你也可以说「再出一版更中性的第三种」，我就按上面第一条做一屏出来给你对比。',
+    ],
+  },
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: NAV.map((g) => ({
+        group: g.group,
+        items: g.items.map(([label, active, soon]) => ({
+          label, soon: !!soon, w: active ? 600 : 400,
+          indBg: active ? '#eef6ff' : 'transparent',
+          indEdge: active ? '#5980a6' : 'transparent',
+          skBg: active ? '#f4f4f5' : 'transparent',
+          skEdge: active ? '#dc2626' : 'transparent',
+        })),
+      })),
+      views: VIEWS.map(([label, n, on]) => ({
+        label, n,
+        indBd: on ? '#5980a6' : 'rgba(29,31,32,0.16)',
+        indBg: on ? '#5980a6' : '#fff',
+        indFg: on ? '#f2f2f3' : '#1d1f20',
+        skBd: on ? '#dc2626' : '#e2e2e4',
+        skBg: on ? '#dc2626' : '#fff',
+        skFg: on ? '#fff' : '#3f3f46',
+      })),
+      chips: CHIPS,
+      rows: ROWS.map(([no, who, status, blocker, due, risk, qty, amount, urgent, act]) => {
+        const i = ST_IND[status], s = ST_SK[status];
+        const has = blocker !== '—';
+        return {
+          no, who, status, blocker, due, qty, amount, act, urgent: !!urgent,
+          dueMark: risk ? '⚠ ' : '',
+          indBd: i[0], indBg: i[1], indFg: i[2],
+          skBg: s[0], skFg: s[1],
+          blkInd: has ? '#2c455d' : '#b7b7ba',
+          blkSk: has ? '#b45309' : '#c4c4c8',
+          dueInd: risk ? '#1d2d3d' : '#424244',
+          dueSk: risk ? '#b45309' : '#3f3f46',
+        };
+      }),
+      notes: NOTES,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

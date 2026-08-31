@@ -31,13 +31,13 @@ export default async function OrderPrintViewPage({
   const { id } = await params;
   const sp = await searchParams;
   const baseUrl = await derivePublicBaseUrl();
-  const factory = await getSetting('factory_name');
   const order = await getOrderForPrint(
     id,
     { id: user.id, role: user.role },
     baseUrl,
   );
   if (!order) notFound();
+  const { name: factoryName } = await getSetting('factory_name');
 
   // Browser print path opts in via `?autoprint=1`; Puppeteer visits
   // without the query so PDF capture happens cleanly. Accept any
@@ -52,7 +52,7 @@ export default async function OrderPrintViewPage({
 
   return (
     <>
-      <OrderPrintLayout order={order} factoryName={factory.name} />
+      <OrderPrintLayout order={order} factoryName={factoryName} />
       <AutoPrint enabled={autoprint} />
     </>
   );

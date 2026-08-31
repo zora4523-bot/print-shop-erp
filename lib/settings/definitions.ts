@@ -1,25 +1,30 @@
 import { z } from 'zod';
+import {
+  SETTING_METADATA,
+  type SettingKey,
+  type SettingMetadata,
+} from './metadata';
 
-// 系统配置的**唯一**定义处：key、校验、兜底值、以及后台表单怎么渲染这一项。
-// 纯数据 + 纯函数，没有 Prisma import —— 和 lib/auth/permissions-dict.ts 同一个
-// 路数，测试和客户端组件都能安全 import（读写在 ./index.ts）。
+export { SETTING_KEYS, SETTING_METADATA, isSettingKey } from './metadata';
+export type {
+  SettingFieldSpec,
+  SettingKey,
+  SettingMetadata,
+} from './metadata';
+
+// 系统配置的服务端定义：在 ./metadata.ts 的客户端安全元数据上，
+// 补齐 schema、fallback 和写入数据库的 remark。SettingsForm 不能引用本文件：
+// `use client` 会把 Zod 整个带进浏览器依赖图。读写实现仍在 ./index.ts。
 //
-// 背景：Setting 表从建表起就只有 prisma/seed.ts 一个写入方、零个读取方，四个 key
+// 背景：Setting 表初期只有 prisma/seed.ts 一个写入方、零个读取方，早期的 key
 // 全部在别处有硬编码副本。最直观的后果是打印视图的厂名永远是默认值——业主改了
 // 设置没有任何效果。这个模块存在的意义就是把这条链路接通。
 
-type FieldSpec =
-  | { kind: 'text'; name: string; maxLength: number }
-  | { kind: 'int'; name: string; min: number; max: number; unit: string };
-
-type SettingDefinition<T> = {
-  label: string;
-  help: string;
+type SettingDefinition<T> = SettingMetadata & {
   // 写回 Setting.remark，让直接翻库的人也知道这一行是干什么的
   remark: string;
   schema: z.ZodType<T>;
   fallback: T;
-  field: FieldSpec;
 };
 
 function define<T>(definition: SettingDefinition<T>): SettingDefinition<T> {
@@ -28,8 +33,7 @@ function define<T>(definition: SettingDefinition<T>): SettingDefinition<T> {
 
 export const SETTING_DEFINITIONS = {
   factory_name: define({
-    label: '工厂名称',
-    help: '打印工单和导出 PDF 的页眉抬头。',
+    ...SETTING_METADATA.factory_name,
     remark: '工厂名称（可改）',
     schema: z.object({
       name: z
@@ -39,12 +43,10 @@ export const SETTING_DEFINITIONS = {
         .max(40, '工厂名称最多 40 个字'),
     }),
     fallback: { name: '佛山红包印刷厂' },
-    field: { kind: 'text', name: 'name', maxLength: 40 },
   }),
 
   cdr_link_expire_hours: define({
-    label: 'CDR 下载链接有效期',
-    help: '打包完成后签发的下载链接多久过期。只影响此后新签发的链接，已发出去的不受影响。',
+    ...SETTING_METADATA.cdr_link_expire_hours,
     remark: 'CDR下载链接有效期',
     schema: z.object({
       // 上限 168 小时 = 7 天，是 OSS 用 AccessKey 直签 URL 的实际可用上限；
@@ -56,12 +58,10 @@ export const SETTING_DEFINITIONS = {
         .max(168, '有效期最多 168 小时（7 天）'),
     }),
     fallback: { hours: 24 },
-    field: { kind: 'int', name: 'hours', min: 1, max: 168, unit: '小时' },
   }),
 
   outsource_overdue_days: define({
-    label: '外协超期阈值',
-    help: '外协单超过预计回厂日多少天算超期。影响老板看板的「超期外协」和每日超期推送。',
+    ...SETTING_METADATA.outsource_overdue_days,
     remark: '外协超期阈值（超过预计日N天报警）',
     schema: z.object({
       days: z
@@ -71,12 +71,10 @@ export const SETTING_DEFINITIONS = {
         .max(30, '阈值最多 30 天'),
     }),
     fallback: { days: 1 },
-    field: { kind: 'int', name: 'days', min: 1, max: 30, unit: '天' },
   }),
 
   report_qty_max_multiple: define({
-    label: '单条报工数量上限倍数',
-    help: '师傅单条报工时，合格 + 不良 + 返工 的合计达到计划数的多少倍就一律拒绝。少报一律放行；超过计划数但未达上限需勾选确认并留痕。批量「一键完工」按计划数报，不受此项影响。',
+    ...SETTING_METADATA.report_qty_max_multiple,
     remark: '单条报工数量上限倍数（合计 >= 计划数×N 一律拒绝）',
     schema: z.object({
       // 判据是 >= 而不是 >：「多打一个零」把 P 变成 10P，严格大于时 N=10
@@ -90,20 +88,19 @@ export const SETTING_DEFINITIONS = {
         .max(10, '倍数最多 10 倍'),
     }),
     fallback: { multiple: 3 },
-    field: { kind: 'int', name: 'multiple', min: 1, max: 10, unit: '倍' },
+  }),
+
+  worker_self_claim_enabled: define({
+    ...SETTING_METADATA.worker_self_claim_enabled,
+    remark: '师傅自由抢单全局开关',
+    schema: z.object({ enabled: z.boolean() }),
+    // 安全默认：新版代码先于 migration / seed 到位时也不会意外开池。
+    fallback: { enabled: false },
   }),
 };
 
-export type SettingKey = keyof typeof SETTING_DEFINITIONS;
-
 export type SettingValue<K extends SettingKey> =
   (typeof SETTING_DEFINITIONS)[K] extends SettingDefinition<infer T> ? T : never;
-
-export const SETTING_KEYS = Object.keys(SETTING_DEFINITIONS) as SettingKey[];
-
-export function isSettingKey(value: string): value is SettingKey {
-  return Object.hasOwn(SETTING_DEFINITIONS, value);
-}
 
 // seed 曾经写过、现在不再对应任何行为的 key。留着比删掉更坏：它让翻库的人以为
 // 工单号格式可配，而实际上 SEQ_PAD / MAX_DAILY_SEQUENCE 是代码常量，
@@ -119,7 +116,7 @@ export const RETIRED_SETTING_KEYS = ['order_no_prefix'] as const;
  * 有效期回到 24 小时，都是能一眼看出来且随时可改的。反过来，让一行手工改坏的
  * 配置把开单、打印、每日推送全部打挂，才是真正的事故。
  *
- * report_qty_max_multiple 是四项里唯一守着「会算出计件金额」那条路径的，但退回
+ * report_qty_max_multiple 是设置项里唯一守着「会算出计件金额」那条路径的，但退回
  * fallback 同样安全，而且方向是对的：它本身不参与任何金额计算，只是一个上界；
  * 库里存了个非法的大值（比如被手工改成 999）时退回 3 反而更严，存了个非法的
  * 小值时退回 3 也仍然把「多打一个零」挡在门外。它绝不会像薪资规则缺失那样
@@ -164,6 +161,11 @@ export function parseSettingInput<K extends SettingKey>(
       return { ok: false, message: `${definition.label}必须是正整数` };
     }
     candidate = { [field.name]: Number.parseInt(trimmed, 10) };
+  } else if (field.kind === 'boolean') {
+    if (trimmed !== 'true' && trimmed !== 'false') {
+      return { ok: false, message: `${definition.label}必须选择开启或关闭` };
+    }
+    candidate = { [field.name]: trimmed === 'true' };
   } else {
     candidate = { [field.name]: trimmed };
   }

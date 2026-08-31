@@ -6,6 +6,7 @@ const {
   permissionsMock,
   productionMock,
   productionBatchMock,
+  taskClaimMock,
   revalidatePathMock,
   MockSchedulingError,
   MockReportError,
@@ -13,6 +14,7 @@ const {
   MockInvalidOrderTransitionError,
   MockInvalidTaskTransitionError,
   MockOverReportError,
+  MockTaskClaimError,
 } = vi.hoisted(() => {
   class ReportErrorStub extends Error {
     constructor(msg: string) {
@@ -62,6 +64,10 @@ const {
     productionBatchMock: {
       scheduleOrdersToWorker: vi.fn(),
     },
+    taskClaimMock: {
+      claimTask: vi.fn(),
+      releaseTaskToClaimPool: vi.fn(),
+    },
     revalidatePathMock: vi.fn(),
     MockSchedulingError: class extends Error {
       constructor(msg: string) {
@@ -93,6 +99,12 @@ const {
       }
     },
     MockOverReportError: OverReportErrorStub,
+    MockTaskClaimError: class extends Error {
+      constructor(msg: string) {
+        super(msg);
+        this.name = 'TaskClaimError';
+      }
+    },
   };
 });
 
@@ -112,6 +124,11 @@ vi.mock('@/lib/production', () => ({
 vi.mock('@/lib/production/batch-scheduling', () => ({
   scheduleOrdersToWorker: productionBatchMock.scheduleOrdersToWorker,
 }));
+vi.mock('@/lib/production/task-claim', () => ({
+  claimTask: taskClaimMock.claimTask,
+  releaseTaskToClaimPool: taskClaimMock.releaseTaskToClaimPool,
+  TaskClaimError: MockTaskClaimError,
+}));
 vi.mock('@/lib/order', () => ({
   OrderInvariantError: MockOrderInvariantError,
   InvalidOrderTransitionError: MockInvalidOrderTransitionError,
@@ -122,6 +139,8 @@ import {
   scheduleOrderAction,
   batchScheduleOrdersAction,
   beginTaskAction,
+  claimTaskFormAction,
+  releaseTaskToClaimPoolAction,
   reportTaskAction,
   reassignProductionTaskAction,
 } from '../production';
@@ -157,6 +176,8 @@ beforeEach(() => {
   productionMock.reportTask.mockReset();
   productionMock.reassignProductionTask.mockReset();
   productionBatchMock.scheduleOrdersToWorker.mockReset();
+  taskClaimMock.claimTask.mockReset();
+  taskClaimMock.releaseTaskToClaimPool.mockReset();
   revalidatePathMock.mockReset();
 });
 
@@ -395,6 +416,96 @@ describe('beginTaskAction', () => {
     expect(r.status).toBe('success');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks/task-1');
+  });
+});
+
+describe('claim task actions', () => {
+  it("claimTaskFormAction first-line requirePermission('task:claim')", async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+    await expect(
+      claimTaskFormAction(null, fd({ taskId: 'task-1' })),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:claim');
+    expect(taskClaimMock.claimTask).not.toHaveBeenCalled();
+  });
+
+  it('抢单成功后失效师傅任务/工单与管理端工单视图', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    taskClaimMock.claimTask.mockResolvedValue({
+      taskId: 'task-1',
+      orderId: 'order-1',
+      workerId: 'worker-1',
+      machineType: 'WINDMILL',
+    });
+    await expect(
+      claimTaskFormAction(null, fd({ taskId: 'task-1' })),
+    ).resolves.toEqual({ status: 'success', taskId: 'task-1' });
+    expect(taskClaimMock.claimTask).toHaveBeenCalledWith('task-1', workerActor);
+    for (const path of [
+      '/worker/tasks',
+      '/worker/orders',
+      '/worker/tasks/task-1',
+      '/orders/order-1',
+    ]) {
+      expect(revalidatePathMock).toHaveBeenCalledWith(path);
+    }
+  });
+
+  it('零 JS form wrapper 先验权再校验 hidden taskId', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    await expect(claimTaskFormAction(null, new FormData())).resolves.toEqual({
+      status: 'error',
+      message: expect.stringContaining('参数缺失'),
+    });
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:claim');
+    expect(taskClaimMock.claimTask).not.toHaveBeenCalled();
+  });
+
+  it('并发抢走等领域错误映射为可读 error', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(workerActor);
+    taskClaimMock.claimTask.mockRejectedValue(
+      new MockTaskClaimError('该任务已被其他师傅抢走'),
+    );
+    await expect(
+      claimTaskFormAction(null, fd({ taskId: 'task-1' })),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '该任务已被其他师傅抢走',
+    });
+  });
+});
+
+describe('releaseTaskToClaimPoolAction', () => {
+  it("first-line requirePermission('task:assign')", async () => {
+    permissionsMock.requirePermission.mockRejectedValue(
+      new UnauthorizedError('未登录'),
+    );
+    await expect(
+      releaseTaskToClaimPoolAction(null, fd({ taskId: 'task-1' })),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(permissionsMock.requirePermission).toHaveBeenCalledWith('task:assign');
+    expect(taskClaimMock.releaseTaskToClaimPool).not.toHaveBeenCalled();
+  });
+
+  it('管理员释放成功后失效管理端和师傅端视图', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(foremanActor);
+    taskClaimMock.releaseTaskToClaimPool.mockResolvedValue({
+      taskId: 'task-1',
+      orderId: 'order-1',
+      previousWorkerId: 'worker-1',
+    });
+    await expect(
+      releaseTaskToClaimPoolAction(null, fd({ taskId: 'task-1' })),
+    ).resolves.toEqual({ status: 'success', taskId: 'task-1' });
+    expect(taskClaimMock.releaseTaskToClaimPool).toHaveBeenCalledWith(
+      'task-1',
+      foremanActor,
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith('/orders/order-1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/tasks');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/worker/orders');
   });
 });
 

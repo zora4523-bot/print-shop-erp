@@ -1,11 +1,13 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import type { PriceMutationResult } from '@/actions/owner-prices.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import type { ProductOption } from '@/lib/product';
 
 type PriceTierInitial = {
@@ -41,7 +43,7 @@ const selectClass =
 function productLabel(product: ProductOption): string {
   const code = product.code ? `${product.code} · ` : '';
   const inactive = product.isActive ? '' : '（已停用）';
-  return `${code}${product.name} · ${product.categoryNode.name}${inactive}`;
+  return `${code}${externalPriceBusinessText(product.name)} · ${externalPriceBusinessText(product.categoryNode.name)}${inactive}`;
 }
 
 export function PriceTierForm(props: Props) {
@@ -58,13 +60,17 @@ export function PriceTierForm(props: Props) {
   const defaultProductId = initial?.productId ?? props.products[0]?.id ?? '';
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="productId">产品</Label>
-          <Link href="/owner/products/new" className="text-xs text-primary hover:underline">
-            新建产品
-          </Link>
+          <Label htmlFor="productId">报价 SKU</Label>
+          <PendingLink
+            href={`${RULE_CENTER_HREFS.stockSkus}/new`}
+            pending={pending}
+            className="text-xs text-primary hover:underline"
+          >
+            新建报价 SKU
+          </PendingLink>
         </div>
         <select
           id="productId"
@@ -73,7 +79,7 @@ export function PriceTierForm(props: Props) {
           defaultValue={defaultProductId}
           disabled={pending || missingProducts}
         >
-          {missingProducts ? <option value="">暂无可用产品</option> : null}
+          {missingProducts ? <option value="">暂无可用报价 SKU</option> : null}
           {props.products.map((product) => (
             <option key={product.id} value={product.id}>
               {productLabel(product)}
@@ -84,8 +90,8 @@ export function PriceTierForm(props: Props) {
           <p className="text-sm text-destructive">{errs.productId[0]}</p>
         ) : null}
         {missingProducts ? (
-          <p role="alert" className="text-sm text-warning-foreground">
-            请先创建并启用至少一个产品，再维护价格阶梯。
+          <p className="text-sm text-muted-foreground">
+            请先创建并启用报价 SKU。
           </p>
         ) : null}
       </div>
@@ -148,9 +154,13 @@ export function PriceTierForm(props: Props) {
         <Button type="submit" disabled={pending || missingProducts}>
           {pending ? '提交中…' : props.mode === 'create' ? '创建价格阶梯' : '保存修改'}
         </Button>
-        <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
-          返回报价管理
-        </Link>
+        <PendingLink
+          href={RULE_CENTER_HREFS.internalPricing}
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
+          返回内部直单价格
+        </PendingLink>
       </div>
     </form>
   );

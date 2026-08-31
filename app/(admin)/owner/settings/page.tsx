@@ -26,10 +26,7 @@ export default async function OwnerSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="系统设置"
-        subtitle="改动立即对之后的打印、打包和看板生效，不需要重启。"
-      />
+      <PageHeader title="系统设置" />
       <SettingsForm initialValues={initialValues} />
     </div>
   );

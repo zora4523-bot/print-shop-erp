@@ -7,6 +7,7 @@ import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { requestOrderExportAction, type OrderExportActionResult } from '@/actions/order-export';
 import { OrderExportStatus } from '@/generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui-business';
 import {
   Sheet,
   SheetClose,
@@ -17,7 +18,12 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { ORDER_EXPORT_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
+import {
+  ORDER_EXPORT_POLLING_TIMEOUT_MS,
+  pendingOrderExportSignature,
+} from './order-export-polling';
 
 export type OrderExportView = {
   id: string;
@@ -47,10 +53,16 @@ export function OrderExportControls({
   recent: readonly OrderExportView[];
 }) {
   const router = useRouter();
-  const hasPending = recent.some((item) => item.status === OrderExportStatus.PENDING);
+  const pendingSignature = pendingOrderExportSignature(recent);
+  const hasPending = pendingSignature.length > 0;
+  const [pausedSignature, setPausedSignature] = useState<string | null>(null);
+  const pollingPaused =
+    hasPending && pausedSignature === pendingSignature;
   const readyCount = recent.filter(
     (item) => item.status === OrderExportStatus.READY,
   ).length;
+  const pendingDefinition =
+    ORDER_EXPORT_STATUS_REGISTRY[OrderExportStatus.PENDING];
 
   // 轮询把状态从「生成中」改成「已生成」并插入下载按钮，视觉上很明显，
   // 但读屏器用户全程无感知——DOM 变了没人告诉他们。用一个**常驻**的
@@ -66,14 +78,24 @@ export function OrderExportControls({
   }, [hasPending, readyCount]);
 
   useEffect(() => {
-    if (!hasPending) return;
+    if (!hasPending || pollingPaused) return;
     const interval = window.setInterval(() => router.refresh(), 3_000);
-    const timeout = window.setTimeout(() => window.clearInterval(interval), 120_000);
+    const timeout = window.setTimeout(() => {
+      window.clearInterval(interval);
+      setPausedSignature(pendingSignature);
+      setLiveMessage('导出仍在后台生成，自动刷新已暂停。');
+    }, ORDER_EXPORT_POLLING_TIMEOUT_MS);
     return () => {
       window.clearInterval(interval);
       window.clearTimeout(timeout);
     };
-  }, [hasPending, router]);
+  }, [hasPending, pendingSignature, pollingPaused, router]);
+
+  function refreshPendingExports() {
+    setPausedSignature(null);
+    setLiveMessage('正在刷新导出进度。');
+    router.refresh();
+  }
 
   return (
     <>
@@ -93,9 +115,13 @@ export function OrderExportControls({
         <FileSpreadsheet aria-hidden="true" />
         导出工单
         {hasPending ? (
-          <span className="rounded-full bg-warning/10 px-1.5 py-0.5 text-xs text-warning-foreground">
-            生成中
-          </span>
+          <StatusBadge
+            tone={pendingDefinition.tone}
+            dot={pendingDefinition.dot}
+            className="h-5 px-1.5"
+          >
+            {pendingDefinition.label}
+          </StatusBadge>
         ) : null}
       </SheetTrigger>
 
@@ -146,6 +172,26 @@ export function OrderExportControls({
               variant={hasFilters ? 'outline' : 'default'}
             />
           </div>
+
+          {pollingPaused ? (
+            <div
+              role="status"
+              className="space-y-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground"
+            >
+              <p>
+                导出仍可能在后台生成，但自动刷新已在 2 分钟后暂停。可稍后手动刷新，不需要重复提交导出。
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11"
+                onClick={refreshPendingExports}
+              >
+                刷新并继续自动检查
+              </Button>
+            </div>
+          ) : null}
 
           {recent.length > 0 ? (
             <div className="min-w-0 border-t pt-4">
@@ -210,7 +256,7 @@ function ExportRequestForm({
   >(requestOrderExportAction, null);
   return (
     <div className="min-w-0 space-y-1">
-      <form action={formAction}>
+      <form action={formAction} aria-busy={pending}>
         <input type="hidden" name="scope" value={scope} />
         <input type="hidden" name="requestKey" value={requestKey} />
         <input type="hidden" name="params" value={JSON.stringify(params)} />
@@ -239,8 +285,14 @@ function ActionFeedback({ state }: { state: OrderExportActionResult }) {
 }
 
 function ExportStatusText({ item }: { item: OrderExportView }) {
-  if (item.status === OrderExportStatus.PENDING) return <>生成中</>;
-  if (item.status === OrderExportStatus.FAILED) return <>生成失败，请重新导出</>;
-  if (item.status === OrderExportStatus.EXPIRED) return <>已过期</>;
-  return <>已生成 {item.matchedOrderCount} 张工单</>;
+  const definition = ORDER_EXPORT_STATUS_REGISTRY[item.status];
+  const label =
+    item.status === OrderExportStatus.READY
+      ? `${definition.label} ${item.matchedOrderCount} 张工单`
+      : definition.label;
+  return (
+    <StatusBadge tone={definition.tone} dot={definition.dot}>
+      {label}
+    </StatusBadge>
+  );
 }

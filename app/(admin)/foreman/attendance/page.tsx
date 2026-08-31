@@ -7,10 +7,10 @@ import {
   parseShanghaiMonth,
 } from '@/lib/attendance';
 import { getActiveWorkHours } from '@/lib/salary/rules';
-import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { roleLabel } from '@/lib/auth/role-labels';
+import { roleLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -116,7 +116,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
         title="员工考勤"
         subtitle={
           <>
-            全体在职员工按半天单位记录实际上班和请假；时薪岗位同时录入工时，供月底工资结算。
+            按半天记录上班和请假；时薪岗位另填工时。
             {workHours ? (
               <>
                 {' · '}当前工时段:{' '}
@@ -129,7 +129,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
             ) : (
               <span className="text-destructive">
                 {' '}
-                · WORK_HOURS 规则未配置，快速填&ldquo;全勤&rdquo;不可用
+                · 未配置工时规则，暂不能快速填&ldquo;全勤&rdquo;
               </span>
             )}
           </>
@@ -164,7 +164,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
               <span className="ml-2 text-xs text-muted-foreground">
                 ({roleLabel(selectedWorker.role)}
                 {selectedWorker.workerType
-                  ? ` · ${WORKER_TYPE_LABELS[selectedWorker.workerType]}`
+                  ? ` · ${workerTypeLabel(selectedWorker.workerType)}`
                   : ''}
                 {' · '}
                 {selectedWorker.username})
@@ -182,21 +182,21 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                 const att = attendanceByDate.get(d);
                 const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
                 return (
-                  <details
+                  <Disclosure
                     key={d}
                     className={`min-w-0 rounded-md border p-2 text-xs open:col-span-full ${
                       att ? 'bg-muted/40' : 'bg-background'
                     }`}
                   >
-                    <summary className="cursor-pointer">
-                      <div className="flex items-center justify-between">
+                    <DisclosureSummary className="block font-normal">
+                      <span className="flex items-center justify-between">
                         <span className="font-sans tabular-nums">{d.slice(8)}</span>
                         <span className="text-muted-foreground">
                           {['日', '一', '二', '三', '四', '五', '六'][dayOfWeek]}
                         </span>
-                      </div>
+                      </span>
                       {att ? (
-                        <div className="mt-1 font-sans tabular-nums text-xs leading-tight">
+                        <span className="mt-1 block font-sans tabular-nums text-xs leading-tight">
                           上班 {String(att.workUnits)} 天
                           {Number(att.leaveUnits) > 0 ? (
                             <>
@@ -218,13 +218,13 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                               <br />S {String(att.spareHours)}
                             </>
                           ) : null}
-                        </div>
+                        </span>
                       ) : (
                         <Badge variant="outline" className="mt-1 text-xs">
                           未录
                         </Badge>
                       )}
-                    </summary>
+                    </DisclosureSummary>
                     <AttendanceRecordDialog
                       workerId={selectedWorker.id}
                       workerName={selectedWorker.displayName}
@@ -257,7 +257,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                           : undefined
                       }
                     />
-                  </details>
+                  </Disclosure>
                 );
               })}
             </div>
@@ -319,7 +319,7 @@ function FilterBar({
               {w.displayName}（
               {roleLabel(w.role)}
               {w.workerType
-                ? ` · ${WORKER_TYPE_LABELS[w.workerType] ?? w.workerType}`
+                ? ` · ${workerTypeLabel(w.workerType)}`
                 : ''}
               ）
             </option>

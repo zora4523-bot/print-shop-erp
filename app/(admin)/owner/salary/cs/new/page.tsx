@@ -15,7 +15,7 @@ export default async function NewCsPeriodPage() {
       <div>
         <h1 className="text-xl font-semibold">新建客服周期</h1>
         <p className="text-sm text-muted-foreground">
-          新客服开户同时创建首个周期；历史导入（SPEC §5.5）时填&ldquo;期初业绩&rdquo;把已累计金额塞入。
+          新客服开户时同时创建首个周期；导入历史数据时，可在&ldquo;期初业绩&rdquo;填写已累计金额。
         </p>
       </div>
 

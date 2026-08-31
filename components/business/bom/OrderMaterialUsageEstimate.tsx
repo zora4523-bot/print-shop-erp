@@ -1,4 +1,5 @@
 import type { OrderMaterialUsageEstimate as Estimate } from '@/lib/bom';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
   if (source === 'PRODUCT') return '产品 BOM';
@@ -45,7 +46,7 @@ export function OrderMaterialUsageEstimate({
                 {estimate.items.map((item) => (
                   <tr key={item.orderItemId} className="border-b last:border-0">
                     <td className="py-3 pr-3 align-top">
-                      #{item.sequence} · {item.itemName}
+                      #{item.sequence} · {externalPriceBusinessText(item.itemName)}
                       <div className="font-sans tabular-nums text-xs text-muted-foreground">
                         数量 {item.quantity}
                       </div>
@@ -54,7 +55,7 @@ export function OrderMaterialUsageEstimate({
                     <td className="py-3 pr-3 align-top">
                       {item.bom ? (
                         <>
-                          {item.bom.name}
+                          {externalPriceBusinessText(item.bom.name)}
                           <div className="font-sans tabular-nums text-xs text-muted-foreground">
                             v{item.bom.version} / 基准 {item.bom.baseQuantity}
                           </div>
@@ -70,7 +71,7 @@ export function OrderMaterialUsageEstimate({
                         <ul className="space-y-1">
                           {item.materials.map((material) => (
                             <li key={material.materialId}>
-                              {material.code} · {material.name}
+                              {material.code} · {externalPriceBusinessText(material.name)}
                               <span className="ml-2 font-sans tabular-nums text-xs">
                                 {material.quantity} {material.unit}
                               </span>
@@ -95,7 +96,7 @@ export function OrderMaterialUsageEstimate({
                     className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                   >
                     <span>
-                      {material.code} · {material.name}
+                      {material.code} · {externalPriceBusinessText(material.name)}
                     </span>
                     <span className="font-sans tabular-nums text-xs">
                       {material.quantity} {material.unit}

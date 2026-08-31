@@ -4,11 +4,24 @@ import {
 } from '../../generated/prisma/client';
 import {
   CustomerPriceBookPurpose,
+  MaterialCategory,
   OrderSettlementType as OrderSettlementTypeValue,
 } from '../../generated/prisma/enums';
 import type { QuoteOrderItemsInput } from '../auth/schemas';
 import { db } from '../db';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../order/limits';
+import {
+  ORDER_PRICING_ROUTE_LABELS,
+  canonicalizePricingCraftCodes,
+  deriveLegacyOrderItemFoilFacts,
+  productCategoryMatchesPricingRoute,
+  requiredPricingCraftGroups,
+} from '../order/pricing-route';
+import {
+  normalizeCatalogPricingText,
+  parseCatalogDimensions,
+  parseCatalogPaperWeight,
+} from '../order/catalog-pricing-facts';
 import { calculateQuote, type QuoteResult } from './quote';
 import {
   calculateExternalSalesQuote,
@@ -19,10 +32,37 @@ import { acquirePriceRuleSnapshotReadLock } from './rule-snapshot-lock';
 
 export type QuoteOrderContext = {
   orderItemCount?: number;
+  /**
+   * Admin-authorized historical repricing may need the stable codes from
+   * catalog rows that were deactivated after the order was created. Older
+   * catalog rows can also predate the structured specification/paper columns;
+   * in that case the already-persisted order facts are accepted only when the
+   * catalog has no contradictory fact. New order and ordinary preview callers
+   * must leave this disabled.
+   */
+  allowInactiveCatalogFacts?: true;
 };
 
+export type QuoteOrderItemInput = Omit<
+  QuoteOrderItemsInput['items'][number],
+  'frontFoilColors' | 'backFoilColors'
+> &
+  Partial<
+    Pick<
+      QuoteOrderItemsInput['items'][number],
+      'frontFoilColors' | 'backFoilColors'
+    >
+  >;
+
+export class QuoteCatalogInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuoteCatalogInvariantError';
+  }
+}
+
 function resolvedOrderItemCount(
-  items: QuoteOrderItemsInput['items'],
+  items: QuoteOrderItemInput[],
   context?: QuoteOrderContext,
 ): number {
   const count = context?.orderItemCount ?? items.length;
@@ -42,6 +82,8 @@ function unavailableExternalPriceBook(): ExternalSalesPriceBook {
     code: 'MISSING',
     name: '未配置外部销售价目簿',
     version: 0,
+    currency: 'CNY',
+    effectiveFrom: null,
     sourceName: null,
     sourceSha256: null,
   };
@@ -70,11 +112,12 @@ function unavailableExternalPriceRule(): ExternalSalesPriceRule {
 }
 
 async function quoteExternalSalesItems(
-  items: QuoteOrderItemsInput['items'],
+  items: QuoteOrderItemInput[],
   settlementType: OrderSettlementType,
   now: Date,
   client: Prisma.TransactionClient,
   orderItemCount: number,
+  allowInactiveCatalogFacts: boolean,
 ): Promise<QuoteResult[]> {
   const books = await client.customerPriceBook.findMany({
     where: {
@@ -89,6 +132,8 @@ async function quoteExternalSalesItems(
       code: true,
       name: true,
       version: true,
+      currency: true,
+      effectiveFrom: true,
       sourceName: true,
       sourceSha256: true,
     },
@@ -103,32 +148,111 @@ async function quoteExternalSalesItems(
     ...new Set(items.flatMap((item) => (item.productId ? [item.productId] : []))),
   ];
   const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
-  const [products, crafts] = await Promise.all([
+  const paperTypes = [
+    ...new Set(
+      items.flatMap((item) => (item.paperType ? [item.paperType] : [])),
+    ),
+  ];
+  const [products, crafts, paperMaterials] = await Promise.all([
     productIds.length === 0
       ? Promise.resolve([])
       : client.product.findMany({
-          where: { id: { in: productIds }, isActive: true },
-          select: { id: true, code: true },
+          where: {
+            id: { in: productIds },
+            ...(allowInactiveCatalogFacts ? {} : { isActive: true }),
+          },
+          select: {
+            id: true,
+            code: true,
+            category: true,
+            specification: true,
+            paperType: true,
+          },
         }),
     craftIds.length === 0
       ? Promise.resolve([])
       : client.craft.findMany({
-          where: { id: { in: craftIds }, isActive: true },
+          where: {
+            id: { in: craftIds },
+            ...(allowInactiveCatalogFacts ? {} : { isActive: true }),
+          },
           select: { id: true, code: true },
+        }),
+    paperTypes.length === 0
+      ? Promise.resolve([])
+      : client.material.findMany({
+          where: {
+            category: MaterialCategory.PAPER,
+            name: { in: paperTypes },
+            ...(allowInactiveCatalogFacts ? {} : { isActive: true }),
+          },
+          select: { name: true },
         }),
   ]);
   if (products.length !== productIds.length) {
-    throw new Error('报价产品字典已变化，请刷新页面后重新选择产品');
+    throw new QuoteCatalogInvariantError(
+      '报价产品字典已变化，请刷新页面后重新选择产品',
+    );
   }
   if (crafts.length !== craftIds.length) {
-    throw new Error('工艺字典已变化，请刷新页面后重新选择工艺');
+    throw new QuoteCatalogInvariantError(
+      '工艺字典已变化，请刷新页面后重新选择工艺',
+    );
   }
 
-  const productCodeById = new Map(products.map((product) => [product.id, product.code]));
+  const productById = new Map(products.map((product) => [product.id, product]));
   const craftCodeById = new Map(crafts.map((craft) => [craft.id, craft.code]));
+  for (const item of items) {
+    if (
+      item.productId &&
+      !(allowInactiveCatalogFacts && item.pricingRoute === 'MANUAL_QUOTE')
+    ) {
+      const product = productById.get(item.productId);
+      if (
+        product &&
+        !productCategoryMatchesPricingRoute(
+          item.pricingRoute,
+          String(product.category),
+          { allowLegacyStockFoilAdd: allowInactiveCatalogFacts },
+        )
+      ) {
+        throw new QuoteCatalogInvariantError(
+          `报价产品“${product.code}”的分类与计价路线“${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}”不一致，请重新选择产品`,
+        );
+      }
+    }
+
+    const rawCraftCodes = item.crafts.map((id) =>
+      String(craftCodeById.get(id)),
+    );
+    const craftCodes = allowInactiveCatalogFacts
+      ? canonicalizePricingCraftCodes(rawCraftCodes)
+      : rawCraftCodes;
+    const requiredGroups = requiredPricingCraftGroups({
+      route: item.pricingRoute,
+      foilColors: item.foilColors,
+      frontFoilColors: item.frontFoilColors,
+      backFoilColors: item.backFoilColors,
+      isDoubleSided: item.isDoubleSided,
+      foilTechnique: item.foilTechnique,
+    });
+    for (const group of requiredGroups) {
+      const acceptedCodes = allowInactiveCatalogFacts
+        ? canonicalizePricingCraftCodes(group.anyOfCodes)
+        : group.anyOfCodes;
+      if (!acceptedCodes.some((code) => craftCodes.includes(code))) {
+        throw new QuoteCatalogInvariantError(
+          `计价路线“${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]}”必须包含“${group.label}”生产工艺`,
+        );
+      }
+    }
+  }
+  const activePaperNames = new Set(
+    paperMaterials.map((material) => material.name),
+  );
   const priceBook = books[0];
   const rules = priceBook
-    ? await client.customerPriceRule.findMany({
+      ? await client.customerPriceRule.findMany({
         // A disabled category is a disabled charging surface.  Keep the
         // calculator aligned with the price-book catalog so a rule can never
         // continue charging after its category disappears from the UI.
@@ -136,6 +260,12 @@ async function quoteExternalSalesItems(
           priceBookId: priceBook.id,
           isActive: true,
           category: { isActive: true },
+          NOT: {
+            triggerCondition: {
+              path: ['target'],
+              equals: 'PACKAGING_GROUP',
+            },
+          },
         },
         select: {
           id: true,
@@ -184,36 +314,113 @@ async function quoteExternalSalesItems(
     },
   }));
 
-  return items.map((item) =>
-    calculateExternalSalesQuote({
+  return items.map((item) => {
+    const product = item.productId
+      ? productById.get(item.productId)
+      : undefined;
+    const foilFacts = deriveLegacyOrderItemFoilFacts(item);
+    const paperCatalogMatched = Boolean(
+      item.paperType && activePaperNames.has(item.paperType),
+    );
+    const catalogDimensions = parseCatalogDimensions(product?.specification);
+    const catalogPaperWeight = parseCatalogPaperWeight(item.paperType);
+    const catalogSpecificationMatched = product?.specification
+      ? Boolean(
+          item.specification &&
+            normalizeCatalogPricingText(product.specification) ===
+              normalizeCatalogPricingText(item.specification),
+        )
+      : Boolean(
+          allowInactiveCatalogFacts && product && item.specification,
+        );
+    const catalogDimensionsMatched = catalogDimensions
+      ? Boolean(
+          item.actualWidthMm !== null &&
+            item.actualHeightMm !== null &&
+            item.actualWidthMm === catalogDimensions.widthMm &&
+            item.actualHeightMm === catalogDimensions.heightMm,
+        )
+      : Boolean(
+          allowInactiveCatalogFacts &&
+            catalogSpecificationMatched &&
+            item.actualWidthMm !== null &&
+            item.actualHeightMm !== null,
+        );
+    const productPaperMatchesSelection = product?.paperType
+      ? Boolean(
+          item.paperType &&
+            normalizeCatalogPricingText(product.paperType) ===
+              normalizeCatalogPricingText(item.paperType),
+        )
+      : true;
+    const catalogPaperWeightMatched =
+      productPaperMatchesSelection &&
+      (catalogPaperWeight !== null
+        ? Boolean(
+            item.paperWeightGsm !== null &&
+              item.paperWeightGsm === catalogPaperWeight,
+          )
+        : Boolean(
+            allowInactiveCatalogFacts &&
+              paperCatalogMatched &&
+              item.paperWeightGsm !== null,
+          ));
+
+    return calculateExternalSalesQuote({
       input: {
         quantity: item.quantity,
         productId: item.productId ?? null,
         productCode: item.productId
-          ? String(productCodeById.get(item.productId) ?? '') || null
+          ? String(productById.get(item.productId)?.code ?? '') || null
           : null,
         craftIds: [...item.crafts],
         craftCodes: item.crafts.map((id) => String(craftCodeById.get(id))),
         specification: item.specification ?? null,
         paperType: item.paperType ?? null,
-        foilColors: [...item.foilColors],
-        isDoubleSided: item.isDoubleSided,
-        isDoubleColor: item.isDoubleColor,
+        paperCatalogMatched,
+        pricingRoute: item.pricingRoute,
+        productStructure: item.productStructure,
+        artworkVersion: item.artworkVersion ?? null,
+        plateGroupId: item.plateGroupId ?? null,
+        pricingGroup: item.pricingGroup ?? null,
+        actualWidthMm: item.actualWidthMm ?? null,
+        actualHeightMm: item.actualHeightMm ?? null,
+        paperWeightGsm: item.paperWeightGsm ?? null,
+        catalogSpecification: product?.specification ?? null,
+        catalogPaperType: product?.paperType ?? null,
+        catalogSpecificationMatched,
+        catalogDimensionsMatched,
+        catalogPaperWeightMatched,
+        frontFoilColors: foilFacts.frontFoilColors,
+        backFoilColors: foilFacts.backFoilColors,
+        foilColors: foilFacts.foilColors,
+        foilTechnique: item.foilTechnique,
+        hasLocalFoil: item.hasLocalFoil,
+        lamination: item.lamination,
+        printColors: [...item.printColors],
+        // Explicit side arrays are the authoritative facts for new orders.
+        // Derive the retired booleans here as well as on the create path so a
+        // stale or forged legacy field cannot bypass a versioned matcher in
+        // the customer-facing preview.
+        isDoubleSided: foilFacts.isDoubleSided,
+        isDoubleColor: foilFacts.isDoubleColor,
         settlementType,
         orderItemCount,
       },
       priceBook: normalizedBook,
       rules: normalizedRules,
-    }),
-  );
+      quotedAt: now,
+    });
+  });
 }
 
 async function quoteOrderItemsInTransaction(
-  items: QuoteOrderItemsInput['items'],
+  items: QuoteOrderItemInput[],
   settlementType: OrderSettlementType,
   now: Date,
   client: Prisma.TransactionClient,
   orderItemCount: number = items.length,
+  allowInactiveCatalogFacts: boolean = false,
 ): Promise<QuoteResult[]> {
   // READ COMMITTED gives each SELECT its own snapshot.  The shared advisory
   // lock makes the three cooperating rule sources one logical snapshot by
@@ -227,6 +434,7 @@ async function quoteOrderItemsInTransaction(
       now,
       client,
       orderItemCount,
+      allowInactiveCatalogFacts,
     );
   }
 
@@ -288,6 +496,7 @@ async function quoteOrderItemsInTransaction(
       craftIds: item.crafts,
       specification: item.specification ?? null,
       paperType: item.paperType ?? null,
+      lamination: item.lamination,
       foilColors: item.foilColors,
       isDoubleSided: item.isDoubleSided,
       isDoubleColor: item.isDoubleColor,
@@ -306,7 +515,7 @@ async function quoteOrderItemsInTransaction(
  * the stored snapshot is based on the exact rules observed by that write.
  */
 export async function quoteOrderItems(
-  items: QuoteOrderItemsInput['items'],
+  items: QuoteOrderItemInput[],
   settlementType: OrderSettlementType,
   now: Date = new Date(),
   client?: Prisma.TransactionClient,
@@ -320,6 +529,7 @@ export async function quoteOrderItems(
       now,
       client,
       orderItemCount,
+      context?.allowInactiveCatalogFacts === true,
     );
   }
 
@@ -332,6 +542,7 @@ export async function quoteOrderItems(
       now,
       tx,
       orderItemCount,
+      context?.allowInactiveCatalogFacts === true,
     ),
   );
 }
@@ -342,7 +553,7 @@ export async function quoteOrderItems(
  * order creation still derives the count from the complete validated payload.
  */
 export async function quoteOrderItemsPreview(
-  items: QuoteOrderItemsInput['items'],
+  items: QuoteOrderItemInput[],
   settlementType: OrderSettlementType,
   orderItemCount: number,
   now: Date = new Date(),

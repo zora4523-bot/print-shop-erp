@@ -1,39 +1,13 @@
-import Link from 'next/link';
-import { createMaterialAction } from '@/actions/owner-materials';
-import { MaterialForm } from '@/components/business/material/MaterialForm';
-import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
-import { requirePermission } from '@/lib/auth/permissions';
+import { NewMaterialCatalogItem } from '@/components/business/rules/catalog/MaterialCatalogPages';
+import { MaterialCategory } from '@/generated/prisma/enums';
 
 export const metadata = {
   title: '新建物料 · 红包印刷 ERP',
 };
 
-export default async function NewOwnerMaterialPage() {
-  await requirePermission('material:manage');
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="新建物料"
-        subtitle="新物料默认启用；库存数量通过出入库单独维护。"
-        actions={
-          <Link
-            href="/owner/materials"
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
-      />
-
-      <section className="rounded-xl border bg-card p-6 shadow-sm">
-        <MaterialForm
-          mode="create"
-          action={createMaterialAction}
-          routeBase="/owner/materials"
-        />
-      </section>
-    </div>
-  );
+export default function NewOwnerMaterialPage() {
+  return NewMaterialCatalogItem({
+    routeBase: '/owner/materials',
+    excludedCategories: [MaterialCategory.PAPER],
+  });
 }

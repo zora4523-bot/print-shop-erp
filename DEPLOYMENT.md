@@ -1,0 +1,52 @@
+---
+status: canonical-entrypoint
+owner: project-maintainers
+last_verified: 2026-08-24
+applies_to: repository deployment workflow at last_verified
+---
+
+# 部署入口
+
+详细、可执行的部署 runbook 只有一份：
+
+> **[`docs/部署指南.md`](./docs/部署指南.md)**
+
+本文件提供稳定的英文文件名入口，不复制安装、迁移、PM2、Nginx、cron 或恢复命令。这样修改部署流程时只维护一个事实源。
+
+## 发布资料地图
+
+| 需要解决的问题 | 事实源 |
+|---|---|
+| 从零部署、更新、故障恢复 | [`docs/部署指南.md`](./docs/部署指南.md) |
+| 当前发布批次的单向门和人工核对 | [`docs/上线前置操作清单.md`](./docs/上线前置操作清单.md) |
+| 自动化 smoke 与备份检查 | [`docs/deployment-smoke-checklist.md`](./docs/deployment-smoke-checklist.md) |
+| 环境变量模板 | [`.env.example`](./.env.example) |
+| 环境预检实现 | [`scripts/check-env.mjs`](./scripts/check-env.mjs) |
+| PM2 三进程配置 | [`deploy/ecosystem.config.cjs`](./deploy/ecosystem.config.cjs) |
+| Nginx 示例 | [`deploy/nginx.conf.example`](./deploy/nginx.conf.example) |
+| 支持的 cron 端点与时间 | [`deploy/crontab.example`](./deploy/crontab.example) |
+| cron 安全调用脚本 | [`deploy/run-cron.sh`](./deploy/run-cron.sh) |
+| 受控更新脚本 | [`deploy/update.sh`](./deploy/update.sh) |
+| Pigsty 扩展激活 | [`docs/pigsty-production-activation-runbook.md`](./docs/pigsty-production-activation-runbook.md) |
+| SLO、告警与恢复目标 | [`docs/production-slo-and-recovery.md`](./docs/production-slo-and-recovery.md) |
+| 数据库规则 | [DATABASE.md](./DATABASE.md) |
+
+## 不可跳过的边界
+
+- 先确认受审查的 release SHA，不能把分支名或本地脏工作区当作发布版本。
+- 生产环境、备份、数据库迁移和外部服务状态必须在目标机器重新验证；仓库文档中的带日期快照不代表今天仍成立。
+- 数据库迁移只向前。迁移开始后不能单独回退代码并恢复写入。
+- 生产调度使用系统 crontab 和 root-only secret file；不要恢复 `pg_cron + pg_net` HTTP 调度。
+- Web、LIGHT worker、HEAVY worker 和健康检查都通过后，才能把发布标为成功。
+- 打印 PDF、OSS 直传、企业微信真发和备份恢复能力需要真实环境验证，接口 `200` 或 mock 成功不能替代。
+- 密钥不进入 Git、shell history、进程参数、数据库自定义 GUC 或共享日志。
+
+## 使用方式
+
+1. 打开 canonical [部署指南](./docs/部署指南.md)。
+2. 对照[当前批次前置清单](./docs/上线前置操作清单.md)，确认是否存在新的不可逆步骤。
+3. 只执行 runbook 中与目标环境和 release SHA 匹配的流程。
+4. 使用[部署 smoke 清单](./docs/deployment-smoke-checklist.md)保存验证证据。
+5. 遇到本地开发问题先查 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)；生产问题以部署 runbook 为准。
+
+如果部署命令或拓扑发生变化，请修改 `docs/部署指南.md`，只在入口或资料地图变化时修改本文件。

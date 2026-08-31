@@ -46,8 +46,7 @@ export default async function EditRulePage({
       <div>
         <h1 className="text-xl font-semibold">编辑事件规则</h1>
         <p className="text-sm text-muted-foreground">
-          消息模板用 Markdown，占位符走 <code>{'{key}'}</code> 形式；至少绑定
-          1 个群且勾选&ldquo;启用&rdquo;事件才会触发推送。
+          模板支持 Markdown 和列出的占位符；至少选择一个群并启用后才会推送。
         </p>
       </div>
       <RuleForm

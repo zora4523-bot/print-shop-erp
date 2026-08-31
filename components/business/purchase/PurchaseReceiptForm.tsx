@@ -1,10 +1,18 @@
 'use client';
 
-import { useActionState, useCallback, useState } from 'react';
+import {
+  useActionState,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ConfirmActionDialog } from '@/components/ui-business';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
 
 type Props = {
@@ -20,6 +28,28 @@ type Props = {
   initialIdempotencyKey: string;
 };
 
+export type PurchaseReceiptPreview = {
+  locationLabel: string;
+  quantity: string;
+  unit: string;
+  unitCost: string;
+};
+
+export function purchaseReceiptImpactItems(
+  preview: PurchaseReceiptPreview,
+  remainingQuantity: string,
+): string[] {
+  return [
+    '方向：入库（采购收货过账）',
+    '物料：当前采购明细物料',
+    `库位：${preview.locationLabel}`,
+    `本次数量：${preview.quantity} ${preview.unit}`,
+    `单位成本：${preview.unitCost || '未填写'}`,
+    `提交前剩余：${remainingQuantity} ${preview.unit}`,
+    '系统会创建采购收货记录和库存流水，并同步更新采购明细的已收数量；提交时会再次校验剩余数量。',
+  ];
+}
+
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -32,6 +62,12 @@ export function PurchaseReceiptForm({
   locationOptions,
   initialIdempotencyKey,
 }: Props) {
+  const formId = useId();
+  const formRef = useRef<HTMLFormElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [preview, setPreview] = useState<PurchaseReceiptPreview | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const submitReceipt = useCallback(
     async (prev: PurchaseMutationResult | null, formData: FormData) => {
@@ -48,12 +84,66 @@ export function PurchaseReceiptForm({
     FormData
   >(submitReceipt, null);
 
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success' ? state.message : null;
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError =
+    visibleState?.status === 'error' ? visibleState.message : null;
+  const success =
+    visibleState?.status === 'success' ? visibleState.message : null;
+
+  function prepareConfirmation() {
+    const form = formRef.current;
+    if (!form) return;
+
+    const quantityInput = form.elements.namedItem('quantity');
+    const unitCostInput = form.elements.namedItem('unitCost');
+    if (
+      !(quantityInput instanceof HTMLInputElement) ||
+      !(unitCostInput instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+
+    setReceiptQuantityValidity(quantityInput, remainingQuantity);
+    if (!form.reportValidity()) return;
+
+    const formData = new FormData(form);
+    setPreview({
+      locationLabel: purchaseReceiptLocationLabel(
+        String(formData.get('locationId') ?? ''),
+        locationOptions,
+      ),
+      quantity: String(formData.get('quantity') ?? '').trim(),
+      unit,
+      unitCost: String(formData.get('unitCost') ?? '').trim(),
+    });
+    setConfirmationOpen(true);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+      return;
+    }
+    // Enter、requestSubmit() 与普通提交都必须先进入同一个 L2 确认层。
+    event.preventDefault();
+    prepareConfirmation();
+  }
 
   return (
-    <form action={formAction} className="space-y-4" noValidate>
+    <form
+      id={formId}
+      ref={formRef}
+      action={formAction}
+      onSubmit={handleSubmit}
+      onInvalidCapture={() => {
+        // 原生校验若阻止确认后的 submit，不允许令牌泄漏到下一次提交。
+        confirmedRef.current = false;
+      }}
+      aria-busy={pending}
+      data-risk-level="L2"
+      className="space-y-4"
+    >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="purchaseOrderItemId" value={purchaseOrderItemId} />
       <div className="space-y-2">
@@ -83,6 +173,9 @@ export function PurchaseReceiptForm({
           name="quantity"
           label={`本次收货数量（${unit}）`}
           hint={`剩余 ${remainingQuantity} ${unit}`}
+          required
+          pattern="\d{1,10}(\.\d{1,2})?"
+          maxLength={13}
           disabled={pending}
           error={errs.quantity?.[0]}
         />
@@ -90,6 +183,8 @@ export function PurchaseReceiptForm({
           id={`receipt-unit-cost-${purchaseOrderItemId}`}
           name="unitCost"
           label="单位成本（选填）"
+          pattern="\d{1,6}(\.\d{1,4})?"
+          maxLength={11}
           disabled={pending}
           error={errs.unitCost?.[0]}
           defaultValue={defaultUnitCost ?? ''}
@@ -101,6 +196,7 @@ export function PurchaseReceiptForm({
           id={`receipt-remark-${purchaseOrderItemId}`}
           name="remark"
           rows={2}
+          maxLength={500}
           disabled={pending}
           aria-invalid={Boolean(errs.remark?.[0])}
           className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -119,9 +215,32 @@ export function PurchaseReceiptForm({
           ✓ {success}
         </p>
       ) : null}
-      <Button type="submit" disabled={pending}>
-        {pending ? '提交中…' : '确认收货过账'}
+      <Button
+        ref={triggerRef}
+        type="submit"
+        disabled={pending}
+        aria-busy={pending}
+        className="min-h-11"
+      >
+        {pending ? '提交中…' : '核对并确认收货过账'}
       </Button>
+      <ConfirmActionDialog
+        level="L2"
+        formId={formId}
+        open={confirmationOpen}
+        onOpenChange={setConfirmationOpen}
+        focusReturnRef={triggerRef}
+        disabled={pending || preview === null}
+        title="确认采购收货过账？"
+        description="请核对当前采购明细、入库库位、数量与成本。过账会立即形成采购收货记录和库存流水。"
+        impactItems={
+          preview ? purchaseReceiptImpactItems(preview, remainingQuantity) : []
+        }
+        confirmLabel="确认收货过账"
+        onConfirm={() => {
+          confirmedRef.current = true;
+        }}
+      />
     </form>
   );
 }
@@ -134,6 +253,9 @@ function TextField({
   error,
   defaultValue,
   disabled,
+  required,
+  pattern,
+  maxLength,
 }: {
   id: string;
   name: string;
@@ -142,6 +264,9 @@ function TextField({
   error?: string | undefined;
   defaultValue?: string;
   disabled?: boolean;
+  required?: boolean;
+  pattern?: string;
+  maxLength?: number;
 }) {
   return (
     <div className="space-y-2">
@@ -150,6 +275,11 @@ function TextField({
         id={id}
         name={name}
         defaultValue={defaultValue}
+        inputMode="decimal"
+        required={required}
+        pattern={pattern}
+        maxLength={maxLength}
+        onInput={(event) => event.currentTarget.setCustomValidity('')}
         disabled={disabled}
         aria-invalid={Boolean(error)}
       />
@@ -160,4 +290,31 @@ function TextField({
       ) : null}
     </div>
   );
+}
+
+function setReceiptQuantityValidity(
+  input: HTMLInputElement,
+  remainingQuantity: string,
+) {
+  input.setCustomValidity('');
+  if (!/^\d{1,10}(\.\d{1,2})?$/.test(input.value.trim())) return;
+
+  const quantity = Number(input.value);
+  const remaining = Number(remainingQuantity);
+  if (quantity <= 0) {
+    input.setCustomValidity('收货数量必须大于 0');
+  } else if (Number.isFinite(remaining) && quantity > remaining) {
+    input.setCustomValidity(`本次最多可收货 ${remainingQuantity}`);
+  }
+}
+
+function purchaseReceiptLocationLabel(
+  locationId: string,
+  options: readonly WarehouseLocationOption[],
+): string {
+  const location = locationId
+    ? options.find((option) => option.id === locationId)
+    : options.find((option) => option.isDefault);
+  if (!location) return locationId ? `库位 ${locationId}` : '系统默认库位';
+  return `${location.warehouseName} / ${location.name}${location.isDefault ? '（默认）' : ''}`;
 }

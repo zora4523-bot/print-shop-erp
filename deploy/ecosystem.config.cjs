@@ -53,7 +53,10 @@ module.exports = {
       ...common,
       name: 'print-shop-erp',
       script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3000',
+      // Next 16 defaults to 0.0.0.0. Binding explicitly to loopback is part of
+      // the login-rate-limit boundary: exposing :3000 would bypass Nginx and
+      // its /login limit_req block entirely.
+      args: 'start -H 127.0.0.1 -p 3000',
       max_memory_restart: memory.web.restart,
       node_args: `--max-old-space-size=${memory.web.heap}`,
       kill_timeout: 30_000,
@@ -69,7 +72,10 @@ module.exports = {
       max_memory_restart: memory.light.restart,
       // `tsx` CLI 会再 spawn 一个实际 worker，导致 PM2/heap limit 只
       // 监控包装进程。Node --import 在同一 pid 内转译 TS。
-      node_args: `--import tsx --max-old-space-size=${memory.light.heap}`,
+      // Worker modules are server-only too, but unlike Next they run directly
+      // under Node. Select the marker package's empty server export instead of
+      // its client-boundary error export.
+      node_args: `--conditions=react-server --import tsx --max-old-space-size=${memory.light.heap}`,
       kill_timeout: 60_000,
       error_file: `${logs}/worker-light-error.log`,
       out_file: `${logs}/worker-light-out.log`,
@@ -81,6 +87,10 @@ module.exports = {
       args: '--queue=HEAVY',
       interpreter: 'node',
       max_memory_restart: memory.heavy.restart,
+      // PDF rendering dynamically loads react-dom/server. The React Server
+      // condition selects its RSC guard instead of the Node renderer, so it is
+      // deliberately LIGHT-only; queue-specific imports keep server-only
+      // notification modules out of this process.
       node_args: `--import tsx --max-old-space-size=${memory.heavy.heap}`,
       kill_timeout: 300_000,
       error_file: `${logs}/worker-heavy-error.log`,

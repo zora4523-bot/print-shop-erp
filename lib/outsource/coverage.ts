@@ -1,5 +1,7 @@
-// 款式级外协覆盖校验（业主 2026-08-21 拍板：不改表，用现有
-// OrderItem.crafts 与 OutsourceOrder.orderItemIds 两个 String[] 比对）。
+// 款式级外协数量覆盖校验。OutsourceOrderItemSnapshot 是权威的
+// 不可变账本，覆盖量必须以 itemSnapshots.quantity 判定。
+// OutsourceOrder.orderItemIds 只是为现有读路径保留的非规范化兼容缓存，
+// 写路径仍然双写，但不得用它驱动覆盖判定。
 //
 // 纯函数、零依赖：完工闸口（lib/production-completion.ts）与读路径
 // （lib/order.ts 的 getOrderDetail → 工单详情页横幅）共用同一份判定，
@@ -20,11 +22,11 @@ export type OutsourceCoverageItem = {
   crafts: string[];
 };
 
-// 只需要 orderItemIds。调用方必须**先**把范围收敛到「本工单 + 未取消」
+// 调用方必须**先**把范围收敛到「本工单 + 未取消」
 // 的外协单再传进来：OutsourceOrder.orderId 是可空的，别的工单的、以及
 // 根本没挂工单的外协单不能算数。
-export type OutsourceCoverageLink = {
-  orderItemIds: string[];
+export type OutsourceQuantityCoverageLink = {
+  itemSnapshots: Array<{ orderItemId: string; quantity: number }>;
 };
 
 /**
@@ -43,6 +45,11 @@ export function outsourceCoverageApplies(order: {
   return order.requiresOutsource === true;
 }
 
+// 字典里查不到的 craftId（直连 SQL 删过工艺留下的脏数据）不会进
+// outsourceCraftIds，因此按「不需要外协」处理——fail-open 是刻意的：
+// 让一行字典空洞把工单永久卡在生产中、且 UI 上无法自救，比漏判一次更糟。
+// Craft 目前没有删除入口（lib/craft.ts 只有 create/update），这条路径
+// 正常不可达。
 export function itemRequiresOutsource(
   item: { crafts: string[] },
   outsourceCraftIds: ReadonlySet<string>,
@@ -50,28 +57,49 @@ export function itemRequiresOutsource(
   return item.crafts.some((craftId) => outsourceCraftIds.has(craftId));
 }
 
-// 字典里查不到的 craftId（直连 SQL 删过工艺留下的脏数据）不会进
-// outsourceCraftIds，因此按「不需要外协」处理——fail-open 是刻意的：
-// 让一行字典空洞把工单永久卡在生产中、且 UI 上无法自救，比漏判一次更糟。
-// Craft 目前没有删除入口（lib/craft.ts 只有 create/update），这条路径
-// 正常不可达。
-export function findUncoveredOutsourceItems<T extends OutsourceCoverageItem>(
+/**
+ * 按外协单创建时的不可变逐款数量快照判定履约覆盖。
+ *
+ * 粒度仍是业主已接受的“款式”，不是“款式 × 外协工艺”；只是把
+ * 旧的布尔链接升级为数量账本。工单后续增量或新增款式不会改写快照，
+ * 因此不能被一张早已 RECEIVED 的外协单冒领。
+ */
+export function findUndercoveredOutsourceItems<
+  T extends OutsourceCoverageItem & { quantity: number },
+>(
   items: readonly T[],
   outsourceCraftIds: ReadonlySet<string>,
-  outsourceOrders: readonly OutsourceCoverageLink[],
+  outsourceOrders: readonly OutsourceQuantityCoverageLink[],
 ): T[] {
   if (outsourceCraftIds.size === 0) return [];
-  const coveredItemIds = new Set<string>();
+
+  // createOutsourceOrder 强制每张单的款式数量 = 当时工单数量，不支持
+  // “部分数量”外协单。因此多张单之间要取 max，不能求和：同一
+  // 款式两道外协工艺可能各有一张冻结 100 的旧单，工单增到 200 后
+  // 若求和会凭空把 100 的增量算成已履约。
+  const coveredQuantityByItemId = new Map<string, number>();
   for (const row of outsourceOrders) {
-    // 一张外协单可以覆盖多个款式；不属于本工单的 orderItemIds（历史误填）
-    // 不会与 items 相交，天然被忽略。
-    for (const itemId of row.orderItemIds) coveredItemIds.add(itemId);
+    for (const snapshot of row.itemSnapshots) {
+      // 正常数据还有 DB CHECK。这里仍 fail-closed，防止旧 mock/脱离
+      // migration 的导入把 NaN、0 或负数当成已履约数量。
+      if (!Number.isSafeInteger(snapshot.quantity) || snapshot.quantity <= 0) {
+        continue;
+      }
+      coveredQuantityByItemId.set(
+        snapshot.orderItemId,
+        Math.max(
+          coveredQuantityByItemId.get(snapshot.orderItemId) ?? 0,
+          snapshot.quantity,
+        ),
+      );
+    }
   }
-  return items.filter(
-    (item) =>
-      itemRequiresOutsource(item, outsourceCraftIds) &&
-      !coveredItemIds.has(item.id),
-  );
+
+  return items.filter((item) => {
+    if (!itemRequiresOutsource(item, outsourceCraftIds)) return false;
+    if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0) return true;
+    return (coveredQuantityByItemId.get(item.id) ?? 0) < item.quantity;
+  });
 }
 
 // 混合工艺（isOutsource === true 且 inHouseMachineTypes 非空）**也算**

@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: var(--color-bg); }
+  a { color: var(--color-accent); text-decoration: none; }
+  a:hover { color: var(--color-accent-700); }
+  input[type="text"] { font-variant-numeric: tabular-nums; }
+  .btn, .tag, .seg-opt, .radio { white-space: nowrap; }
+</style>
+</helmet>
+
+<div style="width: 1760px; min-height: 1100px; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 14px; padding-bottom: 28px">
+
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 18px 24px 14px">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-neutral-600)">
+        <span>管理后台</span><span>›</span><span>价格管理</span><span>›</span><span>外部销售收费</span><span>›</span><span style="color: var(--color-text)">收费项目</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 14px; margin-top: 6px">
+        <h3 style="margin: 0; font-size: 25px; white-space: nowrap">加工费收费项目</h3>
+        <div class="seg" style="flex: none">
+          <label class="seg-opt" style="white-space: nowrap"><input type="radio" name="purpose" checked="checked">加工费</label>
+          <label class="seg-opt" style="white-space: nowrap"><input type="radio" name="purpose">快递与打包耗材</label>
+        </div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px">
+      <span class="tag tag-outline">DEVELOPMENT</span>
+      <button type="button" class="btn btn-secondary">价目版本</button>
+      <button type="button" class="btn btn-secondary">导出</button>
+    </div>
+  </div>
+
+  <div style="position: sticky; top: 0; z-index: 30; padding: 0 24px">
+    <div class="blueprint" style="display: flex; align-items: center; gap: 22px; padding: 12px 18px; background: var(--color-accent-900); border-color: var(--color-accent-900); color: var(--color-bg)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+        <span style="display: inline-grid; place-items: center; width: 18px; height: 18px; background: var(--color-bg); color: var(--color-accent-900); font-family: var(--font-heading); font-size: 12px; flex: none">1</span>
+      </sc-if>
+      <div style="display: flex; align-items: baseline; gap: 12px; flex: none">
+        <span style="font-family: var(--font-heading); font-size: 19px; letter-spacing: 0.02em">调价草稿</span>
+        <span style="font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums">第 {{ draftVersion }} 版</span>
+      </div>
+      <div style="width: 1px; height: 26px; background: rgba(242,242,243,0.28)"></div>
+      <div style="display: flex; align-items: center; gap: 16px; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap">
+        <span><b style="font-size: 15px">{{ changedItems }}</b> 个收费项目 · <b style="font-size: 15px">{{ changedTiers }}</b> 个数量档已调整</span>
+        <span style="opacity: 0.7">原因：8 月原纸上调</span>
+        <span style="opacity: 0.7">最近保存 {{ lastSaved }}</span>
+      </div>
+      <div style="flex: 1"></div>
+      <div style="display: flex; align-items: center; gap: 10px; flex: none">
+        <span class="tag" style="background: rgba(242,242,243,0.16); color: var(--color-bg); font-variant-numeric: tabular-nums; white-space: nowrap">{{ pendingCount }} 项待保存</span>
+        <button type="button" class="btn" style="border-color: rgba(242,242,243,0.4); color: var(--color-bg); white-space: nowrap">查看修改</button>
+        <button type="button" class="btn" onClick="{{ save }}" style="border-color: var(--color-bg); background: var(--color-bg); color: var(--color-accent-900); white-space: nowrap">保存改动</button>
+        <button type="button" class="btn btn-primary" style="background: var(--color-accent-400); border-color: var(--color-accent-400); color: var(--color-accent-900); white-space: nowrap">校验并发布</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 14px 24px 0">
+    <div class="blueprint" style="display: flex; align-items: center; gap: 14px; padding: 10px 14px">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="position: relative; width: 260px; flex: none">
+        <input type="text" class="input" placeholder="项目名称、类目或产品" style="padding-left: 30px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="position: absolute; left: 9px; top: 11px; color: var(--color-neutral-600)"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.3-4.3"></path></svg>
+      </div>
+      <span style="font-size: 12px; color: var(--color-neutral-600); flex: none; white-space: nowrap">已选条件</span>
+      <div style="display: flex; align-items: center; gap: 8px; flex: none">
+        <span class="tag tag-accent" style="white-space: nowrap">收费类目：基础加工费 ✕</span>
+        <span class="tag tag-accent" style="white-space: nowrap">计价方式：按个计价 ✕</span>
+        <span class="tag tag-accent" style="white-space: nowrap">处理方式：自动计价 ✕</span>
+      </div>
+      <button type="button" class="btn btn-ghost" style="flex: none; white-space: nowrap">清除条件</button>
+      <div style="flex: 1"></div>
+      <label class="radio" style="gap: 8px; flex: none; white-space: nowrap"><input type="checkbox"><span class="dot" style="border-radius: 0"></span>只看本次修改</label>
+      <div style="width: 1px; height: 22px; background: var(--color-divider)"></div>
+      <span style="font-size: 13px; font-variant-numeric: tabular-nums">筛选结果 <b>68</b> 项</span>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 890px 800px; gap: 22px; align-items: start; padding: 18px 24px 0">
+
+    <div style="display: flex; flex-direction: column; gap: 14px; min-width: 0">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+        <div class="blueprint" style="min-width: 0">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+            <span style="font-family: var(--font-heading); font-size: 17px; white-space: nowrap">{{ g.paper }}</span>
+            <span style="font-size: 12px; color: var(--color-neutral-600); white-space: nowrap">{{ g.category }}</span>
+            <sc-if value="{{ g.incomplete }}" hint-placeholder-val="{{ false }}">
+              <span class="tag tag-outline" style="white-space: nowrap">纸张待补全 · 补全</span>
+            </sc-if>
+            <div style="flex: 1"></div>
+            <span style="font-size: 12px; color: var(--color-neutral-700); font-variant-numeric: tabular-nums">{{ g.count }} 项</span>
+          </div>
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+            <div onClick="{{ it.select }}" style="display: flex; align-items: center; gap: 16px; padding: 11px 14px 11px 12px; cursor: pointer; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); background: {{ it.bg }}; box-shadow: inset 3px 0 0 {{ it.edge }}">
+              <div style="min-width: 0; flex: 1">
+                <div style="display: flex; align-items: center; gap: 9px">
+                  <sc-if value="{{ it.selected }}" hint-placeholder-val="{{ false }}">
+                    <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+                      <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 11px; flex: none">3</span>
+                    </sc-if>
+                  </sc-if>
+                  <span style="font-weight: 500; font-size: 14px; white-space: nowrap">{{ it.name }}</span>
+                  <sc-if value="{{ it.selected }}" hint-placeholder-val="{{ false }}">
+                    <span class="tag" style="background: var(--color-accent); color: var(--color-bg)">正在编辑</span>
+                  </sc-if>
+                  <sc-if value="{{ it.inactive }}" hint-placeholder-val="{{ false }}">
+                    <span class="tag tag-neutral">已停用</span>
+                  </sc-if>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--color-neutral-700); font-variant-numeric: tabular-nums; white-space: nowrap">
+                  <span>自动计价</span><span style="opacity: 0.45">·</span>
+                  <span>{{ it.summary }}</span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; flex: none">
+                <sc-if value="{{ it.selected }}" hint-placeholder-val="{{ false }}">
+                  <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+                    <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 11px">9</span>
+                  </sc-if>
+                </sc-if>
+                <div style="width: 74px; height: 7px; border: 1px solid var(--color-divider)">
+                  <div style="height: 100%; background: var(--color-accent); width: {{ it.barW }}"></div>
+                </div>
+                <span style="width: 104px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: {{ it.changedColor }}">{{ it.changedLabel }}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--color-accent)"><path d="M9 6l6 6-6 6"></path></svg>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px; font-size: 13px; color: var(--color-neutral-700); font-variant-numeric: tabular-nums">
+        <span>第 1 / 5 页，共 68 项</span>
+        <div style="display: flex; gap: 8px; flex: none">
+          <button type="button" class="btn btn-secondary" disabled="disabled" style="white-space: nowrap">← 上一页</button>
+          <button type="button" class="btn btn-secondary" style="white-space: nowrap">下一页 →</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="position: sticky; top: 76px; min-width: 0">
+      <div class="blueprint" style="background: var(--color-bg)">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+
+        <div style="padding: 13px 16px 12px; border-bottom: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+          <div style="display: flex; align-items: flex-start; gap: 10px">
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+              <span style="display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 3px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 12px; flex: none">2</span>
+            </sc-if>
+            <div style="min-width: 0; flex: 1">
+              <div style="font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700)">正在编辑 · 收费项目</div>
+              <div style="font-family: var(--font-heading); font-size: 22px; line-height: 1.15; margin-top: 2px">{{ sel.name }}</div>
+            </div>
+            <span class="tag tag-accent" style="flex: none; font-variant-numeric: tabular-nums">{{ sel.tierCount }} 个数量档</span>
+            <button type="button" class="btn btn-icon btn-secondary" style="flex: none">✕</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 9px; font-size: 13px; flex-wrap: wrap">
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+              <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 11px; flex: none">5</span>
+            </sc-if>
+            <span style="color: var(--color-neutral-600)">纸张</span><b style="font-weight: 500">{{ sel.paper }}</b>
+            <span style="opacity: 0.4">·</span>
+            <span style="color: var(--color-neutral-600)">规格</span><b style="font-weight: 500">{{ sel.size }}</b>
+            <span style="opacity: 0.4">·</span>
+            <span style="color: var(--color-neutral-600)">计价</span><b style="font-weight: 500">按个计价</b>
+            <span style="opacity: 0.4">·</span>
+            <span style="color: var(--color-neutral-600)">计价单位</span><b style="font-weight: 500">每个成品</b>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--color-divider)">
+          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+            <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 11px; flex: none">10</span>
+          </sc-if>
+          <span style="font-size: 13px; font-weight: 500; flex: none; white-space: nowrap">批量调整</span>
+          <div style="position: relative; width: 96px; flex: none">
+            <input type="text" class="input" value="{{ pct }}" onChange="{{ setPct }}" style="text-align: right; padding-right: 26px">
+            <span style="position: absolute; right: 9px; top: 8px; font-size: 13px; color: var(--color-neutral-600)">%</span>
+          </div>
+          <button type="button" class="btn btn-secondary" onClick="{{ applyBatch }}" style="flex: none; white-space: nowrap">应用到 {{ sel.tierCount }} 档</button>
+          <button type="button" class="btn btn-ghost" onClick="{{ resetAll }}" style="flex: none; white-space: nowrap">还原</button>
+          <div style="flex: 1"></div>
+          <span style="font-size: 12px; color: var(--color-neutral-600); white-space: nowrap">负数为下调 · 数量档不变</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 104px 132px 158px 1fr 92px; gap: 14px; padding: 7px 16px; background: var(--color-neutral-100); border-bottom: 1px solid var(--color-divider); font-size: 11px; letter-spacing: 0.06em; color: var(--color-neutral-700)">
+          <div style="text-align: right">数量</div>
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 5px">
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+              <span style="display: inline-grid; place-items: center; width: 15px; height: 15px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 10px">7</span>
+            </sc-if>
+            <span>当前单价</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 5px">
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+              <span style="display: inline-grid; place-items: center; width: 15px; height: 15px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 10px">4</span>
+            </sc-if>
+            <span>草稿单价（元/个）</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 5px">
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+              <span style="display: inline-grid; place-items: center; width: 15px; height: 15px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 10px">8</span>
+            </sc-if>
+            <span>变化</span>
+          </div>
+          <div style="text-align: right">启用</div>
+        </div>
+
+        <div style="max-height: 620px; overflow-y: auto">
+          <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="10">
+            <div style="display: grid; grid-template-columns: 104px 132px 158px 1fr 92px; gap: 14px; align-items: center; padding: 5px 16px; min-height: 48px; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); background: {{ t.rowBg }}">
+              <div style="text-align: right; font-weight: 500; font-variant-numeric: tabular-nums">{{ t.qty }}</div>
+              <div style="text-align: right; font-variant-numeric: tabular-nums; color: var(--color-neutral-700)">{{ t.cur }}</div>
+              <div style="position: relative">
+                <span style="position: absolute; left: 9px; top: 8px; font-size: 13px; color: var(--color-neutral-600)">¥</span>
+                <input type="text" class="input" value="{{ t.draft }}" onChange="{{ t.onChange }}" style="text-align: right; padding-left: 24px; padding-right: 10px; background: var(--color-bg)">
+              </div>
+              <div style="display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; color: {{ t.deltaColor }}">
+                <span style="font-size: 13px; font-weight: 500">{{ t.deltaAmount }}</span>
+                <span style="font-size: 12px; opacity: 0.75; min-width: 54px; text-align: right">{{ t.deltaPct }}</span>
+              </div>
+              <div style="display: flex; justify-content: flex-end">
+                <label class="radio" style="gap: 7px; font-size: 12px"><input type="checkbox" checked="{{ t.active }}" onChange="{{ t.onToggle }}"><span class="dot" style="border-radius: 0"></span>{{ t.activeLabel }}</label>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-top: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+            <span style="display: inline-grid; place-items: center; width: 16px; height: 16px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 11px; flex: none">6</span>
+          </sc-if>
+          <div style="min-width: 0; flex: 1">
+            <div style="font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums">{{ pendingLabel }}</div>
+            <div style="font-size: 12px; color: var(--color-neutral-600)">任意一行校验失败时，整组价格都不会保存。</div>
+          </div>
+          <button type="button" class="btn btn-secondary" onClick="{{ discard }}">放弃改动</button>
+          <button type="button" class="btn btn-primary" onClick="{{ save }}">保存全部单价（{{ sel.tierCount }} 项）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+    <div style="padding: 26px 24px 0">
+      <div class="blueprint" style="padding: 18px 20px 20px">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px">
+          <h4 style="margin: 0; font-size: 20px">改动清单</h4>
+          <span style="font-size: 12px; color: var(--color-neutral-600)">P0 阻断性 3 项 · P1 密度与冗余 5 项 · 附加 3 项。编号对应界面中的标记。</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 26px">
+          <sc-for list="{{ notes }}" as="n" hint-placeholder-count="11">
+            <div style="display: flex; align-items: flex-start; gap: 11px; padding-top: 10px; border-top: 1px solid var(--color-divider)">
+              <span style="display: inline-grid; place-items: center; width: 20px; height: 20px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: 12px; flex: none">{{ n.i }}</span>
+              <div style="min-width: 0">
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <span style="font-family: var(--font-heading); font-size: 16px">{{ n.title }}</span>
+                  <span class="tag tag-neutral">{{ n.level }}</span>
+                </div>
+                <div style="font-size: 13px; color: var(--color-neutral-700); margin-top: 2px; text-wrap: pretty">{{ n.body }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1760,&quot;height&quot;:1180},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;评审&quot;},&quot;deltaMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;金额 + 百分比&quot;,&quot;仅金额&quot;,&quot;仅百分比&quot;],&quot;default&quot;:&quot;金额 + 百分比&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;价格表&quot;}}">
+const QF = new Intl.NumberFormat('zh-CN');
+
+const NOTES = [
+  { i: 1, level: 'P0', title: '提交出口常驻', body: '调价草稿条 sticky 到顶部：版本、已改数量、待保存数、保存与「去校验并发布」永不滚出视口。原设计里这条信息在页面顶部，一滚就消失。' },
+  { i: 2, level: 'P0', title: '删掉重复的价格胶囊组', body: '右侧面板顶部原样复制了左侧行里的 10 个价格胶囊，白占约 15% 首屏。换成「正在编辑 + 名称 + 数量档 + 关闭」的常驻标题。' },
+  { i: 3, level: 'P0', title: '选中态不再靠四个字', body: '整行 accent 底色 + 左侧 3px 强调边 + 「正在编辑」标签，面板标题回显同一名称，左右两侧建立视觉连线。' },
+  { i: 4, level: 'P1', title: '逐行输入框标签全删', body: '原每个输入框上方都有「500 个草稿单价（元/个）」，与「数量」列和表头三重重复。只保留表头一次。' },
+  { i: 5, level: 'P1', title: '恒定列上移', body: '「计价单位 = 每个成品」十行完全一样，移到面板信息行，省掉一整列宽度。' },
+  { i: 6, level: 'P1', title: '行高 80px → 48px', body: '10 个数量档一屏可见，无需滚动；表头与操作条 sticky，滚动长清单时列义和保存按钮都还在。' },
+  { i: 7, level: 'P1', title: '数字右对齐 + 等宽', body: '¥0.325 与 ¥0.52 小数点对齐，价格可以纵向扫读；原设计左对齐无法比价。' },
+  { i: 8, level: 'P1', title: '「状态」列拆分', body: '启用是开关，变化是可计算的 Δ：金额 + 百分比 + ▲▼ 方向，替代「无变更 / 未修改」四个字。方向用箭头而非红绿，系统只有一个 steel 强调色。' },
+  { i: 9, level: '附加', title: '列表行压成摘要', body: '10 个胶囊 → 「10 档 · ¥0.52 → ¥0.18」+ 变更进度条 + 「4 / 10 档已调整」。明细交给面板，列表只负责扫读和定位。' },
+  { i: 10, level: '附加', title: '批量按百分比调价', body: '68 项、每项 10 档手输不现实。上调/下调 + 百分比 + 一键应用，配「还原为当前价」兜底。' },
+  { i: 11, level: '附加', title: '红色让位给 steel', body: '原「编辑收费项目」「正在编辑」「启用」勾选框全是红色，一屏出现 8 次以上。红色只留给校验错误，其余归到系统强调色。' },
+];
+
+class Component extends DCLogic {
+  seed() {
+    const mk = (rows) => rows.map(([q, cur, draft]) => ({
+      q, cur, draft: draft == null ? cur : draft, saved: draft == null ? cur : draft, active: true,
+    }));
+    return [
+      {
+        paper: '160g艳闪 / 红卡', category: '基础加工费', items: [
+          {
+            id: 'a', name: '专版单色平烫 大号', size: '大号 9×16.5',
+            tiers: mk([[500, '0.52', '0.55'], [1000, '0.325', '0.34'], [2000, '0.285'], [3000, '0.27'],
+              [4000, '0.245', '0.255'], [5000, '0.22'], [10000, '0.2'], [20000, '0.19'], [30000, '0.19'], [50000, '0.18', '0.185']]),
+          },
+          {
+            id: 'b', name: '专版单色平烫 中号/方形', size: '中号/方形 8×15',
+            tiers: mk([[500, '0.48', '0.5'], [1000, '0.31', '0.325'], [2000, '0.27'], [3000, '0.25'],
+              [4000, '0.23'], [5000, '0.2'], [10000, '0.18'], [20000, '0.17'], [30000, '0.17'], [50000, '0.16', '0.165']]),
+          },
+        ],
+      },
+      {
+        paper: '纸张未标（烫金!B13）', category: '基础加工费', incomplete: true, items: [
+          { id: 'c', name: '空封现货 大号', size: '大号', single: true, tiers: mk([[1, '0.19']]) },
+        ],
+      },
+      {
+        paper: '160g杂色珠光纸', category: '基础加工费', items: [
+          { id: 'd', name: '空封现货 杂色珠光纸大号', size: '大号', single: true, tiers: mk([[1, '0.17']]) },
+        ],
+      },
+      {
+        paper: '纸张未标（烫金!B7）', category: '基础加工费', incomplete: true, items: [
+          { id: 'e', name: '空封现货 西封大号', size: '西封大号', single: true, tiers: mk([[1, '0.17']]) },
+        ],
+      },
+      {
+        paper: '触感纸（克重未标）', category: '基础加工费', incomplete: true, items: [
+          { id: 'f', name: '空封现货 触感纸中号', size: '中号', single: true, tiers: mk([[1, '0.23']]) },
+          { id: 'g', name: '空封现货 触感纸方形', size: '方形', single: true, tiers: mk([[1, '0.22']]) },
+        ],
+      },
+    ];
+  }
+
+  state = { groups: this.seed(), selected: 'a', pct: '3', lastSaved: '14:32' };
+
+  num(s) { const v = parseFloat(String(s).trim()); return Number.isFinite(v) ? v : null; }
+  round(v) { return Math.round(v * 10000) / 10000; }
+  money(v) { return '¥' + String(this.round(v)); }
+
+  allItems() { return this.state.groups.flatMap((g) => g.items); }
+  current() { return this.allItems().find((i) => i.id === this.state.selected) || this.allItems()[0]; }
+
+  changedCount(item) {
+    return item.tiers.filter((t) => { const c = this.num(t.cur), d = this.num(t.draft); return c === null || d === null || Math.abs(d - c) > 1e-9; }).length;
+  }
+  pendingCount() {
+    return this.allItems().reduce((n, it) => n + it.tiers.filter((t) => String(t.draft).trim() !== String(t.saved).trim()).length, 0);
+  }
+
+  mutate(fn) {
+    this.setState((s) => {
+      const groups = s.groups.map((g) => ({ ...g, items: g.items.map((it) => ({ ...it, tiers: it.tiers.map((t) => ({ ...t })) })) }));
+      fn(groups);
+      return { groups };
+    });
+  }
+
+  edit(id, idx, value) { this.mutate((gs) => { const it = gs.flatMap((g) => g.items).find((x) => x.id === id); it.tiers[idx].draft = value; }); }
+  toggle(id, idx) { this.mutate((gs) => { const it = gs.flatMap((g) => g.items).find((x) => x.id === id); const t = it.tiers[idx]; t.active = !t.active; }); }
+
+  applyBatch() {
+    const p = this.num(this.state.pct);
+    if (p === null) return;
+    const id = this.current().id;
+    this.mutate((gs) => {
+      const it = gs.flatMap((g) => g.items).find((x) => x.id === id);
+      it.tiers.forEach((t) => {
+        if (!t.active) return;
+        const c = this.num(t.cur);
+        if (c === null) return;
+        t.draft = String(this.round(c * (1 + p / 100)));
+      });
+    });
+  }
+
+  resetAll() {
+    const id = this.current().id;
+    this.mutate((gs) => { const it = gs.flatMap((g) => g.items).find((x) => x.id === id); it.tiers.forEach((t) => { t.draft = t.cur; }); });
+  }
+
+  discard() {
+    const id = this.current().id;
+    this.mutate((gs) => { const it = gs.flatMap((g) => g.items).find((x) => x.id === id); it.tiers.forEach((t) => { t.draft = t.saved; }); });
+  }
+
+  save() {
+    const now = new Date();
+    const stamp = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    this.mutate((gs) => { gs.flatMap((g) => g.items).forEach((it) => it.tiers.forEach((t) => { t.saved = t.draft; })); });
+    this.setState({ lastSaved: stamp });
+  }
+
+  renderVals() {
+    const mode = this.props.deltaMode ?? '金额 + 百分比';
+    const sel = this.current();
+    const selChanged = this.changedCount(sel);
+
+    const groups = this.state.groups.map((g) => ({
+      paper: g.paper, category: g.category, incomplete: !!g.incomplete, count: g.items.length,
+      items: g.items.map((it) => {
+        const n = this.changedCount(it);
+        const total = it.tiers.length;
+        const first = it.tiers[0], last = it.tiers[total - 1];
+        const summary = it.single
+          ? '单档 1–9,999,999 个 · ' + this.money(this.num(first.cur)) + ' / 个'
+          : total + ' 档 · ' + this.money(this.num(first.cur)) + ' → ' + this.money(this.num(last.cur)) + ' / 个';
+        return {
+          name: it.name, summary, selected: it.id === this.state.selected, inactive: false,
+          bg: it.id === this.state.selected ? 'var(--color-accent-100)' : 'transparent',
+          edge: it.id === this.state.selected ? 'var(--color-accent)' : 'transparent',
+          barW: Math.round((n / total) * 100) + '%',
+          changedLabel: n ? n + ' / ' + total + ' 档已调整' : '未调整',
+          changedColor: n ? 'var(--color-accent-700)' : 'var(--color-neutral-600)',
+          select: () => this.setState({ selected: it.id }),
+        };
+      }),
+    }));
+
+    const tiers = sel.tiers.map((t, idx) => {
+      const c = this.num(t.cur), d = this.num(t.draft);
+      let amount = '—', pct = '', color = 'var(--color-neutral-500)';
+      if (c === null || d === null) { amount = '格式错误'; color = 'var(--color-accent-800)'; }
+      else if (Math.abs(d - c) <= 1e-9) { amount = '未修改'; }
+      else {
+        const diff = this.round(d - c);
+        const up = diff > 0;
+        const a = (up ? '▲ +' : '▼ −') + '¥' + String(Math.abs(diff));
+        const p = (up ? '+' : '−') + Math.abs(diff / c * 100).toFixed(1) + '%';
+        amount = mode === '仅百分比' ? p : a;
+        pct = mode === '金额 + 百分比' ? p : '';
+        color = 'var(--color-accent-800)';
+      }
+      const dirty = String(t.draft).trim() !== String(t.saved).trim();
+      return {
+        qty: sel.single ? '1–9,999,999' : QF.format(t.q) + ' 个',
+        cur: this.money(c) + ' / 个',
+        draft: t.draft,
+        deltaAmount: amount, deltaPct: pct, deltaColor: color,
+        active: t.active, activeLabel: t.active ? '启用' : '停用',
+        rowBg: dirty ? 'color-mix(in srgb, var(--color-accent) 9%, transparent)' : 'transparent',
+        onChange: (e) => this.edit(sel.id, idx, e.target.value),
+        onToggle: () => this.toggle(sel.id, idx),
+      };
+    });
+
+    const pending = this.pendingCount();
+    return {
+      showNotes: this.props.showNotes ?? true,
+      notes: NOTES,
+      groups, tiers,
+      sel: { name: sel.name, paper: sel.single ? '未标注' : '160g艳闪 / 红卡', size: sel.size, tierCount: sel.tiers.length },
+      draftVersion: 3,
+      changedItems: this.allItems().filter((it) => this.changedCount(it) > 0).length,
+      changedTiers: this.allItems().reduce((n, it) => n + this.changedCount(it), 0),
+      lastSaved: this.state.lastSaved,
+      pendingCount: pending,
+      pendingLabel: pending ? pending + ' 项待保存 · ' + selChanged + ' 档相对当前价已调整' : '全部改动已保存到草稿 · ' + selChanged + ' 档相对当前价已调整',
+      pct: this.state.pct,
+      setPct: (e) => this.setState({ pct: e.target.value }),
+      applyBatch: () => this.applyBatch(),
+      resetAll: () => this.resetAll(),
+      discard: () => this.discard(),
+      save: () => this.save(),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

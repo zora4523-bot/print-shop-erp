@@ -14,6 +14,8 @@ import {
   midShanghaiMonth,
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
+  openFirstOrderItemEditor,
+  submitDraftOrderAndWait,
 } from './_helpers';
 
 // This E2E protects the boundary between two independent financial facts:
@@ -25,20 +27,25 @@ import {
 //
 // Unit tests can mock either side independently; this flow proves the real
 // browser actions and PostgreSQL transactions preserve that separation.
-test.describe('客服业绩事件账本与客户付款分离', () => {
-  test('提交工单计入业绩，两次客户付款均不重复增加业绩', async ({ page }) => {
+test.describe('客服业绩事件账本与外部销售应收分离', () => {
+  test('客服提交计入业绩，外部销售两次回款均不改写客服业绩', async ({ page }) => {
     test.setTimeout(90_000);
 
     const suffix = uniqueSuffix();
     const submittedCustomerRef = `e2e-cs-submit-${suffix}`;
-    const billedCustomerRef = `e2e-cs-bill-${suffix}`;
+    const internalFinishedCustomerRef = `e2e-bill-cs-internal-${suffix}`;
+    const externalBilledCustomerRef = `e2e-bill-sales-${suffix}`;
     const totalAmount = '3000.00';
     const halfAmount = '1500.00';
     const csUserId = await getUserIdByUsername(
       E2E_USERS.customerService.username,
     );
+    const salesUserId = await getUserIdByUsername(
+      E2E_USERS.billingSales.username,
+    );
 
     await resetBillsForUser(csUserId);
+    await resetBillsForUser(salesUserId);
     await resetCsSalaryStateForUser(csUserId);
 
     const { periodId } = await seedActiveCsPeriod({
@@ -58,19 +65,26 @@ test.describe('客服业绩事件账本与客户付款分离', () => {
       await page
         .locator('input[name="customerRef"]')
         .fill(submittedCustomerRef);
+      await openFirstOrderItemEditor(page);
       await page.locator('input[name="items.0.name"]').fill('E2E 客服业绩款');
       await page.locator('input[name="items.0.quantity"]').fill('1000');
       await page.locator('input[name="items.0.unitPrice"]').fill('3.00');
+      await page
+        .locator('textarea[name="items.0.priceOverrideReason"]')
+        .fill('E2E 客服业绩固定测试价');
       await page.getByRole('button', { name: '现货加烫' }).click();
-      await page.getByRole('button', { name: /创建工单/ }).click();
+      await page.getByRole('tab', { name: /收货与费用/ }).click();
+      await page
+        .getByLabel('收货信息', { exact: true })
+        .fill('E2E 收货人 13800138000 广东省佛山市南海区测试路 1 号');
+      await page
+        .getByRole('button', { name: '保存草稿', exact: true })
+        .click();
       await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+(\/|$)/, {
         timeout: 10_000,
       });
 
-      await page.getByRole('button', { name: /^提交工单$/ }).click();
-      await expect(
-        page.getByRole('button', { name: /^提交工单$/ }),
-      ).toHaveCount(0, { timeout: 10_000 });
+      await submitDraftOrderAndWait(page);
 
       await expect
         .poll(
@@ -86,19 +100,26 @@ test.describe('客服业绩事件账本与客户付款分离', () => {
 
     await logout(page);
 
-    // Billing still groups FINISHED orders by completion month. Seed a
-    // separate receivable-only fixture: its raw insert intentionally does not
-    // create a performance event, so the 3000 above remains the expected
-    // ledger total throughout both payments.
+    // Billing now intentionally scans EXTERNAL_SALES only. Seed one FINISHED
+    // internal-CS order and one external-sales order in the same month: the
+    // bill must contain only the external order, while the CS event ledger
+    // remains the 3000 recorded at submit time.
     await seedFinishedOrder({
       submitterId: csUserId,
       submitterRole: 'CUSTOMER_SERVICE',
-      customerRef: billedCustomerRef,
+      customerRef: internalFinishedCustomerRef,
+      totalAmount,
+      finishedAt: midShanghaiMonth(),
+    });
+    await seedFinishedOrder({
+      submitterId: salesUserId,
+      submitterRole: 'SALES',
+      customerRef: externalBilledCustomerRef,
       totalAmount,
       finishedAt: midShanghaiMonth(),
     });
 
-    await test.step('管理员生成并发出客服应收账单', async () => {
+    await test.step('管理员生成外部销售应收，内部客服单不进账单', async () => {
       await login(page, {
         from: '/owner/bills',
         username: ADMIN_USERNAME,
@@ -113,12 +134,14 @@ test.describe('客服业绩事件账本与客户付款分离', () => {
 
       const row = page
         .locator('table tbody tr')
-        .filter({ hasText: E2E_USERS.customerService.displayName })
-        .filter({ hasText: /¥ 3000\b/ })
+        .filter({ hasText: E2E_USERS.billingSales.displayName })
+        .filter({ hasText: /¥ 3,000\.00\b/ })
         .first();
       await expect(row).toBeVisible({ timeout: 10_000 });
       await row.getByRole('link', { name: /详情/ }).click();
       await page.waitForURL(/\/owner\/bills\/[a-z0-9]+/);
+      await expect(page.getByText(externalBilledCustomerRef)).toBeVisible();
+      await expect(page.getByText(internalFinishedCustomerRef)).toHaveCount(0);
 
       await page
         .getByRole('button', { name: /^发单给销售 \/ 客服$/ })

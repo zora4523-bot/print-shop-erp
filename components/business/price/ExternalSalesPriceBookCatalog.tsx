@@ -3,7 +3,10 @@ import { AdminTableCard } from '@/components/business/admin/AdminDataTable';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, TableScrollArea } from '@/components/ui-business';
 import type { CustomerPriceBookCatalog } from '@/lib/price/customer-price-book';
-import { externalPriceRuleDisplayName } from './external-price-display';
+import {
+  externalPriceBusinessText,
+  externalPriceRuleDisplayName,
+} from './external-price-display';
 
 export type ExternalSalesPriceBookCatalogProps = {
   catalog: CustomerPriceBookCatalog | null;
@@ -24,9 +27,21 @@ function formatEffectiveDate(value: Date | string | null | undefined): string {
 function itemSubject(
   item: CustomerPriceBookCatalog['categories'][number]['items'][number],
 ): string[] {
-  return [item.product, item.specification, item.paper].filter(
-    (value): value is string => Boolean(value),
-  );
+  return [
+    ...new Set(
+      [item.product, item.specification, item.paper]
+        .filter((value): value is string => Boolean(value))
+        .map(externalPriceBusinessText)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function catalogWarning(warning: string): string {
+  return externalPriceBusinessText(warning)
+    .replace(/第\s*\d+\s*行/g, '项目')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 export function ExternalSalesPriceBookCatalog({
@@ -36,8 +51,8 @@ export function ExternalSalesPriceBookCatalog({
   if (!catalog) {
     return (
       <EmptyState
-        title="当前没有生效的外部销售报价单"
-        description="请联系管理员确认价目簿是否已发布并处于有效期内。"
+        title="暂无生效报价"
+        description="请联系管理员。"
       />
     );
   }
@@ -58,7 +73,9 @@ export function ExternalSalesPriceBookCatalog({
             当前生效版本
           </h2>
           <div className="mt-3 flex min-w-0 flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-4">
-            <p className="admin-wrap-anywhere font-medium">{catalog.name}</p>
+            <p className="admin-wrap-anywhere font-medium">
+              {externalPriceBusinessText(catalog.name)}
+            </p>
             <p className="font-sans tabular-nums text-muted-foreground">
               版本 v{catalog.version}
             </p>
@@ -89,7 +106,7 @@ export function ExternalSalesPriceBookCatalog({
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                 {catalog.warnings.map((warning) => (
                   <li key={warning} className="admin-wrap-anywhere">
-                    {warning}
+                    {catalogWarning(warning)}
                   </li>
                 ))}
               </ul>
@@ -100,8 +117,8 @@ export function ExternalSalesPriceBookCatalog({
 
       {itemCount === 0 ? (
         <EmptyState
-          title="当前没有可展示的外部销售报价"
-          description="请联系管理员确认价目簿是否已生效。"
+          title="暂无可用报价"
+          description="请联系管理员。"
         />
       ) : (
         catalog.categories.map((category) => (

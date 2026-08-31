@@ -5,8 +5,18 @@ import {
   type NotificationEvent,
   type NotificationPayloadFor,
 } from '../notification/events';
-import { notify } from '../notification/notify';
-import { enqueueBackgroundJob } from './repository';
+import {
+  notify,
+  NotificationReplayConflictError,
+  replayDurableNotificationLogs,
+  type ManualNotificationReplayTarget,
+  type NotifyOutcome,
+} from '../notification/notify';
+import { databaseNow } from './clock';
+import {
+  enqueueBackgroundJob,
+  type EnqueueClient,
+} from './repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from './types';
 
 const EVENT_SET: ReadonlySet<string> = new Set(
@@ -26,6 +36,7 @@ export async function enqueueNotificationJob<E extends NotificationEvent>(
   event: E,
   payload: NotificationPayloadFor<E>,
   options: { dedupeKey?: string; spreadIndex?: number } = {},
+  client?: EnqueueClient,
 ): Promise<{ jobId: string; created: boolean; requeued: boolean }> {
   const body = JSON.parse(JSON.stringify({ event, payload })) as Prisma.InputJsonValue;
   const { job, created, requeued } = await enqueueBackgroundJob({
@@ -36,22 +47,26 @@ export async function enqueueNotificationJob<E extends NotificationEvent>(
     payload: body,
     maxAttempts: 5,
     priority: 200,
-    // 这里刻意用进程时钟而不是 databaseNow()：这是「排队节流」不是「重试
-    // 定时」，几秒的钟差只会让整批一起早几秒或晚几秒，相对间隔不变；而
-    // databaseNow() 会给每条扇出多一次往返。spreadIndex 缺省（单条事件）
-    // 时留 undefined，让库默认的 now() 生效，与改动前逐字一致。
-    availableAt: spreadAvailableAt(options.spreadIndex),
-  });
+    // availableAt 最终由 claim 的数据库 now() 判断，因此排队节流的基准也
+    // 必须来自数据库。Web 主机慢 5 分钟时，Date.now()+slot 会让前约 85 个
+    // slot 入库即过期，整批瞬间出队、直接撞上企业微信 20 条/分钟限额。
+    // spreadIndex 缺省或为 0 时仍留 undefined，使用列的数据库 now() 默认值。
+    availableAt: await spreadAvailableAt(options.spreadIndex, client),
+  }, client);
   return { jobId: job.id, created, requeued };
 }
 
-function spreadAvailableAt(spreadIndex: number | undefined): Date | undefined {
+async function spreadAvailableAt(
+  spreadIndex: number | undefined,
+  client?: EnqueueClient,
+): Promise<Date | undefined> {
   if (typeof spreadIndex !== 'number' || !Number.isFinite(spreadIndex)) {
     return undefined;
   }
   const slot = Math.max(0, Math.floor(spreadIndex));
   if (slot === 0) return undefined;
-  return new Date(Date.now() + slot * FANOUT_SPACING_MS);
+  const at = await databaseNow(client);
+  return new Date(at.getTime() + slot * FANOUT_SPACING_MS);
 }
 
 export async function handleNotificationJob(
@@ -70,17 +85,42 @@ export async function handleNotificationJob(
     throw new InvalidNotificationJobPayloadError();
   }
 
-  // deliveryKey = job.dedupeKey：跨 attempt 稳定，notify 用它跳过已经推成功的
-  // channel（部分成功不重复打扰）。finalAttempt 决定失败落 RETRYING 还是
-  // FAILED —— claimNextBackgroundJob 在 claim 时已经把 attempts 加过 1，所以
-  // job.attempts 就是「这是第几次」。
-  const finalAttempt = job.attempts >= job.maxAttempts;
-
-  const outcome = await notify(
-    event as NotificationEvent,
-    payload as NotificationPayloadFor<NotificationEvent>,
-    { deliveryKey: job.dedupeKey, finalAttempt },
-  );
+  const replayTargets = manualReplayTargets(body.manualReplay);
+  let replayConflict = false;
+  let outcome: NotifyOutcome;
+  if (replayTargets) {
+    try {
+      outcome = await replayDurableNotificationLogs(event as NotificationEvent, {
+        deliveryKey: job.dedupeKey,
+        deliveryAttempt: job.attempts,
+        targets: replayTargets,
+        ...(job.signal ? { signal: job.signal } : {}),
+        ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+      });
+    } catch (error) {
+      if (!(error instanceof NotificationReplayConflictError)) throw error;
+      replayConflict = true;
+      const conflictCode = error.name;
+      outcome = {
+        ...error.partialOutcome,
+        failed: error.partialOutcome.failed + 1,
+        errorCodes: error.partialOutcome.errorCodes.includes(conflictCode)
+          ? [...error.partialOutcome.errorCodes]
+          : [...error.partialOutcome.errorCodes, conflictCode],
+      };
+    }
+  } else {
+    outcome = await notify(
+      event as NotificationEvent,
+      payload as NotificationPayloadFor<NotificationEvent>,
+      {
+        deliveryKey: job.dedupeKey,
+        deliveryAttempt: job.attempts,
+        ...(job.signal ? { signal: job.signal } : {}),
+        ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+      },
+    );
+  }
 
   const result: Prisma.InputJsonObject = {
     event: outcome.event,
@@ -88,9 +128,28 @@ export async function handleNotificationJob(
     delivered: outcome.delivered,
     skipped: outcome.skipped,
     failed: outcome.failed,
+    unknown: outcome.unknown,
     unlogged: outcome.unlogged,
     errorCodes: outcome.errorCodes,
   };
+
+  if (outcome.unknown > 0) {
+    // The webhook request may have been accepted, but no trustworthy final
+    // acknowledgement was persisted. The pre-send SENDING/UNKNOWN ledger row
+    // prevents every later attempt from sending it again. Keep failing the job
+    // so ops sees a DEAD task and decides manually; never turn ambiguity into a
+    // silent SUCCEEDED or an automatic duplicate.
+    throw new NotificationDeliveryUnknownError(result);
+  }
+
+  if (replayConflict) {
+    // A stale owner form or CAS generation cannot become valid by retrying the
+    // same payload. Throw a dedicated terminal error so failBackgroundJob
+    // makes the owning job DEAD immediately; any earlier RETRYING ledger row
+    // then remains paired with that DEAD job for the owner-visible B5 contract.
+    // UNKNOWN above still wins.
+    throw new NotificationReplayTerminalError(result);
+  }
 
   if (outcome.retryable) {
     // CLAUDE.md §15.4：带着部分进度重抛，绝不把没送出去的 channel 标成成功。
@@ -105,7 +164,8 @@ export async function handleNotificationJob(
       delivered: outcome.delivered,
       skipped: outcome.skipped,
       failed: outcome.failed,
-      finalAttempt,
+      attempt: job.attempts,
+      maxAttempts: job.maxAttempts,
     });
     throw new NotificationDeliveryFailedError(result);
   }
@@ -133,11 +193,59 @@ export class NotificationDeliveryFailedError extends Error {
   }
 }
 
+export class NotificationDeliveryUnknownError extends Error {
+  readonly partialResult: Prisma.InputJsonObject;
+
+  constructor(partialResult: Prisma.InputJsonObject) {
+    super('notification delivery outcome is unknown; automatic resend blocked');
+    this.name = 'NotificationDeliveryUnknownError';
+    this.partialResult = partialResult;
+  }
+}
+
+export class NotificationReplayTerminalError extends Error {
+  readonly partialResult: Prisma.InputJsonObject;
+
+  constructor(partialResult: Prisma.InputJsonObject) {
+    super('manual notification replay conflicted; stale payload retry blocked');
+    this.name = 'NotificationReplayTerminalError';
+    this.partialResult = partialResult;
+  }
+}
+
 function asRecord(value: Prisma.JsonValue): Record<string, Prisma.JsonValue> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new InvalidNotificationJobPayloadError();
   }
   return value as Record<string, Prisma.JsonValue>;
+}
+
+function manualReplayTargets(
+  value: Prisma.JsonValue | undefined,
+): ManualNotificationReplayTarget[] | null {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new InvalidNotificationJobPayloadError();
+  }
+  const targets = value.targets;
+  if (!Array.isArray(targets) || targets.length === 0) {
+    throw new InvalidNotificationJobPayloadError();
+  }
+  return targets.map((target) => {
+    if (!target || typeof target !== 'object' || Array.isArray(target)) {
+      throw new InvalidNotificationJobPayloadError();
+    }
+    if (
+      typeof target.logId !== 'string' ||
+      target.logId.length === 0 ||
+      typeof target.stateVersion !== 'number' ||
+      !Number.isSafeInteger(target.stateVersion) ||
+      target.stateVersion < 0
+    ) {
+      throw new InvalidNotificationJobPayloadError();
+    }
+    return { logId: target.logId, stateVersion: target.stateVersion };
+  });
 }
 
 export class InvalidNotificationJobPayloadError extends Error {

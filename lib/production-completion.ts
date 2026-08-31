@@ -6,9 +6,11 @@ import {
 import { transitionOrder } from './order/status-machine';
 import {
   collectOutsourceCraftIds,
-  findUncoveredOutsourceItems,
+  findUndercoveredOutsourceItems,
   outsourceCoverageApplies,
 } from './outsource/coverage';
+import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
+import type { EnqueueClient } from './background-jobs/repository';
 
 // Shared completion gate for internal production and outsource receiving.
 // Callers must already hold orderCascadeLockKey(orderId) in the same
@@ -30,6 +32,8 @@ export type ProductionCompletionTx = {
       id: string;
       status: OrderStatus;
       requiresOutsource?: boolean;
+      orderNo: string;
+      customerRef: string | null;
     } | null>;
     update: (args: {
       where: { id: string };
@@ -46,6 +50,7 @@ export type ProductionCompletionTx = {
         id: string;
         sequence: number;
         name: string;
+        quantity: number;
         crafts: string[];
       }>
     >;
@@ -67,7 +72,12 @@ export type ProductionCompletionTx = {
       where: unknown;
       select?: unknown;
     }) => Promise<
-      Array<{ id: string; status: OutsourceStatus; orderItemIds: string[] }>
+      Array<{
+        id: string;
+        status: OutsourceStatus;
+        orderItemIds: string[];
+        itemSnapshots: Array<{ orderItemId: string; quantity: number }>;
+      }>
     >;
   };
   orderLog: {
@@ -110,7 +120,13 @@ export async function maybeCompleteProductionOrder(
 ): Promise<ProductionCompletionOutcome> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { id: true, status: true, requiresOutsource: true },
+    select: {
+      id: true,
+      status: true,
+      requiresOutsource: true,
+      orderNo: true,
+      customerRef: true,
+    },
   });
   if (!order) return notApplicable();
   if (order.status === OrderStatus.COMPLETED) return notApplicable();
@@ -129,7 +145,6 @@ export async function maybeCompleteProductionOrder(
   const internalReady = activeTasks.every(
     (task) => task.status === TaskStatus.COMPLETED,
   );
-  if (!internalReady) return blocked('INTERNAL_TASKS');
 
   // 与 getOrderDetail 的「暂不能完工」横幅共用同一个前置谓词。不共用会
   // 出现「页面说不能完工、闸口其实照样完工」的反向漂移。
@@ -141,7 +156,14 @@ export async function maybeCompleteProductionOrder(
     // 另开一次查询。
     const outsourceOrders = await tx.outsourceOrder.findMany({
       where: { orderId, status: { not: OutsourceStatus.CANCELLED } },
-      select: { id: true, status: true, orderItemIds: true },
+      select: {
+        id: true,
+        status: true,
+        orderItemIds: true,
+        itemSnapshots: {
+          select: { orderItemId: true, quantity: true },
+        },
+      },
     });
     if (outsourceOrders.length === 0) return blocked('OUTSOURCE_MISSING');
     if (
@@ -150,13 +172,18 @@ export async function maybeCompleteProductionOrder(
       return blocked('OUTSOURCE_NOT_RECEIVED');
     }
 
-    // 款式级覆盖校验（业主 2026-08-21 拍板）。放在「全部收货」之后是性能
-    // 考量：这段只有在「内部任务全部完工 + 外协单全部收货」这一刻才可达，
-    // 一张工单全程命中个位数次，不是每次报工都跑；非外协工单连上面那条
-    // outsourceOrder 查询都不会跑。
+    // 款式级数量覆盖校验（业主仍接受「款式」而非「款式 × 工艺」）。
+    // 放在「全部收货」之后，但刻意放在 INTERNAL_TASKS 之前：最后一张
+    // 外协单收货时就要把缺口告诉主管，不能等到内部任务全部完工。
     const items = await tx.orderItem.findMany({
       where: { orderId },
-      select: { id: true, sequence: true, name: true, crafts: true },
+      select: {
+        id: true,
+        sequence: true,
+        name: true,
+        quantity: true,
+        crafts: true,
+      },
     });
     const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
     // 按 id 取字典再在 JS 里筛 isOutsource（而不是 where isOutsource:
@@ -170,7 +197,7 @@ export async function maybeCompleteProductionOrder(
             where: { id: { in: craftIds } },
             select: { id: true, isOutsource: true },
           });
-    const uncovered = findUncoveredOutsourceItems(
+    const uncovered = findUndercoveredOutsourceItems(
       items,
       collectOutsourceCraftIds(crafts),
       outsourceOrders,
@@ -186,6 +213,11 @@ export async function maybeCompleteProductionOrder(
       );
     }
   }
+
+  // 收下最后一张外协单时，即使内部任务尚未完成，也要先把外协
+  // 覆盖缺口结构化返回给收货 UI。否则 INTERNAL_TASKS 早退会吞掉唯一个
+  // 只有此刻最容易修复的履约缺口，直到最后一个内部任务报工才暴露。
+  if (!internalReady) return blocked('INTERNAL_TASKS');
 
   transitionOrder(order.status, OrderStatus.COMPLETED);
   await tx.order.update({
@@ -209,5 +241,15 @@ export async function maybeCompleteProductionOrder(
             : '全部任务完工',
     },
   });
+  await enqueueNotificationInTransaction(
+    tx as unknown as EnqueueClient,
+    'ORDER_COMPLETED',
+    {
+      orderId,
+      orderNo: order.orderNo,
+      customerRef: order.customerRef,
+    },
+    { dedupeKey: `notification:ORDER_COMPLETED:${orderId}` },
+  );
   return { completed: true, blockedBy: null, uncoveredItems: [] };
 }

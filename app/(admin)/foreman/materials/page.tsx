@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getMaterialInventoryDashboard } from '@/lib/material-inventory';
 import { MATERIAL_CATEGORY_LABELS } from '@/lib/material';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import {
   PageHeader,
   StatCard,
@@ -47,7 +48,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
     <div className="space-y-6">
       <PageHeader
         title="物料库存"
-        subtitle="查看安全库存、当日出入库、累计出入库和按手工参考成本估算的库存金额。"
+        subtitle="查看库存、出入库和库存金额。"
         actions={
           <Link href="/foreman/materials/new" className={buttonVariants()}>
             新建物料
@@ -74,7 +75,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
           value={money(dashboard.totals.stockValue)}
           icon={PackageCheck}
           tone="primary"
-          hint="库存 × 手工参考平均成本（采购不会自动改价）"
+          hint="库存 × 参考成本；采购入库不会自动更新参考成本"
         />
         <StatCard
           label="今日入库"
@@ -142,7 +143,9 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
             {dashboard.rows.map((row) => (
               <tr key={row.id}>
                 <td className="px-4 py-3">
-                  <div className="font-medium">{row.name}</div>
+                  <div className="font-medium">
+                    {externalPriceBusinessText(row.name)}
+                  </div>
                   <div className="mt-1 font-sans tabular-nums text-xs text-muted-foreground">
                     {row.code}
                   </div>
@@ -150,7 +153,10 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
                 <td className="px-4 py-3">
                   <div>{MATERIAL_CATEGORY_LABELS[row.category]}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {row.specification ?? '-'} · {row.unit}
+                    {row.specification
+                      ? externalPriceBusinessText(row.specification)
+                      : '-'}{' '}
+                    · {row.unit}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right font-sans tabular-nums">

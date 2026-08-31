@@ -42,7 +42,7 @@ import {
 
 const input = {
   idempotencyKey: '00000000-0000-4000-8000-000000000001',
-  remark: null,
+  remark: '月末例行盘点',
   items: [
     {
       materialId: 'mat1',
@@ -57,6 +57,8 @@ const summary = {
   countNo: 'IC20260717-0001',
   countedAt: new Date(),
   remark: null,
+  staleKeys: [],
+  staleMessage: null,
   countedBy: { displayName: '管理员' },
   items: [],
 };
@@ -71,7 +73,6 @@ beforeEach(() => {
   txMock.materialTransaction.createMany.mockReset().mockResolvedValue({ count: 1 });
   dbMock.$transaction.mockReset().mockImplementation((cb) => cb(txMock));
   dbMock.inventoryCount.findUnique.mockReset();
-  // 事务外预检默认「查不到库存行」= 不下结论，照常进事务（权威复检在事务内）。
   dbMock.materialLocationStock.findMany.mockReset().mockResolvedValue([]);
   dbMock.material.findMany.mockReset().mockResolvedValue([]);
   dbMock.warehouseLocation.findMany.mockReset().mockResolvedValue([]);
@@ -134,7 +135,7 @@ describe('postInventoryCount', () => {
       maxWait: 5_000,
       timeout: 30_000,
     });
-    expect(numberMock).toHaveBeenCalledWith('INVENTORY_COUNT', now);
+    expect(numberMock).toHaveBeenCalledWith('INVENTORY_COUNT', now, txMock);
     expect(posted.staleKeys).toEqual([]);
     expect(posted.count.countNo).toBe('IC20260717-0001');
   });
@@ -159,9 +160,28 @@ describe('postInventoryCount', () => {
     expect(txMock.inventoryCountItem.createManyAndReturn).not.toHaveBeenCalled();
     expect(txMock.materialTransaction.createMany).not.toHaveBeenCalled();
     expect(numberMock).not.toHaveBeenCalled();
-    // 幂等重放走不到账面回声守卫：第一次过账已经把余额改成了实盘数，回传的
-    // 账面数当然对不上——校验排在早返回之后是刻意的，否则守卫会自噬。
+    // 幂等重放走不到账面回声守卫：第一次过账已经把余额改成了实盘数。
     expect(dbMock.materialLocationStock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('并发重放在事务锁后读到持久化的部分过账 outcome', async () => {
+    const staleMessage = '物料2(M-002) 默认仓库/2号货架 账面数已变动';
+    dbMock.inventoryCount.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(summary);
+    txMock.inventoryCount.findUnique.mockResolvedValue({
+      id: 'count1',
+      staleKeys: ['mat2:loc2'],
+      staleMessage,
+    });
+
+    const replayed = await postInventoryCount(input, { id: 'owner1' });
+
+    expect(replayed.staleKeys).toEqual(['mat2:loc2']);
+    expect(replayed.staleMessage).toBe(staleMessage);
+    expect(numberMock).not.toHaveBeenCalled();
+    expect(txMock.$queryRaw).not.toHaveBeenCalled();
+    expect(txMock.inventoryCount.create).not.toHaveBeenCalled();
   });
 
   it('keeps database round trips bounded for a 100-row count', async () => {
@@ -210,14 +230,6 @@ describe('postInventoryCount', () => {
       })),
     );
     txMock.$executeRaw.mockResolvedValue(100);
-    dbMock.materialLocationStock.findMany.mockResolvedValue(
-      items.map((item) => ({
-        materialId: item.materialId,
-        locationId: item.locationId,
-        currentStock: '5.00',
-      })),
-    );
-
     await postInventoryCount(
       { ...input, items },
       { id: 'owner1' },
@@ -228,8 +240,7 @@ describe('postInventoryCount', () => {
     expect(txMock.$executeRaw).toHaveBeenCalledTimes(3);
     expect(txMock.inventoryCountItem.createManyAndReturn).toHaveBeenCalledTimes(1);
     expect(txMock.materialTransaction.createMany).toHaveBeenCalledTimes(1);
-    // 预检就是一条 findMany，不随行数放大
-    expect(dbMock.materialLocationStock.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.materialLocationStock.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -332,25 +343,38 @@ describe('postInventoryCount 账面回声守卫', () => {
     expect(ledgerRows).toHaveLength(2);
     expect(ledgerRows.map((row: { materialId: string }) => row.materialId))
       .toEqual(['mat1', 'mat3']);
+
+    expect(txMock.inventoryCount.create.mock.calls[0]![0].data).toMatchObject({
+      staleKeys: ['mat2:loc2'],
+      staleMessage: expect.stringContaining('物料2(M-002)'),
+    });
+
+    // 第一次事务已提交但 HTTP 回执丢失：同 key 重放必须原样返回
+    // 部分过账 outcome，不能把 staleKeys 伪造成 []。
+    const transactionCalls = dbMock.$transaction.mock.calls.length;
+    dbMock.inventoryCount.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({
+        id: 'count1',
+        staleKeys: ['mat2:loc2'],
+        staleMessage: posted.staleMessage,
+      })
+      .mockResolvedValueOnce(summary);
+
+    const replayed = await postInventoryCount(threeRowInput, { id: 'owner1' });
+
+    expect(replayed.staleKeys).toEqual(posted.staleKeys);
+    expect(replayed.staleMessage).toBe(posted.staleMessage);
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(transactionCalls);
+    expect(txMock.materialTransaction.createMany).toHaveBeenCalledTimes(1);
   });
 
-  it('一行都不剩时整体回滚，事务外预检不烧当日盘点单号', async () => {
-    dbMock.inventoryCount.findUnique.mockResolvedValueOnce(null);
-    dbMock.materialLocationStock.findMany.mockResolvedValue([
-      { materialId: 'mat1', locationId: 'loc1', currentStock: '2.00' },
-      { materialId: 'mat2', locationId: 'loc2', currentStock: '3.00' },
-      { materialId: 'mat3', locationId: 'loc3', currentStock: '4.00' },
-    ]);
-    dbMock.material.findMany.mockResolvedValue([
-      { id: 'mat1', code: 'M-001', name: '物料1' },
-      { id: 'mat2', code: 'M-002', name: '物料2' },
-      { id: 'mat3', code: 'M-003', name: '物料3' },
-    ]);
-    dbMock.warehouseLocation.findMany.mockResolvedValue([
-      { id: 'loc1', name: '1号货架', warehouse: { name: '默认仓库' } },
-      { id: 'loc2', name: '2号货架', warehouse: { name: '默认仓库' } },
-      { id: 'loc3', name: '3号货架', warehouse: { name: '默认仓库' } },
-    ]);
+  it('一行都不剩时在取号/建单前整体回滚', async () => {
+    arrangeThreeRows({
+      'mat1:loc1': '2.00',
+      'mat2:loc2': '3.00',
+      'mat3:loc3': '4.00',
+    });
 
     const error = await postInventoryCount(threeRowInput, { id: 'owner1' }).catch(
       (err: unknown) => err,
@@ -362,14 +386,13 @@ describe('postInventoryCount 账面回声守卫', () => {
       'mat2:loc2',
       'mat3:loc3',
     ]);
-    // 单号在事务之外先行提交、回滚收不回来，所以全量失效必须在取号之前拦下
+    // 幂等锁、CAS 与取号同事务；全量失效时不烧号。
     expect(numberMock).not.toHaveBeenCalled();
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
     expect(txMock.inventoryCount.create).not.toHaveBeenCalled();
   });
 
-  it('预检放行后事务内 CAS 仍是权威：全部行在加锁后才发现失效则整体回滚', async () => {
-    // 预检查不到库存行 → 不下结论 → 照常取号进事务（默认 mock 就是这样）
+  it('事务内加锁的 CAS 是唯一权威判定', async () => {
     arrangeThreeRows({
       'mat1:loc1': '1.00',
       'mat2:loc2': '2.00',
@@ -422,25 +445,31 @@ describe('postInventoryCount 账面回声守卫', () => {
       countedQuantity: '8.00',
     }));
     dbMock.inventoryCount.findUnique.mockResolvedValueOnce(null);
-    dbMock.materialLocationStock.findMany.mockResolvedValue(
-      items.map((item) => ({
-        materialId: item.materialId,
-        locationId: item.locationId,
-        currentStock: '1.00',
-      })),
-    );
-    dbMock.material.findMany.mockResolvedValue(
-      items.map((item, index) => ({
-        id: item.materialId,
-        code: `M-00${index + 1}`,
-        name: `物料${index + 1}`,
-      })),
-    );
-    dbMock.warehouseLocation.findMany.mockResolvedValue(
+    txMock.inventoryCount.findUnique.mockResolvedValue(null);
+    txMock.$queryRaw
+      .mockResolvedValueOnce(
+        items.map((item, index) => ({
+          id: item.materialId,
+          code: `M-00${index + 1}`,
+          name: `物料${index + 1}`,
+          isActive: true,
+        })),
+      )
+      .mockResolvedValueOnce(
+        items.map((item, index) => ({
+          id: `stock${index + 1}`,
+          materialId: item.materialId,
+          locationId: item.locationId,
+          currentStock: '1.00',
+        })),
+      );
+    txMock.warehouseLocation.findMany.mockResolvedValue(
       items.map((item, index) => ({
         id: item.locationId,
+        warehouseId: 'wh1',
         name: `${index + 1}号货架`,
-        warehouse: { name: '默认仓库' },
+        isActive: true,
+        warehouse: { name: '默认仓库', isActive: true },
       })),
     );
 

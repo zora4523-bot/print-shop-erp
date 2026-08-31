@@ -9,6 +9,10 @@ import {
   Role,
 } from '../generated/prisma/enums';
 import { db } from './db';
+import {
+  assertExecutionFence,
+  type ExecutionFence,
+} from './execution-fence';
 import { parseShanghaiMonthInstantRange } from './attendance';
 import { orderCascadeLockKey } from './order/locks';
 import {
@@ -160,6 +164,7 @@ export class BillGenerationUnexpectedError extends Error {
 export async function generateBillsForPeriod(
   period: string,
   _actor: { id: string; role: Role },
+  fence?: ExecutionFence,
 ): Promise<BillGenerationResult> {
   void _actor;
   const { start, end } = parseShanghaiMonthInstantRange(period);
@@ -202,10 +207,12 @@ export async function generateBillsForPeriod(
 
   for (const [submitterId, submitterOrders] of bySubmitter) {
     try {
+      await assertExecutionFence(fence);
       const result = await generateBillForSubmitter(
         period,
         submitterId,
         submitterOrders,
+        fence,
       );
       generated.push(result);
     } catch (err) {
@@ -228,6 +235,7 @@ async function generateBillForSubmitter(
   period: string,
   submitterId: string,
   orders: Array<{ id: string; totalAmount: unknown }>,
+  fence?: ExecutionFence,
 ): Promise<BillGenerationResult['generated'][number]> {
   return db.$transaction(async (tx) => {
     // Serialize two concurrent generate runs on the same (sales, period)
@@ -305,6 +313,7 @@ async function generateBillForSubmitter(
         .plus(appendedItemTotal);
       assertBillAmountFits(total);
       const totalAmount = total.toFixed(2);
+      await assertExecutionFence(fence);
       if (toAdd.length > 0) {
         await tx.billItem.createMany({
           data: toAdd.map((o) => ({
@@ -331,6 +340,7 @@ async function generateBillForSubmitter(
     // 首次创建
     const totalAmount = orderTotal;
     assertBillAmountFits(new Decimal(totalAmount));
+    await assertExecutionFence(fence);
     const created = await tx.bill.create({
       data: {
         salesUserId: submitterId,

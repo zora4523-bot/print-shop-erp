@@ -36,7 +36,9 @@ test.describe('账单全链 — golden path', () => {
     const totalAmount = '5000.00';
 
     // Setup: SALES 用户的 id（globalSetup 已建好）+ 一条 FINISHED 工单。
-    const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const salesUserId = await getUserIdByUsername(
+      E2E_USERS.billingSales.username,
+    );
 
     // 清掉这个 sales 用户的旧 E2E 账单 + 订单数据。dev DB 共享，
     // generateBillsForPeriod 又是 per-(salesUser, period) upsert
@@ -77,16 +79,15 @@ test.describe('账单全链 — golden path', () => {
     await test.step('点进我们刚建的工单对应的账单详情', async () => {
       // 账单列表用 customerRef 没有，工单号有。bill row 显示销售人员名 +
       // 周期 + 总额 + 状态；点&ldquo;详情&rdquo;链接进去。
-      // 由于 e2e-sales 在 dev DB 里只有这一条 SALES 角色 + 当月 FINISHED
+      // 由于独立对账账号在 dev DB 里只有这一条当月 FINISHED
       // 订单（其他 wave 创建的 Order 都没到 FINISHED），这条 bill 的
       // 销售姓名是&ldquo;E2E 销售&rdquo;。
-      // Prisma 的 Decimal.toString() 不带尾随 0；UI 渲染 "¥ 5000" 而非
-      // "¥ 5000.00"。匹配 displayName + 不带小数的金额，避免被别的行
-      // 的 "¥ 0" 干扰用 \b 边界。
+      // 金额统一用 formatMoney 渲染千分位 + 2 位小数。同时匹配
+      // displayName 和总额，避免点到其他测试账单。
       const row = page
         .locator('table tbody tr')
-        .filter({ hasText: E2E_USERS.sales.displayName })
-        .filter({ hasText: /¥ 5000\b/ })
+        .filter({ hasText: E2E_USERS.billingSales.displayName })
+        .filter({ hasText: '¥ 5,000.00' })
         .first();
       // strict-mode 防御：先 expect 这一行存在再点 link。
       await expect(row).toBeVisible({ timeout: 10_000 });
@@ -116,7 +117,7 @@ test.describe('账单全链 — golden path', () => {
 
     await test.step('录入完整付款 (ISSUED → FULLY_PAID)', async () => {
       await page.locator('input[name="amount"]').fill(totalAmount);
-      await page.getByRole('button', { name: /^录入付款$/ }).click();
+      await page.getByRole('button', { name: /^录入付款流水$/ }).click();
       // FULLY_PAID 是终态：status badge 切到&ldquo;已结清&rdquo;，&ldquo;录入付款&rdquo;
       // 表单消失（detail 页只在 ISSUED / PARTIAL_PAID 状态渲染）。
       await expect(

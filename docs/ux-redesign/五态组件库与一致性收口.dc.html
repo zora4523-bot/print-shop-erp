@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-p { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .btn-x { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: 1px solid #e4e4e7; border-radius: 8px; background: #f4f4f5; color: #52525b; white-space: nowrap }
+  .cap { font-size: 12.5px; color: #52525b }
+  .code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: #f4f4f5; color: #3f3f46; padding: 2px 6px; border-radius: 5px }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2200px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">五态组件库与一致性收口</h1>
+      <span class="pill" style="background: #f5f3ff; color: #6d28d9">批次八</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty">八批线框已经把每一页要什么写清楚了，但 <b>81 页不可能靠自律保持一致</b>。这一页把规范 C/D 段固化成六个可复用组件 + 四条全站收口 —— 一处改、处处生效。每个组件都给了<b>属性签名</b>，可以直接照着写。这不是设计稿，是交付给实现的契约。</p>
+  </div>
+
+  <section class="sect">
+    <h2 style="margin: 0 0 4px; font-size: 24px; font-weight: 700">六个五态组件</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 20px">左边是组件的真实样子，右边是它的属性与使用规则。凡是页面自己手写这五种状态的，都算违规。</p>
+    <div style="display: flex; flex-direction: column; gap: 18px">
+      <sc-for list="{{ comps }}" as="c" hint-placeholder-count="6">
+        <div class="pcard" style="display: grid; grid-template-columns: 620px 1fr; gap: 0; overflow: hidden">
+          <div style="padding: 16px 18px; border-right: 1px solid #f0f0f2; background: #fafafa; display: flex; flex-direction: column; gap: 11px">
+            <div style="display: flex; align-items: baseline; gap: 9px">
+              <span class="pill" style="background: {{ c.tBg }}; color: {{ c.tFg }}">{{ c.state }}</span>
+              <span style="font-size: 16px; font-weight: 700">{{ c.name }}</span>
+            </div>
+            <div style="background: #fff; border: 1px solid #ececee; border-radius: 10px; padding: 14px 15px; min-height: 118px; display: flex; flex-direction: column; gap: 9px">
+              <sc-if value="{{ c.bars }}" hint-placeholder-val="{{ false }}">
+                <sc-for list="{{ c.barList }}" as="w" hint-placeholder-count="4">
+                  <div style="height: 11px; border-radius: 5px; background: #f2f2f4; width: {{ w }}"></div>
+                </sc-for>
+              </sc-if>
+              <sc-if value="{{ c.head }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; align-items: flex-start; gap: 11px">
+                  <i style="display: block; width: 32px; height: 32px; border-radius: 9px; background: {{ c.tBg }}; flex: none"></i>
+                  <div style="min-width: 0">
+                    <div style="font-size: 14.5px; font-weight: 600">{{ c.head }}</div>
+                    <div class="cap" style="margin-top: 2px; text-wrap: pretty">{{ c.sub }}</div>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-for list="{{ c.rows }}" as="r" hint-placeholder-count="3">
+                <div style="display: flex; align-items: flex-start; gap: 9px; padding: 8px 10px; border: 1px solid {{ r.bd }}; border-radius: 8px; background: {{ r.bg }}">
+                  <span class="pill nw" style="background: {{ r.tBg }}; color: {{ r.tFg }}; flex: none">{{ r.tag }}</span>
+                  <span style="font-size: 12.5px; line-height: 1.55; color: #3f3f46; text-wrap: pretty">{{ r.t }}</span>
+                </div>
+              </sc-for>
+              <div style="flex: 1"></div>
+              <sc-if value="{{ c.hasActs }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; gap: 8px">
+                  <sc-for list="{{ c.acts }}" as="a" hint-placeholder-count="2">
+                    <button type="button" class="{{ a.cls }}">{{ a.t }}</button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+          <div style="padding: 16px 18px">
+            <div class="code" style="display: inline-block; margin-bottom: 9px">{{ c.sig }}</div>
+            <div style="display: flex; flex-direction: column; gap: 7px">
+              <sc-for list="{{ c.props }}" as="p" hint-placeholder-count="4">
+                <div style="display: flex; align-items: flex-start; gap: 10px">
+                  <span class="code nw" style="flex: none; min-width: 132px">{{ p.k }}</span>
+                  <span style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; text-wrap: pretty">{{ p.t }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top: 11px; padding-top: 10px; border-top: 1px solid #f4f4f5">
+              <div style="font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #71717a">使用规则</div>
+              <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ c.rule }}</div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sect" style="border-bottom: none">
+    <h2 style="margin: 0 0 4px; font-size: 24px; font-weight: 700">四条全站收口</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 20px">这四条都是审查里反复出现的同类问题，各自的修法都是一处改全站生效。左边是现状，右边是目标。</p>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1060px)); gap: 18px 22px">
+      <sc-for list="{{ fixes }}" as="f" hint-placeholder-count="4">
+        <div class="pcard" style="padding: 15px 17px 16px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span class="pill" style="background: #fef2f2; color: #b91c1c">{{ f.n }}</span>
+            <span style="font-size: 16px; font-weight: 700">{{ f.name }}</span>
+            <span class="cap nw" style="font-size: 11.5px">{{ f.where }}</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 11px">
+            <div style="padding: 10px 12px; border: 1px solid #fecaca; border-radius: 9px; background: #fffafa">
+              <div style="font-size: 11px; letter-spacing: 0.06em; color: #b91c1c">现状</div>
+              <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ f.now }}</div>
+            </div>
+            <div style="padding: 10px 12px; border: 1px solid #bbf7d0; border-radius: 9px; background: #f7fefa">
+              <div style="font-size: 11px; letter-spacing: 0.06em; color: #047857">目标</div>
+              <div style="font-size: 12.5px; line-height: 1.6; color: #3f3f46; margin-top: 4px; text-wrap: pretty">{{ f.want }}</div>
+            </div>
+          </div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #52525b; margin-top: 10px; text-wrap: pretty"><b>怎么改：</b>{{ f.how }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2200,&quot;height&quot;:1500}}">
+const COMPS = [
+  {
+    state: 'Loading', name: 'Skeleton', tBg: '#f0f9ff', tFg: '#0369a1',
+    bars: 1, barList: ['92%', '78%', '86%', '70%'], head: '', sub: '', rows: [], hasActs: 0, acts: [],
+    sig: '<Skeleton rows={20} variant="table|card|form" />',
+    props: [
+      ['rows', '骨架行数。列表页传当前每页条数（默认 20），不要写死 3 —— 行数不对会造成加载完成后的跳动。'],
+      ['variant', 'table 出行、card 出卡、form 出字段块。三种的高度都固定，与真实内容等高。'],
+      ['keepChrome', '默认 true：外壳、页头、筛选、表头立即渲染，只有数据区出骨架。'],
+    ],
+    rule: '不用整页遮罩、不用居中转圈。分区页面每个分区独立骨架，一个数据源慢不拖累其他分区。超过 8 秒才追加一行「仍在加载，可稍后重试」。',
+  },
+  {
+    state: 'Empty', name: 'EmptyState', tBg: '#f4f4f5', tFg: '#52525b',
+    bars: 0, barList: [], head: '没有符合条件的工单', sub: '当前生效 4 个筛选条件',
+    rows: [
+      ['无数据', '「还没有{对象}」+「{对象}创建后会出现在这里」+ 新建{对象}', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+      ['无结果', '「没有符合条件的{对象}」+「试试放宽条件」+ 清除全部筛选', '#fafafa', '#f0f0f2', '#eff6ff', '#1d4ed8'],
+      ['无权限', '「找不到这个页面，或你没有访问权限」+ 回我的工作台', '#fffafa', '#fee2e2', '#fef2f2', '#b91c1c'],
+    ],
+    hasActs: 1, acts: [['清除全部筛选', 'btn-s'], ['新建工单', 'btn-p']],
+    sig: '<EmptyState kind="no-data|no-result|no-access" noun="工单" />',
+    props: [
+      ['kind', '三选一，决定图标、文案与动作。<b>不允许页面自己拼文案</b> —— 这是「无权限不泄露记录是否存在」这条安全约束的落点。'],
+      ['noun', '对象名，填进文案模板。'],
+      ['onClear / onCreate', '对应 no-result / no-data 的主动作。no-access 的动作固定为「回我的工作台」，按角色路由。'],
+    ],
+    rule: 'no-access 的文案必须与「记录不存在」完全一致 —— 两者共用同一个 kind，实现上不给区分的余地。列表页三态齐全才算过。',
+  },
+  {
+    state: 'Error', name: 'ErrorBoundary', tBg: '#fef2f2', tFg: '#b91c1c',
+    bars: 0, barList: [], head: '这块数据没加载出来', sub: '分区级错误，其他分区照常显示',
+    rows: [
+      ['字段', '输入框下一行 + 自动聚焦第一个错误字段', '#fffafa', '#fee2e2', '#fef2f2', '#b91c1c'],
+      ['分区', '该分区内错误卡 + 重试，页头动作条不因此消失', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+      ['阻断', '不是错误：「有 2 个生产任务未完工，完工后可发货」+ 查看任务', '#fffbeb', '#fed7aa', '#fffbeb', '#b45309'],
+    ],
+    hasActs: 1, acts: [['重试', 'btn-s']],
+    sig: '<ErrorBoundary scope="field|section|page" blocking={false} />',
+    props: [
+      ['scope', '三层，决定影响范围与重试粒度。page 级仍保留返回路径。'],
+      ['blocking', 'true 时是业务阻断而非错误：橙色、写清阻断项与解除路径、给可点的前置链接。<b>不画成红色错误</b>。'],
+      ['preserve', '默认 true：任何一层都保留用户已填内容。禁止清空表单。'],
+    ],
+    rule: '不用「操作失败请重试」这种不说原因的兜底。业务阻断和技术错误必须分色分文案 —— 这是审查里最常混的一对。',
+  },
+  {
+    state: 'Disabled', name: 'DisabledReason', tBg: '#fffbeb', tFg: '#b45309',
+    bars: 0, barList: [], head: '发货（2 个任务未完工）', sub: '原因常驻可见，不藏在 tooltip 里 —— 触屏没有 hover',
+    rows: [
+      ['无权限', '不渲染。渲染成灰按钮会让人以为能申请。', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+      ['状态', '「已结案的工单不能修改」', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+      ['前置', '「先补齐 2 个款式的设计图」+ 去补齐（可点跳）', '#fffbeb', '#fed7aa', '#fffbeb', '#b45309'],
+    ],
+    hasActs: 1, acts: [['发货（2 个任务未完工）', 'btn-x']],
+    sig: '<DisabledReason cause="permission|status|prerequisite" />',
+    props: [
+      ['cause', 'permission 时组件<b>返回 null</b>（不渲染），从源头杜绝「灰按钮暗示可申请」。'],
+      ['reason', '一行原因文字，直接进按钮标签或紧邻一行。必须常驻，不做 tooltip。'],
+      ['fixHref', 'prerequisite 时给可点的前置入口。'],
+    ],
+    rule: '禁用样式统一为中性灰（#f4f4f5 底 / #52525b 字），<b>禁止用主色淡化</b> —— CDR 页的「生成下载包」就是白字淡红填充：既与主按钮同色系容易误点，又没写为什么不能点。（具体对比度未测 —— 那是截图，需在真实页面上量）',
+  },
+  {
+    state: 'Pending', name: 'PendingButton', tBg: '#f5f3ff', tFg: '#6d28d9',
+    bars: 0, barList: [], head: '正在保存…', sub: '按钮内联 spinner + 禁用 + 表单 aria-busy',
+    rows: [
+      ['防重', '禁用期间不接受第二次点击。重复提交在某些接口会计次（如登录限流）。', '#fafafa', '#f0f0f2', '#f5f3ff', '#6d28d9'],
+      ['整组', '「任意一行校验失败时，整组价格都不会保存」这类整组语义写在按钮旁，不藏在别处。', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+    ],
+    hasActs: 1, acts: [['正在保存…', 'btn-x'], ['保存草稿', 'btn-s']],
+    sig: '<PendingButton pending={bool} groupNote blockNavigation />',
+    props: [
+      ['pending', '为 true 时禁用 + 内联 spinner + 换文案，并给表单加 aria-busy。'],
+      ['groupNote', '整组提交的语义说明，渲染在按钮旁而不是页面别处。'],
+      ['blockNavigation', '默认 true：pending 期间离开页面要拦截。'],
+    ],
+    rule: '短任务（< 3 秒）用这个；长任务用 LongTaskReceipt，不要让用户守着页面等。',
+  },
+  {
+    state: 'Pending · 长任务', name: 'LongTaskReceipt', tBg: '#f5f3ff', tFg: '#6d28d9',
+    bars: 0, barList: [], head: '已受理：正在生成导出文件', sub: '可以离开页面，完成后回这里下载',
+    rows: [
+      ['回执', '立即给受理回执 + 预计时长 + 过期时间（如「文件 24 小时后过期」）。', '#fafafa', '#f0f0f2', '#f5f3ff', '#6d28d9'],
+      ['取回', '完成后在原页面的「最近生成」区或通知中心可取回，附生成时间、生成人、下载次数。', '#fafafa', '#f0f0f2', '#f4f4f5', '#52525b'],
+      ['失败', '失败给原因与重试，不静默消失。', '#fffafa', '#fee2e2', '#fef2f2', '#b91c1c'],
+    ],
+    hasActs: 1, acts: [['查看进度', 'btn-s']],
+    sig: '<LongTaskReceipt taskId expiresAt onRetry />',
+    props: [
+      ['expiresAt', '过期时间，直接渲染成人话（「剩 18h」而不是时间戳）。'],
+      ['history', '最近若干次结果，含生成人与下载次数 —— 这是审计证据，不清理。'],
+      ['onRetry', '失败或过期后按同条件重新发起，<b>不让用户回去重填参数</b>。'],
+    ],
+    rule: '用于导出、CDR 打包、薪资重算、账单生成。CDR 页现在过期后要自己滚回顶部重选日期 —— 这个组件的 onRetry 就是为了消灭那种往返。',
+  },
+];
+
+const FIXES = [
+  {
+    n: '收口 1', name: '面包屑中文映射', where: '至少 2 处已确认',
+    now: 'CDR 页面包屑末项显示 cdr，工单修改申请页显示 order-changes —— AdminBreadcrumb 的映射表漏了这些路由。41 页里大概率还有更多。',
+    want: '面包屑末项永远是中文页面名。用户不该看到 URL 片段。',
+    how: '按全站路由补齐映射表，并加一道兜底：映射缺失时不显示原始路由段，改用该页 H1 的文字。这样以后新增路由忘了加映射也不会漏出英文。',
+  },
+  {
+    n: '收口 2', name: '禁用态统一', where: '全站',
+    now: 'CDR 页「生成下载包」用白字淡红填充做禁用（观察自你提供的原图）；工单详情「发货」禁用后不写原因；多处禁用只在 hover tooltip 里说明。三种写法三个样子。',
+    want: '禁用 = 中性灰 + 常驻原因文字。无权限的直接不渲染。',
+    how: '全部走 DisabledReason 组件。禁止在业务代码里手写 disabled 样式 —— 加一条 lint 规则挡住主色淡化的写法。落地前先在真实页面上量一遍现有禁用态的对比度，把实测值归档 —— 本文不给数字，因为我只有截图。',
+  },
+  {
+    n: '收口 3', name: '环境提示与业务警告分色', where: '全站',
+    now: 'CDR 页的「OSS 未配置 / mock-mode」用了和业务警告相同的橙色。环境配置问题和「外协超期未回货」看起来一样重。',
+    want: '环境 / 配置 / 开发态提示用中性灰 + 左侧色条；橙色只留给业务异常；红色只留给校验错误与破坏性动作。',
+    how: '新增一个语义 token（如 --info-neutral），mock-mode、DEVELOPMENT 标记、只读环境提示统一走它。',
+  },
+  {
+    n: '收口 4', name: '列表状态补齐', where: '已大部分完成',
+    now: '已核实：工单列表与价格工作台的筛选都已在 URL 里（OrderListSearchParams 25+ 字段），不是缺失项。真正未入 URL 的只有滚动位置与选中行；另外没有保存视图，每天要在 30+ 字段里重选同一组条件。',
+    want: '搜索词、每个筛选、排序、页码、每页条数、选中行全部进 query string；刷新、分享、后退都能还原同一屏。',
+    how: '大部分已经做到了：工单列表与价格工作台的筛选都已在 URL 里（OrderListSearchParams 25+ 字段，页面按 searchParams 取数）。所以这条不是「统一抽 hook 改 23 个页面」，而是只补两件：滚动位置与选中行入 URL、新增保存视图把常用组合固定下来。',
+  },
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    const strip = (s) => s.replace(/<\/?b>/g, '');
+    return {
+      comps: COMPS.map((c) => ({
+        ...c,
+        bars: !!c.bars, hasActs: !!c.hasActs,
+        rule: strip(c.rule),
+        acts: c.acts.map(([t, cls]) => ({ t, cls })),
+        rows: c.rows.map(([tag, t, bg, bd, tBg, tFg]) => ({ tag, t, bg, bd, tBg, tFg })),
+        props: c.props.map(([k, t]) => ({ k, t: strip(t) })),
+      })),
+      fixes: FIXES,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import { addDailySalaryAdjustmentAction } from '@/actions/owner-salary';
 import type { SalaryMutationResult } from '@/actions/owner-salary.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormMessage } from '@/components/ui-business';
 
 export function AddSalaryAdjustmentForm({
   dailySalaryId,
@@ -42,6 +43,7 @@ export function AddSalaryAdjustmentForm({
     <form
       ref={formRef}
       action={action}
+      aria-busy={pending}
       className="grid gap-3 sm:grid-cols-[150px_150px_1fr_auto] sm:items-end"
     >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
@@ -87,7 +89,7 @@ export function AddSalaryAdjustmentForm({
         </p>
       ) : null}
       {state?.status === 'invalid' ? (
-        <p className="text-xs text-destructive sm:col-span-4">
+        <p role="alert" className="text-xs text-destructive sm:col-span-4">
           {Object.values(state.fieldErrors).flat().join('；')}
         </p>
       ) : null}
@@ -95,7 +97,13 @@ export function AddSalaryAdjustmentForm({
         <p role="alert" className="text-xs text-destructive sm:col-span-4">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
-        <p className="text-xs text-success-foreground sm:col-span-4">调整已记账。</p>
+        <FormMessage
+          fieldId="salary-adjustment-status"
+          tone="success"
+          className="text-xs sm:col-span-4"
+        >
+          调整已记账。
+        </FormMessage>
       ) : null}
     </form>
   );

@@ -1,541 +1,1572 @@
-import { pickDesignGridClass } from './design-grid';
-import {
-  formatDateShanghai,
-  formatDateTimeShanghai,
-} from '@/lib/format/dates';
+import type { CSSProperties, ReactNode } from 'react';
+
+import { formatDateInputShanghai } from '@/lib/format/dates';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+
 import type {
-  PrintDesign,
+  PrintFoilTechnique,
+  PrintLamination,
   PrintOrder,
   PrintOrderItem,
+  PrintPackagingGroup,
+  PrintShipment,
 } from './OrderPrintLayout.types';
-import { formatFoilColors } from '@/lib/order/foil-colors';
-import { formatReceiverInfo } from '@/lib/order/receiver-info';
-
-// Shared print layout for both browser print and server-rendered PDF.
-// Pure render of a PrintOrder view-model — no data fetching, no
-// side-effects. Page layer is responsible for mapping DB rows into this
-// shape (craft IDs → names, role enum → Chinese label, etc).
-//
-// SPEC §E: A4 portrait, 10mm margin, no prices / no money, per-item
-// page-break-inside avoid, urgent banner, per-task QR code at 15mm,
-// order QR code at the page header.
 
 interface Props {
   order: PrintOrder;
-  // 必填，不给默认值。这里原本是 `factoryName = '红包印刷厂'`，而三个渲染
-  // 入口（打印页 / PDF 路由 / PDF background job）一个都没传过——业主在
-  // Setting 表里改厂名永远不生效，而且那个默认值和 seed 里的
-  // '佛山红包印刷厂' 早就对不上了，没人发现。设成必填，下一个渲染入口忘了
-  // 传就是编译错误。取值见 lib/settings。
   factoryName: string;
-  // Injected for determinism — tests / PDF renders can pin the footer
-  // timestamp instead of capturing wall-clock at render time.
-  renderedAt?: Date;
 }
 
-export function OrderPrintLayout({
-  order,
-  factoryName,
-  renderedAt,
-}: Props) {
-  const printedAt = renderedAt ?? new Date();
+type Artwork = {
+  id: string;
+  fig: number;
+  title: string;
+  sub?: string | null;
+  url?: string | null;
+};
+
+type ItemPackaging = {
+  unitsPerBag: number | null;
+  bagCount: number | null;
+  mixed: boolean;
+};
+
+type FlowRow = {
+  key: string;
+  itemSequence: number | null;
+  itemName: string | null;
+  name: string;
+  worker: string | null;
+  planned: string;
+  completed: string;
+  defect: string;
+  completedAt: string;
+  taskQrSvg: string | null;
+};
+
+type SupplementPage = {
+  key: string;
+  label: string;
+  part: number;
+  totalParts: number;
+  value: string;
+};
+
+const MAX_ITEMS_ON_MAIN_PAGE = 8;
+const MAX_ITEMS_PER_ANNEX_PAGE = 12;
+const MAX_ARTWORKS_ON_MAIN_PAGE = 8;
+const MAX_ARTWORKS_PER_ANNEX_PAGE = 10;
+const MAX_FLOW_ROWS_ON_MAIN_PAGE = 1;
+const MAX_FLOW_ROWS_PER_ANNEX_PAGE = 5;
+const MAX_WARNINGS_ON_MAIN_PAGE = 6;
+const MAX_WARNINGS_PER_ANNEX_PAGE = 15;
+const MAX_SHIPMENTS_ON_MAIN_PAGE = 2;
+const MAX_SHIPMENTS_PER_ANNEX_PAGE = 4;
+const MAX_MAIN_FACT_CHARACTERS = 36;
+const MAX_MAIN_REMARK_CHARACTERS = 120;
+const MAX_DENSE_MAIN_FACT_CHARACTERS = 16;
+const MAX_DENSE_MAIN_REMARK_CHARACTERS = 48;
+const MAX_SUPPLEMENT_CHARACTERS_PER_PAGE = 600;
+const MAX_SUPPLEMENT_LINES_PER_PAGE = 22;
+const SUPPLEMENT_CHARACTERS_PER_LINE = 36;
+const MAX_HEADER_FACTORY_CHARACTERS = 24;
+const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
+const MAX_HEADER_TEAM_CHARACTERS = 18;
+const MAX_HEADER_ORDER_NAME_CHARACTERS = 18;
+
+const FOIL_TECHNIQUE_LABEL: Record<PrintFoilTechnique, string> = {
+  UNSPECIFIED: '烫金',
+  NONE: '不烫金',
+  FLAT: '平烫',
+  RELIEF: '浮雕',
+  RAISED: '激凸',
+};
+
+const LAMINATION_LABEL: Record<PrintLamination, string> = {
+  NONE: '不覆膜',
+  MATTE: '亚膜',
+  SOFT_TOUCH: '触感膜',
+  NEW_GLOSS: '新光膜',
+  LASER: '雷射膜',
+};
+
+const CARRIER_LABEL: Record<string, string> = {
+  ZTO: '中通',
+  SF: '顺丰',
+  YTO: '圆通',
+  STO: '申通',
+  YUNDA: '韵达',
+  JD: '京东物流',
+  EMS: '邮政 EMS',
+  DEPPON: '德邦',
+};
+
+export function OrderPrintLayout({ order, factoryName }: Props) {
+  const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
+  const itemPackaging = buildItemPackaging(order.packagingGroups);
+  const totalBags = calculateTotalBags(order, itemPackaging);
+  const artworks = buildArtworks(order);
+  const { mainItems, itemAnnexPages } = paginateItems(order.items);
+  const hasOversizedItem = order.items.some(
+    (item) => estimateItemRowUnits(item) >= 4,
+  );
+  const team = getTeam(order);
+  const fullCraft = formatProductionCrafts(order);
+  const fullPaper = joinDistinct(order.items.map(formatPaper));
+  const fullFoil = joinDistinct(order.items.map(formatFoil));
+  const fullPackageRequirement = clean(order.packageRequirement);
+  const fullRemark = clean(order.remark);
+  const hasLongMainText = [
+    fullCraft,
+    fullPaper,
+    fullFoil,
+    fullPackageRequirement,
+  ].some(
+    (value) =>
+      Array.from(value ?? '').length >= MAX_MAIN_FACT_CHARACTERS ||
+      hasExplicitLineBreak(value),
+  ) ||
+    Array.from(fullRemark ?? '').length >= MAX_MAIN_REMARK_CHARACTERS ||
+    hasExplicitLineBreak(fullRemark);
+  const needsCondensedMain =
+    itemAnnexPages.length > 0 || hasOversizedItem || hasLongMainText;
+  const mainFactLimit =
+    needsCondensedMain
+      ? MAX_DENSE_MAIN_FACT_CHARACTERS
+      : MAX_MAIN_FACT_CHARACTERS;
+  const mainRemarkLimit =
+    needsCondensedMain
+      ? MAX_DENSE_MAIN_REMARK_CHARACTERS
+      : MAX_MAIN_REMARK_CHARACTERS;
+  const craft = previewForMain(fullCraft, mainFactLimit);
+  const paper = previewForMain(fullPaper, mainFactLimit);
+  const foil = previewForMain(fullFoil, mainFactLimit);
+  const packageRequirement = previewForMain(
+    fullPackageRequirement,
+    mainFactLimit,
+  );
+  const remark = previewForMain(fullRemark, mainRemarkLimit);
+  const supplementPages = buildSupplementPages([
+    {
+      key: 'factory',
+      label: '工厂',
+      value: clean(factoryName),
+      mainLimit: MAX_HEADER_FACTORY_CHARACTERS,
+    },
+    {
+      key: 'customer',
+      label: '客户',
+      value: clean(order.customerName),
+      mainLimit: MAX_HEADER_CUSTOMER_CHARACTERS,
+    },
+    {
+      key: 'team',
+      label: '生产团队',
+      value: team,
+      mainLimit: MAX_HEADER_TEAM_CHARACTERS,
+    },
+    {
+      key: 'order-name',
+      label: '工单名称',
+      value: clean(order.customName),
+      mainLimit: MAX_HEADER_ORDER_NAME_CHARACTERS,
+    },
+    {
+      key: 'craft',
+      label: '生产工艺',
+      value: fullCraft,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'paper',
+      label: '纸张类型',
+      value: fullPaper,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'foil',
+      label: '烫金工艺',
+      value: fullFoil,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'package',
+      label: '包装要求',
+      value: fullPackageRequirement,
+      mainLimit: mainFactLimit,
+    },
+    {
+      key: 'remark',
+      label: '备注',
+      value: fullRemark,
+      mainLimit: mainRemarkLimit,
+    },
+  ]);
+  // A split or unusually tall item table consumes the main page's
+  // variable-height allowance. Move all artwork to bounded annex pages in
+  // that case so the browser never has to invent an undeclared physical page.
+  const hasArtworkOnMainPage =
+    artworks.length === 0 ||
+    (!needsCondensedMain &&
+      artworks.length <= MAX_ARTWORKS_ON_MAIN_PAGE);
+  const artworkAnnexPages = hasArtworkOnMainPage
+    ? []
+    : chunk(artworks, MAX_ARTWORKS_PER_ANNEX_PAGE);
+  const warnings = auditOrder(order, itemPackaging, team);
+  const mainWarnings = warnings.slice(0, MAX_WARNINGS_ON_MAIN_PAGE);
+  const warningAnnexPages = chunk(
+    warnings.slice(MAX_WARNINGS_ON_MAIN_PAGE),
+    MAX_WARNINGS_PER_ANNEX_PAGE,
+  );
+  const flowRows = buildFlowRows(order, totalQuantity, totalBags);
+  const { mainFlowRows, flowAnnexPages } = paginateFlowRows(flowRows);
+  const shipments =
+    order.shipments.length > 0 ? order.shipments : [fallbackShipment(order)];
+  const hasShipmentAnnex =
+    shipments.length > MAX_SHIPMENTS_ON_MAIN_PAGE ||
+    shipments.some(isLongShipment) ||
+    shipments.reduce(
+      (sum, shipment) => sum + estimateShipmentLines(shipment),
+      0,
+    ) > 6;
+  const mainShipments = hasShipmentAnnex ? [] : shipments;
+  const shipmentAnnexPages = hasShipmentAnnex
+    ? chunk(shipments, MAX_SHIPMENTS_PER_ANNEX_PAGE)
+    : [];
+  const pageCount =
+    1 +
+    warningAnnexPages.length +
+    supplementPages.length +
+    itemAnnexPages.length +
+    artworkAnnexPages.length +
+    shipmentAnnexPages.length +
+    flowAnnexPages.length;
+  const orderDate = formatDateInputShanghai(order.submittedAt ?? order.createdAt);
+  const denseMainSheet =
+    needsCondensedMain ||
+    hasShipmentAnnex ||
+    order.items.length >= 3 ||
+    artworks.length >= 5 ||
+    order.shipments.length > 1 ||
+    flowRows.some((row) => row.taskQrSvg !== null);
+
   return (
     <>
       <style>{PRINT_CSS}</style>
-
-      {/* 表格外壳：thead / tfoot 是浏览器**原生**的「每页重复」机制，
-          浏览器打印和 Puppeteer PDF 两条路径行为一致，而且会为页眉页脚
-          预留空间。此前页脚用 position: fixed，Chrome 每页重画它却不占
-          位，实测 168 个组合里 125 个（74%）压在正文墨迹上。
-          业主 2026-08-18 决策：放弃「三款一页」，改显式分页 + 每页重复
-          表头。 */}
-      <table className="print-sheet">
-        <thead>
-          <tr>
-            <td>
-              <div className="running-header">
-                <span className="running-header-no">{order.orderNo}</span>
-                <span className="running-header-name">
-                  {order.customName ?? order.customerRef ?? ''}
-                </span>
-                {order.isUrgent ? (
-                  <span className="running-header-urgent">急单</span>
-                ) : null}
-              </div>
-            </td>
-          </tr>
-        </thead>
-        <tfoot>
-          <tr>
-            <td>
-              <div className="print-footer">
-                打印时间：{formatShanghaiDateTime(printedAt)}
-              </div>
-            </td>
-          </tr>
-        </tfoot>
-        <tbody>
-          <tr>
-            <td>
-      <div className="print-container">
-        {order.kind === 'REWORK' ? (
-          <div className="rework-banner">
-            重 做 单
-            {order.sourceOrderNo ? ` · 原单 ${order.sourceOrderNo}` : ''}
-          </div>
-        ) : null}
-        {order.isUrgent && (
-          <div className="urgent-banner">
-            急 单 · 请优先处理
-          </div>
-        )}
-
-        <div className="order-header">
-          <div>
-            <div className="factory-name">{factoryName}</div>
-            <h1 className="order-title">工 单</h1>
-            <div className="order-no">{order.orderNo}</div>
-            {order.customName && (
-              <div className="order-custom-name">{order.customName}</div>
-            )}
-          </div>
-          <div
-            // QR SVG pre-rendered server-side via the `qrcode` package.
-            // We can't use qrcode.react here: renderToStaticMarkup +
-            // dynamic-imported react-dom/server pulls in a separate React
-            // copy from the one qrcode.react was bundled against → "Invalid
-            // hook call". String injection bypasses the hook system.
-            dangerouslySetInnerHTML={{ __html: order.orderQrSvg }}
+      <main className="work-order-document">
+        <WorkOrderSheet
+          order={order}
+          page={1}
+          pageCount={pageCount}
+          orderDate={orderDate}
+          dense={denseMainSheet}
+        >
+          <WorkOrderHeader order={order} team={team} factoryName={factoryName} />
+          <AuditWarnings
+            warnings={mainWarnings}
+            remainingCount={warnings.length - mainWarnings.length}
           />
-        </div>
 
-        <div className="order-meta">
-          <div>下单日期：{formatShanghaiDate(order.submittedAt ?? order.createdAt)}</div>
-          <div>客户名称/简称：{order.customerRef ?? '-'}</div>
-          <div>
-            提交人：{order.submitterDisplayName}（{order.submitterRoleLabel}）
-          </div>
-          <div>急单：{order.isUrgent ? '【是】' : '否'}</div>
-          <div>
-            配送：
-            {order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'}
-            {order.shipments.length > 1
-              ? ` · 多地址 ×${order.shipments.length}`
-              : ''}
-          </div>
-          <div>
-            承诺交期：
-            {order.promisedDate ? formatShanghaiDate(order.promisedDate) : '-'}
-          </div>
-        </div>
+          <section className="sec">
+            <div className="grid">
+              <Fact label="生产工艺" value={craft} emphasis="l0" />
+              <Fact label="纸张类型" value={paper} emphasis="l0" />
+              <Fact label="烫金工艺" value={foil} emphasis="l1" />
+              <Fact
+                label="交货日期"
+                value={order.promisedDate ? formatDateInputShanghai(order.promisedDate) : null}
+                emphasis="l0"
+              />
+              <Fact
+                label="总数量"
+                value={formatNumber(totalQuantity)}
+                emphasis="l0"
+                unit="个"
+              />
+              <Fact
+                label="包装要求"
+                value={packageRequirement}
+                emphasis="l1"
+              />
+            </div>
+            {remark ? (
+              <div className="remark">
+                <div className="lbl">备注</div>
+                <div className="l1 note">{remark}</div>
+              </div>
+            ) : null}
+          </section>
 
-        {order.items.map((item) => (
-          <OrderItemBlock key={item.id} item={item} />
-        ))}
+          <section className="sec">
+            <ItemTable
+              items={mainItems}
+              packaging={itemPackaging}
+              totalQuantity={totalQuantity}
+              totalBags={totalBags}
+              showTotal={itemAnnexPages.length === 0}
+            />
+          </section>
 
-        <div className="order-footer">
-          {order.packageRequirement && (
-            <div>
-              <strong>包装要求：</strong>
-              {order.packageRequirement}
-            </div>
-          )}
-          {order.remark && (
-            <div>
-              <strong>特别备注：</strong>
-              {order.remark}
-            </div>
-          )}
-          {order.shipments.length > 0 ? (
-            <div className="shipment-list">
-              <strong>
-                收货信息
-                {order.shipments.length > 1
-                  ? `（多地址 ×${order.shipments.length}）`
-                  : ''}
-                ：
-              </strong>
-              {order.shipments.map((shipment) => (
-                <div key={shipment.id} className="shipment-row">
-                  <span>
-                    地址 {shipment.sequence}：{formatReceiverInfo(shipment, '-')}
-                  </span>
-                  {shipment.expressCode ? (
-                    <span> · 快递代码 {shipment.expressCode}</span>
-                  ) : null}
-                  {shipment.trackingNo ? (
-                    <span> · 运单号 {shipment.trackingNo}</span>
-                  ) : null}
-                  {shipment.lines.length > 0 ? (
-                    <span>
-                      {' '}
-                      ·{' '}
-                      {shipment.lines
-                        .map(
-                          (line) =>
-                            `#${line.orderItemSequence} ${line.orderItemName} ×${line.quantity}`,
-                        )
-                        .join('；')}
-                    </span>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : order.receiverName ||
-            order.receiverPhone ||
-            order.receiverAddress ? (
-            <div className="shipment-list">
-              <strong>收货信息：</strong>
-              <div>{formatReceiverInfo(order, '-')}</div>
-            </div>
+          {hasArtworkOnMainPage ? (
+            <section className="sec">
+              <ArtworkGrid artworks={artworks} onAnnex={false} />
+            </section>
           ) : null}
-        </div>
 
-      </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+          <section className="sec">
+            <FlowTable rows={mainFlowRows} />
+          </section>
+
+          <section className="sec">
+            {hasShipmentAnnex ? (
+              <div className="shipment-annex-notice">
+                {shipments.length} 个收货地址见附页
+              </div>
+            ) : (
+              <ShippingBlock
+                shipments={mainShipments}
+                isSfCollect={order.isSfCollect}
+              />
+            )}
+          </section>
+        </WorkOrderSheet>
+
+        {warningAnnexPages.map((pageWarnings, index) => {
+          const page = 2 + index;
+          return (
+            <WorkOrderSheet
+              key={`warning-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec warning-annex">
+                <div className="annex-title">数据待补充（续）</div>
+                <ol className="warning-list">
+                  {pageWarnings.map((warning, warningIndex) => (
+                    <li key={`${warningIndex}-${warning}`}>{warning}</li>
+                  ))}
+                </ol>
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {supplementPages.map((supplement, index) => {
+          const page = 2 + warningAnnexPages.length + index;
+          return (
+            <WorkOrderSheet
+              key={`supplement-page-${supplement.key}-${supplement.part}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec supplement-annex">
+                <div className="annex-title">
+                  {supplement.label}
+                  {supplement.totalParts > 1
+                    ? `（${supplement.part} / ${supplement.totalParts}）`
+                    : ''}
+                </div>
+                <div className="supplement-text">{supplement.value}</div>
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {itemAnnexPages.map((items, index) => {
+          const page =
+            2 + warningAnnexPages.length + supplementPages.length + index;
+          const isLastItemPage = index === itemAnnexPages.length - 1;
+          return (
+            <WorkOrderSheet
+              key={`item-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec item-annex">
+                <div className="annex-title">款式明细（续）</div>
+                <ItemTable
+                  items={items}
+                  packaging={itemPackaging}
+                  totalQuantity={totalQuantity}
+                  totalBags={totalBags}
+                  showTotal={isLastItemPage}
+                />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {artworkAnnexPages.map((pageArtworks, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`artwork-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec artwork-annex">
+                <ArtworkGrid artworks={pageArtworks} onAnnex />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {shipmentAnnexPages.map((pageShipments, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            artworkAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`shipment-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec shipment-annex">
+                <div className="annex-title">收货与快递（续）</div>
+                <ShippingBlock
+                  shipments={pageShipments}
+                  isSfCollect={order.isSfCollect}
+                />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+
+        {flowAnnexPages.map((rows, index) => {
+          const page =
+            2 +
+            warningAnnexPages.length +
+            supplementPages.length +
+            itemAnnexPages.length +
+            artworkAnnexPages.length +
+            shipmentAnnexPages.length +
+            index;
+          return (
+            <WorkOrderSheet
+              key={`flow-page-${page}`}
+              order={order}
+              page={page}
+              pageCount={pageCount}
+              orderDate={orderDate}
+            >
+              <WorkOrderHeader
+                order={order}
+                team={team}
+                factoryName={factoryName}
+              />
+              <section className="sec flow-annex">
+                <div className="annex-title">工序明细（续）</div>
+                <FlowTable rows={rows} />
+              </section>
+            </WorkOrderSheet>
+          );
+        })}
+      </main>
     </>
   );
 }
 
-function OrderItemBlock({ item }: { item: PrintOrderItem }) {
+function WorkOrderSheet({
+  order,
+  page,
+  pageCount,
+  orderDate,
+  dense = false,
+  children,
+}: {
+  order: PrintOrder;
+  page: number;
+  pageCount: number;
+  orderDate: string;
+  dense?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="order-item">
-      <div className="item-header">
-        款式 {item.sequence}：{item.name}
-      </div>
+    <article className={classNames('sheet', dense && 'dense')}>
+      {children}
+      <footer className="ft">
+        <span>{order.orderNo}</span>
+        <span>{orderDate}</span>
+        <span>
+          {page} / {pageCount}
+        </span>
+      </footer>
+    </article>
+  );
+}
 
-      <div className="item-body">
-        <DesignGrid designs={item.designs} />
-
-        <div className="item-info">
-          <dl>
-            <dt>规格：</dt>
-            <dd>{item.specification ?? '-'}</dd>
-            <dt>纸张：</dt>
-            <dd>{item.paperType ?? '-'}</dd>
-            <dt>数量：</dt>
-            <dd>{item.quantity}</dd>
-            <dt>烫金色：</dt>
-            <dd>{formatFoilColors(item.foilColors, '-')}</dd>
-            <dt>双面：</dt>
-            <dd>{item.isDoubleSided ? '是' : '否'}</dd>
-            <dt>双色：</dt>
-            <dd>{item.isDoubleColor ? '是' : '否'}</dd>
-            <dt>工艺：</dt>
-            <dd>{item.craftNames.length > 0 ? item.craftNames.join('、') : '-'}</dd>
-          </dl>
-          {item.remark && (
-            <div className="item-remark">
-              <span className="item-remark-label">款式备注：</span>
-              <span className="item-remark-text">{item.remark}</span>
-            </div>
-          )}
+function WorkOrderHeader({
+  order,
+  team,
+  factoryName,
+}: {
+  order: PrintOrder;
+  team: string | null;
+  factoryName: string;
+}) {
+  const displayFactoryName = previewForHeader(
+    clean(factoryName),
+    MAX_HEADER_FACTORY_CHARACTERS,
+  );
+  const displayCustomerName = previewForHeader(
+    clean(order.customerName),
+    MAX_HEADER_CUSTOMER_CHARACTERS,
+  );
+  const displayTeam = previewForHeader(team, MAX_HEADER_TEAM_CHARACTERS);
+  const displayOrderName = previewForHeader(
+    clean(order.customName),
+    MAX_HEADER_ORDER_NAME_CHARACTERS,
+  );
+  return (
+    <header className="hd">
+      <div className="hd-main">
+        <div className="factory">{displayFactoryName}</div>
+        <div className={classNames('cust', !displayCustomerName && 'miss')}>
+          {displayCustomerName ?? '客户未填'}
+        </div>
+        <div className="line">
+          团队 <b className={!displayTeam ? 'miss' : undefined}>{displayTeam ?? '待排产'}</b>
+          {displayOrderName ? (
+            <>
+              <span className="sep">·</span>工单 <b>{displayOrderName}</b>
+            </>
+          ) : null}
+          {order.isUrgent ? <span className="tag">加急</span> : null}
+          {order.kind === 'REWORK' ? (
+            <span className="tag">
+              重做{order.sourceOrderNo ? ` · ${order.sourceOrderNo}` : ''}
+            </span>
+          ) : null}
         </div>
       </div>
-
-      {item.tasks.length > 0 && (
-        <table className="task-table">
-          <thead>
-            <tr>
-              <th>任务号</th>
-              <th>工艺</th>
-              <th>分配师傅</th>
-              <th>二维码</th>
-            </tr>
-          </thead>
-          <tbody>
-            {item.tasks.map((task) => (
-              <tr key={task.id}>
-                <td>{shortId(task.id)}</td>
-                <td>{task.craftName}</td>
-                <td>{task.workerDisplayName ?? '未分配'}</td>
-                <td
-                  dangerouslySetInnerHTML={{ __html: task.qrSvg }}
-                />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+      <div className="scan">
+        <div
+          className="qr"
+          aria-label={`工单 ${order.orderNo} 二维码`}
+          dangerouslySetInnerHTML={{ __html: order.orderQrSvg }}
+        />
+        <div className="no">{order.orderNo}</div>
+      </div>
+    </header>
   );
 }
 
-function DesignGrid({ designs }: { designs: PrintDesign[] }) {
-  // CDR source files aren't meaningful to the workshop — only JPG/PNG
-  // goes on the printed sheet (SPEC E.2.1).
-  const printable = designs.filter((d) => d.fileType === 'IMAGE');
-
-  if (printable.length === 0) {
-    return <div className="design-empty">（无设计图）</div>;
-  }
-
-  const sorted = [...printable].sort(
-    (a, b) => a.uploadedAt.getTime() - b.uploadedAt.getTime(),
-  );
-  const gridClass = pickDesignGridClass(sorted.length);
-
+function AuditWarnings({
+  warnings,
+  remainingCount = 0,
+}: {
+  warnings: string[];
+  remainingCount?: number;
+}) {
   return (
-    <div>
-      <div className={`design-grid ${gridClass}`}>
-        {sorted.map((d) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={d.id}
-            src={d.thumbnailUrl ?? d.fileUrl}
-            alt={d.fileName}
-            className="design-thumb"
-          />
-        ))}
+    <>
+      {warnings.length > 0 ? (
+        <div className="warn">
+          数据不完整：{warnings.join('；')}
+          {remainingCount > 0 ? `；另有 ${remainingCount} 项见附页` : ''}
+        </div>
+      ) : null}
+      <div className="warn image-load-warning" hidden />
+    </>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  emphasis,
+  unit,
+}: {
+  label: string;
+  value: string | null;
+  emphasis: 'l0' | 'l1';
+  unit?: string;
+}) {
+  const present = Boolean(clean(value));
+  return (
+    <div className="fact">
+      <div className="lbl">{label}</div>
+      <div className={classNames(emphasis, !present && 'miss')}>
+        {present ? value : '未填'}
+        {present && unit ? <span className="unit">{unit}</span> : null}
       </div>
     </div>
   );
 }
 
-// 打印视图的空值占位用 '-'（窄字符，打印排版紧凑），与页面端 '—' 区分。
-function formatShanghaiDate(d: Date | null | undefined): string {
-  return formatDateShanghai(d, '-');
+function ItemTable({
+  items,
+  packaging,
+  totalQuantity,
+  totalBags,
+  showTotal,
+}: {
+  items: PrintOrderItem[];
+  packaging: Map<string, ItemPackaging>;
+  totalQuantity: number;
+  totalBags: number | null;
+  showTotal: boolean;
+}) {
+  return (
+    <table className="items">
+      <thead>
+        <tr>
+          <th className="col-fig">图号</th>
+          <th className="col-spec">规格</th>
+          <th>款名</th>
+          <th className="num col-qty">下单数量</th>
+          <th className="num col-pack">包装数量</th>
+          <th className="num col-bags">包数</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.length > 0 ? (
+          items.map((item) => {
+            const itemPack = packaging.get(item.id);
+            const hasPack = Boolean(itemPack?.unitsPerBag && itemPack.unitsPerBag > 0);
+            const processFacts = formatItemProcess(item);
+            return (
+              <tr key={item.id}>
+                <td><span className="badge">{item.sequence}</span></td>
+                <td className={!clean(item.specification) ? 'miss' : undefined}>
+                  {clean(item.specification)
+                    ? externalPriceBusinessText(item.specification!)
+                    : '未填'}
+                </td>
+                <td>
+                  <div>{clean(item.name) ?? `款式 ${item.sequence}`}</div>
+                  {processFacts ? <div className="item-process">{processFacts}</div> : null}
+                </td>
+                <td className="num">{formatNumber(item.quantity)}</td>
+                <td className={classNames('num', !hasPack && 'miss')}>
+                  {hasPack ? formatNumber(itemPack!.unitsPerBag!) : '未填'}
+                </td>
+                <td className={classNames('num', !itemPack && 'miss')}>
+                  {!itemPack
+                    ? '—'
+                    : itemPack.mixed
+                      ? '混装'
+                      : itemPack.bagCount && itemPack.bagCount > 0
+                        ? formatNumber(itemPack.bagCount)
+                        : '—'}
+                </td>
+              </tr>
+            );
+          })
+        ) : (
+          <tr><td colSpan={6} className="empty-row miss">无生产明细</td></tr>
+        )}
+      </tbody>
+      {showTotal ? (
+        <tfoot>
+          <tr>
+            <td colSpan={3}>合　计</td>
+            <td className="num">{formatNumber(totalQuantity)}</td>
+            <td />
+            <td className={classNames('num', totalBags === null && 'miss')}>
+              {totalBags === null ? '—' : formatNumber(totalBags)}
+            </td>
+          </tr>
+        </tfoot>
+      ) : null}
+    </table>
+  );
 }
 
-function formatShanghaiDateTime(d: Date): string {
-  return formatDateTimeShanghai(d);
+function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: boolean }) {
+  const layout = artLayout(artworks.length, onAnnex);
+  const style = {
+    '--cols': String(layout.cols),
+    ...(layout.cap ? { '--cap': layout.cap } : {}),
+    ...(layout.maxBoxHeight
+      ? { '--art-max-box-height': layout.maxBoxHeight }
+      : {}),
+    ...(layout.centered ? { '--art-justify': 'center' } : {}),
+  } as CSSProperties;
+
+  if (artworks.length === 0) return <div className="art-empty miss">未提供设计图</div>;
+
+  return (
+    <div className="art" style={style}>
+      {artworks.map((artwork) => (
+        <figure
+          className={classNames('thumb', !artwork.url && 'image-missing')}
+          key={artwork.id}
+          data-fig={artwork.fig}
+        >
+          <div className="box">
+            <span className="art-placeholder">{artwork.url ? '图稿加载失败' : '图稿未提供'}</span>
+            {artwork.url ? (
+              // Static print HTML needs the signed original URL and native
+              // load/error events; Next/Image cannot participate in either.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={artwork.url} alt={`图 ${artwork.fig} ${artwork.title}`} data-print-artwork="true" />
+            ) : null}
+          </div>
+          <figcaption className="cap">
+            <span className="badge">{artwork.fig}</span>
+            <span className="txt">
+              {artwork.title}
+              {clean(artwork.sub) ? <small>{artwork.sub}</small> : null}
+            </span>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
 }
 
-function shortId(id: string): string {
-  return id.slice(-6).toUpperCase();
+function FlowTable({ rows }: { rows: FlowRow[] }) {
+  return (
+    <table className="flow">
+      <thead>
+        <tr>
+          <th className="flow-step-col">工序</th>
+          <th className="num flow-number-col">计划数</th>
+          <th className="num flow-number-col">完成数</th>
+          <th className="num flow-defect-col">不良数</th>
+          <th className="flow-date-col">完成日期</th>
+          <th className="flow-qr-col">报工</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const itemLabel = formatFlowItemLabel(row);
+          const taskQrLabel = [itemLabel, row.name, '任务报工二维码']
+            .filter(Boolean)
+            .join(' ');
+          return (
+            <tr key={row.key}>
+              <td className="step">
+                {itemLabel ? (
+                  <small className="flow-item">{itemLabel}</small>
+                ) : null}
+                {row.name}
+                {row.worker ? (
+                  <small className="flow-worker">{row.worker}</small>
+                ) : null}
+              </td>
+              <td className="num">{row.planned}</td>
+              <td className="num">{row.completed}</td>
+              <td className="num">{row.defect}</td>
+              <td>{row.completedAt}</td>
+              <td className="task-qr-cell">
+                {row.taskQrSvg ? (
+                  <div
+                    className="task-qr"
+                    aria-label={taskQrLabel}
+                    dangerouslySetInnerHTML={{ __html: row.taskQrSvg }}
+                  />
+                ) : (
+                  <span className="task-qr-empty">—</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
 }
 
-// Inline stylesheet. Intentionally not a global CSS module — it ships
-// with the component so the same markup looks identical whether it's
-// rendered via `window.print()` or via Puppeteer.
-const PRINT_CSS = `
-  @page {
-    size: A4 portrait;
-    margin: 10mm;
+function ShippingBlock({
+  shipments,
+  isSfCollect,
+}: {
+  shipments: PrintShipment[];
+  isSfCollect: boolean;
+}) {
+  return (
+    <div className="ship-list">
+      {shipments.map((shipment) => {
+        const receiver = clean(shipment.receiverName);
+        const rest = [
+          clean(shipment.receiverPhone),
+          formatCarrier(shipment, isSfCollect),
+          clean(shipment.expressCode),
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <div className="ship" key={shipment.id}>
+            <div className="who">
+              <b className={!receiver ? 'miss' : undefined}>{receiver ?? '收件人未填'}</b>
+              {rest ? ` · ${rest}` : ''}
+            </div>
+            <div className={!clean(shipment.receiverAddress) ? 'miss' : undefined}>
+              {clean(shipment.receiverAddress) ?? '收货地址未填'}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function fallbackShipment(order: PrintOrder): PrintShipment {
+  return {
+    id: 'order-shipping-fallback', sequence: 1,
+    receiverName: order.receiverName, receiverPhone: order.receiverPhone,
+    receiverAddress: order.receiverAddress, expressCode: order.expressCode,
+    carrierCode: null, trackingNo: null, lines: [],
+  };
+}
+
+function isLongShipment(shipment: PrintShipment): boolean {
+  return [
+    shipment.receiverName,
+    shipment.receiverPhone,
+    shipment.receiverAddress,
+    shipment.expressCode,
+  ].some((value) => Array.from(clean(value) ?? '').length > 80);
+}
+
+function estimateShipmentLines(shipment: PrintShipment): number {
+  const header = [
+    shipment.receiverName,
+    shipment.receiverPhone,
+    shipment.expressCode,
+  ]
+    .map(clean)
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
+  return (
+    estimateTextLines(header, 42) +
+    estimateTextLines(shipment.receiverAddress, 42)
+  );
+}
+
+function buildArtworks(order: PrintOrder): Artwork[] {
+  return order.items.flatMap<Artwork>((item) => {
+    const images = item.designs.filter((design) => design.fileType === 'IMAGE');
+    if (images.length === 0) {
+      return [{ id: `missing-${item.id}`, fig: item.sequence,
+        title: clean(item.name) ?? `款式 ${item.sequence}`,
+        sub: clean(item.artworkVersion), url: null }];
+    }
+    return images.map((design, index) => ({
+      id: design.id,
+      fig: item.sequence,
+      title: images.length > 1
+        ? `${clean(item.name) ?? `款式 ${item.sequence}`}（${index + 1}）`
+        : clean(item.name) ?? `款式 ${item.sequence}`,
+      sub: clean(item.artworkVersion),
+      url: design.fileUrl,
+    }));
+  });
+}
+
+function buildItemPackaging(groups: PrintPackagingGroup[]): Map<string, ItemPackaging> {
+  const entries = new Map<string, Array<{ unitsPerBag: number; bagCount: number; mixed: boolean }>>();
+  for (const group of groups) {
+    for (const line of group.lines) {
+      const current = entries.get(line.orderItemId) ?? [];
+      current.push({
+        unitsPerBag: line.unitsPerBag,
+        bagCount: group.actualBagCount,
+        mixed: group.mode === 'MIXED_STYLE' || group.lines.length > 1,
+      });
+      entries.set(line.orderItemId, current);
+    }
   }
-  /* 打印视图按定义是纸张模拟，不跟随界面主题。根 layout 的主题脚本会在
-     hydration 前把 .dark 打到 <html> 上，globals.css 的 body 于是变成
-     深色背景，而 PRINT_CSS 只设了 color:#000 —— 结果管理员开着暗色主题
-     点「打印」，预览是黑底黑字，整页看不见。
-     这份 style 只在打印路由注入（OrderPrintLayout 的两个消费者都是打印
-     路径），所以裸 body 选择器的作用域是安全的。 */
-  html:has(.print-sheet), html:has(.print-sheet) body {
-    background: #fff;
-    color: #000;
-    color-scheme: light;
+  return new Map([...entries].map(([itemId, rows]) => {
+    const units = unique(rows.map((row) => row.unitsPerBag).filter((value) => value > 0));
+    const mixed = rows.length > 1 || rows.some((row) => row.mixed);
+    return [itemId, {
+      unitsPerBag: units.length === 1 ? units[0]! : null,
+      bagCount: mixed ? null : rows[0]?.bagCount ?? null,
+      mixed,
+    }];
+  }));
+}
+
+function calculateTotalBags(order: PrintOrder, packaging: Map<string, ItemPackaging>): number | null {
+  if (order.items.length === 0 || order.packagingGroups.length === 0 ||
+    order.items.some((item) => !packaging.get(item.id)?.unitsPerBag) ||
+    order.packagingGroups.some((group) => group.actualBagCount <= 0)) return null;
+  return order.packagingGroups.reduce((sum, group) => sum + group.actualBagCount, 0);
+}
+
+function buildFlowRows(
+  order: PrintOrder,
+  totalQuantity: number,
+  totalBags: number | null,
+): FlowRow[] {
+  const rows = order.items.flatMap((item) =>
+    item.tasks.length > 0
+      ? buildTaskRows(item)
+      : derivePlannedSteps(item),
+  );
+  if (rows.length === 0) {
+    rows.push({
+      key: 'production-pending',
+      itemSequence: null,
+      itemName: null,
+      name: '工序待确认',
+      worker: null,
+      planned: formatNumber(totalQuantity),
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    });
+  }
+  if (
+    order.packagingGroups.length > 0 &&
+    !rows.some((row) => row.name === '打包')
+  ) {
+    rows.push({
+      key: 'packaging',
+      itemSequence: null,
+      itemName: null,
+      name: '打包',
+      worker: null,
+      planned: totalBags === null ? '—' : `${formatNumber(totalBags)} 包`,
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    });
+  }
+  return rows;
+}
+
+function buildTaskRows(item: PrintOrderItem): FlowRow[] {
+  return item.tasks.map((task) => ({
+    key: `task-${task.id}`,
+    itemSequence: item.sequence,
+    itemName: item.name,
+    name: clean(task.craftName) ?? '工序未填',
+    worker: clean(task.workerDisplayName) ?? '待分配',
+    planned: formatNumber(task.plannedQty),
+    completed: formatProgress(task.completedQty),
+    defect: formatProgress(task.defectQty),
+    completedAt: task.completedAt
+      ? formatDateInputShanghai(task.completedAt)
+      : '',
+    taskQrSvg: task.taskQrSvg,
+  }));
+}
+
+function derivePlannedSteps(item: PrintOrderItem): FlowRow[] {
+  return productionStepNames(item)
+    .filter((name) => name !== '打包')
+    .map((name, index) => ({
+      key: `planned-${item.id}-${index}-${name}`,
+      itemSequence: item.sequence,
+      itemName: item.name,
+      name,
+      worker: null,
+      planned: formatNumber(item.quantity),
+      completed: '',
+      defect: '',
+      completedAt: '',
+      taskQrSvg: null,
+    }));
+}
+
+function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>, team: string | null): string[] {
+  const warnings: string[] = [];
+  if (!clean(order.customerName)) warnings.push('客户未填');
+  if (!order.promisedDate) warnings.push('交货日期未填');
+  if (!team) warnings.push('生产团队待排产');
+  if (!clean(order.packageRequirement)) warnings.push('包装要求未填');
+  if (order.items.length === 0) warnings.push('无生产明细');
+  for (const item of order.items) {
+    const prefix = `图 ${item.sequence}`;
+    if (!clean(item.specification)) warnings.push(`${prefix} 规格未填`);
+    if (!clean(formatPaper(item))) warnings.push(`${prefix} 纸张未填`);
+    if (item.tasks.length === 0 && productionStepNames(item).length === 0) {
+      warnings.push(`${prefix} 生产工艺待确认`);
+    }
+    if (
+      item.foilTechnique !== 'NONE' &&
+      item.foilTechnique !== 'UNSPECIFIED' &&
+      foilColorsBySide(item).all.length === 0
+    ) {
+      warnings.push(`${prefix} 烫金颜色未填`);
+    }
+    if (!packaging.get(item.id)?.unitsPerBag) warnings.push(`${prefix} 包装数量未填`);
+    if (!item.designs.some((design) => design.fileType === 'IMAGE')) warnings.push(`${prefix} 缺设计图`);
+  }
+  const shipment = order.shipments[0] ?? fallbackShipment(order);
+  if (!clean(shipment.receiverName)) warnings.push('收件人姓名未填');
+  if (!clean(shipment.receiverPhone)) warnings.push('收件电话未填');
+  if (!clean(shipment.receiverAddress)) warnings.push('收货地址未填');
+  return unique(warnings);
+}
+
+function getTeam(order: PrintOrder): string | null {
+  return joinDistinct(order.items.flatMap((item) => item.tasks.map((task) => task.workerDisplayName)));
+}
+
+function formatPaper(item: PrintOrderItem): string | null {
+  const paper = clean(item.paperType) ? externalPriceBusinessText(item.paperType!) : null;
+  if (!paper) return null;
+  const weight = item.paperWeightGsm;
+  if (!weight || new RegExp(`${weight}\\s*(?:g|克)`, 'i').test(paper)) return paper;
+  return `${paper} ${weight}g`;
+}
+
+function formatFoil(item: PrintOrderItem): string | null {
+  const { front, back, all } = foilColorsBySide(item);
+  if (
+    item.foilTechnique === 'UNSPECIFIED' &&
+    item.hasLocalFoil === null &&
+    all.length === 0
+  ) {
+    return null;
   }
 
-  /* 两条渲染路径（浏览器 window.print() 与 PDF 的 buildPrintHtml doc
-     shell）之前 box-sizing 不一致，设计图在 PDF 侧比网页宽 2px 并溢出
-     网格格子。reset 放在这里，两条路径共用同一份规则。 */
-  .print-sheet, .print-sheet *, .print-sheet *::before, .print-sheet *::after {
-    box-sizing: border-box;
-  }
-  .print-sheet img, .print-sheet svg { display: block; }
+  const technique = FOIL_TECHNIQUE_LABEL[item.foilTechnique];
+  const scope =
+    item.foilTechnique === 'NONE'
+      ? ''
+      : item.hasLocalFoil === true
+        ? '局部'
+        : item.hasLocalFoil === false
+          ? '专版'
+          : '';
+  const process = `${scope}${technique}`;
+  if (all.length === 0) return process;
 
-  /* 运行页眉 / 页脚：thead、tfoot 由浏览器在每个打印页重复并预留空间。 */
-  .print-sheet {
-    width: 100%;
-    border-collapse: collapse;
+  if (back.length > 0) {
+    return `${process} · 正面 ${front.length > 0 ? front.join('、') : '未填'} / 反面 ${back.join('、')}`;
   }
-  .print-sheet > thead > tr > td,
-  .print-sheet > tfoot > tr > td,
-  .print-sheet > tbody > tr > td {
-    padding: 0;
-  }
-  .running-header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    border-bottom: 1px solid #999;
-    padding-bottom: 3px;
-    margin-bottom: 6px;
-    font-size: 10px;
-    color: #444;
-  }
-  .running-header-no { font-weight: bold; color: #000; }
-  .running-header-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .running-header-urgent { color: #dc2626; font-weight: bold; }
+  return `${process} · ${front.length > 0 ? front.join('、') : all.join('、')}`;
+}
 
-  @media print {
-    body { margin: 0; padding: 0; }
-    .no-print { display: none !important; }
-    /* 不要对整个 .order-item 用 avoid：款式本身高于一页时，浏览器无处
-       可断，会塌陷成「非单调页数 + 近乎空白页」。只保护真正不可切的
-       子块，让高款式正常跨页。 */
-    .item-header { break-after: avoid; page-break-after: avoid; }
-    .task-table tr { break-inside: avoid; page-break-inside: avoid; }
-    .design-grid figure { break-inside: avoid; page-break-inside: avoid; }
-    .page-break { page-break-before: always; }
-    /* 首页不需要重复页眉——它下面紧跟着完整的工单抬头。 */
-    .print-sheet > thead { display: table-header-group; }
-    .print-sheet > tfoot { display: table-footer-group; }
+function formatColorPrint(item: PrintOrderItem): string | null {
+  const colors = unique(item.printColors.map(externalPriceBusinessText));
+  const hasPrintColors = colors.length > 0;
+  const hasLamination = item.lamination !== 'NONE';
+  if (!hasPrintColors && !hasLamination) {
+    return null;
   }
-  .print-container {
-    /* 打印视图按定义是纸张模拟，不该跟随界面主题。此前暗色模式下
-       /print/orders/{id} 是黑底黑字（PRINT_CSS 只设了 color:#000，
-       没设 background），整页看不见。 */
-    background: #fff;
-    font-family: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC",
-      "Microsoft YaHei", Arial, sans-serif;
-    color: #000;
-    line-height: 1.5;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+
+  const facts: string[] = [];
+  if (hasPrintColors) {
+    facts.push(`彩印 ${colors.join('、')}`);
+  } else if (!item.printColorsKnown) {
+    facts.push('彩印颜色待确认');
   }
-  .urgent-banner {
-    background: #dc2626;
-    color: white;
-    padding: 8px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 18px;
-    margin-bottom: 10px;
+  if (hasLamination) {
+    facts.push(LAMINATION_LABEL[item.lamination]);
+  } else if (hasPrintColors) {
+    facts.push(LAMINATION_LABEL.NONE);
   }
-  .rework-banner {
-    border: 2px solid #b45309;
-    background: #fffbeb;
-    color: #92400e;
-    padding: 6px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 16px;
-    margin-bottom: 8px;
+  return facts.join(' · ');
+}
+
+function formatItemProcess(item: PrintOrderItem): string | null {
+  return joinDistinct([formatColorPrint(item), formatFoil(item)]);
+}
+
+function foilColorsBySide(item: PrintOrderItem): {
+  front: string[];
+  back: string[];
+  all: string[];
+} {
+  const front = unique(item.frontFoilColors.map(externalPriceBusinessText));
+  const back = unique(item.backFoilColors.map(externalPriceBusinessText));
+  const legacy = unique(item.foilColors.map(externalPriceBusinessText));
+  const normalizedFront = front.length > 0 ? front : back.length === 0 ? legacy : front;
+  return {
+    front: normalizedFront,
+    back,
+    all: unique([...normalizedFront, ...back]),
+  };
+}
+
+function formatProductionCrafts(order: PrintOrder): string | null {
+  return joinDistinct(
+    order.items.flatMap((item) =>
+      item.tasks.length > 0
+        ? item.tasks.map((task) => task.craftName)
+        : productionStepNames(item),
+    ),
+  );
+}
+
+function productionStepNames(item: PrintOrderItem): string[] {
+  const persistedCrafts = unique(
+    item.craftNames.map(clean).filter((name): name is string => Boolean(name)),
+  );
+  if (persistedCrafts.length > 0) return persistedCrafts;
+
+  const explicitSteps: string[] = [];
+  if (item.printColors.length > 0) explicitSteps.push('彩印');
+  if (item.lamination !== 'NONE') explicitSteps.push('覆膜');
+  if (
+    item.foilTechnique !== 'NONE' &&
+    (item.foilTechnique !== 'UNSPECIFIED' ||
+      item.hasLocalFoil !== null ||
+      foilColorsBySide(item).all.length > 0)
+  ) {
+    explicitSteps.push(
+      item.hasLocalFoil === true
+        ? '局部烫金'
+        : item.hasLocalFoil === false
+          ? '专版烫金'
+          : '烫金',
+    );
   }
-  .order-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    border-bottom: 2px solid #000;
-    padding-bottom: 10px;
-    margin-bottom: 15px;
+  return unique(explicitSteps);
+}
+
+function formatFlowItemLabel(row: FlowRow): string | null {
+  if (row.itemSequence === null) return null;
+  const itemName = clean(row.itemName) ?? `款式 ${row.itemSequence}`;
+  return `图 ${row.itemSequence} · ${itemName}`;
+}
+
+function formatCarrier(shipment: PrintShipment, isSfCollect: boolean): string | null {
+  if (isSfCollect) return '顺丰到付';
+  const carrier = clean(shipment.carrierCode);
+  return carrier ? CARRIER_LABEL[carrier] ?? carrier : null;
+}
+
+function artLayout(count: number, onAnnex: boolean): {
+  cols: number;
+  cap: string | null;
+  maxBoxHeight: string | null;
+  centered: boolean;
+} {
+  if (onAnnex && count <= 1) {
+    // A full-width 3:4 artwork is taller than the annex's printable area once
+    // its repeated header, title, caption, and footer are included. Bound both
+    // dimensions explicitly so Chromium cannot create an undeclared spill page.
+    return {
+      cols: 1,
+      cap: '120mm',
+      maxBoxHeight: '160mm',
+      centered: true,
+    };
   }
-  .factory-name { font-size: 12px; color: #666; }
-  .order-title { font-size: 24px; margin: 4px 0; }
-  .order-no { font-size: 16px; font-weight: bold; }
-  .order-custom-name {
-    margin-top: 2px;
-    font-size: 14px;
-    font-weight: bold;
+  if (onAnnex && count === 2) {
+    return {
+      cols: 2,
+      cap: '82mm',
+      maxBoxHeight: '110mm',
+      centered: true,
+    };
   }
-  .order-meta {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px 20px;
-    font-size: 14px;
-    margin-bottom: 15px;
+  if (onAnnex) {
+    return {
+      cols: Math.max(1, Math.min(count, 6)),
+      cap: null,
+      maxBoxHeight: null,
+      centered: false,
+    };
   }
-  .order-item {
-    border: 1px solid #333;
-    margin-bottom: 12px;
-    padding: 10px;
+  if (count <= 1) {
+    return {
+      cols: 1,
+      cap: '50mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
   }
-  .item-header {
-    font-weight: bold;
-    font-size: 16px;
-    border-bottom: 1px dashed #666;
-    padding-bottom: 5px;
-    margin-bottom: 8px;
+  if (count <= 2) {
+    return {
+      cols: count,
+      cap: '44mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
   }
-  .item-body {
-    display: flex;
-    gap: 15px;
+  if (count <= 4) {
+    return {
+      cols: count,
+      cap: '40mm',
+      maxBoxHeight: null,
+      centered: false,
+    };
   }
-  .design-grid {
-    display: grid;
-    gap: 4mm;
-    padding: 2mm;
+  return {
+    cols: count,
+    cap: null,
+    maxBoxHeight: null,
+    centered: false,
+  };
+}
+
+function formatProgress(value: number): string { return value > 0 ? formatNumber(value) : ''; }
+
+function joinDistinct(values: Array<string | null | undefined>): string | null {
+  const joined = unique(values.map(clean).filter((value): value is string => Boolean(value)));
+  return joined.length > 0 ? joined.join(' / ') : null;
+}
+
+function unique<T>(values: T[]): T[] { return [...new Set(values)]; }
+
+function paginateItems(items: PrintOrderItem[]): {
+  mainItems: PrintOrderItem[];
+  itemAnnexPages: PrintOrderItem[][];
+} {
+  const itemUnits = items.map(estimateItemRowUnits);
+  const mainUnitLimit =
+    items.length >= 4 || itemUnits.some((units) => units > 1)
+    ? Math.ceil(MAX_ITEMS_ON_MAIN_PAGE / 2)
+    : MAX_ITEMS_ON_MAIN_PAGE;
+  const mainItems: PrintOrderItem[] = [];
+  let mainUnits = 0;
+  let nextIndex = 0;
+  while (nextIndex < items.length && mainItems.length < MAX_ITEMS_ON_MAIN_PAGE) {
+    const item = items[nextIndex]!;
+    const units = itemUnits[nextIndex]!;
+    if (mainItems.length > 0 && mainUnits + units > mainUnitLimit) {
+      break;
+    }
+    mainItems.push(item);
+    mainUnits += units;
+    nextIndex += 1;
   }
-  .design-grid.count-1      { grid-template-columns: 60mm; }
-  .design-grid.count-2      { grid-template-columns: 45mm 45mm; }
-  .design-grid.count-3-4    { grid-template-columns: 35mm 35mm; }
-  .design-grid.count-5-6    { grid-template-columns: 28mm 28mm 28mm; }
-  .design-grid.count-7-9    { grid-template-columns: 25mm 25mm 25mm; }
-  .design-grid.count-many   { grid-template-columns: 22mm 22mm 22mm; }
-  .design-thumb {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    object-fit: contain;
-    border: 1px solid #ddd;
-    background: #fafafa;
+  return {
+    mainItems,
+    itemAnnexPages: paginateByWeight(
+      items.slice(nextIndex),
+      MAX_ITEMS_PER_ANNEX_PAGE,
+      estimateItemRowUnits,
+    ),
+  };
+}
+
+function estimateItemRowUnits(item: PrintOrderItem): number {
+  const specificationLines = estimateTextLines(item.specification, 8);
+  const nameLines = estimateTextLines(item.name, 20);
+  const processLines = estimateTextLines(formatItemProcess(item), 24);
+  const estimatedLines = Math.max(
+    specificationLines,
+    nameLines + processLines,
+  );
+  // A normal item uses two short visual lines (name + process) and occupies
+  // one historical row slot. Longer legal values consume extra slots before
+  // the deterministic paginator decides the annex boundary.
+  return Math.max(1, Math.ceil(estimatedLines / 2));
+}
+
+function paginateFlowRows(rows: FlowRow[]): {
+  mainFlowRows: FlowRow[];
+  flowAnnexPages: FlowRow[][];
+} {
+  return {
+    mainFlowRows: rows.slice(0, MAX_FLOW_ROWS_ON_MAIN_PAGE),
+    flowAnnexPages: paginateByWeight(
+      rows.slice(MAX_FLOW_ROWS_ON_MAIN_PAGE),
+      MAX_FLOW_ROWS_PER_ANNEX_PAGE,
+      estimateFlowRowUnits,
+    ),
+  };
+}
+
+function estimateFlowRowUnits(row: FlowRow): number {
+  const itemLabel =
+    row.itemSequence === null
+      ? row.itemName
+      : `图 ${row.itemSequence} · ${clean(row.itemName) ?? ''}`;
+  const estimatedLines =
+    estimateTextLines(itemLabel, 16) +
+    estimateTextLines(row.name, 8) +
+    estimateTextLines(row.worker, 16);
+  // The 15mm task QR already establishes roughly four text-line heights for
+  // a normal task. Only content beyond that baseline consumes another slot.
+  return Math.max(1, Math.ceil(estimatedLines / 4));
+}
+
+function paginateByWeight<T>(
+  values: T[],
+  maxUnits: number,
+  getUnits: (value: T) => number,
+): T[][] {
+  const pages: T[][] = [];
+  let page: T[] = [];
+  let usedUnits = 0;
+  for (const value of values) {
+    const units = Math.max(1, getUnits(value));
+    if (page.length > 0 && usedUnits + units > maxUnits) {
+      pages.push(page);
+      page = [];
+      usedUnits = 0;
+    }
+    page.push(value);
+    usedUnits += units;
   }
-  .design-empty {
-    width: 60mm;
-    font-size: 11px;
-    color: #999;
-    font-style: italic;
+  if (page.length > 0) pages.push(page);
+  return pages;
+}
+
+function estimateTextLines(
+  value: string | null | undefined,
+  charactersPerLine: number,
+): number {
+  const normalized = clean(value);
+  if (!normalized) return 0;
+  return normalized.split(/\r?\n/).reduce((sum, line) => {
+    const length = Array.from(line).length;
+    return sum + Math.max(1, Math.ceil(length / charactersPerLine));
+  }, 0);
+}
+
+function previewForMain(
+  value: string | null,
+  maxCharacters: number,
+): string | null {
+  if (!value) return null;
+  // Main-sheet summaries are deliberately single-flow text. Explicit line
+  // breaks are preserved verbatim on deterministic supplement pages instead
+  // of being allowed to make the physical first page taller than its model.
+  const compact = value.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(compact);
+  if (characters.length <= maxCharacters) return compact;
+  return `${characters.slice(0, maxCharacters).join('')}…（见附页）`;
+}
+
+function previewForHeader(
+  value: string | null,
+  maxCharacters: number,
+): string | null {
+  if (!value) return null;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(compact);
+  return characters.length <= maxCharacters
+    ? compact
+    : `${characters.slice(0, maxCharacters).join('')}…`;
+}
+
+function buildSupplementPages(
+  sources: Array<{
+    key: string;
+    label: string;
+    value: string | null;
+    mainLimit: number;
+  }>,
+): SupplementPage[] {
+  return sources.flatMap((source) => {
+    if (!source.value) return [];
+    const characters = Array.from(source.value);
+    if (
+      characters.length <= source.mainLimit &&
+      !hasExplicitLineBreak(source.value)
+    ) {
+      return [];
+    }
+    const parts = paginateSupplementText(source.value);
+    return parts.map((value, index) => ({
+      key: source.key,
+      label: source.label,
+      part: index + 1,
+      totalParts: parts.length,
+      value,
+    }));
+  });
+}
+
+function hasExplicitLineBreak(value: string | null | undefined): boolean {
+  return Boolean(value && /\r?\n/.test(value));
+}
+
+function paginateSupplementText(value: string): string[] {
+  const pages: string[] = [];
+  let pageCharacters: string[] = [];
+  let lineCount = 1;
+  let column = 0;
+
+  const flush = () => {
+    if (pageCharacters.length === 0) return;
+    pages.push(pageCharacters.join(''));
+    pageCharacters = [];
+    lineCount = 1;
+    column = 0;
+  };
+
+  for (const character of Array.from(value)) {
+    const isNewline = character === '\n';
+    const wrapsLine = !isNewline && column >= SUPPLEMENT_CHARACTERS_PER_LINE;
+    const additionalLine = isNewline || wrapsLine ? 1 : 0;
+    if (
+      pageCharacters.length >= MAX_SUPPLEMENT_CHARACTERS_PER_PAGE ||
+      (pageCharacters.length > 0 &&
+        lineCount + additionalLine > MAX_SUPPLEMENT_LINES_PER_PAGE)
+    ) {
+      flush();
+    }
+
+    pageCharacters.push(character);
+    if (isNewline) {
+      lineCount += 1;
+      column = 0;
+    } else if (column >= SUPPLEMENT_CHARACTERS_PER_LINE) {
+      lineCount += 1;
+      column = 1;
+    } else if (character !== '\r') {
+      column += 1;
+    }
   }
-  .design-many-warn {
-    font-size: 11px;
-    color: #c00;
-    margin-top: 4px;
+  flush();
+  return pages;
+}
+
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
   }
-  .item-info { flex: 1; font-size: 13px; }
-  .item-info dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 3px 10px;
-    margin: 0;
-  }
-  .item-info dt { font-weight: 600; }
-  .item-info dd { margin: 0; }
-  .item-remark {
-    margin-top: 8px;
-    font-size: 13px;
-    color: #000;
-  }
-  .item-remark-label {
-    color: #333;
-  }
-  .item-remark-text {
-    padding: 1px 3px;
-    font-weight: bold;
-    color: #c00000;
-    background: #ffe6e6;
-    -webkit-box-decoration-break: clone;
-    box-decoration-break: clone;
-  }
-  .task-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 8px;
-    font-size: 12px;
-  }
-  .task-table th, .task-table td {
-    border: 1px solid #999;
-    padding: 4px 6px;
-    text-align: center;
-  }
-  .order-footer {
-    margin-top: 15px;
-    border-top: 1px solid #333;
-    padding-top: 10px;
-    font-size: 13px;
-  }
-  .shipment-list { margin-top: 8px; }
-  .shipment-row {
-    margin-top: 2px;
-    overflow-wrap: anywhere;
-  }
-  /* compact-3 已移除：它把三款工单的字号压小以塞进一张 A4，
-     而工单一旦排产仍然放不下。业主 2026-08-18 决策改为显式分页 +
-     每页重复表头，车间拿到的字号因此恢复正常大小。 */
-  /* 不再用 position: fixed —— 它每页重画却不占位，会压住正文。现在
-     由 tfoot 承载，浏览器自动每页重复并预留空间。 */
-  .print-footer {
-    border-top: 1px solid #ccc;
-    margin-top: 6px;
-    padding-top: 3px;
-    text-align: center;
-    font-size: 10px;
-    color: #666;
-  }
+  return chunks;
+}
+
+function clean(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function formatNumber(value: number): string { return new Intl.NumberFormat('zh-CN').format(value); }
+
+function classNames(...values: Array<string | false | null | undefined>): string | undefined {
+  const result = values.filter(Boolean).join(' ');
+  return result || undefined;
+}
+
+const PRINT_CSS = String.raw`
+:root{ --ink:#111214; --mute:#7c7f84; --hair:#cdd0d4; --rule:#23262a; --flag:#a8121a; }
+*{ box-sizing:border-box; margin:0; padding:0; }
+html,body{ min-height:100%; }
+body{
+  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC",sans-serif;
+  color:var(--ink); background:#93969a; font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased; padding:8mm 0;
+}
+.work-order-document{ width:100%; }
+.sheet{
+  width:210mm; min-height:297mm; padding:13mm 13mm 10mm; margin:0 auto 8mm;
+  background:#fff; box-shadow:0 2mm 8mm rgba(0,0,0,.3); display:flex;
+  flex-direction:column; break-after:page; page-break-after:always;
+}
+.sheet.dense{ padding-top:10mm; padding-bottom:7mm; }
+.sheet:last-child{ break-after:auto; page-break-after:auto; }
+.lbl{ font-size:6pt; font-weight:600; letter-spacing:.18em; color:var(--mute); }
+.l1{ font-size:13.5pt; font-weight:800; line-height:1.2; }
+.l0{ font-size:18pt; font-weight:800; line-height:1.05; letter-spacing:-.015em; }
+.hd{ display:flex; justify-content:space-between; align-items:flex-start; gap:10mm; padding-bottom:4mm; border-bottom:.7mm solid var(--rule); }
+.hd-main{ min-width:0; flex:1 1 auto; overflow:hidden; }
+.factory{ font-size:8pt; font-weight:700; color:var(--mute); letter-spacing:.08em; margin-bottom:1.8mm; }
+.factory,.cust{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cust{ max-width:130mm; font-size:26pt; font-weight:800; line-height:1; letter-spacing:-.02em; }
+.line{ display:flex; align-items:center; flex-wrap:wrap; gap:1.5mm; max-height:2.7em; overflow:hidden; font-size:9.5pt; font-weight:600; color:var(--mute); margin-top:2.6mm; }
+.line b{ max-width:60mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); }
+.line b.miss{ color:var(--flag); }
+.sep{ color:var(--hair); margin:0 .5mm; }
+.scan{ text-align:right; flex:0 0 auto; }
+.scan .qr{ min-width:25mm; min-height:25mm; margin-left:auto; display:flex; justify-content:flex-end; }
+.scan svg{ min-width:25mm; min-height:25mm; display:block; }
+.scan .no{ font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:8pt; font-weight:700; margin-top:1.4mm; white-space:nowrap; }
+.sec{ padding:4.5mm 0; border-top:.25mm solid var(--hair); }
+.sheet.dense > .sec{ padding-top:3mm; padding-bottom:3mm; }
+.sec:first-of-type{ border-top:none; }
+.grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:5mm 6mm; align-items:start; }
+.fact{ min-width:0; }
+.fact .l0,.fact .l1{ margin-top:1.2mm; overflow-wrap:anywhere; }
+.miss{ color:var(--flag); }
+.warn{ margin-top:3mm; border-left:.8mm solid var(--flag); padding-left:2.4mm; color:var(--flag); font-size:9pt; font-weight:700; line-height:1.4; }
+.warn[hidden]{ display:none; }
+.unit{ font-size:9pt; font-weight:600; color:var(--mute); margin-left:.8mm; }
+.remark{ margin-top:5mm; }
+.note{ border-left:.8mm solid var(--flag); padding-left:2.4mm; color:var(--flag); }
+.tag{ display:inline-block; border:.45mm solid var(--flag); color:var(--flag); font-size:8pt; font-weight:800; padding:.2mm 1.6mm; border-radius:.6mm; letter-spacing:.06em; margin-left:1mm; }
+table{ width:100%; border-collapse:collapse; }
+th,td{ border:none; padding:1.6mm 2mm 1.6mm 0; text-align:left; }
+thead th{ font-size:6pt; font-weight:600; letter-spacing:.18em; color:var(--mute); border-bottom:.4mm solid var(--rule); padding-bottom:1.4mm; }
+tbody td{ border-bottom:.15mm solid var(--hair); font-size:10.5pt; font-weight:600; }
+.num{ text-align:right; font-weight:800; }
+tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5pt; font-weight:800; padding-top:2.2mm; }
+.items tbody td{ height:7mm; }
+.item-process{ max-width:65mm; color:var(--mute); font-size:7.2pt; font-weight:600; line-height:1.35; margin-top:.7mm; }
+.empty-row{ height:14mm !important; text-align:center; }
+.col-fig{ width:14mm; }.col-spec{ width:26mm; }.col-qty,.col-pack{ width:26mm; }.col-bags{ width:22mm; }
+.flow tbody td{ min-height:11mm; }.flow .step{ font-size:11.5pt; font-weight:800; }
+.flow .step small{ display:block; color:var(--mute); font-size:7pt; font-weight:600; }
+.flow .step .flow-item{ margin-bottom:.8mm; }
+.flow .step .flow-worker{ margin-top:.8mm; }
+.flow-step-col{ width:30mm; }.flow-number-col{ width:24mm; }.flow-defect-col{ width:20mm; }.flow-date-col{ width:26mm; }.flow-qr-col{ width:32mm; }
+.task-qr-cell{ text-align:right; padding-right:0; vertical-align:middle; }
+.task-qr{ display:inline-flex; min-width:15mm; min-height:15mm; justify-content:flex-end; }
+.task-qr svg{ min-width:15mm; min-height:15mm; display:block; }
+.task-qr-empty{ color:var(--mute); }
+.flow-annex{ flex:1; }
+.annex-title{ font-size:15pt; font-weight:800; margin-bottom:4mm; }
+.item-annex,.warning-annex,.supplement-annex,.shipment-annex{ flex:1; }
+.warning-list{ padding-left:6mm; color:var(--flag); font-size:10pt; font-weight:700; line-height:1.45; }
+.warning-list li{ padding:1.4mm 0; border-bottom:.15mm solid var(--hair); }
+.supplement-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:11pt; font-weight:600; line-height:1.65; }
+.shipment-annex-notice{ font-size:11pt; font-weight:700; color:var(--mute); }
+.badge{ display:inline-flex; align-items:center; justify-content:center; min-width:5.2mm; height:5.2mm; padding:0 1.3mm; background:var(--ink); color:#fff; border-radius:99mm; font-size:8.5pt; font-weight:800; }
+.art{ display:grid; gap:3.5mm; justify-content:var(--art-justify,start); grid-template-columns:repeat(var(--cols),minmax(0,var(--cap,1fr))); }
+.thumb{ min-width:0; }
+.thumb .box{ width:100%; max-height:var(--art-max-box-height,none); aspect-ratio:3/4; border:.2mm solid var(--hair); display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; background:#fff; }
+.thumb .box img{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff; }
+.art-placeholder{ display:none; color:var(--flag); font-size:8pt; font-weight:700; text-align:center; padding:2mm; }
+.image-missing .art-placeholder,.image-failed .art-placeholder{ display:block; }
+.image-failed .box img{ display:none; }.image-failed .box{ border-color:var(--flag); }
+.thumb .cap{ display:flex; gap:1.4mm; align-items:flex-start; margin-top:1.6mm; }
+.thumb .cap .txt{ font-size:8pt; font-weight:700; line-height:1.3; min-width:0; overflow-wrap:anywhere; }
+.thumb .cap small{ display:block; font-size:6.4pt; color:var(--mute); font-weight:600; margin-top:.4mm; }
+.art-empty{ min-height:24mm; display:flex; align-items:center; justify-content:center; border:.2mm solid var(--flag); font-size:10pt; font-weight:700; }
+.artwork-annex{ flex:1; }
+.ship-list{ display:grid; gap:3mm; }
+.ship{ font-size:11pt; font-weight:700; line-height:1.5; }
+.ship + .ship{ padding-top:3mm; border-top:.15mm solid var(--hair); }
+.ship .who{ color:var(--mute); font-weight:600; font-size:9.5pt; }
+.ship .who b{ color:var(--ink); font-weight:700; }.ship .who b.miss{ color:var(--flag); }
+.ft{ margin-top:auto; padding-top:3mm; border-top:.25mm solid var(--hair); display:flex; justify-content:space-between; font-size:6pt; color:var(--mute); letter-spacing:.06em; }
+tr,.sec,.thumb{ break-inside:avoid; page-break-inside:avoid; }
+@media print{
+  @page{ size:A4; margin:0; }
+  html,body{ width:210mm; background:#fff; padding:0; }
+  .sheet{ margin:0; box-shadow:none; }
+  *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
 `;

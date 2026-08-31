@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createCustomerPriceBookDraftAction,
@@ -13,17 +13,35 @@ import type {
   UpdateCustomerPriceRuleDraftActionInput,
 } from '@/actions/customer-price-books.types';
 import { Button } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ConfirmActionDialog } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderPackagingMode,
+  OrderProductStructure,
 } from '@/generated/prisma/enums';
 import type {
   CustomerPriceRuleDraftEditorDto,
 } from '@/lib/price/customer-price-book-admin';
-import { externalPriceRuleDisplayName } from './external-price-display';
+import {
+  RULE_CENTER_HREFS,
+  customerPricingHref,
+} from '@/lib/navigation/rule-center';
+import {
+  NEW_ORDER_PRICING_ROUTES,
+  ORDER_PRICING_ROUTE_LABELS,
+} from '@/lib/order/pricing-route';
+import {
+  externalPriceBusinessText,
+  externalPriceRuleDisplayName,
+} from '@/lib/price/external-price-display';
 
 export type CustomerPriceBookDraftRuleContext =
   CustomerPriceRuleDraftEditorDto['context'];
@@ -39,9 +57,9 @@ const textareaClass =
   'w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40';
 
 const RULE_KIND_LABELS: Record<CustomerPriceRuleKind, string> = {
-  [CustomerPriceRuleKind.BASE]: '基础价',
-  [CustomerPriceRuleKind.ADD_ON]: '附加费',
-  [CustomerPriceRuleKind.REFERENCE]: '人工参考/阻断',
+  [CustomerPriceRuleKind.BASE]: '基础费用',
+  [CustomerPriceRuleKind.ADD_ON]: '加收费用',
+  [CustomerPriceRuleKind.REFERENCE]: '人工确认',
 };
 
 const CALCULATION_TYPE_LABELS: Record<CustomerPriceCalculationType, string> = {
@@ -50,6 +68,35 @@ const CALCULATION_TYPE_LABELS: Record<CustomerPriceCalculationType, string> = {
   [CustomerPriceCalculationType.PER_SHEET]: '按张',
   [CustomerPriceCalculationType.PER_10K]: '每万个',
   [CustomerPriceCalculationType.PER_ITEM]: '每款一次',
+  [CustomerPriceCalculationType.PER_BAG]: '按实际袋数',
+};
+
+const PRODUCT_STRUCTURE_LABELS: Record<OrderProductStructure, string> = {
+  [OrderProductStructure.UNSPECIFIED]: '未指定（历史）',
+  [OrderProductStructure.STANDARD_ENVELOPE]: '普通封',
+  [OrderProductStructure.WESTERN_ENVELOPE]: '西封',
+  [OrderProductStructure.TEN_THOUSAND_ENVELOPE]: '万元封',
+};
+
+const FOIL_TECHNIQUE_LABELS: Record<OrderFoilTechnique, string> = {
+  [OrderFoilTechnique.UNSPECIFIED]: '未指定（历史）',
+  [OrderFoilTechnique.NONE]: '无烫金',
+  [OrderFoilTechnique.FLAT]: '平烫',
+  [OrderFoilTechnique.RELIEF]: '浮雕',
+  [OrderFoilTechnique.RAISED]: '激凸',
+};
+
+const LAMINATION_LABELS: Record<OrderLamination, string> = {
+  [OrderLamination.NONE]: '无覆膜',
+  [OrderLamination.MATTE]: '亚膜',
+  [OrderLamination.SOFT_TOUCH]: '触感膜',
+  [OrderLamination.NEW_GLOSS]: '新式光膜',
+  [OrderLamination.LASER]: '激光膜',
+};
+
+const PACKAGING_MODE_LABELS: Record<OrderPackagingMode, string> = {
+  [OrderPackagingMode.SINGLE_STYLE]: '单款装',
+  [OrderPackagingMode.MIXED_STYLE]: '混装',
 };
 
 function textValue(formData: FormData, name: string): string {
@@ -65,6 +112,34 @@ function nullableTextValue(formData: FormData, name: string): string | null {
 function nullableNumberValue(formData: FormData, name: string): number | null {
   const value = textValue(formData, name).trim();
   return value ? Number(value) : null;
+}
+
+function listValue(formData: FormData, name: string): string[] {
+  return [
+    ...new Set(
+      formData
+        .getAll(name)
+        .filter((value): value is string => typeof value === 'string')
+        .flatMap((value) => value.split(/[,，、;；\n\r]+/u))
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function enumListValue<T extends string>(formData: FormData, name: string): T[] {
+  return [
+    ...new Set(
+      formData
+        .getAll(name)
+        .filter((value): value is string => typeof value === 'string'),
+    ),
+  ] as T[];
+}
+
+function nullableBooleanValue(formData: FormData, name: string): boolean | null {
+  const value = textValue(formData, name);
+  return value === 'true' ? true : value === 'false' ? false : null;
 }
 
 function checkedValue(formData: FormData, name: string): boolean {
@@ -147,6 +222,112 @@ export function customerPriceRuleInputFromFormData(
             formData,
             'blocksAutomaticQuote',
           ),
+          match: {
+            target:
+              textValue(formData, 'match.target') === 'PACKAGING_GROUP'
+                ? 'PACKAGING_GROUP'
+                : 'ITEM',
+            packagingModes: enumListValue<OrderPackagingMode>(
+              formData,
+              'match.packagingModes',
+            ),
+            pricingRoutes: enumListValue<OrderItemPricingRoute>(
+              formData,
+              'match.pricingRoutes',
+            ),
+            productStructures: enumListValue<OrderProductStructure>(
+              formData,
+              'match.productStructures',
+            ),
+            foilTechniques: enumListValue<OrderFoilTechnique>(
+              formData,
+              'match.foilTechniques',
+            ),
+            laminations: enumListValue<OrderLamination>(
+              formData,
+              'match.laminations',
+            ),
+            specifications: listValue(formData, 'match.specifications'),
+            paperTypes: listValue(formData, 'match.paperTypes'),
+            craftCodes: listValue(formData, 'match.craftCodes'),
+            noneOfCraftCodes: listValue(formData, 'match.noneOfCraftCodes'),
+            anyCraftCodeOutside: listValue(
+              formData,
+              'match.anyCraftCodeOutside',
+            ),
+            craftMode:
+              (nullableTextValue(formData, 'match.craftMode') as
+                | 'ANY'
+                | 'ALL'
+                | null),
+            foilColors: listValue(formData, 'match.foilColors'),
+            printColors: listValue(formData, 'match.printColors'),
+            isDoubleSided: nullableBooleanValue(
+              formData,
+              'match.isDoubleSided',
+            ),
+            isDoubleColor: nullableBooleanValue(
+              formData,
+              'match.isDoubleColor',
+            ),
+            hasLocalFoil: nullableBooleanValue(
+              formData,
+              'match.hasLocalFoil',
+            ),
+            foilColorCount: nullableNumberValue(
+              formData,
+              'match.foilColorCount',
+            ),
+            minFoilColorCount: nullableNumberValue(
+              formData,
+              'match.minFoilColorCount',
+            ),
+            maxFoilColorCount: nullableNumberValue(
+              formData,
+              'match.maxFoilColorCount',
+            ),
+            foilPassCount: nullableNumberValue(
+              formData,
+              'match.foilPassCount',
+            ),
+            minFoilPassCount: nullableNumberValue(
+              formData,
+              'match.minFoilPassCount',
+            ),
+            maxFoilPassCount: nullableNumberValue(
+              formData,
+              'match.maxFoilPassCount',
+            ),
+            printColorCount: nullableNumberValue(
+              formData,
+              'match.printColorCount',
+            ),
+            minPrintColorCount: nullableNumberValue(
+              formData,
+              'match.minPrintColorCount',
+            ),
+            maxPrintColorCount: nullableNumberValue(
+              formData,
+              'match.maxPrintColorCount',
+            ),
+            minWidthMm: nullableNumberValue(formData, 'match.minWidthMm'),
+            maxWidthMm: nullableNumberValue(formData, 'match.maxWidthMm'),
+            minHeightMm: nullableNumberValue(formData, 'match.minHeightMm'),
+            maxHeightMm: nullableNumberValue(formData, 'match.maxHeightMm'),
+            minPaperWeightGsm: nullableNumberValue(
+              formData,
+              'match.minPaperWeightGsm',
+            ),
+            maxPaperWeightGsm: nullableNumberValue(
+              formData,
+              'match.maxPaperWeightGsm',
+            ),
+            minItemCount: nullableNumberValue(formData, 'match.minItemCount'),
+            maxItemCount: nullableNumberValue(formData, 'match.maxItemCount'),
+            perFoilColor: checkedValue(formData, 'match.perFoilColor'),
+            perFoilPass: checkedValue(formData, 'match.perFoilPass'),
+            perPrintColor: checkedValue(formData, 'match.perPrintColor'),
+          },
         }
       : {}),
     ...(formData.has('includedUnits')
@@ -192,6 +373,8 @@ export async function publishDraftFromForm(
     priceBookId: textValue(formData, 'priceBookId'),
     expectedDraftUpdatedAt: textValue(formData, 'expectedDraftUpdatedAt'),
     effectiveFrom: textValue(formData, 'effectiveFrom'),
+    publishNote: textValue(formData, 'publishNote'),
+    confirmedImpact: checkedValue(formData, 'confirmedImpact'),
   });
 }
 
@@ -302,11 +485,11 @@ export function CreateCustomerPriceBookDraftForm({
     if (state?.status !== 'success') return;
     router.replace(
       returnHref ??
-        `/owner/prices/external-sales/items?purpose=${
+        customerPricingHref(
           purpose === CustomerPriceBookPurpose.LOGISTICS
             ? 'logistics'
-            : 'processing'
-        }`,
+            : 'processing',
+        ),
     );
   }, [purpose, returnHref, router, state]);
 
@@ -314,6 +497,7 @@ export function CreateCustomerPriceBookDraftForm({
     <form
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label={`创建${
         purpose === CustomerPriceBookPurpose.PROCESSING
           ? '加工费'
@@ -323,9 +507,9 @@ export function CreateCustomerPriceBookDraftForm({
     >
       <input type="hidden" name="purpose" value={purpose} />
       <div className="space-y-1">
-        <p className="text-sm font-medium">从当前生效价目开始调整</p>
+        <p className="text-sm font-medium">发起调价</p>
         <p className="text-xs leading-5 text-muted-foreground">
-          系统会复制当前价目为一份独立草稿。草稿发布前不会影响当前报价，历史工单的原结算金额也不会改变。
+          草稿发布前不影响当前报价。
         </p>
       </div>
       <div className="space-y-2">
@@ -347,7 +531,7 @@ export function CreateCustomerPriceBookDraftForm({
           )}
         />
         <p id={changeReasonHintId} className="text-xs text-muted-foreground">
-          请说明这次调整的原因，方便后续查看调价记录。
+          用于调价记录。
         </p>
         <FieldErrorMessages
           id={changeReasonErrorId}
@@ -355,7 +539,7 @@ export function CreateCustomerPriceBookDraftForm({
         />
       </div>
       <Button type="submit" className="min-h-11" disabled={pending}>
-        {pending ? '正在复制…' : '复制当前价目并开始调价'}
+        {pending ? '正在创建…' : '开始调价'}
       </Button>
       <MutationFeedback
         state={state}
@@ -370,12 +554,26 @@ export function PublishCustomerPriceBookDraftForm({
   priceBookId,
   expectedDraftUpdatedAt,
   defaultEffectiveFrom,
+  ruleCount,
+  impact,
 }: {
   priceBookId: string;
   expectedDraftUpdatedAt: string;
   defaultEffectiveFrom: string;
+  ruleCount?: number;
+  impact?: {
+    totalRuleCount: number;
+    changedItemCount: number;
+    changedRuleCount: number;
+    increasedRuleCount: number;
+    decreasedRuleCount: number;
+    deltaPercentMin: string | null;
+    deltaPercentMax: string | null;
+    validationStatus: 'PASS' | 'FAIL';
+  };
 }) {
   const router = useRouter();
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [state, formAction, pending] = useActionState<MutationState, FormData>(
     publishDraftFromForm,
     null,
@@ -383,18 +581,33 @@ export function PublishCustomerPriceBookDraftForm({
   const formRef = useFocusFirstInvalidField(state);
   const errors = mutationFieldErrors(state);
   const effectiveFromId = `effectiveFrom-${priceBookId}`;
-  const effectiveFromHintId = `${effectiveFromId}-hint`;
   const effectiveFromErrorId = `${effectiveFromId}-error`;
+  const publishNoteId = `publishNote-${priceBookId}`;
+  const publishNoteHintId = `${publishNoteId}-hint`;
+  const publishNoteErrorId = `${publishNoteId}-error`;
+  const confirmedImpactId = `confirmedImpact-${priceBookId}`;
+  const confirmedImpactErrorId = `${confirmedImpactId}-error`;
+  const validationPassed = impact?.validationStatus !== 'FAIL';
+
+  const deltaRange =
+    impact && impact.deltaPercentMin !== null && impact.deltaPercentMax !== null
+      ? impact.deltaPercentMin === impact.deltaPercentMax
+        ? `${Number(impact.deltaPercentMin) > 0 ? '+' : ''}${impact.deltaPercentMin}%`
+        : `${Number(impact.deltaPercentMin) > 0 ? '+' : ''}${impact.deltaPercentMin}% 〜 ${
+            Number(impact.deltaPercentMax) > 0 ? '+' : ''
+          }${impact.deltaPercentMax}%`
+      : '含启停或非金额修改';
 
   useEffect(() => {
     if (state?.status !== 'success') return;
-    router.replace('/owner/prices/external-sales/versions');
+    router.replace(RULE_CENTER_HREFS.priceVersions);
   }, [router, state]);
 
   return (
     <form
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label="发布价目草稿"
       className="min-w-0 space-y-3 rounded-lg border p-3"
     >
@@ -416,24 +629,147 @@ export function PublishCustomerPriceBookDraftForm({
           defaultValue={defaultEffectiveFrom}
           required
           aria-required="true"
+          onChange={() => setConfirmationOpen(false)}
           aria-invalid={Boolean(errors.effectiveFrom?.length)}
           aria-describedby={fieldDescriptionIds(
             effectiveFromErrorId,
             errors.effectiveFrom,
-            effectiveFromHintId,
           )}
         />
-        <p id={effectiveFromHintId} className="text-xs text-muted-foreground">
-          按 Asia/Shanghai 解释。发布前会检查数量区间、金额和规则冲突。
-        </p>
         <FieldErrorMessages
           id={effectiveFromErrorId}
           messages={errors.effectiveFrom}
         />
       </div>
-      <Button type="submit" className="min-h-11" disabled={pending}>
-        {pending ? '校验并发布中…' : '校验并发布'}
-      </Button>
+      <div className="space-y-2">
+        <Label htmlFor={publishNoteId}>发布说明（必填）</Label>
+        <textarea
+          id={publishNoteId}
+          name="publishNote"
+          className={`${textareaClass} min-h-24`}
+          placeholder="例如：已完成 2026 年 9 月加工费复核，按新价目生效"
+          minLength={2}
+          maxLength={500}
+          required
+          aria-required="true"
+          aria-invalid={Boolean(errors.publishNote?.length)}
+          aria-describedby={fieldDescriptionIds(
+            publishNoteErrorId,
+            errors.publishNote,
+            publishNoteHintId,
+          )}
+          onChange={() => setConfirmationOpen(false)}
+        />
+        <p id={publishNoteHintId} className="text-xs text-muted-foreground">
+          用于发布记录。
+        </p>
+        <FieldErrorMessages id={publishNoteErrorId} messages={errors.publishNote} />
+      </div>
+
+      {!confirmationOpen ? (
+        <div className="space-y-2">
+          <Button
+            type="button"
+            className="min-h-11 w-full"
+            disabled={pending || !validationPassed}
+            onClick={() => {
+              if (!formRef.current?.reportValidity()) return;
+              setConfirmationOpen(true);
+            }}
+          >
+            校验通过，进入发布确认
+          </Button>
+          {!validationPassed ? (
+            <p className="text-xs text-destructive">
+              发布检查未通过，请先修正问题。
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <section
+          aria-live="polite"
+          aria-labelledby={`${confirmedImpactId}-heading`}
+          className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
+              发布确认
+            </span>
+            <p id={`${confirmedImpactId}-heading`} className="font-medium">
+              确认发布影响
+            </p>
+          </div>
+          <dl className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">影响收费项目</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.changedItemCount ?? '—'} 项
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">影响数量档/规则</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.changedRuleCount ?? ruleCount ?? '—'} 档
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">涨跌区间</dt>
+              <dd className="font-sans tabular-nums">{deltaRange}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">涨价 / 下调</dt>
+              <dd className="font-sans tabular-nums">
+                {impact?.increasedRuleCount ?? '—'} / {impact?.decreasedRuleCount ?? '—'} 档
+              </dd>
+            </div>
+          </dl>
+          <p className="rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
+            已开工单价格不变；新价格从生效时间起用于新建或重新报价工单。
+          </p>
+          <label
+            htmlFor={confirmedImpactId}
+            className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border bg-background p-2 text-sm"
+          >
+            <input
+              id={confirmedImpactId}
+              name="confirmedImpact"
+              type="checkbox"
+              value="true"
+              required
+              aria-required="true"
+              aria-invalid={Boolean(errors.confirmedImpact?.length)}
+              aria-describedby={
+                errors.confirmedImpact?.length ? confirmedImpactErrorId : undefined
+              }
+              className="mt-1 size-4 shrink-0"
+            />
+            <span>我已核对变更、生效时间和历史工单影响。</span>
+          </label>
+          <FieldErrorMessages
+            id={confirmedImpactErrorId}
+            messages={errors.confirmedImpact}
+          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 sm:flex-1"
+              disabled={pending}
+              onClick={() => setConfirmationOpen(false)}
+            >
+              返回修改
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              className="min-h-11 sm:flex-[1.4]"
+              disabled={pending}
+            >
+              {pending ? '正在发布…' : '确认发布'}
+            </Button>
+          </div>
+        </section>
+      )}
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
@@ -455,26 +791,20 @@ export function DiscardCustomerPriceBookDraftForm({
     discardDraftFromForm,
     null,
   );
+  const formId = useId();
 
   useEffect(() => {
     if (state?.status !== 'success') return;
-    router.replace('/owner/prices/external-sales/versions');
+    router.replace(RULE_CENTER_HREFS.priceVersions);
   }, [router, state]);
 
   return (
     <form
+      id={formId}
       action={formAction}
       aria-label="放弃价目草稿"
+      aria-busy={pending}
       className="min-w-0 space-y-3 rounded-lg border border-destructive/30 p-3"
-      onSubmit={(event) => {
-        if (
-          !window.confirm(
-            '确定放弃这份草稿？草稿和其中所有未发布修改将永久删除，已发布版本不受影响。',
-          )
-        ) {
-          event.preventDefault();
-        }
-      }}
     >
       <input type="hidden" name="priceBookId" value={priceBookId} />
       <input
@@ -482,17 +812,29 @@ export function DiscardCustomerPriceBookDraftForm({
         name="expectedDraftUpdatedAt"
         value={expectedDraftUpdatedAt}
       />
-      <p className="text-xs text-muted-foreground">
-        仅删除未发布草稿，不影响当前价目和历史工单。
-      </p>
-      <Button
-        type="submit"
-        variant="destructive"
-        className="min-h-11"
+      <ConfirmActionDialog
+        level="L2"
+        formId={formId}
         disabled={pending}
-      >
-        {pending ? '放弃中…' : '放弃草稿'}
-      </Button>
+        trigger={
+          <Button
+            type="button"
+            variant="destructive"
+            className="min-h-11"
+            disabled={pending}
+          >
+            {pending ? '放弃中…' : '放弃草稿'}
+          </Button>
+        }
+        title="放弃这份价目草稿？"
+        description="请确认未发布修改已不再需要。"
+        impactItems={[
+          '草稿及其中所有未发布修改将永久删除。',
+          '当前已发布版本、历史版本与既有工单不受影响。',
+        ]}
+        confirmLabel="确认放弃草稿"
+        cancelLabel="返回检查"
+      />
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
@@ -533,6 +875,175 @@ function Field({
   );
 }
 
+function MatchCheckboxGroup<T extends string>({
+  legend,
+  name,
+  labels,
+  values,
+  defaultValues,
+  required,
+  errors,
+  errorId,
+}: {
+  legend: string;
+  name: string;
+  labels: Record<T, string>;
+  values?: readonly T[];
+  defaultValues: readonly T[];
+  required?: boolean;
+  errors?: string[];
+  errorId: string;
+}) {
+  const visibleValues =
+    values ?? (Object.keys(labels) as T[]);
+  return (
+    <fieldset className="min-w-0 rounded-lg border p-3">
+      <legend className="px-1 text-sm font-medium">
+        {legend}
+        {required ? '（必选）' : '（不选表示不限）'}
+      </legend>
+      <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {visibleValues.map(
+          (value) => (
+            <label
+              key={value}
+              className="relative flex min-h-11 min-w-0 cursor-pointer items-center rounded-lg border bg-background pl-10 pr-2 text-sm"
+            >
+              <input
+                type="checkbox"
+                name={name}
+                value={value}
+                className="absolute left-3 size-4"
+                defaultChecked={defaultValues.includes(value)}
+                aria-invalid={Boolean(errors?.length)}
+                aria-describedby={errors?.length ? errorId : undefined}
+              />
+              <span className="admin-wrap-anywhere">{labels[value]}</span>
+            </label>
+          ),
+        )}
+      </div>
+      <div className="mt-2">
+        <FieldErrorMessages id={errorId} messages={errors} />
+      </div>
+    </fieldset>
+  );
+}
+
+function MatcherTextField({
+  id,
+  name,
+  label,
+  defaultValues,
+  errors,
+  placeholder,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  defaultValues: readonly string[];
+  errors?: string[];
+  placeholder?: string;
+}) {
+  const errorId = `${id}-error`;
+  // Imported markers remain part of historical exact matching. Preserve the
+  // submitted value until the administrator deliberately edits this field.
+  const rawDefaultValue = defaultValues.join('、');
+  const visibleDefaultValue = defaultValues
+    .map(externalPriceBusinessText)
+    .filter(Boolean)
+    .join('、');
+  const [submittedValue, setSubmittedValue] = useState(rawDefaultValue);
+  return (
+    <Field label={label} htmlFor={id} errorId={errorId} errors={errors}>
+      <input type="hidden" name={name} value={submittedValue} />
+      <Input
+        id={id}
+        className={controlClass}
+        defaultValue={visibleDefaultValue}
+        onChange={(event) => setSubmittedValue(event.currentTarget.value)}
+        placeholder={placeholder ?? '多个值用逗号或顿号分隔；留空表示不限'}
+        aria-invalid={Boolean(errors?.length)}
+        aria-describedby={errors?.length ? errorId : undefined}
+      />
+    </Field>
+  );
+}
+
+function MatcherTriStateField({
+  id,
+  name,
+  label,
+  defaultValue,
+  trueLabel,
+  falseLabel,
+  errors,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  defaultValue: boolean | null;
+  trueLabel: string;
+  falseLabel: string;
+  errors?: string[];
+}) {
+  const errorId = `${id}-error`;
+  return (
+    <Field label={label} htmlFor={id} errorId={errorId} errors={errors}>
+      <select
+        id={id}
+        name={name}
+        className={selectClass}
+        defaultValue={defaultValue === null ? '' : String(defaultValue)}
+        aria-invalid={Boolean(errors?.length)}
+        aria-describedby={errors?.length ? errorId : undefined}
+      >
+        <option value="">不限</option>
+        <option value="true">{trueLabel}</option>
+        <option value="false">{falseLabel}</option>
+      </select>
+    </Field>
+  );
+}
+
+function MatcherNumberField({
+  id,
+  name,
+  label,
+  defaultValue,
+  errors,
+  min = 0,
+  step = 1,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  defaultValue: number | null;
+  errors?: string[];
+  min?: number;
+  step?: number;
+}) {
+  const errorId = `${id}-error`;
+  return (
+    <Field label={label} htmlFor={id} errorId={errorId} errors={errors}>
+      <Input
+        id={id}
+        name={name}
+        type="number"
+        inputMode={step === 1 ? 'numeric' : 'decimal'}
+        min={min}
+        max={9_999_999}
+        step={step}
+        className={controlClass}
+        defaultValue={defaultValue ?? ''}
+        placeholder="不限"
+        aria-invalid={Boolean(errors?.length)}
+        aria-describedby={errors?.length ? errorId : undefined}
+      />
+    </Field>
+  );
+}
+
 export function CustomerPriceBookDraftRuleForm({
   context,
   rule,
@@ -549,6 +1060,7 @@ export function CustomerPriceBookDraftRuleForm({
   );
   const formRef = useFocusFirstInvalidField(state);
   const errors = mutationFieldErrors(state);
+  const conditionTarget = rule.match.target;
 
   useEffect(() => {
     if (state?.status !== 'success') return;
@@ -563,6 +1075,34 @@ export function CustomerPriceBookDraftRuleForm({
   const isShipping = rule.editorMode === 'SHIPPING';
   const isPackaging = rule.editorMode === 'PACKAGING';
   const displayName = externalPriceRuleDisplayName(rule.name);
+  const referencedCraftCodes = [
+    ...new Set([
+      ...rule.match.craftCodes,
+      ...rule.match.noneOfCraftCodes,
+      ...rule.match.anyCraftCodeOutside,
+    ]),
+  ];
+  const knownCraftCodes = new Set(context.crafts.map((craft) => craft.value));
+  const craftOptions = [
+    ...context.crafts,
+    ...referencedCraftCodes
+      .filter((code) => !knownCraftCodes.has(code))
+      .map((value, index) => ({
+        value,
+        label: `历史工艺 ${index + 1}`,
+      })),
+  ];
+  const craftValues = craftOptions.map((craft) => craft.value);
+  const craftLabels = Object.fromEntries(
+    craftOptions.map((craft) => [craft.value, craft.label]),
+  );
+  const hasMatchErrors =
+    rule.matchValidationErrors.length > 0 ||
+    Object.entries(errors).some(
+      ([field, messages]) =>
+        (field === 'match' || field.startsWith('match.')) &&
+        Boolean(messages?.length),
+    );
   const errorIdFor = (name: string) => `${prefix}-${name}-error`;
   const fieldA11y = (name: string, hintId?: string) => ({
     'aria-invalid': Boolean(errors[name]?.length),
@@ -578,19 +1118,13 @@ export function CustomerPriceBookDraftRuleForm({
       key={rule.id}
       ref={formRef}
       action={formAction}
+      aria-busy={pending}
       aria-label={`编辑收费项目：${displayName}`}
       className="min-w-0 space-y-5 rounded-xl border bg-card p-4 shadow-sm"
     >
       <input type="hidden" name="priceBookId" value={context.id} />
       <input type="hidden" name="ruleId" value={rule.id} />
       <input type="hidden" name="expectedUpdatedAt" value={rule.updatedAt} />
-
-      <div className="space-y-1 border-b pb-4">
-        <p className="text-sm font-medium">正在编辑调价草稿</p>
-        <p className="text-xs leading-5 text-muted-foreground">
-          保存只更新草稿，发布前不会改变当前报价或历史工单金额。
-        </p>
-      </div>
 
       <div className="grid min-w-0 gap-4 sm:grid-cols-2">
         <Field
@@ -613,7 +1147,7 @@ export function CustomerPriceBookDraftRuleForm({
         {isProcessing ? (
           <>
             <Field
-              label="收费类目"
+              label="费用分类"
               htmlFor={`${prefix}-category`}
               errorId={errorIdFor('categoryId')}
               errors={errors.categoryId}
@@ -629,7 +1163,7 @@ export function CustomerPriceBookDraftRuleForm({
               >
                 {context.categories.map((category) => (
                   <option key={category.id} value={category.id}>
-                    {category.name}
+                    {externalPriceBusinessText(category.name)}
                   </option>
                 ))}
               </select>
@@ -637,7 +1171,7 @@ export function CustomerPriceBookDraftRuleForm({
             <Field
               label="适用产品"
               htmlFor={`${prefix}-product`}
-              hint="留空表示通用收费项；基础价规则必须选择产品。"
+              hint="基础费用必须选择产品；其他费用留空表示通用。"
               hintId={`${prefix}-product-hint`}
               errorId={errorIdFor('productId')}
               errors={errors.productId}
@@ -652,13 +1186,13 @@ export function CustomerPriceBookDraftRuleForm({
                 <option value="">通用（不限产品）</option>
                 {context.products.map((product) => (
                   <option key={product.id} value={product.id}>
-                    {product.name}
+                    {externalPriceBusinessText(product.name)}
                   </option>
                 ))}
               </select>
             </Field>
             <Field
-              label="规则类型"
+              label="费用类型"
               htmlFor={`${prefix}-kind`}
               errorId={errorIdFor('kind')}
               errors={errors.kind}
@@ -683,7 +1217,7 @@ export function CustomerPriceBookDraftRuleForm({
         ) : (
           <>
             <div className="min-w-0 space-y-2 text-sm">
-              <p className="font-medium">收费类目</p>
+              <p className="font-medium">费用分类</p>
               <p className="admin-wrap-anywhere min-h-11 rounded-lg border bg-muted/40 px-3 py-2.5">
                 {rule.categoryName}
               </p>
@@ -812,6 +1346,253 @@ export function CustomerPriceBookDraftRuleForm({
         </Field>
       </div>
 
+      {isProcessing ? (
+        <Disclosure
+          className="min-w-0 rounded-xl border bg-muted/20 p-3"
+          open={hasMatchErrors || undefined}
+        >
+          <DisclosureSummary className="font-semibold">
+            适用范围
+          </DisclosureSummary>
+          <div className="mt-3 space-y-4">
+            <p className="text-xs leading-5 text-muted-foreground">
+              仅在适用范围变化时修改。
+            </p>
+            {rule.matchValidationErrors.length > 0 ? (
+              <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                <p className="font-medium">原适用条件需重新确认：</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {rule.matchValidationErrors.map((message) => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <FieldErrorMessages
+              id={`${prefix}-match-error`}
+              messages={errors.match}
+            />
+            <div className="min-w-0 space-y-2">
+              <p className="text-sm font-medium">计价对象</p>
+              <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                {conditionTarget === 'PACKAGING_GROUP' ? '包装组' : '款式'}
+              </p>
+              <input type="hidden" name="match.target" value={conditionTarget} />
+              <FieldErrorMessages
+                id={errorIdFor('match.target')}
+                messages={errors['match.target']}
+              />
+            </div>
+            {conditionTarget === 'PACKAGING_GROUP' ? (
+              <MatchCheckboxGroup
+                legend="包装模式"
+                name="match.packagingModes"
+                labels={PACKAGING_MODE_LABELS}
+                defaultValues={rule.match.packagingModes}
+                required
+                errors={errors['match.packagingModes']}
+                errorId={`${prefix}-packagingModes-error`}
+              />
+            ) : (
+              <>
+                <MatchCheckboxGroup
+                  legend="适用计价方式"
+                  name="match.pricingRoutes"
+                  labels={ORDER_PRICING_ROUTE_LABELS}
+                  values={NEW_ORDER_PRICING_ROUTES}
+                  defaultValues={rule.match.pricingRoutes}
+                  required
+                  errors={errors['match.pricingRoutes']}
+                  errorId={`${prefix}-pricingRoutes-error`}
+                />
+                {rule.match.pricingRoutes.includes(
+                  OrderItemPricingRoute.MANUAL_QUOTE,
+                ) ? (
+                  <p className="rounded-lg border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
+                    历史规则仅可查看；新规则限选三种计价方式。
+                  </p>
+                ) : null}
+            <MatchCheckboxGroup
+              legend="产品结构"
+              name="match.productStructures"
+              labels={PRODUCT_STRUCTURE_LABELS}
+              defaultValues={rule.match.productStructures}
+              errors={errors['match.productStructures']}
+              errorId={`${prefix}-productStructures-error`}
+            />
+            <MatchCheckboxGroup
+              legend="烫金方式"
+              name="match.foilTechniques"
+              labels={FOIL_TECHNIQUE_LABELS}
+              defaultValues={rule.match.foilTechniques}
+              errors={errors['match.foilTechniques']}
+              errorId={`${prefix}-foilTechniques-error`}
+            />
+            <MatchCheckboxGroup
+              legend="覆膜方式"
+              name="match.laminations"
+              labels={LAMINATION_LABELS}
+              defaultValues={rule.match.laminations}
+              errors={errors['match.laminations']}
+              errorId={`${prefix}-laminations-error`}
+            />
+
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <MatcherTextField
+                id={`${prefix}-specifications`}
+                name="match.specifications"
+                label="尺寸规格名称"
+                defaultValues={rule.match.specifications}
+                errors={errors['match.specifications']}
+                placeholder="例如：大号、中号"
+              />
+              <MatcherTextField
+                id={`${prefix}-paperTypes`}
+                name="match.paperTypes"
+                label="纸张名称"
+                defaultValues={rule.match.paperTypes}
+                errors={errors['match.paperTypes']}
+                placeholder="例如：160克触感纸、触感纸"
+              />
+              <MatchCheckboxGroup<string>
+                legend="适用工艺"
+                name="match.craftCodes"
+                labels={craftLabels}
+                values={craftValues}
+                defaultValues={rule.match.craftCodes}
+                errors={errors['match.craftCodes']}
+                errorId={`${prefix}-craftCodes-error`}
+              />
+              <Field
+                label="多工艺条件"
+                htmlFor={`${prefix}-craftMode`}
+                errorId={`${prefix}-craftMode-error`}
+                errors={errors['match.craftMode']}
+              >
+                <select
+                  id={`${prefix}-craftMode`}
+                  name="match.craftMode"
+                  className={selectClass}
+                  defaultValue={rule.match.craftMode === 'ALL' ? 'ALL' : ''}
+                >
+                  <option value="">命中任一工艺（默认）</option>
+                  <option value="ALL">必须同时包含全部工艺</option>
+                </select>
+              </Field>
+              <MatchCheckboxGroup<string>
+                legend="排除工艺"
+                name="match.noneOfCraftCodes"
+                labels={craftLabels}
+                values={craftValues}
+                defaultValues={rule.match.noneOfCraftCodes}
+                errors={errors['match.noneOfCraftCodes']}
+                errorId={`${prefix}-noneOfCraftCodes-error`}
+              />
+              <MatchCheckboxGroup<string>
+                legend="已覆盖工艺（出现其他工艺时触发）"
+                name="match.anyCraftCodeOutside"
+                labels={craftLabels}
+                values={craftValues}
+                defaultValues={rule.match.anyCraftCodeOutside}
+                errors={errors['match.anyCraftCodeOutside']}
+                errorId={`${prefix}-anyCraftCodeOutside-error`}
+              />
+              <MatcherTextField
+                id={`${prefix}-foilColors`}
+                name="match.foilColors"
+                label="烫金颜色"
+                defaultValues={rule.match.foilColors}
+                errors={errors['match.foilColors']}
+                placeholder="例如：金、银"
+              />
+              <MatcherTextField
+                id={`${prefix}-printColors`}
+                name="match.printColors"
+                label="彩印颜色"
+                defaultValues={rule.match.printColors}
+                errors={errors['match.printColors']}
+                placeholder="例如：C、M、Y、K"
+              />
+              <MatcherTriStateField
+                id={`${prefix}-isDoubleSided`}
+                name="match.isDoubleSided"
+                label="单双面"
+                defaultValue={rule.match.isDoubleSided}
+                trueLabel="双面"
+                falseLabel="单面"
+                errors={errors['match.isDoubleSided']}
+              />
+              <MatcherTriStateField
+                id={`${prefix}-isDoubleColor`}
+                name="match.isDoubleColor"
+                label="单双色"
+                defaultValue={rule.match.isDoubleColor}
+                trueLabel="双色"
+                falseLabel="单色"
+                errors={errors['match.isDoubleColor']}
+              />
+              <MatcherTriStateField
+                id={`${prefix}-hasLocalFoil`}
+                name="match.hasLocalFoil"
+                label="局部烫金"
+                defaultValue={rule.match.hasLocalFoil}
+                trueLabel="是"
+                falseLabel="否"
+                errors={errors['match.hasLocalFoil']}
+              />
+            </div>
+
+            <fieldset className="min-w-0 rounded-lg border p-3">
+              <legend className="px-1 text-sm font-medium">颜色与烫金道数</legend>
+              <p className="mt-1 text-xs text-muted-foreground">
+                精确值与范围不能同时填写。
+              </p>
+              <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <MatcherNumberField id={`${prefix}-foilColorCount`} name="match.foilColorCount" label="烫金颜色精确数" defaultValue={rule.match.foilColorCount} errors={errors['match.foilColorCount']} />
+                <MatcherNumberField id={`${prefix}-minFoilColorCount`} name="match.minFoilColorCount" label="烫金颜色最小数" defaultValue={rule.match.minFoilColorCount} errors={errors['match.minFoilColorCount']} />
+                <MatcherNumberField id={`${prefix}-maxFoilColorCount`} name="match.maxFoilColorCount" label="烫金颜色最大数" defaultValue={rule.match.maxFoilColorCount} errors={errors['match.maxFoilColorCount']} />
+                <MatcherNumberField id={`${prefix}-foilPassCount`} name="match.foilPassCount" label="烫金精确道数（正面＋背面）" defaultValue={rule.match.foilPassCount} errors={errors['match.foilPassCount']} />
+                <MatcherNumberField id={`${prefix}-minFoilPassCount`} name="match.minFoilPassCount" label="烫金最少道数（正面＋背面）" defaultValue={rule.match.minFoilPassCount} errors={errors['match.minFoilPassCount']} />
+                <MatcherNumberField id={`${prefix}-maxFoilPassCount`} name="match.maxFoilPassCount" label="烫金最多道数（正面＋背面）" defaultValue={rule.match.maxFoilPassCount} errors={errors['match.maxFoilPassCount']} />
+                <MatcherNumberField id={`${prefix}-printColorCount`} name="match.printColorCount" label="彩印颜色精确数" defaultValue={rule.match.printColorCount} errors={errors['match.printColorCount']} />
+                <MatcherNumberField id={`${prefix}-minPrintColorCount`} name="match.minPrintColorCount" label="彩印颜色最小数" defaultValue={rule.match.minPrintColorCount} errors={errors['match.minPrintColorCount']} />
+                <MatcherNumberField id={`${prefix}-maxPrintColorCount`} name="match.maxPrintColorCount" label="彩印颜色最大数" defaultValue={rule.match.maxPrintColorCount} errors={errors['match.maxPrintColorCount']} />
+              </div>
+            </fieldset>
+
+            <fieldset className="min-w-0 rounded-lg border p-3">
+              <legend className="px-1 text-sm font-medium">实际尺寸、克重与订单范围</legend>
+              <div className="mt-2 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <MatcherNumberField id={`${prefix}-minWidthMm`} name="match.minWidthMm" label="最小宽度（mm）" defaultValue={rule.match.minWidthMm} errors={errors['match.minWidthMm']} min={0.01} step={0.01} />
+                <MatcherNumberField id={`${prefix}-maxWidthMm`} name="match.maxWidthMm" label="最大宽度（mm）" defaultValue={rule.match.maxWidthMm} errors={errors['match.maxWidthMm']} min={0.01} step={0.01} />
+                <MatcherNumberField id={`${prefix}-minHeightMm`} name="match.minHeightMm" label="最小高度（mm）" defaultValue={rule.match.minHeightMm} errors={errors['match.minHeightMm']} min={0.01} step={0.01} />
+                <MatcherNumberField id={`${prefix}-maxHeightMm`} name="match.maxHeightMm" label="最大高度（mm）" defaultValue={rule.match.maxHeightMm} errors={errors['match.maxHeightMm']} min={0.01} step={0.01} />
+                <MatcherNumberField id={`${prefix}-minPaperWeightGsm`} name="match.minPaperWeightGsm" label="最小克重（g）" defaultValue={rule.match.minPaperWeightGsm} errors={errors['match.minPaperWeightGsm']} min={1} />
+                <MatcherNumberField id={`${prefix}-maxPaperWeightGsm`} name="match.maxPaperWeightGsm" label="最大克重（g）" defaultValue={rule.match.maxPaperWeightGsm} errors={errors['match.maxPaperWeightGsm']} min={1} />
+                <MatcherNumberField id={`${prefix}-minItemCount`} name="match.minItemCount" label="订单最少款式数" defaultValue={rule.match.minItemCount} errors={errors['match.minItemCount']} min={1} />
+                <MatcherNumberField id={`${prefix}-maxItemCount`} name="match.maxItemCount" label="订单最多款式数" defaultValue={rule.match.maxItemCount} errors={errors['match.maxItemCount']} min={1} />
+              </div>
+            </fieldset>
+
+                <fieldset className="grid min-w-0 gap-2 rounded-lg border p-3 sm:grid-cols-2">
+              <legend className="px-1 text-sm font-medium">计算倍数</legend>
+              {[
+                ['match.perFoilColor', '按实际烫金颜色数乘算', rule.match.perFoilColor],
+                ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
+                ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
+              ].map(([name, label, checked]) => (
+                <label key={String(name)} className="flex min-h-11 items-center gap-3 rounded-lg border bg-background px-3 text-sm">
+                  <input type="checkbox" name={String(name)} value="true" defaultChecked={Boolean(checked)} className="size-4" />
+                  <span>{String(label)}</span>
+                </label>
+              ))}
+                </fieldset>
+              </>
+            )}
+          </div>
+        </Disclosure>
+      ) : null}
+
       {isShipping ? (
         <fieldset className="min-w-0 rounded-lg border p-3">
           <legend className="px-1 text-sm font-medium">物流首重/续重</legend>
@@ -872,7 +1653,7 @@ export function CustomerPriceBookDraftRuleForm({
           isProcessing ? 'sm:grid-cols-2' : ''
         }`}
       >
-        <legend className="px-1 text-sm font-medium">状态与自动计价</legend>
+        <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
         <label className="relative flex min-h-11 min-w-0 cursor-pointer items-center pl-12 text-sm">
           <input
@@ -918,7 +1699,7 @@ export function CustomerPriceBookDraftRuleForm({
                 ✓
               </span>
               <span className="admin-wrap-anywhere">
-                此项目仅供参考，不自动计价
+                不自动计价
               </span>
             </label>
             <FieldErrorMessages
@@ -934,18 +1715,18 @@ export function CustomerPriceBookDraftRuleForm({
       <MutationFeedback
         state={state}
         onRefresh={() => router.refresh()}
-        successMessage="已保存到调价草稿。"
+        successMessage="草稿已保存。"
       />
       <div className="sticky bottom-0 z-10 -mx-4 flex min-w-0 flex-col gap-2 border-t bg-card/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_18px_-16px_var(--foreground)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-muted-foreground">
-          只保存草稿；需要在发布中心发布后，新价才会生效。
+          发布后生效。
         </p>
         <Button
           type="submit"
           className="min-h-11 w-full sm:w-auto"
           disabled={pending}
         >
-          {pending ? '保存中…' : '保存到调价草稿'}
+          {pending ? '保存中…' : '保存草稿'}
         </Button>
       </div>
     </form>

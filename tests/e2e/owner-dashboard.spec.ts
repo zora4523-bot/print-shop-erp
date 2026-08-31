@@ -153,7 +153,9 @@ test.describe('owner dashboard — KPI + 关注列表', () => {
     // 预测提成应是金额而非 "—"
     const csRow = csPeriodsCard
       .locator('[data-slot="table-body"] [data-slot="table-row"]')
-      .filter({ hasText: E2E_USERS.customerService.displayName });
+      .filter({ hasText: E2E_USERS.customerService.displayName })
+      .filter({ hasText: '¥ 300,000.00' })
+      .filter({ hasText: `${seeded.csPeriodDaysUntilEnd} 天` });
     await expect(csRow).toContainText(/¥ [\d,]+\.\d{2}/);
 
     // ─── Slice C: 3 个图表 ───

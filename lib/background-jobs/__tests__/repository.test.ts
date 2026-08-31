@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: {
-      create: vi.fn(),
+      createMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -12,6 +12,7 @@ const { dbMock } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    notificationLog: { updateMany: vi.fn() },
     designBundle: { updateMany: vi.fn() },
     orderExport: { updateMany: vi.fn() },
     $executeRaw: vi.fn(),
@@ -54,6 +55,7 @@ beforeEach(() => {
   for (const group of [
     dbMock.backgroundJob,
     dbMock.backgroundJobAttempt,
+    dbMock.notificationLog,
     dbMock.designBundle,
     dbMock.orderExport,
   ]) {
@@ -78,18 +80,11 @@ function input() {
   };
 }
 
-function duplicateError() {
-  return new Prisma.PrismaClientKnownRequestError('duplicate', {
-    code: 'P2002',
-    clientVersion: '7.7.0',
-    meta: { target: ['dedupeKey'] },
-  });
-}
-
 describe('enqueueBackgroundJob', () => {
   it('creates a fresh ledger row', async () => {
     const job = { id: 'job-1', status: BackgroundJobStatus.PENDING };
-    dbMock.backgroundJob.create.mockResolvedValue(job);
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJob.findUnique.mockResolvedValue(job);
 
     await expect(enqueueBackgroundJob(input())).resolves.toEqual({
       job,
@@ -105,7 +100,7 @@ describe('enqueueBackgroundJob', () => {
       attempts: 1,
       maxAttempts: 4,
     };
-    dbMock.backgroundJob.create.mockRejectedValue(duplicateError());
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
     dbMock.backgroundJob.findUnique.mockResolvedValue(job);
 
     await expect(enqueueBackgroundJob(input())).resolves.toEqual({
@@ -116,9 +111,10 @@ describe('enqueueBackgroundJob', () => {
     expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
   });
 
-  it.each([BackgroundJobStatus.DEAD, BackgroundJobStatus.CANCELLED])(
-    're-arms a %s duplicate with a fresh retry budget',
-    async (status) => {
+  it(
+    're-arms a DEAD duplicate with a fresh retry budget',
+    async () => {
+      const status = BackgroundJobStatus.DEAD;
       const terminal = {
         id: 'job-1',
         status,
@@ -130,7 +126,7 @@ describe('enqueueBackgroundJob', () => {
         status: BackgroundJobStatus.PENDING,
         maxAttempts: 8,
       };
-      dbMock.backgroundJob.create.mockRejectedValue(duplicateError());
+      dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
       dbMock.backgroundJob.findUnique
         .mockResolvedValueOnce(terminal)
         .mockResolvedValueOnce(pending);
@@ -143,7 +139,12 @@ describe('enqueueBackgroundJob', () => {
       });
       expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ id: 'job-1' }),
+          where: {
+            id: 'job-1',
+            status,
+            attempts: 4,
+            maxAttempts: 4,
+          },
           data: expect.objectContaining({
             status: BackgroundJobStatus.PENDING,
             maxAttempts: 8,
@@ -158,9 +159,97 @@ describe('enqueueBackgroundJob', () => {
     },
   );
 
+  it('keeps an operator-cancelled duplicate terminal', async () => {
+    const cancelled = {
+      id: 'job-1',
+      status: BackgroundJobStatus.CANCELLED,
+      attempts: 1,
+      maxAttempts: 4,
+    };
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
+    dbMock.backgroundJob.findUnique.mockResolvedValue(cancelled);
+
+    await expect(enqueueBackgroundJob(input())).resolves.toEqual({
+      job: cancelled,
+      created: false,
+      requeued: false,
+    });
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps an ambiguous notification DEAD when the business event is enqueued again', async () => {
+    const unknown = {
+      id: 'job-notification-unknown',
+      type: 'NOTIFICATION',
+      status: BackgroundJobStatus.DEAD,
+      attempts: 1,
+      maxAttempts: 5,
+      lastErrorCode: 'NotificationDeliveryUnknownError',
+      payload: {
+        event: 'ORDER_SUBMITTED',
+        payload: { orderId: 'order-1', orderNo: 'GD-1' },
+      },
+    };
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
+    dbMock.backgroundJob.findUnique.mockResolvedValue(unknown);
+
+    await expect(
+      enqueueBackgroundJob({
+        type: 'NOTIFICATION',
+        queue: BackgroundJobQueue.LIGHT,
+        dedupeKey: 'notification:order-submitted:order-1',
+        // A repeated caller may now render a different body. It must not
+        // overwrite the payload that the owner is reviewing.
+        payload: {
+          event: 'ORDER_SUBMITTED',
+          payload: { orderId: 'order-1', orderNo: 'CHANGED' },
+        },
+      }),
+    ).resolves.toEqual({ job: unknown, created: false, requeued: false });
+
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.backgroundJob.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a stale terminal reader overwrite a newer generation', async () => {
+    const stale = {
+      id: 'job-1',
+      status: BackgroundJobStatus.DEAD,
+      attempts: 5,
+      maxAttempts: 5,
+    };
+    const newer = {
+      id: 'job-1',
+      status: BackgroundJobStatus.CANCELLED,
+      attempts: 10,
+      maxAttempts: 10,
+    };
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
+    dbMock.backgroundJob.findUnique
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(newer);
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(enqueueBackgroundJob(input())).resolves.toEqual({
+      job: newer,
+      created: false,
+      requeued: false,
+    });
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'job-1',
+          status: BackgroundJobStatus.DEAD,
+          attempts: 5,
+          maxAttempts: 5,
+        },
+      }),
+    );
+  });
+
   it('复活时显式传入的 availableAt 优先于库时钟', async () => {
     const at = new Date('2026-09-01T00:00:00.000Z');
-    dbMock.backgroundJob.create.mockRejectedValue(duplicateError());
+    dbMock.backgroundJob.createMany.mockResolvedValue({ count: 0 });
     dbMock.backgroundJob.findUnique
       .mockResolvedValueOnce({
         id: 'job-1',
@@ -224,30 +313,14 @@ describe('claim and lease lifecycle', () => {
       }),
     ).resolves.toEqual(claimed);
 
-    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(4);
-    const exportReconciliationSql = (
-      dbMock.$executeRaw.mock.calls[3]![0] as TemplateStringsArray
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+    const claimSql = (
+      dbMock.$queryRaw.mock.calls[0]![0] as TemplateStringsArray
     ).join('?');
-    expect(exportReconciliationSql).toContain(
-      'UPDATE "OrderExport" AS order_export',
-    );
-    expect(exportReconciliationSql).toContain(
-      'order_export."status" = \'PENDING\'::"OrderExportStatus"',
-    );
-    expect(exportReconciliationSql).toContain(
-      '"filters" = jsonb_build_object(',
-    );
-    expect(exportReconciliationSql).toContain(
-      "WHEN order_export.\"filters\"->>'scope' = 'all' THEN 'all'",
-    );
-    expect(exportReconciliationSql).toContain("ELSE 'filtered'");
-    expect(exportReconciliationSql).not.toContain('filterHash');
-    expect(exportReconciliationSql).not.toContain("- 'params'");
-    expect(exportReconciliationSql).toContain(
-      'job."status" = \'DEAD\'::"BackgroundJobStatus"',
-    );
-    expect(exportReconciliationSql).toContain("job.\"type\" = 'ORDER_EXPORT'");
-    expect(exportReconciliationSql).toContain('WorkerLeaseExpired');
+    expect(claimSql).toContain('UPDATE "BackgroundJob" AS job');
+    expect(claimSql).not.toContain('NotificationLog');
+    expect(claimSql).not.toContain('DesignBundle');
+    expect(claimSql).not.toContain('OrderExport');
     expect(dbMock.backgroundJobAttempt.create).toHaveBeenCalledWith({
       data: {
         jobId: claimed.id,
@@ -284,7 +357,7 @@ describe('claim and lease lifecycle', () => {
       ...dbMock.$executeRaw.mock.calls,
       ...dbMock.$queryRaw.mock.calls,
     ];
-    expect(statements).toHaveLength(5);
+    expect(statements).toHaveLength(1);
 
     for (const [strings, ...values] of statements) {
       const sql = (strings as TemplateStringsArray).join('?');
@@ -330,6 +403,46 @@ describe('claim and lease lifecycle', () => {
     expect(leaseCutoff?.sql).toContain("interval '1 millisecond'");
     // leaseMs 是绑定参数，不是拼进 SQL 的字符串。
     expect(leaseCutoff?.values).toEqual([300_000]);
+    // An idle poll must not carry notification/CDR/export reconciliation.
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+    expect(dbMock.backgroundJobAttempt.create).not.toHaveBeenCalled();
+  });
+
+  it('reclaims a stale lease only after locking its job, then abandons the old attempt', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        id: claimed.id,
+        type: claimed.type,
+        queue: claimed.queue,
+        dedupeKey: claimed.dedupeKey,
+        payload: claimed.payload,
+        attempts: 2,
+        maxAttempts: claimed.maxAttempts,
+        claimedAt: claimed.claimedAt,
+        reclaimed: true,
+      },
+    ]);
+    dbMock.backgroundJobAttempt.create.mockResolvedValue({});
+
+    await claimNextBackgroundJob({
+      queue: BackgroundJobQueue.LIGHT,
+      workerId: 'worker-1',
+      leaseMs: 300_000,
+    });
+
+    const claimSql = (
+      dbMock.$queryRaw.mock.calls[0]![0] as TemplateStringsArray
+    ).join('?');
+    const abandonCall = dbMock.$executeRaw.mock.calls[0]!;
+    const abandonSql = (abandonCall[0] as TemplateStringsArray).join('?');
+    expect(claimSql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(claimSql).toContain('candidate."reclaimed"');
+    expect(abandonSql).toContain('UPDATE "BackgroundJobAttempt" AS attempt');
+    expect(abandonSql).toContain('attempt."attempt" = ?');
+    expect(abandonCall.slice(1)).toEqual([claimed.id, 1]);
+    expect(dbMock.backgroundJobAttempt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ attempt: 2 }),
+    });
   });
 
   it('heartbeat rejects when the worker no longer owns the lease', async () => {
@@ -383,6 +496,9 @@ describe('claim and lease lifecycle', () => {
         durationMs: 1_000,
       },
     });
+    expect(
+      dbMock.backgroundJob.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.backgroundJobAttempt.update.mock.invocationCallOrder[0]!);
   });
 
   it('takes the completion instant from the database when none is injected', async () => {
@@ -435,6 +551,177 @@ describe('claim and lease lifecycle', () => {
         }),
       }),
     );
+    expect(
+      dbMock.backgroundJob.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(dbMock.backgroundJobAttempt.update.mock.invocationCallOrder[0]!);
+  });
+
+  it('persists typed partial progress before scheduling a retry', async () => {
+    const partialResult = {
+      attempted: 2,
+      delivered: 1,
+      failed: 1,
+      errorCodes: ['http 429'],
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      claimed,
+      Object.assign(new Error('private'), {
+        name: 'NotificationDeliveryFailedError',
+        partialResult,
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ result: partialResult }),
+      }),
+    );
+  });
+
+  it.each(['http 429', 'wecom errcode=45009'])(
+    'last notification attempt for %s makes the job DEAD without rewriting its RETRYING log',
+    async (providerError) => {
+      const exhausted = { ...claimed, attempts: 5, maxAttempts: 5 };
+      const partialResult = {
+        event: 'ORDER_SUBMITTED',
+        attempted: 1,
+        delivered: 0,
+        failed: 1,
+        unknown: 0,
+        errorCodes: [providerError],
+      };
+      dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+      dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+      await failBackgroundJob(
+        exhausted,
+        Object.assign(new Error('retry budget exhausted'), {
+          name: 'NotificationDeliveryFailedError',
+          partialResult,
+        }),
+        DB_NOW,
+      );
+
+      expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ attempts: 5 }),
+          data: expect.objectContaining({
+            status: BackgroundJobStatus.DEAD,
+            finishedAt: DB_NOW,
+            lastErrorCode: 'NotificationDeliveryFailedError',
+            result: partialResult,
+          }),
+        }),
+      );
+      // NotificationLog 在 notify 阶段已经是 RETRYING。job 耗尽只终结
+      // BackgroundJob，不得把日志改成 FAILED 或其他状态。
+      expect(dbMock.notificationLog.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('moves an ambiguous notification straight to DEAD for owner resolution', async () => {
+    const partialResult = {
+      event: 'ORDER_SUBMITTED',
+      attempted: 1,
+      delivered: 0,
+      unknown: 1,
+      errorCodes: ['HTTP 500'],
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      claimed,
+      Object.assign(new Error('ambiguous'), {
+        name: 'NotificationDeliveryUnknownError',
+        partialResult,
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.DEAD,
+          finishedAt: DB_NOW,
+          lastErrorCode: 'NotificationDeliveryUnknownError',
+          result: partialResult,
+        }),
+      }),
+    );
+  });
+
+  it('moves a manual replay conflict straight to DEAD and preserves RETRYING evidence', async () => {
+    const partialResult = {
+      event: 'ORDER_SUBMITTED',
+      attempted: 1,
+      delivered: 0,
+      failed: 2,
+      unknown: 0,
+      errorCodes: ['http 429', 'NotificationReplayConflictError'],
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      { ...claimed, attempts: 2, maxAttempts: 5 },
+      Object.assign(new Error('stale manual replay'), {
+        name: 'NotificationReplayTerminalError',
+        partialResult,
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.DEAD,
+          finishedAt: DB_NOW,
+          lastErrorCode: 'NotificationReplayTerminalError',
+          result: partialResult,
+        }),
+      }),
+    );
+    // The already-finalized 429 row remains RETRYING. B5 joins it to this
+    // DEAD owner job; the terminal classifier must never rewrite the ledger.
+    expect(dbMock.notificationLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not burn the remaining retry budget for a pure replay conflict', async () => {
+    const partialResult = {
+      event: 'ORDER_SUBMITTED',
+      attempted: 0,
+      delivered: 0,
+      failed: 1,
+      unknown: 0,
+      errorCodes: ['NotificationReplayConflictError'],
+    };
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+
+    await failBackgroundJob(
+      { ...claimed, attempts: 1, maxAttempts: 5 },
+      Object.assign(new Error('stale manual replay'), {
+        name: 'NotificationReplayTerminalError',
+        partialResult,
+      }),
+      DB_NOW,
+    );
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ attempts: 1 }),
+        data: expect.objectContaining({
+          status: BackgroundJobStatus.DEAD,
+          lastErrorCode: 'NotificationReplayTerminalError',
+          result: partialResult,
+        }),
+      }),
+    );
   });
 
   it('anchors retry backoff on the database clock when none is injected', async () => {
@@ -466,20 +753,92 @@ describe('claim and lease lifecycle', () => {
       attempts: 5,
       maxAttempts: 5,
     });
-    dbMock.backgroundJob.update.mockResolvedValue({});
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(retryDeadBackgroundJob(claimed.id)).resolves.toBe(true);
 
-    expect(dbMock.backgroundJob.update).toHaveBeenCalledWith({
-      where: { id: claimed.id },
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: claimed.id,
+        status: BackgroundJobStatus.DEAD,
+        attempts: 5,
+        maxAttempts: 5,
+      },
       data: {
         status: BackgroundJobStatus.PENDING,
         maxAttempts: 8,
         availableAt: DB_NOW,
         finishedAt: null,
+        lockedBy: null,
+        lockedAt: null,
+        heartbeatAt: null,
         lastErrorCode: null,
       },
     });
+  });
+
+  it('rejects a direct retry of an ambiguous notification on the server', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION',
+      attempts: 1,
+      maxAttempts: 5,
+      lastErrorCode: 'NotificationDeliveryUnknownError',
+    });
+
+    await expect(retryDeadBackgroundJob(claimed.id)).resolves.toBe(false);
+
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('loses a concurrent DEAD retry CAS without resetting the new owner or child ledger', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'CDR_BUNDLE',
+      attempts: 3,
+      maxAttempts: 3,
+    });
+    // 另一事务已先把 DEAD 移走；本事务的条件更新必须成为 no-op。
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(retryDeadBackgroundJob('job-cdr')).resolves.toBe(false);
+
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'job-cdr',
+          status: BackgroundJobStatus.DEAD,
+          attempts: 3,
+          maxAttempts: 3,
+        },
+      }),
+    );
+    expect(dbMock.designBundle.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows exactly one of two simultaneous operator retries to win', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION',
+      attempts: 5,
+      maxAttempts: 5,
+    });
+    let alreadyMoved = false;
+    dbMock.backgroundJob.updateMany.mockImplementation(async () => {
+      // Model PostgreSQL's conditional UPDATE: both callers observed the same
+      // DEAD generation, but only the first statement can move it.
+      if (alreadyMoved) return { count: 0 };
+      alreadyMoved = true;
+      return { count: 1 };
+    });
+
+    const results = await Promise.all([
+      retryDeadBackgroundJob('job-dead'),
+      retryDeadBackgroundJob('job-dead'),
+    ]);
+
+    expect(results.sort()).toEqual([false, true]);
+    expect(dbMock.backgroundJob.updateMany).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -531,7 +890,7 @@ describe('terminal CDR state', () => {
       attempts: 3,
       maxAttempts: 3,
     });
-    dbMock.backgroundJob.update.mockResolvedValue({});
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
     dbMock.designBundle.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(retryDeadBackgroundJob('job-cdr')).resolves.toBe(true);
@@ -624,7 +983,7 @@ describe('terminal order export state', () => {
       maxAttempts: 3,
     });
     await expect(retryDeadBackgroundJob('job-export')).resolves.toBe(false);
-    expect(dbMock.backgroundJob.update).not.toHaveBeenCalled();
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
     expect(dbMock.orderExport.updateMany).not.toHaveBeenCalled();
     const scrubCall = dbMock.$executeRaw.mock.calls.at(-1);
     expect((scrubCall?.[0] as TemplateStringsArray).join('?')).toContain(

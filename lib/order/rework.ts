@@ -14,6 +14,10 @@ import {
 } from './order-number';
 import { orderCascadeLockKey } from './locks';
 import { dispatchNotification } from '../notification/dispatch';
+import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
+import type { EnqueueClient } from '../background-jobs/repository';
+import { backgroundJobsMode } from '../background-jobs/mode';
+import { ORDER_PRICING_STATUS } from './pricing-status';
 
 export class ReworkOrderError extends Error {
   constructor(message: string) {
@@ -26,6 +30,22 @@ export type ReworkCraftOption = {
   id: string;
   name: string;
   isOutsource: boolean;
+};
+
+type ReworkPricingRevisionTxClient = {
+  order: {
+    create: (args: {
+      data: unknown;
+      select: unknown;
+    }) => Promise<{
+      id: string;
+      orderNo: string;
+      items: Array<{ id: string; sequence: number }>;
+    }>;
+  };
+  orderPricingRevision: {
+    create: (args: { data: unknown }) => Promise<unknown>;
+  };
 };
 
 export async function getReworkCraftOptions(
@@ -49,6 +69,7 @@ export async function createReworkOrder(
     throw new ReworkOrderError('只有管理员可以创建重做工单');
   }
 
+  let notificationQueued = false;
   const created = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.sourceOrderId,
@@ -78,6 +99,21 @@ export async function createReworkOrder(
       source.status !== OrderStatus.FINISHED
     ) {
       throw new ReworkOrderError('只有已发货或已完成工单可以发起重做');
+    }
+
+    const primarySourceShipment = source.shipments.find(
+      (shipment) => shipment.sequence === 1,
+    );
+    // 历史数据可能只有工单或主发货记录的一边有地址。
+    // 以实际履约的主发货地址优先，另一边作为可验证回退，
+    // 并把同一值同时写入新工单和新主发货记录。
+    const receiverAddress =
+      primarySourceShipment?.receiverAddress?.trim() ||
+      source.receiverAddress?.trim();
+    if (!receiverAddress) {
+      throw new ReworkOrderError(
+        '原工单和主发货记录均缺少收货地址，请先补全原工单地址再创建重做单',
+      );
     }
 
     const selectedIds = input.items.map((item) => item.sourceOrderItemId);
@@ -116,7 +152,8 @@ export async function createReworkOrder(
       tx as unknown as OrderSeqTxClient,
       now,
     );
-    const createdOrder = await tx.order.create({
+    const pricingTx = tx as unknown as ReworkPricingRevisionTxClient;
+    const createdOrder = await pricingTx.order.create({
       data: {
         orderNo,
         submitterId: actor.id,
@@ -127,6 +164,10 @@ export async function createReworkOrder(
         kind: OrderKind.REWORK,
         billingMode: OrderBillingMode.NO_CHARGE,
         settlementType: OrderSettlementType.NO_CHARGE,
+        pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+        priceRevision: 1,
+        pricingConfirmedAt: now,
+        pricingConfirmedById: null,
         sourceOrderId: source.id,
         reworkCause: input.cause,
         reworkReason: input.reason,
@@ -136,7 +177,7 @@ export async function createReworkOrder(
         customerRef: source.customerRef,
         receiverName: source.receiverName,
         receiverPhone: source.receiverPhone,
-        receiverAddress: source.receiverAddress,
+        receiverAddress,
         expressCode: source.expressCode,
         packageRequirement: source.packageRequirement,
         remark: `原单 ${source.orderNo}；重做原因：${input.reason}`,
@@ -158,6 +199,7 @@ export async function createReworkOrder(
               quantity: requested.quantity,
               crafts: requested.craftIds,
               foilColors: sourceItem.foilColors,
+              lamination: sourceItem.lamination,
               isDoubleSided: sourceItem.isDoubleSided,
               isDoubleColor: sourceItem.isDoubleColor,
               unitPrice: '0',
@@ -208,7 +250,6 @@ export async function createReworkOrder(
       },
     });
 
-    const primarySourceShipment = source.shipments[0];
     const shipment = await tx.orderShipment.create({
       data: {
         orderId: createdOrder.id,
@@ -217,8 +258,7 @@ export async function createReworkOrder(
           primarySourceShipment?.receiverName ?? source.receiverName,
         receiverPhone:
           primarySourceShipment?.receiverPhone ?? source.receiverPhone,
-        receiverAddress:
-          primarySourceShipment?.receiverAddress ?? source.receiverAddress,
+        receiverAddress,
         expressCode: primarySourceShipment?.expressCode ?? source.expressCode,
         status: ShipmentStatus.PLANNED,
       },
@@ -230,6 +270,54 @@ export async function createReworkOrder(
         orderItemId: item.id,
         quantity: input.items[index]!.quantity,
       })),
+    });
+    await pricingTx.orderPricingRevision.create({
+      data: {
+        orderId: createdOrder.id,
+        revision: 1,
+        status: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+        source: 'REWORK_ORDER_CREATED_NO_CHARGE',
+        createdById: actor.id,
+        createdAt: now,
+        snapshot: {
+          version: 1,
+          source: 'REWORK_ORDER_CREATED_NO_CHARGE',
+          pricedAt: now.toISOString(),
+          order: {
+            id: createdOrder.id,
+            orderNo: createdOrder.orderNo,
+            settlementType: OrderSettlementType.NO_CHARGE,
+            pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+            priceRevision: 1,
+            processingAmount: '0.00',
+            totalAmount: '0.00',
+          },
+          items: input.items.map((requested, index) => {
+            const sourceItem = sourceItemById.get(
+              requested.sourceOrderItemId,
+            )!;
+            return {
+              id: createdOrder.items[index]?.id ?? null,
+              sequence: index + 1,
+              name: sourceItem.name,
+              quantity: requested.quantity,
+              unitPrice: '0',
+              fixedFee: '0',
+              subtotal: '0',
+              suggestedSubtotal: null,
+              priceOverrideReason: '免费重做，不计加工费',
+              requiresAdminConfirmation: false,
+              pricingSnapshot: {
+                version: 1,
+                source: 'FREE_REWORK',
+                sourceOrderId: source.id,
+                sourceOrderItemId: sourceItem.id,
+              },
+            };
+          }),
+          customerCharges: [],
+        },
+      },
     });
     await tx.orderLog.create({
       data: {
@@ -243,10 +331,51 @@ export async function createReworkOrder(
       },
     });
 
+    if (backgroundJobsMode() === 'durable') {
+      const payload = await tx.order.findUniqueOrThrow({
+        where: { id: createdOrder.id },
+        select: {
+          id: true,
+          orderNo: true,
+          customerRef: true,
+          totalAmount: true,
+          isUrgent: true,
+          submitter: { select: { displayName: true } },
+        },
+      });
+      notificationQueued = await enqueueNotificationInTransaction(
+        tx as unknown as EnqueueClient,
+        'ORDER_SUBMITTED',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+          totalAmount: String(payload.totalAmount),
+          urgentMark: payload.isUrgent ? '🚨 急单' : '',
+        },
+        { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
+      );
+      if (payload.isUrgent) {
+        const urgentQueued = await enqueueNotificationInTransaction(
+          tx as unknown as EnqueueClient,
+          'URGENT_ORDER',
+          {
+            orderId: payload.id,
+            orderNo: payload.orderNo,
+            submitterName: payload.submitter.displayName,
+            customerRef: payload.customerRef,
+          },
+          { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+        );
+        notificationQueued = notificationQueued && urgentQueued;
+      }
+    }
+
     return createdOrder;
   });
 
-  const payload = await db.order.findUnique({
+  const payload = notificationQueued ? null : await db.order.findUnique({
     where: { id: created.id },
     select: {
       id: true,
@@ -270,6 +399,18 @@ export async function createReworkOrder(
       },
       { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
     );
+    if (payload.isUrgent) {
+      await dispatchNotification(
+        'URGENT_ORDER',
+        {
+          orderId: payload.id,
+          orderNo: payload.orderNo,
+          submitterName: payload.submitter.displayName,
+          customerRef: payload.customerRef,
+        },
+        { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
+      );
+    }
   }
 
   return { id: created.id, orderNo: created.orderNo };

@@ -6,6 +6,7 @@ import { PERMISSIONS } from '../../auth/permissions-dict';
 import { ADMIN_MODULES } from '../admin-modules';
 import {
   ADMIN_ROLE_BADGE,
+  flattenAdminMenuItems,
   getActiveAdminMenuHref,
   getAdminQuickLinks,
   getAdminMenuItems,
@@ -13,7 +14,7 @@ import {
 } from '../admin-menu';
 
 function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
-  return items.flatMap((g) => g.items);
+  return flattenAdminMenuItems(items.flatMap((group) => group.items));
 }
 
 describe('getAdminMenuItems', () => {
@@ -21,14 +22,14 @@ describe('getAdminMenuItems', () => {
     const groups = getAdminMenuItems({ role: Role.ADMIN });
     const items = flatten(groups);
     expect(groups.map((g) => g.label)).toEqual([
-      '概览',
       '业务',
+      '规则',
       '财务',
       '字典',
       '账号',
       '运维',
     ]);
-    expect(items).toHaveLength(30);
+    expect(items).toHaveLength(33);
     expect(items.map((i) => i.label)).toEqual([
       'Dashboard',
       '工单',
@@ -38,19 +39,22 @@ describe('getAdminMenuItems', () => {
       '外协',
       '车间用料',
       '工时录入',
+      '规则配置中心',
+      '客户计价',
+      '纸张',
+      '报价 SKU',
+      '产品结构',
+      '工艺参数',
+      '价格版本',
+      '内部计价',
+      '师傅计件',
+      '工资提成',
       '账单',
       '薪资总览',
       '计件工资',
-      '开机师傅计件规则',
-      '员工工资规则',
       '客服周期',
       '时薪工月结',
       '客户/供应商',
-      '工艺字典',
-      '产品字典',
-      '产品分类',
-      '外部销售收费',
-      '内部报价（低频）',
       'BOM/用料',
       '物料',
       '仓库/库位',
@@ -90,45 +94,111 @@ describe('getAdminMenuItems', () => {
     const warehouses = items.find((i) => i.label === '仓库/库位');
     expect(warehouses?.href).toBe('/owner/warehouses');
     expect(warehouses?.requiredPermission).toBe('warehouse:manage');
-    const productCategories = items.find((i) => i.label === '产品分类');
-    expect(productCategories?.href).toBe('/owner/product-categories');
-    expect(productCategories?.requiredPermission).toBe('dict:product:manage');
-    const externalSalesCharges = items.find(
-      (i) => i.label === '外部销售收费',
-    );
-    expect(externalSalesCharges?.href).toBe(
-      '/owner/prices/external-sales/items',
-    );
-    expect(externalSalesCharges?.activeRouteBase).toBe(
-      '/owner/prices/external-sales',
-    );
-    expect(externalSalesCharges?.requiredPermission).toBe(
-      'dict:price:manage',
-    );
-    expect(externalSalesCharges?.breadcrumbLabel).toBe('外部销售收费');
-    const prices = items.find((i) => i.label === '内部报价（低频）');
-    expect(prices?.href).toBe('/owner/prices');
-    expect(prices?.requiredPermission).toBe('dict:price:manage');
-    expect(prices?.breadcrumbLabel).toBe('内部报价');
+    const rules = items.find((i) => i.label === '规则配置中心');
+    expect(rules?.href).toBe('/owner/rules');
+    expect(rules?.activeRouteBase).toBe('/owner/rules');
+    expect(rules?.requiredPermission).toBe('dict:price:manage');
+    expect(rules?.breadcrumbLabel).toBe('规则配置中心');
+    const rulesGroup = groups.find((group) => group.label === '规则');
+    expect(rulesGroup?.items).toHaveLength(1);
+    expect(
+      rulesGroup?.items.map(({ label, href, requiredPermission }) => ({
+        label,
+        href,
+        requiredPermission,
+      })),
+    ).toEqual([
+      {
+        label: '规则配置中心',
+        href: '/owner/rules',
+        requiredPermission: 'dict:price:manage',
+      },
+    ]);
+    expect(
+      rulesGroup?.items[0]?.children?.map(
+        ({ label, href, requiredPermission }) => ({
+          label,
+          href,
+          requiredPermission,
+        }),
+      ),
+    ).toEqual([
+      {
+        label: '客户计价',
+        href: '/owner/rules/customer-pricing',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '纸张',
+        href: '/owner/rules/papers',
+        requiredPermission: 'material:manage',
+      },
+      {
+        label: '报价 SKU',
+        href: '/owner/rules/stock-skus',
+        requiredPermission: 'dict:product:manage',
+      },
+      {
+        label: '产品结构',
+        href: '/owner/rules/product-categories',
+        requiredPermission: 'dict:product:manage',
+      },
+      {
+        label: '工艺参数',
+        href: '/owner/rules/crafts',
+        requiredPermission: 'dict:craft:manage',
+      },
+      {
+        label: '价格版本',
+        href: '/owner/rules/price-versions',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '内部计价',
+        href: '/owner/rules/internal-pricing',
+        requiredPermission: 'dict:price:manage',
+      },
+      {
+        label: '师傅计件',
+        href: '/owner/rules/worker-piecework',
+        requiredPermission: 'salary:rule:manage',
+      },
+      {
+        label: '工资提成',
+        href: '/owner/rules/employee-pay',
+        requiredPermission: 'salary:rule:manage',
+      },
+    ]);
     const boms = items.find((i) => i.label === 'BOM/用料');
     expect(boms?.href).toBe('/owner/boms');
     expect(boms?.requiredPermission).toBe('bom:manage');
-    const pieceworkRules = items.find((i) => i.label === '开机师傅计件规则');
-    expect(pieceworkRules?.href).toBe('/owner/salary/piecework-rules');
-    expect(pieceworkRules?.requiredPermission).toBe('salary:rule:manage');
-    const salaryRules = items.find((i) => i.label === '员工工资规则');
-    expect(salaryRules?.href).toBe('/owner/salary/rules');
-    expect(salaryRules?.requiredPermission).toBe('salary:rule:manage');
+    expect(items.map((item) => item.label)).not.toEqual(
+      expect.arrayContaining([
+        '外部销售收费',
+        '内部报价（低频）',
+        '开机师傅计件规则',
+        '员工工资规则',
+      ]),
+    );
+    expect(items.map((item) => item.href)).not.toEqual(
+      expect.arrayContaining([
+        '/owner/prices/external-sales/items',
+        '/owner/prices',
+        '/owner/salary/piecework-rules',
+        '/owner/salary/rules',
+      ]),
+    );
   });
 
-  it('ADMIN 同时拥有原经营端与生产端入口，且路由不重复', () => {
+  it('ADMIN 字典不再重复暴露规则中心已收口的计价对象', () => {
     const labels = flatten(getAdminMenuItems({ role: Role.ADMIN })).map(
       (i) => i.label,
     );
     expect(labels).toContain('账单');
     expect(labels).toContain('用户管理');
-    expect(labels).toContain('工艺字典');
-    expect(labels).toContain('产品字典');
+    expect(labels).not.toContain('工艺字典');
+    expect(labels).not.toContain('产品字典');
+    expect(labels).not.toContain('产品分类');
     expect(labels).toContain('Dashboard');
     expect(labels).toContain('排产');
     expect(labels).toContain('外协');
@@ -149,24 +219,33 @@ describe('getAdminMenuItems', () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it('外部销售所有子路由唯一高亮收费入口', () => {
-    const items = flatten(getAdminMenuItems({ role: Role.ADMIN }));
-
-    expect(
-      getActiveAdminMenuHref(
-        '/owner/prices/external-sales/items/rule-1',
-        items,
-      ),
-    ).toBe('/owner/prices/external-sales/items');
-    expect(
-      getActiveAdminMenuHref(
-        '/owner/prices/external-sales/versions',
-        items,
-      ),
-    ).toBe('/owner/prices/external-sales/items');
-    expect(getActiveAdminMenuHref('/owner/prices', items)).toBe(
-      '/owner/prices',
+  it('规则中心根页与各模块子路由分别唯一高亮', () => {
+    const items = getAdminMenuItems({ role: Role.ADMIN }).flatMap(
+      (group) => group.items,
     );
+
+    const expectations = {
+      '/owner/rules': '/owner/rules',
+      '/owner/rules/pricing-routes': '/owner/rules',
+      '/owner/rules/papers': '/owner/rules/papers',
+      '/owner/rules/papers/new': '/owner/rules/papers',
+      '/owner/rules/stock-skus': '/owner/rules/stock-skus',
+      '/owner/rules/stock-skus/sku-1': '/owner/rules/stock-skus',
+      '/owner/rules/product-categories': '/owner/rules/product-categories',
+      '/owner/rules/product-categories/new': '/owner/rules/product-categories',
+      '/owner/rules/crafts': '/owner/rules/crafts',
+      '/owner/rules/customer-pricing': '/owner/rules/customer-pricing',
+      '/owner/rules/price-versions': '/owner/rules/price-versions',
+      '/owner/rules/internal-pricing': '/owner/rules/internal-pricing',
+      '/owner/rules/internal-pricing/tiers/new':
+        '/owner/rules/internal-pricing',
+      '/owner/rules/worker-piecework': '/owner/rules/worker-piecework',
+      '/owner/rules/employee-pay': '/owner/rules/employee-pay',
+    } as const;
+
+    for (const [pathname, expectedHref] of Object.entries(expectations)) {
+      expect(getActiveAdminMenuHref(pathname, items)).toBe(expectedHref);
+    }
   });
 
   it('SALES 菜单不含管理员/主管独占项', () => {
@@ -178,9 +257,10 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('产品字典');
     expect(labels).not.toContain('外部销售收费');
     expect(labels).not.toContain('内部报价（低频）');
+    expect(labels).not.toContain('规则配置中心');
     expect(labels).not.toContain('排产');
     expect(labels).not.toContain('外协');
-    expect(labels).toContain('我的 Dashboard');
+    expect(labels).not.toContain('我的 Dashboard');
     expect(labels).toContain('创建工单');
     expect(labels).toContain('我的工单');
     expect(labels).toContain('我的账单');
@@ -198,7 +278,7 @@ describe('getAdminMenuItems', () => {
     const labels = flatten(
       getAdminMenuItems({ role: Role.CUSTOMER_SERVICE }),
     ).map((i) => i.label);
-    expect(labels).toContain('我的 Dashboard');
+    expect(labels).not.toContain('我的 Dashboard');
     expect(labels).toContain('创建工单');
     expect(labels).toContain('我的业绩');
     expect(labels).toContain('我的工资单');
@@ -206,6 +286,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('我的账单');
     expect(labels).not.toContain('外部销售收费');
     expect(labels).not.toContain('内部报价（低频）');
+    expect(labels).not.toContain('规则配置中心');
     const quote = flatten(
       getAdminMenuItems({ role: Role.CUSTOMER_SERVICE }),
     ).find((item) => item.label === '报价查询');
@@ -262,6 +343,15 @@ describe('ADMIN_MODULES registry', () => {
       expect(adminModule.breadcrumbLabel).toBeTruthy();
       expect(adminModule.menuSection).toBeTruthy();
       expect(adminModule.status).toMatch(/^(implemented|placeholder)$/);
+    }
+
+    for (const adminModule of ADMIN_MODULES) {
+      if (!adminModule.menuParentId) continue;
+      expect(
+        ids.has(adminModule.menuParentId),
+        `${adminModule.id} references missing parent ${adminModule.menuParentId}`,
+      ).toBe(true);
+      expect(adminModule.menuParentId).not.toBe(adminModule.id);
     }
   });
 

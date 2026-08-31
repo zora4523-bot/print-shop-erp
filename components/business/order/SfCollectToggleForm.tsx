@@ -50,9 +50,11 @@ export function SfCollectToggleForm({
   return (
     <form
       action={(formData) => {
+        if (pending) return;
         formData.set('isSfCollect', String(target));
         startTransition(() => action(formData));
       }}
+      aria-busy={pending}
       className={
         requiresShippedChargeCorrection
           ? 'w-full space-y-4 rounded-lg border border-warning/40 bg-warning/5 p-3 sm:p-4'
@@ -103,6 +105,7 @@ export function SfCollectToggleForm({
                       id={`${prefix}-province`}
                       name="sfShipmentDestinationProvince"
                       defaultValue={shipment.destinationProvince ?? ''}
+                      disabled={pending}
                       required
                       aria-required="true"
                       aria-invalid={Boolean(provinceError)}
@@ -133,6 +136,7 @@ export function SfCollectToggleForm({
                       type="text"
                       inputMode="decimal"
                       defaultValue={shipment.weightKg ?? ''}
+                      disabled={pending}
                       required
                       aria-required="true"
                       aria-invalid={Boolean(weightError)}
@@ -159,13 +163,14 @@ export function SfCollectToggleForm({
                       type="text"
                       inputMode="decimal"
                       defaultValue={shipment.shippingFee ?? ''}
+                      disabled={pending}
                       aria-invalid={Boolean(shippingError)}
                       aria-describedby={
                         shippingError
                           ? `${prefix}-shipping-error`
                           : `${prefix}-shipping-hint`
                       }
-                      placeholder="留空则按冻结价目自动核价"
+                      placeholder="留空则按创建时价格自动核价"
                     />
                     <FieldError
                       id={`${prefix}-shipping-error`}
@@ -190,6 +195,7 @@ export function SfCollectToggleForm({
                       defaultValue={
                         shipment.customerChargeOverrideReason ?? ''
                       }
+                      disabled={pending}
                       rows={2}
                       maxLength={500}
                       aria-invalid={Boolean(reasonError)}

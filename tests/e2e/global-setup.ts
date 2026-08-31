@@ -50,6 +50,16 @@ export const E2E_USERS: Record<string, E2EUser> = {
     displayName: 'E2E 销售',
     role: 'SALES',
   },
+  // Billing owns a dedicated SALES identity. Production-flow orders are
+  // intentionally durable because salary and task ledgers restrict deletion;
+  // sharing e2e-sales made a later bill test re-aggregate those old FINISHED
+  // orders. A separate account keeps the receivables fixture deterministic
+  // without weakening the production ledger cleanup rules.
+  billingSales: {
+    username: 'e2e-billing-sales',
+    displayName: 'E2E 对账销售',
+    role: 'SALES',
+  },
   foreman: {
     username: 'e2e-foreman',
     displayName: 'E2E 管理员 2',

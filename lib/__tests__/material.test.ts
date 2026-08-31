@@ -52,6 +52,7 @@ import {
   createMaterial,
   createMaterialTransaction,
   getMaterialSummary,
+  listActivePaperOrderOptions,
   listMaterialsPage,
   listMaterials,
   MaterialInvariantError,
@@ -194,6 +195,73 @@ describe('listMaterialsPage', () => {
         take: 2,
       }),
     );
+  });
+
+  it('applies an exact material category scope to count and row queries', async () => {
+    dbMock.material.count.mockResolvedValue(1);
+    dbMock.material.findMany.mockResolvedValue([makeMaterial()]);
+
+    await listMaterialsPage({
+      category: MaterialCategory.PAPER,
+      page: 1,
+      pageSize: 20,
+      sort: 'default',
+      direction: 'asc',
+    });
+
+    expect(dbMock.material.count).toHaveBeenCalledWith({
+      where: { category: MaterialCategory.PAPER },
+    });
+    expect(dbMock.material.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { category: MaterialCategory.PAPER },
+      }),
+    );
+  });
+
+  it('可从通用物料列表同时排除纸张主数据', async () => {
+    dbMock.material.count.mockResolvedValue(1);
+    dbMock.material.findMany.mockResolvedValue([
+      makeMaterial({ category: MaterialCategory.FOIL }),
+    ]);
+
+    await listMaterialsPage({
+      excludeCategory: MaterialCategory.PAPER,
+      page: 1,
+      pageSize: 20,
+      sort: 'default',
+      direction: 'asc',
+    });
+
+    const expectedWhere = {
+      category: { not: MaterialCategory.PAPER },
+    };
+    expect(dbMock.material.count).toHaveBeenCalledWith({
+      where: expectedWhere,
+    });
+    expect(dbMock.material.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere }),
+    );
+  });
+});
+
+describe('listActivePaperOrderOptions', () => {
+  it('returns only active paper fields in stable display order', async () => {
+    dbMock.material.findMany.mockResolvedValue([]);
+
+    await listActivePaperOrderOptions();
+
+    expect(dbMock.material.findMany).toHaveBeenCalledWith({
+      where: { category: MaterialCategory.PAPER, isActive: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        specification: true,
+        unit: true,
+      },
+      orderBy: [{ name: 'asc' }, { specification: 'asc' }, { id: 'asc' }],
+    });
   });
 });
 
@@ -415,11 +483,15 @@ describe('createMaterialTransaction', () => {
       safetyStock: '2.00',
     });
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
-      materialName: 'A4 白卡纸',
-      currentStock: '1.00',
-      safetyStock: '2.00',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'STOCK_ALERT',
+      {
+        materialName: 'A4 白卡纸',
+        currentStock: '1.00',
+        safetyStock: '2.00',
+      },
+      { dedupeKey: 'notification:STOCK_ALERT:tx1' },
+    );
     expect(callOrder).toEqual(['commit', 'dispatch']);
   });
 

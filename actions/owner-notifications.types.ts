@@ -12,3 +12,7 @@ export type NotificationMutationResult =
 export type ChannelTestResult =
   | { status: 'success'; mock: boolean }
   | { status: 'error'; message: string };
+
+export type NotificationResolutionResult =
+  | { status: 'success'; message: string }
+  | { status: 'error'; message: string };

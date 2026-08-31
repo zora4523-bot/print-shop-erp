@@ -105,7 +105,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (pending || !canSubmit) return;
     const payload = {
       sourceOrderId,
       cause,
@@ -122,12 +122,13 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-4">
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="font-medium">重做原因类型</span>
           <select
             value={cause}
+            disabled={pending}
             onChange={(event) => setCause(event.target.value as ReworkCause)}
             className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
           >
@@ -146,6 +147,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             rows={2}
             maxLength={500}
             required
+            disabled={pending}
             className="w-full rounded-md border bg-background px-3 py-2"
             placeholder="例如：运输途中受潮，重做第 1 款 500 个"
           />
@@ -165,6 +167,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                   <input
                     type="checkbox"
                     checked={selected}
+                    disabled={pending}
                     onChange={() => toggleItem(item.id)}
                     className="h-4 w-4 shrink-0"
                   />
@@ -182,6 +185,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         max={item.quantity}
                         step={1}
                         value={quantities[item.id] ?? item.quantity}
+                        disabled={pending}
                         onChange={(event) =>
                           setQuantities((current) => ({
                             ...current,
@@ -205,6 +209,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                               checked={
                                 selectedCrafts[item.id]?.has(craft.id) ?? false
                               }
+                              disabled={pending}
                               onChange={() => toggleCraft(item.id, craft.id)}
                               className="h-4 w-4"
                             />

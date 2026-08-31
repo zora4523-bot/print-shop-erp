@@ -48,9 +48,10 @@ test.describe('CDR 汇总下载 — golden path', () => {
     await expect(page.getByText(/已生成 \d+ 个 CDR 文件的下载包/)).toBeVisible({
       timeout: 10_000,
     });
-    // OSS 未配置时显示 mock-mode 提示（页头 banner + 成功 banner 各一处，
-    // 任一可见即可）
-    await expect(page.getByText(/mock-mode|OSS 未配置/).first()).toBeVisible();
+    // 文件存储未配置时显示可执行的业务提示。
+    await expect(
+      page.getByText(/下载功能暂不可用|文件存储尚未配置/).first(),
+    ).toBeVisible();
 
     // success banner 里的 link：href = 绝对 URL（含 host），文本也是
     // 绝对 URL —— "复制链接地址"和"复制文字"得到一致结果（Codex
@@ -71,14 +72,14 @@ test.describe('CDR 汇总下载 — golden path', () => {
 
     // 真去访问 downloadUrl —— mock-mode zipFileUrl 形如 mock://...，
     // 路由识别后返 503（不是 404，不是 redirect 到 mock://）。
-    const res = await request.get(`http://localhost:3000${relativePath}`);
+    const res = await request.get(relativePath);
     expect(res.status()).toBe(503);
     const body = await res.json();
     expect(body.error).toMatch(/OSS 未配置/);
 
     // 不存在的 bundle id → 404（与&ldquo;过期&rdquo;不区分文案；round 119 medium）
     const fake = await request.get(
-      'http://localhost:3000/api/cdr/bundles/cknotrealid000000000000000',
+      '/api/cdr/bundles/cknotrealid000000000000000',
     );
     expect(fake.status()).toBe(404);
     const fakeBody = await fake.json();

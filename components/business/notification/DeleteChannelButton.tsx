@@ -1,8 +1,14 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ActionNotice,
+  ConfirmActionDialog,
+  DisabledReason,
+} from '@/components/ui-business';
 import { deleteChannelAction } from '@/actions/owner-notifications';
 
 type Props = {
@@ -20,45 +26,70 @@ export function DeleteChannelButton({
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (disabled) {
     return (
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        disabled
-        title={disabledReason}
+      <DisabledReason
+        cause="prerequisite"
+        reason={disabledReason ?? '当前群仍被规则引用'}
+        fixHref="/owner/notifications#notification-rules"
+        fixLabel="去规则移除"
+        className="items-end text-right"
       >
-        删除
-      </Button>
+        <Button type="button" size="sm" variant="outline" disabled>
+          删除
+        </Button>
+      </DisabledReason>
     );
   }
 
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      disabled={pending}
-      onClick={() => {
-        // 注意这是 JS 模板字符串不是 JSX：HTML 实体不会被解析，必须写
-        // 字面量引号，否则用户看到的是 `确定删除&ldquo;渠道名&rdquo;？`。
-        if (!confirm(`确定删除“${channelName}”？此操作不可撤销。`)) return;
-        startTransition(async () => {
-          const r = await deleteChannelAction(channelId);
-          if (r.status === 'error') {
-            alert(r.message);
-            return;
-          }
-          // revalidatePath alone 不刷 client RSC 缓存（直调 server
-          // action 没经过 Form 自动 refresh）；显式 router.refresh()
-          // 让 landing 页 re-fetch 不再显示已删行。
-          router.refresh();
-        });
-      }}
-    >
-      {pending ? '删除中…' : '删除'}
-    </Button>
+    <div className="flex flex-col items-end gap-2" aria-busy={pending}>
+      <ConfirmActionDialog
+        level="L2"
+        disabled={pending}
+        trigger={
+          <Button type="button" size="sm" variant="destructive" disabled={pending}>
+            {pending ? (
+              <>
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+                删除中…
+              </>
+            ) : (
+              '删除'
+            )}
+          </Button>
+        }
+        title={`删除“${channelName}”？`}
+        description="删除后无法撤销，请确认这不是暂时停用。"
+        impactItems={[
+          '该群配置会从系统中永久删除。',
+          '存在规则或历史投递记录时无法删除。',
+        ]}
+        confirmLabel="确认删除"
+        onConfirm={() => {
+          setErrorMessage(null);
+          startTransition(async () => {
+            const result = await deleteChannelAction(channelId);
+            if (result.status === 'error') {
+              setErrorMessage(result.message);
+              return;
+            }
+            // Direct action calls do not refresh the client RSC cache by
+            // themselves; fetch the list again so the removed row disappears.
+            router.refresh();
+          });
+        }}
+      />
+      {errorMessage ? (
+        <ActionNotice
+          tone="error"
+          title="删除失败"
+          description={errorMessage}
+          className="max-w-sm p-2 text-left"
+        />
+      ) : null}
+    </div>
   );
 }

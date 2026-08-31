@@ -2,7 +2,10 @@ import Link from 'next/link';
 import { BackgroundJobActionButton } from '@/components/business/admin/BackgroundJobActionButton';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui-business';
+import {
+  PageHeader,
+  StatusBadge as UiStatusBadge,
+} from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBackgroundJobs } from '@/lib/background-jobs/repository';
 import { getBackgroundJobHealth } from '@/lib/background-jobs/health';
@@ -14,6 +17,11 @@ import {
 } from '@/actions/background-jobs';
 import { BackgroundJobStatus } from '@/generated/prisma/enums';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { BACKGROUND_JOB_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import {
+  backgroundJobQueueLabel,
+  backgroundJobTypeLabel,
+} from '@/lib/background-jobs/labels';
 
 export const metadata = { title: '后台任务 · 红包印刷 ERP' };
 export const dynamic = 'force-dynamic';
@@ -29,7 +37,7 @@ export default async function BackgroundJobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="后台任务"
-        subtitle="通知、定时结算和文件生成的持久化账本。普通失败任务可重试；导出失败请回工单列表重新发起。"
+        subtitle="查看后台任务状态和失败记录；普通失败可重试，导出失败需重新发起。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -55,7 +63,7 @@ export default async function BackgroundJobsPage() {
         <div className="mt-2 flex flex-wrap gap-2">
           {health.activeWorkers.length ? health.activeWorkers.map((worker, index) => (
             <Badge key={`${worker.queue}-${index}`} variant="outline">
-              {worker.queue} · {worker.version} · {formatDateTimeShanghai(worker.lastSeenAt)}
+              {backgroundJobQueueLabel(worker.queue)} · {formatDateTimeShanghai(worker.lastSeenAt)}
             </Badge>
           )) : <span className="text-destructive">未检测到 worker 心跳</span>}
         </div>
@@ -94,8 +102,8 @@ export default async function BackgroundJobsPage() {
             {jobs.map((job) => (
               <tr key={job.id}>
                 <td className="px-3 py-2 text-xs">{formatDateTimeShanghai(job.createdAt)}</td>
-                <td className="px-3 py-2 font-mono text-xs">{job.type}</td>
-                <td className="px-3 py-2"><Badge variant="outline">{job.queue}</Badge></td>
+                <td className="px-3 py-2 text-xs">{backgroundJobTypeLabel(job.type)}</td>
+                <td className="px-3 py-2"><Badge variant="outline">{backgroundJobQueueLabel(job.queue)}</Badge></td>
                 <td className="px-3 py-2"><JobStatus status={job.status} /></td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{job.attempts}/{job.maxAttempts}</td>
                 {/* 通知的永久性投递失败让 job 正常 SUCCEEDED（重试也是同样
@@ -115,9 +123,24 @@ export default async function BackgroundJobsPage() {
 }
 
 function JobOperation({ job }: {
-  job: { id: string; type: string; status: BackgroundJobStatus };
+  job: {
+    id: string;
+    type: string;
+    status: BackgroundJobStatus;
+    lastErrorCode: string | null;
+  };
 }) {
   const operation = backgroundJobOperatorAction(job);
+  if (operation === 'RESOLVE_NOTIFICATION') {
+    return (
+      <Link
+        href="/owner/notifications"
+        className={buttonVariants({ variant: 'outline', size: 'xs' })}
+      >
+        核对推送
+      </Link>
+    );
+  }
   if (operation === 'REQUEST_NEW_EXPORT') {
     return (
       <Link
@@ -166,11 +189,10 @@ function Metric({ label, value, alert = false, note }: {
 }
 
 function JobStatus({ status }: { status: BackgroundJobStatus }) {
-  const variant = status === BackgroundJobStatus.DEAD
-    ? 'destructive'
-    : status === BackgroundJobStatus.SUCCEEDED
-      ? 'default'
-      : 'outline';
-  return <Badge variant={variant}>{status}</Badge>;
+  const definition = BACKGROUND_JOB_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
 }
-

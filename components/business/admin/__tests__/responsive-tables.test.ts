@@ -13,6 +13,9 @@ describe('admin native tables', () => {
     for (const filePath of TABLE_ROOTS.flatMap(findTsxFiles)) {
       if (filePath.endsWith('OrderPrintLayout.tsx')) continue;
       const sourceText = readFileSync(filePath, 'utf8');
+      // Avoid building a TypeScript AST for the hundreds of business TSX
+      // files that cannot contain the native-table contract under test.
+      if (!sourceText.includes('<table')) continue;
       const source = ts.createSourceFile(
         filePath,
         sourceText,

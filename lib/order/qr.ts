@@ -26,15 +26,17 @@ const QR_MODULE_PX = 1.9;
 export async function buildQrSvg(
   value: string,
   minSize: number,
+  options: { errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H' } = {},
 ): Promise<string> {
+  const errorCorrectionLevel = options.errorCorrectionLevel ?? 'Q';
   // 先算这段内容需要多少模块，再反推能保住模块尺寸的渲染宽度。
   const modules =
-    qrcode.create(value, { errorCorrectionLevel: 'M' }).modules.size +
+    qrcode.create(value, { errorCorrectionLevel }).modules.size +
     QR_QUIET_ZONE_MODULES * 2;
   const width = Math.max(minSize, Math.ceil(modules * QR_MODULE_PX));
   return qrcode.toString(value, {
     type: 'svg',
-    errorCorrectionLevel: 'M',
+    errorCorrectionLevel,
     width,
     margin: QR_QUIET_ZONE_MODULES,
   });

@@ -1,6 +1,23 @@
 import Decimal from 'decimal.js';
 import { NO_FOIL_COLOR } from '@/lib/order/foil-colors';
 import type {
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderProductStructure,
+} from '@/generated/prisma/client';
+import {
+  STOCK_LOCAL_FOIL_CRAFT_CODE,
+  canonicalizePricingCraftCodes,
+  orderItemFoilPassCount,
+  resolveOrderItemFoilSides,
+} from '@/lib/order/pricing-route';
+import {
+  parseCustomerRuleCondition,
+  type CustomerRuleConditionV1,
+} from './customer-rule-condition';
+import { externalPriceRuleDisplayName } from './external-price-display';
+import type {
   QuoteAdjustmentType,
   QuoteComponent,
   QuoteResult,
@@ -22,6 +39,8 @@ export type ExternalSalesPriceBook = {
   code: string;
   name: string;
   version: number;
+  currency?: string;
+  effectiveFrom?: Date | string | null;
   sourceName: string | null;
   sourceSha256: string | null;
 };
@@ -57,52 +76,32 @@ export type ExternalSalesQuoteInput = {
   craftCodes: string[];
   specification: string | null;
   paperType: string | null;
+  paperCatalogMatched: boolean;
+  pricingRoute: OrderItemPricingRoute;
+  productStructure: OrderProductStructure;
+  artworkVersion: string | null;
+  plateGroupId: string | null;
+  pricingGroup: string | null;
+  actualWidthMm: number | null;
+  actualHeightMm: number | null;
+  paperWeightGsm: number | null;
+  catalogSpecification?: string | null;
+  catalogPaperType?: string | null;
+  catalogSpecificationMatched?: boolean;
+  catalogDimensionsMatched?: boolean;
+  catalogPaperWeightMatched?: boolean;
+  frontFoilColors?: string[];
+  backFoilColors?: string[];
   foilColors: string[];
+  foilTechnique: OrderFoilTechnique;
+  hasLocalFoil: boolean | null;
+  lamination: OrderLamination;
+  printColors: string[];
   isDoubleSided: boolean;
   isDoubleColor: boolean;
   settlementType: string;
   orderItemCount: number;
 };
-
-type NormalizedCondition = {
-  productCodes?: string[];
-  craftCodes?: string[];
-  noneOfCraftCodes?: string[];
-  anyCraftCodeOutside?: string[];
-  craftMode?: 'ANY' | 'ALL';
-  specifications?: string[];
-  paperTypes?: string[];
-  foilColors?: string[];
-  isDoubleSided?: boolean;
-  isDoubleColor?: boolean;
-  foilColorCount?: number;
-  minFoilColorCount?: number;
-  maxFoilColorCount?: number;
-  minItemCount?: number;
-  maxItemCount?: number;
-  unitsPerSheet?: number;
-  perFoilColor?: boolean;
-};
-
-const CONDITION_KEYS = new Set<keyof NormalizedCondition>([
-  'productCodes',
-  'craftCodes',
-  'noneOfCraftCodes',
-  'anyCraftCodeOutside',
-  'craftMode',
-  'specifications',
-  'paperTypes',
-  'foilColors',
-  'isDoubleSided',
-  'isDoubleColor',
-  'foilColorCount',
-  'minFoilColorCount',
-  'maxFoilColorCount',
-  'minItemCount',
-  'maxItemCount',
-  'unitsPerSheet',
-  'perFoilColor',
-]);
 
 const RULE_KINDS = new Set<CustomerPriceRuleKindValue>([
   'BASE',
@@ -128,197 +127,60 @@ const RATE_MAX = new Decimal(EXTERNAL_SALES_PRICE_LIMITS.ruleAmount);
 const SUBTOTAL_MAX = new Decimal(EXTERNAL_SALES_PRICE_LIMITS.subtotal);
 const UNIT_PRICE_MAX = new Decimal(EXTERNAL_SALES_PRICE_LIMITS.unitPrice);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseStringArray(
-  value: unknown,
-  label: string,
-  errors: string[],
-): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.some((entry) => typeof entry !== 'string' || entry.trim() === '')
-  ) {
-    errors.push(`${label} 必须是非空字符串数组`);
-    return undefined;
-  }
-  return [...new Set(value.map((entry) => String(entry).trim()))];
-}
-
-function parsePositiveInteger(
-  value: unknown,
-  label: string,
-  errors: string[],
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    errors.push(`${label} 必须是正整数`);
-    return undefined;
-  }
-  return Number(value);
-}
-
-function parseNonNegativeInteger(
-  value: unknown,
-  label: string,
-  errors: string[],
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    errors.push(`${label} 必须是非负整数`);
-    return undefined;
-  }
-  return Number(value);
-}
-
-function parseCondition(
-  raw: unknown,
-): { condition: NormalizedCondition | null; errors: string[] } {
-  if (raw === null || raw === undefined) {
-    return { condition: {}, errors: [] };
-  }
-  if (!isRecord(raw)) {
-    return { condition: null, errors: ['触发条件必须是 JSON object'] };
-  }
-
-  const errors: string[] = [];
-  const unknownKeys = Object.keys(raw).filter(
-    (key) => !CONDITION_KEYS.has(key as keyof NormalizedCondition),
-  );
-  if (unknownKeys.length > 0) {
-    errors.push(`包含未知触发字段：${unknownKeys.join('、')}`);
-  }
-
-  const condition: NormalizedCondition = {
-    productCodes: parseStringArray(raw.productCodes, 'productCodes', errors),
-    craftCodes: parseStringArray(raw.craftCodes, 'craftCodes', errors),
-    noneOfCraftCodes: parseStringArray(
-      raw.noneOfCraftCodes,
-      'noneOfCraftCodes',
-      errors,
-    ),
-    anyCraftCodeOutside: parseStringArray(
-      raw.anyCraftCodeOutside,
-      'anyCraftCodeOutside',
-      errors,
-    ),
-    specifications: parseStringArray(
-      raw.specifications,
-      'specifications',
-      errors,
-    ),
-    paperTypes: parseStringArray(raw.paperTypes, 'paperTypes', errors),
-    foilColors: parseStringArray(raw.foilColors, 'foilColors', errors),
-    foilColorCount: parseNonNegativeInteger(
-      raw.foilColorCount,
-      'foilColorCount',
-      errors,
-    ),
-    minFoilColorCount: parseNonNegativeInteger(
-      raw.minFoilColorCount,
-      'minFoilColorCount',
-      errors,
-    ),
-    maxFoilColorCount: parseNonNegativeInteger(
-      raw.maxFoilColorCount,
-      'maxFoilColorCount',
-      errors,
-    ),
-    minItemCount: parsePositiveInteger(
-      raw.minItemCount,
-      'minItemCount',
-      errors,
-    ),
-    maxItemCount: parsePositiveInteger(
-      raw.maxItemCount,
-      'maxItemCount',
-      errors,
-    ),
-    unitsPerSheet: parsePositiveInteger(
-      raw.unitsPerSheet,
-      'unitsPerSheet',
-      errors,
-    ),
-  };
-
-  for (const key of [
-    'isDoubleSided',
-    'isDoubleColor',
-    'perFoilColor',
-  ] as const) {
-    if (raw[key] === undefined) continue;
-    if (typeof raw[key] !== 'boolean') {
-      errors.push(`${key} 必须是布尔值`);
-    } else {
-      condition[key] = raw[key];
-    }
-  }
-
-  if (raw.craftMode !== undefined) {
-    if (raw.craftMode !== 'ANY' && raw.craftMode !== 'ALL') {
-      errors.push('craftMode 只能是 ANY 或 ALL');
-    } else {
-      condition.craftMode = raw.craftMode;
-    }
-  }
-
-  if (
-    condition.minItemCount !== undefined &&
-    condition.maxItemCount !== undefined &&
-    condition.minItemCount > condition.maxItemCount
-  ) {
-    errors.push('minItemCount 不能大于 maxItemCount');
-  }
-  if (
-    condition.minFoilColorCount !== undefined &&
-    condition.maxFoilColorCount !== undefined &&
-    condition.minFoilColorCount > condition.maxFoilColorCount
-  ) {
-    errors.push('minFoilColorCount 不能大于 maxFoilColorCount');
-  }
-
-  return errors.length > 0
-    ? { condition: null, errors }
-    : { condition, errors: [] };
-}
-
 function actualFoilColors(input: ExternalSalesQuoteInput): string[] {
+  const sides = resolveOrderItemFoilSides(input);
   return [
-    ...new Set(input.foilColors.filter((color) => color !== NO_FOIL_COLOR)),
+    ...new Set(
+      [...sides.frontFoilColors, ...sides.backFoilColors].filter(
+        (color) => color !== NO_FOIL_COLOR,
+      ),
+    ),
   ];
+}
+
+function foilPassCount(input: ExternalSalesQuoteInput): number {
+  return orderItemFoilPassCount(input);
 }
 
 function matchesCondition(
   input: ExternalSalesQuoteInput,
-  condition: NormalizedCondition,
+  condition: CustomerRuleConditionV1,
+  options: { productBound: boolean },
 ): boolean {
+  const inputCraftCodes = canonicalizePricingCraftCodes(input.craftCodes);
+  if (condition.target !== 'ITEM') return false;
   if (
+    !options.productBound &&
     condition.productCodes &&
     (!input.productCode || !condition.productCodes.includes(input.productCode))
   ) {
     return false;
   }
   if (condition.craftCodes) {
+    const conditionCraftCodes = canonicalizePricingCraftCodes(
+      condition.craftCodes,
+    );
     const matches =
       (condition.craftMode ?? 'ANY') === 'ALL'
-        ? condition.craftCodes.every((code) => input.craftCodes.includes(code))
-        : condition.craftCodes.some((code) => input.craftCodes.includes(code));
+        ? conditionCraftCodes.every((code) => inputCraftCodes.includes(code))
+        : conditionCraftCodes.some((code) => inputCraftCodes.includes(code));
     if (!matches) return false;
   }
   if (
     condition.noneOfCraftCodes &&
-    condition.noneOfCraftCodes.some((code) => input.craftCodes.includes(code))
+    canonicalizePricingCraftCodes(condition.noneOfCraftCodes).some((code) =>
+      inputCraftCodes.includes(code),
+    )
   ) {
     return false;
   }
   if (
     condition.anyCraftCodeOutside &&
-    !input.craftCodes.some(
-      (code) => !condition.anyCraftCodeOutside?.includes(code),
+    !inputCraftCodes.some(
+      (code) =>
+        !canonicalizePricingCraftCodes(
+          condition.anyCraftCodeOutside ?? [],
+        ).includes(code),
     )
   ) {
     return false;
@@ -333,6 +195,30 @@ function matchesCondition(
   if (
     condition.paperTypes &&
     (!input.paperType || !condition.paperTypes.includes(input.paperType))
+  ) {
+    return false;
+  }
+  if (
+    condition.pricingRoutes &&
+    !condition.pricingRoutes.includes(input.pricingRoute)
+  ) {
+    return false;
+  }
+  if (
+    condition.productStructures &&
+    !condition.productStructures.includes(input.productStructure)
+  ) {
+    return false;
+  }
+  if (
+    condition.foilTechniques &&
+    !condition.foilTechniques.includes(input.foilTechnique)
+  ) {
+    return false;
+  }
+  if (
+    condition.laminations &&
+    !condition.laminations.includes(input.lamination)
   ) {
     return false;
   }
@@ -355,6 +241,18 @@ function matchesCondition(
     return false;
   }
   if (
+    condition.hasLocalFoil !== undefined &&
+    condition.hasLocalFoil !== input.hasLocalFoil
+  ) {
+    return false;
+  }
+  if (
+    condition.printColors &&
+    !condition.printColors.some((color) => input.printColors.includes(color))
+  ) {
+    return false;
+  }
+  if (
     condition.foilColorCount !== undefined &&
     condition.foilColorCount !== actualFoilColors(input).length
   ) {
@@ -371,6 +269,58 @@ function matchesCondition(
     actualFoilColors(input).length > condition.maxFoilColorCount
   ) {
     return false;
+  }
+  if (
+    condition.foilPassCount !== undefined &&
+    condition.foilPassCount !== foilPassCount(input)
+  ) {
+    return false;
+  }
+  if (
+    condition.minFoilPassCount !== undefined &&
+    foilPassCount(input) < condition.minFoilPassCount
+  ) {
+    return false;
+  }
+  if (
+    condition.maxFoilPassCount !== undefined &&
+    foilPassCount(input) > condition.maxFoilPassCount
+  ) {
+    return false;
+  }
+  if (
+    condition.printColorCount !== undefined &&
+    condition.printColorCount !== input.printColors.length
+  ) {
+    return false;
+  }
+  if (
+    condition.minPrintColorCount !== undefined &&
+    input.printColors.length < condition.minPrintColorCount
+  ) {
+    return false;
+  }
+  if (
+    condition.maxPrintColorCount !== undefined &&
+    input.printColors.length > condition.maxPrintColorCount
+  ) {
+    return false;
+  }
+  for (const [value, minimum, maximum] of [
+    [input.actualWidthMm, condition.minWidthMm, condition.maxWidthMm],
+    [input.actualHeightMm, condition.minHeightMm, condition.maxHeightMm],
+    [
+      input.paperWeightGsm,
+      condition.minPaperWeightGsm,
+      condition.maxPaperWeightGsm,
+    ],
+  ] as const) {
+    if (minimum !== undefined && (value === null || value < minimum)) {
+      return false;
+    }
+    if (maximum !== undefined && (value === null || value > maximum)) {
+      return false;
+    }
   }
   if (
     condition.minItemCount !== undefined &&
@@ -424,7 +374,7 @@ function parseRuleRate(rule: ExternalSalesPriceRule): Decimal | null {
 
 type ValidatedRule = {
   rule: ExternalSalesPriceRule;
-  condition: NormalizedCondition;
+  condition: CustomerRuleConditionV1;
   rate: Decimal | null;
 };
 
@@ -436,9 +386,9 @@ function validateRules(rules: ExternalSalesPriceRule[]): {
   const validated: ValidatedRule[] = [];
 
   for (const rule of rules) {
-    const label = rule.name || rule.code || rule.id;
+    const label = externalPriceRuleDisplayName(rule.name);
     if (!RULE_KINDS.has(rule.kind)) {
-      errors.push(`报价规则“${label}”类型非法`);
+      errors.push(`收费项目“${label}”的类型设置无效`);
       continue;
     }
     if (
@@ -450,13 +400,13 @@ function validateRules(rules: ExternalSalesPriceRule[]): {
         rule.maxQty !== null &&
         rule.minQty > rule.maxQty)
     ) {
-      errors.push(`报价规则“${label}”数量范围非法`);
+      errors.push(`收费项目“${label}”的数量范围设置无效`);
       continue;
     }
-    const parsed = parseCondition(rule.triggerCondition);
+    const parsed = parseCustomerRuleCondition(rule.triggerCondition);
     if (!parsed.condition) {
       for (const error of parsed.errors) {
-        errors.push(`报价规则“${label}”：${error}`);
+        errors.push(`收费项目“${label}”：${error}`);
       }
       continue;
     }
@@ -466,19 +416,19 @@ function validateRules(rules: ExternalSalesPriceRule[]): {
         rule.calculationType === null ||
         !CALCULATION_TYPES.has(rule.calculationType)
       ) {
-        errors.push(`报价规则“${label}”缺少有效计价方式`);
+        errors.push(`收费项目“${label}”缺少有效计价方式`);
         continue;
       }
       if (
         rule.calculationType === 'PER_SHEET' &&
         parsed.condition.unitsPerSheet === undefined
       ) {
-        errors.push(`报价规则“${label}”按张计价但缺少 unitsPerSheet`);
+        errors.push(`收费项目“${label}”按张计价但未填写每张成品数`);
         continue;
       }
       const rate = parseRuleRate(rule);
       if (!rate) {
-        errors.push(`报价规则“${label}”金额非法`);
+        errors.push(`收费项目“${label}”的金额设置无效`);
         continue;
       }
       validated.push({ rule, condition: parsed.condition, rate });
@@ -507,11 +457,20 @@ export function validateExternalSalesPriceRules(
 function calculationUnits(
   input: ExternalSalesQuoteInput,
   rule: ExternalSalesPriceRule,
-  condition: NormalizedCondition,
+  condition: CustomerRuleConditionV1,
 ): Decimal {
-  const colorMultiplier = condition.perFoilColor
+  const foilMultiplier = condition.perFoilColor
     ? new Decimal(actualFoilColors(input).length)
     : new Decimal(1);
+  const foilPassMultiplier = condition.perFoilPass
+    ? new Decimal(foilPassCount(input))
+    : new Decimal(1);
+  const printMultiplier = condition.perPrintColor
+    ? new Decimal(input.printColors.length)
+    : new Decimal(1);
+  const colorMultiplier = foilMultiplier
+    .times(foilPassMultiplier)
+    .times(printMultiplier);
   switch (rule.calculationType) {
     case 'PER_PIECE':
       return new Decimal(input.quantity).times(colorMultiplier);
@@ -538,7 +497,7 @@ function componentType(
 }
 
 function snapshotTriggerCondition(
-  condition: NormalizedCondition,
+  condition: CustomerRuleConditionV1,
 ): QuoteTriggerCondition {
   return Object.fromEntries(
     Object.entries(condition).filter((entry) => entry[1] !== undefined),
@@ -560,7 +519,7 @@ function makeComponent(
   return {
     source: rule.kind === 'BASE' ? 'BASE' : 'ADJUSTMENT',
     sourceId: rule.id,
-    name: rule.name,
+    name: externalPriceRuleDisplayName(rule.name),
     adjustmentType: componentType(calculationType),
     rate: (rate as Decimal).toFixed(4),
     units: units.toString(),
@@ -591,7 +550,7 @@ function selectAddOns(
     grouped.set(group, current);
   }
 
-  for (const [group, candidates] of grouped) {
+  for (const candidates of grouped.values()) {
     const highestPriority = Math.max(
       ...candidates.map((candidate) => candidate.rule.priority),
     );
@@ -599,8 +558,16 @@ function selectAddOns(
       (candidate) => candidate.rule.priority === highestPriority,
     );
     if (winners.length !== 1) {
+      const names = [
+        ...new Set(
+          winners.map(({ rule }) => externalPriceRuleDisplayName(rule.name)),
+        ),
+      ]
+        .filter(Boolean)
+        .map((name) => `“${name}”`)
+        .join('、');
       errors.push(
-        `收费规则组“${group}”同时命中多个同优先级规则，请管理员修正规则`,
+        `${names || '多个收费项目'}在同一适用范围和顺序下同时命中，请管理员修正后再报价`,
       );
       continue;
     }
@@ -614,9 +581,11 @@ export function calculateExternalSalesQuote(args: {
   input: ExternalSalesQuoteInput;
   priceBook: ExternalSalesPriceBook;
   rules: ExternalSalesPriceRule[];
+  quotedAt?: Date;
 }): QuoteResult {
   const { input, priceBook } = args;
   const errors: string[] = [];
+  const sides = resolveOrderItemFoilSides(input);
 
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) {
     errors.push('数量必须是正整数');
@@ -624,25 +593,126 @@ export function calculateExternalSalesQuote(args: {
   if (!Number.isSafeInteger(input.orderItemCount) || input.orderItemCount < 1) {
     errors.push('工单款式数量非法');
   }
+  if (input.pricingRoute === 'MANUAL_QUOTE') {
+    errors.push('本款式使用历史人工路线，需管理员填写终价');
+  } else {
+    if (!input.paperCatalogMatched) {
+      errors.push(
+        '自定义纸张或纸张已不在有效字典，需管理员填写终价',
+      );
+    }
+    if (input.productStructure === 'UNSPECIFIED') {
+      errors.push('未明确产品结构，不能自动计价');
+    }
+    if (input.foilTechnique === 'UNSPECIFIED') {
+      errors.push('未明确烫金方式，不能自动计价');
+    }
+    if (actualFoilColors(input).length > 0 && input.hasLocalFoil === null) {
+      errors.push('未明确是否局部烫金，不能自动计价');
+    }
+    if (
+      input.pricingRoute === 'CUSTOM_SINGLE_FLAT_FOIL' ||
+      input.pricingRoute === 'COLOR_PRINT'
+    ) {
+      if (input.actualWidthMm === null || input.actualHeightMm === null) {
+        errors.push('专版/彩印自动计价必须填写实际宽度和高度');
+      }
+      if (input.paperWeightGsm === null) {
+        errors.push('专版/彩印自动计价必须填写纸张克重');
+      }
+      if (input.catalogSpecificationMatched === false) {
+        errors.push('MANUAL_PRICING_REQUIRED：所选规格与报价 SKU 不一致');
+      }
+      if (input.catalogDimensionsMatched === false) {
+        errors.push('MANUAL_PRICING_REQUIRED：实际尺寸不是报价 SKU 的标准尺寸');
+      }
+      if (input.catalogPaperWeightMatched === false) {
+        errors.push('MANUAL_PRICING_REQUIRED：纸张克重为手工值或与纸张字典不一致');
+      }
+    }
+    if (
+      input.craftCodes.includes('EMBOSS') &&
+      input.craftCodes.includes('BUMP')
+    ) {
+      errors.push('浮雕与激凸只能选择一种');
+    }
+    if (input.pricingRoute === 'COLOR_PRINT' && input.printColors.length === 0) {
+      errors.push('彩印自动计价必须填写彩印颜色');
+    }
+    if (
+      input.pricingRoute !== 'COLOR_PRINT' &&
+      input.lamination !== 'NONE'
+    ) {
+      errors.push('非彩印款式的覆膜方式必须为“无覆膜”');
+    }
+    if (input.pricingRoute === 'COLOR_PRINT') {
+      const foilColorCount = actualFoilColors(input).length;
+      if (foilColorCount === 0) {
+        if (input.foilTechnique !== 'NONE') {
+          errors.push('纯彩印未选烫金颜色时，烫金方式必须为“无烫金”');
+        }
+        if (input.hasLocalFoil !== false) {
+          errors.push('纯彩印未选烫金颜色时，不能标记局部烫金');
+        }
+      } else {
+        if (input.foilTechnique === 'NONE') {
+          errors.push('彩印加烫金时必须选择烫金方式');
+        }
+      }
+    }
+    if (input.pricingRoute === 'STOCK_BLANK') {
+      const normalizedCraftCodes = canonicalizePricingCraftCodes(
+        input.craftCodes,
+      );
+      if (!normalizedCraftCodes.includes(STOCK_LOCAL_FOIL_CRAFT_CODE)) {
+        errors.push('通版现货局部烫金必须选择“局部烫金”工艺');
+      }
+      if (input.hasLocalFoil !== true) {
+        errors.push('通版现货路线必须明确为局部烫金');
+      }
+    }
+  }
 
-  const validation = validateRules(args.rules);
+  const itemRules = args.rules.filter((rule) => {
+    const parsed = parseCustomerRuleCondition(rule.triggerCondition);
+    return parsed.condition?.target !== 'PACKAGING_GROUP';
+  });
+  const validation = validateRules(itemRules);
   errors.push(...validation.errors);
 
   const matched = validation.rules.filter(
     ({ rule, condition }) =>
       appliesToProduct(input, rule) &&
       quantityMatches(input, rule) &&
-      matchesCondition(input, condition),
+      matchesCondition(input, condition, {
+        productBound: rule.productId !== null,
+      }),
   );
 
   const blockingReferences = matched.filter(
     ({ rule }) => rule.kind === 'REFERENCE' && rule.blocksAutomaticQuote,
   );
   for (const { rule } of blockingReferences) {
-    errors.push(`需人工报价：${rule.name}${rule.note ? `（${rule.note}）` : ''}`);
+    errors.push(
+      `需人工报价：${externalPriceRuleDisplayName(rule.name)}${
+        rule.note ? `（${rule.note}）` : ''
+      }`,
+    );
   }
 
-  const baseCandidates = matched.filter(({ rule }) => rule.kind === 'BASE');
+  const routeAwareBaseCandidates = matched.filter(
+    ({ rule, condition }) =>
+      rule.kind === 'BASE' &&
+      condition.pricingRoutes?.includes(input.pricingRoute),
+  );
+  const matchedBaseWithoutRoute = matched.some(
+    ({ rule, condition }) =>
+      rule.kind === 'BASE' && !condition.pricingRoutes,
+  );
+  if (routeAwareBaseCandidates.length === 0 && matchedBaseWithoutRoute) {
+    errors.push('命中的基础报价未选择适用计价路线，需管理员补全后再报价');
+  }
+  const baseCandidates = routeAwareBaseCandidates;
   let base: ValidatedRule | null = null;
   if (baseCandidates.length === 0) {
     errors.push('报价单未覆盖当前产品、规格、纸张或数量，请联系管理员人工报价');
@@ -670,7 +740,9 @@ export function calculateExternalSalesQuote(args: {
             condition.perFoilColor
               ? actualFoilColors(input).length
               : 1,
-          ),
+          )
+            .times(condition.perFoilPass ? foilPassCount(input) : 1)
+            .times(condition.perPrintColor ? input.printColors.length : 1),
         ),
       new Decimal(0),
     );
@@ -703,11 +775,17 @@ export function calculateExternalSalesQuote(args: {
   const complete = errors.length === 0 && base !== null;
   const snapshot: QuoteSnapshot = {
     version: 1,
+    quotedAt: (args.quotedAt ?? new Date()).toISOString(),
     priceBook: {
       id: priceBook.id,
       code: priceBook.code,
       name: priceBook.name,
       version: priceBook.version,
+      currency: priceBook.currency ?? 'CNY',
+      effectiveFrom:
+        priceBook.effectiveFrom instanceof Date
+          ? priceBook.effectiveFrom.toISOString()
+          : priceBook.effectiveFrom ?? null,
       sourceName: priceBook.sourceName,
       sourceSha256: priceBook.sourceSha256,
     },
@@ -719,7 +797,28 @@ export function calculateExternalSalesQuote(args: {
       craftCodes: [...input.craftCodes],
       specification: input.specification,
       paperType: input.paperType,
+      pricingRoute: input.pricingRoute,
+      productStructure: input.productStructure,
+      artworkVersion: input.artworkVersion,
+      plateGroupId: input.plateGroupId,
+      pricingGroup: input.pricingGroup,
+      actualWidthMm: input.actualWidthMm,
+      actualHeightMm: input.actualHeightMm,
+      paperWeightGsm: input.paperWeightGsm,
+      catalogSpecification: input.catalogSpecification ?? null,
+      catalogPaperType: input.catalogPaperType ?? null,
+      catalogSpecificationMatched:
+        input.catalogSpecificationMatched ?? null,
+      catalogDimensionsMatched: input.catalogDimensionsMatched ?? null,
+      catalogPaperWeightMatched: input.catalogPaperWeightMatched ?? null,
+      frontFoilColors: [...sides.frontFoilColors],
+      backFoilColors: [...sides.backFoilColors],
+      foilPassCount: foilPassCount(input),
       foilColors: [...input.foilColors],
+      foilTechnique: input.foilTechnique,
+      hasLocalFoil: input.hasLocalFoil,
+      lamination: input.lamination,
+      printColors: [...input.printColors],
       isDoubleSided: input.isDoubleSided,
       isDoubleColor: input.isDoubleColor,
       settlementType: input.settlementType,
@@ -738,7 +837,7 @@ export function calculateExternalSalesQuote(args: {
     },
     appliedAdjustments: addOns.map(({ rule, condition, rate }) => ({
       id: rule.id,
-      name: rule.name,
+      name: externalPriceRuleDisplayName(rule.name),
       adjustmentType: componentType(
         rule.calculationType as CustomerPriceCalculationTypeValue,
       ),

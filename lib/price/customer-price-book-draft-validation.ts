@@ -1,6 +1,12 @@
 import Decimal from 'decimal.js';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../order/foil-colors';
 import {
+  MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE,
+  isNewOrderPricingRoute,
+} from '../order/pricing-route';
+import { MAX_ORDER_ITEM_PRINT_COLORS } from '../order/print-colors';
+import { productCategoryMatchesPricingRoute } from '../order/pricing-route';
+import {
   EXTERNAL_ORDER_CHARGE_MONEY_MAX,
   normalizeZtoProvince,
 } from './external-order-charges';
@@ -11,6 +17,8 @@ import {
   EXTERNAL_SALES_PRICE_LIMITS,
   validateExternalSalesPriceRules,
 } from './external-sales-quote';
+import { externalPriceBusinessText } from './external-price-display';
+import { parseCustomerRuleCondition } from './customer-rule-condition';
 
 export type DraftPriceBookPurpose = 'PROCESSING' | 'LOGISTICS';
 
@@ -44,6 +52,7 @@ export type DraftPriceRuleForValidation = {
   };
   product: {
     code: string;
+    category: string;
     isActive: boolean;
   } | null;
 };
@@ -171,7 +180,12 @@ function conditionsCanOverlap(aRaw: unknown, bRaw: unknown): boolean {
   const a = isRecord(aRaw) ? aRaw : {};
   const b = isRecord(bRaw) ? bRaw : {};
 
-  for (const key of ['productCodes', 'specifications', 'paperTypes'] as const) {
+  for (const key of [
+    'productCodes',
+    'specifications',
+    'paperTypes',
+    'laminations',
+  ] as const) {
     if (arraysAreDisjoint(a[key], b[key])) return false;
   }
   for (const key of ['isDoubleSided', 'isDoubleColor'] as const) {
@@ -197,6 +211,22 @@ function conditionsCanOverlap(aRaw: unknown, bRaw: unknown): boolean {
     'maxFoilColorCount',
   );
   if (Math.max(aColorMin, bColorMin) > Math.min(aColorMax, bColorMax)) {
+    return false;
+  }
+
+  const [aPassMin, aPassMax] = numberRangeFromCondition(
+    a,
+    'foilPassCount',
+    'minFoilPassCount',
+    'maxFoilPassCount',
+  );
+  const [bPassMin, bPassMax] = numberRangeFromCondition(
+    b,
+    'foilPassCount',
+    'minFoilPassCount',
+    'maxFoilPassCount',
+  );
+  if (Math.max(aPassMin, bPassMin) > Math.min(aPassMax, bPassMax)) {
     return false;
   }
 
@@ -229,13 +259,13 @@ function commonRuleIssues(
       issues.push({
         path: `${prefix}.code`,
         ruleId: rule.id,
-        message: `规则代码与“${previous.name}”重复`,
+        message: `收费项目与“${previous.name}”重复，请检查后再发布`,
       });
     } else {
       seenCodes.set(code, rule);
     }
     if (!rule.name.trim()) {
-      issues.push({ path: `${prefix}.name`, ruleId: rule.id, message: '规则名称不能为空' });
+      issues.push({ path: `${prefix}.name`, ruleId: rule.id, message: '收费项目名称不能为空' });
     }
     if (!rule.category.isActive) {
       issues.push({
@@ -248,7 +278,7 @@ function commonRuleIssues(
       issues.push({
         path: `${prefix}.productId`,
         ruleId: rule.id,
-        message: '规则引用的产品已停用',
+        message: '收费项目所选产品已停用',
       });
     }
     if (
@@ -259,7 +289,7 @@ function commonRuleIssues(
       issues.push({
         path: `${prefix}.priority`,
         ruleId: rule.id,
-        message: '优先级必须是非负整数',
+        message: '应用顺序必须是非负整数',
       });
     }
     if (
@@ -316,16 +346,49 @@ function processingColorMultiplier(rule: DraftPriceRuleForValidation): Decimal {
   const condition = isRecord(rule.triggerCondition)
     ? rule.triggerCondition
     : {};
-  if (condition.perFoilColor !== true) return new Decimal(1);
-  const exact = condition.foilColorCount;
+  return colorDimensionMultiplier({
+    enabled: condition.perFoilColor === true,
+    exact: condition.foilColorCount,
+    maximum: condition.maxFoilColorCount,
+    absoluteMaximum: MAX_ORDER_ITEM_FOIL_COLORS,
+  })
+    .times(
+      colorDimensionMultiplier({
+        enabled: condition.perFoilPass === true,
+        exact: condition.foilPassCount,
+        maximum: condition.maxFoilPassCount,
+        absoluteMaximum: MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE * 2,
+      }),
+    )
+    .times(
+      colorDimensionMultiplier({
+      enabled: condition.perPrintColor === true,
+      exact: condition.printColorCount,
+      maximum: condition.maxPrintColorCount,
+      absoluteMaximum: MAX_ORDER_ITEM_PRINT_COLORS,
+      }),
+    );
+}
+
+function colorDimensionMultiplier({
+  enabled,
+  exact,
+  maximum,
+  absoluteMaximum,
+}: {
+  enabled: boolean;
+  exact: unknown;
+  maximum: unknown;
+  absoluteMaximum: number;
+}): Decimal {
+  if (!enabled) return new Decimal(1);
   if (Number.isSafeInteger(exact) && Number(exact) >= 0) {
     return new Decimal(Number(exact));
   }
-  const maximum = condition.maxFoilColorCount;
   if (Number.isSafeInteger(maximum) && Number(maximum) >= 0) {
     return new Decimal(Number(maximum));
   }
-  return new Decimal(MAX_ORDER_ITEM_FOIL_COLORS);
+  return new Decimal(absoluteMaximum);
 }
 
 function maximumProcessingComponent(
@@ -500,7 +563,7 @@ function processingAggregateIssues(
       issues.push({
         path: `rules.${base.id}.amount`,
         ruleId: base.id,
-        message: `基础规则“${base.name}”与必然叠加收费合计超过款式可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
+        message: `基础报价“${base.name}”与必然叠加收费合计超过款式可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
       });
     }
   }
@@ -511,8 +574,123 @@ function processingIssues(
   rules: DraftPriceRuleForValidation[],
 ): DraftPriceBookValidationIssue[] {
   const issues: DraftPriceBookValidationIssue[] = [];
+  for (const rule of rules) {
+    const condition = parseCustomerRuleCondition(rule.triggerCondition).condition;
+    if (
+      condition?.target === 'ITEM' &&
+      condition.pricingRoutes?.some(
+        (route) => !isNewOrderPricingRoute(route),
+      )
+    ) {
+      issues.push({
+        path: `rules.${rule.id}.triggerCondition`,
+        ruleId: rule.id,
+        message:
+          '新规则只允许局部烫金（通版现货）、专版烫金或彩印三条计价路线',
+      });
+    }
+  }
   const active = rules.filter((rule) => rule.isActive);
+  const itemRules: DraftPriceRuleForValidation[] = [];
+  const packagingGroupRules: Array<{
+    rule: DraftPriceRuleForValidation;
+    modes: string[];
+  }> = [];
   for (const rule of active) {
+    const parsedCondition = parseCustomerRuleCondition(rule.triggerCondition);
+    if (!parsedCondition.condition) {
+      for (const error of parsedCondition.errors) {
+        issues.push({
+          path: `rules.${rule.id}.triggerCondition`,
+          ruleId: rule.id,
+          message: `适用条件非法：${error}`,
+        });
+      }
+    } else if (parsedCondition.condition.target === 'ITEM') {
+      itemRules.push(rule);
+      if (!parsedCondition.condition.pricingRoutes?.length) {
+        issues.push({
+          path: `rules.${rule.id}.triggerCondition`,
+          ruleId: rule.id,
+          message: '款式规则必须明确至少一条适用计价路线',
+        });
+      }
+      if (rule.calculationType === 'PER_BAG') {
+        issues.push({
+          path: `rules.${rule.id}.calculationType`,
+          ruleId: rule.id,
+          message: '款式规则不能使用按袋计价',
+        });
+      }
+      if (
+        rule.product &&
+        parsedCondition.condition.pricingRoutes?.some(
+          (route) =>
+            !productCategoryMatchesPricingRoute(
+              route,
+              rule.product!.category,
+            ),
+        )
+      ) {
+        issues.push({
+          path: `rules.${rule.id}.triggerCondition`,
+          ruleId: rule.id,
+          message: '所选报价产品的分类与适用计价路线不一致',
+        });
+      }
+    } else {
+      packagingGroupRules.push({
+        rule,
+        modes: parsedCondition.condition.packagingModes ?? [],
+      });
+      if (rule.productId !== null) {
+        issues.push({
+          path: `rules.${rule.id}.productId`,
+          ruleId: rule.id,
+          message: '包装组规则必须使用通用产品',
+        });
+      }
+      if (
+        rule.kind !== 'ADD_ON' ||
+        rule.calculationType !== 'PER_BAG' ||
+        rule.blocksAutomaticQuote
+      ) {
+        issues.push({
+          path: `rules.${rule.id}.calculationType`,
+          ruleId: rule.id,
+          message: '包装组收费必须按实际袋数自动计价',
+        });
+      }
+      if (rule.category.code !== 'PACKING') {
+        issues.push({
+          path: `rules.${rule.id}.categoryId`,
+          ruleId: rule.id,
+          message: '包装组规则必须使用“入袋与包装”类目',
+        });
+      }
+      if (rule.minQty !== null || rule.maxQty !== null) {
+        issues.push({
+          path: `rules.${rule.id}.minQty`,
+          ruleId: rule.id,
+          message: '包装组规则直接按实际袋数乘算，不能混用款式数量区间',
+        });
+      }
+      if (rule.exclusiveGroup !== 'PACKAGING_GROUP_MODE') {
+        issues.push({
+          path: `rules.${rule.id}.exclusiveGroup`,
+          ruleId: rule.id,
+          message: '包装组的包装方式设置不完整，请重新选择',
+        });
+      }
+      const amount = parsedDecimal(rule.amount);
+      if (amount?.times(QUANTITY_MAX).gt(PROCESSING_SUBTOTAL_MAX)) {
+        issues.push({
+          path: `rules.${rule.id}.amount`,
+          ruleId: rule.id,
+          message: `按最大实际袋数计算时超过可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
+        });
+      }
+    }
     if (['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(rule.category.code)) {
       issues.push({
         path: `rules.${rule.id}.categoryId`,
@@ -533,7 +711,7 @@ function processingIssues(
         issues.push({
           path: `rules.${rule.id}.triggerCondition`,
           ruleId: rule.id,
-          message: `产品条件必须包含规则所选产品代码“${rule.product.code}”`,
+          message: '所选报价产品与适用范围不一致，请重新选择产品',
         });
       }
     }
@@ -553,12 +731,12 @@ function processingIssues(
       issues.push({
         path: `rules.${rule.id}.amount`,
         ruleId: rule.id,
-        message: `规则在数量上限处的金额超过款式可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
+        message: `收费项目在数量上限处的金额超过款式可保存上限 ${EXTERNAL_SALES_PRICE_LIMITS.subtotal} 元`,
       });
     }
   }
   const engineErrors = validateExternalSalesPriceRules(
-    active.map(
+    itemRules.map(
       (rule): ExternalSalesPriceRule => ({
         id: rule.id,
         code: rule.code,
@@ -587,9 +765,27 @@ function processingIssues(
   issues.push(
     ...engineErrors.map((message) => ({ path: 'rules', message })),
   );
-  issues.push(...processingAggregateIssues(active));
+  issues.push(...processingAggregateIssues(itemRules));
 
-  const bases = active.filter((rule) => rule.kind === 'BASE');
+  for (const [mode, modeLabel] of [
+    ['SINGLE_STYLE', '单款装'],
+    ['MIXED_STYLE', '混装'],
+  ] as const) {
+    const matches = packagingGroupRules.filter(({ modes }) =>
+      modes.includes(mode),
+    );
+    if (matches.length > 1) {
+      for (const { rule } of matches.slice(1)) {
+        issues.push({
+          path: `rules.${rule.id}.triggerCondition`,
+          ruleId: rule.id,
+          message: `${modeLabel}同时命中多条入袋规则`,
+        });
+      }
+    }
+  }
+
+  const bases = itemRules.filter((rule) => rule.kind === 'BASE');
   if (bases.length === 0) {
     issues.push({ path: 'rules', message: '加工费价目簿至少需要一条启用的基础报价规则' });
   }
@@ -611,7 +807,7 @@ function processingIssues(
   }
 
   const grouped = new Map<string, DraftPriceRuleForValidation[]>();
-  for (const rule of active) {
+  for (const rule of itemRules) {
     const group = rule.exclusiveGroup?.trim();
     if (!group || rule.kind !== 'ADD_ON') continue;
     const key = `${group}\u0000${rule.priority}`;
@@ -636,7 +832,7 @@ function processingIssues(
           issues.push({
             path: `rules.${right.id}.exclusiveGroup`,
             ruleId: right.id,
-            message: `互斥组“${right.exclusiveGroup}”内与“${left.name}”存在同优先级命中冲突`,
+            message: `收费项目“${right.name}”与“${left.name}”在同一适用范围和顺序下冲突`,
           });
         }
       }
@@ -701,14 +897,14 @@ function logisticsIssues(
       issues.push({
         path: `${prefix}.triggerCondition`,
         ruleId: rule.id,
-        message: '快递费规则触发条件只能包含 carrierCode 和 provinces',
+        message: '快递费的适用范围只能包含承运商和省份',
       });
     }
     if (rule.kind !== 'ADD_ON' || rule.calculationType !== 'FIXED_AMOUNT') {
       issues.push({
         path: `${prefix}.kind`,
         ruleId: rule.id,
-        message: '快递费规则类型必须固定为 ADD_ON / FIXED_AMOUNT',
+        message: '快递费必须使用自动固定金额计价',
       });
     }
     if (rule.productId !== null) {
@@ -729,14 +925,14 @@ function logisticsIssues(
       issues.push({
         path: `${prefix}.exclusiveGroup`,
         ruleId: rule.id,
-        message: '快递费互斥组必须固定为 ZTO_PROVINCE_RATE',
+        message: '快递费的地区范围设置不完整，请重新选择承运商和省份',
       });
     }
     if (rule.priority !== 100) {
       issues.push({
         path: `${prefix}.priority`,
         ruleId: rule.id,
-        message: '快递费规则优先级必须固定为 100',
+        message: '快递费的应用顺序设置不正确',
       });
     }
     if (rule.blocksAutomaticQuote) {
@@ -803,7 +999,7 @@ function logisticsIssues(
         issues.push({
           path: `${prefix}.incrementAmount`,
           ruleId: rule.id,
-          message: `规则在最大计费重量下超过收费可保存上限 ${EXTERNAL_ORDER_CHARGE_MONEY_MAX} 元`,
+          message: `收费项目在最大计费重量下超过可保存上限 ${EXTERNAL_ORDER_CHARGE_MONEY_MAX} 元`,
         });
       }
     }
@@ -898,15 +1094,14 @@ function logisticsIssues(
       issues.push({
         path: `${prefix}.exclusiveGroup`,
         ruleId: rule.id,
-        message:
-          '耗材互斥组必须固定为 PACKING_MATERIAL_QUANTITY_TIER',
+        message: '打包耗材的数量范围设置不完整，请重新选择适用数量',
       });
     }
     if (rule.priority !== 100) {
       issues.push({
         path: `${prefix}.priority`,
         ruleId: rule.id,
-        message: '耗材规则优先级必须固定为 100',
+        message: '打包耗材的应用顺序设置不正确',
       });
     }
     if (rule.includedUnits !== null || rule.incrementUnits !== null || rule.incrementAmount !== null) {
@@ -953,5 +1148,8 @@ export function validateDraftPriceBookRules(args: {
       ? processingIssues(args.rules)
       : logisticsIssues(args.rules)),
   );
-  return issues;
+  return issues.map((issue) => ({
+    ...issue,
+    message: externalPriceBusinessText(issue.message),
+  }));
 }

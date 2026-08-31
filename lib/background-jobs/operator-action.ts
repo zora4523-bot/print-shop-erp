@@ -1,17 +1,26 @@
 import { BackgroundJobStatus } from '../../generated/prisma/enums';
+import { backgroundJobRequiresOwnerResolution } from './terminal-policy';
 import { BACKGROUND_JOB_TYPES } from './types';
 
 export type BackgroundJobOperatorAction =
   | 'RETRY'
   | 'CANCEL'
   | 'REQUEST_NEW_EXPORT'
+  | 'RESOLVE_NOTIFICATION'
   | 'NONE';
 
 export function backgroundJobOperatorAction(job: {
   type: string;
   status: BackgroundJobStatus;
+  lastErrorCode?: string | null;
 }): BackgroundJobOperatorAction {
   if (job.status === BackgroundJobStatus.DEAD) {
+    if (backgroundJobRequiresOwnerResolution(job)) {
+      // Retrying the job alone cannot reopen a monotonic UNKNOWN delivery row;
+      // it only burns attempts and returns to DEAD. The notification log owns
+      // the explicit delivered / confirmed-not-delivered resolution workflow.
+      return 'RESOLVE_NOTIFICATION';
+    }
     return job.type === BACKGROUND_JOB_TYPES.ORDER_EXPORT
       ? 'REQUEST_NEW_EXPORT'
       : 'RETRY';

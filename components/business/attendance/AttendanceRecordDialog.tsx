@@ -48,12 +48,17 @@ export function AttendanceRecordDialog({
   const [leaveUnits, setLeaveUnits] = useState(existing?.leaveUnits ?? '0');
   const [leaveType, setLeaveType] = useState(existing?.leaveType ?? '');
 
-  const [recordState, recordAction] = useActionState<
+  const [recordState, recordAction, actionPending] = useActionState<
     AttendanceMutationResult | null,
     unknown
   >(recordAttendanceAction, null);
-  const [pending, startTransition] = useTransition();
-  const state = recordState;
+  const [transitionPending, startTransition] = useTransition();
+  const pending = actionPending || transitionPending;
+  // useActionState 在新一轮 action 完成前会保留上一轮 state。
+  // 如果上次也是 success，新一轮成功后文字完全相同，live region
+  // 没有 DOM 变化就不会再播报。pending 时卸载旧 outcome，完成后
+  // 重新挂载，同时避免在「保存中…」旁还显示过期的「已保存」。
+  const state = pending ? null : recordState;
 
   const isCook = workerType === WorkerType.COOK;
   const usesHourlyFields =
@@ -157,20 +162,20 @@ export function AttendanceRecordDialog({
             label="正常工时"
             value={normal}
             onChange={setNormal}
-            errors={fieldErr(recordState, 'normalHours')}
+            errors={fieldErr(state, 'normalHours')}
           />
           <NumberField
             label="加班工时"
             value={ot}
             onChange={setOt}
-            errors={fieldErr(recordState, 'otHours')}
+            errors={fieldErr(state, 'otHours')}
           />
           {isCook ? (
           <NumberField
             label="代班打包工时"
             value={spare}
             onChange={setSpare}
-            errors={fieldErr(recordState, 'spareHours')}
+            errors={fieldErr(state, 'spareHours')}
           />
           ) : null}
         </div>
@@ -222,7 +227,11 @@ export function AttendanceRecordDialog({
         <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'invalid' ? (
-        <ul className="text-xs text-destructive space-y-1">
+        <ul
+          role="alert"
+          aria-atomic="true"
+          className="space-y-1 text-xs text-destructive"
+        >
           {Object.entries(state.fieldErrors).flatMap(([field, msgs]) =>
             msgs.map((m) => <li key={`${field}-${m}`}>{m}</li>),
           )}

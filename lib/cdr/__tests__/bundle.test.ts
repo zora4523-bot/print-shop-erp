@@ -470,6 +470,7 @@ describe('listRecentBundles', () => {
     ]);
     const r = await listRecentBundles(20);
     expect(r).toHaveLength(1);
+    expect(r[0]!.orderIds).toEqual(['o1', 'o2']);
     expect(r[0]!.orderCount).toBe(2);
     expect(r[0]!.fileCount).toBe(3);
     expect(r[0]!.createdByName).toBe('车间张主管');

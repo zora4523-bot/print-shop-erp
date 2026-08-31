@@ -20,6 +20,41 @@ type Props = {
   onBlur: () => void;
 };
 
+type ChoicePresentationInput = {
+  value: string | null;
+  options: readonly OrderItemQuickOption[];
+  isEditingCustom: boolean;
+  customDraft: string;
+};
+
+/**
+ * Keep the controlled value authoritative while protecting the text currently
+ * being edited. This also lets a value supplied by another field (for example,
+ * a SKU specification) immediately reveal the custom input when it is not one
+ * of the quick options.
+ */
+export function resolveOrderItemChoicePresentation({
+  value,
+  options,
+  isEditingCustom,
+  customDraft,
+}: ChoicePresentationInput) {
+  const controlledCustomSelected = Boolean(
+    value && !options.some((option) => option.value === value),
+  );
+  const customSelected = isEditingCustom || controlledCustomSelected;
+
+  return {
+    controlledCustomSelected,
+    customSelected,
+    customInputValue: isEditingCustom
+      ? customDraft
+      : controlledCustomSelected
+        ? (value ?? '')
+        : customDraft,
+  };
+}
+
 export function OrderItemChoiceField({
   id,
   label,
@@ -37,31 +72,47 @@ export function OrderItemChoiceField({
   const initialIsCustom = Boolean(
     value && !options.some((option) => option.value === value),
   );
-  const [customSelected, setCustomSelected] = useState(initialIsCustom);
-  const [customValue, setCustomValue] = useState(
+  const [isEditingCustom, setIsEditingCustom] = useState(false);
+  const [customDraft, setCustomDraft] = useState(
     initialIsCustom ? (value ?? '') : '',
   );
   const customInputRef = useRef<HTMLInputElement>(null);
   const messageId = `${id}-message`;
+  const {
+    controlledCustomSelected,
+    customSelected,
+    customInputValue,
+  } = resolveOrderItemChoicePresentation({
+    value,
+    options,
+    isEditingCustom,
+    customDraft,
+  });
 
   function selectPreset(optionValue: string) {
     if (!customSelected && value === optionValue) {
       onChange(null);
       return;
     }
-    setCustomSelected(false);
+    if (controlledCustomSelected) {
+      setCustomDraft(value ?? '');
+    }
+    setIsEditingCustom(false);
     onChange(optionValue);
   }
 
   function toggleCustom() {
     if (customSelected) {
-      setCustomSelected(false);
+      if (controlledCustomSelected) {
+        setCustomDraft(value ?? '');
+      }
+      setIsEditingCustom(false);
       onChange(null);
       return;
     }
 
-    setCustomSelected(true);
-    onChange(customValue);
+    setIsEditingCustom(true);
+    onChange(customDraft);
     requestAnimationFrame(() => customInputRef.current?.focus());
   }
 
@@ -125,16 +176,27 @@ export function OrderItemChoiceField({
           <Input
             ref={customInputRef}
             id={`${id}-custom`}
-            value={customValue}
+            value={customInputValue}
             maxLength={maxLength}
             disabled={disabled}
             placeholder={customPlaceholder}
             aria-invalid={Boolean(error)}
             aria-describedby={error ? `${id}-error` : undefined}
-            onBlur={onBlur}
+            onFocus={() => {
+              if (!isEditingCustom) {
+                if (controlledCustomSelected) {
+                  setCustomDraft(value ?? '');
+                }
+                setIsEditingCustom(true);
+              }
+            }}
+            onBlur={() => {
+              setIsEditingCustom(false);
+              onBlur();
+            }}
             onChange={(event) => {
               const next = event.target.value;
-              setCustomValue(next);
+              setCustomDraft(next);
               onChange(next);
             }}
           />

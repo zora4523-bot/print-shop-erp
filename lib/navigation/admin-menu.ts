@@ -21,6 +21,7 @@ export type AdminMenuItem = {
   status: AdminModuleStatus;
   requiredPermission?: Permission;
   roles?: readonly Role[];
+  children?: AdminMenuItem[];
 };
 
 export type AdminMenuGroup = {
@@ -29,8 +30,8 @@ export type AdminMenuGroup = {
 };
 
 const SECTION_LABELS: Record<AdminMenuSection, string> = {
-  dashboard: '概览',
   workflow: '业务',
+  rules: '规则',
   finance: '财务',
   dictionary: '字典',
   operations: '运维',
@@ -55,7 +56,15 @@ function isVisible(
 
 function toMenuItem(
   module: ReturnType<typeof getAdminModulesForRole>[number],
+  childrenByParent: ReadonlyMap<
+    string,
+    ReturnType<typeof getAdminModulesForRole>
+  >,
 ): AdminMenuItem {
+  const children = (childrenByParent.get(module.id) ?? []).map((child) =>
+    toMenuItem(child, childrenByParent),
+  );
+
   return {
     label: module.label,
     href: module.routeBase,
@@ -65,6 +74,7 @@ function toMenuItem(
     status: module.status,
     requiredPermission: module.requiredPermission,
     roles: module.roles,
+    ...(children.length > 0 ? { children } : {}),
   };
 }
 
@@ -82,11 +92,33 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
   const modules = getAdminModulesForRole(user.role).filter((module) =>
     isVisible(module, user.role),
   );
-  const groups: AdminMenuGroup[] = [];
+  const visibleModuleIds = new Set(modules.map((module) => module.id));
+  const childrenByParent = new Map<
+    string,
+    ReturnType<typeof getAdminModulesForRole>
+  >();
+  const rootModules: typeof modules = [];
+
   for (const adminModule of modules) {
+    if (
+      adminModule.menuParentId &&
+      visibleModuleIds.has(adminModule.menuParentId)
+    ) {
+      const siblings = childrenByParent.get(adminModule.menuParentId) ?? [];
+      siblings.push(adminModule);
+      childrenByParent.set(adminModule.menuParentId, siblings);
+    } else {
+      // A visible child must not disappear merely because its parent is hidden
+      // for the current role. Promote such an orphan to the section root.
+      rootModules.push(adminModule);
+    }
+  }
+
+  const groups: AdminMenuGroup[] = [];
+  for (const adminModule of rootModules) {
     const label = sectionLabel(adminModule.menuSection);
     const group = groups.find((candidate) => candidate.label === label);
-    const item = toMenuItem(adminModule);
+    const item = toMenuItem(adminModule, childrenByParent);
     if (group) {
       group.items.push(item);
     } else {
@@ -97,6 +129,27 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
 }
 
 /**
+ * 按菜单的显示顺序展平任意深度的父子树。
+ *
+ * 高亮、快捷入口和侧边栏派生列表共用同一展平逻辑，避免子项
+ * 只显示但不参与路由匹配或权限检查。
+ */
+export function flattenAdminMenuItems(
+  items: readonly AdminMenuItem[],
+): AdminMenuItem[] {
+  const flattened: AdminMenuItem[] = [];
+
+  for (const item of items) {
+    flattened.push(item);
+    if (item.children?.length) {
+      flattened.push(...flattenAdminMenuItems(item.children));
+    }
+  }
+
+  return flattened;
+}
+
+/**
  * 返回当前 pathname 应唯一高亮的菜单 href。
  *
  * `activeRouteBase` 可以把多个同属一个业务模块的页面归到同一入口，
@@ -104,12 +157,12 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
  */
 export function getActiveAdminMenuHref(
   pathname: string,
-  items: readonly Pick<AdminMenuItem, 'href' | 'activeRouteBase'>[],
+  items: readonly AdminMenuItem[],
 ): string | null {
   let bestHref: string | null = null;
   let bestMatchLength = -1;
 
-  for (const item of items) {
+  for (const item of flattenAdminMenuItems(items)) {
     const matchBase = item.activeRouteBase ?? item.href;
     if (matchBase === '#' || matchBase === '/') continue;
     const matches =
@@ -133,7 +186,9 @@ export function getAdminQuickLinks(user: { role: Role }): AdminMenuItem[] {
     [Role.SALES]: ['/orders/new', '/orders', '/sales/bills'],
     [Role.CUSTOMER_SERVICE]: ['/orders/new', '/orders'],
   };
-  const visible = getAdminMenuItems(user).flatMap((group) => group.items);
+  const visible = flattenAdminMenuItems(
+    getAdminMenuItems(user).flatMap((group) => group.items),
+  );
   const preferred = preferredByRole[user.role] ?? [];
   return preferred
     .map((href) => visible.find((item) => item.href === href))

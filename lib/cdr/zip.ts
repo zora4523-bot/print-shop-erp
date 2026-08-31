@@ -93,12 +93,16 @@ async function generateRealZip(
   nowFn: () => Date,
   env: NodeJS.ProcessEnv,
   expireHours: number,
+  context: {
+    signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
+  },
 ): Promise<ZipUploadResult> {
+  await context.assertLease?.();
+  context.signal?.throwIfAborted();
   const cfgResult = readOssConfig(env);
   if (!cfgResult.configured) {
-    throw new CdrZipError(
-      `OSS 未配置（缺 ${cfgResult.missing.join(', ')}），无法真实打包`,
-    );
+    throw new CdrZipError('CDR 打包暂不可用，请联系管理员');
   }
   const cfg = cfgResult.cfg;
 
@@ -115,6 +119,15 @@ async function generateRealZip(
   const zipObjectKey = `bundles/${input.bundleId}.zip`;
   const archive = new ZipArchive({ zlib: { level: 9 } });
   const out = new PassThrough();
+  const abortUpload = () => {
+    archive.abort();
+    out.destroy(
+      context.signal?.reason instanceof Error
+        ? context.signal.reason
+        : new Error('CDR bundle lease lost'),
+    );
+  };
+  context.signal?.addEventListener('abort', abortUpload, { once: true });
   // destroy(err) 会在流上 emit 'error'；没有监听器时 Node 视为
   // uncaught exception 直接崩进程。错误本体已经通过 putSettled /
   // archiveError 传递，这里只需吞掉事件。
@@ -146,7 +159,10 @@ async function generateRealZip(
     // ZIP 内按工单号分目录；同名文件追加序号，避免静默覆盖。
     const usedNames = new Map<string, number>();
     for (const entry of entries) {
+      await context.assertLease?.();
+      context.signal?.throwIfAborted();
       const result = await client.getStream(entry.objectKey);
+      context.signal?.throwIfAborted();
       const baseName = `${entry.orderNo}/${entry.fileName}`;
       const seen = usedNames.get(baseName) ?? 0;
       usedNames.set(baseName, seen + 1);
@@ -157,31 +173,35 @@ async function generateRealZip(
       archive.append(result.stream, { name });
     }
     await archive.finalize();
+    const putResult = await putSettled;
+    if (!putResult.ok) throw putResult.err;
+    if (archiveError) throw archiveError;
+    await context.assertLease?.();
+    context.signal?.throwIfAborted();
+
+    // 预签 GET URL。**上传完成后**取当前时间——URL 的寿命从签发起算，
+    // DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务白白缩短
+    // 外协的下载窗口。两处都用同一个 expireHours，不能各写各的。
+    const signedAt = nowFn();
+    const zipFileUrl = client.signatureUrl(zipObjectKey, {
+      expires: expireHours * SECONDS_PER_HOUR,
+      method: 'GET',
+    });
+
+    return {
+      zipFileUrl,
+      expiresAt: new Date(signedAt.getTime() + expireHours * MS_PER_HOUR),
+      isMock: false,
+    };
   } catch (err) {
     // 半途失败：终止 archiver；putSettled 永不 reject，等它收尾即可。
     archive.abort();
     out.destroy();
     await putSettled;
     throw err;
+  } finally {
+    context.signal?.removeEventListener('abort', abortUpload);
   }
-  const putResult = await putSettled;
-  if (!putResult.ok) throw putResult.err;
-  if (archiveError) throw archiveError;
-
-  // 预签 GET URL。**上传完成后**取当前时间——URL 的寿命从签发起算，
-  // DB 的 expiresAt 必须与之对齐；用打包开始时间会让慢任务白白缩短
-  // 外协的下载窗口。两处都用同一个 expireHours，不能各写各的。
-  const signedAt = nowFn();
-  const zipFileUrl = client.signatureUrl(zipObjectKey, {
-    expires: expireHours * SECONDS_PER_HOUR,
-    method: 'GET',
-  });
-
-  return {
-    zipFileUrl,
-    expiresAt: new Date(signedAt.getTime() + expireHours * MS_PER_HOUR),
-    isMock: false,
-  };
 }
 
 /**
@@ -196,6 +216,8 @@ export async function uploadBundleZip(
     env?: NodeJS.ProcessEnv;
     // 由调用方从 Setting 的 cdr_link_expire_hours 读好传入；省略走兜底。
     expireHours?: number;
+    signal?: AbortSignal;
+    assertLease?: () => Promise<void>;
   } = {},
 ): Promise<ZipUploadResult> {
   const expireHours = opts.expireHours ?? DEFAULT_EXPIRE_HOURS;
@@ -217,5 +239,9 @@ export async function uploadBundleZip(
     () => opts.now ?? new Date(),
     opts.env ?? process.env,
     expireHours,
+    {
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.assertLease ? { assertLease: opts.assertLease } : {}),
+    },
   );
 }

@@ -6,18 +6,18 @@ import { createPurchaseReceiptAction } from '@/actions/owner-purchases';
 import { CancelPurchaseOrderButton } from '@/components/business/purchase/CancelPurchaseOrderButton';
 import { CancelPurchaseReceiptButton } from '@/components/business/purchase/CancelPurchaseReceiptButton';
 import { PurchaseReceiptForm } from '@/components/business/purchase/PurchaseReceiptForm';
-import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/ui-business';
-import { requirePermission } from '@/lib/auth/permissions';
 import {
-  getPurchaseOrderDetail,
-  PURCHASE_ORDER_STATUS_LABELS,
-  PURCHASE_RECEIPT_STATUS_LABELS,
-} from '@/lib/purchase';
+  PurchaseOrderStatusBadge,
+  PurchaseReceiptStatusBadge,
+} from '@/components/business/purchase/PurchaseStatusBadge';
+import { PageHeader, TableEmptyState } from '@/components/ui-business';
+import { requirePermission } from '@/lib/auth/permissions';
+import { getPurchaseOrderDetail } from '@/lib/purchase';
 import { listActiveWarehouseLocationOptions } from '@/lib/warehouse';
 // 之前这里直接 receivedAt.toLocaleString('zh-CN')，走的是服务器本地
 // 时区——而部署里没有设 TZ，收货时间会随机器时区漂。
 import { formatDateTimeShanghai } from '@/lib/format/dates';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -60,9 +60,7 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
         title={`采购单：${order.purchaseNo}`}
         subtitle={`${order.supplierName} · ${order.supplierCode}`}
         actions={
-          <Badge variant="outline">
-            {PURCHASE_ORDER_STATUS_LABELS[order.status]}
-          </Badge>
+          <PurchaseOrderStatusBadge status={order.status} />
         }
       />
 
@@ -88,7 +86,9 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               {order.items.map((item) => (
                 <tr key={item.id} className="border-b last:border-0">
                   <td className="py-3 pr-3">
-                    <div className="font-medium">{item.material.name}</div>
+                    <div className="font-medium">
+                      {externalPriceBusinessText(item.material.name)}
+                    </div>
                     <div className="font-sans tabular-nums text-xs text-muted-foreground">
                       {item.material.code}
                     </div>
@@ -122,7 +122,8 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
               return (
                 <div key={item.id} className="rounded-lg border p-4">
                   <div className="mb-3 text-sm font-medium">
-                    {item.material.name} · 剩余 {remain} {item.material.unit}
+                    {externalPriceBusinessText(item.material.name)} · 剩余 {remain}{' '}
+                    {item.material.unit}
                   </div>
                   <PurchaseReceiptForm
                     action={boundReceiptAction}
@@ -143,7 +144,11 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">收货记录</h2>
         {order.receipts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂无收货记录</p>
+          <TableEmptyState
+            variant="compact"
+            title="暂无收货记录"
+            description="采购收货过账后，收货单会显示在这里。"
+          />
         ) : (
           <div className="space-y-4">
             {order.receipts.map((receipt) => (
@@ -155,19 +160,28 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
                       {formatDateTimeShanghai(receipt.receivedAt)}
                     </div>
                   </div>
-                  <Badge variant={receipt.status === PurchaseReceiptStatus.POSTED ? 'outline' : 'secondary'}>
-                    {PURCHASE_RECEIPT_STATUS_LABELS[receipt.status]}
-                  </Badge>
+                  <PurchaseReceiptStatusBadge status={receipt.status} />
                 </div>
                 <ul className="mb-3 space-y-1 text-sm">
                   {receipt.items.map((item) => (
                     <li key={item.id}>
-                      {item.material.name}：{decimal(item.quantity)} {item.material.unit}
+                      {externalPriceBusinessText(item.material.name)}：
+                      {decimal(item.quantity)} {item.material.unit}
                     </li>
                   ))}
                 </ul>
                 {receipt.status === PurchaseReceiptStatus.POSTED ? (
-                  <CancelPurchaseReceiptButton receiptId={receipt.id} />
+                  <CancelPurchaseReceiptButton
+                    receiptId={receipt.id}
+                    receiptNo={receipt.receiptNo}
+                    purchaseNo={order.purchaseNo}
+                    items={receipt.items.map((item) => ({
+                      materialCode: item.material.code,
+                      materialName: externalPriceBusinessText(item.material.name),
+                      quantity: decimal(item.quantity),
+                      unit: item.material.unit,
+                    }))}
+                  />
                 ) : receipt.cancelReason ? (
                   <p className="text-sm text-muted-foreground">
                     取消原因：{receipt.cancelReason}
@@ -185,7 +199,17 @@ export default async function OwnerPurchaseDetailPage({ params }: PageProps) {
           <p className="mb-3 text-sm text-muted-foreground">
             只有尚未收货的采购单可以直接取消；已有收货记录时请先取消对应收货单。
           </p>
-          <CancelPurchaseOrderButton purchaseOrderId={order.id} />
+          <CancelPurchaseOrderButton
+            purchaseOrderId={order.id}
+            purchaseNo={order.purchaseNo}
+            supplierName={order.supplierName}
+            items={order.items.map((item) => ({
+              materialCode: item.material.code,
+              materialName: externalPriceBusinessText(item.material.name),
+              quantity: decimal(item.quantity),
+              unit: item.material.unit,
+            }))}
+          />
         </section>
       ) : null}
     </div>

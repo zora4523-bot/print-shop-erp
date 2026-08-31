@@ -475,11 +475,15 @@ describe('cancelPurchaseReceipt', () => {
 
     // 5.00 - 4.00 = 1.00 < 安全库存 2.00，且取消前 >= 2.00 → 跨越告警
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock).toHaveBeenCalledWith('STOCK_ALERT', {
-      materialName: 'A4 白卡纸',
-      currentStock: '1.00',
-      safetyStock: '2.00',
-    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      'STOCK_ALERT',
+      {
+        materialName: 'A4 白卡纸',
+        currentStock: '1.00',
+        safetyStock: '2.00',
+      },
+      { dedupeKey: 'notification:STOCK_ALERT:tx2' },
+    );
     expect(callOrder).toEqual(['commit', 'dispatch']);
   });
 

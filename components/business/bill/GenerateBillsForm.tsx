@@ -21,9 +21,11 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
   return (
     <form
       action={(fd) => {
+        if (pending) return;
         const period = String(fd.get('period') ?? '');
         startTransition(() => action({ period }));
       }}
+      aria-busy={pending}
       className="space-y-2"
     >
       <div className="flex flex-wrap items-end gap-3">
@@ -34,6 +36,7 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
             type="month"
             name="period"
             defaultValue={defaultPeriod}
+            disabled={pending}
             className="max-w-45"
           />
         </div>
@@ -49,9 +52,9 @@ export function GenerateBillsForm({ defaultPeriod }: Props) {
       </div>
       {state?.status === 'success' && state.errors.length > 0 ? (
         <ul className="text-xs text-destructive space-y-1">
-          {state.errors.map((e) => (
-            <li key={e.salesUserId}>
-              {e.salesUserId}: {e.message}
+          {state.errors.map((e, index) => (
+            <li key={`${e.salesUserId}:${index}`}>
+              {e.message}
             </li>
           ))}
         </ul>

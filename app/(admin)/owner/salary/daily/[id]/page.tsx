@@ -1,8 +1,12 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { randomUUID } from 'node:crypto';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import { SalaryAdjustmentType } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
+import { hasPermission } from '@/lib/auth/permissions-dict';
+import { getSession } from '@/lib/auth/session';
 import { getDailyWorkerSalaryDetail } from '@/lib/salary/daily';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -10,14 +14,18 @@ import {
   formatDateShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { AddSalaryAdjustmentForm } from '@/components/business/salary/AddSalaryAdjustmentForm';
 import { MarkPaidForm } from '@/components/business/salary/MarkPaidForm';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { PageHeader } from '@/components/ui-business';
 import type { MachineRuleWithBase } from '@/lib/salary/rules';
 
 type PageProps = { params: Promise<{ id: string }> };
+
+const getDailySalaryPageData = cache((id: string) =>
+  getDailyWorkerSalaryDetail(id),
+);
 
 const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   BONUS: '奖金',
@@ -25,10 +33,25 @@ const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
   CORRECTION: '差错修正',
 };
 
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const session = await getSession();
+  if (!session || !hasPermission('salary:view:all', session.user.role)) {
+    return { title: '计件工资' };
+  }
+
+  const { id } = await params;
+  const salary = await getDailySalaryPageData(id);
+  return {
+    title: salary
+      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 计件工资`
+      : '计件工资记录不存在',
+  };
+}
+
 export default async function DailySalaryDetailPage({ params }: PageProps) {
   await requirePermission('salary:view:all');
   const { id } = await params;
-  const salary = await getDailyWorkerSalaryDetail(id);
+  const salary = await getDailySalaryPageData(id);
   if (!salary) notFound();
   const salaryDateKey = salary.date.toISOString().slice(0, 10);
 
@@ -36,7 +59,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
-        subtitle="逐项核对报工数量、工单、工艺、规则快照和人工调整。上班/请假天数不自动扣减计件保底；已发放后整条记录锁定。"
+        subtitle="核对报工、计件、保底与调整；已发放记录不可修改。"
         actions={
           <div className="flex gap-2">
             <Link
@@ -67,8 +90,15 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">状态</p>
           <div className="mt-2 flex items-center justify-between gap-2">
-            {salary.isPaid ? <Badge>已发</Badge> : <Badge variant="outline">未发</Badge>}
-            <MarkPaidForm returnTo="/owner/salary/daily" id={salary.id} currentPaid={salary.isPaid} />
+            <PaymentStatusBadge isPaid={salary.isPaid} />
+            <MarkPaidForm
+              returnTo="/owner/salary/daily"
+              id={salary.id}
+              currentPaid={salary.isPaid}
+              workerName={salary.worker.displayName}
+              salaryDate={formatDateShanghai(salary.date)}
+              amount={String(salary.actualSalary)}
+            />
           </div>
         </div>
       </section>

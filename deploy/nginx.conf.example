@@ -4,6 +4,8 @@
 #      nginx -t 测试通过后 systemctl reload nginx。
 #
 # 关键点（部署审计强调，漏配会静默出问题）：
+#   0. Next 必须只监听 127.0.0.1:3000（见 ecosystem.config.cjs）。如果把
+#      3000 暴露到网卡，客户端可绕过本文件里的登录/PDF限流直接访问应用。
 #   1. 必须转发 X-Forwarded-Proto: https —— 否则 (a) 登录 cookie 的 Secure 标志失效，
 #      (b) 工单打印二维码/CDR 外协短链的 base URL 推导退化成 localhost 死链。
 #   2. 必须转发 Host / X-Forwarded-Host —— 二维码/短链域名跟随它。
@@ -87,11 +89,10 @@ server {
     # 也不影响匹配 —— location 只看路径。
     #
     # `= /login` 是精确匹配，优先级高于 `location /`，与书写顺序无关。
-    # 该 Server Action 只被 app/(auth)/login/page.tsx 用到，而 Next 的
-    # serverModuleMap 按当前页面 scope 查 action（manifests-singleton.js:
-    # workers[normalizeWorkerPageName(workStore.page)]，查不到直接抛
-    # "Failed to find Server Action"），所以攻击者无法拿 Next-Action 头 POST
-    # 到别的路径来绕开这里 —— 这一个块就覆盖了浏览器侧的全部登录面。
+    # 但 Next 16 会把带 Next-Action 的 POST 在页面 worker 之间转发，攻击者
+    # 可以从其他页面路径命中同一登录 Action。因此这个 Nginx 桶只是
+    # 边缘纵深防御；权威限流在 credentials authorize 内，用 PostgreSQL
+    # 共享计数并覆盖所有 Server Action / callback 入口。
     #
     # burst=5 nodelay 沿用原有标定：允许连着输错 5 次，之后每 6 秒放行一次。
     location = /login {

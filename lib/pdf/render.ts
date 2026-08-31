@@ -1,5 +1,7 @@
 import type { Browser, LaunchOptions, PDFOptions } from 'puppeteer';
 
+export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
+
 // Thin wrapper around Puppeteer's HTML → PDF flow. Kept in lib/pdf so
 // the same helper can render the order print view now and, later,
 // salary slips / bills / CDR cover sheets without duplicating the
@@ -12,8 +14,9 @@ import type { Browser, LaunchOptions, PDFOptions } from 'puppeteer';
 
 export type RenderPdfOptions = {
   html: string;
-  // Extra `page.pdf()` flags if a caller wants a non-A4 size. Defaults
-// come from SPEC 附录 E: A4 portrait with 10mm margins.
+  // Extra `page.pdf()` flags. The work-order paper invariants below (A4,
+  // background graphics, CSS page size, and zero Puppeteer margins) always
+  // win so preview and downloaded PDF cannot drift apart.
   pdf?: PDFOptions;
   // Extra `puppeteer.launch()` flags — mostly for tests, where a
   // pre-existing browser is injected via `browser` below.
@@ -21,6 +24,8 @@ export type RenderPdfOptions = {
   // Inject an already-launched browser (tests). When present, launch
   // is skipped and the caller retains responsibility for teardown.
   browser?: Browser;
+  // Durable workers abort this when they can no longer prove lease ownership.
+  signal?: AbortSignal;
 };
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
@@ -34,19 +39,47 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     }));
 
   const page = await browser.newPage();
+  const abortRender = () => {
+    void page.close().catch(() => undefined);
+    if (!opts.browser) void browser.close().catch(() => undefined);
+  };
+  opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
+    opts.signal?.throwIfAborted();
     // `networkidle0` is required so OSS-hosted design thumbnails have
     // finished loading before we snapshot. Inline SVG (QR codes)
     // doesn't trigger network activity, but image tags do.
     await page.setContent(opts.html, { waitUntil: 'networkidle0' });
+    opts.signal?.throwIfAborted();
+    try {
+      await page.waitForFunction(
+        () => document.documentElement.dataset.printReady === 'true',
+        {
+          timeout: PDF_PRINT_READY_TIMEOUT_MS,
+          signal: opts.signal,
+        },
+      );
+    } catch (error) {
+      // A missing/broken readiness script must not hang PDF production. Only
+      // the bounded readiness timeout is recoverable; page crashes and other
+      // Puppeteer failures still surface. Abort keeps its original semantics.
+      opts.signal?.throwIfAborted();
+      if (!(error instanceof puppeteer.TimeoutError)) throw error;
+    }
+    opts.signal?.throwIfAborted();
+    await page.emulateMediaType('print');
+    opts.signal?.throwIfAborted();
     const pdf = await page.pdf({
+      ...opts.pdf,
       format: 'A4',
       printBackground: true,
-      margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
-      ...opts.pdf,
+      preferCSSPageSize: true,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
     });
+    opts.signal?.throwIfAborted();
     return Buffer.from(pdf);
   } finally {
+    opts.signal?.removeEventListener('abort', abortRender);
     // Always dispose of the page — when the caller shares a browser,
     // closing only at browser-shutdown would accumulate pages across
     // renders. Swallow errors so a page-close failure doesn't mask

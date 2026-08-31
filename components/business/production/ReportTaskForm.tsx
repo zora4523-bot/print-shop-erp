@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,36 +34,55 @@ export function ReportTaskForm({
     ReportTaskMutationResult | null,
     FormData
   >(bound, null);
-  const router = useRouter();
-
-  // On success, kick the router to refresh server state — the task
-  // page itself will re-render showing the completed view. We don't
-  // navigate away since the worker might want to look at the payoff
-  // breakdown.
-  if (state?.status === 'success' && !pending) {
-    // Defer to microtask so React finishes committing before refresh.
-    queueMicrotask(() => router.refresh());
-  }
-
   // 回填。零 JS 下一次提交就是一次整页 POST + 服务端重渲染，浏览器不会保留
   // 输入框里的值。不回填的话「超报被拦下 → 数字被重置回计划数 → 勾确认再
   // 提交」会静默按计划数入库 —— 正好把这个守卫要防的事情做实。
   const values = state && state.status !== 'success' ? state.values : null;
 
-  // 确认框只依赖**服务端状态**出现，不看输入框的 onChange。这是它在零 JS 下
-  // 也存在的原因：条件在 SSR 时就已经算完了。代价是必须先提交一次才看得见
-  // ——而「停一下再确认」本来就是这个守卫想要的摩擦。
-  //
-  // defaultChecked 跟着回填走：不这样的话，第二次提交若撞上别的校验错误，
-  // 勾选会被悄悄清掉，师傅再点提交仍然被拦，页面上却看不出任何变化，读起来
-  // 就像「按钮坏了」。
+  // 服务端状态保证零 JS 提交后仍会显示确认框；hydration 成功时再叠加即时
+  // 合计，让师傅一输到超计划就能看到确认动作，不必先走一次失败往返。
+  // defaultChecked 跟着回填走：第二次提交若撞上别的校验错误，已确认状态和
+  // 三个数量都不能被悄悄清掉。
   const overReport = state?.status === 'invalid' ? state.overReport : undefined;
   const confirmErrors = fieldErrors(state, 'overReportConfirmed');
+  const [liveTotal, setLiveTotal] = useState<number | null>(() => {
+    if (!values) return null;
+    const parts = [values.completedQty, values.defectQty, values.reworkQty].map(
+      (value) => Number(value),
+    );
+    return parts.every(Number.isFinite)
+      ? parts.reduce((sum, value) => sum + value, 0)
+      : null;
+  });
+  const liveOverPlan = liveTotal !== null && liveTotal > plannedQty;
+  const liveAtCap = liveTotal !== null && liveTotal >= maxReportQty;
   const showOverReportConfirm =
-    overReport !== undefined || values?.overReportConfirmed === true;
+    !liveAtCap &&
+    (liveOverPlan ||
+      overReport !== undefined ||
+      values?.overReportConfirmed === true);
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form
+      action={formAction}
+      aria-busy={pending}
+      onInput={(event) => {
+        const nativeForm = event.currentTarget;
+        const read = (name: string) => {
+          const field = nativeForm.elements.namedItem(name);
+          if (!(field instanceof HTMLInputElement)) return 0;
+          const value = Number(field.value);
+          return Number.isFinite(value) ? value : 0;
+        };
+        setLiveTotal(
+          read('completedQty') + read('defectQty') + read('reworkQty'),
+        );
+      }}
+    >
+      <fieldset
+        disabled={pending}
+        className="min-w-0 space-y-4 border-0 p-0"
+      >
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField
           name="completedQty"
@@ -94,6 +112,12 @@ export function ReportTaskForm({
           ? '计件金额按机台薪资规则计算。'
           : '本任务只记录完工数量，工资按考勤时薪结算。'}
       </p>
+
+      {liveAtCap ? (
+        <p className="text-sm text-warning-foreground">
+          合计已达到上限 {maxReportQty.toLocaleString()}，请修改数量后再提交。
+        </p>
+      ) : null}
 
       {showOverReportConfirm ? (
         <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
@@ -126,7 +150,9 @@ export function ReportTaskForm({
               >
                 {overReport
                   ? `合计 ${overReport.totalReported.toLocaleString()} 超过计划数 ${overReport.plannedQty.toLocaleString()}。`
-                  : ''}
+                  : liveOverPlan
+                    ? `当前合计 ${liveTotal.toLocaleString()} 超过计划数 ${plannedQty.toLocaleString()}。`
+                    : ''}
                 勾选后提交，超出情况会记进任务备注和工单日志。
               </span>
             </span>
@@ -150,14 +176,17 @@ export function ReportTaskForm({
         </p>
       ) : null}
 
-      <Button
-        type="submit"
-        disabled={pending}
-        size="lg"
-        className="min-h-11 w-full bg-foreground text-background hover:bg-foreground/80"
-      >
-        {pending ? '提交中…' : '完工报工'}
-      </Button>
+      <div className="sticky bottom-0 z-20 -mx-4 border-t bg-background/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-sm">
+        <Button
+          type="submit"
+          disabled={pending}
+          size="lg"
+          className="min-h-[52px] w-full bg-foreground text-background hover:bg-foreground/80"
+        >
+          {pending ? '提交中…' : '完工报工'}
+        </Button>
+      </div>
+      </fieldset>
     </form>
   );
 }

@@ -2,23 +2,21 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { CalendarRange, Inbox, ReceiptText, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
-import { BillStatus } from '@/generated/prisma/enums';
-import {
-  BILL_STATUS_LABELS,
-  ROLE_LABELS,
-} from '@/lib/auth/role-labels';
+import { listUsers } from '@/lib/account';
+import { BillStatus, Role } from '@/generated/prisma/enums';
+import { ROLE_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { GenerateBillsForm } from '@/components/business/bill/GenerateBillsForm';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
-  BILL_STATUS_TO_BADGE,
   EmptyState,
   PageHeader,
   StatCard,
   StatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
+import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '销售应收账单' };
@@ -70,11 +68,20 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
   const salesUserIdFilter =
     sp.salesUserId && sp.salesUserId.trim() ? sp.salesUserId.trim() : undefined;
 
-  const rows = await listBills({
-    period: periodFilter,
-    status: statusFilter,
-    salesUserId: salesUserIdFilter,
-  });
+  const [rows, accounts] = await Promise.all([
+    listBills({
+      period: periodFilter,
+      status: statusFilter,
+      salesUserId: salesUserIdFilter,
+    }),
+    listUsers(),
+  ]);
+  const salesUsers = accounts.filter(
+    (account) =>
+      account.role === Role.SALES ||
+      account.role === Role.CUSTOMER_SERVICE ||
+      account.id === salesUserIdFilter,
+  );
 
   // 已发但未收：status = ISSUED 且 paidAmount = 0；sum totalAmount
   const issuedUnpaid = rows
@@ -115,20 +122,13 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="销售应收账单"
-        subtitle="月初按 Asia/Shanghai 日历月归集上月已结束的外部销售工单；加工、快递、耗材等对客收费进入同一张应收账单，管理员发单后记录付款。"
+        subtitle="按上海日历月归集上月已结束的外部销售工单，并记录应收与收款。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateBillsForm defaultPeriod={currentMonth} />
         <p className="mt-2 text-xs text-muted-foreground">
-          重跑选中月份会把新完工工单追加到已有 DRAFT 账单。该月账单一旦发单
-          （ISSUED / PARTIAL_PAID / FULLY_PAID）后，生成流程对该条账单会报错，
-          不再向其追加任何工单。含义是：凡是在发单那一刻没被归集进 BillItems
-          的&ldquo;该月 finishedAt&rdquo;工单——无论是发单前已 FINISHED 但业主没再
-          点一次&ldquo;生成 / 追加&rdquo;来拉取，还是发单后才 FINISHED——之后都不会被任何
-          月份的生成流程抓到，需业主线下单独处理。因此发单前务必确认：
-          (1) 所选周期内所有待入账工单都已 FINISHED，(2) 再点一次&ldquo;生成 /
-          追加&rdquo;把最新 FINISHED 工单拉入 DRAFT。
+          发单前请再次生成 / 追加，确认待入账工单已全部归集。发单后不再追加新工单，遗漏项目需另行处理。
         </p>
       </section>
 
@@ -157,6 +157,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
         status={statusFilter}
         period={periodFilter}
         salesUserId={salesUserIdFilter}
+        salesUsers={salesUsers}
       />
 
       {rows.length === 0 ? (
@@ -193,7 +194,7 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.period}</td>
                   <td className="px-4 py-3">{r.salesUser.displayName}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {ROLE_LABELS[r.salesUser.role] ?? r.salesUser.role}
+                    {ROLE_LABELS[r.salesUser.role] ?? '未识别角色'}
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {formatMoney(r.totalAmount)}
@@ -228,11 +229,10 @@ export default async function OwnerBillsPage({ searchParams }: PageProps) {
   );
 }
 
-// 账单状态徽章——委托给 ui-business StatusBadge + BILL_STATUS_TO_BADGE map
+// 账单状态徽章——委托给 ui-business StatusBadge + 集中注册表。
 // 集中色调（与 /sales/bills 共用，避免双份本地定义飘移）。
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  const cfg = BILL_STATUS_TO_BADGE[status];
-  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
+  const cfg = BILL_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={cfg.tone} dot={cfg.dot}>
       {cfg.label}
@@ -244,10 +244,17 @@ function FilterBar({
   status,
   period,
   salesUserId,
+  salesUsers,
 }: {
   status: BillStatus | undefined;
   period: string | undefined;
   salesUserId: string | undefined;
+  salesUsers: Array<{
+    id: string;
+    username: string;
+    displayName: string;
+    isActive: boolean;
+  }>;
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
@@ -262,7 +269,7 @@ function FilterBar({
           <option value="">全部</option>
           {Object.values(BillStatus).map((s) => (
             <option key={s} value={s}>
-              {BILL_STATUS_LABELS[s] ?? s}
+              {BILL_STATUS_REGISTRY[s].label}
             </option>
           ))}
         </select>
@@ -279,16 +286,22 @@ function FilterBar({
       </div>
       <div className="flex flex-col">
         <label htmlFor="owner-bills-sales-user" className="text-xs text-muted-foreground">
-          销售 / 客服 id (可选)
+          销售 / 客服
         </label>
-        <input
+        <select
           id="owner-bills-sales-user"
-          type="text"
           name="salesUserId"
           defaultValue={salesUserId ?? ''}
-          placeholder="留空=全部"
           className="rounded-md border bg-background px-3 py-1 text-sm"
-        />
+        >
+          <option value="">全部人员</option>
+          {salesUsers.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.displayName}（{account.username}
+              {account.isActive ? '' : ' · 已停用'}）
+            </option>
+          ))}
+        </select>
       </div>
       <Button type="submit" size="sm">
         筛选

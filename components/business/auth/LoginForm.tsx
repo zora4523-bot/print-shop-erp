@@ -16,7 +16,7 @@ export function LoginForm({ from }: { from: string }) {
   const generalError = state?.status === 'error' ? state.message : null;
 
   return (
-    <form action={formAction} className="space-y-4" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-4" noValidate>
       <input type="hidden" name="from" value={from} />
 
       <div className="space-y-2">

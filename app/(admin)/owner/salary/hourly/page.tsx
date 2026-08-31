@@ -2,14 +2,16 @@ import Decimal from 'decimal.js';
 import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls } from '@/lib/salary/hourly-aggregate';
+import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
-import { WorkerType } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
+import { Role, WorkerType } from '@/generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { RecomputeHourlyForm } from '@/components/business/salary/RecomputeHourlyForm';
 import { MarkHourlyPaidForm } from '@/components/business/salary/MarkHourlyPaidForm';
+import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
+  ActionNotice,
   EmptyState,
   PageHeader,
   StatCard as UiStatCard,
@@ -23,7 +25,13 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '时薪工月结' };
 
 type PageProps = {
-  searchParams: Promise<{ month?: string; paid?: string; workerId?: string }>;
+  searchParams: Promise<{
+    month?: string;
+    paid?: string;
+    workerId?: string;
+    marked?: string;
+    markedPaid?: string;
+  }>;
 };
 
 function currentShanghaiMonth(): string {
@@ -41,16 +49,45 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('salary:view:all');
   const sp = await searchParams;
+  const currentMonth = currentShanghaiMonth();
   const selectedMonth =
-    sp.month && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : currentShanghaiMonth();
+    sp.month && /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.month)
+      ? sp.month
+      : currentMonth;
   const isPaid =
     sp.paid === 'paid' ? true : sp.paid === 'unpaid' ? false : undefined;
+  const filterQuery = new URLSearchParams();
+  if (sp.month) filterQuery.set('month', sp.month);
+  if (sp.paid) filterQuery.set('paid', sp.paid);
+  if (sp.workerId) filterQuery.set('workerId', sp.workerId);
+  const returnTo = filterQuery.size
+    ? `/owner/salary/hourly?${filterQuery.toString()}`
+    : '/owner/salary/hourly';
+  const markedName = sp.marked?.trim();
+  const markedPaid = sp.markedPaid === '1';
 
-  const rows = await listHourlyPayrolls({
-    month: selectedMonth,
-    workerId: sp.workerId,
-    isPaid,
-  });
+  // 重算影响不能被页面的「已发 / 师傅」筛选误导：操作会
+  // 扫描整个月份，因此额外读取该月全部现有月结，只将真实快照
+  // 传给客户端确认层。
+  const [rows, allMonthRows, accounts] = await Promise.all([
+    listHourlyPayrolls({
+      month: selectedMonth,
+      workerId: sp.workerId,
+      isPaid,
+    }),
+    listHourlyPayrolls({ month: selectedMonth }),
+    listUsers(),
+  ]);
+  const payrollWorkerIds = new Set(allMonthRows.map((row) => row.workerId));
+  const workers = accounts.filter(
+    (account) =>
+      account.id === sp.workerId ||
+      payrollWorkerIds.has(account.id) ||
+      (account.role === Role.WORKER &&
+        (account.workerType === WorkerType.PACKER ||
+          account.workerType === WorkerType.CLEANER ||
+          account.workerType === WorkerType.COOK)),
+  );
   const monthRange = parseShanghaiMonth(selectedMonth);
   const attendanceSummaries = await getAttendanceSummaries(
     rows.map((row) => row.workerId),
@@ -70,16 +107,54 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
       new Decimal(0),
     )
     .toFixed(2);
+  const allMonthUnpaidRows = allMonthRows.filter((row) => !row.isPaid);
+  const recomputeContext = {
+    existingRecordCount: allMonthRows.length,
+    unpaidRecordCount: allMonthUnpaidRows.length,
+    paidRecordCount: allMonthRows.length - allMonthUnpaidRows.length,
+    unpaidTotal: allMonthUnpaidRows
+      .reduce(
+        (sum, row) =>
+          sum.plus(new Decimal(row.totalSalary as unknown as string)),
+        new Decimal(0),
+      )
+      .toFixed(2),
+    sampleRows: allMonthRows.slice(0, 5).map((row) => ({
+      workerName: row.worker.displayName,
+      totalSalary: String(row.totalSalary),
+      isPaid: row.isPaid,
+    })),
+  };
 
   return (
     <div className="space-y-6">
+      {markedName ? (
+        <ActionNotice
+          tone="success"
+          title={markedPaid ? '已标记发放' : '已撤销发放标记'}
+          description={`${markedName} 的时薪月结已${markedPaid ? '标记为已发放' : '解除发放锁定'}。`}
+          action={
+            <Link
+              href={returnTo}
+              prefetch={false}
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              关闭提示
+            </Link>
+          }
+        />
+      ) : null}
       <PageHeader
         title="时薪工月结"
-        subtitle="PACKER / CLEANER / COOK — 按 Asia/Shanghai 日历月汇总 Attendance，PACKER/CLEANER 走时薪 + 加班倍率，COOK 按月薪 + 空闲打包时薪。已发行拒绝重算。"
+        subtitle="按上海日历月汇总打包、清废和厨师工资；已发放记录不可重算。"
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <RecomputeHourlyForm defaultMonth={selectedMonth} maxMonth={currentShanghaiMonth()} />
+        <RecomputeHourlyForm
+          month={selectedMonth}
+          maxMonth={currentMonth}
+          context={recomputeContext}
+        />
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -107,6 +182,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         selectedMonth={selectedMonth}
         paid={sp.paid}
         workerId={sp.workerId}
+        workers={workers}
       />
 
       {rows.length === 0 ? (
@@ -154,7 +230,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
                     <td className="px-4 py-3">{r.worker.displayName}</td>
                     <td className="px-4 py-3 text-xs">
-                      {wt ? (WORKER_TYPE_LABELS[wt] ?? wt) : '—'}
+                      {wt ? (WORKER_TYPE_LABELS[wt] ?? '未识别岗位') : '—'}
                     </td>
                     <td className="px-4 py-3 text-right font-sans tabular-nums text-xs">
                       {String(r.totalWorkHours)}
@@ -177,14 +253,17 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                       {formatMoney(r.totalSalary)}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {r.isPaid ? (
-                        <Badge>已发</Badge>
-                      ) : (
-                        <Badge variant="outline">未发</Badge>
-                      )}
+                      <PaymentStatusBadge isPaid={r.isPaid} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <MarkHourlyPaidForm id={r.id} currentPaid={r.isPaid} />
+                      <MarkHourlyPaidForm
+                        id={r.id}
+                        currentPaid={r.isPaid}
+                        workerName={r.worker.displayName}
+                        month={r.month}
+                        totalSalary={String(r.totalSalary)}
+                        returnTo={returnTo}
+                      />
                     </td>
                   </tr>
                 );
@@ -201,10 +280,17 @@ function FilterBar({
   selectedMonth,
   paid,
   workerId,
+  workers,
 }: {
   selectedMonth: string;
   paid: string | undefined;
   workerId: string | undefined;
+  workers: Array<{
+    id: string;
+    username: string;
+    displayName: string;
+    isActive: boolean;
+  }>;
 }) {
   return (
     <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
@@ -232,15 +318,21 @@ function FilterBar({
         </select>
       </div>
       <div className="flex flex-col">
-        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅 id（选填）</label>
-        <input
+        <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅</label>
+        <select
           id="hourly-workerId"
-          type="text"
           name="workerId"
           defaultValue={workerId ?? ''}
-          placeholder="留空=全部"
           className="rounded-md border bg-background px-3 py-1 text-sm"
-        />
+        >
+          <option value="">全部师傅</option>
+          {workers.map((worker) => (
+            <option key={worker.id} value={worker.id}>
+              {worker.displayName}（{worker.username}
+              {worker.isActive ? '' : ' · 已停用'}）
+            </option>
+          ))}
+        </select>
       </div>
       <Button type="submit" size="sm">
         筛选

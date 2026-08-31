@@ -4,9 +4,9 @@ import { useActionState, useTransition } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import Link from 'next/link';
 import { startCsPeriodAction } from '@/actions/owner-salary';
 import type { StartCsPeriodResult } from '@/actions/owner-salary.types';
+import { PendingLink } from '@/components/ui-business';
 
 export type CsUserOption = {
   id: string;
@@ -43,8 +43,9 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         };
         startTransition(() => action(payload));
       }}
-      className="space-y-4"
+      aria-busy={pending}
     >
+      <fieldset disabled={pending} className="space-y-4 border-0 p-0">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label className="text-xs text-muted-foreground" htmlFor="cs-user">客服 *</Label>
@@ -69,7 +70,7 @@ export function StartCsPeriodForm({ csUsers }: Props) {
             </p>
           ) : null}
           {missingCsUsers ? (
-            <p role="alert" className="mt-1 text-xs text-warning-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               暂无启用的客服账号，请先在用户管理中创建或启用客服。
             </p>
           ) : null}
@@ -183,13 +184,15 @@ export function StartCsPeriodForm({ csUsers }: Props) {
         <Button type="submit" disabled={pending || missingCsUsers}>
           {pending ? '创建中…' : '创建周期'}
         </Button>
-        <Link
+        <PendingLink
           href={missingCsUsers ? '/owner/accounts/new' : '/owner/salary/cs'}
+          pending={pending}
           className={buttonVariants({ variant: 'outline' })}
         >
           {missingCsUsers ? '新建客服账号' : '取消'}
-        </Link>
+        </PendingLink>
       </div>
+      </fieldset>
     </form>
   );
 }

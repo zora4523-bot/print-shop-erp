@@ -5,12 +5,16 @@ import { notFound } from 'next/navigation';
 import { getCsPeriodDetail, isCsPeriodDue } from '@/lib/salary/cs';
 import {
   CsSalesEntryType,
+  Role,
   SalaryPeriodStatus,
 } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { SettleCsPeriodButton } from '@/components/business/salary/SettleCsPeriodButton';
 import { CsPayrollPaymentForm } from '@/components/business/salary/CsPayrollPaymentForm';
+import {
+  PaymentStatusBadge,
+  SalaryPeriodStatusBadge,
+} from '@/components/business/salary/SalaryStatusBadge';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
@@ -79,6 +83,10 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
     commissionTotal.minus(paidCommission),
     0,
   );
+  const periodLabel = `${formatDateShanghai(period.periodStart)} ~ ${formatDateShanghai(period.periodEnd)}`;
+  const tierSalesTotal = new Decimal(period.totalSales as Decimal.Value).plus(
+    new Decimal(period.initialSales as Decimal.Value),
+  );
 
   return (
     <div className="space-y-6">
@@ -95,13 +103,10 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
             月数 {period.durationMonths}
           </p>
         </div>
-        {period.status === SalaryPeriodStatus.SETTLED ? (
-          <Badge>已结算</Badge>
-        ) : ready ? (
-          <Badge variant="destructive">待结算</Badge>
-        ) : (
-          <Badge variant="outline">进行中</Badge>
-        )}
+        <SalaryPeriodStatusBadge
+          status={period.status}
+          readyToSettle={ready}
+        />
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
@@ -187,10 +192,24 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">结算</h2>
           <p className="text-xs text-muted-foreground">
-            周期 {ready ? '已到期' : '未到期'}；周期结束后的次日可手动结算，或由
-            cron 自动扫描结算。结算后会自动开启下一个周期。
+            周期{ready ? '已到期' : '未到期'}；周期结束次日可手动结算，系统也会自动处理。启用中的客服会自动开始下一周期。
           </p>
-          {ready ? <SettleCsPeriodButton periodId={period.id} /> : null}
+          {ready ? (
+            <SettleCsPeriodButton
+              periodId={period.id}
+              context={{
+                csUserName: period.csUser.displayName,
+                periodLabel,
+                tierSalesTotal: tierSalesTotal.toFixed(2),
+                baseTotal: baseTotal.toFixed(2),
+                paidBase: paidBase.toFixed(2),
+                paidCommission: paidCommission.toFixed(2),
+                willStartNextPeriod:
+                  period.csUser.role === Role.CUSTOMER_SERVICE &&
+                  period.csUser.isActive,
+              }}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -227,6 +246,8 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
         {remainingBase.gt(0) || remainingCommission.gt(0) ? (
           <CsPayrollPaymentForm
             periodId={period.id}
+            csUserName={period.csUser.displayName}
+            periodLabel={periodLabel}
             remainingBase={remainingBase.toFixed(2)}
             remainingCommission={remainingCommission.toFixed(2)}
             commissionAvailable={commission !== null}
@@ -327,11 +348,7 @@ export default async function CsPeriodDetailPage({ params }: PageProps) {
                     {formatMoney(c.paidCommission)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {c.isFullyPaid ? (
-                      <Badge>已发</Badge>
-                    ) : (
-                      <Badge variant="outline">未发</Badge>
-                    )}
+                    <PaymentStatusBadge isPaid={c.isFullyPaid} />
                   </td>
                 </tr>
               ))}

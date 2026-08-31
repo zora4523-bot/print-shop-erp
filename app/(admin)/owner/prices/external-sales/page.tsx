@@ -1,5 +1,10 @@
 import { redirect } from 'next/navigation';
 import { firstSearchParam } from '@/lib/admin/table';
+import {
+  RULE_CENTER_HREFS,
+  customerPricingHref,
+  priceVersionsHref,
+} from '@/lib/navigation/rule-center';
 
 type PageProps = {
   searchParams: Promise<{
@@ -17,15 +22,13 @@ export default async function LegacyExternalSalesPriceBookPage({
     const draft = firstSearchParam(sp.draft).trim();
     redirect(
       draft
-        ? `/owner/prices/external-sales/versions?draft=${encodeURIComponent(
-            draft,
-          )}`
-        : '/owner/prices/external-sales/versions',
+        ? priceVersionsHref(draft)
+        : RULE_CENTER_HREFS.priceVersions,
     );
   }
   redirect(
-    `/owner/prices/external-sales/items?purpose=${
-      section === 'logistics' ? 'logistics' : 'processing'
-    }`,
+    customerPricingHref(
+      section === 'logistics' ? 'logistics' : 'processing',
+    ),
   );
 }

@@ -38,6 +38,40 @@ export type PriceAdjustmentTriggerCondition = {
   perFoilColor?: boolean;
 };
 
+const CONDITION_FIELD_LABELS: Record<PriceAdjustmentConditionKey, string> = {
+  productIds: '限定产品',
+  craftIds: '限定工艺',
+  craftMode: '多工艺匹配方式',
+  specifications: '规格',
+  paperTypes: '纸张',
+  foilColors: '烫金颜色',
+  isDoubleSided: '单双面',
+  isDoubleColor: '单双色',
+  minQty: '最小数量',
+  maxQty: '最大数量',
+  settlementTypes: '结算类型',
+  unitsPerSheet: '每张可生产数量',
+  perFoilColor: '按烫金颜色数量计费',
+};
+
+const TECHNICAL_CONDITION_ERROR_PATTERN =
+  /(?:json|unknown\s+keys?|未知字段|[a-z][a-z0-9_]*)/i;
+const GENERIC_CONDITION_ERROR =
+  '适用条件设置无效，请按页面选项重新设置。';
+
+/**
+ * Prevent stale server or database validation messages from exposing stored
+ * condition keys and enum tokens in the business-facing form.
+ */
+export function priceAdjustmentConditionErrorForDisplay(
+  message: string,
+): string {
+  const normalized = message.trim();
+  return normalized !== '' && !TECHNICAL_CONDITION_ERROR_PATTERN.test(normalized)
+    ? normalized
+    : GENERIC_CONDITION_ERROR;
+}
+
 const KNOWN_KEYS = new Set<string>(PRICE_ADJUSTMENT_CONDITION_KEYS);
 const STRING_ARRAY_KEYS = [
   'productIds',
@@ -75,17 +109,15 @@ export function validatePriceAdjustmentTriggerCondition(
 ): string[] {
   if (value === null || value === undefined) {
     return adjustmentType === AdjustmentType.PER_SHEET
-      ? ['按张计价必须提供正整数 unitsPerSheet（每张可生产数量）']
+      ? ['按张计价必须填写“每张可生产数量”。']
       : [];
   }
-  if (!isRecord(value)) return ['触发条件必须是 JSON object'];
+  if (!isRecord(value)) return ['旧条件格式无法识别，请清空后重新设置。'];
 
   const errors: string[] = [];
   const unknownKeys = Object.keys(value).filter((key) => !KNOWN_KEYS.has(key));
   if (unknownKeys.length > 0) {
-    errors.push(
-      `包含未知字段：${unknownKeys.join('、')}；请只使用页面列出的支持键`,
-    );
+    errors.push('旧条件包含页面不支持的设置，请清空后重新设置。');
   }
 
   for (const key of STRING_ARRAY_KEYS) {
@@ -98,7 +130,9 @@ export function validatePriceAdjustmentTriggerCondition(
         (entry) => typeof entry !== 'string' || entry.trim() === '',
       )
     ) {
-      errors.push(`${key}必须是至少含一项的非空字符串数组`);
+      errors.push(
+        `“${CONDITION_FIELD_LABELS[key]}”必须至少选择或填写一项有效内容。`,
+      );
     }
   }
 
@@ -109,14 +143,12 @@ export function validatePriceAdjustmentTriggerCondition(
         typeof entry === 'string' && !ORDER_SETTLEMENT_TYPES.has(entry.trim()),
     )
   ) {
-    errors.push(
-      `settlementTypes 只能使用：${Object.values(OrderSettlementType).join('、')}`,
-    );
+    errors.push('结算类型包含不支持的选项，请重新选择。');
   }
 
   for (const key of BOOLEAN_KEYS) {
     if (key in value && typeof value[key] !== 'boolean') {
-      errors.push(`${key}必须是布尔值 true 或 false`);
+      errors.push(`“${CONDITION_FIELD_LABELS[key]}”设置无效，请重新选择。`);
     }
   }
 
@@ -124,7 +156,7 @@ export function validatePriceAdjustmentTriggerCondition(
     if (!(key in value)) continue;
     const candidate = value[key];
     if (!Number.isSafeInteger(candidate) || (candidate as number) < 1) {
-      errors.push(`${key}必须是正整数`);
+      errors.push(`“${CONDITION_FIELD_LABELS[key]}”必须填写正整数。`);
     }
   }
 
@@ -133,10 +165,10 @@ export function validatePriceAdjustmentTriggerCondition(
     value.craftMode !== 'ANY' &&
     value.craftMode !== 'ALL'
   ) {
-    errors.push('craftMode 只能是 ANY 或 ALL');
+    errors.push('多工艺匹配方式无效，请重新选择。');
   }
   if ('craftMode' in value && !('craftIds' in value)) {
-    errors.push('craftMode 必须与 craftIds 一起使用');
+    errors.push('设置多工艺匹配方式前，请先选择至少一项工艺。');
   }
   if (
     typeof value.minQty === 'number' &&
@@ -145,15 +177,13 @@ export function validatePriceAdjustmentTriggerCondition(
     Number.isSafeInteger(value.maxQty) &&
     value.minQty > value.maxQty
   ) {
-    errors.push('minQty 不能大于 maxQty');
+    errors.push('最小数量不能大于最大数量。');
   }
   if (
     adjustmentType === AdjustmentType.PER_SHEET &&
     !('unitsPerSheet' in value)
   ) {
-    errors.push(
-      '按张计价必须提供正整数 unitsPerSheet（每张可生产数量）',
-    );
+    errors.push('按张计价必须填写“每张可生产数量”。');
   }
 
   return errors;

@@ -30,7 +30,11 @@ export function BackgroundJobActionButton({
   >(action, null);
 
   return (
-    <form action={formAction} className="inline-flex flex-col items-end gap-1">
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="inline-flex flex-col items-end gap-1"
+    >
       <input type="hidden" name="jobId" value={jobId} />
       <Button variant="outline" size="xs" type="submit" disabled={pending}>
         {pending ? '处理中…' : label}

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: #e9e9ec; font: 400 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; color: #27272a }
+  h1, h2, h3 { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; letter-spacing: -0.01em }
+  a { color: #b91c1c; text-decoration: none }
+  .nw { white-space: nowrap }
+  .frame { width: 1280px; height: 800px; overflow: hidden; background: #fafafa; border: 1px solid #d7d7db; display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 100% }
+  .col { display: flex; flex-direction: column; min-width: 0 }
+  .pcard { background: #fff; border: 1px solid #ececee; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap }
+  .btn-p { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 15px; border: none; border-radius: 8px; background: #dc2626; color: #fff; cursor: pointer; white-space: nowrap }
+  .btn-s { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 13px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #3f3f46; cursor: pointer; white-space: nowrap }
+  .btn-d { font: inherit; font-size: 13px; font-weight: 500; height: 34px; padding: 0 13px; border: 1px solid #fecaca; border-radius: 8px; background: #fff; color: #b91c1c; cursor: pointer; white-space: nowrap }
+  .fld { font-size: 12.5px; height: 30px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; display: flex; align-items: center; padding: 0 10px }
+  .cap { font-size: 12.5px; color: #52525b }
+  .oid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; padding: 3px 8px; background: #18181b; color: #fff; border-radius: 5px }
+  .sect { padding: 30px 40px 34px; border-bottom: 1px solid #d7d7db }
+</style>
+</helmet>
+
+<div style="min-width: 2760px; padding-bottom: 46px">
+
+  <div style="padding: 34px 40px 24px; background: #fff; border-bottom: 1px solid #d7d7db">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+      <h1 style="margin: 0; font-size: 36px; font-weight: 700">批次六 · 账单与薪资</h1>
+      <span class="pill" style="background: #f4f4f5; color: #52525b">1280×800</span>
+      <span class="pill" style="background: #fef2f2; color: #b91c1c">13 个页面</span>
+    </div>
+    <p style="max-width: 1180px; margin: 11px 0 0; font-size: 15px; line-height: 1.65; color: #52525b; text-wrap: pretty"><b>证据范围</b>：本轮打开了 salary-daily-light（1280）。账单四页与薪资其余四页的原图未打开，相关判断标「推断」。<b>本批的核心命题</b>：薪资页不是普通数据表——重算、结算、人工调整、发放是四类不同风险的操作，而快照是审计证据。旅程文档写死了「保留生成时的规则快照，人工调整是追加事实，不要把历史金额表达成可任意覆盖」。</p>
+    <div class="pcard" style="max-width: 1180px; margin-top: 14px; padding: 12px 15px; border-color: #fecaca">
+      <div style="font-size: 14px; font-weight: 600; color: #b91c1c">本批最重的一条</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #3f3f46; margin-top: 4px; text-wrap: pretty">观察（salary-daily-light 1280）：<b>「重算该日全员日薪」是整页唯一的红色主按钮</b>，和日期选择器并排放在最显眼的位置——而它会覆盖该日已生成的全员工资数据，是标准的 L3 不可逆操作。同一页上「导出 Excel」这种零副作用的动作反而是次要样式。另外日期出现在两处（重算卡一个、筛选卡一个），两个 date input 各管各的，用户很容易在 A 日期下按了 B 日期的重算。</div>
+    </div>
+  </div>
+
+  <section class="sect" id="s1">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 6px">
+      <span class="oid">B1</span><h2 style="margin: 0; font-size: 23px; font-weight: 700">计件工资</h2>
+      <span class="cap">/owner/salary/daily · 契约 01 02 03 07 08 09</span>
+    </div>
+    <div class="frame">
+      <div style="background: #fff; border-right: 1px solid #ececec; display: flex; flex-direction: column">
+        <div style="padding: 13px 16px 11px"><div style="font-size: 15px; font-weight: 700">红包印刷 ERP</div><div style="font-size: 11px; color: #71717a; margin-top: 1px">管理员后台</div></div>
+        <sc-for list="{{ nav }}" as="g" hint-placeholder-count="3">
+          <div style="padding: 0 0 9px">
+            <div style="padding: 0 16px 3px; font-size: 11px; color: #71717a">{{ g.group }}</div>
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 9px; margin: 0 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; background: {{ it.bg }}; box-shadow: inset 2px 0 0 {{ it.edge }}">
+                <i style="display: block; width: 14px; height: 14px; border: 1.4px solid #a1a1aa; border-radius: 3px; flex: none"></i>
+                <span class="nw" style="font-weight: {{ it.w }}">{{ it.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div class="col">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 48px; background: #fff; border-bottom: 1px solid #ececec; flex: none">
+          <i style="display: block; width: 15px; height: 13px; border: 1.4px solid #52525b; border-radius: 3px; flex: none"></i>
+          <div class="nw" style="font-size: 12.5px; color: #71717a; display: flex; gap: 6px"><span>薪资</span><span>›</span><span style="color: #3f3f46">计件工资</span></div>
+          <div style="flex: 1"></div>
+          <div class="nw" style="display: flex; gap: 14px; font-size: 12.5px; color: #3f3f46"><span>工单</span><span>排产</span><span>采购单</span><span>仓库/库位</span></div>
+          <span class="pill" style="border: 1px solid #e4e4e7; color: #52525b">DEVELOPMENT</span>
+          <div class="nw" style="display: flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px; border: 1px solid #e4e4e7; border-radius: 999px"><i style="display: block; width: 22px; height: 22px; border-radius: 999px; background: #fee2e2"></i><span style="font-size: 12.5px; font-weight: 500">E2E 管理员 · 管理员…</span></div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 20px 0; flex: none">
+          <div style="min-width: 0">
+            <h3 style="margin: 0; font-size: 22px; font-weight: 700">计件工资</h3>
+            <div class="cap" style="margin-top: 2px">按上海日历天汇总已完工任务。</div>
+          </div>
+          <div style="display: flex; gap: 8px; flex: none">
+            <button type="button" class="btn-s">计件规则</button>
+            <button type="button" class="btn-s">导出 Excel</button>
+          </div>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: none">
+          <div class="pcard" style="padding: 10px 13px">
+            <div style="display: flex; align-items: center; gap: 9px">
+              <span class="cap nw" style="font-size: 12px">日期</span>
+              <div class="fld nw" style="width: 132px; font-weight: 500">2026-08-23 ▾</div>
+              <span class="cap nw" style="font-size: 12px">状态</span><div class="fld nw">全部 ▾</div>
+              <span class="cap nw" style="font-size: 12px">师傅</span><div class="fld nw" style="width: 150px">全部师傅 ▾</div>
+              <div style="flex: 1"></div>
+              <span class="nw" style="font-size: 12.5px; font-variant-numeric: tabular-nums">记录 <b>12</b> 条</span>
+              <div style="width: 1px; height: 20px; background: #ececee"></div>
+              <button type="button" class="btn-d" style="height: 30px; font-size: 12.5px">重算该日全员日薪</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f4f4f5">
+              <span class="cap" style="font-size: 11px">计算口径</span>
+              <sc-for list="{{ rules }}" as="r" hint-placeholder-count="3">
+                <span class="pill nw" style="background: #f4f4f5; color: #52525b">{{ r }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; padding: 11px 20px 0; flex: none">
+          <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+            <div class="pcard" style="padding: 10px 13px; border-color: {{ k.bd }}">
+              <div class="cap nw" style="font-size: 11.5px">{{ k.k }}</div>
+              <div class="nw" style="font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; color: {{ k.c }}">{{ k.v }}</div>
+              <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px">{{ k.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="padding: 11px 20px 0; flex: 1; min-height: 0; overflow: hidden">
+          <div class="pcard" style="height: 100%; overflow: hidden; display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: 30px 150px 104px 96px 96px 104px 118px 1fr; gap: 10px; padding: 9px 13px; background: #fafafa; border-bottom: 1px solid #f0f0f2; font-size: 11.5px; color: #71717a; flex: none">
+              <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid #d4d4d8; border-radius: 4px"></i></div>
+              <div>师傅 / 工种</div><div style="text-align: right">计件合计</div><div style="text-align: right">保底</div><div style="text-align: right">人工调整</div><div style="text-align: right">应发</div><div>状态</div><div>规则快照</div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; min-height: 0">
+              <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+                <div style="display: grid; grid-template-columns: 30px 150px 104px 96px 96px 104px 118px 1fr; gap: 10px; align-items: center; padding: 9px 13px; border-bottom: 1px solid #f5f5f7; background: {{ r.bg }}">
+                  <div><i style="display: block; width: 14px; height: 14px; border: 1.4px solid {{ r.ckBd }}; border-radius: 4px; background: {{ r.ckBg }}"></i></div>
+                  <div style="min-width: 0">
+                    <div class="nw" style="font-size: 12.5px; font-weight: 500">{{ r.name }}</div>
+                    <div class="nw" style="font-size: 11px; color: #52525b; margin-top: 1px">{{ r.job }}</div>
+                  </div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums">{{ r.piece }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: {{ r.baseC }}">{{ r.base }}</div>
+                  <div class="nw" style="text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: {{ r.adjC }}">{{ r.adj }}</div>
+                  <div class="nw" style="text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums">{{ r.pay }}</div>
+                  <div><span class="pill nw" style="background: {{ r.stBg }}; color: {{ r.stFg }}">{{ r.st }}</span></div>
+                  <div class="nw" style="font-size: 11.5px; color: #52525b; overflow: hidden; text-overflow: ellipsis">{{ r.snap }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 9px 13px; border-top: 1px solid #f0f0f2; background: #fafafa; flex: none">
+              <span class="nw" style="font-size: 12.5px; font-weight: 500">已选 2 人 · 应发合计 ¥412.60</span>
+              <div style="flex: 1"></div>
+              <button type="button" class="btn-s" style="height: 30px; font-size: 12.5px">人工调整</button>
+              <button type="button" class="btn-d" style="height: 30px; font-size: 12.5px">标记发放</button>
+            </div>
+          </div>
+        </div>
+        <div style="height: 14px; flex: none"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="dlg">
+    <div style="display: flex; align-items: baseline; gap: 11px; margin-bottom: 12px">
+      <h2 style="margin: 0; font-size: 23px; font-weight: 700">重算与发放的 L3 确认层</h2>
+      <span class="cap">薪资是本系统里最不可逆的一类操作</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+      <sc-for list="{{ dialogs }}" as="d" hint-placeholder-count="2">
+        <div style="flex: none; width: 560px">
+          <div style="display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px">
+            <span class="pill" style="background: #fef2f2; color: #b91c1c">L3 · 需理由</span>
+            <span style="font-size: 14px; font-weight: 600">{{ d.title }}</span>
+          </div>
+          <div style="padding: 24px; border-radius: 14px; background: rgba(24,24,27,0.42)">
+            <div style="background: #fff; border-radius: 14px; padding: 17px 19px 16px; box-shadow: 0 18px 44px rgba(0,0,0,0.28)">
+              <div style="font-size: 17px; font-weight: 700">{{ d.h }}</div>
+              <div style="font-size: 13px; line-height: 1.65; color: #52525b; margin-top: 6px; text-wrap: pretty">{{ d.body }}</div>
+              <div style="margin-top: 11px; border: 1px solid #f0f0f2; border-radius: 10px; overflow: hidden">
+                <div style="padding: 7px 11px; background: #fafafa; font-size: 11.5px; color: #52525b; border-bottom: 1px solid #f0f0f2">受影响对象</div>
+                <sc-for list="{{ d.impact }}" as="im" hint-placeholder-count="4">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 11px; border-bottom: 1px solid #f7f7f9; font-size: 12.5px">
+                    <span style="color: #3f3f46">{{ im.k }}</span>
+                    <span class="nw" style="font-variant-numeric: tabular-nums; font-weight: 500; color: {{ im.c }}">{{ im.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top: 11px">
+                <span class="cap" style="font-size: 11.5px; display: block; margin-bottom: 4px">{{ d.reason }}</span>
+                <div style="height: 54px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; padding: 8px 11px; font-size: 12.5px; color: #71717a">{{ d.ph }}</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 9px; margin-top: 13px">
+                <span class="cap" style="font-size: 11.5px">{{ d.note }}</span>
+                <div style="flex: 1"></div>
+                <button type="button" class="btn-s">取消</button>
+                <button type="button" class="btn-d">{{ d.ok }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="sect" id="rest" style="border-bottom: none">
+    <h2 style="margin: 0 0 6px; font-size: 23px; font-weight: 700">本批其余十二页</h2>
+    <p class="cap" style="max-width: 1180px; margin: 0 0 16px">账单四页与薪资其余八页的原图本轮未打开，以下按已定骨架与业务约束推导，逐条标注。</p>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 860px)); gap: 16px 22px">
+      <sc-for list="{{ rest }}" as="r" hint-placeholder-count="8">
+        <div class="pcard" style="padding: 13px 15px 14px">
+          <div style="display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap">
+            <span style="font-size: 14.5px; font-weight: 600">{{ r.name }}</span>
+            <span class="pill" style="background: {{ r.tBg }}; color: {{ r.tFg }}">{{ r.tag }}</span>
+          </div>
+          <div class="cap" style="font-size: 11.5px; margin-top: 2px">{{ r.route }}</div>
+          <div style="font-size: 12.5px; line-height: 1.65; color: #3f3f46; margin-top: 7px; text-wrap: pretty">{{ r.t }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2760,&quot;height&quot;:1500}}">
+function navFor(active) {
+  const G = [
+    ['概览', [['Dashboard', 0]]],
+    ['业务', [['工单', 0], ['采购单', 0], ['工单修改申请', 0], ['排产', 0], ['外协', 0], ['车间用料', 0], ['工时录入', 0]]],
+    ['财务', [['账单', 0], ['薪资总览', 0], ['计件工资', 0], ['开机师傅计件规则', 0], ['员工工资规则', 0]]],
+  ];
+  return G.map(([group, items]) => ({
+    group,
+    items: items.map(([label]) => ({
+      label, w: label === active ? 600 : 400,
+      bg: label === active ? '#f4f4f5' : 'transparent',
+      edge: label === active ? '#dc2626' : 'transparent',
+    })),
+  }));
+}
+
+const RULES = ['取「计件合计」与「机型最高保底」的较高者', '再加人工调整', '上班/请假天数仅作考勤展示，不自动扣减保底'];
+
+const KPIS = [
+  ['记录数', '12', '当日已生成', '#e4e4e7', '#27272a'],
+  ['计件合计', '¥2,486.40', '未含保底与调整', '#e4e4e7', '#27272a'],
+  ['当日应发合计', '¥2,742.60', '含保底补足与人工调整', '#e4e4e7', '#27272a'],
+  ['未发合计', '¥1,180.20', '5 人待发放', '#fecaca', '#b91c1c'],
+];
+
+const ROWS = [
+  ['E2E 开机仔', '开机师傅 · 风车机', '¥286.40', '—', '—', '¥286.40', '已发放', 'v4 · 08-01 起', 0],
+  ['李师傅', '开机师傅 · 风车机', '¥168.00', '¥220.00 补足', '—', '¥220.00', '待发放', 'v4 · 08-01 起', 1],
+  ['王师傅', '黏封机', '¥312.80', '—', '+¥20.00', '¥332.80', '待发放', 'v4 · 08-01 起', 0],
+  ['赵师傅', '打包', '¥96.00', '¥180.00 补足', '—', '¥180.00', '待发放', 'v3 · 07-01 起', 1],
+  ['孙师傅', '开机师傅 · 风车机', '¥402.20', '—', '−¥15.00', '¥387.20', '已发放', 'v4 · 08-01 起', 0],
+  ['周师傅', '黏封机', '¥228.60', '—', '—', '¥228.60', '待发放', 'v4 · 08-01 起', 0],
+  ['吴师傅', '打包', '¥144.00', '¥180.00 补足', '—', '¥180.00', '待发放', 'v4 · 08-01 起', 0],
+];
+
+const DIALOGS = [
+  {
+    title: '重算该日全员日薪', h: '重算 2026-08-23 的全员日薪？', ok: '填写原因后重算',
+    body: '重算会用当前生效的计件规则重新计算该日所有师傅的日薪，并覆盖已生成的记录。已标记发放的记录不会被改动。',
+    impact: [['将被重算的记录', '7 条（待发放）', '#b45309'], ['跳过（已发放）', '5 条', '#52525b'], ['将换用的规则版本', 'v4 · 2026-08-01 起', '#27272a'], ['人工调整', '保留，重算后重新叠加', '#047857']],
+    reason: '重算原因 *（必填，记入薪资操作日志）',
+    ph: '例如：补录了 3 条漏报的完工任务',
+    note: '已发放记录不受影响',
+  },
+  {
+    title: '标记发放', h: '把 2 人的日薪标记为已发放？', ok: '填写发放方式后确认',
+    body: '标记发放后这两条记录进入终态只读：金额、保底与人工调整都不能再改，重算也会跳过它们。',
+    impact: [['标记人数', '2 人', '#27272a'], ['应发合计', '¥412.60', '#27272a'], ['进入只读', '是，不可撤销', '#b91c1c'], ['规则快照', '按当时规则固定保存', '#047857']],
+    reason: '发放方式与备注 *',
+    ph: '例如：2026-08-25 现金发放，已签字',
+    note: '操作留痕，可在薪资日志查',
+  },
+];
+
+const REST = [
+  ['账单列表', '推断', '/owner/bills', 'S1 列表 + KPI。原图未打开。核心：应收 / 已付 / 未付 / 付款流水四个数必须可追溯，部分付款不是错误状态。生成月账单属 L2，要列出会归集多少张已结案工单、合计多少钱。保存视图给「本月待发单 / 逾期未付 / 部分付款」。'],
+  ['账单详情', '推断', '/owner/bills/:id', 'S2 详情。左栏时间线走「生成 → 发单 → 部分付款 → 结清」；右栏分区保留加工费 / 快递费 / 打包耗材 / 其他四类分项，不合并成总额。登记付款是 L2，进抽屉填；发单是 L2，确认层列出收件人与金额。'],
+  ['销售账单 / 详情', '推断', '/sales/bills · /sales/bills/:id', '销售只看本人账单，只读。越权入口不渲染而不是禁用。交接包提示当前没有安全的 SALES-owned fixture，设计上不得借用 ADMIN 账单绕过 scope——这一页需要你们提供隔离好的测试数据才能验收。'],
+  ['计件工资详情', '推断', '/owner/salary/daily/:id', 'S2 详情。必须逐项列出：规则快照（哪一版、何时生效）、参与计算的任务明细、保底补足的计算过程、每一笔人工调整及其操作人和时间。人工调整是追加事实——用流水形式展示，不做成可编辑的当前值。'],
+  ['客服薪资周期', '推断', '/owner/salary/cs · cs/new · cs/:id', '周期有明确起止日与底薪。业绩来源是「客服提交的收费工单」，批准的金额变更记差额、取消时冲销——这三条口径要在界面上写出来，否则对不上账。结算属 L3。'],
+  ['时薪月结', '推断', '/owner/salary/hourly', '打包、保洁、厨师的月结。重算与发放同样是 L3，确认层列出人数与合计。月份切换要和筛选状态一起进 URL。'],
+  ['薪资总览', '推断', '/owner/salary', '入口卡片页。三类薪资（计件 / 客服 / 时薪）各自的状态与待办数，点进对应页面。不要在这里放任何写操作——总览页出现「重算」按钮是危险的。'],
+  ['薪资规则两页', '推断', '/owner/salary/piecework-rules · /owner/salary/rules', '规则版本有生效区间，改规则不影响已生成的历史工资（快照已固定）——这句话必须写在页面上。新建版本属 L3，要提示「将从 X 日起对新生成的工资生效」。'],
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: navFor('计件工资'),
+      rules: RULES,
+      kpis: KPIS.map(([k, v, sub, bd, c]) => ({ k, v, sub, bd, c })),
+      rows: ROWS.map(([name, job, piece, base, adj, pay, st, snap, sel]) => ({
+        name, job, piece, base, adj, pay, st, snap,
+        bg: sel ? '#fffafa' : '#fff',
+        ckBd: sel ? '#dc2626' : '#d4d4d8',
+        ckBg: sel ? '#dc2626' : '#fff',
+        baseC: base === '—' ? '#71717a' : '#b45309',
+        adjC: adj === '—' ? '#71717a' : (adj.charAt(0) === '−' ? '#b91c1c' : '#047857'),
+        stBg: st === '已发放' ? '#f4f4f5' : '#fffbeb',
+        stFg: st === '已发放' ? '#52525b' : '#b45309',
+      })),
+      dialogs: DIALOGS.map((d) => ({ ...d, impact: d.impact.map(([k, v, c]) => ({ k, v, c })) })),
+      rest: REST.map(([name, tag, route, t]) => ({
+        name, tag, route, t,
+        tBg: tag === '推断' ? '#fffbeb' : '#f4f4f5',
+        tFg: tag === '推断' ? '#92400e' : '#52525b',
+      })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

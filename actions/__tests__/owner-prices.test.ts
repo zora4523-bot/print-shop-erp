@@ -123,7 +123,9 @@ describe('createPriceTierAction', () => {
       effectiveFrom: new Date('2025-12-31T16:00:00.000Z'),
       effectiveTo: new Date('2026-05-31T16:00:00.000Z'),
     });
-    expect(redirectMock).toHaveBeenCalledWith('/owner/prices/tiers/tier1');
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/tiers/tier1',
+    );
   });
 
   it('rejects inverted effective windows at schema boundary', async () => {
@@ -183,12 +185,43 @@ describe('updatePriceTierAction', () => {
     const result = await updatePriceTierAction('tier1', null, fd(validTier));
 
     expect(result.status).toBe('success');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/tiers/tier1',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices/tiers/tier1');
   });
 });
 
 describe('createPriceAdjustmentAction', () => {
+  it('不向管理端暴露内部加价类型', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+    const result = await createPriceAdjustmentAction(
+      null,
+      fd({
+        ...validAdjustment,
+        adjustmentType: 'INTERNAL_ADJUSTMENT_TYPE',
+      }),
+    );
+
+    expect(result.status).toBe('invalid');
+    if (result.status === 'invalid') {
+      expect(result.fieldErrors.adjustmentType).toContain(
+        '请选择有效的加价类型',
+      );
+      const visibleErrors = JSON.stringify(result.fieldErrors);
+      expect(visibleErrors).not.toContain('INTERNAL_ADJUSTMENT_TYPE');
+      expect(visibleErrors).not.toContain('PER_ORDER');
+      expect(visibleErrors).not.toContain('PER_PIECE');
+      expect(visibleErrors).not.toContain('PER_SHEET');
+    }
+    expect(priceMock.createPriceAdjustment).not.toHaveBeenCalled();
+  });
+
   it('rejects non-object triggerCondition JSON', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     const result = await createPriceAdjustmentAction(
@@ -222,17 +255,19 @@ describe('createPriceAdjustmentAction', () => {
         unitsPerSheet: 500,
       },
     });
-    expect(redirectMock).toHaveBeenCalledWith('/owner/prices/adjustments/adj1');
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/adjustments/adj1',
+    );
   });
 
   it.each([
-    ['{"craft":"foil","unitsPerSheet":500}', '未知字段：craft'],
-    ['{"craftIds":"craft-foil","unitsPerSheet":500}', 'craftIds必须是'],
-    ['{"craftMode":"ALL","unitsPerSheet":500}', 'craftMode 必须与 craftIds'],
-    ['{"minQty":2000,"maxQty":1000,"unitsPerSheet":500}', 'minQty 不能大于 maxQty'],
-    ['{"perFoilColor":1,"unitsPerSheet":500}', 'perFoilColor必须是布尔值'],
-    ['{}', '按张计价必须提供正整数 unitsPerSheet'],
-    ['{"unitsPerSheet":0}', 'unitsPerSheet必须是正整数'],
+    ['{"craft":"foil","unitsPerSheet":500}', '页面不支持的设置'],
+    ['{"craftIds":"craft-foil","unitsPerSheet":500}', '限定工艺'],
+    ['{"craftMode":"ALL","unitsPerSheet":500}', '请先选择至少一项工艺'],
+    ['{"minQty":2000,"maxQty":1000,"unitsPerSheet":500}', '最小数量不能大于最大数量'],
+    ['{"perFoilColor":1,"unitsPerSheet":500}', '按烫金颜色数量计费'],
+    ['{}', '按张计价必须填写“每张可生产数量”'],
+    ['{"unitsPerSheet":0}', '每张可生产数量”必须填写正整数'],
   ])(
     'rejects triggerCondition outside the quote contract: %s',
     async (triggerCondition, expectedMessage) => {
@@ -360,6 +395,12 @@ describe('setPriceAdjustmentActiveAction', () => {
     const result = await setPriceAdjustmentActiveAction('adj1', false);
 
     expect(result.status).toBe('success');
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/rules/internal-pricing/adjustments/adj1',
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/prices');
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/prices/adjustments/adj1',

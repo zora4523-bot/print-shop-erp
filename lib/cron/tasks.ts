@@ -1,4 +1,3 @@
-import Decimal from 'decimal.js';
 import { Role } from '../../generated/prisma/enums';
 import {
   BillGenerationUnexpectedError,
@@ -13,6 +12,16 @@ import {
 } from '../dashboard/owner-watchlist';
 import { formatDateShanghai } from '../format/dates';
 import { dispatchNotification } from '../notification/dispatch';
+import {
+  dailySalaryNotificationKey,
+  getOrCreateDailySalaryRoster,
+  prepareDailySalarySummary,
+  readDailySalaryRunCheckpoint,
+} from './daily-salary-summary';
+import {
+  assertExecutionFence,
+  type ExecutionFence,
+} from '../execution-fence';
 import { orderStatusZh } from '../order/log-format';
 import { cleanupExpiredOrderExports } from '../order/export';
 import { scrubTerminalOrderExportFilters } from '../order/export-retention';
@@ -50,11 +59,32 @@ function logPartialBatchProgress(
   });
 }
 
-export async function runDailySalaryTask(date: string) {
+export async function runDailySalaryTask(
+  date: string,
+  fence?: ExecutionFence,
+) {
+  const checkpoint = await readDailySalaryRunCheckpoint(date);
+  if (checkpoint) {
+    return {
+      status: 'ok' as const,
+      date,
+      workerCount: checkpoint.workerCount,
+      errorCount: 0,
+    };
+  }
+
+  const roster = await getOrCreateDailySalaryRoster(date, fence);
+
   let unexpected: DailyBatchUnexpectedError | null = null;
   let result: BatchDailyResult;
   try {
-    result = await computeDailyForAllMachineWorkers(date);
+    result = await computeDailyForAllMachineWorkers(
+      date,
+      undefined,
+      fence,
+      true,
+      roster,
+    );
   } catch (error) {
     if (!(error instanceof DailyBatchUnexpectedError)) throw error;
     unexpected = error;
@@ -68,36 +98,46 @@ export async function runDailySalaryTask(date: string) {
     // summary on retry, so leave partial progress to counts-only observability.
     throw unexpected;
   }
-  if (settled.length > 0) {
-    const totalAmount = settled
-      .reduce<Decimal>(
-        (sum, row) => sum.plus(new Decimal(row.actualSalary)),
-        new Decimal(0),
-      )
-      .toFixed(2);
+  if (errors.length > 0) {
+    logPartialBatchProgress('daily-salary', settled.length, errors.length);
+    throw new DailySalaryBatchIncompleteError(result);
+  }
+
+  const summary = await prepareDailySalarySummary(date, roster, fence);
+  if (summary.workerCount > 0 && !summary.notificationQueued) {
     await dispatchNotification(
       'DAILY_WORKER_SALARY',
       {
         date,
-        workerCount: settled.length,
-        totalAmount: formatMoneyPlain(totalAmount),
+        workerCount: summary.workerCount,
+        totalAmount: summary.totalAmount,
       },
-      { dedupeKey: `notification:DAILY_WORKER_SALARY:${date}` },
+      { dedupeKey: dailySalaryNotificationKey(date) },
     );
   }
   return {
     status: 'ok' as const,
     date,
-    workerCount: settled.length,
-    errorCount: errors.length,
+    workerCount: summary.workerCount,
+    errorCount: 0,
   };
 }
 
-export async function runHourlyPayrollTask(month: string) {
+export class DailySalaryBatchIncompleteError extends Error {
+  readonly partialResult: BatchDailyResult;
+
+  constructor(partialResult: BatchDailyResult) {
+    super('daily salary batch contains unresolved worker errors');
+    this.name = 'DailySalaryBatchIncompleteError';
+    this.partialResult = partialResult;
+  }
+}
+
+export async function runHourlyPayrollTask(month: string, fence?: ExecutionFence) {
   let unexpected: HourlyBatchUnexpectedError | null = null;
   let result: BatchHourlyResult;
   try {
-    result = await computeHourlyForAllInMonth(month);
+    result = await computeHourlyForAllInMonth(month, undefined, fence);
   } catch (error) {
     if (!(error instanceof HourlyBatchUnexpectedError)) throw error;
     unexpected = error;
@@ -118,9 +158,15 @@ export async function runHourlyPayrollTask(month: string) {
 
 async function dispatchCsSettlementNotifications(
   settled: SettledCommission[],
+  fence?: ExecutionFence,
 ): Promise<void> {
-  if (settled.length > 0) {
-    const csIds = Array.from(new Set(settled.map((row) => row.csUserId)));
+  const needsPostCommitDispatch = settled.filter(
+    (row) => !row.notificationQueued,
+  );
+  if (needsPostCommitDispatch.length > 0) {
+    const csIds = Array.from(
+      new Set(needsPostCommitDispatch.map((row) => row.csUserId)),
+    );
     // The name is presentation-only. A settlement may already be committed
     // when this best-effort lookup runs, so a transient read failure must not
     // prevent its durable, deduplicated notification from being enqueued.
@@ -139,11 +185,12 @@ async function dispatchCsSettlementNotifications(
         return [];
       });
     const nameById = new Map(users.map((user) => [user.id, user.displayName]));
-    for (const row of settled) {
+    for (const row of needsPostCommitDispatch) {
+      await assertExecutionFence(fence);
       await dispatchNotification(
         'CS_PERIOD_SETTLED',
         {
-          settledCount: settled.length,
+          settledCount: 1,
           csName: nameById.get(row.csUserId) ?? row.csUserId,
           totalSales: formatMoneyPlain(row.totalSales),
           commission: formatMoneyPlain(row.commissionAmount),
@@ -156,18 +203,18 @@ async function dispatchCsSettlementNotifications(
   }
 }
 
-export async function runCsSettleTask() {
+export async function runCsSettleTask(fence?: ExecutionFence) {
   let unexpected: CsBatchUnexpectedError | null = null;
   let result: BatchSettleResult;
   try {
-    result = await settleReadyCsPeriods();
+    result = await settleReadyCsPeriods(undefined, undefined, fence);
   } catch (error) {
     if (!(error instanceof CsBatchUnexpectedError)) throw error;
     unexpected = error;
     result = error.partialResult;
   }
   const { settled, errors } = result;
-  await dispatchCsSettlementNotifications(settled);
+  await dispatchCsSettlementNotifications(settled, fence);
   // The successful rows are already committed and their deduplicated
   // notifications have now been queued. Rethrow so Sentry and the durable job
   // retry the unprocessed tail rather than silently marking a partial run OK.
@@ -179,14 +226,17 @@ export async function runCsSettleTask() {
   };
 }
 
-export async function runGenerateBillsTask(period: string) {
+export async function runGenerateBillsTask(
+  period: string,
+  fence?: ExecutionFence,
+) {
   let unexpected: BillGenerationUnexpectedError | null = null;
   let result: BillGenerationResult;
   try {
     result = await generateBillsForPeriod(period, {
       id: 'system',
       role: Role.ADMIN,
-    });
+    }, fence);
   } catch (error) {
     if (!(error instanceof BillGenerationUnexpectedError)) throw error;
     unexpected = error;
@@ -208,11 +258,15 @@ export async function runGenerateBillsTask(period: string) {
   };
 }
 
-export async function runOutsourceOverdueTask(runDate: string) {
+export async function runOutsourceOverdueTask(
+  runDate: string,
+  fence?: ExecutionFence,
+) {
   const rows = await getOverdueOutsourcing();
   // spreadIndex：批量扇出按序摊开 availableAt，别把整批同时怼向企业微信
   // 的 20 条/分钟限额（见 lib/background-jobs/notification.ts）。
   for (const [index, row] of rows.entries()) {
+    await assertExecutionFence(fence);
     await dispatchNotification(
       'OUTSOURCE_OVERDUE',
       {
@@ -230,9 +284,13 @@ export async function runOutsourceOverdueTask(runDate: string) {
   }
   return { status: 'ok' as const, overdueCount: rows.length };
 }
-export async function runCsPeriodEndingTask(runDate: string) {
+export async function runCsPeriodEndingTask(
+  runDate: string,
+  fence?: ExecutionFence,
+) {
   const rows = await getEndingPeriods();
   for (const [index, row] of rows.entries()) {
+    await assertExecutionFence(fence);
     await dispatchNotification(
       'CS_PERIOD_ENDING',
       {
@@ -250,7 +308,10 @@ export async function runCsPeriodEndingTask(runDate: string) {
   return { status: 'ok' as const, endingCount: rows.length };
 }
 
-export async function runOrderOverdueTask(runDate: string) {
+export async function runOrderOverdueTask(
+  runDate: string,
+  fence?: ExecutionFence,
+) {
   // 「只推逾期」由 scanOverdueOrders 在 SQL 层保证（promisedDate <
   // 今日上海日界）。以前这里取的是看板那份「逾期 + 3 天内到期」的无界
   // 结果再在 JS 里 filter，等于把 due-soon 的行白搬一趟，还把看板的
@@ -265,6 +326,7 @@ export async function runOrderOverdueTask(runDate: string) {
     });
   }
   for (const [index, row] of rows.entries()) {
+    await assertExecutionFence(fence);
     await dispatchNotification(
       'ORDER_OVERDUE',
       {
@@ -289,8 +351,13 @@ export async function runOrderOverdueTask(runDate: string) {
   return { status: 'ok' as const, overdueCount: rows.length, truncated };
 }
 
-export async function runOrderExportCleanupTask(runDate: string) {
+export async function runOrderExportCleanupTask(
+  runDate: string,
+  fence?: ExecutionFence,
+) {
+  await assertExecutionFence(fence);
   const scrubbedFilterCount = await scrubTerminalOrderExportFilters();
+  await assertExecutionFence(fence);
   const expiredCount = await cleanupExpiredOrderExports();
   return {
     status: 'ok' as const,

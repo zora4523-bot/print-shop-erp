@@ -1,10 +1,8 @@
 import { OrderStatus } from '../../../generated/prisma/enums';
-import {
-  ORDER_STATUS_TO_BADGE,
-  StatusBadge,
-} from '@/components/ui-business';
+import { StatusBadge } from '@/components/ui-business';
+import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
-// 工单状态徽章——委托给 ui-business 的 StatusBadge + ORDER_STATUS_TO_BADGE
+// 工单状态徽章——委托给 ui-business 的 StatusBadge + ORDER_STATUS_REGISTRY
 // 集中映射，让&ldquo;状态色 / dot / 文案&rdquo;在跨页面（OrdersTable / 详情头 /
 // dashboard 列表 / production-flow E2E）保持一致。
 //
@@ -13,7 +11,7 @@ import {
 // IN_PRODUCTION/COMPLETED/SHIPPED。新版按状态语义着色，看一眼就知道。
 
 export function orderStatusLabel(status: OrderStatus): string {
-  return ORDER_STATUS_TO_BADGE[status]?.label ?? status;
+  return ORDER_STATUS_REGISTRY[status].label;
 }
 
 export function OrderStatusBadge({
@@ -23,12 +21,7 @@ export function OrderStatusBadge({
   status: OrderStatus;
   className?: string;
 }) {
-  const cfg = ORDER_STATUS_TO_BADGE[status];
-  if (!cfg) {
-    // schema 加新状态但 map 漏配——退化成 neutral 而不是抛错，避免
-    // 一个状态枚举的疏漏导致整个工单页崩。
-    return <StatusBadge tone="neutral" className={className}>{status}</StatusBadge>;
-  }
+  const cfg = ORDER_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={cfg.tone} dot={cfg.dot} className={className}>
       {cfg.label}

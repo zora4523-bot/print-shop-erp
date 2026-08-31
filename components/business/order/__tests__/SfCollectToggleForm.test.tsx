@@ -61,7 +61,8 @@ describe('SfCollectToggleForm', () => {
     expect(weight).toContain('required=""');
     expect(weight).toContain('aria-required="true"');
     expect(shipping).not.toContain('required=""');
-    expect(html).toContain('留空则按冻结价目自动核价');
+    expect(html).toContain('留空则按创建时价格自动核价');
+    expect(html).not.toContain('冻结价目');
     expect(html).toContain('确认取消并重新核算应收');
   });
 

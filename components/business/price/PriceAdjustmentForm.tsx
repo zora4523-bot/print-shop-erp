@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState, useMemo, useState } from 'react';
 import {
   AdjustmentType,
@@ -8,16 +7,20 @@ import {
 } from '../../../generated/prisma/enums';
 import type { PriceMutationResult } from '@/actions/owner-prices.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';
 import {
   PRICE_ADJUSTMENT_CONDITION_KEYS,
+  priceAdjustmentConditionErrorForDisplay,
   validatePriceAdjustmentTriggerCondition,
   type PriceAdjustmentConditionKey,
   type PriceAdjustmentTriggerCondition,
 } from '@/lib/price/adjustment-condition';
 import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type PriceAdjustmentInitial = {
   name: string;
@@ -82,6 +85,10 @@ export function PriceAdjustmentForm(props: Props) {
         parsedDraft.condition,
         adjustmentType,
       );
+  const submittedConditionErrors = conditionErrorsForDisplay(
+    errs.triggerCondition,
+  );
+  const visibleDraftErrors = conditionErrorsForDisplay(draftErrors);
 
   function setConditionField(
     key: PriceAdjustmentConditionKey,
@@ -91,7 +98,7 @@ export function PriceAdjustmentForm(props: Props) {
   }
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <TextField
         id="name"
         label="收费项目名称"
@@ -138,9 +145,9 @@ export function PriceAdjustmentForm(props: Props) {
 
       <section className="space-y-4 rounded-xl border bg-muted/20 p-4">
         <div>
-          <h2 className="text-sm font-semibold">触发条件</h2>
+          <h2 className="text-sm font-semibold">适用条件</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            选择这项费用适用的产品、工艺和工单条件；全部留空表示通用。
+            全部留空表示通用。
           </p>
         </div>
 
@@ -164,15 +171,15 @@ export function PriceAdjustmentForm(props: Props) {
           value={triggerCondition}
         />
 
-        {errs.triggerCondition?.[0] ? (
+        {submittedConditionErrors.length > 0 ? (
           <div id="triggerCondition-error" role="alert" className="space-y-1 text-sm text-destructive">
-            {errs.triggerCondition.map((error) => (
+            {submittedConditionErrors.map((error) => (
               <p key={error}>{error}</p>
             ))}
           </div>
-        ) : draftErrors.length > 0 ? (
+        ) : visibleDraftErrors.length > 0 ? (
           <div id="triggerCondition-help" className="space-y-1 text-sm text-warning-foreground">
-            {draftErrors.map((error) => (
+            {visibleDraftErrors.map((error) => (
               <p key={error}>{error}</p>
             ))}
             {parsedDraft.error ? (
@@ -183,18 +190,11 @@ export function PriceAdjustmentForm(props: Props) {
                 disabled={pending}
                 onClick={() => setTriggerCondition('')}
               >
-                清空旧条件后重新设置
+                重新设置条件
               </Button>
             ) : null}
           </div>
-        ) : (
-          <p
-            id="triggerCondition-help"
-            className="text-xs text-success-foreground"
-          >
-            当前业务条件可以保存。
-          </p>
-        )}
+        ) : null}
       </section>
 
       {generalError ? (
@@ -212,12 +212,24 @@ export function PriceAdjustmentForm(props: Props) {
         <Button type="submit" disabled={pending}>
           {pending ? '提交中…' : props.mode === 'create' ? '创建收费项目' : '保存修改'}
         </Button>
-        <Link href="/owner/prices" className={buttonVariants({ variant: 'outline' })}>
-          返回报价管理
-        </Link>
+        <PendingLink
+          href={RULE_CENTER_HREFS.internalPricing}
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
+          返回内部直单价格
+        </PendingLink>
       </div>
     </form>
   );
+}
+
+function conditionErrorsForDisplay(
+  errors: readonly string[] | undefined,
+): string[] {
+  return [
+    ...new Set((errors ?? []).map(priceAdjustmentConditionErrorForDisplay)),
+  ];
 }
 
 function ConditionBuilder({
@@ -240,8 +252,8 @@ function ConditionBuilder({
     <div className="grid gap-4 md:grid-cols-2">
       <MultiSelectField
         id="condition-productIds"
-        label="限定产品"
-        hint="可多选；不选表示不限产品。"
+        label="适用产品"
+        hint="不选表示不限产品。"
         options={products}
         value={stringArray(condition.productIds)}
         disabled={disabled}
@@ -249,8 +261,8 @@ function ConditionBuilder({
       />
       <MultiSelectField
         id="condition-craftIds"
-        label="限定工艺"
-        hint="可多选；不选表示不限工艺。"
+        label="适用工艺"
+        hint="不选表示不限工艺。"
         options={crafts}
         value={stringArray(condition.craftIds)}
         disabled={disabled}
@@ -263,8 +275,8 @@ function ConditionBuilder({
         value={condition.craftMode ?? ''}
         disabled={disabled}
         options={[
-          { value: '', label: '任意一项' },
-          { value: 'ANY', label: '任意一项' },
+          { value: '', label: '不指定' },
+          { value: 'ANY', label: '命中任一工艺' },
           { value: 'ALL', label: '必须全部包含' },
         ]}
         onChange={(value) =>
@@ -276,16 +288,13 @@ function ConditionBuilder({
       />
       <MultiSelectField
         id="condition-settlementTypes"
-        label="结算类型"
-        hint="可多选；不选表示不限。外部销售已由独立版本化价目簿管理，在此选择不会改变外部销售报价。"
+        label="适用订单"
+        hint="不选表示不限。"
         value={stringArray(condition.settlementTypes)}
         disabled={disabled}
         options={Object.values(OrderSettlementType).map((value) => ({
           id: value,
-          label:
-            value === OrderSettlementType.EXTERNAL_SALES
-              ? `${ORDER_SETTLEMENT_LABELS[value]}（独立价目簿）`
-              : ORDER_SETTLEMENT_LABELS[value],
+          label: ORDER_SETTLEMENT_LABELS[value],
         }))}
         onChange={(value) => onChange('settlementTypes', value)}
       />
@@ -295,6 +304,7 @@ function ConditionBuilder({
         label="规格"
         hint="多项用逗号分隔，例如：大号, 中号。"
         value={stringArray(condition.specifications)}
+        projectBusinessText
         disabled={disabled}
         onChange={(value) => onChange('specifications', value)}
       />
@@ -303,6 +313,7 @@ function ConditionBuilder({
         label="纸张"
         hint="多项用逗号分隔。"
         value={stringArray(condition.paperTypes)}
+        projectBusinessText
         disabled={disabled}
         onChange={(value) => onChange('paperTypes', value)}
       />
@@ -316,21 +327,21 @@ function ConditionBuilder({
       />
       <BooleanField
         id="condition-isDoubleSided"
-        label="是否双面"
+        label="单双面"
         value={condition.isDoubleSided}
         disabled={disabled}
         onChange={(value) => onChange('isDoubleSided', value)}
       />
       <BooleanField
         id="condition-isDoubleColor"
-        label="是否双色"
+        label="单双色"
         value={condition.isDoubleColor}
         disabled={disabled}
         onChange={(value) => onChange('isDoubleColor', value)}
       />
       <BooleanField
         id="condition-perFoilColor"
-        label="是否按烫金色数量倍增"
+        label="按烫金色数计费"
         value={condition.perFoilColor}
         disabled={disabled}
         onChange={(value) => onChange('perFoilColor', value)}
@@ -492,6 +503,7 @@ function StringListField({
   label,
   hint,
   value,
+  projectBusinessText = false,
   disabled,
   onChange,
 }: {
@@ -499,23 +511,24 @@ function StringListField({
   label: string;
   hint: string;
   value: string[];
+  projectBusinessText?: boolean;
   disabled: boolean;
   onChange: (value: string[] | undefined) => void;
 }) {
   const serialized = value.join(', ');
+  const displayed = projectBusinessText
+    ? value.map(externalPriceBusinessText).filter(Boolean).join(', ')
+    : serialized;
   const [draftState, setDraftState] = useState({
     source: serialized,
-    value: serialized,
+    value: displayed,
   });
   const draft =
-    draftState.source === serialized ? draftState.value : serialized;
+    draftState.source === serialized ? draftState.value : displayed;
 
-  function commit() {
-    const values = draft
-      .split(/[,\n，、]/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    onChange(values.length > 0 ? [...new Set(values)] : undefined);
+  function syncValue(nextDraft: string) {
+    setDraftState({ source: serialized, value: nextDraft });
+    onChange(normalizePriceAdjustmentStringList(nextDraft));
   }
 
   return (
@@ -525,14 +538,22 @@ function StringListField({
         id={id}
         value={draft}
         disabled={disabled}
-        onChange={(event) =>
-          setDraftState({ source: serialized, value: event.target.value })
-        }
-        onBlur={commit}
+        onChange={(event) => syncValue(event.target.value)}
+        onBlur={() => onChange(normalizePriceAdjustmentStringList(draft))}
       />
       <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   );
+}
+
+export function normalizePriceAdjustmentStringList(
+  draft: string,
+): string[] | undefined {
+  const values = draft
+    .split(/[,\n，、]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return values.length > 0 ? [...new Set(values)] : undefined;
 }
 
 function NumberField({
@@ -579,14 +600,14 @@ function parseConditionDraft(value: string): {
   try {
     const parsed: unknown = JSON.parse(value);
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { condition: null, error: '旧条件格式无法识别，请清空后重新设置。' };
+      return { condition: null, error: '原适用条件需重新设置。' };
     }
     return {
       condition: parsed as PriceAdjustmentTriggerCondition,
       error: null,
     };
   } catch {
-    return { condition: null, error: '旧条件格式无法识别，请清空后重新设置。' };
+    return { condition: null, error: '原适用条件需重新设置。' };
   }
 }
 

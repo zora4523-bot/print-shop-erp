@@ -1,7 +1,14 @@
+import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderBillingMode,
+  MachineType,
   OrderChangeRequestStatus,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderPackagingMode,
+  OrderProductStructure,
   OrderSettlementType,
   OrderStatus,
   Role,
@@ -19,6 +26,9 @@ const { dbMock } = vi.hoisted(() => {
       update: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+    },
+    orderPackagingGroup: {
+      update: vi.fn(),
     },
     orderShipmentLine: {
       upsert: vi.fn(),
@@ -42,6 +52,7 @@ const { dbMock } = vi.hoisted(() => {
     orderLog: { create: vi.fn() },
     craft: { findMany: vi.fn() },
     product: { findMany: vi.fn() },
+    material: { findMany: vi.fn() },
     priceTier: { findMany: vi.fn() },
     priceAdjustment: { findMany: vi.fn() },
     customerPriceBook: { findMany: vi.fn() },
@@ -64,6 +75,12 @@ const { dbMock } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+const { appendPricingRevisionMock } = vi.hoisted(() => ({
+  appendPricingRevisionMock: vi.fn(),
+}));
+vi.mock('@/lib/order/pricing-revision', () => ({
+  appendOrderPricingRevisionInTx: appendPricingRevisionMock,
+}));
 
 import {
   createOrderChangeRequest,
@@ -166,7 +183,10 @@ function externalBaseRule({
     amount,
     minQty,
     maxQty,
-    triggerCondition: null,
+    triggerCondition: {
+      schemaVersion: 1,
+      pricingRoutes: [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL],
+    },
     exclusiveGroup: null,
     priority: 100,
     blocksAutomaticQuote: false,
@@ -194,9 +214,40 @@ function externalAddOnRule({
     name,
     kind: 'ADD_ON',
     calculationType: 'PER_PIECE',
-    triggerCondition,
+    triggerCondition: {
+      schemaVersion: 1,
+      pricingRoutes: [OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL],
+      ...triggerCondition,
+    },
     priority: 50,
     category: { code: 'ADD_ON', name: '附加加工费' },
+  };
+}
+
+function externalPackagingRule({
+  id = 'packaging-single-style',
+  mode = OrderPackagingMode.SINGLE_STYLE,
+  amount = '0.1000',
+}: {
+  id?: string;
+  mode?: OrderPackagingMode;
+  amount?: string;
+} = {}) {
+  return {
+    ...externalBaseRule({ id, amount, productId: null }),
+    name: '单款入袋',
+    kind: 'ADD_ON',
+    calculationType: 'PER_BAG',
+    minQty: null,
+    maxQty: null,
+    triggerCondition: {
+      schemaVersion: 1,
+      target: 'PACKAGING_GROUP',
+      packagingModes: [mode],
+    },
+    exclusiveGroup: 'PACKAGING_GROUP_MODE',
+    blocksAutomaticQuote: false,
+    category: { code: 'PACKING', name: '入袋费' },
   };
 }
 
@@ -209,11 +260,51 @@ const updateInput = {
       itemId: 'item-1',
       name: '红包 A',
       quantity: 1200,
-      specification: '大号',
+      specification: '中号',
       foilColors: ['浅金'],
     },
   ],
 };
+
+function requestableSourceItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'item-1',
+    sequence: 1,
+    name: '红包 A',
+    productId: 'product-1',
+    pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+    productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+    quantity: 1_000,
+    specification: '中号',
+    actualWidthMm: new Decimal(210),
+    actualHeightMm: new Decimal(105),
+    paperType: '艳红珠光纸',
+    frontFoilColors: ['哑金'],
+    backFoilColors: [],
+    foilColors: ['哑金'],
+    foilTechnique: OrderFoilTechnique.FLAT,
+    hasLocalFoil: false,
+    lamination: OrderLamination.NONE,
+    printColors: [],
+    isDoubleSided: false,
+    tasks: [],
+    ...overrides,
+  };
+}
+
+function historicalManualSourceItem(overrides: Record<string, unknown> = {}) {
+  return requestableSourceItem({
+    pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+    productId: null,
+    paperType: null,
+    frontFoilColors: [],
+    backFoilColors: [],
+    foilColors: [],
+    foilTechnique: OrderFoilTechnique.UNSPECIFIED,
+    hasLocalFoil: null,
+    ...overrides,
+  });
+}
 
 function baseReviewRequest(overrides: Record<string, unknown> = {}) {
   return {
@@ -229,7 +320,7 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
           operation: 'UPDATE',
           itemId: 'item-1',
           name: '红包 A（新版）',
-          specification: '大号',
+          specification: '中号',
           foilColors: ['浅金', '红金'],
         },
       ],
@@ -246,8 +337,11 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
       settlementType: OrderSettlementType.EXTERNAL_SALES,
       billingMode: OrderBillingMode.CHARGE,
       revision: 2,
+      pricingStatus: 'ADMIN_CONFIRMED',
+      priceRevision: 5,
       status: OrderStatus.IN_PRODUCTION,
       isSfCollect: false,
+      packagingAmount: '0.00',
       processingAmount: '1000.00',
       totalAmount: '1000.00',
       items: [
@@ -260,10 +354,25 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
           fixedFee: '0',
           subtotal: '1000.00',
           productId: 'product-1',
+          pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
+          productStructure: OrderProductStructure.STANDARD_ENVELOPE,
+          artworkVersion: null,
+          plateGroupId: null,
+          pricingGroup: null,
+          manualQuoteReason: null,
           specification: '中号',
+          actualWidthMm: new Decimal(210),
+          actualHeightMm: new Decimal(105),
           paperType: '艳红珠光纸',
+          paperWeightGsm: 160,
           crafts: ['craft-1'],
+          frontFoilColors: ['哑金'],
+          backFoilColors: [],
           foilColors: ['哑金'],
+          foilTechnique: OrderFoilTechnique.FLAT,
+          hasLocalFoil: false,
+          lamination: OrderLamination.NONE,
+          printColors: [],
           isDoubleSided: false,
           isDoubleColor: false,
           suggestedSubtotal: null,
@@ -272,11 +381,17 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
           remark: null,
           tasks: [
             {
+              id: 'task-1',
               craftId: 'craft-1',
               workerId: 'worker-1',
               workerType: 'MACHINE',
               machineType: 'WINDMILL',
               status: TaskStatus.PENDING,
+              plannedQty: 1000,
+              isSelfClaimable: false,
+              selfClaimOpenedAt: null,
+              selfClaimedAt: null,
+              claimMachineTypes: [],
             },
           ],
           shipmentLines: [
@@ -293,10 +408,11 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
           id: 'shipment-1',
           sequence: 1,
           destinationProvince: '广东',
-          quotedWeightKg: '2',
-          weightKg: null,
+          quotedWeightKg: '12.5',
+          weightKg: '2',
         },
       ],
+      packagingGroups: [],
       customerCharges: [
         {
           id: 'charge-shipping-1',
@@ -322,6 +438,104 @@ function baseReviewRequest(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function orderWithTwoPackagingGroups() {
+  const base = baseReviewRequest().order;
+  const secondItem = {
+    ...base.items[0],
+    id: 'item-2',
+    sequence: 2,
+    name: '红包 B',
+    quantity: 500,
+    subtotal: '500.00',
+    tasks: [],
+    shipmentLines: [
+      {
+        quantity: 500,
+        shipment: { id: 'shipment-1', sequence: 1 },
+      },
+    ],
+  };
+  const thirdItem = {
+    ...base.items[0],
+    id: 'item-3',
+    sequence: 3,
+    name: '红包 C',
+    tasks: [],
+  };
+  return {
+    ...base,
+    packagingAmount: '30.00',
+    processingAmount: '2530.00',
+    totalAmount: '2541.30',
+    items: [base.items[0], secondItem, thirdItem],
+    customerCharges: base.customerCharges.map((charge) =>
+      charge.category.code === 'PACKING_MATERIAL'
+        ? { ...charge, amount: '7.00' }
+        : charge,
+    ),
+    packagingGroups: [
+      {
+        id: 'packaging-group-1',
+        sequence: 1,
+        name: '单款入袋',
+        mode: OrderPackagingMode.SINGLE_STYLE,
+        actualBagCount: 100,
+        unitPrice: new Decimal('0.1000'),
+        subtotal: new Decimal('10.00'),
+        suggestedSubtotal: new Decimal('10.00'),
+        pricingSnapshot: {
+          source: 'ORDER_CREATE_AUTO',
+          priceBook: { id: 'old-packaging-book' },
+          rule: { id: 'old-single-rule' },
+        },
+        priceOverrideReason: null,
+        lines: [{ orderItemId: 'item-1', unitsPerBag: 10 }],
+      },
+      {
+        id: 'packaging-group-2',
+        sequence: 2,
+        name: '混装入袋',
+        mode: OrderPackagingMode.MIXED_STYLE,
+        actualBagCount: 100,
+        unitPrice: new Decimal('0.2000'),
+        subtotal: new Decimal('20.00'),
+        suggestedSubtotal: new Decimal('20.00'),
+        pricingSnapshot: {
+          source: 'ORDER_CREATE_AUTO',
+          priceBook: { id: 'old-packaging-book' },
+          rule: { id: 'old-mixed-rule' },
+        },
+        priceOverrideReason: '历史人工确认',
+        lines: [
+          { orderItemId: 'item-2', unitsPerBag: 5 },
+          { orderItemId: 'item-3', unitsPerBag: 10 },
+        ],
+      },
+    ],
+  };
+}
+
+function orderWithCrossGroupMembership() {
+  const order = orderWithTwoPackagingGroups();
+  const [firstGroup, secondGroup] = order.packagingGroups;
+  if (!firstGroup || !secondGroup) {
+    throw new Error('测试包装组夹具不完整');
+  }
+  return {
+    ...order,
+    packagingGroups: [
+      firstGroup,
+      {
+        ...secondGroup,
+        lines: [
+          ...secondGroup.lines,
+          { orderItemId: 'item-1', unitsPerBag: 10 },
+        ],
+      },
+    ],
+  };
+}
+
 function reviewOrderItems(count: number) {
   const template = baseReviewRequest().order.items[0];
   return Array.from({ length: count }, (_, index) => ({
@@ -330,6 +544,18 @@ function reviewOrderItems(count: number) {
     sequence: index + 1,
     name: `红包 ${index + 1}`,
   }));
+}
+
+function mockFlatFoilCraftCode(
+  code:
+    | 'FLAT_FOIL_SINGLE'
+    | 'FLAT_FOIL_DOUBLE'
+    | 'FLAT_FOIL_TRIPLE',
+) {
+  dbMock.craft.findMany.mockImplementation(
+    async ({ where }: { where: { id: { in: string[] } } }) =>
+      where.id.in.map((id) => ({ id, code, isActive: true })),
+  );
 }
 
 beforeEach(() => {
@@ -353,17 +579,15 @@ beforeEach(() => {
     {
       id: 'product-1',
       code: 'PRODUCT_1',
+      category: 'CUSTOM_FLAT_FOIL',
       isActive: true,
       baseUnitPrice: '1.0000',
     },
   ]);
-  dbMock.craft.findMany.mockImplementation(
-    async ({ where }: { where: { id: { in: string[] } } }) =>
-      where.id.in.map((id) => ({
-        id,
-        code: `CRAFT_${id}`,
-        isActive: true,
-      })),
+  mockFlatFoilCraftCode('FLAT_FOIL_SINGLE');
+  dbMock.material.findMany.mockImplementation(
+    async ({ where }: { where: { name: { in: string[] } } }) =>
+      where.name.in.map((name) => ({ name })),
   );
   dbMock.priceTier.findMany.mockResolvedValue([]);
   dbMock.priceAdjustment.findMany.mockResolvedValue([]);
@@ -379,6 +603,13 @@ beforeEach(() => {
   dbMock.$transaction.mockReset().mockImplementation(
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
+  appendPricingRevisionMock.mockReset().mockResolvedValue({
+    priceRevision: 6,
+    orderRevision: 3,
+    snapshot: {},
+  });
+  dbMock.productionTask.updateMany.mockResolvedValue({ count: 1 });
+  dbMock.productionTask.createMany.mockResolvedValue({ count: 1 });
 });
 
 describe('createOrderChangeRequest', () => {
@@ -389,16 +620,7 @@ describe('createOrderChangeRequest', () => {
       submitterId: 'sales-1',
       status: OrderStatus.IN_PRODUCTION,
       revision: 2,
-      items: [
-        {
-          id: 'item-1',
-          sequence: 1,
-          name: '红包 A',
-          quantity: 1000,
-          specification: '中号',
-          foilColors: ['哑金'],
-        },
-      ],
+      items: [requestableSourceItem()],
       changeRequests: [],
     });
     dbMock.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
@@ -413,11 +635,344 @@ describe('createOrderChangeRequest', () => {
           orderId: 'order-1',
           requesterId: 'sales-1',
           baseRevision: 2,
-          proposedChanges: { items: updateInput.items },
+          proposedChanges: {
+            items: [
+              {
+                operation: 'UPDATE',
+                itemId: 'item-1',
+                name: '红包 A',
+                quantity: 1200,
+                specification: '中号',
+                frontFoilColors: ['浅金'],
+                backFoilColors: [],
+              },
+            ],
+          },
         }),
       }),
     );
     expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('按正反面持久六色烫金申请，不写入已退役的聚合字段', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [requestableSourceItem()],
+      changeRequests: [],
+    });
+    dbMock.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
+
+    await createOrderChangeRequest(
+      {
+        orderId: 'order-1',
+        reason: '正反面各三色',
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            frontFoilColors: ['哑金', '红金', '银色'],
+            backFoilColors: ['蓝金', '浅金', '古铜金'],
+          },
+        ],
+      },
+      salesActor,
+    );
+
+    const stored =
+      dbMock.orderChangeRequest.create.mock.calls[0]?.[0].data.proposedChanges
+        .items[0];
+    expect(stored).toMatchObject({
+      frontFoilColors: ['哑金', '红金', '银色'],
+      backFoilColors: ['蓝金', '浅金', '古铜金'],
+    });
+    expect(stored).not.toHaveProperty('foilColors');
+    expect(stored).not.toHaveProperty('isDoubleSided');
+    expect(stored).not.toHaveProperty('isDoubleColor');
+  });
+
+  it('复用新建工单校验，拒绝把专版烫金改成正反面都无颜色', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [requestableSourceItem()],
+      changeRequests: [],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '清空烫金颜色',
+          items: [
+            {
+              operation: 'UPDATE',
+              itemId: 'item-1',
+              frontFoilColors: [],
+              backFoilColors: [],
+            },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/专版烫金必须选择至少 1 种烫金颜色/);
+
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('非烫金修改不在申请快照中填入烫金事实', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [
+        requestableSourceItem({
+          frontFoilColors: [],
+          backFoilColors: [],
+          foilColors: ['哑金'],
+          isDoubleSided: true,
+        }),
+      ],
+      changeRequests: [],
+    });
+    dbMock.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
+
+    await createOrderChangeRequest(
+      {
+        orderId: 'order-1',
+        reason: '只修改名称',
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', name: '红包 A 新名称' },
+        ],
+      },
+      salesActor,
+    );
+
+    expect(
+      dbMock.orderChangeRequest.create.mock.calls[0]?.[0].data.proposedChanges
+        .items[0],
+    ).toEqual({
+      operation: 'UPDATE',
+      itemId: 'item-1',
+      name: '红包 A 新名称',
+    });
+  });
+
+  it('历史人工报价款式可以申请仅修改名称', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [historicalManualSourceItem()],
+      changeRequests: [],
+    });
+    dbMock.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '更新客户款式名',
+          items: [
+            {
+              operation: 'UPDATE',
+              itemId: 'item-1',
+              name: '历史人工报价款新名称',
+            },
+          ],
+        },
+        salesActor,
+      ),
+    ).resolves.toEqual({ id: 'request-1' });
+
+    expect(dbMock.orderChangeRequest.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('历史人工报价款式不能作为新增款式模板', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [historicalManualSourceItem()],
+      changeRequests: [],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '新增人工报价款',
+          items: [
+            {
+              operation: 'ADD',
+              templateItemId: 'item-1',
+              name: '新款',
+              quantity: 1_000,
+            },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/历史人工报价路线.*不能作为新增款式模板/);
+
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['数量', { quantity: 1_200 }],
+    ['正面烫金颜色', { frontFoilColors: ['金色'] }],
+    ['反面烫金颜色', { backFoilColors: ['金色'] }],
+  ])('历史人工报价款式拒绝修改%s', async (_label, change) => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [historicalManualSourceItem()],
+      changeRequests: [],
+      packagingGroups: [],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '修改历史人工报价事实',
+          items: [
+            {
+              operation: 'UPDATE',
+              itemId: 'item-1',
+              ...change,
+            },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/历史人工报价路线.*只允许更新名称/);
+
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('已有包装组时在创建申请阶段拒绝 ADD，不占用待审槽位', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [requestableSourceItem()],
+      changeRequests: [],
+      packagingGroups: [
+        {
+          id: 'packaging-group-1',
+          sequence: 1,
+          lines: [{ orderItemId: 'item-1' }],
+        },
+      ],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '新增一款',
+          items: [
+            {
+              operation: 'ADD',
+              templateItemId: 'item-1',
+              name: '红包 B',
+              quantity: 1_000,
+            },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/已有包装组.*新增款式必须同时指定每袋组成/);
+
+    expect(dbMock.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('创建数量修改申请时拒绝同一款式跨包装组', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.SUBMITTED,
+      revision: 2,
+      items: [requestableSourceItem()],
+      changeRequests: [],
+      packagingGroups: [
+        {
+          id: 'packaging-group-1',
+          sequence: 1,
+          lines: [{ orderItemId: 'item-1' }],
+        },
+        {
+          id: 'packaging-group-2',
+          sequence: 2,
+          lines: [{ orderItemId: 'item-1' }],
+        },
+      ],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '修改数量',
+          items: [
+            { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/同时归属包装组 1 和 2/);
+
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('款式已开工时拒绝提交规格修改', async () => {
+    dbMock.order.findUnique.mockResolvedValue({
+      id: 'order-1',
+      orderNo: '20260731-0001',
+      submitterId: 'sales-1',
+      status: OrderStatus.IN_PRODUCTION,
+      revision: 2,
+      items: [
+        requestableSourceItem({
+          tasks: [{ status: TaskStatus.IN_PROGRESS }],
+        }),
+      ],
+      changeRequests: [],
+    });
+
+    await expect(
+      createOrderChangeRequest(
+        {
+          orderId: 'order-1',
+          reason: '修改规格',
+          items: [
+            { operation: 'UPDATE', itemId: 'item-1', specification: '大号' },
+          ],
+        },
+        salesActor,
+      ),
+    ).rejects.toThrow(/规格与产品 SKU.*不支持单独改规格/);
+    expect(dbMock.orderChangeRequest.create).not.toHaveBeenCalled();
   });
 
   it('rejects changes to another salesperson’s order', async () => {
@@ -561,20 +1116,12 @@ describe('previewOrderChangeRequestPricing', () => {
   });
 
   it('withholds the new total and explains every incomplete quote instead of implying a carried price', async () => {
-    const request = baseReviewRequest({
-      order: {
-        ...baseReviewRequest().order,
-        items: [
-          {
-            ...baseReviewRequest().order.items[0],
-            productId: null,
-          },
-        ],
-      },
-    });
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
+    const request = baseReviewRequest();
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([]);
 
     const preview = await previewOrderChangeRequestPricing(
       'request-1',
@@ -662,6 +1209,57 @@ describe('previewOrderChangeRequestPricing', () => {
       }),
     });
   });
+
+  it('预览阶段拒绝历史人工报价款式的数量变更', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            productId: null,
+            pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+            manualQuoteReason: '历史人工报价',
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      previewOrderChangeRequestPricing('request-1', adminActor),
+    ).rejects.toThrow(/历史人工报价路线.*只允许更新名称/);
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it('预览阶段拒绝同一款式跨包装组重复计费', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+        ],
+      },
+      order: orderWithCrossGroupMembership(),
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      previewOrderChangeRequestPricing('request-1', adminActor),
+    ).rejects.toThrow(/同时归属包装组 1 和 2/);
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('reviewOrderChangeRequest', () => {
@@ -739,6 +1337,144 @@ describe('reviewOrderChangeRequest', () => {
     expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
+  it('批准历史人工报价款式的名称修改时不强制新计价路线', async () => {
+    const base = baseReviewRequest();
+    const manualItem = {
+      ...base.order.items[0],
+      productId: null,
+      pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+      manualQuoteReason: '历史人工报价',
+      paperType: null,
+      frontFoilColors: [],
+      backFoilColors: [],
+      foilColors: [],
+      foilTechnique: OrderFoilTechnique.UNSPECIFIED,
+      hasLocalFoil: null,
+    };
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            name: '人工报价款新名称',
+          },
+        ],
+      },
+      order: { ...base.order, items: [manualItem] },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1000.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    const updateData = dbMock.orderItem.update.mock.calls[0]?.[0].data;
+    expect(updateData.name).toBe('人工报价款新名称');
+    expect(updateData).not.toHaveProperty('pricingSnapshot');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it('审批阶段拒绝历史人工报价款式的烫金事实变更', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            frontFoilColors: ['金色'],
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            productId: null,
+            pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+            manualQuoteReason: '历史人工报价',
+            paperType: null,
+            frontFoilColors: [],
+            backFoilColors: [],
+            foilColors: [],
+            foilTechnique: OrderFoilTechnique.UNSPECIFIED,
+            hasLocalFoil: null,
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/历史人工报价路线.*只允许更新名称/);
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('审核历史待处理申请时仍拒绝复制人工报价款', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '新增人工报价款',
+            quantity: 1_000,
+            specification: null,
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            productId: null,
+            pricingRoute: OrderItemPricingRoute.MANUAL_QUOTE,
+            manualQuoteReason: '历史人工报价',
+            paperType: null,
+            frontFoilColors: [],
+            backFoilColors: [],
+            foilColors: [],
+            foilTechnique: OrderFoilTechnique.UNSPECIFIED,
+            hasLocalFoil: null,
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/历史人工报价路线.*不能作为新增款式模板/);
+
+    expect(dbMock.orderItem.create).not.toHaveBeenCalled();
+  });
+
   it('blocks quantity changes after that style has started production', async () => {
     const request = baseReviewRequest();
     request.proposedChanges = { items: updateInput.items };
@@ -758,7 +1494,256 @@ describe('reviewOrderChangeRequest', () => {
     expect(dbMock.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('re-quotes an approved specification/foil change and increments the revision', async () => {
+  it.each([
+    {
+      label: '规格',
+      status: TaskStatus.IN_PROGRESS,
+      change: { specification: '大号' },
+      expected: /规格与产品 SKU.*不支持单独改规格/,
+    },
+    {
+      label: '烫金参数',
+      status: TaskStatus.COMPLETED,
+      change: { frontFoilColors: ['红金'] },
+      expected: /已有开工或完工记录.*规格或烫金/,
+    },
+    {
+      label: '历史聚合烫金参数',
+      status: TaskStatus.IN_PROGRESS,
+      change: { foilColors: ['红金'] },
+      expected: /已有开工或完工记录.*规格或烫金/,
+    },
+  ])(
+    '款式已生产时拒绝修改$label',
+    async ({ status, change, expected }) => {
+      const request = baseReviewRequest({
+        proposedChanges: {
+          items: [
+            {
+              operation: 'UPDATE',
+              itemId: 'item-1',
+              ...change,
+            },
+          ],
+        },
+      });
+      (
+        request.order.items[0].tasks[0] as { status: TaskStatus }
+      ).status = status;
+      dbMock.orderChangeRequest.findUnique
+        .mockResolvedValueOnce({ orderId: 'order-1' })
+        .mockResolvedValueOnce(request);
+
+      await expect(
+        reviewOrderChangeRequest(
+          { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+          adminActor,
+        ),
+      ).rejects.toThrow(expected);
+      expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+      expect(dbMock.product.findMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('未开工也拒绝用旧 SKU 自动报价新规格', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            specification: '大号',
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/规格与产品 SKU.*不支持单独改规格/);
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+  });
+
+  it('正反面各三色可进入版本引擎，未覆盖时由管理员说明后沿用成交价', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_TRIPLE');
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            frontFoilColors: ['哑金', '红金', '银色'],
+            backFoilColors: ['蓝金', '浅金', '古铜金'],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([]);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1000.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '当前价目未覆盖专版双面，已人工确认',
+      },
+      adminActor,
+    );
+
+    expect(dbMock.orderItem.update).toHaveBeenCalledWith({
+      where: { id: 'item-1' },
+      data: expect.objectContaining({
+        frontFoilColors: ['哑金', '红金', '银色'],
+        backFoilColors: ['蓝金', '浅金', '古铜金'],
+        isDoubleSided: true,
+        pricingSnapshot: expect.objectContaining({
+          source: 'CHANGE_REQUEST_PRICE_CARRY_FORWARD',
+        }),
+        priceOverrideReason:
+          '当前价目未覆盖专版双面，已人工确认',
+      }),
+    });
+  });
+
+  it('按工艺组守恒重分配待处理的拆分任务', async () => {
+    const base = baseReviewRequest();
+    const templateTask = base.order.items[0].tasks[0];
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            tasks: [
+              {
+                ...templateTask,
+                id: 'task-a',
+                craftId: 'craft-1',
+                plannedQty: 600,
+              },
+              {
+                ...templateTask,
+                id: 'task-b',
+                craftId: 'craft-1',
+                plannedQty: 400,
+              },
+              {
+                ...templateTask,
+                id: 'task-c',
+                craftId: 'craft-2',
+                plannedQty: 500,
+              },
+              {
+                ...templateTask,
+                id: 'task-d',
+                craftId: 'craft-2',
+                plannedQty: 500,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({ amount: '0.8000', minQty: 1_200 }),
+    ]);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '960.00' }]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    const allocations = new Map<string, number>(
+      dbMock.productionTask.updateMany.mock.calls.map(([command]) => [
+        command.where.id,
+        command.data.plannedQty,
+      ]),
+    );
+    expect(allocations).toEqual(
+      new Map([
+        ['task-a', 720],
+        ['task-b', 480],
+        ['task-c', 600],
+        ['task-d', 600],
+      ]),
+    );
+    expect(
+      (allocations.get('task-a') ?? 0) + (allocations.get('task-b') ?? 0),
+    ).toBe(1_200);
+    expect(
+      (allocations.get('task-c') ?? 0) + (allocations.get('task-d') ?? 0),
+    ).toBe(1_200);
+    expect(dbMock.productionTask.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'task-a',
+        orderItemId: 'item-1',
+        status: TaskStatus.PENDING,
+        plannedQty: 600,
+      },
+      data: { plannedQty: 720 },
+    });
+  });
+
+  it('排产任务在事务内发生并发变更时中止批准', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({ amount: '0.8000', minQty: 1_200 }),
+    ]);
+    dbMock.productionTask.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/排产任务已变更.*重新审核/);
+
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.$executeRaw).toHaveBeenCalled();
+  });
+
+  it('re-quotes an approved foil change and increments the revision', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());
@@ -784,8 +1769,12 @@ describe('reviewOrderChangeRequest', () => {
       data: expect.objectContaining({
         name: '红包 A（新版）',
         quantity: undefined,
-        specification: '大号',
+        specification: '中号',
+        frontFoilColors: ['浅金', '红金'],
+        backFoilColors: [],
         foilColors: ['浅金', '红金'],
+        isDoubleSided: false,
+        isDoubleColor: true,
         subtotal: '1000.00',
         unitPrice: '1.0000',
         fixedFee: '0.00',
@@ -813,6 +1802,16 @@ describe('reviewOrderChangeRequest', () => {
       },
     });
     expect(dbMock.orderLog.create).toHaveBeenCalledTimes(1);
+    expect(appendPricingRevisionMock).toHaveBeenCalledWith(
+      dbMock,
+      expect.objectContaining({
+        orderId: 'order-1',
+        status: 'PENDING_ADMIN_CONFIRMATION',
+        source: 'CHANGE_REQUEST_APPLIED_PENDING',
+        expectedPriceRevision: 5,
+        incrementOrderRevision: false,
+      }),
+    );
   });
 
   it('re-quotes a quantity change across a price tier using one transaction timestamp', async () => {
@@ -880,6 +1879,477 @@ describe('reviewOrderChangeRequest', () => {
         }),
       }),
     });
+  });
+
+  it('数量修改后从每袋组成重算实际袋数，并按当前价目刷新入袋费证据', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            quantity: 1_200,
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        packagingAmount: '10.00',
+        processingAmount: '1010.00',
+        totalAmount: '1019.30',
+        packagingGroups: [
+          {
+            id: 'packaging-group-1',
+            sequence: 1,
+            name: '单款入袋',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            unitPrice: new Decimal('0.1000'),
+            subtotal: new Decimal('10.00'),
+            suggestedSubtotal: new Decimal('10.00'),
+            pricingSnapshot: { source: 'ORDER_CREATE_AUTO' },
+            priceOverrideReason: null,
+            lines: [
+              {
+                orderItemId: 'item-1',
+                unitsPerBag: 10,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([
+        externalBaseRule({
+          id: 'tier-1200',
+          amount: '0.8000',
+          minQty: 1_200,
+        }),
+      ])
+      .mockResolvedValueOnce([externalPackagingRule()]);
+    dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '960.00' }]);
+    dbMock.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: '9.30' },
+    });
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenCalledWith({
+      where: { id: 'packaging-group-1' },
+      data: {
+        actualBagCount: 120,
+        unitPrice: '0.1000',
+        subtotal: '12.00',
+        suggestedSubtotal: '12.00',
+        pricingSnapshot: expect.objectContaining({
+          source: 'CHANGE_REQUEST_REQUOTE',
+          requestId: 'request-1',
+          input: expect.objectContaining({ actualBagCount: 120 }),
+          actual: {
+            unitPrice: '0.1000',
+            subtotal: '12.00',
+            overrideReason: null,
+          },
+        }),
+        priceOverrideReason: null,
+      },
+    });
+    expect(dbMock.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        revision: 3,
+        packagingAmount: '12.00',
+        processingAmount: '972.00',
+        totalAmount: '981.30',
+      },
+    });
+  });
+
+  it('外部工单按组内每袋组成重算多包装组，并记录前后证据', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+          { operation: 'UPDATE', itemId: 'item-2', quantity: 600 },
+          { operation: 'UPDATE', itemId: 'item-3', quantity: 1_200 },
+        ],
+      },
+      order: orderWithTwoPackagingGroups(),
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([
+        externalBaseRule({
+          id: 'tier-1200',
+          amount: '0.8000',
+          minQty: 600,
+        }),
+      ])
+      .mockResolvedValueOnce([
+        externalPackagingRule({
+          id: 'packaging-single-current',
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          amount: '0.1000',
+        }),
+        externalPackagingRule({
+          id: 'packaging-mixed-current',
+          mode: OrderPackagingMode.MIXED_STYLE,
+          amount: '0.2000',
+        }),
+      ]);
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '960.00' },
+      { subtotal: '480.00' },
+      { subtotal: '960.00' },
+    ]);
+    dbMock.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: '11.30' },
+    });
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '多款物流金额已人工确认',
+      },
+      adminActor,
+    );
+
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenCalledTimes(2);
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'packaging-group-1' },
+      data: expect.objectContaining({
+        actualBagCount: 120,
+        unitPrice: '0.1000',
+        subtotal: '12.00',
+      }),
+    });
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'packaging-group-2' },
+      data: expect.objectContaining({
+        actualBagCount: 120,
+        unitPrice: '0.2000',
+        subtotal: '24.00',
+      }),
+    });
+    expect(dbMock.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        revision: 3,
+        packagingAmount: '36.00',
+        processingAmount: '2436.00',
+        totalAmount: '2447.30',
+      },
+    });
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changedFields: expect.objectContaining({
+          packagingAmount: { before: '30.00', after: '36.00' },
+          packagingGroups: [
+            expect.objectContaining({
+              groupId: 'packaging-group-1',
+              sequence: 1,
+              before: expect.objectContaining({
+                actualBagCount: 100,
+                unitPrice: '0.1000',
+                subtotal: '10.00',
+                pricingSource: 'ORDER_CREATE_AUTO',
+                priceBookId: 'old-packaging-book',
+                ruleId: 'old-single-rule',
+              }),
+              after: expect.objectContaining({
+                actualBagCount: 120,
+                subtotal: '12.00',
+                pricingSource: 'CHANGE_REQUEST_REQUOTE',
+                priceBookId: 'external-book-test',
+                ruleId: 'packaging-single-current',
+              }),
+            }),
+            expect.objectContaining({
+              groupId: 'packaging-group-2',
+              sequence: 2,
+              before: expect.objectContaining({
+                actualBagCount: 100,
+                overrideReason: '历史人工确认',
+              }),
+              after: expect.objectContaining({
+                actualBagCount: 120,
+                subtotal: '24.00',
+                pricingSource: 'CHANGE_REQUEST_REQUOTE',
+                ruleId: 'packaging-mixed-current',
+                overrideReason: null,
+              }),
+            }),
+          ],
+        }),
+      }),
+    });
+  });
+
+  it('内部工单重算多包装组时保留存量单价并写入不可变审计证据', async () => {
+    const order = orderWithTwoPackagingGroups();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+          { operation: 'UPDATE', itemId: 'item-2', quantity: 600 },
+          { operation: 'UPDATE', itemId: 'item-3', quantity: 1_200 },
+        ],
+      },
+      order: {
+        ...order,
+        settlementType: OrderSettlementType.INTERNAL_SALES,
+        status: OrderStatus.DRAFT,
+        totalAmount: '2530.00',
+        customerCharges: [],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '1200.00' },
+      { subtotal: '600.00' },
+      { subtotal: '1200.00' },
+    ]);
+    dbMock.orderCustomerCharge.aggregate.mockResolvedValue({
+      _sum: { amount: null },
+    });
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'packaging-group-1' },
+      data: expect.objectContaining({
+        actualBagCount: 120,
+        unitPrice: '0.1000',
+        subtotal: '12.00',
+        suggestedSubtotal: null,
+        pricingSnapshot: expect.objectContaining({
+          source: 'CHANGE_REQUEST_STORED_RATE_RECALC',
+        }),
+      }),
+    });
+    expect(dbMock.orderPackagingGroup.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'packaging-group-2' },
+      data: expect.objectContaining({
+        actualBagCount: 120,
+        unitPrice: '0.2000',
+        subtotal: '24.00',
+        priceOverrideReason: '历史人工确认',
+      }),
+    });
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changedFields: expect.objectContaining({
+          packagingAmount: { before: '30.00', after: '36.00' },
+          packagingGroups: [
+            expect.objectContaining({
+              groupId: 'packaging-group-1',
+              before: expect.objectContaining({
+                pricingSource: 'ORDER_CREATE_AUTO',
+                ruleId: 'old-single-rule',
+              }),
+              after: expect.objectContaining({
+                actualBagCount: 120,
+                unitPrice: '0.1000',
+                subtotal: '12.00',
+                pricingSource: 'CHANGE_REQUEST_STORED_RATE_RECALC',
+              }),
+            }),
+            expect.objectContaining({
+              groupId: 'packaging-group-2',
+              before: expect.objectContaining({
+                overrideReason: '历史人工确认',
+              }),
+              after: expect.objectContaining({
+                actualBagCount: 120,
+                unitPrice: '0.2000',
+                subtotal: '24.00',
+                pricingSource: 'CHANGE_REQUEST_STORED_RATE_RECALC',
+                overrideReason: '历史人工确认',
+              }),
+            }),
+          ],
+        }),
+      }),
+    });
+    expect(dbMock.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: {
+        revision: 3,
+        packagingAmount: '36.00',
+        processingAmount: '3036.00',
+        totalAmount: '3036.00',
+      },
+    });
+  });
+
+  it.each([
+    ['外部销售', OrderSettlementType.EXTERNAL_SALES, OrderStatus.IN_PRODUCTION],
+    ['内部销售', OrderSettlementType.INTERNAL_SALES, OrderStatus.DRAFT],
+  ])('%s工单审批时拒绝同一款式跨包装组', async (
+    _label,
+    settlementType,
+    status,
+  ) => {
+    const order = orderWithCrossGroupMembership();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          { operation: 'UPDATE', itemId: 'item-1', quantity: 1_200 },
+        ],
+      },
+      order: {
+        ...order,
+        settlementType,
+        status,
+        ...(settlementType === OrderSettlementType.INTERNAL_SALES
+          ? { totalAmount: '2530.00', customerCharges: [] }
+          : {}),
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/同时归属包装组 1 和 2/);
+
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+    expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('已有包装组时拒绝不带每袋组成的新增款式', async () => {
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '红包 C',
+            quantity: 600,
+            specification: null,
+          },
+        ],
+      },
+      order: orderWithTwoPackagingGroups(),
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+
+    await expect(
+      reviewOrderChangeRequest(
+        { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+        adminActor,
+      ),
+    ).rejects.toThrow(/已有包装组.*新增款式必须同时指定每袋组成/);
+
+    expect(dbMock.orderItem.create).not.toHaveBeenCalled();
+    expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+  });
+
+  it('包装组事实或当前入袋规则不完整时失败关闭，不复用旧 packagingAmount', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'UPDATE',
+            itemId: 'item-1',
+            quantity: 1_200,
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        packagingAmount: '10.00',
+        packagingGroups: [
+          {
+            id: 'packaging-group-1',
+            sequence: 1,
+            name: '单款入袋',
+            mode: OrderPackagingMode.SINGLE_STYLE,
+            actualBagCount: 100,
+            unitPrice: new Decimal('0.1000'),
+            subtotal: new Decimal('10.00'),
+            suggestedSubtotal: new Decimal('10.00'),
+            pricingSnapshot: { source: 'ORDER_CREATE_AUTO' },
+            priceOverrideReason: null,
+            lines: [
+              {
+                orderItemId: 'item-1',
+                unitsPerBag: 10,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([
+        externalBaseRule({
+          id: 'tier-1200',
+          amount: '0.8000',
+          minQty: 1_200,
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      reviewOrderChangeRequest(
+        {
+          requestId: 'request-1',
+          decision: 'APPROVE',
+          reviewRemark: '不允许说明绕过结构化入袋规则',
+        },
+        adminActor,
+      ),
+    ).rejects.toThrow(/无法按当前规则重算入袋费/);
+
+    expect(dbMock.orderPackagingGroup.update).not.toHaveBeenCalled();
+    expect(dbMock.orderItem.update).not.toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
   it('requires an audit remark before retaining a confirmed logistics amount that differs after re-tiering', async () => {
@@ -1048,6 +2518,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('re-quotes a foil-color change with the per-color multiplier', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());
@@ -1075,7 +2546,11 @@ describe('reviewOrderChangeRequest', () => {
     expect(dbMock.orderItem.update).toHaveBeenCalledWith({
       where: { id: 'item-1' },
       data: expect.objectContaining({
+        frontFoilColors: ['浅金', '红金'],
+        backFoilColors: [],
         foilColors: ['浅金', '红金'],
+        isDoubleSided: false,
+        isDoubleColor: true,
         unitPrice: '1.2000',
         subtotal: '1200.00',
         pricingSnapshot: expect.objectContaining({
@@ -1091,7 +2566,7 @@ describe('reviewOrderChangeRequest', () => {
     });
   });
 
-  it('quotes and approves the 50th style from its complete merged business facts', async () => {
+  it('旧申请的 null 规格按未覆盖处理，新增款式继承模板规格', async () => {
     const base = baseReviewRequest();
     const request = baseReviewRequest({
       proposedChanges: {
@@ -1101,7 +2576,7 @@ describe('reviewOrderChangeRequest', () => {
             templateItemId: 'item-1',
             name: '红包 B',
             quantity: 1200,
-            specification: '大号',
+            specification: null,
             foilColors: ['浅金'],
           },
         ],
@@ -1133,7 +2608,11 @@ describe('reviewOrderChangeRequest', () => {
     });
 
     await reviewOrderChangeRequest(
-      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '整单数量超过中通自动报价范围，沿用历史运费待后续确认',
+      },
       adminActor,
     );
 
@@ -1143,7 +2622,7 @@ describe('reviewOrderChangeRequest', () => {
         sequence: 50,
         name: '红包 B',
         productId: 'product-1',
-        specification: '大号',
+        specification: '中号',
         paperType: '艳红珠光纸',
         quantity: 1200,
         crafts: ['craft-1'],
@@ -1170,6 +2649,250 @@ describe('reviewOrderChangeRequest', () => {
     });
   });
 
+  it('新增款式复制拆分模板时每个工艺组总量等于新款数量', async () => {
+    const base = baseReviewRequest();
+    const templateTask = base.order.items[0].tasks[0];
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '红包 B',
+            quantity: 1_200,
+            specification: '中号',
+            frontFoilColors: ['浅金'],
+            backFoilColors: [],
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            tasks: [
+              {
+                ...templateTask,
+                id: 'task-a',
+                craftId: 'craft-1',
+                plannedQty: 600,
+              },
+              {
+                ...templateTask,
+                id: 'task-b',
+                craftId: 'craft-1',
+                plannedQty: 400,
+              },
+              {
+                ...templateTask,
+                id: 'task-c',
+                craftId: 'craft-2',
+                plannedQty: 1_000,
+              },
+              {
+                ...templateTask,
+                id: 'task-cancelled',
+                craftId: 'craft-1',
+                plannedQty: 1_000,
+                status: TaskStatus.CANCELLED,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({ amount: '0.8000', minQty: 1_200 }),
+    ]);
+    dbMock.orderItem.create.mockResolvedValue({ id: 'item-2' });
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '1000.00' },
+      { subtotal: '960.00' },
+    ]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '整单数量跨耗材档，保留已确认金额',
+      },
+      adminActor,
+    );
+
+    const rows = dbMock.productionTask.createMany.mock.calls[0]![0].data;
+    expect(dbMock.orderItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        frontFoilColors: ['浅金'],
+        backFoilColors: [],
+        foilColors: ['浅金'],
+        isDoubleSided: false,
+        isDoubleColor: false,
+      }),
+      select: { id: true },
+    });
+    expect(rows).toHaveLength(3);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ craftId: 'craft-1', plannedQty: 720 }),
+        expect.objectContaining({ craftId: 'craft-1', plannedQty: 480 }),
+        expect.objectContaining({ craftId: 'craft-2', plannedQty: 1_200 }),
+      ]),
+    );
+    expect(
+      rows
+        .filter((row: { craftId: string }) => row.craftId === 'craft-1')
+        .reduce(
+          (sum: number, row: { plannedQty: number }) => sum + row.plannedQty,
+          0,
+        ),
+    ).toBe(1_200);
+    expect(rows).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ plannedQty: 1_000 }),
+      ]),
+    );
+  });
+
+  it('新增款式复制抢单池任务时保留可抢上下文并重置开放时间', async () => {
+    const base = baseReviewRequest();
+    const previousOpenedAt = new Date('2026-08-01T00:00:00.000Z');
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '红包 B',
+            quantity: 1_200,
+            specification: '中号',
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            tasks: [
+              {
+                ...base.order.items[0].tasks[0],
+                workerId: null,
+                workerType: 'MACHINE',
+                machineType: null,
+                isSelfClaimable: true,
+                selfClaimOpenedAt: previousOpenedAt,
+                selfClaimedAt: null,
+                claimMachineTypes: [
+                  MachineType.WINDMILL,
+                  MachineType.HAND_PRESS,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      externalBaseRule({ amount: '0.8000', minQty: 1_200 }),
+    ]);
+    dbMock.orderItem.create.mockResolvedValue({ id: 'item-2' });
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '1000.00' },
+      { subtotal: '960.00' },
+    ]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      {
+        requestId: 'request-1',
+        decision: 'APPROVE',
+        reviewRemark: '新增款式导致耗材跨档，保留已确认金额',
+      },
+      adminActor,
+    );
+
+    const row = dbMock.productionTask.createMany.mock.calls[0]?.[0].data[0];
+    expect(row).toMatchObject({
+      orderItemId: 'item-2',
+      craftId: 'craft-1',
+      workerId: null,
+      workerType: 'MACHINE',
+      machineType: null,
+      isSelfClaimable: true,
+      selfClaimedAt: null,
+      claimMachineTypes: [MachineType.WINDMILL, MachineType.HAND_PRESS],
+      status: TaskStatus.PENDING,
+      plannedQty: 1_200,
+    });
+    expect(row.selfClaimOpenedAt).toBeInstanceOf(Date);
+    expect(row.selfClaimOpenedAt).not.toEqual(previousOpenedAt);
+  });
+
+  it('新增款式不会被模板款式已回货的外协单自动继承', async () => {
+    const base = baseReviewRequest();
+    const request = baseReviewRequest({
+      proposedChanges: {
+        items: [
+          {
+            operation: 'ADD',
+            templateItemId: 'item-1',
+            name: '红包 B',
+            quantity: 500,
+            specification: '中号',
+            foilColors: ['哑金'],
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        outsourceOrders: [
+          {
+            id: 'outsource-received',
+            status: 'RECEIVED',
+            orderItemIds: ['item-1'],
+          },
+        ],
+      },
+    });
+    dbMock.orderChangeRequest.findUnique
+      .mockResolvedValueOnce({ orderId: 'order-1' })
+      .mockResolvedValueOnce(request);
+    dbMock.orderItem.create.mockResolvedValue({ id: 'item-2' });
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { subtotal: '1000.00' },
+      { subtotal: '500.00' },
+    ]);
+    dbMock.orderChangeRequest.update.mockResolvedValue({
+      id: 'request-1',
+      orderId: 'order-1',
+      status: OrderChangeRequestStatus.APPROVED,
+    });
+
+    await reviewOrderChangeRequest(
+      { requestId: 'request-1', decision: 'APPROVE', reviewRemark: null },
+      adminActor,
+    );
+
+    expect(dbMock.orderItem.create).toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.update).not.toHaveBeenCalled();
+  });
+
   it('quotes all affected updates and additions in one batched rule read', async () => {
     const request = baseReviewRequest({
       proposedChanges: {
@@ -1177,7 +2900,7 @@ describe('reviewOrderChangeRequest', () => {
           {
             operation: 'UPDATE',
             itemId: 'item-1',
-            specification: '大号',
+            frontFoilColors: ['浅金'],
           },
           {
             operation: 'ADD',
@@ -1220,6 +2943,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('does not re-quote a name-only change or replace its immutable price snapshot', async () => {
+    const base = baseReviewRequest();
     const request = baseReviewRequest({
       proposedChanges: {
         items: [
@@ -1227,6 +2951,19 @@ describe('reviewOrderChangeRequest', () => {
             operation: 'UPDATE',
             itemId: 'item-1',
             name: '只改名称',
+          },
+        ],
+      },
+      order: {
+        ...base.order,
+        items: [
+          {
+            ...base.order.items[0],
+            frontFoilColors: [],
+            backFoilColors: [],
+            foilColors: ['哑金'],
+            isDoubleSided: true,
+            isDoubleColor: true,
           },
         ],
       },
@@ -1261,23 +2998,20 @@ describe('reviewOrderChangeRequest', () => {
     expect(updateData).not.toHaveProperty('suggestedPrice');
     expect(updateData).not.toHaveProperty('pricingSnapshot');
     expect(updateData).not.toHaveProperty('priceOverrideReason');
+    expect(updateData).not.toHaveProperty('frontFoilColors');
+    expect(updateData).not.toHaveProperty('backFoilColors');
+    expect(updateData).not.toHaveProperty('foilColors');
+    expect(updateData).not.toHaveProperty('isDoubleSided');
+    expect(updateData).not.toHaveProperty('isDoubleColor');
   });
 
   it('blocks an incomplete re-quote until the reviewer explicitly explains carrying the old price', async () => {
-    const request = baseReviewRequest({
-      order: {
-        ...baseReviewRequest().order,
-        items: [
-          {
-            ...baseReviewRequest().order.items[0],
-            productId: null,
-          },
-        ],
-      },
-    });
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
+    const request = baseReviewRequest();
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([]);
 
     await expect(
       reviewOrderChangeRequest(
@@ -1290,20 +3024,12 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('carries the old price on an incomplete quote only with the explicit review remark', async () => {
-    const request = baseReviewRequest({
-      order: {
-        ...baseReviewRequest().order,
-        items: [
-          {
-            ...baseReviewRequest().order.items[0],
-            productId: null,
-          },
-        ],
-      },
-    });
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
+    const request = baseReviewRequest();
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(request);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([]);
     dbMock.orderItem.findMany.mockResolvedValue([{ subtotal: '1000.00' }]);
     dbMock.orderChangeRequest.update.mockResolvedValue({
       id: 'request-1',
@@ -1332,13 +3058,15 @@ describe('reviewOrderChangeRequest', () => {
           requestId: 'request-1',
           source: 'CHANGE_REQUEST_PRICE_CARRY_FORWARD',
           complete: false,
-          previousSnapshot: { version: 1, marker: 'original' },
           actual: expect.objectContaining({
             overrideReason: '客户已确认沿用原成交价',
           }),
         }),
       }),
     });
+    expect(
+      dbMock.orderItem.update.mock.calls[0]![0].data.pricingSnapshot,
+    ).not.toHaveProperty('previousSnapshot');
   });
 
   it('attributes an approved amount change to the order submitter snapshot even if the requester role changed', async () => {
@@ -1517,7 +3245,12 @@ describe('reviewOrderChangeRequest', () => {
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(request);
     dbMock.product.findMany.mockResolvedValue([
-      { id: 'product-1', baseUnitPrice: '2000.0000' },
+      {
+        id: 'product-1',
+        code: 'PRODUCT_1',
+        category: 'CUSTOM_FLAT_FOIL',
+        baseUnitPrice: '2000.0000',
+      },
     ]);
     dbMock.customerPriceRule.findMany.mockResolvedValue([
       externalBaseRule({ amount: '2000.0000' }),
@@ -1534,6 +3267,7 @@ describe('reviewOrderChangeRequest', () => {
   });
 
   it('rejects a combined order total that would overflow Decimal(12,2)', async () => {
+    mockFlatFoilCraftCode('FLAT_FOIL_DOUBLE');
     dbMock.orderChangeRequest.findUnique
       .mockResolvedValueOnce({ orderId: 'order-1' })
       .mockResolvedValueOnce(baseReviewRequest());

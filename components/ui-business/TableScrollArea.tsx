@@ -1,4 +1,7 @@
+'use client';
+
 import { cn } from '@/lib/utils';
+import { useHorizontalScrollCue } from '@/components/ui/use-horizontal-scroll-cue';
 
 export type TableScrollAreaProps = {
   children: React.ReactNode;
@@ -11,14 +14,17 @@ export function TableScrollArea({
   label,
   className,
 }: TableScrollAreaProps) {
+  const scrollRef = useHorizontalScrollCue<HTMLDivElement>();
+
   return (
     <div
+      ref={scrollRef}
       data-slot="admin-table-scroll"
       role="region"
       aria-label={label}
       tabIndex={0}
       className={cn(
-        'w-full overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'admin-horizontal-scroll-cue w-full overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className,
       )}
     >

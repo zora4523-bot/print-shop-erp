@@ -25,9 +25,9 @@ type PageProps = {
 
 const SECTION_SUBTITLES = {
   processing:
-    '查询外部销售工单的加工费规则。标为需人工确认的项目不得套用相邻档位。',
+    '查看加工费价格；“需人工确认”项目不得套用相邻档位。',
   logistics:
-    '查询快递费与打包耗材价目。价目未覆盖的地区、承运商或包装方案必须联系管理员确认。',
+    '查看快递费和耗材价格；未覆盖的地区或方案请联系管理员。',
 } as const;
 
 export default async function SalesQuotePage({ searchParams }: PageProps) {

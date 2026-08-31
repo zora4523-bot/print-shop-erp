@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createOutsourceAction } from '@/actions/outsource';
 import type { OutsourceMutationResult } from '@/actions/outsource.types';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { nextOutsourceIdempotencyKey } from './idempotency';
 
 export type OutsourceFormItem = {
@@ -91,6 +92,7 @@ export function CreateOutsourceForm({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     const payload = {
       idempotencyKey,
       orderId,
@@ -110,7 +112,7 @@ export function CreateOutsourceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-6">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">
@@ -126,6 +128,7 @@ export function CreateOutsourceForm({
                   id={`item-${it.id}`}
                   type="checkbox"
                   checked={!!selected[it.id]}
+                  disabled={pending}
                   onChange={(e) =>
                     setSelected((prev) => ({
                       ...prev,
@@ -135,7 +138,7 @@ export function CreateOutsourceForm({
                   className="h-4 w-4"
                 />
                 <Label htmlFor={`item-${it.id}`} className="flex-1">
-                  #{it.sequence} · {it.name} · 数量{' '}
+                  #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}
                   {it.quantity.toLocaleString()}
                 </Label>
               </li>
@@ -164,18 +167,21 @@ export function CreateOutsourceForm({
           <Field
             label="外协厂名 *"
             value={supplierName}
+            disabled={pending}
             onChange={setSupplierName}
             errors={fieldErrors(state, 'supplierName')}
           />
           <Field
             label="联系方式"
             value={supplierContact}
+            disabled={pending}
             onChange={setSupplierContact}
             errors={fieldErrors(state, 'supplierContact')}
           />
           <Field
             label="工艺 / 内容"
             value={craftDescription}
+            disabled={pending}
             onChange={setCraftDescription}
             errors={fieldErrors(state, 'craftDescription')}
             full
@@ -183,6 +189,7 @@ export function CreateOutsourceForm({
           <Field
             label="特殊要求"
             value={specialRequirement}
+            disabled={pending}
             onChange={setSpecialRequirement}
             errors={fieldErrors(state, 'specialRequirement')}
             full
@@ -190,6 +197,7 @@ export function CreateOutsourceForm({
           <Field
             label="供应商应付金额（人工确认，元）"
             value={amount}
+            disabled={pending}
             onChange={setAmount}
             errors={fieldErrors(state, 'amount')}
             inputMode="decimal"
@@ -197,6 +205,7 @@ export function CreateOutsourceForm({
           <Field
             label="预计回货"
             value={expectedDate}
+            disabled={pending}
             onChange={setExpectedDate}
             errors={fieldErrors(state, 'expectedDate')}
             type="date"
@@ -204,6 +213,7 @@ export function CreateOutsourceForm({
           <Field
             label="备注"
             value={remark}
+            disabled={pending}
             onChange={setRemark}
             errors={fieldErrors(state, 'remark')}
             full
@@ -249,6 +259,7 @@ function fieldErrors(
 function Field({
   label,
   value,
+  disabled,
   onChange,
   errors,
   full,
@@ -257,6 +268,7 @@ function Field({
 }: {
   label: string;
   value: string;
+  disabled: boolean;
   onChange: (v: string) => void;
   errors: string[];
   full?: boolean;
@@ -274,6 +286,7 @@ function Field({
         id={inputId}
         type={type}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         inputMode={inputMode}
         aria-invalid={errors.length > 0}

@@ -8,6 +8,7 @@ import {
   parseSettingInput,
   resolveSetting,
 } from '../definitions';
+import { SETTING_METADATA } from '../metadata';
 
 describe('SETTING_DEFINITIONS', () => {
   it('每一项的兜底值都能通过自己的 schema', () => {
@@ -27,6 +28,14 @@ describe('SETTING_DEFINITIONS', () => {
     for (const key of SETTING_KEYS) {
       const { field, fallback } = SETTING_DEFINITIONS[key];
       expect(Object.hasOwn(fallback as object, field.name), key).toBe(true);
+    }
+  });
+
+  it('服务端定义与客户端表单元数据保持同一份约束', () => {
+    expect(Object.keys(SETTING_METADATA)).toEqual(SETTING_KEYS);
+    for (const key of SETTING_KEYS) {
+      const { label, help, field } = SETTING_DEFINITIONS[key];
+      expect({ label, help, field }, key).toEqual(SETTING_METADATA[key]);
     }
   });
 
@@ -51,6 +60,9 @@ describe('resolveSetting', () => {
     expect(resolveSetting('outsource_overdue_days', { days: 7 })).toEqual({
       days: 7,
     });
+    expect(
+      resolveSetting('worker_self_claim_enabled', { enabled: true }),
+    ).toEqual({ enabled: true });
   });
 
   it.each([
@@ -86,6 +98,15 @@ describe('resolveSetting', () => {
     });
   });
 
+  it('抢单开关缺失或形状非法时安全退回关闭', () => {
+    expect(resolveSetting('worker_self_claim_enabled', undefined)).toEqual({
+      enabled: false,
+    });
+    expect(
+      resolveSetting('worker_self_claim_enabled', { enabled: 'true' }),
+    ).toEqual({ enabled: false });
+  });
+
   it('超出范围的数值也退回默认值', () => {
     expect(resolveSetting('cdr_link_expire_hours', { hours: 0 })).toEqual({
       hours: 24,
@@ -115,6 +136,19 @@ describe('parseSettingInput', () => {
       ok: true,
       value: { days: 7 },
     });
+  });
+
+  it('布尔项只接受明确的 true / false', () => {
+    expect(parseSettingInput('worker_self_claim_enabled', 'true')).toEqual({
+      ok: true,
+      value: { enabled: true },
+    });
+    expect(parseSettingInput('worker_self_claim_enabled', 'false')).toEqual({
+      ok: true,
+      value: { enabled: false },
+    });
+    expect(parseSettingInput('worker_self_claim_enabled', '1').ok).toBe(false);
+    expect(parseSettingInput('worker_self_claim_enabled', '').ok).toBe(false);
   });
 
   it.each([

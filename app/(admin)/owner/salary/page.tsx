@@ -4,6 +4,7 @@ import { getSalaryIndexSummary } from '@/lib/salary/summary';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader, StatCard } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 
 export const metadata = { title: '薪资总览' };
 
@@ -19,19 +20,19 @@ export default async function SalaryIndexPage() {
         title="薪资总览"
         subtitle={
           <>
-            今日：<span className="font-sans tabular-nums">{s.today}</span> · 所有金额按 Asia/Shanghai 日历。
+            今日：<span className="font-sans tabular-nums">{s.today}</span> · 按上海日历统计。
           </>
         }
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/owner/salary/rules"
+              href={RULE_CENTER_HREFS.employeePay}
               className={buttonVariants({ variant: 'outline' })}
             >
               设置员工工资规则
             </Link>
             <Link
-              href="/owner/salary/piecework-rules"
+              href={RULE_CENTER_HREFS.workerPiecework}
               className={buttonVariants({ variant: 'outline' })}
             >
               设置开机师傅计件规则
@@ -39,10 +40,6 @@ export default async function SalaryIndexPage() {
           </div>
         }
       />
-
-      <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        本页均为工厂支付给内部员工的工资与提成；外部销售的加工费归入“账单”应收，避免把应收和应付混在同一套规则里。
-      </p>
 
       <section className="space-y-3">
         <h2 className="text-base font-semibold">生产师傅计件工资</h2>
@@ -86,14 +83,14 @@ export default async function SalaryIndexPage() {
             value={`${s.csActivePeriods} 个`}
             icon={CalendarClock}
             tone="info"
-            hint="每位客服一条 IN_PROGRESS"
+            hint="每位客服最多一条进行中周期"
           />
           <StatCard
             label="待结算（已到期）"
             value={`${s.csReadyToSettle} 个`}
             icon={CalendarClock}
             tone={s.csReadyToSettle > 0 ? 'warning' : 'neutral'}
-            hint="periodEnd 已过"
+            hint="周期已结束"
           />
           <StatCard
             label="已结算周期剩余未发"

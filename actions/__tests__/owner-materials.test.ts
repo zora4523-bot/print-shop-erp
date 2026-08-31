@@ -16,6 +16,7 @@ const {
     updateMaterial: vi.fn(),
     setMaterialActive: vi.fn(),
     createMaterialTransaction: vi.fn(),
+    getMaterialSummary: vi.fn(),
   },
   revalidatePathMock: vi.fn(),
   redirectMock: vi.fn((path: string) => {
@@ -37,6 +38,7 @@ vi.mock('@/lib/material', () => ({
   updateMaterial: materialMock.updateMaterial,
   setMaterialActive: materialMock.setMaterialActive,
   createMaterialTransaction: materialMock.createMaterialTransaction,
+  getMaterialSummary: materialMock.getMaterialSummary,
   MaterialInvariantError: MockMaterialInvariantError,
 }));
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
@@ -44,8 +46,13 @@ vi.mock('next/navigation', () => ({ redirect: redirectMock }));
 
 import {
   createMaterialAction,
+  createNonPaperMaterialAction,
+  createPaperAction,
+  createPaperTransactionAction,
   createMaterialTransactionAction,
+  setPaperActiveAction,
   setMaterialActiveAction,
+  updatePaperAction,
   updateMaterialAction,
 } from '../owner-materials';
 
@@ -80,6 +87,7 @@ beforeEach(() => {
   materialMock.updateMaterial.mockReset();
   materialMock.setMaterialActive.mockReset();
   materialMock.createMaterialTransaction.mockReset();
+  materialMock.getMaterialSummary.mockReset();
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
@@ -150,6 +158,83 @@ describe('createMaterialAction', () => {
     expect(redirectMock).toHaveBeenCalledWith('/foreman/materials/mat1');
   });
 
+  it('keeps paper creation inside the rule center', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.createMaterial.mockResolvedValue({ id: 'mat1' });
+
+    await expect(
+      createMaterialAction(
+        null,
+        fd({ ...validMaterial, routeBase: '/owner/rules/papers' }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(redirectMock).toHaveBeenCalledWith('/owner/rules/papers/mat1');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/rules/papers');
+  });
+
+  it('纸张专用 action 强制 PAPER 分类与 canonical 返回路径', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.createMaterial.mockResolvedValue({ id: 'paper-1' });
+
+    await expect(
+      createPaperAction(
+        null,
+        fd({
+          ...validMaterial,
+          category: MaterialCategory.OTHER,
+          routeBase: '/owner/materials',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(materialMock.createMaterial).toHaveBeenCalledWith(
+      expect.objectContaining({ category: MaterialCategory.PAPER }),
+    );
+    expect(redirectMock).toHaveBeenCalledWith(
+      '/owner/rules/papers/paper-1',
+    );
+  });
+
+  it('通用物料字典的专用 action 拒绝纸张分类', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+    const result = await createNonPaperMaterialAction(
+      null,
+      fd({ ...validMaterial, routeBase: '/foreman/materials' }),
+    );
+
+    expect(result).toEqual({
+      status: 'invalid',
+      fieldErrors: {
+        category: ['纸张请在规则配置中心统一维护'],
+      },
+    });
+    expect(materialMock.createMaterial).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it('通用物料字典的专用 action 将非纸张物料固定返回旧物料详情', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.createMaterial.mockResolvedValue({ id: 'foil-1' });
+
+    await expect(
+      createNonPaperMaterialAction(
+        null,
+        fd({
+          ...validMaterial,
+          category: MaterialCategory.FOIL,
+          routeBase: '/foreman/materials',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(materialMock.createMaterial).toHaveBeenCalledWith(
+      expect.objectContaining({ category: MaterialCategory.FOIL }),
+    );
+    expect(redirectMock).toHaveBeenCalledWith('/owner/materials/foil-1');
+  });
+
   it('maps P2002 on material code to invalid.code field error', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     materialMock.createMaterial.mockRejectedValueOnce(
@@ -175,6 +260,37 @@ describe('updateMaterialAction', () => {
     await expect(updateMaterialAction('mat1', null, fd(validMaterial))).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
+  });
+
+  it('纸张专用更新不允许修改分类或跨类编辑', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.getMaterialSummary.mockResolvedValue({
+      id: 'paper-1',
+      category: MaterialCategory.PAPER,
+    });
+    materialMock.updateMaterial.mockResolvedValue({ id: 'paper-1' });
+
+    await updatePaperAction(
+      'paper-1',
+      null,
+      fd({ ...validMaterial, category: MaterialCategory.OTHER }),
+    );
+    expect(materialMock.updateMaterial).toHaveBeenCalledWith(
+      'paper-1',
+      expect.objectContaining({ category: MaterialCategory.PAPER }),
+    );
+
+    materialMock.getMaterialSummary.mockResolvedValue({
+      id: 'foil-1',
+      category: MaterialCategory.FOIL,
+    });
+    const result = await updatePaperAction(
+      'foil-1',
+      null,
+      fd(validMaterial),
+    );
+    expect(result.status).toBe('error');
+    expect(materialMock.updateMaterial).toHaveBeenCalledTimes(1);
   });
 
   it('maps MaterialInvariantError to error status', async () => {
@@ -221,6 +337,19 @@ describe('setMaterialActiveAction', () => {
     await expect(setMaterialActiveAction('mat1', false)).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
+  });
+
+  it('纸张专用启停 action 拒绝非纸张 ID', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.getMaterialSummary.mockResolvedValue({
+      id: 'foil-1',
+      category: MaterialCategory.FOIL,
+    });
+
+    const result = await setPaperActiveAction('foil-1', false);
+
+    expect(result.status).toBe('error');
+    expect(materialMock.setMaterialActive).not.toHaveBeenCalled();
   });
 
   it('maps invariant to error', async () => {
@@ -289,5 +418,22 @@ describe('createMaterialTransactionAction', () => {
       status: 'error',
       message: '库存不足，不能出库到负数',
     });
+  });
+
+  it('纸张专用库存 action 拒绝非纸张 ID', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    materialMock.getMaterialSummary.mockResolvedValue({
+      id: 'bag-1',
+      category: MaterialCategory.BAG,
+    });
+
+    const result = await createPaperTransactionAction(
+      'bag-1',
+      null,
+      fd(validTx),
+    );
+
+    expect(result.status).toBe('error');
+    expect(materialMock.createMaterialTransaction).not.toHaveBeenCalled();
   });
 });

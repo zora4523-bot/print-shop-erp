@@ -8,35 +8,60 @@
 
 ## 当前任务
 
-**2026-08-22：发布源连续性收口 —— 两个 PR 已合并，`main` 成为发布候选。**
+**2026-08-24：UI/UX 对齐与状态契约整改批次已完成当前可安全落地范围，未 commit、未部署。** 问题已按 S0–S3 严重度、C1–C4 成本拆成 23 个独立任务。已闭合根错误恢复、基础 UI 原子件、七个共享状态组件、L2/L3 确认层、核心状态注册表、CDR 过期重生、工单字段差异/批量安全子集、通知 UNKNOWN 人工决策、产品引用影响闭环和首批表单/空态迁移。
 
-本次没有改任何业务代码。做的是把上一批（2026-08-21 上线前对抗审查）的成果归档进 Git，并解决长期挂着的"发布分支领先 main 且无 remote"问题。
+**验证事实：** 272 个 Vitest 文件 / 3184 项、typecheck、lint、Prisma validate、diff-check 和 Next.js 16.2.4 生产构建全绿；管理端 36/36、师傅端 12/12、打印像素基线 8/8 通过。应用内浏览器对 `/dev/showcase` 的 393×852 / 1280×800 与 L2/L3 交互检查也通过，开发服务器仍运行于 `http://localhost:3000`。
 
-### 已完成
+**下一轮不要把开放项写成已完成。** 主数据只有产品域已做真实引用闭环；工艺和账号需先拍板停用策略。剩余旧写表单、长任务回执和复杂页分区错误隔离应按页面族独立迁移。管理/师傅门禁是响应式、axe 与候选截图，不是 85 页设计稿像素 diff；真像素基线仍需业主确认。
 
-| 事项 | 结果 |
+**此前已完成（不要重做）：**
+
+**2026-08-23：根路由失效会话 500 已修复并提交。**
+
+`/` 原先直接调用 `requireSession()`：签名 JWT 仍有效、但数据库账号已删除或停用时，Edge proxy 的乐观检查会放行，页面层却把 `UnauthorizedError` 演变为 500，进而触发 React 错误恢复阶段的二次 Script 警告。根页现改用 `getSession()`，验证结果为 `null` 时跳转 `/login`；数据库等真实异常仍原样抛出。四角色分流、失效会话和异常透传已有回归测试；修复提交为 `cbc88ca`。Prisma validate、typecheck、lint、236 个测试文件 / 2988 项单测、Next 生产 build 及带失效会话的浏览器复验均通过；未改 `RootLayout` 主题脚本。
+
+**同日已完成的结构复审：** Codex 已完成未提交上线前加固批次的独立结构复审，并只修复当前代码下仍成立的部分。
+
+复审结论已填入 `docs/代码质量审查-2026-08-23.md`：B1 / B2 / B4 / B5 与 S1 / S3 / S5 / S6 / S7 成立，B3 / B6 / S2 / S4 部分成立，没有整项直接证伪。成立部分已按规定修法落地：通知 `RETRYING + DEAD` 业主契约、共用发送 / finalize 循环、queue-local lease reaper、daily / notification admin / outsource 职责拆分、死 API 删除、未 apply 的查询索引 migration 压缩及 S1–S7 收口。
+
+部分证伪的旧修法没有实施：不把 RETRYING 改成 FAILED，不改 5xx / 超时 / 网络的 UNKNOWN，不改外协 `max` 覆盖、`orderItemIds` 兼容缓存、日薪已发 / 冻结 roster、独立取号可留空隙、Server Component `<details>` 与登录成功也消耗 GCRA 令牌的契约。代码收口按小块提交为 `f608e39 → 9dd1cc5`；任务外的原有脏改动仍留在工作树，未 stash / reset / revert。
+
+| 文档 | 用途 |
 |---|---|
-| 首次配置 Git remote | `https://github.com/zora4523-bot/print-shop-erp.git`（**私有**） |
-| 推送前的敏感数据核查 | `.env` 从未进过任何 commit（`.gitignore:37` 覆盖 `.env*`）；`.env.example` 全是占位符；全历史无 xlsx/csv 真实数据；无硬编码 AK/token |
-| PR #1 | 17 项修复按主题拆 10 个 commit → `fix/launch-review` → `codex/complex-client-data-layer-poc`，已合并（`9a0825e`） |
-| PR #2 | 发布分支快进合入 `main`（104 commit / 795 文件），已合并（`dd648c0`） |
-| 合并后门禁 | 在 `main` 上实跑：lint 0 / typecheck 0 / **206 文件 2758 项单测** / Prisma validate 全绿 |
+| `docs/定价表单优化-2026-08-24.md` | 定价现状对照 + 首批范围 |
+| `docs/codex-prompt-定价表单优化-2026-08-24.md` | **下一轮 Codex 执行稿** |
+| `docs/ux-redesign/` | 交互稿（浏览器打开 `.dc.html`） |
+| `docs/UI-DESIGN-COVERAGE.md` | 85 页设计证据等级、实现覆盖与不可过度声称的边界 |
+| `docs/UI-REMEDIATION-BACKLOG.md` | 严重度×成本排序、23 个独立任务、状态与本批门禁证据 |
+| `UI-SYSTEM.md` | UI token、组件、状态、确认级别与测试契约 |
+| `TROUBLESHOOTING.md` | 含 `fetchServerAction: Failed to fetch` 的根因分类与恢复步骤 |
+| `docs/代码质量审查-2026-08-23.md` | 结构审查正文 + 已完成的复审表（留档） |
+| `docs/codex-prompt-代码质量审查修复-2026-08-23.md` | 结构收口原始约束（留档，不要再跑） |
 
-### 现在的 Git 事实（取代此前多处"无 remote"的记述）
+### 仍成立的 Git / 生产事实
 
-- `main` = `dd648c0`，**就是发布候选**，77 项 migration，尾项 `20260821120100_notification_log_delivery_key_unique`。
-- **`aa42ba0`（生产当前运行的版本）已是 `main` 的祖先**，可从 `main` 重建。此前 HANDOFF 记的"没有可依赖的远端恢复路径""不能从 `main@245be5c` 发版"两条**均已失效**，`deploy/update.sh` 的默认 `git pull` 路径恢复可用。
-- ⚠️ **SSH 在开发机上不通**：`git@github.com` 解析到 `198.18.1.8`（保留段地址，像是 VPN 分流或本地 DNS 劫持），推送直接 `Connection closed`。remote 已改用 **HTTPS**，凭据走 `gh` 的 token（`gh auth setup-git` 配的 `osxkeychain`）。**不要把 remote 改回 SSH**，除非先确认 VPN 分流规则已修。
-
-### 仍未变的关键事实
-
-**生产未动。** <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。本次只是 Git 归档，**没有部署**。`main` 上的 77 项是发布候选口径，不是生产事实——部署意味着一次性应用 **32 个迁移**。
+- 发布候选与 `357a084` 均在 `main` 祖先链；本次结构收口代码提交为 `f608e39 → 9dd1cc5`。
+- remote：`https://github.com/zora4523-bot/print-shop-erp.git`（**私有，HTTPS**）。开发机 SSH 不通（`git@github.com` 解析到 `198.18.1.8`），**不要把 remote 改回 SSH**。
+- **生产未动。** <https://bag.sshapi.cn> 仍运行 `aa42ba0`（2026-08-02）/ **45 / 45 migrations**。工作区这批加固也**没有部署**。
+- 当前 `HEAD` 已跟踪 82 项 migration，尾项是 `20260822112100_create_notification_log_query_index`；工作树还有未提交的 `20260822102000_retire_database_http_scheduler`，所以本地目录共 83 项。这些都**不是生产已 apply 事实**。
 
 ---
 
 ## 下一步具体指令（给下次 AI）
 
-**部署前必须先做（顺序不能反）**
+**立刻做：收口本轮展示层，不要开新功能**
+
+1. 本轮改动还没 commit。小步提交，`type(scope): subject`，不要把结构审查文件混进来，不要 stash/reset 丢掉工作区其它脏文件。
+2. 建议至少再跑：`pnpm lint`、`pnpm typecheck`、`pnpm test run`；动过的页面再评估 `pnpm test:admin-ui`。打印基线不要更新。
+3. 若继续 UI：只补有交互稿、且现有数据够画的页面（批次七八主数据/设置若要对着稿，先打开 `docs/ux-redesign/批次七八 主数据设置仓库与打印 交互稿.dc.html` 对照现状）。不要做执行清单 B 区。
+4. 不要从 `ERP 全站线框 批次1-3.dc.html` 开工。
+
+**根路由修复和结构复审都已收口：不要为消除该警告改 `RootLayout` 的 `beforeInteractive` Script，也不要重做 B1–B6 / S1–S7。**
+
+5. 与结构审查无关的原有脏文件仍在；后续处理它们时继续禁止 stash / reset / 猜测性 revert。若要把整个上线前加固批次定为发布候选，仍应跑 `test:admin-ui` / `test:worker-ui` 与人工验收。
+6. B4 压缩的前提已在本地开发库确认；若未来发现外部库曾 apply 旧的 `20260822111000` / `20260822112000`，必须停止部署并恢复不改写历史的方案。
+
+**部署前仍必须先做（顺序不能反）**
 
 1. **跑 `docs/上线前置操作清单.md` §一的"底数核对" + 查询 1**（只读，可反复跑）。
    ⚠️ **查询 1 返回 0 行有两种完全不同的含义**：真的没缺口，或谓词根本没匹配到任何东西。2026-08-21 在开发库上实测就是后者（6 个外协工艺、1 张有效外协单，但"应外协款式数 = 0"），那次执行**只证明了 SQL 语法可用，没有证明判定逻辑对**。先看底数核对的三个数字再解读查询 1。
@@ -57,14 +82,13 @@
 
 10. **fix#3b：盘点的逐行时间基线 + ledger scan**（单独设计评审）。只解决「净额为零的往返」。要做就必须做**逐行**基线：`counts` 的 entry 加 `snapshotAt`、提交时逐行下发、服务端一条 `groupBy` 走 `(materialId, locationId, createdAt)` 复合索引、`InventoryCount.snapshotAt` 存 `min(item.snapshotAt)`、成功后服务端回 `postedAt` 让客户端设 `baselineFloor`。**不要**重新引入整页共用的基线时刻，也不要引入 `inventory_count_snapshot_max_age_hours` 这类墙上时钟阈值——那正是被否的四条理由的来源。需要 1 个 migration（可空列 + 复合索引，additive）。
 11. **fix#4：OSS 临时 key + 服务端 copy**。**前置动作必须先于代码上线**：RAM 子账号加 `upload-tmp/*` 的 `GetObject`+`DeleteObject`、加 `design/*` 的 `PutObject`、bucket 给 `upload-tmp/` 挂生命周期规则。清单在 `docs/上线前置操作清单.md`。`design/` 前缀**永远不能挂生命周期规则**（它是业务数据）。实施时两个必踩陷阱已写进 DECISIONS 2026-08-21：`ali-oss` 的 `copyObject` 对 headers 只加前缀不删原键 → 裸 `If-Match` 让 copy 恒 412 而所有单测都 mock 了 SDK、CI 会一路全绿；`etag` 缺失被当成成功 → 写出悬空指针。
-12. **通知重试的已知缺口**：最后一次 attempt 期间 worker 猝死（PM2 reload / OOM）时，租约清扫直接把 job 判 `DEAD`，那一轮写下的 `NotificationLog(RETRYING)` 行永远翻不成 `FAILED`，而 `countRecentFailures` 只数 `FAILED` —— 这条**真正丢掉**的推送会在 `/owner/notifications` 上一直显示「重试中」、首页告警条计数为 0。修法：在 `lib/background-jobs/repository.ts` 的租约清扫之后，把 DEAD 通知任务对应 `deliveryKey` 的 `RETRYING` 行收敛成 `FAILED`。
-13. **三处无界查询（backlog）**——都是 `findMany` 无 `take`，行数随时间线性增长：
+12. **三处无界查询（backlog）**——都是 `findMany` 无 `take`，行数随时间线性增长：
     - `lib/salary/daily.ts:593 listDailyWorkerSalaries`（`/owner/salary/daily`，不筛就是全表）
     - `lib/salary/hourly-aggregate.ts:549 listHourlyPayrolls`（同上）
     - `lib/worker-portal.ts:222 listWorkerSalaries`（师傅端 H5，三年约 900 行）
     **`listWorkerSalaries` 不能照抄 `listWorkerOrders` 的分页补丁**：`app/(worker)/worker/salary/page.tsx` 的 `salaryTotals()` 从整个数组 reduce 出「累计工资 / 尚未发放」，直接分页会把这两个金额静默变成「本页合计」——给师傅看错工资总额比慢更糟。正确修法是行分页 + `db.dailyWorkerSalary.aggregate` 单独算 total / unpaid。（`listWorkerHourlyPayrolls` 已核实**不需要**分页：每人每月最多一行。）
-14. **运维缺口**：Pigsty 异地 repo2、30 天保留、恢复演练；生产 `SENTRY_DSN / APP_VERSION`；应用机至少 4 GiB RAM；`deploy-smoke` 继承 PM2 的系统 Chromium 路径与 `--no-sandbox`。
-15. **`/api/health/jobs` 尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信响应目标不生效。
+13. **运维缺口**：Pigsty 异地 repo2、30 天保留、恢复演练；生产 `SENTRY_DSN / APP_VERSION`；应用机至少 4 GiB RAM；`deploy-smoke` 继承 PM2 的系统 Chromium 路径与 `--no-sandbox`。
+14. **`/api/health/jobs` 尚未接进任何外部监控**；在有东西按分钟去拉它之前，SLO 表里的死信响应目标不生效。
 
 ---
 
@@ -158,3 +182,8 @@
 - 2026-08-21：并行缺陷修复批次（11 项）：cron 密钥不再进 curl argv + 恒定时间比较、登录限流改挂 `location = /login` 并按方法豁免 GET、新增 `/api/health/jobs` 死信探针（`/ready` 状态码语义不变）、日薪/月结拒绝严格未来日期、`/owner/salary` 未发聚合下推数据库（+1 项 CONCURRENTLY 索引 migration，累计 75 项）、交期看板与逾期推送各自收窄并加 200 条 fan-out 安全阀、师傅端「我的工单」改 `createdAt desc` 分页、9 个详情页 `generateMetadata` 查真实业务编号（含四页越权标题泄漏修复）、`lib/order/export.ts` 全量显式 `select`、background-jobs 时间戳锚到数据库时钟、`OrderForm` 必填语义与 `AttendanceRecordDialog` 保存回执的无障碍修复。文档由单一 agent 统一同步：README、`docs/部署指南.md`、`docs/deployment-smoke-checklist.md`、`docs/production-slo-and-recovery.md`，DECISIONS 追加 12 条。**CLAUDE.md 未改**（配置文件，留给业主）。
 - 2026-08-21：上线前对抗审查 + 修复。四条候选高风险修复经对抗性审查后**没有一条能照原样实施**，全部 blocking 破绽实读代码核对属实；定稿后落地四项：单条报工数量守卫（判据 `>=`、`Setting` 默认 3、配套老板看板「超计划报工」知情通道）、工单完工闸口收紧为款式级外协覆盖（残留粒度缺口显式接受）、盘点并发守卫改用逐行账面回声 CAS + 部分过账（时间戳基线方案整体否决）、通知投递失败可重试并进死信（`NotificationLog.deliveryKey` 幂等，+2 项 migration，累计 77 项）。OSS 直传重放加固与盘点 ledger scan 明确本批不做并写明理由与陷阱。新增 `docs/上线前置操作清单.md`（外协覆盖的两段部署前只读 SQL、唯一索引 `indisvalid` 验收、单向门与人工验证），DECISIONS 追加 6 条。**CLAUDE.md 未改**（留给业主）。
 - 2026-08-22：发布源连续性收口。仓库首次配置 Git remote（`https://github.com/zora4523-bot/print-shop-erp.git`，私有）；`main`、`codex/complex-client-data-layer-poc`、`fix/launch-review` 三个分支推送完成。上线前审查的 17 项修复按主题拆成 10 个 commit 经 PR #1 合入发布分支，随后 PR #2 将发布分支快进合入 `main`（`245be5c → dd648c0`，104 commit / 795 文件）。合并后在 `main` 上复跑门禁：lint 0 / typecheck 0 / 206 文件 2758 项单测 / Prisma validate 全绿。**生产仍为 `aa42ba0` / 45 migrations，本次只是 Git 归档，未部署。**
+- 2026-08-23：对工作区未提交加固批次（相对 `357a084`，111 文件 +5999/-1991 及 47 个未跟踪文件）做结构审查。结论：要求修改，不能按现状合入。报告 `docs/代码质量审查-2026-08-23.md`，Codex 执行稿 `docs/codex-prompt-代码质量审查修复-2026-08-23.md`。旧「RETRYING→FAILED」修法作废。未改业务代码，未 commit，未部署。
+- 2026-08-23：Codex 独立复审代码质量审查；成立项已按规定修法收口并拆成 `f608e39 → 9dd1cc5` 小提交。未做 / 已证伪的是已发与冻结 roster 语义改写、删外协兼容缓存或把 `max` 改 `sum`、强搬所有取号进事务、客户端化 Server Component `<details>`、改登录令牌消耗时机及 `RETRYING→FAILED`；程序化门禁全绿，未部署。
+- 2026-08-23：修复签名 JWT 仍有效但数据库账号已失效时 `/` 返回 500 并连带触发 Script 警告的问题；根路由现统一跳转 `/login`，四角色分流与异常透传回归已补，提交 `cbc88ca`，全量门禁与浏览器复验通过，未部署。
+- 2026-08-24：入库 UI 重设计交付包（源：Downloads「定价表单优化分析」）。交互稿在 `docs/ux-redesign/`；定价对照 `docs/定价表单优化-2026-08-24.md`；Codex 展示层执行稿 `docs/codex-prompt-定价表单优化-2026-08-24.md`。首批只做外部销售工作台/阶梯表/发布中心，不做全站 12 项。未实现、未部署。
+- 2026-08-24：按交互稿改已有页面（展示层，未 commit）：工单详情常驻动作条 + 时间线 + 款式折叠 + 取消收回页头；收费工作台阶梯 Δ / 粘性草稿条 / 两套只读文案 / 发布 L3 影响；排产「本次可派 / 阻断」列 + 师傅候选卡；Dashboard 处理队列优先（无毛利、无上次查看）；工单修改申请列表前移决策列；计件工资重算移到筛选行末。未碰 lib/actions/prisma。未部署。

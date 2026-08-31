@@ -3,9 +3,17 @@
 import { useActionState, useCallback, useMemo, useState } from 'react';
 import type { MutationResult } from '@/lib/admin/action-helpers';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
-import { Button } from '@/components/ui/button';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 
 type MaterialOption = {
   id: string;
@@ -34,6 +42,21 @@ type Props = {
 const selectClass =
   'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
+const STOCK_TRANSFER_FIELDS: Record<
+  string,
+  { fieldId: string; label: string }
+> = {
+  idempotencyKey: { fieldId: 'stock-transfer-form', label: '调拨请求' },
+  materialId: { fieldId: 'transfer-material', label: '物料' },
+  sourceLocationId: { fieldId: 'transfer-source', label: '来源库位' },
+  destinationLocationId: {
+    fieldId: 'transfer-destination',
+    label: '目标库位',
+  },
+  quantity: { fieldId: 'transfer-quantity', label: '调拨数量' },
+  remark: { fieldId: 'transfer-remark', label: '备注' },
+};
+
 export function StockTransferForm({
   action,
   materials,
@@ -59,9 +82,14 @@ export function StockTransferForm({
   const [materialId, setMaterialId] = useState('');
   const [sourceLocationId, setSourceLocationId] = useState('');
   const [destinationLocationId, setDestinationLocationId] = useState('');
-  const errors = state?.status === 'invalid' ? state.fieldErrors : {};
-  const error = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success' ? state.message : null;
+  const visibleState = pending ? null : state;
+  const errors = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const error = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const successMessage = success
+    ? (visibleState.message ?? '库存调拨已完成')
+    : null;
+  const summaryErrors = toStockTransferErrorSummary(errors);
   const selectedMaterial = materials.find((material) => material.id === materialId);
   const available = useMemo(
     () =>
@@ -75,14 +103,24 @@ export function StockTransferForm({
   const prerequisitesMissing = materials.length === 0 || locations.length < 2;
 
   return (
-    <form action={formAction} className="space-y-4" noValidate>
+    <form
+      id="stock-transfer-form"
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-4"
+      noValidate
+    >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+      <FormErrorSummary errors={summaryErrors} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Field id="transfer-material" label="物料" error={errors.materialId?.[0]}>
           <select
             id="transfer-material"
             name="materialId"
-            {...fieldA11y("transfer-material", errors.materialId?.[0])}
+            {...(errors.materialId?.[0]
+              ? formMessageA11yProps('transfer-material', 'error')
+              : {})}
             className={selectClass}
             value={materialId}
             onChange={(event) => setMaterialId(event.target.value)}
@@ -91,7 +129,7 @@ export function StockTransferForm({
             <option value="">请选择物料</option>
             {materials.map((material) => (
               <option key={material.id} value={material.id}>
-                {material.code} · {material.name}
+                {material.code} · {externalPriceBusinessText(material.name)}
               </option>
             ))}
           </select>
@@ -100,7 +138,9 @@ export function StockTransferForm({
           <select
             id="transfer-source"
             name="sourceLocationId"
-            {...fieldA11y("transfer-source", errors.sourceLocationId?.[0])}
+            {...(errors.sourceLocationId?.[0]
+              ? formMessageA11yProps('transfer-source', 'error')
+              : {})}
             className={selectClass}
             value={sourceLocationId}
             onChange={(event) => setSourceLocationId(event.target.value)}
@@ -123,7 +163,9 @@ export function StockTransferForm({
           <select
             id="transfer-destination"
             name="destinationLocationId"
-            {...fieldA11y("transfer-destination", errors.destinationLocationId?.[0])}
+            {...(errors.destinationLocationId?.[0]
+              ? formMessageA11yProps('transfer-destination', 'error')
+              : {})}
             className={selectClass}
             value={destinationLocationId}
             onChange={(event) => setDestinationLocationId(event.target.value)}
@@ -149,35 +191,54 @@ export function StockTransferForm({
           label={`调拨数量${selectedMaterial ? `（${selectedMaterial.unit}）` : ''}`}
           error={errors.quantity?.[0]}
         >
-          <Input id="transfer-quantity" name="quantity" {...fieldA11y("transfer-quantity", errors.quantity?.[0])} inputMode="decimal" disabled={pending} />
+          <Input
+            id="transfer-quantity"
+            name="quantity"
+            {...(errors.quantity?.[0]
+              ? formMessageA11yProps('transfer-quantity', 'error')
+              : {})}
+            inputMode="decimal"
+            disabled={pending}
+          />
         </Field>
         <Field id="transfer-remark" label="备注（选填）" error={errors.remark?.[0]}>
-          <Input id="transfer-remark" name="remark" {...fieldA11y("transfer-remark", errors.remark?.[0])} disabled={pending} />
+          <Input
+            id="transfer-remark"
+            name="remark"
+            {...(errors.remark?.[0]
+              ? formMessageA11yProps('transfer-remark', 'error')
+              : {})}
+            disabled={pending}
+          />
         </Field>
       </div>
 
       {prerequisitesMissing ? (
-        <p role="alert" className="text-sm text-warning-foreground">
-          调拨至少需要一个启用物料和两个启用库位。
-        </p>
+        <ActionNotice
+          tone="warning"
+          title="暂时无法调拨"
+          description="调拨至少需要一个启用物料和两个启用库位。"
+        />
       ) : null}
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-      {success ? <p role="status" className="text-sm text-success-foreground">✓ {success}</p> : null}
-      <Button type="submit" disabled={pending || prerequisitesMissing}>
-        {pending ? '调拨中…' : '确认调拨'}
-      </Button>
+      {error ? (
+        <ActionNotice
+          tone="error"
+          title="库存调拨失败"
+          description={error}
+        />
+      ) : null}
+      {successMessage ? (
+        <ActionNotice tone="success" title={successMessage} />
+      ) : null}
+      <PendingButton
+        pending={pending}
+        pendingLabel="正在调拨…"
+        disabled={prerequisitesMissing}
+      >
+        确认调拨
+      </PendingButton>
     </form>
   );
-}
-
-// 与 components/business/price/ExternalSalesPriceBookDraftForms.tsx 的
-// fieldA11y 同形状：把「控件 ↔ 错误文案」的程序化关联收成一处，避免在
-// 每个调用点重复写两条 aria。
-function fieldA11y(id: string, error?: string) {
-  return {
-    'aria-invalid': Boolean(error),
-    'aria-describedby': error ? `${id}-error` : undefined,
-  } as const;
 }
 
 function Field({
@@ -195,13 +256,23 @@ function Field({
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
       {children}
-      {/* 逐字段错误不用 role="alert"：靠 aria-describedby 与控件关联，
-          聚焦时读屏器自然读出。标 alert 会在每次校验时抢播报。 */}
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
   );
+}
+
+function toStockTransferErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([field, messages]) => {
+    const target = STOCK_TRANSFER_FIELDS[field] ?? {
+      fieldId: 'stock-transfer-form',
+      label: field,
+    };
+    return messages.map((message) => ({ ...target, message }));
+  });
 }

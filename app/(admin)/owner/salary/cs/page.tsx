@@ -1,10 +1,11 @@
 import Link from 'next/link';
+import Decimal from 'decimal.js';
 import { CalendarClock } from 'lucide-react';
-import { listCsPeriods } from '@/lib/salary/cs';
+import { isCsPeriodDue, listCsPeriods } from '@/lib/salary/cs';
 import { SalaryPeriodStatus } from '@/generated/prisma/enums';
-import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { SettleReadyCsButton } from '@/components/business/salary/SettleReadyCsButton';
+import { SalaryPeriodStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -26,16 +27,66 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
       : sp.status === 'SETTLED'
         ? SalaryPeriodStatus.SETTLED
         : undefined;
-  const periods = await listCsPeriods({
-    status,
-    csUserId: sp.csUserId,
-  });
+  // 页面筛选只影响下方列表；批量结算扫描的是全部已到期周期。
+  // 因此单独读取全部进行中周期，避免确认层被 URL 筛选缩小影响范围。
+  const [periods, inProgressPeriods] = await Promise.all([
+    listCsPeriods({
+      status,
+      csUserId: sp.csUserId,
+    }),
+    listCsPeriods({ status: SalaryPeriodStatus.IN_PROGRESS }),
+  ]);
+  const previewNow = new Date();
+  const duePeriods = inProgressPeriods
+    .filter((period) => isCsPeriodDue(period.periodEnd, previewNow))
+    .sort((left, right) => left.periodEnd.getTime() - right.periodEnd.getTime());
+  const tierSalesTotal = duePeriods.reduce(
+    (sum, period) =>
+      sum
+        .plus(new Decimal(period.totalSales as Decimal.Value))
+        .plus(new Decimal(period.initialSales as Decimal.Value)),
+    new Decimal(0),
+  );
+  const baseTotal = duePeriods.reduce(
+    (sum, period) =>
+      sum.plus(
+        new Decimal(period.monthlyBase as Decimal.Value).times(
+          period.durationMonths,
+        ),
+      ),
+    new Decimal(0),
+  );
+  const settlementPreview = {
+    duePeriodCount: duePeriods.length,
+    csUserCount: new Set(duePeriods.map((period) => period.csUserId)).size,
+    tierSalesTotal: tierSalesTotal.toFixed(2),
+    baseTotal: baseTotal.toFixed(2),
+    earliestPeriodEnd:
+      duePeriods.length > 0
+        ? formatDateShanghai(duePeriods[0]!.periodEnd)
+        : null,
+    latestPeriodEnd:
+      duePeriods.length > 0
+        ? formatDateShanghai(duePeriods[duePeriods.length - 1]!.periodEnd)
+        : null,
+    samplePeriods: duePeriods.slice(0, 5).map((period) => ({
+      periodId: period.id,
+      csUserName: period.csUser.displayName,
+      periodLabel: `${formatDateShanghai(period.periodStart)} ~ ${formatDateShanghai(period.periodEnd)}`,
+      tierSalesTotal: new Decimal(period.totalSales as Decimal.Value)
+        .plus(new Decimal(period.initialSales as Decimal.Value))
+        .toFixed(2),
+      baseTotal: new Decimal(period.monthlyBase as Decimal.Value)
+        .times(period.durationMonths)
+        .toFixed(2),
+    })),
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="客服周期与提成"
-        subtitle="每位客服一条活跃周期（默认 4 个月）。周期到期后扫档位 → 生成提成记录 → 自动开启下一个。"
+        subtitle="查看客服周期、结算状态和提成。"
         actions={
           <Link
             href="/owner/salary/cs/new"
@@ -47,7 +98,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
       />
 
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <SettleReadyCsButton />
+        <SettleReadyCsButton preview={settlementPreview} />
       </section>
 
       {periods.length === 0 ? (
@@ -94,11 +145,7 @@ export default async function CsSalaryListPage({ searchParams }: PageProps) {
                     {String(p.monthlyBase)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {p.status === SalaryPeriodStatus.SETTLED ? (
-                      <Badge>已结算</Badge>
-                    ) : (
-                      <Badge variant="outline">进行中</Badge>
-                    )}
+                    <SalaryPeriodStatusBadge status={p.status} />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

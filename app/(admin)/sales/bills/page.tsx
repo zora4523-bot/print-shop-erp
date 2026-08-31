@@ -3,18 +3,17 @@ import Link from 'next/link';
 import { CheckCircle2, Inbox, Wallet } from 'lucide-react';
 import { listBills } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
-import { BILL_STATUS_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import {
-  BILL_STATUS_TO_BADGE,
   EmptyState,
   PageHeader,
   StatCard,
   StatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
+import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的对客应付账单' };
@@ -80,7 +79,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="我的对客应付账单"
-        subtitle="这里展示外部销售工单应付工厂的加工费、快递费、打包耗材费及其他对客收费。管理员负责出账并登记付款，销售端只读查看结算进度。"
+        subtitle="查看加工费、物流、耗材及其他收费的结算进度。"
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -106,7 +105,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
         <EmptyState
           icon={Inbox}
           title="当前筛选条件下暂无账单"
-          description="月初管理员生成后会出现在这里。"
+          description="管理员生成账单后会显示在这里。"
         />
       ) : (
         <TableScrollArea
@@ -166,8 +165,7 @@ export default async function SalesBillsPage({ searchParams }: PageProps) {
 }
 
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  const cfg = BILL_STATUS_TO_BADGE[status];
-  if (!cfg) return <StatusBadge tone="neutral">{status}</StatusBadge>;
+  const cfg = BILL_STATUS_REGISTRY[status];
   return (
     <StatusBadge tone={cfg.tone} dot={cfg.dot}>
       {cfg.label}
@@ -195,7 +193,7 @@ function FilterBar({
           <option value="">全部</option>
           {Object.values(BillStatus).map((s) => (
             <option key={s} value={s}>
-              {BILL_STATUS_LABELS[s] ?? s}
+              {BILL_STATUS_REGISTRY[s].label}
             </option>
           ))}
         </select>

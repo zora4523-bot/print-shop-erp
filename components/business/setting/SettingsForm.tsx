@@ -7,10 +7,10 @@ import { Label } from '@/components/ui/label';
 import { updateSettingsAction } from '@/actions/owner-settings';
 import type { SettingsMutationResult } from '@/actions/owner-settings.types';
 import {
-  SETTING_DEFINITIONS,
   SETTING_KEYS,
+  SETTING_METADATA,
   type SettingKey,
-} from '@/lib/settings/definitions';
+} from '@/lib/settings/metadata';
 
 type Props = {
   // 由 Server Component 读好当前值传进来（页面层不直连 Prisma 之外的东西，
@@ -27,33 +27,40 @@ export function SettingsForm({ initialValues }: Props) {
   >(updateSettingsAction, null);
 
   return (
-    <form action={formAction} className="space-y-6">
-      <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
-        {SETTING_KEYS.map((key) => (
-          <SettingField
-            key={key}
-            settingKey={key}
-            defaultValue={initialValues[key]}
-            errors={fieldErrors(state, key)}
-          />
-        ))}
-      </div>
+    <form action={formAction} aria-busy={pending}>
+      <fieldset disabled={pending} className="space-y-6 border-0 p-0">
+        <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
+          {SETTING_KEYS.map((key) => (
+            <SettingField
+              // The action revalidates this Server Component and can return a
+              // new saved default. Base UI correctly warns when an uncontrolled
+              // input's defaultValue changes in place, so remount only that
+              // field when its persisted value changes. Invalid submissions keep
+              // the same key and therefore preserve the user's attempted input.
+              key={`${key}:${initialValues[key]}`}
+              settingKey={key}
+              defaultValue={initialValues[key]}
+              errors={fieldErrors(state, key)}
+            />
+          ))}
+        </div>
 
-      {state?.status === 'error' ? (
-        <p role="alert" className="text-sm text-destructive">
-          {state.message}
-        </p>
-      ) : null}
+        {state?.status === 'error' ? (
+          <p role="alert" className="text-sm text-destructive">
+            {state.message}
+          </p>
+        ) : null}
 
-      {state?.status === 'success' ? (
-        <p role="status" className="text-sm text-success-foreground">
-          {state.message ?? '设置已保存'}
-        </p>
-      ) : null}
+        {state?.status === 'success' ? (
+          <p role="status" className="text-sm text-success-foreground">
+            {state.message ?? '设置已保存'}
+          </p>
+        ) : null}
 
-      <Button type="submit" disabled={pending}>
-        {pending ? '保存中…' : '保存设置'}
-      </Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? '保存中…' : '保存设置'}
+        </Button>
+      </fieldset>
     </form>
   );
 }
@@ -67,7 +74,7 @@ function SettingField({
   defaultValue: string;
   errors: string[];
 }) {
-  const definition = SETTING_DEFINITIONS[settingKey];
+  const definition = SETTING_METADATA[settingKey];
   const { field } = definition;
   const hasError = errors.length > 0;
   const errorId = `${settingKey}-error`;
@@ -82,28 +89,42 @@ function SettingField({
         {definition.help}
       </p>
       <div className="flex items-center gap-2">
-        <Input
-          id={settingKey}
-          name={settingKey}
-          defaultValue={defaultValue}
-          aria-invalid={hasError}
-          // 说明文字始终关联，出错时把错误排在前面先读
-          aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
-          {...(field.kind === 'int'
-            ? {
-                type: 'number',
-                inputMode: 'numeric' as const,
-                min: field.min,
-                max: field.max,
-                step: 1,
-                className: 'max-w-32',
-              }
-            : {
-                type: 'text',
-                maxLength: field.maxLength,
-                className: 'max-w-md',
-              })}
-        />
+        {field.kind === 'boolean' ? (
+          <select
+            id={settingKey}
+            name={settingKey}
+            defaultValue={defaultValue}
+            aria-invalid={hasError}
+            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+            className="min-h-10 min-w-32 rounded-md border bg-background px-3 py-2 text-sm"
+          >
+            <option value="false">关闭</option>
+            <option value="true">开启</option>
+          </select>
+        ) : (
+          <Input
+            id={settingKey}
+            name={settingKey}
+            defaultValue={defaultValue}
+            aria-invalid={hasError}
+            // 说明文字始终关联，出错时把错误排在前面先读
+            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+            {...(field.kind === 'int'
+              ? {
+                  type: 'number',
+                  inputMode: 'numeric' as const,
+                  min: field.min,
+                  max: field.max,
+                  step: 1,
+                  className: 'max-w-32',
+                }
+              : {
+                  type: 'text',
+                  maxLength: field.maxLength,
+                  className: 'max-w-md',
+                })}
+          />
+        )}
         {field.kind === 'int' ? (
           <span className="text-sm text-muted-foreground">{field.unit}</span>
         ) : null}

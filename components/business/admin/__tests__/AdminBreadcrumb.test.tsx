@@ -9,13 +9,22 @@ vi.mock('next/navigation', () => ({
   usePathname: usePathnameMock,
 }));
 
-import { AdminBreadcrumb, resolveSegmentLabel } from '../AdminBreadcrumb';
+import {
+  AdminBreadcrumb,
+  BREADCRUMB_PATH_LABELS,
+  resolveSegmentLabel,
+} from '../AdminBreadcrumb';
 
 // 面包屑最后一段今天直接把 25 位 cuid 印出来，等于什么都没说。
 // resolveSegmentLabel 是这部分逻辑的纯函数出口，单测直接调。
 const CUID = 'cmey8k3s10000abcdefghijkl';
 
 describe('resolveSegmentLabel', () => {
+  it('完整路径标签明确区分新规则中心与旧工资规则', () => {
+    expect(BREADCRUMB_PATH_LABELS['/owner/rules']).toBe('规则配置中心');
+    expect(BREADCRUMB_PATH_LABELS['/owner/salary/rules']).toBe('员工工资规则');
+  });
+
   it('已知段名走中文标签表', () => {
     expect(resolveSegmentLabel('orders', null)).toBe('工单');
   });
@@ -38,14 +47,15 @@ describe('resolveSegmentLabel', () => {
     ).toBe('详情');
   });
 
-  it('非 id 的未知段原样显示', () => {
-    // tests/visual/admin-responsive.spec.ts 会 goto /orders/e2e-admin-ui-missing
-    // 跑 404 用例；这个段带连字符、不匹配 cuid 正则，行为与今天一致。
-    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBe(
-      'e2e-admin-ui-missing',
-    );
-    expect(resolveSegmentLabel('e2e-admin-ui-missing', 'GD-260821-001')).toBe(
-      'e2e-admin-ui-missing',
+  it('模块表里的段优先于本地映射，漏网段不露出英文路由', () => {
+    expect(resolveSegmentLabel('cdr', null)).toBe('CDR 汇总');
+    expect(resolveSegmentLabel('order-changes', null)).toBe('工单修改申请');
+    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBe('页面');
+  });
+
+  it('未知末级路由最终回落到页面 H1，不泄露英文路由段', () => {
+    expect(resolveSegmentLabel('future-screen', null, '未来业务页')).toBe(
+      '未来业务页',
     );
   });
 });
@@ -73,5 +83,26 @@ describe('AdminBreadcrumb SSR', () => {
     usePathnameMock.mockReturnValue('/');
 
     expect(renderToStaticMarkup(<AdminBreadcrumb />)).toContain('首页');
+  });
+
+  it('/owner/rules 子路由显示规则中心与子模块，不串到员工工资规则', () => {
+    usePathnameMock.mockReturnValue('/owner/rules/customer-pricing');
+
+    const html = renderToStaticMarkup(<AdminBreadcrumb />);
+    const text = visibleText(html);
+
+    expect(html).toContain('href="/owner/rules"');
+    expect(text).toContain('规则配置中心');
+    expect(text).toContain('客户计价规则');
+    expect(text).not.toContain('员工工资规则');
+  });
+
+  it('/owner/salary/rules 仍显示员工工资规则，不串到新规则中心', () => {
+    usePathnameMock.mockReturnValue('/owner/salary/rules');
+
+    const text = visibleText(renderToStaticMarkup(<AdminBreadcrumb />));
+
+    expect(text).toContain('员工工资规则');
+    expect(text).not.toContain('规则配置中心');
   });
 });

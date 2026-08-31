@@ -15,12 +15,24 @@ import {
   MachineType,
   OrderCostCategory,
   EmploymentType,
+  OrderFoilTechnique,
+  OrderItemPricingRoute,
+  OrderLamination,
+  OrderPackagingMode,
+  OrderProductStructure,
 } from '../../generated/prisma/enums';
 import {
   MAX_ORDER_ITEM_FOIL_COLORS,
   NO_FOIL_COLOR,
 } from '../order/foil-colors';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../order/limits';
+import { MAX_ORDER_ITEM_PRINT_COLORS } from '../order/print-colors';
+import {
+  MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE,
+  isNewOrderPricingRoute,
+  resolveOrderItemFoilSides,
+} from '../order/pricing-route';
+import { calculatePackagingBagCount } from '../order/packaging-bag-count';
 import { validatePriceAdjustmentTriggerCondition } from '../price/adjustment-condition';
 
 // bcrypt (and bcryptjs, which we use) only hashes the first 72 bytes of the
@@ -363,6 +375,15 @@ const formBoolean = z.preprocess((v) => {
   return false;
 }, z.boolean());
 
+// Omitted legacy facts stay unknown instead of being silently converted to
+// an explicit "no". New browser forms submit a real boolean for this field.
+const nullableFormBoolean = z.preprocess((v) => {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v === 'true' || v === 'on';
+  return v;
+}, z.boolean().nullable());
+
 const requiredFormBoolean = z.preprocess((v) => {
   if (typeof v === 'boolean') return v;
   if (v === 'true' || v === 'on') return true;
@@ -441,11 +462,21 @@ const craftNameField = z
 // pick anything. Normalize to null so Prisma's MachineType? column stores
 // a proper "no default machine".
 const optionalMachineTypeField = z
-  .union([z.nativeEnum(MachineType), z.literal(''), z.null(), z.undefined()])
+  .union([
+    z.nativeEnum(MachineType),
+    z.literal(''),
+    z.null(),
+    z.undefined(),
+  ], { error: '请选择有效的接单机型' })
   .transform((v) => (v === '' || v === undefined ? null : v));
 
 const optionalProductionWorkerTypeField = z
-  .union([z.nativeEnum(WorkerType), z.literal(''), z.null(), z.undefined()])
+  .union([
+    z.nativeEnum(WorkerType),
+    z.literal(''),
+    z.null(),
+    z.undefined(),
+  ], { error: '请选择有效的接单岗位' })
   .transform((v) => (v === '' || v === undefined ? null : v));
 
 function validateCraftAssignment(
@@ -517,7 +548,6 @@ export type CreateCraftInput = z.infer<typeof createCraftSchema>;
 
 export const updateCraftSchema = z.object({
   name: craftNameField,
-  code: craftCodeField,
   isOutsource: formBoolean,
   defaultWorkerType: optionalProductionWorkerTypeField,
   defaultMachineType: optionalMachineTypeField,
@@ -647,7 +677,9 @@ const productCategorySortOrderField = z.coerce
 export const createProductCategoryNodeSchema = z.object({
   parentId: productCategoryParentField,
   name: productCategoryNameField,
-  legacyCategory: z.nativeEnum(ProductCategory),
+  legacyCategory: z.nativeEnum(ProductCategory, {
+    error: '请选择有效的产品分类',
+  }),
   sortOrder: productCategorySortOrderField,
 });
 
@@ -659,7 +691,9 @@ export type CreateProductCategoryNodeInput = z.infer<
 // 子节点 path）；只能改名/旧分类快照/排序。
 export const updateProductCategoryNodeSchema = z.object({
   name: productCategoryNameField,
-  legacyCategory: z.nativeEnum(ProductCategory),
+  legacyCategory: z.nativeEnum(ProductCategory, {
+    error: '请选择有效的产品分类',
+  }),
   sortOrder: productCategorySortOrderField,
 });
 
@@ -865,7 +899,9 @@ export const createPriceAdjustmentSchema = z
       .trim()
       .min(1, '请填写加价规则名称')
       .max(64, '加价规则名称过长（最多 64 个字符）'),
-    adjustmentType: z.nativeEnum(AdjustmentType),
+    adjustmentType: z.nativeEnum(AdjustmentType, {
+      error: '请选择有效的加价类型',
+    }),
     amount: priceMoneyField('加价金额'),
     triggerCondition: triggerConditionJsonObjectField,
   })
@@ -986,7 +1022,9 @@ const materialDecimal10Optional = decimalOptionalField({
 
 const materialSchemaFields = {
   name: materialNameField,
-  category: z.nativeEnum(MaterialCategory),
+  category: z.nativeEnum(MaterialCategory, {
+    error: '请选择有效的物料分类',
+  }),
   specification: productTextFieldOptional('规格', 64),
   unit: materialUnitField,
   safetyStock: materialDecimal12Optional,
@@ -1145,9 +1183,16 @@ const inventoryBookQuantityField = z
   .trim()
   .regex(/^\d{1,10}(\.\d{1,2})?$/, '账面数快照格式非法，请刷新页面后重新盘点');
 
+const inventoryCountReasonField = z
+  .string({ error: '请填写盘点过账原因' })
+  .trim()
+  .min(1, '请填写盘点过账原因')
+  .max(500, '盘点过账原因过长（最多 500 个字符）');
+
 export const postInventoryCountSchema = z.object({
   idempotencyKey: z.string().uuid('盘点请求标识格式非法'),
-  remark: productTextFieldOptional('备注', 500),
+  // 盘点会直接改写库存余额；原因随盘点单持久化，作为 L3 操作审计说明。
+  remark: inventoryCountReasonField,
   items: z
     .array(
       z.object({
@@ -1330,7 +1375,11 @@ export type CreatePurchaseReceiptInput = z.infer<
 >;
 
 export const cancelPurchaseReceiptSchema = z.object({
-  reason: productTextFieldOptional('取消原因', 500),
+  reason: z
+    .string()
+    .trim()
+    .min(1, '请填写取消原因')
+    .max(500, '取消原因过长（最多 500 个字符）'),
 });
 
 export type CancelPurchaseReceiptInput = z.infer<
@@ -1382,7 +1431,7 @@ const craftIdSchema = z
   .min(1, '工艺 id 不能为空')
   .max(32, '工艺 id 过长');
 
-const orderItemFoilColorsField = z
+const orderItemFoilColorsArray = (maximum: number, message: string) => z
   .array(
     z
       .string()
@@ -1390,10 +1439,7 @@ const orderItemFoilColorsField = z
       .min(1, '烫金颜色不能为空')
       .max(32, '烫金颜色过长（最多 32 个字符）'),
   )
-  .max(
-    MAX_ORDER_ITEM_FOIL_COLORS,
-    `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
-  )
+  .max(maximum, message)
   .superRefine((colors, ctx) => {
     if (new Set(colors).size !== colors.length) {
       ctx.addIssue({ code: 'custom', message: '烫金颜色不能重复' });
@@ -1406,17 +1452,117 @@ const orderItemFoilColorsField = z
     }
   });
 
-const orderItemSchema = z.object({
+const orderItemFoilColorsField = orderItemFoilColorsArray(
+  MAX_ORDER_ITEM_FOIL_COLORS,
+  `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
+);
+
+// A new command can carry three explicit colors per side. The retired
+// aggregate may therefore contain six distinct colors, but only when the side
+// arrays prove that split; validateOrderItemPricingFacts keeps a legacy
+// aggregate without side evidence at the historical five-color ceiling.
+const orderItemFoilColorsWithExplicitSidesField = orderItemFoilColorsArray(
+  MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE * 2,
+  `正反面烫金颜色合计不超过 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE * 2} 种`,
+);
+
+const orderItemFoilSideColorsField = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1, '烫金颜色不能为空')
+      .max(32, '烫金颜色过长（最多 32 个字符）'),
+  )
+  .max(
+    MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE,
+    `每面烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE} 种`,
+  )
+  .superRefine((colors, ctx) => {
+    if (new Set(colors).size !== colors.length) {
+      ctx.addIssue({ code: 'custom', message: '同一面的烫金颜色不能重复' });
+    }
+    if (colors.includes(NO_FOIL_COLOR)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `正反面颜色明细不能填写“${NO_FOIL_COLOR}”`,
+      });
+    }
+  });
+
+const orderItemBaseSchema = z.object({
   name: z.string().trim().min(1, '请填写款式名').max(64, '款式名过长（最多 64 个字符）'),
   productId: optionalTrimmedText('产品 id', 32),
+  pricingRoute: z.enum(OrderItemPricingRoute),
+  productStructure: z
+    .enum(OrderProductStructure)
+    .default(OrderProductStructure.UNSPECIFIED),
+  artworkVersion: optionalTrimmedText('稿件版本', 64).default(null),
+  plateGroupId: optionalTrimmedText('版组/模具组', 64).default(null),
+  pricingGroup: optionalTrimmedText('专版计价组', 64).default(null),
+  manualQuoteReason: optionalTrimmedText('人工报价原因', 500).default(null),
   specification: optionalTrimmedText('规格', 64),
+  actualWidthMm: z.preprocess(
+    (value) => (value === '' || value === undefined ? null : value),
+    z
+      .number({ message: '实际宽度必须是数字' })
+      .finite('实际宽度必须是有限数')
+      .positive('实际宽度必须大于 0')
+      .max(999_999.99, '实际宽度过大')
+      .nullable(),
+  ),
+  actualHeightMm: z.preprocess(
+    (value) => (value === '' || value === undefined ? null : value),
+    z
+      .number({ message: '实际高度必须是数字' })
+      .finite('实际高度必须是有限数')
+      .positive('实际高度必须大于 0')
+      .max(999_999.99, '实际高度过大')
+      .nullable(),
+  ),
   paperType: optionalTrimmedText('纸张', 32),
+  paperWeightGsm: z.preprocess(
+    (value) => (value === '' || value === undefined ? null : value),
+    z
+      .number({ message: '纸张克重必须是数字' })
+      .int('纸张克重必须是整数')
+      .min(1, '纸张克重必须大于 0')
+      .max(2_000, '纸张克重不能超过 2000g')
+      .nullable(),
+  ),
   quantity: orderItemQuantityField,
   crafts: z
     .array(craftIdSchema)
     .min(1, '至少选择一项工艺')
     .max(10, '单款式工艺不超过 10 项'),
-  foilColors: orderItemFoilColorsField.default([]),
+  frontFoilColors: orderItemFoilSideColorsField.default([]),
+  backFoilColors: orderItemFoilSideColorsField.default([]),
+  // Retired aggregate facts remain accepted for old clients. The domain
+  // write path always derives them from the two side arrays for new rows.
+  foilColors: orderItemFoilColorsWithExplicitSidesField.default([]),
+  foilTechnique: z
+    .enum(OrderFoilTechnique)
+    .default(OrderFoilTechnique.UNSPECIFIED),
+  hasLocalFoil: nullableFormBoolean,
+  lamination: z.enum(OrderLamination).default(OrderLamination.NONE),
+  printColors: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1, '彩印颜色不能为空')
+        .max(32, '彩印颜色过长（最多 32 个字符）'),
+    )
+    .max(
+      MAX_ORDER_ITEM_PRINT_COLORS,
+      `单款式彩印颜色不超过 ${MAX_ORDER_ITEM_PRINT_COLORS} 种`,
+    )
+    .default([])
+    .superRefine((colors, ctx) => {
+      if (new Set(colors).size !== colors.length) {
+        ctx.addIssue({ code: 'custom', message: '彩印颜色不能重复' });
+      }
+    }),
   isDoubleSided: formBoolean,
   isDoubleColor: formBoolean,
   unitPrice: moneyOptionalField,
@@ -1426,6 +1572,217 @@ const orderItemSchema = z.object({
   remark: optionalTrimmedText('款式备注', 1000),
 });
 
+type OrderItemPricingFactsForValidation = Pick<
+  z.infer<typeof orderItemBaseSchema>,
+  | 'productId'
+  | 'pricingRoute'
+  | 'paperType'
+  | 'actualWidthMm'
+  | 'actualHeightMm'
+  | 'frontFoilColors'
+  | 'backFoilColors'
+  | 'foilColors'
+  | 'foilTechnique'
+  | 'hasLocalFoil'
+  | 'lamination'
+  | 'printColors'
+  | 'isDoubleSided'
+>;
+
+function validateOrderItemPricingFacts(
+  item: OrderItemPricingFactsForValidation,
+  ctx: z.RefinementCtx,
+): void {
+  if (!isNewOrderPricingRoute(item.pricingRoute)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['pricingRoute'],
+      message: '新建工单必须从三条计价路线中选择一条',
+    });
+    return;
+  }
+
+  if ((item.actualWidthMm === null) !== (item.actualHeightMm === null)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: item.actualWidthMm === null ? ['actualWidthMm'] : ['actualHeightMm'],
+      message: '实际宽度和高度必须同时填写',
+    });
+  }
+
+  if (!item.productId) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['productId'],
+      message: '自动计价路线必须选择精确的报价产品',
+    });
+  }
+  if (!item.paperType) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['paperType'],
+      message: '请选择标准纸张或填写自定义纸张',
+    });
+  }
+
+  if (
+    item.foilColors.length > MAX_ORDER_ITEM_FOIL_COLORS &&
+    item.frontFoilColors.length === 0 &&
+    item.backFoilColors.length === 0
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['foilColors'],
+      message: `未按正反面填写时，烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
+    });
+  }
+
+  const { frontFoilColors, backFoilColors } = resolveOrderItemFoilSides(item);
+  const actualFoilColors = [...frontFoilColors, ...backFoilColors];
+  if (
+    item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT &&
+    item.lamination !== OrderLamination.NONE
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lamination'],
+      message: '非彩印款式的覆膜方式必须为“无覆膜”',
+    });
+  }
+  if (
+    frontFoilColors.length > MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE ||
+    backFoilColors.length > MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path:
+        frontFoilColors.length > MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE
+          ? ['frontFoilColors']
+          : ['backFoilColors'],
+      message: `正反面各最多 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE} 种烫金颜色`,
+    });
+  }
+
+  if (item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL) {
+    if (
+      item.foilTechnique === OrderFoilTechnique.NONE ||
+      item.foilTechnique === OrderFoilTechnique.UNSPECIFIED
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foilTechnique'],
+        message: '专版烫金必须选择烫金方式',
+      });
+    }
+    if (actualFoilColors.length < 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foilColors'],
+        message: '专版烫金必须选择至少 1 种烫金颜色',
+      });
+    }
+  }
+
+  if (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK) {
+    if (item.hasLocalFoil !== true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['hasLocalFoil'],
+        message: '通版现货路线必须使用局部烫金',
+      });
+    }
+    if (
+      item.foilTechnique === OrderFoilTechnique.NONE ||
+      item.foilTechnique === OrderFoilTechnique.UNSPECIFIED
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foilTechnique'],
+        message: '局部烫金必须选择烫金方式',
+      });
+    }
+    if (actualFoilColors.length < 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foilColors'],
+        message: '局部烫金必须选择至少 1 种烫金颜色',
+      });
+    }
+  }
+
+  if (item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT) {
+    if (item.printColors.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['printColors'],
+        message: '彩印自动计价必须填写彩印颜色',
+      });
+    }
+    if (actualFoilColors.length === 0) {
+      if (item.foilTechnique !== OrderFoilTechnique.NONE) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['foilTechnique'],
+          message: '纯彩印未选烫金颜色时，烫金方式必须为“无烫金”',
+        });
+      }
+      if (item.hasLocalFoil !== false) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['hasLocalFoil'],
+          message: '纯彩印未选烫金颜色时，不能标记局部烫金',
+        });
+      }
+    } else {
+      if (
+        item.foilTechnique === OrderFoilTechnique.NONE ||
+        item.foilTechnique === OrderFoilTechnique.UNSPECIFIED
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['foilTechnique'],
+          message: '彩印加烫金时必须选择烫金方式',
+        });
+      }
+      if (item.hasLocalFoil === null) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['hasLocalFoil'],
+          message: '彩印加烫金时必须明确是否局部烫金',
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Shared command-boundary validation for a fully merged set of pricing
+ * facts. Change requests use this schema after combining a proposal with the
+ * persisted item, so they cannot bypass the same route invariants enforced
+ * when an order is first created.
+ */
+export const orderItemPricingFactsSchema = orderItemBaseSchema
+  .pick({
+    productId: true,
+    pricingRoute: true,
+    paperType: true,
+    actualWidthMm: true,
+    actualHeightMm: true,
+    frontFoilColors: true,
+    backFoilColors: true,
+    foilColors: true,
+    foilTechnique: true,
+    hasLocalFoil: true,
+    lamination: true,
+    printColors: true,
+    isDoubleSided: true,
+  })
+  .superRefine(validateOrderItemPricingFacts);
+
+const orderItemSchema = orderItemBaseSchema.superRefine(
+  validateOrderItemPricingFacts,
+);
+
 export type OrderItemInput = z.infer<typeof orderItemSchema>;
 
 // 建议价由服务端根据当前生效规则计算。客户端只传业务事实，
@@ -1433,16 +1790,33 @@ export type OrderItemInput = z.infer<typeof orderItemSchema>;
 export const quoteOrderItemsSchema = z.object({
   items: z
     .array(
-      orderItemSchema.pick({
-        productId: true,
-        specification: true,
-        paperType: true,
-        quantity: true,
-        crafts: true,
-        foilColors: true,
-        isDoubleSided: true,
-        isDoubleColor: true,
-      }),
+      orderItemBaseSchema
+        .pick({
+          productId: true,
+          specification: true,
+          paperType: true,
+          pricingRoute: true,
+          productStructure: true,
+          artworkVersion: true,
+          plateGroupId: true,
+          pricingGroup: true,
+          manualQuoteReason: true,
+          actualWidthMm: true,
+          actualHeightMm: true,
+          paperWeightGsm: true,
+          quantity: true,
+          crafts: true,
+          frontFoilColors: true,
+          backFoilColors: true,
+          foilColors: true,
+          foilTechnique: true,
+          hasLocalFoil: true,
+          lamination: true,
+          printColors: true,
+          isDoubleSided: true,
+          isDoubleColor: true,
+        })
+        .superRefine(validateOrderItemPricingFacts),
     )
     .min(1, '至少需要一个款式')
     .max(20, '单次最多计算 20 个款式'),
@@ -1550,10 +1924,11 @@ const shipmentChargeMoneyField = z.preprocess(
   ]),
 );
 
-// These fields were added after the original order command shipped.  Treat a
+// These fields were added after the original order command shipped. Treat a
 // missing key exactly like an empty form field so legacy API/domain callers
-// still normalize to null; external-sales business rules decide later whether
-// the facts are sufficient to quote safely.
+// still normalize to null. This schema validates shape, not trust: role-aware
+// server commands decide whether a submitted weight may be used or must be
+// ignored (external-sales create/preview always ignore it).
 const optionalShipmentText = (label: string, max: number) =>
   z.preprocess(
     (value) => (value === undefined ? null : value),
@@ -1584,6 +1959,33 @@ const externalOrderChargeQuoteShipmentSchema = z.object({
       MAX_ORDER_ITEMS_PER_ORDER * 9_999_999,
       '单票分配数量过大',
     ),
+  itemQuantities: z
+    .array(
+      z
+        .number()
+        .int('分配数量必须是整数')
+        .min(0, '分配数量不能小于 0')
+        .max(9_999_999, '分配数量过大'),
+    )
+    .max(MAX_ORDER_ITEMS_PER_ORDER, '单票分配款式过多')
+    .optional(),
+});
+
+const externalOrderChargeQuoteItemSchema = z.object({
+  itemKey: z.string().trim().min(1).max(64).optional(),
+  quantity: z
+    .number()
+    .int('款式数量必须是整数')
+    .min(1, '款式数量必须大于 0')
+    .max(9_999_999, '款式数量过大'),
+  paperWeightGsm: z
+    .number()
+    .int('纸张克重必须是整数')
+    .min(1)
+    .max(2_000)
+    .nullable(),
+  paperType: optionalTrimmedText('纸张', 64).optional(),
+  productStructure: z.enum(OrderProductStructure),
 });
 
 // 创建页物流报价只接收业务事实，不接收价格、规则或价目簿编号。
@@ -1591,6 +1993,11 @@ const externalOrderChargeQuoteShipmentSchema = z.object({
 export const quoteExternalOrderChargesSchema = z
   .object({
     isSfCollect: z.boolean(),
+    items: z
+      .array(externalOrderChargeQuoteItemSchema)
+      .min(1, '至少需要一个款式')
+      .max(MAX_ORDER_ITEMS_PER_ORDER, '款式数量过多')
+      .optional(),
     shipments: z
       .array(externalOrderChargeQuoteShipmentSchema)
       .min(1, '至少需要一个发货地址')
@@ -1608,10 +2015,106 @@ export const quoteExternalOrderChargesSchema = z
       }
       seen.add(shipment.shipmentKey);
     }
+
+    if (!input.items) return;
+    const allocatedByItem = input.items.map(() => 0);
+    for (const [shipmentIndex, shipment] of input.shipments.entries()) {
+      if (!shipment.itemQuantities) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shipments', shipmentIndex, 'itemQuantities'],
+          message: '自动物流报价必须提供各款分配数量',
+        });
+        continue;
+      }
+      if (shipment.itemQuantities.length !== input.items.length) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shipments', shipmentIndex, 'itemQuantities'],
+          message: '各地址的款式分配必须与工单款式一一对应',
+        });
+        continue;
+      }
+      shipment.itemQuantities.forEach((quantity, itemIndex) => {
+        allocatedByItem[itemIndex] =
+          (allocatedByItem[itemIndex] ?? 0) + quantity;
+      });
+      if (!shipment.itemQuantities.some((quantity) => quantity > 0)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shipments', shipmentIndex, 'itemQuantities'],
+          message: '每个地址至少要分配一个款式',
+        });
+      }
+      const allocatedQuantity = shipment.itemQuantities.reduce(
+        (sum, quantity) => sum + quantity,
+        0,
+      );
+      if (shipment.itemQuantity !== allocatedQuantity) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shipments', shipmentIndex, 'itemQuantity'],
+          message: '地址总数量必须等于各款分配数量之和',
+        });
+      }
+    }
+    input.items.forEach((item, itemIndex) => {
+      if (allocatedByItem[itemIndex] !== item.quantity) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', itemIndex, 'quantity'],
+          message: `款式 #${itemIndex + 1} 的地址分配数量必须等于本款数量`,
+        });
+      }
+    });
   });
 
 export type QuoteExternalOrderChargesInput = z.infer<
   typeof quoteExternalOrderChargesSchema
+>;
+
+// 创建页包装组预报价只接收可验证的业务事实。袋数由浏览器根据
+// 每袋组成实时计算，服务端仍严格校验类型和范围，并按当前生效价目重算金额。
+const orderPackagingQuoteGroupSchema = z.object({
+  groupKey: z
+    .string({ error: '包装组标识不能为空' })
+    .trim()
+    .min(1, '包装组标识不能为空')
+    .max(64, '包装组标识过长'),
+  mode: z.enum(OrderPackagingMode, { error: '包装方式非法' }),
+  actualBagCount: z
+    .number({ error: '袋数必须是数字' })
+    .finite('袋数必须是有限数')
+    .int('袋数必须是整数')
+    .min(1, '袋数必须大于 0')
+    .max(9_999_999, '袋数过大'),
+});
+
+export const quoteOrderPackagingGroupsSchema = z
+  .object({
+    groups: z
+      .array(orderPackagingQuoteGroupSchema, {
+        error: '包装组数据格式非法',
+      })
+      .min(1, '至少需要一个包装组')
+      .max(20, '单工单包装组不超过 20 组'),
+  })
+  .superRefine((input, ctx) => {
+    const seen = new Set<string>();
+    input.groups.forEach((group, index) => {
+      if (seen.has(group.groupKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', index, 'groupKey'],
+          message: '包装组标识不能重复',
+        });
+      }
+      seen.add(group.groupKey);
+    });
+  });
+
+export type QuoteOrderPackagingGroupsInput = z.infer<
+  typeof quoteOrderPackagingGroupsSchema
 >;
 
 const additionalShipmentSchema = z.object({
@@ -1623,6 +2126,42 @@ const additionalShipmentSchema = z.object({
   itemQuantities: z
     .array(shipmentSplitQuantityField)
     .max(50, '单个地址的款式分配不超过 50 项'),
+});
+
+const packagingUnitsPerBagField = z.preprocess(
+  (value) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+      return Number.parseInt(value.trim(), 10);
+    }
+    return value;
+  },
+  z
+    .number({ message: '每袋数量必须是非负整数' })
+    .int('每袋数量必须是整数')
+    .min(0, '每袋数量不能小于 0')
+    .max(9_999_999, '每袋数量过大'),
+);
+
+const packagingGroupSchema = z.object({
+  name: optionalTrimmedText('包装组名称', 64),
+  mode: z.enum(OrderPackagingMode),
+  actualBagCount: z.preprocess(
+    (value) => {
+      if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+        return Number.parseInt(value.trim(), 10);
+      }
+      return value;
+    },
+    z
+      .number({ message: '实际袋数必须是数字' })
+      .int('实际袋数必须是整数')
+      .min(1, '实际袋数必须大于 0')
+      .max(9_999_999, '实际袋数过大'),
+  ),
+  itemUnitsPerBag: z
+    .array(packagingUnitsPerBagField)
+    .max(MAX_ORDER_ITEMS_PER_ORDER, '包装组款式组成过多'),
 });
 
 // 严格 YYYY-MM-DD → Date（parseStrictYmd 拒绝 2024-02-31 这类滚动日期；
@@ -1656,10 +2195,16 @@ const optionalDateFieldPartial = z.preprocess((v) => {
 export const createOrderSchema = z
   .object({
     customName: optionalTrimmedText('工单名称', 100).optional(),
+    customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
     customerRef: optionalTrimmedText('客户名称/简称', 64),
     receiverName: optionalTrimmedText('收货人', 64),
     receiverPhone: optionalTrimmedText('收货电话', 32),
-    receiverAddress: optionalTrimmedText('收货地址', 256),
+    receiverAddress: optionalTrimmedText('收货地址', 256)
+      .optional()
+      .refine((value) => Boolean(value), {
+        message: '请填写收货地址',
+      })
+      .transform((value) => value ?? null),
     expressCode: optionalTrimmedText('快递代码', 32),
     ...shipmentChargeFields,
     packageRequirement: optionalTrimmedText('包装要求', 500),
@@ -1670,6 +2215,10 @@ export const createOrderSchema = z
     additionalShipments: z
       .array(additionalShipmentSchema)
       .max(9, '额外地址不超过 9 个')
+      .default([]),
+    packagingGroups: z
+      .array(packagingGroupSchema)
+      .max(20, '单工单包装组不超过 20 组')
       .default([]),
     items: z
       .array(orderItemSchema)
@@ -1787,12 +2336,73 @@ export const createOrderSchema = z
         message: '主地址至少要保留一个款式的发货数量',
       });
     }
+
+    const packagingGroupCountByItem = input.items.map(() => 0);
+    for (const [groupIndex, group] of input.packagingGroups.entries()) {
+      if (group.itemUnitsPerBag.length !== input.items.length) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups', groupIndex, 'itemUnitsPerBag'],
+          message: '每个包装组必须为全部款式表达每袋组成',
+        });
+        continue;
+      }
+      const selectedItemCount = group.itemUnitsPerBag.filter(
+        (quantity) => quantity > 0,
+      ).length;
+      if (
+        group.mode === OrderPackagingMode.SINGLE_STYLE &&
+        selectedItemCount !== 1
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups', groupIndex, 'itemUnitsPerBag'],
+          message: '单款装包装组必须且只能包含 1 个款式',
+        });
+      }
+      if (
+        group.mode === OrderPackagingMode.MIXED_STYLE &&
+        selectedItemCount < 2
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups', groupIndex, 'itemUnitsPerBag'],
+          message: '混装包装组至少要包含 2 个款式',
+        });
+      }
+      const derived = calculatePackagingBagCount({
+        mode: group.mode,
+        itemQuantities: input.items.map((item) => item.quantity),
+        itemUnitsPerBag: group.itemUnitsPerBag,
+      });
+      if (!derived.complete) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups', groupIndex, 'itemUnitsPerBag'],
+          message: derived.errors.join('；'),
+        });
+      }
+      group.itemUnitsPerBag.forEach((unitsPerBag, itemIndex) => {
+        if (unitsPerBag <= 0) return;
+        packagingGroupCountByItem[itemIndex] =
+          (packagingGroupCountByItem[itemIndex] ?? 0) + 1;
+      });
+    }
+    packagingGroupCountByItem.forEach((groupCount, itemIndex) => {
+      if (groupCount > 1) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups'],
+          message: `款式 #${itemIndex + 1} 只能归入一个包装组`,
+        });
+      }
+    });
   });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 export const cancelOrderSchema = z.object({
-  reason: optionalTrimmedText('取消原因', 500),
+  reason: requiredTrimmedText('取消原因', 500),
 });
 
 export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
@@ -1878,6 +2488,11 @@ const updateOrderItemChangeSchema = z
     name: z.string().trim().min(1).max(64).optional(),
     quantity: orderItemQuantityField.optional(),
     specification: optionalTrimmedText('规格', 64).optional(),
+    frontFoilColors: orderItemFoilSideColorsField.optional(),
+    backFoilColors: orderItemFoilSideColorsField.optional(),
+    // Historical clients only submitted one aggregate array. It remains
+    // readable at the command boundary, but the domain layer immediately
+    // projects it into explicit front/back facts before persisting.
     foilColors: orderItemFoilColorsField.optional(),
   })
   .refine(
@@ -1885,6 +2500,8 @@ const updateOrderItemChangeSchema = z
       value.name !== undefined ||
       value.quantity !== undefined ||
       value.specification !== undefined ||
+      value.frontFoilColors !== undefined ||
+      value.backFoilColors !== undefined ||
       value.foilColors !== undefined,
     '至少修改一个款式字段',
   );
@@ -1894,42 +2511,45 @@ const addOrderItemChangeSchema = z.object({
   templateItemId: orderChangeId,
   name: z.string().trim().min(1, '请填写新增款式名').max(64),
   quantity: orderItemQuantityField,
-  specification: optionalTrimmedText('规格', 64),
-  foilColors: orderItemFoilColorsField.default([]),
+  specification: optionalTrimmedText('规格', 64).optional(),
+  frontFoilColors: orderItemFoilSideColorsField.optional(),
+  backFoilColors: orderItemFoilSideColorsField.optional(),
+  foilColors: orderItemFoilColorsField.optional(),
 });
 
-export const createOrderChangeRequestSchema = z
-  .object({
-    orderId: orderChangeId,
-    reason: z
-      .string()
-      .trim()
-      .min(1, '请填写修改原因')
-      .max(500, '修改原因过长'),
-    items: z
-      .array(
-        z.discriminatedUnion('operation', [
-          updateOrderItemChangeSchema,
-          addOrderItemChangeSchema,
-        ]),
-      )
-      .min(1, '至少填写一项修改')
-      .max(50, '单次修改不超过 50 项'),
-  })
+export const orderChangeRequestItemsSchema = z
+  .array(
+    z.discriminatedUnion('operation', [
+      updateOrderItemChangeSchema,
+      addOrderItemChangeSchema,
+    ]),
+  )
+  .min(1, '至少填写一项修改')
+  .max(50, '单次修改不超过 50 项')
   .superRefine((value, ctx) => {
     const updatedItemIds = new Set<string>();
-    value.items.forEach((item, index) => {
+    value.forEach((item, index) => {
       if (item.operation !== 'UPDATE') return;
       if (updatedItemIds.has(item.itemId)) {
         ctx.addIssue({
           code: 'custom',
-          path: ['items', index, 'itemId'],
+          path: [index, 'itemId'],
           message: '同一款式不能重复提交修改',
         });
       }
       updatedItemIds.add(item.itemId);
     });
   });
+
+export const createOrderChangeRequestSchema = z.object({
+  orderId: orderChangeId,
+  reason: z
+    .string()
+    .trim()
+    .min(1, '请填写修改原因')
+    .max(500, '修改原因过长'),
+  items: orderChangeRequestItemsSchema,
+});
 
 export type CreateOrderChangeRequestInput = z.infer<
   typeof createOrderChangeRequestSchema
@@ -1952,6 +2572,234 @@ export type PreviewOrderChangeRequestPricingInput = z.infer<
   typeof previewOrderChangeRequestPricingSchema
 >;
 
+// 外部销售终价只接收管理员的确认值；价目簿 id、建议价和小计
+// 一律由领域层按最新有效版本重算，不信任浏览器快照。
+const orderPricingRevisionField = z.preprocess(
+  (value) => {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : Number.NaN;
+  },
+  z.number().int('价格版本必须是整数').min(1, '价格版本非法'),
+);
+
+const confirmedShipmentChargeMoneyField = shipmentChargeMoneyField.refine(
+  (value): value is string => value !== null,
+  '请填写确认收费',
+);
+
+export const previewOrderPricingReviewSchema = z.object({
+  orderId: orderChangeId,
+});
+
+export type PreviewOrderPricingReviewInput = z.infer<
+  typeof previewOrderPricingReviewSchema
+>;
+
+export const finalizeOrderPricingSchema = z
+  .object({
+    orderId: orderChangeId,
+    expectedOrderRevision: orderPricingRevisionField,
+    expectedPriceRevision: orderPricingRevisionField,
+    items: z
+      .array(
+        z.object({
+          itemId: orderChangeId,
+          unitPrice: moneyOptionalField,
+          fixedFee: orderItemMoneyOptionalField,
+          reason: optionalTrimmedText('管理员定价依据', 500),
+        }),
+      )
+      .max(
+        MAX_ORDER_ITEMS_PER_ORDER,
+        `单工单款式不超过 ${MAX_ORDER_ITEMS_PER_ORDER} 项`,
+      )
+      .default([]),
+    packagingGroups: z
+      .array(
+        z.object({
+          packagingGroupId: orderChangeId,
+          expectedMode: z.enum(OrderPackagingMode),
+          expectedActualBagCount: z.preprocess(
+            (value) => {
+              if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+                return Number.parseInt(value.trim(), 10);
+              }
+              return value;
+            },
+            z
+              .number({ message: '实际袋数必须是数字' })
+              .int('实际袋数必须是整数')
+              .min(1, '实际袋数必须大于 0')
+              .max(9_999_999, '实际袋数过大'),
+          ),
+          unitPrice: moneyOptionalField,
+          reason: optionalTrimmedText('包装组定价依据', 500),
+        }),
+      )
+      .max(20, '单工单包装组不超过 20 组')
+      .default([]),
+    shipments: z
+      .array(
+        z.object({
+          shipmentId: orderChangeId,
+          expectedDestinationProvince: optionalShipmentText('预览计费省份', 32),
+          expectedBillableWeightKg: shipmentBillableWeightField,
+          shippingFee: confirmedShipmentChargeMoneyField,
+          packingMaterialFee: confirmedShipmentChargeMoneyField,
+          reason: optionalShipmentText('收费确认说明', 500),
+        }),
+      )
+      .max(10, '单工单发货地址不超过 10 个'),
+    remark: optionalTrimmedText('终价备注', 500),
+  })
+  .superRefine((input, ctx) => {
+    const itemIds = new Set<string>();
+    input.items.forEach((item, index) => {
+      if (itemIds.has(item.itemId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['items', index, 'itemId'],
+          message: '同一款式不能重复提交终价',
+        });
+      }
+      itemIds.add(item.itemId);
+    });
+
+    const shipmentIds = new Set<string>();
+    input.shipments.forEach((shipment, index) => {
+      if (shipmentIds.has(shipment.shipmentId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shipments', index, 'shipmentId'],
+          message: '同一发货地址不能重复提交收费',
+        });
+      }
+      shipmentIds.add(shipment.shipmentId);
+    });
+
+    const packagingGroupIds = new Set<string>();
+    input.packagingGroups.forEach((group, index) => {
+      if (packagingGroupIds.has(group.packagingGroupId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingGroups', index, 'packagingGroupId'],
+          message: '同一包装组不能重复提交终价',
+        });
+      }
+      packagingGroupIds.add(group.packagingGroupId);
+    });
+  });
+
+export type FinalizeOrderPricingInput = z.infer<
+  typeof finalizeOrderPricingSchema
+>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Structured customer extras / per-style plate details
+// ─────────────────────────────────────────────────────────────────────
+
+const orderCommercialMoneyField = orderItemMoneyOptionalField.refine(
+  (value): value is string => value !== null,
+  '请填写金额',
+);
+
+const signedOrderAdjustmentMoneyField = z.preprocess(
+  (value) => (value === null || value === undefined ? '' : value),
+  z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        /^-?(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(value),
+      '调整金额格式错误（整数部分最多 10 位、小数最多 2 位）',
+    ),
+);
+
+export const saveOrderManualChargeSchema = z
+  .object({
+    orderId: orderChangeId,
+    chargeId: orderChangeId.nullable().default(null),
+    expectedPriceRevision: orderPricingRevisionField,
+    categoryCode: z.enum([
+      'SAMPLE_FEE',
+      'OTHER_PACKAGING_FEE',
+      'APPROVED_ADJUSTMENT',
+    ]),
+    description: requiredTrimmedText('收费说明', 120),
+    amount: z.union([
+      orderCommercialMoneyField,
+      signedOrderAdjustmentMoneyField,
+    ]),
+    reason: requiredTrimmedText('收费原因', 500),
+    approvalReference: optionalTrimmedText('审批信息', 500).default(null),
+  })
+  .superRefine((input, ctx) => {
+    const signedAmount = Number(input.amount);
+    if (
+      input.categoryCode !== 'APPROVED_ADJUSTMENT' &&
+      signedAmount < 0
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['amount'],
+        message: '只有经审批调整金额可以为负数',
+      });
+    }
+    if (
+      input.categoryCode === 'APPROVED_ADJUSTMENT' &&
+      !input.approvalReference
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['approvalReference'],
+        message: '经审批调整必须填写审批信息',
+      });
+    }
+  });
+
+export const deleteOrderManualChargeSchema = z.object({
+  orderId: orderChangeId,
+  chargeId: orderChangeId,
+  expectedPriceRevision: orderPricingRevisionField,
+  reason: requiredTrimmedText('移除原因', 500),
+});
+
+export const saveOrderPlateDetailSchema = z.object({
+  orderId: orderChangeId,
+  orderItemId: orderChangeId,
+  plateDetailId: orderChangeId.nullable().default(null),
+  expectedPriceRevision: orderPricingRevisionField,
+  name: requiredTrimmedText('制版名称', 120),
+  plateGroupId: optionalTrimmedText('版组 ID', 64).default(null),
+  specification: optionalTrimmedText('制版规格', 120).default(null),
+  quantity: orderItemQuantityField,
+  unitPrice: orderCommercialMoneyField,
+  remark: optionalTrimmedText('制版备注', 500).default(null),
+});
+
+export const deleteOrderPlateDetailSchema = z.object({
+  orderId: orderChangeId,
+  orderItemId: orderChangeId,
+  plateDetailId: orderChangeId,
+  expectedPriceRevision: orderPricingRevisionField,
+  reason: requiredTrimmedText('移除原因', 500),
+});
+
+export type SaveOrderManualChargeInput = z.infer<
+  typeof saveOrderManualChargeSchema
+>;
+export type DeleteOrderManualChargeInput = z.infer<
+  typeof deleteOrderManualChargeSchema
+>;
+export type SaveOrderPlateDetailInput = z.infer<
+  typeof saveOrderPlateDetailSchema
+>;
+export type DeleteOrderPlateDetailInput = z.infer<
+  typeof deleteOrderPlateDetailSchema
+>;
+
 // ─────────────────────────────────────────────────────────────────────
 // Order edit (SPEC §3.6 — top-level fields only, E-lean scope)
 // ─────────────────────────────────────────────────────────────────────
@@ -1963,20 +2811,21 @@ export type PreviewOrderChangeRequestPricingInput = z.infer<
 
 // Partial-update shape: every field is independently optional so the
 // action can submit only what the form actually touched. Missing key
-// → don't change; empty string → clear to null; present value → update.
-// optionalFormBoolean handles the undefined case for checkbox fields.
+// → don't change; optional text may be cleared to null. receiverAddress
+// is the deliberate exception: once supplied it must stay non-blank.
+// optionalFormBoolean handles the undefined case for the urgent checkbox.
 export const updateEditableOrderSchema = z.object({
   customName: optionalTrimmedText('工单名称', 100).optional(),
   customerRef: optionalTrimmedText('客户名称/简称', 64).optional(),
   receiverName: optionalTrimmedText('收货人', 64).optional(),
   receiverPhone: optionalTrimmedText('收货电话', 32).optional(),
-  receiverAddress: optionalTrimmedText('收货地址', 256).optional(),
+  // 普通编辑允许不传该 key（partial update），但只要传了就不能清空。
+  receiverAddress: requiredTrimmedText('收货地址', 256).optional(),
   expressCode: optionalTrimmedText('快递代码', 32).optional(),
   packageRequirement: optionalTrimmedText('包装要求', 500).optional(),
   remark: optionalTrimmedText('工单备注', 1000).optional(),
   promisedDate: optionalDateFieldPartial,
   isUrgent: optionalFormBoolean,
-  isSfCollect: optionalFormBoolean,
 });
 
 export type UpdateEditableOrderInput = z.infer<typeof updateEditableOrderSchema>;
@@ -1984,11 +2833,10 @@ export type UpdateEditableOrderInput = z.infer<typeof updateEditableOrderSchema>
 export const updateShippingOrderSchema = z.object({
   receiverName: optionalTrimmedText('收货人', 64),
   receiverPhone: optionalTrimmedText('收货电话', 32),
-  receiverAddress: optionalTrimmedText('收货地址', 256),
+  receiverAddress: requiredTrimmedText('收货地址', 256),
   expressCode: optionalTrimmedText('快递代码', 32),
   packageRequirement: optionalTrimmedText('包装要求', 500),
   remark: optionalTrimmedText('工单备注', 1000),
-  isSfCollect: optionalFormBoolean,
 });
 
 export type UpdateShippingOrderInput = z.infer<typeof updateShippingOrderSchema>;
@@ -2061,9 +2909,18 @@ const assignmentOverrideReasonField = z
   .optional();
 
 const scheduleAssignmentSchema = z.object({
+  taskId: safeId('生产任务 id').optional(),
   orderItemId: safeId('款式 id'),
   craftId: safeId('工艺 id'),
   workerId: safeId('师傅 id'),
+  plannedQty: z.coerce
+    .number()
+    .int('分配数量必须是整数')
+    .positive('分配数量必须大于 0')
+    .max(100_000_000, '分配数量不能超过 100000000')
+    // 兼容旧客户端：同一款式工艺只有一条派工时，
+    // 业务层会以 OrderItem.quantity 补全。拆分多人时必须显式传入。
+    .optional(),
   overrideReason: assignmentOverrideReasonField,
 });
 
@@ -2075,8 +2932,9 @@ export const scheduleOrderSchema = z.object({
     // the empty array so scheduleOrder can still transition Order to
     // SCHEDULING (lib enforces the real invariant: every expected
     // non-outsource pair must be covered).
-    // createOrder allows 50 items × 10 crafts; accept the same ceiling.
-    .max(500, '单次排产不超过 500 个任务'),
+    // createOrder allows 50 items × 10 crafts, and each pair may be split
+    // across workers. Keep a bounded payload while leaving room for splits.
+    .max(2000, '单次排产不超过 2000 个师傅任务'),
 });
 
 export type ScheduleOrderInput = z.infer<typeof scheduleOrderSchema>;
@@ -2102,6 +2960,35 @@ export const reassignProductionTaskSchema = z.object({
 
 export type ReassignProductionTaskInput = z.infer<
   typeof reassignProductionTaskSchema
+>;
+
+export const createProductionTaskDisputeSchema = z.object({
+  taskId: safeId('生产任务 id'),
+  reason: z
+    .string()
+    .trim()
+    .min(5, '异议原因至少 5 个字')
+    .max(1000, '异议原因最多 1000 个字符'),
+});
+
+export type CreateProductionTaskDisputeInput = z.infer<
+  typeof createProductionTaskDisputeSchema
+>;
+
+export const reviewProductionTaskDisputeSchema = z.object({
+  disputeId: safeId('异议 id'),
+  decision: z.enum(['RESOLVED', 'REJECTED'], {
+    error: '请选择同意调整或驳回异议',
+  }),
+  resolution: z
+    .string()
+    .trim()
+    .min(2, '处理回复至少 2 个字')
+    .max(1000, '处理回复最多 1000 个字符'),
+});
+
+export type ReviewProductionTaskDisputeInput = z.infer<
+  typeof reviewProductionTaskDisputeSchema
 >;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2383,27 +3270,48 @@ export type MarkOutsourceReceivedInput = z.infer<typeof markOutsourceReceivedSch
 // The recompute-daily endpoint takes a date and optionally a single
 // workerId (for "recompute just this row" from the UI). Strict calendar
 // validation — refuses 2026-02-31 and the like .
-export const recomputeDailySalarySchema = z.object({
-  date: z
-    .string()
-    .trim()
-    .superRefine((val, ctx) => {
-      if (!YMD_RE.test(val)) {
-        ctx.addIssue({
-          code: 'custom',
-          message: '日期格式非法（应为 YYYY-MM-DD）',
-        });
-        return;
-      }
-      if (!parseStrictYmd(val)) {
-        ctx.addIssue({
-          code: 'custom',
-          message: '日期不是合法日历日期',
-        });
-      }
-    }),
-  workerId: safeId('师傅 id').optional(),
-});
+// Server Action 输入契约（不是 Prisma schema）。第一阶段只读预检
+// 不要求用户先编造理由；任何 confirmed=true 的写入请求仍由
+// 服务端强制 1–500 字。这个闸口不依赖客户端对话框的 required。
+export const recomputeDailySalarySchema = z
+  .object({
+    date: z
+      .string()
+      .trim()
+      .superRefine((val, ctx) => {
+        if (!YMD_RE.test(val)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: '日期格式非法（应为 YYYY-MM-DD）',
+          });
+          return;
+        }
+        if (!parseStrictYmd(val)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: '日期不是合法日历日期',
+          });
+        }
+      }),
+    workerId: safeId('师傅 id').optional(),
+    reason: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z
+        .string()
+        .trim()
+        .max(500, '重算理由过长（最多 500 个字符）'),
+    ),
+    confirmed: formBoolean,
+  })
+  .superRefine((data, ctx) => {
+    if (data.confirmed && data.reason.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: '请填写重算理由',
+      });
+    }
+  });
 
 export type RecomputeDailySalaryInput = z.infer<typeof recomputeDailySalarySchema>;
 

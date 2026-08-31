@@ -6,10 +6,16 @@ import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
+  OrderFoilTechnique,
+  OrderLamination,
+  OrderPackagingMode,
+  OrderProductStructure,
 } from '../generated/prisma/enums';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
 import { parseStrictShanghaiDateTimeLocal } from '@/lib/auth/schemas';
+import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { NEW_ORDER_PRICING_ROUTES } from '@/lib/order/pricing-route';
 import {
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
@@ -34,6 +40,44 @@ const safeId = z
   .min(1, '标识不能为空')
   .max(128, '标识过长')
   .regex(/^[A-Za-z0-9_-]+$/, '标识格式非法');
+
+const VALIDATION_FIELD_LABELS: Readonly<Record<string, string>> = {
+  purpose: '调价用途',
+  kind: '收费类型',
+  calculationType: '计价方式',
+  target: '计价对象',
+  packagingModes: '包装方式',
+  pricingRoutes: '计价方式',
+  productStructures: '产品结构',
+  foilTechniques: '烫金方式',
+  laminations: '覆膜方式',
+  craftMode: '多工艺条件',
+  isActive: '启用状态',
+  blocksAutomaticQuote: '自动计价设置',
+};
+
+function customerPriceBookFieldErrors(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[],
+): Record<string, string[]> {
+  return collectFieldErrorsDeep(
+    issues.map((issue) => {
+      const field = [...issue.path]
+        .reverse()
+        .find((segment): segment is string => typeof segment === 'string');
+      const hasTechnicalMessage =
+        /(?:invalid|unrecognized|expected|received|json)/i.test(issue.message) ||
+        /\b[A-Z][A-Z0-9_]{2,}\b/.test(issue.message);
+      if (!hasTechnicalMessage) return issue;
+      return {
+        path: issue.path,
+        message:
+          issue.path.length === 0
+            ? '提交内容包含页面不支持的字段，请刷新后重试'
+            : `${VALIDATION_FIELD_LABELS[field ?? ''] ?? '该项'}设置无效，请重新选择或填写`,
+      };
+    }),
+  );
+}
 
 const nullableDecimal = (label: string, integerDigits: number, decimalPlaces: number) =>
   z.preprocess(
@@ -70,6 +114,216 @@ const nullableUnitsPerSheet = z.preprocess(
     .max(9_999_999, '每张含几个不能超过 9999999')
     .nullable(),
 );
+
+const matcherStringList = z
+  .array(z.string().trim().min(1, '条件值不能为空').max(120, '单个条件最多 120 字'))
+  .max(100, '单项条件最多 100 个值')
+  .transform((values) => [...new Set(values)]);
+
+const nullableMatchBoolean = z.boolean().nullable();
+const nullableMatchCount = z.number().int().min(0).max(100).nullable();
+const nullablePositiveInteger = z
+  .number()
+  .int()
+  .min(1)
+  .max(9_999_999)
+  .nullable();
+const nullableMeasurement = z.number().finite().gt(0).max(99_999).nullable();
+
+const processingRuleMatchSchema = z
+  .object({
+    target: z.enum(['ITEM', 'PACKAGING_GROUP'], {
+      error: '请选择有效的计价对象',
+    }),
+    packagingModes: z
+      .array(
+        z.enum(OrderPackagingMode, {
+          error: '请选择有效的包装方式',
+        }),
+      )
+      .max(20),
+    pricingRoutes: z
+      .array(
+        z.enum(NEW_ORDER_PRICING_ROUTES, {
+          error: '请选择有效的计价方式',
+        }),
+      )
+      .max(NEW_ORDER_PRICING_ROUTES.length),
+    productStructures: z
+      .array(
+        z.enum(OrderProductStructure, {
+          error: '请选择有效的产品结构',
+        }),
+      )
+      .max(20),
+    foilTechniques: z
+      .array(
+        z.enum(OrderFoilTechnique, {
+          error: '请选择有效的烫金方式',
+        }),
+      )
+      .max(20),
+    laminations: z
+      .array(
+        z.enum(OrderLamination, {
+          error: '请选择有效的覆膜方式',
+        }),
+      )
+      .max(20),
+    specifications: matcherStringList,
+    paperTypes: matcherStringList,
+    craftCodes: matcherStringList,
+    noneOfCraftCodes: matcherStringList,
+    anyCraftCodeOutside: matcherStringList,
+    craftMode: z
+      .enum(['ANY', 'ALL'], {
+        error: '请选择有效的多工艺条件',
+      })
+      .nullable(),
+    foilColors: matcherStringList,
+    printColors: matcherStringList,
+    isDoubleSided: nullableMatchBoolean,
+    isDoubleColor: nullableMatchBoolean,
+    hasLocalFoil: nullableMatchBoolean,
+    foilColorCount: nullableMatchCount,
+    minFoilColorCount: nullableMatchCount,
+    maxFoilColorCount: nullableMatchCount,
+    foilPassCount: nullableMatchCount,
+    minFoilPassCount: nullableMatchCount,
+    maxFoilPassCount: nullableMatchCount,
+    printColorCount: nullableMatchCount,
+    minPrintColorCount: nullableMatchCount,
+    maxPrintColorCount: nullableMatchCount,
+    minWidthMm: nullableMeasurement,
+    maxWidthMm: nullableMeasurement,
+    minHeightMm: nullableMeasurement,
+    maxHeightMm: nullableMeasurement,
+    minPaperWeightGsm: nullablePositiveInteger,
+    maxPaperWeightGsm: nullablePositiveInteger,
+    minItemCount: nullablePositiveInteger,
+    maxItemCount: nullablePositiveInteger,
+    perFoilColor: z.boolean(),
+    perFoilPass: z.boolean(),
+    perPrintColor: z.boolean(),
+  })
+  .strict()
+  .superRefine((match, ctx) => {
+    if (match.target === 'ITEM') {
+      if (match.pricingRoutes.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['pricingRoutes'],
+          message: '款式规则至少选择一条计价路线',
+        });
+      }
+      if (match.packagingModes.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingModes'],
+          message: '款式规则不能配置包装模式',
+        });
+      }
+    } else {
+      if (match.packagingModes.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['packagingModes'],
+          message: '包装组规则至少选择一种包装模式',
+        });
+      }
+      const mixedItemFields = [
+        match.pricingRoutes,
+        match.productStructures,
+        match.foilTechniques,
+        match.laminations,
+        match.specifications,
+        match.paperTypes,
+        match.craftCodes,
+        match.noneOfCraftCodes,
+        match.anyCraftCodeOutside,
+        match.foilColors,
+        match.printColors,
+      ];
+      const hasMixedScalar = [
+        match.craftMode,
+        match.isDoubleSided,
+        match.isDoubleColor,
+        match.hasLocalFoil,
+        match.foilColorCount,
+        match.minFoilColorCount,
+        match.maxFoilColorCount,
+        match.foilPassCount,
+        match.minFoilPassCount,
+        match.maxFoilPassCount,
+        match.printColorCount,
+        match.minPrintColorCount,
+        match.maxPrintColorCount,
+        match.minWidthMm,
+        match.maxWidthMm,
+        match.minHeightMm,
+        match.maxHeightMm,
+        match.minPaperWeightGsm,
+        match.maxPaperWeightGsm,
+        match.minItemCount,
+        match.maxItemCount,
+      ].some((value) => value !== null);
+      if (
+        mixedItemFields.some((values) => values.length > 0) ||
+        hasMixedScalar ||
+        match.perFoilColor ||
+        match.perFoilPass ||
+        match.perPrintColor
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['target'],
+          message: '包装组规则不能混用款式匹配条件',
+        });
+      }
+    }
+    for (const [minimumKey, maximumKey, label] of [
+      ['minFoilColorCount', 'maxFoilColorCount', '烫金颜色数'],
+      ['minFoilPassCount', 'maxFoilPassCount', '烫金道数'],
+      ['minPrintColorCount', 'maxPrintColorCount', '彩印颜色数'],
+      ['minWidthMm', 'maxWidthMm', '宽度'],
+      ['minHeightMm', 'maxHeightMm', '高度'],
+      ['minPaperWeightGsm', 'maxPaperWeightGsm', '纸张克重'],
+      ['minItemCount', 'maxItemCount', '款式数'],
+    ] as const) {
+      const minimum = match[minimumKey];
+      const maximum = match[maximumKey];
+      if (minimum !== null && maximum !== null && minimum > maximum) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [maximumKey],
+          message: `${label}上限不能小于下限`,
+        });
+      }
+    }
+    for (const [exactKey, minimumKey, maximumKey, label] of [
+      ['foilColorCount', 'minFoilColorCount', 'maxFoilColorCount', '烫金颜色数'],
+      ['foilPassCount', 'minFoilPassCount', 'maxFoilPassCount', '烫金道数'],
+      ['printColorCount', 'minPrintColorCount', 'maxPrintColorCount', '彩印颜色数'],
+    ] as const) {
+      if (
+        match[exactKey] !== null &&
+        (match[minimumKey] !== null || match[maximumKey] !== null)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [exactKey],
+          message: `${label}精确值和范围只能选择一种`,
+        });
+      }
+    }
+    if (match.perFoilColor && match.perFoilPass) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['perFoilPass'],
+        message: '烫金颜色倍数与烫金道数倍数只能选择一种',
+      });
+    }
+  });
 
 const strictIsoInstant = z.string().trim().transform((value, ctx) => {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
@@ -113,6 +367,7 @@ const updateDraftRuleSchema = z
     minQty: nullableQuantity.optional(),
     maxQty: nullableQuantity.optional(),
     blocksAutomaticQuote: z.boolean().optional(),
+    match: processingRuleMatchSchema.optional(),
     includedUnits: nullableDecimal('首重单位', 7, 3).optional(),
     incrementUnits: nullableDecimal('续重单位', 7, 3).optional(),
     incrementAmount: nullableDecimal('续重金额', 10, 4).optional(),
@@ -168,6 +423,13 @@ const updateDraftRuleSchema = z
         code: 'custom',
         path: ['productId'],
         message: '基础报价规则必须选择产品',
+      });
+    }
+    if (input.categoryId !== undefined && input.match === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['match'],
+        message: '加工费规则必须填写结构化适用条件',
       });
     }
     if (
@@ -247,6 +509,14 @@ const publishDraftSchema = z
   .object({
     priceBookId: safeId,
     expectedDraftUpdatedAt: strictIsoInstant,
+    publishNote: z
+      .string()
+      .trim()
+      .min(2, '请填写至少 2 个字符的发布说明')
+      .max(500, '发布说明最多 500 字'),
+    confirmedImpact: z.literal(true, {
+      error: '请确认已了解发布影响范围',
+    }),
     effectiveFrom: z.string().trim().transform((value, ctx) => {
       const parsed = parseStrictShanghaiDateTimeLocal(value);
       if (!parsed) {
@@ -287,6 +557,7 @@ const updateRuleFormFieldNames = new Set([
   'minQty',
   'maxQty',
   'blocksAutomaticQuote',
+  'match',
   'includedUnits',
   'incrementUnits',
   'incrementAmount',
@@ -306,7 +577,15 @@ function invalidUpdateFromDomain(
       segments[1] === ruleId &&
       fieldName !== undefined &&
       updateRuleFormFieldNames.has(fieldName);
-    const path = isCurrentEditableRuleField ? fieldName : issue.path;
+    const path =
+      isCurrentEditableRuleField
+        ? fieldName
+        : segments.length === 3 &&
+            segments[0] === 'rules' &&
+            segments[1] === ruleId &&
+            fieldName === 'triggerCondition'
+          ? 'match'
+          : issue.path;
     (fieldErrors[path] ??= []).push(issue.message);
   }
   return { status: 'invalid', fieldErrors };
@@ -340,6 +619,8 @@ function invalidGroupUpdateFromDomain(
 
 function revalidatePriceBookPaths(): void {
   for (const path of [
+    RULE_CENTER_HREFS.customerPricing,
+    RULE_CENTER_HREFS.priceVersions,
     '/owner/prices',
     '/owner/prices/external-sales',
     '/owner/prices/external-sales/items',
@@ -360,7 +641,10 @@ export async function createCustomerPriceBookDraftAction(
 
   const parsed = createDraftSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
   }
   try {
     const draft = await createCustomerPriceBookDraft(parsed.data, actor);
@@ -386,7 +670,10 @@ export async function updateCustomerPriceRuleDraftAction(
 
   const parsed = updateDraftRuleSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
   }
   try {
     const updated = await updateCustomerPriceRuleDraft(parsed.data, actor);
@@ -416,7 +703,7 @@ export async function updateCustomerPriceRuleDraftGroupAction(
   if (!parsed.success) {
     return {
       status: 'invalid',
-      fieldErrors: collectFieldErrorsDeep(parsed.error.issues),
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
     };
   }
   try {
@@ -445,10 +732,21 @@ export async function publishCustomerPriceBookDraftAction(
 
   const parsed = publishDraftSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
   }
   try {
-    const published = await publishCustomerPriceBookDraft(parsed.data, actor);
+    const published = await publishCustomerPriceBookDraft(
+      {
+        priceBookId: parsed.data.priceBookId,
+        expectedDraftUpdatedAt: parsed.data.expectedDraftUpdatedAt,
+        effectiveFrom: parsed.data.effectiveFrom,
+        publishNote: parsed.data.publishNote,
+      },
+      actor,
+    );
     revalidatePriceBookPaths();
     return {
       status: 'success',
@@ -471,7 +769,10 @@ export async function discardCustomerPriceBookDraftAction(
 
   const parsed = discardDraftSchema.safeParse(raw);
   if (!parsed.success) {
-    return { status: 'invalid', fieldErrors: collectFieldErrorsDeep(parsed.error.issues) };
+    return {
+      status: 'invalid',
+      fieldErrors: customerPriceBookFieldErrors(parsed.error.issues),
+    };
   }
   try {
     const discarded = await discardCustomerPriceBookDraft(parsed.data, actor);

@@ -12,6 +12,7 @@ import type { SalaryRuleSettingsData } from '@/lib/salary/rule-admin';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormMessage } from '@/components/ui-business';
 
 type TierRow = { minSales: string; rate: string };
 
@@ -92,6 +93,7 @@ export function SalaryRuleSettingsForm({
     <form
       key={`${selectedKey}:${current?.id ?? 'new'}`}
       action={formAction}
+      aria-busy={pending}
       className="space-y-5"
       noValidate
     >
@@ -127,7 +129,7 @@ export function SalaryRuleSettingsForm({
         <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           当前版本：{current ? `自 ${formatDateTime(current.effectiveFrom)} 起生效` : '尚未配置'}。
-          已生成工资/提成记录不回写，仍以各自的规则快照为准。
+          已生成的工资和提成不受影响，仍按生成时的规则计算。
         </p>
       </div>
 
@@ -217,7 +219,11 @@ export function SalaryRuleSettingsForm({
         <ErrorText text={Object.entries(errors).filter(([key]) => key !== '_').flatMap(([, messages]) => messages).join('；')} />
       ) : null}
       {state?.status === 'error' ? <ErrorText text={state.message} /> : null}
-      {state?.status === 'success' ? <p className="text-sm text-success-foreground">工资规则新版本已保存。</p> : null}
+      {state?.status === 'success' ? (
+        <FormMessage fieldId="salary-rule-status" tone="success">
+          工资规则新版本已保存。
+        </FormMessage>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>{pending ? '保存中…' : '保存新规则版本'}</Button>
         <span className="text-xs text-muted-foreground">保存会自动关闭相交的上一版本，不会修改历史工资单。</span>

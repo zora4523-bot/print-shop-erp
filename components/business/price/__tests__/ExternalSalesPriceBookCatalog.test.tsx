@@ -41,7 +41,7 @@ const catalog = {
           name: '中号 / 方形 · 500 个',
           product: '专版单色平烫',
           specification: '8*11.5 中号 / 方形',
-          paper: '160g 艳闪 / 红卡',
+          paper: '纸张未标（烫金!B13）',
           calculationLabel: '按个',
           quantityRangeLabel: '500 个锚点',
           amountLabel: '¥ 0.48 / 个',
@@ -78,10 +78,12 @@ describe('ExternalSalesPriceBookCatalog', () => {
     expect(html).toContain('¥ 0.48 / 个');
     expect(html).toContain('自动计价');
     expect(html).toContain('需人工确认');
+    expect(html).toContain('纸张未标');
     expect(html).toContain('aria-label="专版烫金报价明细"');
     expect(html).toContain('overflow-x-auto');
     expect(html).not.toContain('FOIL-MEDIUM-500');
     expect(html).not.toContain('E4:F4');
+    expect(html).not.toContain('烫金!B13');
     expect(html).not.toContain('EXTERNAL_SALES_PROCESSING');
     expect(html).not.toContain('SHA-256');
   });
@@ -92,16 +94,20 @@ describe('ExternalSalesPriceBookCatalog', () => {
     );
 
     expect(html).toContain('当前生效版本');
+    expect(html).toContain('客户加工费报价单');
     expect(html).toContain('版本 v3');
     expect(html).toContain('2026/08/08');
-    expect(html).toContain('彩印第 10 行缺少规格标签');
+    expect(html).toContain('彩印项目缺少规格标签');
     expect(html).not.toContain('来源与审计详情');
     expect(html).not.toContain('长昆-线下报价表.xlsx');
     expect(html).not.toContain('SHA-256');
     expect(html).not.toContain('A1:D29');
     expect(html).not.toContain('FOIL-MEDIUM-500');
     expect(html).not.toContain('E4:F4');
+    expect(html).not.toContain('烫金!B13');
+    expect(html).not.toContain('第 10 行');
     expect(html).not.toContain('abc123');
+    expect(html).not.toContain('外部销售');
   });
 
   it('fails closed when no external-sales price book is active', () => {
@@ -109,7 +115,8 @@ describe('ExternalSalesPriceBookCatalog', () => {
       <ExternalSalesPriceBookCatalog catalog={null} />,
     );
 
-    expect(html).toContain('当前没有生效的外部销售报价单');
+    expect(html).toContain('暂无生效报价');
+    expect(html).not.toContain('外部销售');
     expect(html).not.toContain('¥ 0.48 / 个');
   });
 });

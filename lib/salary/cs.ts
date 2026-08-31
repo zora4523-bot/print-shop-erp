@@ -5,8 +5,14 @@ import {
   SalaryRuleType,
 } from '../../generated/prisma/enums';
 import { db } from '../db';
+import {
+  assertExecutionFence,
+  type ExecutionFence,
+} from '../execution-fence';
 import { parseStrictYmd } from '../auth/schemas';
 import { todayShanghai } from '../dashboard/shanghai-clock';
+import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
+import type { EnqueueClient } from '../background-jobs/repository';
 import {
   calcCsCommission,
   calcCsMonthlyBaseTotal,
@@ -358,6 +364,8 @@ export type SettledCommission = {
   monthlyBaseTotal: string;
   totalIncome: string;
   nextPeriodId: string | null;
+  /** True when the durable notification was committed with the settlement. */
+  notificationQueued: boolean;
 };
 
 // Settles a single period: fetches active CS_TIERS, computes commission
@@ -367,6 +375,7 @@ export type SettledCommission = {
 export async function settleCsPeriod(
   periodId: string,
   now: Date = new Date(),
+  fence?: ExecutionFence,
 ): Promise<SettledCommission> {
   return db.$transaction(async (tx) => {
     const txc = tx as unknown as SalaryRuleClient & {
@@ -399,6 +408,7 @@ export async function settleCsPeriod(
         findUnique: (args: { where: { id: string }; select?: unknown }) => Promise<{
           role: Role;
           isActive: boolean;
+          displayName?: string;
         } | null>;
       };
       csPayrollPayment: {
@@ -448,7 +458,7 @@ export async function settleCsPeriod(
 
     const csUser = await txc.user.findUnique({
       where: { id: period.csUserId },
-      select: { role: true, isActive: true },
+      select: { role: true, isActive: true, displayName: true },
     });
     if (!csUser) throw new CsPeriodError('客服账号不存在');
     const shouldStartNextPeriod =
@@ -568,6 +578,10 @@ export async function settleCsPeriod(
       },
     };
 
+    // The user/rule locks above can queue behind another settlement. A worker
+    // that lost its durable lease while waiting must stop before changing the
+    // period or creating a commission liability.
+    await assertExecutionFence(fence);
     await txc.salaryPeriod.update({
       where: { id: period.id },
       data: {
@@ -659,6 +673,21 @@ export async function settleCsPeriod(
     // not accrue a new salary obligation. Active CS accounts are guaranteed a
     // next period above; missing rules abort the entire settlement atomically.
 
+    // Durable mode uses the settlement transaction as an outbox boundary. If
+    // enqueue fails the finance mutation rolls back, so a retry can never find
+    // an already-SETTLED period whose notification was silently lost.
+    const notificationQueued = await enqueueNotificationInTransaction(
+      tx as unknown as EnqueueClient,
+      'CS_PERIOD_SETTLED',
+      {
+        settledCount: 1,
+        csName: csUser.displayName ?? period.csUserId,
+        totalSales: totalForTier.toFixed(2),
+        commission: commissionAmount.toFixed(2),
+      },
+      { dedupeKey: `notification:CS_PERIOD_SETTLED:${period.id}` },
+    );
+
     return {
       commissionId: commission.id,
       periodId: period.id,
@@ -669,6 +698,7 @@ export async function settleCsPeriod(
       monthlyBaseTotal: monthlyBaseTotal.toFixed(2),
       totalIncome: totalIncome.toFixed(2),
       nextPeriodId,
+      notificationQueued,
     };
   });
 }
@@ -702,6 +732,7 @@ export class CsBatchUnexpectedError extends Error {
 export async function settleReadyCsPeriods(
   now: Date = new Date(),
   maxPeriods: number = MAX_CS_PERIODS_PER_SETTLEMENT_RUN,
+  fence?: ExecutionFence,
 ): Promise<BatchSettleResult> {
   if (!Number.isSafeInteger(maxPeriods) || maxPeriods < 1) {
     throw new CsPeriodError('单次结算周期上限必须是正整数');
@@ -747,7 +778,8 @@ export async function settleReadyCsPeriods(
     for (const period of freshDue) {
       attemptedIds.add(period.id);
       try {
-        settled.push(await settleCsPeriod(period.id, now));
+        await assertExecutionFence(fence);
+        settled.push(await settleCsPeriod(period.id, now, fence));
       } catch (err) {
         if (
           err instanceof CsPeriodError ||
@@ -1052,7 +1084,14 @@ export async function getCsPeriodDetail(id: string) {
       status: true,
       settledAt: true,
       createdAt: true,
-      csUser: { select: { id: true, displayName: true } },
+      csUser: {
+        select: {
+          id: true,
+          displayName: true,
+          role: true,
+          isActive: true,
+        },
+      },
       salesEntries: {
         orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
         select: {

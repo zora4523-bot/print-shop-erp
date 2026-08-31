@@ -10,6 +10,13 @@ import {
   OrderCustomerChargeError,
   quoteExternalOrderChargesPreview,
 } from '@/lib/price/order-charge-service';
+import { deriveExternalOrderChargeShipments } from '@/lib/price/external-order-charge-facts';
+
+function businessLogisticsQuoteError(message: string): string {
+  return /\b[A-Z][A-Z0-9_]{2,}\b/.test(message)
+    ? '物流价目簿配置异常，请联系管理员'
+    : message;
+}
 
 export async function quoteExternalOrderChargesAction(
   raw: unknown,
@@ -35,14 +42,43 @@ export async function quoteExternalOrderChargesAction(
   }
 
   try {
-    const quote = await quoteExternalOrderChargesPreview(parsed.data);
+    // This action is exposed to external sales accounts. A carrier billable
+    // weight only becomes trusted when an administrator records fulfilment;
+    // accepting a browser value here would let the salesperson choose the
+    // shipping charge. Keep the schema tolerant for old clients, then erase
+    // the untrusted field at this role-aware server boundary.
+    const shipmentsWithoutTrustedWeight = parsed.data.shipments.map(
+      (shipment) => ({
+        ...shipment,
+        billableWeightKg: null,
+      }),
+    );
+    const quoteInput = parsed.data.items
+      ? {
+          isSfCollect: parsed.data.isSfCollect,
+          shipments: deriveExternalOrderChargeShipments({
+            isSfCollect: parsed.data.isSfCollect,
+            items: parsed.data.items,
+            shipments: shipmentsWithoutTrustedWeight.map((shipment) => ({
+              shipmentKey: shipment.shipmentKey,
+              province: shipment.province,
+              billableWeightKg: shipment.billableWeightKg,
+              itemQuantities: shipment.itemQuantities ?? [],
+            })),
+          }),
+        }
+      : {
+          isSfCollect: parsed.data.isSfCollect,
+          shipments: shipmentsWithoutTrustedWeight,
+        };
+    const quote = await quoteExternalOrderChargesPreview(quoteInput);
     return { status: 'success', quote };
   } catch (error) {
     return {
       status: 'error',
       message:
         error instanceof OrderCustomerChargeError
-          ? `物流报价失败：${error.message}`
+          ? `物流报价失败：${businessLogisticsQuoteError(error.message)}`
           : '物流报价失败，请稍后重试',
     };
   }

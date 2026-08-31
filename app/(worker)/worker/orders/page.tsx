@@ -3,7 +3,7 @@ import { ClipboardList } from 'lucide-react';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listWorkerOrders } from '@/lib/worker-portal';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
-import { Badge } from '@/components/ui/badge';
+import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { EmptyState } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { parsePositiveInt } from '@/lib/admin/table';
@@ -35,7 +35,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
       <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">我的工单</h1>
         <p className="text-xs text-muted-foreground">
-          只显示至少有一个生产任务分配给你的工单，包含已完成的历史记录，最新的排在最前面。
+          包含已完成记录，最新工单优先。
         </p>
       </header>
 
@@ -63,14 +63,7 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
                         status={order.status}
                         className="border-border bg-background text-foreground"
                       />
-                      {order.isUrgent ? (
-                        <Badge
-                          variant="destructive"
-                          className="bg-destructive text-background dark:bg-destructive dark:text-background"
-                        >
-                          急单
-                        </Badge>
-                      ) : null}
+                      {order.isUrgent ? <UrgentBadge /> : null}
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-sm">
                       客户名称/简称：{order.customerRef ?? '—'}

@@ -13,7 +13,7 @@ export type CountEntry = {
   /** 操作员敲进去的实盘数原文（可能是半成品，例如 "12."） */
   value: string;
   /**
-   * 录入这一格时**页面上显示的**账面数，钉住不动。
+   * 这一格**首次展示**时的账面数，钉住不动。
    *
    * 之后的搜索/刷新只更新未录入行的显示值，已录入行的 book 不再被覆盖——否则
    * 回传给服务端的就不是「操作员数东西时看到的账面数」，CAS 恒等成立、守卫
@@ -21,6 +21,31 @@ export type CountEntry = {
    */
   book: string;
 };
+
+export type BookQuantitySnapshots = Readonly<Record<string, string>>;
+
+/**
+ * 把本次查询首次展示的库位账面数合并进盘点会话快照。
+ *
+ * 后续搜索/刷新可以带回更新的 currentStock，但已经出现过的 key 绝不
+ * 覆盖。否则操作员先数完、尚未输入时点「刷新」，首次录入就会把
+ * 刷新后的库存冒充成盘点起点，服务端 CAS 恒等成立。
+ */
+export function pinDisplayedBookQuantities(
+  current: BookQuantitySnapshots,
+  rows: readonly InventoryCountMaterialRow[],
+): Record<string, string> {
+  let next: Record<string, string> | null = null;
+  for (const row of rows) {
+    for (const location of row.locations) {
+      const key = countKey(row.id, location.locationId);
+      if (current[key] !== undefined) continue;
+      next ??= { ...current };
+      next[key] = location.currentStock;
+    }
+  }
+  return next ?? (current as Record<string, string>);
+}
 
 export type SubmittedCountItem = {
   materialId: string;
@@ -53,7 +78,7 @@ export function sameBookQuantity(a: string, b: string): boolean {
 /**
  * 从当前表格数据 + 录入状态派生提交明细。
  *
- * bookQuantity 取 **entry.book**（录入那一刻钉住的账面数），**不是**
+ * bookQuantity 取 **entry.book**（这一行首次展示时钉住的账面数），**不是**
  * location.currentStock（最近一次 fetch 的显示值）。这两者在「录入后又刷新/
  * 搜索过」时会分叉，用后者等于把守卫关掉。
  */

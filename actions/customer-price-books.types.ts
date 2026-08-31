@@ -3,6 +3,7 @@ import type {
   CustomerPriceCalculationType,
   CustomerPriceRuleKind,
 } from '../generated/prisma/enums';
+import type { CustomerRuleConditionEditorInput } from '../lib/price/customer-rule-condition';
 
 export type CreateCustomerPriceBookDraftActionInput = {
   purpose: CustomerPriceBookPurpose;
@@ -27,6 +28,8 @@ export type UpdateCustomerPriceRuleDraftActionInput = {
   minQty?: number | null;
   maxQty?: number | null;
   blocksAutomaticQuote?: boolean;
+  /** Processing-only, closed and versioned matcher. Arbitrary JSON is not accepted. */
+  match?: CustomerRuleConditionEditorInput;
   /** Shipping-only business fields. Hidden matching conditions stay server-side. */
   includedUnits?: string | null;
   incrementUnits?: string | null;
@@ -55,6 +58,10 @@ export type PublishCustomerPriceBookDraftActionInput = {
   expectedDraftUpdatedAt: string;
   /** Shanghai wall time from an HTML datetime-local control. */
   effectiveFrom: string;
+  /** Human-readable release note stored with the published workflow and audit. */
+  publishNote: string;
+  /** Explicit acknowledgement for the L3, all-future-orders impact. */
+  confirmedImpact: boolean;
 };
 
 export type DiscardCustomerPriceBookDraftActionInput = {

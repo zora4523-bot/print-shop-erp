@@ -10,6 +10,9 @@ const {
   getEndingPeriodsMock,
   dbMock,
   dispatchMock,
+  readDailyCheckpointMock,
+  getDailyRosterMock,
+  prepareDailySummaryMock,
   MockDailyBatchUnexpectedError,
   MockCsBatchUnexpectedError,
 } = vi.hoisted(() => ({
@@ -22,6 +25,9 @@ const {
     user: { findMany: vi.fn() },
   },
   dispatchMock: vi.fn<(...args: unknown[]) => void>(),
+  readDailyCheckpointMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  getDailyRosterMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  prepareDailySummaryMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   MockDailyBatchUnexpectedError: class extends Error {
     partialResult: unknown;
     constructor(partialResult: unknown) {
@@ -57,6 +63,13 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: dispatchMock,
 }));
+vi.mock('@/lib/cron/daily-salary-summary', () => ({
+  dailySalaryNotificationKey: (date: string) =>
+    `notification:DAILY_WORKER_SALARY:v2:${date}`,
+  readDailySalaryRunCheckpoint: readDailyCheckpointMock,
+  getOrCreateDailySalaryRoster: getDailyRosterMock,
+  prepareDailySalarySummary: prepareDailySummaryMock,
+}));
 
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as csSettlePost } from '../cs-settle/route';
@@ -74,6 +87,9 @@ beforeEach(() => {
   getEndingPeriodsMock.mockReset();
   dbMock.user.findMany.mockReset();
   dispatchMock.mockReset();
+  readDailyCheckpointMock.mockReset().mockResolvedValue(null);
+  getDailyRosterMock.mockReset().mockResolvedValue([]);
+  prepareDailySummaryMock.mockReset();
   process.env.CRON_SECRET = SECRET;
 });
 
@@ -104,6 +120,12 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
       ],
       errors: [],
     });
+    prepareDailySummaryMock.mockResolvedValue({
+      date: '2026-04-27',
+      workerCount: 3,
+      totalAmount: '201.00',
+      notificationQueued: false,
+    });
     const res = await dailySalaryPost(
       authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
     );
@@ -117,12 +139,18 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
         // 千分位 + 不含 ¥（formatMoneyPlain；round 109 P2）
         totalAmount: '201.00',
       },
-      { dedupeKey: 'notification:DAILY_WORKER_SALARY:2026-04-27' },
+      { dedupeKey: 'notification:DAILY_WORKER_SALARY:v2:2026-04-27' },
     );
   });
 
   it('settled empty → 不触发推送', async () => {
     computeDailyMock.mockResolvedValue({ settled: [], errors: [] });
+    prepareDailySummaryMock.mockResolvedValue({
+      date: '2026-04-27',
+      workerCount: 0,
+      totalAmount: '0.00',
+      notificationQueued: false,
+    });
     const res = await dailySalaryPost(
       authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
     );
@@ -154,6 +182,12 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
         { workerId: 'w3', date: '2026-04-27', actualSalary: '0.30', machineType: 'HAND_PRESS', totalPieceworkAmount: '0.30', baseSalary: '0', taskCount: 0, orderCount: 0 },
       ],
       errors: [],
+    });
+    prepareDailySummaryMock.mockResolvedValue({
+      date: '2026-04-27',
+      workerCount: 3,
+      totalAmount: '0.60',
+      notificationQueued: false,
     });
     await dailySalaryPost(
       authedReq('http://x/api/cron/daily-salary', { date: '2026-04-27' }),
@@ -236,7 +270,7 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
       1,
       'CS_PERIOD_SETTLED',
       {
-        settledCount: 2,
+        settledCount: 1,
         csName: 'CS 张',
         totalSales: '300,000.00',
         commission: '9,000.00',
@@ -247,7 +281,7 @@ describe('POST /api/cron/cs-settle → CS_PERIOD_SETTLED', () => {
       2,
       'CS_PERIOD_SETTLED',
       {
-        settledCount: 2,
+        settledCount: 1,
         csName: 'CS 李',
         totalSales: '50,000.00',
         commission: '250.00',

@@ -64,6 +64,21 @@ assert_process_stopped() {
   fi
 }
 
+assert_web_loopback_binding() {
+  if ! command -v ss >/dev/null 2>&1; then
+    echo >&2 "未找到 ss，无法验收 Web 是否仅监听回环地址"
+    return 1
+  fi
+
+  local listeners
+  listeners="$(ss -H -ltn 'sport = :3000' | awk '{print $4}')"
+  if [ "$listeners" != "127.0.0.1:3000" ]; then
+    echo >&2 "Web :3000 必须且只能监听 127.0.0.1，实际监听：${listeners:-(无)}"
+    echo >&2 "拒绝发布：非回环监听会让客户端绕过 Nginx 登录/PDF 限流。"
+    return 1
+  fi
+}
+
 trap on_exit EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -123,6 +138,7 @@ for i in $(seq 1 15); do
 done
 
 if [ "$ok" = "1" ]; then
+  assert_web_loopback_binding
   DEPLOYMENT_QUIESCED=0
   echo "✅ 部署成功：$PREV_COMMIT → $NEW_COMMIT，健康检查通过。"
 else

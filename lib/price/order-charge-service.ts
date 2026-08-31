@@ -81,6 +81,16 @@ type LoadedLogisticsPriceBook = {
   categoryIdByCode: Map<string, string>;
 };
 
+export type ExternalOrderChargePriceBookSnapshot = Omit<
+  LoadedLogisticsPriceBook,
+  'rules' | 'ruleRowsByCode' | 'categoryIdByCode'
+>;
+
+export type ExternalOrderChargeBookQuote = {
+  priceBook: ExternalOrderChargePriceBookSnapshot;
+  quote: ExternalOrderChargeQuote;
+};
+
 function requiredDecimal(value: unknown, label: string): string {
   if (value === null || value === undefined) {
     throw new OrderCustomerChargeError(`物流价目簿规则缺少${label}`);
@@ -113,7 +123,7 @@ function sourceFromRule(rule: PriceBookRuleRow) {
     !rule.sourceRange
   ) {
     throw new OrderCustomerChargeError(
-      `物流价目簿规则 ${String(rule.code)} 缺少来源文件快照`,
+      '物流价目簿中的一条收费规则缺少来源文件快照',
     );
   }
   return {
@@ -128,7 +138,7 @@ function shippingRule(rule: PriceBookRuleRow): ExternalOrderShippingRule {
   const condition = rule.triggerCondition;
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
     throw new OrderCustomerChargeError(
-      `物流价目簿规则 ${String(rule.code)} 的地区条件非法`,
+      '快递费规则的地区条件设置无效',
     );
   }
   const rawProvinces = (condition as Record<string, unknown>).provinces;
@@ -142,7 +152,7 @@ function shippingRule(rule: PriceBookRuleRow): ExternalOrderShippingRule {
     )
   ) {
     throw new OrderCustomerChargeError(
-      `物流价目簿规则 ${String(rule.code)} 的承运商或省份非法`,
+      '快递费规则的承运商或省份设置无效',
     );
   }
   return {
@@ -157,16 +167,19 @@ function shippingRule(rule: PriceBookRuleRow): ExternalOrderShippingRule {
   };
 }
 
-function packagingRule(rule: PriceBookRuleRow): ExternalOrderPackagingRule {
+function packagingRule(
+  rule: PriceBookRuleRow,
+  options: { allowLegacyBlockedRule?: boolean } = {},
+): ExternalOrderPackagingRule {
   if (
     !Number.isSafeInteger(rule.minQty) ||
     !Number.isSafeInteger(rule.maxQty) ||
     (rule.minQty ?? 0) < 1 ||
     (rule.maxQty ?? 0) < (rule.minQty ?? 0) ||
-    !rule.blocksAutomaticQuote
+    (rule.blocksAutomaticQuote && !options.allowLegacyBlockedRule)
   ) {
     throw new OrderCustomerChargeError(
-      `物流价目簿规则 ${String(rule.code)} 的耗材数量区间非法`,
+      '纸箱费规则必须是可自动计算的连续数量档',
     );
   }
   return {
@@ -174,8 +187,8 @@ function packagingRule(rule: PriceBookRuleRow): ExternalOrderPackagingRule {
     code: String(rule.code),
     minQty: rule.minQty as number,
     maxQty: rule.maxQty as number,
-    amount: requiredDecimal(rule.amount, '耗材参考金额'),
-    advisory: true,
+    amount: requiredDecimal(rule.amount, '纸箱费金额'),
+    advisory: false,
     source: sourceFromRule(rule),
   };
 }
@@ -185,6 +198,7 @@ async function loadLogisticsPriceBook(
   now: Date,
   priceBookId?: string,
   snapshotLockHeld = false,
+  allowLegacyBlockedPackagingRules = false,
 ): Promise<LoadedLogisticsPriceBook> {
   if (!snapshotLockHeld) {
     await acquirePriceRuleSnapshotReadLock(client);
@@ -262,14 +276,18 @@ async function loadLogisticsPriceBook(
     const code = String(row.code);
     const categoryCode = String(row.category.code);
     if (ruleRowsByCode.has(code)) {
-      throw new OrderCustomerChargeError(`物流价目簿规则代码重复：${code}`);
+      throw new OrderCustomerChargeError('物流价目簿中存在重复的收费规则');
     }
     ruleRowsByCode.set(code, row);
     categoryIdByCode.set(categoryCode, row.category.id);
     if (categoryCode === 'SHIPPING_FEE') {
       rules.push(shippingRule(row));
     } else if (categoryCode === 'PACKING_MATERIAL') {
-      rules.push(packagingRule(row));
+      rules.push(
+        packagingRule(row, {
+          allowLegacyBlockedRule: allowLegacyBlockedPackagingRules,
+        }),
+      );
     }
   }
   if (
@@ -324,9 +342,39 @@ export async function quoteExternalOrderChargesPreview(
   now: Date = new Date(),
 ): Promise<ExternalOrderChargeQuote> {
   return db.$transaction(async (client) => {
-    const book = await loadLogisticsPriceBook(client, now);
-    return calculateExternalOrderCharges(input, book.rules);
+    const result = await quoteExternalOrderChargesInTransaction(client, input, now);
+    return result.quote;
   });
+}
+
+/**
+ * Transaction-aware quote used by the administrator's whole-order pricing
+ * review. It returns the selected version as well as the calculation, and it
+ * never accepts a browser supplied price-book id.
+ */
+export async function quoteExternalOrderChargesInTransaction(
+  client: Prisma.TransactionClient,
+  input: ExternalOrderChargeInput,
+  now: Date,
+  options: { snapshotLockHeld?: boolean } = {},
+): Promise<ExternalOrderChargeBookQuote> {
+  const book = await loadLogisticsPriceBook(
+    client,
+    now,
+    undefined,
+    options.snapshotLockHeld ?? false,
+  );
+  return {
+    priceBook: {
+      id: book.id,
+      code: book.code,
+      name: book.name,
+      version: book.version,
+      sourceName: book.sourceName,
+      sourceSha256: book.sourceSha256,
+    },
+    quote: calculateExternalOrderCharges(input, book.rules),
+  };
 }
 
 function resolveAmount(params: {
@@ -335,12 +383,18 @@ function resolveAmount(params: {
   overrideReason: string | null;
   label: string;
   requireExplicitConfirmation: boolean;
-}): { amount: string; suggestedAmount: string | null; overrideReason: string | null } {
+  allowPending: boolean;
+}): {
+  amount: string;
+  suggestedAmount: string | null;
+  overrideReason: string | null;
+  requiresAdminConfirmation: boolean;
+} {
   const suggested = params.line.amount === null
     ? null
     : new Decimal(params.line.amount);
-  const submitted = parseSubmittedAmount(params.submitted, params.label);
   if (params.line.waived) {
+    const submitted = parseSubmittedAmount(params.submitted, params.label);
     if (submitted && !submitted.isZero()) {
       throw new OrderCustomerChargeError('顺丰到付的快递费必须为 0');
     }
@@ -348,6 +402,23 @@ function resolveAmount(params: {
       amount: '0.00',
       suggestedAmount: '0.00',
       overrideReason: null,
+      requiresAdminConfirmation: false,
+    };
+  }
+  const submitted = parseSubmittedAmount(params.submitted, params.label);
+  if (params.allowPending) {
+    const amount = submitted ?? suggested ?? new Decimal(0);
+    const differs = suggested === null || !amount.equals(suggested);
+    return {
+      amount: amount.toFixed(2),
+      suggestedAmount: suggested?.toFixed(2) ?? null,
+      overrideReason:
+        (differs || !params.line.complete || params.line.advisory) &&
+        params.overrideReason?.trim()
+          ? params.overrideReason.trim()
+          : null,
+      requiresAdminConfirmation:
+        params.line.advisory || !params.line.complete || differs,
     };
   }
   if (params.requireExplicitConfirmation && submitted === null) {
@@ -373,9 +444,13 @@ function resolveAmount(params: {
   return {
     amount: amount.toFixed(2),
     suggestedAmount: suggested?.toFixed(2) ?? null,
-    overrideReason: differs || !params.line.complete
-      ? params.overrideReason?.trim() ?? null
+    // An explicit final amount is an administrator-confirmed business fact.
+    // Keep any accompanying note for the audit trail even when the amount
+    // happens to equal the automatic suggestion.
+    overrideReason: submitted !== null
+      ? params.overrideReason?.trim() || null
       : null,
+    requiresAdminConfirmation: false,
   };
 }
 
@@ -391,6 +466,7 @@ export async function resolveExternalOrderChargesForCreation(
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
   charges: ResolvedOrderCustomerCharge[];
   totalAmount: string;
+  requiresAdminConfirmation: boolean;
 }> {
   return resolveExternalOrderCharges(
     client,
@@ -398,6 +474,37 @@ export async function resolveExternalOrderChargesForCreation(
     now,
     undefined,
     options.snapshotLockHeld ?? false,
+    false,
+  );
+}
+
+/**
+ * Creation-time resolver for external sales. Missing or advisory prices are
+ * persisted as provisional (suggestion when available, otherwise zero) so the
+ * sales user can create a DRAFT; only the ADMIN finalization path may turn the
+ * order into a confirmed price revision.
+ */
+export async function resolveExternalOrderChargesForProvisionalCreation(
+  client: Prisma.TransactionClient,
+  input: {
+    isSfCollect: boolean;
+    shipments: SubmittedShipmentCustomerCharges[];
+  },
+  now: Date,
+  options: { snapshotLockHeld?: boolean } = {},
+): Promise<{
+  priceBook: ExternalOrderChargePriceBookSnapshot;
+  charges: ResolvedOrderCustomerCharge[];
+  totalAmount: string;
+  requiresAdminConfirmation: boolean;
+}> {
+  return resolveExternalOrderCharges(
+    client,
+    input,
+    now,
+    undefined,
+    options.snapshotLockHeld ?? false,
+    true,
   );
 }
 
@@ -409,12 +516,24 @@ export async function resolveExternalOrderChargesForFinalization(
   },
   priceBookId: string,
   now: Date,
+  options: {
+    allowLegacyBlockedPackagingRules?: boolean;
+  } = {},
 ): Promise<{
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
   charges: ResolvedOrderCustomerCharge[];
   totalAmount: string;
+  requiresAdminConfirmation: boolean;
 }> {
-  return resolveExternalOrderCharges(client, input, now, priceBookId);
+  return resolveExternalOrderCharges(
+    client,
+    input,
+    now,
+    priceBookId,
+    false,
+    false,
+    options.allowLegacyBlockedPackagingRules ?? false,
+  );
 }
 
 async function resolveExternalOrderCharges(
@@ -426,16 +545,20 @@ async function resolveExternalOrderCharges(
   now: Date,
   priceBookId?: string,
   snapshotLockHeld = false,
+  allowPending = false,
+  allowLegacyBlockedPackagingRules = false,
 ): Promise<{
   priceBook: Omit<LoadedLogisticsPriceBook, 'rules' | 'ruleRowsByCode' | 'categoryIdByCode'>;
   charges: ResolvedOrderCustomerCharge[];
   totalAmount: string;
+  requiresAdminConfirmation: boolean;
 }> {
   const book = await loadLogisticsPriceBook(
     client,
     now,
     priceBookId,
     snapshotLockHeld,
+    allowLegacyBlockedPackagingRules,
   );
   const quoteInput: ExternalOrderChargeInput = {
     isSfCollect: input.isSfCollect,
@@ -451,6 +574,7 @@ async function resolveExternalOrderCharges(
     input.shipments.map((shipment) => [shipment.shipmentKey, shipment]),
   );
   const charges: ResolvedOrderCustomerCharge[] = [];
+  let requiresAdminConfirmation = false;
 
   for (const shipmentQuote of quote.shipments) {
     const submitted = submittedByKey.get(shipmentQuote.shipmentKey);
@@ -463,13 +587,15 @@ async function resolveExternalOrderCharges(
       overrideReason: submitted.overrideReason,
       label: `地址 ${shipmentQuote.shipmentKey} 快递费`,
       requireExplicitConfirmation: false,
+      allowPending,
     });
     const packaging = resolveAmount({
       line: shipmentQuote.packaging,
       submitted: submitted.packingMaterialFee,
       overrideReason: submitted.overrideReason,
-      label: `地址 ${shipmentQuote.shipmentKey} 打包耗材费`,
-      requireExplicitConfirmation: true,
+      label: `地址 ${shipmentQuote.shipmentKey} 纸箱费`,
+      requireExplicitConfirmation: false,
+      allowPending,
     });
 
     for (const [categoryCode, line, resolved] of [
@@ -479,11 +605,16 @@ async function resolveExternalOrderCharges(
       const sourceRule = line.ruleCode
         ? book.ruleRowsByCode.get(line.ruleCode) ?? null
         : null;
+      const isShipping = categoryCode === 'SHIPPING_FEE';
       const categoryId = book.categoryIdByCode.get(categoryCode);
       if (!categoryId) {
-        throw new OrderCustomerChargeError(`物流价目簿缺少收费类目 ${categoryCode}`);
+        throw new OrderCustomerChargeError(
+          isShipping
+            ? '物流价目簿缺少快递费收费类目'
+            : '物流价目簿缺少打包耗材费收费类目',
+        );
       }
-      const isShipping = categoryCode === 'SHIPPING_FEE';
+      requiresAdminConfirmation ||= resolved.requiresAdminConfirmation;
       charges.push({
         shipmentKey: shipmentQuote.shipmentKey,
         categoryCode,
@@ -516,6 +647,8 @@ async function resolveExternalOrderCharges(
           actual: {
             amount: resolved.amount,
             overrideReason: resolved.overrideReason,
+            provisional: allowPending && resolved.requiresAdminConfirmation,
+            requiresAdminConfirmation: resolved.requiresAdminConfirmation,
           },
         },
         overrideReason: resolved.overrideReason,
@@ -536,5 +669,6 @@ async function resolveExternalOrderCharges(
     totalAmount: charges
       .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0))
       .toFixed(2),
+    requiresAdminConfirmation,
   };
 }

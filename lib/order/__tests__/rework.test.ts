@@ -8,17 +8,20 @@ import {
   Role,
   ShipmentStatus,
 } from '../../../generated/prisma/enums';
+import { ORDER_PRICING_STATUS } from '../pricing-status';
 
-const { dbMock, notifyMock } = vi.hoisted(() => {
+const { dbMock, notifyMock, modeMock, enqueueNotificationMock } = vi.hoisted(() => {
   const mock = {
     order: {
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
     },
     craft: { findMany: vi.fn() },
     orderShipment: { create: vi.fn() },
     orderShipmentLine: { createMany: vi.fn() },
+    orderPricingRevision: { create: vi.fn() },
     orderLog: { create: vi.fn() },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -26,12 +29,20 @@ const { dbMock, notifyMock } = vi.hoisted(() => {
   return {
     dbMock: mock,
     notifyMock: vi.fn<(...args: unknown[]) => Promise<void>>(),
+    modeMock: vi.fn<() => 'inline' | 'durable'>(),
+    enqueueNotificationMock: vi.fn<(...args: unknown[]) => Promise<boolean>>(),
   };
 });
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/notification/dispatch', () => ({
   dispatchNotification: notifyMock,
+}));
+vi.mock('@/lib/background-jobs/mode', () => ({
+  backgroundJobsMode: modeMock,
+}));
+vi.mock('@/lib/notification/transactional-outbox', () => ({
+  enqueueNotificationInTransaction: enqueueNotificationMock,
 }));
 
 import {
@@ -84,6 +95,7 @@ const sourceOrder = {
   ],
   shipments: [
     {
+      sequence: 1,
       receiverName: '张先生',
       receiverPhone: '13800000000',
       receiverAddress: '佛山市主地址',
@@ -111,6 +123,7 @@ beforeEach(() => {
     dbMock.craft,
     dbMock.orderShipment,
     dbMock.orderShipmentLine,
+    dbMock.orderPricingRevision,
     dbMock.orderLog,
   ]) {
     for (const mockFn of Object.values(model)) mockFn.mockReset();
@@ -128,8 +141,11 @@ beforeEach(() => {
   });
   dbMock.orderShipment.create.mockResolvedValue({ id: 'shipment-1' });
   dbMock.orderShipmentLine.createMany.mockResolvedValue({ count: 1 });
+  dbMock.orderPricingRevision.create.mockResolvedValue({});
   dbMock.orderLog.create.mockResolvedValue({});
   notifyMock.mockReset().mockResolvedValue(undefined);
+  modeMock.mockReset().mockReturnValue('inline');
+  enqueueNotificationMock.mockReset().mockResolvedValue(true);
 });
 
 describe('createReworkOrder', () => {
@@ -158,10 +174,15 @@ describe('createReworkOrder', () => {
       kind: OrderKind.REWORK,
       billingMode: OrderBillingMode.NO_CHARGE,
       settlementType: OrderSettlementType.NO_CHARGE,
+      pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+      priceRevision: 1,
+      pricingConfirmedAt: now,
+      pricingConfirmedById: null,
       sourceOrderId: 'source-1',
       reworkCause: ReworkCause.QUALITY,
       totalAmount: '0.00',
       submittedAt: now,
+      receiverAddress: '佛山市主地址',
     });
     expect(data.items.create[0]).toMatchObject({
       name: '大号红包',
@@ -193,6 +214,32 @@ describe('createReworkOrder', () => {
         },
       ],
     });
+    expect(dbMock.orderPricingRevision.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 'rework-1',
+        revision: 1,
+        status: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+        source: 'REWORK_ORDER_CREATED_NO_CHARGE',
+        createdById: 'owner-1',
+        createdAt: now,
+        snapshot: expect.objectContaining({
+          source: 'REWORK_ORDER_CREATED_NO_CHARGE',
+          order: expect.objectContaining({
+            settlementType: OrderSettlementType.NO_CHARGE,
+            pricingStatus: ORDER_PRICING_STATUS.AUTO_CONFIRMED,
+            totalAmount: '0.00',
+          }),
+          items: [
+            expect.objectContaining({
+              id: 'rework-item-1',
+              subtotal: '0',
+              requiresAdminConfirmation: false,
+            }),
+          ],
+          customerCharges: [],
+        }),
+      }),
+    });
     expect(dbMock.orderLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         orderId: 'source-1',
@@ -207,6 +254,159 @@ describe('createReworkOrder', () => {
       }),
       { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
     );
+    expect(notifyMock).toHaveBeenCalledWith(
+      'URGENT_ORDER',
+      {
+        orderId: 'rework-1',
+        orderNo: 'GD-260731-001',
+        submitterName: '管理员',
+        customerRef: '客户 A',
+      },
+      { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
+    );
+    expect(notifyMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [
+      '工单快照缺失',
+      null,
+      [{ ...sourceOrder.shipments[0], receiverAddress: '  广州市主票地址  ' }],
+      '广州市主票地址',
+    ],
+    [
+      '主票缺失',
+      '  佛山市工单快照地址  ',
+      [
+        {
+          ...sourceOrder.shipments[0],
+          sequence: 2,
+          receiverAddress: '深圳市额外地址',
+        },
+      ],
+      '佛山市工单快照地址',
+    ],
+  ])(
+    '%s时复用唯一可验证地址，并同步写入子工单与主发货记录',
+    async (_label, sourceAddress, shipments, expectedAddress) => {
+      dbMock.order.findUnique
+        .mockResolvedValueOnce({
+          ...sourceOrder,
+          receiverAddress: sourceAddress,
+          shipments,
+        })
+        .mockResolvedValueOnce({
+          id: 'rework-1',
+          orderNo: 'GD-260731-001',
+          customerRef: '客户 A',
+          totalAmount: '0.00',
+          isUrgent: true,
+          submitter: { displayName: '管理员' },
+        });
+
+      await createReworkOrder(validInput, ownerActor);
+
+      expect(dbMock.order.create.mock.calls[0]![0].data.receiverAddress).toBe(
+        expectedAddress,
+      );
+      expect(
+        dbMock.orderShipment.create.mock.calls[0]![0].data.receiverAddress,
+      ).toBe(expectedAddress);
+    },
+  );
+
+  it('原工单与主发货记录都没有可用地址时给出可执行修复提示', async () => {
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      ...sourceOrder,
+      receiverAddress: '   ',
+      shipments: [
+        {
+          ...sourceOrder.shipments[0],
+          receiverAddress: null,
+        },
+      ],
+    });
+
+    await expect(createReworkOrder(validInput, ownerActor)).rejects.toThrow(
+      /原工单和主发货记录均缺少收货地址.*先补全.*再创建/,
+    );
+    expect(dbMock.order.create).not.toHaveBeenCalled();
+    expect(dbMock.orderShipment.create).not.toHaveBeenCalled();
+  });
+
+  it('does not emit URGENT_ORDER when the source order is not urgent', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({ ...sourceOrder, isUrgent: false })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260731-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: false,
+        submitter: { displayName: '管理员' },
+      });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith(
+      'ORDER_SUBMITTED',
+      expect.objectContaining({ orderId: 'rework-1', urgentMark: '' }),
+      { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
+    );
+  });
+
+  it('atomically enqueues both submitted and urgent events in durable mode', async () => {
+    modeMock.mockReturnValue('durable');
+    dbMock.order.findUnique.mockResolvedValueOnce(sourceOrder);
+    dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      customerRef: '客户 A',
+      totalAmount: '0.00',
+      isUrgent: true,
+      submitter: { displayName: '管理员' },
+    });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(enqueueNotificationMock).toHaveBeenNthCalledWith(
+      1,
+      dbMock,
+      'ORDER_SUBMITTED',
+      expect.objectContaining({ orderId: 'rework-1', urgentMark: '🚨 急单' }),
+      { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
+    );
+    expect(enqueueNotificationMock).toHaveBeenNthCalledWith(
+      2,
+      dbMock,
+      'URGENT_ORDER',
+      expect.objectContaining({ orderId: 'rework-1' }),
+      { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
+    );
+    expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates an urgent outbox failure so the owning transaction can roll back', async () => {
+    modeMock.mockReturnValue('durable');
+    dbMock.order.findUnique.mockResolvedValueOnce(sourceOrder);
+    dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      customerRef: '客户 A',
+      totalAmount: '0.00',
+      isUrgent: true,
+      submitter: { displayName: '管理员' },
+    });
+    enqueueNotificationMock
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('outbox unavailable'));
+
+    await expect(createReworkOrder(validInput, ownerActor)).rejects.toThrow(
+      'outbox unavailable',
+    );
+    expect(enqueueNotificationMock).toHaveBeenCalledTimes(2);
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 
   it('rejects non-admin callers before opening a transaction', async () => {

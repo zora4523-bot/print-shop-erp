@@ -16,6 +16,14 @@ import type {
   PriceTierSummary,
 } from '@/lib/price';
 import { ADJUSTMENT_TYPE_LABELS } from '@/lib/price-labels';
+import {
+  internalPriceAdjustmentHref,
+  internalPriceTierHref,
+} from '@/lib/navigation/rule-center';
+import {
+  externalPriceBusinessText,
+  externalPriceRuleDisplayName,
+} from '@/lib/price/external-price-display';
 
 function decimal(value: unknown): string {
   if (value === null || value === undefined) return '—';
@@ -55,13 +63,15 @@ export function PriceTiersTable({ tiers }: { tiers: PriceTierSummary[] }) {
             className={!tier.product.isActive ? 'opacity-60' : undefined}
           >
             <TableCell>
-              <div className="font-medium">{tier.product.name}</div>
+              <div className="font-medium">
+                {externalPriceBusinessText(tier.product.name)}
+              </div>
               <div className="font-sans tabular-nums text-xs text-muted-foreground">
                 {tier.product.code ?? '无编码'}
               </div>
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {tier.product.categoryNode.name}
+              {externalPriceBusinessText(tier.product.categoryNode.name)}
             </TableCell>
             <TableCell className="text-right font-sans tabular-nums text-xs">
               {tier.minQty}
@@ -74,7 +84,7 @@ export function PriceTiersTable({ tiers }: { tiers: PriceTierSummary[] }) {
             <TableCell>
               <AdminRowActions>
                 <Link
-                  href={`/owner/prices/tiers/${tier.id}`}
+                  href={internalPriceTierHref(tier.id)}
                   prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >
@@ -112,7 +122,7 @@ export function PriceAdjustmentsTable({
             key={adjustment.id}
             className={!adjustment.isActive ? 'opacity-60' : undefined}
           >
-            <TableCell>{adjustment.name}</TableCell>
+            <TableCell>{externalPriceRuleDisplayName(adjustment.name)}</TableCell>
             <TableCell className="text-muted-foreground">
               {ADJUSTMENT_TYPE_LABELS[adjustment.adjustmentType]}
             </TableCell>
@@ -128,7 +138,7 @@ export function PriceAdjustmentsTable({
             <TableCell>
               <AdminRowActions>
                 <Link
-                  href={`/owner/prices/adjustments/${adjustment.id}`}
+                  href={internalPriceAdjustmentHref(adjustment.id)}
                   prefetch={false}
                   className="text-sm text-primary underline hover:no-underline"
                 >

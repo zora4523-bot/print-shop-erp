@@ -1,9 +1,15 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+} from '@/components/ui-business';
 import { resetUserPasswordAction } from '@/actions/owner-accounts';
 import type { AccountMutationResult } from '@/actions/owner-accounts.types';
 
@@ -16,12 +22,32 @@ export function ResetPasswordForm({ userId }: { userId: string }) {
     null,
   );
 
-  const fieldErrors = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success';
+  const visibleState = pending ? null : state;
+  const fieldErrors =
+    visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError =
+    visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const passwordErrors = fieldErrors.newPassword ?? [];
+  const passwordError = passwordErrors[0];
 
   return (
-    <form action={formAction} className="space-y-3" noValidate>
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-3"
+      noValidate
+    >
+      <FormErrorSummary
+        errors={
+          passwordErrors.map((message) => ({
+            fieldId: 'newPassword',
+            label: '新密码',
+            message,
+          }))
+        }
+      />
+
       <div className="space-y-2">
         <Label htmlFor="newPassword">新密码</Label>
         <Input
@@ -31,34 +57,36 @@ export function ResetPasswordForm({ userId }: { userId: string }) {
           autoComplete="new-password"
           required
           disabled={pending}
-          aria-invalid={Boolean(fieldErrors.newPassword)}
-          aria-describedby={fieldErrors.newPassword ? 'newPassword-error' : 'newPassword-hint'}
+          {...formMessageA11yProps(
+            'newPassword',
+            passwordError ? 'error' : 'hint',
+          )}
         />
-        {fieldErrors.newPassword?.[0] ? (
-          <p id="newPassword-error" className="text-sm text-destructive">
-            {fieldErrors.newPassword[0]}
-          </p>
+        {passwordError ? (
+          <FormMessage fieldId="newPassword" tone="error">
+            {passwordError}
+          </FormMessage>
         ) : (
-          <p id="newPassword-hint" className="text-xs text-muted-foreground">
-            至少 8 位；最多 72 字符（bcrypt 限制）。
-          </p>
+          <FormMessage fieldId="newPassword" tone="hint" className="text-xs">
+            8–72 位。
+          </FormMessage>
         )}
       </div>
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="密码重置失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ 密码已重置
-        </p>
+        <ActionNotice tone="success" title="密码已重置" />
       ) : null}
 
-      <Button type="submit" disabled={pending}>
-        {pending ? '重置中…' : '重置密码'}
-      </Button>
+      <PendingButton pending={pending} pendingLabel="正在重置密码…">
+        重置密码
+      </PendingButton>
     </form>
   );
 }

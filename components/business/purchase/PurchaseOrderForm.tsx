@@ -1,12 +1,13 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 export type PurchaseMaterialOption = {
   id: string;
@@ -49,14 +50,18 @@ export function PurchaseOrderForm({
   const prerequisitesMissing = missingSuppliers || missingMaterials;
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="supplierPartyId">供应商</Label>
-            <Link href={NEW_SUPPLIER_HREF} className="text-xs text-primary hover:underline">
+            <PendingLink
+              href={NEW_SUPPLIER_HREF}
+              pending={pending}
+              className="text-xs text-primary hover:underline"
+            >
               新建供应商
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="supplierPartyId"
@@ -79,7 +84,7 @@ export function PurchaseOrderForm({
             <p className="text-sm text-destructive">{errs.supplierPartyId[0]}</p>
           ) : null}
           {missingSuppliers ? (
-            <p id="supplierPartyId-empty" role="alert" className="text-sm text-warning-foreground">
+            <p id="supplierPartyId-empty" className="text-sm text-muted-foreground">
               只有启用的“供应商”或“客户/供应商”主数据可用于采购。
             </p>
           ) : null}
@@ -88,9 +93,13 @@ export function PurchaseOrderForm({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="materialId">物料</Label>
-            <Link href="/owner/materials/new" className="text-xs text-primary hover:underline">
+            <PendingLink
+              href="/owner/materials/new"
+              pending={pending}
+              className="text-xs text-primary hover:underline"
+            >
               新建物料
-            </Link>
+            </PendingLink>
           </div>
           <select
             id="materialId"
@@ -103,7 +112,8 @@ export function PurchaseOrderForm({
             <option value="">{missingMaterials ? '暂无可用物料' : '请选择物料'}</option>
             {materials.map((material) => (
               <option key={material.id} value={material.id}>
-                {material.code} · {material.name}（{material.unit}）
+                {material.code} · {externalPriceBusinessText(material.name)}（
+                {material.unit}）
               </option>
             ))}
           </select>
@@ -111,7 +121,7 @@ export function PurchaseOrderForm({
             <p className="text-sm text-destructive">{errs.materialId[0]}</p>
           ) : null}
           {missingMaterials ? (
-            <p id="materialId-empty" role="alert" className="text-sm text-warning-foreground">
+            <p id="materialId-empty" className="text-sm text-muted-foreground">
               请先创建并启用至少一种物料。
             </p>
           ) : null}
@@ -165,9 +175,13 @@ export function PurchaseOrderForm({
         <Button type="submit" disabled={pending || prerequisitesMissing}>
           {pending ? '提交中…' : '创建采购单'}
         </Button>
-        <Link href="/owner/purchases" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href="/owner/purchases"
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回列表
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

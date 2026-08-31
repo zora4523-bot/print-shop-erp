@@ -30,15 +30,15 @@ export const MACHINE_TYPE_LABELS: Record<MachineType, string> = {
 };
 
 export function roleLabel(role: Role): string {
-  return ROLE_LABELS[role] ?? role;
+  return ROLE_LABELS[role] ?? '未识别角色';
 }
 
 export function workerTypeLabel(workerType: WorkerType | null | undefined): string {
-  return workerType ? (WORKER_TYPE_LABELS[workerType] ?? workerType) : '';
+  return workerType ? (WORKER_TYPE_LABELS[workerType] ?? '未识别岗位') : '';
 }
 
 export function machineTypeLabel(machineType: MachineType | null | undefined): string {
-  return machineType ? (MACHINE_TYPE_LABELS[machineType] ?? machineType) : '';
+  return machineType ? (MACHINE_TYPE_LABELS[machineType] ?? '未识别机型') : '';
 }
 
 // TODO: 需业主确认 —— 这些中文标签是根据 enum 名猜的，Prisma schema 里没有
@@ -53,7 +53,7 @@ export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
 };
 
 export function productCategoryLabel(category: ProductCategory): string {
-  return PRODUCT_CATEGORY_LABELS[category] ?? category;
+  return PRODUCT_CATEGORY_LABELS[category] ?? '未识别产品分类';
 }
 
 export const BILL_STATUS_LABELS: Record<BillStatus, string> = {
@@ -64,5 +64,5 @@ export const BILL_STATUS_LABELS: Record<BillStatus, string> = {
 };
 
 export function billStatusLabel(status: BillStatus): string {
-  return BILL_STATUS_LABELS[status] ?? status;
+  return BILL_STATUS_LABELS[status] ?? '未识别账单状态';
 }

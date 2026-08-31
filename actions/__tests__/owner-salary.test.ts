@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Role } from '../../generated/prisma/enums';
 import { UnauthorizedError } from '../../lib/auth/errors';
+import { RULE_CENTER_HREFS } from '../../lib/navigation/rule-center';
 
 const {
   permissionsMock,
@@ -15,6 +16,7 @@ const {
   MockHourlyAggregateError,
   pieceworkAdminMock,
   auditMock,
+  impactMock,
 } = vi.hoisted(() => ({
   permissionsMock: { requirePermission: vi.fn() },
   salaryMock: {
@@ -29,6 +31,7 @@ const {
     workerMachineRuleInputSchema: { safeParse: vi.fn() },
   },
   auditMock: { writeAuditLog: vi.fn() },
+  impactMock: { getDailySalaryRecomputeImpact: vi.fn() },
   csMock: {
     startCsPeriod: vi.fn(),
     settleCsPeriod: vi.fn(),
@@ -92,6 +95,10 @@ vi.mock('@/lib/salary/piecework-admin', () => ({
 vi.mock('@/lib/audit-log', () => ({
   writeAuditLog: auditMock.writeAuditLog,
 }));
+vi.mock('@/lib/salary/daily-recompute-impact', () => ({
+  getDailySalaryRecomputeImpact:
+    impactMock.getDailySalaryRecomputeImpact,
+}));
 vi.mock('@/lib/salary/cs', () => ({
   startCsPeriod: csMock.startCsPeriod,
   settleCsPeriod: csMock.settleCsPeriod,
@@ -119,6 +126,7 @@ import {
   recordCsPayrollPaymentAction,
   recomputeHourlyPayrollAction,
   setHourlyPayrollPaidAction,
+  createWorkerMachineSalaryRuleAction,
 } from '../owner-salary';
 
 const ownerActor = {
@@ -130,14 +138,47 @@ const ownerActor = {
   machineType: null,
 };
 
+const confirmedRecompute = (
+  overrides: Record<string, unknown> = {},
+) => ({
+  date: '2026-04-23',
+  reason: '补报工后重新核对',
+  confirmed: true,
+  ...overrides,
+});
+
+const defaultRecomputeImpact = {
+  candidateWorkerCount: 2,
+  affectedWorkerCount: 1,
+  createCount: 0,
+  overwriteUnpaidCount: 1,
+  paidSkippedCount: 1,
+};
+
+const matchingRecomputePreview = (
+  overrides: Record<string, unknown> = {},
+) => ({
+  status: 'confirm' as const,
+  date: '2026-04-23',
+  reason: '',
+  impact: defaultRecomputeImpact,
+  ...overrides,
+});
+
 beforeEach(() => {
   permissionsMock.requirePermission.mockReset();
   salaryMock.computeDailyWorkerSalary.mockReset();
   salaryMock.computeDailyForAllMachineWorkers.mockReset();
   salaryMock.markDailySalaryPaid.mockReset();
   salaryMock.addDailySalaryAdjustment.mockReset();
+  pieceworkAdminMock.createWorkerMachineSalaryRule.mockReset();
   pieceworkAdminMock.salaryAdjustmentInputSchema.safeParse.mockReset();
+  pieceworkAdminMock.workerMachineRuleInputSchema.safeParse.mockReset();
   auditMock.writeAuditLog.mockReset();
+  impactMock.getDailySalaryRecomputeImpact
+    .mockReset()
+    .mockResolvedValue(defaultRecomputeImpact);
+  auditMock.writeAuditLog.mockResolvedValue({ id: 'audit-1' });
   csMock.startCsPeriod.mockReset();
   csMock.settleCsPeriod.mockReset();
   csMock.settleReadyCsPeriods.mockReset();
@@ -148,6 +189,48 @@ beforeEach(() => {
   revalidatePathMock.mockReset();
   redirectMock.mockReset().mockImplementation((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
+  });
+});
+
+describe('createWorkerMachineSalaryRuleAction', () => {
+  it('refreshes both the legacy page and canonical rule-center workspace', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const input = {
+      workerId: 'worker-1',
+      machineType: 'HAND_PRESS',
+      dailyBase: '100.00',
+      pieceRate: '0.0100',
+      boardRate: '0.00',
+      smallOrderThreshold: 100,
+      smallOrderFlatPrice: '10.00',
+      smallOrderInclusive: true,
+      largeOrderSetupFee: '0.00',
+      multiplierFactors: [],
+      effectiveFrom: new Date('2026-08-26T00:00:00.000Z'),
+      remark: null,
+    };
+    pieceworkAdminMock.workerMachineRuleInputSchema.safeParse.mockReturnValue({
+      success: true,
+      data: input,
+    });
+    pieceworkAdminMock.createWorkerMachineSalaryRule.mockResolvedValue({
+      id: 'piecework-rule-1',
+    });
+
+    await expect(
+      createWorkerMachineSalaryRuleAction(null, new FormData()),
+    ).resolves.toEqual({ status: 'success', ruleId: 'piecework-rule-1' });
+
+    expect(pieceworkAdminMock.createWorkerMachineSalaryRule).toHaveBeenCalledWith({
+      ...input,
+      actor: ownerActor,
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      '/owner/salary/piecework-rules',
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith(
+      RULE_CENTER_HREFS.workerPiecework,
+    );
   });
 });
 
@@ -166,7 +249,10 @@ describe('recomputeDailySalaryAction', () => {
 
   it('rejects invalid date format', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const r = await recomputeDailySalaryAction(null, { date: '2026/04/23' });
+    const r = await recomputeDailySalaryAction(
+      null,
+      confirmedRecompute({ date: '2026/04/23' }),
+    );
     expect(r.status).toBe('invalid');
   });
 
@@ -175,7 +261,10 @@ describe('recomputeDailySalaryAction', () => {
     // YYYY-MM-DD regex — matches shanghaiDayRange's behavior so the
     // action fails fast without hitting the lib.
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const r = await recomputeDailySalaryAction(null, { date: '2026-02-31' });
+    const r = await recomputeDailySalaryAction(
+      null,
+      confirmedRecompute({ date: '2026-02-31' }),
+    );
     expect(r.status).toBe('invalid');
     if (r.status === 'invalid') {
       expect(r.fieldErrors.date?.[0]).toMatch(/合法日历日期/);
@@ -184,8 +273,194 @@ describe('recomputeDailySalaryAction', () => {
 
   it('rejects garbage string', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const r = await recomputeDailySalaryAction(null, { date: 'not-a-date' });
+    const r = await recomputeDailySalaryAction(
+      null,
+      confirmedRecompute({ date: 'not-a-date' }),
+    );
     expect(r.status).toBe('invalid');
+  });
+
+  it('allows the read-only impact preview without asking for a reason first', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const r = await recomputeDailySalaryAction(null, {
+      date: '2026-04-23',
+      reason: '   ',
+      confirmed: false,
+    });
+
+    expect(r).toEqual({
+      status: 'confirm',
+      date: '2026-04-23',
+      reason: '',
+      impact: expect.objectContaining({ affectedWorkerCount: 1 }),
+    });
+    expect(impactMock.getDailySalaryRecomputeImpact).toHaveBeenCalledWith(
+      '2026-04-23',
+      undefined,
+    );
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('server-side confirmed=true requires a 1–500 character reason before impact or writes', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+    for (const reason of ['', '   ', 'x'.repeat(501)]) {
+      const r = await recomputeDailySalaryAction(null, {
+        date: '2026-04-23',
+        reason,
+        confirmed: true,
+      });
+      expect(r.status).toBe('invalid');
+      if (r.status === 'invalid') {
+        expect(r.fieldErrors.reason?.[0]).toMatch(/重算理由/);
+      }
+    }
+
+    expect(impactMock.getDailySalaryRecomputeImpact).not.toHaveBeenCalled();
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('does not let a direct confirmed=true request skip the server preview stage', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+
+    const r = await recomputeDailySalaryAction(null, confirmedRecompute());
+
+    expect(r).toEqual({
+      status: 'confirm',
+      date: '2026-04-23',
+      reason: '补报工后重新核对',
+      impact: defaultRecomputeImpact,
+    });
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('first submit returns affected/skipped counts without changing salary rows', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const r = await recomputeDailySalaryAction(null, {
+      date: '2026-04-23',
+      reason: '补报工后重新核对',
+      confirmed: false,
+    });
+
+    expect(r).toEqual({
+      status: 'confirm',
+      date: '2026-04-23',
+      reason: '补报工后重新核对',
+      impact: expect.objectContaining({
+        affectedWorkerCount: 1,
+        paidSkippedCount: 1,
+      }),
+    });
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('recomputes server impact on confirmation instead of trusting the previous preview', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const freshImpact = {
+      candidateWorkerCount: 4,
+      affectedWorkerCount: 3,
+      createCount: 2,
+      overwriteUnpaidCount: 1,
+      paidSkippedCount: 1,
+    };
+    impactMock.getDailySalaryRecomputeImpact.mockResolvedValueOnce(freshImpact);
+    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
+      settled: [{ workerId: 'w1' }],
+      errors: [],
+    });
+
+    const r = await recomputeDailySalaryAction(
+      {
+        status: 'confirm',
+        date: '2026-04-23',
+        reason: '',
+        impact: {
+          candidateWorkerCount: 99,
+          affectedWorkerCount: 99,
+          createCount: 99,
+          overwriteUnpaidCount: 0,
+          paidSkippedCount: 0,
+        },
+      },
+      confirmedRecompute(),
+    );
+
+    expect(impactMock.getDailySalaryRecomputeImpact).toHaveBeenCalledWith(
+      '2026-04-23',
+      undefined,
+    );
+    expect(r).toEqual({
+      status: 'confirm',
+      date: '2026-04-23',
+      reason: '补报工后重新核对',
+      impact: freshImpact,
+    });
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('binds a changed date and reason to a fresh server precheck, never to an old confirmation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.computeDailyForAllMachineWorkers.mockResolvedValue({
+      settled: [],
+      errors: [],
+    });
+
+    const confirmedInput = {
+      date: '2026-04-23',
+      reason: '改为核对 4 月 23 日补报工',
+      confirmed: true,
+    };
+    const refreshedPreview = await recomputeDailySalaryAction(
+      {
+        status: 'confirm',
+        date: '2026-04-22',
+        reason: '原先的重算理由',
+        impact: {
+          candidateWorkerCount: 8,
+          affectedWorkerCount: 8,
+          createCount: 8,
+          overwriteUnpaidCount: 0,
+          paidSkippedCount: 0,
+        },
+      },
+      confirmedInput,
+    );
+
+    expect(impactMock.getDailySalaryRecomputeImpact).toHaveBeenCalledWith(
+      '2026-04-23',
+      undefined,
+    );
+    expect(refreshedPreview).toEqual({
+      status: 'confirm',
+      date: '2026-04-23',
+      reason: '改为核对 4 月 23 日补报工',
+      impact: defaultRecomputeImpact,
+    });
+    expect(salaryMock.computeDailyForAllMachineWorkers).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
+
+    const result = await recomputeDailySalaryAction(
+      refreshedPreview,
+      confirmedInput,
+    );
+
+    expect(result.status).toBe('success');
+    expect(salaryMock.computeDailyForAllMachineWorkers).toHaveBeenCalledWith(
+      '2026-04-23',
+    );
+    expect(auditMock.writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: '2026-04-23',
+        after: expect.objectContaining({
+          reason: '改为核对 4 月 23 日补报工',
+        }),
+      }),
+    );
   });
 
   it('batch path: calls computeDailyForAllMachineWorkers when no workerId', async () => {
@@ -194,22 +469,32 @@ describe('recomputeDailySalaryAction', () => {
       settled: [{ workerId: 'w1' }, { workerId: 'w2' }],
       errors: [],
     });
-    const r = await recomputeDailySalaryAction(null, { date: '2026-04-23' });
+    const r = await recomputeDailySalaryAction(
+      matchingRecomputePreview(),
+      confirmedRecompute(),
+    );
     expect(r.status).toBe('success');
     if (r.status === 'success') {
       expect(r.workerCount).toBe(2);
       expect(r.date).toBe('2026-04-23');
     }
     expect(salaryMock.computeDailyWorkerSalary).not.toHaveBeenCalled();
+    expect(auditMock.writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: ownerActor,
+        action: 'SALARY_DAILY_RECOMPUTE',
+        after: expect.objectContaining({ reason: '补报工后重新核对' }),
+      }),
+    );
   });
 
   it('single path: calls computeDailyWorkerSalary when workerId is provided', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
     salaryMock.computeDailyWorkerSalary.mockResolvedValue({});
-    const r = await recomputeDailySalaryAction(null, {
-      date: '2026-04-23',
-      workerId: 'worker-1',
-    });
+    const r = await recomputeDailySalaryAction(
+      matchingRecomputePreview({ workerId: 'worker-1' }),
+      confirmedRecompute({ workerId: 'worker-1' }),
+    );
     expect(r.status).toBe('success');
     if (r.status === 'success') expect(r.workerCount).toBe(1);
     expect(salaryMock.computeDailyWorkerSalary).toHaveBeenCalledWith(
@@ -223,10 +508,10 @@ describe('recomputeDailySalaryAction', () => {
     salaryMock.computeDailyWorkerSalary.mockRejectedValueOnce(
       new MockDailySalaryError('师傅未配置机型'),
     );
-    const r = await recomputeDailySalaryAction(null, {
-      date: '2026-04-23',
-      workerId: 'worker-1',
-    });
+    const r = await recomputeDailySalaryAction(
+      matchingRecomputePreview({ workerId: 'worker-1' }),
+      confirmedRecompute({ workerId: 'worker-1' }),
+    );
     expect(r.status).toBe('error');
     if (r.status === 'error') expect(r.message).toMatch(/机型/);
   });
@@ -239,7 +524,10 @@ describe('recomputeDailySalaryAction', () => {
     salaryMock.computeDailyForAllMachineWorkers.mockRejectedValueOnce(
       new MockDailySalaryError('不能结算未来日期（2026-04-24，上海日历）：该日尚未开始'),
     );
-    const r = await recomputeDailySalaryAction(null, { date: '2026-04-23' });
+    const r = await recomputeDailySalaryAction(
+      matchingRecomputePreview(),
+      confirmedRecompute(),
+    );
     expect(r.status).toBe('error');
     if (r.status === 'error') expect(r.message).toMatch(/未来日期/);
   });
@@ -250,16 +538,19 @@ describe('recomputeDailySalaryAction', () => {
       settled: [],
       errors: [],
     });
-    await recomputeDailySalaryAction(null, { date: '2026-04-23' });
+    await recomputeDailySalaryAction(
+      matchingRecomputePreview(),
+      confirmedRecompute(),
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/daily');
   });
 
   it('rejects workerId with path-injection characters', async () => {
     permissionsMock.requirePermission.mockResolvedValue(ownerActor);
-    const r = await recomputeDailySalaryAction(null, {
-      date: '2026-04-23',
-      workerId: '../etc',
-    });
+    const r = await recomputeDailySalaryAction(
+      null,
+      confirmedRecompute({ workerId: '../etc' }),
+    );
     expect(r.status).toBe('invalid');
   });
 });
@@ -309,6 +600,34 @@ describe('setDailySalaryPaidAction', () => {
       setDailySalaryPaidAction('ds-1', null, fd({})),
     ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(salaryMock.markDailySalaryPaid).toHaveBeenCalledWith('ds-1', false);
+  });
+
+  it('将当前日期禁付等已知业务错误返回给表单', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    salaryMock.markDailySalaryPaid.mockRejectedValue(
+      new MockDailySalaryError(
+        '不能将当前或未来日期的日薪标记为已发（2026-04-23）',
+      ),
+    );
+
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' })),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '不能将当前或未来日期的日薪标记为已发（2026-04-23）',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it('标记日薪已发时未知错误继续抛出', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const unexpected = new Error('database unavailable');
+    salaryMock.markDailySalaryPaid.mockRejectedValue(unexpected);
+
+    await expect(
+      setDailySalaryPaidAction('ds-1', null, fd({ isPaid: 'true' })),
+    ).rejects.toBe(unexpected);
   });
 
   it('returnTo 被限制在 /owner/salary/daily 前缀内（防开放重定向）', async () => {
@@ -793,8 +1112,11 @@ describe('setHourlyPayrollPaidAction', () => {
     hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
       id: 'p-1',
       isPaid: true,
+      workerName: '李师傅',
     });
-    await setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'on' }));
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'on' })),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(hourlyMock.markHourlyPayrollPaid).toHaveBeenCalledWith('p-1', true);
   });
 
@@ -803,8 +1125,80 @@ describe('setHourlyPayrollPaidAction', () => {
     hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
       id: 'p-1',
       isPaid: false,
+      workerName: '李师傅',
     });
-    await setHourlyPayrollPaidAction('p-1', null, fd({}));
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({})),
+    ).rejects.toThrow(/NEXT_REDIRECT/);
     expect(hourlyMock.markHourlyPayrollPaid).toHaveBeenCalledWith('p-1', false);
+  });
+
+  it('保留时薪筛选并把可信人员名提升为页面级回执', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
+      id: 'p-1',
+      isPaid: true,
+      workerName: '李师傅',
+    });
+
+    await expect(
+      setHourlyPayrollPaidAction(
+        'p-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: '/owner/salary/hourly?month=2026-07&paid=unpaid',
+        }),
+      ),
+    ).rejects.toThrow(
+      /NEXT_REDIRECT:\/owner\/salary\/hourly\?month=2026-07&paid=unpaid&marked=/,
+    );
+  });
+
+  it('拒绝把时薪 returnTo 当成开放重定向', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.markHourlyPayrollPaid.mockResolvedValue({
+      id: 'p-1',
+      isPaid: true,
+      workerName: '李师傅',
+    });
+
+    await expect(
+      setHourlyPayrollPaidAction(
+        'p-1',
+        null,
+        fd({
+          isPaid: 'true',
+          returnTo: 'https://evil.example.com/steal',
+        }),
+      ),
+    ).rejects.toThrow(/NEXT_REDIRECT:\/owner\/salary\/hourly\?marked=/);
+  });
+
+  it('将当前月禁付等已知业务错误返回给表单', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    hourlyMock.markHourlyPayrollPaid.mockRejectedValue(
+      new MockHourlyAggregateError(
+        '不能将当前或未来月份的月结标记为已发（2026-05）',
+      ),
+    );
+
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'true' })),
+    ).resolves.toEqual({
+      status: 'error',
+      message: '不能将当前或未来月份的月结标记为已发（2026-05）',
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it('标记月结已发时未知错误继续抛出', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    const unexpected = new Error('database unavailable');
+    hourlyMock.markHourlyPayrollPaid.mockRejectedValue(unexpected);
+
+    await expect(
+      setHourlyPayrollPaidAction('p-1', null, fd({ isPaid: 'true' })),
+    ).rejects.toBe(unexpected);
   });
 });

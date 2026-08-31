@@ -50,14 +50,12 @@ test.describe('owner notifications — admin UI', () => {
     await expect(
       page.locator('[data-slot="notifications-mock-banner"]'),
     ).toBeVisible();
-    // 10 条 seeded rule（按字母序：CS_PERIOD_ENDING, CS_PERIOD_SETTLED,
-    // DAILY_WORKER_SALARY, ORDER_COMPLETED, ORDER_SCHEDULED, ORDER_SHIPPED,
-    // ORDER_SUBMITTED, OUTSOURCE_OVERDUE, STOCK_ALERT, URGENT_ORDER）
+    // 列表使用业务名称，不暴露内部事件值。
     await expect(
-      page.locator('text=ORDER_SUBMITTED').first(),
+      page.getByText('工单已提交', { exact: true }).first(),
     ).toBeVisible();
     await expect(
-      page.locator('text=DAILY_WORKER_SALARY').first(),
+      page.getByText('师傅日薪汇总', { exact: true }).first(),
     ).toBeVisible();
 
     // ─── 2. 创建 channel ───
@@ -75,7 +73,6 @@ test.describe('owner notifications — admin UI', () => {
 
     await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
     await expect(page.locator(`text=${channelName}`).first()).toBeVisible();
-    await expect(page.locator(`text=${channelKey}`).first()).toBeVisible();
     // webhook 显示走 mask（不该看到完整 key）
     await expect(
       page.locator(`text=https://qyapi.weixin.qq.com/cgi-bin/webhook/send`),
@@ -83,7 +80,7 @@ test.describe('owner notifications — admin UI', () => {
 
     // ─── 3. 编辑 ORDER_SUBMITTED rule，绑新 channel + 启用 ───
     await page
-      .locator('tr', { has: page.locator('text=ORDER_SUBMITTED') })
+      .locator('tr', { has: page.getByText('工单已提交', { exact: true }) })
       .getByRole('link', { name: '编辑' })
       .click();
     await expect(page).toHaveURL(
@@ -102,7 +99,7 @@ test.describe('owner notifications — admin UI', () => {
     // ORDER_SUBMITTED 行：绑群数应为 1（多个 rule 可能也显示 1，所以
     // 直接断言整行包含相应文案）
     const orderSubmittedRow = page.locator('tr', {
-      has: page.locator('text=ORDER_SUBMITTED'),
+      has: page.getByText('工单已提交', { exact: true }),
     });
     await expect(orderSubmittedRow).toContainText('启用');
 
@@ -112,16 +109,16 @@ test.describe('owner notifications — admin UI', () => {
       .locator('tr', { has: page.locator(`text=${channelName}`) })
       .getByRole('button', { name: '测试' })
       .click();
-    // alert 弹完后会 reload；等&ldquo;最近推送日志&rdquo;表里出现 __TEST__ 行
+    // alert 弹完后会 reload；等&ldquo;最近推送日志&rdquo;表里出现测试记录
     // —— Playwright 会自动等 page reload。
-    await expect(page.locator('text=__TEST__').first()).toBeVisible({
+    await expect(page.getByText('测试消息', { exact: true }).first()).toBeVisible({
       timeout: 5000,
     });
 
     // ─── 5. 删除 channel（被引用 → disabled / 提示） ───
-    const channelRow = page.locator('tr', {
-      has: page.locator(`text=${channelKey}`),
-    });
+    const channelRow = page
+      .getByRole('region', { name: '企业微信群列表' })
+      .locator('tr', { hasText: channelName });
     const deleteBtn = channelRow.getByRole('button', { name: '删除' });
     await expect(deleteBtn).toBeDisabled();
 

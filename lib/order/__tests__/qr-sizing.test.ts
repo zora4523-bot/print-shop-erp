@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import qrcode from 'qrcode';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildQrSvg } from '../qr';
 
 // 把二维码的可扫描性钉住。这两条以前只是"看起来能扫"，域名一变就悄悄退化：
@@ -27,6 +28,31 @@ describe('buildQrSvg', () => {
   // 真实生产域名会比 localhost 长不少，这是最容易踩的退化场景
   const longUrl =
     'https://erp.changkun-printing.example.com.cn/worker/tasks/cm5abcdefghijklmnopqrstuvw';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('默认使用 Q 级纠错生成可打印 SVG', async () => {
+    const value = 'https://erp.example.com/wo/GD-260827-001';
+    const createSpy = vi.spyOn(qrcode, 'create');
+    const toStringSpy = vi.spyOn(qrcode, 'toString');
+
+    const svg = await buildQrSvg(value, 95);
+
+    expect(createSpy).toHaveBeenCalledWith(value, {
+      errorCorrectionLevel: 'Q',
+    });
+    expect(toStringSpy).toHaveBeenCalledWith(
+      value,
+      expect.objectContaining({
+        type: 'svg',
+        errorCorrectionLevel: 'Q',
+        margin: 4,
+      }),
+    );
+    expect(svg).toMatch(/^<svg/);
+  });
 
   it('静区是 4 个模块（QR 标准要求）', () => {
     // viewBox 的模块数 = 数据区 + 两侧静区。margin=4 → 比数据区多 8。

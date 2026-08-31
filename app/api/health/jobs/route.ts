@@ -36,7 +36,7 @@ export const dynamic = 'force-dynamic';
 // 用法：外部监控每分钟 `curl -fsS https://host/api/health/jobs`
 export async function GET(): Promise<Response> {
   const version = process.env.APP_VERSION ?? 'dev';
-  const time = new Date().toISOString();
+  const fallbackTime = new Date().toISOString();
   const mode = backgroundJobsMode();
 
   try {
@@ -50,7 +50,7 @@ export async function GET(): Promise<Response> {
     return NextResponse.json(
       {
         status: report.level,
-        time,
+        time: health.observedAt.toISOString(),
         mode,
         jobs: {
           pending: health.pending,
@@ -66,7 +66,7 @@ export async function GET(): Promise<Response> {
     );
   } catch {
     return NextResponse.json(
-      { status: 'error', db: 'down', time },
+      { status: 'error', db: 'down', time: fallbackTime },
       { status: 503 },
     );
   }

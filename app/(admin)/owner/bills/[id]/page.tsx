@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAdminBillDetail } from '@/lib/bill';
 import { BillStatus } from '@/generated/prisma/enums';
-import {
-  BILL_STATUS_LABELS,
-  ROLE_LABELS,
-} from '@/lib/auth/role-labels';
-import { Badge } from '@/components/ui/badge';
+import { ROLE_LABELS } from '@/lib/auth/role-labels';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
+import {
+  ActionNotice,
+  StatusBadge as UiStatusBadge,
+  TableEmptyState,
+} from '@/components/ui-business';
 import { IssueBillButton } from '@/components/business/bill/IssueBillButton';
 import { RecordPaymentForm } from '@/components/business/bill/RecordPaymentForm';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
@@ -26,9 +27,13 @@ import {
 import { calculateOrderCostBreakdown } from '@/lib/bill/costing';
 import { BillCostEntryList } from '@/components/business/bill/BillCostEntryList';
 import { isLegacyOpeningBillPayment } from '@/lib/bill/payment-display';
+import { BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 import { formatMoney } from '@/lib/dashboard/format';
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ issued?: string }>;
+};
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
@@ -48,11 +53,15 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function OwnerBillDetailPage({ params }: PageProps) {
+export default async function OwnerBillDetailPage({
+  params,
+  searchParams,
+}: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('bill:view:all');
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
   const bill = await getAdminBillDetail(id);
   if (!bill) notFound();
 
@@ -99,6 +108,22 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
+      {sp.issued === '1' ? (
+        <ActionNotice
+          tone="success"
+          title="账单已发布"
+          description="账单已进入可收款状态，后续新完工工单不会再自动追加到本账单。"
+          action={
+            <Link
+              href={`/owner/bills/${bill.id}`}
+              prefetch={false}
+              className="text-sm font-medium underline underline-offset-2"
+            >
+              关闭提示
+            </Link>
+          }
+        />
+      ) : null}
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={`${bill.period} ${bill.salesUser.displayName}`} />
@@ -109,12 +134,12 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           </h1>
           <p className="text-sm text-muted-foreground">
             周期 <span className="font-sans tabular-nums">{bill.period}</span> ·{' '}
-            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? bill.salesUser.role}
+            当前身份 {ROLE_LABELS[bill.salesUser.role] ?? '未识别角色'}
             {bill.issuedAt ? ` · 发单 ${formatDateTimeShanghai(bill.issuedAt)}` : ''}
             {bill.paidAt ? ` · 结清 ${formatDateTimeShanghai(bill.paidAt)}` : ''}
           </p>
         </div>
-        <StatusBadge status={bill.status} />
+        <BillStatusBadge status={bill.status} />
       </div>
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-4">
@@ -171,7 +196,7 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
         </dl>
         {openingAmount.isZero() ? null : (
           <p className="text-xs text-muted-foreground">
-            该金额用于解释逐单账单启用前的历史账面差额；总额 = 此差额 + 工单明细。
+            历史期初/手工差额 + 工单明细 = 应收总额。
           </p>
         )}
         {isCsAttributedBill ? (
@@ -224,15 +249,13 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
       {bill.status === BillStatus.DRAFT ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">发单</h2>
-          <p className="text-xs text-muted-foreground">
-            发单后进入 ISSUED，可接受付款。状态单向，不可回退到 DRAFT。发单
-            前请先在列表页&ldquo;生成 / 追加月账单&rdquo;把截至目前所有完工
-            工单汇入，因为发单后 {BILL_STATUS_LABELS[BillStatus.ISSUED]} /
-            {BILL_STATUS_LABELS[BillStatus.PARTIAL_PAID]} /
-            {BILL_STATUS_LABELS[BillStatus.FULLY_PAID]} 的账单不再由生成流程
-            自动追加新工单。
-          </p>
-          <IssueBillButton billId={bill.id} />
+          <IssueBillButton
+            billId={bill.id}
+            period={bill.period}
+            recipientLabel={`${bill.salesUser.displayName}（${ROLE_LABELS[bill.salesUser.role] ?? '未识别角色'}）`}
+            totalAmount={total.toFixed(2)}
+            orderCount={bill.items.length}
+          />
         </section>
       ) : null}
 
@@ -240,13 +263,11 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
       bill.status === BillStatus.PARTIAL_PAID ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <h2 className="text-base font-semibold">录入付款</h2>
-          <p className="text-xs text-muted-foreground">
-            累加式记账；累计 = 总额自动切 FULLY_PAID 终态（不可回退）。最多可录
-            入 <span className="font-sans tabular-nums">¥ {remaining.toFixed(2)}</span>。
-            {isCsAttributedBill
-              ? ' 该账单归属客服；客服销售额已在工单提交时记入，收款不会重复计算提成。'
-              : ''}
-          </p>
+          {isCsAttributedBill ? (
+            <p className="text-xs text-muted-foreground">
+              该账单归属客服；客服业绩已在工单提交时计入，本次收款不会重复计算提成。
+            </p>
+          ) : null}
           <RecordPaymentForm
             billId={bill.id}
             remainingAmount={remaining.toFixed(2)}
@@ -272,9 +293,12 @@ export default async function OwnerBillDetailPage({ params }: PageProps) {
           结款明细（{bill.payments.length}）
         </h2>
         {bill.payments.length === 0 ? (
-          <p className="px-4 py-5 text-sm text-muted-foreground sm:px-6">
-            暂无收款流水。
-          </p>
+          <TableEmptyState
+            variant="compact"
+            title="暂无收款流水"
+            description="账单出账后录入的收款会显示在这里。"
+            className="m-4 sm:m-6"
+          />
         ) : (
           <ol className="divide-y">
             {bill.payments.map((payment) => (
@@ -437,18 +461,11 @@ function Row({
   );
 }
 
-function StatusBadge({ status }: { status: BillStatus }) {
-  const label = BILL_STATUS_LABELS[status] ?? status;
-  switch (status) {
-    case BillStatus.FULLY_PAID:
-      return <Badge>{label}</Badge>;
-    case BillStatus.PARTIAL_PAID:
-      return <Badge variant="secondary">{label}</Badge>;
-    case BillStatus.ISSUED:
-      return <Badge variant="destructive">{label}</Badge>;
-    case BillStatus.DRAFT:
-      return <Badge variant="outline">{label}</Badge>;
-    default:
-      return <Badge variant="outline">{label}</Badge>;
-  }
+function BillStatusBadge({ status }: { status: BillStatus }) {
+  const definition = BILL_STATUS_REGISTRY[status];
+  return (
+    <UiStatusBadge tone={definition.tone} dot={definition.dot}>
+      {definition.label}
+    </UiStatusBadge>
+  );
 }

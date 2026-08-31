@@ -7,6 +7,7 @@ import type { PieceworkRuleMutationResult } from '@/actions/owner-salary.types';
 import { MACHINE_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormMessage } from '@/components/ui-business';
 
 type RuleDefaults = {
   dailyBase: string;
@@ -57,8 +58,9 @@ export function WorkerMachineRuleForm({
     <form
       key={`${selectedWorker.id}:${machineType}:${defaultEffectiveFrom}`}
       action={(formData) => startTransition(() => action(formData))}
-      className="space-y-4"
+      aria-busy={pending}
     >
+      <fieldset disabled={pending} className="space-y-4 border-0 p-0">
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="师傅">
           <select
@@ -174,11 +176,11 @@ export function WorkerMachineRuleForm({
           {pending ? '保存中…' : '新增规则版本'}
         </Button>
         <span className="text-xs text-muted-foreground">
-          新版本会自动结束上一版本；已报工任务仍保留原规则快照。
+          新版本会自动结束上一版本；已报工任务的计件结果不受影响。
         </span>
       </div>
       {state?.status === 'invalid' ? (
-        <p className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {Object.values(state.fieldErrors).flat().join('；')}
         </p>
       ) : null}
@@ -186,8 +188,15 @@ export function WorkerMachineRuleForm({
         <p role="alert" className="text-xs text-destructive">{state.message}</p>
       ) : null}
       {state?.status === 'success' ? (
-        <p className="text-xs text-success-foreground">规则版本已生效。</p>
+        <FormMessage
+          fieldId="worker-machine-rule-status"
+          tone="success"
+          className="text-xs"
+        >
+          规则版本已生效。
+        </FormMessage>
       ) : null}
+      </fieldset>
     </form>
   );
 }

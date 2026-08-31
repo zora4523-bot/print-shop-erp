@@ -1,8 +1,9 @@
-import { db } from '../db';
 import {
+  BackgroundJobStatus,
   NotificationStatus,
   type NotificationStatus as NotificationStatusType,
 } from '../../generated/prisma/enums';
+import { db } from '../db';
 import {
   NOTIFICATION_EVENTS,
   PRIVATE_EVENT_MAX_CHANNELS,
@@ -10,6 +11,7 @@ import {
   isPrivatePerCsEvent,
   type NotificationEvent,
 } from './events';
+import { BACKGROUND_JOB_TYPES } from '../background-jobs/types';
 
 // 推送配置 / 日志的 admin-side 读写。Prisma 调用集中在这里（CLAUDE.md
 // 三层架构：app → actions → lib → Prisma）。Server Actions 在
@@ -31,6 +33,42 @@ export type ChannelSummary = {
   referencingActiveRuleCount: number;
 };
 
+type ChannelWithoutRefCount = Omit<
+  ChannelSummary,
+  'referencingActiveRuleCount'
+>;
+
+async function listChannels(): Promise<ChannelWithoutRefCount[]> {
+  return db.notificationChannel.findMany({
+    orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      channelKey: true,
+      channelName: true,
+      webhookUrl: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+function addChannelReferenceCounts(
+  channels: readonly ChannelWithoutRefCount[],
+  rules: readonly { channelIds: readonly string[] }[],
+): ChannelSummary[] {
+  const refCount = new Map<string, number>();
+  for (const rule of rules) {
+    for (const channelId of rule.channelIds) {
+      refCount.set(channelId, (refCount.get(channelId) ?? 0) + 1);
+    }
+  }
+  return channels.map((channel) => ({
+    ...channel,
+    referencingActiveRuleCount: refCount.get(channel.id) ?? 0,
+  }));
+}
+
 /**
  * 列出全部 channel + 每个 channel 被多少 rule 引用（不管 isActive，
  * 用于 UI 渲染&ldquo;删除前置&rdquo;红/灰按钮）。NotificationRule.channelIds 是
@@ -42,34 +80,13 @@ export type ChannelSummary = {
  */
 export async function listChannelsWithRefCount(): Promise<ChannelSummary[]> {
   const [channels, allRules] = await Promise.all([
-    db.notificationChannel.findMany({
-      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
-      select: {
-        id: true,
-        channelKey: true,
-        channelName: true,
-        webhookUrl: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
+    listChannels(),
     db.notificationRule.findMany({
       // 故意不过滤 isActive —— 见函数注释。
       select: { channelIds: true },
     }),
   ]);
-  // 把所有 rule 引用的 channelId 拍平成 multiset，count by channelId
-  const refCount = new Map<string, number>();
-  for (const r of allRules) {
-    for (const cid of r.channelIds) {
-      refCount.set(cid, (refCount.get(cid) ?? 0) + 1);
-    }
-  }
-  return channels.map((c) => ({
-    ...c,
-    referencingActiveRuleCount: refCount.get(c.id) ?? 0,
-  }));
+  return addChannelReferenceCounts(channels, allRules);
 }
 
 export async function getChannel(id: string): Promise<ChannelSummary | null> {
@@ -226,6 +243,23 @@ export async function listRules(): Promise<RuleSummary[]> {
     },
   });
   return rules;
+}
+
+/**
+ * 通知管理首页同时需要 channel 引用数和完整 rule 列表。
+ * 单独调用 `listChannelsWithRefCount()` + `listRules()` 会把
+ * NotificationRule 读两遍；这个组合入口只读一次完整 rules，
+ * 然后用同一份快照在内存中计算 channel 引用数。
+ */
+export async function listNotificationConfiguration(): Promise<{
+  channels: ChannelSummary[];
+  rules: RuleSummary[];
+}> {
+  const [channels, rules] = await Promise.all([listChannels(), listRules()]);
+  return {
+    channels: addChannelReferenceCounts(channels, rules),
+    rules,
+  };
 }
 
 export async function getRule(eventType: string): Promise<RuleSummary | null> {
@@ -413,10 +447,11 @@ export async function updateRuleWithGuard(
 export type LogFilter = {
   eventType?: NotificationEvent;
   status?: NotificationStatusType;
-  // 按 createdAt 范围（半开区间）
+  // 按最近一次投递时间范围（半开区间）
   start?: Date;
   end?: Date;
   limit?: number; // 默认 50
+  skip?: number;
 };
 
 export type LogRow = {
@@ -430,25 +465,39 @@ export type LogRow = {
   retryCount: number;
   relatedOrderId: string | null;
   sentAt: Date | null;
+  deliveryKey: string | null;
+  deliveryStateVersion: number;
+  lastAttemptAt: Date;
   createdAt: Date;
+  updatedAt: Date;
+  /** 投递日志所属的持久化后台任务状态；inline/测试投递为 null。 */
+  backgroundJobStatus: BackgroundJobStatus | null;
+  /**
+   * RETRYING 本身只表示可重试；当对应的 durable job 已经 DEAD
+   * 时，才是需要 owner 介入的死信。不改 NotificationLog 的单调状态，
+   * 只在读模型上暴露跨账本契约。
+   */
+  hasDeadLetterJob: boolean;
 };
 
 export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
-  const limit = filter.limit ?? 50;
+  const limit = Math.min(200, Math.max(1, filter.limit ?? 50));
+  const skip = Math.max(0, Math.floor(filter.skip ?? 0));
   const rows = await db.notificationLog.findMany({
     where: {
       ...(filter.eventType ? { eventType: filter.eventType } : {}),
       ...(filter.status ? { status: filter.status } : {}),
       ...(filter.start || filter.end
         ? {
-            createdAt: {
+            lastAttemptAt: {
               ...(filter.start ? { gte: filter.start } : {}),
               ...(filter.end ? { lt: filter.end } : {}),
             },
           }
         : {}),
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ lastAttemptAt: 'desc' }, { id: 'desc' }],
+    skip,
     take: limit,
     select: {
       id: true,
@@ -460,26 +509,142 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
       retryCount: true,
       relatedOrderId: true,
       sentAt: true,
+      deliveryKey: true,
+      deliveryStateVersion: true,
+      lastAttemptAt: true,
       createdAt: true,
+      updatedAt: true,
       channel: { select: { channelName: true } },
     },
   });
+  const deliveryKeys = [
+    ...new Set(rows.flatMap((row) => (row.deliveryKey ? [row.deliveryKey] : []))),
+  ];
+  const jobs =
+    deliveryKeys.length === 0
+      ? []
+      : await db.backgroundJob.findMany({
+          where: {
+            type: BACKGROUND_JOB_TYPES.NOTIFICATION,
+            dedupeKey: { in: deliveryKeys },
+          },
+          select: { dedupeKey: true, status: true },
+        });
+  const jobStatusByDeliveryKey = new Map(
+    jobs.map((job) => [job.dedupeKey, job.status] as const),
+  );
   return rows.map((r) => ({
     id: r.id,
     eventType: r.eventType,
     channelId: r.channelId,
     channelName: r.channel?.channelName ?? null,
     messageContent: r.messageContent,
-    status: r.status as NotificationStatusType,
+    status: r.status,
     errorMessage: r.errorMessage,
     retryCount: r.retryCount,
     relatedOrderId: r.relatedOrderId,
     sentAt: r.sentAt,
+    deliveryKey: r.deliveryKey,
+    deliveryStateVersion: r.deliveryStateVersion,
+    lastAttemptAt: r.lastAttemptAt,
     createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    backgroundJobStatus: r.deliveryKey
+      ? (jobStatusByDeliveryKey.get(r.deliveryKey) ?? null)
+      : null,
+    hasDeadLetterJob:
+      r.status === NotificationStatus.RETRYING &&
+      r.deliveryKey !== null &&
+      jobStatusByDeliveryKey.get(r.deliveryKey) === BackgroundJobStatus.DEAD,
   }));
 }
 
+type UnresolvedLogQueryOptions = {
+  limit?: number;
+  skip?: number;
+};
+
+/**
+ * Owner 必须处置的通知队列：
+ * - UNKNOWN 需要人工确认是否送达；
+ * - RETRYING 仍保持可重试语义，但 owning BackgroundJob 已 DEAD 时自动
+ *   重试已经耗尽，也必须进入 owner 队列。
+ *
+ * 分页必须在数据库里对合并后的队列执行；分别查两类再在
+ * Node 里合并会使 skip/take 丢行或重行。
+ */
+export async function listUnresolvedNotificationLogs(
+  options: UnresolvedLogQueryOptions = {},
+): Promise<LogRow[]> {
+  const limit = Math.min(200, Math.max(1, options.limit ?? 50));
+  const skip = Math.max(0, Math.floor(options.skip ?? 0));
+  const rows = await db.$queryRaw<LogRow[]>`
+    SELECT log."id",
+           log."eventType",
+           log."channelId",
+           channel."channelName" AS "channelName",
+           log."messageContent",
+           log."status",
+           log."errorMessage",
+           log."retryCount",
+           log."relatedOrderId",
+           log."sentAt",
+           log."deliveryKey",
+           log."deliveryStateVersion",
+           log."lastAttemptAt",
+           log."createdAt",
+           log."updatedAt",
+           job."status" AS "backgroundJobStatus",
+           (
+             log."status" = ${NotificationStatus.RETRYING}::"NotificationStatus"
+             AND job."status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"
+           ) AS "hasDeadLetterJob"
+      FROM "NotificationLog" AS log
+      LEFT JOIN "NotificationChannel" AS channel
+        ON channel."id" = log."channelId"
+      LEFT JOIN "BackgroundJob" AS job
+        ON job."dedupeKey" = log."deliveryKey"
+       AND job."type" = ${BACKGROUND_JOB_TYPES.NOTIFICATION}
+     WHERE log."status" = ${NotificationStatus.UNKNOWN}::"NotificationStatus"
+        OR (
+          log."status" = ${NotificationStatus.RETRYING}::"NotificationStatus"
+          AND job."status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"
+        )
+     ORDER BY log."lastAttemptAt" DESC, log."id" DESC
+     LIMIT ${limit}
+     OFFSET ${skip}
+  `;
+  return rows;
+}
+
+export async function countUnresolvedNotifications(): Promise<number> {
+  const rows = await db.$queryRaw<Array<{ count: bigint }>>`
+    SELECT count(*)::bigint AS "count"
+      FROM "NotificationLog" AS log
+      LEFT JOIN "BackgroundJob" AS job
+        ON job."dedupeKey" = log."deliveryKey"
+       AND job."type" = ${BACKGROUND_JOB_TYPES.NOTIFICATION}
+     WHERE log."status" = ${NotificationStatus.UNKNOWN}::"NotificationStatus"
+        OR (
+          log."status" = ${NotificationStatus.RETRYING}::"NotificationStatus"
+          AND job."status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"
+        )
+  `;
+  const count = rows[0]?.count;
+  if (typeof count !== 'bigint') {
+    throw new Error('notification admin: unresolved count unavailable');
+  }
+  if (count > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('notification admin: unresolved count exceeds safe integer');
+  }
+  return Number(count);
+}
+
+
 // 让 UI 一眼看出"最近一次推送是不是失败"——dashboard 顶部告警条。
+// RETRYING 只有在 owning BackgroundJob 已 DEAD 时计入：任务尚在
+// PENDING/RUNNING 时是正常退避，不应报警；耗尽 attempts 后则已无
+// 自动处理者，必须显示给 owner。
 //
 // 手动测试按钮也写 NotificationLog 行（eventType
 // = '__TEST__'）；如果 owner 测过一次失败的 webhook URL，那条 log
@@ -488,12 +653,37 @@ export async function listLogs(filter: LogFilter = {}): Promise<LogRow[]> {
 export async function countRecentFailures(
   windowHours = 24,
 ): Promise<number> {
-  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-  return db.notificationLog.count({
-    where: {
-      status: NotificationStatus.FAILED,
-      createdAt: { gte: since },
-      NOT: { eventType: TEST_EVENT_TYPE },
-    },
-  });
+  // 时间窗口仍以 PostgreSQL 时钟为准，但把“读 DB now”和
+  // “count”合成一条语句，避免每次打开 owner 页面都串行跑
+  // 两次数据库往返。不回退到 Node 时钟，原始查询错误也直接上抛。
+  const rows = await db.$queryRaw<Array<{ count: bigint }>>`
+    SELECT count(*)::bigint AS "count"
+      FROM "NotificationLog" AS log
+      LEFT JOIN "BackgroundJob" AS job
+        ON job."dedupeKey" = log."deliveryKey"
+       AND job."type" = ${BACKGROUND_JOB_TYPES.NOTIFICATION}
+     WHERE (
+       log."status" IN (
+       ${NotificationStatus.FAILED}::"NotificationStatus",
+       ${NotificationStatus.UNKNOWN}::"NotificationStatus"
+       )
+       OR (
+         log."status" = ${NotificationStatus.RETRYING}::"NotificationStatus"
+         AND job."status" = ${BackgroundJobStatus.DEAD}::"BackgroundJobStatus"
+       )
+     )
+       AND log."lastAttemptAt" >= (
+         (now() AT TIME ZONE 'UTC')
+           - (${windowHours}::double precision * INTERVAL '1 hour')
+       )
+       AND log."eventType" <> ${TEST_EVENT_TYPE}
+  `;
+  const count = rows[0]?.count;
+  if (typeof count !== 'bigint') {
+    throw new Error('notification admin: recent failure count unavailable');
+  }
+  if (count > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('notification admin: recent failure count exceeds safe integer');
+  }
+  return Number(count);
 }

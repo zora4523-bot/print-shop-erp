@@ -59,7 +59,7 @@ export function OrderCostEntryForm({
   const isAdjustment = selectedCategory === OrderCostCategory.ADJUSTMENT;
 
   return (
-    <form ref={formRef} action={action} className="space-y-3">
+    <form ref={formRef} action={action} aria-busy={pending} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input type="hidden" name="orderId" value={orderId} />
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -68,6 +68,7 @@ export function OrderCostEntryForm({
           <select
             name="category"
             value={selectedCategory}
+            disabled={pending}
             onChange={(event) =>
               setCategory(event.target.value as OrderCostCategory)
             }
@@ -85,6 +86,7 @@ export function OrderCostEntryForm({
           <Input
             name="description"
             required
+            disabled={pending}
             maxLength={100}
             placeholder={
               isSfCollect ? '例如：补录纸张耗用' : '例如：快递重量 12.5kg'
@@ -96,6 +98,7 @@ export function OrderCostEntryForm({
           <Input
             name="amount"
             required
+            disabled={pending}
             inputMode="decimal"
             step="0.01"
             min={isAdjustment ? undefined : '0.01'}
@@ -106,6 +109,7 @@ export function OrderCostEntryForm({
           <span>数量</span>
           <Input
             name="quantity"
+            disabled={pending}
             inputMode="decimal"
             min="0"
             max="999999999.999"
@@ -114,12 +118,18 @@ export function OrderCostEntryForm({
         </label>
         <label className="space-y-1 text-sm">
           <span>单位</span>
-          <Input name="unit" maxLength={20} placeholder="kg / 度 / 餐" />
+          <Input
+            name="unit"
+            disabled={pending}
+            maxLength={20}
+            placeholder="kg / 度 / 餐"
+          />
         </label>
         <label className="space-y-1 text-sm">
           <span>单价</span>
           <Input
             name="unitPrice"
+            disabled={pending}
             inputMode="decimal"
             min="0"
             max="99999999.9999"
@@ -128,7 +138,7 @@ export function OrderCostEntryForm({
         </label>
         <label className="space-y-1 text-sm">
           <span>备注</span>
-          <Input name="remark" maxLength={200} />
+          <Input name="remark" disabled={pending} maxLength={200} />
         </label>
       </div>
       <p className="text-xs text-muted-foreground">

@@ -427,6 +427,47 @@ describe('customer price-rule workspace list', () => {
     expect(serialized).not.toContain('INTERNAL_CRAFT_CODE');
   });
 
+  it('用中文业务文字展示烫金道数与乘算方式', async () => {
+    const currentRule = rule({
+      triggerCondition: {
+        pricingRoutes: ['STOCK_BLANK'],
+        foilPassCount: 2,
+        perFoilPass: true,
+      },
+    });
+    const draftRule = rule({
+      id: 'rule-draft-a',
+      triggerCondition: {
+        pricingRoutes: ['STOCK_BLANK'],
+        foilPassCount: 3,
+        perFoilPass: true,
+      },
+      updatedAt: draftUpdatedAt,
+    });
+    dbMock.customerPriceBook.findMany.mockResolvedValue([draftBook, currentBook]);
+    dbMock.customerPriceRule.findMany
+      .mockResolvedValueOnce([draftRule])
+      .mockResolvedValueOnce([currentRule])
+      .mockResolvedValueOnce([draftRule]);
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+
+    const result = await getCustomerPriceRuleWorkspace(
+      { purpose: CustomerPriceBookPurpose.PROCESSING },
+      now,
+    );
+
+    expect(result.items[0]?.current?.scopeLabel).toBe(
+      '2 道烫金（正面＋背面） · 按实际烫金道数乘算',
+    );
+    expect(result.items[0]?.draft?.scopeLabel).toBe(
+      '3 道烫金（正面＋背面） · 按实际烫金道数乘算',
+    );
+    const serialized = JSON.stringify(result.items[0]);
+    expect(serialized).not.toMatch(
+      /foilPassCount|perFoilPass|STOCK_BLANK|triggerCondition/,
+    );
+  });
+
   it('uses notIn for the unchanged-only filter and paginates in the database', async () => {
     const changedCurrent = rule();
     const changedDraft = rule({

@@ -1,12 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { useActionState, useRef } from 'react';
+import { buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  FormErrorSummary,
+  FormMessage,
+  PendingButton,
+  formMessageA11yProps,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductCategoryOption } from '@/lib/product';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type EditInitial = {
   code: string | null;
@@ -19,16 +29,27 @@ type EditInitial = {
   isActive: boolean;
 };
 
-type Props =
-  | {
+export type ProductRouteBase =
+  | '/owner/products'
+  | '/owner/rules/stock-skus';
+
+type CommonProps = {
+  routeBase?: ProductRouteBase;
+  categoryManagementHref?: string;
+  showInternalPrice?: boolean;
+};
+
+type Props = CommonProps &
+  (
+    | {
       mode: 'create';
       action: (
         prev: ProductMutationResult | null,
         fd: FormData,
       ) => Promise<ProductMutationResult>;
       categoryNodes: ProductCategoryOption[];
-    }
-  | {
+      }
+    | {
       mode: 'edit';
       action: (
         prev: ProductMutationResult | null,
@@ -36,10 +57,21 @@ type Props =
       ) => Promise<ProductMutationResult>;
       initial: EditInitial;
       categoryNodes: ProductCategoryOption[];
-    };
+      }
+  );
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+
+const PRODUCT_FIELD_LABELS: Record<string, string> = {
+  code: '产品编码',
+  categoryNodeId: '分类',
+  name: '产品名',
+  specification: '规格',
+  paperType: '纸张',
+  baseUnitPrice: '内部销售/工厂直单基础单价',
+  minOrderQty: '最小起订量',
+};
 
 export function ProductForm(props: Props) {
   const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
@@ -49,11 +81,17 @@ export function ProductForm(props: Props) {
   const isCreate = props.mode === 'create';
   const initial = props.mode === 'edit' ? props.initial : undefined;
 
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const generalError = state?.status === 'error' ? state.message : null;
-  const success = state?.status === 'success';
+  const visibleState = pending ? null : state;
+  const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
+  const generalError = visibleState?.status === 'error' ? visibleState.message : null;
+  const success = visibleState?.status === 'success';
+  const summaryErrors = toProductErrorSummary(errs);
   const missingCategoryNodes = props.categoryNodes.length === 0;
   const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
+  const routeBase = props.routeBase ?? '/owner/products';
+  const categoryManagementHref =
+    props.categoryManagementHref ?? '/owner/product-categories';
+  const showInternalPrice = props.showInternalPrice ?? true;
 
   const priceDefault =
     initial?.baseUnitPrice === null || initial?.baseUnitPrice === undefined
@@ -61,15 +99,24 @@ export function ProductForm(props: Props) {
       : String(initial.baseUnitPrice);
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form
+      action={formAction}
+      aria-busy={pending}
+      className="space-y-5"
+      noValidate
+    >
+      <input type="hidden" name="routeBase" value={routeBase} />
+
+      <FormErrorSummary errors={summaryErrors} />
+
       {isCreate ? (
-        <details
+        <Disclosure
           className="rounded-lg border border-dashed p-3"
           open={Boolean(errs.code?.[0])}
         >
-          <summary className="cursor-pointer text-sm text-muted-foreground">
-            高级设置：自定义产品编码（通常无需填写）
-          </summary>
+          <DisclosureSummary className="text-muted-foreground">
+            自定义产品编码
+          </DisclosureSummary>
           <div className="mt-3">
             <TextField
               id="code"
@@ -79,12 +126,12 @@ export function ProductForm(props: Props) {
               error={errs.code?.[0]}
             />
           </div>
-        </details>
+        </Disclosure>
       ) : (
         <TextField
           id="code"
           label="产品编码"
-          hint="用于内部 SKU / 快速搜索；大小写不敏感。"
+          hint="大小写不敏感。"
           disabled={pending}
           error={errs.code?.[0]}
           defaultValue={initial?.code ?? ''}
@@ -93,9 +140,11 @@ export function ProductForm(props: Props) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="categoryNodeId">分类</Label>
+          <Label htmlFor="categoryNodeId">
+            产品结构分类
+          </Label>
           <Link
-            href="/owner/product-categories/new"
+            href={`${categoryManagementHref}/new`}
             className="text-xs text-primary hover:underline"
           >
             新建分类
@@ -104,6 +153,9 @@ export function ProductForm(props: Props) {
         <select
           id="categoryNodeId"
           name="categoryNodeId"
+          {...(errs.categoryNodeId?.[0]
+            ? formMessageA11yProps('categoryNodeId', 'error')
+            : {})}
           className={selectClass}
           defaultValue={defaultCategoryNodeId}
           disabled={pending || missingCategoryNodes}
@@ -114,58 +166,97 @@ export function ProductForm(props: Props) {
             return (
               <option key={node.id} value={node.id}>
                 {prefix}
-                {node.name}
+                {externalPriceBusinessText(node.name) || '未命名分类'}
                 {node.isActive ? '' : '（已停用）'}
               </option>
             );
           })}
         </select>
         {errs.categoryNodeId?.[0] ? (
-          <p className="text-sm text-destructive">{errs.categoryNodeId[0]}</p>
+          <FormMessage fieldId="categoryNodeId" tone="error">
+            {errs.categoryNodeId[0]}
+          </FormMessage>
         ) : null}
         {missingCategoryNodes ? (
-          <p role="alert" className="text-sm text-warning-foreground">
-            暂无可用产品分类，请先创建并启用分类。
-          </p>
+          <ActionNotice
+            tone="warning"
+            title="缺少可用产品分类"
+            description="请先创建并启用分类，再保存产品。"
+          />
         ) : null}
       </div>
 
-      <TextField
-        id="name"
-        label="产品名"
-        required
-        disabled={pending}
-        error={errs.name?.[0]}
-        defaultValue={initial?.name}
-      />
+      {initial ? (
+        <PreservedBusinessTextField
+          id="name"
+          label="产品名"
+          fallback="未命名 SKU"
+          required
+          disabled={pending}
+          error={errs.name?.[0]}
+          rawValue={initial.name}
+        />
+      ) : (
+        <TextField
+          id="name"
+          label="产品名"
+          required
+          disabled={pending}
+          error={errs.name?.[0]}
+        />
+      )}
 
-      <TextField
-        id="specification"
-        label="规格（选填）"
-        hint="例如 100×200、中号、方形"
-        disabled={pending}
-        error={errs.specification?.[0]}
-        defaultValue={initial?.specification ?? ''}
-      />
+      {initial ? (
+        <PreservedBusinessTextField
+          id="specification"
+          label="规格（选填）"
+          fallback="未标注规格"
+          hint="例如 100×200、中号、方形"
+          disabled={pending}
+          error={errs.specification?.[0]}
+          rawValue={initial.specification ?? ''}
+        />
+      ) : (
+        <TextField
+          id="specification"
+          label="规格（选填）"
+          hint="例如 100×200、中号、方形"
+          disabled={pending}
+          error={errs.specification?.[0]}
+        />
+      )}
 
-      <TextField
-        id="paperType"
-        label="纸张（选填）"
-        hint="例如 铜版纸、艺术纸"
-        disabled={pending}
-        error={errs.paperType?.[0]}
-        defaultValue={initial?.paperType ?? ''}
-      />
+      {initial ? (
+        <PreservedBusinessTextField
+          id="paperType"
+          label="纸张（选填）"
+          fallback="未标注纸张"
+          hint="例如 铜版纸、艺术纸"
+          disabled={pending}
+          error={errs.paperType?.[0]}
+          rawValue={initial.paperType ?? ''}
+        />
+      ) : (
+        <TextField
+          id="paperType"
+          label="纸张（选填）"
+          hint="例如 铜版纸、艺术纸"
+          disabled={pending}
+          error={errs.paperType?.[0]}
+        />
+      )}
 
-      <TextField
-        id="baseUnitPrice"
-        label="内部销售/工厂直单基础单价（选填）"
-        hint="最多 6 位整数、4 位小数。仅在内部销售或工厂直单没有适用阶梯价时使用；外部销售不读取此价格。"
-        type="text"
-        disabled={pending}
-        error={errs.baseUnitPrice?.[0]}
-        defaultValue={priceDefault}
-      />
+      {showInternalPrice ? (
+        <TextField
+          id="baseUnitPrice"
+          label="内部销售/工厂直单基础单价（选填）"
+          hint="最多 6 位整数、4 位小数。"
+          type="text"
+          disabled={pending}
+          error={errs.baseUnitPrice?.[0]}
+          defaultValue={priceDefault}
+        />
+      ) : null}
 
       <TextField
         id="minOrderQty"
@@ -180,21 +271,25 @@ export function ProductForm(props: Props) {
       />
 
       {generalError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {generalError}
-        </p>
+        <ActionNotice
+          tone="error"
+          title="产品保存失败"
+          description={generalError}
+        />
       ) : null}
       {success ? (
-        <p role="status" className="text-sm text-success-foreground">
-          ✓ 已保存
-        </p>
+        <ActionNotice tone="success" title="产品已保存" />
       ) : null}
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={pending || missingCategoryNodes}>
-          {pending ? '提交中…' : isCreate ? '创建产品' : '保存修改'}
-        </Button>
-        <Link href="/owner/products" className={buttonVariants({ variant: 'outline' })}>
+        <PendingButton
+          pending={pending}
+          pendingLabel="正在保存产品…"
+          disabled={missingCategoryNodes}
+        >
+          {isCreate ? '创建产品' : '保存修改'}
+        </PendingButton>
+        <Link href={routeBase} className={buttonVariants({ variant: 'outline' })}>
           返回列表
         </Link>
       </div>
@@ -232,19 +327,94 @@ function TextField({
         type={type}
         min={min}
         step={step}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
         {...inputProps}
       />
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-destructive">
+        <FormMessage fieldId={id} tone="error">
           {error}
-        </p>
+        </FormMessage>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
           {hint}
-        </p>
+        </FormMessage>
       ) : null}
     </div>
+  );
+}
+
+function PreservedBusinessTextField({
+  id,
+  label,
+  hint,
+  error,
+  rawValue,
+  fallback,
+  ...inputProps
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  error?: string | undefined;
+  rawValue: string;
+  fallback: string;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  const submittedValueRef = useRef<HTMLInputElement>(null);
+  const businessValue = externalPriceBusinessText(rawValue);
+  const visibleValue = businessValue || (rawValue.trim() ? fallback : '');
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <input
+        ref={submittedValueRef}
+        type="hidden"
+        name={id}
+        defaultValue={rawValue}
+      />
+      <Input
+        id={id}
+        type="text"
+        defaultValue={visibleValue}
+        onInput={(event) => {
+          if (submittedValueRef.current) {
+            submittedValueRef.current.value = event.currentTarget.value;
+          }
+        }}
+        {...(error
+          ? formMessageA11yProps(id, 'error')
+          : hint
+            ? formMessageA11yProps(id, 'hint')
+            : {})}
+        {...inputProps}
+      />
+      {error ? (
+        <FormMessage fieldId={id} tone="error">
+          {error}
+        </FormMessage>
+      ) : hint ? (
+        <FormMessage fieldId={id} tone="hint" className="text-xs">
+          {hint}
+        </FormMessage>
+      ) : null}
+    </div>
+  );
+}
+
+function toProductErrorSummary(
+  fieldErrors: Record<string, string[]>,
+): FormErrorSummaryItem[] {
+  return Object.entries(fieldErrors).flatMap(([fieldId, messages]) =>
+    messages.map((message) => ({
+      fieldId,
+      label: PRODUCT_FIELD_LABELS[fieldId] ?? '表单内容',
+      message,
+    })),
   );
 }

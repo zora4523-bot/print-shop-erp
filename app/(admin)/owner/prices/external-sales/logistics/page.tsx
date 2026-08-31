@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
+import { customerPricingHref } from '@/lib/navigation/rule-center';
 
 export default function OwnerExternalSalesLogisticsPriceBookPage() {
-  redirect('/owner/prices/external-sales/items?purpose=logistics');
+  redirect(customerPricingHref('logistics'));
 }

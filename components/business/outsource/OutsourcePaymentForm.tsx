@@ -1,30 +1,82 @@
 'use client';
 
-import { useActionState, useCallback, useRef, useState } from 'react';
+import {
+  useActionState,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { recordOutsourcePaymentAction } from '@/actions/outsource';
 import type { OutsourcePaymentMutationResult } from '@/actions/outsource.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  ActionNotice,
+  ConfirmActionDialog,
+  FormErrorSummary,
+  type FormErrorSummaryItem,
+} from '@/components/ui-business';
 import { nextOutsourceIdempotencyKey } from './idempotency';
 
 type Props = {
   id: string;
+  supplierName: string;
+  orderNo: string | null;
   remainingAmount: string;
   initialIdempotencyKey: string;
 };
 
+type PaymentPreview = {
+  amount: string;
+  paidAt: string;
+  method: string;
+  reference: string;
+};
+
+export function outsourcePaymentImpactItems(
+  preview: PaymentPreview,
+  remainingAmount: string,
+): string[] {
+  const amount = Number(preview.amount);
+  const remaining = Number(remainingAmount);
+  const after = remaining - amount;
+  const settlement =
+    Number.isFinite(after) && Math.abs(after) < 0.005
+      ? '本次付款后该外协单将全部结清。'
+      : `本次付款后预计仍有 ¥ ${after.toFixed(2)} 未付。`;
+
+  return [
+    `本次付款：¥ ${amount.toFixed(2)}`,
+    `付款时间：${preview.paidAt.replace('T', ' ')}`,
+    `付款方式：${preview.method || '未填写'}`,
+    `付款流水号：${preview.reference || '未填写'}`,
+    settlement,
+    '这笔流水只记入外协加工付款，不进入销售账单或员工工资。',
+    '系统使用本次请求标识防止重复记账；结果未确认前请勿再次录入。',
+  ];
+}
+
 export function OutsourcePaymentForm({
   id,
+  supplierName,
+  orderNo,
   remainingAmount,
   initialIdempotencyKey,
 }: Props) {
   const router = useRouter();
+  const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmedRef = useRef(false);
   const [idempotencyKey, setIdempotencyKey] = useState(
     initialIdempotencyKey,
   );
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [preview, setPreview] = useState<PaymentPreview | null>(null);
   const submitPayment = useCallback(
     async (
       previous: OutsourcePaymentMutationResult | null,
@@ -51,11 +103,83 @@ export function OutsourcePaymentForm({
     FormData
   >(submitPayment, null);
   const errors = state?.status === 'invalid' ? state.fieldErrors : {};
+  const inputIds = {
+    amount: 'outsource-payment-amount',
+    paidAt: 'outsource-payment-paid-at',
+    method: 'outsource-payment-method',
+    reference: 'outsource-payment-reference',
+    remark: 'outsource-payment-remark',
+  } as const;
+  const fieldLabels: Record<string, string> = {
+    amount: '本次付款金额',
+    paidAt: '付款时间',
+    method: '付款方式',
+    reference: '付款流水号',
+    remark: '备注',
+    idempotencyKey: '付款请求',
+  };
+  const errorSummary: FormErrorSummaryItem[] = Object.entries(errors).flatMap(
+    ([field, messages]) =>
+      messages.map((message) => ({
+        fieldId:
+          inputIds[field as keyof typeof inputIds] ?? inputIds.amount,
+        label: fieldLabels[field] ?? field,
+        message,
+      })),
+  );
+  const visibleState = pending ? null : state;
+
+  function prepareConfirmation() {
+    const form = formRef.current;
+    if (!form) return;
+
+    const amountInput = form.elements.namedItem('amount');
+    if (!(amountInput instanceof HTMLInputElement)) return;
+    amountInput.setCustomValidity('');
+    const amount = Number(amountInput.value);
+    const remaining = Number(remainingAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      amountInput.setCustomValidity('付款金额必须大于 0');
+    } else if (!Number.isFinite(remaining) || amount - remaining > 0.0001) {
+      amountInput.setCustomValidity(`本次最多可录入 ${remainingAmount}`);
+    }
+    if (!form.reportValidity()) return;
+
+    const formData = new FormData(form);
+    setPreview({
+      amount: String(formData.get('amount') ?? ''),
+      paidAt: String(formData.get('paidAt') ?? ''),
+      method: String(formData.get('method') ?? '').trim(),
+      reference: String(formData.get('reference') ?? '').trim(),
+    });
+    setConfirmationOpen(true);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+      return;
+    }
+    // 输入框内按 Enter 也只能打开确认层，不得直接记账。
+    event.preventDefault();
+    prepareConfirmation();
+  }
 
   return (
-    <form ref={formRef} action={action} className="space-y-3">
+    <form
+      ref={formRef}
+      id={formId}
+      action={action}
+      onSubmit={handleSubmit}
+      aria-busy={pending}
+      className="space-y-3"
+      data-risk-level="L2"
+    >
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
-      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+      <fieldset
+        disabled={pending}
+        className="grid min-w-0 grid-cols-1 gap-3 disabled:opacity-70 sm:grid-cols-2"
+      >
         <div className="space-y-1">
           <Label htmlFor="outsource-payment-amount">本次付款金额（元）</Label>
           <Input
@@ -66,6 +190,7 @@ export function OutsourcePaymentForm({
             className="font-sans tabular-nums"
             required
             aria-invalid={Boolean(errors.amount?.length)}
+            onInput={(event) => event.currentTarget.setCustomValidity('')}
           />
         </div>
         <div className="space-y-1">
@@ -108,35 +233,58 @@ export function OutsourcePaymentForm({
             aria-invalid={Boolean(errors.remark?.length)}
           />
         </div>
-      </div>
+      </fieldset>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending} className="min-h-11">
-          {pending ? '记录中…' : '记录外协付款'}
+        <Button
+          ref={triggerRef}
+          type="button"
+          disabled={pending}
+          aria-busy={pending}
+          className="min-h-11"
+          onClick={prepareConfirmation}
+        >
+          {pending ? '正在记录…' : '核对并记录外协付款'}
         </Button>
-        {state?.status === 'success' ? (
-          <span
-            className="text-xs text-muted-foreground"
-            role="status"
-            aria-live="polite"
-          >
-            已付 ¥ {state.newPaidAmount} / ¥ {state.totalAmount} ·{' '}
-            {state.isFullyPaid
-              ? '已结清'
-              : `未付 ¥ ${state.remainingAmount}`}
-          </span>
-        ) : null}
       </div>
+      <ConfirmActionDialog
+        level="L2"
+        formId={formId}
+        open={confirmationOpen}
+        onOpenChange={setConfirmationOpen}
+        focusReturnRef={triggerRef}
+        disabled={pending || preview === null}
+        title={`确认向${supplierName}记录这笔外协付款？`}
+        description={
+          orderNo
+            ? `关联工单 ${orderNo}，提交前未付金额为 ¥ ${remainingAmount}。`
+            : `提交前未付金额为 ¥ ${remainingAmount}。`
+        }
+        impactItems={
+          preview ? outsourcePaymentImpactItems(preview, remainingAmount) : []
+        }
+        confirmLabel="确认记录付款"
+        onConfirm={() => {
+          confirmedRef.current = true;
+        }}
+      />
 
-      {state?.status === 'invalid' ? (
-        <p className="text-xs text-destructive" role="alert">
-          {Object.values(state.fieldErrors).flat().join('；')}
-        </p>
+      {visibleState?.status === 'success' ? (
+        <ActionNotice
+          tone="success"
+          title="外协付款流水已记入"
+          description={`已付 ¥ ${visibleState.newPaidAmount} / ¥ ${visibleState.totalAmount} · ${visibleState.isFullyPaid ? '已结清' : `未付 ¥ ${visibleState.remainingAmount}`}`}
+        />
       ) : null}
-      {state?.status === 'error' ? (
-        <p role="alert" className="text-xs text-destructive">
-          {state.message}
-        </p>
+      {visibleState?.status === 'error' ? (
+        <ActionNotice
+          tone="error"
+          title="外协付款未记入"
+          description={visibleState.message}
+        />
+      ) : null}
+      {visibleState?.status === 'invalid' ? (
+        <FormErrorSummary errors={errorSummary} />
       ) : null}
     </form>
   );

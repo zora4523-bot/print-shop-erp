@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProductCategory } from '../../generated/prisma/enums';
+import {
+  CustomerPriceBookPurpose,
+  CustomerPriceRuleKind,
+  OrderSettlementType,
+  ProductCategory,
+  Role,
+} from '../../generated/prisma/enums';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
+    businessAuditLog: {
+      create: vi.fn(),
+    },
     businessCodeSequence: {
       upsert: vi.fn(),
     },
@@ -14,6 +24,13 @@ const { dbMock } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+    },
+    customerPriceRule: {
+      count: vi.fn(),
+      findMany: vi.fn(),
+    },
+    customerPriceBook: {
+      findMany: vi.fn(),
     },
     productCategoryNode: {
       findMany: vi.fn(),
@@ -27,6 +44,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   listActiveProductOrderOptions,
+  listCurrentExternalSalesProductOrderOptions,
   listProducts,
   listProductsPage,
   listProductCategoryOptions,
@@ -36,15 +54,36 @@ import {
   updateProductCategoryNode,
   setProductCategoryNodeActive,
   getProductSummary,
+  getProductReferenceImpact,
   createProduct,
   updateProduct,
   setProductActive,
   ProductInvariantError,
+  QUOTE_PRODUCT_CATEGORIES,
   orderCategoryNodesAsTree,
 } from '../product';
 
+describe('QUOTE_PRODUCT_CATEGORIES', () => {
+  it('覆盖三条计价路线的 SKU，排除已归并与自带纸料分类', () => {
+    expect(QUOTE_PRODUCT_CATEGORIES).toEqual([
+      ProductCategory.BLANK_STOCK,
+      ProductCategory.GENERIC_STOCK,
+      ProductCategory.CUSTOM_FLAT_FOIL,
+      ProductCategory.COLOR_PRINT,
+    ]);
+    expect(QUOTE_PRODUCT_CATEGORIES).not.toContain(
+      ProductCategory.STOCK_FOIL_ADD,
+    );
+    expect(QUOTE_PRODUCT_CATEGORIES).not.toContain(
+      ProductCategory.BYO_MATERIAL,
+    );
+  });
+});
+
 beforeEach(() => {
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
+  dbMock.$queryRaw.mockReset().mockResolvedValue([]);
+  dbMock.businessAuditLog.create.mockReset().mockResolvedValue({ id: 'audit-1' });
   dbMock.$transaction
     .mockReset()
     .mockImplementation(
@@ -52,6 +91,9 @@ beforeEach(() => {
     );
   dbMock.businessCodeSequence.upsert.mockReset();
   for (const fn of Object.values(dbMock.product)) fn.mockReset();
+  dbMock.customerPriceRule.count.mockReset().mockResolvedValue(0);
+  dbMock.customerPriceRule.findMany.mockReset().mockResolvedValue([]);
+  dbMock.customerPriceBook.findMany.mockReset().mockResolvedValue([]);
   for (const fn of Object.values(dbMock.productCategoryNode)) fn.mockReset();
 });
 
@@ -87,6 +129,16 @@ const makeProduct = (over = {}) => ({
   },
   ...over,
 });
+
+const activeChangeContext = {
+  actor: {
+    id: 'admin-1',
+    role: Role.ADMIN,
+    username: 'admin',
+    displayName: '管理员',
+  },
+  reason: '旧款停产',
+};
 
 describe('listProducts', () => {
   it('orders by isActive desc, category asc, name asc', async () => {
@@ -176,6 +228,63 @@ describe('listProductsPage', () => {
       expect.objectContaining({ where: expectedWhere, skip: 0, take: 20 }),
     );
   });
+
+  it('applies the explicit active-state filter and attaches real reference counts', async () => {
+    dbMock.product.count.mockResolvedValue(1);
+    dbMock.product.findMany.mockResolvedValue([makeProduct()]);
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        productId: 'p1',
+        orderCount: 3,
+        bomCount: 2,
+        currentExternalPriceRuleCount: 4,
+        currentInternalPriceTierCount: 1,
+      },
+    ]);
+
+    const result = await listProductsPage({
+      status: 'inactive',
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(dbMock.product.count).toHaveBeenCalledWith({
+      where: { isActive: false },
+    });
+    expect(result.rows[0]?.referenceImpact).toEqual({
+      orderCount: 3,
+      bomCount: 2,
+      currentExternalPriceRuleCount: 4,
+      currentInternalPriceTierCount: 1,
+    });
+  });
+
+  it('can scope the rule-center list to stock product categories', async () => {
+    dbMock.product.count.mockResolvedValue(0);
+    dbMock.product.findMany.mockResolvedValue([]);
+
+    await listProductsPage({
+      categories: [
+        ProductCategory.BLANK_STOCK,
+        ProductCategory.GENERIC_STOCK,
+      ],
+      page: 1,
+      pageSize: 20,
+    });
+
+    const where = {
+      category: {
+        in: [
+          ProductCategory.BLANK_STOCK,
+          ProductCategory.GENERIC_STOCK,
+        ],
+      },
+    };
+    expect(dbMock.product.count).toHaveBeenCalledWith({ where });
+    expect(dbMock.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where }),
+    );
+  });
 });
 
 describe('listActiveProductOrderOptions', () => {
@@ -183,6 +292,7 @@ describe('listActiveProductOrderOptions', () => {
     dbMock.product.findMany.mockResolvedValue([
       {
         id: 'p1',
+        code: 'HB001',
         name: '专版红包',
         category: ProductCategory.CUSTOM_FLAT_FOIL,
         specification: '中号',
@@ -196,6 +306,7 @@ describe('listActiveProductOrderOptions', () => {
       where: { isActive: true },
       select: {
         id: true,
+        code: true,
         name: true,
         category: true,
         specification: true,
@@ -203,6 +314,82 @@ describe('listActiveProductOrderOptions', () => {
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     });
+  });
+});
+
+describe('listCurrentExternalSalesProductOrderOptions', () => {
+  const now = new Date('2026-08-27T02:00:00.000Z');
+  const referencedProduct = {
+    id: 'product-priced',
+    code: 'PRD-000042',
+    name: '管理员新建报价 SKU',
+    category: ProductCategory.CUSTOM_FLAT_FOIL,
+    specification: '大号封90×165',
+    paperType: '160g珠光艳闪',
+  };
+
+  it('仅返回当前加工费价目启用基础规则引用的 SKU，不依赖 EXT- 编码', async () => {
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      { id: 'processing-book-current' },
+    ]);
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      { product: referencedProduct },
+      { product: referencedProduct },
+    ]);
+
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).resolves.toEqual([referencedProduct]);
+
+    expect(dbMock.customerPriceBook.findMany).toHaveBeenCalledWith({
+      where: {
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        purpose: CustomerPriceBookPurpose.PROCESSING,
+        isActive: true,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+      },
+      select: { id: true },
+      orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+      take: 2,
+    });
+    expect(dbMock.customerPriceRule.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          priceBookId: 'processing-book-current',
+          kind: CustomerPriceRuleKind.BASE,
+          isActive: true,
+          category: { isActive: true },
+          product: { is: { isActive: true } },
+          NOT: {
+            triggerCondition: {
+              path: ['target'],
+              equals: 'PACKAGING_GROUP',
+            },
+          },
+        },
+      }),
+    );
+    expect(dbMock.product.findMany).not.toHaveBeenCalled();
+  });
+
+  it('没有当前加工费价目时关闭报价 SKU 目录', async () => {
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).resolves.toEqual([]);
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it('当前加工费价目不唯一时拒绝猜测 SKU 集合', async () => {
+    dbMock.customerPriceBook.findMany.mockResolvedValue([
+      { id: 'processing-book-a' },
+      { id: 'processing-book-b' },
+    ]);
+
+    await expect(
+      listCurrentExternalSalesProductOrderOptions(now),
+    ).rejects.toThrow('同时存在多个生效加工费价目簿');
+    expect(dbMock.customerPriceRule.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -521,6 +708,60 @@ describe('updateProduct', () => {
     expect(data.baseUnitPrice).toBe('1.5000');
   });
 
+  it('protects SKU matching facts referenced by a current or scheduled price book', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+
+    await expect(
+      updateProduct('p1', {
+        code: 'NEW001',
+        categoryNodeId: 'cat_custom_flat_foil',
+        name: '只改展示名',
+        specification: '100×200',
+        paperType: '铜版纸',
+        baseUnitPrice: '0.5000',
+      }),
+    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+  });
+
+  it('allows display-name changes without rewriting protected pricing facts', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '新展示名' }));
+
+    await updateProduct('p1', {
+      code: 'HB001',
+      categoryNodeId: 'cat_custom_flat_foil',
+      name: '新展示名',
+      specification: '100×200',
+      paperType: '铜版纸',
+      baseUnitPrice: '0.5000',
+      minOrderQty: 1000,
+    });
+
+    expect(dbMock.product.update).toHaveBeenCalledOnce();
+  });
+
+  it('omits baseUnitPrice so a concurrent internal-price update is preserved', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct());
+    dbMock.product.update.mockResolvedValue(makeProduct({ name: '改名' }));
+
+    await updateProduct('p1', {
+      code: null,
+      categoryNodeId: 'cat_custom_flat_foil',
+      name: '改名',
+      specification: null,
+      paperType: null,
+    });
+
+    const data = dbMock.product.update.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    expect('baseUnitPrice' in data).toBe(false);
+  });
+
   it('allows saving a product that already uses a disabled category node', async () => {
     dbMock.product.findUnique.mockResolvedValue(
       makeProduct({
@@ -571,7 +812,7 @@ describe('setProductActive', () => {
   it('no-ops when already matching', async () => {
     const p = makeProduct({ isActive: true });
     dbMock.product.findUnique.mockResolvedValue(p);
-    const r = await setProductActive('p1', true);
+    const r = await setProductActive('p1', true, activeChangeContext);
     expect(r).toBe(p);
     expect(dbMock.product.update).not.toHaveBeenCalled();
   });
@@ -579,15 +820,82 @@ describe('setProductActive', () => {
   it('flips isActive when different', async () => {
     dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
     dbMock.product.update.mockResolvedValue(makeProduct({ isActive: false }));
-    await setProductActive('p1', false);
+    await setProductActive('p1', false, activeChangeContext);
     expect(dbMock.product.update.mock.calls[0][0].data).toEqual({ isActive: false });
+    expect(dbMock.businessAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'PRODUCT_DEACTIVATE',
+          entityType: 'Product',
+          entityId: 'p1',
+          actorId: 'admin-1',
+          requestMetadata: expect.objectContaining({
+            reason: '旧款停产',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects deactivation while a current or scheduled price version references the SKU', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
+    dbMock.customerPriceRule.count.mockResolvedValue(1);
+
+    await expect(
+      setProductActive('p1', false, activeChangeContext),
+    ).rejects.toThrow(/新建 SKU.*新价格版本/u);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a reason for deactivation inside the domain transaction', async () => {
+    dbMock.product.findUnique.mockResolvedValue(makeProduct({ isActive: true }));
+    await expect(
+      setProductActive('p1', false, {
+        ...activeChangeContext,
+        reason: '   ',
+      }),
+    ).rejects.toThrow(/必须填写业务理由/);
+    expect(dbMock.product.update).not.toHaveBeenCalled();
+    expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
   it('throws when target missing', async () => {
     dbMock.product.findUnique.mockResolvedValue(null);
-    await expect(setProductActive('nope', false)).rejects.toBeInstanceOf(
+    await expect(
+      setProductActive('nope', false, activeChangeContext),
+    ).rejects.toBeInstanceOf(
       ProductInvariantError,
     );
+  });
+});
+
+describe('getProductReferenceImpact', () => {
+  it('counts distinct orders and only currently effective quote sources', async () => {
+    dbMock.$queryRaw.mockResolvedValue([
+      {
+        productId: 'p1',
+        orderCount: 7,
+        bomCount: 2,
+        currentExternalPriceRuleCount: 3,
+        currentInternalPriceTierCount: 4,
+      },
+    ]);
+
+    await expect(
+      getProductReferenceImpact('p1', new Date('2026-08-24T00:00:00Z')),
+    ).resolves.toEqual({
+      orderCount: 7,
+      bomCount: 2,
+      currentExternalPriceRuleCount: 3,
+      currentInternalPriceTierCount: 4,
+    });
+    expect(dbMock.$queryRaw).toHaveBeenCalledOnce();
+    const query = dbMock.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
+    expect(query.sql).toContain('COUNT(DISTINCT item."orderId")');
+    expect(query.sql).toContain('book."settlementType" = \'EXTERNAL_SALES\'');
+    expect(query.sql).toContain('book."effectiveFrom" <=');
+    expect(query.sql).toContain('tier."effectiveFrom" <=');
   });
 });
 

@@ -54,7 +54,7 @@ describe('admin navigation prefetch policy', () => {
     ).toEqual([]);
   });
 
-  it('prefetches sidebar routes only after user intent and exposes pending state', () => {
+  it('prefetches sidebar routes only after sustained user intent', () => {
     const sidebar = readFileSync(
       path.join(ROOT, 'components/business/admin/AppSidebar.tsx'),
       'utf8',
@@ -62,11 +62,15 @@ describe('admin navigation prefetch policy', () => {
 
     expect(sidebar).toContain('useLinkStatus');
     expect(sidebar).toContain(
-      'prefetch={intentHref === item.href ? null : false}',
+      'prefetch={intentHref === item.href ? true : false}',
     );
-    expect(sidebar).toContain('onMouseEnter={() => setIntentHref(item.href)}');
-    expect(sidebar).toContain('onFocus={() => setIntentHref(item.href)}');
-    expect(sidebar).toContain('onTouchStart={() => setIntentHref(item.href)}');
+    expect(sidebar).toContain('IntentPrefetchScheduler');
+    expect(sidebar).toContain('onEnter={scheduleIntentPrefetch}');
+    expect(sidebar).toContain('onLeave={cancelIntentPrefetch}');
+    expect(sidebar).toContain('onEnter(item.href)');
+    expect(sidebar).toContain('onMouseLeave');
+    expect(sidebar).not.toContain('onFocus');
+    expect(sidebar).not.toContain('onTouchStart');
     expect(sidebar).toContain('<SidebarLinkPendingIndicator />');
   });
 
@@ -82,10 +86,26 @@ describe('admin navigation prefetch policy', () => {
 
     expect(header).toContain('prefetch={false}');
     expect(breadcrumb).toContain('prefetch={false}');
+    expect(breadcrumb).toContain('export const BREADCRUMB_PATH_LABELS');
+    expect(breadcrumb).toContain("'/owner/rules': '规则配置中心'");
+    expect(breadcrumb).toContain(
+      "'/owner/rules/customer-pricing': '客户计价规则'",
+    );
+    expect(breadcrumb).toContain("'/owner/rules/price-versions': '价格版本'");
+    expect(breadcrumb).toContain(
+      "'/owner/rules/internal-pricing': '内部计价'",
+    );
+    expect(breadcrumb).toContain(
+      "'/owner/rules/worker-piecework': '师傅计件规则'",
+    );
+    expect(breadcrumb).toContain(
+      "'/owner/rules/employee-pay': '员工工资与提成'",
+    );
+    expect(breadcrumb).toContain("'/owner/salary/rules': '员工工资规则'");
     expect(breadcrumb).toContain("prices: '价格管理'");
-    expect(breadcrumb).toContain("'external-sales': '外部销售收费'");
-    expect(breadcrumb).toContain("items: '收费项目'");
-    expect(breadcrumb).toContain("versions: '发布中心'");
+    expect(breadcrumb).toContain("'external-sales': '客户计价规则'");
+    expect(breadcrumb).toContain("items: '规则工作台'");
+    expect(breadcrumb).toContain("versions: '价格版本'");
     expect(breadcrumb).toContain("quote: '报价查询'");
   });
 });

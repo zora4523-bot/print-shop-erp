@@ -29,7 +29,12 @@ vi.mock('next/navigation', () => ({
 
 import {
   ExternalSalesPriceTierGroupEditor,
+  applyExternalSalesTierPercentAdjustment,
+  countExternalSalesTierDraftChanges,
+  createExternalSalesTierDraftState,
   externalSalesPriceTierSaveInputFromFormData,
+  formatDraftAmountDelta,
+  undoExternalSalesTierDraftChange,
   type ExternalSalesPriceTier,
   type ExternalSalesPriceTierGroupEditorProps,
 } from '../ExternalSalesPriceTierGroupEditor';
@@ -113,12 +118,41 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('20,000 个');
     expect(html.match(/name="tierAmount-\d"/g)).toHaveLength(7);
     expect(html).toContain('¥295');
-    expect(html).toContain('¥0.295 / 个');
-    expect(html).toContain('保存全部总价（7 项）');
+    expect(html).toContain('折合单价自动计算');
+    expect(html).toContain('保存（0 档）');
     expect(html).toContain('aria-label="1,000 个价格档启用"');
+    expect(html).toContain('>当前<');
+    expect(html).toContain('>草稿<');
+    expect(html).toContain('>变化<');
+    expect(html).toContain('启用');
+    expect(html).toContain('撤销上一步');
+    expect(html).toContain('撤销本次修改');
+    expect(html).not.toContain('1,000 个草稿总价（元）');
   });
 
-  it('固定金额明确显示总价并用总价计算折合单价', () => {
+  it('shows amount and percent delta when the draft differs from the current price', () => {
+    const html = renderToStaticMarkup(
+      <ExternalSalesPriceTierGroupEditor
+        {...props({ tiers: [tier(1_000, '100', '105.8')] })}
+      />,
+    );
+
+    expect(html).toContain('+¥5.8');
+    expect(html).toContain('+5.8%');
+    expect(html).not.toContain('未修改');
+    expect(formatDraftAmountDelta('100', '100')).toEqual({
+      kind: 'none',
+      amountLabel: '未修改',
+      percentLabel: '',
+    });
+    expect(formatDraftAmountDelta('100', '97')).toEqual({
+      kind: 'down',
+      amountLabel: '−¥3',
+      percentLabel: '−3%',
+    });
+  });
+
+  it('固定金额明确显示总价，折合单价说明只出现一次', () => {
     const html = renderToStaticMarkup(
       <ExternalSalesPriceTierGroupEditor
         {...props({ tiers: [tier(1_000, '295', '310')] })}
@@ -129,8 +163,9 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('当前总价');
     expect(html).toContain('草稿总价（元）');
     expect(html).toContain('¥295 / 批');
-    expect(html).toContain('¥0.31 / 个');
-    expect(html).toContain('修改每档整批总价');
+    expect(html).toContain('折合单价自动计算');
+    expect(html).not.toContain('¥0.31 / 个');
+    expect(html).toContain('修改各数量档总价');
   });
 
   it('按个计价显示元每个，不将 amount 再除以数量', () => {
@@ -147,9 +182,8 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('当前单价');
     expect(html).toContain('草稿单价（元/个）');
     expect(html).toContain('¥0.295 / 个');
-    expect(html).toContain('每个成品');
-    expect(html).toContain('不会将单价再除以数量');
-    expect(html).toContain('保存全部单价（1 项）');
+    expect(html).toContain('修改各数量档单价');
+    expect(html).toContain('保存（0 档）');
     expect(html).not.toContain('¥0.0003');
     expect(html).not.toContain('折合单价');
     expect(html).not.toContain('当前总价');
@@ -304,7 +338,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
     expect(pendingHtml).toContain('aria-busy="true"');
-    expect(pendingHtml).toContain('正在保存全部总价…');
+    expect(pendingHtml).toContain('正在保存总价…');
     expect(pendingHtml).toMatch(/<button[^>]*disabled=""[^>]*>/);
 
     actionStateMock.mockImplementation((action) => {
@@ -321,7 +355,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
       />,
     );
     expect(successHtml).toContain('role="status"');
-    expect(successHtml).toContain('这一组总价已全部保存');
+    expect(successHtml).toContain('草稿已保存');
 
     actionStateMock.mockImplementation((action) => {
       capturedAction = action;
@@ -353,9 +387,9 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
 
     expect(html).toContain('min-w-0');
     expect(html).toContain('@container');
-    expect(html).toContain('@min-[42rem]:grid-cols-[');
+    expect(html).toContain('@min-[31rem]:grid-cols-[');
     expect(html).toContain('w-full');
-    expect(html).toContain('@min-[32rem]:w-auto');
+    expect(html).toContain('@min-[31rem]:w-auto');
     expect(html).toContain('pb-[max(1rem,env(safe-area-inset-bottom))]');
     expect(html).not.toContain('overflow-x-auto');
     expect(html).not.toContain('min-w-max');
@@ -370,7 +404,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     );
 
     expect(html).toContain('¥9,999,999,999.9999');
-    expect(html).toContain('¥3,333,333,333.3333 / 个');
+    expect(html).toContain('折合单价自动计算');
   });
 });
 
@@ -402,5 +436,85 @@ describe('externalSalesPriceTierSaveInputFromFormData', () => {
         ],
       },
     });
+  });
+});
+
+describe('阶梯价本地编辑状态', () => {
+  it('批量百分比只修改启用档，并保持 Decimal 输入精度', () => {
+    const result = applyExternalSalesTierPercentAdjustment(
+      {
+        amounts: ['1000', '2000', '300'],
+        activeStates: [true, false, true],
+      },
+      '5.8',
+    );
+
+    expect(result).toEqual({
+      success: true,
+      state: {
+        amounts: ['1058', '2000', '317.4'],
+        activeStates: [true, false, true],
+      },
+    });
+  });
+
+  it.each([
+    ['', '请输入调整百分比'],
+    ['1.23456', '请输入有效百分比，最多 4 位小数'],
+    ['-100', '降价幅度必须大于 -100%'],
+  ])('百分比 %j 给出可操作的行内错误', (input, message) => {
+    expect(
+      applyExternalSalesTierPercentAdjustment(
+        { amounts: ['100'], activeStates: [true] },
+        input,
+      ),
+    ).toEqual({ success: false, message });
+  });
+
+  it('停用档的无效金额不会阻断启用档批量调整', () => {
+    expect(
+      applyExternalSalesTierPercentAdjustment(
+        { amounts: ['100', '待设置'], activeStates: [true, false] },
+        '5',
+      ),
+    ).toEqual({
+      success: true,
+      state: {
+        amounts: ['105', '待设置'],
+        activeStates: [true, false],
+      },
+    });
+  });
+
+  it('撤销恢复同一步中的金额与启用状态', () => {
+    const first = {
+      amounts: ['100', '200'],
+      activeStates: [true, false],
+    };
+    const second = {
+      amounts: ['110', '200'],
+      activeStates: [false, false],
+    };
+
+    expect(undoExternalSalesTierDraftChange([first, second])).toEqual({
+      state: second,
+      history: [first],
+    });
+    expect(undoExternalSalesTierDraftChange([])).toBeNull();
+  });
+
+  it('待保存档数同时统计金额和启用状态变更', () => {
+    const tiers = [tier(1_000, '100'), tier(2_000, '200')];
+    const initial = createExternalSalesTierDraftState(tiers);
+    expect(countExternalSalesTierDraftChanges(initial, tiers)).toBe(0);
+    expect(
+      countExternalSalesTierDraftChanges(
+        {
+          amounts: ['101', '200'],
+          activeStates: [true, false],
+        },
+        tiers,
+      ),
+    ).toBe(2);
   });
 });

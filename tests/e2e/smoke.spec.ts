@@ -9,6 +9,11 @@ import {
   seedSearchSmokeFixtures,
   uniqueSuffix,
 } from './_helpers';
+import {
+  RULE_CENTER_HREFS,
+  RULE_CENTER_SIDEBAR_ITEMS,
+  customerPricingHref,
+} from '../../lib/navigation/rule-center';
 
 test.describe('automation smoke', () => {
   test('protected routes redirect unauthenticated users to /login', async ({
@@ -16,12 +21,198 @@ test.describe('automation smoke', () => {
   }) => {
     for (const path of [
       '/owner/pigsty',
+      RULE_CENTER_HREFS.root,
       '/orders?q=CODX-E2E-ORDER-001',
       '/foreman/materials?q=CODX-E2E-MAT-001',
     ]) {
       await page.goto(path);
       await expect(page).toHaveURL(/\/login(\?|$)/);
     }
+  });
+
+  test('ADMIN uses direct rule-center sidebar entries and canonical rule pages', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+
+    await login(page, {
+      from: RULE_CENTER_HREFS.root,
+      username: E2E_USERS.owner.username,
+      password: E2E_PASSWORD,
+    });
+
+    await expect(
+      page.getByRole('heading', { name: '规则配置中心', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('navigation', { name: '规则配置中心模块' }),
+    ).toHaveCount(0);
+    const sidebar = page.locator('[data-sidebar="sidebar"]');
+    await expect(
+      sidebar.locator('[data-menu-group="概览"]'),
+    ).toHaveCount(0);
+    const dashboardLink = sidebar.getByRole('link', {
+      name: 'Dashboard',
+      exact: true,
+    });
+    await expect(dashboardLink).toHaveCount(1);
+    await expect(dashboardLink).toHaveAttribute('href', '/owner');
+    const ruleRootItem = RULE_CENTER_SIDEBAR_ITEMS.find(
+      (item) => !('menuParentId' in item),
+    );
+    const ruleChildItems = RULE_CENTER_SIDEBAR_ITEMS.filter(
+      (item) => 'menuParentId' in item,
+    );
+    if (!ruleRootItem) throw new Error('规则配置中心父菜单缺失');
+
+    for (const item of RULE_CENTER_SIDEBAR_ITEMS) {
+      const entry = sidebar.getByRole('link', {
+        name: item.label,
+        exact: true,
+      });
+      await expect(entry).toHaveCount(1);
+      await expect(entry).toHaveAttribute('href', item.href);
+    }
+
+    const ruleParentLink = sidebar.getByRole('link', {
+      name: ruleRootItem.label,
+      exact: true,
+    });
+    const ruleParent = sidebar.locator(
+      '[data-menu-level="parent"]:has(a[href="/owner/rules"])',
+    );
+    const ruleSubmenu = ruleParent.locator('[data-sidebar="menu-sub"]');
+    await expect(ruleParent).toHaveCount(1);
+    await expect(ruleSubmenu).toHaveCount(1);
+    await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
+    for (const child of ruleChildItems) {
+      await expect(
+        ruleSubmenu.getByRole('link', { name: child.label, exact: true }),
+      ).toHaveAttribute('href', child.href);
+    }
+
+    const rulesGroup = sidebar.locator('[data-menu-group="规则"]');
+    await expect(
+      rulesGroup.getByRole('button', { name: '规则 收起', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await rulesGroup
+      .getByRole('button', { name: '规则 收起', exact: true })
+      .click();
+    await expect(
+      rulesGroup.getByRole('button', { name: '规则 展开', exact: true }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    await expect(ruleParentLink).toHaveCount(0);
+    await rulesGroup
+      .getByRole('button', { name: '规则 展开', exact: true })
+      .click();
+    await expect(ruleParentLink).toHaveCount(1);
+    await expect(
+      sidebar.locator(
+        [
+          'a[href="/owner/prices"]',
+          'a[href="/owner/prices/external-sales/items"]',
+          'a[href="/owner/salary/piecework-rules"]',
+          'a[href="/owner/salary/rules"]',
+        ].join(','),
+      ),
+    ).toHaveCount(0);
+
+    const canonicalPages = [
+      {
+        label: '客户计价',
+        path: customerPricingHref('processing'),
+        navPath: RULE_CENTER_HREFS.customerPricing,
+        heading: '客户计价规则',
+      },
+      {
+        label: '客户计价',
+        path: customerPricingHref('logistics'),
+        navPath: RULE_CENTER_HREFS.customerPricing,
+        heading: '客户计价规则',
+      },
+      {
+        label: '价格版本',
+        path: RULE_CENTER_HREFS.priceVersions,
+        navPath: RULE_CENTER_HREFS.priceVersions,
+        heading: '价格版本与发布',
+      },
+      {
+        label: '内部计价',
+        path: RULE_CENTER_HREFS.internalPricing,
+        navPath: RULE_CENTER_HREFS.internalPricing,
+        heading: '内部兼容价格',
+      },
+      {
+        label: '师傅计件',
+        path: RULE_CENTER_HREFS.workerPiecework,
+        navPath: RULE_CENTER_HREFS.workerPiecework,
+        heading: '计件规则',
+      },
+      {
+        label: '工资提成',
+        path: RULE_CENTER_HREFS.employeePay,
+        navPath: RULE_CENTER_HREFS.employeePay,
+        heading: '员工工资规则',
+      },
+    ] as const;
+
+    for (const route of canonicalPages) {
+      await expect(
+        sidebar.getByRole('link', {
+          name: route.label,
+          exact: true,
+        }),
+      ).toHaveAttribute('href', route.navPath);
+      await page.goto(route.path);
+      await expect(
+        page.getByRole('heading', {
+          name: route.heading,
+          exact: true,
+        }).first(),
+      ).toBeVisible();
+      await expectNoNextErrorOverlay(page);
+    }
+
+    const activePayLink = sidebar.getByRole('link', {
+      name: '工资提成',
+      exact: true,
+    });
+    await expect(activePayLink).toHaveAttribute('aria-current', 'page');
+    await expect(ruleParentLink).not.toHaveAttribute('aria-current', 'page');
+    await expect(ruleParent).toHaveAttribute('data-has-active-child', 'true');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(RULE_CENTER_HREFS.root);
+    await page
+      .getByRole('button', { name: '打开/关闭侧边栏菜单' })
+      .click();
+    const mobileSidebar = page.locator(
+      '[data-sidebar="sidebar"][data-mobile="true"]',
+    );
+    await expect(mobileSidebar).toBeVisible();
+    await expect(
+      mobileSidebar.locator('[data-menu-group="概览"]'),
+    ).toHaveCount(0);
+    await expect(
+      mobileSidebar.getByRole('link', {
+        name: 'Dashboard',
+        exact: true,
+      }),
+    ).toHaveAttribute('href', '/owner');
+    const mobileRuleParent = mobileSidebar.locator(
+      '[data-menu-level="parent"]:has(a[href="/owner/rules"])',
+    );
+    await expect(
+      mobileRuleParent.locator('[data-sidebar="menu-sub"]'),
+    ).toHaveCount(1);
+    await expect(
+      mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),
+    ).toHaveAttribute('href', RULE_CENTER_HREFS.customerPricing);
+    await mobileSidebar
+      .getByRole('link', { name: '价格版本', exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`${RULE_CENTER_HREFS.priceVersions}$`));
+    await expect(mobileSidebar).toBeHidden();
   });
 
   test('ADMIN can open Pigsty readiness and search core ERP surfaces', async ({
@@ -49,14 +240,10 @@ test.describe('automation smoke', () => {
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/product-categories');
-    await expect(page.getByRole('heading', { name: '产品分类' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: '产品结构分类 / BOM 分类' }),
+    ).toBeVisible();
     await expect(page.getByRole('cell', { name: '空白现货' }).first()).toBeVisible();
-    await expectNoNextErrorOverlay(page);
-
-    await page.goto('/owner/prices');
-    await expect(page.getByRole('heading', { name: '报价管理' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '价格阶梯' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '加价规则' })).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/boms');
@@ -153,7 +340,10 @@ test.describe('automation smoke', () => {
     await expect(page.locator('input[name="customerRef"]')).toBeVisible();
     await expect(page.locator('input[name="receiverName"]')).toHaveCount(0);
     await expect(page.locator('input[name="receiverPhone"]')).toHaveCount(0);
-    await expect(page.getByLabel('收货信息')).toBeVisible();
+    await page.getByRole('tab', { name: /收货与费用/ }).click();
+    const receiverAddress = page.getByLabel('收货信息');
+    await expect(receiverAddress).toBeVisible();
+    await expect(receiverAddress).toHaveAttribute('required', '');
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders?q=${fixture.orderNo}`);
@@ -162,8 +352,40 @@ test.describe('automation smoke', () => {
         .locator('[data-sidebar="sidebar"]')
         .getByRole('link', { name: '采购单' }),
     ).toBeVisible();
-    await expect(page.getByText(fixture.orderNo)).toBeVisible();
-    await expect(page.getByText(fixture.customerRef)).toBeVisible();
+    const matchedOrder = page
+      .locator(`[data-order-id="${fixture.orderId}"]:visible`)
+      .first();
+    await expect(matchedOrder).toContainText(fixture.orderNo);
+    await expect(matchedOrder).toContainText(fixture.customerRef);
+    await expectNoNextErrorOverlay(page);
+
+    const detailFromList = page.locator(
+      `a[href="/orders/${fixture.orderId}"]:visible`,
+    );
+    await detailFromList.first().click();
+    await expect(page).toHaveURL(`/orders/${fixture.orderId}`);
+    await page.goBack();
+    await expect(
+      page.getByRole('heading', { name: '工单', exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL((url) => {
+      return (
+        url.pathname === '/orders' &&
+        url.searchParams.get('q') === fixture.orderNo &&
+        url.searchParams.get('selected') === fixture.orderId
+      );
+    });
+    await expect(
+      page.locator(
+        `[data-order-id="${fixture.orderId}"][data-state="selected"]:visible`,
+      ),
+    ).toBeVisible();
+    const restoredScroll = new URL(page.url()).searchParams.get('scroll');
+    if (restoredScroll) {
+      await expect
+        .poll(() => page.evaluate(() => Math.round(window.scrollY)))
+        .toBe(Number(restoredScroll));
+    }
     await expectNoNextErrorOverlay(page);
 
     await page.goto(`/orders/${fixture.orderId}`);

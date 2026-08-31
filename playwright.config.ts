@@ -98,7 +98,9 @@ export default defineConfig({
     })),
   ],
   webServer: {
-    command: `node ./node_modules/next/dist/bin/next dev --port ${webServerPort}`,
+    // Keep Playwright on the same lifecycle as local development so predev
+    // regenerates Prisma before Next loads its client.
+    command: `pnpm run dev --port ${webServerPort}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import { E2E_PASSWORD, E2E_USERS, login } from './_helpers';
 import {
@@ -116,12 +116,25 @@ async function selectWorker(
   await select.selectOption(value!);
 }
 
+async function confirmBatchSchedule(page: Page) {
+  await page
+    .getByRole('button', { name: '确认分配所选工艺', exact: true })
+    .click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByRole('button', { name: /^确认分配 \d+ 个任务$/ })
+    .click();
+}
+
 test.beforeAll(async () => {
   fixture = await seedWorkerUiFixture('batch-scheduling-e2e');
 });
 
 test.afterAll(async () => {
-  await cleanupWorkerUiFixture(fixture);
+  if (fixture) {
+    await cleanupWorkerUiFixture(fixture);
+  }
 });
 
 test('账号在页面打开后失效时提示重新登录且排产事务不落数据', async ({
@@ -145,9 +158,7 @@ test('账号在页面打开后失效时提示重新登录且排产事务不落�
 
   await setE2EUserActive(ownerUsername, false);
   try {
-    await page
-      .getByRole('button', { name: '确认分配所选工艺', exact: true })
-      .click();
+    await confirmBatchSchedule(page);
 
     await expect(
       page.getByRole('alert').filter({ hasText: '登录状态已失效' }),
@@ -188,9 +199,7 @@ test('管理员可将两张工单的兼容工艺批量排给同一师傅', async
   }
   await expect(page.getByText('已选 2 张', { exact: false })).toBeVisible();
 
-  await page
-    .getByRole('button', { name: '确认分配所选工艺', exact: true })
-    .click();
+  await confirmBatchSchedule(page);
 
   await expect(
     page.getByRole('status').filter({ hasText: '已为 2 张工单分配' }),
@@ -225,9 +234,7 @@ test('混合机型工单可分两次派给不同师傅，全部完成后才离�
   await selectWorker(workerSelect, E2E_USERS.workerHandPress!.displayName);
   await orderCheckbox.check();
   await expect(page.getByText('本次将分配 1 个匹配任务')).toBeVisible();
-  await page
-    .getByRole('button', { name: '确认分配所选工艺', exact: true })
-    .click();
+  await confirmBatchSchedule(page);
 
   await expect(
     page.getByRole('status').filter({ hasText: '其中 0 张已完成全部排产' }),
@@ -235,13 +242,14 @@ test('混合机型工单可分两次派给不同师傅，全部完成后才离�
   const mixedRow = page
     .getByRole('row')
     .filter({ hasText: fixture.mixedSchedulingOrderNo });
-  await expect(mixedRow).toContainText('已排 1 · 待排 1');
+  await expect(mixedRow).toContainText('无可派');
+  await expect(orderCheckbox).toBeDisabled();
 
   await selectWorker(workerSelect, E2E_USERS.workerWindmill!.displayName);
+  await expect(mixedRow).toContainText('可派 1 项');
+  await expect(orderCheckbox).toBeEnabled();
   await orderCheckbox.check();
-  await page
-    .getByRole('button', { name: '确认分配所选工艺', exact: true })
-    .click();
+  await confirmBatchSchedule(page);
 
   await expect(
     page.getByRole('status').filter({ hasText: '其中 1 张已完成全部排产' }),
@@ -285,7 +293,7 @@ test('管理员越过熟练工艺推荐时必须填写原因并写入审计日�
       .getByLabel('非推荐派工原因（1 项）', { exact: true })
       .fill(reason);
     await expect(submit).toBeEnabled();
-    await submit.click();
+    await confirmBatchSchedule(page);
 
     await expect(
       page.getByRole('status').filter({ hasText: '已为 1 张工单分配' }),

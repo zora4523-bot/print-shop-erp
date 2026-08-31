@@ -5,6 +5,7 @@ import {
   buildSubmittedItems,
   countKey,
   parseCountValue,
+  pinDisplayedBookQuantities,
   sameBookQuantity,
   type CountEntry,
 } from '../inventory-count-entries';
@@ -38,6 +39,29 @@ function fixtureRow(
 }
 
 describe('buildSubmittedItems', () => {
+  it('账面数在首次展示就钉住，首次录入前的刷新不得推进基线', () => {
+    const firstDisplay = [fixtureRow()];
+    const snapshots = pinDisplayedBookQuantities({}, firstDisplay);
+    const refreshed = [
+      fixtureRow({
+        locations: [{ ...fixtureRow().locations[0]!, currentStock: '20.00' }],
+      }),
+    ];
+    const afterRefresh = pinDisplayedBookQuantities(snapshots, refreshed);
+
+    expect(afterRefresh['mat1:loc1']).toBe('5.00');
+    expect(
+      buildSubmittedItems(refreshed, {
+        'mat1:loc1': { value: '8', book: afterRefresh['mat1:loc1']! },
+      })[0],
+    ).toEqual({
+      materialId: 'mat1',
+      locationId: 'loc1',
+      bookQuantity: '5.00',
+      countedQuantity: '8.00',
+    });
+  });
+
   it('回传的是录入那一刻钉住的账面数，而不是刷新后的最新值', () => {
     const rows = [fixtureRow()];
     // 操作员在账面数还是 5.00 时录入 8；之后点了刷新，页面显示的账面数变成 2.00

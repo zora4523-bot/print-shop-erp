@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Role } from '../../../generated/prisma/enums';
+import {
+  OrderItemPricingRoute,
+  Role,
+} from '../../../generated/prisma/enums';
+import {
+  EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+  type CustomerRuleConditionEditorInput,
+} from '../customer-rule-condition';
 
 vi.mock('server-only', () => ({}));
 
@@ -31,6 +38,9 @@ const { dbMock } = vi.hoisted(() => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
     },
+    craft: {
+      findMany: vi.fn(),
+    },
     orderCustomerCharge: { count: vi.fn() },
     businessAuditLog: { create: vi.fn() },
   },
@@ -43,6 +53,7 @@ import {
   createCustomerPriceBookDraft,
   CustomerPriceBookAdminError,
   discardCustomerPriceBookDraft,
+  getCustomerPriceBookDraftPublishPreview,
   getCustomerPriceBookDraftRuleEditor,
   listCustomerPriceBookVersionsAndDrafts,
   publishCustomerPriceBookDraft,
@@ -61,6 +72,16 @@ const actor = {
 const now = new Date('2026-08-09T02:00:00.000Z');
 const publishAt = new Date('2026-08-10T01:30:00.000Z');
 
+function processingMatch(
+  overrides: Partial<CustomerRuleConditionEditorInput> = {},
+): CustomerRuleConditionEditorInput {
+  return {
+    ...EMPTY_CUSTOMER_RULE_CONDITION_EDITOR_INPUT,
+    pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+    ...overrides,
+  };
+}
+
 const sourceRule = {
   categoryId: 'category-base',
   productId: 'product-a',
@@ -74,7 +95,11 @@ const sourceRule = {
   incrementAmount: null,
   minQty: 1,
   maxQty: 1_000,
-  triggerCondition: { productCodes: ['PRODUCT_A'] },
+  triggerCondition: {
+    schemaVersion: 1,
+    productCodes: ['PRODUCT_A'],
+    pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+  },
   exclusiveGroup: null,
   priority: 100,
   sourceSheet: '报价',
@@ -98,7 +123,7 @@ function validationRule(
       name: '基础加工费',
       isActive: true,
     },
-    product: { code: 'PRODUCT_A', isActive: true },
+    product: { code: 'PRODUCT_A', category: 'BLANK_STOCK', isActive: true },
     ...overrides,
   };
 }
@@ -142,7 +167,9 @@ function editableDraftRule(
     minQty: 1,
     maxQty: 1_000,
     triggerCondition: {
+      schemaVersion: 1,
       productCodes: ['PRODUCT_A'],
+      pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
       craftCodes: ['craft_color_print'],
     },
     exclusiveGroup: 'PRODUCT_BASE',
@@ -182,7 +209,9 @@ function editableGroupRule(
     minQty: quantity,
     maxQty: quantity,
     triggerCondition: {
+      schemaVersion: 1,
       productCodes: ['PRODUCT_A'],
+      pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
       specifications: ['大号'],
       paperTypes: ['157克双铜纸'],
     },
@@ -204,6 +233,7 @@ beforeEach(() => {
     dbMock.customerPriceRule,
     dbMock.customerChargeCategory,
     dbMock.product,
+    dbMock.craft,
     dbMock.orderCustomerCharge,
     dbMock.businessAuditLog,
   ]) {
@@ -219,6 +249,91 @@ beforeEach(() => {
 });
 
 describe('customer price-book draft lifecycle', () => {
+  it('builds an exact publish preview against the immutable draft baseline', async () => {
+    const impactRule = (
+      amount: string,
+      id: string,
+      overrides: Record<string, unknown> = {},
+    ) => ({
+      id,
+      code: 'BASE_A',
+      name: '基础报价 A',
+      categoryId: 'category-base',
+      productId: 'product-a',
+      kind: 'BASE',
+      calculationType: 'PER_PIECE',
+      amount,
+      includedUnits: null,
+      incrementUnits: null,
+      incrementAmount: null,
+      minQty: 1,
+      maxQty: 1_000,
+      triggerCondition: { productCodes: ['PRODUCT_A'] },
+      exclusiveGroup: null,
+      priority: 100,
+      note: null,
+      blocksAutomaticQuote: false,
+      isActive: true,
+      category: { name: '基础加工费' },
+      product: { name: '产品 A' },
+      ...overrides,
+    });
+    dbMock.customerPriceBook.findUnique
+      .mockResolvedValueOnce({
+        id: 'book-v2-draft',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 2,
+        isActive: false,
+        notes: draftNotes(),
+        rules: [
+          impactRule('0.1500', 'draft-rule-a', {
+            exclusiveGroup: 'PRODUCT_SCOPE',
+            priority: 110,
+          }),
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'book-v1',
+        purpose: 'PROCESSING',
+        settlementType: 'EXTERNAL_SALES',
+        version: 1,
+        rules: [impactRule('0.1350', 'current-rule-a')],
+      });
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      validationRule({ amount: '0.1500' }),
+    ]);
+
+    const preview = await getCustomerPriceBookDraftPublishPreview(
+      'book-v2-draft',
+    );
+
+    expect(preview).toMatchObject({
+      priceBookId: 'book-v2-draft',
+      basedOnVersion: 1,
+      totalRuleCount: 1,
+      activeRuleCount: 1,
+      changedItemCount: 1,
+      changedRuleCount: 1,
+      increasedRuleCount: 1,
+      decreasedRuleCount: 0,
+      deltaPercentMin: '11.1',
+      deltaPercentMax: '11.1',
+      changes: [
+        expect.objectContaining({
+          draftRuleId: 'draft-rule-a',
+          name: '基础报价 A',
+          direction: 'UP',
+          deltaAmount: '0.015',
+          deltaPercent: '11.1',
+          changedFields: ['价格', '适用范围', '应用顺序'],
+        }),
+      ],
+    });
+    expect(JSON.stringify(preview)).not.toContain('BASE_A');
+    expect(JSON.stringify(preview)).not.toContain('productCodes');
+  });
+
   it('copies the current book into one inactive, traceable next version', async () => {
     dbMock.customerPriceBook.findMany
       .mockResolvedValueOnce([
@@ -363,6 +478,7 @@ describe('customer price-book draft lifecycle', () => {
           minQty: 1,
           maxQty: 1_000,
           blocksAutomaticQuote: false,
+          match: processingMatch(),
           isActive: true,
         },
         actor,
@@ -379,8 +495,10 @@ describe('customer price-book draft lifecycle', () => {
       editableDraftRule({
         calculationType: 'PER_SHEET',
         triggerCondition: {
+          schemaVersion: 1,
           productCodes: ['PRODUCT_A'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
           unitsPerSheet: 4,
         },
       }),
@@ -390,6 +508,9 @@ describe('customer price-book draft lifecycle', () => {
     ]);
     dbMock.product.findMany.mockResolvedValue([
       { id: 'product-a', name: 'A 产品' },
+    ]);
+    dbMock.craft.findMany.mockResolvedValue([
+      { code: 'craft_color_print', name: '彩印' },
     ]);
 
     const editor = await getCustomerPriceBookDraftRuleEditor(
@@ -403,6 +524,7 @@ describe('customer price-book draft lifecycle', () => {
         purpose: 'PROCESSING',
         categories: [{ id: 'category-base', name: '基础加工费' }],
         products: [{ id: 'product-a', name: 'A 产品' }],
+        crafts: [{ value: 'craft_color_print', label: '彩印' }],
       },
       rule: expect.objectContaining({
         id: 'draft-rule-a',
@@ -426,13 +548,16 @@ describe('customer price-book draft lifecycle', () => {
       editableDraftRule({
         calculationType: 'PER_SHEET',
         triggerCondition: {
+          schemaVersion: 1,
           productCodes: ['PRODUCT_A'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
           unitsPerSheet: '4',
         },
       }),
     );
     dbMock.customerChargeCategory.findMany.mockResolvedValue([]);
     dbMock.product.findMany.mockResolvedValue([]);
+    dbMock.craft.findMany.mockResolvedValue([]);
 
     const editor = await getCustomerPriceBookDraftRuleEditor(
       'book-v2-draft',
@@ -440,6 +565,9 @@ describe('customer price-book draft lifecycle', () => {
     );
 
     expect(editor?.rule.unitsPerSheet).toBeNull();
+    expect(editor?.rule.matchValidationErrors).toContain(
+      '每张成品数：设置无效，请重新选择或填写',
+    );
     expect(editor?.rule).not.toHaveProperty('triggerCondition');
   });
 
@@ -462,8 +590,13 @@ describe('customer price-book draft lifecycle', () => {
     dbMock.customerPriceRule.findMany.mockResolvedValue([
       validationRule({
         productId: 'product-b',
-        product: { code: 'PRODUCT_B', isActive: true },
-        triggerCondition: { productCodes: ['PRODUCT_B'] },
+        product: { code: 'PRODUCT_B', category: 'BLANK_STOCK', isActive: true },
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          productCodes: ['PRODUCT_B'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+        },
       }),
     ]);
     dbMock.customerPriceBook.update.mockResolvedValue({ id: 'book-v2-draft' });
@@ -484,6 +617,7 @@ describe('customer price-book draft lifecycle', () => {
           minQty: 1,
           maxQty: 1_000,
           blocksAutomaticQuote: false,
+          match: processingMatch(),
           isActive: true,
         },
         actor,
@@ -494,12 +628,51 @@ describe('customer price-book draft lifecycle', () => {
     expect(dbMock.customerPriceRule.update.mock.calls[0]![0].data).toEqual(
       expect.objectContaining({
         productId: 'product-b',
-        triggerCondition: { productCodes: ['PRODUCT_B'] },
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          productCodes: ['PRODUCT_B'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+        },
       }),
     );
   });
 
-  it('adds a product matcher when selecting a product and preserves other technical fields', async () => {
+  it('拒绝绕过只读界面改变计价对象', async () => {
+    dbMock.customerPriceRule.findUnique.mockResolvedValue(editableDraftRule());
+    dbMock.customerChargeCategory.findUnique.mockResolvedValue({
+      id: 'category-base',
+      code: 'PRODUCT_BASE',
+    });
+
+    await expect(
+      updateCustomerPriceRuleDraft(
+        {
+          priceBookId: 'book-v2-draft',
+          ruleId: 'draft-rule-a',
+          expectedUpdatedAt: now,
+          name: '基础报价 A',
+          categoryId: 'category-base',
+          productId: 'product-a',
+          kind: 'BASE',
+          calculationType: 'PER_PIECE',
+          unitsPerSheet: null,
+          amount: '0.1400',
+          minQty: 1,
+          maxQty: 1_000,
+          blocksAutomaticQuote: false,
+          match: processingMatch({ target: 'PACKAGING_GROUP' }),
+          isActive: true,
+        },
+        actor,
+        now,
+      ),
+    ).rejects.toThrow('计价对象不能直接变更');
+
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+
+  it('adds a product matcher and saves the structured foil-pass multiplier', async () => {
     dbMock.customerPriceRule.findUnique.mockResolvedValue(
       editableDraftRule({
         productId: null,
@@ -521,10 +694,14 @@ describe('customer price-book draft lifecycle', () => {
     dbMock.customerPriceRule.findMany.mockResolvedValue([
       validationRule({
         productId: 'product-b',
-        product: { code: 'PRODUCT_B', isActive: true },
+        product: { code: 'PRODUCT_B', category: 'BLANK_STOCK', isActive: true },
         triggerCondition: {
+          schemaVersion: 1,
           productCodes: ['PRODUCT_B'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+          foilPassCount: 3,
+          perFoilPass: true,
         },
       }),
     ]);
@@ -546,6 +723,11 @@ describe('customer price-book draft lifecycle', () => {
           minQty: 1,
           maxQty: 1_000,
           blocksAutomaticQuote: false,
+          match: processingMatch({
+            craftCodes: ['craft_color_print'],
+            foilPassCount: 3,
+            perFoilPass: true,
+          }),
           isActive: true,
         },
         actor,
@@ -558,8 +740,13 @@ describe('customer price-book draft lifecycle', () => {
       expect.objectContaining({
         productId: 'product-b',
         triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
           productCodes: ['PRODUCT_B'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+          foilPassCount: 3,
+          perFoilPass: true,
         },
       }),
     );
@@ -583,7 +770,12 @@ describe('customer price-book draft lifecycle', () => {
       validationRule({
         productId: null,
         product: null,
-        triggerCondition: { craftCodes: ['craft_color_print'] },
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+        },
       }),
     ]);
     dbMock.customerPriceBook.update.mockResolvedValue({ id: 'book-v2-draft' });
@@ -604,6 +796,7 @@ describe('customer price-book draft lifecycle', () => {
           minQty: 1,
           maxQty: 1_000,
           blocksAutomaticQuote: false,
+          match: processingMatch({ craftCodes: ['craft_color_print'] }),
           isActive: true,
         },
         actor,
@@ -616,10 +809,92 @@ describe('customer price-book draft lifecycle', () => {
     expect(data).toEqual(
       expect.objectContaining({
         productId: null,
-        triggerCondition: { craftCodes: ['craft_color_print'] },
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
+        },
       }),
     );
     expect(data.triggerCondition).not.toHaveProperty('productCodes');
+  });
+
+  it('只改金额时保留历史多产品匹配范围', async () => {
+    dbMock.customerPriceRule.findUnique.mockResolvedValue(
+      editableDraftRule({
+        productId: null,
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          productCodes: ['COLOR_LARGE_COPPER', 'COLOR_MEDIUM_COPPER'],
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+        },
+      }),
+    );
+    dbMock.customerChargeCategory.findUnique.mockResolvedValue({
+      id: 'category-base',
+      code: 'PRODUCT_BASE',
+    });
+    dbMock.customerPriceRule.update.mockResolvedValue({
+      id: 'draft-rule-a',
+      priceBookId: 'book-v2-draft',
+    });
+    dbMock.customerPriceRule.findMany.mockResolvedValue([
+      validationRule({
+        productId: null,
+        product: null,
+        amount: '0.1600',
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          productCodes: ['COLOR_LARGE_COPPER', 'COLOR_MEDIUM_COPPER'],
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+        },
+      }),
+    ]);
+    dbMock.customerPriceBook.update.mockResolvedValue({ id: 'book-v2-draft' });
+
+    await updateCustomerPriceRuleDraft(
+      {
+        priceBookId: 'book-v2-draft',
+        ruleId: 'draft-rule-a',
+        expectedUpdatedAt: now,
+        name: '彩印双铜纸加价',
+        categoryId: 'category-base',
+        productId: null,
+        kind: 'ADD_ON',
+        calculationType: 'PER_PIECE',
+        unitsPerSheet: null,
+        amount: '0.1600',
+        minQty: null,
+        maxQty: null,
+        blocksAutomaticQuote: false,
+        match: processingMatch({
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+        }),
+        isActive: true,
+      },
+      actor,
+      now,
+    );
+
+    expect(dbMock.product.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.update.mock.calls[0]![0].data).toEqual(
+      expect.objectContaining({
+        amount: '0.1600',
+        triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
+          productCodes: ['COLOR_LARGE_COPPER', 'COLOR_MEDIUM_COPPER'],
+          craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.COLOR_PRINT],
+        },
+      }),
+    );
   });
 
   it('updates sheet capacity while preserving the other processing matchers', async () => {
@@ -649,8 +924,11 @@ describe('customer price-book draft lifecycle', () => {
       validationRule({
         calculationType: 'PER_SHEET',
         triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
           productCodes: ['PRODUCT_A'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
           unitsPerSheet: 4,
         },
       }),
@@ -672,6 +950,7 @@ describe('customer price-book draft lifecycle', () => {
         minQty: 1,
         maxQty: 1_000,
         blocksAutomaticQuote: false,
+        match: processingMatch({ craftCodes: ['craft_color_print'] }),
         isActive: true,
       },
       actor,
@@ -682,8 +961,11 @@ describe('customer price-book draft lifecycle', () => {
       expect.objectContaining({
         calculationType: 'PER_SHEET',
         triggerCondition: {
+          schemaVersion: 1,
+          target: 'ITEM',
           productCodes: ['PRODUCT_A'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
           unitsPerSheet: 4,
         },
       }),
@@ -717,8 +999,10 @@ describe('customer price-book draft lifecycle', () => {
       validationRule({
         calculationType: 'PER_PIECE',
         triggerCondition: {
+          schemaVersion: 1,
           productCodes: ['PRODUCT_A'],
           craftCodes: ['craft_color_print'],
+          pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
         },
       }),
     ]);
@@ -739,6 +1023,7 @@ describe('customer price-book draft lifecycle', () => {
         minQty: 1,
         maxQty: 1_000,
         blocksAutomaticQuote: false,
+        match: processingMatch({ craftCodes: ['craft_color_print'] }),
         isActive: true,
       },
       actor,
@@ -748,8 +1033,11 @@ describe('customer price-book draft lifecycle', () => {
     const triggerCondition =
       dbMock.customerPriceRule.update.mock.calls[0]![0].data.triggerCondition;
     expect(triggerCondition).toEqual({
+      schemaVersion: 1,
+      target: 'ITEM',
       productCodes: ['PRODUCT_A'],
       craftCodes: ['craft_color_print'],
+      pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
     });
     expect(triggerCondition).not.toHaveProperty('unitsPerSheet');
   });
@@ -781,6 +1069,7 @@ describe('customer price-book draft lifecycle', () => {
           minQty: 1,
           maxQty: 1_000,
           blocksAutomaticQuote: false,
+          match: processingMatch(),
           isActive: true,
         },
         actor,
@@ -1019,7 +1308,9 @@ describe('customer price-book draft lifecycle', () => {
   it('treats reordered trigger matcher arrays as the same atomic price ladder', async () => {
     const first = editableGroupRule('draft-rule-a', 1_000, {
       triggerCondition: {
+        schemaVersion: 1,
         productCodes: ['PRODUCT_A', 'PRODUCT_ALIAS'],
+        pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
         specifications: ['大号', '非标'],
         paperTypes: ['157克双铜纸', '铜版纸'],
       },
@@ -1033,7 +1324,9 @@ describe('customer price-book draft lifecycle', () => {
     });
     const second = editableGroupRule('draft-rule-b', 2_000, {
       triggerCondition: {
+        schemaVersion: 1,
         paperTypes: ['铜版纸', '157克双铜纸'],
+        pricingRoutes: [OrderItemPricingRoute.STOCK_BLANK],
         specifications: ['非标', '大号'],
         productCodes: ['PRODUCT_ALIAS', 'PRODUCT_A'],
       },
@@ -1344,6 +1637,7 @@ describe('customer price-book draft lifecycle', () => {
           priceBookId: 'book-v2-draft',
           expectedDraftUpdatedAt: now,
           effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
         },
         actor,
         now,
@@ -1373,6 +1667,7 @@ describe('customer price-book draft lifecycle', () => {
             workflow: expect.objectContaining({
               status: 'PUBLISHED',
               ruleSetSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+              publishNote: '已完成价格复核',
             }),
           }),
         }),
@@ -1399,6 +1694,7 @@ describe('customer price-book draft lifecycle', () => {
           priceBookId: 'book-v2-draft',
           expectedDraftUpdatedAt: new Date('2026-08-09T01:59:59.999Z'),
           effectiveFrom: publishAt,
+          publishNote: '已完成价格复核',
         },
         actor,
         now,
@@ -1535,7 +1831,7 @@ describe('price-book admin DTO and normalized hash', () => {
       id: 'draft-rule-b',
       code: 'BASE_B',
       productId: 'product-b',
-      product: { code: 'PRODUCT_B', isActive: true },
+      product: { code: 'PRODUCT_B', category: 'BLANK_STOCK', isActive: true },
       triggerCondition: { productCodes: ['PRODUCT_B'], isDoubleSided: false },
     });
     const hash = calculateCustomerPriceRuleSetSha256([first, second]);

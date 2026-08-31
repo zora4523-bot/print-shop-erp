@@ -20,6 +20,18 @@ export type DashboardChartsContentProps = {
   categoryDistribution: CategoryDistributionChartProps['data'];
 };
 
+export type ProductionTrendChartContentProps = {
+  data: ProductionTrendChartProps['data'];
+};
+
+export type SalesRankingChartContentProps = {
+  data: SalesRankingChartProps['data'];
+};
+
+export type CategoryDistributionChartContentProps = {
+  data: CategoryDistributionChartProps['data'];
+};
+
 export function DashboardChartsContent({
   productionTrend,
   salesRanking,
@@ -27,31 +39,55 @@ export function DashboardChartsContent({
 }: DashboardChartsContentProps) {
   return (
     <>
-      <ChartCard
-        slot="dashboard-chart-trend-card"
-        title="近 30 天产量趋势"
-        description="按完工时间汇总 · COMPLETED / SHIPPED / FINISHED"
-      >
-        <ProductionTrendChart data={productionTrend} />
-      </ChartCard>
+      <ProductionTrendChartContent data={productionTrend} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard
-          slot="dashboard-chart-ranking-card"
-          title="本月销售业绩 Top 10"
-          description="按提交时间归属 · SALES 蓝色 / 客服 绿色"
-        >
-          <SalesRankingChart data={salesRanking} />
-        </ChartCard>
-        <ChartCard
-          slot="dashboard-chart-category-card"
-          title="本月产品线分布"
-          description="按工单计数（同一工单多款式只计 1 次）"
-        >
-          <CategoryDistributionChart data={categoryDistribution} />
-        </ChartCard>
+        <SalesRankingChartContent data={salesRanking} />
+        <CategoryDistributionChartContent data={categoryDistribution} />
       </div>
     </>
+  );
+}
+
+export function ProductionTrendChartContent({
+  data,
+}: ProductionTrendChartContentProps) {
+  return (
+    <ChartCard
+      slot="dashboard-chart-trend-card"
+      title="近 30 天产量趋势"
+      description="按完工时间汇总"
+    >
+      <ProductionTrendChart data={data} />
+    </ChartCard>
+  );
+}
+
+export function SalesRankingChartContent({
+  data,
+}: SalesRankingChartContentProps) {
+  return (
+    <ChartCard
+      slot="dashboard-chart-ranking-card"
+      title="本月销售业绩 Top 10"
+      description="按提交时间归属"
+    >
+      <SalesRankingChart data={data} />
+    </ChartCard>
+  );
+}
+
+export function CategoryDistributionChartContent({
+  data,
+}: CategoryDistributionChartContentProps) {
+  return (
+    <ChartCard
+      slot="dashboard-chart-category-card"
+      title="本月产品线分布"
+      description="按工单计数（同一工单多款式只计 1 次）"
+    >
+      <CategoryDistributionChart data={data} />
+    </ChartCard>
   );
 }
 

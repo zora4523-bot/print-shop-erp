@@ -63,7 +63,7 @@ export async function GET(
       );
     }
     return NextResponse.json(
-      { error: '下载失败；联系业主' },
+      { error: '下载失败；请联系管理员' },
       { status: 500 },
     );
   }
@@ -72,10 +72,7 @@ export async function GET(
   // 还没配 OSS&rdquo;，不是&ldquo;链接坏了&rdquo;。
   if (bundle.zipFileUrl.startsWith('mock://')) {
     return NextResponse.json(
-      {
-        error: 'OSS 未配置；CDR 下载暂不可用，请联系业主',
-        mockUrl: bundle.zipFileUrl,
-      },
+      { error: 'CDR 下载暂不可用，请联系管理员' },
       { status: 503 },
     );
   }

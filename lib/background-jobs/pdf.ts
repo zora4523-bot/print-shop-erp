@@ -10,9 +10,9 @@ import {
 } from '../../generated/prisma/client';
 import { getOrderForPrint } from '../order/print-view';
 import { buildPrintHtml } from '../order/print-html';
-import { getSetting } from '../settings';
 import { renderHtmlToPdf } from '../pdf/render';
 import { db } from '../db';
+import { getSetting } from '../settings';
 import { enqueueBackgroundJob } from './repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from './types';
 
@@ -52,11 +52,19 @@ export async function handleOrderPdfJob(
   );
   if (!order) throw new OrderPdfNotFoundError();
 
-  const factory = await getSetting('factory_name');
-  const html = await buildPrintHtml(order, { factoryName: factory.name });
-  const pdf = await renderHtmlToPdf({ html });
-  const artifactName = `${job.id}.pdf`;
+  const { name: factoryName } = await getSetting('factory_name');
+  const html = await buildPrintHtml(order, { factoryName });
+  await job.assertLease?.();
+  job.signal?.throwIfAborted();
+  const pdf = await renderHtmlToPdf({
+    html,
+    ...(job.signal ? { signal: job.signal } : {}),
+  });
+  await job.assertLease?.();
+  job.signal?.throwIfAborted();
+  const artifactName = `${job.id}-${job.attempts}.pdf`;
   await writePdfArtifact(artifactName, pdf);
+  await job.assertLease?.();
   await cleanupOldPdfArtifacts();
   return { artifactName, byteLength: pdf.byteLength, orderNo: order.orderNo };
 }

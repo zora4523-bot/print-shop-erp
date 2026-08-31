@@ -1,3 +1,5 @@
+import { SlowLoadingHint } from '@/components/ui-business';
+
 export default function WorkerLoading() {
   return (
     <div aria-busy="true" aria-live="polite" className="space-y-4">
@@ -12,6 +14,7 @@ export default function WorkerLoading() {
           />
         ))}
       </div>
+      <SlowLoadingHint />
     </div>
   );
 }

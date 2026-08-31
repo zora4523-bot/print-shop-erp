@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import { MachineType, WorkerType } from '../../../generated/prisma/enums';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
@@ -14,7 +14,6 @@ import {
 
 type EditInitial = {
   name: string;
-  code: string;
   isOutsource: boolean;
   defaultWorkerType: WorkerType | null;
   defaultMachineType: MachineType | null;
@@ -22,22 +21,28 @@ type EditInitial = {
   isActive: boolean;
 };
 
-type Props =
-  | {
+export type CraftRouteBase = '/owner/crafts' | '/owner/rules/crafts';
+
+type CommonProps = { routeBase?: CraftRouteBase };
+
+type Props = CommonProps &
+  (
+    | {
       mode: 'create';
       action: (
         prev: CraftMutationResult | null,
         fd: FormData,
       ) => Promise<CraftMutationResult>;
-    }
-  | {
+      }
+    | {
       mode: 'edit';
       action: (
         prev: CraftMutationResult | null,
         fd: FormData,
       ) => Promise<CraftMutationResult>;
       initial: EditInitial;
-    };
+      }
+  );
 
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
@@ -65,48 +70,29 @@ export function CraftForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
+  const routeBase = props.routeBase ?? '/owner/crafts';
+  const hasUnassignedFieldError = Object.entries(errs).some(
+    ([field, messages]) =>
+      ![
+        'name',
+        'defaultWorkerType',
+        'defaultMachineType',
+        'sortOrder',
+      ].includes(field) && Boolean(messages?.length),
+  );
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
+      <input type="hidden" name="routeBase" value={routeBase} />
       <TextField
         id="name"
         label="工艺名"
-        hint="工艺的中文显示名，例如 专版单色平烫"
+        hint="例如：专版单色平烫。"
         required
         disabled={pending}
         error={errs.name?.[0]}
         defaultValue={initial?.name}
       />
-
-      {isCreate ? (
-        <details
-          className="rounded-lg border border-dashed p-3"
-          open={Boolean(errs.code?.[0])}
-        >
-          <summary className="cursor-pointer text-sm text-muted-foreground">
-            高级设置：自定义工艺代码（通常无需填写）
-          </summary>
-          <div className="mt-3">
-            <TextField
-              id="code"
-              label="自定义代码（选填）"
-              hint="留空将自动生成，例如 CRF_000001。仅在对接旧系统时需要自定义。"
-              disabled={pending}
-              error={errs.code?.[0]}
-            />
-          </div>
-        </details>
-      ) : (
-        <TextField
-          id="code"
-          label="工艺代码"
-          hint="这是历史工单的稳定标识，修改前请确认外部对接影响。"
-          required
-          disabled={pending}
-          error={errs.code?.[0]}
-          defaultValue={initial?.code}
-        />
-      )}
 
       <label className="flex items-start gap-2 text-sm">
         <input
@@ -119,7 +105,7 @@ export function CraftForm(props: Props) {
         <span className="space-y-1">
           <span className="block">外协工艺</span>
           <span className="block text-xs text-muted-foreground">
-            勾选后，该工艺不创建内部生产任务，只加入外协清单（SPEC §6.1）。
+            勾选后，该工艺不创建内部生产任务，只加入外协清单。
           </span>
         </span>
       </label>
@@ -172,7 +158,7 @@ export function CraftForm(props: Props) {
       <TextField
         id="sortOrder"
         label="排序"
-        hint="数字越小越靠前，必须 ≥ 1。建议从 10 起每 10 留一档（10, 20, 30…）"
+        hint="正整数；数值越小越靠前。"
         type="number"
         min={1}
         step={1}
@@ -187,6 +173,11 @@ export function CraftForm(props: Props) {
           {generalError}
         </p>
       ) : null}
+      {hasUnassignedFieldError ? (
+        <p role="alert" className="text-sm text-destructive">
+          部分设置无法保存，请刷新后重试。
+        </p>
+      ) : null}
       {success ? (
         <p role="status" className="text-sm text-success-foreground">
           ✓ 已保存
@@ -197,9 +188,13 @@ export function CraftForm(props: Props) {
         <Button type="submit" disabled={pending}>
           {pending ? '提交中…' : isCreate ? '创建工艺' : '保存修改'}
         </Button>
-        <Link href="/owner/crafts" className={buttonVariants({ variant: 'outline' })}>
+        <PendingLink
+          href={routeBase}
+          pending={pending}
+          className={buttonVariants({ variant: 'outline' })}
+        >
           返回列表
-        </Link>
+        </PendingLink>
       </div>
     </form>
   );

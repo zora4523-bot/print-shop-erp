@@ -132,6 +132,9 @@ describe('createOutsourceOrder', () => {
       idempotencyKey: string;
       createdById: string;
       totalQty: number;
+      itemSnapshots: {
+        create: Array<{ orderItemId: string; quantity: number }>;
+      };
     };
     expect(data.status).toBe(OutsourceStatus.SENT);
     expect(data.amount).toBe('500.00');
@@ -140,6 +143,9 @@ describe('createOutsourceOrder', () => {
     expect(data.idempotencyKey).toBe(baseInput.idempotencyKey);
     expect(data.createdById).toBe(foremanActor.id);
     expect(data.totalQty).toBe(5000);
+    expect(data.itemSnapshots.create).toEqual([
+      { orderItemId: 'item-1', quantity: 5000 },
+    ]);
     expect(dbMock.businessAuditLog.create).toHaveBeenCalledTimes(1);
   });
 
@@ -288,6 +294,7 @@ describe('createOutsourceOrder', () => {
       amount: '500.00',
       remark: baseInput.remark,
       createdById: foremanActor.id,
+      itemSnapshots: [],
     });
 
     await expect(
@@ -298,7 +305,34 @@ describe('createOutsourceOrder', () => {
     expect(dbMock.businessAuditLog.create).not.toHaveBeenCalled();
   });
 
-  it('replays after canonicalizing item order and deriving a legacy null total', async () => {
+  it('replays from immutable snapshots after source item quantities changed', async () => {
+    dbMock.orderItem.findMany.mockResolvedValue([
+      { id: 'item-1', orderId: 'order-1', quantity: 6000 },
+    ]);
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-existing',
+      orderId: baseInput.orderId,
+      orderItemIds: baseInput.orderItemIds,
+      supplierName: baseInput.supplierName,
+      supplierContact: baseInput.supplierContact,
+      craftDescription: baseInput.craftDescription,
+      specialRequirement: baseInput.specialRequirement,
+      totalQty: 5000,
+      expectedDate: baseInput.expectedDate,
+      amount: '500.00',
+      remark: baseInput.remark,
+      createdById: foremanActor.id,
+      itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
+    });
+
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).resolves.toEqual({ id: 'outsource-existing' });
+    expect(dbMock.orderItem.findMany).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('replays after canonicalizing item order and reading a null total from snapshots', async () => {
     dbMock.orderItem.findMany.mockResolvedValue([
       { id: 'item-2', orderId: 'order-1', quantity: 1250 },
       { id: 'item-1', orderId: 'order-1', quantity: 5000 },
@@ -316,6 +350,10 @@ describe('createOutsourceOrder', () => {
       amount: '500.00',
       remark: baseInput.remark,
       createdById: foremanActor.id,
+      itemSnapshots: [
+        { orderItemId: 'item-2', quantity: 1250 },
+        { orderItemId: 'item-1', quantity: 5000 },
+      ],
     });
 
     await expect(
@@ -329,6 +367,30 @@ describe('createOutsourceOrder', () => {
       ),
     ).resolves.toEqual({ id: 'outsource-existing' });
     expect(dbMock.order.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a null-total historical replay has no quantity evidence', async () => {
+    dbMock.outsourceOrder.findUnique.mockResolvedValue({
+      id: 'outsource-existing',
+      orderId: baseInput.orderId,
+      orderItemIds: baseInput.orderItemIds,
+      supplierName: baseInput.supplierName,
+      supplierContact: baseInput.supplierContact,
+      craftDescription: baseInput.craftDescription,
+      specialRequirement: baseInput.specialRequirement,
+      totalQty: null,
+      expectedDate: baseInput.expectedDate,
+      amount: '500.00',
+      remark: baseInput.remark,
+      createdById: foremanActor.id,
+      itemSnapshots: [],
+    });
+
+    await expect(
+      createOutsourceOrder(baseInput, foremanActor),
+    ).rejects.toThrow(/缺少创建时数量证据/);
+    expect(dbMock.orderItem.findMany).not.toHaveBeenCalled();
     expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
   });
 
@@ -346,6 +408,7 @@ describe('createOutsourceOrder', () => {
       amount: '500.00',
       remark: baseInput.remark,
       createdById: 'other-actor',
+      itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
     });
 
     await expect(
@@ -855,6 +918,7 @@ describe('markOutsourceReceived', () => {
         id: 'outsource-1',
         status: OutsourceStatus.RECEIVED,
         orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
       },
     ]);
     dbMock.productionTask.findMany.mockResolvedValue([]);
@@ -888,7 +952,7 @@ describe('markOutsourceReceived', () => {
     );
   });
 
-  it('回传覆盖缺口：收下最后一张外协单但款式二没人管 → pendingOutsourceItems 穿过外层 return', async () => {
+  it('回传覆盖缺口：内部任务未完时也不被 INTERNAL_TASKS 吞掉', async () => {
     // ⚠️ 这条用例守的是 markOutsourceReceived 的**外层** return（事务外那个
     // 逐字段重建对象的）。漏掉一行 pendingOutsourceItems，字段会被原地丢弃、
     // action 层的 notice 恒为 undefined，而它是可选字段，tsc 不报、
@@ -908,6 +972,7 @@ describe('markOutsourceReceived', () => {
         id: 'outsource-1',
         status: OutsourceStatus.RECEIVED,
         orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
       },
     ]);
     dbMock.orderItem.findMany.mockResolvedValue([
@@ -916,6 +981,7 @@ describe('markOutsourceReceived', () => {
         orderId: 'order-1',
         sequence: 1,
         name: '款式一',
+        quantity: 5000,
         crafts: ['craft-uv'],
       },
       {
@@ -923,10 +989,13 @@ describe('markOutsourceReceived', () => {
         orderId: 'order-1',
         sequence: 2,
         name: '款式二',
+        quantity: 5000,
         crafts: ['craft-uv'],
       },
     ]);
-    dbMock.productionTask.findMany.mockResolvedValue([]);
+    dbMock.productionTask.findMany.mockResolvedValue([
+      { id: 'task-1', status: TaskStatus.IN_PROGRESS },
+    ]);
     dbMock.order.findUnique.mockResolvedValue({
       id: 'order-1',
       status: OrderStatus.SCHEDULING,
@@ -962,6 +1031,7 @@ describe('markOutsourceReceived', () => {
         id: 'outsource-1',
         status: OutsourceStatus.RECEIVED,
         orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
       },
     ]);
     dbMock.productionTask.findMany.mockResolvedValue([]);
@@ -999,6 +1069,14 @@ describe('markOutsourceReceived', () => {
     });
     dbMock.productionTask.findMany.mockResolvedValue([
       { id: 'task-1', status: TaskStatus.IN_PROGRESS },
+    ]);
+    dbMock.outsourceOrder.findMany.mockResolvedValue([
+      {
+        id: 'outsource-1',
+        status: OutsourceStatus.RECEIVED,
+        orderItemIds: ['item-1'],
+        itemSnapshots: [{ orderItemId: 'item-1', quantity: 5000 }],
+      },
     ]);
     dbMock.order.findUnique.mockResolvedValue({
       id: 'order-1',
@@ -1124,10 +1202,14 @@ describe('cancelOutsourceOrder', () => {
 });
 
 describe('getOutsourceOrderDetail', () => {
-  it('includes append-only amount and payment histories with operators', async () => {
+  it('includes authoritative item snapshots, compatibility ids, and append-only histories', async () => {
     dbMock.outsourceOrder.findUnique.mockResolvedValue({ id: 'outsource-1' });
     await getOutsourceOrderDetail('outsource-1');
     const query = dbMock.outsourceOrder.findUnique.mock.calls[0][0];
+    expect(query.select.orderItemIds).toBe(true);
+    expect(query.select.itemSnapshots).toEqual({
+      select: { orderItemId: true, quantity: true },
+    });
     expect(query.select.amountChanges).toEqual({
       orderBy: { createdAt: 'desc' },
       select: {

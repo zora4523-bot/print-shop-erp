@@ -12,6 +12,26 @@ describe('backgroundJobOperatorAction', () => {
     ).toBe('REQUEST_NEW_EXPORT');
   });
 
+  it('sends an ambiguous notification to the audited log workflow instead of offering a no-op retry', () => {
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryUnknownError',
+      }),
+    ).toBe('RESOLVE_NOTIFICATION');
+  });
+
+  it('still offers retry for a definitively retryable notification failure', () => {
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryFailedError',
+      }),
+    ).toBe('RETRY');
+  });
+
   it.each([
     [BackgroundJobStatus.DEAD, 'NOTIFICATION', 'RETRY'],
     [BackgroundJobStatus.PENDING, 'ORDER_EXPORT', 'CANCEL'],

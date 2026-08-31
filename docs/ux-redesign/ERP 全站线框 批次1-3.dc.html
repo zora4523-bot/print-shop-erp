@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/styles.css">
+<script src="_ds/industry-a28c40cf-cfa2-4a10-b7ac-e211055d0c9d/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; background: var(--color-bg); }
+  a { color: var(--color-accent); text-decoration: none; }
+  a:hover { color: var(--color-accent-700); }
+  .wf-sec { padding: 34px 40px 30px; border-bottom: 1px solid var(--color-divider); }
+  .wf-row { display: flex; flex-wrap: wrap; gap: 30px; align-items: flex-start; }
+  .wf-screen { flex: none; border: 1px solid var(--color-divider); background: var(--color-bg); }
+  .wf-blk { position: relative; border: 1px solid var(--color-neutral-400); padding: 16px 10px 10px; }
+  .wf-lab { position: absolute; top: -1px; left: -1px; font-family: var(--font-heading); font-size: 9px; letter-spacing: 0.09em; text-transform: uppercase; padding: 1px 6px; background: var(--color-neutral-300); color: var(--color-neutral-900); }
+  .wf-bar { height: 8px; background: var(--color-neutral-300); }
+  .wf-note { font-size: 10.5px; line-height: 1.45; color: var(--color-neutral-700); }
+  .wf-sid { font-family: var(--font-heading); font-size: 10px; letter-spacing: 0.08em; padding: 2px 7px; background: var(--color-accent); color: var(--color-bg); }
+  .wf-st { flex: none; width: 236px; border: 1px solid var(--color-divider); padding: 8px 10px 10px; }
+  h2 { font-size: 30px; margin: 0 0 4px; }
+  h3 { font-size: 19px; margin: 0; }
+  h5 { font-size: 13px; margin: 0 0 4px; letter-spacing: 0.04em; }
+  .btn, .tag { white-space: nowrap; flex: none; }
+</style>
+</helmet>
+
+<div style="min-width: 3000px; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 14px">
+
+  <div style="padding: 40px 40px 30px; border-bottom: 1px solid var(--color-divider)">
+    <div style="display: flex; align-items: baseline; gap: 16px">
+      <h1 style="margin: 0; font-size: 46px">红包印刷 ERP · 全站线框</h1>
+      <span class="tag tag-outline" style="white-space: nowrap">低保真 · 信息架构级</span>
+      <span class="tag tag-neutral" style="white-space: nowrap">2026-08-23</span>
+    </div>
+    <p style="max-width: 1180px; margin: 12px 0 0; font-size: 15px; color: var(--color-neutral-800); text-wrap: pretty">本轮交付第 1–3 批共 13 屏线框、每屏五态、以及 85 页的批次计划与 A–E 评审。桌面主视口 1280×800；手机 393×852 只用于师傅端与高密度表格降级。所有结论按交接包的 Screen ID 回溯；「观察」与「推断」分开标注。业务状态机、权限、金额口径、通知语义、外协 max 口径、打印基线一律未改，需要改的都进了「待业主确认」。</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px">
+      <a class="btn btn-secondary" href="#b1">批次一 · 外壳与设计语言</a>
+      <a class="btn btn-secondary" href="#b2">批次二 · Dashboard 与告警</a>
+      <a class="btn btn-secondary" href="#b3">批次三 · 工单（痛点）</a>
+      <a class="btn btn-secondary" href="#plan">85 页批次计划</a>
+      <a class="btn btn-secondary" href="#review">A–E 评审</a>
+    </div>
+    <div class="blueprint" style="max-width: 1180px; margin-top: 18px; padding: 12px 14px">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family: var(--font-heading); font-size: 15px; letter-spacing: 0.04em">证据来源</div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--color-neutral-800); margin-top: 4px">本轮逐张查阅了这 10 张，全部打开过：<b>1280×800</b> dashboard-light / orders-light / orders-filtered-light / order-new-light / order-detail-light / order-changes-light；<b>393×852</b> dashboard-light / orders-light / order-new-light / order-detail-light。</div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--color-neutral-800); margin-top: 6px">每屏「问题与改动」里的标签只有两类：<b>严重度</b>（Blocker / High / Medium）与<b>证据性质</b>（推断 = 证据不足，需要材料或你的回答；更正 = 我前几版写错、已按截图改掉）。条目文字里以「观察（文件名 视口）」开头的，都能在上面这 10 张图里指到具体位置——它是条目内的写法，不是标签，所以本文不给它计数。</div>
+      <div style="font-size: 12px; line-height: 1.7; color: var(--color-neutral-800); margin-top: 6px"><b>本轮不可读代码</b>：print-shop-erp 目录已取消挂载，因此 app/(admin)/layout.tsx、globals.css 相关的判断一律只标推断，不当作现状。<b>覆盖范围</b>：交接包的 <code>screenshots/automated/admin</code> 下有 37 组桌面 + 37 组手机，本轮只动了其中 10 张；此外还有 <code>automated/worker</code>、<code>supplemental/admin</code>、<code>supplemental/public</code>、<code>theme-reference/*</code> 和 <code>references/print</code>（01-screen-inventory 里另有约 40 个 SUP ID）——余量远大于本轮覆盖量，全部留到对应批次，届时同样逐张查阅后才下结论。</div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--color-divider); font-size: 12px; color: var(--color-neutral-700)">
+      <span style="display: flex; align-items: center; gap: 7px"><i style="display: block; width: 22px; height: 10px; border: 1px solid var(--color-neutral-400)"></i>普通区块</span>
+      <span style="display: flex; align-items: center; gap: 7px"><i style="display: block; width: 22px; height: 10px; border: 1px solid var(--color-accent); background: var(--color-accent-100)"></i>主操作 / 决策区</span>
+      <span style="display: flex; align-items: center; gap: 7px"><i style="display: block; width: 22px; height: 10px; border: 1px dashed var(--color-neutral-500)"></i>渐进展开 / 折叠</span>
+      <span style="display: flex; align-items: center; gap: 7px"><i style="display: block; width: 22px; height: 8px; background: var(--color-neutral-300)"></i>占位内容</span>
+      <span>五态 = Loading / Empty / Error / Disabled / Pending，逐屏在线框下方给出</span>
+    </div>
+  </div>
+
+  <section class="wf-sec" id="b1">
+    <h2>批次一 · 设计语言、外壳与导航</h2>
+    <p style="max-width: 1100px; margin: 0 0 22px; color: var(--color-neutral-800)">外壳决定其余 80 页的密度上限。截图显示后台已有两级侧栏（概览/业务/财务，12 项，带折叠）和统一页头——所以这一批不是重做外壳，而是补三个缺口：侧栏只覆盖 12 个入口而后台有 56 页；顶栏与侧栏有三项重复导航；告警条只在首页存在，离开就看不到未解决项。</p>
+    <div class="wf-row">
+      <sc-for list="{{ batch1 }}" as="sc" hint-placeholder-count="5">
+        <div class="wf-screen" style="width: {{ sc.w }}px">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; border-bottom: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+            <span class="wf-sid">{{ sc.sid }}</span>
+            <div style="min-width: 0; flex: 1">
+              <h3>{{ sc.name }}</h3>
+              <div style="font-size: 11px; color: var(--color-neutral-700); margin-top: 2px">{{ sc.route }} · {{ sc.role }} · {{ sc.vp }}</div>
+              <div style="font-size: 12px; margin-top: 5px; text-wrap: pretty">{{ sc.goal }}</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px">
+            <sc-for list="{{ sc.blocks }}" as="b" hint-placeholder-count="5">
+              <div class="wf-blk" style="min-height: {{ b.h }}px; border-color: {{ b.bc }}; background: {{ b.bg }}; border-style: {{ b.bs }}">
+                <div class="wf-lab" style="background: {{ b.lb }}">{{ b.t }}</div>
+                <sc-if value="{{ b.hasCols }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; gap: 8px; margin-bottom: 7px">
+                    <sc-for list="{{ b.cols }}" as="c" hint-placeholder-count="3">
+                      <div style="flex: 1; min-width: 0; font-size: 10.5px; color: var(--color-neutral-800); border-bottom: 1px solid var(--color-neutral-400); padding-bottom: 3px">{{ c }}</div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-for list="{{ b.bars }}" as="w" hint-placeholder-count="2">
+                  <div class="wf-bar" style="width: {{ w }}; margin-top: 5px"></div>
+                </sc-for>
+                <sc-if value="{{ b.note }}" hint-placeholder-val="{{ false }}">
+                  <div class="wf-note" style="margin-top: 7px">{{ b.note }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding: 0 13px 13px">
+            <h5>五态</h5>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <sc-for list="{{ sc.states }}" as="st" hint-placeholder-count="5">
+                <div class="wf-st">
+                  <div style="font-family: var(--font-heading); font-size: 12px; letter-spacing: 0.06em">{{ st.k }}</div>
+                  <div class="wf-note" style="margin-top: 3px">{{ st.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding: 0 13px 14px">
+            <h5>问题与改动</h5>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{ sc.issues }}" as="is" hint-placeholder-count="3">
+                <div style="display: flex; align-items: flex-start; gap: 8px">
+                  <span class="tag" style="flex: none; white-space: nowrap; background: {{ is.bg }}; color: {{ is.fg }}">{{ is.lv }}</span>
+                  <div class="wf-note" style="font-size: 11.5px">{{ is.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="wf-sec" id="b2">
+    <h2>批次二 · Dashboard、全局告警与待办</h2>
+    <p style="max-width: 1100px; margin: 0 0 22px; color: var(--color-neutral-800)">旅程文档写的是「首屏应优先回答今天必须处理什么」。当前 Dashboard 平均展示所有模块的 KPI，异常和常规指标同级。这一批把首屏改成一条按可操作性排序的处理队列，KPI 降为第二层证据；并保住 <b>RETRYING + job DEAD</b> 这个组合在告警条、徽章、未解决队列三处都可见。</p>
+    <div class="wf-row">
+      <sc-for list="{{ batch2 }}" as="sc" hint-placeholder-count="2">
+        <div class="wf-screen" style="width: {{ sc.w }}px">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; border-bottom: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+            <span class="wf-sid">{{ sc.sid }}</span>
+            <div style="min-width: 0; flex: 1">
+              <h3>{{ sc.name }}</h3>
+              <div style="font-size: 11px; color: var(--color-neutral-700); margin-top: 2px">{{ sc.route }} · {{ sc.role }} · {{ sc.vp }}</div>
+              <div style="font-size: 12px; margin-top: 5px; text-wrap: pretty">{{ sc.goal }}</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px">
+            <sc-for list="{{ sc.blocks }}" as="b" hint-placeholder-count="6">
+              <div class="wf-blk" style="min-height: {{ b.h }}px; border-color: {{ b.bc }}; background: {{ b.bg }}; border-style: {{ b.bs }}">
+                <div class="wf-lab" style="background: {{ b.lb }}">{{ b.t }}</div>
+                <sc-if value="{{ b.hasCols }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; gap: 8px; margin-bottom: 7px">
+                    <sc-for list="{{ b.cols }}" as="c" hint-placeholder-count="3">
+                      <div style="flex: 1; min-width: 0; font-size: 10.5px; color: var(--color-neutral-800); border-bottom: 1px solid var(--color-neutral-400); padding-bottom: 3px">{{ c }}</div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-for list="{{ b.bars }}" as="w" hint-placeholder-count="2">
+                  <div class="wf-bar" style="width: {{ w }}; margin-top: 5px"></div>
+                </sc-for>
+                <sc-if value="{{ b.note }}" hint-placeholder-val="{{ false }}">
+                  <div class="wf-note" style="margin-top: 7px">{{ b.note }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding: 0 13px 13px">
+            <h5>五态</h5>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <sc-for list="{{ sc.states }}" as="st" hint-placeholder-count="5">
+                <div class="wf-st">
+                  <div style="font-family: var(--font-heading); font-size: 12px; letter-spacing: 0.06em">{{ st.k }}</div>
+                  <div class="wf-note" style="margin-top: 3px">{{ st.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding: 0 13px 14px">
+            <h5>问题与改动</h5>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{ sc.issues }}" as="is" hint-placeholder-count="3">
+                <div style="display: flex; align-items: flex-start; gap: 8px">
+                  <span class="tag" style="flex: none; white-space: nowrap; background: {{ is.bg }}; color: {{ is.fg }}">{{ is.lv }}</span>
+                  <div class="wf-note" style="font-size: 11.5px">{{ is.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="wf-sec" id="b3">
+    <h2>批次三 · 工单：列表 → 新建 → 详情 → 修改审核</h2>
+    <p style="max-width: 1100px; margin: 0 0 8px; color: var(--color-neutral-800)">你点名的痛点：<b>「工单页太繁琐，在保证功能正常的情况下尽可能高效率」</b>。所以这一批不做减字段——旅程文档明确「不得删掉对计价和生产有意义的字段」——而是改<b>录入节奏</b>：把一次性长表单拆成「三段 + 常驻摘要」，把款式从「全部展开堆叠」改成「摘要行列表 + 一次只开一款的编辑区」，把重复劳动交给「按上次 / 复制上一款」，把校验从提交后报错改成常驻清单可点跳。</p>
+    <p style="max-width: 1100px; margin: 0 0 22px; color: var(--color-neutral-800)">效率的可验收口径写在每屏的「问题与改动」里：字段数不变、点击数与滚动距离下降、错误定位从「提交后找」变成「随时可见」。</p>
+    <div class="wf-row">
+      <sc-for list="{{ batch3 }}" as="sc" hint-placeholder-count="6">
+        <div class="wf-screen" style="width: {{ sc.w }}px">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; border-bottom: 1px solid var(--color-divider); background: var(--color-neutral-200)">
+            <span class="wf-sid">{{ sc.sid }}</span>
+            <div style="min-width: 0; flex: 1">
+              <h3>{{ sc.name }}</h3>
+              <div style="font-size: 11px; color: var(--color-neutral-700); margin-top: 2px">{{ sc.route }} · {{ sc.role }} · {{ sc.vp }}</div>
+              <div style="font-size: 12px; margin-top: 5px; text-wrap: pretty">{{ sc.goal }}</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px">
+            <sc-for list="{{ sc.blocks }}" as="b" hint-placeholder-count="7">
+              <div class="wf-blk" style="min-height: {{ b.h }}px; border-color: {{ b.bc }}; background: {{ b.bg }}; border-style: {{ b.bs }}">
+                <div class="wf-lab" style="background: {{ b.lb }}">{{ b.t }}</div>
+                <sc-if value="{{ b.hasCols }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; gap: 8px; margin-bottom: 7px">
+                    <sc-for list="{{ b.cols }}" as="c" hint-placeholder-count="4">
+                      <div style="flex: 1; min-width: 0; font-size: 10.5px; color: var(--color-neutral-800); border-bottom: 1px solid var(--color-neutral-400); padding-bottom: 3px">{{ c }}</div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-for list="{{ b.bars }}" as="w" hint-placeholder-count="2">
+                  <div class="wf-bar" style="width: {{ w }}; margin-top: 5px"></div>
+                </sc-for>
+                <sc-if value="{{ b.note }}" hint-placeholder-val="{{ false }}">
+                  <div class="wf-note" style="margin-top: 7px">{{ b.note }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding: 0 13px 13px">
+            <h5>五态</h5>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <sc-for list="{{ sc.states }}" as="st" hint-placeholder-count="5">
+                <div class="wf-st">
+                  <div style="font-family: var(--font-heading); font-size: 12px; letter-spacing: 0.06em">{{ st.k }}</div>
+                  <div class="wf-note" style="margin-top: 3px">{{ st.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding: 0 13px 14px">
+            <h5>问题与改动</h5>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{ sc.issues }}" as="is" hint-placeholder-count="4">
+                <div style="display: flex; align-items: flex-start; gap: 8px">
+                  <span class="tag" style="flex: none; white-space: nowrap; background: {{ is.bg }}; color: {{ is.fg }}">{{ is.lv }}</span>
+                  <div class="wf-note" style="font-size: 11.5px">{{ is.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="wf-sec" id="plan">
+    <h2>85 页批次计划</h2>
+    <p style="max-width: 1100px; margin: 0 0 14px; color: var(--color-neutral-800)">交接包盘点 85 个 <code>page.tsx</code>。按你勾选的顺序分 8 批；本轮完成前 3 批的线框。</p>
+    <div class="blueprint" style="max-width: 1100px; margin-bottom: 22px; padding: 12px 14px">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family: var(--font-heading); font-size: 15px; letter-spacing: 0.04em">完整性核对</div>
+      <div style="font-size: 12px; line-height: 1.75; color: var(--color-neutral-800); margin-top: 4px">按清单分节加总：全局认证与打印 5 + 共享工单 4 + 生产外协考勤车间 10 + 管理员后台 56 + 外部销售 4 + 师傅 H5 6 = <b>85</b>。按批次加总：3 + 1 + 5 + 8 + 9 + 13 + 41 = <b>81 个有 UI 的页面</b>，加批次八记账的 <b>4 个纯跳转页</b>（<code>/</code>、<code>external-sales</code>、<code>external-sales/logistics</code>、<code>sales/quote/logistics</code>）= <b>85</b>，两边对上。<b>额外设计目标（不在 85 之内）</b>：共用 not-found（清单明确不计入）；CUSTOMER_SERVICE 没有独立页面文件，复用工单四页但动作集不同，三个 GAP/TEXT Screen ID（CS-ORDERS-01 / CS-ORDER-NEW-01 / CS-ORDER-DETAIL-01）当作批次三的独立设计对象，等你给动作差异清单。</div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; max-width: 2900px">
+      <sc-for list="{{ plan }}" as="p" hint-placeholder-count="8">
+        <div class="blueprint" style="padding: 14px 15px 16px; background: {{ p.bg }}">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display: flex; align-items: baseline; gap: 10px">
+            <span style="font-family: var(--font-heading); font-size: 26px">{{ p.n }}</span>
+            <span style="font-family: var(--font-heading); font-size: 17px; flex: 1">{{ p.title }}</span>
+            <span class="tag tag-neutral" style="white-space: nowrap">{{ p.count }}</span>
+          </div>
+          <div style="margin-top: 4px"><span class="tag" style="white-space: nowrap; background: {{ p.sbg }}; color: {{ p.sfg }}">{{ p.status }}</span></div>
+          <div style="margin-top: 10px; font-size: 11.5px; line-height: 1.6; color: var(--color-neutral-800); text-wrap: pretty">{{ p.routes }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="wf-sec" id="review" style="border-bottom: none">
+    <h2>A–E 评审</h2>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 34px; max-width: 2200px; margin-top: 14px">
+      <sc-for list="{{ review }}" as="r" hint-placeholder-count="5">
+        <div style="border-top: 2px solid var(--color-accent); padding-top: 12px">
+          <h3 style="font-size: 20px">{{ r.h }}</h3>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 9px">
+            <sc-for list="{{ r.items }}" as="x" hint-placeholder-count="4">
+              <div style="display: flex; align-items: flex-start; gap: 9px">
+                <span style="flex: none; width: 6px; height: 6px; margin-top: 7px; background: var(--color-accent)"></span>
+                <div style="font-size: 13px; line-height: 1.6; color: var(--color-neutral-900); text-wrap: pretty">{{ x }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:3000,&quot;height&quot;:1400}}">
+const N400 = 'var(--color-neutral-400)';
+const N300 = 'var(--color-neutral-300)';
+const ACC = 'var(--color-accent)';
+const ACC100 = 'var(--color-accent-100)';
+
+// b(label, height, {c: columns, r: bar widths, n: note, k: kind})
+// kind: '' 普通 | 'a' 主操作/决策 | 'd' 渐进展开
+function b(t, h, o) {
+  o = o || {};
+  const k = o.k || '';
+  return {
+    t, h,
+    bc: k === 'a' ? ACC : (k === 'd' ? 'var(--color-neutral-500)' : N400),
+    bg: k === 'a' ? ACC100 : 'transparent',
+    bs: k === 'd' ? 'dashed' : 'solid',
+    lb: k === 'a' ? ACC : N300,
+    hasCols: !!o.c, cols: o.c || [],
+    bars: o.r || [], note: o.n || '',
+  };
+}
+
+const LV = {
+  Blocker: { bg: 'var(--color-accent-800)', fg: 'var(--color-bg)' },
+  High: { bg: 'var(--color-accent-200)', fg: 'var(--color-accent-900)' },
+  Medium: { bg: 'var(--color-neutral-200)', fg: 'var(--color-neutral-900)' },
+  推断: { bg: 'transparent', fg: 'var(--color-accent-700)' },
+  更正: { bg: 'var(--color-accent-700)', fg: 'var(--color-bg)' },
+};
+function iss(lv, d) { return { lv, d, bg: LV[lv].bg, fg: LV[lv].fg }; }
+
+const BATCH1 = [
+  {
+    sid: 'SYS-SHELL-01', name: '后台外壳与导航', route: 'app/(admin)/layout', role: 'ADMIN / SALES / CS', vp: '1280×800', w: 1280,
+    goal: '在不增加点击的前提下，让用户随时知道「我在哪、有什么异常、下一步能做什么」。外壳决定其余 80 页的密度上限。',
+    blocks: [
+      b('顶栏 56px', 42, { c: ['品牌 / 侧栏折叠', '全局搜索（当前没有）', '告警铃 + 未解决计数', '主题', '账号'], n: '观察（dashboard-light 1280）：顶栏右侧有 工单/排产/采购单/仓库/库位 五个链接，其中前三个与侧栏完全重复；主题切换与账号也挤在同一区。改为：左品牌+折叠、中全局搜索、右告警+主题+账号，导航只保留侧栏一处。' }),
+      b('全局告警条（仅有未解决项时出现）', 40, { k: 'a', n: '一行一条最高优先级：通知 UNKNOWN / RETRYING+DEAD / 超期外协 / 交期风险。文字 + 图标双编码，不靠颜色单独承担。点击进未解决队列，不是弹窗。' }),
+      b('侧栏导航 228px · 重大更正', 130, { c: ['实际 30 个模块', '数据驱动', '按角色裁剪', '我之前的结论是错的'], n: '更正（读了 lib/navigation/admin-modules.ts）：侧栏是数据驱动的，ADMIN 共 30 个模块，不是 13 个。外部销售收费、内部报价、产品字典、产品分类、客户/供应商、工艺字典、BOM/用料、物料、仓库/库位、用户管理、推送配置、系统设置、Pigsty 运维、后台任务、CDR 汇总——全部都已经在导航里。我看到的 13 项是截图里侧栏被截断的那一段，我把它当成了全部。所以「补主数据/设置两组」这条建议作废。真正待解的是导航长度：30 项单层平铺，800px 装不下必然滚动，需要的是分组可折叠 + 记住折叠状态 + 高频项置顶。另：SALES/CS 侧栏里有 routeBase 为 # 的占位项（我的 Dashboard、我的业绩、我的工资单、报价查询），这些确实要灰态标「未上线」。' }),
+      b('页头模式（全站统一）', 62, { c: ['面包屑', '页面标题 + 计数', '页面级说明', '主操作 1–2 个'], n: '面包屑末项与 H1 不再重复；主操作固定右上，破坏性动作不与常规导航平级。' }),
+      b('内容区', 150, { n: '单列或「列表 + 详情」双列；双列右栏 sticky。滚动边界属于内容区，页头与告警条不随之滚动。' }),
+      b('底部常驻操作条（表单/编辑页出现）', 40, { k: 'a', n: '保存 / 提交 / 放弃 + 未保存计数 + 校验摘要。取代「滚到底才有按钮」。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '侧栏与页头即时渲染，内容区骨架屏；不整页转圈，避免布局跳动。' },
+      { k: 'Empty', d: '区分「无数据」「筛选无结果」「无权限」三种文案与下一步动作。' },
+      { k: 'Error', d: '内容区级错误 + 重试；外壳保持可用，用户仍能换页。' },
+      { k: 'Disabled', d: '无权限菜单隐藏，有权限但状态不允许的动作显示禁用 + 原因。' },
+      { k: 'Pending', d: '底部操作条按钮进入 pending，禁止重复提交，允许离开时提示。' },
+    ],
+    issues: [
+      iss('更正', '本项目最严重的一条错误：我说「侧栏只覆盖 12–13 项、40 余页没有导航入口」——完全错了。admin-modules.ts 里 ADMIN 有 30 个模块，主数据、设置、运维全在导航里。而这条错结论是本批「补两组」建议的唯一依据，一并作废。教训：截图里看到的列表长度不等于它的全部。'),
+      iss('High', '面包屑的真正原因也找到了：模块定义里每个都带 breadcrumbLabel（cdr →「CDR 汇总」、order-changes →「工单修改申请」），但 AdminBreadcrumb 用的是它自己那张 SEGMENT_LABELS，两张表不同步。不是「漏了 key」，是「现成的数据没用上」——修法更简单：面包屑优先读模块表，再回落 SEGMENT_LABELS，最后回落 H1。'),
+      iss('High', '观察（dashboard-light 等三图）：侧栏 30 项单层平铺，800px 高度装不下，必然滚动且下半被截。需要的不是补分组，而是分组可折叠 + 记住折叠状态 + 高频项置顶。'),
+      iss('更正', '上一版我建议补一个「运维」组，不对。这四页不是一类东西：通知配置与系统设置是业务配置，CDR 是车间作业，只有 Pigsty 是纯基础设施只读。按「谁处置、处置后果是不是业务」切：Pigsty 不进导航；后台任务拆开（worker 心跳、队列深度跟 Pigsty 走，死信里有业务后果的并进告警队列）；其余归「设置」组。'),
+      iss('High', '观察（dashboard-light）：顶栏右侧 工单/排产/采购单 与侧栏重复，同一目标两个入口且高亮状态不同步。'),
+      iss('High', '观察（order-changes-light）：面包屑末项显示英文路由段「order-changes」而不是中文页面名——AdminBreadcrumb 缺少该路由的中文映射。需要按全站路由补齐映射表。'),
+      iss('推断', '全局告警条：三张截图都只在 /owner 首页看到告警类卡片，离开首页后未见常驻入口。提为外壳级常驻属推断，需确认数据来源与轮询成本。'),
+      iss('Medium', '约束保持：灰色占位菜单保留灰态并标「未上线」，不设计成已上线功能。'),
+    ],
+  },
+  {
+    sid: 'SYS-SHELL-02', name: '后台外壳 · 窄屏降级', route: 'app/(admin)/layout', role: 'ADMIN / SALES / CS', vp: '393×852', w: 393,
+    goal: '后台在手机上是「偶发查看 + 少量处置」，不是主场景。目标是不撑破、不静默裁列、关键动作拇指可达。',
+    blocks: [
+      b('顶栏', 38, { c: ['菜单', '标题', '告警'], n: '侧栏收为抽屉；标题区显示当前页与筛选摘要。' }),
+      b('告警条', 34, { k: 'a', n: '压成一行 + 计数徽章，点开是队列页而不是折叠面板。' }),
+      b('内容：卡片化', 150, { n: '观察（orders-light 393）：当前表格在 393 下只显示「工单号」一列，长工单号在右边缘被直接切断，页面本身没有横向溢出——问题是表格容器静默裁列裁字，不是撑破 body。改为一行一卡：卡内 3 行（标识 / 关键指标 / 状态+动作）；确需表格时给明确的横向滚动区与边缘阴影提示。' }),
+      b('底部主操作 + 安全区', 46, { k: 'a', n: '≥44×44 触控目标，env(safe-area-inset-bottom) 内边距，软键盘弹出时不遮挡提交。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '卡片骨架 3 张，高度固定，避免 CLS。' },
+      { k: 'Empty', d: '空态文案 + 单个主动作按钮，占满拇指区。' },
+      { k: 'Error', d: '整页错误卡 + 重试；保留返回列表路径。' },
+      { k: 'Disabled', d: '禁用动作给出一行原因，不做纯灰按钮。' },
+      { k: 'Pending', d: '提交按钮内联 spinner + 禁用，长任务转后台并提示回来查看。' },
+    ],
+    issues: [
+      iss('Blocker', '观察（orders-light 393）：表格容器静默裁掉除「工单号」以外的全部列，长工单号也被切断，无滚动条与任何提示。交接包 §10 明确「不能静默裁掉关键列」。这是裁切，不是撑破——上一版我写「横向撑破」措辞不准，已更正。'),
+      iss('更正', '上一版把「约 28 个文件无横向滚动容器」当作现状写成 Blocker，来源是 docs/codex-ui-brief.md ——交接包 §7 与 §1 都说明该文件的现状描述已过时，且仓库里已有 375/393/768/1024/1920 五档 + 暗色的视觉回归产物，说明多视口闸已经在跑。该条已改为只依据 393 截图陈述。'),
+      iss('High', '观察（order-new-light 393 直接可见）：长表单提交按钮在页面最底部且不吸底；order-detail-light 393 的页头动作条（编辑/外协/打印/下载 PDF）折两行且同样不吸顶。改为常驻操作条 + env(safe-area-inset-bottom) 内边距。'),
+    ],
+  },
+  {
+    sid: 'WRK-SHELL-01', name: '师傅端外壳', route: 'app/(worker)/layout', role: 'WORKER', vp: '393×852（主视口）', w: 393,
+    goal: '车间单手操作。首屏直接回答「我现在做哪一件」，开工与报工在拇指区，不需要读导航。',
+    blocks: [
+      b('精简顶栏', 34, { c: ['本人姓名/工种', '今日汇总'], n: '不放全局搜索、不放面包屑；师傅不需要跨页导航。' }),
+      b('当前任务卡（置顶、唯一强调）', 96, { k: 'a', r: ['70%', '46%'], n: '急单优先。卡内：工单号+款式、工艺、目标数量、承诺交期；主按钮「开始生产 / 报工」占满宽度，≥48px 高。' }),
+      b('待处理任务列表', 110, { n: '一行一卡；支持多选批量开工/完工（旅程 §6）。已完成与取消为只读，视觉与可操作项明显区分。' }),
+      b('底部 Tab', 44, { c: ['任务', '我的工单', '我的工资'], n: '三个 Tab 对应师傅的 6 个页面；拇指区，≥44×44。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '当前任务卡骨架优先出现，列表其后；不让首屏空白。' },
+      { k: 'Empty', d: '「今天没有分配给你的任务」+ 查看我的工单 / 我的工资 两个出口。' },
+      { k: 'Error', d: '报工提交失败：保留已填数字，给出重试；不清空表单。' },
+      { k: 'Disabled', d: '未开工不能报工、他人任务不可操作，禁用并说明原因。' },
+      { k: 'Pending', d: '报工提交中锁定按钮；成功后明确反馈「已计入今日计件」并回到列表。' },
+    ],
+    issues: [
+      iss('High', '推断：当前师傅端与后台共用较通用的列表密度。改为「当前任务」单卡置顶，其余降为列表——需确认业务上是否允许并行多任务。'),
+      iss('Medium', '约束保持：报工影响生产进度与工资，必须有确认与结果反馈；不做静默提交。'),
+    ],
+  },
+  {
+    sid: 'AUTH-LOGIN-01', name: '登录', route: '/login', role: '公开', vp: '1280 / 393 同一卡片', w: 393,
+    goal: '内部账号登录并安全回到 from。限流后的文案要可理解、可恢复，但不改服务端准入语义。',
+    blocks: [
+      b('品牌区', 40, { n: '工厂名 + 环境标（DEVELOPMENT 等），让人确认自己登的是哪套环境。' }),
+      b('表单', 88, { c: ['账号', '密码'], n: '零 JS 可提交（Server Action），label 正确关联，autocomplete 完整。' }),
+      b('主按钮 + 状态区', 44, { k: 'a', n: '登录按钮 + 内联状态；错误、pending、限流三种消息共用同一区域，不叠加多个提示条。' }),
+      b('恢复指引', 34, { k: 'd', n: '限流时展示「稍后重试的具体时间 + 找管理员重置」；不暗示「只有密码错才计次」。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '首屏即完整表单，无骨架（服务端渲染）。' },
+      { k: 'Empty', d: '初始态：无错误提示，焦点在账号输入框。' },
+      { k: 'Error', d: '账号或密码错误：统一文案不区分「账号不存在」，避免账号枚举。' },
+      { k: 'Disabled', d: '限流窗口内按钮禁用 + 倒计时；文案说明成功登录也计入尝试。' },
+      { k: 'Pending', d: '按钮 pending 且禁止重复提交（重复提交也是一次尝试）。' },
+    ],
+    issues: [
+      iss('High', '约束保持：成功登录也消耗 GCRA 令牌、非法表单也算一次尝试，均为刻意设计。只优化文案与恢复指引，不动准入语义。'),
+      iss('Medium', '待业主确认：厂区 NAT 共享出口可能导致整厂误伤。是否需要「按账号 + 按 IP」双维度提示，属安全取舍，列入待确认。'),
+    ],
+  },
+  {
+    sid: 'SYS-404-01', name: '404 / 无权限', route: 'not-found', role: '全部', vp: '1280 / 393', w: 393,
+    goal: '不泄露记录是否存在，同时给出可用的返回路径。',
+    blocks: [
+      b('说明区', 56, { n: '统一文案：「找不到这个页面，或你没有访问权限」。不区分「不存在」与「无权限」——这是必须保留的语义。' }),
+      b('出口', 40, { k: 'a', c: ['回我的工作台', '全局搜索'], n: '按角色给出正确的工作台入口（ADMIN→看板，SALES/CS→我的工单，WORKER→我的任务）。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '不适用（静态页）。' },
+      { k: 'Empty', d: '即本页；不再细分。' },
+      { k: 'Error', d: '与全局 error 边界区分：404 是预期结果，不显示「系统错误」。' },
+      { k: 'Disabled', d: '不适用。' },
+      { k: 'Pending', d: '不适用。' },
+    ],
+    issues: [
+      iss('High', '约束保持：不得因为「文案更友好」而区分「记录不存在」和「无权访问」。'),
+    ],
+  },
+];
+
+const BATCH2 = [
+  {
+    sid: 'DASH-01', name: '管理看板', route: '/owner', role: 'ADMIN', vp: '1280×800', w: 1280,
+    goal: '首屏在不滚动的情况下回答「今天必须处理什么」，并且每一条都能点进可操作队列。',
+    blocks: [
+      b('处理队列（首屏第一块，按可操作性排序）', 132, { k: 'a', c: ['信号', '数量', '最早到期', '责任人', '进入处置'], r: ['96%', '96%', '96%'], n: '取代当前首屏顺序：观察（dashboard-light）现在是 160px 的「欢迎回来，E2E 管理员」问候卡 → 4 张 KPI → 4 张快捷入口 → 到 y≈560 才是「超期外协」「待发货工单」。把可处置信号提到第一块：待排产 / 交期风险 / 超期外协 / 未解决通知 / 后台任务异常。图标 + 文字双编码，颜色不单独承担含义。' }),
+      b('通知未解决专列（语义不可合并）', 74, { c: ['UNKNOWN 结果不明', 'RETRYING 可重试', 'RETRYING + job DEAD', 'FAILED 确定失败'], n: '四种状态分列显示。RETRYING + job DEAD 必须单独可见，不得改写成 FAILED；UNKNOWN 文案诚实写「无法确认企业微信是否已收到」，不写「待自动重试」。' }),
+      b('KPI 行（降为第二层证据）', 68, { c: ['今日提交工单', '今日完工', '今日发货', '本月应收'], n: '沿用现有四张 KPI（含「无急单」「与昨日持平」「已收/未收」这类副文案，保留），只从首屏主角下移为队列的支撑数字。外协覆盖保持 max 口径，不改 sum，指标名不重命名。' }),
+      b('趋势图', 92, { k: 'd', n: '观察：当前「近 30 天产量趋势」已在 y≈1400 的第二屏，位置本身合理，只补折叠。分类色是否可分辨本轮无法验证——截图内三个图表都是「暂无数据」；且「本月销售业绩 Top 10」副标题写着「SALES 蓝色 / 客服 绿色」，说明分类色已在用。见 D 段待确认。' }),
+      b('快捷入口', 52, { k: 'd', n: '按角色与近期使用排序；占位功能保持灰态。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '处理队列骨架优先，KPI 与图表其后；固定高度防跳动。' },
+      { k: 'Empty', d: '「今天没有待处理信号」是一个好结果，明确表达，并给出常规入口。' },
+      { k: 'Error', d: '分区错误：某个数据源失败只让该块显示重试，不整页失败。' },
+      { k: 'Disabled', d: '非 ADMIN 不进本页；越权入口不渲染。' },
+      { k: 'Pending', d: '队列内的处置动作（如标记已处理）pending 时行内锁定，不整页遮罩。' },
+    ],
+    issues: [
+      iss('Blocker', '观察（dashboard-light 1280 + 393 两个视口都如此）：「超期外协」卡内表格右侧被容器裁切——「超期 40 天 / 39 天」徽章之后的状态列与「进…」动作链接被切掉；「待发货工单」卡的提交人与日期列同样被裁（393 下连客户名称都不全）。告警看得见但点不到，正是旅程 §2 要求的「必须能进入可操作队列」没有达成。'),
+      iss('更正', '上一版写「告警只有颜色与数字，无法进入队列」不准确：动作链接是存在的，只是被横向裁掉了。已按截图更正为裁切问题。'),
+      iss('High', '观察（dashboard-light 1280 + 393）：首屏第一块是不含任何可处置信息的问候卡（160px）；393 下 4 张 KPI + 4 张快捷入口单列堆成约 600px，第一个可处置信号要滚两屏以上。改为处理队列优先，KPI 与快捷入口次之，问候卡删除或压成一行。'),
+      iss('High', '约束保持：RETRYING + job DEAD 必须在告警条、徽章、未解决队列三处可见。'),
+      iss('推断', '图表分类色是否可分辨：本轮三个图表均无数据，无法验证。上一版按旧 UI brief 断言「灰阶不可分辨」已撤回，改为待确认项。'),
+    ],
+  },
+  {
+    sid: 'DASH-02', name: '未解决队列（告警落地页）', route: '/owner/notifications#unresolved', role: 'ADMIN', vp: '1280×800', w: 1280,
+    goal: '把告警条的一次点击落到一个可以逐条处置并留痕的队列，而不是一个配置页。',
+    blocks: [
+      b('队列筛选', 44, { c: ['状态', '事件', '时间窗', '只看未解决'], n: '默认「未解决」；状态筛选按四种传输语义分开，不合并。' }),
+      b('队列表', 148, { c: ['事件', '目标群', '传输状态', 'job 状态', '最后尝试', '人工决策'], r: ['96%', '96%', '96%', '96%'], n: '传输状态与 job 状态是两列，因为 RETRYING + DEAD 是合法组合。人工决策列给「已人工确认送达 / 需重发 / 忽略」，每次决策留痕。' }),
+      b('单条详情抽屉', 96, { k: 'd', n: '展示脱敏 webhook、请求时间线、企业微信返回码。不显示完整 webhook 密钥。' }),
+      b('批量处置', 40, { k: 'a', n: '仅允许对「已人工确认」类做批量；UNKNOWN 不提供批量自动重试入口。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '表格骨架 4 行。' },
+      { k: 'Empty', d: '「没有未解决项」+ 切换到全部日志的入口。' },
+      { k: 'Error', d: '拉取失败：保留筛选条件，给重试。' },
+      { k: 'Disabled', d: 'UNKNOWN 的「自动重试」永久不可用，并说明原因（防重复发送）。' },
+      { k: 'Pending', d: '人工决策提交中逐行锁定，结果明确回显。' },
+    ],
+    issues: [
+      iss('Blocker', '约束保持：不得把 UNKNOWN 设计成自动重试、不得把 RETRYING 改写成 FAILED。界面必须能表达「结果不明」。'),
+      iss('High', '推断：需要「人工决策」这一列来闭环 UNKNOWN。是否已有对应服务端字段与审计，列入待业主确认。'),
+    ],
+  },
+];
+
+const BATCH3 = [
+  {
+    sid: 'ORD-LIST-01', name: '工单列表', route: '/orders', role: 'ADMIN / SALES / CS（按 scope）', vp: '1280×800', w: 1280,
+    goal: '一屏看出急单与阻断项，常用组合筛选一次点到，行内就能做下一步动作。',
+    blocks: [
+      b('页头', 52, { c: ['面包屑', '工单 · 计数', '导出（ADMIN）', '新建工单'], n: '沿用现状：orders-light 已有「标题 + 说明 + 右上主按钮」，且导出弹框已写清「导出筛选结果（N 条）/ 导出全部工单」与「文件 24 小时后过期」。本项无需重设计，只把这套页头模式推到全站。' }),
+      b('保存视图（新增，效率核心）', 44, { k: 'a', c: ['我的急单', '今天要发', '待排产', '待审核修改', '+ 保存当前条件'], n: '把最常用的筛选组合固化成一次点击。取代每次重开筛选面板逐项选。' }),
+      b('常驻筛选一行 + 已选 chips', 62, { c: ['搜索（工单号/客户/款式）', '状态', '交期', '负责人', '更多筛选'], n: '观察：折叠态只有「筛选条件」加箭头（orders-light）；有筛选时变为「更多筛选 · 已启用」一个布尔徽章，不告诉你是哪些条件（orders-filtered-light）。已选 chips 在展开区上方存在，折叠后看不到。改为：常驻一行 + 已选条件 chips 可单独移除 + 清除全部；结果计数紧邻筛选而不是飘在右上角。' }),
+      b('表格：固定列 + 可选列 + 明确横滚区', 150, { c: ['工单号 / 客户', '状态 + 阻断原因', '承诺交期', '款式数 / 数量', '金额（按权限）', '行内动作'], r: ['96%', '96%', '96%', '96%'], n: '观察（orders-light 1280）：现在只看得见 工单号 / 工单名称 / 客户名称 三列，且第三列在右边缘被切断；状态、承诺交期、金额、动作全部不可见，也没有滚动提示。固定前 2 列，其余入明确的横滚区；急单与交期风险用图标 + 文字双编码；行内动作（排产/打印/查看变更）免掉往返。' }),
+      b('分页 + 每页条数', 40, { n: '沿用现状：已有「共 36 条 · 每页 20 条 · 第 1/2 页」与上/下一页。只补两件：每页条数可改、筛选与排序进 URL（可分享、可后退、返回不丢上下文）。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '保留表头与筛选，行区骨架 6 行；不整页转圈。' },
+      { k: 'Empty', d: '沿用现有空态（图标 + 「暂无工单 / 工单提交后会出现在这里」），只拆三态：无工单 / 筛选无结果（一键清除条件）/ 无权限。' },
+      { k: 'Error', d: '拉取失败保留筛选条件与滚动位置，行区显示重试。' },
+      { k: 'Disabled', d: 'SALES/CS 不渲染导出与计件成本列；不显示为灰色按钮（避免暗示可申请）。' },
+      { k: 'Pending', d: '沿用现状：导出已是独立重任务 + 24 小时过期说明，已经是正确的长任务处理，不动。' },
+    ],
+    issues: [
+      iss('Blocker', '观察（orders-light 1280）：表格在 1280 下只渲出 3 列，第 3 列在右边缘被切断，状态 / 承诺交期 / 金额 / 动作完全不可见。旅程 §3 要求的「看出急单和阻断项」在当前实现下无法完成。本批最高优先。'),
+      iss('High', '观察（orders-filtered-light）：「更多筛选」展开后是一张 30+ 字段的巨型表单（工艺 17 个勾选、生产任务状态 4、机器类型 3、外协状态 4、金额/数量/交期区间…），折叠后只留一个「已启用」布尔徽章。拆为：常驻高频一行 + chips 永远可见 + 高级筛选分组收进抽屉。'),
+      iss('High', '效率：无保存视图。每天在 30+ 字段里重复选同一组条件。新增「我的急单 / 今天要发 / 待排产 / 待审核修改」+ 保存当前条件。'),
+      iss('High', '效率（orders-light）：表格无行内动作，所有操作必须进详情再返回，且返回后筛选与滚动位置丢失。补行内动作 + 状态入 URL。'),
+      iss('更正', '上一版两条已删：①「导出按钮要写明 N 条」——已存在（导出筛选结果（0 条）/ 导出全部工单）；②「结果计数饣在右上角」——实际已紧邻筛选卡标题（共找到 36 条工单）。'),
+      iss('Medium', '约束保持：SALES/CS 的 scope 与可见列不变；金额与计件成本按权限裁剪，不因共用页面而暴露。'),
+    ],
+  },
+  {
+    sid: 'ORD-LIST-02', name: '工单列表 · 窄屏降级', route: '/orders', role: 'ADMIN / SALES / CS', vp: '393×852', w: 393,
+    goal: '手机上能查、能筛、能进详情；不撑破、不静默裁列。',
+    blocks: [
+      b('搜索 + 保存视图（横滚 chips）', 46, { k: 'a', n: '视图 chips 横向滚动，一次点击切批。' }),
+      b('筛选进抽屉', 34, { k: 'd', n: '底部抽屉 + 已选计数徽章；应用后回列表并显示 chips。' }),
+      b('卡片列表（一行一卡）', 150, { n: '卡内三行：① 工单号 + 客户 ② 状态 + 阻断原因 + 承诺交期 ③ 款式/数量 + 主动作。金额按权限决定是否出现。' }),
+      b('加载更多 / 分页', 40, { n: '保持服务端分页语义；按钮 ≥44px。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '卡片骨架 3 张，固定高度。' },
+      { k: 'Empty', d: '同桌面三态，文案更短，主动作占满宽度。' },
+      { k: 'Error', d: '整块错误卡 + 重试，保留已选筛选。' },
+      { k: 'Disabled', d: '越权列与动作不渲染。' },
+      { k: 'Pending', d: '导出在手机上默认隐藏（长任务 + 下载体验差），需业主确认。' },
+    ],
+    issues: [
+      iss('Blocker', '观察（orders-light 393）：表格只剩「工单号」一列，长工单号在右边缘被切断，无滚动条也无提示——静默裁列，非撑破 body。改卡片化。'),
+      iss('Medium', '观察（orders-light 393）：导出入口在手机上仍存在。待业主确认是否保留。'),
+    ],
+  },
+  {
+    sid: 'ORD-NEW-01', name: '新建工单（效率重构核心）', route: '/orders/new', role: 'ADMIN / SALES / CS', vp: '1280×800', w: 1280,
+    goal: '字段一个不减，但把「一次填完一张长表单」改成「三段推进 + 常驻摘要 + 随时可见的缺口清单」。',
+    blocks: [
+      b('页头 + 草稿状态', 48, { c: ['面包屑', '新建工单', '自动保存于 …', '放弃草稿'], n: '自动保存草稿并显示时间戳；手机/断网后可恢复。取代「填一半丢失」。' }),
+      b('段一：客户与交期', 78, { c: ['客户（可搜索 + 最近使用）', '联系人', '承诺交期', '业务归属'], n: '「按上次」按钮：一键带入该客户上次的联系人/交期口径/收货地址。这是最高频的重复劳动。' }),
+      b('段二：款式列表（摘要行）', 96, { k: 'a', c: ['#', '款式名 / 规格', '纸张', '工艺数', '数量', '成交单价', '缺口'], r: ['96%', '96%'], n: '更正（见下方第一条）：上一版我提的「行内编辑 6 列」字段量装不下。改为主从结构：这里只是摘要行（一行一款，可拖拽排序、可删除、尾部「复制上一款」），点一行在下方编辑区展开完整字段。缺口列直接标出哪一款还差什么。' }),
+      b('段二：当前款式编辑区（完整字段，一次只开一款）', 150, { k: 'a', c: ['规格 7 选项', '纸张 15 选项', '烫金色 9+ 选项', '工艺 16 卡片', '加工费价 + 人工改价', '设计图'], n: '观察（order-new-light 1280）：单一款式就包含 规格 7 chips、纸张 15 chips + 自定义、烫金色 9 chips + 自定义色号 + 双面/双色、工艺 16 张卡片（带「外协」标）+ 低频工艺 4 张、加工费价（成交单价/一次性费用/人工改价说明/计算并应用建议价）、款式备注、设计图上传——约 60 个控件、约 2000px 高。字段一个不删，只是从「全部展开堆叠」改成「一次只开一款」。' }),
+      b('多地址发货（按款式分配数量）', 70, { k: 'd', n: '观察：当前每增一个额外地址，就要对每一款式填一个分配数量（#1 未命名款式 = 100）。到 3 款×2 地址就是 6 个格子，而款式在这里只有「#N 未命名款式」这个标识。改为与段二的款式摘要行共用名称与序号，并实时校「已分配/总数量」。' }),
+      b('段三：收货与费用', 84, { c: ['收货地址（可多地址）', '快递费', '打包耗材费', '一次性费用'], n: '四类金额保持独立概念，不合并为「价格」。金额由服务端权威计算，界面预览标注「以提交后服务端核价为准」。' }),
+      b('右侧常驻摘要 + 校验清单（sticky）', 118, { k: 'a', c: ['款式数 / 总数量', '建议价合计', '成交价合计 + 差额', '缺口清单'], n: '观察：当前页面没有任何汇总区，也没有分段导航，一款式就拿不到全局数字。取代「提交后才知道缺什么」：缺口清单每条可点击跳转到对应字段并聚焦。「计算并应用建议价」已存在，保留；差额（成交 − 建议）实时显示，但不改服务端计价口径。' }),
+      b('底部常驻操作条', 44, { k: 'a', c: ['保存草稿', '提交工单'], n: '观察：当前「创建工单（草稿）/ 返回列表」在页面最底部、不吸底，单款式时已需滚约 2900px 才能看到。改为常驻，并把缺口数量写在按钮旁。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '段一即时可填，客户/产品字典异步加载时字段可用但选项显示加载中。' },
+      { k: 'Empty', d: '初始只有一行空款式 + 段一聚焦；不预铺空白区块。' },
+      { k: 'Error', d: '逐字段错误 + 缺口清单聚合；提交失败保留全部已填内容与草稿。' },
+      { k: 'Disabled', d: '提交按钮在有阻断缺口时禁用并显示原因；设计图增删在非草稿状态不可用并说明走变更申请。' },
+      { k: 'Pending', d: '提交中锁定操作条，防重复提交；成功后跳详情并高亮新建结果。' },
+    ],
+    issues: [
+      iss('Blocker', '观察（order-new-light 1280）：单列长表单，一个款式就约 60 个控件、约 2000px，整页在只有 1 款式时已约 2900px；没有分段导航、没有汇总区、提交按钮在最底部不吸底。录 3 款就是约 6000px 的滚动。这就是你说的「太繁琐」的具体成因。'),
+      iss('更正', '上一版我提的「款式行内编辑器（ 6 列行内改）」不可行——看了原图才发现纸张有 15 个选项、工艺 16 张卡片、烫金色 9+ 并可自定义，一行装不下。改为「摘要行列表 + 当前款式编辑区」的主从结构，效率收益相同但不牽强。'),
+      iss('High', '效率：无「按上次」「复制上一款」。order-new-light 里规格/纸张/工艺/烫金色都是 chips 多选，多款式间绝大多数选择相同，这两个按钮直接砍掉重复输入。'),
+      iss('High', '效率：无草稿自动保存（页头无任何保存时间戳），长表单中断即丢失。加自动保存 + 恢复。'),
+      iss('High', '约束保持：字段不删。段二只改「一次只开一款」，不是删字段；建议价/成交价/一次性费用/快递费/打包耗材费五个概念保持独立。'),
+      iss('Medium', '观察：页面已有「跳到主要内容」跳转链接，无障碍基础已在。重设计时不要丢掉。'),
+      iss('Medium', '待业主确认：款式模板（常用产品+纸张+工艺组合存模板）是效率收益最大的一项，但属新功能范围，不并入默认稿。'),
+    ],
+  },
+  {
+    sid: 'ORD-NEW-02', name: '新建工单 · 窄屏', route: '/orders/new', role: 'ADMIN / SALES / CS', vp: '393×852', w: 393,
+    goal: '手机上以「分段推进」代替行编辑，保证可完成而不是可浏览。',
+    blocks: [
+      b('段进度条', 34, { c: ['① 客户交期', '② 款式', '③ 收货费用'], n: '三段可跳转；每段头部显示本段缺口数。手机上款式本来就是一款一屏，与桌面的主从结构天然一致。' }),
+      b('当前段表单', 130, { n: '一次只展示一段；款式在手机上退回「一款一屏」的卡片编辑，不做行内多列。' }),
+      b('摘要抽屉（底部拉起）', 44, { k: 'd', n: '桌面右栏的摘要与缺口清单在手机上收为可拉起抽屉，带缺口计数徽章。' }),
+      b('底部操作条 + 安全区', 46, { k: 'a', c: ['上一段', '保存草稿', '下一段 / 提交'], n: '软键盘弹出时操作条上移不遮挡；≥44×44。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '当前段骨架，其余段不预渲染。' },
+      { k: 'Empty', d: '段二初始一款空卡 + 「复制上一款」在有第二款后才出现。' },
+      { k: 'Error', d: '错误定位到具体段并在进度条上标记，不让用户逐段找。' },
+      { k: 'Disabled', d: '缺口未清时「提交」禁用，但「保存草稿」始终可用。' },
+      { k: 'Pending', d: '提交中锁定；断网时提示草稿已本地保存。' },
+    ],
+    issues: [
+      iss('High', '观察（order-new-light 393）：单列到底，无分段、无进度、无汇总；规格 chips 折 3 行、纸张 4 行、烫金色 5 行、工艺 5 行，全部展开；「创建工单（草稿）/ 返回列表」在最底部且不吸底。手机上实际不可完成。'),
+      iss('推断', '草稿恢复：页头看不到保存时间戳，但「断网/切后台后能不能恢复」无法从静态截图判定。上一版的「无恢复」已降为推断。'),
+    ],
+  },
+  {
+    sid: 'ORD-DETAIL-01', name: '工单详情', route: '/orders/:id', role: 'ADMIN / SALES / CS（按 scope）', vp: '1280×800', w: 1280,
+    goal: '快速判断「这单卡在哪、我下一步做什么」，同时保留生产、金额与审计证据。',
+    blocks: [
+      b('页头 + 常驻下一动作条', 56, { k: 'a', c: ['工单号 / 客户', '当前状态', '下一动作（随状态变化）', '打印 / PDF', '取消工单'], n: '沿用现有动作区（编辑 / 取消顺丰到付 / 外协 / 打印 / 下载 PDF + 「生产中」徽章），只加两件：吸顶，以及把底部那个孤立的「取消工单」收回这里（作为需二次确认的危险动作，不与常规动作同级）。状态机不变：DRAFT→SUBMITTED→SCHEDULING→IN_PRODUCTION→COMPLETED→SHIPPED→FINISHED，CANCELLED 为终态；界面不提供状态机不允许的跳转。' }),
+      b('左栏：状态时间线（sticky，新增）', 138, { n: '观察：当前完全没有时间线，只有页头一个「生产中」徽章与底部「修改日志：暂无」。新增一列：已发生与待发生节点、每个节点的时间与责任人；阻断项在时间线上标注原因文字，不用颜色替代说明。' }),
+      b('右栏 · 款式与工艺（摘要行 + 展开）', 96, { c: ['款式', '产品/规格/纸张', '工艺', '数量', '生产进度'], n: '观察：当前 2 款式全展开约 950px。改为摘要行，点开看完整字段。生产、外协、客服业绩、账单是相关但不同的事实，不用单一「完成度」替代。' }),
+      b('右栏 · 设计图', 62, { k: 'd', n: '缩略图网格；增删仅草稿阶段可用，其余状态显示「走变更申请」并给入口。' }),
+      b('右栏 · 生产任务与外协', 92, { c: ['任务/外协单', '负责人/供应商', '状态', '数量（外协覆盖 max）', '金额'], n: '外协覆盖保持 max 口径，不做多单相加，指标名不重命名。' }),
+      b('右栏 · 收费与金额证据', 88, { c: ['加工费', '快递费', '打包耗材', '一次性费用', '合计'], n: '分项保留，不折叠成一个总额；金额精度沿用服务端十进制口径。' }),
+      b('右栏 · 变更申请与审计', 74, { k: 'd', n: '历次申请、审批人、差额与生效版本；可深链，默认折叠。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '页头与时间线优先渲染，右栏分区各自骨架。' },
+      { k: 'Empty', d: '分区空态各自说明（如「暂无外协单」+ 新建入口，按权限）。' },
+      { k: 'Error', d: '分区级错误重试；页头动作不因某个分区失败而消失。' },
+      { k: 'Disabled', d: '动作不可用时给出原因：权限 / 当前状态不允许 / 前置条件未完成，三种文案分开。' },
+      { k: 'Pending', d: '状态变更（发货、结案）pending 时锁定该动作并显示影响范围；成功后时间线即时更新。' },
+    ],
+    issues: [
+      iss('更正', '上一版写「主操作散落在各区块」不准。order-detail-light 页头右上已有成型的动作区：「生产中」徽章 + 编辑 / 取消顺丰到付 / 外协 / 打印 / 下载 PDF。'),
+      iss('High', '观察（order-detail-light 1280 + 393）：页头动作区不吸顶，而页面约 2600px（393 下更长），滚到款式/成本区后它就不可见；更关键的是「取消工单」这个破坏性动作被放在页面最底部一个独立区块（取消原因 + 红色按钮），与页头动作区隔开两千多像素。改为常驻动作条，高风险动作单独分级但不放逐下。'),
+      iss('High', '观察（order-detail-light）：无任何状态时间线——只有页头一个「生产中」徽章，底部「修改日志」为「暂无」。“卡在哪、下一步做什么”靠通读全页拼。补左侧状态时间线（已发生/待发生节点 + 时间 + 责任人）。'),
+      iss('High', '观察（order-detail-light 1280 + 393）：款式区全展开平铺，2 款就约 950px，每款重复 规格/纸张/烫金色/印刷面/印刷色数/工艺/系统建议小计/人工改价说明/生产安排/款式备注/设计文件。与 ORD-NEW-01 同构，应收为摘要行 + 展开。'),
+      iss('High', '观察（order-detail-light 1280 + 393）：「款式备注」整句用红色正文渲染，但它只是普通备注，不是错误或警告。红色应只留给校验错误与破坏性动作。'),
+      iss('Medium', '观察（order-detail-light）：「成本补录与调整」是一个完整的录入表单（成本类型/名称/金额/数量/单位/单价/备注 + 新增成本明细），直接内嵌在以阅读为主的详情页里。建议收进抽屉或独立入口，避免误操作。'),
+      iss('Medium', '观察（order-detail-light）：面包屑第二项是超长英文 slug「e2e-worker-ui-admin-admin-1280x800-order」，折行撑高页头。面包屑应用页面名 + 短工单号，不直接展实体标识。'),
+      iss('推断', '阻断原因如何呈现：本图工单处于生产中且无阻断，无法观察。上一版的「阻断原因依赖颜色/徽章」已降为推断，需一张有阻断的工单图。'),
+      iss('Medium', '约束保持：金额证据已很完整（数量/单价/一次性费用/小计 + 计件工资关联合计 + 成本补录），本次只改版式不改分项；生产/外协/账单/业绩四类事实不合并；外协 max 口径不改。'),
+    ],
+  },
+  {
+    sid: 'ORD-CHANGE-01', name: '工单修改申请审核', route: '/owner/order-changes', role: 'ADMIN', vp: '1280×800', w: 1280,
+    goal: '先看清差异与计价影响，再批准或拒绝；不绕过版本与生产阻断。',
+    blocks: [
+      b('队列筛选', 44, { c: ['状态', '提交人', '工单号', '时间窗'], n: '默认「待审核」。' }),
+      b('申请列表', 96, { c: ['工单号 / 客户', '提交人（销售/客服）', '变更摘要', '计价影响', '生产阻断'], r: ['96%', '96%'], n: '列表就显示「计价影响」和「是否有生产阻断」，避免逐条点开才知道能不能批。' }),
+      b('差异对照（选中后右栏）', 128, { k: 'a', c: ['字段', '原值', '新值', '影响'], n: '逐字段 diff；金额类影响单独一行显示差额。客服业绩按差额记，取消时冲销——文案要与服务端口径一致。' }),
+      b('审批操作条', 44, { k: 'a', c: ['拒绝（需理由）', '批准并同步任务'], n: '批准会同步生产任务，属高风险动作：按钮与常规导航分级，二次确认列出影响范围。' }),
+    ],
+    states: [
+      { k: 'Loading', d: '列表骨架 4 行；右栏空态提示「选择一条申请」。' },
+      { k: 'Empty', d: '「没有待审核申请」+ 切到历史记录入口。' },
+      { k: 'Error', d: '批准失败（并发/状态已变）给出「已被他人处理，刷新查看」，不静默失败。' },
+      { k: 'Disabled', d: '有生产阻断时批准禁用并说明阻断项与解除路径。' },
+      { k: 'Pending', d: '批准中锁定，成功后明确回显「已同步 N 个生产任务」。' },
+    ],
+    issues: [
+      iss('Blocker', '推断：order-changes-light 截图是空态（待审核 0 条，只有「暂无工单修改申请」），本轮无法观察列结构。上一版我写「列表缺少计价影响/生产阻断两列」已降为推断，需有数据的 fixture 才能定级。'),
+      iss('High', '观察（order-changes-light）：面包屑末项直接显示英文路由段「order-changes」。这是可直接验收的缺陷：按全站路由补齐中文映射表。'),
+      iss('High', '观察（order-changes-light）：空态只有一句「暂无工单修改申请」，无图标、无下一步出口（对比 orders-light 的空态有图标+说明）。全站空态需统一。'),
+      iss('High', '约束保持：批准不绕过版本与生产阻断；客服业绩按差额记、取消冲销的口径不改。'),
+      iss('推断', '并发冲突提示（同一申请被两人处理）：是否已有乐观锁字段，列入待确认。'),
+    ],
+  },
+];
+
+const PLAN = [
+  { n: '01', title: '设计语言 · 外壳 · 导航', count: '3 页 + 3 外壳', status: '本轮完成', routes: '/login · /account/password · /dev/showcase · 后台外壳（桌面/窄屏）· 师傅端外壳。另含共用 not-found——清单明确它不计入 85 个 page.tsx，但必须设计（不泄露记录是否存在）。' },
+  { n: '02', title: 'Dashboard 与全局告警', count: '1 页 + 队列', status: '本轮完成', routes: '/owner · 全局告警条 · 未解决队列落地页' },
+  { n: '03', title: '工单全流程', count: '5 页', status: '本轮完成', routes: '/orders · /orders/new · /orders/:id · /orders/:id/edit · /owner/order-changes（SALES/CS 视角同页不同 scope）' },
+  { n: '04', title: '排产与师傅端', count: '8 页', status: '下一轮', routes: '/foreman/scheduling · /foreman/scheduling/:id · /worker/tasks · /worker/tasks/:id · /worker/orders · /worker/orders/:id · /worker/salary · /worker/salary/:id' },
+  { n: '05', title: '价格与报价', count: '9 页', status: '待排', routes: '/owner/prices · prices/tiers/new · tiers/:id · adjustments/new · adjustments/:id · external-sales/items · external-sales/versions · visual-fixture · /sales/quote' },
+  { n: '06', title: '账单与薪资', count: '13 页', status: '待排', routes: '/owner/bills · bills/:id · /sales/bills · sales/bills/:id · /owner/salary · salary/daily · daily/:id · salary/cs · cs/new · cs/:id · salary/hourly · piecework-rules · salary/rules' },
+  { n: '07', title: '主数据 · 设置 · 仓库', count: '41 页', status: '待排', routes: '账号 ×3 · 往来单位 ×3 · 产品 ×3 · 分类 ×3 · 工艺 ×3 · BOM ×3 · 物料 ×3 + 盘点 · 采购 ×3 · 仓库作业台 · 车间物料 ×3 · 外协 ×3 · 考勤 · CDR · 通知 ×4 · 后台任务 · Pigsty · 系统设置（3+3+3+3+3+3+4+3+1+3+3+1+1+4+1+1+1 = 41）。其中 Pigsty 不进侧栏导航，后台任务拆分后业务部分并入告警队列。' },
+  { n: '08', title: '打印 · 五态库 · 一致性', count: '1 页 + 4 跳转', status: '待排', routes: '/print/orders/:id（需单独立案、经你确认后才动基线）· 全站五态组件库 · 跨模块一致性收口。四个无独立 UI 的纯跳转页归在这里记账：/ · /owner/prices/external-sales · /external-sales/logistics · /sales/quote/logistics' },
+];
+
+const REVIEW = [
+  {
+    h: 'A. 本批旅程摘要',
+    items: [
+      '角色与场景：ADMIN 每日在电脑上处理异常与工单全流程；SALES/CS 在电脑上录单与跟踪自己的工单；WORKER 在手机上开工报工。三者共用工单四页但 scope 不同。',
+      '入口与成功结果：登录 → 按服务端角色进入对应工作台。ADMIN 的成功结果是「今天的异常都进入了处置」；SALES/CS 是「工单提交成功且计价可核对」。',
+      '会丢失的上下文（当前）：工单列表的筛选与滚动位置在进详情后返回时丢失（筛选未入 URL）；新建工单中断后草稿丢失（页头无保存时间戳）；离开 Dashboard 后告警不可见。前两条已在线框里补为持久化，第三条属推断。',
+    ],
+  },
+  {
+    h: 'C. 跨页面一致性',
+    items: [
+      '应统一：页头模式（已基本成型，只需推平）、筛选模式（常驻一行 + 已选 chips + 保存视图）、表格降级模式（固定列 + 明确横滚 / 手机卡片化）、底部常驻操作条、空态模式（orders-light 有图标+说明，order-changes-light 只有一句话，得拉齐）、长字段处理（order-detail-light 393 已能正确换行，属可复用的好实现）。',,
+      '必须保留差异：高风险动作（批准变更、发货结案、薪资重算与发放、盘点过账）不能与常规导航同级，需要二次确认与影响范围说明；师傅端不套用后台外壳。',
+      '不为一致性牺牲：角色可见性差异（SALES/CS 不显示 ADMIN 动作）、状态证据（四类事实不合并）、通知四态语义。',
+    ],
+  },
+  {
+    h: 'D. 待业主确认',
+    items: [
+      '设计系统落地方式：项目绑定 Industry（Barlow Condensed + 钢蓝），而 03-design-constraints §9 要求保留 Tailwind + shadcn/ui + OKLCH 语义 token、不引入新字体。方案 ① 把 Industry 映射成一套新的 OKLCH 语义 token（改皮不改架构，成本中）；方案 ② 设计稿仅作方向参考，实现继续用现有 shadcn 皮肤（成本低，视觉收益也低）。需要你选。',
+      '款式模板（新建工单）：把常用「产品 + 纸张 + 工艺」组合存成模板，是效率收益最大的一项，但属新功能范围。是否立项？',
+      '通知 UNKNOWN 的「人工决策」列：需要服务端字段与审计支持才能闭环。当前是否已有？',
+      '手机端导出入口：长任务 + 下载体验差，是否在 393 视口隐藏导出？',
+      '登录限流的双维度提示：厂区 NAT 共享出口可能整厂误伤，是否需要在文案上区分「按账号」与「按出口 IP」？属安全取舍。',
+      '图表分类色：旧 UI brief 说 --chart-1..5 是灰阶不可分辨，但交接包 §7 已声明该文件现状描述过时，而本轮截图里三个图表都没数据（且销售业绩卡副标题写着「SALES 蓝色 / 客服 绿色」）。需要你确认：分类色当前到底是什么状态，要不要立项改色盲友好色板？',
+      '红色的用法：order-detail-light 里「款式备注」整句是红色正文，价格页里「编辑收费项目」与勾选框也是红色。红色目前同时承担了品牌色、链接色、备注色和危险色。要不要把红色收紧为「仅校验错误 + 破坏性动作」？这会改动全站语义色 token。',
+      '打印视图：本轮完全未动。如需重设计，我会单独立案并附全部款式数量的 before/after，等你人工确认后才替换基线。',
+    ],
+  },
+  {
+    h: 'E. 下一轮需要的材料',
+    items: [
+      '排产页（AUTO:scheduling-light / scheduling-detail-light）的分段图：1280 全图里「阻断原因」的文字在缩略图下不可读，需要 fold 或 seg 图。',
+      '有数据的 order-changes fixture：本轮截图是空态（待审核 0 条），无法判断列结构、差异展示方式和审批操作位置。ORD-CHANGE-01 的级别得等这张图。',
+      '有数据的 dashboard 图表：本轮三个图表均「暂无数据」，无法验证分类色是否可分辨（旧 UI brief 说 --chart-1..5 是灰阶，但该文件已被交接包标为过时）。',
+      '有阻断的工单详情图：order-detail-light 的工单处于生产中且无阻断，看不到阻断原因如何呈现。需一张有阻断（如外协未回货、工艺不兼容）的工单图。',
+      '重新挂载 print-shop-erp 代码目录，或单独给我 app/(admin)/layout.tsx、components/business/admin/*、app/globals.css 三处。侧栏实际覆盖范围、面包屑映射表、分类色 token 都要靠它们才能从推断变成观察。',
+      '师傅端 393 的报工表单原图（AUTO:worker/task-detail-reporting-light）：需要确认合格/不良/返工三个数字的校验与上限提示当前如何呈现。',
+      'CS 角色的工单三页（GAP/TEXT CS-ORDERS-01 / CS-ORDER-NEW-01 / CS-ORDER-DETAIL-01）：请确认 CS 与 SALES 在动作上的具体差异清单，我不从菜单名推断。',
+      '业务回答：多款式工单里「款式」平均几款、最多几款？这直接决定摘要行列表需不需要虚拟滚动与批量粘贴。',
+      '业务回答：ADMIN 每天真实要处理的告警条数量级（个位数还是上百）？决定处理队列是列表还是需要分组折叠。',
+    ],
+  },
+  {
+    h: 'B. 按 Screen ID 评审',
+    items: [
+      '证据口径：本轮逐张查阅 10 张截图（全部打开过），代码目录不可读。前几版有若干条「观察」在本轮被改标为「更正」或降为「推断」：侧栏实际已存在（非缺失）、告警动作链接实际存在只是被裁切、图表灰阶无法验证、工单详情页头动作区实际已成型（非散落）、阻断原因呈现方式无法观察、手机草稿恢复无法从静态图判定。另有两条建议已删除，因为现实现已做到（导出按钮写明条数、结果计数紧邻筛选）。具体条数以页面上渲染的标签为准，本文不另给计数。',,
+      '逐屏的「观察到的问题」「设计推断」「信息架构」「桌面布局」「窄屏布局」「五态」「无障碍与文案」已直接标注在上方每一屏线框的区块说明与「问题与改动」里，按 Screen ID 可回溯。',
+      '分级口径：Blocker = 阻断用户完成任务或违反交接包硬约束；High = 显著增加操作成本；Medium = 一致性与可维护性；推断 = 证据不足；更正 = 上一版写错已改。',
+      '无障碍统一要求（全批适用）：键盘可达且焦点顺序合理、每个输入有正确关联的 label（删除可见标签时必须补 aria-label）、焦点环可见不被裁、非颜色唯一提示、正文对比度 ≥4.5:1、触控目标 ≥44×44、尊重 prefers-reduced-motion、长中文与工单号可换行或可取全文。',
+      '验收口径（可截图或交互验证）：① 6 个视口下溢出探测器 0 命中；② axe 0 严重违规；③ 新建工单录 3 款的点击数与滚动距离对比当前实现下降；④ 提交前缺口清单可点跳到字段；⑤ RETRYING + job DEAD 在三处可见；⑥ 打印基线像素未变。',
+    ],
+  },
+];
+
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      '本轮完成': { sbg: 'var(--color-accent)', sfg: 'var(--color-bg)', bg: 'var(--color-accent-100)' },
+      '下一轮': { sbg: 'var(--color-accent-200)', sfg: 'var(--color-accent-900)', bg: 'transparent' },
+      '待排': { sbg: 'var(--color-neutral-200)', sfg: 'var(--color-neutral-800)', bg: 'transparent' },
+    };
+    const plan = PLAN.map((p) => ({ ...p, ...S[p.status] }));
+    return { batch1: BATCH1, batch2: BATCH2, batch3: BATCH3, plan, review: REVIEW };
+  }
+}
+
+</script>
+</body>
+</html>

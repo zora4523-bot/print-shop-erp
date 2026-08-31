@@ -2,17 +2,17 @@
 
 import {
   useActionState,
-  useEffect,
   useMemo,
   useState,
   useTransition,
 } from 'react';
 import type { FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
+import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 
 type ItemOption = {
   id: string;
@@ -20,15 +20,21 @@ type ItemOption = {
   name: string;
   quantity: number;
   specification: string | null;
+  frontFoilColors?: string[];
+  backFoilColors?: string[];
   foilColors: string[];
+  isDoubleSided?: boolean;
 };
 
 type EditableItem = {
   selected: boolean;
+  /** Submitted value; keep the imported matcher text until the user edits it. */
   name: string;
+  displayName: string;
   quantity: number;
-  specification: string;
-  foilColors: string;
+  displaySpecification: string;
+  frontFoilColors: string;
+  backFoilColors: string;
 };
 
 type OrderItemChangePayload =
@@ -37,16 +43,16 @@ type OrderItemChangePayload =
       itemId: string;
       name: string;
       quantity: number;
-      specification: string | null;
-      foilColors: string[];
+      frontFoilColors: string[];
+      backFoilColors: string[];
     }
   | {
       operation: 'ADD';
       templateItemId: string;
       name: string;
       quantity: number;
-      specification: string | null;
-      foilColors: string[];
+      frontFoilColors: string[];
+      backFoilColors: string[];
     };
 
 type Props = {
@@ -63,6 +69,22 @@ function splitColors(value: string): string[] {
         .filter(Boolean),
     ),
   ];
+}
+
+export function createOrderChangeEditableItem(item: ItemOption): EditableItem {
+  const specification = item.specification ?? '';
+  const foilSides = resolveOrderItemFoilSides(item);
+  return {
+    selected: false,
+    name: item.name,
+    displayName: externalPriceBusinessText(item.name),
+    quantity: item.quantity,
+    displaySpecification: specification
+      ? externalPriceBusinessText(specification)
+      : '',
+    frontFoilColors: foilSides.frontFoilColors.join('、'),
+    backFoilColors: foilSides.backFoilColors.join('、'),
+  };
 }
 
 function StateMessage({
@@ -83,7 +105,6 @@ function StateMessage({
 }
 
 export function OrderChangeRequestForm({ orderId, items }: Props) {
-  const router = useRouter();
   const [state, action] = useActionState<
     CreateOrderChangeRequestMutationResult | null,
     unknown
@@ -94,13 +115,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
     Object.fromEntries(
       items.map((item) => [
         item.id,
-        {
-          selected: false,
-          name: item.name,
-          quantity: item.quantity,
-          specification: item.specification ?? '',
-          foilColors: item.foilColors.join('、'),
-        },
+        createOrderChangeEditableItem(item),
       ]),
     ),
   );
@@ -108,12 +123,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   const [templateItemId, setTemplateItemId] = useState(items[0]?.id ?? '');
   const [newName, setNewName] = useState('');
   const [newQuantity, setNewQuantity] = useState(1);
-  const [newSpecification, setNewSpecification] = useState('');
-  const [newFoilColors, setNewFoilColors] = useState('');
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  const [newFrontFoilColors, setNewFrontFoilColors] = useState('');
+  const [newBackFoilColors, setNewBackFoilColors] = useState('');
 
   const selectedCount = Object.values(editable).filter(
     (item) => item.selected,
@@ -145,7 +156,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (pending || !canSubmit) return;
     const changes: OrderItemChangePayload[] = items.flatMap((item) => {
       const current = editable[item.id];
       if (!current.selected) return [];
@@ -155,8 +166,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           itemId: item.id,
           name: current.name,
           quantity: current.quantity,
-          specification: current.specification || null,
-          foilColors: splitColors(current.foilColors),
+          frontFoilColors: splitColors(current.frontFoilColors),
+          backFoilColors: splitColors(current.backFoilColors),
         },
       ];
     });
@@ -166,8 +177,8 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         templateItemId,
         name: newName,
         quantity: newQuantity,
-        specification: newSpecification || null,
-        foilColors: splitColors(newFoilColors),
+        frontFoilColors: splitColors(newFrontFoilColors),
+        backFoilColors: splitColors(newBackFoilColors),
       });
     }
     startTransition(() =>
@@ -191,9 +202,10 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        勾选要修改的款式；可改款式名、数量、规格和烫金颜色。已开工款式不能改数量。
+        勾选要修改的款式；可改款式名、数量和正反面烫金颜色。已开工款式不能改数量。
+        新增款式继承规格、纸张、工艺和计价参数。
       </p>
       <fieldset className="space-y-3">
         <legend className="sr-only">选择并修改现有款式</legend>
@@ -205,13 +217,14 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 <input
                   type="checkbox"
                   checked={current.selected}
+                  disabled={pending}
                   onChange={(event) =>
                     updateItem(item.id, { selected: event.target.checked })
                   }
                   className="size-4 shrink-0"
                 />
                 <span className="admin-wrap-anywhere min-w-0 font-medium">
-                  #{item.sequence} · {item.name}
+                  #{item.sequence} · {externalPriceBusinessText(item.name)}
                 </span>
               </label>
               {current.selected ? (
@@ -219,11 +232,15 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                   <label className="space-y-1 text-sm">
                     <span>款式名称</span>
                     <Input
-                      value={current.name}
+                      value={current.displayName}
                       maxLength={64}
                       required
+                      disabled={pending}
                       onChange={(event) =>
-                        updateItem(item.id, { name: event.target.value })
+                        updateItem(item.id, {
+                          name: event.target.value,
+                          displayName: event.target.value,
+                        })
                       }
                     />
                   </label>
@@ -235,6 +252,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       step={1}
                       value={current.quantity}
                       required
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
                           quantity: Number(event.target.value),
@@ -242,26 +260,34 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                       }
                     />
                   </label>
-                  <label className="space-y-1 text-sm">
+                  <div className="space-y-1 text-sm">
                     <span>规格</span>
+                    <p className="min-h-11 rounded-md border bg-muted/30 px-3 py-2.5">
+                      {current.displaySpecification || '未填'}
+                    </p>
+                  </div>
+                  <label className="space-y-1 text-sm">
+                    <span>正面烫金颜色（多个用顿号分隔）</span>
                     <Input
-                      value={current.specification}
-                      maxLength={64}
+                      value={current.frontFoilColors}
+                      maxLength={200}
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
-                          specification: event.target.value,
+                          frontFoilColors: event.target.value,
                         })
                       }
                     />
                   </label>
                   <label className="space-y-1 text-sm">
-                    <span>烫金颜色（多个用顿号分隔）</span>
+                    <span>反面烫金颜色（多个用顿号分隔）</span>
                     <Input
-                      value={current.foilColors}
+                      value={current.backFoilColors}
                       maxLength={200}
+                      disabled={pending}
                       onChange={(event) =>
                         updateItem(item.id, {
-                          foilColors: event.target.value,
+                          backFoilColors: event.target.value,
                         })
                       }
                     />
@@ -279,6 +305,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           <input
             type="checkbox"
             checked={addEnabled}
+            disabled={pending}
             onChange={(event) => setAddEnabled(event.target.checked)}
             className="size-4"
           />
@@ -287,15 +314,16 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
         {addEnabled ? (
           <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
-              <span>参考现有款式（继承纸张、工艺和单价）</span>
+              <span>参考现有款式（继承规格、纸张、工艺和计价参数）</span>
               <select
                 value={templateItemId}
+                disabled={pending}
                 onChange={(event) => setTemplateItemId(event.target.value)}
                 className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
-                    #{item.sequence} · {item.name}
+                    #{item.sequence} · {externalPriceBusinessText(item.name)}
                   </option>
                 ))}
               </select>
@@ -306,6 +334,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 value={newName}
                 maxLength={64}
                 required
+                disabled={pending}
                 onChange={(event) => setNewName(event.target.value)}
               />
             </label>
@@ -317,23 +346,26 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
                 step={1}
                 value={newQuantity}
                 required
+                disabled={pending}
                 onChange={(event) => setNewQuantity(Number(event.target.value))}
               />
             </label>
-            <label className="space-y-1 text-sm">
-              <span>规格</span>
+            <label className="space-y-1 text-sm sm:col-span-2">
+              <span>正面烫金颜色（可多色）</span>
               <Input
-                value={newSpecification}
-                maxLength={64}
-                onChange={(event) => setNewSpecification(event.target.value)}
+                value={newFrontFoilColors}
+                maxLength={200}
+                disabled={pending}
+                onChange={(event) => setNewFrontFoilColors(event.target.value)}
               />
             </label>
             <label className="space-y-1 text-sm sm:col-span-2">
-              <span>烫金颜色（可多色）</span>
+              <span>反面烫金颜色（可多色）</span>
               <Input
-                value={newFoilColors}
+                value={newBackFoilColors}
                 maxLength={200}
-                onChange={(event) => setNewFoilColors(event.target.value)}
+                disabled={pending}
+                onChange={(event) => setNewBackFoilColors(event.target.value)}
               />
             </label>
           </div>
@@ -348,6 +380,7 @@ export function OrderChangeRequestForm({ orderId, items }: Props) {
           rows={3}
           maxLength={500}
           required
+          disabled={pending}
           className="w-full rounded-md border bg-background px-3 py-2"
           placeholder="写明客户要求、交期影响等，方便管理员审核"
         />
